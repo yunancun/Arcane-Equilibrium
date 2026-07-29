@@ -22,7 +22,12 @@ for _candidate in (HELPERS, ML_ROOT):
     if str(_candidate) not in sys.path:
         sys.path.insert(0, str(_candidate))
 
+import agent_governance_alr_quiesce_fence as quiesce  # noqa: E402
 import agent_governance_alr_quiesce_inventory as inventory  # noqa: E402
+from agent_governance_s2_4_install_evidence import (  # noqa: E402
+    S2_4_APPLY_GATED_DEPENDENCY_CLASSES,
+)
+import agent_governance_s2_4_install_plan as s2_4_install_plan  # noqa: E402
 import agent_governance_s2_5_attestation as attestation  # noqa: E402
 import agent_governance_s2_5_lifecycle as lifecycle  # noqa: E402
 import aiml_gate_receipt_validator as validator  # noqa: E402
@@ -164,8 +169,90 @@ def start_intent(phase: str = "S2_5A_START", **core_overrides: Any) -> dict[str,
     )
 
 
-def s2_4_receipt() -> dict[str, Any]:
-    """P1-2:真 canonical 構造——self_digest 由 artifact_self_digest 重封(自報值不再可行)。"""
+def fixture_digest(label: str) -> str:
+    """由導出的 ``canonical_digest`` 對標籤導出一個穩定 digest。
+
+    lineage 細節一律**導出**而非寫死 hex 字面量(避免把上游契約凍進 S2.5 測試面)。
+    """
+
+    return validator.canonical_digest({"s2_5_testkit_fixture": label})
+
+
+S2_4_PLAN_ID = "s2-4-" + fixture_digest("s2-4-install-plan").split(":", 1)[1]
+
+
+def s2_4_receipt(*, expires_at: str = EXPIRES) -> dict[str, Any]:
+    """P1-2:真 canonical 構造——self_digest 由 artifact_self_digest 重封(自報值不再可行)。
+
+    PR#153 Codex-4:S2.5 precheck 已把這份 receipt 送進中央閘(closed schema CP2b +
+    ``derive_install_lineage_status``)並另判新鮮度,故 fixture 必須是**全欄位**的真形狀:
+    五 APPLY row 依 ``S2_4_APPLY_ROW_CLASS_ORDER`` exact 次序、兩 scoped probe digest 相異、
+    逆向補償鏈 digest 由 ``aggregate_rollback_digest`` 導出、三族 dependency-refresh 鍵由
+    ``S2_4_DEPENDENCY_REFRESH_CLASSES`` 導出。時間欄一律取凍結錨(禁 wall clock)。
+
+    ⚠ honesty:這是丟棄式 fixture,``evidence_class`` 恆 ``STRUCTURAL_ONLY``——它證明的是
+    「S2.5 的上游閘會對一份結構合格的 receipt 放行」,絕不假冒任何真發生過的安裝。
+    """
+
+    receipt = {
+        "schema_version": "s2_4_install_effect_receipt_v1",
+        "plan_id": S2_4_PLAN_ID,
+        "plan_core_digest": fixture_digest("s2-4-plan-core"),
+        "idempotency_key": S2_4_PLAN_ID,
+        "status": "APPLIED_INACTIVE",
+        "aggregate_authorization_id": fixture_digest("s2-4-aggregate-authorization-id"),
+        "aggregate_authorization_digest": fixture_digest("s2-4-aggregate-authorization"),
+        "pg_authorization_id": fixture_digest("s2-4-pg-authorization-id"),
+        "pg_authorization_digest": fixture_digest("s2-4-pg-authorization"),
+        # 兩 scoped probe receipt 必須相異(同一 digest = 一個 probe 充當兩 scope ⇒ lineage 拒)。
+        "prepare_sandbox_probe_receipt_digest": fixture_digest("s2-4-prepare-sandbox-probe"),
+        "installed_unit_probe_receipt_digest": fixture_digest("s2-4-installed-unit-probe"),
+        "prepare_result_digest": fixture_digest("s2-4-prepare-result"),
+        "prepare_postcheck_digest": fixture_digest("s2-4-prepare-postcheck"),
+        # null = 該族在 admission 當下 SOURCE_DEPENDENCY_FRESH(S2.4-AMEND-1 §3/§9.2 三值窮盡);
+        # 鍵集由 APPLY step(2b)真正被閘的三族導出(S1.3 不入閘,故不在 receipt 面上)。
+        "dependency_refresh_digests": {
+            name: None for name in S2_4_APPLY_GATED_DEPENDENCY_CLASSES
+        },
+        "apply_row_results": [
+            {
+                "component_effect_class": effect_class,
+                "result_digest": fixture_digest(f"s2-4-apply-result-{effect_class}"),
+                "postcheck_digest": fixture_digest(f"s2-4-apply-postcheck-{effect_class}"),
+            }
+            for effect_class in validator.S2_4_APPLY_ROW_CLASS_ORDER
+        ],
+        "reverse_compensation_chain_digest": s2_4_install_plan.aggregate_rollback_digest(
+            plan_id=S2_4_PLAN_ID
+        ),
+        "journal_digest": fixture_digest("s2-4-terminal-journal"),
+        "unit_state": {"loaded": True, "disabled": True, "inactive": True},
+        "service_flags": {
+            "service_enabled": False,
+            "service_active": False,
+            "service_started_by_s2_4": False,
+        },
+        "evidence_class": "STRUCTURAL_ONLY",
+        "production_authority_flags": {
+            "nine_authorities_false": True,
+            "production_apply_performed": False,
+            "running_attested": False,
+        },
+        "source_head": SOURCE_HEAD,
+        "target_host": HOST,
+        "trusted_host_time": ISSUED,
+        "observed_at": ISSUED,
+        "expires_at": expires_at,
+    }
+    receipt["self_digest"] = validator.artifact_self_digest(receipt)
+    return receipt
+
+
+def legacy_s2_4_receipt_stub() -> dict[str, Any]:
+    """Codex-4 修前唯一被接受的形狀:canonical 自洽、但**沒有** closed schema/lineage 的兩鍵 stub。
+
+    digest 三值鏈仍成立(self_digest 真的重算),所以它專門用來證明「digest 綁定 ≠ 上游站得住」。
+    """
 
     receipt = {
         "schema_version": "s2_4_install_effect_receipt_v1",
@@ -188,10 +275,203 @@ def s2_4_prestate() -> dict[str, Any]:
     }
 
 
-def drill_receipt() -> dict[str, Any]:
+# ── S2.1 drill receipt(同 Codex-4:S2.5B precheck 也把它送進中央閘的委派分支)────────
+# 路徑/常量一律由 WP3 inventory 導出;fixture 的 owner/stable 指紋是丟棄式 digest(此處不
+# 宣稱任何真主機觀測——真 fence 屬 S2.1 EFFECT session)。
+_DRILL_FRAGMENT_PATH = "/etc/systemd/system/" + lifecycle.S2_5_UNIT_NAME
+_DRILL_FLOCK_PATH = "/run/arcane-equilibrium/aiml-engine-scanner/consumer.lock"
+_DRILL_DSN_PATH = "/run/credentials/" + lifecycle.S2_5_UNIT_NAME + "/pg-dsn"
+_DRILL_CONTROL_GROUP = "/system.slice/" + lifecycle.S2_5_UNIT_NAME
+_DRILL_SCANNER_UID = 4001
+_DRILL_APPLIER_NODE = "s2-1-quiesce-applier"
+_DRILL_VERIFIER_NODE = "s2-1-quiesce-verifier"
+# 丟棄式 armor:body 是嚴格 base64(schema 的 SSHSIG armor pattern 與 strict-base64 護欄都要過);
+# 它**不是**任何真簽章——中央閘對 quiesce result 的 operator 授權只做結構綁定驗(見該葉 docstring)。
+_DRILL_SIGNATURE_ARMOR = (
+    b"-----BEGIN SSH SIGNATURE-----\n"
+    b"QVJDQU5FLUVRVUlMSUJSSVVNLVMyLTUtVEVTVEtJVC1GSVhUVVJFLVNJR05BVFVSRQ==\n"
+    b"-----END SSH SIGNATURE-----\n"
+)
+
+
+def _drill_host_inventory(
+    *,
+    main_pid: int = 4242,
+    start_ticks: str | None = "998877",
+    invocation: str = "inv-1",
+    active_state: str = "active",
+    sub_state: str = "running",
+) -> dict[str, Any]:
+    return {
+        "owner": {"uid": _DRILL_SCANNER_UID, "unit": lifecycle.S2_5_UNIT_NAME},
+        "process": {
+            "main_pid": main_pid,
+            "process_start_ticks": start_ticks,
+            "boot_id": "boot-1",
+            "cmdline_digest": fixture_digest("s2-1-drill-cmdline"),
+        },
+        "unit": {
+            "load_state": "loaded",
+            "active_state": active_state,
+            "sub_state": sub_state,
+            "fragment_path": _DRILL_FRAGMENT_PATH,
+            "drop_in_paths": "",
+            "need_daemon_reload": "no",
+        },
+        "cgroup": {"control_group": _DRILL_CONTROL_GROUP},
+        "env_hash": fixture_digest("s2-1-drill-env"),
+        "runtime_digest": fixture_digest("s2-1-drill-runtime"),
+        "restart_policy": {
+            "restart": "on-failure", "restart_usec": "5s", "timeout_stop_usec": "30s",
+        },
+        "watchdog": {"watchdog_usec": "0", "n_restarts": 0, "invocation_id": invocation},
+        "queue": {
+            "listen_channel": inventory.LISTEN_CHANNEL,
+            "advisory_lock_name": inventory.ADVISORY_LOCK_NAME,
+            "flock_path": _DRILL_FLOCK_PATH,
+            "flock_held": True,
+        },
+    }
+
+
+def _drill_db(*, held: bool, count: int, backend: bool, status: str) -> dict[str, Any]:
+    return {
+        "advisory_lock_held": held,
+        "advisory_lock_holder_count": count,
+        "backend_present": backend,
+        "consumer_session_status": status,
+        "listen_backlog_drained": True,
+    }
+
+
+def _drill_credential_exposure() -> dict[str, Any]:
+    return {
+        "dsn_file_path": _DRILL_DSN_PATH,
+        "dsn_mode": "0600",
+        "dsn_owner_uid": _DRILL_SCANNER_UID,
+        "world_readable": False,
+        "plaintext_ingress": False,
+        "unit_hardening": {
+            "no_new_privileges": "yes",
+            "protect_system": "full",
+            "private_tmp": "yes",
+            "restrict_address_families": "AF_UNIX AF_INET",
+        },
+    }
+
+
+def _drill_observation(
+    phase: str,
+    verdict: str,
+    *,
+    candidate_count: int,
+    host_inventory: dict[str, Any],
+    db_quiesce: dict[str, Any],
+    observed_at: str,
+    owner_fingerprint: str,
+) -> dict[str, Any]:
+    return quiesce.build_quiesce_observation(
+        phase=phase,
+        verdict=verdict,
+        candidate_count=candidate_count,
+        owner_fingerprint=owner_fingerprint,
+        host_inventory=host_inventory,
+        db_quiesce=db_quiesce,
+        credential_exposure=_drill_credential_exposure(),
+        applier_node=_DRILL_APPLIER_NODE,
+        verifier_node=_DRILL_VERIFIER_NODE,
+        verifier_capture_digest=fixture_digest("s2-1-drill-verifier-capture"),
+        observed_at=observed_at,
+    )
+
+
+def drill_receipt(*, completed_at: str = ISSUED) -> dict[str, Any]:
+    """真 ``quiesce_result_v1``(QUIESCED_STATIC_GUARDS_HELD)——過中央閘的 S2.1 drill 錨。
+
+    Codex-4:S2.5B precheck 不再只看 ``status.startswith("QUIESCED")`` + digest 三值鏈,
+    而是把這份 receipt 丟進中央閘的 quiesce 委派分支(closed schema + 逐 observation 再驗 +
+    window adequacy + 新鮮度),故 fixture 必須是完整的 confirm→fence→held-window→restore 形狀。
+    時間錨全取凍結常量;窗跨度 5s(= duration_seconds)由兩個 in-window 樣本張開。
+    """
+
+    drill_intent = quiesce.build_quiesce_intent(
+        target_class=quiesce.DISPOSABLE_TARGET_CLASS,
+        target_host=HOST,
+        unit_fragment_path=_DRILL_FRAGMENT_PATH,
+        expected_owner_fingerprint=fixture_digest("s2-1-drill-owner"),
+        flock_path=_DRILL_FLOCK_PATH,
+        observed_relations=["learning.alr_consumer_events"],
+        observation_window={
+            "duration_seconds": 5, "min_samples": 2, "sample_interval_seconds": 5,
+        },
+        applier_node_id=_DRILL_APPLIER_NODE,
+        postcheck_node_id=_DRILL_VERIFIER_NODE,
+        created_at=ISSUED,
+        ttl_seconds=900,
+        source_head=SOURCE_HEAD,
+    )
+    owner = fixture_digest("s2-1-drill-owner")
+    stable = fixture_digest("s2-1-drill-stable-identity")
+    fenced_inventory = _drill_host_inventory(
+        main_pid=0, start_ticks=None, invocation="",
+        active_state="inactive", sub_state="dead",
+    )
+    return quiesce.build_quiesce_fence_result(
+        intent=drill_intent,
+        status="QUIESCED_STATIC_GUARDS_HELD",
+        owner_fingerprint=owner,
+        pre_fence_observation=_drill_observation(
+            "PRE_FENCE_INVENTORY", "CONFIRMED_SINGLE_OWNER", candidate_count=1,
+            host_inventory=_drill_host_inventory(),
+            db_quiesce=_drill_db(held=True, count=1, backend=True, status="OPEN"),
+            observed_at=ISSUED, owner_fingerprint=owner,
+        ),
+        window_samples=[
+            _drill_observation(
+                "IN_WINDOW_STATIC_GUARD", "STATIC_GUARDS_HELD", candidate_count=0,
+                host_inventory=fenced_inventory,
+                db_quiesce=_drill_db(held=False, count=0, backend=False, status="STOPPED"),
+                observed_at=ISSUED, owner_fingerprint=owner,
+            ),
+            _drill_observation(
+                "IN_WINDOW_STATIC_GUARD", "STATIC_GUARDS_HELD", candidate_count=0,
+                host_inventory=fenced_inventory,
+                db_quiesce=_drill_db(held=False, count=0, backend=False, status="STOPPED"),
+                observed_at=(ANCHOR + timedelta(seconds=5)).isoformat(),
+                owner_fingerprint=owner,
+            ),
+        ],
+        post_unfence_observation=_drill_observation(
+            "POST_UNFENCE_RESTORATION", "RESTORED_HEALTHY", candidate_count=1,
+            host_inventory=_drill_host_inventory(main_pid=5555, start_ticks="1002003", invocation="inv-2"),
+            db_quiesce=_drill_db(held=True, count=1, backend=True, status="OPEN"),
+            observed_at=ISSUED,
+            owner_fingerprint=fixture_digest("s2-1-drill-owner-after-restore"),
+        ),
+        rollback_record=quiesce.build_quiesce_rollback(
+            intent=drill_intent,
+            pre_fence_stable_fingerprint=stable,
+            post_unfence_stable_fingerprint=stable,
+            owner_healthy=True,
+            observed_at=ISSUED,
+        ),
+        operator_authorization=quiesce.build_operator_authorization(
+            intent=drill_intent, source_head=SOURCE_HEAD
+        ),
+        operator_signature=_DRILL_SIGNATURE_ARMOR,
+        apply_actor_node=_DRILL_APPLIER_NODE,
+        started_at=ISSUED,
+        completed_at=completed_at,
+        evidence_class="LOCAL_REPRODUCIBLE",
+    )
+
+
+def legacy_drill_receipt_stub() -> dict[str, Any]:
+    """Codex-4 修前唯一被接受的形狀:``status.startswith("QUIESCED")`` + 自洽 self_digest 的兩鍵 stub。"""
+
     receipt = {
         "schema_version": "quiesce_result_v1",
-        "status": "QUIESCED_STATIC_GUARDS_HELD_RESTORED",
+        "status": "QUIESCED_STATIC_GUARDS_HELD",
     }
     receipt["self_digest"] = validator.artifact_self_digest(receipt)
     return receipt

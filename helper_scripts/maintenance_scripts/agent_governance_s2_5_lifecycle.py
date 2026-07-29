@@ -719,6 +719,62 @@ def _bound_artifact_digest_ok(artifact: Any, bound_digest: Any) -> bool:
     )
 
 
+def _upstream_receipt_gate_reasons(
+    artifact: dict[str, Any],
+    *,
+    now_dt: datetime,
+    schema_version: str,
+    label: str,
+    expiry_field: str | None,
+) -> list[str]:
+    """PR#153 Codex-4:上游 receipt 的 **digest 綁定只證 bytes**,不證那份 receipt 站得住。
+
+    ``_bound_artifact_digest_ok`` 對「任何 canonical 自洽的物件」都會通過——一份缺 closed
+    schema 必填欄、缺五 APPLY row lineage、或已過期的 receipt 照樣能綁進 operator-signed
+    intent。此處補上 §3.1a 原文要求的另一半(「digest 在手**且未過期**」):
+
+    1. exact ``schema_version``(名字對不上就不必談內容);
+    2. 中央閘全套(closed schema CP2b + 該 schema 的 lineage/委派驗;s2_4 走
+       ``derive_install_lineage_status``,quiesce 走 S2.1 葉的逐 observation 再驗);
+    3. wall-clock 窗:``expiry_field`` 已過 ⇒ typed 拒。quiesce result 的新鮮窗由中央閘
+       自己判(``started_at <= now < evidence_expires_at``),故該分支傳 ``None`` 不重複判;
+       s2_4 install receipt 在中央閘**沒有**窗判,由此處補。
+
+    ⚠ honesty:通過此閘只證「這份 receipt 結構上站得住且未過期」,**不**證明它描述的安裝/
+    drill 真的發生過(那需要 platform-attested 證據,非 source lane 可得)。
+    """
+
+    if artifact.get("schema_version") != schema_version:
+        return [
+            f"{label} does not declare schema_version {schema_version!r}; a differently "
+            "shaped artifact never satisfies the binding (fail-closed)"
+        ]
+    reasons: list[str] = []
+    central_errors = central_validator.validate_aiml_artifact(
+        artifact, now=_iso(now_dt)
+    )
+    if central_errors:
+        reasons.append(
+            f"{label} fails the central closed-schema/lineage gate: "
+            + "; ".join(central_errors)
+        )
+    if expiry_field is not None:
+        try:
+            expires_dt = central_validator._parse_timestamp(str(artifact[expiry_field]))
+        except (KeyError, TypeError, ValueError):
+            reasons.append(
+                f"{label} carries no parseable {expiry_field}; an upstream receipt whose "
+                "validity window cannot be derived is never in hand (fail-closed)"
+            )
+        else:
+            if expires_dt <= now_dt:
+                reasons.append(
+                    f"{label} expired at {artifact[expiry_field]} (now {_iso(now_dt)}); "
+                    "§3.1a requires the bound receipt to be in hand AND unexpired"
+                )
+    return reasons
+
+
 def _static_precheck_reasons(
     core: dict[str, Any],
     *,
@@ -749,6 +805,17 @@ def _static_precheck_reasons(
             "APPLIED_INACTIVE) bound by the core digest is not in hand or its "
             "self_digest does not re-derive (a self-reported digest is never trusted; "
             "fail-closed)"
+        )
+    else:
+        # Codex-4:digest 綁定之後,那份 receipt 本身也必須過中央閘且未過期。
+        reasons.extend(
+            _upstream_receipt_gate_reasons(
+                s2_4_install_effect_receipt,
+                now_dt=now_dt,
+                schema_version="s2_4_install_effect_receipt_v1",
+                label="S2.5 precheck: the bound s2_4_install_effect_receipt_v1",
+                expiry_field="expires_at",
+            )
         )
     # b. native-loader closure 重驗(§8.1:S2.5A 於 start 前重跑)。
     observed_closure = (
@@ -784,6 +851,17 @@ def _static_precheck_reasons(
                 "S2.5B precheck: the exact quiesce_result_v1(status=QUIESCED_...) bound "
                 "by s2_1_drill_receipt_digest is not in hand or its self_digest does not "
                 "re-derive (the drill must have actually happened and restored)"
+            )
+        else:
+            # Codex-4 的同形第二洞:drill receipt 也只被檢查過 status 前綴 + digest 三值鏈。
+            reasons.extend(
+                _upstream_receipt_gate_reasons(
+                    s2_1_drill_receipt,
+                    now_dt=now_dt,
+                    schema_version="quiesce_result_v1",
+                    label="S2.5B precheck: the bound quiesce_result_v1 drill receipt",
+                    expiry_field=None,
+                )
             )
         pre_drill_ok = (
             isinstance(pre_drill_attestation, dict)
