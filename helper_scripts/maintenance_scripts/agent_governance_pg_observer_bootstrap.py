@@ -1730,11 +1730,17 @@ def validate_pg_observer_bootstrap_binding(
     """Closure admission for one observer-bootstrap effect: intent + OPS preflight + result
     + independent postcheck bound to the verifier's OWN governed command_capture_v2.
 
-    SOURCE-only: this predicate is NOT wired into the live ``validate_deploy_effect_binding``
-    dispatch and no ``route_task`` effect node is injected before the S2.0 EFFECT session;
-    it exists so that session's closure can admit the exact three-way (result verifier
-    capture digest == ops_postcheck capture digest == verifier command_capture_v2
-    record_digest) cross-check with applier != verifier.
+    NEW-P2-B(S2E.1 更新):本謂詞**已**接入 live dispatch —— ``agent_governance_effects``
+    的 S2 分派委派 ``agent_governance_s2_effect_binding``,後者對 ``S2_0_APPLY``
+    一律先呼叫本謂詞(``_DELEGATED_STEP_BINDINGS``,委派不是取代),且 ``route_task`` 在
+    S2 effect selector 命中時已注入該 adapter 節點。舊註「SOURCE-only / 不接 live dispatch /
+    無 route 節點」自本波起為假,故改寫。
+    仍為真的界線:本謂詞只認 ``APPLIED_ROLLED_BACK_EXACT``(拋棄式邏輯證明),而該 status 被
+    result schema 釘成 disposable_local/LOCAL_REPRODUCIBLE + production_apply_performed=false;
+    S2 closure sibling 因此把 S2.0 標成 ``closure_pass_blocked_reason``(今日無可 closure-PASS
+    的成功頂點)。本謂詞存在的理由不變:讓 S2.0 EFFECT session 的 closure 能核 exact 三方
+    (result verifier capture digest == ops_postcheck capture digest == verifier
+    command_capture_v2 record_digest)並要求 applier != verifier。
     """
 
     errors: list[str] = []
