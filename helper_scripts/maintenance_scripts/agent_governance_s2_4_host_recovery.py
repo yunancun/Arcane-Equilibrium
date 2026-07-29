@@ -79,6 +79,36 @@ ROW_NO_DELTA = "NO_DELTA"
 # APPLY 交易需要的兩張 permit(§9.1 atomically 消費;aggregate 永不代替 PG)。
 REQUIRED_AUTHORIZATION_PROFILE_KEYS = ("apply_aggregate", "pg_migration")
 
+# ── §C:新 probe / PREPARE intent 之前的 journal-routed 收斂閘(自有 informal namespace)──
+INTENT_GATE_SCHEMA_VERSION = "s2_4_startup_intent_gate_verdict_v1_informal"
+INTENT_GATE_ADMITTED = "STARTUP_INTENT_ADMITTED"
+INTENT_GATE_SURFACE_ABSENT = _reconcile.RECONCILE_STATUS_SURFACE_ABSENT
+INTENT_GATE_INSTALL_COMPENSATION_REQUIRED = "INSTALL_LANE_REVERSE_COMPENSATION_REQUIRED"
+INTENT_GATE_RECOVERY_REQUIRED = STARTUP_COMPENSATION_RECOVERY_REQUIRED
+INTENT_GATE_JOURNAL_CORRUPT = STARTUP_COMPENSATION_JOURNAL_CORRUPT
+INTENT_GATE_LOCK_HELD = STARTUP_COMPENSATION_LOCK_HELD
+INTENT_GATE_PENDING = STARTUP_COMPENSATION_PENDING
+INTENT_GATE_LANE_UNSUPPORTED = STARTUP_COMPENSATION_LANE_UNSUPPORTED
+INTENT_GATE_TYPED_STATUSES = (
+    INTENT_GATE_ADMITTED,
+    INTENT_GATE_INSTALL_COMPENSATION_REQUIRED,
+    INTENT_GATE_JOURNAL_CORRUPT,
+    INTENT_GATE_LANE_UNSUPPORTED,
+    INTENT_GATE_LOCK_HELD,
+    INTENT_GATE_PENDING,
+    INTENT_GATE_RECOVERY_REQUIRED,
+    INTENT_GATE_SURFACE_ABSENT,
+)
+# 本閘只對這兩條 lane 存在:APPLY lane 的啟動 reconcile 由 ``apply_s2_4_install_plan`` 在**同一把
+# lock 下**自己做(它只需要四個 startup_* 參數),再包一層等於同一件事做兩次、兩把 lock。
+INTENT_GATE_LANES = ("probe", "prepare")
+# §C.2 的誠實缺口:``RESUME_VERIFICATION`` 的正解是「只重跑該步的驗證路徑」,而今日 probe 與
+# PREPARE **沒有** verify-only 進入點。本波不臨時發明一條(那會變成一次沒有 WAL 前置的重放),
+# 而是誠實回 typed RECOVERY_REQUIRED 並把缺口記成 obligation。
+RESUME_VERIFICATION_OBLIGATION = (
+    "S2E_2B_1_PROBE_PREPARE_VERIFY_ONLY_ENTRY_POINT_ABSENT"
+)
+
 _ALL_FALSE_PRODUCTION_FLAGS = dict(_component._ALL_FALSE_PRODUCTION_FLAGS)
 
 
@@ -514,21 +544,33 @@ def compensate_s2_4_startup_residue(
     return _fold_release_into_startup_verdict(outcome, release, plan_id=plan_id)
 
 
-def _fold_release_into_startup_verdict(
+def _release_is_clean(
     outcome: dict[str, Any], release: dict[str, Any], *, plan_id: str
-) -> dict[str, Any]:
-    """把 lock 釋放結果折進 verdict —— **政策**取自 ``install_driver``,只投影回本 namespace。
+) -> dict[str, Any] | None:
+    """lock 釋放的**政策**取自 ``install_driver``;乾淨即回折好的 outcome,否則回 ``None``。
 
     「未乾淨釋放 ⇒ 整份結果降為 ``RECOVERY_REQUIRED``」這條政策的擁有者是
     :func:`agent_governance_s2_4_install_driver._fold_lock_release`;抄一份等於製造第二份判準。
     但它的失敗分支回的是 **aggregate 交易的** verdict 形狀(``s2_4_install_transaction_verdict``
-    + receipt enum 的 status),而本模組刻意不借用那個 namespace(§B.6),故此處只把它的**決定**
-    投影回本模組的 informal verdict。
+    + receipt enum 的 status),而本模組刻意不借用那個 namespace(§B.6),故呼叫端只取它的
+    **決定**,再把結果投影回本模組自己的 informal verdict。
     """
 
     folded = _install_driver._fold_lock_release(outcome, release, plan_id=plan_id)
-    if folded.get("schema_version") == STARTUP_COMPENSATION_SCHEMA_VERSION:
+    if folded.get("schema_version") == outcome.get("schema_version"):
         return folded
+    return None
+
+
+def _fold_release_into_startup_verdict(
+    outcome: dict[str, Any], release: dict[str, Any], *, plan_id: str
+) -> dict[str, Any]:
+    """把 lock 釋放結果折進**補償** verdict(未乾淨釋放 → 整份降為 RECOVERY_REQUIRED)。"""
+
+    clean = _release_is_clean(outcome, release, plan_id=plan_id)
+    if clean is not None:
+        return clean
+    folded = _install_driver._fold_lock_release(outcome, release, plan_id=plan_id)
     return _verdict(
         STARTUP_COMPENSATION_RECOVERY_REQUIRED,
         list(folded.get("reasons") or []),
@@ -1005,4 +1047,302 @@ def _finish_reverse_chain(
         plan_id=plan_id, mutation_performed=mutation_performed, driver_engaged=True,
         reconcile=reconcile, row_classification=classification, reverse_ops=reverse_ops,
         rollback=rollback, journal=journal, residue=residue,
+    )
+
+
+# --------------------------------------------------------------------------- #
+# §C:新 probe / PREPARE intent 之前的 journal-routed 收斂閘
+# --------------------------------------------------------------------------- #
+def _intent_verdict(
+    status: str,
+    reasons: list[str],
+    *,
+    lane: str | None = None,
+    lane_path: str | None = None,
+    admits_new_work: Any = False,
+    driver_engaged: bool = False,
+    reconcile: dict[str, Any] | None = None,
+    intent_result: Any = None,
+    intent_executed: bool = False,
+    new_obligations: list[str] | None = None,
+    lock_release: dict[str, Any] | None = None,
+) -> dict[str, Any]:
+    """§C 的單一出境面。
+
+    ``admits_new_work`` 逐位元組轉述 :func:`reconcile_before_new_intent` 的三態:``True`` /
+    ``False`` / ``None``。``None`` 是「**沒能建立**收斂」——它既不是「乾淨」也不是「不乾淨」,
+    把它折成 ``False`` 會讓「沒有 durable journal 面」讀起來像「有殘留」,折成 ``True`` 則是
+    直接放行。三態原樣保留是唯一誠實的形狀。
+    """
+
+    return {
+        "schema_version": INTENT_GATE_SCHEMA_VERSION,
+        "status": status,
+        "reasons": list(reasons),
+        "lane": lane,
+        "lane_path": lane_path,
+        "admits_new_work": admits_new_work,
+        "intent_executed": bool(intent_executed),
+        "intent_result": intent_result,
+        "new_obligations": list(new_obligations or []),
+        "driver_engaged": bool(driver_engaged),
+        "reconcile": reconcile,
+        "lock_release": lock_release,
+        "mutation_performed": bool(intent_executed),
+        "emits_effect_receipt": False,
+        "production_authority_flags": dict(_ALL_FALSE_PRODUCTION_FLAGS),
+    }
+
+
+def dispatch_startup_reconcile(outcome: Any, *, lane: str) -> dict[str, Any]:
+    """§C.2 的分流矩陣。**一律 branch on ``admits_new_work``,絕不 branch 字串。**
+
+    status 字串是給人讀的;``admits_new_work`` 才是那份 verdict 對「能不能開始新工作」的裁決。
+    先看字串再決定,等於在收斂端重新實作一次收斂判準——兩份判準遲早分岔,而分岔的方向是放行。
+    """
+
+    admits = (outcome or {}).get("admits_new_work")
+    status = (outcome or {}).get("status")
+    lanes = (outcome or {}).get("lanes") or {}
+    reasons = list((outcome or {}).get("reasons") or [])
+    if admits is True:
+        return {"status": INTENT_GATE_ADMITTED, "reasons": reasons, "obligations": []}
+    if admits is None:
+        # 「沒能建立」≠「乾淨」:``SURFACE_ABSENT`` 原樣轉述,絕不冒充成已收斂。
+        return {
+            "status": INTENT_GATE_SURFACE_ABSENT, "reasons": reasons, "obligations": [],
+        }
+    if status == _reconcile.RECONCILE_STATUS_CORRUPT:
+        return {"status": INTENT_GATE_JOURNAL_CORRUPT, "reasons": reasons, "obligations": []}
+    if status == _reconcile.RECONCILE_STATUS_LOCK_REQUIRED:
+        return {"status": INTENT_GATE_LOCK_HELD, "reasons": reasons, "obligations": []}
+    if status == _reconcile.RECONCILE_STATUS_PENDING:
+        return {"status": INTENT_GATE_PENDING, "reasons": reasons, "obligations": []}
+    if status == _reconcile.RECONCILE_STATUS_RESUME:
+        return {
+            "status": INTENT_GATE_RECOVERY_REQUIRED,
+            "reasons": reasons + [
+                "the interrupted step converged to RESUME_VERIFICATION, whose correct next "
+                "action is to re-run ONLY that step's verification path — and neither the "
+                "capability probe nor PREPARE exposes a verify-only entry point today. This "
+                "surface refuses rather than inventing one: a blind re-run would repeat an "
+                "external effect with no write-ahead record of the repeat. RECOVERY_REQUIRED "
+                "with zero mutation; the gap is recorded as an obligation"
+            ],
+            "obligations": [RESUME_VERIFICATION_OBLIGATION],
+        }
+    if status == _reconcile.RECONCILE_STATUS_COMPENSATE:
+        compensating = sorted(
+            key for key, verdict in lanes.items()
+            if (verdict or {}).get("status") == _reconcile.RECONCILE_STATUS_COMPENSATE
+        )
+        if any(key == "install" or key.startswith("install:") for key in compensating):
+            return {
+                "status": INTENT_GATE_INSTALL_COMPENSATION_REQUIRED,
+                "reasons": reasons + [
+                    "the install lane holds a task-owned partial state with a valid journal "
+                    "ownership binding; §5.4 reverse compensation must run first via "
+                    "compensate_s2_4_startup_residue (it needs the signed plan, the five "
+                    "plan-bound component intents and the two burnt operator permits, none of "
+                    f"which this {lane} intent gate has). Zero mutation"
+                ],
+                "obligations": [],
+            }
+        return {
+            "status": INTENT_GATE_LANE_UNSUPPORTED,
+            "reasons": reasons + [
+                f"lane(s) {compensating} converged to COMPENSATE_REVERSE_ORDER, but the §5.4 "
+                "five-row reverse chain is defined only for the install lane; probe and "
+                "PREPARE carry their own cleanup contracts and an operator resolves them"
+            ],
+            "obligations": [],
+        }
+    return {
+        "status": INTENT_GATE_RECOVERY_REQUIRED, "reasons": reasons, "obligations": [],
+    }
+
+
+def reconcile_before_s2_4_intent(
+    driver: Any = None,
+    *,
+    lane: str,
+    lane_id: Any,
+    intent_driver: Any = None,
+    build_journal: Callable[[list[dict[str, Any]], bool], dict[str, Any]] | None = None,
+    run_intent: Callable[[Any], Any] | None = None,
+    clock: Callable[[], datetime] | None = None,
+) -> dict[str, Any]:
+    """§5.2 前置:接受一個新的 probe / PREPARE intent **之前**先收斂任何非終端 journal。
+
+    固定閘序(§C.1,每一步都有既存錨點):
+
+      1. **先** lock。``reconcile_startup_journals`` 先問 lock 再問 driver,所以倒過來會讓
+         「driver=None ∧ 無 lock」回報 ``EXTERNAL_VERIFICATION_PENDING`` —— 那句話讀起來像
+         「只差一個主機面就成」,實際上連 §5.2 的准入前提都不成立;
+      2. 把該進入點的 host driver 包進
+         :class:`agent_governance_s2_4_reconcile.JournalRoutedDriver`(綁該 lane 的
+         :class:`JournalStore` 與**已取得**的 lock),於是它的每一次 ``journal_transition``
+         都經 durable WAL 落盤;
+      3. ``reconcile_before_new_intent`` 自 ``startup_reconcile_surface()`` 取回檔案面與 lock
+         裁決並跑真正的收斂;
+      4. §C.2 分流(一律 branch on ``admits_new_work``);
+      5. ``finally`` 釋放 lock 並把釋放結果折入。
+
+    ``run_intent`` 是「被閘保護的那件事」:它**只**在收斂放行時被呼叫,且在**同一把 lock 之下**
+    收到已包好的 driver。這不是可有可無的便利參數——把閘與 intent 拆成兩次 lock 會留下一個
+    TOCTOU 窗:閘說「乾淨」、鎖放掉、另一個 writer 動手、然後 intent 才開始。缺席時本函式是
+    一個純粹的 dry-run 閘(零主機變更)。
+
+    APPLY lane 不走這裡:``apply_s2_4_install_plan`` 已在它自己那把 lock 下做同一件事,只需要
+    餵它四個 ``startup_*`` 參數(見 :data:`INTENT_GATE_LANES`)。
+    """
+
+    tick = clock or (lambda: datetime.now(timezone.utc))
+    if lane not in INTENT_GATE_LANES:
+        return _intent_verdict(
+            INTENT_GATE_RECOVERY_REQUIRED,
+            [
+                f"the startup intent gate covers {list(INTENT_GATE_LANES)}; the APPLY lane "
+                "reconciles inside apply_s2_4_install_plan under its own install lock, and "
+                "wrapping it here would take a second lock for the same work"
+            ],
+            lane=lane,
+        )
+    try:
+        lane_path = _reconcile.rederive_lane_path(lane, lane_id)
+    except _reconcile.InstallDriverContractError as error:
+        return _intent_verdict(
+            INTENT_GATE_RECOVERY_REQUIRED,
+            [
+                f"the {lane} journal path could not be re-derived from the supplied id "
+                f"({error.code}); a caller string is never joined into the §5.2 state root"
+            ],
+            lane=lane,
+        )
+    if driver is None:
+        return _intent_verdict(
+            INTENT_GATE_PENDING,
+            [
+                "the §5.2 startup reconciliation is reachable but authority-locked: no host "
+                "lock/file surface is present (Mac/source/test lane); "
+                "EXTERNAL_VERIFICATION_PENDING with zero mutation"
+            ],
+            lane=lane, lane_path=lane_path,
+        )
+    try:
+        lock_driver = driver.lock_driver()
+        file_driver = driver.file_driver()
+    except Exception as error:  # noqa: BLE001
+        return _intent_verdict(
+            INTENT_GATE_RECOVERY_REQUIRED,
+            [
+                "the driver could not supply its lock/file surfaces: "
+                f"{_component.redact_driver_error(error)}"
+            ],
+            lane=lane, lane_path=lane_path, driver_engaged=True,
+        )
+    # ── (1) lock-first ─────────────────────────────────────────────────────────
+    lock_verdict = _lock.acquire_s2_4_install_lock(lock_driver)
+    if lock_verdict["status"] != _lock.LOCK_STATUS_ACQUIRED:
+        mapped = {
+            _lock.LOCK_STATUS_HELD: INTENT_GATE_LOCK_HELD,
+            _lock.LOCK_STATUS_PENDING: INTENT_GATE_PENDING,
+        }.get(lock_verdict["status"], INTENT_GATE_RECOVERY_REQUIRED)
+        return _intent_verdict(
+            mapped, lock_verdict["reasons"], lane=lane, lane_path=lane_path,
+            driver_engaged=True,
+        )
+    try:
+        outcome = _gate_under_lock(
+            lane=lane, lane_path=lane_path, intent_driver=intent_driver,
+            file_driver=file_driver, lock_verdict=lock_verdict,
+            build_journal=build_journal, run_intent=run_intent, tick=tick,
+        )
+    except BaseException:
+        _lock.release_s2_4_install_lock(lock_driver, lock_verdict)
+        raise
+    release = _lock.release_s2_4_install_lock(lock_driver, lock_verdict)
+    clean = _release_is_clean(outcome, release, plan_id=lane_path)
+    if clean is not None:
+        return clean
+    folded = _install_driver._fold_lock_release(outcome, release, plan_id=lane_path)
+    return _intent_verdict(
+        INTENT_GATE_RECOVERY_REQUIRED, list(folded.get("reasons") or []),
+        lane=lane, lane_path=lane_path,
+        admits_new_work=outcome.get("admits_new_work"),
+        driver_engaged=True, reconcile=outcome.get("reconcile"),
+        intent_result=outcome.get("intent_result"),
+        intent_executed=bool(outcome.get("intent_executed")),
+        new_obligations=outcome.get("new_obligations"),
+        lock_release=dict(release),
+    )
+
+
+def _gate_under_lock(
+    *,
+    lane: str,
+    lane_path: str,
+    intent_driver: Any,
+    file_driver: Any,
+    lock_verdict: dict[str, Any],
+    build_journal: Callable[[list[dict[str, Any]], bool], dict[str, Any]] | None,
+    run_intent: Callable[[Any], Any] | None,
+    tick: Callable[[], datetime],
+) -> dict[str, Any]:
+    """握著 install lock 的那一段(wrap → reconcile → 分流 → 放行時跑 intent)。"""
+
+    wrapped = _reconcile.JournalRoutedDriver(
+        intent_driver,
+        store=_journal.JournalStore(file_driver, journal_path=lane_path),
+        # ``build_journal`` 只在該 intent 真的做出一次 state 轉移時才被呼叫;收斂本身零變更。
+        # 缺席時給一個 typed raise 的替身,而不是一個「看起來能用」的空 journal builder。
+        build_journal=build_journal or _refuse_journal_build,
+        lock_verdict=lock_verdict, clock=tick, step_index=None, transaction=None,
+    )
+    reconcile = _reconcile.reconcile_before_new_intent(
+        wrapped, lane=lane, lane_path=lane_path
+    )
+    decision = dispatch_startup_reconcile(reconcile, lane=lane)
+    if decision["status"] != INTENT_GATE_ADMITTED:
+        return _intent_verdict(
+            decision["status"], decision["reasons"], lane=lane, lane_path=lane_path,
+            admits_new_work=reconcile.get("admits_new_work"), driver_engaged=True,
+            reconcile=reconcile, new_obligations=decision["obligations"],
+        )
+    if run_intent is None:
+        return _intent_verdict(
+            INTENT_GATE_ADMITTED,
+            decision["reasons"] + [
+                "startup reconciliation admits a new intent on this lane; no intent callable "
+                "was supplied, so this call is a dry-run gate with zero mutation"
+            ],
+            lane=lane, lane_path=lane_path, admits_new_work=True, driver_engaged=True,
+            reconcile=reconcile,
+        )
+    try:
+        result = run_intent(wrapped)
+    except Exception as error:  # noqa: BLE001
+        return _intent_verdict(
+            INTENT_GATE_RECOVERY_REQUIRED,
+            decision["reasons"] + [
+                "the admitted intent raised under the install lock: "
+                f"{_component.redact_driver_error(error)}; whatever it durably wrote is on the "
+                "WAL and the next startup reconciles from there"
+            ],
+            lane=lane, lane_path=lane_path, admits_new_work=True, driver_engaged=True,
+            reconcile=reconcile, intent_executed=True,
+        )
+    return _intent_verdict(
+        INTENT_GATE_ADMITTED, decision["reasons"], lane=lane, lane_path=lane_path,
+        admits_new_work=True, driver_engaged=True, reconcile=reconcile,
+        intent_result=result, intent_executed=True,
+    )
+
+
+def _refuse_journal_build(entries: Any, terminal: Any) -> dict[str, Any]:
+    """沒有 journal builder 就不可能有 durable WAL —— typed raise,絕不落一本空 journal。"""
+
+    del entries, terminal
+    raise _reconcile.InstallDriverContractError(
+        "startup_intent_gate_requires_a_lane_journal_builder"
     )

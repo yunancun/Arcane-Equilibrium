@@ -17,6 +17,7 @@
 """
 from __future__ import annotations
 
+import ast
 import inspect
 import json
 import sys
@@ -620,9 +621,37 @@ def test_the_compensator_never_wraps_a_row_driver_into_a_journal_routed_driver()
     進去就直接拿到 WAL 與 install lock。啟動補償器只把 ``row_driver()`` 的回傳物當**獨立
     verifier** 用,故它在結構上不出現在任何包裹點。"""
 
-    source = (HELPERS / "agent_governance_s2_4_host_recovery.py").read_text(encoding="utf-8")
-    assert "JournalRoutedDriver" not in source
-    assert "row_driver" in source  # 反例保護:名字改了就不是這個檢查了
+    tree = ast.parse(
+        (HELPERS / "agent_governance_s2_4_host_recovery.py").read_text(encoding="utf-8")
+    )
+    wrapping_functions: list[str] = []
+    for node in ast.walk(tree):
+        if not isinstance(node, (ast.FunctionDef, ast.AsyncFunctionDef)):
+            continue
+        for inner in ast.walk(node):
+            func = getattr(inner, "func", None)
+            if not isinstance(inner, ast.Call) or not isinstance(func, ast.Attribute):
+                continue
+            if func.attr != "JournalRoutedDriver":
+                continue
+            wrapping_functions.append(node.name)
+            # 直接判準:被包的那個東西不得是 ``…​.row_driver(...)`` 的回傳物。
+            wrapped = inner.args[0] if inner.args else None
+            assert not (
+                isinstance(wrapped, ast.Call)
+                and isinstance(wrapped.func, ast.Attribute)
+                and wrapped.func.attr == "row_driver"
+            ), node.name
+    # 反例保護:名字改了(或包裹點消失了)就不是這個檢查了。
+    assert wrapping_functions == ["_gate_under_lock"], wrapping_functions
+    # 範圍判準:唯一的包裹點所在函式裡完全不出現 ``row_driver``。
+    for node in ast.walk(tree):
+        if isinstance(node, ast.FunctionDef) and node.name in wrapping_functions:
+            assert "row_driver" not in ast.unparse(node), node.name
+    assert any(
+        isinstance(node, ast.Attribute) and node.attr == "row_driver"
+        for node in ast.walk(tree)
+    ), "the compensator is still expected to call row_driver() as an independent verifier"
 
 
 def test_the_typed_status_namespace_is_disjoint_from_the_frozen_receipt_enum():
@@ -638,3 +667,230 @@ def test_the_typed_status_namespace_is_disjoint_from_the_frozen_receipt_enum():
     assert "APPLIED_INACTIVE" not in own
     assert "SOURCE_SIMULATION_PASS" not in own
     assert own == set(sorted(own))
+
+
+# --------------------------------------------------------------------------- #
+# C4 §C:新 probe / PREPARE intent 之前的 journal-routed 收斂閘
+# --------------------------------------------------------------------------- #
+_PROBE_ID = journal.PROBE_ID_PREFIX + "a" * 64
+_PREPARE_ID = journal.PREPARE_ID_PREFIX + "a" * 64
+
+
+def _outcome(status, admits, *, lanes=None):
+    return {"status": status, "admits_new_work": admits, "lanes": lanes or {}, "reasons": []}
+
+
+@pytest.mark.parametrize("status,admits,expected", [
+    (reconcile_leaf.RECONCILE_STATUS_CLEAN, True, recovery.INTENT_GATE_ADMITTED),
+    (reconcile_leaf.RECONCILE_STATUS_NOT_APPLIED, True, recovery.INTENT_GATE_ADMITTED),
+    (reconcile_leaf.RECONCILE_STATUS_RESUME, False, recovery.INTENT_GATE_RECOVERY_REQUIRED),
+    (reconcile_leaf.RECONCILE_STATUS_RECOVERY_REQUIRED, False,
+     recovery.INTENT_GATE_RECOVERY_REQUIRED),
+    (reconcile_leaf.RECONCILE_STATUS_CORRUPT, False, recovery.INTENT_GATE_JOURNAL_CORRUPT),
+    (reconcile_leaf.RECONCILE_STATUS_LOCK_REQUIRED, False, recovery.INTENT_GATE_LOCK_HELD),
+    (reconcile_leaf.RECONCILE_STATUS_PENDING, False, recovery.INTENT_GATE_PENDING),
+    (reconcile_leaf.RECONCILE_STATUS_SURFACE_ABSENT, None,
+     recovery.INTENT_GATE_SURFACE_ABSENT),
+])
+@pytest.mark.parametrize("lane", list(recovery.INTENT_GATE_LANES))
+def test_the_dispatch_matrix_covers_every_convergence(status, admits, expected, lane):
+    decision = recovery.dispatch_startup_reconcile(_outcome(status, admits), lane=lane)
+    assert decision["status"] == expected
+    assert decision["status"] in recovery.INTENT_GATE_TYPED_STATUSES
+
+
+@pytest.mark.parametrize("lane", list(recovery.INTENT_GATE_LANES))
+def test_a_compensating_install_lane_routes_to_the_reverse_chain_not_to_this_gate(lane):
+    decision = recovery.dispatch_startup_reconcile(
+        _outcome(
+            reconcile_leaf.RECONCILE_STATUS_COMPENSATE, False,
+            lanes={"install": {"status": reconcile_leaf.RECONCILE_STATUS_COMPENSATE}},
+        ),
+        lane=lane,
+    )
+    assert decision["status"] == recovery.INTENT_GATE_INSTALL_COMPENSATION_REQUIRED
+    assert any("compensate_s2_4_startup_residue" in r for r in decision["reasons"])
+
+
+@pytest.mark.parametrize("lane", list(recovery.INTENT_GATE_LANES))
+def test_a_compensating_probe_or_prepare_lane_is_typed_unsupported_at_the_gate(lane):
+    decision = recovery.dispatch_startup_reconcile(
+        _outcome(
+            reconcile_leaf.RECONCILE_STATUS_COMPENSATE, False,
+            lanes={"probe:" + _PROBE_ID: {
+                "status": reconcile_leaf.RECONCILE_STATUS_COMPENSATE
+            }},
+        ),
+        lane=lane,
+    )
+    assert decision["status"] == recovery.INTENT_GATE_LANE_UNSUPPORTED
+
+
+def test_the_gate_branches_on_admits_new_work_not_on_the_status_string():
+    """status 字串是給人讀的;``admits_new_work`` 才是那份 verdict 的裁決。先看字串等於在
+    收斂端重新實作一次收斂判準,而兩份判準分岔的方向是放行。"""
+
+    # 「壞名字 + admits=True」必須放行 —— 否則分流讀的是字串。
+    assert recovery.dispatch_startup_reconcile(
+        _outcome(reconcile_leaf.RECONCILE_STATUS_RECOVERY_REQUIRED, True), lane="probe"
+    )["status"] == recovery.INTENT_GATE_ADMITTED
+    # 「好名字 + admits=None」必須是 SURFACE_ABSENT —— None 既不是 False 也不是 True。
+    assert recovery.dispatch_startup_reconcile(
+        _outcome(reconcile_leaf.RECONCILE_STATUS_CLEAN, None), lane="probe"
+    )["status"] == recovery.INTENT_GATE_SURFACE_ABSENT
+    # 「好名字 + admits=False」必須擋下。
+    assert recovery.dispatch_startup_reconcile(
+        _outcome(reconcile_leaf.RECONCILE_STATUS_CLEAN, False), lane="probe"
+    )["status"] == recovery.INTENT_GATE_RECOVERY_REQUIRED
+
+
+def test_the_resume_verification_gap_is_recorded_as_an_obligation_not_invented_away():
+    decision = recovery.dispatch_startup_reconcile(
+        _outcome(reconcile_leaf.RECONCILE_STATUS_RESUME, False), lane="prepare"
+    )
+    assert decision["obligations"] == [recovery.RESUME_VERIFICATION_OBLIGATION]
+    assert any("verify-only entry point" in reason for reason in decision["reasons"])
+
+
+@pytest.mark.parametrize("lane,lane_id", [("probe", _PROBE_ID), ("prepare", _PREPARE_ID)])
+def test_a_clean_lane_admits_the_intent_under_the_lock(fx, lane, lane_id):
+    seen = {}
+
+    def _run(wrapped):
+        seen["wrapped_driver"] = wrapped.wrapped_driver
+        bound = wrapped.startup_reconcile_surface()
+        # intent 在**同一把已取得的 lock 之下**執行(閘與 intent 分成兩次 lock 會留 TOCTOU 窗)。
+        seen["held"] = lock.install_lock_is_held(bound["lock_verdict"])
+        seen["file_driver"] = bound["file_driver"]
+        return {"ran": True}
+
+    sentinel = object()
+    verdict = recovery.reconcile_before_s2_4_intent(
+        fx.driver, lane=lane, lane_id=lane_id, intent_driver=sentinel,
+        build_journal=lambda entries, terminal: None, run_intent=_run,
+        clock=kit.frozen_clock(),
+    )
+    assert verdict["status"] == recovery.INTENT_GATE_ADMITTED, verdict["reasons"]
+    assert verdict["admits_new_work"] is True
+    assert verdict["intent_executed"] is True
+    assert verdict["intent_result"] == {"ran": True}
+    assert seen["wrapped_driver"] is sentinel
+    assert seen["held"] is True
+    assert seen["file_driver"] is fx.fs
+    # 離開之後 lock 已釋放(下一次取得成功即證明)。
+    assert lock.acquire_s2_4_install_lock(fx.lock_fake)["status"] == (
+        lock.LOCK_STATUS_ACQUIRED
+    )
+
+
+def test_a_dry_run_gate_runs_no_intent_and_mutates_nothing(fx):
+    verdict = recovery.reconcile_before_s2_4_intent(
+        fx.driver, lane="probe", lane_id=_PROBE_ID, clock=kit.frozen_clock()
+    )
+    assert verdict["status"] == recovery.INTENT_GATE_ADMITTED
+    assert verdict["intent_executed"] is False
+    assert verdict["mutation_performed"] is False
+    assert any("dry-run gate" in reason for reason in verdict["reasons"])
+
+
+def test_a_previous_plans_stranded_transaction_blocks_a_new_probe_intent(fx):
+    """§5.2 的「**任何**非終端 journal」:上一份 plan 半途崩掉留下的那本也擋新 intent。"""
+
+    _crash(fx, "PG_ROLE_ACL_MIGRATION:post_effect_pre_observation")
+    verdict = recovery.reconcile_before_s2_4_intent(
+        fx.driver, lane="probe", lane_id=_PROBE_ID,
+        run_intent=lambda wrapped: pytest.fail("the intent must not run"),
+        clock=kit.frozen_clock(),
+    )
+    assert verdict["status"] == recovery.INTENT_GATE_RECOVERY_REQUIRED
+    assert verdict["admits_new_work"] is False
+    assert verdict["intent_executed"] is False
+
+
+def test_the_gate_takes_the_lock_before_it_asks_for_a_file_surface(fx):
+    """§5.2 的閘序是 lock-first:倒過來會讓「無 lock ∧ 無 driver」回報
+    EXTERNAL_VERIFICATION_PENDING,那句話讀起來像「只差一個主機面就成」。"""
+
+    from test_agent_governance_s2_4_lock import FakeLockDriver
+
+    fx.driver._lock = FakeLockDriver(flock_succeeds=False)
+    verdict = recovery.reconcile_before_s2_4_intent(
+        fx.driver, lane="probe", lane_id=_PROBE_ID,
+        run_intent=lambda wrapped: pytest.fail("the intent must not run"),
+        clock=kit.frozen_clock(),
+    )
+    assert verdict["status"] == recovery.INTENT_GATE_LOCK_HELD
+    assert verdict["reconcile"] is None
+    assert verdict["intent_executed"] is False
+
+
+def test_no_driver_is_authority_locked_at_the_gate_too(fx):
+    verdict = recovery.reconcile_before_s2_4_intent(
+        None, lane="probe", lane_id=_PROBE_ID
+    )
+    assert verdict["status"] == recovery.INTENT_GATE_PENDING
+    assert verdict["driver_engaged"] is False
+    assert verdict["lane_path"] == journal.probe_journal_path(_PROBE_ID)
+
+
+@pytest.mark.parametrize("bad", ["", "../etc/passwd", "s2-4-probe-zz", None, 7])
+def test_a_caller_string_is_never_joined_into_the_state_root(fx, bad):
+    verdict = recovery.reconcile_before_s2_4_intent(
+        fx.driver, lane="probe", lane_id=bad, clock=kit.frozen_clock()
+    )
+    assert verdict["status"] == recovery.INTENT_GATE_RECOVERY_REQUIRED
+    assert verdict["lane_path"] is None
+    assert verdict["driver_engaged"] is False
+
+
+def test_the_apply_lane_is_not_gated_here(fx):
+    verdict = recovery.reconcile_before_s2_4_intent(
+        fx.driver, lane="install", lane_id="s2-4-" + "a" * 64, clock=kit.frozen_clock()
+    )
+    assert verdict["status"] == recovery.INTENT_GATE_RECOVERY_REQUIRED
+    assert any("apply_s2_4_install_plan" in reason for reason in verdict["reasons"])
+    assert verdict["driver_engaged"] is False
+
+
+def test_an_intent_without_a_journal_builder_can_never_write_a_wal(fx):
+    """沒有 journal builder 就不可能有 durable WAL —— typed raise,絕不落一本空 journal。"""
+
+    def _run(wrapped):
+        wrapped.journal_transition(entry={
+            "state": "APPLYING", "pre_state_digest": "sha256:" + "1" * 64,
+            "post_state_digest": "sha256:" + "2" * 64,
+            "component_effect_class": "CAPABILITY_PROBE",
+        })
+
+    verdict = recovery.reconcile_before_s2_4_intent(
+        fx.driver, lane="probe", lane_id=_PROBE_ID, run_intent=_run,
+        clock=kit.frozen_clock(),
+    )
+    assert verdict["status"] == recovery.INTENT_GATE_RECOVERY_REQUIRED
+    assert verdict["intent_executed"] is True
+    assert any("raised under the install lock" in r for r in verdict["reasons"])
+
+
+def test_an_unclean_release_downgrades_the_gate_without_borrowing_a_receipt_status(
+    fx, monkeypatch
+):
+    original = lock.release_s2_4_install_lock
+
+    def _dirty(driver, lock_verdict):
+        original(driver, lock_verdict)
+        return {
+            "status": lock.LOCK_STATUS_RECOVERY_REQUIRED,
+            "reasons": ["install-lock release failed: injected"], "lock_unlinked": False,
+        }
+
+    monkeypatch.setattr(lock, "release_s2_4_install_lock", _dirty)
+    verdict = recovery.reconcile_before_s2_4_intent(
+        fx.driver, lane="probe", lane_id=_PROBE_ID, clock=kit.frozen_clock()
+    )
+    assert verdict["status"] == recovery.INTENT_GATE_RECOVERY_REQUIRED
+    assert verdict["schema_version"] == recovery.INTENT_GATE_SCHEMA_VERSION
+    assert verdict["lock_release"]["status"] == lock.LOCK_STATUS_RECOVERY_REQUIRED
+    assert any("not cleanly released" in reason for reason in verdict["reasons"])
+    assert verdict["status"] not in runner.AGGREGATE_TYPED_STATUSES or (
+        verdict["status"] == "RECOVERY_REQUIRED"
+    )
