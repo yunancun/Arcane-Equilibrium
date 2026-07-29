@@ -359,6 +359,16 @@ def test_registry_carries_identity_only_s2_2b_adapter_fail_closed() -> None:
     invariant = entry["invariant"]
     # 五個 invariant 子句(設計 §C):fail-closed / 九 authority false / EFFECT session 前
     # 不注入 / S2.5B 唯一合法上游 / runtime-attestor 執行與驗證屬 S2E.4。
+    #
+    # ⚠ NEW-P2-F 讀法(PM 已裁 registry 字串不改,frozen 面):第三句「no route_task effect
+    # node or closure effect binding is injected **before** the S2.2B EFFECT session」與同檔
+    # :104/:259/:279/:321 那些「admitted selector ⇒ 恰一 effect 節點」的斷言**不矛盾**。
+    # 等式是:**S2 effect selector claim admission = 該 adapter 的 EFFECT session 開始**
+    # (那是「EFFECT session」在 route 層唯一的機器定義,見 agent_governance_routing 的 S2
+    # selector 分支註)。invariant 禁止的是 admission **之前**的注入,而 source lane
+    # (selector 缺席)零 effect 節點注入——正由
+    # test_source_lane_stays_unreachable_without_selector 逐 class 證明——就是它。
+    # 兩組測試因此同時為真;未來讀者不應把它們讀成矛盾。
     for clause in (
         "fail-closed EXTERNAL_VERIFICATION_PENDING",
         "nine authorities stay false",

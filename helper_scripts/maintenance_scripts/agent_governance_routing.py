@@ -175,6 +175,11 @@ P0B_CLAIM_KEYS_BY_PHASE = {
 # exact-match 恰一 step + exact claim-key set + selector↔side_effect_class 互鎖,任何不符
 # typed ValueError,絕不靜默回落 source route。route 是純編譯器:只驗身分與集合,不驗真偽——
 # head/freshness/permit/attestor 全在 adapter 與 closure 層閉合。
+# 📎 registry invariant 讀法(NEW-P2-F):九條 S2 adapter invariant 的
+# 「no route_task effect node ... is injected **before** the S2.x EFFECT session」與本處的注入
+# 不矛盾——等式是 **S2 effect selector claim admission = 該 adapter 的 EFFECT session 開始**。
+# invariant 禁止的是 admission 之前的注入,而 source lane(selector 缺席)零 effect 節點注入
+# 正是它;故「釘 invariant 字串」與「斷言 admission 後有注入」兩組測試同時為真。
 # W6A/W6B probe 共用 adapter id 與 side_effect_class,scope 互斥由 step 差(selector)+ adapter
 # 的 scope-bound authorization 消耗雙層保證;S2.5A/S2.5B 共用 s2_5_start_intent 亦同。
 # per-step metadata(intent/result/rollback schema versions、S2.5 actor 與 independent

@@ -39,6 +39,11 @@ HEAD = "b" * 40
 T_START = "2026-07-28T10:00:00Z"
 T_DONE = "2026-07-28T10:05:00Z"
 T_POST = "2026-07-28T10:06:00Z"
+# NEW-P2-G/P3-J:closure 裁決時刻(驗方時鐘)= §6 的 now。刻意取一個**與 fixture 其他任何
+# 時間戳皆不相等**的值:舊 sentinel 只斷言 `now == receipt["completed_at"]`,而 T_DONE 恰好
+# 等於一個「好猜的」整分常數 ⇒ 把來源換成硬編常數 `"2026-07-28T10:05:00Z"` 測試仍綠(存活
+# 突變)。時間戳碰撞不得成為守衛的一部分,故此值帶秒且不與任何其他常數相等。
+T_ADJUDICATED = "2026-07-28T10:07:37Z"
 T_EXPIRY = "2026-07-28T10:20:00Z"
 # 與 routing 測試同形的 per-step 合法粗類 facts(effect lane 硬性要求 authority 面)。
 STEP_FACT_SHAPES = {
@@ -198,6 +203,8 @@ def _packet(step: str, receipt: dict, postcheck_id: str = "pc") -> tuple[dict, d
         "acceptance": [{"status": "PASS", "evidence_refs": ["effect", postcheck_id]}],
         "side_effects": {"runtime_contact": True},
         "disposition": "CHANGED",
+        # NEW-P2-G:closure_packet_v1 的 required 頂層欄位;§6 的新鮮度時鐘取自此處。
+        "adjudicated_at": T_ADJUDICATED,
     }
     fragments = {"ops_postcheck": {"evidence_refs": [postcheck_id]}}
     evidence_by_id = {postcheck_id: postcheck}
@@ -511,6 +518,41 @@ def _s2_5_carriers(receipt: dict) -> tuple[dict, dict, dict, dict]:
     return intent, intent_evidence, preflight, capture_evidence
 
 
+def _ops_preflight_fragment(preflight: dict) -> dict:
+    """OPS preflight 的 role_fragment 載體(NEW-P3-I:形狀由真 schema 驗證器另行釘住)。
+
+    fragment 的 payload_kind 由 registry 釘死 operation_review_fragment_v1,故 §6 要的
+    preflight artifact 只能掛在 payload 的具名鍵下;其餘欄位取 closure_packet_v1
+    role_fragments 的 required 最小集,讓被適配層真正讀到的是一份 schema-valid fragment。
+    """
+
+    return {
+        "schema_version": "role_fragment_v1",
+        "id": "fragment:ops_preflight",
+        "node_id": "ops_preflight",
+        "role": "OPS",
+        "task_contract_digest": DIGEST,
+        "context_artifact_digest": DIGEST,
+        "producer_call_ref": "agent-wave:ops_preflight:attempt:1",
+        "producer_call_receipt_digest": DIGEST,
+        "producer_record_kind": "workflow_call_record_v1",
+        "work_status": "DONE",
+        "gate_verdict": "PASS",
+        "classification": "FACT",
+        "confidence": "high",
+        "summary": "S2.5 OPS preflight observed the unit inactive",
+        "evidence_refs": ["pc"],
+        "concerns": [],
+        "next_action": None,
+        "consumption": {
+            "measurement_status": "unavailable",
+            "unavailable_reason": "no trusted telemetry in a structural test",
+        },
+        "payload_kind": "operation_review_fragment_v1",
+        "payload": {binding.S2_5_OPS_PREFLIGHT_PAYLOAD_KEY: preflight},
+    }
+
+
 @pytest.mark.parametrize("step", S2_5_STEPS)
 def test_s2_5_delegation_passes_the_exact_carriers_to_the_section6_gate(
     monkeypatch: pytest.MonkeyPatch, step: str,
@@ -535,10 +577,7 @@ def test_s2_5_delegation_passes_the_exact_carriers_to_the_section6_gate(
     evidence_by_id[intent_evidence["id"]] = intent_evidence
     evidence_by_id[capture_evidence["id"]] = capture_evidence
     fragments["ops_postcheck"]["evidence_refs"].append(capture_evidence["id"])
-    fragments["ops_preflight"] = {
-        "payload_kind": "operation_review_fragment_v1",
-        "payload": {binding.S2_5_OPS_PREFLIGHT_PAYLOAD_KEY: preflight},
-    }
+    fragments["ops_preflight"] = _ops_preflight_fragment(preflight)
     assert binding.validate_s2_effect_binding(
         packet, route, fragments, evidence_by_id, {"effect": receipt}
     ) == []
@@ -547,7 +586,16 @@ def test_s2_5_delegation_passes_the_exact_carriers_to_the_section6_gate(
     assert seen[0]["ops_preflight"] is preflight
     assert seen[0]["receipt"] is receipt
     assert seen[0]["verifier_capture"] is capture_evidence["artifact"]
-    assert seen[0]["now"] == receipt["completed_at"]
+    # NEW-P2-G:now 取自封包的 adjudicated_at(驗方時鐘),不是收據自報的 completed_at。
+    assert seen[0]["now"] == packet["adjudicated_at"]
+    # NEW-P3-J:值相等不足以釘住**來源**——模組內硬編一個同值常數仍會綠。故另斷言物件同一性
+    # (該字串含非識別字元、不會被 CPython 自動 intern,兩處字面量必是相異物件),並釘死它
+    # 與收據自報的任何時刻皆不相等。
+    assert seen[0]["now"] is packet["adjudicated_at"]
+    assert packet["adjudicated_at"] not in {
+        receipt.get("completed_at"), receipt.get("started_at"),
+        receipt.get("evidence_expires_at"), T_START, T_DONE, T_POST, T_EXPIRY,
+    }
 
 
 @pytest.mark.parametrize("step", S2_5_STEPS)
@@ -594,10 +642,7 @@ def test_s2_5_delegation_runs_the_real_three_way_capture_cross_check(
     evidence_by_id[intent_evidence["id"]] = intent_evidence
     evidence_by_id[capture_evidence["id"]] = capture_evidence
     fragments["ops_postcheck"]["evidence_refs"].append(capture_evidence["id"])
-    fragments["ops_preflight"] = {
-        "payload_kind": "operation_review_fragment_v1",
-        "payload": {binding.S2_5_OPS_PREFLIGHT_PAYLOAD_KEY: preflight},
-    }
+    fragments["ops_preflight"] = _ops_preflight_fragment(preflight)
     # ① capture 在場但 receipt 未綁其 record_digest ⇒ §6 拒(單側主張)。
     errors = binding.validate_s2_effect_binding(
         packet, route, fragments, evidence_by_id, {"effect": receipt}
@@ -651,16 +696,121 @@ def test_s2_5_external_verification_pending_is_never_a_closure_pass(
     packet, fragments, evidence_by_id = _packet(step, receipt)
     intent, intent_evidence, preflight, capture_evidence = _s2_5_carriers(receipt)
     evidence_by_id[intent_evidence["id"]] = intent_evidence
-    fragments["ops_preflight"] = {
-        "payload_kind": "operation_review_fragment_v1",
-        "payload": {binding.S2_5_OPS_PREFLIGHT_PAYLOAD_KEY: preflight},
-    }
+    fragments["ops_preflight"] = _ops_preflight_fragment(preflight)
     assert (
         "S2.5 §6 attestation binding is not VERIFIED "
         f"({s2_5_leaf.S2_5_BINDING_PENDING}): structurally coherent but not yet bound"
     ) in binding.validate_s2_effect_binding(
         packet, route, fragments, evidence_by_id, {"effect": receipt}
     )
+
+
+def _s2_5_bound_case(step: str) -> tuple[dict, dict, dict, dict, dict]:
+    """§6 三載體齊備的 S2.5 案例(intent + OPS preflight fragment,capture 視測試另加)。"""
+
+    route = _route(step)
+    receipt = _receipt(step)
+    packet, fragments, evidence_by_id = _packet(step, receipt)
+    _intent, intent_evidence, preflight, _capture = _s2_5_carriers(receipt)
+    evidence_by_id[intent_evidence["id"]] = intent_evidence
+    fragments["ops_preflight"] = _ops_preflight_fragment(preflight)
+    return route, receipt, packet, fragments, evidence_by_id
+
+
+@pytest.mark.parametrize("step", S2_5_STEPS)
+def test_s2_5_freshness_clock_is_the_packet_adjudication_not_the_receipt(
+    monkeypatch: pytest.MonkeyPatch, step: str,
+) -> None:
+    """NEW-P2-G:§6 的 ``now`` 取自被驗方自報時刻 ⇒ 新鮮度面結構性恆過。
+
+    ``completed_at`` 與 ``evidence_expires_at`` 同在該收據內、同一方控制,被驗方永遠能自報
+    一個早於自己 expiry 的完成時刻。改用封包的 ``adjudicated_at``(驗方時鐘、closure_packet_v1
+    的 required 頂層欄位)後,一份**已過期**的收據在裁決時刻必被 §6 判過期。
+    """
+
+    monkeypatch.setattr(binding, "_receipt_validation_errors", lambda *_a, **_k: [])
+    route, receipt, packet, fragments, evidence_by_id = _s2_5_bound_case(step)
+    expired = "s2_5 attestation evidence is expired at the central gate (fail-closed)"
+    # 裁決時刻晚於收據 expiry ⇒ 過期(舊碼 now=completed_at 時此面永遠看不到)。
+    late = deepcopy(packet)
+    late["adjudicated_at"] = "2026-07-28T10:30:00Z"
+    assert any(
+        expired in error for error in binding.validate_s2_effect_binding(
+            late, route, fragments, evidence_by_id, {"effect": receipt}
+        )
+    )
+    # 對照:裁決時刻早於 expiry 時該面不觸發(證明紅的原因就是「裁決時刻」而非別的)。
+    assert not any(
+        expired in error for error in binding.validate_s2_effect_binding(
+            packet, route, fragments, evidence_by_id, {"effect": receipt}
+        )
+    )
+    # 收據自報時刻仍早於 expiry(自洽)——它不是新鮮度權威這件事才是本測試的重點。
+    assert receipt["completed_at"] < receipt["evidence_expires_at"]
+
+
+@pytest.mark.parametrize(
+    "adjudicated_at",
+    [None, "", "not-a-timestamp", "2026-07-28T10:07:37"],  # 末項:無時區
+)
+def test_s2_5_requires_a_parseable_packet_adjudication_time(
+    monkeypatch: pytest.MonkeyPatch, adjudicated_at,
+) -> None:
+    """NEW-P2-G fail-closed:``adjudicated_at`` 缺席/畸形 ⇒ typed error 且葉自己再 fail-closed。"""
+
+    monkeypatch.setattr(binding, "_receipt_validation_errors", lambda *_a, **_k: [])
+    route, receipt, packet, fragments, evidence_by_id = _s2_5_bound_case("S2_5A_START")
+    broken = deepcopy(packet)
+    if adjudicated_at is None:
+        broken.pop("adjudicated_at")
+    else:
+        broken["adjudicated_at"] = adjudicated_at
+    errors = binding.validate_s2_effect_binding(
+        broken, route, fragments, evidence_by_id, {"effect": receipt}
+    )
+    assert (
+        "S2.5 attestation binding requires a parseable closure packet adjudicated_at "
+        "as the §6 freshness clock (the receipt's own completed_at is verified-party "
+        "time and would make the expiry face vacuously true)"
+    ) in errors
+    # now=None 傳到葉 ⇒ 葉對每個 artifact 回「requires now for freshness」(絕不靜默放行)。
+    assert any(
+        "requires now for freshness at the central gate" in error for error in errors
+    ), errors
+
+
+@pytest.mark.parametrize("step", S2_5_STEPS)
+def test_s2_5_one_sided_receipt_capture_claim_is_rejected(
+    monkeypatch: pytest.MonkeyPatch, step: str,
+) -> None:
+    """NEW-P3-K:receipt 帶 ``verifier_capture_digest`` 但 capture evidence 缺席 = 單側主張。
+
+    反向那一側(capture 在場而 receipt 未綁)已由
+    ``test_s2_5_delegation_runs_the_real_three_way_capture_cross_check`` ① 釘住;此處補的是
+    適配層「capture 缺席時傳 None」那條路徑的負例——傳 None 不等於「跳過」,§6 必判 REJECTED。
+    """
+
+    monkeypatch.setattr(binding, "_receipt_validation_errors", lambda *_a, **_k: [])
+    route = _route(step)
+    receipt = _receipt(step)
+    receipt["verifier_capture_digest"] = "sha256:" + "9" * 64
+    packet, fragments, evidence_by_id = _packet(step, receipt)
+    _intent, intent_evidence, preflight, _capture = _s2_5_carriers(receipt)
+    evidence_by_id[intent_evidence["id"]] = intent_evidence
+    fragments["ops_preflight"] = _ops_preflight_fragment(preflight)
+    # ops_postcheck fragment 內確無 capture kind 的 evidence(只有 S2 postcheck)。
+    assert all(
+        evidence_by_id[ref].get("kind") != binding.S2_5_VERIFIER_CAPTURE_KIND
+        for ref in fragments["ops_postcheck"]["evidence_refs"]
+    )
+    errors = binding.validate_s2_effect_binding(
+        packet, route, fragments, evidence_by_id, {"effect": receipt}
+    )
+    assert any(
+        "verifier_capture_digest and the verifier capture record must be present "
+        "together (a one-sided claim is rejected)" in error
+        for error in errors
+    ), errors
 
 
 def test_delegated_hard_gate_requires_the_ops_preflight_fragment(
@@ -1010,6 +1160,127 @@ def test_ops_postcheck_artifact_must_cross_bind_the_receipt_self_digest(
     )
 
 
+@pytest.mark.parametrize("status", ["FAIL", "REJECTED"])
+@pytest.mark.parametrize("step", PASSABLE_STEPS)
+def test_ops_postcheck_artifact_status_must_be_pass(
+    structural_receipts, step: str, status: str,
+) -> None:
+    """NEW-P1-B(BLOCKER):artifact 自報的 ``status`` 從不被讀 = false success。
+
+    合法重封(status 改掉、self_digest 與 wrapper digest 全部重算成一致)後,一份明說
+    「我驗失敗」的獨立 postcheck 仍會背書 closure PASS。對四個 s2_4 step 與 S2.2B 而言
+    ``_ops_postcheck_artifact_errors`` 是**唯一**的 postcheck 執法面(無 delegated 硬門),
+    其中含 W6B APPLY(裝 unit + PG migration)。先例
+    ``agent_governance_target_host_effects:644-645`` 明文有這道檢查。
+    """
+
+    route = _route(step)
+    receipt = _receipt(step)
+    packet, fragments, evidence_by_id = _packet(step, receipt)
+    artifact = evidence_by_id["pc"]["artifact"]
+    artifact["status"] = status
+    artifact["self_digest"] = binding._artifact_self_digest(artifact)  # 合法重封
+    evidence_by_id["pc"]["digest"] = artifact["self_digest"]
+    # 唯一的錯誤就是 status:所有 digest/欄位面都仍然全綠(證明擋住它的是 status 判定本身)。
+    assert binding.validate_s2_effect_binding(
+        packet, route, fragments, evidence_by_id, {"effect": receipt}
+    ) == [
+        "S2 ops_postcheck artifact status must be PASS (an independent postcheck "
+        "that reports its own failure never endorses a closure PASS)"
+    ], step
+
+
+def test_ops_postcheck_artifact_field_contract_is_exact(structural_receipts) -> None:
+    """NEW-P3-H:postcheck artifact 無欄位契約 ⇒ 手搓 artifact 與死欄位全部過關。
+
+    E2 探測:只有 ``{schema_version, effect_receipt_digest, <任意鍵>, self_digest}`` 的手搓
+    artifact 過關——``self_digest`` 只證「這份內容沒被改過」,不證「這份內容是一份 postcheck」。
+    先例用 exact field set(``target_host POSTCHECK_FIELDS``)。
+    """
+
+    route, receipt, packet, fragments, evidence_by_id = _guard_case()
+    expected = (
+        "S2 ops_postcheck artifact fields are not exact "
+        f"({sorted(binding._S2_OPS_POSTCHECK_ARTIFACT_FIELDS)})"
+    )
+    # 參照建構子的輸出欄位集 == 契約集合(兩端不得漂移)。
+    assert set(evidence_by_id["pc"]["artifact"]) == (
+        binding._S2_OPS_POSTCHECK_ARTIFACT_FIELDS
+    )
+
+    def _resealed(artifact: dict) -> dict:
+        evidence = deepcopy(evidence_by_id)
+        artifact["self_digest"] = binding._artifact_self_digest(artifact)
+        evidence["pc"]["artifact"] = artifact
+        evidence["pc"]["digest"] = artifact["self_digest"]
+        return evidence
+
+    # ① E2 實測的手搓最小 artifact(digest 面全對)。
+    handmade = _resealed({
+        "schema_version": binding.S2_OPS_POSTCHECK_KIND,
+        "effect_receipt_digest": receipt["self_digest"],
+        "anything": "at all",
+    })
+    assert expected in binding.validate_s2_effect_binding(
+        packet, route, fragments, handmade, {"effect": receipt}
+    )
+    # ② 缺一欄(其餘全對且合法重封)。
+    missing = deepcopy(evidence_by_id["pc"]["artifact"])
+    missing.pop("verifier_node")
+    assert expected in binding.validate_s2_effect_binding(
+        packet, route, fragments, _resealed(missing), {"effect": receipt}
+    )
+    # ③ 多一欄(其餘全對且合法重封)。
+    extra = deepcopy(evidence_by_id["pc"]["artifact"])
+    extra["smuggled_field"] = "anything"
+    assert expected in binding.validate_s2_effect_binding(
+        packet, route, fragments, _resealed(extra), {"effect": receipt}
+    )
+
+
+@pytest.mark.parametrize(
+    ("field", "value", "expected"),
+    [
+        (
+            "effect_step", "S2_5B_FINAL",
+            "S2 ops_postcheck artifact effect_step is not the admitted step",
+        ),
+        (
+            "source_head", "c" * 40,
+            "S2 ops_postcheck artifact source_head is not bound to the effect source head",
+        ),
+        (
+            "host", "other-host",
+            "S2 ops_postcheck artifact host is not bound to the effect target host",
+        ),
+        (
+            "observed_at", "2026-07-28T10:09:00Z",
+            "S2 ops_postcheck artifact observed_at is not bound to the evidence wrapper "
+            "observed_at",
+        ),
+        (
+            "verifier_node", "",
+            "S2 ops_postcheck artifact must carry a non-empty verifier_node",
+        ),
+    ],
+)
+def test_ops_postcheck_artifact_fields_are_not_dead(
+    structural_receipts, field: str, value, expected: str,
+) -> None:
+    """NEW-P3-H 續:``effect_step``/``source_head``/``host``/``observed_at``/``verifier_node``
+    改成任意值曾經全過(死欄位);每欄各釘一條完整錯誤字串。"""
+
+    route, receipt, packet, fragments, evidence_by_id = _guard_case()
+    forged = deepcopy(evidence_by_id)
+    artifact = forged["pc"]["artifact"]
+    artifact[field] = value
+    artifact["self_digest"] = binding._artifact_self_digest(artifact)  # 合法重封
+    forged["pc"]["digest"] = artifact["self_digest"]
+    assert expected in binding.validate_s2_effect_binding(
+        packet, route, fragments, forged, {"effect": receipt}
+    )
+
+
 def test_successful_effect_requires_runtime_contact_and_changed_disposition(
     structural_receipts,
 ) -> None:
@@ -1286,17 +1557,32 @@ def test_r1_claim_inventory_cross_checks_frozen_adapter_contracts() -> None:
 # --------------------------------------------------------------------------- #
 # NEW-P1-A:evidence 形狀必須在 closure_packet_v1 真的可表示(真驗證器,非手搓 dict)
 # --------------------------------------------------------------------------- #
+def _closure_packet_schema() -> dict:
+    return json.loads(
+        (ROOT / ".codex/schemas/closure_packet_v1.schema.json").read_text(
+            encoding="utf-8"
+        )
+    )
+
+
 def _closure_evidence_errors(evidence: dict) -> list[str]:
     """以真驗證器 agent_governance_schema.schema_subset_errors 驗一份 evidence wrapper。"""
 
     from agent_governance_schema import schema_subset_errors
 
-    root = json.loads(
-        (ROOT / ".codex/schemas/closure_packet_v1.schema.json").read_text(
-            encoding="utf-8"
-        )
-    )
+    root = _closure_packet_schema()
     return schema_subset_errors(evidence, root["$defs"]["evidence"], root)
+
+
+def _closure_fragment_errors(fragment: dict) -> list[str]:
+    """同一把真驗證器,對 closure_packet_v1 的 role_fragments item schema。"""
+
+    from agent_governance_schema import schema_subset_errors
+
+    root = _closure_packet_schema()
+    return schema_subset_errors(
+        fragment, root["properties"]["role_fragments"]["items"], root
+    )
 
 
 @pytest.mark.parametrize("step", PASSABLE_STEPS)
@@ -1309,6 +1595,39 @@ def test_s2_effect_evidence_shapes_are_closure_packet_v1_valid(step: str) -> Non
         receipt, verifier_node="s2_ops_postcheck", observed_at=T_POST,
     )
     assert _closure_evidence_errors(postcheck) == []
+
+
+@pytest.mark.parametrize("step", S2_5_STEPS)
+def test_s2_5_carrier_shapes_are_closure_packet_v1_valid(step: str) -> None:
+    """NEW-P3-I:§6 三個新引入載體同樣要有真驗證器的可表示性 pin(不能只有 postcheck 有)。
+
+    * ``s2_5_start_intent_v1`` intent evidence 與 ``s2_effect_verifier_command_capture_v2``
+      capture evidence → ``$defs/evidence``;
+    * ``payload.s2_5_ops_preflight`` → ``role_fragments`` item schema(payload_kind 由 registry
+      釘死 operation_review_fragment_v1,故 preflight 只能掛在 payload 的具名鍵下)。
+
+    三者同時是適配層真正讀的形狀:本測試順帶證明適配層從這份 schema-valid fragment 取得的
+    就是同一個 preflight 物件(不是另一份手搓 dict)。
+    """
+
+    receipt = _receipt(step)
+    intent, intent_evidence, preflight, capture_evidence = _s2_5_carriers(receipt)
+    assert _closure_evidence_errors(intent_evidence) == []
+    assert intent_evidence["kind"] == binding.S2_5_INTENT_EVIDENCE_KIND
+    assert intent_evidence["digest"] == intent["self_digest"]
+    assert _closure_evidence_errors(capture_evidence) == []
+    assert capture_evidence["kind"] == binding.S2_5_VERIFIER_CAPTURE_KIND
+    fragment = _ops_preflight_fragment(preflight)
+    assert _closure_fragment_errors(fragment) == []
+    assert fragment["payload"][binding.S2_5_OPS_PREFLIGHT_PAYLOAD_KEY] is preflight
+    # 反向釘:capture 若改用 registry 的 command_capture_v2 kind,schema 會把 scope 釘成 test
+    # ⇒ runtime capture 不可表示(這正是本波另立 S2 專屬 capture kind 的理由)。
+    registry_kind = deepcopy(capture_evidence)
+    registry_kind["kind"] = "command_capture_v2"
+    assert any(
+        "$.scope: expected const 'test'" in error
+        for error in _closure_evidence_errors(registry_kind)
+    )
 
 
 def test_pre_delta_postcheck_shapes_are_rejected_by_the_real_schema() -> None:
@@ -1373,15 +1692,28 @@ def test_blocked_steps_capture_postcheck_limitation_is_explicit() -> None:
 
 
 def test_binding_success_sets_match_per_step_result_vocabularies() -> None:
+    """P3:CC-A1/CC-B 後 S2.0/S2.1 的成功集是空集 ⇒ 舊斷言 ``frozenset() <= vocab`` 恆真、
+    已無 pin 力。改成有 pin 力的版本:
+
+    * 兩步的「最佳可得 status」必真存在於各自 result 詞彙表(證明空成功集是**刻意排除**一個
+      真 status,不是打錯字造成的空集),且該 status 必在 blocked reason 內被指名;
+    * 兩步的成功集嚴格為空、其餘 step 的成功集嚴格非空(空/非空與 blocked reason 互為充要)。
+
+    兩步「處置對稱性」本身由 test_s2_0_and_s2_1_blocked_dispositions_are_symmetric 接手。
+    """
+
     import agent_governance_alr_quiesce_fence as quiesce
     import agent_governance_pg_observer_bootstrap as observer
 
-    assert binding.S2_STEP_RECEIPT_CONTRACTS["S2_0_APPLY"]["success_statuses"] <= (
-        observer.RESULT_STATUSES
-    )
-    assert binding.S2_STEP_RECEIPT_CONTRACTS["S2_1_DRILL"]["success_statuses"] <= (
-        quiesce.RESULT_STATUSES
-    )
+    for step, module in (("S2_0_APPLY", observer), ("S2_1_DRILL", quiesce)):
+        contract = binding.S2_STEP_RECEIPT_CONTRACTS[step]
+        assert contract["success_statuses"] == frozenset(), step
+        assert _BLOCKED_STEP_STATUS[step] in module.RESULT_STATUSES, step
+        assert _BLOCKED_STEP_STATUS[step] in contract["closure_pass_blocked_reason"], step
+    for step in PASSABLE_STEPS:
+        contract = binding.S2_STEP_RECEIPT_CONTRACTS[step]
+        assert contract["success_statuses"], step
+        assert contract["closure_pass_blocked_reason"] is None, step
     # 每 step 的 receipt schema 與 route metadata result_schema_version 等值。
     for step, contract in binding.S2_STEP_RECEIPT_CONTRACTS.items():
         assert contract["receipt_schema_version"] == (

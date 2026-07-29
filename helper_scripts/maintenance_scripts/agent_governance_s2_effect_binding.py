@@ -42,6 +42,14 @@ route admission 側的新規則(NEW-P2-C,實作在 ``agent_governance_routing`` 
 (裝 unit + PG migration)與 S2.5A(起 production service)會在**無 constitutional gate**
 的 DAG 下 admitted。缺 authority 面 ⇒ typed ValueError(鏡 P0-B effect lane 的同型要求)。
 
+📎 registry invariant 讀法(NEW-P2-F;PM 已裁 registry 字串不改):九條 S2 adapter invariant
+寫「no route_task effect node or closure effect binding is injected **before** the S2.x EFFECT
+session」,而 route 今日確實會注入 effect 節點——兩者不矛盾,因為
+**S2 effect selector claim admission 就是該 adapter 的 EFFECT session 開始**(那是「EFFECT
+session」在 route 層唯一的機器定義,見 ``agent_governance_routing`` 的 S2 selector 分支)。
+invariant 禁止的是 admission **之前**的注入,而 source lane(selector 缺席)零 effect 節點
+注入正是它。故「釘 invariant 字串」與「斷言 admission 後有注入」兩組測試同時為真。
+
 ⚠ SOURCE-TRUTH 邊界:route 層無法驗 head/freshness/permit 真偽是設計事實——閉合在
 adapter(SSHSIG/attestor/replay-ledger)與 closure(out-of-band 信任主機驗證)層;本
 模組乾淨 ``[]`` 「不」證任何 runtime 真的施加過。rollback 綁定不新造:各 adapter 的
@@ -126,6 +134,17 @@ S2_ADAPTER_IDS = frozenset(
 S2_OPS_POSTCHECK_KIND = "s2_effect_ops_postcheck_v1"
 _OPS_POSTCHECK_RECEIPT_BINDING = "artifact.effect_receipt_digest"
 _CAPTURE_POSTCHECK_KIND = "command_capture_v2"
+# ── NEW-P3-H:postcheck artifact 的 exact field set(先例 target_host POSTCHECK_FIELDS)──
+# 沒有這條時,一份 ``{schema_version, effect_receipt_digest, <任意鍵>, self_digest}`` 的手搓
+# artifact 就能過關——self_digest 只證「這份內容沒被改過」,不證「這份內容是一份 postcheck」;
+# 且 effect_step/source_head/host/observed_at 可填任意值 = 死欄位。本集合同時是參照建構子
+# ``build_s2_effect_ops_postcheck_evidence`` 的輸出欄位集(由測試釘兩端等值,漂移即紅)。
+_S2_OPS_POSTCHECK_ARTIFACT_FIELDS = frozenset({
+    "schema_version", "status", "effect_step", "effect_receipt_digest",
+    "verifier_node", "source_head", "host", "observed_at", "self_digest",
+})
+# NEW-P1-B:獨立 postcheck 唯一可背書 closure 的自報結論(先例明文 `status must be PASS`)。
+_S2_OPS_POSTCHECK_PASS_STATUS = "PASS"
 
 # CC-A2:S2.5A/S2.5B 委派 §6 attestation binding 所需的三個載體(同樣只用 closure_packet_v1
 # 真有的欄位:evidence.artifact 與 role_fragment.payload;OPS fragment 的 payload_kind 由
@@ -618,6 +637,13 @@ def _s2_5_attestation_binding_errors(
       由 §6 自己走 typed 分支(receipt 帶 verifier_capture_digest 而 capture 缺席 = 單側主張,
       §6 判 REJECTED;兩側皆缺 = EXTERNAL_VERIFICATION_PENDING)。
 
+    ``now``(NEW-P2-G)—— **必取自封包的 ``adjudicated_at``,不得取自收據自報時刻**。舊碼傳
+    ``receipt["completed_at"]``,而 ``completed_at`` 與 ``evidence_expires_at`` 同在該收據內、
+    同一方(被驗方)控制 ⇒ §6 的新鮮度面結構性恆過(被驗方永遠能自報一個早於自己 expiry 的
+    完成時刻)。``adjudicated_at`` 是 ``closure_packet_v1`` 的 required 頂層欄位、屬驗方時鐘;
+    缺席或不可解析 ⇒ typed error 且 ``now`` 傳 None,由葉自己 fail-closed(葉對 None 直接回
+    「requires now for freshness」)。
+
     只有 ``S2_5_ATTESTATION_BINDING_VERIFIED`` 才是零錯誤;``EXTERNAL_VERIFICATION_PENDING``
     與 ``..._REJECTED`` 一律換算成 typed closure error(PENDING 永不是 PASS)。
     """
@@ -698,12 +724,24 @@ def _s2_5_attestation_binding_errors(
         if isinstance(record, dict):
             verifier_capture = record
 
+    # NEW-P2-G:新鮮度時鐘取驗方(closure 裁決時刻),絕不取被驗方自報的 completed_at。
+    adjudicated_at = packet.get("adjudicated_at") if isinstance(packet, dict) else None
+    try:
+        _parse_time(str(adjudicated_at))
+    except (TypeError, ValueError):
+        errors.append(
+            "S2.5 attestation binding requires a parseable closure packet "
+            "adjudicated_at as the §6 freshness clock (the receipt's own completed_at "
+            "is verified-party time and would make the expiry face vacuously true)"
+        )
+        adjudicated_at = None
+
     verdict = s2_5_leaf.validate_s2_5_attestation_binding(
         intent=intent,
         ops_preflight=ops_preflight,
         receipt=receipt,
         verifier_capture=verifier_capture,
-        now=receipt.get("completed_at"),
+        now=adjudicated_at,
     )
     if verdict.get("status") != s2_5_leaf.S2_5_BINDING_VERIFIED:
         errors.append(
@@ -770,14 +808,25 @@ def _ops_postcheck_artifact_errors(
     postcheck: dict[str, Any],
     receipt: dict[str, Any],
     contract: dict[str, Any],
+    *,
+    step: str,
 ) -> list[str]:
-    """獨立 ops_postcheck 的 artifact 面(NEW-P1-A)。
+    """獨立 ops_postcheck 的 artifact 面(NEW-P1-A / NEW-P1-B / NEW-P3-H)。
 
     ``postcheck_receipt_binding is None``(S2.0/S2.1)時本函式不執法:那兩步的 postcheck
-    形狀與三方交叉核歸委派的既有硬門。其餘 step 一律要求:內嵌 artifact 為 dict、其
-    ``schema_version`` 等於 evidence kind、``self_digest`` canonical 反偽造重算成立且等於
-    wrapper ``digest``(否則 artifact 可被整段替換而 wrapper 照舊)、綁定欄位等於 effect
-    receipt 的 ``self_digest``。
+    形狀與三方交叉核歸委派的既有硬門。其餘 step 一律要求(逐條鏡先例
+    ``agent_governance_target_host_effects:640-686``):**exact field set**、``schema_version``
+    等於 evidence kind、**``status`` 必為 PASS**、``self_digest`` canonical 反偽造重算成立且
+    等於 wrapper ``digest``(否則 artifact 可被整段替換而 wrapper 照舊)、綁定欄位等於 effect
+    receipt 的 ``self_digest``,其餘欄位逐一綁到 admitted step / receipt / wrapper 的對應值。
+
+    ⚠ NEW-P1-B 的教訓(先例採用不完整):artifact 自報的 ``status`` 若從不被讀,一份明說
+    「我驗失敗」的獨立 postcheck(合法重封、所有 digest 全對)仍會背書 closure PASS。而對
+    四個 s2_4 step 與 S2.2B 來說本函式是**唯一**的 postcheck 執法面(那些 step 在
+    ``_DELEGATED_STEP_BINDINGS`` 內沒有硬門),其中含 W6B APPLY(裝 unit + PG migration)。
+
+    誠實界線:本函式**不**驗 applier != verifier——s2_4 家族收據頂層沒有 apply actor node
+    欄位可比,其分離閉合在 adapter 層;此處只要求 ``verifier_node`` 非空(先例同型)。
     """
 
     receipt_binding = contract["postcheck_receipt_binding"]
@@ -790,9 +839,19 @@ def _ops_postcheck_artifact_errors(
             f"({contract['postcheck_kind']})"
         ]
     errors: list[str] = []
+    if set(artifact) != _S2_OPS_POSTCHECK_ARTIFACT_FIELDS:
+        errors.append(
+            "S2 ops_postcheck artifact fields are not exact "
+            f"({sorted(_S2_OPS_POSTCHECK_ARTIFACT_FIELDS)})"
+        )
     if artifact.get("schema_version") != contract["postcheck_kind"]:
         errors.append(
             "S2 ops_postcheck artifact schema_version does not match the evidence kind"
+        )
+    if artifact.get("status") != _S2_OPS_POSTCHECK_PASS_STATUS:
+        errors.append(
+            "S2 ops_postcheck artifact status must be PASS (an independent postcheck "
+            "that reports its own failure never endorses a closure PASS)"
         )
     if artifact.get("self_digest") != _artifact_self_digest(artifact):
         errors.append(
@@ -807,6 +866,28 @@ def _ops_postcheck_artifact_errors(
             f"S2 ops_postcheck {receipt_binding} is not bound to the effect receipt "
             "self_digest"
         )
+    # NEW-P3-H:其餘欄位不得是死欄位(舊碼填任意值全過)——逐一綁 admitted step / receipt /
+    # wrapper 的對應值。
+    for field, expected, message in (
+        ("effect_step", step, "is not the admitted step"),
+        (
+            "source_head", receipt.get("source_head"),
+            "is not bound to the effect source head",
+        ),
+        (
+            "host", _get(receipt, contract["host_field"]),
+            "is not bound to the effect target host",
+        ),
+        (
+            "observed_at", postcheck.get("observed_at"),
+            "is not bound to the evidence wrapper observed_at",
+        ),
+    ):
+        if artifact.get(field) != expected:
+            errors.append(f"S2 ops_postcheck artifact {field} {message}")
+    verifier_node = artifact.get("verifier_node")
+    if not (isinstance(verifier_node, str) and verifier_node):
+        errors.append("S2 ops_postcheck artifact must carry a non-empty verifier_node")
     return errors
 
 
@@ -926,7 +1007,9 @@ def validate_s2_effect_binding(
         )
     else:
         postcheck = postchecks[0]
-        errors.extend(_ops_postcheck_artifact_errors(postcheck, receipt, contract))
+        errors.extend(
+            _ops_postcheck_artifact_errors(postcheck, receipt, contract, step=step)
+        )
         try:
             if _parse_time(str(postcheck.get("observed_at", ""))) < _parse_time(
                 str(_get(receipt, contract["observed_field"]))
