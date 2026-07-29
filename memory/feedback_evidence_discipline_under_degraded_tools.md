@@ -27,3 +27,8 @@
 - 收尾前 `git ls-files` 確認自己的關鍵 report 已 commit（非只在 WIP）。
 
 ref：`project_multi_session_memory_race.md`（commit-first / 不認識的改動禁 revert）+ `feedback_v_migration_pg_dry_run.md`（idempotency double-apply 是 load-bearing gate）+ CLAUDE.md §四（不可 fake evidence）。
+
+## 2026-07-28 追加：mutation harness 必帶 pristine 對照組
+
+- W5 round-6 E2 複驗第一輪 mutation harness 產出 20 個「RED」全是假紅——受限 env（HOME 隔離）下 `/usr/local/bin/python3` 找不到 user-site pytest，pytest 根本沒跑就非零退出。
+- **鐵則**：任何 mutation/紅綠測試前，先在同一 env 跑 pristine 副本證明 GREEN（對照組）；「非零退出」≠「測試抓到突變」。`git archive` 副本（無 `.git`）跑依賴 committed-blob 的 governance 測試也會系統性假紅——用完整 `git clone --shared`。
