@@ -484,43 +484,75 @@ def empty_ledger() -> dict[str, Any]:
     return {"entries": []}
 
 
-class SimulatedLockProbe:
-    """§5.7 lock 介面的注入模擬(P1-5/P2-2):``held`` 可注入,探測/取鎖/釋放次數可斷言。"""
+SIMULATED_INSTALL_LOCK_PATH = "/tmp/s2-5-testkit/simulated-s2-4-install.lock"
+SIMULATED_LIFECYCLE_LOCK_PATH = "/tmp/s2-5-testkit/simulated-s2-5-lifecycle.lock"
 
-    def __init__(self, *, held: bool = False) -> None:
+
+class SimulatedInstallLockProbe:
+    """**S2.4 install 鎖**的 probe-only 注入模擬(F3:與 lifecycle hold 是兩個資源)。
+
+    ``held`` 可注入;``probes`` 記次數以斷言「真的探測過,不是 caller 自報 boolean」。
+    刻意沒有 acquire/release —— 有 hold 面的物件會被型別互斥守衛擋掉。
+    """
+
+    def __init__(
+        self, *, held: bool = False, lock_path: str = SIMULATED_INSTALL_LOCK_PATH
+    ) -> None:
         self.held = bool(held)
+        self.lock_path = lock_path
         self.probes = 0
-        self.acquires = 0
-        self.releases = 0
-        self.holding = False
 
     def flock_probe(self) -> dict[str, Any]:
         self.probes += 1
-        return {"held": self.held, "exists": True, "lock_path": "<simulated-lock>"}
+        return {"held": self.held, "exists": True, "lock_path": self.lock_path}
+
+
+class SimulatedLifecycleLock:
+    """**S2.5 lifecycle 鎖**的 hold-style 注入模擬(P2-2):取鎖/釋放次數與持有態可斷言。
+
+    ``fail_release`` 讓 release 逸出(F4 的 typed release 用):真實世界對應「flock UN /
+    close 失敗」——fd 仍被持有,鎖窗未被證明關閉。
+    """
+
+    def __init__(
+        self,
+        *,
+        held: bool = False,
+        fail_release: bool = False,
+        lock_path: str = SIMULATED_LIFECYCLE_LOCK_PATH,
+    ) -> None:
+        self.held = bool(held)
+        self.fail_release = bool(fail_release)
+        self.lock_path = lock_path
+        self.acquires = 0
+        self.releases = 0
+        self.holding = False
 
     def acquire(self) -> dict[str, Any]:
         self.acquires += 1
         if self.held or self.holding:
             return {
                 "status": lifecycle.S2_5_LOCK_HELD,
-                "lock_path": "<simulated-lock>",
+                "lock_path": self.lock_path,
                 "reasons": ["simulated: the lifecycle lock is held by another applier"],
             }
         self.holding = True
         return {
             "status": lifecycle.S2_5_LOCK_ACQUIRED,
-            "lock_path": "<simulated-lock>",
+            "lock_path": self.lock_path,
             "reasons": [],
         }
 
     def release(self) -> dict[str, Any]:
         self.releases += 1
+        if self.fail_release:
+            raise RuntimeError("simulated: the lifecycle lock release failed")
         released, self.holding = self.holding, False
         return {
             "status": (
                 lifecycle.S2_5_LOCK_RELEASED if released else lifecycle.S2_5_LOCK_NOT_HELD
             ),
-            "lock_path": "<simulated-lock>",
+            "lock_path": self.lock_path,
             "reasons": [],
         }
 
@@ -739,7 +771,9 @@ def apply_kwargs(
             "native_loader_closure_digest": LOADER_CLOSURE_DIGEST
         },
         "s2_4_recovery_clear": True,
-        "lock_probe": SimulatedLockProbe(),
+        # F3:兩個 lock 面是兩個資源(S2.4 install probe-only / S2.5 lifecycle hold)。
+        "install_lock_probe": SimulatedInstallLockProbe(),
+        "lifecycle_lock": SimulatedLifecycleLock(),
         "state_root": tmp_path / "state",
         "observers": observers or HarnessObserver(unit, clock=clock),
         "owner_fingerprint": OWNER_FINGERPRINT,

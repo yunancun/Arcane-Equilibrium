@@ -51,6 +51,9 @@ from agent_governance_alr_quiesce_inventory import (  # noqa: E402
     compute_owner_fingerprint,
 )
 from agent_governance_s2_4_credential import redact_driver_error  # noqa: E402
+from agent_governance_s2_4_lock import (  # noqa: E402
+    INSTALL_LOCK_PATH as S2_4_INSTALL_LOCK_PATH,
+)
 from agent_governance_s2_5_driver import S2_5_UNIT_NAME  # noqa: E402
 from aiml_gate_receipt_s2_5 import (  # noqa: E402
     S2_5_PHASE_EFFECT_CLASS,
@@ -438,22 +441,57 @@ S2_5_LOCK_NOT_HELD = "S2_5_LIFECYCLE_LOCK_NOT_HELD"
 S2_5_LOCK_PRECHECK_FAILED = "S2_5_LIFECYCLE_LOCK_PRECHECK_FAILED"
 
 
-class S2_5FlockProbe:
-    """§5.7 lifecycle 鎖的兩個面:probe-only 探測 + hold-style 取鎖(P2-2)。
+def _flock_free_observation(lock_path: Path | str) -> dict[str, Any]:
+    """probe-only 的 non-blocking exclusive ``flock`` 探測(探測即釋放)。
 
-    * ``flock_probe``:non-blocking exclusive ``flock`` 探測(探測即釋放)——只證
-      「當下自由」,不護任何窗;
-    * ``acquire``/``release``:hold-style 交易鎖(鏡 ``agent_governance_s2_4_lock`` 的
-      acquire/release 公開形制)——取得後 fd 一直持有到 release,anchor-check→consume→
-      persist→journal 整段在鎖下,關閉「探測即釋放」與消費之間的競態窗。
+    只證「當下自由」,**不護任何窗**;lock 檔不存在=無人持有;O_NOFOLLOW 拒 symlink 替身
+    (逸出交由 caller 當 unproven-free 處理);lock 檔永不 unlink/chmod(§5.2 紀律)。
+    """
 
-    production 面預設 :data:`S2_5_LOCK_PATH`;source lane/測試注入 tmp 路徑。lock 檔
-    不存在=無人持有(lock 由取鎖者以 O_CREAT 建立);O_NOFOLLOW 拒 symlink 替身;
-    lock 檔**永不** unlink/chmod(§5.2 紀律)。
+    path = Path(lock_path)
+    try:
+        fd = os.open(path, os.O_RDONLY | os.O_NOFOLLOW | os.O_CLOEXEC)
+    except FileNotFoundError:
+        return {"held": False, "exists": False, "lock_path": str(path)}
+    try:
+        try:
+            fcntl.flock(fd, fcntl.LOCK_EX | fcntl.LOCK_NB)
+        except OSError:
+            return {"held": True, "exists": True, "lock_path": str(path)}
+        fcntl.flock(fd, fcntl.LOCK_UN)
+        return {"held": False, "exists": True, "lock_path": str(path)}
+    finally:
+        os.close(fd)
+
+
+class S2_4InstallLockFreeProbe:
+    """**S2.4 install 鎖**的 probe-only 面(F3:與 S2.5 lifecycle 鎖是兩個資源)。
+
+    §3.1c 的 ``install_lock_free`` 問的是「S2.4 的 install 交易是否正在進行」,故此探針
+    的預設路徑是 :data:`S2_4_INSTALL_LOCK_PATH`(來自 s2_4 lock 葉的 SSOT,不重宣告)。
+    刻意**沒有** acquire/release:S2.5 永不去持有 S2.4 的鎖(那會與合法 install 交易競爭)。
+    """
+
+    def __init__(self, lock_path: Path | str = S2_4_INSTALL_LOCK_PATH) -> None:
+        self.lock_path = Path(lock_path)
+
+    def flock_probe(self) -> dict[str, Any]:
+        return _flock_free_observation(self.lock_path)
+
+
+class S2_5LifecycleLockHold:
+    """**S2.5 lifecycle 鎖**的 hold-style 面(P2-2;鏡 ``agent_governance_s2_4_lock`` 的公開形制)。
+
+    取得後 fd 一直持有到 :meth:`release`,reconcile→anchor-check→前態→consume→persist→
+    journal 整段在鎖下,關閉「探測即釋放」與消費之間的競態窗。刻意**沒有** ``flock_probe``:
+    probe-only 面不護窗,把兩者放在同一個 class 上正是 F3 要拆掉的混淆。
+
+    production 面預設 :data:`S2_5_LOCK_PATH`;source lane/測試注入 tmp 路徑。lock 檔不存在
+    =無人持有(由取鎖者以 O_CREAT 建立);O_NOFOLLOW 拒 symlink 替身;永不 unlink/chmod。
     """
 
     def __init__(self, lock_path: Path | str = S2_5_LOCK_PATH) -> None:
-        self._lock_path = Path(lock_path)
+        self.lock_path = Path(lock_path)
         self._held_fd: int | None = None
 
     def acquire(self) -> dict[str, Any]:
@@ -462,15 +500,15 @@ class S2_5FlockProbe:
         if self._held_fd is not None:
             return {
                 "status": S2_5_LOCK_HELD,
-                "lock_path": str(self._lock_path),
+                "lock_path": str(self.lock_path),
                 "reasons": [
-                    "this probe already holds the s2_5 lifecycle lock (a hold is "
+                    "this hold already owns the s2_5 lifecycle lock (a hold is "
                     "never re-entrant)"
                 ],
             }
         try:
             fd = os.open(
-                self._lock_path,
+                self.lock_path,
                 os.O_RDWR | os.O_CREAT | os.O_NOFOLLOW | os.O_CLOEXEC,
                 0o600,
             )
@@ -478,7 +516,7 @@ class S2_5FlockProbe:
             # symlink 替身(O_NOFOLLOW)/權限問題:unproven fail-closed,零變更。
             return {
                 "status": S2_5_LOCK_PRECHECK_FAILED,
-                "lock_path": str(self._lock_path),
+                "lock_path": str(self.lock_path),
                 "reasons": [
                     "s2_5 lifecycle lock open failed: " + redact_driver_error(error)
                 ],
@@ -489,7 +527,7 @@ class S2_5FlockProbe:
             os.close(fd)
             return {
                 "status": S2_5_LOCK_HELD,
-                "lock_path": str(self._lock_path),
+                "lock_path": str(self.lock_path),
                 "reasons": [
                     "another S2.5 applier holds the lifecycle lock (a live consume→"
                     "persist transaction is in flight); typed rejection with zero "
@@ -499,7 +537,7 @@ class S2_5FlockProbe:
         self._held_fd = fd
         return {
             "status": S2_5_LOCK_ACQUIRED,
-            "lock_path": str(self._lock_path),
+            "lock_path": str(self.lock_path),
             "reasons": [],
         }
 
@@ -509,8 +547,8 @@ class S2_5FlockProbe:
         if self._held_fd is None:
             return {
                 "status": S2_5_LOCK_NOT_HELD,
-                "lock_path": str(self._lock_path),
-                "reasons": ["no s2_5 lifecycle hold is held by this probe"],
+                "lock_path": str(self.lock_path),
+                "reasons": ["no s2_5 lifecycle hold is held by this object"],
             }
         fd, self._held_fd = self._held_fd, None
         try:
@@ -519,60 +557,98 @@ class S2_5FlockProbe:
             os.close(fd)
         return {
             "status": S2_5_LOCK_RELEASED,
-            "lock_path": str(self._lock_path),
+            "lock_path": str(self.lock_path),
             "reasons": [],
         }
 
-    def flock_probe(self) -> dict[str, Any]:
-        try:
-            fd = os.open(
-                self._lock_path, os.O_RDONLY | os.O_NOFOLLOW | os.O_CLOEXEC
-            )
-        except FileNotFoundError:
-            return {"held": False, "exists": False, "lock_path": str(self._lock_path)}
-        try:
-            try:
-                fcntl.flock(fd, fcntl.LOCK_EX | fcntl.LOCK_NB)
-            except OSError:
-                return {"held": True, "exists": True, "lock_path": str(self._lock_path)}
-            fcntl.flock(fd, fcntl.LOCK_UN)
-            return {"held": False, "exists": True, "lock_path": str(self._lock_path)}
-        finally:
-            os.close(fd)
 
+def derive_s2_4_install_lock_free(install_lock_probe: Any) -> tuple[bool, list[str]]:
+    """``install_lock_free`` 的唯一導出點:注入 **S2.4 install** 鎖介面的真 flock 探測。
 
-def derive_s2_5_install_lock_free(lock_probe: Any) -> tuple[bool, list[str]]:
-    """``install_lock_free`` 的唯一導出點:注入 lock 介面的真 flock 探測(E2 E1#5)。
+    F3:改名前這個函式收的是 S2.5 自己的 lifecycle 鎖探針(``S2_5FlockProbe`` 預設
+    ``S2_5_LOCK_PATH``),於是 receipt 上的 ``install_lock_free`` **從未探測過 S2.4 install
+    lock**,而另一個 S2.5 applier 持 hold 時得到的 reason 竟寫「S2.4 install lock is held」
+    ——歸因錯誤。型別互斥守衛在此執法:帶 hold 面(acquire)的物件是 lifecycle 鎖,不是
+    install 探針,一律 typed 拒。
 
     無介面/探測逸出/held/形狀不明 一律 ``(False, typed reasons)``——自報 boolean 永不採信。
     """
 
-    if lock_probe is None:
+    if install_lock_probe is None:
         return False, [
-            "no install-lock probe interface was injected; lock freedom cannot be proved "
-            "(a caller-asserted boolean is never accepted)"
+            "no S2.4 install-lock probe interface was injected; lock freedom cannot be "
+            "proved (a caller-asserted boolean is never accepted)"
         ]
-    if isinstance(lock_probe, bool):
+    if isinstance(install_lock_probe, bool):
         return False, [
             "a bare boolean is not a lock probe; install_lock_free derives only from a "
-            "real non-blocking flock probe (§5.7)"
+            "real non-blocking flock probe of the S2.4 install lock (§5.7)"
+        ]
+    if callable(getattr(install_lock_probe, "acquire", None)):
+        return False, [
+            "the injected S2.4 install-lock probe exposes a hold-style acquire; that is "
+            "the S2.5 lifecycle lock, not the S2.4 install lock (S2.5 never holds the "
+            "install lock — it would race a legitimate install transaction)"
         ]
     try:
-        observation = lock_probe.flock_probe()
+        observation = install_lock_probe.flock_probe()
     except Exception as error:  # noqa: BLE001 —— 探測逸出=unproven-free,fail-closed。
         return False, [
-            f"install-lock probe raised: {redact_driver_error(error)} (unproven-free "
-            "fails closed)"
+            f"S2.4 install-lock probe raised: {redact_driver_error(error)} "
+            "(unproven-free fails closed)"
         ]
     if not isinstance(observation, dict) or observation.get("held") is not False:
         return False, [
-            "the install lock is held (or the probe observation is malformed); a live "
-            "install transaction blocks any S2.5 lifecycle effect"
+            "the S2.4 install lock is held (or the probe observation is malformed); a "
+            "live install transaction blocks any S2.5 lifecycle effect"
         ]
     return True, []
 
 
-def acquire_s2_5_lifecycle_hold(lock_probe: Any) -> tuple[bool, list[str]]:
+def _resolved_lock_path(lock_face: Any) -> str | None:
+    """取注入物件宣告的 lock 位置並正規化(不可導出 ⇒ ``None`` ⇒ 分離不可證)。"""
+
+    declared = getattr(lock_face, "lock_path", None)
+    if declared is None:
+        return None
+    try:
+        return os.path.normpath(os.path.abspath(str(declared)))
+    except (TypeError, ValueError):
+        return None
+
+
+def _lock_resource_separation_reasons(
+    install_lock_probe: Any, lifecycle_lock: Any
+) -> list[str]:
+    """F3 的 load-bearing 守衛:兩個 lock 面必須是**兩個資源**(在取 hold 之前執法)。
+
+    同一物件、或解析後指向同一個 lock 檔,都代表「S2.4 install 自由」與「S2.5 lifecycle
+    窗互斥」兩件事被同一把鎖同時充當——那正是改名前 receipt 上 ``install_lock_free``
+    無意義的根因。不可導出位置=分離不可證,同樣 fail-closed。
+    """
+
+    if install_lock_probe is not None and install_lock_probe is lifecycle_lock:
+        return [
+            "the S2.4 install-lock probe and the S2.5 lifecycle hold are the same "
+            "object; one lock can never stand for both resources (fail-closed)"
+        ]
+    install_path = _resolved_lock_path(install_lock_probe)
+    lifecycle_path = _resolved_lock_path(lifecycle_lock)
+    if install_path is None or lifecycle_path is None:
+        return [
+            "the injected lock faces do not declare resolvable lock_path values; the "
+            "S2.4 install lock and the S2.5 lifecycle lock cannot be proved distinct "
+            "(fail-closed)"
+        ]
+    if install_path == lifecycle_path:
+        return [
+            "the S2.4 install lock and the S2.5 lifecycle lock resolve to the same file; "
+            "S2.5 must never contend for the install lock (fail-closed)"
+        ]
+    return []
+
+
+def acquire_s2_5_lifecycle_hold(lifecycle_lock: Any) -> tuple[bool, list[str]]:
     """P2-2:consume→persist→journal 交易窗的 hold-style 取鎖(唯一導出點)。
 
     probe-only 面(只有 ``flock_probe``)不足以護窗——探測即釋放,兩個 applier 可在
@@ -580,7 +656,7 @@ def acquire_s2_5_lifecycle_hold(lock_probe: Any) -> tuple[bool, list[str]]:
     不明一律 ``(False, typed reasons)`` fail-closed。
     """
 
-    acquire = getattr(lock_probe, "acquire", None)
+    acquire = getattr(lifecycle_lock, "acquire", None)
     if not callable(acquire):
         return False, [
             "the injected lock interface has no hold-style acquire; a probe-only "
@@ -606,11 +682,11 @@ def acquire_s2_5_lifecycle_hold(lock_probe: Any) -> tuple[bool, list[str]]:
     return True, []
 
 
-def _release_s2_5_lifecycle_hold(lock_probe: Any) -> None:
+def _release_s2_5_lifecycle_hold(lifecycle_lock: Any) -> None:
     """finally 臂的釋放。釋放失敗時 fd 仍被持有=fail-closed 方向(擋人而非放行),
     不以第二個例外遮蔽窗內的真實 verdict/例外。"""
 
-    release = getattr(lock_probe, "release", None)
+    release = getattr(lifecycle_lock, "release", None)
     if callable(release):
         try:
             release()
@@ -1074,7 +1150,7 @@ def _common_gate(
     replay_ledger: Any,
     target_class: str,
     recovery_state: S2_5RecoveryState | None,
-    lock_probe: Any,
+    install_lock_probe: Any,
     precheck_inputs: dict[str, Any],
 ) -> tuple[dict[str, Any] | None, dict[str, Any], datetime]:
     """step 0-6 的共用閘。回 (提前終止的 verdict | None, 導出的 precheck 旗標, now)。"""
@@ -1136,9 +1212,10 @@ def _common_gate(
             precheck_flags,
             now_dt,
         )
-    # step 3 —— 靜態 precheck(零 driver 接觸)。install_lock_free 唯一由真 flock 探測
-    # 導出(P1-5:caller 自報 boolean 不採信)。
-    install_lock_free, lock_reasons = derive_s2_5_install_lock_free(lock_probe)
+    # step 3 —— 靜態 precheck(零 driver 接觸)。install_lock_free 唯一由 **S2.4 install 鎖**
+    # 的真 flock 探測導出(P1-5:caller 自報 boolean 不採信)。此處是 fail-fast:探測即釋放,
+    # 護窗的是窗內(F2b)的重探 + lifecycle hold。
+    install_lock_free, lock_reasons = derive_s2_4_install_lock_free(install_lock_probe)
     static_reasons = _static_precheck_reasons(
         core,
         phase=phase,
@@ -1211,7 +1288,8 @@ def apply_s2_5_start(
     s2_4_inactive_prestate: Any = None,
     loader_closure_observation: Any = None,
     s2_4_recovery_clear: Any = None,
-    lock_probe: Any = None,
+    install_lock_probe: Any = None,
+    lifecycle_lock: Any = None,
     recovery_state: S2_5RecoveryState | None = None,
     state_root: Path | None = None,
     observers: Any = None,
@@ -1229,7 +1307,7 @@ def apply_s2_5_start(
         replay_ledger=replay_ledger,
         target_class=target_class,
         recovery_state=recovery_state,
-        lock_probe=lock_probe,
+        install_lock_probe=install_lock_probe,
         precheck_inputs={
             "s2_4_install_effect_receipt": s2_4_install_effect_receipt,
             "loader_closure_observation": loader_closure_observation,
@@ -1266,10 +1344,17 @@ def apply_s2_5_start(
                 "before any lifecycle effect (fail-closed)"
             ],
         )
+    # F3:取 hold 之前先證「兩個 lock 面是兩個資源」——同物件/同路徑代表 S2.4 install
+    # 自由與 S2.5 窗互斥被同一把鎖充當,那正是 install_lock_free 曾經無意義的根因。
+    separation_reasons = _lock_resource_separation_reasons(
+        install_lock_probe, lifecycle_lock
+    )
+    if separation_reasons:
+        return _verdict(S2_5_STATUS_REQUEST_REJECTED, separation_reasons)
     # P2-2:anchor-check→前態讀取→consume→persist→journal(APPLYING)整段持 hold-style
     # flock,release 在 finally——「探測即釋放」的 probe 只是 §3.1 的 fail-fast,護窗的是
     # 這裡的 hold(第二個 applier 在窗內一律 typed 拒,永不雙消費)。
-    hold_ok, hold_reasons = acquire_s2_5_lifecycle_hold(lock_probe)
+    hold_ok, hold_reasons = acquire_s2_5_lifecycle_hold(lifecycle_lock)
     if not hold_ok:
         return _verdict(S2_5_STATUS_REQUEST_REJECTED, hold_reasons)
     try:
@@ -1335,7 +1420,7 @@ def apply_s2_5_start(
             replay_ledger_head=_replay_ledger_head(replay_ledger["entries"]),
         )
     finally:
-        _release_s2_5_lifecycle_hold(lock_probe)
+        _release_s2_5_lifecycle_hold(lifecycle_lock)
     try:
         driver.enable_now()
     except Exception as error:  # noqa: BLE001 —— effect 失敗必走 rollback,絕不轉成功。
@@ -1583,7 +1668,8 @@ def apply_s2_5_final(
     s2_4_install_effect_receipt: Any = None,
     loader_closure_observation: Any = None,
     s2_4_recovery_clear: Any = None,
-    lock_probe: Any = None,
+    install_lock_probe: Any = None,
+    lifecycle_lock: Any = None,
     s2_1_drill_receipt: Any = None,
     pre_drill_attestation: Any = None,
     recovery_state: S2_5RecoveryState | None = None,
@@ -1603,7 +1689,7 @@ def apply_s2_5_final(
         replay_ledger=replay_ledger,
         target_class=target_class,
         recovery_state=recovery_state,
-        lock_probe=lock_probe,
+        install_lock_probe=install_lock_probe,
         precheck_inputs={
             "s2_4_install_effect_receipt": s2_4_install_effect_receipt,
             "loader_closure_observation": loader_closure_observation,
@@ -1639,9 +1725,15 @@ def apply_s2_5_final(
                 "before any lifecycle effect (fail-closed)"
             ],
         )
+    # F3:同 start——兩個 lock 面必須是兩個資源(守衛在取 hold 之前)。
+    separation_reasons = _lock_resource_separation_reasons(
+        install_lock_probe, lifecycle_lock
+    )
+    if separation_reasons:
+        return _verdict(S2_5_STATUS_REQUEST_REJECTED, separation_reasons)
     # P2-2:與 apply_s2_5_start 同一條 hold-style 交易窗(anchor→前態→consume→persist→
     # journal),release 在 finally。
-    hold_ok, hold_reasons = acquire_s2_5_lifecycle_hold(lock_probe)
+    hold_ok, hold_reasons = acquire_s2_5_lifecycle_hold(lifecycle_lock)
     if not hold_ok:
         return _verdict(S2_5_STATUS_REQUEST_REJECTED, hold_reasons)
     try:
@@ -1688,7 +1780,7 @@ def apply_s2_5_final(
             replay_ledger_head=_replay_ledger_head(replay_ledger["entries"]),
         )
     finally:
-        _release_s2_5_lifecycle_hold(lock_probe)
+        _release_s2_5_lifecycle_hold(lifecycle_lock)
     # 五維再證(drill 之後的新 PID/InvocationID;stable identity 的比對折在觀測面)。
     # P1-1:觀測例外不得裸逸——journal terminal + typed 失敗(S2.5B 無 rollback 語義)。
     try:

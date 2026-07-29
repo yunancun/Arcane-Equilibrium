@@ -110,27 +110,29 @@ def test_unresolved_s2_4_recovery_blocks_the_start(tmp_path, monkeypatch):
 
 
 def test_held_install_lock_blocks_the_start(tmp_path, monkeypatch):
-    # P1-5:install_lock_free 由注入 lock 介面的 flock 探測導出——持鎖 ⇒ typed 拒。
+    # P1-5:install_lock_free 由注入 **S2.4 install 鎖**介面的 flock 探測導出——持鎖 ⇒ typed 拒。
     _key, intent, permit, _unit = kit.a_side_setup(tmp_path, monkeypatch)
-    probe = kit.SimulatedLockProbe(held=True)
+    probe = kit.SimulatedInstallLockProbe(held=True)
     verdict = lifecycle.apply_s2_5_start(
         intent, permit, UntouchableDriver(),
         **kit.apply_kwargs(
-            tmp_path=tmp_path, unit=kit.SimulatedUnit(), lock_probe=probe,
+            tmp_path=tmp_path, unit=kit.SimulatedUnit(), install_lock_probe=probe,
         ),
     )
     assert verdict["status"] == "REQUEST_REJECTED"
-    assert any("install lock" in reason for reason in verdict["reasons"])
+    # F3:reason 必須指名 **S2.4** install lock(修前這句話會在 S2.5 自己的 lifecycle 鎖
+    # 被持有時出現,是歸因錯誤)。
+    assert any("S2.4 install lock" in reason for reason in verdict["reasons"])
     assert probe.probes == 1  # 真的探測過,不是自報。
     # 無 lock 介面 = unproven-free ⇒ 同樣拒(caller 自報 boolean 不再是縫)。
     verdict2 = lifecycle.apply_s2_5_start(
         intent, permit, UntouchableDriver(),
         **kit.apply_kwargs(
-            tmp_path=tmp_path, unit=kit.SimulatedUnit(), lock_probe=None,
+            tmp_path=tmp_path, unit=kit.SimulatedUnit(), install_lock_probe=None,
         ),
     )
     assert verdict2["status"] == "REQUEST_REJECTED"
-    assert any("install lock" in reason for reason in verdict2["reasons"])
+    assert any("install-lock probe" in reason for reason in verdict2["reasons"])
 
 
 def test_live_prestate_mismatch_refuses_a_lookalike_unit(tmp_path, monkeypatch):

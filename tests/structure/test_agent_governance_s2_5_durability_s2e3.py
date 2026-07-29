@@ -137,3 +137,95 @@ def test_bound_upstream_receipt_of_the_wrong_schema_is_rejected(tmp_path, monkey
         expiry_field="expires_at",
     )
     assert reasons and "does not declare schema_version" in reasons[0]
+
+
+# ── F3:兩個 lock 是兩個資源(型別互斥 + 路徑相異守衛)───────────────────────────────
+def test_install_lock_default_path_is_the_s2_4_lock_not_the_s2_5_lifecycle_lock():
+    """F3 的根:``install_lock_free`` 修前探的是 S2.5 自己的 lifecycle 鎖(歸因錯誤)。"""
+
+    assert (
+        lifecycle.S2_4InstallLockFreeProbe().lock_path
+        == Path(lifecycle.S2_4_INSTALL_LOCK_PATH)
+    )
+    assert lifecycle.S2_5LifecycleLockHold().lock_path == Path(lifecycle.S2_5_LOCK_PATH)
+    assert lifecycle.S2_4_INSTALL_LOCK_PATH != lifecycle.S2_5_LOCK_PATH
+
+
+def test_a_hold_style_object_is_never_accepted_as_the_install_lock_probe():
+    """型別互斥:帶 acquire 面的物件是 lifecycle 鎖,不是 S2.4 install 探針。"""
+
+    free, reasons = lifecycle.derive_s2_4_install_lock_free(
+        kit.SimulatedLifecycleLock()
+    )
+    assert free is False
+    assert any("hold-style acquire" in reason for reason in reasons), reasons
+
+
+def test_one_object_or_one_path_can_never_stand_for_both_locks(tmp_path, monkeypatch):
+    """資源分離守衛:同物件 / 同解析路徑 ⇒ typed 拒(在取 hold 之前,零消費零 effect)。"""
+
+    shared_path = tmp_path / "shared.lock"
+
+    class _BothFaces:
+        """修前形狀:一個 class 同時是 probe-only 面與 hold 面。"""
+
+        lock_path = str(shared_path)
+
+        def flock_probe(self):
+            return {"held": False, "exists": True, "lock_path": str(shared_path)}
+
+        def acquire(self):
+            return {
+                "status": lifecycle.S2_5_LOCK_ACQUIRED,
+                "lock_path": str(shared_path),
+                "reasons": [],
+            }
+
+        def release(self):
+            return {
+                "status": lifecycle.S2_5_LOCK_RELEASED,
+                "lock_path": str(shared_path),
+                "reasons": [],
+            }
+
+    both = _BothFaces()
+    # 同一物件充當兩面:先被 derive 的型別互斥守衛擋(install_lock_free 不可證)。
+    assert lifecycle._lock_resource_separation_reasons(both, both)[0].startswith(
+        "the S2.4 install-lock probe and the S2.5 lifecycle hold are the same object"
+    )
+    # 兩個不同物件、但指向同一個 lock 檔:同樣拒。
+    separation = lifecycle._lock_resource_separation_reasons(
+        kit.SimulatedInstallLockProbe(lock_path=str(shared_path)),
+        kit.SimulatedLifecycleLock(lock_path=str(shared_path)),
+    )
+    assert separation and "resolve to the same file" in separation[0]
+    # 端到端:同路徑注入 ⇒ REQUEST_REJECTED、零 driver 接觸、零 state_root 落盤。
+    _key, intent, permit, _u = kit.a_side_setup(tmp_path, monkeypatch)
+    unit = kit.SimulatedUnit()
+    ledger = {"entries": []}
+    verdict = lifecycle.apply_s2_5_start(
+        intent, permit, unit,
+        **kit.apply_kwargs(
+            tmp_path=tmp_path, unit=unit, replay_ledger=ledger,
+            install_lock_probe=kit.SimulatedInstallLockProbe(lock_path=str(shared_path)),
+            lifecycle_lock=kit.SimulatedLifecycleLock(lock_path=str(shared_path)),
+        ),
+    )
+    assert verdict["status"] == "REQUEST_REJECTED", verdict
+    assert any("same file" in reason for reason in verdict["reasons"])
+    assert unit.calls == []
+    assert ledger["entries"] == []
+    assert not (tmp_path / "state").exists()
+
+
+def test_lock_faces_without_a_declared_path_cannot_prove_separation():
+    """位置不可導出 = 分離不可證 ⇒ fail-closed(不預設「不同物件就一定不同資源」)。"""
+
+    class _Anonymous:
+        def acquire(self):  # pragma: no cover —— 永不該被呼叫。
+            raise AssertionError("the hold must never be acquired without separation")
+
+    reasons = lifecycle._lock_resource_separation_reasons(
+        kit.SimulatedInstallLockProbe(), _Anonymous()
+    )
+    assert reasons and "resolvable lock_path" in reasons[0]

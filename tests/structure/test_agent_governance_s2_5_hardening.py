@@ -327,33 +327,55 @@ def test_tampered_durable_ledger_blocks_new_consumption(tmp_path, monkeypatch):
 
 # ── P1-5(E2 E1#5):§5.7 lock 真 flock 探測(§11.14 acceptance)─────────────────────
 def test_real_flock_contention_yields_a_typed_rejection(tmp_path, monkeypatch):
-    lock_path = tmp_path / "s2-5-lifecycle.lock"
-    lock_path.touch()
-    holder_fd = os.open(lock_path, os.O_RDWR)
+    # F3:被持有的必須是**真的 S2.4 install lock**(修前這裡加鎖的是 S2.5 自己的 lifecycle
+    # lock,卻斷言 reason 說「install lock is held」——把歸因錯誤固化進了測試)。
+    install_lock_path = tmp_path / "s2-4-install.lock"
+    install_lock_path.touch()
+    holder_fd = os.open(install_lock_path, os.O_RDWR)
     try:
-        fcntl.flock(holder_fd, fcntl.LOCK_EX | fcntl.LOCK_NB)  # 對手真的持鎖。
-        probe = lifecycle.S2_5FlockProbe(lock_path)
+        fcntl.flock(holder_fd, fcntl.LOCK_EX | fcntl.LOCK_NB)  # 對手真的持 install 鎖。
+        probe = lifecycle.S2_4InstallLockFreeProbe(install_lock_path)
         assert probe.flock_probe()["held"] is True
         _key, intent, permit, _unit = kit.a_side_setup(tmp_path, monkeypatch)
         unit = kit.SimulatedUnit()
         verdict = lifecycle.apply_s2_5_start(
             intent, permit, unit,
-            **kit.apply_kwargs(tmp_path=tmp_path, unit=unit, lock_probe=probe),
+            **kit.apply_kwargs(tmp_path=tmp_path, unit=unit, install_lock_probe=probe),
         )
         assert verdict["status"] == "REQUEST_REJECTED"
-        assert any("install lock" in reason for reason in verdict["reasons"])
+        assert any("S2.4 install lock" in reason for reason in verdict["reasons"])
         assert unit.calls == []
     finally:
         fcntl.flock(holder_fd, fcntl.LOCK_UN)
         os.close(holder_fd)
     # 釋放後同一 probe 導出 free(探測即釋放,絕不 unlink)。
-    assert lifecycle.S2_5FlockProbe(lock_path).flock_probe()["held"] is False
-    assert lock_path.exists()
+    assert lifecycle.S2_4InstallLockFreeProbe(install_lock_path).flock_probe()["held"] is False
+    assert install_lock_path.exists()
+    # 對照:S2.5 自己的 lifecycle 鎖被持有時,理由**不再**冒充 S2.4 install lock。
+    lifecycle_lock_path = tmp_path / "s2-5-lifecycle.lock"
+    contender = lifecycle.S2_5LifecycleLockHold(lifecycle_lock_path)
+    assert contender.acquire()["status"] == lifecycle.S2_5_LOCK_ACQUIRED
+    try:
+        _key2, intent2, permit2, _u2 = kit.a_side_setup(tmp_path, monkeypatch)
+        unit2 = kit.SimulatedUnit()
+        blocked = lifecycle.apply_s2_5_start(
+            intent2, permit2, unit2,
+            **kit.apply_kwargs(
+                tmp_path=tmp_path, unit=unit2,
+                install_lock_probe=lifecycle.S2_4InstallLockFreeProbe(install_lock_path),
+                lifecycle_lock=lifecycle.S2_5LifecycleLockHold(lifecycle_lock_path),
+            ),
+        )
+        assert blocked["status"] == "REQUEST_REJECTED", blocked
+        assert not any("install lock" in reason for reason in blocked["reasons"]), blocked
+        assert any("lifecycle lock" in reason for reason in blocked["reasons"]), blocked
+    finally:
+        contender.release()
 
 
 def test_lock_probe_symlink_and_absence_semantics(tmp_path):
     # 不存在 ⇒ 無人持有;symlink ⇒ O_NOFOLLOW 拒(探測逸出=unproven-free)。
-    absent = lifecycle.S2_5FlockProbe(tmp_path / "missing.lock").flock_probe()
+    absent = lifecycle.S2_4InstallLockFreeProbe(tmp_path / "missing.lock").flock_probe()
     assert absent == {
         "held": False, "exists": False,
         "lock_path": str(tmp_path / "missing.lock"),
@@ -362,8 +384,8 @@ def test_lock_probe_symlink_and_absence_semantics(tmp_path):
     real.touch()
     link = tmp_path / "link.lock"
     link.symlink_to(real)
-    free, reasons = lifecycle.derive_s2_5_install_lock_free(
-        lifecycle.S2_5FlockProbe(link)
+    free, reasons = lifecycle.derive_s2_4_install_lock_free(
+        lifecycle.S2_4InstallLockFreeProbe(link)
     )
     assert free is False and reasons
 
