@@ -22,6 +22,7 @@ runtime 恆 inactive,生產 PG 從未被接觸。
 
 from __future__ import annotations
 
+import ast
 import os
 import shutil
 import subprocess
@@ -84,10 +85,47 @@ def _exploding_factory():
     return _factory
 
 
+def _never_connect():  # pragma: no cover - 必須永不被呼叫
+    raise AssertionError("no PG connection may be opened on a refused / L2-gated path")
+
+
 PRODUCTION_VIEWS = [
     {"target_class": kernel.TARGET_CLASS_PRODUCTION, "reason": "x", "facts": {}},
     {"target_class": kernel.TARGET_CLASS_UNKNOWN, "reason": "x", "facts": {}},
 ]
+
+
+def _force_derived(monkeypatch, view):
+    """target class 只能被**主機事實**決定 ⇒ 測試也只能從 ``derive_host_target_class`` 這一點造假。"""
+
+    monkeypatch.setattr(kernel, "derive_host_target_class", lambda: view)
+
+
+# --------------------------------------------------------------------------- #
+# RUN-1:production lane 完全不收 caller view(一個 caller 字串繞不過 L1)
+# --------------------------------------------------------------------------- #
+def test_production_lane_takes_no_caller_target_view():
+    import inspect
+
+    for entry in (runner.run_observer_bootstrap_on_host,):
+        assert "target_view" not in inspect.signature(entry).parameters
+
+
+def test_a_forged_target_view_cannot_reach_the_production_lane(monkeypatch):
+    # 偽造一份 disposable_candidate view 遞進 production lane:今日連參數都不存在 ⇒ TypeError,
+    # 且 driver_factory 從未被呼叫(主機零接觸)。
+    _force_derived(monkeypatch, PRODUCTION_VIEWS[0])
+    intent = _intent()
+    before = runner.ObserverBootstrapHostDriver.constructions
+    with pytest.raises(TypeError):
+        runner.run_observer_bootstrap_on_host(
+            intent, None, None, now=NOW, source_head=HEAD,
+            driver_factory=_exploding_factory(),
+            target_view={"target_class": kernel.TARGET_CLASS_DISPOSABLE_CANDIDATE},
+            allow_production=True, production_confirm=intent["self_digest"],
+            operator_authorization_verified=True,
+        )
+    assert runner.ObserverBootstrapHostDriver.constructions == before
 
 
 @pytest.mark.parametrize("view", PRODUCTION_VIEWS)
@@ -98,7 +136,8 @@ PRODUCTION_VIEWS = [
     {"allow_production": True, "production_confirm": "sha256:" + "9" * 64},
     {"operator_authorization_verified": True, "production_confirm": "match"},
 ])
-def test_production_refusal_never_constructs_a_driver(view, kwargs):
+def test_production_refusal_never_constructs_a_driver(monkeypatch, view, kwargs):
+    _force_derived(monkeypatch, view)
     intent = _intent()
     if kwargs.get("production_confirm") == "match":
         kwargs["production_confirm"] = intent["self_digest"]
@@ -106,54 +145,81 @@ def test_production_refusal_never_constructs_a_driver(view, kwargs):
     with pytest.raises(runner.S2_0HostRunnerError):
         runner.run_observer_bootstrap_on_host(
             intent, None, None, now=NOW, source_head=HEAD,
-            driver_factory=_exploding_factory(), target_view=view, **kwargs,
+            driver_factory=_exploding_factory(), **kwargs,
         )
     assert runner.ObserverBootstrapHostDriver.constructions == before
 
 
 @pytest.mark.parametrize("view", PRODUCTION_VIEWS)
-def test_all_three_conditions_reach_the_driver_factory(view):
+def test_all_three_conditions_reach_the_driver_factory(monkeypatch, view):
+    _force_derived(monkeypatch, view)
     intent = _intent()
     reached = {"count": 0}
 
-    class _Placeholder:
-        """一個沒有任何寫能力面的佔位 driver(adapter 因缺 SSHSIG 根本不會呼叫它)。"""
-
-        evidence_class = runner.LOCAL_REPRODUCIBLE_EVIDENCE_CLASS
-        calls: list = []
-
     def _factory():
         reached["count"] += 1
-        return _Placeholder()
+        # runner 自有 driver;連線 callable 會炸 —— adapter 因缺 SSHSIG 根本不會呼叫它。
+        return runner.ObserverBootstrapHostDriver(
+            applier_connect=_never_connect, verifier_connect=_never_connect,
+        )
 
     # driver 被構造了,但 adapter 的 L2 閘(缺 operator SSHSIG)仍讓它停在 PENDING —— L1 只決定
     # 「今天要不要碰這台主機」,證據完整性仍由 L2 把關。
     result = runner.run_observer_bootstrap_on_host(
         intent, None, None, now=NOW, source_head=HEAD, driver_factory=_factory,
-        target_view=view, allow_production=True, production_confirm=intent["self_digest"],
+        allow_production=True, production_confirm=intent["self_digest"],
         operator_authorization_verified=True,
     )
     assert reached["count"] == 1
     assert result["status"] == "EXTERNAL_VERIFICATION_PENDING"
     assert result["production_apply_performed"] is False
     assert result["closure_pass_blocked"] is True
+    # 落盤的 target_class_view 是**導出值**,不是任何注入值。
+    assert result["target_class_view"] is view
+    # driver 是 runner 自有類別 ⇒ 呼叫序真的可觀測(而不是一個不可信的空序列)。
+    assert result["driver_calls_observable"] is True
+    assert result["driver_calls"] == []
 
 
-def test_non_target_host_is_refused_outright():
+# --------------------------------------------------------------------------- #
+# RUN-3:production lane 拒絕不可觀測的 capability 類別
+# --------------------------------------------------------------------------- #
+def test_production_lane_refuses_a_foreign_capability_object(monkeypatch):
+    _force_derived(monkeypatch, PRODUCTION_VIEWS[0])
+    intent = _intent()
+
+    class _ForeignDriver:
+        """一個「看起來像」driver 的注入物件:沒有 ``calls``,呼叫序永遠報不出來。"""
+
+        evidence_class = runner.LOCAL_REPRODUCIBLE_EVIDENCE_CLASS
+
+        def observer_role_present(self, *, role):  # pragma: no cover - 必須永不被呼叫
+            raise AssertionError("a foreign capability must be refused before any call")
+
+    with pytest.raises(runner.S2_0HostRunnerError) as error:
+        runner.run_observer_bootstrap_on_host(
+            intent, None, None, now=NOW, source_head=HEAD,
+            driver_factory=_ForeignDriver, allow_production=True,
+            production_confirm=intent["self_digest"], operator_authorization_verified=True,
+        )
+    assert "unobservable" in str(error.value)
+
+
+def test_non_target_host_is_refused_outright(monkeypatch):
+    _force_derived(monkeypatch, {"target_class": kernel.TARGET_CLASS_NON_TARGET, "reason": "mac"})
     intent = _intent()
     before = runner.ObserverBootstrapHostDriver.constructions
     with pytest.raises(runner.S2_0HostRunnerError):
         runner.run_observer_bootstrap_on_host(
             intent, None, None, now=NOW, source_head=HEAD,
             driver_factory=_exploding_factory(),
-            target_view={"target_class": kernel.TARGET_CLASS_NON_TARGET, "reason": "mac"},
             allow_production=True, production_confirm=intent["self_digest"],
             operator_authorization_verified=True,
         )
     assert runner.ObserverBootstrapHostDriver.constructions == before
 
 
-def test_this_machine_refuses_the_production_lane_with_no_target_view_supplied():
+def test_this_machine_refuses_the_production_lane_with_no_forcing_at_all():
     intent = _intent()
     if sys.platform == "linux":  # pragma: no cover - 開發機為 Mac
         pytest.skip("only asserts the non-target refusal on a non-target host")
@@ -165,21 +231,40 @@ def test_this_machine_refuses_the_production_lane_with_no_target_view_supplied()
         )
 
 
-def test_rehearsal_refuses_on_a_production_target_class():
+@pytest.mark.parametrize("injected", [
+    kernel.TARGET_CLASS_PRODUCTION,
+    kernel.TARGET_CLASS_UNKNOWN,     # unknown 與 production 在 rehearsal lane 同等對待
+])
+def test_rehearsal_refuses_on_an_injected_production_grade_class(injected):
     driver = runner.ObserverBootstrapHostDriver(
-        applier_connect=lambda: None, verifier_connect=lambda: None,
+        applier_connect=_never_connect, verifier_connect=_never_connect,
     )
     with pytest.raises(runner.S2_0HostRunnerError):
         runner.rehearse_observer_bootstrap(
             _intent(), None, None, now=NOW, source_head=HEAD, driver=driver,
             catalog_probe=lambda: "sha256:" + "0" * 64, role_probe=lambda: False,
-            target_view={"target_class": kernel.TARGET_CLASS_PRODUCTION, "reason": "x"},
+            target_view={"target_class": injected, "reason": "x"},
+        )
+
+
+@pytest.mark.parametrize("derived", PRODUCTION_VIEWS)
+def test_a_forged_disposable_view_cannot_loosen_the_rehearsal_refusal(monkeypatch, derived):
+    # 注入**只能加嚴**:即使遞一份偽造的 disposable_candidate view,derived 仍讓排練被拒。
+    _force_derived(monkeypatch, derived)
+    driver = runner.ObserverBootstrapHostDriver(
+        applier_connect=_never_connect, verifier_connect=_never_connect,
+    )
+    with pytest.raises(runner.S2_0HostRunnerError):
+        runner.rehearse_observer_bootstrap(
+            _intent(), None, None, now=NOW, source_head=HEAD, driver=driver,
+            catalog_probe=lambda: "sha256:" + "0" * 64, role_probe=lambda: False,
+            target_view={"target_class": kernel.TARGET_CLASS_DISPOSABLE_CANDIDATE},
         )
 
 
 def test_rehearsal_driver_may_never_claim_platform_attested():
     driver = runner.ObserverBootstrapHostDriver(
-        applier_connect=lambda: None, verifier_connect=lambda: None,
+        applier_connect=_never_connect, verifier_connect=_never_connect,
         evidence_class=obs.PRODUCTION_APPLIED_EVIDENCE_CLASS,
     )
     with pytest.raises(runner.S2_0HostRunnerError):
@@ -188,6 +273,116 @@ def test_rehearsal_driver_may_never_claim_platform_attested():
             catalog_probe=lambda: "sha256:" + "0" * 64, role_probe=lambda: False,
             target_view={"target_class": kernel.TARGET_CLASS_NON_TARGET, "reason": "mac"},
         )
+
+
+# --------------------------------------------------------------------------- #
+# RUN-2:零 role membership DDL、識別碼一律過 _safe_ident
+# --------------------------------------------------------------------------- #
+def _executed_statement_literals(module) -> list[str]:
+    """AST 掃出 runner 模組**實際送進 cursor.execute() 的字面 SQL**(不看註解/docstring)。"""
+
+    tree = ast.parse(Path(module.__file__).read_text(encoding="utf-8"))
+    literals: list[str] = []
+    for node in ast.walk(tree):
+        if not isinstance(node, ast.Call):
+            continue
+        func = node.func
+        if not (isinstance(func, ast.Attribute) and func.attr == "execute") or not node.args:
+            continue
+        statement = node.args[0]
+        if isinstance(statement, ast.Constant) and isinstance(statement.value, str):
+            literals.append(statement.value)
+        elif isinstance(statement, ast.JoinedStr):
+            literals.append("".join(
+                part.value for part in statement.values
+                if isinstance(part, ast.Constant) and isinstance(part.value, str)
+            ))
+        else:  # pragma: no cover - 非字面 SQL 一律視為違規證據
+            literals.append(f"<non-literal statement at line {node.lineno}>")
+    return literals
+
+
+def test_the_runner_never_issues_role_membership_ddl():
+    """RUN-2(b):registry invariant 的 ``no role membership`` 對本 implementation path 逐字成立。"""
+
+    statements = _executed_statement_literals(runner)
+    # runner 只發一條語句:session 局部、非 DDL、不持久的 SET ROLE。
+    assert [item.split()[0] for item in statements] == ["SET"], statements
+    for statement in statements:
+        upper = statement.upper()
+        assert "GRANT" not in upper and "REVOKE" not in upper, statement
+    # 撤權路徑不存在 ⇒ 不可能有「撤權失敗被 except: pass 吞掉」這回事(fail loud)。
+    source = Path(runner.__file__).read_text(encoding="utf-8")
+    assert "except Exception" not in source
+    assert "pass\n" not in source
+
+
+def test_the_driver_holds_no_admin_write_connection_for_the_proof(monkeypatch):
+    """verifier 連線只被用來做**唯讀** catalog 投影 —— 它從不執行任何語句字面。"""
+
+    executed: list[str] = []
+
+    class _RecordingCursor:
+        def execute(self, statement, parameters=None):
+            executed.append(str(statement))
+
+        def fetchone(self):
+            return None
+
+        def fetchall(self):
+            return []
+
+    class _Connection:
+        def cursor(self):
+            return _RecordingCursor()
+
+        def close(self):
+            return None
+
+    driver = runner.ObserverBootstrapHostDriver(
+        applier_connect=_never_connect, verifier_connect=_Connection,
+        observer_session_connect=_Connection, credential_escalation_connect=_never_connect,
+        set_role_target=WRITER,
+    )
+    with pytest.raises(obs.PgObserverReadOnlyError):
+        # 錄音 cursor 不會拒絕 DELETE ⇒ adapter 的拒絕證明 fail-closed 地炸掉(絕不偽造 42501)。
+        driver.independent_read_only_proof(grant_set={
+            "role": OBSERVER, "schema": SCHEMA, "relations": [TABLE],
+        })
+    assert [item.split()[0] for item in executed][:1] == ["SET"]
+    for statement in executed:
+        assert "GRANT" not in statement.upper() and "REVOKE" not in statement.upper()
+
+
+def test_the_driver_constructor_no_longer_takes_a_session_role():
+    import inspect
+
+    parameters = inspect.signature(runner.ObserverBootstrapHostDriver.__init__).parameters
+    assert "observer_session_role" not in parameters
+
+
+@pytest.mark.parametrize("hostile_role", [
+    'aiml_s2e2_assume", "e2_probe_victim',      # E2 在真 PG 16.14 上逃出裸雙引號的 payload
+    "postgres; DROP ROLE x",
+    "Observer",                                  # 大寫不在 ^[a-z_][a-z0-9_]*$ 白名單內
+])
+def test_a_hostile_role_identifier_is_refused_by_the_safe_ident_allowlist(hostile_role):
+    session = {"opened": 0}
+
+    def _session_connect():  # pragma: no cover - 必須永不被呼叫
+        session["opened"] += 1
+        raise AssertionError("no connection may be opened for an unsafe identifier")
+
+    driver = runner.ObserverBootstrapHostDriver(
+        applier_connect=_never_connect, verifier_connect=_never_connect,
+        observer_session_connect=_session_connect,
+        credential_escalation_connect=_never_connect, set_role_target="aiml_writer",
+    )
+    with pytest.raises(obs.PgObserverBootstrapError):
+        driver.independent_read_only_proof(grant_set={
+            "role": hostile_role, "schema": SCHEMA, "relations": [TABLE],
+        })
+    assert session["opened"] == 0
 
 
 def test_signed_apply_attestation_always_raises():
@@ -365,17 +560,43 @@ def _role_probe(sock):
     return _probe
 
 
+def _provisioned_observer_session(sock):
+    """**供裝者**(而非 runner)交出一條「已經可以扮演 observer 角色」的 session。
+
+    RUN-2(b) 的處置:role membership DDL 屬於「誰供裝這台主機」的職責 —— T1 由本拋棄式叢集
+    harness 供裝(鏡既有先例 ``test_agent_governance_pg_observer_bootstrap_disposable.py``),
+    生產面由 operator 的 peer/ident 映射供裝。runner 自己**一行 membership DDL 都不發**,也因此
+    不需要持有 admin 寫連線 ⇒ ``pg_observer_bootstrap_adapter_v1.invariant`` 的
+    ``no role membership`` 對 runner 這條 implementation path 逐字成立。
+
+    ``ASSUME`` 刻意是**非 superuser** 登入角色:superuser 的 session 可以 ``SET ROLE`` 任何角色,
+    於是 ``probe_observer_set_role_denied`` 根本得不到真的 42501 —— 那會把拒絕證明變成假的。
+    """
+
+    connection = _admin(sock)
+    try:
+        connection.cursor().execute(f'GRANT "{OBSERVER}" TO "{ASSUME}"')
+    finally:
+        connection.close()
+    session = psycopg2.connect(
+        host=sock, dbname=DB, user=ASSUME, password=ASSUME_PW, connect_timeout=10
+    )
+    session.autocommit = True
+    return session
+
+
 def _driver(sock, **overrides):
     applier = _admin(sock)
-    verifier = _admin(sock)
+    # verifier 只做**唯讀** catalog 投影,故用一條 read-only 連線(絕不是 admin 寫連線)。
+    verifier = psycopg2.connect(
+        host=sock, dbname=DB, user="postgres", connect_timeout=10,
+        options="-c default_transaction_read_only=on",
+    )
+    verifier.autocommit = True
     opened = [applier, verifier]
 
     def _observer_session():
-        session = psycopg2.connect(
-            host=sock, dbname=DB, user=ASSUME, password=ASSUME_PW, connect_timeout=10
-        )
-        session.autocommit = True
-        return session
+        return _provisioned_observer_session(sock)
 
     def _wrong_credential():
         return psycopg2.connect(
@@ -388,7 +609,6 @@ def _driver(sock, **overrides):
         observer_session_connect=_observer_session,
         credential_escalation_connect=_wrong_credential,
         set_role_target=WRITER,
-        observer_session_role=ASSUME,
         verifier_capture_digest=CAP,
         **overrides,
     )

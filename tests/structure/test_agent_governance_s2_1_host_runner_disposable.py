@@ -174,6 +174,37 @@ PRODUCTION_VIEWS = [
 ]
 
 
+def _force_derived(monkeypatch, view):
+    """target class 只能被主機事實決定 ⇒ 測試也只能從 ``derive_host_target_class`` 這一點造假。"""
+
+    monkeypatch.setattr(kernel, "derive_host_target_class", lambda: view)
+
+
+# --------------------------------------------------------------------------- #
+# RUN-1:production lane 完全不收 caller view
+# --------------------------------------------------------------------------- #
+def test_production_lane_takes_no_caller_target_view():
+    import inspect
+
+    assert "target_view" not in inspect.signature(runner.run_quiesce_fence_on_host).parameters
+
+
+def test_a_forged_target_view_cannot_reach_the_production_lane(monkeypatch):
+    _force_derived(monkeypatch, PRODUCTION_VIEWS[0])
+    intent = _intent("sha256:" + "0" * 64, target_class="production")
+
+    def _factory():  # pragma: no cover - 必須永不被呼叫
+        raise AssertionError("no fence capability may be built when admission refuses")
+
+    with pytest.raises(TypeError):
+        runner.run_quiesce_fence_on_host(
+            intent, None, None, now=NOW, source_head=HEAD, capability_factory=_factory,
+            target_view={"target_class": kernel.TARGET_CLASS_DISPOSABLE_CANDIDATE},
+            allow_production=True, production_confirm=intent["self_digest"],
+            operator_authorization_verified=True,
+        )
+
+
 @pytest.mark.parametrize("view", PRODUCTION_VIEWS)
 @pytest.mark.parametrize("kwargs", [
     {},
@@ -181,7 +212,8 @@ PRODUCTION_VIEWS = [
     {"allow_production": True, "operator_authorization_verified": True},
     {"allow_production": True, "production_confirm": "sha256:" + "9" * 64},
 ])
-def test_production_refusal_never_builds_a_fence_capability(view, kwargs):
+def test_production_refusal_never_builds_a_fence_capability(monkeypatch, view, kwargs):
+    _force_derived(monkeypatch, view)
     intent = _intent("sha256:" + "0" * 64, target_class="production")
 
     def _factory():  # pragma: no cover - 必須永不被呼叫
@@ -190,11 +222,65 @@ def test_production_refusal_never_builds_a_fence_capability(view, kwargs):
     with pytest.raises(runner.S2_1HostRunnerError):
         runner.run_quiesce_fence_on_host(
             intent, None, None, now=NOW, source_head=HEAD,
-            capability_factory=_factory, target_view=view, **kwargs,
+            capability_factory=_factory, **kwargs,
         )
 
 
-def test_rehearsal_refuses_on_a_production_target_class():
+# --------------------------------------------------------------------------- #
+# RUN-3:production lane 拒絕非 runner 自有的 capability 物件
+# --------------------------------------------------------------------------- #
+def test_production_lane_refuses_foreign_capability_objects(monkeypatch):
+    _force_derived(monkeypatch, PRODUCTION_VIEWS[0])
+    intent = _intent("sha256:" + "0" * 64, target_class="production")
+
+    class _ForeignFenceOps:
+        """一個**真的會 stop** 主機、但 runner 報不出 stop_calls 的注入物件。"""
+
+        def stop(self):  # pragma: no cover - 必須永不被呼叫
+            raise AssertionError("a foreign fence capability must be refused before any call")
+
+        def start(self):  # pragma: no cover - 必須永不被呼叫
+            raise AssertionError("a foreign fence capability must be refused before any call")
+
+    def _factory():
+        return {
+            "host_probe": runner.QuiesceHostProbe(
+                executor=_RecordingExecutor(), proc_root="/proc"
+            ),
+            "fence_ops": _ForeignFenceOps(),
+            "db_observer": runner.QuiesceDbObserver(None),
+        }
+
+    with pytest.raises(runner.S2_1HostRunnerError) as error:
+        runner.run_quiesce_fence_on_host(
+            intent, None, None, now=NOW, source_head=HEAD, capability_factory=_factory,
+            allow_production=True, production_confirm=intent["self_digest"],
+            operator_authorization_verified=True,
+        )
+    assert "unobservable capabilities" in str(error.value)
+    assert "fence_ops=" in str(error.value)
+
+
+def test_unobservable_fence_is_reported_as_null_never_as_zero():
+    """RUN-3 的核心:``0`` / ``[]`` 只能出現在**真的觀測過**的情形,否則必須是 ``null``。"""
+
+    result = runner._run_result(
+        lane="production", target_view={"target_class": kernel.TARGET_CLASS_PRODUCTION},
+        receipt={"status": "EXTERNAL_VERIFICATION_PENDING"}, probe=None, fence_ops=None,
+        verifier_node="s2_1_ops_postcheck",
+    )
+    assert result["stop_calls"] is None
+    assert result["start_calls"] is None
+    assert result["fence_argv"] is None
+    assert result["read_argv"] is None
+    assert result["fence_observable"] is False
+
+
+@pytest.mark.parametrize("injected", [
+    kernel.TARGET_CLASS_PRODUCTION,
+    kernel.TARGET_CLASS_UNKNOWN,     # unknown 與 production 在 rehearsal lane 同等對待
+])
+def test_rehearsal_refuses_on_an_injected_production_grade_class(injected):
     intent = _intent("sha256:" + "0" * 64)
     probe = runner.QuiesceHostProbe(executor=_RecordingExecutor(), proc_root="/proc")
     with pytest.raises(runner.S2_1HostRunnerError):
@@ -202,7 +288,21 @@ def test_rehearsal_refuses_on_a_production_target_class():
             intent, None, None, now=NOW, source_head=HEAD, host_probe=probe,
             fence_ops=runner.QuiesceFenceOps(executor=_RecordingExecutor()),
             db_observer=runner.QuiesceDbObserver(None), clock=lambda: 0.0,
-            target_view={"target_class": kernel.TARGET_CLASS_PRODUCTION, "reason": "x"},
+            target_view={"target_class": injected, "reason": "x"},
+        )
+
+
+@pytest.mark.parametrize("derived", PRODUCTION_VIEWS)
+def test_a_forged_disposable_view_cannot_loosen_the_rehearsal_refusal(monkeypatch, derived):
+    _force_derived(monkeypatch, derived)
+    intent = _intent("sha256:" + "0" * 64)
+    probe = runner.QuiesceHostProbe(executor=_RecordingExecutor(), proc_root="/proc")
+    with pytest.raises(runner.S2_1HostRunnerError):
+        runner.rehearse_quiesce_fence(
+            intent, None, None, now=NOW, source_head=HEAD, host_probe=probe,
+            fence_ops=runner.QuiesceFenceOps(executor=_RecordingExecutor()),
+            db_observer=runner.QuiesceDbObserver(None), clock=lambda: 0.0,
+            target_view={"target_class": kernel.TARGET_CLASS_DISPOSABLE_CANDIDATE},
         )
 
 

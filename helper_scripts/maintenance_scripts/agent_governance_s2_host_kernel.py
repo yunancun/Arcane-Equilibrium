@@ -468,6 +468,56 @@ def host_target_admission_errors(
     return errors
 
 
+# rehearsal lane 的拒絕集合:``unknown`` 與 ``production`` **同等對待**(排練絕不在可能是生產的
+# 主機上跑)。
+REHEARSAL_REFUSED_TARGET_CLASSES = frozenset({TARGET_CLASS_PRODUCTION, TARGET_CLASS_UNKNOWN})
+
+
+def rehearsal_target_refusals(
+    derived_view: dict[str, Any], injected_view: dict[str, Any] | None = None
+) -> list[str]:
+    """rehearsal lane 的 target 拒絕謂詞:derived 與 injected **取更嚴**(嚴格性單調遞增)。
+
+    production lane **不收**任何 caller view —— 那個洞正是 L1 的存在理由。rehearsal lane 需要能在
+    非目標主機上證明「production 會被拒」,故允許注入一份 view,但注入**只能加嚴、不能放寬**:
+    derived 或 injected 任一落在 :data:`REHEARSAL_REFUSED_TARGET_CLASSES` 即拒。因此一份偽造的
+    ``disposable_candidate`` view 在真 production 主機上仍然拒絕,而測試注入的 ``production``
+    view 在 Mac(derived=``non_target``)上也仍然拒絕。
+
+    落盤 artifact 必須分別記錄 derived 與 injected(:func:`rehearsal_target_view_record`),
+    ``target_class_view`` 永遠是**導出值**,絕不是注入值。
+    """
+
+    refusals: list[str] = []
+    derived_class = (derived_view or {}).get("target_class")
+    if derived_class in REHEARSAL_REFUSED_TARGET_CLASSES:
+        refusals.append(
+            f"the derived host target_class is {derived_class!r} (unknown is treated exactly like "
+            "production); a rehearsal never runs here"
+        )
+    if injected_view is not None:
+        injected_class = injected_view.get("target_class")
+        if injected_class in REHEARSAL_REFUSED_TARGET_CLASSES:
+            refusals.append(
+                f"the injected rehearsal target_class is {injected_class!r}; an injected view may "
+                "only make the refusal stricter, never weaker"
+            )
+    return refusals
+
+
+def rehearsal_target_view_record(
+    derived_view: dict[str, Any], injected_view: dict[str, Any] | None = None
+) -> dict[str, Any]:
+    """artifact 用的誠實投影:``target_class`` 恆為**導出值**,注入值只作旁註。"""
+
+    return {
+        "target_class": (derived_view or {}).get("target_class"),
+        "derived": derived_view,
+        "injected": injected_view,
+        "injected_is_authoritative": False,
+    }
+
+
 # --------------------------------------------------------------------------- #
 # (4) trusted host time
 # --------------------------------------------------------------------------- #

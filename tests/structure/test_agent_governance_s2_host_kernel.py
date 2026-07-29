@@ -486,6 +486,46 @@ def test_unknown_is_treated_exactly_like_production():
 
 
 # --------------------------------------------------------------------------- #
+# rehearsal lane — an injected view may only TIGHTEN, never loosen (RUN-1)
+# --------------------------------------------------------------------------- #
+DISPOSABLE = {"target_class": kernel.TARGET_CLASS_DISPOSABLE_CANDIDATE, "reason": "throwaway"}
+NON_TARGET = {"target_class": kernel.TARGET_CLASS_NON_TARGET, "reason": "mac"}
+
+
+@pytest.mark.parametrize("derived,injected,refused", [
+    (DISPOSABLE, None, False),
+    (NON_TARGET, None, False),
+    # derived 落在 production-grade ⇒ 拒,任何注入都救不回來(注入不能放寬)。
+    ({"target_class": kernel.TARGET_CLASS_PRODUCTION}, None, True),
+    ({"target_class": kernel.TARGET_CLASS_UNKNOWN}, None, True),
+    ({"target_class": kernel.TARGET_CLASS_PRODUCTION}, DISPOSABLE, True),
+    ({"target_class": kernel.TARGET_CLASS_UNKNOWN}, DISPOSABLE, True),
+    # injected 落在 production-grade ⇒ 也拒(注入只能加嚴)。
+    (NON_TARGET, {"target_class": kernel.TARGET_CLASS_PRODUCTION}, True),
+    (NON_TARGET, {"target_class": kernel.TARGET_CLASS_UNKNOWN}, True),
+    (DISPOSABLE, {"target_class": kernel.TARGET_CLASS_PRODUCTION}, True),
+])
+def test_rehearsal_refusal_is_the_stricter_of_derived_and_injected(derived, injected, refused):
+    assert bool(kernel.rehearsal_target_refusals(derived, injected)) is refused
+
+
+def test_rehearsal_unknown_is_treated_exactly_like_production():
+    assert kernel.REHEARSAL_REFUSED_TARGET_CLASSES == frozenset(
+        {kernel.TARGET_CLASS_PRODUCTION, kernel.TARGET_CLASS_UNKNOWN}
+    )
+
+
+def test_the_recorded_target_class_is_always_the_derived_one():
+    record = kernel.rehearsal_target_view_record(
+        DISPOSABLE, {"target_class": kernel.TARGET_CLASS_NON_TARGET}
+    )
+    assert record["target_class"] == kernel.TARGET_CLASS_DISPOSABLE_CANDIDATE
+    assert record["derived"] is DISPOSABLE
+    assert record["injected"] == {"target_class": kernel.TARGET_CLASS_NON_TARGET}
+    assert record["injected_is_authoritative"] is False
+
+
+# --------------------------------------------------------------------------- #
 # W5 #21 — PR_SET_DUMPABLE is actually enforced (not a declared constant)
 # --------------------------------------------------------------------------- #
 def test_process_hardening_is_observed_and_load_bearing():

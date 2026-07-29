@@ -336,22 +336,40 @@ def test_script_index_documents_every_new_runner_family_script():
         assert len(rows) == 1, path.name
 
 
-def test_registry_growth_leaves_headroom_under_the_execve_single_argument_cap():
-    """PR#129 的 ``E2BIG`` 前例:registry 成長會推高每一份 compiled context artifact。
+MAX_ARG_STRLEN = 128 * 1024
 
-    量測(同一 working tree 狀態,registry 前/後):E1 114398 → 115030(+632)、
-    E2 114390 → 115022(+632)、OPS 112727 → 112727(+0)、PM 95597 → 95597(+0);
-    registry 檔身 96035 → 96675(+640)。上限是 Linux ``execve`` 的 ``MAX_ARG_STRLEN``
-    (128 KiB = 131072)。本測試釘住「仍有明顯餘裕」,且 canonical 慣例本來就是以
-    ``@file`` 傳 context artifact 而非塞進單一 argv 元素。
+
+def test_registry_tracked_bytes_leave_headroom_under_the_execve_single_argument_cap():
+    """PR#129 的 ``E2BIG`` 前例的**可重現**量測:只量 tracked 檔身。
+
+    E2 指出「compiled context artifact 大小隨工作樹狀態變動(未追蹤/未提交檔會進 baseline)」
+    ⇒ 那個數字不可作為可重現的迴歸釘。本測試改量唯一真正被 registry append 推大的 tracked
+    檔:``.codex/agent_registry_v1.json``(S2E.2a 前 96035 → 後 96675,+640 bytes),與工作樹
+    髒度完全無關。上限是 Linux ``execve`` 的 ``MAX_ARG_STRLEN``(128 KiB = 131072)。
+    """
+
+    registry_bytes = len((ROOT / ".codex/agent_registry_v1.json").read_bytes())
+    assert registry_bytes < MAX_ARG_STRLEN, registry_bytes
+    # registry 自身留 ≥ 24 KiB 餘裕:任何一次把它推到 100 KiB 以上的成長都必須被重新評估。
+    assert MAX_ARG_STRLEN - registry_bytes > 24 * 1024, registry_bytes
+
+
+def test_compiled_context_artifact_stays_under_the_execve_cap():
+    """compiled artifact 的硬上限(**不是**可重現的餘裕釘)。
+
+    ``compile_context`` 會納入當下工作樹的 diff/inventory ⇒ 量到的 bytes 依樹狀態而變
+    (乾淨樹 @ ``9dfb4d27f``:E1 115030 / E2 115022 / OPS 112727 / PM 95597;髒樹會更大)。
+    故此處只釘「絕不越過 ``MAX_ARG_STRLEN``」這條真正的硬邊界,並把量測當時的樹狀態寫進失敗
+    訊息,讓任何一次紅都能被重現與歸因。canonical 慣例本來就是以 ``@file`` 傳 context artifact
+    而非塞進單一 argv 元素。
     """
 
     from agent_governance_context import capture_repository_baseline
     from agent_governance_execution import compile_context, materialize_context_artifact
     from agent_governance_routing import route_task
 
-    max_arg_strlen = 128 * 1024
     scope = ["helper_scripts/maintenance_scripts/agent_governance_s2_host_kernel.py"]
+    baseline = capture_repository_baseline(root=ROOT)
     routed = route_task({
         "task_shape": "implementation", "surfaces": ["governance"], "risk": "medium",
         "uncertainty": "low", "side_effect_class": "repo_write",
@@ -359,7 +377,7 @@ def test_registry_growth_leaves_headroom_under_the_execve_single_argument_cap():
         "scope": scope, "dirty_scope": scope, "verification_scope": scope,
         "acceptance_criteria": ["registry growth leaves execve headroom"],
         "hard_stops": ["no runtime mutation"],
-        "baseline": capture_repository_baseline(root=ROOT),
+        "baseline": baseline,
         "direct_interfaces": ["agent_governance_s2_host_kernel"],
         "previous_failure": "PR#129 registry growth crossed MAX_ARG_STRLEN and raised E2BIG",
     })
@@ -367,8 +385,7 @@ def test_registry_growth_leaves_headroom_under_the_execve_single_argument_cap():
         compile_context("E1", routed["task_facts"], root=ROOT)
     )
     size = len(json.dumps(artifact, separators=(",", ":"), ensure_ascii=False).encode("utf-8"))
-    assert size < max_arg_strlen, size
-    assert max_arg_strlen - size > 8 * 1024, size
+    assert size < MAX_ARG_STRLEN, {"artifact_bytes": size, "tree_state": baseline}
 
 
 def test_cli_runs_as_a_script_and_makes_no_host_contact(tmp_path):

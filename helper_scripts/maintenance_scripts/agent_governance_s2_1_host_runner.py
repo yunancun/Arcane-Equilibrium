@@ -240,6 +240,31 @@ def _ops_postcheck_projection(
     return {"evidence": evidence, "refusal": None}
 
 
+def _require_runner_capabilities(probe: Any, fence_ops: Any, db_observer: Any) -> None:
+    """能力物件必須是 runner 自有類別,否則 typed 拒(E2 RUN-3)。
+
+    收下任意物件會讓 ``stop_calls`` / ``fence_argv`` 這些欄位在物件**確實**動過主機時仍被寫成
+    ``0`` / ``[]`` —— 零值被當成事實發出。runner 存在的理由正是提供可觀測的主機面,故非自有類別
+    一律拒絕,而不是靜默降級成不可觀測。
+    """
+
+    expected = (
+        ("host_probe", probe, QuiesceHostProbe),
+        ("fence_ops", fence_ops, QuiesceFenceOps),
+        ("db_observer", db_observer, QuiesceDbObserver),
+    )
+    wrong = [
+        f"{name}={type(value).__name__!r} (expected {klass.__name__})"
+        for name, value, klass in expected
+        if not isinstance(value, klass)
+    ]
+    if wrong:
+        raise S2_1HostRunnerError(
+            "the S2.1 host runner only drives its own capability classes; refusing unobservable "
+            "capabilities " + "; ".join(wrong)
+        )
+
+
 def _run_result(
     *,
     lane: str,
@@ -259,10 +284,12 @@ def _run_result(
         "target_class_view": target_view,
         "status": receipt.get("status"),
         "receipt": receipt,
-        "read_argv": [list(item) for item in (probe.argv if probe else [])],
-        "fence_argv": [list(item) for item in (fence_ops.argv if fence_ops else [])],
-        "stop_calls": fence_ops.stop_calls if fence_ops else 0,
-        "start_calls": fence_ops.start_calls if fence_ops else 0,
+        # 無法觀測時發 ``null``,**絕不**發 ``0`` / ``[]``(那是把零值當成事實)。
+        "read_argv": None if probe is None else [list(item) for item in probe.argv],
+        "fence_argv": None if fence_ops is None else [list(item) for item in fence_ops.argv],
+        "fence_observable": fence_ops is not None,
+        "stop_calls": fence_ops.stop_calls if fence_ops is not None else None,
+        "start_calls": fence_ops.start_calls if fence_ops is not None else None,
         "rollback_status": rollback.get("status"),
         "ops_postcheck_evidence": postcheck["evidence"],
         "ops_postcheck_refusal": postcheck["refusal"],
@@ -296,15 +323,18 @@ def run_quiesce_fence_on_host(
     allow_production: bool = False,
     production_confirm: Any = None,
     operator_authorization_verified: bool = False,
-    target_view: dict[str, Any] | None = None,
 ) -> dict[str, Any]:
     """Drive one S2.1 production quiesce fence (L1 admission strictly first).
 
+    **production lane 不收任何 caller target view**(E2 RUN-1):target class 一律當場由
+    ``derive_host_target_class()`` 從主機事實導出,落盤 artifact 記的也是導出值。
+
     ``capability_factory`` 回一個 ``{"host_probe", "fence_ops", "db_observer"}`` 字典,且**只有在
-    host admission 通過之後**才被呼叫 —— 被拒時 fence 能力根本不存在,主機零接觸。
+    host admission 通過之後**才被呼叫 —— 被拒時 fence 能力根本不存在,主機零接觸;三個能力都必須
+    是 runner 自有類別(RUN-3)。
     """
 
-    view = target_view or host_kernel.derive_host_target_class()
+    view = host_kernel.derive_host_target_class()
     _require_host_admission(
         view,
         allow_production=allow_production,
@@ -316,6 +346,7 @@ def run_quiesce_fence_on_host(
     probe = capabilities["host_probe"]
     fence_ops = capabilities["fence_ops"]
     db_observer = capabilities["db_observer"]
+    _require_runner_capabilities(probe, fence_ops, db_observer)
     surface_errors = host_kernel.assert_read_only_surface(probe)
     surface_errors.extend(host_kernel.assert_read_only_surface(db_observer))
     if surface_errors:
@@ -328,8 +359,7 @@ def run_quiesce_fence_on_host(
     )
     return _run_result(
         lane="production", target_view=view, receipt=receipt,
-        probe=probe if isinstance(probe, QuiesceHostProbe) else None,
-        fence_ops=fence_ops if isinstance(fence_ops, QuiesceFenceOps) else None,
+        probe=probe, fence_ops=fence_ops,
         verifier_node=str(intent.get("postcheck_node_id")),
     )
 
@@ -352,13 +382,20 @@ def rehearse_quiesce_fence(
     verifier_capture_digest: str | None = None,
     target_view: dict[str, Any] | None = None,
 ) -> dict[str, Any]:
-    """Rehearse the S2.1 fence cycle through the runner's own classes (never on production)."""
+    """Rehearse the S2.1 fence cycle through the runner's own classes (never on production).
 
-    view = target_view or host_kernel.derive_host_target_class()
-    if view.get("target_class") == host_kernel.TARGET_CLASS_PRODUCTION:
+    ``target_view`` 只在排練面存在且**只能加嚴**:derived 或 injected 任一為 ``production`` /
+    ``unknown`` 即拒。落盤的 ``target_class_view.target_class`` 永遠是導出值。
+    """
+
+    derived = host_kernel.derive_host_target_class()
+    refusals = host_kernel.rehearsal_target_refusals(derived, target_view)
+    if refusals:
         raise S2_1HostRunnerError(
-            "refusing to rehearse the S2.1 quiesce fence on a production target host"
+            "refusing to rehearse the S2.1 quiesce fence: " + "; ".join(refusals)
         )
+    view = host_kernel.rehearsal_target_view_record(derived, target_view)
+    _require_runner_capabilities(host_probe, fence_ops, db_observer)
     surface_errors = host_kernel.assert_read_only_surface(host_probe)
     surface_errors.extend(host_kernel.assert_read_only_surface(db_observer))
     if surface_errors:
