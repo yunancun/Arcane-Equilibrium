@@ -12,8 +12,11 @@
    固定 timeout / 輸出 redact 的單一 exec 點,且 ``session`` 為**必填**建構參數並綁一個封閉
    allowlist(沒有 "generic" session,故本 kernel 不會退化成通用 exec service)。
 3. :func:`derive_host_target_class` —— target class 由**主機事實**導出,**絕不**收 caller 字串;
-   ``unknown`` 與 ``production`` 同等對待。搭配 :func:`host_target_admission_errors`(對同一份
-   導出視圖的薄准入謂詞),讓 runner 在**構造任何 driver 之前**就能 typed 拒絕。
+   命中釘死的 target hostname 即支配一切供裝訊號(導出面只回 ``non_target`` / ``production`` /
+   ``unknown``,``unknown`` 與 ``production`` 同等對待,rehearsal-only 的 ``disposable_candidate``
+   永不被導出)。搭配 :func:`host_target_admission_errors`(對同一份導出視圖的薄准入謂詞,另把
+   intent 自宣告的 ``target_class`` 綁到導出的主機 class),讓 runner 在**構造任何 driver 之前**
+   就能 typed 拒絕。
 4. :func:`host_wall_clock_time` —— 本機牆鐘的 UTC 讀值(純敘述性,不帶 trust 語義;
    與 adapter driver Protocol 的 ``trusted_host_time`` 是兩件事,故刻意不同名)。
 5. :func:`assert_read_only_surface` —— 鏡 ``agent_governance_s2_4_install_driver
@@ -333,8 +336,27 @@ TARGET_CLASS_NON_TARGET = "non_target"
 TARGET_CLASS_DISPOSABLE_CANDIDATE = "disposable_candidate"
 TARGET_CLASS_PRODUCTION = "production"
 TARGET_CLASS_UNKNOWN = "unknown"
-# ``unknown`` 與 ``production`` **同等對待**:兩者都必須滿足三條件才可執行。
+# ``unknown`` 與 ``production`` **同等對待**:兩者都必須滿足 :func:`host_target_admission_errors`
+# 的四條件才可執行。
 PRODUCTION_GRADE_TARGET_CLASSES = frozenset({TARGET_CLASS_PRODUCTION, TARGET_CLASS_UNKNOWN})
+# **rehearsal-only class(P1-A 的處置)**:``disposable_candidate`` 不是一件可從主機事實導出的事實,
+# 只在 rehearsal 的**注入面**上成立(:func:`rehearsal_target_refusals`,且注入只能加嚴)。
+# :func:`derive_host_target_class` 因此永遠不回它,兩支由主機事實驅動的准入謂詞則一律拒它。
+REHEARSAL_ONLY_TARGET_CLASSES = frozenset({TARGET_CLASS_DISPOSABLE_CANDIDATE})
+# 可由主機事實導出的完整值域(結構測試以此釘住「導不出 rehearsal-only class」)。
+DERIVABLE_TARGET_CLASSES = frozenset({
+    TARGET_CLASS_NON_TARGET, TARGET_CLASS_PRODUCTION, TARGET_CLASS_UNKNOWN,
+})
+
+# intent 側的 ``target_class`` 是**另一個**命名空間(S2.0/S2.1 adapter 的 schema:
+# ``production`` / ``disposable_local``),與上面那組由主機事實導出的 host class 不是同一件事。
+# kernel 不匯入任何 applier 模組(observer 的 import-closure 硬邊界),故在此以字面量宣告,
+# 由結構測試對兩個 adapter 的常量逐字比對釘死。
+INTENT_TARGET_CLASS_PRODUCTION = "production"
+INTENT_TARGET_CLASS_DISPOSABLE_LOCAL = "disposable_local"
+INTENT_TARGET_CLASSES = frozenset({
+    INTENT_TARGET_CLASS_PRODUCTION, INTENT_TARGET_CLASS_DISPOSABLE_LOCAL,
+})
 
 
 def _writable(path: str) -> bool | None:
@@ -391,13 +413,25 @@ def derive_host_target_class() -> dict[str, Any]:
     (``apply_s2_5_start(target_class=...)``)、在 S2.4 的 plan/probe schema 根本不存在——
     「我在拋棄式主機上」目前完全是呼叫端自我宣告。runner 是唯一能把它變成主機導出事實的地方。
 
-    判定(§E.2):
+    **分類優先序(P1-A 的處置;順序本身就是安全性質)。**
 
-    * ``platform != linux`` → ``non_target``
-    * hostname 不在 :data:`TARGET_HOSTNAMES` → ``non_target``
-    * ``/etc/systemd/system`` 不可寫 **且** canonical roots 皆不存在 → ``disposable_candidate``
-    * 三項全命中(linux + target hostname + 可寫 unit dir + canonical roots 齊備)→ ``production``
-    * 任何一項不可判定 → ``unknown``(與 ``production`` 同等對待)
+    1. ``platform != linux`` → ``non_target``。非 Linux 主機沒有 systemd,結構上不可能是 S2 目標。
+    2. hostname 不在 :data:`TARGET_HOSTNAMES` → ``non_target``。
+    3. hostname **在** :data:`TARGET_HOSTNAMES` → 這台就是被釘死的生產目標主機,**該事實支配**
+       其餘所有訊號:``production``(可寫 unit dir + canonical roots 齊備)或 ``unknown``(其餘一切)。
+
+    先前的版本在第 3 步之下多一條「unit dir 不可寫 **且** canonical roots 全缺 → ``disposable_candidate``」
+    的分支,而 ``disposable_candidate`` 在准入謂詞裡是**無條件放行**的。那兩個訊號都是**易變的**:
+    unit dir 的可寫性只反映本行程的 euid(非 root 執行即為不可寫),canonical roots 的存在與否只反映
+    供裝進度(初始供裝 / 恢復期恆為全缺)。於是一台**貨真價實的 trade-core**,只要在初始供裝期以
+    非 root 身分跑一次,就會被分類成 ``disposable_candidate`` 而跳過三條 production 承認。
+
+    hostname 相反地是**穩定且被釘死**的身分宣告。因此優先序是「hostname 支配供裝訊號」:命中 target
+    hostname 之後,供裝訊號只能在 ``production`` 與 ``unknown`` 之間做選擇,而 ``unknown`` 與
+    ``production`` 同等對待 ⇒ 任何一種供裝狀態都落在三條件閘之內(fail-closed 方向)。代價是「一台
+    真的叫 trade-core 的拋棄式 VM」會被當成生產主機看待 —— 那正是正確的保守方向:一台拋棄式主機
+    **不可能**被主機事實證明成拋棄式(那正是 L1 要收掉的自我宣告洞),所以 ``disposable_candidate``
+    從此只是 rehearsal 注入面的 class(:data:`REHEARSAL_ONLY_TARGET_CLASSES`),導出面永不回它。
     """
 
     facts: dict[str, Any] = {
@@ -449,11 +483,15 @@ def derive_host_target_class() -> dict[str, Any]:
             "facts": facts,
         }
     if not writable and not any(roots):
+        # P1-A:這**曾經**是 ``disposable_candidate`` 分支。一個未供裝 / 非 root 的視圖是供裝階段的
+        # 訊號,不是「這台是拋棄式主機」的證明 —— 命中 target hostname 的主機一律留在 production 閘內。
         return {
-            "target_class": TARGET_CLASS_DISPOSABLE_CANDIDATE,
+            "target_class": TARGET_CLASS_UNKNOWN,
             "reason": (
-                "linux target hostname without a writable system unit directory and without any "
-                "canonical install root; only a disposable rehearsal may run here"
+                "the pinned target hostname is present but the host is unprovisioned from this "
+                "process's view (no writable system unit directory, no canonical install root); "
+                "that is a provisioning-stage signal, never a proof of a disposable host, so "
+                "unknown is treated exactly like production"
             ),
             "facts": facts,
         }
@@ -474,21 +512,33 @@ def host_target_admission_errors(
     production_confirm: Any,
     intent_digest: Any,
     operator_authorization_verified: bool,
+    intent_target_class: Any,
 ) -> list[str]:
-    """L1 准入謂詞:``production`` / ``unknown`` 必須三條件並存,否則 typed 拒(driver 永不構造)。
+    """L1 准入謂詞:``production`` / ``unknown`` 必須**四**條件並存,否則 typed 拒(driver 永不構造)。
 
     (a) CLI 顯式 ``--allow-production``;
     (b) 已驗證的 operator SSHSIG(綁 exact intent digest + source_head + target_host——驗簽本身屬
         adapter 的 L2 閘,呼叫端把「已驗證」這個布林事實遞進來);
-    (c) ``--production-confirm <intent_digest>`` 逐字回填(防手滑 / 防貼上)。
+    (c) ``--production-confirm <intent_digest>`` 逐字回填(防手滑 / 防貼上);
+    (d) **intent 自己宣告的 ``target_class`` 必須與導出的主機 class 同一級**(P1-B)。
 
-    ``non_target`` 一律拒(那台主機根本不是 S2 目標);``disposable_candidate`` 放行 rehearsal。
-    三條件**任一**缺席即回非空 errors —— 特別是 ``--allow-production`` 單獨絕不足夠。
+    (d) 是 P1-B 的處置。少了它,呼叫端可以在導出為 ``production`` / ``unknown`` 的主機上遞一份
+    **合法簽章的 ``disposable_local`` intent**:adapter 於是走它的 disposable 分支(``apply_quiesce_fence``
+    會真的對 system-level unit 發 ``stop``/``start``),卻回報 rehearsal 級的 local 證據 —— 一次真實的
+    runtime effect 被記成演練。故生產進入點只收 ``production`` intent;``disposable_local`` intent 只能
+    走 rehearsal lane(那條 lane 的 derived class 若是 production-grade 本來就恆拒)。
+
+    ``non_target`` 一律拒(那台主機根本不是 S2 目標)。``disposable_candidate`` **也一律拒**(P1-A):
+    它是 :data:`REHEARSAL_ONLY_TARGET_CLASSES`,不可由主機事實導出,故生產進入點見到它只可能是一份
+    偽造 / 過期的視圖。四條件**任一**缺席即回非空 errors —— 特別是 ``--allow-production`` 單獨絕不足夠。
     """
 
     target_class = target_view.get("target_class")
-    if target_class == TARGET_CLASS_DISPOSABLE_CANDIDATE:
-        return []
+    if target_class in REHEARSAL_ONLY_TARGET_CLASSES:
+        return [
+            f"target_class={target_class} is a rehearsal-only class that host facts can never "
+            "derive; a production entry point never admits it (use the rehearsal lane instead)"
+        ]
     if target_class == TARGET_CLASS_NON_TARGET:
         return [
             "S2 host runner refuses to construct a driver on a non-target host "
@@ -497,6 +547,22 @@ def host_target_admission_errors(
     if target_class not in PRODUCTION_GRADE_TARGET_CLASSES:
         return [f"S2 host runner cannot classify this host (target_class={target_class!r})"]
     errors: list[str] = []
+    # intent/主機 class 綁定:訊息只複述**封閉枚舉**(兩個宣告值或 ``unrecognized``),絕不把呼叫端
+    # 遞進來的原字串回寫進任何理由 —— 這些理由會落進 artifact 與 stdout summary。
+    if intent_target_class != INTENT_TARGET_CLASS_PRODUCTION:
+        # ``isinstance`` 先行:一份壞 intent 可能遞來 list/dict,而 ``x in frozenset`` 對不可雜湊值
+        # 會拋 TypeError —— 一道准入謂詞絕不可以自己炸成未分類例外。
+        declared = (
+            intent_target_class
+            if isinstance(intent_target_class, str) and intent_target_class in INTENT_TARGET_CLASSES
+            else "unrecognized"
+        )
+        errors.append(
+            f"target_class={target_class} only admits an intent whose own target_class is "
+            f"{INTENT_TARGET_CLASS_PRODUCTION}; this intent declares {declared} (a "
+            f"{INTENT_TARGET_CLASS_DISPOSABLE_LOCAL} intent would drive the adapter's rehearsal "
+            "branch with real host capabilities and report a real effect as a drill)"
+        )
     if not allow_production:
         errors.append(
             f"target_class={target_class} requires an explicit --allow-production; refusing "
@@ -532,10 +598,12 @@ def host_observation_admission_errors(
       ``--allow-production`` 承認;``unknown`` 一如既往與 ``production`` 同等對待。
     * ``non_target`` **放行**:那台主機上的觀測只會打到不存在的 ``systemctl``(typed 失敗),
       擋它沒有安全收益,反而會讓 Mac 上的結構測試失去唯一一條真子行程路徑。
+    * ``disposable_candidate`` **拒**(P1-A):本謂詞的輸入恆為導出視圖,而導出面永不回 rehearsal-only
+      class,故見到它只可能是一份偽造 / 過期的視圖 —— 落在「無法分類」那一支才是誠實的收場。
     """
 
     target_class = target_view.get("target_class")
-    if target_class in (TARGET_CLASS_NON_TARGET, TARGET_CLASS_DISPOSABLE_CANDIDATE):
+    if target_class == TARGET_CLASS_NON_TARGET:
         return []
     if target_class not in PRODUCTION_GRADE_TARGET_CLASSES:
         return [
@@ -874,6 +942,10 @@ def kernel_abi_projection() -> dict[str, Any]:
             TARGET_CLASS_PRODUCTION, TARGET_CLASS_UNKNOWN,
         }),
         "production_grade_target_classes": sorted(PRODUCTION_GRADE_TARGET_CLASSES),
+        # P1-A / P1-B 的兩條硬邊界在 artifact 上的可稽核投影。
+        "derivable_target_classes": sorted(DERIVABLE_TARGET_CLASSES),
+        "rehearsal_only_target_classes": sorted(REHEARSAL_ONLY_TARGET_CLASSES),
+        "production_entry_intent_target_class": INTENT_TARGET_CLASS_PRODUCTION,
         "forbidden_read_only_surface": sorted(FORBIDDEN_READ_ONLY_SURFACE),
         "forbidden_argv_tokens": sorted(FORBIDDEN_ARGV_TOKENS),
         # 出境秘密掃描在 artifact 上的活再導出面(鏡 s2_4 credential ABI 的同名欄位形制)。

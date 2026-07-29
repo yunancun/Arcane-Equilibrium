@@ -229,6 +229,39 @@ def test_production_refusal_never_builds_a_fence_capability(monkeypatch, view, k
 # --------------------------------------------------------------------------- #
 # RUN-3:production lane 拒絕非 runner 自有的 capability 物件
 # --------------------------------------------------------------------------- #
+@pytest.mark.parametrize("view", PRODUCTION_VIEWS)
+def test_a_disposable_local_intent_never_builds_a_fence_capability(monkeypatch, view):
+    """P1-B:``disposable_local`` intent 在生產級主機上必須在 ``capability_factory`` **之前**被拒。
+
+    這是最嚴重的一形:``apply_quiesce_fence`` 的 disposable 分支會對**真的** kernel capability 發
+    system-level ``stop``/``start``,再把那次真實 effect 標成 rehearsal 級的 local 證據。
+    """
+
+    _force_derived(monkeypatch, view)
+    intent = _intent("sha256:" + "0" * 64, target_class="disposable_local")
+
+    def _factory():  # pragma: no cover - 必須永不被呼叫
+        raise AssertionError("no fence capability may be built for a mismatched intent class")
+
+    with pytest.raises(runner.S2_1HostRunnerError) as error:
+        runner.run_quiesce_fence_on_host(
+            intent, None, None, now=NOW, source_head=HEAD, capability_factory=_factory,
+            allow_production=True, production_confirm=intent["self_digest"],
+            operator_authorization_verified=True,
+        )
+    assert "disposable_local" in str(error.value)
+
+
+def test_the_runner_binds_the_intent_class_before_building_anything():
+    """結構釘:admission 必須在 ``capability_factory()`` 之前,且真的把 intent 的 class 遞進去。"""
+
+    import inspect
+
+    source = inspect.getsource(runner.run_quiesce_fence_on_host)
+    assert 'intent_target_class=intent.get("target_class")' in source
+    assert source.index("_require_host_admission") < source.index("capability_factory()")
+
+
 def test_production_lane_refuses_foreign_capability_objects(monkeypatch):
     _force_derived(monkeypatch, PRODUCTION_VIEWS[0])
     intent = _intent("sha256:" + "0" * 64, target_class="production")

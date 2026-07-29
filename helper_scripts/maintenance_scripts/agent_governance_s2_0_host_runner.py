@@ -255,6 +255,7 @@ def _require_host_admission(
     production_confirm: Any,
     intent_digest: Any,
     operator_authorization_verified: bool,
+    intent_target_class: Any,
 ) -> None:
     errors = host_kernel.host_target_admission_errors(
         target_view,
@@ -262,6 +263,7 @@ def _require_host_admission(
         production_confirm=production_confirm,
         intent_digest=intent_digest,
         operator_authorization_verified=operator_authorization_verified,
+        intent_target_class=intent_target_class,
     )
     if errors:
         raise S2_0HostRunnerError(
@@ -363,6 +365,11 @@ def run_observer_bootstrap_on_host(
     driver 根本不被構造」在程式結構上的保證;且回傳物件必須是 runner 自有的
     :class:`ObserverBootstrapHostDriver`,否則 typed 拒(RUN-3:一個無法觀測的注入物件會讓
     ``driver_calls`` 這類欄位變成不可信的零值,而 runner 存在的理由正是提供可觀測的主機面)。
+
+    **intent 的 ``target_class`` 也在 factory 之前被綁到導出的主機 class(P1-B)。** S2.0 的
+    ``apply_observer_bootstrap`` 同樣以 ``intent["target_class"]`` 分流:一份 ``disposable_local``
+    intent 會離開生產閘、走進丟棄式證明分支,而 driver 早已被構造(真 PG 能力在手)。本 runner 因此
+    在**呼叫 factory 之前**就拒掉任何 intent/主機 class 不匹配,而不是倚賴 adapter 在下游剛好停下來。
     """
 
     view = host_kernel.derive_host_target_class()
@@ -372,6 +379,7 @@ def run_observer_bootstrap_on_host(
         production_confirm=production_confirm,
         intent_digest=intent.get("self_digest"),
         operator_authorization_verified=operator_authorization_verified,
+        intent_target_class=intent.get("target_class"),
     )
     driver = driver_factory()
     if type(driver) is not ObserverBootstrapHostDriver:

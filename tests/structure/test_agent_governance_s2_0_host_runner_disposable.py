@@ -185,6 +185,37 @@ def test_all_three_conditions_reach_the_driver_factory(monkeypatch, view):
 # --------------------------------------------------------------------------- #
 # RUN-3:production lane 拒絕不可觀測的 capability 類別
 # --------------------------------------------------------------------------- #
+@pytest.mark.parametrize("view", PRODUCTION_VIEWS)
+def test_a_disposable_local_intent_never_reaches_the_driver_factory(monkeypatch, view):
+    """P1-B:合法簽章的 ``disposable_local`` intent 在生產級主機上必須在 factory **之前**被拒。
+
+    S2.0 的 ``apply_observer_bootstrap`` 同樣以 ``intent["target_class"]`` 分流,而 driver 早在分流
+    之前就被構造(真 PG 能力在手)。故這道拒絕必須落在 runner 的 L1,不能倚賴 adapter 下游剛好停下。
+    """
+
+    _force_derived(monkeypatch, view)
+    intent = _intent(target_class="disposable_local")
+    before = runner.ObserverBootstrapHostDriver.constructions
+    with pytest.raises(runner.S2_0HostRunnerError) as error:
+        runner.run_observer_bootstrap_on_host(
+            intent, None, None, now=NOW, source_head=HEAD,
+            driver_factory=_exploding_factory(), allow_production=True,
+            production_confirm=intent["self_digest"], operator_authorization_verified=True,
+        )
+    assert "disposable_local" in str(error.value)
+    assert runner.ObserverBootstrapHostDriver.constructions == before
+
+
+def test_the_runner_binds_the_intent_class_before_building_anything():
+    """結構釘:admission 必須在 ``driver_factory()`` 之前,且真的把 intent 的 class 遞進去。"""
+
+    import inspect
+
+    source = inspect.getsource(runner.run_observer_bootstrap_on_host)
+    assert 'intent_target_class=intent.get("target_class")' in source
+    assert source.index("_require_host_admission") < source.index("driver_factory()")
+
+
 def test_production_lane_refuses_a_foreign_capability_object(monkeypatch):
     _force_derived(monkeypatch, PRODUCTION_VIEWS[0])
     intent = _intent()

@@ -572,7 +572,10 @@ def _force_host(monkeypatch, *, platform, hostname, writable, roots):
 @pytest.mark.parametrize("platform,hostname,writable,roots,expected", [
     ("darwin", "trade-core", True, True, kernel.TARGET_CLASS_NON_TARGET),
     ("linux", "some-laptop", True, True, kernel.TARGET_CLASS_NON_TARGET),
-    ("linux", "trade-core", False, False, kernel.TARGET_CLASS_DISPOSABLE_CANDIDATE),
+    # P1-A:未供裝 + 非 root(unit dir 不可寫、canonical roots 全缺)**曾經**落
+    # ``disposable_candidate``(= 無條件放行)。那是初始供裝 / 恢復期的真 trade-core 常態視圖,
+    # 故 hostname 支配供裝訊號,結果必須是 ``unknown``(與 production 同等對待)。
+    ("linux", "trade-core", False, False, kernel.TARGET_CLASS_UNKNOWN),
     ("linux", "trade-core", True, True, kernel.TARGET_CLASS_PRODUCTION),
     ("linux", "trade-core", None, True, kernel.TARGET_CLASS_UNKNOWN),
     ("linux", "trade-core", True, None, kernel.TARGET_CLASS_UNKNOWN),
@@ -605,12 +608,20 @@ def test_this_development_machine_is_never_a_production_target():
 DIGEST = "sha256:" + "a" * 64
 
 
+ADMITTED = {
+    "allow_production": True, "production_confirm": DIGEST, "intent_digest": DIGEST,
+    "operator_authorization_verified": True,
+    "intent_target_class": kernel.INTENT_TARGET_CLASS_PRODUCTION,
+}
+
+
 @pytest.mark.parametrize("target_class", sorted(kernel.PRODUCTION_GRADE_TARGET_CLASSES))
 def test_allow_production_alone_is_insufficient(target_class):
     view = {"target_class": target_class, "reason": "x", "facts": {}}
     errors = kernel.host_target_admission_errors(
         view, allow_production=True, production_confirm=None,
         intent_digest=DIGEST, operator_authorization_verified=False,
+        intent_target_class=kernel.INTENT_TARGET_CLASS_PRODUCTION,
     )
     assert errors
     assert any("operator SSHSIG" in error for error in errors)
@@ -618,48 +629,145 @@ def test_allow_production_alone_is_insufficient(target_class):
 
 
 @pytest.mark.parametrize("target_class", sorted(kernel.PRODUCTION_GRADE_TARGET_CLASSES))
-def test_all_three_conditions_admit_and_any_missing_one_refuses(target_class):
+def test_all_four_conditions_admit_and_any_missing_one_refuses(target_class):
     view = {"target_class": target_class, "reason": "x", "facts": {}}
-    assert kernel.host_target_admission_errors(
-        view, allow_production=True, production_confirm=DIGEST,
-        intent_digest=DIGEST, operator_authorization_verified=True,
-    ) == []
+    assert kernel.host_target_admission_errors(view, **ADMITTED) == []
     for override in (
         {"allow_production": False},
         {"operator_authorization_verified": False},
         {"production_confirm": "sha256:" + "b" * 64},
         {"production_confirm": None},
+        # P1-B:第四條件 —— intent 自宣告的 class 必須與導出的主機 class 同一級。
+        {"intent_target_class": kernel.INTENT_TARGET_CLASS_DISPOSABLE_LOCAL},
+        {"intent_target_class": None},
     ):
-        kwargs = {
-            "allow_production": True, "production_confirm": DIGEST,
-            "intent_digest": DIGEST, "operator_authorization_verified": True,
-            **override,
-        }
-        assert kernel.host_target_admission_errors(view, **kwargs)
+        assert kernel.host_target_admission_errors(view, **{**ADMITTED, **override})
 
 
-def test_non_target_is_refused_and_disposable_candidate_is_admitted():
-    assert kernel.host_target_admission_errors(
-        {"target_class": kernel.TARGET_CLASS_NON_TARGET, "reason": "mac"},
-        allow_production=True, production_confirm=DIGEST, intent_digest=DIGEST,
-        operator_authorization_verified=True,
+def test_the_admission_predicate_cannot_silently_skip_the_intent_binding():
+    """P1-B:``intent_target_class`` 是**必填** kwarg —— 忘了遞是 TypeError,不是靜默放行。"""
+
+    import inspect
+
+    parameter = inspect.signature(kernel.host_target_admission_errors).parameters[
+        "intent_target_class"
+    ]
+    assert parameter.kind is inspect.Parameter.KEYWORD_ONLY
+    assert parameter.default is inspect.Parameter.empty
+
+
+@pytest.mark.parametrize("target_class", sorted(kernel.PRODUCTION_GRADE_TARGET_CLASSES))
+def test_a_disposable_local_intent_is_refused_on_a_production_grade_host(target_class):
+    """P1-B:一份合法簽章的 ``disposable_local`` intent 絕不可在生產級主機上被承認。
+
+    它若被承認,``apply_quiesce_fence`` 會走 disposable 分支,用**真的** kernel capability 發
+    system-level ``stop``/``start``,再把那次真實 effect 標成 rehearsal 級的 local 證據。
+    """
+
+    view = {"target_class": target_class, "reason": "x", "facts": {}}
+    errors = kernel.host_target_admission_errors(
+        view, **{**ADMITTED, "intent_target_class": kernel.INTENT_TARGET_CLASS_DISPOSABLE_LOCAL}
     )
+    # 其餘三條件全部滿足 ⇒ 唯一的拒絕理由就是這道綁定(不是碰巧被別的條件擋下)。
+    assert len(errors) == 1
+    assert kernel.INTENT_TARGET_CLASS_DISPOSABLE_LOCAL in errors[0]
+
+
+def test_the_intent_binding_reason_never_echoes_the_caller_string():
+    """理由字串會落進 artifact 與 stdout summary ⇒ 只准複述封閉枚舉,絕不回寫呼叫端遞來的位元組。"""
+
+    view = {"target_class": kernel.TARGET_CLASS_PRODUCTION, "reason": "x", "facts": {}}
+    hostile = "PG" + "PASSWORD" + "=" + "s3cr3t-not-real"
+    errors = kernel.host_target_admission_errors(
+        view, **{**ADMITTED, "intent_target_class": hostile}
+    )
+    assert errors
+    joined = " ".join(errors)
+    assert hostile not in joined
+    assert "unrecognized" in joined
+    # 壞 intent 可能遞來不可雜湊值:謂詞必須照樣回一份 typed 拒絕,而不是自己炸成 TypeError。
+    for unhashable in ([], {}, {"target_class": "production"}):
+        assert kernel.host_target_admission_errors(
+            view, **{**ADMITTED, "intent_target_class": unhashable}
+        )
+
+
+def test_non_target_and_the_rehearsal_only_class_are_both_refused():
+    """P1-A:``disposable_candidate`` 是 rehearsal-only class ⇒ 生產進入點一律拒(曾經是放行)。"""
+
+    assert kernel.host_target_admission_errors(
+        {"target_class": kernel.TARGET_CLASS_NON_TARGET, "reason": "mac"}, **ADMITTED
+    )
+    errors = kernel.host_target_admission_errors(
+        {"target_class": kernel.TARGET_CLASS_DISPOSABLE_CANDIDATE, "reason": "throwaway"},
+        **ADMITTED,
+    )
+    assert any("rehearsal-only" in error for error in errors)
+    # 連「四條件全滿足」都救不回來:它根本不是一個可導出的主機事實。
     assert kernel.host_target_admission_errors(
         {"target_class": kernel.TARGET_CLASS_DISPOSABLE_CANDIDATE, "reason": "throwaway"},
         allow_production=False, production_confirm=None, intent_digest=None,
+        operator_authorization_verified=False, intent_target_class=None,
+    )
+
+
+def test_the_rehearsal_only_class_is_never_derivable_from_host_facts(monkeypatch):
+    """P1-A 的核心:任何主機事實組合都導不出 ``disposable_candidate``。"""
+
+    assert kernel.REHEARSAL_ONLY_TARGET_CLASSES == frozenset(
+        {kernel.TARGET_CLASS_DISPOSABLE_CANDIDATE}
+    )
+    assert not (kernel.DERIVABLE_TARGET_CLASSES & kernel.REHEARSAL_ONLY_TARGET_CLASSES)
+    for platform in ("linux", "darwin"):
+        for hostname in ("trade-core", "trade-core.internal", "some-laptop"):
+            for writable in (True, False, None):
+                for roots in (True, False, None):
+                    _force_host(
+                        monkeypatch, platform=platform, hostname=hostname,
+                        writable=writable, roots=roots,
+                    )
+                    derived = kernel.derive_host_target_class()["target_class"]
+                    assert derived in kernel.DERIVABLE_TARGET_CLASSES
+                    assert derived not in kernel.REHEARSAL_ONLY_TARGET_CLASSES
+
+
+@pytest.mark.parametrize("writable,roots", [(False, False), (False, True), (True, False)])
+def test_an_unprovisioned_target_host_stays_inside_the_production_gate(monkeypatch, writable, roots):
+    """P1-A 的實景:初始供裝 / 恢復期的真 trade-core(非 root、roots 未建)必須落 production 閘。"""
+
+    _force_host(
+        monkeypatch, platform="linux", hostname="trade-core", writable=writable, roots=roots
+    )
+    view = kernel.derive_host_target_class()
+    assert view["target_class"] == kernel.TARGET_CLASS_UNKNOWN
+    assert kernel.host_target_admission_errors(
+        view, allow_production=False, production_confirm=None, intent_digest=None,
         operator_authorization_verified=False,
-    ) == []
+        intent_target_class=kernel.INTENT_TARGET_CLASS_PRODUCTION,
+    )
+
+
+def test_the_intent_target_classes_are_pinned_to_both_adapters():
+    """kernel 不匯入 applier 模組,故 intent 側的字面量必須在測試裡對兩個 adapter 常量釘死。"""
+
+    import agent_governance_alr_quiesce_fence as fence
+    import agent_governance_pg_observer_bootstrap as bootstrap
+
+    for adapter in (fence, bootstrap):
+        assert kernel.INTENT_TARGET_CLASS_PRODUCTION == adapter.PRODUCTION_TARGET_CLASS
+        assert kernel.INTENT_TARGET_CLASS_DISPOSABLE_LOCAL == adapter.DISPOSABLE_TARGET_CLASS
+        assert kernel.INTENT_TARGET_CLASSES == adapter.TARGET_CLASSES
 
 
 def test_unknown_is_treated_exactly_like_production():
     unknown = {"target_class": kernel.TARGET_CLASS_UNKNOWN, "reason": "x"}
     production = {"target_class": kernel.TARGET_CLASS_PRODUCTION, "reason": "x"}
-    for kwargs in (
-        {"allow_production": False, "production_confirm": DIGEST, "intent_digest": DIGEST,
-         "operator_authorization_verified": True},
-        {"allow_production": True, "production_confirm": None, "intent_digest": DIGEST,
-         "operator_authorization_verified": True},
+    for override in (
+        {"allow_production": False},
+        {"production_confirm": None},
+        {"intent_target_class": kernel.INTENT_TARGET_CLASS_DISPOSABLE_LOCAL},
     ):
+        kwargs = {**ADMITTED, **override}
         assert bool(kernel.host_target_admission_errors(unknown, **kwargs)) == bool(
             kernel.host_target_admission_errors(production, **kwargs)
         )
@@ -751,7 +859,9 @@ def test_process_hardening_is_re_observed_on_every_execution(monkeypatch):
 # --------------------------------------------------------------------------- #
 @pytest.mark.parametrize("target_class,allow,refused", [
     (kernel.TARGET_CLASS_NON_TARGET, False, False),
-    (kernel.TARGET_CLASS_DISPOSABLE_CANDIDATE, False, False),
+    # P1-A:rehearsal-only class 導不出來 ⇒ 觀測面見到它也只能是偽造視圖,一律拒。
+    (kernel.TARGET_CLASS_DISPOSABLE_CANDIDATE, False, True),
+    (kernel.TARGET_CLASS_DISPOSABLE_CANDIDATE, True, True),
     (kernel.TARGET_CLASS_PRODUCTION, False, True),
     (kernel.TARGET_CLASS_UNKNOWN, False, True),      # unknown 同等對待
     (kernel.TARGET_CLASS_PRODUCTION, True, False),
@@ -766,12 +876,13 @@ def test_read_only_observation_admission(target_class, allow, refused):
 
 def test_the_observation_gate_is_deliberately_weaker_than_the_apply_gate():
     # 觀測面不需要 SSHSIG / --production-confirm(觀測正是拿到 permit 之前要做的事),但 apply 面
-    # 在同一份 view 上仍然需要三條件 —— 兩者絕不可被混為一談。
+    # 在同一份 view 上仍然需要四條件 —— 兩者絕不可被混為一談。
     view = {"target_class": kernel.TARGET_CLASS_PRODUCTION, "reason": "x"}
     assert kernel.host_observation_admission_errors(view, allow_production=True) == []
     assert kernel.host_target_admission_errors(
         view, allow_production=True, production_confirm=None, intent_digest=DIGEST,
         operator_authorization_verified=False,
+        intent_target_class=kernel.INTENT_TARGET_CLASS_PRODUCTION,
     )
 
 
@@ -850,6 +961,16 @@ def test_kernel_abi_projection_is_code_owned():
     assert projection["mutating_sessions"] == [kernel.SESSION_S2_1_QUIESCE_FENCE]
     assert projection["production_grade_target_classes"] == sorted(
         {kernel.TARGET_CLASS_PRODUCTION, kernel.TARGET_CLASS_UNKNOWN}
+    )
+    # P1-A / P1-B 的兩條硬邊界必須在 artifact 上看得見(稽核不必讀原始碼)。
+    assert projection["rehearsal_only_target_classes"] == [
+        kernel.TARGET_CLASS_DISPOSABLE_CANDIDATE
+    ]
+    assert kernel.TARGET_CLASS_DISPOSABLE_CANDIDATE not in projection[
+        "derivable_target_classes"
+    ]
+    assert projection["production_entry_intent_target_class"] == (
+        kernel.INTENT_TARGET_CLASS_PRODUCTION
     )
     # 出境守衛必須在 artifact 上看得見,且其判準明記為 capture_v2 的既有規則(非自造)。
     assert projection["egress_secret_scanner"].endswith(

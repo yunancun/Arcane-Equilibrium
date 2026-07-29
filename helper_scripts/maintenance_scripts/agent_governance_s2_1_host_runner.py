@@ -239,6 +239,7 @@ def _require_host_admission(
     production_confirm: Any,
     intent_digest: Any,
     operator_authorization_verified: bool,
+    intent_target_class: Any,
 ) -> None:
     errors = host_kernel.host_target_admission_errors(
         target_view,
@@ -246,6 +247,7 @@ def _require_host_admission(
         production_confirm=production_confirm,
         intent_digest=intent_digest,
         operator_authorization_verified=operator_authorization_verified,
+        intent_target_class=intent_target_class,
     )
     if errors:
         raise S2_1HostRunnerError(
@@ -391,6 +393,13 @@ def run_quiesce_fence_on_host(
     是 runner 自有類別(RUN-3,且比對 exact type),兩個 exec 面背後的 ``executor`` 還必須是真的
     :class:`agent_governance_s2_host_kernel.HostExecutionKernel`(RES-4:否則 ``shell=False`` /
     sanitized env / timeout / prctl 執法在真 fence 路徑上一項都不成立)。
+
+    **intent 的 ``target_class`` 也在 factory 之前被綁到導出的主機 class(P1-B)。**
+    ``apply_quiesce_fence`` 以 ``intent["target_class"]`` 分流:``production`` 走 fail-closed 的
+    pending 分支(絕不接觸真主機),``disposable_local`` 則走真的 fence 週期 —— 它會對這些**真的**
+    kernel capability 發 system-level ``stop``/``start``,再把結果標成 ``LOCAL_REPRODUCIBLE`` /
+    ``production_fence_performed=false``。也就是一次真實 runtime effect 被記成演練。故本 runner 在
+    ``capability_factory`` 被呼叫**之前**就拒掉任何 intent/主機 class 不匹配。
     """
 
     view = host_kernel.derive_host_target_class()
@@ -400,6 +409,7 @@ def run_quiesce_fence_on_host(
         production_confirm=production_confirm,
         intent_digest=intent.get("self_digest"),
         operator_authorization_verified=operator_authorization_verified,
+        intent_target_class=intent.get("target_class"),
     )
     capabilities = capability_factory()
     probe = capabilities["host_probe"]

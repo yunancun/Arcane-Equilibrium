@@ -19,7 +19,9 @@
                      caller 只能遞 code-owned 表裡的 **key**,遞不進路徑。
 ``process_identity`` ``/proc/<pid>/{cmdline,cgroup,stat}`` + unit 的 MainPID/InvocationID,
                      交叉 ``compute_owner_fingerprint``。指紋演算法**只調用不重寫**
-                     (``agent_governance_alr_quiesce_inventory`` 是 SSOT)。
+                     (``agent_governance_alr_quiesce_inventory`` 是 SSOT)。本面**必須**與
+                     ``unit_state`` 同時請求:少了那些屬性,它只會發出由缺席值算出的預設紀錄
+                     (P2-D),故 request 層與觀測層各拒一次。
 ===================  ============================================================
 
 **applier ≠ verifier 的三層(§B.2,強度遞減,誠實標示)**
@@ -205,6 +207,28 @@ class PgAclObserver:
             for item in (request.get("observed_relations") or [])
         ]
         connect_as = _assert_pg_ident(request.get("connect_as") or role, label="connect_as")
+        # P2-C:PG 不可用 / catalog query 失敗時,``psycopg2`` 拋的是它自己的例外型別,不在
+        # ``main()`` 捕捉的兩個型別內 ⇒ 裸 traceback + exit 1,破壞已文件化的 typed exit 契約。
+        # 這裡把整個連線+查詢邊界收成 :class:`S2HostObserverError`(exit 5)。**只帶例外型別名**,
+        # 不帶 DB 訊息本身:那段字串是主機給的內容(可能含連線 locus / 角色名),而 stderr 是診斷
+        # 通道不是資料通道(SEC-3 的同一條界線)。
+        try:
+            return self._observe_catalog(
+                socket_dir=socket_dir, database=database, connect_as=connect_as,
+                role=role, schema=schema, relations=relations,
+            )
+        except S2HostObserverError:
+            raise
+        except Exception as error:  # noqa: BLE001 - 任何 DB 側失敗一律 typed fail-closed
+            raise S2HostObserverError(
+                "the PG ACL face could not complete its read-only catalog observation "
+                f"({type(error).__name__}); refusing to report a partial or guessed projection"
+            ) from error
+
+    def _observe_catalog(
+        self, *, socket_dir: str, database: str, connect_as: str,
+        role: str, schema: str, relations: list[str],
+    ) -> dict[str, Any]:
         connection = self._open(socket_dir=socket_dir, database=database, user=connect_as)
         try:
             cursor = connection.cursor()
@@ -338,12 +362,28 @@ class ProcessIdentityObserver:
 
     指紋由 ``quiesce_inventory.compute_owner_fingerprint`` / ``compute_stable_identity_fingerprint``
     導出(C1 exact 9-token 指紋比對已在 owner 模組;observer 只調用不重寫)。
+
+    **本面完全寄生在 unit 面的觀測結果上(P2-D)。** ``MainPID`` / ``InvocationID`` / ``ControlGroup``
+    都只能從 ``systemctl show`` 來;缺了它們,``observe`` 產出的每一個欄位——``main_pid=0``、
+    ``proc_present=false``、由**缺席**屬性算出的兩個指紋——都不是觀測結果,而是預設值。那份 payload
+    仍能通過 ``validate_observation`` 並被 CLI 報成一次成功觀測,等於把「從未被觀測的 process」
+    包裝成看似有效的 runtime 證據。故屬性缺席時一律 typed 拒,絕不發一份預設值紀錄。
     """
+
+    #: 指紋所依賴、且必須真的被 ``systemctl show`` 觀測到的 unit 屬性(全部在 owner 的封閉屬性集內)。
+    REQUIRED_UNIT_PROPERTIES = ("ControlGroup", "InvocationID", "MainPID")
 
     def __init__(self, proc_root: str = DEFAULT_PROC_ROOT) -> None:
         self._proc_root = Path(proc_root)
 
     def observe(self, unit_properties: dict[str, str], *, flock_path: str = "") -> dict[str, Any]:
+        missing = [key for key in self.REQUIRED_UNIT_PROPERTIES if key not in unit_properties]
+        if missing:
+            raise S2HostObserverError(
+                "the process_identity face needs the unit's observed "
+                f"{sorted(missing)}; without them every field below would be derived from "
+                "properties that were never observed, so no process record is emitted"
+            )
         main_pid_raw = str(unit_properties.get("MainPID", "0"))
         main_pid = int(main_pid_raw) if main_pid_raw.isdigit() else 0
         present = main_pid > 0 and (self._proc_root / str(main_pid)).exists()
@@ -463,6 +503,13 @@ def validate_observation_request(request: Any) -> list[str]:
         errors.append("the pg_acl face requires a pg object")
     if FACE_FILE_IDENTITY in (faces or []) and not isinstance(request.get("path_keys"), list):
         errors.append("the file_identity face requires a path_keys list of code-owned keys")
+    # P2-D:``process_identity`` 的每個欄位都衍生自 unit 面的 MainPID/InvocationID/ControlGroup,
+    # 故單獨請求它只會產出一份「未被觀測卻看起來有效」的 process 紀錄 —— 在 request 層就拒。
+    if FACE_PROCESS_IDENTITY in (faces or []) and FACE_UNIT_STATE not in (faces or []):
+        errors.append(
+            "the process_identity face requires the unit_state face; a process record derived "
+            "from an unobserved unit is not evidence"
+        )
     if "allow_production" in request and not isinstance(request["allow_production"], bool):
         errors.append("allow_production must be a bool acknowledgement (absent means false)")
     return errors

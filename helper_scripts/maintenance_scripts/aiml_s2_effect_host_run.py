@@ -148,12 +148,16 @@ def _admission(args, intent: Any, authorization: Any, signature: bytes | None) -
         source_head=args.source_head, now=now,
     )
     intent_digest = intent.get("self_digest") if isinstance(intent, dict) else None
+    # P1-B:同一道 intent/主機 class 綁定也套在 CLI 的 dry-run 矩陣上 —— ``admit`` 的裁決必須與
+    # 兩個 runner 進入點逐字同義,否則 operator 會拿到一份與真實施作不同的預演結論。
+    intent_target_class = intent.get("target_class") if isinstance(intent, dict) else None
     errors = host_kernel.host_target_admission_errors(
         target_view,
         allow_production=bool(args.allow_production),
         production_confirm=args.production_confirm,
         intent_digest=intent_digest,
         operator_authorization_verified=bool(verification["verified"]),
+        intent_target_class=intent_target_class,
     )
     if not isinstance(intent, dict):
         errors.append("--intent-file must contain a typed intent object")
@@ -201,9 +205,13 @@ def _observation(args, target_view: dict[str, Any]) -> dict[str, Any]:
     kernel = host_kernel.HostExecutionKernel(
         session=host_kernel.SESSION_S2_HOST_OBSERVER_CHILD
     )
+    # P2-D:``s2_0`` 段**沒有** unit 面(它的主機面是 local-socket PG,不是 systemd),而
+    # ``process_identity`` 的每一個欄位都衍生自 unit 的 MainPID/InvocationID/ControlGroup ——
+    # 少了 unit 面,它只會發出 ``main_pid=0`` / ``proc_present=false`` 與由**缺席**屬性算出的指紋,
+    # 也就是把一個從未被觀測的 process 包裝成看似有效的 runtime 證據。故 s2_0 只取檔案身分面。
     request = {
         "schema_version": host_observer.REQUEST_SCHEMA_VERSION,
-        "faces": [host_observer.FACE_FILE_IDENTITY, host_observer.FACE_PROCESS_IDENTITY],
+        "faces": [host_observer.FACE_FILE_IDENTITY],
         "path_keys": sorted(host_observer.CANONICAL_OBSERVABLE_PATHS),
         # child 的 ``main()`` 自己也過同一道 L1 閘(RES-6),故承認必須隨 request 傳下去 ——
         # 否則 CLI 這邊放行、child 那邊自己拒,兩道閘會不一致。

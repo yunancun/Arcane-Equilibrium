@@ -28,6 +28,7 @@ for candidate in (HELPERS, ML_ROOT):
 import agent_governance_pg_observer_bootstrap as obs  # noqa: E402
 import agent_governance_s2_0_host_runner as s2_0_runner  # noqa: E402
 import agent_governance_s2_host_kernel as kernel  # noqa: E402
+import agent_governance_s2_host_observer as host_observer  # noqa: E402
 import aiml_s2_effect_host_run as cli  # noqa: E402
 
 HEAD = "0123456789abcdef0123456789abcdef01234567"
@@ -302,7 +303,7 @@ def test_an_unreadable_operator_signature_is_typed(tmp_path):
 
 
 def test_a_permit_without_a_signature_is_an_admission_refusal(tmp_path, monkeypatch):
-    _force_target_class(monkeypatch, kernel.TARGET_CLASS_DISPOSABLE_CANDIDATE)
+    _force_target_class(monkeypatch, kernel.TARGET_CLASS_PRODUCTION)
     permit = tmp_path / "permit.json"
     permit.write_text(json.dumps({"totally": "bogus"}), encoding="utf-8")
     out_dir = tmp_path / "out"
@@ -430,8 +431,83 @@ def test_production_confirm_must_be_the_exact_intent_digest(tmp_path, monkeypatc
     assert _artifacts(exact)["run_summary.json"]["status"] == "ADMITTED_DRY_RUN"
 
 
-def test_source_head_must_equal_the_intent_source_head(tmp_path, monkeypatch):
+@pytest.mark.parametrize("session", ["s2_0", "s2_1"])
+def test_a_disposable_local_intent_is_refused_on_a_production_grade_host(
+    tmp_path, monkeypatch, session
+):
+    """P1-B(CLI 面):四條件裡的三條全滿足,唯一的拒絕理由是 intent/主機 class 不匹配。"""
+
+    _force_target_class(monkeypatch, kernel.TARGET_CLASS_PRODUCTION)
+    monkeypatch.setattr(
+        cli, "_verify_operator_authorization",
+        lambda **kwargs: {"verified": True, "errors": []},
+    )
+    intent = _intent(target_class="disposable_local")
+    out_dir = tmp_path / f"{session}-mismatch"
+    before = s2_0_runner.ObserverBootstrapHostDriver.constructions
+    code = cli.main([
+        "--session", session, "--mode", "apply", "--out-dir", str(out_dir),
+        "--source-head", HEAD, "--intent-file", str(_write_intent(tmp_path, intent)),
+        "--allow-production", "--production-confirm", intent["self_digest"],
+    ])
+    admission = _artifacts(out_dir)["admission.json"]
+    assert code == cli.EXIT_ADMISSION_REFUSED
+    assert admission["admitted"] is False
+    assert admission["refusal_reasons"] == [
+        reason for reason in admission["refusal_reasons"] if "disposable_local" in reason
+    ]
+    assert s2_0_runner.ObserverBootstrapHostDriver.constructions == before
+
+
+def test_a_forged_disposable_candidate_view_is_refused_by_every_mode(tmp_path, monkeypatch):
+    """P1-A(CLI 面):rehearsal-only class 不再是「無條件放行」的萬能鑰匙。"""
+
     _force_target_class(monkeypatch, kernel.TARGET_CLASS_DISPOSABLE_CANDIDATE)
+    monkeypatch.setattr(
+        cli, "_verify_operator_authorization",
+        lambda **kwargs: {"verified": True, "errors": []},
+    )
+    intent = _intent()
+    for mode in ("admit", "apply"):
+        out_dir = tmp_path / mode
+        code = cli.main([
+            "--session", "s2_1", "--mode", mode, "--out-dir", str(out_dir),
+            "--source-head", HEAD, "--intent-file", str(_write_intent(tmp_path, intent)),
+            "--allow-production", "--production-confirm", intent["self_digest"],
+        ])
+        admission = _artifacts(out_dir)["admission.json"]
+        assert code == cli.EXIT_ADMISSION_REFUSED
+        assert any("rehearsal-only" in reason for reason in admission["refusal_reasons"])
+
+
+def test_the_s2_0_observation_never_asks_for_an_unobservable_process_record(monkeypatch):
+    """P2-D:``s2_0`` 沒有 unit 面 ⇒ 它絕不可請求 ``process_identity``(否則發出的是預設值)。"""
+
+    seen: dict = {}
+
+    def _capture(self, request):
+        seen.update(request)
+        raise cli.host_kernel.S2HostCommandFailed("no host contact in this test")
+
+    monkeypatch.setattr(cli.host_kernel.HostExecutionKernel, "run_observer_child", _capture)
+    for session in ("s2_0", "s2_1"):
+        seen.clear()
+        args = cli.argparse.Namespace(
+            session=session, allow_production=False, observe=True,
+        )
+        with pytest.raises(cli.host_kernel.S2HostCommandFailed):
+            cli._observation(args, {"target_class": kernel.TARGET_CLASS_NON_TARGET})
+        # request 本身必須是可承認的(process 面永遠與 unit 面同行,或根本不出現)。
+        assert host_observer.validate_observation_request(seen) == []
+        if session == "s2_0":
+            assert host_observer.FACE_PROCESS_IDENTITY not in seen["faces"]
+        else:
+            assert host_observer.FACE_UNIT_STATE in seen["faces"]
+            assert host_observer.FACE_PROCESS_IDENTITY in seen["faces"]
+
+
+def test_source_head_must_equal_the_intent_source_head(tmp_path, monkeypatch):
+    _force_target_class(monkeypatch, kernel.TARGET_CLASS_PRODUCTION)
     intent = _intent()
     out_dir = tmp_path / "out"
     code = cli.main([
@@ -469,13 +545,20 @@ def test_unverifiable_operator_authorization_is_never_reported_as_verified(tmp_p
 # apply mode — reachable gate, no host capability supplier in source
 # --------------------------------------------------------------------------- #
 def test_apply_mode_fails_closed_without_a_host_capability_supplier(tmp_path, monkeypatch):
-    _force_target_class(monkeypatch, kernel.TARGET_CLASS_DISPOSABLE_CANDIDATE)
+    # P1-A:``disposable_candidate`` 不再是可導出的 class(且生產進入點一律拒),故「閘可達」
+    # 這件事只能經真正的四條件承認來證明。
+    _force_target_class(monkeypatch, kernel.TARGET_CLASS_PRODUCTION)
+    monkeypatch.setattr(
+        cli, "_verify_operator_authorization",
+        lambda **kwargs: {"verified": True, "errors": []},
+    )
     intent = _intent()
     out_dir = tmp_path / "out"
     before = s2_0_runner.ObserverBootstrapHostDriver.constructions
     code = cli.main([
         "--session", "s2_0", "--mode", "apply", "--out-dir", str(out_dir),
         "--source-head", HEAD, "--intent-file", str(_write_intent(tmp_path, intent)),
+        "--allow-production", "--production-confirm", intent["self_digest"],
     ])
     assert code == cli.EXIT_HOST_CAPABILITY_ABSENT
     assert s2_0_runner.ObserverBootstrapHostDriver.constructions == before

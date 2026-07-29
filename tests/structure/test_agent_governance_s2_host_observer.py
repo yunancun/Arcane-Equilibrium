@@ -128,17 +128,17 @@ def test_capability_partition_refuses_before_calling_anything():
 # --------------------------------------------------------------------------- #
 def test_observer_runs_in_an_isolated_child_and_returns_a_verifiable_payload():
     host = kernel.HostExecutionKernel(session=kernel.SESSION_S2_HOST_OBSERVER_CHILD)
+    # P2-D:``process_identity`` 不再能單獨請求(它需要 unit 面,而 Mac 上沒有 systemctl),
+    # 故這條 L2 進程分離證明改用純檔案身分面 —— 它證的是「真的另一個 process + 可重算 payload」。
     request = {
         "schema_version": observer_module.REQUEST_SCHEMA_VERSION,
-        "faces": [observer_module.FACE_FILE_IDENTITY, observer_module.FACE_PROCESS_IDENTITY],
+        "faces": [observer_module.FACE_FILE_IDENTITY],
         "path_keys": ["unit_fragment", "install_root_runtimes"],
     }
     raw = host.run_observer_child(request)
     observation = json.loads(raw)
     assert observer_module.validate_observation(observation) == []
-    assert set(observation["faces"]) == {
-        observer_module.FACE_FILE_IDENTITY, observer_module.FACE_PROCESS_IDENTITY
-    }
+    assert set(observation["faces"]) == {observer_module.FACE_FILE_IDENTITY}
     assert observation["request_digest"] == observer_module._digest(request)
     # 子行程真的是另一個 process:kernel 記了一次 exec,且 argv 是 code-owned 的構造結果。
     assert len(host.calls) == 1
@@ -511,10 +511,77 @@ def test_pg_face_pins_read_only_connection_options_and_never_takes_a_password():
     assert "search_path=pg_catalog" in source
     assert "password" not in source
     assert "dsn" not in source.lower()
-    # 只讀語句:PG 面只跑 SELECT。
-    observe_source = inspect.getsource(observer_module.PgAclObserver.observe)
+    # 只讀語句:PG 面只跑 SELECT。掃描整個類別(而非單一方法)—— P2-C 把查詢搬進
+    # ``_observe_catalog``,只掃 ``observe`` 會讓這道判準從此空轉。
+    class_source = inspect.getsource(observer_module.PgAclObserver)
     for verb in ("INSERT", "UPDATE", "DELETE", "CREATE", "DROP", "GRANT", "REVOKE", "ALTER"):
-        assert verb not in observe_source
+        assert verb not in class_source
+
+
+def test_pg_face_failures_are_typed_never_a_bare_db_exception():
+    """P2-C:PG 不可用 / catalog query 失敗時,DB 例外不得逸出成裸 traceback。"""
+
+    class _DbError(Exception):
+        """站位:``psycopg2`` 的例外型別不在 ``main()`` 捕捉的兩個型別內。"""
+
+    request = {"socket_dir": "/var/run/postgresql", "database": "trading_ai",
+               "observer_role": "aiml_observer", "observed_schema": "learning",
+               "observed_relations": ["alr_consumer_events"]}
+
+    def _connect_explodes(**kwargs):
+        raise _DbError("connection to server on socket failed: FATAL: role does not exist")
+
+    with pytest.raises(observer_module.S2HostObserverError) as error:
+        observer_module.PgAclObserver(connect=_connect_explodes).observe(request)
+    # 只帶例外型別名:DB 訊息本身是主機給的內容,診斷通道不是資料通道(SEC-3 的同一條界線)。
+    assert "_DbError" in str(error.value)
+    assert "FATAL" not in str(error.value)
+
+    class _ExplodingCursor:
+        def execute(self, statement, parameters=None):
+            raise _DbError("permission denied for table pg_class")
+
+    class _Connection:
+        def cursor(self):
+            return _ExplodingCursor()
+
+        def close(self):
+            return None
+
+    with pytest.raises(observer_module.S2HostObserverError):
+        observer_module.PgAclObserver(connect=lambda **kwargs: _Connection()).observe(request)
+
+
+def test_the_standalone_observer_exits_typed_when_the_pg_face_fails(monkeypatch, capsys):
+    """P2-C 的終點:``main()`` 必須以已文件化的 exit 5 收場,而不是 traceback + exit 1。"""
+
+    monkeypatch.setattr(
+        observer_module.host_kernel, "derive_host_target_class",
+        lambda: {"target_class": kernel.TARGET_CLASS_NON_TARGET, "reason": "mac"},
+    )
+
+    class _DbError(Exception):
+        pass
+
+    def _connect_explodes(**kwargs):
+        raise _DbError("the cluster is not running")
+
+    monkeypatch.setattr(
+        observer_module.PgAclObserver, "_open",
+        lambda self, **kwargs: _connect_explodes(**kwargs),
+    )
+    code = observer_module.main(["--request-base64", _encoded({
+        "schema_version": observer_module.REQUEST_SCHEMA_VERSION,
+        "faces": [observer_module.FACE_PG_ACL],
+        "pg": {"socket_dir": "/var/run/postgresql", "database": "trading_ai",
+               "observer_role": "aiml_observer", "observed_schema": "learning",
+               "observed_relations": []},
+    })])
+    captured = capsys.readouterr()
+    assert code == 5
+    assert captured.out == ""
+    assert "read-only observation refused" in captured.err
+    assert "Traceback" not in captured.err
 
 
 # --------------------------------------------------------------------------- #
@@ -612,6 +679,51 @@ def test_process_face_fingerprint_equals_the_inventory_ssot(tmp_path):
         flock_path=_FLOCK,
     )
     assert face["owner_fingerprint"] == expected
+
+
+def test_process_face_fails_closed_without_the_observed_unit_properties(tmp_path):
+    """P2-D:unit 面缺席時,process 面**不得**發出一份由缺席屬性算出的預設值紀錄。
+
+    舊行為:``unit_properties={}`` ⇒ ``main_pid=0`` / ``proc_present=false`` + 由缺席
+    MainPID/InvocationID 導出的兩個指紋,而該 payload 通過 ``validate_observation``、CLI 報成
+    一次成功觀測 —— 一個從未被觀測的 process 被包裝成看似有效的 runtime 證據。
+    """
+
+    process = observer_module.ProcessIdentityObserver(str(tmp_path))
+    with pytest.raises(observer_module.S2HostObserverError) as error:
+        process.observe({})
+    assert "never observed" in str(error.value)
+    # 少一個必要屬性也一樣拒(部分觀測不得被補成完整紀錄)。
+    for dropped in observer_module.ProcessIdentityObserver.REQUIRED_UNIT_PROPERTIES:
+        partial = {key: "" for key in
+                   observer_module.ProcessIdentityObserver.REQUIRED_UNIT_PROPERTIES
+                   if key != dropped}
+        with pytest.raises(observer_module.S2HostObserverError):
+            process.observe(partial)
+    # 那些屬性全部在 owner 的封閉 show 屬性集內(observer 不會要求觀測不到的東西)。
+    assert set(observer_module.ProcessIdentityObserver.REQUIRED_UNIT_PROPERTIES) <= set(
+        qi.QUIESCE_SHOW_PROPERTIES
+    )
+
+
+def test_a_process_identity_request_without_the_unit_face_is_inadmissible():
+    """P2-D 的第一道:request 層就拒,故 aggregate 根本不會走到那個面。"""
+
+    errors = observer_module.validate_observation_request({
+        "schema_version": observer_module.REQUEST_SCHEMA_VERSION,
+        "faces": [observer_module.FACE_PROCESS_IDENTITY],
+    })
+    assert any("requires the unit_state face" in item for item in errors)
+    assert observer_module.validate_observation_request({
+        "schema_version": observer_module.REQUEST_SCHEMA_VERSION,
+        "faces": [observer_module.FACE_UNIT_STATE, observer_module.FACE_PROCESS_IDENTITY],
+    }) == []
+    observer = observer_module.S2HostObserver()
+    with pytest.raises(observer_module.S2HostObserverError):
+        observer.observe({
+            "schema_version": observer_module.REQUEST_SCHEMA_VERSION,
+            "faces": [observer_module.FACE_PROCESS_IDENTITY],
+        })
 
 
 def test_process_face_is_honest_when_the_owner_is_gone(tmp_path):
