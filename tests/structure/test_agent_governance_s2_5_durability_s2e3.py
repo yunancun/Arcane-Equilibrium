@@ -229,3 +229,156 @@ def test_lock_faces_without_a_declared_path_cannot_prove_separation():
         kit.SimulatedInstallLockProbe(), _Anonymous()
     )
     assert reasons and "resolvable lock_path" in reasons[0]
+
+
+# ── F2/F2b:reconcile 與 install-lock 重探都在 hold 窗內 ───────────────────────────
+class _DeferredHold(lifecycle.S2_5LifecycleLockHold):
+    """在**取鎖之前**插入一個 callback 的 hold(單執行緒地重現兩 applier 的交錯)。
+
+    真實競態:A1 與 A2 幾乎同時在窗外 reconcile 得乾淨;A1 先取鎖→寫 APPLYING→釋放→
+    進入(鎖已釋放的)長效果窗;A2 此刻才到取鎖點,鎖已自由 ⇒ 取鎖成功,而它手上的
+    reconcile 是舊觀測、永不重跑。callback 就是「A1 在 A2 取鎖前跑完鎖窗」。
+    """
+
+    def __init__(self, lock_path, callback) -> None:
+        super().__init__(lock_path)
+        self._callback = callback
+        self.fired = False
+
+    def acquire(self):
+        if not self.fired:
+            self.fired = True
+            self._callback()
+        return super().acquire()
+
+
+def _crash_in_the_effect_window(unit: "kit.SimulatedUnit") -> None:
+    """讓 A1 在 `enable_now()`(鎖已釋放的效果窗)崩掉,journal 因此停在 APPLYING。
+
+    用 KeyboardInterrupt(BaseException)是刻意的:applier 的 `except Exception` 臂不會
+    捕捉它,故不會走 rollback / journal terminal——這正是「主機狀態不明」的殘留形狀。
+    """
+
+    def _boom() -> None:
+        unit.calls.append("enable_now")
+        raise KeyboardInterrupt("harness: the applier process died mid-effect")
+
+    unit.enable_now = _boom
+
+
+def test_second_applier_reconciles_the_residue_left_after_the_first_hold_closed(
+    tmp_path, monkeypatch
+):
+    """F2 的核心紅測試:A1 的 APPLYING 殘留必須擋住 A2,即使 A2 早在窗外看過「乾淨」。"""
+
+    state_root = kit.fresh_state_root(tmp_path, "shared-state")
+    lock_path = tmp_path / "shared-lifecycle.lock"
+    ledger = {"entries": []}
+    private_key, intent1, permit1, unit1 = kit.a_side_setup(tmp_path, monkeypatch)
+    _crash_in_the_effect_window(unit1)
+
+    def _run_first_applier() -> None:
+        try:
+            lifecycle.apply_s2_5_start(
+                intent1, permit1, unit1,
+                **kit.apply_kwargs(
+                    tmp_path=tmp_path, unit=unit1, state_root=state_root,
+                    replay_ledger=ledger,
+                    lifecycle_lock=lifecycle.S2_5LifecycleLockHold(lock_path),
+                ),
+            )
+        except KeyboardInterrupt:
+            pass  # A1 的行程死在效果窗中(kernel 會釋放它的 flock)。
+
+    intent2 = kit.start_intent("S2_5A_START", target_host="trade-core-second-applier")
+    permit2 = kit.signed_permit(private_key, intent2)
+    unit2 = kit.SimulatedUnit()
+    verdict = lifecycle.apply_s2_5_start(
+        intent2, permit2, unit2,
+        **kit.apply_kwargs(
+            tmp_path=tmp_path, unit=unit2, state_root=state_root, replay_ledger=ledger,
+            lifecycle_lock=_DeferredHold(lock_path, _run_first_applier),
+        ),
+    )
+    assert verdict["status"] == "RECOVERY_REQUIRED", verdict
+    assert any("non-terminal state 'APPLYING'" in r for r in verdict["reasons"]), verdict
+    assert unit2.calls == []            # A2 從未碰過 driver。
+    assert len(ledger["entries"]) == 1  # 只有 A1 消費過;A2 零消費。
+    assert lifecycle._flock_free_observation(lock_path)["held"] is False  # 鎖已釋放。
+
+
+def test_residue_still_blocks_when_the_hold_is_obtained_cleanly(tmp_path, monkeypatch):
+    """對照組:殘留在**乾淨取鎖**的路徑上同樣擋(reconcile 不是被 hold 順序偷換掉的)。"""
+
+    state_root = kit.fresh_state_root(tmp_path, "residue-state")
+    state_root.mkdir(parents=True)
+    (state_root / f"s2-5-{'1' * 64}.journal.json").write_text(
+        '{"schema_version": "s2_5_start_journal_v1_informal", "start_id": "s2-5-'
+        + "1" * 64
+        + '", "state": "APPLYING", "updated_at": "'
+        + kit.NOW
+        + '", "history": []}',
+        encoding="utf-8",
+    )
+    _key, intent, permit, unit = kit.a_side_setup(tmp_path, monkeypatch)
+    verdict = lifecycle.apply_s2_5_start(
+        intent, permit, unit,
+        **kit.apply_kwargs(tmp_path=tmp_path, unit=unit, state_root=state_root),
+    )
+    assert verdict["status"] == "RECOVERY_REQUIRED", verdict
+    assert unit.calls == []
+
+
+def test_a_held_lifecycle_lock_rejects_before_any_state_root_write(tmp_path, monkeypatch):
+    """鎖被別人持有 ⇒ typed REQUEST_REJECTED、零 state_root 落盤,且說明殘留未被觀測。"""
+
+    _key, intent, permit, unit = kit.a_side_setup(tmp_path, monkeypatch)
+    state_root = kit.fresh_state_root(tmp_path, "held-state")
+    verdict = lifecycle.apply_s2_5_start(
+        intent, permit, unit,
+        **kit.apply_kwargs(
+            tmp_path=tmp_path, unit=unit, state_root=state_root,
+            lifecycle_lock=kit.SimulatedLifecycleLock(held=True),
+        ),
+    )
+    assert verdict["status"] == "REQUEST_REJECTED", verdict
+    assert any("re-run once the lock is released" in r for r in verdict["reasons"])
+    assert unit.calls == []
+    assert not state_root.exists()
+
+
+class _InstallLockTakenInsideTheWindow:
+    """窗外探測自由、窗內(第二次探測起)被持有——F2b 的 TOCTOU 形狀。"""
+
+    def __init__(self, lock_path: str = "/tmp/s2-5-testkit/f2b-install.lock") -> None:
+        self.lock_path = lock_path
+        self.probes = 0
+
+    def flock_probe(self):
+        self.probes += 1
+        return {
+            "held": self.probes > 1,
+            "exists": True,
+            "lock_path": self.lock_path,
+        }
+
+
+def test_install_lock_taken_after_the_fail_fast_probe_is_caught_inside_the_window(
+    tmp_path, monkeypatch
+):
+    """F2b:step 3 的探測即釋放同樣有 TOCTOU;窗內重探把「窗外自由、窗內被搶走」抓下來。"""
+
+    _key, intent, permit, unit = kit.a_side_setup(tmp_path, monkeypatch)
+    probe = _InstallLockTakenInsideTheWindow()
+    ledger = {"entries": []}
+    verdict = lifecycle.apply_s2_5_start(
+        intent, permit, unit,
+        **kit.apply_kwargs(
+            tmp_path=tmp_path, unit=unit, replay_ledger=ledger, install_lock_probe=probe,
+        ),
+    )
+    assert verdict["status"] == "REQUEST_REJECTED", verdict
+    assert any("S2.4 install lock is held" in r for r in verdict["reasons"]), verdict
+    assert probe.probes == 2      # 窗外 fail-fast 一次 + 窗內權威一次。
+    assert unit.calls == []
+    assert ledger["entries"] == []  # 窗內拒絕在 consume 之前。

@@ -1321,9 +1321,12 @@ def apply_s2_5_start(
     core = intent["core"]
     clock = clock or (lambda: now_dt)
     # step 7 前置:driver 在場必須有 journal 面與獨立 observer/verifier。
-    reconcile = reconcile_s2_5_journal(state_root)
-    if reconcile["admits_new_work"] is not True:
-        return _verdict(S2_5_STATUS_RECOVERY_REQUIRED, reconcile["reasons"])
+    # F2:此處只留**純結構** fail-fast(state_root 缺席 ⇒ journal/ledger 路徑根本導不出),
+    # 真 reconcile(狀態觀測)已移進 hold 內——見窗內第一件事。
+    if state_root is None:
+        return _verdict(
+            S2_5_STATUS_RECOVERY_REQUIRED, reconcile_s2_5_journal(None)["reasons"]
+        )
     journal_path = s2_5_journal_path(state_root, intent["start_id"])
     ledger_path = s2_5_replay_ledger_path(state_root)
     if observers is None or not str(getattr(observers, "verifier_node_id", "")):
@@ -1356,8 +1359,35 @@ def apply_s2_5_start(
     # 這裡的 hold(第二個 applier 在窗內一律 typed 拒,永不雙消費)。
     hold_ok, hold_reasons = acquire_s2_5_lifecycle_hold(lifecycle_lock)
     if not hold_ok:
-        return _verdict(S2_5_STATUS_REQUEST_REJECTED, hold_reasons)
+        # 誠實記錄的小退化(F2 的代價):殘留 + 鎖被持有時,第一因由 RECOVERY_REQUIRED
+        # 變成 REQUEST_REJECTED——因為殘留只在窗內被觀測。零效果零消費,可重試。
+        return _verdict(
+            S2_5_STATUS_REQUEST_REJECTED,
+            hold_reasons
+            + [
+                "any s2_5 journal residue was therefore never observed under the hold; "
+                "re-run once the lock is released to obtain the reconcile verdict"
+            ],
+        )
     try:
+        # F2:reconcile 是**窗內第一件事**。窗外的裁決是舊觀測——另一個 applier 可能在本
+        # applier 的窗外 reconcile 之後才寫下 APPLYING 並進入(鎖已釋放的)效果窗;等本
+        # applier 取得 hold 時,手上那份「乾淨」早已過時,於是兩個 applier 依次進效果窗。
+        # reconcile 是唯讀診斷(修復是 operator 面),移進 hold 只改「誰有資格觀測」,
+        # 不改 crash 語義:flock 是 fd-scoped advisory lock,持鎖行程死亡由 kernel 釋放,
+        # lock 檔永不 unlink ⇒ 無死鎖無 stale。
+        reconcile = reconcile_s2_5_journal(state_root)
+        if reconcile["admits_new_work"] is not True:
+            return _verdict(S2_5_STATUS_RECOVERY_REQUIRED, reconcile["reasons"])
+        # F2b:step 3 的 S2.4 install-lock 探測同樣是「探測即釋放」,同一個 TOCTOU。窗內
+        # 重探,並以窗內值為 precheck 旗標的權威(同鍵覆寫)——receipt 上的
+        # install_lock_free 因此陳述的是鎖窗內的事實,而非窗外某一瞬間的事實。
+        install_lock_free, install_lock_reasons = derive_s2_4_install_lock_free(
+            install_lock_probe
+        )
+        precheck_flags["install_lock_free"] = bool(install_lock_free)
+        if not install_lock_free:
+            return _verdict(S2_5_STATUS_REQUEST_REJECTED, install_lock_reasons)
         # P1-3 head-anchor:journal/durable ledger 釘過的 head 必須被涵蓋(截斷/清空即拒)。
         anchor_reasons = _replay_ledger_anchor_reasons(
             journal_path, ledger_path, replay_ledger
@@ -1702,9 +1732,11 @@ def apply_s2_5_final(
         return outcome
     core = intent["core"]
     clock = clock or (lambda: now_dt)
-    reconcile = reconcile_s2_5_journal(state_root)
-    if reconcile["admits_new_work"] is not True:
-        return _verdict(S2_5_STATUS_RECOVERY_REQUIRED, reconcile["reasons"])
+    # F2:同 start——窗外只留 state_root 的結構 fail-fast,真 reconcile 在 hold 內。
+    if state_root is None:
+        return _verdict(
+            S2_5_STATUS_RECOVERY_REQUIRED, reconcile_s2_5_journal(None)["reasons"]
+        )
     journal_path = s2_5_journal_path(state_root, intent["start_id"])
     ledger_path = s2_5_replay_ledger_path(state_root)
     if observers is None or not str(getattr(observers, "verifier_node_id", "")):
@@ -1735,8 +1767,27 @@ def apply_s2_5_final(
     # journal),release 在 finally。
     hold_ok, hold_reasons = acquire_s2_5_lifecycle_hold(lifecycle_lock)
     if not hold_ok:
-        return _verdict(S2_5_STATUS_REQUEST_REJECTED, hold_reasons)
+        # 誠實記錄的小退化(F2 的代價):殘留 + 鎖被持有時,第一因由 RECOVERY_REQUIRED
+        # 變成 REQUEST_REJECTED——因為殘留只在窗內被觀測。零效果零消費,可重試。
+        return _verdict(
+            S2_5_STATUS_REQUEST_REJECTED,
+            hold_reasons
+            + [
+                "any s2_5 journal residue was therefore never observed under the hold; "
+                "re-run once the lock is released to obtain the reconcile verdict"
+            ],
+        )
     try:
+        # F2/F2b:與 start 同——reconcile 與 install-lock 重探都在窗內(窗外裁決是舊觀測)。
+        reconcile = reconcile_s2_5_journal(state_root)
+        if reconcile["admits_new_work"] is not True:
+            return _verdict(S2_5_STATUS_RECOVERY_REQUIRED, reconcile["reasons"])
+        install_lock_free, install_lock_reasons = derive_s2_4_install_lock_free(
+            install_lock_probe
+        )
+        precheck_flags["install_lock_free"] = bool(install_lock_free)
+        if not install_lock_free:
+            return _verdict(S2_5_STATUS_REQUEST_REJECTED, install_lock_reasons)
         anchor_reasons = _replay_ledger_anchor_reasons(
             journal_path, ledger_path, replay_ledger
         )
