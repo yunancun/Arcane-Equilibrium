@@ -112,10 +112,6 @@ RESUME_VERIFICATION_OBLIGATION = (
 _ALL_FALSE_PRODUCTION_FLAGS = dict(_component._ALL_FALSE_PRODUCTION_FLAGS)
 
 
-def _iso(value: datetime) -> str:
-    return value.astimezone(timezone.utc).isoformat()
-
-
 def _verdict(
     status: str,
     reasons: list[str],
