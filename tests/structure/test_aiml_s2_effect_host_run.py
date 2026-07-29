@@ -300,6 +300,77 @@ def test_every_mode_writes_a_run_summary_even_on_refusal(tmp_path, monkeypatch, 
 # --------------------------------------------------------------------------- #
 # the CLI is really runnable as a script (no import-time host contact)
 # --------------------------------------------------------------------------- #
+def test_registry_binds_the_runner_family_to_the_two_existing_adapters():
+    registry = json.loads((ROOT / ".codex/agent_registry_v1.json").read_text(encoding="utf-8"))
+    adapters = registry["effect_adapters"]
+    shared = {
+        "helper_scripts/maintenance_scripts/agent_governance_s2_host_kernel.py",
+        "helper_scripts/maintenance_scripts/agent_governance_s2_host_observer.py",
+        "helper_scripts/maintenance_scripts/aiml_s2_effect_host_run.py",
+    }
+    s2_0 = adapters["pg_observer_bootstrap_adapter_v1"]["implementation_paths"]
+    s2_1 = adapters["alr_quiesce_fence_adapter_v1"]["implementation_paths"]
+    assert shared <= set(s2_0) and shared <= set(s2_1)
+    assert "helper_scripts/maintenance_scripts/agent_governance_s2_0_host_runner.py" in s2_0
+    assert "helper_scripts/maintenance_scripts/agent_governance_s2_1_host_runner.py" in s2_1
+    # runner 不是新的 effect adapter,而是既有 adapter 的主機面實作 ⇒ 不得新增 adapter 條目。
+    assert "s2_host_runner_adapter_v1" not in adapters
+    for path in (*s2_0, *s2_1):
+        assert (ROOT / path).is_file(), path
+    # 九條 S2 adapter 的 authority / invariant 一行不改(本波只 append implementation_paths)。
+    assert "nine authorities stay false" in adapters["pg_observer_bootstrap_adapter_v1"]["invariant"]
+    assert (
+        "no route_task effect node or closure effect binding is injected before the S2.0 "
+        "EFFECT session"
+    ) in adapters["pg_observer_bootstrap_adapter_v1"]["invariant"]
+    assert (
+        "NEVER pkill/kill-by-name/kill-by-pattern/kill-by-pid"
+    ) in adapters["alr_quiesce_fence_adapter_v1"]["invariant"]
+
+
+def test_script_index_documents_every_new_runner_family_script():
+    index = (ROOT / "helper_scripts/SCRIPT_INDEX.md").read_text(encoding="utf-8").splitlines()
+    for path in RUNNER_FAMILY:
+        prefix = f"| `maintenance_scripts/{path.name}` |"
+        rows = [line for line in index if line.startswith(prefix)]
+        assert len(rows) == 1, path.name
+
+
+def test_registry_growth_leaves_headroom_under_the_execve_single_argument_cap():
+    """PR#129 的 ``E2BIG`` 前例:registry 成長會推高每一份 compiled context artifact。
+
+    量測(同一 working tree 狀態,registry 前/後):E1 114398 → 115030(+632)、
+    E2 114390 → 115022(+632)、OPS 112727 → 112727(+0)、PM 95597 → 95597(+0);
+    registry 檔身 96035 → 96675(+640)。上限是 Linux ``execve`` 的 ``MAX_ARG_STRLEN``
+    (128 KiB = 131072)。本測試釘住「仍有明顯餘裕」,且 canonical 慣例本來就是以
+    ``@file`` 傳 context artifact 而非塞進單一 argv 元素。
+    """
+
+    from agent_governance_context import capture_repository_baseline
+    from agent_governance_execution import compile_context, materialize_context_artifact
+    from agent_governance_routing import route_task
+
+    max_arg_strlen = 128 * 1024
+    scope = ["helper_scripts/maintenance_scripts/agent_governance_s2_host_kernel.py"]
+    routed = route_task({
+        "task_shape": "implementation", "surfaces": ["governance"], "risk": "medium",
+        "uncertainty": "low", "side_effect_class": "repo_write",
+        "objective": "measure the compiled context artifact size after the registry append",
+        "scope": scope, "dirty_scope": scope, "verification_scope": scope,
+        "acceptance_criteria": ["registry growth leaves execve headroom"],
+        "hard_stops": ["no runtime mutation"],
+        "baseline": capture_repository_baseline(root=ROOT),
+        "direct_interfaces": ["agent_governance_s2_host_kernel"],
+        "previous_failure": "PR#129 registry growth crossed MAX_ARG_STRLEN and raised E2BIG",
+    })
+    artifact = materialize_context_artifact(
+        compile_context("E1", routed["task_facts"], root=ROOT)
+    )
+    size = len(json.dumps(artifact, separators=(",", ":"), ensure_ascii=False).encode("utf-8"))
+    assert size < max_arg_strlen, size
+    assert max_arg_strlen - size > 8 * 1024, size
+
+
 def test_cli_runs_as_a_script_and_makes_no_host_contact(tmp_path):
     out_dir = tmp_path / "out"
     completed = subprocess.run(
