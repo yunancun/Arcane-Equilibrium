@@ -592,7 +592,9 @@
         "helper_scripts/maintenance_scripts/agent_governance_s2_4_install.py",
         "helper_scripts/maintenance_scripts/agent_governance_s2_4_install_driver.py",
         "helper_scripts/maintenance_scripts/agent_governance_s2_4_install_plan.py",
-        "helper_scripts/maintenance_scripts/agent_governance_s2_4_install_evidence.py"
+        "helper_scripts/maintenance_scripts/agent_governance_s2_4_install_evidence.py",
+        "helper_scripts/maintenance_scripts/agent_governance_s2_4_host_storage.py",
+        "helper_scripts/maintenance_scripts/agent_governance_s2_4_host_recovery.py"
       ],
       "component_paths": [
         "program_code/ml_training/aiml_gate_receipt_validator.py",
