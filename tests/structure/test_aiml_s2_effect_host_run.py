@@ -178,6 +178,84 @@ def test_observe_is_admitted_once_production_is_acknowledged(tmp_path, monkeypat
 
 
 # --------------------------------------------------------------------------- #
+# 出境秘密掃描(父側 sink):observation.json 落盤之前必須過同一支掃描器
+# --------------------------------------------------------------------------- #
+# 反例以片段拼接構造(repo 內不留看起來像真憑證的字面量)。
+_SECRET_SHAPED_PROPERTY = "PG" + "PASSWORD" + "=" + "s3cr3t-not-real"
+
+
+def _child_payload(environment_value: str) -> str:
+    """一份 self_digest 合法的 child stdout —— 用來模擬「child 那道閘被繞過」的情形。"""
+
+    import agent_governance_s2_host_observer as host_observer
+
+    body = {
+        "schema_version": host_observer.OBSERVATION_SCHEMA_VERSION,
+        "observed_at": "2026-07-29T00:00:00Z",
+        "target_class_view": {"target_class": kernel.TARGET_CLASS_NON_TARGET},
+        "request_digest": "sha256:" + "0" * 64,
+        "faces": {
+            host_observer.FACE_UNIT_STATE: {
+                "properties": {"ActiveState": "active", "Environment": environment_value},
+            },
+        },
+    }
+    body["self_digest"] = host_observer._digest(body)
+    return json.dumps(body, ensure_ascii=False, sort_keys=True, separators=(",", ":"))
+
+
+def test_observe_drops_an_observation_that_carries_secret_shaped_content(tmp_path, monkeypatch):
+    """父側**不得**把「子行程有守衛」當成自己的保證:落盤 sink 自己也要擋。"""
+
+    monkeypatch.setattr(
+        cli.host_kernel.HostExecutionKernel, "run_observer_child",
+        lambda self, request: _child_payload(_SECRET_SHAPED_PROPERTY),
+    )
+    out_dir = tmp_path / "leaky"
+    code = cli.main([
+        "--session", "s2_1", "--mode", "probe", "--out-dir", str(out_dir),
+        "--source-head", HEAD, "--observe",
+    ])
+    artifacts = _artifacts(out_dir)
+    summary = artifacts["run_summary.json"]
+    assert code == cli.EXIT_OBSERVATION_FAILED
+    assert summary["status"] == "OBSERVATION_FAILED"
+    assert "carried secret-shaped content and was dropped" in summary["observation_error"]
+    # 整包丟棄:既沒有 observation.json,run_summary 也拿不到 observation_digest。
+    assert "observation.json" not in artifacts
+    assert "observation_digest" not in summary
+    assert _SECRET_SHAPED_PROPERTY not in json.dumps(artifacts, ensure_ascii=False)
+
+
+def test_observe_writes_a_clean_observation_unchanged(tmp_path, monkeypatch):
+    clean = _child_payload("ALR_SOURCE_HEAD=" + "0" * 40)
+    monkeypatch.setattr(
+        cli.host_kernel.HostExecutionKernel, "run_observer_child",
+        lambda self, request: clean,
+    )
+    out_dir = tmp_path / "clean"
+    code = cli.main([
+        "--session", "s2_1", "--mode", "probe", "--out-dir", str(out_dir),
+        "--source-head", HEAD, "--observe",
+    ])
+    artifacts = _artifacts(out_dir)
+    assert code == cli.EXIT_OK
+    assert artifacts["observation.json"] == json.loads(clean)
+    assert artifacts["run_summary.json"]["observation_digest"] == (
+        artifacts["observation.json"]["self_digest"]
+    )
+
+
+def test_the_parent_egress_guard_runs_before_the_observation_is_returned():
+    """結構釘:守衛在 ``_observation`` 的 return 之前,故 ``observation.json`` 永遠寫不出髒 payload。"""
+
+    import inspect
+
+    source = inspect.getsource(cli._observation)
+    assert source.index("scan_serializable_surface_for_secrets") < source.rindex("return observation")
+
+
+# --------------------------------------------------------------------------- #
 # P2 #8 — bad input is a typed fail-closed, and the artifact matches the exit code
 # --------------------------------------------------------------------------- #
 def _artifact_exit_code_matches(out_dir: Path, code: int) -> None:

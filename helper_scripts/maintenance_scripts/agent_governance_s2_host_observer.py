@@ -29,7 +29,10 @@
   .assert_read_only_surface` 在**呼叫任何方法之前**檢查,且本模組的 import closure 不含任何
   applier 模組(結構測試執法)。
 * **L2 進程分離**:``main()`` 讓本模組能以 ``python3 -E`` 子行程獨立執行(由 kernel 的
-  ``run_observer_child`` 以 sanitized env 啟動),輸出只經 stdout 的 canonical JSON。
+  ``run_observer_child`` 以 sanitized env 啟動),輸出只經 stdout 的 canonical JSON,且該唯一出口
+  在寫出之前必須通過 kernel 的 :func:`agent_governance_s2_host_kernel
+  .scan_serializable_surface_for_secrets`(命中即零 stdout + typed 退出
+  :data:`EXIT_OBSERVATION_SECRET_LEAK_BLOCKED`)。
 * **L3 OS 身分分離:本波不提供**。真 uid 分離需主機側供裝(獨立 unix user),屬 operator/W6B。
   S2E.2a 提供「相異 process + 相異 object capability」,**不**提供相異 OS uid;W5 ledger 的
   ``ATTESTOR_KEY_IS_NOT_SEPARATE_FROM_THE_PERMIT_KEY`` 因此被**縮小**但未關閉。
@@ -68,6 +71,8 @@ REQUEST_SCHEMA_VERSION = "s2_host_observation_request_v1"
 
 # ``main()`` 的 L1 觀測閘退出碼(E2 RES-6):production/unknown 上沒有顯式承認 ⇒ 零觀測、零 exec。
 EXIT_OBSERVATION_NOT_ADMITTED = 6
+# ``main()`` 的出境秘密掃描退出碼:observation 命中中央 secret scanner ⇒ 整包丟棄、**零 stdout**。
+EXIT_OBSERVATION_SECRET_LEAK_BLOCKED = 7
 
 FACE_UNIT_STATE = "unit_state"
 FACE_PG_ACL = "pg_acl"
@@ -533,6 +538,17 @@ def main(argv: list[str] | None = None) -> int:
     except (S2HostObserverError, host_kernel.S2HostKernelError) as error:
         sys.stderr.write(f"read-only observation refused: {error}\n")
         return 5
+    # 出境守衛:stdout 是本 child 唯一的資料出口,故 observation 在**寫出之前**必須過中央 secret
+    # scanner。輸入側的硬邊界只保證「caller 遞不進秘密」(PG 面拒任何 DSN 形、檔案面只收 code-owned
+    # key),它**不**保證「主機事實裡沒有秘密」—— unit 的 ``Environment=``、role 的 ``rolconfig``、
+    # ACL 文字全是主機給的字串,今日對它們零機械保證。命中即整包丟棄:零 stdout、typed 退出,
+    # 絕不寫出被判定含 secret 的內容(理由只帶鍵名 trail,不帶值)。
+    leak_reasons = host_kernel.scan_serializable_surface_for_secrets(observation)
+    if leak_reasons:
+        sys.stderr.write(
+            "read-only observation withheld: " + "; ".join(leak_reasons[:3]) + "\n"
+        )
+        return EXIT_OBSERVATION_SECRET_LEAK_BLOCKED
     sys.stdout.write(
         json.dumps(observation, ensure_ascii=False, sort_keys=True, separators=(",", ":"))
     )

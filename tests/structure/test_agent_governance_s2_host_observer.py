@@ -231,6 +231,92 @@ def test_main_admits_the_same_host_once_the_acknowledgement_is_present(monkeypat
     assert observer_module.main(["--request-base64", _encoded(request)]) == 0
 
 
+# --------------------------------------------------------------------------- #
+# 出境秘密掃描:stdout 是 child 唯一的資料出口,命中即整包丟棄(零 stdout)
+# --------------------------------------------------------------------------- #
+# 反例以片段拼接構造(repo 內不留看起來像真憑證的字面量);這是 S2.4 封閉 DSN 的 libpq 鍵值形。
+_SECRET_SHAPED_PROPERTY = "PG" + "PASSWORD" + "=" + "s3cr3t-not-real"
+
+
+def _observation_with(environment_value: str) -> dict:
+    body = {
+        "schema_version": observer_module.OBSERVATION_SCHEMA_VERSION,
+        "observed_at": "2026-07-29T00:00:00Z",
+        "target_class_view": {"target_class": kernel.TARGET_CLASS_NON_TARGET},
+        "request_digest": "sha256:" + "0" * 64,
+        "faces": {
+            observer_module.FACE_UNIT_STATE: {
+                "unit": qi.UNIT_NAME, "manager_scope": "system",
+                "properties": {"ActiveState": "active", "Environment": environment_value},
+            },
+        },
+    }
+    body["self_digest"] = observer_module._digest(body)
+    return body
+
+
+def _install_observer_returning(monkeypatch, observation: dict) -> None:
+    """把 ``main()`` 建構的 aggregate observer 換成一支回傳指定 payload 的唯讀替身。"""
+
+    class _Stub:
+        def __init__(self, **kwargs) -> None:
+            del kwargs
+
+        def observe(self, request):
+            del request
+            return observation
+
+    # 替身仍必須通過 L1 能力分割硬檢(它結構上就沒有任何寫能力方法)。
+    assert kernel.assert_read_only_surface(_Stub()) == []
+    monkeypatch.setattr(observer_module, "S2HostObserver", _Stub)
+
+
+def test_main_withholds_an_observation_carrying_secret_shaped_host_facts(monkeypatch, capsys):
+    """主機事實(unit 的 ``Environment=``)帶 secret 形 ⇒ typed 拒 + **stdout 為空**。"""
+
+    _install_observer_returning(monkeypatch, _observation_with(_SECRET_SHAPED_PROPERTY))
+    code = observer_module.main(["--request-base64", _encoded({
+        "schema_version": observer_module.REQUEST_SCHEMA_VERSION,
+        "faces": [observer_module.FACE_FILE_IDENTITY], "path_keys": ["unit_fragment"],
+    })])
+    captured = capsys.readouterr()
+    assert code == observer_module.EXIT_OBSERVATION_SECRET_LEAK_BLOCKED
+    # 絕不寫出被判定含 secret 的內容:一個位元組都沒有。
+    assert captured.out == ""
+    assert "observation withheld" in captured.err
+    # 理由只帶鍵名 trail,值本身絕不入 stderr(否則守衛自己就是第二條洩漏路徑)。
+    assert "faces.unit_state.properties.Environment" in captured.err
+    assert _SECRET_SHAPED_PROPERTY not in captured.err
+
+
+def test_main_emits_a_clean_observation_unchanged(monkeypatch, capsys):
+    """同一條路徑上,乾淨的觀測照常整份寫出(守衛不是把所有輸出都掐掉)。"""
+
+    clean = _observation_with("ALR_SOURCE_HEAD=" + "0" * 40)
+    _install_observer_returning(monkeypatch, clean)
+    code = observer_module.main(["--request-base64", _encoded({
+        "schema_version": observer_module.REQUEST_SCHEMA_VERSION,
+        "faces": [observer_module.FACE_FILE_IDENTITY], "path_keys": ["unit_fragment"],
+    })])
+    captured = capsys.readouterr()
+    assert code == 0
+    assert captured.err == ""
+    assert json.loads(captured.out) == clean
+    assert observer_module.validate_observation(json.loads(captured.out)) == []
+
+
+def test_the_egress_guard_runs_before_the_stdout_write(monkeypatch):
+    """結構釘:守衛必須在 ``sys.stdout.write`` **之前**,而不是寫出之後補一個檢查。"""
+
+    import inspect
+
+    source = inspect.getsource(observer_module.main)
+    assert source.index("scan_serializable_surface_for_secrets") < source.index(
+        "sys.stdout.write"
+    )
+    assert "EXIT_OBSERVATION_SECRET_LEAK_BLOCKED" in source
+
+
 def test_a_non_bool_acknowledgement_is_inadmissible():
     errors = observer_module.validate_observation_request({
         "schema_version": observer_module.REQUEST_SCHEMA_VERSION,

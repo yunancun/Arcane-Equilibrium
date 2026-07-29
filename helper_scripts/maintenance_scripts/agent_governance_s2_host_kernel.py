@@ -18,8 +18,14 @@
 5. :func:`assert_read_only_surface` —— 鏡 ``agent_governance_s2_4_install_driver
    .assert_no_aggregate_forbidden_surface``:物件上出現任一寫能力方法即 typed 拒,且**絕不呼叫**。
 
-外加一件與 exec 不可分割的執法::func:`enforce_process_hardening` 在**每一次**主機指令執行之前真的
-跑 ``prctl(PR_SET_DUMPABLE, 0)`` 並回讀 ``PR_GET_DUMPABLE`` 確認為 0,不為 0 即拒絕執行。
+外加兩件與 exec / 出境不可分割的執法:
+
+* :func:`enforce_process_hardening` 在**每一次**主機指令執行之前真的跑 ``prctl(PR_SET_DUMPABLE, 0)``
+  並回讀 ``PR_GET_DUMPABLE`` 確認為 0,不為 0 即拒絕執行。
+* :func:`scan_serializable_surface_for_secrets` 是家族共用的**出境守衛**:任何 payload 進 sink
+  (observer child 的 stdout、CLI 的 ``observation.json``)之前必須先過它,判準直接取自
+  ``agent_governance_command_capture_v2.SECRET_VALUE_PATTERNS``(與 :func:`_redact` 同一套規則,
+  不另造第二套),命中即整包丟棄。
 
 **W5 obligation #21 的誠實措辭(必讀)。** ``PR_SET_DUMPABLE_IS_DECLARED_NOT_ENFORCED`` 的原文要求
 是「observing prctl(PR_GET_DUMPABLE) on the applier and refusing when it is not 0 —— a
@@ -659,6 +665,93 @@ def _redact(data: bytes) -> str:
     return redacted.decode("utf-8", "replace")
 
 
+# --------------------------------------------------------------------------- #
+# (6) 出境秘密掃描 —— runner 家族任何 payload 進 sink 之前的共用守衛
+# --------------------------------------------------------------------------- #
+def _egress_bytes(payload: Any) -> bytes:
+    """把任一 payload 折成掃描用 bytes;不可 canonical 序列化時退回 ``repr``(絕不因此放過)。"""
+
+    try:
+        return json.dumps(
+            payload, ensure_ascii=False, sort_keys=True, separators=(",", ":"),
+            allow_nan=False, default=repr,
+        ).encode("utf-8")
+    except (TypeError, ValueError):
+        return repr(payload).encode("utf-8", "replace")
+
+
+def _carries_secret_shaped_value(payload: Any) -> bool:
+    """判定一份 payload 是否帶 secret 形的值(判準 = capture_v2 的 ``SECRET_VALUE_PATTERNS``)。
+
+    掃的是**canonical JSON bytes**而不是逐個葉節點:``{"password":"x"}`` 這種「鍵值相鄰」形只有在
+    序列化後才看得見,逐葉掃描會漏掉它。
+    """
+
+    from agent_governance_command_capture_v2 import _redact_preview
+
+    return _redact_preview(_egress_bytes(payload))[1]
+
+
+def _secret_trails(node: Any, trail: str) -> list[str]:
+    """定位命中點的 JSON trail;**只回鍵名路徑,絕不回內容**(理由字串本身不得成為第二條洩漏路徑)。"""
+
+    if isinstance(node, dict):
+        found: list[str] = []
+        for key, value in node.items():
+            here = f"{trail}{key}"
+            if _carries_secret_shaped_value({key: value}):
+                found.extend(_secret_trails(value, here + ".") or [here])
+        return found
+    if isinstance(node, (list, tuple)):
+        found = []
+        for index, item in enumerate(node):
+            here = f"{trail}{index}"
+            if _carries_secret_shaped_value(item):
+                found.extend(_secret_trails(item, here + ".") or [here])
+        return found
+    return []
+
+
+def scan_serializable_surface_for_secrets(payload: Any) -> list[str]:
+    """對一份**即將出境**的 payload 做秘密掃描;命中回 typed 理由(絕不逸出例外、絕不回內容)。
+
+    形制鏡 ``agent_governance_s2_4_install_driver`` 的 ``scan_serializable_surface(verdict)`` 用法:
+    命中即整包丟棄、只回理由,而不是把「疑似含秘密」的內容照樣送出去再標一個旗標。
+
+    **判準來源(不自造)**:``agent_governance_command_capture_v2.SECRET_VALUE_PATTERNS`` ——
+    也就是每一份 governed capture 的 preview 去敏、以及本 kernel :func:`_redact` 對主機 stdout/stderr
+    去敏所用的**同一套**正則(``*TOKEN/SECRET/PASSWORD/PASSWD/API_KEY/ACCESS_KEY/PRIVATE_KEY/
+    CREDENTIAL* = <值>``、``Authorization: Bearer <值>``、``scheme://user:pass@host``)。
+
+    **誠實界線(必讀)**
+
+    * 這是**形狀**掃描,不是「不含秘密」的證明:它擋得住密碼賦值 / bearer token / URL 內嵌密碼這
+      三類已知形,擋不住一段沒有任何鍵名線索的高熵字串。它的價值在於「本來零機械保證」→「已知形
+      一律 fail-closed」,不在於完備。
+    * **已知殘餘缺口(不在本波收口)**:``SECRET_VALUE_PATTERNS`` 的 URL 形只涵蓋 ``http(s)``
+      scheme,故 ``<db-scheme>``-URI 形(授權段內嵌密碼)今日**擋不住**。repo 內確實另有一支涵蓋
+      該形的中央規則 —— ``public_repo_security_gate.EMBEDDED_CREDENTIAL_DSN`` —— 但那個模組
+      ``import subprocess``,把它拉進 runner 家族等於重新開一條完整 exec 路徑(正是 E2 RES-5 對
+      ``agent_governance_command_capture_v2`` 收掉的那條縫),故本波**不**匯入它。正確修法是把該形
+      併進中央的 ``SECRET_VALUE_PATTERNS``(全 repo 的 governed capture preview 一起受惠),而不是
+      在 runner 家族自造第二套判準。S2.4 實際使用的封閉 DSN 是 libpq 鍵值形(密碼以 ``pass``+
+      ``word=`` 鍵出現),那一形**有**被擋;此缺口以結構測試釘住,中央一旦加寬即被看見。
+    * **為何不用** ``agent_governance_s2_4_credential.scan_serializable_surface``:那一支是
+      **哨兵**掃描——它比對的是本行程內活著的 :class:`SealedSecretHandle` 明文,沒有 handle 時
+      恆回 ``[]``。observer child 從不鑄造 handle,故那支在此路徑上結構性地是 no-op(等於沒有
+      守衛);且 ``s2_4_*`` 是 applier 側模組,匯入它會同時破壞「observer 的 import closure ∩
+      applier == ∅」與 runner 家族的正面 import 白名單。兩支掃描器是互補的兩層,不是替代品。
+    """
+
+    if not _carries_secret_shaped_value(payload):
+        return []
+    trails = sorted(set(_secret_trails(payload, ""))) or ["<root>"]
+    return [
+        f"a secret-shaped value reached a serializable surface at {trails}; the whole payload is "
+        "dropped rather than emitted (the reason carries key trails only, never the value)"
+    ]
+
+
 class HostExecutionKernel:
     """The one and only place the S2 host runner family calls ``subprocess``.
 
@@ -769,4 +862,11 @@ def kernel_abi_projection() -> dict[str, Any]:
         "production_grade_target_classes": sorted(PRODUCTION_GRADE_TARGET_CLASSES),
         "forbidden_read_only_surface": sorted(FORBIDDEN_READ_ONLY_SURFACE),
         "forbidden_argv_tokens": sorted(FORBIDDEN_ARGV_TOKENS),
+        # 出境秘密掃描在 artifact 上的活再導出面(鏡 s2_4 credential ABI 的同名欄位形制)。
+        "egress_secret_scanner": (
+            "agent_governance_s2_host_kernel.scan_serializable_surface_for_secrets"
+        ),
+        "egress_secret_scanner_rules": (
+            "agent_governance_command_capture_v2.SECRET_VALUE_PATTERNS"
+        ),
     }

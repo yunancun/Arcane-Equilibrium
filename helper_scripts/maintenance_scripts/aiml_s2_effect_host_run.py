@@ -221,6 +221,21 @@ def _observation(args, target_view: dict[str, Any]) -> dict[str, Any]:
         raise host_observer.S2HostObserverError(
             "the process-separated observation is invalid: " + "; ".join(errors[:3])
         )
+    # 出境守衛(父側,與 child 的 stdout 閘同一支掃描器):observation 落 ``observation.json``
+    # 之前必須再過一次。父側**不得**把「子行程有守衛」當成自己的保證 —— 這裡是 observer 產出
+    # 進入落盤 sink 的唯一入口,舊 child / 被替換的 child / 未來新增的觀測面都必須在此被同一套
+    # 判準攔下。命中即 typed 拒 ⇒ 零 observation.json。
+    #
+    # 誠實界線:真 spawn 路徑上,child stdout 早已在 kernel 的 ``_execute`` 裡過了同一套規則的
+    # ``_redact``,所以命中形會先變成 ``<redacted>`` 而導致 self_digest 對不上(上面那道 typed
+    # 拒)。本守衛因此**不是**該路徑上的第一道防線,而是「不經 ``_redact`` 的傳輸」(測試替身、
+    # 被替換的 child、未來任何直接回傳形)上的顯式且理由正確的那一道。
+    leak_reasons = host_kernel.scan_serializable_surface_for_secrets(observation)
+    if leak_reasons:
+        raise host_observer.S2HostObserverError(
+            "the process-separated observation carried secret-shaped content and was dropped: "
+            + "; ".join(leak_reasons[:3])
+        )
     return observation
 
 

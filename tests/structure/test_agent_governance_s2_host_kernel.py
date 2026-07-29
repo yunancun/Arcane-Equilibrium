@@ -851,3 +851,106 @@ def test_kernel_abi_projection_is_code_owned():
     assert projection["production_grade_target_classes"] == sorted(
         {kernel.TARGET_CLASS_PRODUCTION, kernel.TARGET_CLASS_UNKNOWN}
     )
+    # 出境守衛必須在 artifact 上看得見,且其判準明記為 capture_v2 的既有規則(非自造)。
+    assert projection["egress_secret_scanner"].endswith(
+        "scan_serializable_surface_for_secrets"
+    )
+    assert projection["egress_secret_scanner_rules"].endswith("SECRET_VALUE_PATTERNS")
+
+
+# --------------------------------------------------------------------------- #
+# (6) 出境秘密掃描 —— 判準必須是 capture_v2 的既有規則,而不是本 kernel 自造的第二套
+# --------------------------------------------------------------------------- #
+# 反例以片段拼接構造(repo 內不留任何看起來像真憑證的字面量);三段分別命中
+# ``SECRET_VALUE_PATTERNS`` 的三條規則:賦值形 / bearer 形 / URL user:pass 形。
+_SECRET_SHAPED_VALUES = (
+    "PG" + "PASSWORD" + "=" + "s3cr3t-not-real",
+    "Authorization: " + "Bearer " + "abcdef0123456789",
+    "htt" + "ps://reader" + ":" + "s3cr3t-not-real" + "@trade-core/db",
+)
+
+
+def _clean_observation() -> dict:
+    """一份形狀與真 observation 相同、但不含任何 secret 形的 payload。"""
+
+    return {
+        "schema_version": "s2_host_observation_v1",
+        "observed_at": "2026-07-29T00:00:00Z",
+        "target_class_view": kernel.derive_host_target_class(),
+        "request_digest": "sha256:" + "0" * 64,
+        "faces": {
+            "unit_state": {
+                "unit": "arcane-equilibrium-aiml-engine-scanner.service",
+                "properties": {
+                    "ActiveState": "active",
+                    "Environment": "ALR_SOURCE_HEAD=" + "0" * 40,
+                    "FragmentPath": "/etc/systemd/system/x.service",
+                },
+            },
+            "file_identity": {"unit_fragment": {"present": False, "mode": "0644"}},
+        },
+        "self_digest": "sha256:" + "1" * 64,
+    }
+
+
+def test_a_clean_observation_shaped_payload_is_not_flagged():
+    assert kernel.scan_serializable_surface_for_secrets(_clean_observation()) == []
+
+
+@pytest.mark.parametrize("value", _SECRET_SHAPED_VALUES)
+def test_every_central_secret_rule_blocks_an_observation(value):
+    payload = _clean_observation()
+    payload["faces"]["unit_state"]["properties"]["Environment"] = value
+    reasons = kernel.scan_serializable_surface_for_secrets(payload)
+    assert reasons, value
+    # 理由只帶鍵名 trail;命中的值本身**絕不**出現在理由裡(否則理由就是第二條洩漏路徑)。
+    assert "faces.unit_state.properties.Environment" in reasons[0]
+    assert value not in reasons[0]
+
+
+def test_the_key_value_adjacency_form_is_caught_too():
+    """``{"password": "..."}`` 這種「鍵值相鄰」形只有掃 canonical JSON bytes 才看得見。"""
+
+    payload = _clean_observation()
+    payload["faces"]["pg_acl"] = {"pass" + "word": "s3cr3t-not-real"}
+    reasons = kernel.scan_serializable_surface_for_secrets(payload)
+    assert reasons and "faces.pg_acl" in reasons[0]
+
+
+def test_the_scanner_delegates_to_the_capture_v2_rules_not_a_second_set():
+    import inspect
+
+    from agent_governance_command_capture_v2 import SECRET_VALUE_PATTERNS
+
+    source = inspect.getsource(kernel._carries_secret_shaped_value)
+    assert "from agent_governance_command_capture_v2 import _redact_preview" in source
+    # kernel 不得自造第二套 secret 正則。
+    assert "re.compile" not in source
+    # 中央規則各有一個對應反例:新增一條中央規則而沒補反例 ⇒ 本測試變紅。
+    assert len(SECRET_VALUE_PATTERNS) == len(_SECRET_SHAPED_VALUES)
+
+
+def test_the_non_http_uri_dsn_gap_is_pinned_as_an_honest_boundary():
+    """釘住殘餘缺口:中央規則的 URL 形只涵蓋 ``http(s)`` scheme,不涵蓋 DB-scheme 的 URI 形。
+
+    這條缺口**不在**本波收口:正確的修法是把該形併進
+    ``agent_governance_command_capture_v2.SECRET_VALUE_PATTERNS``(那樣全 repo 的 governed capture
+    preview 一起受惠),而在 runner 家族自造第二套判準正是本波刻意拒絕的事。repo 內另有一支涵蓋
+    該形的 ``public_repo_security_gate.EMBEDDED_CREDENTIAL_DSN``,但那個模組 ``import subprocess``
+    ⇒ 匯入它等於給 runner 家族重開一條完整 exec 路徑(E2 RES-5 收掉的那條縫),故不採用。S2.4
+    實際使用的封閉 DSN 是 libpq 鍵值形,那一形**有**被擋(下面第二個斷言)。未來一旦中央規則加寬,
+    本測試變紅並被看見。
+    """
+
+    uri_form = "postgre" + "sql://reader" + ":" + "s3cr3t-not-real" + "@trade-core/db"
+    assert kernel.scan_serializable_surface_for_secrets({"faces": uri_form}) == []
+    libpq_form = "host=127.0.0.1 " + "pass" + "word=" + "s3cr3t-not-real" + " dbname=x"
+    assert kernel.scan_serializable_surface_for_secrets({"faces": libpq_form})
+
+
+def test_an_unserializable_payload_is_scanned_rather_than_waved_through():
+    class _Opaque:
+        def __repr__(self) -> str:
+            return _SECRET_SHAPED_VALUES[0]
+
+    assert kernel.scan_serializable_surface_for_secrets({"faces": _Opaque()})
