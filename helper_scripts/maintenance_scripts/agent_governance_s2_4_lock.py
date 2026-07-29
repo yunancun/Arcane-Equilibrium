@@ -844,6 +844,11 @@ def _read_durable_ledger(store: Any, *, ledger_path: str) -> dict[str, Any]:
     return {"status": "LEDGER_LOADED", "reasons": [], "ledger": ledger}
 
 
+# S2E.2b-1 P2-4:S2.4 §5.4 的啟動補償 runner 需要同一條 durable 讀路徑(絕不另抄一份)。
+# 由本 owner 模組公開再匯出,取代跨模組的私有名穿透(零行為改動)。
+read_durable_ledger = _read_durable_ledger
+
+
 def _commit_durable_ledger(store: Any, ledger: dict[str, Any]) -> dict[str, Any]:
     """ledger 的 durable 落盤(同 journal 的 temp→fsync→rename→parent-fsync 紀律)。"""
 

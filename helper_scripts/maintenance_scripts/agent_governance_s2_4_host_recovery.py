@@ -109,7 +109,10 @@ RESUME_VERIFICATION_OBLIGATION = (
     "S2E_2B_1_PROBE_PREPARE_VERIFY_ONLY_ENTRY_POINT_ABSENT"
 )
 
-_ALL_FALSE_PRODUCTION_FLAGS = dict(_component._ALL_FALSE_PRODUCTION_FLAGS)
+# S2E.2b-1 P2-4:本模組對外部模組一律只用**公開名**。設計批准的唯一私有跨模組穿透是
+# ``_install_driver._fold_lock_release``(lock 釋放政策的單一擁有者;見 :func:`_release_is_clean`
+# 說明它為何不能被抄一份),其餘六處已由各 owner 模組逐名公開再匯出。
+_ALL_FALSE_PRODUCTION_FLAGS = dict(_component.ALL_FALSE_PRODUCTION_FLAGS)
 
 
 def _verdict(
@@ -193,6 +196,12 @@ def classify_journal_rows(journal: Any) -> dict[str, dict[str, Any]]:
     ``component_effect_class == ENTRY_SCOPE_AGGREGATE_TRANSACTION`` 的 entry 是**交易級**的
     (``COMPENSATING`` 與終端態),它們的 pre/post 是 plan 級前態,不屬於任何一 row 的 digest
     空間,故不參與任何 row 的分類。
+
+    ``row_applied_state_digest`` / ``row_pre_state_digest`` 只由 ``entry_source ==
+    ENTRY_SOURCE_COMPONENT_ROW`` 的 entry 導出,而**本模組自己寫的**補償 entry 一律標
+    ``ENTRY_SOURCE_AGGREGATE``(§B.4;判別欄的定義是「誰寫的」)——否則補償鏈中崩、第二次啟動
+    時 ``row_driver_entries[-1]`` 取到的會是補償器自己那一筆,於是「這一列被施作成什麼樣」會被
+    讀成「這一列已被還原成什麼樣」。
     """
 
     entries = (journal or {}).get("entries") or []
@@ -227,10 +236,6 @@ def classify_journal_rows(journal: Any) -> dict[str, dict[str, Any]]:
             ),
             "row_pre_state_digest": (
                 row_driver_entries[0].get("pre_state_digest") if row_driver_entries else None
-            ),
-            # §B.4:``pre_compensation_observed_digest`` 的 durable 替身。
-            "pre_compensation_observed_digest": (
-                row_driver_entries[-1].get("post_state_digest") if row_driver_entries else None
             ),
         }
     return classified
@@ -304,7 +309,7 @@ def replay_consumption_reasons(
             "the startup compensator requires the two operator permits this plan's APPLY "
             "consumed; without them nothing proves that authorization ever happened (§9.1)"
         ]
-    chain_errors = central_validator._s2_4_replay_ledger_errors(ledger)
+    chain_errors = central_validator.s2_4_replay_ledger_errors(ledger)
     if chain_errors:
         return list(chain_errors) + [
             "the replay ledger head does not re-derive its hash chain, so it cannot prove any "
@@ -602,9 +607,26 @@ def _under_lock(
     """握著 install lock 的那一段(S1-S2c + 逆序鏈);呼叫端負責釋放並折入釋放結果。"""
 
     # ── S1:§5.2 啟動 reconcile(零變更;只讀 journal 與 caller 的獨立觀測)──────────
+    #
+    # caller 遞交的 probe/prepare lane id 一律經 ``rederive_lane_path`` 重算,畸形值是 typed
+    # 契約層硬錯。它必須在**這裡**被轉譯成本模組的 typed verdict:公開 docstring 承諾「任何一道
+    # 不過即 typed 非成功」,而 ``reconcile_before_s2_4_intent`` 對同一類輸入早就是 typed 轉譯
+    # ——兩個公開面對同一種畸形輸入給出不同判準,本身就是一道判準漂移。
+    try:
+        journal_paths = _reconcile.startup_journal_paths(plan_id, startup_journal_paths)
+    except _reconcile.InstallDriverContractError as error:
+        return _verdict(
+            STARTUP_COMPENSATION_RECOVERY_REQUIRED,
+            [
+                "a supplied startup journal lane id could not be re-derived into its §5.2 path "
+                f"({error.code}); a caller string is never joined into the state root. "
+                "Zero mutation"
+            ],
+            plan_id=plan_id, driver_engaged=True,
+        )
     reconcile = _reconcile.reconcile_startup_journals(
         file_driver,
-        journal_paths=_reconcile.startup_journal_paths(plan_id, startup_journal_paths),
+        journal_paths=journal_paths,
         observed_state_digests=startup_observed_state_digests,
         task_owned_partials=startup_task_owned_partials,
         ownership_evidence=ownership_evidence,
@@ -643,7 +665,7 @@ def _under_lock(
     ledger_store = _journal.JournalStore(
         file_driver, journal_path=_lock.REPLAY_LEDGER_PATH
     )
-    ledger_read = _lock._read_durable_ledger(
+    ledger_read = _lock.read_durable_ledger(
         ledger_store, ledger_path=_lock.REPLAY_LEDGER_PATH
     )
     if ledger_read["status"] != "LEDGER_LOADED":
@@ -750,6 +772,14 @@ def _run_reverse_chain(
     交易內版本只寫**一筆**交易級 ``COMPENSATING``,因為五 row 的補償在同一個行程內一氣呵成。
     啟動補償器不同:它本身就可能再崩一次,而「鏈中崩潰」若不可分辨,下一次重啟就會對一台
     被拆到一半的主機再猜一次。故每一 row 前後各一筆 durable 記錄。
+
+    **撤回(E2 S2E.2b-1 P1-1)**:本函式先前宣稱「``pre_compensation_observed_digest`` 的
+    durable 替身**只能是** WAL 上該 row driver 寫的 post_state_digest」,以及「收緊它需要 W4b
+    的 ``OBSERVER_SPACE_PRE_STATE_DIGEST``」。兩句都不成立——
+    :func:`agent_governance_s2_4_component.capture_pre_compensation_observation` 本來就存在、
+    唯讀、零新主機能力,mid-effect row 的交易內補償路徑已經在用它,形狀與此處完全同構。舊寫法
+    把 applier 空間的值餵進一個 verifier 空間的不等式,那道「排除常量 verifier」的判準因此恆真、
+    形同不存在;現在改由同一支獨立 verifier 在補償前後各觀測一次。
     """
 
     del file_driver  # journal store 已綁住同一支;此處不再另取檔案面。
@@ -802,27 +832,19 @@ def _run_reverse_chain(
                 "ownership-aware condition is NOT established for its reverse op"
             )
         # ── 前 WAL:方向是**反的**(pre = 已施作態,post = 原前態)──────────────
-        #
-        # ``entry_source`` 是**digest 空間**的判別欄(§5.2),不是「哪個行程動的手」。這兩個
-        # digest 逐位元組取自該 row driver 自己寫的 entry,活在該 row 的 subject 空間;宣告
-        # 任何其他空間才是說謊。
         before = transaction.record(
             state="COMPENSATING",
             pre_state_digest=row["row_applied_state_digest"] or plan["core"]["pre_state_digest"],
             post_state_digest=row["row_pre_state_digest"] or plan["core"]["pre_state_digest"],
             step_index=_install_driver.APPLY_ROW_STEP_INDEX[name],
             terminal=False,
-            entry_source=(
-                _journal.ENTRY_SOURCE_COMPONENT_ROW
-                if row["row_applied_state_digest"] is not None
-                else _journal.ENTRY_SOURCE_AGGREGATE
-            ),
+            entry_source=_row_compensation_entry_source(),
             component_effect_class=name,
         )
         if before["status"] != _journal.JOURNAL_STATUS_COMMITTED:
             # 一步都不做,整鏈中止:un-journalled compensation 是所有結局裡最壞的一種——主機被
             # 拆了而磁碟上沒有任何證據,下一次重啟會對一台半拆主機收斂出 RESUME_VERIFICATION。
-            residue = _install_driver._observe_residue(
+            residue = _install_driver.observe_residue(
                 driver, dict(probe_receipt_digests or {})
             )
             return _verdict(
@@ -836,6 +858,37 @@ def _run_reverse_chain(
                 reconcile=reconcile, row_classification=classification,
                 reverse_ops=reverse_ops, journal=journal, residue=residue,
             )
+        # ── 補償**之前**先取 verifier 並唯讀觀測一次(§B.4;整條鏈的順序關鍵)────────
+        #
+        # ``COMPENSATED_EXACT`` 唯一能排除「對任何 subject 都回同一份乾淨觀測」的常量 verifier
+        # 的手段,就是「補償後那次觀測 ≠ 補償前那次觀測」。而那個前值必須與後值落在**同一個
+        # digest 空間**(同一支獨立 verifier 的投影)才比得起來:跨空間的兩個值恆不相等,這道
+        # 判準就會恆真、形同不存在。故此處呼叫 ``capture_pre_compensation_observation``
+        # ——它唯讀(只跑 ``independent_postcheck``)、零新主機能力,而 mid-effect row 的交易內
+        # 補償路徑(``_component._compensating_failure``)用的就是同一支。
+        #
+        # 次序同時修掉一個實作風險:``row_driver()`` 若在補償**之後**才取而它拋了例外,主機
+        # 已經被改而完全沒有 verifier 可用。先取,拿不到就誠實地在無 verifier 之下補償(delta
+        # 一律不跳過),並停在 typed 未證。
+        try:
+            row_driver = driver.row_driver(component_effect_class=name)
+        except Exception as error:  # noqa: BLE001
+            # C2 的教訓:主機部分施作時,這是最不能讓 untyped 例外逸出的時刻。
+            row_driver = None
+            exact = False
+            reasons.append(
+                f"{name} row driver was unavailable before compensation: "
+                f"{_component.redact_driver_error(error)}; the reverse op cannot be "
+                "independently re-observed, so exact restoration is not claimed"
+            )
+        applier_node = f"s2-4-{name.lower()}-applier"
+        pre_observed = (
+            None if row_driver is None
+            else _component.capture_pre_compensation_observation(
+                row_driver, component_effect_class=name,
+                install_plan_digest=plan["core_digest"], applier_node=applier_node,
+            )
+        )
         try:
             outcome = driver.compensate_component_row(
                 component_effect_class=name, plan_id=plan_id,
@@ -855,42 +908,15 @@ def _run_reverse_chain(
             _record_row_terminal(transaction, name, row, plan, compensated=False)
             continue
         mutation_performed = True
-        try:
-            row_driver = driver.row_driver(component_effect_class=name)
-        except Exception as error:  # noqa: BLE001
-            # C2 的教訓:主機部分施作時,這是最不能讓 untyped 例外逸出的時刻。
-            exact = False
-            reasons.append(
-                f"{name} row driver was unavailable during compensation: "
-                f"{_component.redact_driver_error(error)}; the reverse op cannot be "
-                "independently re-observed, so exact restoration is not claimed"
-            )
-            reverse_ops.append({
-                "component_effect_class": name, "per_row_rollback_digest": digest,
-                "ownership_verified": False,
-            })
-            _record_row_terminal(transaction, name, row, plan, compensated=False)
-            continue
         normalized, independent = _component.compensation_with_independent_postcheck(
             outcome, driver=row_driver, component_effect_class=name,
-            install_plan_digest=plan["core_digest"],
-            applier_node=f"s2-4-{name.lower()}-applier",
+            install_plan_digest=plan["core_digest"], applier_node=applier_node,
             pre_state_digest=plan["core"]["pre_state_digest"],
-            # ★本波唯一真正新的導出★ —— 交易內版本取自 ``row_verdicts[name]["postcheck"]
-            # ["observed_subject_digest"]``,啟動時那份 verdict 根本不存在。durable 的替身
-            # 只能是**該 row driver 自己寫進 WAL 的** post_state_digest:``entry_source``
-            # 這個判別欄存在的理由,正是讓重啟的 runner 分得出這是哪個 digest 空間。
-            #
-            # **絕不可**改用 aggregate 空間的 ``_row_observation_digest``:那是由 plan 導出、
-            # 與主機無關的值,補償前後恆等 ⇒ 這道「verifier 有沒有真的再看一次」的檢查會變成
-            # 空的,而它正是 COMPENSATED_EXACT 唯一能排除常量 verifier 的手段。
-            #
-            # 誠實界線:WAL 上的那個 digest 是 **applier** 空間的,獨立 postcheck 回的是
-            # **verifier** 空間的。兩者只在「同一個 subject 的 canonical 投影由兩個節點各算
-            # 一次」時可比;因此「兩者不同」是「真的再觀測過」的**必要**而非充分條件,本替身
-            # 買到的常量-verifier 排除力嚴格弱於交易內版本。這是一條記錄在案的殘留界線,
-            # 不是被抹掉的問題(收緊它需要 W4b 的 OBSERVER_SPACE_PRE_STATE_DIGEST)。
-            pre_compensation_observed_digest=row["pre_compensation_observed_digest"],
+            # 拿不到補償前觀測(verifier 不在/逸出/形狀不符)時一律遞交 ``None`` ⇒ typed
+            # ``POST_COMPENSATION_PRE_OBSERVATION_UNPROVEN`` ⇒ 不宣稱 exact。**絕不**在此
+            # 塞一個 WAL 上的 applier 空間 digest 當替身:那與 verifier 空間的後值恆不相等,
+            # 會讓這道檢查恆真,而「恆真的排除力」就是「沒有排除力」。
+            pre_compensation_observed_digest=pre_observed,
         )
         status, row_exact = _component.derive_compensation_status(normalized)
         reasons.extend(independent["reasons"])
@@ -944,6 +970,20 @@ def _run_reverse_chain(
     )
 
 
+def _row_compensation_entry_source() -> str:
+    """本模組寫的每一筆 row 級補償 entry 的 ``entry_source``。
+
+    ``agent_governance_s2_4_journal`` 對 :data:`ENTRY_SOURCE_COMPONENT_ROW` 的定義是「由**該
+    row 的 driver** 寫入」。啟動補償器不是任何一 row 的 driver——它是 aggregate 級的 runner,
+    只是把該 row 自己寫過的兩個 digest 逐位元組轉抄進逆向 entry。標成 COMPONENT_ROW 會在
+    「補償鏈中崩 → 第二次啟動」時反噬::func:`classify_journal_rows` 的
+    ``row_driver_entries[-1]`` 會取到補償器自己那一筆,把「這一列被施作成什麼樣」讀成「這一列
+    已被還原成什麼樣」。故一律 AGGREGATE(digest 空間的事實記在轉抄處的註解,不靠判別欄說謊)。
+    """
+
+    return _journal.ENTRY_SOURCE_AGGREGATE
+
+
 def _record_row_terminal(
     transaction: Any, name: str, row: dict[str, Any], plan: dict[str, Any], *, compensated: bool
 ) -> dict[str, Any]:
@@ -960,11 +1000,7 @@ def _record_row_terminal(
         post_state_digest=row["row_pre_state_digest"] or plan["core"]["pre_state_digest"],
         step_index=_install_driver.APPLY_ROW_STEP_INDEX[name],
         terminal=False,
-        entry_source=(
-            _journal.ENTRY_SOURCE_COMPONENT_ROW
-            if row["row_applied_state_digest"] is not None
-            else _journal.ENTRY_SOURCE_AGGREGATE
-        ),
+        entry_source=_row_compensation_entry_source(),
         component_effect_class=name,
     )
 
@@ -989,7 +1025,7 @@ def _finish_reverse_chain(
 ) -> dict[str, Any]:
     """§B.5 終端:獨立殘留觀測 → rollback artifact → 終端 journal。"""
 
-    residue = _install_driver._observe_residue(driver, dict(probe_receipt_digests or {}))
+    residue = _install_driver.observe_residue(driver, dict(probe_receipt_digests or {}))
     if residue["installed_unit_inactive"] is not True:
         exact = False
         reasons.extend(residue["reasons"])
@@ -999,7 +1035,7 @@ def _finish_reverse_chain(
                 "'could not observe' is NOT 'observed clean', so no result may claim an "
                 "independently confirmed clean residue"
             )
-    rollback = _install_driver._build_install_rollback(
+    rollback = _install_driver.build_install_rollback(
         plan=plan, reverse_ops=reverse_ops, exact=exact,
         post_state_digest=central_validator.canonical_digest({
             "domain": STARTUP_ROLLBACK_POST_STATE_DOMAIN,
@@ -1015,7 +1051,7 @@ def _finish_reverse_chain(
     if rollback_errors:
         exact = False
         reasons.extend(rollback_errors)
-    journal = _install_driver._terminal_journal(
+    journal = _install_driver.terminal_journal(
         transaction, None, plan, tick, compensated=exact
     )
     if journal is None:

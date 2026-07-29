@@ -169,7 +169,7 @@ from aiml_gate_receipt_s2_4_contracts import (  # noqa: E402,F401
     derive_source_dependency_admission_status,
     reproduce_dependency_semantic_digests,
     s2_4_authorization_identity_digest,
-    s2_4_authorization_profiles_digest,
+    s2_4_authorization_profiles_digest, s2_4_replay_ledger_errors,
 )
 from aiml_gate_receipt_adoption import (  # noqa: E402,F401
     _github_policy_attestation_errors,

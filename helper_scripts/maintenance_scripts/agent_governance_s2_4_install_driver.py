@@ -1726,6 +1726,13 @@ def _terminal_journal(
     return verdict["journal"]
 
 
+# S2E.2b-1 P2-4:設計只批准 ``_fold_lock_release`` 一處私有跨模組穿透。啟動補償 runner 另需的
+# 三支由本 owner 模組逐名公開再匯出(零行為改動、零新面)。
+observe_residue = _observe_residue
+build_install_rollback = _build_install_rollback
+terminal_journal = _terminal_journal
+
+
 def _compensate_transaction(
     *,
     plan: dict[str, Any],

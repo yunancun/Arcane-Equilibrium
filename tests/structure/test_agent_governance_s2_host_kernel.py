@@ -54,10 +54,16 @@ RUNNER_FAMILY = (
 RUNNER_FAMILY_GLOBS = ("agent_governance_s2_*host_*.py", "aiml_s2_*host_run*.py")
 # glob 是形狀判準,不是語義判準:S2.4 的 row driver **protocol 葉**恰好也叫 ``…_host_identity``,
 # 但它不是 runner(沒有 lane、沒有主機能力、其匯入面由 S2.4 wave 治理)。故此處允許顯式除名,
-# 但除名**只**豁免 per-file import 白名單那一項:被除名的檔案仍要通過 raw-command 掃描的其餘
-# 每一道,且一律不得碰 :data:`KERNEL_ONLY_IMPORTS`(見
-# ``test_every_file_that_looks_like_an_s2_host_runner_is_scanned``)。於是「把新 runner 塞進除名表」
-# 換不到任何 exec 能力,只換到一次必須寫明理由的顯式動作。
+# 但除名**只**豁免 per-file import 白名單與 ``shell=`` 呼叫形狀兩項:被除名的檔案仍要通過
+# raw-command 掃描的其餘每一道,且一律不得碰 :data:`KERNEL_ONLY_IMPORTS` 或
+# :data:`EXEC_CAPABLE_IMPORT_DENYLIST`。
+#
+# S2E.2b-1 P2-1(E2 實證):關掉正面 import 白名單,關掉的**恰好**是唯一擋得住 ``pty`` /
+# ``importlib`` 的那一道——E2 兩個全綠反例是「除名檔帶 ``pty.spawn(argv)``」與「除名檔帶
+# ``importlib.import_module(name)``」(名稱是變數,故字面拼接那道也抓不到)。原註解宣稱「四道
+# 一道都不放…根本沒有任何 shell 可以到達」是 **overclaim,在此撤回**。改法:除名 = 白名單關掉
+# **加上**一張顯式 import 黑名單(下方 :data:`EXEC_CAPABLE_IMPORT_DENYLIST`),於是「把新
+# runner 塞進除名表」仍然換不到任何 exec 能力,只換到一次必須寫明理由的顯式動作。
 NON_RUNNER_HOST_LEAVES = {
     "agent_governance_s2_4_host_identity.py": (
         "S2.4 HOST_IDENTITY_INSTALL row 的 typed driver Protocol 與純導出葉;它不驅動任何 lane、"
@@ -159,6 +165,13 @@ GOVERNANCE_IMPORTS_BY_FILE: dict[str, frozenset[str]] = {
 KERNEL_ONLY_IMPORTS = frozenset({
     "subprocess", "ctypes", "agent_governance_command_capture_v2",
 })
+# S2E.2b-1 P2-1:除名檔案(``exec_family=False``)沒有正面白名單可依,故改以一張顯式**黑**名單
+# 兜底。每一個都是一條完整的行程生成/動態載入路徑,且沒有任何一條是 protocol 葉會需要的:
+# ``pty``(``spawn``)、``importlib``(名稱可為變數 ⇒ 字面拼接那道抓不到)、``commands``、
+# ``asyncio``(``create_subprocess_exec``)、``multiprocessing``(``Popen``/spawn)。
+EXEC_CAPABLE_IMPORT_DENYLIST = frozenset({
+    "pty", "importlib", "commands", "asyncio", "multiprocessing",
+})
 
 FORBIDDEN_RAW_COMMAND_NAMES = frozenset({
     "system", "popen", "startfile", "fork", "forkpty",
@@ -213,10 +226,12 @@ def _raw_command_findings(path: Path, *, exec_family: bool = True) -> list[str]:
     ``exec_family=False`` 只給 :data:`NON_RUNNER_HOST_LEAVES` 用,關掉兩件**只對 exec 家族成立**
     的判準:①per-file import 白名單(那些檔案的匯入面由別的 wave 治理);②``shell=`` 必須是常量
     ``False``——它是 ``subprocess`` **呼叫形狀**的規則,而 S2.4 的 host-identity row driver 把
-    POSIX 帳號的**登入 shell** 當一個同名欄位傳給 ``create_system_account``。關掉它是**可證安全**
-    的:被除名的檔案一律不得 import :data:`KERNEL_ONLY_IMPORTS`(下方 ``_check_module`` 仍執法),
-    也一律過不了 raw-command 名稱 denylist / builtin denylist / 動態取名 / 字面拼接四道,故它根本
-    沒有任何 shell 可以到達。
+    POSIX 帳號的**登入 shell** 當一個同名欄位傳給 ``create_system_account``。
+
+    S2E.2b-1 P2-1:關掉①原本連帶關掉了唯一擋得住 ``pty`` / ``importlib`` 的那一道(E2 兩個全綠
+    反例)。故除名路徑改為「白名單關掉 **+** :data:`KERNEL_ONLY_IMPORTS` ∪
+    :data:`EXEC_CAPABLE_IMPORT_DENYLIST` 顯式黑名單」;其餘四道(raw-command 名稱 / builtin /
+    動態取名 / 字面拼接)本來就照跑。
     """
 
     tree = ast.parse(path.read_text(encoding="utf-8"), filename=str(path))
@@ -236,10 +251,14 @@ def _raw_command_findings(path: Path, *, exec_family: bool = True) -> list[str]:
     def _check_module(lineno: int, module: str, rendered: str) -> None:
         top = (module or "").split(".")[0]
         if allowed_modules is None:
-            # 除名檔案:只擋 kernel 專屬的三個 exec 路徑模組,不管其餘匯入面。
+            # 除名檔案:白名單關掉,但 kernel 專屬三支 + exec-capable 黑名單一律仍擋。
             if top in KERNEL_ONLY_IMPORTS:
                 findings.append(
                     f"line {lineno}: kernel-only module outside the kernel: {rendered}"
+                )
+            elif top in EXEC_CAPABLE_IMPORT_DENYLIST:
+                findings.append(
+                    f"line {lineno}: exec-capable module on a non-runner leaf: {rendered}"
                 )
             return
         if top in allowed_modules:
@@ -327,7 +346,8 @@ def test_every_file_that_looks_like_an_s2_host_runner_is_scanned():
 
 def test_a_declared_non_runner_leaf_is_still_denied_every_exec_path():
     # 除名不是逃生門:它只豁免 per-file import 白名單與 ``shell=`` 呼叫形狀兩項,exec 能力面
-    # (raw-command 名稱 / builtin / 動態取名 / 字面拼接 / kernel-only 模組)一道都不放。
+    # (raw-command 名稱 / builtin / 動態取名 / 字面拼接 / kernel-only + exec-capable 模組)
+    # 一道都不放。
     for name, reason in NON_RUNNER_HOST_LEAVES.items():
         path = HELPERS / name
         assert path.is_file(), name
@@ -342,6 +362,57 @@ def test_the_exec_family_exemption_never_admits_a_kernel_only_module(tmp_path):
         path.write_text(f"import {module}\n", encoding="utf-8")
         findings = _raw_command_findings(path, exec_family=False)
         assert any("kernel-only module outside the kernel" in item for item in findings), module
+
+
+# S2E.2b-1 P2-1:E2 的兩個全綠反例 —— 除名檔案帶 ``pty.spawn`` / ``importlib.import_module``。
+# 兩者在修前都完全不被任何一道抓到(白名單被關掉、模組名不是被禁**屬性**名、
+# ``import_module(name)`` 的名稱是**變數**故字面拼接那道也沉默)。
+EXEMPT_LEAF_EXEC_COUNTEREXAMPLES = {
+    "E2_pty_spawn_on_an_exempt_leaf": "import pty\n\n\ndef f(argv):\n    return pty.spawn(argv)\n",
+    "E2_importlib_dynamic_name_on_an_exempt_leaf": (
+        "import importlib\n\n\ndef f(name):\n    return importlib.import_module(name)\n"
+    ),
+    "asyncio_create_subprocess": (
+        "import asyncio\n\n\nasync def f(argv):\n"
+        "    return await asyncio.create_subprocess_exec(*argv)\n"
+    ),
+    "multiprocessing_spawn": (
+        "import multiprocessing\n\n\ndef f(fn):\n    return multiprocessing.Process(target=fn)\n"
+    ),
+    "commands_legacy": ("import commands\n\n\ndef f(cmd):\n    return commands.getoutput(cmd)\n"),
+}
+
+
+@pytest.mark.parametrize("mutation", sorted(EXEMPT_LEAF_EXEC_COUNTEREXAMPLES))
+def test_the_exec_family_exemption_never_admits_an_exec_capable_module(tmp_path, mutation):
+    path = tmp_path / f"{mutation}.py"
+    path.write_text(EXEMPT_LEAF_EXEC_COUNTEREXAMPLES[mutation], encoding="utf-8")
+    findings = _raw_command_findings(path, exec_family=False)
+    assert any("exec-capable module on a non-runner leaf" in item for item in findings), findings
+    # 對照:同一份 source 在 exec 家族路徑上本來就被正面白名單擋下(兩條路都紅,不是二選一)。
+    assert _raw_command_findings(path, exec_family=True)
+
+
+@pytest.mark.parametrize("module", sorted(EXEC_CAPABLE_IMPORT_DENYLIST))
+@pytest.mark.parametrize("form", ["import {m}", "import {m}.sub", "from {m} import x"])
+def test_every_exec_capable_denylist_entry_is_caught_in_every_import_form(
+    tmp_path, module, form
+):
+    path = tmp_path / f"denied_{module}_{abs(hash(form))}.py"
+    path.write_text(form.format(m=module) + "\n", encoding="utf-8")
+    assert any(
+        "exec-capable module on a non-runner leaf" in item
+        for item in _raw_command_findings(path, exec_family=False)
+    ), (module, form)
+
+
+def test_the_two_import_denylists_never_overlap_the_positive_allowlist():
+    # 黑名單若與白名單相交,exec 家族上就會出現「宣告過但仍被擋」的自相矛盾條目。
+    allowed = ALLOWED_STDLIB_IMPORTS | ALLOWED_THIRD_PARTY_IMPORTS
+    for name, modules in GOVERNANCE_IMPORTS_BY_FILE.items():
+        allowed = allowed | modules
+    assert not (EXEC_CAPABLE_IMPORT_DENYLIST & allowed)
+    assert not (EXEC_CAPABLE_IMPORT_DENYLIST & KERNEL_ONLY_IMPORTS)
 
 
 def test_the_family_derivation_is_red_when_a_new_runner_is_left_out(tmp_path):

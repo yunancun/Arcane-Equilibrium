@@ -335,6 +335,11 @@ class S2_4PosixInstallLockDriver:
         bits = _flag_bits(flags, expected=_lock.LOCK_FILE_OPEN_FLAGS)
         if basename != _lock.INSTALL_LOCK_BASENAME:
             raise S2_4HostStorageError("install_lock_basename_is_not_the_declared_contract")
+        # 誠實界線(S2E.2b-1 P2-6):``created`` 是一次 **TOCTOU 觀測**——``stat`` 與底下那次
+        # ``open(O_CREAT)`` 之間,另一個 writer 可以建出或移走同名檔,故它只描述「stat 當下看到
+        # 什麼」,不是「這次 open 真的建立了它」。它因此**只**落成 verdict 的資訊欄
+        # (``lock_file_created``),不是任何閘;互斥完全由 ``flock(LOCK_EX|LOCK_NB)`` 買單,而
+        # 本 driver 從不 unlink lock 檔,所以 inode 不會在兩個 writer 腳下被換掉。
         existed = True
         try:
             os.stat(basename, dir_fd=owned_parent, follow_symlinks=False)

@@ -9,8 +9,10 @@
 * **無 permit 消費紀錄 → typed 拒且零主機接觸**(§B.1 S2c)。沒有這一道,本模組就是一支
   「找到任何 journal 就對主機做破壞性動作」的免 permit 工具;
 * ``applied_rows`` 與 ``ownership_verified`` 都由 durable state 導出,caller 遞交不進來;
-* ``pre_compensation_observed_digest`` 取自該 row driver 自己寫的 WAL entry(**不是** aggregate
-  空間由 plan 導出的 ``_row_observation_digest`` —— 後者補償前後恆等,比對會變成空的);
+* ``pre_compensation_observed_digest`` 由**獨立 verifier 在補償之前唯讀觀測一次**取得
+  (``capture_pre_compensation_observation``),因此「補償後那次觀測 ≠ 補償前那次」是一道**真的**
+  能排除常量 verifier 的判準 —— 舊寫法拿 WAL 上的 applier 空間 digest 當替身,跨空間恆不相等,
+  該判準恆真形同不存在(E2 S2E.2b-1 P1-1);
 * 補償成功**不**重開 lane:同一份 plan 重跑必然停在 ``RECOVERY_REQUIRED``(F-0.2)。
 
 時間全部錨在 :mod:`s2_4_w3b_testkit` 的凍結常量上(無 wall clock,故無日期腐化)。
@@ -197,21 +199,35 @@ def test_only_the_transaction_terminal_record_is_ever_marked_terminal(fx):
     assert {state for state, _flag in trail[:-1]} == {"COMPENSATING", "COMPENSATED"}
 
 
-def test_a_crash_inside_an_effect_window_can_never_claim_exact(fx):
-    """崩在 effect 窗內的 row 沒有任何自己寫的 WAL entry ⇒ 拿不到補償前觀測 ⇒ 永不宣稱 exact。"""
+def test_a_crash_inside_an_effect_window_is_still_compensated_and_really_reobserved(fx):
+    """崩在 effect 窗內的 row **沒有**自己寫的 WAL entry —— 而那件事不再決定 exactness。
+
+    修前:``pre_compensation_observed_digest`` 取自 WAL,所以「沒有 row entry」⇒ 拿不到前值 ⇒
+    永不 exact。那條路徑同時吃掉了 ``None → COMPENSATED_NOT_REOBSERVED`` 這個分支的覆蓋,而
+    byte-identity 分支在整個測試套件裡一次都沒被執行過(E2 S2E.2b-1 P1-1)。
+
+    修後:補償前的觀測由**獨立 verifier** 現場唯讀取得,與 WAL 上有沒有 entry 無關。故本測試
+    改釘三件真正成立的事:①該 row 的 WAL 替身確實不存在;②它仍然**被補償**(可能存在的 delta
+    永遠不被跳過);③它的 exactness 現在由一次真的再觀測決定。
+    """
 
     persisted = _crash(fx, "CREDENTIAL_INSTALL:pre_effect")
+    marks = {name: len(row.calls) for name, row in fx.row_drivers.items()}
     verdict = _compensate(fx, persisted)
-    assert verdict["status"] == recovery.STARTUP_COMPENSATION_RECOVERY_REQUIRED
-    assert verdict["row_classification"]["CREDENTIAL_INSTALL"]["classification"] == (
-        recovery.ROW_DELTA_POSSIBLE
-    )
-    assert verdict["row_classification"]["CREDENTIAL_INSTALL"][
-        "pre_compensation_observed_digest"
-    ] is None
-    assert any("cannot be checked at all" in reason for reason in verdict["reasons"])
-    # 但它仍然**被補償**:一個可能存在的 delta 永遠不被跳過。
+    row = verdict["row_classification"]["CREDENTIAL_INSTALL"]
+    assert row["classification"] == recovery.ROW_DELTA_POSSIBLE
+    # ① 該 row 沒有任何自己寫的 WAL entry(舊實作正是拿這個當前值)。
+    assert row["row_applied_state_digest"] is None
+    # ② 仍然被補償。
     assert "CREDENTIAL_INSTALL" in fx.driver.compensated
+    # ③ 補償前後各真的觀測過一次,故這一窗現在收在 exact。
+    tail = fx.row_drivers["CREDENTIAL_INSTALL"].calls[marks["CREDENTIAL_INSTALL"]:]
+    assert tail[:3] == [
+        "independent_postcheck", "remove:CREDENTIAL_INSTALL", "independent_postcheck"
+    ], tail
+    assert verdict["status"] == recovery.STARTUP_COMPENSATION_COMPLETED_EXACT, (
+        verdict["reasons"]
+    )
 
 
 # --------------------------------------------------------------------------- #
@@ -316,6 +332,73 @@ def test_the_aggregate_permit_never_stands_in_for_the_pg_permit(fx):
     assert fx.driver.compensated == []
 
 
+def _seed_apply_consumption_ledger(fx, **forgeries):
+    """把 durable head 換成「前導 lineage + 這份 plan 的兩筆 APPLY consume」。
+
+    ``forgeries[profile_key]`` 覆寫**寫進 ledger entry 的那份 authorization 投影**
+    (``authorization_digest`` 取自 ``self_digest``、``profile_identity`` 取同名欄)。於是
+    entry 的 hash chain 仍自洽、``authorization_id`` 仍由 plan-bound payload 重算得到,只有
+    「這一筆到底綁哪一張 permit」被換掉 —— 那正是 S2c 唯一剩下的信任錨。
+    """
+
+    projected = [
+        dict(fx.authorization_set[key], **forgeries.get(key, {}))
+        for key in recovery.REQUIRED_AUTHORIZATION_PROFILE_KEYS
+    ]
+    sealed = lock.append_replay_entries(
+        w4b.prior_lineage_ledger(), projected, consumed_at=kit.ISSUED
+    )
+    fx.fs.files[w4b.LEDGER_BASENAME] = validator._canonical_bytes(sealed)
+    return sealed
+
+
+def test_the_reseeded_apply_consumption_ledger_is_an_admitting_control(fx):
+    """正對照:同一條重種路徑在**不**竄改任何欄位時必須放行。
+
+    沒有它,下面兩支 forgery 測試可能只是因為「ledger 被重種過」而綠(錯的理由)。
+    """
+
+    persisted = _crash(fx, "PG_ROLE_ACL_MIGRATION:post_effect_pre_observation")
+    ledger = _seed_apply_consumption_ledger(fx)
+    assert recovery.replay_consumption_reasons(ledger, fx.plan, fx.authorization_set) == []
+    assert _compensate(fx, persisted)["status"] == (
+        recovery.STARTUP_COMPENSATION_COMPLETED_EXACT
+    )
+
+
+@pytest.mark.parametrize("profile_key", list(recovery.REQUIRED_AUTHORIZATION_PROFILE_KEYS))
+@pytest.mark.parametrize("field,forged", [
+    ("self_digest", "sha256:" + "b" * 64),
+    ("profile_identity", "aiml-s2-some-other-operator-v1"),
+])
+def test_a_consumption_record_that_binds_another_permit_is_typed_refused(
+    fx, profile_key, field, forged
+):
+    """★S2c 唯一剩餘信任錨的機器判準★
+
+    ``replay_consumption_reasons`` 刻意不重驗 SSHSIG(重啟時 permit 幾乎必然已過期,把新鮮度
+    當判準等於讓補償器恰在被需要時不可達)。整條 S2c 因此塌縮到「entry 的
+    ``authorization_digest`` == permit 的 ``self_digest``(含簽章位元組)且 ``profile_identity``
+    相符」這一道:``validate_aiml_artifact`` 是 schema 閘不驗簽,``derive_authorization_id``
+    只用自報欄,沒有任何其他東西補位。E2 的 M5b 突變(該 if 改成 ``if False:``)修前全綠。
+    """
+
+    persisted = _crash(fx, "PG_ROLE_ACL_MIGRATION:post_effect_pre_observation")
+    ledger = _seed_apply_consumption_ledger(fx, **{profile_key: {field: forged}})
+    # chain 自洽、id 也對得上 —— 唯一不對的就是「這一筆綁的是別的 permit」。
+    assert validator.s2_4_replay_ledger_errors(ledger) == []
+    reasons = recovery.replay_consumption_reasons(ledger, fx.plan, fx.authorization_set)
+    assert any(
+        "does not bind this exact permit" in reason for reason in reasons
+    ), reasons
+    verdict = _compensate(fx, persisted)
+    assert verdict["status"] == recovery.STARTUP_COMPENSATION_RECOVERY_REQUIRED
+    # 零主機接觸:driver 一次都沒被呼叫,journal 上一個位元組都沒動。
+    assert verdict["mutation_performed"] is False
+    assert fx.driver.compensated == []
+    assert fx.persisted_install_journal()["entries"] == persisted["entries"]
+
+
 def test_a_stale_permit_still_proves_a_past_consumption(fx):
     """誠實界線:重啟時 permit 幾乎必然已過期;新鮮度若是判準,補償器恰在被需要時不可達。
 
@@ -406,6 +489,33 @@ def test_a_resume_verification_convergence_is_not_silently_compensated(fx):
     assert verdict["status"] == recovery.STARTUP_COMPENSATION_RECOVERY_REQUIRED
 
 
+@pytest.mark.parametrize("bad", ["", "../etc/passwd", "s2-4-probe-zz", 7])
+@pytest.mark.parametrize("lane", ["probe", "prepare"])
+def test_a_malformed_startup_lane_id_is_typed_not_a_raw_contract_error(fx, lane, bad):
+    """★P2-3★ 公開 docstring 承諾「任何一道不過即 typed 非成功且零主機變更」。
+
+    修前 ``startup_journal_paths`` 的 ``InstallDriverContractError`` 從
+    ``compensate_s2_4_startup_residue`` **裸逸**,而 ``reconcile_before_s2_4_intent`` 對**同一類
+    輸入**早就是 typed 轉譯 —— 兩個公開面對同一種畸形輸入給出不同判準,本身就是判準漂移。
+    """
+
+    persisted = _crash(fx, "PG_ROLE_ACL_MIGRATION:post_effect_pre_observation")
+    verdict = _compensate(fx, persisted, startup_journal_paths={lane: bad})
+    assert verdict["status"] == recovery.STARTUP_COMPENSATION_RECOVERY_REQUIRED
+    assert verdict["status"] in recovery.STARTUP_COMPENSATION_TYPED_STATUSES
+    assert verdict["mutation_performed"] is False
+    assert fx.driver.compensated == []
+    assert any(
+        "never joined into the state root" in reason for reason in verdict["reasons"]
+    ), verdict["reasons"]
+    assert fx.persisted_install_journal()["entries"] == persisted["entries"]
+    # 兩個公開面對同一種輸入必須同判準(§C 閘早已 typed)。
+    gate = recovery.reconcile_before_s2_4_intent(
+        fx.driver, lane=lane, lane_id=bad, clock=kit.frozen_clock()
+    )
+    assert gate["status"] == recovery.INTENT_GATE_RECOVERY_REQUIRED
+
+
 def test_no_driver_is_authority_locked_with_zero_mutation(fx):
     verdict = recovery.compensate_s2_4_startup_residue(fx.plan, fx.authorization_set, None)
     assert verdict["status"] == recovery.STARTUP_COMPENSATION_PENDING
@@ -451,6 +561,55 @@ def test_an_interrupted_previous_compensation_is_never_skipped(fx):
     ]["classification"] == recovery.ROW_DELTA_PROVEN
 
 
+class _ProcessDied(BaseException):
+    """行程在補償鏈中途「消失」——刻意不是 :class:`Exception`,故逐 row 的 typed 處理接不到。"""
+
+
+def test_a_compensation_chain_that_died_mid_way_is_re_read_from_the_original_row_entries(fx):
+    """★P2-5★ 補償器寫的 entry 一律標 aggregate,故第二輪讀到的仍是**原本那次 apply** 的 digest。
+
+    ``agent_governance_s2_4_journal`` 對 ``ENTRY_SOURCE_COMPONENT_ROW`` 的定義是「由該 row 的
+    driver 寫入」;啟動補償器不是任何一 row 的 driver。標錯的後果不是文件問題:補償鏈中崩、
+    第二次啟動時 ``classify_journal_rows`` 的 ``row_driver_entries[-1]`` 會取到補償器自己那一筆,
+    把「這一列被施作成什麼樣」讀成「這一列已被還原成什麼樣」。
+    """
+
+    persisted = _crash(fx, "PG_ROLE_ACL_MIGRATION:post_effect_pre_observation")
+    baseline = recovery.classify_journal_rows(persisted)
+    original = fx.driver.compensate_component_row
+
+    def _die_on_the_last_row(*, component_effect_class, **kwargs):
+        if component_effect_class == "HOST_IDENTITY_INSTALL":
+            raise _ProcessDied("the compensator process vanished mid-chain")
+        return original(component_effect_class=component_effect_class, **kwargs)
+
+    fx.driver.compensate_component_row = _die_on_the_last_row
+    with pytest.raises(_ProcessDied):
+        _compensate(fx, persisted)
+
+    mid = fx.persisted_install_journal()
+    assert "PG_ROLE_ACL_MIGRATION" in fx.driver.compensated, "the chain must have run a row"
+    written = [
+        entry for entry in mid["entries"]
+        if entry["state"] in {"COMPENSATING", "COMPENSATED", "FAILED"}
+    ]
+    assert written, "the compensator must have written durable records before it died"
+    assert {entry["entry_source"] for entry in written} == {
+        journal.ENTRY_SOURCE_AGGREGATE
+    }, written
+    # 第二輪:每一列的 applied/pre digest 仍逐位元組取自**原本那次 apply** 的 row driver entry。
+    second = recovery.classify_journal_rows(mid)
+    for name in runner.APPLY_ROW_ORDER:
+        assert second[name]["row_applied_state_digest"] == (
+            baseline[name]["row_applied_state_digest"]
+        ), name
+        assert second[name]["row_pre_state_digest"] == baseline[name]["row_pre_state_digest"], name
+    # 而那一列現在的 state 序列帶著一次已完成的補償,第二輪仍會冪等再補一次(永不跳過)。
+    assert "COMPENSATED" in second["PG_ROLE_ACL_MIGRATION"]["states"]
+    assert second["PG_ROLE_ACL_MIGRATION"]["classification"] != recovery.ROW_NO_DELTA
+    assert mid["terminal"] is False
+
+
 def test_a_transaction_scoped_entry_never_classifies_a_row(fx):
     """``ENTRY_SCOPE_AGGREGATE_TRANSACTION`` 的 pre/post 是 plan 級前態,不屬任何一 row。"""
 
@@ -465,6 +624,98 @@ def test_a_transaction_scoped_entry_never_classifies_a_row(fx):
     }
 
 
+def test_row_ownership_is_derived_and_never_a_constant(fx):
+    """★P2-2 的機器判準★ ``_row_ownership_verified`` 恆回 ``True`` 的突變必須紅。
+
+    它是**破壞性**安全謂詞:真 driver 據以決定要不要拆一列它可能不擁有的狀態。三個合取裡的
+    第三個(「該 row 的 driver 自己寫過一筆 pre_state 等於 plan 綁定 intent 前態的 entry」)
+    的導出邏輯修前零測試。
+    """
+
+    persisted = _crash(fx, "PG_ROLE_ACL_MIGRATION:post_effect_pre_observation")
+    name = "HOST_IDENTITY_INSTALL"
+    intents = fx.component_intents
+
+    def _verified(journal_view, component_intents=intents, component_effect_class=name):
+        return recovery._row_ownership_verified(
+            journal=journal_view, component_effect_class=component_effect_class,
+            component_intents=component_intents,
+        )
+
+    # 正對照:真實 journal + 真實 plan-bound intent ⇒ True(否則以下全部因錯的理由而綠)。
+    assert _verified(persisted) is True
+    # (a) 沒有該 row 的 intent ⇒ 沒有可比的前態 ⇒ False(caller 填不進「我擁有這一列」)。
+    assert _verified(persisted, component_intents={}) is False
+    assert _verified(persisted, component_intents=None) is False
+    assert _verified(persisted, component_intents={name: {"pre_state_digest": 7}}) is False
+    # (b) 同樣的 entry,但**不是**該 row 的 driver 寫的 ⇒ False。
+    aggregate_only = {"entries": [
+        dict(entry, entry_source=journal.ENTRY_SOURCE_AGGREGATE)
+        for entry in persisted["entries"]
+    ]}
+    assert _verified(aggregate_only) is False
+    # (c) 該 row 的 driver 寫了,但沒有一筆的 pre_state 等於 plan 綁定的 intent 前態 ⇒ False。
+    shifted = {"entries": [
+        dict(entry, pre_state_digest="sha256:" + "3" * 64) for entry in persisted["entries"]
+    ]}
+    assert _verified(shifted) is False
+    # (d) 別的 row 的 entry 不算數(判準是 per-row 的)。
+    assert _verified(persisted, component_effect_class="ENGINE_SCANNER") is False
+
+
+def test_the_derived_row_ownership_is_exactly_what_the_destructive_call_receives(fx, monkeypatch):
+    """導出值必須真的流到 driver 的破壞性呼叫上,而不是算完就丟。"""
+
+    persisted = _crash(fx, "PG_ROLE_ACL_MIGRATION:post_effect_pre_observation")
+    seen: dict[str, object] = {}
+    original = fx.driver.compensate_component_row
+
+    def _record(*, component_effect_class, plan_id, per_row_rollback_digest, ownership_verified):
+        seen[component_effect_class] = ownership_verified
+        return original(
+            component_effect_class=component_effect_class, plan_id=plan_id,
+            per_row_rollback_digest=per_row_rollback_digest,
+            ownership_verified=ownership_verified,
+        )
+
+    fx.driver.compensate_component_row = _record
+    del monkeypatch
+    assert _compensate(fx, persisted)["status"] == (
+        recovery.STARTUP_COMPENSATION_COMPLETED_EXACT
+    )
+    assert seen and set(seen.values()) == {True}
+
+
+def test_a_false_row_ownership_reaches_the_driver_and_the_verdict(fx, monkeypatch):
+    """反向:謂詞說 False,那個 False 必須原樣抵達 driver 並在 verdict 上留下 typed reason。"""
+
+    persisted = _crash(fx, "PG_ROLE_ACL_MIGRATION:post_effect_pre_observation")
+    seen: dict[str, object] = {}
+    original = fx.driver.compensate_component_row
+
+    def _record(*, component_effect_class, plan_id, per_row_rollback_digest, ownership_verified):
+        seen[component_effect_class] = ownership_verified
+        return original(
+            component_effect_class=component_effect_class, plan_id=plan_id,
+            per_row_rollback_digest=per_row_rollback_digest,
+            ownership_verified=ownership_verified,
+        )
+
+    fx.driver.compensate_component_row = _record
+    monkeypatch.setattr(recovery, "_row_ownership_verified", lambda **_kwargs: False)
+    verdict = _compensate(fx, persisted)
+    assert seen and set(seen.values()) == {False}
+    assert any(
+        "ownership-aware condition is NOT established" in reason
+        for reason in verdict["reasons"]
+    ), verdict["reasons"]
+    touched = {op["component_effect_class"] for op in verdict["reverse_ops"]} & set(seen)
+    assert touched
+    for op in verdict["reverse_ops"]:
+        if op["component_effect_class"] in touched:
+            assert op["ownership_verified"] is False, op
+
+
 def test_an_unbound_component_intent_is_a_caller_view_not_evidence(fx):
     persisted = _crash(fx, "PG_ROLE_ACL_MIGRATION:post_effect_pre_observation")
     tampered = {name: dict(intent) for name, intent in fx.component_intents.items()}
@@ -476,24 +727,46 @@ def test_an_unbound_component_intent_is_a_caller_view_not_evidence(fx):
 
 
 # --------------------------------------------------------------------------- #
-# §B.4:pre_compensation_observed_digest 的來源
+# §B.4:pre_compensation_observed_digest 的來源(E2 S2E.2b-1 P1-1)
 # --------------------------------------------------------------------------- #
-def test_the_pre_compensation_digest_comes_from_the_row_drivers_own_wal_entry(fx):
-    """**絕不**是 aggregate 空間的 ``_row_observation_digest``:那由 plan 導出、與主機無關,
-    補償前後恆等 ⇒ 「verifier 有沒有真的再看一次」這道檢查會變成空的。"""
+_CONSTANT_OBSERVATION = "sha256:" + "5" * 64
+
+
+def _constant_verifier(*, component_effect_class, install_plan_digest, applier_node):
+    """對**任何** subject、在補償前後都回同一份「乾淨」觀測的 verifier(E2 的反例 driver)。"""
+
+    del component_effect_class, install_plan_digest, applier_node
+    return {
+        "verifier_node": "s2-4-independent-verifier",
+        "observed_subject_digest": _CONSTANT_OBSERVATION,
+        "applied_state_verified": False,
+        "pre_state_lineage_verified": True,
+        "verifier_capture_digest": kit.CAPTURE_DIGEST,
+    }
+
+
+def test_the_pre_compensation_observation_is_taken_by_the_verifier_before_the_reverse_op(fx):
+    """補償前的那次觀測必須來自**同一支獨立 verifier**,且必須在 driver 動手**之前**。
+
+    兩個理由,兩者都是 P1-1 的實質:①同空間才比得起來——拿 WAL 上 applier 空間的 digest 當
+    前值,與 verifier 空間的後值恆不相等,那道判準就恆真、形同不存在;②次序——``row_driver()``
+    若在補償**之後**才取而它拋了例外,主機已被改而完全沒有 verifier 可用。
+    """
 
     persisted = _crash(fx, "PG_ROLE_ACL_MIGRATION:post_effect_pre_observation")
+    marks = {name: len(row.calls) for name, row in fx.row_drivers.items()}
+    verdict = _compensate(fx, persisted)
+    assert verdict["status"] == recovery.STARTUP_COMPENSATION_COMPLETED_EXACT
+    assert fx.driver.compensated
+    for name in fx.driver.compensated:
+        tail = fx.row_drivers[name].calls[marks[name]:]
+        assert tail[:3] == ["independent_postcheck", f"remove:{name}", "independent_postcheck"], (
+            name, tail
+        )
+    # 兩個空間的替身都已從導出面消失:WAL 的 applier 空間欄位不再存在,而 aggregate 空間的
+    # ``_row_observation_digest`` 由 plan 導出、與主機無關,補償前後恆等 —— 兩者都買不到排除力。
     classification = recovery.classify_journal_rows(persisted)
-    row_entries = [
-        entry for entry in persisted["entries"]
-        if entry["component_effect_class"] == "HOST_IDENTITY_INSTALL"
-        and entry["entry_source"] == journal.ENTRY_SOURCE_COMPONENT_ROW
-    ]
-    assert row_entries, "the row driver must have written its own entries"
-    assert classification["HOST_IDENTITY_INSTALL"]["pre_compensation_observed_digest"] == (
-        row_entries[-1]["post_state_digest"]
-    )
-    # 對照組:aggregate 空間的值是由 plan 導出的,與主機無關 —— 兩者必不相同。
+    assert "pre_compensation_observed_digest" not in classification["HOST_IDENTITY_INSTALL"]
     aggregate_space = evidence_leaf._row_observation_digest(
         component_effect_class="HOST_IDENTITY_INSTALL",
         component_intent_digest=runner.component_intent_plan_binding_digest(
@@ -501,9 +774,90 @@ def test_the_pre_compensation_digest_comes_from_the_row_drivers_own_wal_entry(fx
         ),
         admitted=True,
     )
-    assert classification["HOST_IDENTITY_INSTALL"][
-        "pre_compensation_observed_digest"
-    ] != aggregate_space
+    assert aggregate_space not in [
+        value for value in classification["HOST_IDENTITY_INSTALL"].values()
+        if isinstance(value, str)
+    ]
+
+
+def test_a_constant_returning_verifier_can_never_buy_completed_exact(fx):
+    """★P1-1 的機器判準★ 一支「對任何 subject 都回同一份乾淨觀測」的 verifier 必須拿不到 exact。
+
+    正對照是 :func:`test_at_least_one_crash_window_reaches_completed_exact` —— **同一個** crash
+    窗、同一份 fixture,只換掉 row driver 的 verifier 就從 ``COMPLETED_EXACT`` 掉到
+    ``RECOVERY_REQUIRED``,故本測試釘住的是那道 byte-identity 判準本身,不是別的閘。
+    """
+
+    persisted = _crash(fx, "PG_ROLE_ACL_MIGRATION:post_effect_pre_observation")
+    for row_driver in fx.row_drivers.values():
+        row_driver.independent_postcheck = _constant_verifier
+    verdict = _compensate(fx, persisted)
+    assert verdict["status"] == recovery.STARTUP_COMPENSATION_RECOVERY_REQUIRED
+    assert any(
+        "byte-identical to the" in reason for reason in verdict["reasons"]
+    ), verdict["reasons"]
+    assert verdict["rollback"]["exact_pre_state_restored"] is False
+    # 但每一列仍然真的被補償:常量 verifier 換不到 exact 宣稱,換不到「跳過一個可能的 delta」。
+    assert fx.driver.compensated == [
+        name for name in runner.REVERSE_COMPENSATION_ORDER
+        if verdict["row_classification"][name]["classification"] != recovery.ROW_NO_DELTA
+    ]
+
+
+def test_an_unobtainable_pre_compensation_observation_is_never_read_as_proof(fx):
+    """補償**前**那次觀測拿不到 ⇒ typed 未證(``exact=False``),絕不是「沒有約束要滿足」。
+
+    這正是舊實作把 ``None`` 分支吃掉之後從未被執行過的那一條:verifier 在補償前逸出、補償後
+    可用,於是後值有、前值無 —— 修前會被 WAL 替身填成「有前值且必不相等」。
+    """
+
+    persisted = _crash(fx, "PG_ROLE_ACL_MIGRATION:post_effect_pre_observation")
+    for row_driver in fx.row_drivers.values():
+        original = row_driver.independent_postcheck
+        state = {"pending": True}
+
+        def _raise_before_compensation(
+            *, component_effect_class, install_plan_digest, applier_node,
+            _original=original, _state=state,
+        ):
+            if _state["pending"]:
+                _state["pending"] = False
+                raise RuntimeError("verifier unavailable before compensation")
+            return _original(
+                component_effect_class=component_effect_class,
+                install_plan_digest=install_plan_digest, applier_node=applier_node,
+            )
+
+        row_driver.independent_postcheck = _raise_before_compensation
+    verdict = _compensate(fx, persisted)
+    assert verdict["status"] == recovery.STARTUP_COMPENSATION_RECOVERY_REQUIRED
+    assert any(
+        "cannot be checked at all" in reason for reason in verdict["reasons"]
+    ), verdict["reasons"]
+    assert fx.driver.compensated, "an unprovable exactness never means skipping the delta"
+
+
+def test_a_row_driver_that_is_unavailable_is_never_taken_after_the_host_was_changed(fx):
+    """``row_driver()`` 在補償**之前**取。取不到就是「這一列將在無 verifier 之下被補償」,
+    而不是「主機已被改、現在才發現沒有 verifier」。"""
+
+    persisted = _crash(fx, "PG_ROLE_ACL_MIGRATION:post_effect_pre_observation")
+    original = fx.driver.row_driver
+
+    def _unavailable(*, component_effect_class):
+        if component_effect_class == "PG_ROLE_ACL_MIGRATION":
+            raise RuntimeError("row driver surface unavailable")
+        return original(component_effect_class=component_effect_class)
+
+    fx.driver.row_driver = _unavailable
+    verdict = _compensate(fx, persisted)
+    assert verdict["status"] == recovery.STARTUP_COMPENSATION_RECOVERY_REQUIRED
+    assert any(
+        "row driver was unavailable before compensation" in reason
+        for reason in verdict["reasons"]
+    ), verdict["reasons"]
+    # 該列仍被補償(delta 不跳過),但因為沒有 verifier,exact 一律不宣稱。
+    assert "PG_ROLE_ACL_MIGRATION" in fx.driver.compensated
 
 
 # --------------------------------------------------------------------------- #
@@ -652,6 +1006,42 @@ def test_the_compensator_never_wraps_a_row_driver_into_a_journal_routed_driver()
         isinstance(node, ast.Attribute) and node.attr == "row_driver"
         for node in ast.walk(tree)
     ), "the compensator is still expected to call row_driver() as an independent verifier"
+
+
+# S2E.2b-1 P2-4:設計批准的**唯一**私有跨模組穿透。它的擁有者是 lock 釋放政策的單一正本
+# (``_fold_lock_release``),抄一份等於製造第二份判準;其餘一律走 owner 模組的公開再匯出。
+_APPROVED_PRIVATE_CROSS_MODULE_NAMES = {("_install_driver", "_fold_lock_release")}
+
+
+def test_the_compensator_penetrates_exactly_one_approved_private_cross_module_name():
+    source = (HELPERS / "agent_governance_s2_4_host_recovery.py").read_text(encoding="utf-8")
+    tree = ast.parse(source)
+    module_aliases = {
+        alias.asname or alias.name
+        for node in ast.walk(tree) if isinstance(node, ast.Import)
+        for alias in node.names
+    }
+    assert "_install_driver" in module_aliases and "central_validator" in module_aliases
+    found = {
+        (node.value.id, node.attr)
+        for node in ast.walk(tree)
+        if isinstance(node, ast.Attribute) and node.attr.startswith("_")
+        and isinstance(node.value, ast.Name) and node.value.id in module_aliases
+    }
+    assert found == _APPROVED_PRIVATE_CROSS_MODULE_NAMES, sorted(found)
+
+
+def test_every_public_re_export_is_the_same_object_as_its_private_owner():
+    """P2-4 的「零行為改動」判準:公開名必須**就是**那一支,不是另一份拷貝或包裝。"""
+
+    import agent_governance_s2_4_component as component  # noqa: PLC0415
+
+    assert runner.observe_residue is runner._observe_residue
+    assert runner.build_install_rollback is runner._build_install_rollback
+    assert runner.terminal_journal is runner._terminal_journal
+    assert lock.read_durable_ledger is lock._read_durable_ledger
+    assert validator.s2_4_replay_ledger_errors is validator._s2_4_replay_ledger_errors
+    assert component.ALL_FALSE_PRODUCTION_FLAGS is component._ALL_FALSE_PRODUCTION_FLAGS
 
 
 def test_the_typed_status_namespace_is_disjoint_from_the_frozen_receipt_enum():
