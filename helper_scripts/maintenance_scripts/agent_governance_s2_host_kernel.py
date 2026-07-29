@@ -36,8 +36,11 @@ obligation ``PR_SET_DUMPABLE_IS_DECLARED_NOT_ENFORCED`` 指出該常量今日只
 
 from __future__ import annotations
 
+import base64
 import ctypes
+import json
 import os
+import re
 import socket
 import subprocess
 import sys
@@ -87,6 +90,10 @@ class S2HostCommandFailed(S2HostKernelError):
 SESSION_S2_0_OBSERVER_BOOTSTRAP = "s2_0_pg_observer_bootstrap"
 SESSION_S2_1_QUIESCE_READ = "s2_1_quiesce_read"
 SESSION_S2_1_QUIESCE_FENCE = "s2_1_quiesce_fence"
+# 唯讀 observer 的**進程分離**子行程(§B.2 L2)。它沒有字面 allowlist:argv 由
+# :meth:`HostExecutionKernel.run_observer_child` 於 kernel 內部**構造**(解譯器 + ``-E`` + 絕對
+# 腳本路徑 + 一段經 charset/大小驗證的 base64 request),caller 永遠遞不進 argv。
+SESSION_S2_HOST_OBSERVER_CHILD = "s2_host_observer_child"
 
 # 只有 fence session 允許變更主機狀態,且必須由 caller 顯式 ``allow_mutation=True`` 承認。
 MUTATING_SESSIONS = frozenset({SESSION_S2_1_QUIESCE_FENCE})
@@ -145,6 +152,8 @@ SESSION_ARGV_ALLOWLISTS: dict[str, frozenset[tuple[str, ...]]] = {
     SESSION_S2_0_OBSERVER_BOOTSTRAP: frozenset(),
     SESSION_S2_1_QUIESCE_READ: frozenset(_derive_quiesce_read_argv()),
     SESSION_S2_1_QUIESCE_FENCE: frozenset(_derive_quiesce_fence_argv()),
+    # observer child 的 argv 由 kernel 構造,故字面 allowlist 為空 ⇒ ``run()`` 對此 session 恆拒。
+    SESSION_S2_HOST_OBSERVER_CHILD: frozenset(),
 }
 
 # per-session 固定 timeout(code-owned,caller 不可放大)。fence 需容納 unit 的 TimeoutStopUSec。
@@ -152,7 +161,14 @@ SESSION_TIMEOUT_SECONDS: dict[str, int] = {
     SESSION_S2_0_OBSERVER_BOOTSTRAP: 30,
     SESSION_S2_1_QUIESCE_READ: 30,
     SESSION_S2_1_QUIESCE_FENCE: 120,
+    SESSION_S2_HOST_OBSERVER_CHILD: 120,
 }
+
+# observer child 的 code-owned 進入點與 request 上限(防 execve 的 MAX_ARG_STRLEN / E2BIG)。
+OBSERVER_CHILD_SCRIPT = HELPER_DIR / "agent_governance_s2_host_observer.py"
+OBSERVER_CHILD_FLAG = "--request-base64"
+OBSERVER_CHILD_MAX_REQUEST_BYTES = 8192
+_BASE64_TOKEN_RE = re.compile(r"^[A-Za-z0-9+/]+={0,2}$")
 
 
 def _assert_allowlist_shape() -> None:
@@ -207,6 +223,25 @@ def assert_session_argv(session: str, argv: Iterable[str]) -> tuple[str, ...]:
             f"argv is not in the closed allowlist of session {session!r}"
         )
     return candidate
+
+
+def observer_child_argv(request_base64: str) -> list[str]:
+    """唯一的 read-only observer child argv 構造點(鏡 S2.5 ``allowlisted_systemctl_argv`` 的形制)。
+
+    caller 永遠遞不進 argv:解譯器、``-E``(忽略 ``PYTHON*`` env ⇒ 防 ``PYTHONPATH`` 注入)、絕對
+    腳本路徑與旗標名全是 code-owned 常量,唯一變動處是一段必須通過 charset + 大小檢查的 base64
+    request。任何非 base64 charset / 超長 payload 一律 typed 拒(後者同時是 ``E2BIG`` 護欄)。
+    """
+
+    if not isinstance(request_base64, str) or not _BASE64_TOKEN_RE.fullmatch(request_base64):
+        raise S2HostArgvNotAllowlisted(
+            "observer child request must be a strict base64 token (no shell metacharacters)"
+        )
+    if len(request_base64) > OBSERVER_CHILD_MAX_REQUEST_BYTES:
+        raise S2HostArgvNotAllowlisted(
+            f"observer child request exceeds {OBSERVER_CHILD_MAX_REQUEST_BYTES} bytes"
+        )
+    return [sys.executable, "-E", str(OBSERVER_CHILD_SCRIPT), OBSERVER_CHILD_FLAG, request_base64]
 
 
 # --------------------------------------------------------------------------- #
@@ -538,12 +573,35 @@ class HostExecutionKernel:
         return self._timeout_seconds
 
     # -- the exec point ----------------------------------------------------- #
+    def run_observer_child(self, request: dict[str, Any]) -> str:
+        """Spawn the read-only observer in an isolated ``python3 -E`` child and return its stdout.
+
+        §B.2 L2 的進程分離:子行程以 sanitized allowlist env 啟動、不繼承任何治理閘 env、不持有
+        本行程的任何 driver 或連線物件,產出只經 stdout 的 canonical JSON 回來。argv 由
+        :func:`observer_child_argv` 於 kernel 內部構造,caller 只遞一份 dict request。
+        """
+
+        if self.session != SESSION_S2_HOST_OBSERVER_CHILD:
+            raise S2HostSessionError(
+                f"session {self.session!r} may not spawn the read-only observer child"
+            )
+        payload = json.dumps(
+            request, ensure_ascii=False, sort_keys=True, separators=(",", ":"), allow_nan=False,
+        ).encode("utf-8")
+        argv = observer_child_argv(base64.b64encode(payload).decode("ascii"))
+        enforce_process_hardening()
+        self.calls.append(tuple(argv))
+        return self._execute(argv)
+
     def run(self, argv: Iterable[str]) -> str:
         """Execute exactly one allowlisted argv and return its redacted stdout."""
 
         candidate = assert_session_argv(self.session, argv)
         enforce_process_hardening()
         self.calls.append(candidate)
+        return self._execute(list(candidate))
+
+    def _execute(self, candidate: list[str]) -> str:
         try:
             completed = subprocess.run(  # noqa: S603 - fixed absolute argv, shell=False, no caller string
                 list(candidate),
