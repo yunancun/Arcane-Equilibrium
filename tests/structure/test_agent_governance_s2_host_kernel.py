@@ -129,16 +129,17 @@ GOVERNANCE_IMPORTS_BY_FILE: dict[str, frozenset[str]] = {
         "agent_governance_s2_4_lock",
     }),
     # S2.4 §5.4 的啟動逆序補償器:它是唯一需要 applier 匯入面的 family 成員(補償要重用
-    # aggregate 交易葉的 rollback 契約、殘留觀測與 lock-release 折入政策,絕不另抄一份)。
+    # aggregate 交易葉的 rollback 契約、殘留觀測與 lock-release 折入政策,絕不另抄一份),
+    # 也是唯一需要中央 schema/digest 驗證器的成員(permit 身分與 rollback artifact 的再導出)。
+    # 本表是**每檔模組**白名單,不限於 ``agent_governance_*`` 前綴——前綴是名字,不是能力。
     "agent_governance_s2_4_host_recovery.py": frozenset({
         "agent_governance_s2_4_component",
-        "agent_governance_s2_4_host_storage",
         "agent_governance_s2_4_install_driver",
         "agent_governance_s2_4_install_evidence",
-        "agent_governance_s2_4_install_plan",
         "agent_governance_s2_4_journal",
         "agent_governance_s2_4_lock",
         "agent_governance_s2_4_reconcile",
+        "aiml_gate_receipt_validator",
     }),
     "aiml_s2_effect_host_run.py": frozenset({
         "agent_governance_alr_quiesce_fence",
