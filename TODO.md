@@ -80,6 +80,13 @@ governed pytest provider 改由 reviewed Git head 的 exact lock＋8 支 hash-pi
 遞迴納入 repo-local Python dependencies 與 pytest 會執行的 tracked package-parent
 `__init__.py`；210-test W0 在 300 秒留下 2 項未完成，故預設 bounded timeout
 依 exact-head machine evidence 校正為 600 秒。
+同一 frozen candidate 的 current-head Codex review 再發現兩個 recovery 缺口：
+prepared anchor intent 過期後仍可能先進 writer effect window，以及 unresolved latch
+只活在 weak in-process registry。兩者已在本 checkpoint 以 effect 前 freshness
+拒絕、strong controller ownership，及位於可替換 state root 外的 owner-only
+append-history durable latch ledger＋exact readback 修復；root rename／process
+reconstruction 不再清閂，所有 ledger entry 仍固定為 `DISPOSABLE_TEST` 且
+production effect／authority 均 false。
 這只關閉 launch tooling 的 `PA-S2E-LW1-P2-006`、`F-LW1-04`、
 `F-LW1-04-schema` 與 `LAUNCH-04` review debt；**尚未發行 W0 genesis 或 LW1 wave
 receipt，尚未取得 `S2E_2B_2A_SECURITY_RECOVERY_READY`，不得解鎖 LW2**。

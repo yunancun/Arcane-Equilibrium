@@ -865,6 +865,32 @@ def test_record_is_sticky_and_captures_failure_time_state_instead_of_posthoc_adm
     assert state.unresolved == captured
 
 
+def test_unresolved_latch_survives_reconstruction_and_state_root_replacement(
+    tmp_path,
+):
+    state_root = tmp_path / "state"
+    state_root.mkdir()
+    capture = _host_capture(state_root)
+    state = lifecycle.S2_5RecoveryState(
+        state_root=state_root,
+        host_capture=capture,
+        now=NOW,
+    )
+    _record_state(state)
+    captured = copy.deepcopy(state.unresolved)
+    state_root.rename(tmp_path / "replaced-state")
+
+    restarted = lifecycle.S2_5RecoveryState(
+        state_root=state_root,
+        host_capture=capture,
+        now=NOW,
+    )
+
+    assert restarted.unresolved == captured
+    assert restarted._generation == 1
+    assert restarted._previous_root_digest == D2
+
+
 @pytest.mark.parametrize(
     "mutation",
     [

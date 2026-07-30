@@ -582,7 +582,10 @@ class AuthenticatedRecoveryAnchor:
             raise RecoveryAnchorError("anchor_clock_not_aware_datetime")
         return moment
 
-    def _freshness(self, artifact: dict[str, Any], *, label: str) -> None:
+    @staticmethod
+    def _freshness_at(
+        artifact: dict[str, Any], *, label: str, moment: datetime
+    ) -> None:
         issued = _parse_time(artifact.get("issued_at"), code=f"{label}_issued_at_invalid")
         expires = _parse_time(
             artifact.get("expires_at"), code=f"{label}_expires_at_invalid"
@@ -590,11 +593,13 @@ class AuthenticatedRecoveryAnchor:
         lifetime = expires - issued
         if lifetime <= timedelta(0) or lifetime > timedelta(minutes=5):
             raise RecoveryAnchorError(f"{label}_freshness_window_invalid")
-        now = self._now()
-        if issued - now > timedelta(seconds=60):
+        if issued - moment > timedelta(seconds=60):
             raise RecoveryAnchorError(f"{label}_issued_in_future")
-        if now > expires:
+        if moment > expires:
             raise RecoveryAnchorError(f"{label}_stale")
+
+    def _freshness(self, artifact: dict[str, Any], *, label: str) -> None:
+        self._freshness_at(artifact, label=label, moment=self._now())
 
     def _verify_signed(
         self,
@@ -1226,6 +1231,20 @@ class AuthenticatedRecoveryAnchor:
         entry = payload["entry"]
         intent = payload["intent"]
         request = payload["request"]
+        try:
+            self._freshness_at(
+                intent,
+                label="anchor_append_intent",
+                moment=moment,
+            )
+        except RecoveryAnchorError as error:
+            return self._recovery_chain(
+                intent,
+                prepared_packet_digest=prepared["self_digest"],
+                code=error.code,
+                result_status="RECOVERY_REQUIRED",
+                moment=moment,
+            )
         latest = {
             "snapshot_id": request["expected_snapshot_id"],
             "latest_version_id": request["expected_latest_version_id"],

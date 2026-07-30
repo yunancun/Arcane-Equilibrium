@@ -1,7 +1,7 @@
 # CLAUDE_CHANGELOG.md — 開發歷史歸檔
 
 > 從 CLAUDE.md / TODO.md 遷出的 Wave/Sprint/Batch + TODO version-increment 歷史敘事。新 session 不需要讀此文件，僅供回顧歷史時查閱。
-> 最後更新：2026-07-30（AIML S2E launch-gate calibration；PROGRESS ledger v17）
+> 最後更新：2026-07-30（AIML S2E launch-gate calibration；PROGRESS ledger v18）
 
 ---
 
@@ -18,6 +18,12 @@ safe extraction，provider identity 納入 closure schema；S2E source manifest 
 candidate Git-blob repo-local import closure，並納入 pytest 會執行的 tracked
 package-parent `__init__.py`；210-test W0 在 300 秒留下 2 項未完成，故 bounded
 capture default 依 exact-head machine evidence 調為 600 秒。
+Frozen-candidate current-head Codex review 後再修兩項：prepared anchor intent
+已過期時在任何 writer 呼叫前產生 typed `RECOVERY_REQUIRED` chain；recovery
+controller 不再依賴可被 GC／restart 清除的 weak registry，改用 strong live
+ownership 與可替換 state root 外的 owner-only append-history durable latch ledger，
+並在每次 admission／更新後重驗 exact readback。ledger effect boundary 固定
+`DISPOSABLE_TEST`、production effect／authority false。
 此 checkpoint 不改 5/9 package projection；`S2E.2b-2` 仍 ACTIVE，
 `S2E_2B_2A_SECURITY_RECOVERY_READY` 尚未成立，production effect 仍 0/6。
 

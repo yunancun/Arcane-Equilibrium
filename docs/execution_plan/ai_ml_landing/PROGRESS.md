@@ -1,7 +1,7 @@
 # AI/ML Landing Progress Ledger
 
 **Program**: `AIML-LONG-LIVED-LANDING-V2`
-**Ledger version**: 17
+**Ledger version**: 18
 **Updated**: 2026-07-30
 **Overall state**: `PROGRAM_ADOPTED` · **`S1_CLOSED`** · every S2 effect-session
 source-seam predicate is narrowly `SOURCE_READY` (S2.0 + S2.1 + S2.2A + S2.3 +
@@ -29,7 +29,13 @@ hash-pinned Git wheel blobs; the closure schema requires its provider identity;
 the review manifest includes transitive repo-local Python dependencies and every
 tracked package-parent `__init__.py` pytest can execute; and the W0 capture
 default is 600 seconds after the 210-test profile left two tests incomplete at
-the old 300-second bound. This checkpoint issues no W0/LW1 receipt,
+the old 300-second bound. Current-head Codex review then closed two additional
+recovery deltas: an expired prepared anchor intent is rejected before the writer
+effect window, and the unresolved latch now survives GC/process reconstruction
+and whole state-root replacement through strong live ownership plus an
+owner-only, off-state-root, append-history durable ledger with exact readback.
+Its entries remain `DISPOSABLE_TEST`, production-effect false and
+production-authority false. This checkpoint issues no W0/LW1 receipt,
 does not satisfy `S2E_2B_2A_SECURITY_RECOVERY_READY`, does not unlock LW2, and
 does not change the 5/9 package projection or production effect 0/6.
 A fresh Linux run at H_effect

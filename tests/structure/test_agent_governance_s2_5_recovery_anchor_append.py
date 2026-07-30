@@ -5,6 +5,7 @@ from __future__ import annotations
 import copy
 import json
 import sys
+from datetime import timedelta
 from pathlib import Path
 
 import pytest
@@ -85,6 +86,20 @@ def test_execute_prepared_uses_the_identical_persistable_request():
     assert len(backend.records) == 1
     assert packet["result"]["prepared_packet_digest"] == prepared["self_digest"]
     assert packet["postcheck"]["status"] == "UNVERIFIED"
+
+
+def test_execute_prepared_rejects_expired_intent_before_writer_effect():
+    protocol, backend, writer, _, _ = _protocol()
+    prepared = protocol.prepare_append(manifest())
+    protocol._clock.value += timedelta(minutes=6)
+
+    packet = protocol.execute_prepared(prepared)
+
+    assert packet["status"] == "RECOVERY_REQUIRED"
+    assert packet["result"]["status"] == "RECOVERY_REQUIRED"
+    assert packet["failure_detail_code"] == "anchor_append_intent_stale"
+    assert writer.requests == []
+    assert backend.records == []
 
 
 def test_lost_response_reconciles_and_retries_only_the_exact_prepared_request():
