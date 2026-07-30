@@ -274,7 +274,7 @@ def _raw_command_findings(path: Path, *, exec_family: bool = True) -> list[str]:
     module_lookup_aliases: set[str] = set()
     os_aliases: set[str] = {"os"}
     subprocess_aliases: set[str] = {"subprocess"}
-    container_aliases: dict[str, dict[object, set[str]]] = {}
+    container_aliases: dict[str, object] = {}
     family_aliases = {
         "builtins": builtins_aliases, "ctypes": ctypes_handles,
         "module_lookup": module_lookup_aliases,
@@ -310,13 +310,46 @@ def _raw_command_findings(path: Path, *, exec_family: bool = True) -> list[str]:
             return
         findings.append(f"line {lineno}: import outside the declared allowlist: {rendered}")
 
-    def _value_families(node: ast.AST | None) -> set[str]:
+    def _flatten_provenance(provenance: object) -> set[str]:
+        if isinstance(provenance, set):
+            return set(provenance)
+        families: set[str] = set()
+        if isinstance(provenance, dict):
+            for member in provenance.values():
+                families.update(_flatten_provenance(member))
+        return families
+
+    def _merge_provenance(left: object, right: object) -> object:
+        if isinstance(left, dict) and isinstance(right, dict):
+            merged = dict(left)
+            for key, member in right.items():
+                merged[key] = (
+                    _merge_provenance(merged[key], member)
+                    if key in merged else member
+                )
+            return merged
+        return _flatten_provenance(left) | _flatten_provenance(right)
+
+    def _value_provenance(node: ast.AST | None) -> object:
         if isinstance(node, ast.Name):
+            if node.id in container_aliases:
+                return container_aliases[node.id]
             families = {
                 family for family, aliases in family_aliases.items()
                 if node.id in aliases
             }
             return families | ({"ctypes"} if node.id == "ctypes" else set())
+        if isinstance(node, (ast.List, ast.Tuple)):
+            return {
+                index: _value_provenance(item)
+                for index, item in enumerate(node.elts)
+            }
+        if isinstance(node, ast.Dict):
+            return {
+                key.value: _value_provenance(item)
+                for key, item in zip(node.keys, node.values)
+                if isinstance(key, ast.Constant)
+            }
         if isinstance(node, ast.Attribute):
             if (
                 node.attr == "modules" and isinstance(node.value, ast.Name)
@@ -334,24 +367,28 @@ def _raw_command_findings(path: Path, *, exec_family: bool = True) -> list[str]:
                 return {"ctypes"}
             if (
                 isinstance(node.func, ast.Attribute) and node.func.attr == "get"
-                and "module_registry" in _value_families(node.func.value)
+                and "module_registry" in _flatten_provenance(
+                    _value_provenance(node.func.value)
+                )
             ):
                 return {"module_lookup"}
             return set()
         if isinstance(node, ast.Subscript):
-            families = set()
-            base_families = _value_families(node.value)
-            if "module_registry" in base_families:
-                families.add("module_lookup")
-            if isinstance(node.value, ast.Name):
-                members = container_aliases.get(node.value.id, {})
-                if isinstance(node.slice, ast.Constant):
-                    families.update(members.get(node.slice.value, set()))
-                else:
-                    for member_families in members.values():
-                        families.update(member_families)
-            return families
+            provenance = _value_provenance(node.value)
+            if isinstance(provenance, dict):
+                provenance = (
+                    provenance.get(node.slice.value, set())
+                    if isinstance(node.slice, ast.Constant)
+                    else _flatten_provenance(provenance)
+                )
+            families = _flatten_provenance(provenance)
+            if isinstance(provenance, set) and "module_registry" in families:
+                return (families - {"module_registry"}) | {"module_lookup"}
+            return provenance
         return set()
+
+    def _value_families(node: ast.AST | None) -> set[str]:
+        return _flatten_provenance(_value_provenance(node))
 
     def _module_registry(receiver: ast.AST | None) -> bool:
         return "module_registry" in _value_families(receiver)
@@ -504,36 +541,21 @@ def _raw_command_findings(path: Path, *, exec_family: bool = True) -> list[str]:
             for target, bound_value in bindings:
                 if not isinstance(target, ast.Name):
                     continue
-                for family in _value_families(bound_value):
+                provenance = _value_provenance(bound_value)
+                for family in _flatten_provenance(provenance):
                     aliases = family_aliases[family]
                     if target.id not in aliases:
                         aliases.add(target.id)
                         changed = True
-            members: dict[object, set[str]] = {}
-            if isinstance(value, (ast.List, ast.Tuple)):
-                members = {
-                    index: _value_families(item)
-                    for index, item in enumerate(value.elts)
-                }
-            elif isinstance(value, ast.Dict):
-                members = {
-                    key.value: _value_families(item)
-                    for key, item in zip(value.keys, value.values)
-                    if isinstance(key, ast.Constant)
-                }
-            for target in targets:
-                if not isinstance(target, ast.Name):
-                    continue
-                inherited = (
-                    container_aliases.get(value.id)
-                    if isinstance(value, ast.Name) else None
-                )
-                candidate = members or inherited
-                if candidate and container_aliases.get(target.id) != candidate:
-                    container_aliases[target.id] = {
-                        key: set(families) for key, families in candidate.items()
-                    }
-                    changed = True
+                if (
+                    isinstance(provenance, dict)
+                ):
+                    merged = _merge_provenance(
+                        container_aliases.get(target.id, {}), provenance
+                    )
+                    if container_aliases.get(target.id) != merged:
+                        container_aliases[target.id] = merged
+                        changed = True
             for target, bound_value in bindings:
                 if bound_value is None or _callee_capability(bound_value) is None:
                     continue
@@ -936,15 +958,15 @@ AST_SCANNER_MUTATIONS = {
         "def f(key, expr):\n    return __builtins__.get(key)(expr)\n",
         "dynamic execution subscript",
     ),
-    "list_held_builtins_alias_variable_subscript": (
+    "nested_list_held_builtins_alias_variable_subscript": (
         "def f(key, expr):\n"
-        "    box = [__builtins__]\n"
-        "    return box[0][key](expr)\n",
+        "    outer = [[__builtins__]]\n"
+        "    return outer[0][0][key](expr)\n",
         "dynamic execution subscript",
     ),
-    "tuple_unpacked_builtins_alias_variable_subscript": (
+    "recursively_unpacked_builtins_alias_variable_subscript": (
         "def f(key, expr):\n"
-        "    harmless, builtins_alias = (object(), __builtins__)\n"
+        "    _, (harmless, builtins_alias) = (object(), (object(), __builtins__))\n"
         "    return builtins_alias[key](expr)\n",
         "dynamic execution subscript",
     ),
@@ -974,12 +996,16 @@ AST_SCANNER_MUTATIONS = {
         "    return sp.call(argv)\n",
         "dynamic module execution",
     ),
-    "tuple_held_sys_modules_alias_call": (
+    "recursive_mixed_container_sys_modules_alias_call": (
         "import sys\n\ndef f(module_key, argv):\n"
-        "    box = (object(), sys.modules)\n"
-        "    sp = box[1][module_key]\n"
+        "    outer = ({'level': [(sys.modules,)]},)\n"
+        "    sp = outer[0]['level'][0][0][module_key]\n"
         "    return sp.call(argv)\n",
         "dynamic module execution",
+    ),
+    "nested_list_held_sys_modules_alias_call": (
+        "import sys\n\ndef f(key, argv):\n    outer = [[sys.modules]]\n"
+        "    return outer[0][0][key].call(argv)\n", "dynamic module execution",
     ),
     "os_dunder_getattribute_then_call": (
         "import os\n\ndef f(name, argv):\n"
@@ -1002,6 +1028,10 @@ AST_SCANNER_MUTATIONS = {
         "    box = {'safe': object(), 'os': os}\n"
         "    return getattr(box['os'], name)(*argv)\n",
         "dynamic callable attribute",
+    ),
+    "nested_list_held_os_alias_variable_getattr": (
+        "import os\n\ndef f(name, argv):\n    outer = [[os]]\n"
+        "    return getattr(outer[0][0], name)(*argv)\n", "dynamic callable attribute",
     ),
     "computed_getattr_stored_in_container": (
         "import os\n\ndef f(name, argv):\n"
@@ -1111,20 +1141,7 @@ def test_kernel_ctypes_is_limited_to_the_exact_prctl_hardening_shapes(tmp_path):
     assert any("ctypes call outside the hardening allowlist" in item for item in findings)
 
 
-def test_allowlisted_ctypes_handle_cannot_hide_dynamic_ffi_getattr(tmp_path):
-    path = tmp_path / KERNEL_PATH.name
-    path.write_text(
-        "import ctypes\n"
-        "def enforce_process_hardening(name, argv):\n"
-        "    libc = ctypes.CDLL(None, use_errno=True)\n"
-        "    return getattr(libc, name)(*argv)\n",
-        encoding="utf-8",
-    )
-    findings = _raw_command_findings(path)
-    assert any("dynamic callable attribute" in item for item in findings), findings
-
-
-def test_assigned_ctypes_handle_alias_cannot_hide_dynamic_ffi_getattr(tmp_path):
+def test_assigned_ctypes_handle_cannot_hide_dynamic_ffi_getattr(tmp_path):
     path = tmp_path / KERNEL_PATH.name
     path.write_text(
         "import ctypes\n"
@@ -1138,11 +1155,27 @@ def test_assigned_ctypes_handle_alias_cannot_hide_dynamic_ffi_getattr(tmp_path):
     assert any("dynamic callable attribute" in item for item in findings), findings
 
 
+def test_nested_ctypes_handle_cannot_hide_dynamic_ffi_getattr(tmp_path):
+    path = tmp_path / KERNEL_PATH.name
+    source = (
+        "import ctypes\n"
+        "def enforce_process_hardening(name, argv):\n"
+        "    libc = ctypes.CDLL(None, use_errno=True)\n"
+        "    outer = [[libc, object()]]\n"
+        "    return getattr(outer[0][0], name)(*argv)\n"
+    )
+    path.write_text(source, encoding="utf-8")
+    findings = _raw_command_findings(path)
+    assert any("dynamic callable attribute" in item for item in findings), findings
+    path.write_text(source.replace("[0][0]", "[0][1]"), encoding="utf-8")
+    assert _raw_command_findings(path) == []
+
+
 def test_container_aliases_do_not_taint_a_benign_sibling(tmp_path):
     sources = (
-        "import os\nbox = [os, object()]\ngetattr(box[1], name)\n",
-        "import os\nos_alias, safe = (os, object())\ngetattr(safe, name)\n",
-        "import os\nbox = {'os': os, 'safe': object()}\ngetattr(box['safe'], name)\n",
+        "outer = [[__builtins__, {}]]\nouter[0][1][key](expr)\n",
+        "import sys\nouter = [[sys.modules, {}]]\nouter[0][1][key].call(argv)\n",
+        "import os\nouter = [[os, object()]]\ngetattr(outer[0][1], name)\n",
     )
     for index, source in enumerate(sources):
         path = tmp_path / f"benign_container_sibling_{index}.py"
