@@ -10,7 +10,7 @@ from __future__ import annotations
 
 import json
 import sys
-from datetime import datetime
+from datetime import datetime, timezone
 from functools import lru_cache
 from pathlib import Path
 from typing import Any
@@ -24,6 +24,7 @@ for _candidate in (Path(__file__).resolve().parent, ML_TRAINING_DIR):
 
 import aiml_gate_receipt_validator as central_validator  # noqa: E402
 import agent_governance_s2_5_recovery_controller as controller  # noqa: E402
+import agent_governance_s2_5_recovery_store as recovery_store  # noqa: E402
 from agent_governance_schema import schema_subset_errors  # noqa: E402
 from agent_governance_s2_5_disposable_profile import (  # noqa: E402
     ANCHOR_READER_CGROUP,
@@ -187,6 +188,47 @@ def _seal(value: dict[str, Any]) -> dict[str, Any]:
     artifact = dict(value)
     artifact["self_digest"] = central_validator.artifact_self_digest(artifact)
     return artifact
+
+
+def _trusted_now() -> datetime:
+    """Read code-owned aware UTC; public APIs cannot supply or replace time."""
+
+    return datetime.now(timezone.utc)
+
+
+def _fixed_manifest_observation(*, source_head: str) -> dict[str, Any]:
+    """Read the exact current manifest from the code-owned fixed POSIX store."""
+
+    driver = recovery_store._FIXED_POSIX_RECOVERY_DRIVER()
+    store = recovery_store.S2_5RecoveryStore(driver)
+    root: dict[str, Any] | None = None
+    try:
+        root = store._open_root()
+        snapshot = store._snapshot(root["fd"], root)
+        manifest = store._existing_manifest(
+            snapshot, source_head=source_head
+        )
+        if (
+            not isinstance(manifest, dict)
+            or manifest.get("schema_version") != controller.MANIFEST_SCHEMA
+        ):
+            raise ControllerAnchorEffectError(
+                "anchor_effect_current_v2_manifest_absent"
+            )
+        return {
+            "manifest": manifest,
+            "manifest_discriminator_digest": store._prior_discriminator(
+                snapshot
+            ),
+            "state_root_id": snapshot["state_root_id"],
+        }
+    except recovery_store.RecoveryStoreError as error:
+        raise ControllerAnchorEffectError(
+            "anchor_effect_fixed_store_observation_failed"
+        ) from error
+    finally:
+        if root is not None:
+            store._close(root.get("fd"))
 
 
 def derive_controller_anchor_head(
@@ -378,8 +420,8 @@ def _failure_code(
 class ControllerAnchorEffectAdapter:
     """Dispatch only a fresh, exact v2 controller outbox."""
 
-    def __init__(self, *, writer: Any, reader: Any, verifier: Any, clock: Any) -> None:
-        capabilities = (writer, reader, verifier, clock)
+    def __init__(self, *, writer: Any, reader: Any, verifier: Any) -> None:
+        capabilities = (writer, reader, verifier)
         if len({id(item) for item in capabilities}) != len(capabilities):
             raise ControllerAnchorEffectError(
                 "anchor_effect_capabilities_must_be_distinct"
@@ -390,7 +432,6 @@ class ControllerAnchorEffectAdapter:
             (reader, "enumerate_controller_chain"),
             (reader, "read_controller_latest"),
             (verifier, "verify_signed"),
-            (clock, "now"),
         )
         if any(
             not hasattr(capability, method)
@@ -403,11 +444,10 @@ class ControllerAnchorEffectAdapter:
         self._writer = writer
         self._reader = reader
         self._verifier = verifier
-        self._clock = clock
 
     def _now(self) -> datetime:
         try:
-            moment = self._clock.now()
+            moment = _trusted_now()
         except Exception as error:
             raise ControllerAnchorEffectError(
                 "anchor_effect_clock_unavailable"
@@ -519,11 +559,13 @@ class ControllerAnchorEffectAdapter:
         state: dict[str, Any],
         outbox: dict[str, Any],
         request: dict[str, Any],
+        manifest_discriminator_digest: str,
         moment: datetime,
     ) -> dict[str, Any]:
         return _seal({
             "schema_version": "s2_5_recovery_anchor_effect_intent_v1",
             "outbox_prepared_state_digest": state["self_digest"],
+            "manifest_discriminator_digest": manifest_discriminator_digest,
             "outbox_digest": outbox["self_digest"],
             "transition_digest": outbox["transition_digest"],
             "request_digest": outbox["request_digest"],
@@ -912,10 +954,19 @@ class ControllerAnchorEffectAdapter:
         state: dict[str, Any],
         *,
         confirmed_candidate_subject_digest: str,
+        source_head: str,
+        manifest: dict[str, Any],
+        manifest_discriminator_digest: str,
     ) -> dict[str, Any]:
         outbox, request = self._decode_pending(state)
         moment = self._now()
-        intent = self._intent(state, outbox, request, moment)
+        intent = self._intent(
+            state,
+            outbox,
+            request,
+            manifest_discriminator_digest,
+            moment,
+        )
         admission_errors = controller.validate_fresh_controller_admission(
             state, trusted_now=moment
         )
@@ -927,6 +978,26 @@ class ControllerAnchorEffectAdapter:
                 state,
                 intent,
                 code=_failure_code(admission_errors, transition_errors),
+                moment=moment,
+            )
+        try:
+            current = _fixed_manifest_observation(
+                source_head=source_head
+            )
+        except ControllerAnchorEffectError as error:
+            return self._precheck_rejection(
+                state, intent, code=error.code, moment=moment
+            )
+        if (
+            current.get("manifest_discriminator_digest")
+            != manifest_discriminator_digest
+            or current.get("state_root_id") != manifest.get("state_root_id")
+            or current.get("manifest") != manifest
+        ):
+            return self._precheck_rejection(
+                state,
+                intent,
+                code="anchor_effect_manifest_changed_before_effect",
                 moment=moment,
             )
         try:
@@ -951,26 +1022,28 @@ class ControllerAnchorEffectAdapter:
             )
 
     def execute_pending_state(self, state: dict[str, Any]) -> dict[str, Any]:
-        """Execute an isolated pending state without synthesizing a successor."""
+        """Refuse caller-supplied raw state as an effect entry."""
 
-        if not isinstance(state, dict) or not isinstance(
-            state.get("candidate_subject_digest"), str
-        ):
-            raise ControllerAnchorEffectError(
-                "anchor_effect_pending_state_invalid"
-            )
-        return self._execute_pending(
-            state,
-            confirmed_candidate_subject_digest=state[
-                "candidate_subject_digest"
-            ],
+        raise ControllerAnchorEffectError(
+            "anchor_effect_fixed_profile_required"
         )
 
     def execute_pending_manifest(
         self, manifest: dict[str, Any]
     ) -> dict[str, Any]:
-        """Execute a v2 manifest and bind proof to its exact attach successor."""
+        """Refuse caller-supplied raw manifest as an effect entry."""
 
+        raise ControllerAnchorEffectError(
+            "anchor_effect_fixed_profile_required"
+        )
+
+    def execute_fixed_profile(
+        self, *, source_head: str
+    ) -> dict[str, Any]:
+        """Execute only the twice-observed current fixed-store manifest."""
+
+        observed = _fixed_manifest_observation(source_head=source_head)
+        manifest = observed.get("manifest")
         errors = controller.validate_controller_artifact(manifest)
         if (
             errors
@@ -1004,4 +1077,9 @@ class ControllerAnchorEffectAdapter:
                     successor_subject
                 )
             ),
+            source_head=source_head,
+            manifest=manifest,
+            manifest_discriminator_digest=observed[
+                "manifest_discriminator_digest"
+            ],
         )

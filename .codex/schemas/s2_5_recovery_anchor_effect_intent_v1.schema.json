@@ -5,7 +5,8 @@
   "type": "object",
   "additionalProperties": false,
   "required": [
-    "schema_version", "outbox_prepared_state_digest", "outbox_digest",
+    "schema_version", "outbox_prepared_state_digest",
+    "manifest_discriminator_digest", "outbox_digest",
     "transition_digest", "request_digest", "idempotency_key", "source_head",
     "start_id", "phase", "candidate_external_sequence", "checked_at",
     "evidence_class", "side_effect_class", "target_class", "target_profile_id",
@@ -15,6 +16,7 @@
   "properties": {
     "schema_version": {"const": "s2_5_recovery_anchor_effect_intent_v1"},
     "outbox_prepared_state_digest": {"$ref": "#/$defs/digest"},
+    "manifest_discriminator_digest": {"$ref": "#/$defs/digest"},
     "outbox_digest": {"$ref": "#/$defs/digest"},
     "transition_digest": {"$ref": "#/$defs/digest"},
     "request_digest": {"$ref": "#/$defs/digest"},

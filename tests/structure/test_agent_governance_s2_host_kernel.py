@@ -80,6 +80,7 @@ GOVERNANCE_IMPORTS_BY_FILE: dict[str, frozenset[str]] = {
     "agent_governance_s2_5_recovery_anchor_v2.py": frozenset({
         "agent_governance_s2_5_disposable_profile",
         "agent_governance_s2_5_recovery_controller",
+        "agent_governance_s2_5_recovery_store",
         "agent_governance_schema",
         "aiml_gate_receipt_validator",
     }),

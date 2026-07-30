@@ -727,6 +727,38 @@ class _ControllerAnchorClock:
         return self.value
 
 
+class _FixedManifestObservation:
+    def __init__(self, manifest: dict) -> None:
+        self.manifest = manifest
+        self.calls = 0
+        self.discriminator_digest = validator.canonical_digest({
+            "schema_version": "test_fixed_manifest_discriminator_v1",
+            "manifest_digest": manifest["self_digest"],
+        })
+
+    def __call__(self, *, source_head: str) -> dict:
+        assert source_head == HEAD
+        self.calls += 1
+        return {
+            "manifest": copy.deepcopy(self.manifest),
+            "manifest_discriminator_digest": self.discriminator_digest,
+            "state_root_id": self.manifest["state_root_id"],
+        }
+
+
+class _ChangingManifestObservation(_FixedManifestObservation):
+    def __call__(self, *, source_head: str) -> dict:
+        observed = super().__call__(source_head=source_head)
+        if self.calls == 2:
+            observed["manifest_discriminator_digest"] = (
+                validator.canonical_digest({
+                    "schema_version": "changed_manifest_discriminator_v1",
+                    "manifest_digest": self.manifest["self_digest"],
+                })
+            )
+        return observed
+
+
 class _NeverCalledControllerAnchorWriter:
     def __init__(self) -> None:
         self.requests: list[dict] = []
@@ -752,19 +784,28 @@ class _UnusedControllerAnchorVerifier:
         raise AssertionError("expired outbox reached verification")
 
 
-def test_controller_anchor_rechecks_transition_freshness_at_effect_time():
+def test_controller_anchor_rechecks_transition_freshness_at_effect_time(
+    monkeypatch,
+):
     _transition_value, _outbox_value, state, manifest = _genesis()
     writer = _NeverCalledControllerAnchorWriter()
+    clock = _ControllerAnchorClock("2030-01-01T00:27:00+00:00")
+    observation = _FixedManifestObservation(manifest)
+    monkeypatch.setattr(anchor_v2, "_trusted_now", clock.now)
+    monkeypatch.setattr(
+        anchor_v2, "_fixed_manifest_observation", observation
+    )
     adapter = anchor_v2.ControllerAnchorEffectAdapter(
         writer=writer,
         reader=_UnusedControllerAnchorReader(),
         verifier=_UnusedControllerAnchorVerifier(),
-        clock=_ControllerAnchorClock("2030-01-01T00:27:00+00:00"),
     )
 
-    chain = adapter.execute_pending_manifest(manifest)
+    chain = adapter.execute_fixed_profile(source_head=HEAD)
 
     assert writer.requests == []
+    assert clock.calls == 1
+    assert observation.calls == 1
     assert chain["status"] == "PRECHECK_REJECTED"
     assert chain["proof"] is None
     assert chain["result"]["effect_attempted"] is False
@@ -927,22 +968,32 @@ class _ControllerAnchorReader:
         }
 
 
-def test_controller_anchor_dispatches_only_the_exact_persisted_request():
+def test_controller_anchor_dispatches_only_the_exact_persisted_request(
+    monkeypatch,
+):
     _transition_value, outbox, state, manifest = _genesis()
     clock = _ControllerAnchorClock("2030-01-01T00:25:00+00:00")
     writer = _ControllerAnchorWriter(outbox=outbox, clock=clock)
     reader = _ControllerAnchorReader(writer)
+    observation = _FixedManifestObservation(manifest)
+    monkeypatch.setattr(anchor_v2, "_trusted_now", clock.now)
+    monkeypatch.setattr(
+        anchor_v2, "_fixed_manifest_observation", observation
+    )
     adapter = anchor_v2.ControllerAnchorEffectAdapter(
         writer=writer,
         reader=reader,
         verifier=_ControllerAnchorVerifier(),
-        clock=clock,
     )
 
-    chain = adapter.execute_pending_manifest(manifest)
+    chain = adapter.execute_fixed_profile(source_head=HEAD)
 
     assert writer.requests == [json.loads(outbox["prepared_payload_json"])]
     assert clock.calls == 1
+    assert observation.calls == 2
+    assert chain["intent"]["manifest_discriminator_digest"] == (
+        observation.discriminator_digest
+    )
     assert chain["status"] == "UNVERIFIED_EXTERNAL_ANCHOR_REQUIRED"
     assert chain["result"]["status"] == "APPENDED"
     assert chain["result"]["effect_attempted"] is True
@@ -984,20 +1035,26 @@ def test_controller_anchor_dispatches_only_the_exact_persisted_request():
     assert anchor_v2.validate_effect_chain(chain) == []
 
 
-def test_controller_anchor_returns_typed_recovery_on_invalid_effect_response():
+def test_controller_anchor_returns_typed_recovery_on_invalid_effect_response(
+    monkeypatch,
+):
     _transition_value, outbox, state, manifest = _genesis()
     clock = _ControllerAnchorClock("2030-01-01T00:25:00+00:00")
     writer = _InvalidFloorControllerAnchorWriter(
         outbox=outbox, clock=clock
     )
+    observation = _FixedManifestObservation(manifest)
+    monkeypatch.setattr(anchor_v2, "_trusted_now", clock.now)
+    monkeypatch.setattr(
+        anchor_v2, "_fixed_manifest_observation", observation
+    )
     adapter = anchor_v2.ControllerAnchorEffectAdapter(
         writer=writer,
         reader=_ControllerAnchorReader(writer),
         verifier=_ControllerAnchorVerifier(),
-        clock=clock,
     )
 
-    chain = adapter.execute_pending_manifest(manifest)
+    chain = adapter.execute_fixed_profile(source_head=HEAD)
 
     assert len(writer.requests) == 1
     assert chain["status"] == "RECOVERY_REQUIRED"
@@ -1007,6 +1064,57 @@ def test_controller_anchor_returns_typed_recovery_on_invalid_effect_response():
     assert chain["postcheck"]["status"] == "RECOVERY_REQUIRED"
     assert chain["rollback"]["status"] == "RECOVERY_REQUIRED"
     assert chain["rollback"]["operator_action_required"] is True
+    assert anchor_v2.validate_effect_chain(chain) == []
+
+
+def test_controller_anchor_rejects_raw_state_and_manifest_effect_entries(
+    monkeypatch,
+):
+    _transition_value, _outbox_value, state, manifest = _genesis()
+    writer = _NeverCalledControllerAnchorWriter()
+    adapter = anchor_v2.ControllerAnchorEffectAdapter(
+        writer=writer,
+        reader=_UnusedControllerAnchorReader(),
+        verifier=_UnusedControllerAnchorVerifier(),
+    )
+
+    with pytest.raises(
+        anchor_v2.ControllerAnchorEffectError,
+        match="anchor_effect_fixed_profile_required",
+    ):
+        adapter.execute_pending_state(state)
+    with pytest.raises(
+        anchor_v2.ControllerAnchorEffectError,
+        match="anchor_effect_fixed_profile_required",
+    ):
+        adapter.execute_pending_manifest(manifest)
+
+    assert writer.requests == []
+
+
+def test_controller_anchor_rechecks_fixed_manifest_before_writer(monkeypatch):
+    _transition_value, _outbox_value, _state, manifest = _genesis()
+    writer = _NeverCalledControllerAnchorWriter()
+    clock = _ControllerAnchorClock("2030-01-01T00:25:00+00:00")
+    observation = _ChangingManifestObservation(manifest)
+    monkeypatch.setattr(anchor_v2, "_trusted_now", clock.now)
+    monkeypatch.setattr(
+        anchor_v2, "_fixed_manifest_observation", observation
+    )
+    adapter = anchor_v2.ControllerAnchorEffectAdapter(
+        writer=writer,
+        reader=_UnusedControllerAnchorReader(),
+        verifier=_UnusedControllerAnchorVerifier(),
+    )
+
+    chain = adapter.execute_fixed_profile(source_head=HEAD)
+
+    assert writer.requests == []
+    assert observation.calls == 2
+    assert chain["status"] == "PRECHECK_REJECTED"
+    assert chain["failure_code"] == (
+        "anchor_effect_manifest_changed_before_effect"
+    )
     assert anchor_v2.validate_effect_chain(chain) == []
 
 
