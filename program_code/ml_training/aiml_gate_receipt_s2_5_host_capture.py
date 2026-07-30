@@ -8,6 +8,7 @@ facts, selects a key/profile, performs an effect, or grants production authority
 from __future__ import annotations
 
 import hmac
+import json
 import os
 import stat
 from datetime import datetime, timedelta
@@ -15,7 +16,10 @@ from pathlib import Path
 from typing import Any
 
 import agent_governance_aiml_trusted_host as _trusted_host
+from agent_governance_schema import schema_subset_errors
 from aiml_gate_receipt_schema_core import (
+    SCHEMA_DIR,
+    SCHEMA_FILES,
     _canonical_bytes,
     _parse_timestamp,
     artifact_self_digest,
@@ -56,6 +60,19 @@ _PROCESS_KEYS = frozenset({"uid", "cgroup"})
 _BOOT_MANAGER_KEYS = frozenset({
     "boot_id", "manager", "manager_root", "unit_name", "canonical_state_root",
 })
+_HOST_CAPTURE_SCHEMA_PATH = (
+    SCHEMA_DIR / SCHEMA_FILES[HOST_CAPTURE_SCHEMA_VERSION]
+)
+
+
+def _checked_in_schema_errors(capture: Any) -> list[str]:
+    """Apply the one code-owned host-capture schema; callers select no schema."""
+
+    try:
+        schema = json.loads(_HOST_CAPTURE_SCHEMA_PATH.read_text(encoding="utf-8"))
+    except (OSError, json.JSONDecodeError) as error:
+        return [f"checked-in host capture schema is unavailable or invalid: {error}"]
+    return schema_subset_errors(capture, schema, schema)
 
 
 def _exact(value: Any, keys: frozenset[str], label: str) -> list[str]:
@@ -150,7 +167,8 @@ def validate_s2_5_recovery_host_capture(
 ) -> list[str]:
     """Validate closed shape, derivations, freshness, and fixed-profile SSHSIG."""
 
-    errors = _exact(capture, _HOST_CAPTURE_KEYS, "host capture")
+    errors = _checked_in_schema_errors(capture)
+    errors.extend(_exact(capture, _HOST_CAPTURE_KEYS, "host capture"))
     if not isinstance(capture, dict):
         return errors
     if now is None:

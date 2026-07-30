@@ -616,8 +616,8 @@ def test_a_fresh_controller_cannot_replace_the_registered_controller_for_one_roo
     state_root = tmp_path / "state"
     shared = lifecycle.S2_5RecoveryState(
         state_root=state_root,
-        host_capture=_host_capture(state_root),
-        now=NOW,
+        host_capture=kit.signed_recovery_host_capture(state_root),
+        now=kit.NOW,
     )
     first = lifecycle.apply_s2_5_start(
         intent,
@@ -633,8 +633,8 @@ def test_a_fresh_controller_cannot_replace_the_registered_controller_for_one_roo
     assert first["status"] == lifecycle.S2_5_STATUS_PENDING
     substituted = lifecycle.S2_5RecoveryState(
         state_root=state_root,
-        host_capture=_host_capture(state_root),
-        now=NOW,
+        host_capture=kit.signed_recovery_host_capture(state_root),
+        now=kit.NOW,
     )
     second = lifecycle.apply_s2_5_start(
         intent,
@@ -1163,6 +1163,32 @@ def test_intent_requires_explicit_time_and_resolve_uses_closed_central_schema(tm
     assert state.unresolved is not None
 
 
+@pytest.mark.parametrize(
+    ("mutate", "needle"),
+    [
+        (
+            lambda item: item.update(schema_version="foreign_host_capture_v1"),
+            "schema_version",
+        ),
+        (lambda item: item.update(source_head="not-a-git-sha"), "source_head"),
+        (lambda item: item["process_identity"].update(uid=True), "uid"),
+        (lambda item: item["node_identity"].update(node_id=""), "node_id"),
+    ],
+)
+def test_nested_recovery_chain_revalidates_fully_resigned_host_capture_schema(
+    tmp_path, mutate, needle
+):
+    state = _state(tmp_path)
+    intent, _rollback, _result, _postcheck = _chain(state)
+    capture = intent["recovery_binding"]["host_capture"]
+    mutate(capture)
+    mutate(capture["signed_binding"])
+    _replace_signature_with_profile(capture, "host_capture")
+    capture["self_digest"] = validator.artifact_self_digest(capture)
+    errors = validator.validate_aiml_artifact(intent, now=NOW)
+    assert any(needle in error for error in errors), errors
+
+
 def test_signed_capture_timestamp_must_be_fresh_at_central_validation(tmp_path):
     state = _state(tmp_path)
     kernel, admission, anchor, authorization = _intent_materials(state)
@@ -1181,17 +1207,50 @@ def test_signed_capture_timestamp_must_be_fresh_at_central_validation(tmp_path):
         observed_state=post_state,
         observed_at="2026-07-30T12:09:00Z",
     )
-    rollback = recovery.build_recovery_rollback(
+    with pytest.raises(ValueError, match="future|authorization window"):
+        recovery.build_recovery_rollback(
+            intent=intent,
+            actor_capture=future_capture,
+            post_state=post_state,
+            status="LATCH_PRESERVED",
+            now=NOW,
+        )
+
+
+def test_result_and_postcheck_builders_reject_future_signed_capture(tmp_path):
+    state = _state(tmp_path)
+    intent, rollback, result, _postcheck = _chain(state)
+    future_actor = _capture(
         intent=intent,
-        actor_capture=future_capture,
-        post_state=post_state,
-        status="LATCH_PRESERVED",
-        now=NOW,
+        observed_state=rollback["post_state"],
+        observed_at="2026-07-30T12:09:00Z",
     )
-    assert any(
-        "future" in error or "authorization window" in error
-        for error in validator.validate_aiml_artifact(rollback, now=NOW)
+    with pytest.raises(ValueError, match="future"):
+        recovery.build_recovery_result(
+            intent=intent,
+            actor_capture=future_actor,
+            rollback=rollback,
+            post_state=rollback["post_state"],
+            status="RECOVERY_ABORTED",
+            authorization_consumption_proof=_consumption_proof(intent),
+            now=NOW,
+        )
+    future_verifier = _capture(
+        intent=intent,
+        result=result,
+        observed_state=result["post_state"],
+        verifier=True,
+        observed_at="2026-07-30T12:09:00Z",
     )
+    with pytest.raises(ValueError, match="future"):
+        recovery.build_recovery_postcheck(
+            intent=intent,
+            result=result,
+            verifier_capture=future_verifier,
+            observed_state=result["post_state"],
+            status="RECOVERY_UNRESOLVED",
+            now=NOW,
+        )
 
 
 def test_host_capture_leaf_and_schema_extend_closure_without_lifecycle_roots():
@@ -1221,6 +1280,7 @@ def test_host_capture_leaf_and_schema_extend_closure_without_lifecycle_roots():
     assert not any(
         path.endswith((
             "agent_governance_s2_5_recovery.py",
+            "agent_governance_s2_5_recovery_state.py",
             "agent_governance_s2_5_lifecycle.py",
         ))
         for path in closure["python_modules"]

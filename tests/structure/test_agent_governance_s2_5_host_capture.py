@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import copy
+import ast
 import importlib
 import inspect
 import sys
@@ -122,6 +123,15 @@ def _reseal(artifact: dict) -> None:
     artifact["self_digest"] = validator.artifact_self_digest(artifact)
 
 
+def _resign(artifact: dict, private_key: Path) -> None:
+    artifact["sshsig_armored"] = __import__("s2_5_testkit")._sign_bytes(
+        private_key,
+        validator._canonical_bytes(artifact["signed_binding"]),
+        namespace=host_capture.RECOVERY_HOST_CAPTURE_SIGNATURE_NAMESPACE,
+    )
+    _reseal(artifact)
+
+
 def test_host_capture_schema_is_registered_before_recovery_artifact_validation():
     assert HOST_CAPTURE_SCHEMA in schema_core.SCHEMA_FILES
     leaf = importlib.import_module("aiml_gate_receipt_s2_5_host_capture")
@@ -143,6 +153,31 @@ def test_valid_signed_host_capture_is_dispatched_by_the_central_validator(
         "explicit trusted current time" in error
         for error in validator.validate_aiml_artifact(artifact)
     )
+
+
+@pytest.mark.parametrize(
+    ("mutate", "needle"),
+    [
+        (
+            lambda item: item.update(schema_version="foreign_host_capture_v1"),
+            "schema_version",
+        ),
+        (lambda item: item.update(source_head="not-a-git-sha"), "source_head"),
+        (lambda item: item["process_identity"].update(uid=True), "uid"),
+        (lambda item: item["node_identity"].update(node_id=""), "node_id"),
+    ],
+)
+def test_direct_leaf_enforces_checked_in_schema_for_fully_resigned_capture(
+    tmp_path, signing_profile, mutate, needle
+):
+    artifact = _signed_capture(tmp_path / "state", signing_profile)
+    mutate(artifact)
+    mutate(artifact["signed_binding"])
+    _resign(artifact, signing_profile[0])
+    errors = host_capture.validate_s2_5_recovery_host_capture(
+        artifact, now=NOW
+    )
+    assert any(needle in error for error in errors), errors
 
 
 def test_host_capture_has_no_caller_selected_trust_or_replay_seams():
@@ -300,6 +335,32 @@ def test_recovery_controller_requires_full_capture_and_rejects_raw_host_api(
         )
 
 
+@pytest.mark.parametrize(
+    ("mutate", "needle"),
+    [
+        (
+            lambda item: item.update(schema_version="foreign_host_capture_v1"),
+            "schema_version",
+        ),
+        (lambda item: item.update(source_head="not-a-git-sha"), "source_head"),
+        (lambda item: item["process_identity"].update(uid=True), "uid"),
+        (lambda item: item["node_identity"].update(node_id=""), "node_id"),
+    ],
+)
+def test_controller_rejects_fully_resigned_capture_outside_checked_in_schema(
+    tmp_path, signing_profile, mutate, needle
+):
+    state_root = tmp_path / "state"
+    artifact = _signed_capture(state_root, signing_profile)
+    mutate(artifact)
+    mutate(artifact["signed_binding"])
+    _resign(artifact, signing_profile[0])
+    with pytest.raises(ValueError, match=needle):
+        lifecycle.S2_5RecoveryState(
+            state_root=state_root, host_capture=artifact, now=NOW
+        )
+
+
 def test_recovery_controller_rejects_cross_root_capture_and_binds_root_to_host(
     tmp_path, signing_profile
 ):
@@ -318,3 +379,19 @@ def test_recovery_controller_rejects_cross_root_capture_and_binds_root_to_host(
         lifecycle.S2_5RecoveryState(
             state_root=tmp_path / "state-b", host_capture=capture, now=NOW
         )
+
+
+def test_recovery_state_is_split_and_identically_reexported_from_lifecycle():
+    lifecycle_path = (
+        HELPERS / "agent_governance_s2_5_lifecycle.py"
+    )
+    split_path = HELPERS / "agent_governance_s2_5_recovery_state.py"
+    assert split_path.is_file()
+    assert not any(
+        isinstance(node, ast.ClassDef) and node.name == "S2_5RecoveryState"
+        for node in ast.parse(lifecycle_path.read_text(encoding="utf-8")).body
+    )
+    split = importlib.import_module("agent_governance_s2_5_recovery_state")
+    assert lifecycle.S2_5RecoveryState is split.S2_5RecoveryState
+    assert sum(1 for _ in lifecycle_path.open(encoding="utf-8")) <= 2000
+    assert sum(1 for _ in split_path.open(encoding="utf-8")) <= 2000

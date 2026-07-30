@@ -921,6 +921,7 @@ def build_recovery_rollback(
         permission="effect",
         intent=intent,
         observed_state=post_state,
+        now=now,
     ))
     errors.extend(_exact(post_state, _STATE_KEYS, "rollback post_state"))
     if actor_capture.get("source_head") != intent.get("recovery_binding", {}).get("source_head"):
@@ -997,6 +998,7 @@ def build_recovery_result(
         permission="effect",
         intent=intent,
         observed_state=post_state,
+        now=now,
     ))
     if rollback.get("recovery_intent_digest") != intent.get("intent_digest"):
         errors.append("rollback is bound to a different recovery intent")
@@ -1070,6 +1072,7 @@ def build_recovery_postcheck(
         intent=intent,
         recovery_result_digest=result.get("result_digest"),
         observed_state=observed_state,
+        now=now,
     ))
     if result.get("recovery_intent_digest") != intent.get("intent_digest"):
         errors.append("postcheck result is bound to a different intent")

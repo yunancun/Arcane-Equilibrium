@@ -88,7 +88,13 @@ def mint_key(tmp_path: Path, name: str = "s2-5-operator"):
     return private_key, public_key, fingerprint
 
 
-def signed_recovery_host_capture(state_root: Path) -> dict[str, Any]:
+def signed_recovery_host_capture(
+    state_root: Path,
+    *,
+    source_head: str = SOURCE_HEAD,
+    observed_at: str = NOW,
+    expires_at: str = EXPIRES,
+) -> dict[str, Any]:
     """Mint a disposable signed host capture for source-only lifecycle tests."""
 
     canonical_root = state_root.resolve(strict=False)
@@ -110,7 +116,7 @@ def signed_recovery_host_capture(state_root: Path) -> dict[str, Any]:
     signed = {
         "schema_version": host_capture_leaf.HOST_CAPTURE_SCHEMA_VERSION,
         "capture_profile": host_capture_leaf.HOST_CAPTURE_PROFILE,
-        "source_head": SOURCE_HEAD,
+        "source_head": source_head,
         "stable_host_facts": {
             "machine_id_digest": "sha256:" + "8" * 64,
             "node_name": "disposable-systemd-test",
@@ -135,8 +141,8 @@ def signed_recovery_host_capture(state_root: Path) -> dict[str, Any]:
             "unit_name": lifecycle.S2_5_UNIT_NAME,
             "canonical_state_root": str(canonical_root),
         },
-        "observed_at": NOW,
-        "expires_at": EXPIRES,
+        "observed_at": observed_at,
+        "expires_at": expires_at,
         "side_effect_class": "DISPOSABLE_TEST",
         "production_effect": False,
         "production_authority": False,
