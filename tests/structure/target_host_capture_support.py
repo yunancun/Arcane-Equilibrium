@@ -25,10 +25,11 @@ def governed_ops_capture(root: Path, *, node_id: str = "ops_preflight") -> dict:
     ]
     facts = {
         "task_shape": "review",
-        "surfaces": ["operations"],
-        "risk": "medium",
+        "surfaces": ["runtime_effect", "service"],
+        "runtime_claim": True,
+        "risk": "high",
         "uncertainty": "low",
-        "side_effect_class": "none",
+        "side_effect_class": "target_host_probe",
         "objective": "capture one bounded target-host test reference",
         "scope": scope,
         "dirty_scope": [],
