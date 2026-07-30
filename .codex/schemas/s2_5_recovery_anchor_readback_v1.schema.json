@@ -1,0 +1,87 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://arcane-equilibrium.local/schemas/s2_5_recovery_anchor_readback_v1.schema.json",
+  "title": "s2_5_recovery_anchor_readback_v1",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "schema_version", "anchor_store_id", "anchor_collection_id",
+    "result_digest", "object_id", "version_id", "checksum", "head_digest",
+    "sequence", "entry_digest", "exact_version_match", "checksum_match",
+    "head_match", "reader_identity", "verifier_identity", "verified_at",
+    "status", "failure_code", "evidence_class", "side_effect_class",
+    "target_class", "target_profile_id", "production_effect",
+    "production_authority", "production_effect_count", "self_digest"
+  ],
+  "properties": {
+    "schema_version": {"const": "s2_5_recovery_anchor_readback_v1"},
+    "anchor_store_id": {"const": "s2-5-recovery-external-anchor-v1"},
+    "anchor_collection_id": {"const": "s2-5-recovery-anchor-chain-v1"},
+    "result_digest": {"$ref": "#/$defs/digest"},
+    "object_id": {"$ref": "#/$defs/nullableObject"},
+    "version_id": {"$ref": "#/$defs/nullableVersion"},
+    "checksum": {"$ref": "#/$defs/nullableDigest"},
+    "head_digest": {"$ref": "#/$defs/nullableDigest"},
+    "sequence": {"$ref": "#/$defs/nullableInteger"},
+    "entry_digest": {"$ref": "#/$defs/nullableDigest"},
+    "exact_version_match": {"type": "boolean"},
+    "checksum_match": {"type": "boolean"},
+    "head_match": {"type": "boolean"},
+    "reader_identity": {"$ref": "#/$defs/readerIdentity"},
+    "verifier_identity": {"$ref": "#/$defs/verifierIdentity"},
+    "verified_at": {"type": "string", "format": "date-time"},
+    "status": {"enum": ["UNVERIFIED", "RECOVERY_REQUIRED", "NOT_PERFORMED"]},
+    "failure_code": {"anyOf": [{"type": "string", "minLength": 1}, {"type": "null"}]},
+    "evidence_class": {"const": "LOCAL_REPRODUCIBLE"},
+    "side_effect_class": {"const": "DISPOSABLE_TEST"},
+    "target_class": {"const": "disposable_systemd"},
+    "target_profile_id": {"const": "s2_5_recovery_user_systemd_disposable_v1"},
+    "production_effect": {"const": false},
+    "production_authority": {"const": false},
+    "production_effect_count": {"const": 0},
+    "self_digest": {"$ref": "#/$defs/digest"}
+  },
+  "$defs": {
+    "digest": {"type": "string", "pattern": "^sha256:[0-9a-f]{64}$"},
+    "nullableDigest": {"anyOf": [{"$ref": "#/$defs/digest"}, {"type": "null"}]},
+    "nullableInteger": {
+      "anyOf": [{"type": "integer", "minimum": 1}, {"type": "null"}]
+    },
+    "nullableObject": {
+      "anyOf": [
+        {"type": "string", "pattern": "^s2-5-anchor-object-[0-9a-f]{64}$"},
+        {"type": "null"}
+      ]
+    },
+    "nullableVersion": {
+      "anyOf": [
+        {"type": "string", "pattern": "^s2-5-anchor-version-[0-9a-f]{64}$"},
+        {"type": "null"}
+      ]
+    },
+    "readerIdentity": {
+      "type": "object", "additionalProperties": false,
+      "required": ["role", "unit", "cgroup", "key_fingerprint"],
+      "properties": {
+        "role": {"const": "external_anchor_reader"},
+        "unit": {"const": "arcane-equilibrium-aiml-s2-5-anchor-reader.service"},
+        "cgroup": {
+          "const": "/user.slice/user-1000.slice/user@1000.service/app.slice/arcane-equilibrium-aiml-s2-5-anchor-reader.service"
+        },
+        "key_fingerprint": {"type": "null"}
+      }
+    },
+    "verifierIdentity": {
+      "type": "object", "additionalProperties": false,
+      "required": ["role", "unit", "cgroup", "key_fingerprint"],
+      "properties": {
+        "role": {"const": "external_anchor_verifier"},
+        "unit": {"const": "arcane-equilibrium-aiml-s2-5-anchor-verifier.service"},
+        "cgroup": {
+          "const": "/user.slice/user-1000.slice/user@1000.service/app.slice/arcane-equilibrium-aiml-s2-5-anchor-verifier.service"
+        },
+        "key_fingerprint": {"type": "null"}
+      }
+    }
+  }
+}

@@ -30,18 +30,18 @@ for _candidate in (Path(__file__).resolve().parent, ML_TRAINING_DIR):
 
 import aiml_gate_receipt_validator as central_validator  # noqa: E402
 import agent_governance_s2_5_attestation as attestation  # noqa: E402
+from agent_governance_s2_5_disposable_profile import (  # noqa: E402
+    DISPOSABLE_STATE_ROOT,
+    PROFILE_GID,
+    PROFILE_ID,
+    PROFILE_UID,
+)
 from agent_governance_schema import schema_subset_errors  # noqa: E402
 
 
-DISPOSABLE_STATE_ROOT = (
-    "/run/user/1000/arcane-equilibrium-aiml-s2e/s2_5-recovery"
-)
 MANIFEST_BASENAME = "recovery-store-manifest.json"
 MANIFEST_TEMP_BASENAME = ".recovery-store-manifest.json.tmp"
 REPLAY_LEDGER_BASENAME = "authorization-replay-ledger.json"
-PROFILE_ID = "s2_5_recovery_user_systemd_disposable_v1"
-PROFILE_UID = 1000
-PROFILE_GID = 1000
 
 PARENT_OPEN_FLAGS = ("O_DIRECTORY", "O_NOFOLLOW", "O_CLOEXEC")
 READ_OPEN_FLAGS = ("O_NOFOLLOW", "O_CLOEXEC")

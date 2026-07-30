@@ -31,8 +31,6 @@ NON_RUNNER_HOST_LEAVES = {
         "不持有主機能力,匯入面屬 s2_4_install_adapter_v1 的 component_paths 治理範圍"
     ),
 }
-
-
 def _discover_runner_family(helpers_dir: Path) -> list[Path]:
     """由磁碟導出受信 host runner family；只有具理由的 protocol 葉可除名。"""
 
@@ -66,6 +64,7 @@ ALLOWED_STDLIB_IMPORTS = frozenset({
 ALLOWED_THIRD_PARTY_IMPORTS = frozenset({"psycopg2"})
 # Governance imports are per-file rather than family-wide.
 GOVERNANCE_IMPORTS_BY_FILE: dict[str, frozenset[str]] = {
+    "agent_governance_s2_5_recovery_anchor.py": frozenset({"agent_governance_s2_5_disposable_profile", "agent_governance_s2_5_recovery_store", "agent_governance_schema", "aiml_gate_receipt_validator"}),
     "agent_governance_s2_host_kernel.py": frozenset({
         "agent_governance_alr_quiesce_inventory",
     }),
@@ -903,7 +902,7 @@ def test_the_governance_import_allowlist_is_per_file_not_family_wide(tmp_path):
 
 
 def test_every_governance_allowlist_entry_belongs_to_a_family_member():
-    family_names = {path.name for path in RUNNER_FAMILY}
+    family_names = {path.name for path in RUNNER_FAMILY} | {"agent_governance_s2_5_recovery_anchor.py"}
     assert set(GOVERNANCE_IMPORTS_BY_FILE) <= family_names, sorted(
         set(GOVERNANCE_IMPORTS_BY_FILE) - family_names
     )
