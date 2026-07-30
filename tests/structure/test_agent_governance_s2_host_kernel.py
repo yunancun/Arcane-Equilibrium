@@ -36,23 +36,9 @@ import agent_governance_alr_quiesce_inventory as qi  # noqa: E402
 import agent_governance_s2_host_kernel as kernel  # noqa: E402
 
 
-# ── runner 家族(§G owned paths;AST 掃描的對象) ──
 KERNEL_PATH = HELPERS / "agent_governance_s2_host_kernel.py"
-# S2E.2b-1 曾以手維護 tuple 當 AST scanner 的唯一輸入；新 runner 若漏加便完全不被看見。
-# 現在 family 直接由磁碟形狀導出，新增符合命名契約的 runner 在同一個 test run 即進 scanner。
 RUNNER_FAMILY_GLOBS = ("agent_governance_s2_*host_*.py", "aiml_s2_*host_run*.py")
-# glob 是形狀判準,不是語義判準:S2.4 的 row driver **protocol 葉**恰好也叫 ``…_host_identity``,
-# 但它不是 runner(沒有 lane、沒有主機能力、其匯入面由 S2.4 wave 治理)。故此處允許顯式除名,
-# 但除名**只**豁免 per-file import 白名單與 ``shell=`` 呼叫形狀兩項:被除名的檔案仍要通過
-# raw-command 掃描的其餘每一道,且一律不得碰 :data:`KERNEL_ONLY_IMPORTS` 或
-# :data:`EXEC_CAPABLE_IMPORT_DENYLIST`。
-#
-# S2E.2b-1 P2-1(E2 實證):關掉正面 import 白名單,關掉的**恰好**是唯一擋得住 ``pty`` /
-# ``importlib`` 的那一道——E2 兩個全綠反例是「除名檔帶 ``pty.spawn(argv)``」與「除名檔帶
-# ``importlib.import_module(name)``」(名稱是變數,故字面拼接那道也抓不到)。原註解宣稱「四道
-# 一道都不放…根本沒有任何 shell 可以到達」是 **overclaim,在此撤回**。改法:除名 = 白名單關掉
-# **加上**一張顯式 import 黑名單(下方 :data:`EXEC_CAPABLE_IMPORT_DENYLIST`),於是「把新
-# runner 塞進除名表」仍然換不到任何 exec 能力,只換到一次必須寫明理由的顯式動作。
+# Explicit exclusions still pass every raw-command rule and the import denylist.
 NON_RUNNER_HOST_LEAVES = {
     "agent_governance_s2_4_host_identity.py": (
         "S2.4 HOST_IDENTITY_INSTALL row 的 typed driver Protocol 與純導出葉;它不驅動任何 lane、"
@@ -86,32 +72,13 @@ APPLIER_MODULES = frozenset({
     "agent_governance_s2_5_driver",
 })
 
-# ── ★驗收判準★ 的兩張表:正面 import 白名單 + 名稱層 denylist ──
-# E2 的突變實證(M2/M2b/M2c)證明「只列黑名單模組」抓不到 ``from os import system`` /
-# ``importlib.import_module("sub"+"process")`` / ``getattr(_o, "sys"+"tem")``。改成**正面白名單**:
-# runner 家族只准 import 這一組宣告過的模組,任何其他 import 一律是 finding —— 於是
-# ``importlib`` / ``pty`` / ``commands`` / ``ctypes``(可 `CDLL(None).system`)全都不必逐一列黑。
-# ``fcntl``(``flock``)與 ``errno``(``EWOULDBLOCK``/``ELOOP``/``ENOTDIR`` 的**具名**常量;
-# 硬編數值在 Linux 與 darwin 上不同)是 S2.4 POSIX file/lock driver 的最小需求;兩者都沒有
-# 任何行程生成能力。
+# Positive imports are capability declarations; unlisted imports fail closed.
 ALLOWED_STDLIB_IMPORTS = frozenset({
     "__future__", "argparse", "base64", "datetime", "errno", "fcntl", "hashlib", "json",
     "os", "pathlib", "re", "socket", "stat", "sys", "typing",
 })
 ALLOWED_THIRD_PARTY_IMPORTS = frozenset({"psycopg2"})
-# E2 RES-5:原本是 ``GOVERNANCE_IMPORT_PREFIX = "agent_governance_"`` 的**無條件前綴放行**,而
-# ``agent_governance_command_capture_v2`` 本身就是一個 ``subprocess.run`` 執行器 —— 於是「import
-# 它 + ``capture_command(argv)``」這條 exec 路徑在五個檔案上全綠(E2 的 N16 探針)。前綴是名字,
-# 不是能力。改成**顯式模組列**:新增任何一個都必須在這裡明說。
-#
-# S2E.2b-1:再從「全家族共用一個集合」改成 **per-file**。共用集合有一個結構性的副作用——S2.4 的
-# 啟動補償 runner 需要 import 多個 applier 模組(``agent_governance_s2_4_install_driver`` 等),
-# 而把它們塞進共用集合等於**同時**允許 observer 與 kernel import applier;
-# ``test_kernel_import_closure_excludes_every_applier_module`` 只覆蓋 kernel,於是 E2 RES-5 收掉的
-# 那個洞會從側門回到 observer 上。白名單是**能力**宣告,能力屬於檔案,不屬於家族。
-#
-# 未列名的檔案(含合成突變樣本)其治理白名單為**空集**——fail-closed:新 family 檔的第一個治理
-# import 就必須在此顯式宣告。
+# Governance imports are per-file rather than family-wide.
 GOVERNANCE_IMPORTS_BY_FILE: dict[str, frozenset[str]] = {
     "agent_governance_s2_host_kernel.py": frozenset({
         "agent_governance_alr_quiesce_inventory",
@@ -160,18 +127,11 @@ GOVERNANCE_IMPORTS_BY_FILE: dict[str, frozenset[str]] = {
         "agent_governance_s2_host_observer",
     }),
 }
-# 只有 kernel 可以 import 的三個模組:``subprocess``(唯一 exec 點)、``ctypes``(prctl 執法;
-# 它同時也是一條 libc ``system()`` 路徑)、以及 ``agent_governance_command_capture_v2``
-# —— 後者**本身就是一個 exec 器**(``capture_command`` 內有 ``subprocess.run``),kernel 只從它
-# 導出 ``SAFE_INHERITED_ENVIRONMENT`` 與 ``_redact_preview`` 兩個純值/純函式(不另造第二套規則),
-# 但對其他家族成員它是一條完整的 exec 路徑,故一律禁止(E2 RES-5 的 N16 探針)。
+# Kernel-only modules expose process/FFI capability.
 KERNEL_ONLY_IMPORTS = frozenset({
     "subprocess", "ctypes", "agent_governance_command_capture_v2",
 })
-# S2E.2b-1 P2-1:除名檔案(``exec_family=False``)沒有正面白名單可依,故改以一張顯式**黑**名單
-# 兜底。每一個都是一條完整的行程生成/動態載入路徑,且沒有任何一條是 protocol 葉會需要的:
-# ``pty``(``spawn``)、``importlib``(名稱可為變數 ⇒ 字面拼接那道抓不到)、``commands``、
-# ``asyncio``(``create_subprocess_exec``)、``multiprocessing``(``Popen``/spawn)。
+# Exempt leaves retain an explicit exec-capable import denylist.
 EXEC_CAPABLE_IMPORT_DENYLIST = frozenset({
     "pty", "importlib", "commands", "asyncio", "multiprocessing", "runpy", "imp",
     "code", "pdb", "timeit", "concurrent",
@@ -214,9 +174,6 @@ def _present_family() -> list[Path]:
     return _discover_runner_family(HELPERS)
 
 
-# --------------------------------------------------------------------------- #
-# (4) ★驗收判準★ — AST no-raw-command scan over the runner family
-# --------------------------------------------------------------------------- #
 def _fold_string(node: ast.AST) -> str | None:
     """把純字面的 ``"a" + "b"`` 折成 ``"ab"``(其他形一律回 None)。"""
 
@@ -231,26 +188,9 @@ def _fold_string(node: ast.AST) -> str | None:
 
 
 def _raw_command_findings(path: Path, *, exec_family: bool = True) -> list[str]:
-    """整個 runner 家族的 no-raw-command 掃描;kernel 之外**任何** finding 即紅。
+    """Fail closed over imports, raw/dynamic callees, obfuscation and shell use.
 
-    五道:①import **正面白名單**(``subprocess``/``ctypes`` 只准 kernel;治理模組是
-    :data:`GOVERNANCE_IMPORTS_BY_FILE` 的 **per-file** 顯式列,而非 ``agent_governance_`` 前綴
-    放行 —— E2 RES-5:前綴會放行 ``agent_governance_command_capture_v2``,而它自己就是一個
-    ``subprocess.run`` 執行器);②``from <allowed> import <forbidden name>``(收口 E2 的 M2:
-    ``from os import system as _s``);③屬性名層 denylist(不論 receiver,故 ``libc.system`` /
-    ``_o.system`` 都抓得到);④``getattr``/``setattr``/``delattr`` 的名稱參數不得是**算出來的**,
-    也不得是被禁名字面(收口 M2c);⑤字面字串拼接折疊(收口 ``"sub"+"process"`` 這類混淆,連帶
-    讓 M2b 即使不 import ``importlib`` 也被抓)。另加 ``shell=`` 必須是常量 ``False``。
-
-    ``exec_family=False`` 只給 :data:`NON_RUNNER_HOST_LEAVES` 用,關掉兩件**只對 exec 家族成立**
-    的判準:①per-file import 白名單(那些檔案的匯入面由別的 wave 治理);②``shell=`` 必須是常量
-    ``False``——它是 ``subprocess`` **呼叫形狀**的規則,而 S2.4 的 host-identity row driver 把
-    POSIX 帳號的**登入 shell** 當一個同名欄位傳給 ``create_system_account``。
-
-    S2E.2b-1 P2-1:關掉①原本連帶關掉了唯一擋得住 ``pty`` / ``importlib`` 的那一道(E2 兩個全綠
-    反例)。故除名路徑改為「白名單關掉 **+** :data:`KERNEL_ONLY_IMPORTS` ∪
-    :data:`EXEC_CAPABLE_IMPORT_DENYLIST` 顯式黑名單」;其餘四道(raw-command 名稱 / builtin /
-    動態取名 / 字面拼接)本來就照跑。
+    ``exec_family=False`` disables only the positive import list and shell-shape rule.
     """
 
     tree = ast.parse(path.read_text(encoding="utf-8"), filename=str(path))
@@ -275,6 +215,7 @@ def _raw_command_findings(path: Path, *, exec_family: bool = True) -> list[str]:
     os_aliases: set[str] = {"os"}
     subprocess_aliases: set[str] = {"subprocess"}
     container_aliases: dict[str, object] = {}
+    wildcard_key = ("dynamic",)
     family_aliases = {
         "builtins": builtins_aliases, "ctypes": ctypes_handles,
         "module_lookup": module_lookup_aliases,
@@ -330,6 +271,34 @@ def _raw_command_findings(path: Path, *, exec_family: bool = True) -> list[str]:
             return merged
         return _flatten_provenance(left) | _flatten_provenance(right)
 
+    def _key_token(node: ast.AST) -> object:
+        return (
+            ("constant", node.value) if isinstance(node, ast.Constant)
+            else ("expression", ast.dump(node, annotate_fields=False))
+        )
+    def _target_path(node: ast.AST) -> tuple[str, list[ast.AST]] | None:
+        slices: list[ast.AST] = []
+        while isinstance(node, ast.Subscript):
+            slices.append(node.slice)
+            node = node.value
+        return (
+            (node.id, list(reversed(slices)))
+            if isinstance(node, ast.Name) else None
+        )
+    def _write_provenance(
+        current: object, slices: list[ast.AST], value: object
+    ) -> object:
+        if not slices:
+            return _merge_provenance(current, value)
+        mapping = dict(current) if isinstance(current, dict) else {}
+        token = _key_token(slices[0])
+        child = _write_provenance(mapping.get(token, {}), slices[1:], value)
+        mapping[token] = child
+        if not isinstance(slices[0], ast.Constant):
+            mapping[wildcard_key] = _merge_provenance(
+                mapping.get(wildcard_key, set()), child
+            )
+        return mapping
     def _value_provenance(node: ast.AST | None) -> object:
         if isinstance(node, ast.Name):
             if node.id in container_aliases:
@@ -345,11 +314,20 @@ def _raw_command_findings(path: Path, *, exec_family: bool = True) -> list[str]:
                 for index, item in enumerate(node.elts)
             }
         if isinstance(node, ast.Dict):
-            return {
-                key.value: _value_provenance(item)
-                for key, item in zip(node.keys, node.values)
-                if isinstance(key, ast.Constant)
-            }
+            members: dict[object, object] = {}
+            for key, item in zip(node.keys, node.values):
+                if key is None:
+                    continue
+                provenance = _value_provenance(item)
+                token = _key_token(key)
+                members[token] = _merge_provenance(
+                    members.get(token, set()), provenance
+                )
+                if not isinstance(key, ast.Constant):
+                    members[wildcard_key] = _merge_provenance(
+                        members.get(wildcard_key, set()), provenance
+                    )
+            return members
         if isinstance(node, ast.Attribute):
             if (
                 node.attr == "modules" and isinstance(node.value, ast.Name)
@@ -376,11 +354,19 @@ def _raw_command_findings(path: Path, *, exec_family: bool = True) -> list[str]:
         if isinstance(node, ast.Subscript):
             provenance = _value_provenance(node.value)
             if isinstance(provenance, dict):
-                provenance = (
-                    provenance.get(node.slice.value, set())
-                    if isinstance(node.slice, ast.Constant)
-                    else _flatten_provenance(provenance)
-                )
+                if isinstance(node.slice, ast.Constant):
+                    raw, keyed = provenance.get(node.slice.value), provenance.get(_key_token(node.slice))
+                    provenance = (
+                        keyed if raw is None else raw if keyed is None
+                        else _merge_provenance(raw, keyed)
+                    )
+                elif all(isinstance(key, tuple) for key in provenance):
+                    provenance = _merge_provenance(
+                        provenance.get(_key_token(node.slice), set()),
+                        provenance.get(wildcard_key, set()),
+                    )
+                else:
+                    provenance = _flatten_provenance(provenance)
             families = _flatten_provenance(provenance)
             if isinstance(provenance, set) and "module_registry" in families:
                 return (families - {"module_registry"}) | {"module_lookup"}
@@ -503,26 +489,43 @@ def _raw_command_findings(path: Path, *, exec_family: bool = True) -> list[str]:
         ):
             dynamic_return_functions.add(function.name)
 
-    # A dynamic getattr/subscript/container can be assigned and called later. Propagate
-    # aliases to a fixed point so ``f = getattr(os, name); box = [f]; box[0](...)`` cannot
-    # hide the callee.
     def _assignment_bindings(
         target: ast.AST, value: ast.AST | None
     ) -> list[tuple[ast.AST, ast.AST | None]]:
-        if (
-            isinstance(target, (ast.List, ast.Tuple))
-            and isinstance(value, (ast.List, ast.Tuple))
-            and len(target.elts) == len(value.elts)
+        if isinstance(target, (ast.List, ast.Tuple)) and isinstance(
+            value, (ast.List, ast.Tuple)
         ):
+            targets, values = list(target.elts), list(value.elts)
+            stars = [index for index, item in enumerate(targets) if isinstance(item, ast.Starred)]
+            if len(stars) == 1:
+                index = stars[0]
+                suffix = len(targets) - index - 1
+                if len(values) < index + suffix:
+                    return [(target, value)]
+                pairs = list(zip(targets[:index], values[:index]))
+                pairs.append((
+                    targets[index].value,
+                    ast.List(elts=values[index:len(values) - suffix or None], ctx=ast.Load()),
+                ))
+                pairs.extend(zip(targets[index + 1:], values[len(values) - suffix:]))
+            elif not stars and len(targets) == len(values):
+                pairs = list(zip(targets, values))
+            else:
+                return [(target, value)]
             return [
                 binding
-                for item_target, item_value in zip(target.elts, value.elts)
+                for item_target, item_value in pairs
                 for binding in _assignment_bindings(item_target, item_value)
             ]
         return [(target, value)]
 
     changed = True
     while changed:
+        before = (
+            repr(container_aliases),
+            tuple((family, tuple(sorted(aliases))) for family, aliases in family_aliases.items()),
+            tuple(sorted(dynamic_callable_aliases)),
+        )
         changed = False
         for node in ast.walk(tree):
             value: ast.AST | None = None
@@ -539,9 +542,19 @@ def _raw_command_findings(path: Path, *, exec_family: bool = True) -> list[str]:
                 for binding in _assignment_bindings(target, value)
             ]
             for target, bound_value in bindings:
+                provenance = _value_provenance(bound_value)
+                target_path = _target_path(target)
+                if target_path is not None and not isinstance(target, ast.Name):
+                    root, slices = target_path
+                    updated = _write_provenance(
+                        container_aliases.get(root, {}), slices, provenance
+                    )
+                    if container_aliases.get(root) != updated:
+                        container_aliases[root] = updated
+                        changed = True
+                    continue
                 if not isinstance(target, ast.Name):
                     continue
-                provenance = _value_provenance(bound_value)
                 for family in _flatten_provenance(provenance):
                     aliases = family_aliases[family]
                     if target.id not in aliases:
@@ -567,6 +580,11 @@ def _raw_command_findings(path: Path, *, exec_family: bool = True) -> list[str]:
                     if name not in dynamic_callable_aliases:
                         dynamic_callable_aliases.add(name)
                         changed = True
+        changed = before != (
+            repr(container_aliases),
+            tuple((family, tuple(sorted(aliases))) for family, aliases in family_aliases.items()),
+            tuple(sorted(dynamic_callable_aliases)),
+        )
 
     for node in ast.walk(tree):
         if isinstance(node, ast.Import):
@@ -726,9 +744,7 @@ def test_no_raw_command_outside_the_kernel():
         assert findings == [], f"{path.name} carries a raw-command surface: {findings}"
 
 
-# --------------------------------------------------------------------------- #
 # S2E.2b-1 (a) — RUNNER_FAMILY 由檔案系統**導出**比對,不是純手抄
-# --------------------------------------------------------------------------- #
 def _unscanned_runner_candidates(helpers_dir: Path, family_names: set[str]) -> list[str]:
     """磁碟上「長得像 S2 受信主機 runner」但不在掃描家族、也未被顯式除名的檔案。"""
 
@@ -851,9 +867,7 @@ def test_the_runner_family_is_auto_discovered_not_copied_into_a_tuple(tmp_path):
     assert _discover_runner_family(tmp_path) == sorted(expected)
 
 
-# --------------------------------------------------------------------------- #
 # S2E.2b-1 (b) — 治理 import 白名單是 per-file 的能力宣告
-# --------------------------------------------------------------------------- #
 def test_the_governance_import_allowlist_is_per_file_not_family_wide(tmp_path):
     """S2.4 補償 runner 需要的 applier 匯入面,絕不因此在 observer / kernel 上也成立。"""
 
@@ -958,16 +972,20 @@ AST_SCANNER_MUTATIONS = {
         "def f(key, expr):\n    return __builtins__.get(key)(expr)\n",
         "dynamic execution subscript",
     ),
-    "nested_list_held_builtins_alias_variable_subscript": (
-        "def f(key, expr):\n"
-        "    outer = [[__builtins__]]\n"
-        "    return outer[0][0][key](expr)\n",
+    "dynamic_dict_key_nested_builtins_alias_variable_subscript": (
+        "import sys\n\ndef f(slot, key, expr):\n"
+        "    outer = {slot: [[__builtins__]], 'modules': [[sys.modules]]}\n"
+        "    return outer[slot][0][0][key](expr)\n",
         "dynamic execution subscript",
     ),
-    "recursively_unpacked_builtins_alias_variable_subscript": (
+    "dynamic_dict_key_alias_mismatch": (
+        "def f(slot, other, key, expr):\n    outer = {slot: [[__builtins__]]}\n"
+        "    return outer[other][0][0][key](expr)\n", "dynamic execution subscript",
+    ),
+    "starred_unpack_builtins_alias_variable_subscript": (
         "def f(key, expr):\n"
-        "    _, (harmless, builtins_alias) = (object(), (object(), __builtins__))\n"
-        "    return builtins_alias[key](expr)\n",
+        "    safe, *caps = (object(), __builtins__)\n"
+        "    return caps[0][key](expr)\n",
         "dynamic execution subscript",
     ),
     "variable_sys_modules_key_then_run": (
@@ -1003,9 +1021,10 @@ AST_SCANNER_MUTATIONS = {
         "    return sp.call(argv)\n",
         "dynamic module execution",
     ),
-    "nested_list_held_sys_modules_alias_call": (
-        "import sys\n\ndef f(key, argv):\n    outer = [[sys.modules]]\n"
-        "    return outer[0][0][key].call(argv)\n", "dynamic module execution",
+    "dynamic_dict_sys_modules_sibling_alias_call": (
+        "import sys\n\ndef f(slot, key, argv):\n"
+        "    outer = {slot: [[__builtins__]], 'modules': [[sys.modules]]}\n"
+        "    return outer['modules'][0][0][key].call(argv)\n", "dynamic module execution",
     ),
     "os_dunder_getattribute_then_call": (
         "import os\n\ndef f(name, argv):\n"
@@ -1029,9 +1048,15 @@ AST_SCANNER_MUTATIONS = {
         "    return getattr(box['os'], name)(*argv)\n",
         "dynamic callable attribute",
     ),
-    "nested_list_held_os_alias_variable_getattr": (
-        "import os\n\ndef f(name, argv):\n    outer = [[os]]\n"
-        "    return getattr(outer[0][0], name)(*argv)\n", "dynamic callable attribute",
+    "subscript_target_builtins_mutation": (
+        "def f(key, expr):\n    outer = {}\n    outer['cap'] = __builtins__\n"
+        "    return outer['cap'][key](expr)\n", "dynamic execution subscript",
+    ),
+    "nested_subscript_target_os_mutation": (
+        "import os\n\ndef f(name, argv):\n    outer = {'nested': {}}\n"
+        "    outer['nested']['cap'] = os\n"
+        "    return getattr(outer['nested']['cap'], name)(*argv)\n",
+        "dynamic callable attribute",
     ),
     "computed_getattr_stored_in_container": (
         "import os\n\ndef f(name, argv):\n"
@@ -1173,9 +1198,10 @@ def test_nested_ctypes_handle_cannot_hide_dynamic_ffi_getattr(tmp_path):
 
 def test_container_aliases_do_not_taint_a_benign_sibling(tmp_path):
     sources = (
-        "outer = [[__builtins__, {}]]\nouter[0][1][key](expr)\n",
-        "import sys\nouter = [[sys.modules, {}]]\nouter[0][1][key].call(argv)\n",
-        "import os\nouter = [[os, object()]]\ngetattr(outer[0][1], name)\n",
+        "outer = {slot: [[__builtins__]], 'safe': [[{}]]}\nouter['safe'][0][0][key](expr)\n",
+        "import sys\nouter = {slot: [[sys.modules]], 'safe': [[{}]]}\nouter['safe'][0][0][key].call(argv)\n",
+        "import os\nouter = {slot: [[os]], 'safe': [[object()]]}\ngetattr(outer['safe'][0][0], name)\n",
+        "safe, *caps = (object(), __builtins__)\ngetattr(safe, name)\n",
     )
     for index, source in enumerate(sources):
         path = tmp_path / f"benign_container_sibling_{index}.py"
@@ -1231,9 +1257,7 @@ def test_kernel_is_the_only_family_member_importing_subprocess():
             assert "subprocess" not in source, path.name
 
 
-# --------------------------------------------------------------------------- #
 # (1)+(4) allowlist ≡ owner — derived, not hand-copied
-# --------------------------------------------------------------------------- #
 _FRAG = "/etc/systemd/system/arcane-equilibrium-aiml-engine-scanner.service"
 _FLOCK = "/run/arcane-equilibrium/aiml-engine-scanner/consumer.lock"
 _DSN = "/run/credentials/arcane-equilibrium-aiml-engine-scanner.service/pg-dsn"
@@ -1337,9 +1361,7 @@ def test_s2_0_session_has_no_argv_surface_at_all():
         kernel.assert_session_argv(kernel.SESSION_S2_0_OBSERVER_BOOTSTRAP, ["/usr/bin/psql", "-c", "select 1"])
 
 
-# --------------------------------------------------------------------------- #
 # (2) kernel-side independent re-assert — a non-allowlisted argv NEVER executes
-# --------------------------------------------------------------------------- #
 @pytest.mark.parametrize("argv", [
     [qi.SYSTEMD, "stop", qi.UNIT_NAME],                                   # 唯讀 session 不得 stop
     [qi.SYSTEMD, "show", qi.UNIT_NAME],                                   # 屬性集不完整
@@ -1449,9 +1471,7 @@ def test_stdout_is_redacted_with_the_existing_capture_v2_patterns(monkeypatch):
     assert "<redacted>" in output
 
 
-# --------------------------------------------------------------------------- #
 # (3) capability partition
-# --------------------------------------------------------------------------- #
 class _WriterSurface:
     def stop(self):  # pragma: no cover - 必須永不被呼叫
         raise AssertionError("assert_read_only_surface must refuse BEFORE calling anything")
@@ -1477,9 +1497,7 @@ def test_forbidden_read_only_surface_covers_the_four_adapter_mutators():
         assert name in kernel.FORBIDDEN_READ_ONLY_SURFACE
 
 
-# --------------------------------------------------------------------------- #
 # target class is derived from HOST FACTS (a caller string can never reach it)
-# --------------------------------------------------------------------------- #
 def _force_host(monkeypatch, *, platform, hostname, writable, roots):
     monkeypatch.setattr(kernel.sys, "platform", platform)
     monkeypatch.setattr(kernel, "_observed_nodename", lambda: hostname)
@@ -1521,9 +1539,7 @@ def test_this_development_machine_is_never_a_production_target():
         assert view["target_class"] == kernel.TARGET_CLASS_NON_TARGET
 
 
-# --------------------------------------------------------------------------- #
 # production / unknown admission matrix — --allow-production alone is NOT enough
-# --------------------------------------------------------------------------- #
 DIGEST = "sha256:" + "a" * 64
 
 
@@ -1692,9 +1708,7 @@ def test_unknown_is_treated_exactly_like_production():
         )
 
 
-# --------------------------------------------------------------------------- #
 # rehearsal lane — an injected view may only TIGHTEN, never loosen (RUN-1)
-# --------------------------------------------------------------------------- #
 DISPOSABLE = {"target_class": kernel.TARGET_CLASS_DISPOSABLE_CANDIDATE, "reason": "throwaway"}
 NON_TARGET = {"target_class": kernel.TARGET_CLASS_NON_TARGET, "reason": "mac"}
 
@@ -1732,9 +1746,7 @@ def test_the_recorded_target_class_is_always_the_derived_one():
     assert record["injected_is_authoritative"] is False
 
 
-# --------------------------------------------------------------------------- #
 # W5 #21 — PR_SET_DUMPABLE is actually enforced (not a declared constant)
-# --------------------------------------------------------------------------- #
 def test_process_hardening_is_observed_and_load_bearing():
     observation = kernel.enforce_process_hardening(force=True)
     if sys.platform == "linux":
@@ -1773,9 +1785,7 @@ def test_process_hardening_is_re_observed_on_every_execution(monkeypatch):
     assert observations["count"] == 2
 
 
-# --------------------------------------------------------------------------- #
 # P2 #7 — the read-only observation face also passes an L1 gate (a weaker one)
-# --------------------------------------------------------------------------- #
 @pytest.mark.parametrize("target_class,allow,refused", [
     (kernel.TARGET_CLASS_NON_TARGET, False, False),
     # P1-A:rehearsal-only class 導不出來 ⇒ 觀測面見到它也只能是偽造視圖,一律拒。
@@ -1805,9 +1815,7 @@ def test_the_observation_gate_is_deliberately_weaker_than_the_apply_gate():
     )
 
 
-# --------------------------------------------------------------------------- #
 # P2 #12 — hostname is derived from the same source as S1.6B
-# --------------------------------------------------------------------------- #
 def test_hostname_comes_from_the_same_source_as_the_s1_6b_preflight():
     import agent_governance_target_host_probe as th
     import inspect
@@ -1843,9 +1851,7 @@ def test_process_hardening_refusal_blocks_execution(monkeypatch):
         host.run(list(allowed))
 
 
-# --------------------------------------------------------------------------- #
 # derived constants are pinned against their owners (no re-invented host facts)
-# --------------------------------------------------------------------------- #
 def test_target_hostnames_are_pinned_to_the_s1_target_host():
     import agent_governance_target_host_probe as th
 
@@ -1898,9 +1904,7 @@ def test_kernel_abi_projection_is_code_owned():
     assert projection["egress_secret_scanner_rules"].endswith("SECRET_VALUE_PATTERNS")
 
 
-# --------------------------------------------------------------------------- #
 # (6) 出境秘密掃描 —— 判準必須是 capture_v2 的既有規則,而不是本 kernel 自造的第二套
-# --------------------------------------------------------------------------- #
 # 反例以片段拼接構造(repo 內不留任何看起來像真憑證的字面量);三段分別命中
 # ``SECRET_VALUE_PATTERNS`` 的三條規則:賦值形 / bearer 形 / URL user:pass 形。
 _SECRET_SHAPED_VALUES = (
