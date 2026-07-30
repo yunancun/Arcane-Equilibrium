@@ -88,10 +88,20 @@
     "signer": {
       "type": "object",
       "additionalProperties": false,
-      "required": ["role", "namespace", "key_fingerprint"],
+      "required": [
+        "role",
+        "identity",
+        "namespace",
+        "key_generation",
+        "anchor",
+        "key_fingerprint"
+      ],
       "properties": {
         "role": {"type": "string", "minLength": 1, "maxLength": 32},
-        "namespace": {"const": "s2e-receipt-carrier"},
+        "identity": {"const": "aiml-s2e-receipt-signer-v1"},
+        "namespace": {"const": "arcane-equilibrium-aiml-s2e-receipts"},
+        "key_generation": {"const": "independent_off_repo_ed25519_v1"},
+        "anchor": {"const": "fixed_off_repo_public_trust_root_v1"},
         "key_fingerprint": {
           "type": "string",
           "pattern": "^SHA256:[A-Za-z0-9+/=]{40,64}$"

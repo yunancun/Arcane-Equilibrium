@@ -1,0 +1,165 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://arcane-equilibrium.local/schemas/s2e_launch_acceptance_review_bundle_v1.schema.json",
+  "title": "s2e_launch_acceptance_review_bundle_v1",
+  "description": "Closed independently signed and externally immutable review of one exact S2E launch candidate.",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "schema_version",
+    "candidate_payload_digest",
+    "launch_id",
+    "wave",
+    "reviewed_source_head",
+    "reviewed_source_tree",
+    "generation_task_contract_digest",
+    "predicate_results",
+    "governed_capture_identity",
+    "governed_capture_record_digest",
+    "reviewer_identity",
+    "issued_at",
+    "expires_at",
+    "signer",
+    "signed_core_digest",
+    "signature",
+    "external_worm_binding",
+    "bundle_digest"
+  ],
+  "properties": {
+    "schema_version": {"const": "s2e_launch_acceptance_review_bundle_v1"},
+    "candidate_payload_digest": {"$ref": "#/$defs/digest"},
+    "launch_id": {"const": "S2E-LW1-LW5"},
+    "wave": {
+      "enum": ["W0-GENESIS", "S2E-LW1", "S2E-LW2", "S2E-LW3", "S2E-LW4", "S2E-LW5"]
+    },
+    "reviewed_source_head": {"$ref": "#/$defs/git_sha"},
+    "reviewed_source_tree": {"$ref": "#/$defs/git_sha"},
+    "generation_task_contract_digest": {"$ref": "#/$defs/digest"},
+    "predicate_results": {
+      "type": "array",
+      "minItems": 5,
+      "maxItems": 6,
+      "items": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": ["predicate_id", "result"],
+        "properties": {
+          "predicate_id": {
+            "enum": [
+              "CANDIDATE_SCHEMA_VALID",
+              "EXACT_SOURCE_HEAD_TREE_VALID",
+              "EXTERNAL_WORM_IMMUTABLE_READBACK_VALID",
+              "INDEPENDENT_GOVERNED_REVIEW_VALID",
+              "INDEPENDENT_SSHSIG_VALID",
+              "PREDECESSOR_CHAIN_VALID"
+            ]
+          },
+          "result": {"const": "PASS"}
+        }
+      }
+    },
+    "governed_capture_identity": {"$ref": "#/$defs/capture_identity"},
+    "governed_capture_record_digest": {"$ref": "#/$defs/digest"},
+    "reviewer_identity": {"$ref": "#/$defs/reviewer_identity"},
+    "issued_at": {"type": "string", "format": "date-time"},
+    "expires_at": {"type": "string", "format": "date-time"},
+    "signer": {"$ref": "#/$defs/signer"},
+    "signed_core_digest": {"$ref": "#/$defs/digest"},
+    "signature": {"$ref": "#/$defs/signature"},
+    "external_worm_binding": {"$ref": "#/$defs/external_worm_binding"},
+    "bundle_digest": {"$ref": "#/$defs/digest"}
+  },
+  "$defs": {
+    "digest": {"type": "string", "pattern": "^sha256:[0-9a-f]{64}$"},
+    "git_sha": {"type": "string", "pattern": "^[0-9a-f]{40}$"},
+    "capture_identity": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "schema_version",
+        "record_digest",
+        "context_artifact_digest",
+        "task_contract_digest",
+        "node_id",
+        "role_id",
+        "native_agent",
+        "permission"
+      ],
+      "properties": {
+        "schema_version": {"const": "governed_capture_identity_v1"},
+        "record_digest": {"$ref": "#/$defs/digest"},
+        "context_artifact_digest": {"$ref": "#/$defs/digest"},
+        "task_contract_digest": {"$ref": "#/$defs/digest"},
+        "node_id": {"type": "string", "minLength": 1, "maxLength": 128},
+        "role_id": {"type": "string", "minLength": 1, "maxLength": 32},
+        "native_agent": {"type": "string", "minLength": 1, "maxLength": 64},
+        "permission": {"const": "read_only"}
+      }
+    },
+    "reviewer_identity": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["node_id", "role_id", "native_agent", "permission"],
+      "properties": {
+        "node_id": {"type": "string", "minLength": 1, "maxLength": 128},
+        "role_id": {"type": "string", "minLength": 1, "maxLength": 32},
+        "native_agent": {"type": "string", "minLength": 1, "maxLength": 64},
+        "permission": {"const": "read_only"}
+      }
+    },
+    "signer": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "role",
+        "identity",
+        "namespace",
+        "key_generation",
+        "anchor",
+        "key_fingerprint"
+      ],
+      "properties": {
+        "role": {"type": "string", "minLength": 1, "maxLength": 32},
+        "identity": {"const": "aiml-s2e-receipt-signer-v1"},
+        "namespace": {"const": "arcane-equilibrium-aiml-s2e-receipts"},
+        "key_generation": {"const": "independent_off_repo_ed25519_v1"},
+        "anchor": {"const": "fixed_off_repo_public_trust_root_v1"},
+        "key_fingerprint": {
+          "type": "string",
+          "pattern": "^SHA256:[A-Za-z0-9+/=]{40,64}$"
+        }
+      }
+    },
+    "signature": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["algorithm", "signed_digest", "signature"],
+      "properties": {
+        "algorithm": {"const": "SSHSIG"},
+        "signed_digest": {"$ref": "#/$defs/digest"},
+        "signature": {"type": "string", "minLength": 32, "maxLength": 16384}
+      }
+    },
+    "external_worm_binding": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "result_digest",
+        "readback_ack_digest",
+        "record_locator",
+        "object_version_id",
+        "checksum_sha256"
+      ],
+      "properties": {
+        "result_digest": {"$ref": "#/$defs/digest"},
+        "readback_ack_digest": {"$ref": "#/$defs/digest"},
+        "record_locator": {
+          "type": "string",
+          "pattern": "^records/[0-9a-f]{64}\\.record$"
+        },
+        "object_version_id": {"type": "string", "minLength": 1, "maxLength": 256},
+        "checksum_sha256": {"$ref": "#/$defs/digest"}
+      }
+    }
+  }
+}

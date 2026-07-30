@@ -17,6 +17,7 @@
     "launch_contract_digest",
     "generation_task_contract_digest",
     "checkpoint_status",
+    "acceptance_review_bundle_digest",
     "side_effect_class",
     "production_effect_count",
     "payload_digest"
@@ -32,7 +33,12 @@
     "schema_carrier_tree": {"$ref": "#/$defs/git_sha"},
     "launch_contract_digest": {"$ref": "#/$defs/digest"},
     "generation_task_contract_digest": {"$ref": "#/$defs/digest"},
-    "checkpoint_status": {"const": "PENDING_REVIEW"},
+    "checkpoint_status": {
+      "enum": ["PENDING_REVIEW", "TASK_BRANCH_CHECKPOINT_READY"]
+    },
+    "acceptance_review_bundle_digest": {
+      "anyOf": [{"$ref": "#/$defs/digest"}, {"type": "null"}]
+    },
     "side_effect_class": {"enum": ["SOURCE_ONLY", "DISPOSABLE_TEST"]},
     "production_effect_count": {"const": 0},
     "payload_digest": {"$ref": "#/$defs/digest"}
