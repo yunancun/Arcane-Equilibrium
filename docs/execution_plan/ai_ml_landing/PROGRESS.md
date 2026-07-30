@@ -35,7 +35,12 @@ effect window, and the unresolved latch now survives GC/process reconstruction
 and whole state-root replacement through strong live ownership plus an
 owner-only, off-state-root, append-history durable ledger with exact readback.
 Its entries remain `DISPOSABLE_TEST`, production-effect false and
-production-authority false. This checkpoint issues no W0/LW1 receipt,
+production-authority false. Delta review then closed coherent-prefix rollback:
+a reconstructed resolved tombstone cannot admit lifecycle work without an
+external monotonic floor, and every predecessor consumption—including an
+intact-state retry—requires fresh candidate-bound authority from the signed
+external single-use registry rather than trusting the co-rollbackable Git
+common-directory pair. This checkpoint issues no W0/LW1 receipt,
 does not satisfy `S2E_2B_2A_SECURITY_RECOVERY_READY`, does not unlock LW2, and
 does not change the 5/9 package projection or production effect 0/6.
 A fresh Linux run at H_effect

@@ -21,7 +21,7 @@ LAUNCH_WAVES = ("S2E-LW1", "S2E-LW2", "S2E-LW3", "S2E-LW4", "S2E-LW5")
 LEDGER_SCHEMA = "s2e_launch_predecessor_consumption_ledger_v1"
 ENTRY_SCHEMA = "s2e_launch_predecessor_consumption_entry_v1"
 BOOTSTRAP_SCHEMA = "s2e_launch_consumption_bootstrap_authority_v1"
-BOOTSTRAP_PURPOSE = "INITIALIZE_RESETTABLE_LOCAL_PREDECESSOR_CONSUMPTION_STORE"
+BOOTSTRAP_PURPOSE = "AUTHORIZE_PREDECESSOR_SINGLE_USE_CONSUMPTION"
 BOOTSTRAP_REGISTRY_CLASS = (
     "TRUSTED_SIGNER_PREDECESSOR_SINGLE_USE_REGISTRY_V1"
 )
@@ -755,6 +755,11 @@ def consume_s2e_launch_predecessor(
 ) -> dict[str, Any]:
     """Consume one predecessor atomically; exact retries are idempotent."""
 
+    if bootstrap_authority is None:
+        raise ValueError(
+            "S2E launch fresh signed external single-use registry authority "
+            "is required for every predecessor consumption"
+        )
     store = FileS2ELaunchConsumptionStore(repo_root)
     selected: dict[str, Any] = {}
     status = "CONSUMED"
@@ -870,7 +875,7 @@ def consume_s2e_launch_predecessor(
         "ledger_digest": ledger["ledger_digest"],
         "state_location_class": "GIT_COMMON_DIRECTORY",
         "reset_evidence_class": (
-            "SIGNED_EXTERNAL_BOOTSTRAP_PLUS_LOCAL_DUAL_COPY_V1"
+            "SIGNED_EXTERNAL_SINGLE_USE_REGISTRY_REQUIRED_PLUS_LOCAL_DUAL_COPY_V1"
         ),
         "tombstone_anchor_ledger_digest": ledger["ledger_digest"],
         "state_recovery_performed": bool(
@@ -884,6 +889,7 @@ def consume_s2e_launch_predecessor(
             store.last_bootstrap_authority_applied
         ),
         "bootstrap_authority_digest": bootstrap_authority_digest,
+        "external_single_use_registry_authority_validated": True,
         "external_immutability_proven": False,
         "file_fsynced": True,
         "parent_directory_fsynced": True,

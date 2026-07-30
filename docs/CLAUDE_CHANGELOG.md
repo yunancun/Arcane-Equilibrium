@@ -24,6 +24,11 @@ controller 不再依賴可被 GC／restart 清除的 weak registry，改用 stro
 ownership 與可替換 state root 外的 owner-only append-history durable latch ledger，
 並在每次 admission／更新後重驗 exact readback。ledger effect boundary 固定
 `DISPOSABLE_TEST`、production effect／authority false。
+Delta review 再補 coherent-prefix rollback：process reconstruction 只讀到
+resolved tombstone 時，沒有 external monotonic floor 不得再進 effect；predecessor
+consume-once 改為每次（含 intact-state retry）都必須驗 fresh、candidate-bound、
+single-use external registry authority，Git common directory 內 state＋anchor
+同步 rollback 不再自行取得 consumption authority。
 此 checkpoint 不改 5/9 package projection；`S2E.2b-2` 仍 ACTIVE，
 `S2E_2B_2A_SECURITY_RECOVERY_READY` 尚未成立，production effect 仍 0/6。
 

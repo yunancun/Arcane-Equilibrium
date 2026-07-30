@@ -891,6 +891,41 @@ def test_unresolved_latch_survives_reconstruction_and_state_root_replacement(
     assert restarted._previous_root_digest == D2
 
 
+def test_resolved_prefix_rollback_requires_external_monotonic_floor_after_restart(
+    tmp_path,
+):
+    state = _state(tmp_path)
+    state_module = __import__("agent_governance_s2_5_recovery_state")
+    ledger_path = state_module._latch_ledger_path(state._binding)
+    tombstone_digest = state._persist_durable_state(
+        status="RESOLVED_TOMBSTONE",
+        generation=state._generation,
+        previous_root_digest=state._previous_root_digest,
+        unresolved=None,
+        consumed_authorization_ids={"s2-5-recovery-auth-" + "8" * 64},
+    )
+    state._durable_ledger_digest = tombstone_digest
+    state.unresolved = None
+    state._recorded_unresolved_digest = None
+    tombstone_prefix = ledger_path.read_bytes()
+    _record_state(state, start="5")
+    assert state.unresolved is not None
+
+    ledger_path.write_bytes(tombstone_prefix)
+    ledger_path.chmod(0o600)
+    restarted = lifecycle.S2_5RecoveryState(
+        state_root=state.state_root,
+        host_capture=state.host_capture,
+        now=NOW,
+    )
+
+    assert restarted.unresolved is None
+    assert any(
+        "external monotonic floor" in error
+        for error in restarted.admission_errors(state.state_root)
+    )
+
+
 @pytest.mark.parametrize(
     "mutation",
     [

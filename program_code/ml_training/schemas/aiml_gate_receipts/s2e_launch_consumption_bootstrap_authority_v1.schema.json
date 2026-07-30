@@ -33,7 +33,7 @@
       "const": "s2e_launch_consumption_bootstrap_authority_v1"
     },
     "purpose": {
-      "const": "INITIALIZE_RESETTABLE_LOCAL_PREDECESSOR_CONSUMPTION_STORE"
+      "const": "AUTHORIZE_PREDECESSOR_SINGLE_USE_CONSUMPTION"
     },
     "launch_id": {"const": "S2E-LW1-LW5"},
     "predecessor_payload_digest": {"$ref": "#/$defs/digest"},

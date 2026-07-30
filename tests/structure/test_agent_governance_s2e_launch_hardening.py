@@ -436,6 +436,18 @@ def test_wave_issuance_binds_effects_and_consumes_predecessor_once(
     ledger = consumption.FileS2ELaunchConsumptionStore(repo).read()
     assert consumption.validate_s2e_launch_consumption_ledger(ledger) == []
     assert len(ledger["entries"]) == 1
+    no_external_floor = _issue_wave(
+        case,
+        review,
+        candidate,
+        bootstrap_authority=None,
+    )
+    assert no_external_floor["status"] == "EXTERNAL_VERIFICATION_PENDING"
+    assert any(
+        "fresh signed external single-use registry authority is required"
+        in error
+        for error in no_external_floor["errors"]
+    )
 
     store = consumption.FileS2ELaunchConsumptionStore(repo)
     store.state_path.unlink()
@@ -487,7 +499,8 @@ def test_wave_issuance_binds_effects_and_consumes_predecessor_once(
     )
     assert renamed_all["status"] == "EXTERNAL_VERIFICATION_PENDING"
     assert any(
-        "explicit signed bootstrap authority is required" in error
+        "fresh signed external single-use registry authority is required"
+        in error
         for error in renamed_all["errors"]
     )
     restored_from_authority = _issue_wave(case, review, candidate)
@@ -534,7 +547,7 @@ def test_wave_issuance_binds_effects_and_consumes_predecessor_once(
         tmp_path=tmp_path,
         monkeypatch=monkeypatch,
         intent_suffix="b-second02",
-        grant_bootstrap=False,
+        grant_bootstrap=True,
     )
     blocked = _issue_wave(case, sibling_review, sibling)
     assert blocked["status"] == "EXTERNAL_VERIFICATION_PENDING"
@@ -555,10 +568,16 @@ def test_wave_issuance_binds_effects_and_consumes_predecessor_once(
         for error in missing_anchor["errors"]
     )
     store.state_path.unlink()
-    reset_pair = _issue_wave(case, sibling_review, sibling)
+    reset_pair = _issue_wave(
+        case,
+        sibling_review,
+        sibling,
+        bootstrap_authority=None,
+    )
     assert reset_pair["status"] == "EXTERNAL_VERIFICATION_PENDING"
     assert any(
-        "state and tombstone anchor were reset" in error
+        "fresh signed external single-use registry authority is required"
+        in error
         for error in reset_pair["errors"]
     )
     store.lock_path.unlink()
@@ -570,7 +589,8 @@ def test_wave_issuance_binds_effects_and_consumes_predecessor_once(
     )
     assert triple_reset["status"] == "EXTERNAL_VERIFICATION_PENDING"
     assert any(
-        "explicit signed bootstrap authority is required" in error
+        "fresh signed external single-use registry authority is required"
+        in error
         for error in triple_reset["errors"]
     )
     assert triple_reset["issued_receipt"] is None
@@ -605,9 +625,7 @@ def test_wave_issuance_binds_effects_and_consumes_predecessor_once(
         "mutation_performed"
     ] is False
     support._git(repo, "checkout", "--detach", sibling["source_head"])
-    sibling_still_blocked = _issue_wave(
-        case, sibling_review, sibling, bootstrap_authority=None
-    )
+    sibling_still_blocked = _issue_wave(case, sibling_review, sibling)
     assert sibling_still_blocked["status"] == "EXTERNAL_VERIFICATION_PENDING"
     assert any(
         "already consumed by another successor" in error

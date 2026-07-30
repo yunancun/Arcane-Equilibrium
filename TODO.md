@@ -86,7 +86,11 @@ prepared anchor intent 過期後仍可能先進 writer effect window，以及 un
 拒絕、strong controller ownership，及位於可替換 state root 外的 owner-only
 append-history durable latch ledger＋exact readback 修復；root rename／process
 reconstruction 不再清閂，所有 ledger entry 仍固定為 `DISPOSABLE_TEST` 且
-production effect／authority 均 false。
+production effect／authority 均 false。Delta review 再證明本地合法 prefix 仍可
+rollback；因此 resolved tombstone 在 process reconstruction 後若無 external monotonic
+floor 一律 fail closed，且每次 predecessor consumption（含 intact-state retry）均
+強制 fresh、candidate-bound、single-use external registry authority，不能只信
+Git common directory 內可一併 rollback 的 state＋anchor。
 這只關閉 launch tooling 的 `PA-S2E-LW1-P2-006`、`F-LW1-04`、
 `F-LW1-04-schema` 與 `LAUNCH-04` review debt；**尚未發行 W0 genesis 或 LW1 wave
 receipt，尚未取得 `S2E_2B_2A_SECURITY_RECOVERY_READY`，不得解鎖 LW2**。

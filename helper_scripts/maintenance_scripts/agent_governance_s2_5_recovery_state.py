@@ -213,6 +213,7 @@ class S2_5RecoveryState:
         "_previous_root_digest",
         "_durable_ledger_digest",
         "_durable_errors",
+        "_resolved_reload_requires_external_floor",
         "__weakref__",
     )
 
@@ -267,7 +268,12 @@ class S2_5RecoveryState:
         })
         self._durable_ledger_digest: str | None = None
         self._durable_errors: tuple[str, ...] = ()
+        self._resolved_reload_requires_external_floor = False
         self._reload_durable_state()
+        self._resolved_reload_requires_external_floor = bool(
+            self._durable_ledger_digest is not None
+            and self.unresolved is None
+        )
 
     def __setattr__(self, name: str, value: Any) -> None:
         if name == "_binding" and hasattr(self, "_binding"):
@@ -434,6 +440,11 @@ class S2_5RecoveryState:
         )
         self._reload_durable_state()
         errors.extend(self._durable_errors)
+        if self._resolved_reload_requires_external_floor:
+            errors.append(
+                "S2.5 resolved recovery state reloaded without an external "
+                "monotonic floor; new lifecycle effects remain fail-closed"
+            )
         if (
             self._durable_ledger_digest is not None
             and cached_state != (
