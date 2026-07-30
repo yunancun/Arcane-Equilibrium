@@ -253,6 +253,36 @@ const promotedEnvelopeV1 = (baseEnvelope, requiredNodes) => {
 }
 // END GENERATED CONTEXT_ADMISSION_V1
 
+const rollingParallelV1 = async (factories, capacity) => {
+  if (!Array.isArray(factories) || !Number.isInteger(capacity) || capacity <= 0) {
+    throw new Error('rolling scheduler requires task factories and a positive capacity')
+  }
+  const results = Array(factories.length)
+  let nextIndex = 0
+  let stopped = false
+  let firstError
+  const workers = Array.from(
+    { length: Math.min(capacity, factories.length) },
+    () => async () => {
+      while (!stopped && nextIndex < factories.length) {
+        const index = nextIndex
+        nextIndex += 1
+        try {
+          results[index] = await factories[index]()
+        } catch (error) {
+          if (!stopped) {
+            stopped = true
+            firstError = error
+          }
+        }
+      }
+    },
+  )
+  await parallel(workers)
+  if (stopped) throw firstError
+  return results
+}
+
 const JUDGMENT_SCHEMA = {
   type: 'object',
   additionalProperties: false,
@@ -943,7 +973,7 @@ for (let waveIndex = 0; waveIndex < executionWaves.length; waveIndex += 1) {
   if (!runnable.length) continue
   phase('Wave')
   const generations = runnable.map(index => Object.fromEntries(tasks[index].requires.map(node => [node, producerRecords[nodeIds.indexOf(node)].record_digest])))
-  const first = await boundedParallelV1(runnable.map((index, position) => () => invoke({
+  const first = await rollingParallelV1(runnable.map((index, position) => () => invoke({
     task: tasks[index], index, attempt: 1, retryParent: null, phaseName: 'Wave',
     prompt: basePrompts[index], topologicalWave: waveIndex, producerGeneration: generations[position],
   })), authority.max_concurrent_calls)
@@ -959,7 +989,7 @@ for (let waveIndex = 0; waveIndex < executionWaves.length; waveIndex += 1) {
   retriesRemaining -= admittedRetries.length
   if (admittedRetries.length) {
     phase('Retry')
-    const retried = await boundedParallelV1(admittedRetries.map(index => () => invoke({
+    const retried = await rollingParallelV1(admittedRetries.map(index => () => invoke({
       task: tasks[index], index, attempt: 2,
       retryParent: producerRecords[index].logical_call_id, phaseName: 'Retry',
       prompt: basePrompts[index] + '\n\n' + relay, topologicalWave: waveIndex,

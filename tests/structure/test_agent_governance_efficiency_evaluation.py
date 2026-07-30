@@ -5,6 +5,7 @@ from __future__ import annotations
 import importlib.util
 import hashlib
 import json
+import os
 import subprocess
 import sys
 from copy import deepcopy
@@ -611,3 +612,26 @@ def test_runner_is_a_read_only_machine_consumer() -> None:
     result = json.loads(completed.stdout)
     assert result["measurement_status"] == "synthetic"
     assert result["measured_claim_allowed"] is False
+
+
+def test_standalone_runner_loads_siblings_under_governed_safe_path() -> None:
+    governed_environment = dict(os.environ)
+    governed_environment.pop("PYTHONPATH", None)
+    governed_environment.update(
+        PYTHONNOUSERSITE="1",
+        PYTHONSAFEPATH="1",
+    )
+
+    # -I preserves the no-implicit-script-path contract on Python 3.10, where
+    # PYTHONSAFEPATH is not yet implemented.
+    completed = subprocess.run(
+        [sys.executable, "-I", str(MODULE_PATH), f"@{FIXTURE_PATH}"],
+        cwd=ROOT,
+        env=governed_environment,
+        check=False,
+        capture_output=True,
+        text=True,
+    )
+
+    assert completed.returncode == 0, completed.stderr
+    assert json.loads(completed.stdout)["measurement_status"] == "synthetic"

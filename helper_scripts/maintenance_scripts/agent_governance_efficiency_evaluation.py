@@ -28,7 +28,12 @@ from functools import lru_cache
 from pathlib import Path
 from typing import Any, Iterable, Protocol
 
-from agent_governance_schema import schema_subset_errors
+
+IMPLEMENTATION_DIR = Path(__file__).resolve().parent
+if str(IMPLEMENTATION_DIR) not in sys.path:
+    sys.path.insert(0, str(IMPLEMENTATION_DIR))
+
+from agent_governance_schema import schema_subset_errors  # noqa: E402
 
 
 REPO_ROOT = Path(__file__).resolve().parents[2]

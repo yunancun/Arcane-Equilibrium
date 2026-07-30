@@ -31,7 +31,7 @@ def _git(repo: Path, *args: str) -> None:
     )
 
 
-def _wave_args(tmp_path: Path) -> dict:
+def _wave_args(tmp_path: Path, *, risk: str = "low") -> dict:
     repo = tmp_path / "repo"
     repo.mkdir()
     _git(repo, "init")
@@ -47,7 +47,7 @@ def _wave_args(tmp_path: Path) -> dict:
     facts = {
         "task_shape": "review",
         "surfaces": ["agent_workflow"],
-        "risk": "low",
+        "risk": risk,
         "uncertainty": "low",
         "runtime_claim": False,
         "end_to_end_claim": False,
@@ -432,6 +432,197 @@ def test_wave_scheduler_never_exceeds_context_authority_capacity(
     ] == 2
 
 
+def test_wave_scheduler_refills_capacity_before_slower_calls_finish(
+    tmp_path: Path,
+) -> None:
+    wave_args = _wave_args(tmp_path)
+    template = wave_args["tasks"][0]
+    wave_args["tasks"] = [
+        {
+            **deepcopy(template),
+            "node_id": f"node-{suffix}",
+            "description": f"rolling-pool-{suffix}",
+            "requires": [],
+        }
+        for suffix in ("a", "b", "c", "d")
+    ]
+    dag = {
+        "schema_version": "agent_wave_execution_dag_v1",
+        "nodes": [
+            {
+                "node_id": task["node_id"],
+                "role": task["agentType"],
+                "native_agent": task["native_agent"],
+                "requires": [],
+                "node_class": task["node_class"],
+                "permission": task["permission"],
+            }
+            for task in wave_args["tasks"]
+        ],
+    }
+    wave_args["dag_digest"] = canonical_digest(dag)
+    script = r"""
+const fs = require('node:fs');
+if (!globalThis.crypto) globalThis.crypto = require('node:crypto').webcrypto;
+const AsyncFunction = Object.getPrototypeOf(async function () {}).constructor;
+const source = fs.readFileSync(__WORKFLOW__, 'utf8').replace('export const meta =', 'const meta =');
+const runner = new AsyncFunction('args', 'phase', 'log', 'parallel', 'agent', source);
+const parallel = async jobs => Promise.all(jobs.map(job => job()));
+const events = [];
+let activeCalls = 0;
+let peakCalls = 0;
+let releaseSlowCall;
+let slowCallTimedOut = false;
+const replacementStarted = new Promise(resolve => { releaseSlowCall = resolve; });
+const agent = async (_prompt, option) => {
+  events.push(`start:${option.label}`);
+  activeCalls += 1;
+  peakCalls = Math.max(peakCalls, activeCalls);
+  if (option.label === 'node-c') releaseSlowCall();
+  if (option.label === 'node-a') {
+    const release = await Promise.race([
+      replacementStarted.then(() => 'replacement'),
+      new Promise(resolve => setTimeout(() => resolve('timeout'), 100)),
+    ]);
+    slowCallTimedOut = release === 'timeout';
+  } else {
+    await Promise.resolve();
+  }
+  activeCalls -= 1;
+  events.push(`end:${option.label}`);
+  return {
+    work_status: 'DONE', gate_verdict: 'PASS', classification: 'FACT',
+    confidence: 'high', summary: `reviewed ${option.label}`,
+    evidence_refs: [`evidence:${option.label}`], concerns: [],
+    next_action: { owner: 'PM', action: 'integrate' }, payload: {},
+  };
+};
+(async () => {
+  const result = await runner(__ARGS__, () => {}, () => {}, parallel, agent);
+  console.log(JSON.stringify({
+    ok: true,
+    events,
+    peakCalls,
+    slowCallTimedOut,
+    maxConcurrentCalls: result.wave_record.budget_authority.admitted_caps.max_concurrent_calls,
+  }));
+})().catch(error => {
+  console.log(JSON.stringify({ ok: false, error: String(error.message || error), events, peakCalls, slowCallTimedOut }));
+});
+""".replace("__WORKFLOW__", json.dumps(str(ROOT / ".claude/workflows/agent-wave.js"))).replace(
+        "__ARGS__", json.dumps(wave_args)
+    )
+    completed = subprocess.run(
+        ["node", "-e", script],
+        cwd=ROOT,
+        text=True,
+        capture_output=True,
+        check=False,
+    )
+    assert completed.returncode == 0, completed.stderr
+    outcome = json.loads(completed.stdout)
+
+    assert outcome["ok"] is True
+    assert outcome["slowCallTimedOut"] is False
+    assert outcome["events"].index("start:node-c") < outcome["events"].index(
+        "end:node-a"
+    )
+    assert outcome["peakCalls"] == outcome["maxConcurrentCalls"] == 2
+
+
+def test_wave_scheduler_stops_dequeue_and_settles_in_flight_calls_on_error(
+    tmp_path: Path,
+) -> None:
+    wave_args = _wave_args(tmp_path)
+    template = wave_args["tasks"][0]
+    wave_args["tasks"] = [
+        {
+            **deepcopy(template),
+            "node_id": f"node-{suffix}",
+            "description": f"rolling-error-{suffix}",
+            "requires": [],
+        }
+        for suffix in ("a", "b", "c", "d")
+    ]
+    dag = {
+        "schema_version": "agent_wave_execution_dag_v1",
+        "nodes": [
+            {
+                "node_id": task["node_id"],
+                "role": task["agentType"],
+                "native_agent": task["native_agent"],
+                "requires": [],
+                "node_class": task["node_class"],
+                "permission": task["permission"],
+            }
+            for task in wave_args["tasks"]
+        ],
+    }
+    wave_args["dag_digest"] = canonical_digest(dag)
+    script = r"""
+const fs = require('node:fs');
+if (!globalThis.crypto) globalThis.crypto = require('node:crypto').webcrypto;
+const AsyncFunction = Object.getPrototypeOf(async function () {}).constructor;
+const source = fs.readFileSync(__WORKFLOW__, 'utf8').replace('export const meta =', 'const meta =');
+const runner = new AsyncFunction('args', 'phase', 'log', 'parallel', 'agent', source);
+const parallel = async jobs => Promise.all(jobs.map(job => job()));
+const events = [];
+let activeCalls = 0;
+let peakCalls = 0;
+const agent = async (_prompt, option) => {
+  events.push(`start:${option.label}`);
+  activeCalls += 1;
+  peakCalls = Math.max(peakCalls, activeCalls);
+  if (option.label === 'node-a') {
+    activeCalls -= 1;
+    events.push('throw:node-a');
+    throw new Error('agent boom');
+  }
+  await new Promise(resolve => setTimeout(resolve, 20));
+  activeCalls -= 1;
+  events.push(`end:${option.label}`);
+  return {
+    work_status: 'DONE', gate_verdict: 'PASS', classification: 'FACT',
+    confidence: 'high', summary: `reviewed ${option.label}`,
+    evidence_refs: [`evidence:${option.label}`], concerns: [],
+    next_action: { owner: 'PM', action: 'integrate' }, payload: {},
+  };
+};
+(async () => {
+  try {
+    await runner(__ARGS__, () => {}, () => {}, parallel, agent);
+    console.log(JSON.stringify({ ok: true, events, peakCalls }));
+  } catch (error) {
+    events.push(`caught:${String(error.message || error)}`);
+    await new Promise(resolve => setTimeout(resolve, 80));
+    console.log(JSON.stringify({ ok: false, error: String(error.message || error), events, peakCalls }));
+  }
+})().catch(error => { console.error(error); process.exit(1); });
+""".replace("__WORKFLOW__", json.dumps(str(ROOT / ".claude/workflows/agent-wave.js"))).replace(
+        "__ARGS__", json.dumps(wave_args)
+    )
+    completed = subprocess.run(
+        ["node", "-e", script],
+        cwd=ROOT,
+        text=True,
+        capture_output=True,
+        check=False,
+    )
+    assert completed.returncode == 0, completed.stderr
+    outcome = json.loads(completed.stdout)
+
+    assert outcome["ok"] is False
+    assert outcome["error"] == "agent boom"
+    assert outcome["events"] == [
+        "start:node-a",
+        "throw:node-a",
+        "start:node-b",
+        "end:node-b",
+        "caught:agent boom",
+    ]
+    assert outcome["peakCalls"] <= 2
+
+
 def test_wave_rejects_caller_model_or_effort_override_before_agent_call(
     tmp_path: Path,
 ) -> None:
@@ -520,3 +711,75 @@ def test_wave_rejects_unbound_or_cyclic_dag_and_never_runs_blocked_dependents(
     errors = validate_workflow_wave_record(reordered_wave, reordered_manifest)
     assert "workflow call manifest order regresses across topological waves" in errors
     assert any("producer generation is incomplete" in error for error in errors)
+
+
+def test_wave_validator_enforces_bound_surface_event_coverage(
+    tmp_path: Path,
+) -> None:
+    result = _run_harness(_wave_args(tmp_path, risk="medium"))["retry"]["result"]
+    wave = deepcopy(result["wave_record"])
+    ledger = wave["execution_event_ledger"]
+    retry_event = next(
+        event for event in ledger["events"] if event["kind"] == "retry"
+    )
+    retry_event["kind"] = "follow_up"
+    ledger["ledger_digest"] = canonical_digest(
+        {
+            key: value
+            for key, value in ledger.items()
+            if key != "ledger_digest"
+        }
+    )
+    wave["record_digest"] = canonical_digest(
+        {
+            key: value
+            for key, value in wave.items()
+            if key != "record_digest"
+        }
+    )
+
+    assert validate_workflow_wave_record(
+        wave,
+        result["call_manifest"],
+    ) == [
+        "execution event 2 surface profile does not attest follow_up",
+        "workflow wave sampling event 1 kind differs from manifest call",
+    ]
+
+
+def test_wave_validator_binds_sampling_event_semantics_to_manifest(
+    tmp_path: Path,
+) -> None:
+    result = _run_harness(_wave_args(tmp_path))["retry"]["result"]
+    wave = deepcopy(result["wave_record"])
+    ledger = wave["execution_event_ledger"]
+    root_event = next(
+        event for event in ledger["events"] if event["kind"] == "root_turn"
+    )
+    retry_event = next(
+        event for event in ledger["events"] if event["kind"] == "retry"
+    )
+    retry_event["kind"] = "model_call"
+    retry_event["parent_event_id"] = root_event["event_id"]
+    ledger["ledger_digest"] = canonical_digest(
+        {
+            key: value
+            for key, value in ledger.items()
+            if key != "ledger_digest"
+        }
+    )
+    wave["record_digest"] = canonical_digest(
+        {
+            key: value
+            for key, value in wave.items()
+            if key != "record_digest"
+        }
+    )
+
+    assert validate_workflow_wave_record(
+        wave,
+        result["call_manifest"],
+    ) == [
+        "workflow wave sampling event 1 kind differs from manifest call",
+        "workflow wave sampling event 1 parent_event_id differs from manifest call",
+    ]

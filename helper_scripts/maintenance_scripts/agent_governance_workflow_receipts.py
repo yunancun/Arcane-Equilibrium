@@ -12,6 +12,7 @@ from agent_governance_registry import load_registry
 from agent_governance_execution_policy import (
     admit_execution_event,
     new_execution_event_ledger,
+    surface_profile_binding,
     validate_execution_event_ledger,
 )
 from agent_governance_workflow_identity import (
@@ -578,20 +579,108 @@ def validate_workflow_wave_record(
         except (TypeError, ValueError, json.JSONDecodeError):
             execution_policy = None
         if isinstance(execution_policy, dict):
+            surface_profile_ids = [
+                record.get("requested", {}).get("surface_profile_id")
+                for record in records
+                if isinstance(record, dict)
+                and isinstance(record.get("requested"), dict)
+            ]
+            surface_profile = None
+            if (
+                not surface_profile_ids
+                or any(
+                    not isinstance(profile_id, str)
+                    for profile_id in surface_profile_ids
+                )
+                or len(set(surface_profile_ids)) != 1
+            ):
+                errors.append(
+                    "workflow wave calls do not bind one execution surface profile"
+                )
+            else:
+                try:
+                    surface_profile = surface_profile_binding(
+                        surface_profile_ids[0],
+                        load_registry(),
+                    )["profile"]
+                except ValueError:
+                    errors.append(
+                        "workflow wave execution surface profile is invalid"
+                    )
             errors.extend(
                 validate_execution_event_ledger(
                     execution_policy,
                     wave.get("execution_event_ledger"),
                     call_record_digests=actual_record_digests,
+                    surface_profile=surface_profile,
                 )
             )
+            ledger = wave.get("execution_event_ledger")
+            ledger_events = (
+                ledger.get("events")
+                if isinstance(ledger, dict)
+                and isinstance(ledger.get("events"), list)
+                else []
+            )
+            root_events = [
+                event
+                for event in ledger_events
+                if isinstance(event, dict)
+                and event.get("kind") == "root_turn"
+                and event.get("outcome") != "rejected"
+            ]
+            sampling_events = [
+                event
+                for event in ledger_events
+                if isinstance(event, dict)
+                and event.get("kind")
+                in {"model_call", "retry", "follow_up"}
+                and event.get("outcome") != "rejected"
+            ]
+            manifest_records = [
+                record for record in records if isinstance(record, dict)
+            ]
+            if (
+                len(root_events) == 1
+                and len(sampling_events) == len(manifest_records)
+            ):
+                root_event_id = root_events[0].get("event_id")
+                for index, (event, record) in enumerate(
+                    zip(sampling_events, manifest_records, strict=True)
+                ):
+                    is_retry = (
+                        isinstance(record.get("attempt"), int)
+                        and not isinstance(record.get("attempt"), bool)
+                        and record["attempt"] > 1
+                    )
+                    expected_event = {
+                        "call_record_digest": record.get("record_digest"),
+                        "event_id": record.get("logical_call_id"),
+                        "node_id": record.get("node_id"),
+                        "kind": "retry" if is_retry else "model_call",
+                        "parent_event_id": (
+                            record.get("retry_parent_call_id")
+                            if is_retry
+                            else root_event_id
+                        ),
+                        "outcome": (
+                            "null"
+                            if record.get("returned_null") is True
+                            else "completed"
+                        ),
+                    }
+                    for field, expected in expected_event.items():
+                        if event.get(field) != expected:
+                            errors.append(
+                                f"workflow wave sampling event {index} {field} "
+                                "differs from manifest call"
+                            )
             surface_digests = {
                 record.get("requested", {}).get("surface_profile_digest")
                 for record in records
                 if isinstance(record, dict)
                 and isinstance(record.get("requested"), dict)
             }
-            ledger = wave.get("execution_event_ledger")
             if (
                 len(surface_digests) != 1
                 or not isinstance(ledger, dict)
