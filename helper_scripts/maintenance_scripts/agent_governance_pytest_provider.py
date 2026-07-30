@@ -13,8 +13,6 @@ GOVERNED_PYTEST_BOOTSTRAP = (
     "[__import__(name) for name in _provider_names "
     "if importlib.util.find_spec(name) is not None];"
     "import pytest;"
-    "sys.path.extend(sorted(set(os.path.dirname(os.path.realpath(item)) "
-    "for item in sys.argv[1:] if item.endswith('.py'))));"
     "raise SystemExit(pytest.console_main())"
 )
 GOVERNED_PYTEST_PREFIX = (
@@ -25,7 +23,8 @@ GOVERNED_PYTEST_PREFIX = (
 )
 GOVERNED_PYTEST_REQUIRED_ARGS = (
     "--noconftest",
-    "--import-mode=importlib",
+    "--import-mode=append",
     "-c",
     "/dev/null",
+    "--rootdir=.",
 )

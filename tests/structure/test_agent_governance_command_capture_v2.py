@@ -464,7 +464,8 @@ def test_governed_pytest_bootstrap_rejects_candidate_provider_injection(
     assert marker.exists() is False
     assert result["pytest_provider"]["provider_stable"] is True
     assert result["pytest_provider"]["project_config_loading_disabled"] is True
-    assert result["pytest_provider"]["test_import_mode_isolated"] is True
+    assert result["pytest_provider"]["test_import_path_appended"] is True
+    assert result["pytest_provider"]["repository_root_fixed"] is True
     assert capture_v2._pytest_provider_errors(
         result["pytest_provider"],
         argv=[

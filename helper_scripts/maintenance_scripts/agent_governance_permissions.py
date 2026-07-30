@@ -188,9 +188,10 @@ def _safe_process_probe_allowed(tokens: list[str]) -> bool:
 
 def _safe_pytest_allowed(tokens: list[str]) -> bool:
     if tuple(tokens[:4]) == GOVERNED_PYTEST_PREFIX:
-        if tuple(tokens[4:8]) != GOVERNED_PYTEST_REQUIRED_ARGS:
+        required_end = 4 + len(GOVERNED_PYTEST_REQUIRED_ARGS)
+        if tuple(tokens[4:required_end]) != GOVERNED_PYTEST_REQUIRED_ARGS:
             return False
-        arguments = tokens[8:]
+        arguments = tokens[required_end:]
     elif tokens[:3] in (
         ["python", "-m", "pytest"],
         ["python3", "-m", "pytest"],

@@ -80,7 +80,7 @@ PYTEST_PROVIDER_FIELDS = {
     "provider_digest_after", "provider_stable", "site_import_disabled",
     "candidate_cwd_removed_by_bootstrap", "plugin_autoload_disabled",
     "conftest_loading_disabled", "project_config_loading_disabled",
-    "test_import_mode_isolated",
+    "test_import_path_appended", "repository_root_fixed",
 }
 PYTEST_PROVIDER_REQUIRED_DISTRIBUTIONS = (
     "iniconfig",
@@ -241,9 +241,10 @@ def _is_pytest_argv(argv: list[str]) -> bool:
 
 
 def _is_governed_pytest_argv(argv: list[str]) -> bool:
+    required_end = 4 + len(GOVERNED_PYTEST_REQUIRED_ARGS)
     return (
         tuple(argv[:4]) == GOVERNED_PYTEST_PREFIX
-        and tuple(argv[4:8]) == GOVERNED_PYTEST_REQUIRED_ARGS
+        and tuple(argv[4:required_end]) == GOVERNED_PYTEST_REQUIRED_ARGS
     )
 
 
@@ -439,7 +440,8 @@ def _prepare_pytest_provider(
             _is_governed_pytest_argv(argv)
         ),
         "project_config_loading_disabled": _is_governed_pytest_argv(argv),
-        "test_import_mode_isolated": _is_governed_pytest_argv(argv),
+        "test_import_path_appended": _is_governed_pytest_argv(argv),
+        "repository_root_fixed": _is_governed_pytest_argv(argv),
     }
     return capsule, identity
 
@@ -784,7 +786,8 @@ def _pytest_provider_errors(
         ("plugin_autoload_disabled", True),
         ("conftest_loading_disabled", True),
         ("project_config_loading_disabled", True),
-        ("test_import_mode_isolated", True),
+        ("test_import_path_appended", True),
+        ("repository_root_fixed", True),
         ("provider_stable", True),
     ):
         if provider.get(field) != expected:
