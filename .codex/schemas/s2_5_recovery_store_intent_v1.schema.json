@@ -8,7 +8,9 @@
     "schema_version", "store_id", "state_root_id", "source_head", "operation",
     "expected_previous_manifest_digest", "candidate_manifest_digest",
     "issued_at", "expires_at", "side_effect_class", "target_class",
-    "production_effect", "production_authority", "self_digest"
+    "target_profile_id", "production_effect", "production_authority",
+    "production_effect_count",
+    "self_digest"
   ],
   "properties": {
     "schema_version": {"const": "s2_5_recovery_store_intent_v1"},
@@ -22,8 +24,12 @@
     "expires_at": {"type": "string", "format": "date-time"},
     "side_effect_class": {"const": "DISPOSABLE_TEST"},
     "target_class": {"const": "disposable_systemd"},
+    "target_profile_id": {
+      "const": "s2_5_recovery_user_systemd_disposable_v1"
+    },
     "production_effect": {"const": false},
     "production_authority": {"const": false},
+    "production_effect_count": {"const": 0},
     "self_digest": {"$ref": "#/$defs/digest"}
   },
   "$defs": {

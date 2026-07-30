@@ -7,8 +7,10 @@
   "required": [
     "schema_version", "store_id", "state_root_id", "source_head", "generation",
     "phase", "previous_manifest_digest", "unresolved_state_digest",
-    "anchor_head_digest", "consumed_authorization_ids", "side_effect_class",
-    "target_class", "production_effect", "production_authority", "self_digest"
+    "anchor_head_digest", "consumed_authorization_ids", "state_root_identity",
+    "journal_inventory", "journal_set_digest", "replay_ledger",
+    "side_effect_class", "target_class", "target_profile_id", "production_effect",
+    "production_authority", "production_effect_count", "self_digest"
   ],
   "properties": {
     "schema_version": {"const": "s2_5_recovery_store_manifest_v1"},
@@ -24,15 +26,78 @@
       "type": "array", "uniqueItems": true,
       "items": {"type": "string", "pattern": "^s2-5-auth-[0-9a-f]{64}$"}
     },
+    "state_root_identity": {"$ref": "#/$defs/stateRootIdentity"},
+    "journal_inventory": {
+      "type": "array",
+      "uniqueItems": true,
+      "items": {"$ref": "#/$defs/journalInventoryEntry"}
+    },
+    "journal_set_digest": {"$ref": "#/$defs/digest"},
+    "replay_ledger": {"$ref": "#/$defs/replayLedger"},
     "side_effect_class": {"const": "DISPOSABLE_TEST"},
     "target_class": {"const": "disposable_systemd"},
+    "target_profile_id": {
+      "const": "s2_5_recovery_user_systemd_disposable_v1"
+    },
     "production_effect": {"const": false},
     "production_authority": {"const": false},
+    "production_effect_count": {"const": 0},
     "self_digest": {"$ref": "#/$defs/digest"}
   },
   "$defs": {
     "digest": {"type": "string", "pattern": "^sha256:[0-9a-f]{64}$"},
     "nullableDigest": {"anyOf": [{"$ref": "#/$defs/digest"}, {"type": "null"}]},
-    "head": {"type": "string", "pattern": "^[0-9a-f]{40}$"}
+    "head": {"type": "string", "pattern": "^[0-9a-f]{40}$"},
+    "stateRootIdentity": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "canonical_path", "device", "inode", "mode", "uid", "gid", "nlink",
+        "is_directory"
+      ],
+      "properties": {
+        "canonical_path": {
+          "const": "/run/user/1000/arcane-equilibrium-aiml-s2e/s2_5-recovery"
+        },
+        "device": {"type": "integer", "minimum": 0},
+        "inode": {"type": "integer", "minimum": 1},
+        "mode": {"const": "0700"},
+        "uid": {"const": 1000},
+        "gid": {"const": 1000},
+        "nlink": {"type": "integer", "minimum": 1},
+        "is_directory": {"const": true}
+      }
+    },
+    "journalInventoryEntry": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["basename", "start_id", "file_digest", "journal_head_digest"],
+      "properties": {
+        "basename": {
+          "type": "string",
+          "pattern": "^s2-5-[0-9a-f]{64}\\.journal\\.json$"
+        },
+        "start_id": {
+          "type": "string",
+          "pattern": "^s2-5-[0-9a-f]{64}$"
+        },
+        "file_digest": {"$ref": "#/$defs/digest"},
+        "journal_head_digest": {"$ref": "#/$defs/digest"}
+      }
+    },
+    "replayLedger": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "basename", "present", "file_digest", "entry_count", "head_digest"
+      ],
+      "properties": {
+        "basename": {"const": "authorization-replay-ledger.json"},
+        "present": {"type": "boolean"},
+        "file_digest": {"$ref": "#/$defs/nullableDigest"},
+        "entry_count": {"type": "integer", "minimum": 0},
+        "head_digest": {"$ref": "#/$defs/nullableDigest"}
+      }
+    }
   }
 }

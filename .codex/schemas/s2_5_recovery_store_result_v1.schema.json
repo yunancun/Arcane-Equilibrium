@@ -8,7 +8,8 @@
     "schema_version", "intent_digest", "status", "manifest_digest",
     "file_fsynced", "atomic_replace", "directory_fsynced",
     "parent_identity_rechecked", "failure_code", "side_effect_class",
-    "target_class", "production_effect", "production_authority", "self_digest"
+    "target_class", "target_profile_id", "production_effect", "production_authority",
+    "production_effect_count", "self_digest"
   ],
   "properties": {
     "schema_version": {"const": "s2_5_recovery_store_result_v1"},
@@ -22,8 +23,12 @@
     "failure_code": {"anyOf": [{"type": "string", "minLength": 1}, {"type": "null"}]},
     "side_effect_class": {"const": "DISPOSABLE_TEST"},
     "target_class": {"const": "disposable_systemd"},
+    "target_profile_id": {
+      "const": "s2_5_recovery_user_systemd_disposable_v1"
+    },
     "production_effect": {"const": false},
     "production_authority": {"const": false},
+    "production_effect_count": {"const": 0},
     "self_digest": {"$ref": "#/$defs/digest"}
   },
   "$defs": {

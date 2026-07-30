@@ -28,8 +28,10 @@ STORE_ID = "s2-5-store-" + "2" * 64
 COMMON = {
     "side_effect_class": "DISPOSABLE_TEST",
     "target_class": "disposable_systemd",
+    "target_profile_id": "s2_5_recovery_user_systemd_disposable_v1",
     "production_effect": False,
     "production_authority": False,
+    "production_effect_count": 0,
 }
 
 
@@ -50,6 +52,27 @@ SAMPLES = {
         "unresolved_state_digest": DIGEST,
         "anchor_head_digest": None,
         "consumed_authorization_ids": [],
+        "state_root_identity": {
+            "canonical_path": (
+                "/run/user/1000/arcane-equilibrium-aiml-s2e/s2_5-recovery"
+            ),
+            "device": 1,
+            "inode": 2,
+            "mode": "0700",
+            "uid": 1000,
+            "gid": 1000,
+            "nlink": 2,
+            "is_directory": True,
+        },
+        "journal_inventory": [],
+        "journal_set_digest": DIGEST,
+        "replay_ledger": {
+            "basename": "authorization-replay-ledger.json",
+            "present": False,
+            "file_digest": None,
+            "entry_count": 0,
+            "head_digest": None,
+        },
         **COMMON,
     }),
     "s2_5_recovery_anchor_entry_v1": _seal({
@@ -100,6 +123,7 @@ SAMPLES = {
         "parent_identity_match": True,
         "temp_residue_absent": True,
         "status": "PASS",
+        "failure_code": None,
         **COMMON,
     }),
     "s2_5_recovery_store_rollback_v1": _seal({
@@ -130,8 +154,10 @@ def test_local_recovery_store_schema_is_closed_and_accepts_typed_sample(schema_v
     [
         ("side_effect_class", "NONE"),
         ("target_class", "production"),
+        ("target_profile_id", "caller-selected-profile"),
         ("production_effect", True),
         ("production_authority", True),
+        ("production_effect_count", 1),
     ],
 )
 def test_local_recovery_store_schemas_reject_effect_or_authority_relabel(

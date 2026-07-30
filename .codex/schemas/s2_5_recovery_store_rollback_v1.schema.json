@@ -8,7 +8,8 @@
     "schema_version", "intent_digest", "result_digest", "status",
     "restored_manifest_digest", "temp_residue_absent", "operator_action_required",
     "side_effect_class", "target_class", "production_effect",
-    "production_authority", "self_digest"
+    "target_profile_id", "production_authority", "production_effect_count",
+    "self_digest"
   ],
   "properties": {
     "schema_version": {"const": "s2_5_recovery_store_rollback_v1"},
@@ -20,8 +21,12 @@
     "operator_action_required": {"type": "boolean"},
     "side_effect_class": {"const": "DISPOSABLE_TEST"},
     "target_class": {"const": "disposable_systemd"},
+    "target_profile_id": {
+      "const": "s2_5_recovery_user_systemd_disposable_v1"
+    },
     "production_effect": {"const": false},
     "production_authority": {"const": false},
+    "production_effect_count": {"const": 0},
     "self_digest": {"$ref": "#/$defs/digest"}
   },
   "$defs": {
