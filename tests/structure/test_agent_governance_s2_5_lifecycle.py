@@ -113,21 +113,48 @@ def test_operation_rejects_post_construction_capture_substitution_before_driver(
     _key, intent, permit, unit = kit.a_side_setup(tmp_path, monkeypatch)
     state_root = kit.fresh_state_root(tmp_path, "substituted-capture-state")
     controller = kit.recovery_controller(state_root)
-    controller.host_capture = {}
+    original = controller.host_capture
+    for field, replacement in (
+        ("host_capture", {}),
+        ("host_capture_digest", "sha256:" + "0" * 64),
+        ("host_identity", "foreign-host"),
+        ("state_root", tmp_path / "foreign-root"),
+        ("root_id", "sha256:" + "1" * 64),
+    ):
+        with pytest.raises(AttributeError):
+            setattr(controller, field, replacement)
+    projected = controller.host_capture
+    projected["source_head"] = "b" * 40
+    assert controller.host_capture == original
+
+    binding = controller._binding
+    corrupt = type(binding)(
+        state_root=binding.state_root,
+        host_capture_bytes=b"{}",
+        host_capture_digest=binding.host_capture_digest,
+        host_identity=binding.host_identity,
+        root_id=binding.root_id,
+        binding_digest=binding.binding_digest,
+    )
+    object.__setattr__(controller, "_binding", corrupt)
+    kwargs = kit.apply_kwargs(
+        tmp_path=tmp_path,
+        unit=unit,
+        state_root=state_root,
+        recovery_state=controller,
+    )
     verdict = lifecycle.apply_s2_5_start(
         intent,
         permit,
         unit,
-        **kit.apply_kwargs(
-            tmp_path=tmp_path,
-            unit=unit,
-            state_root=state_root,
-            recovery_state=controller,
-        ),
+        **kwargs,
     )
     assert verdict["status"] == lifecycle.S2_5_STATUS_RECOVERY_REQUIRED
     assert verdict["reasons"]
     assert unit.calls == []
+    assert kwargs["install_lock_probe"].probes == 0
+    assert kwargs["lifecycle_lock"].acquires == 0
+    assert not state_root.exists()
 
 
 def test_final_driver_none_returns_external_verification_pending(tmp_path, monkeypatch):

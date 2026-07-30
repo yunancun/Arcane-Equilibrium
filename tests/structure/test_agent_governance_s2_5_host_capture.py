@@ -7,6 +7,7 @@ import ast
 import importlib
 import inspect
 import sys
+import weakref
 from pathlib import Path
 
 import pytest
@@ -321,8 +322,13 @@ def test_recovery_controller_requires_full_capture_and_rejects_raw_host_api(
         state_root=state_root, host_capture=capture, now=NOW
     )
     assert state.host_capture == capture
+    assert state.host_capture is not state.host_capture
     assert state.host_capture_digest == capture["self_digest"]
     assert state.host_identity == capture["host_identity"]
+    assert state.state_root == state_root.resolve(strict=False)
+    assert not hasattr(state, "__dict__")
+    assert weakref.ref(state)() is state
+    assert state.admission_errors(state_root) == []
     with pytest.raises(TypeError):
         lifecycle.S2_5RecoveryState(  # type: ignore[call-arg]
             state_root=state_root, host_identity=capture["host_identity"], now=NOW
