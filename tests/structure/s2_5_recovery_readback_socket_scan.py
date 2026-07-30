@@ -55,24 +55,45 @@ def readback_socket_contract_findings(
     ):
         findings.append("readback socket module reassignment is forbidden")
 
-    path_assignments = [
-        node
-        for node in tree.body
-        if isinstance(node, (ast.Assign, ast.AnnAssign))
-        and any(
-            isinstance(target, ast.Name)
-            and target.id == "FIXED_ATTESTOR_SOCKET_PATH"
-            for target in (
-                node.targets if isinstance(node, ast.Assign) else [node.target]
+    def exact_constant_target(name: str, expected: object) -> ast.Name | None:
+        assignments = [
+            node
+            for node in tree.body
+            if isinstance(node, (ast.Assign, ast.AnnAssign))
+            and any(
+                isinstance(target, ast.Name) and target.id == name
+                for target in (
+                    node.targets if isinstance(node, ast.Assign) else [node.target]
+                )
             )
+        ]
+        targets = (
+            assignments[0].targets
+            if len(assignments) == 1 and isinstance(assignments[0], ast.Assign)
+            else [assignments[0].target]
+            if len(assignments) == 1
+            else []
         )
-    ]
-    path_value = path_assignments[0].value if len(path_assignments) == 1 else None
-    if not (
-        isinstance(path_value, ast.Constant)
-        and path_value.value == FIXED_SOCKET_PATH
-    ):
-        findings.append("readback fixed attestor endpoint constant is not exact")
+        value = assignments[0].value if len(assignments) == 1 else None
+        exact = (
+            len(targets) == 1
+            and isinstance(targets[0], ast.Name)
+            and targets[0].id == name
+            and isinstance(value, ast.Constant)
+            and type(value.value) is type(expected)
+            and value.value == expected
+        )
+        if not exact:
+            findings.append(f"readback {name} top-level constant is not exact")
+            return None
+        return targets[0]
+
+    path_target = exact_constant_target(
+        "FIXED_ATTESTOR_SOCKET_PATH",
+        FIXED_SOCKET_PATH,
+    )
+    timeout_target = exact_constant_target("SOCKET_TIMEOUT_SECONDS", 2.0)
+    response_limit_target = exact_constant_target("MAX_RESPONSE_BYTES", 65536)
     path_stores = [
         node
         for node in ast.walk(tree)
@@ -137,6 +158,86 @@ def readback_socket_contract_findings(
     ]
     if len(client_stores) != 1:
         findings.append("readback socket client alias or reassignment is forbidden")
+
+    transport_functions = [
+        node
+        for node in tree.body
+        if isinstance(node, ast.FunctionDef)
+        and node.name == "_fixed_transport_exchange"
+    ]
+    transport = transport_functions[0] if len(transport_functions) == 1 else None
+    arguments = transport.args if transport is not None else None
+    if not (
+        transport is not None
+        and not transport.decorator_list
+        and arguments is not None
+        and not arguments.posonlyargs
+        and len(arguments.args) == 1
+        and arguments.args[0].arg == "request_bytes"
+        and isinstance(arguments.args[0].annotation, ast.Name)
+        and arguments.args[0].annotation.id == "bytes"
+        and arguments.vararg is None
+        and not arguments.kwonlyargs
+        and arguments.kwarg is None
+        and not arguments.defaults
+        and not arguments.kw_defaults
+    ):
+        findings.append(
+            "readback _fixed_transport_exchange exact signature is required"
+        )
+
+    protected = {
+        "socket",
+        "FIXED_ATTESTOR_SOCKET_PATH",
+        "SOCKET_TIMEOUT_SECONDS",
+        "MAX_RESPONSE_BYTES",
+        "client",
+    }
+    allowed_binding_ids = {
+        "socket": (
+            {id(socket_imports[0])}
+            if len(socket_imports) == 1 and socket_imports[0].asname is None
+            else set()
+        ),
+        "FIXED_ATTESTOR_SOCKET_PATH": (
+            {id(path_target)} if path_target is not None else set()
+        ),
+        "SOCKET_TIMEOUT_SECONDS": (
+            {id(timeout_target)} if timeout_target is not None else set()
+        ),
+        "MAX_RESPONSE_BYTES": (
+            {id(response_limit_target)}
+            if response_limit_target is not None
+            else set()
+        ),
+        "client": (
+            {id(client_stores[0])}
+            if len(client_stores) == 1
+            and constructor_targets == [client_stores[0]]
+            else set()
+        ),
+    }
+    bound: list[tuple[str, ast.AST]] = []
+    for node in ast.walk(tree):
+        if isinstance(node, ast.Name) and isinstance(node.ctx, (ast.Store, ast.Del)):
+            bound.append((node.id, node))
+        elif isinstance(node, ast.arg):
+            bound.append((node.arg, node))
+        elif isinstance(node, ast.alias):
+            bound.append((node.asname or node.name.split(".")[0], node))
+        elif isinstance(node, (ast.FunctionDef, ast.AsyncFunctionDef, ast.ClassDef)):
+            bound.append((node.name, node))
+        elif isinstance(node, ast.ExceptHandler) and isinstance(node.name, str):
+            bound.append((node.name, node))
+        elif isinstance(node, (ast.Global, ast.Nonlocal)):
+            bound.extend((name, node) for name in node.names)
+        elif isinstance(node, (ast.MatchAs, ast.MatchStar)) and node.name:
+            bound.append((node.name, node))
+        elif isinstance(node, ast.MatchMapping) and node.rest:
+            bound.append((node.rest, node))
+    for name, node in bound:
+        if name in protected and id(node) not in allowed_binding_ids[name]:
+            findings.append(f"readback {name} binding shadow is forbidden")
 
     allowed_shapes = {
         "settimeout": lambda call: (

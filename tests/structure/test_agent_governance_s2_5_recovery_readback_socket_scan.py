@@ -18,6 +18,40 @@ from test_agent_governance_s2_host_kernel import HELPERS, _raw_command_findings
             "AF_UNIX",
         ),
         (
+            "def _fixed_transport_exchange(request_bytes: bytes)",
+            "def _fixed_transport_exchange("
+            "request_bytes: bytes, "
+            "FIXED_ATTESTOR_SOCKET_PATH: str = '/tmp/foreign.sock'"
+            ")",
+            "exact signature",
+        ),
+        (
+            "def _fixed_transport_exchange(request_bytes: bytes)",
+            "def _fixed_transport_exchange("
+            "request_bytes: bytes, socket=socket"
+            ")",
+            "socket binding shadow",
+        ),
+        (
+            "def _fixed_transport_exchange(request_bytes: bytes)",
+            "def _fixed_transport_exchange("
+            "request_bytes: bytes, SOCKET_TIMEOUT_SECONDS: float = 999999.0"
+            ")",
+            "SOCKET_TIMEOUT_SECONDS binding shadow",
+        ),
+        (
+            "def _fixed_transport_exchange(request_bytes: bytes)",
+            "def _fixed_transport_exchange("
+            "request_bytes: bytes, MAX_RESPONSE_BYTES: int = 1"
+            ")",
+            "MAX_RESPONSE_BYTES binding shadow",
+        ),
+        (
+            "import socket",
+            "import socket\nimport json as socket",
+            "socket binding shadow",
+        ),
+        (
             "client = socket.socket(socket.AF_UNIX, socket.SOCK_STREAM)",
             "socket = object()\n    "
             "client = socket.socket(socket.AF_UNIX, socket.SOCK_STREAM)",
@@ -44,6 +78,11 @@ from test_agent_governance_s2_host_kernel import HELPERS, _raw_command_findings
             "client.connect(FIXED_ATTESTOR_SOCKET_PATH)",
             "peer = client\n        peer.connect(FIXED_ATTESTOR_SOCKET_PATH)",
             "socket client alias",
+        ),
+        (
+            "def _trusted_now()",
+            "def client():\n    return None\n\n\ndef _trusted_now()",
+            "client binding shadow",
         ),
     ),
 )
