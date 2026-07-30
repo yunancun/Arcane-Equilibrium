@@ -366,6 +366,37 @@ def validate_current_readback_chain(value: Any) -> list[str]:
         for item in (intent, result, postcheck, rollback)
     ):
         errors.append("readback query Adapter identity differs")
+    expected_schemas = {
+        "chain": "s2_5_recovery_anchor_readback_query_chain_v1",
+        "intent": "s2_5_recovery_anchor_readback_query_intent_v1",
+        "result": "s2_5_recovery_anchor_readback_query_result_v1",
+        "postcheck": "s2_5_recovery_anchor_readback_query_postcheck_v1",
+        "rollback": "s2_5_recovery_anchor_readback_query_rollback_v1",
+    }
+    for name, artifact in (
+        ("chain", value),
+        ("intent", intent),
+        ("result", result),
+        ("postcheck", postcheck),
+        ("rollback", rollback),
+    ):
+        if artifact.get("schema_version") != expected_schemas[name]:
+            errors.append(f"readback query {name} schema is invalid")
+    if intent.get("operation") != "READ_CURRENT_EXTERNAL_ANCHOR":
+        errors.append("readback query intent operation is invalid")
+    if intent.get("store_id") != FIXED_STORE_ID:
+        errors.append("readback query intent store is not fixed")
+    if intent.get("transport_class") != "CODE_OWNED_FIXED_UNIX_SOCKET":
+        errors.append("readback query intent transport is not fixed")
+    nonce = intent.get("challenge_nonce")
+    nonce_prefix = "s2-5-readback-challenge-"
+    if not (
+        isinstance(nonce, str)
+        and nonce.startswith(nonce_prefix)
+        and len(nonce) == len(nonce_prefix) + 64
+        and all(character in "0123456789abcdef" for character in nonce[len(nonce_prefix):])
+    ):
+        errors.append("readback query intent challenge nonce is invalid")
     if result.get("intent_digest") != intent.get("self_digest"):
         errors.append("readback query result does not bind intent")
     if postcheck.get("intent_digest") != intent.get("self_digest"):
@@ -386,17 +417,56 @@ def validate_current_readback_chain(value: Any) -> list[str]:
         errors.append("readback query response must be an object")
     elif result.get("response_digest") != canonical_digest(response):
         errors.append("readback query response digest does not re-derive")
-    checks = (
-        postcheck.get("challenge_match"),
-        postcheck.get("query_digest_match"),
-        postcheck.get("store_match"),
-        postcheck.get("scope_match"),
-    )
-    if any(not isinstance(item, bool) for item in checks):
+    stored_checks = {
+        "challenge_match": postcheck.get("challenge_match"),
+        "query_digest_match": postcheck.get("query_digest_match"),
+        "store_match": postcheck.get("store_match"),
+        "scope_match": postcheck.get("scope_match"),
+    }
+    if any(not isinstance(item, bool) for item in stored_checks.values()):
         errors.append("readback query postcheck booleans are invalid")
-    frame_bound = all(item is True for item in checks)
+    binding_fields = {
+        "challenge_nonce": ("challenge_match", intent.get("challenge_nonce")),
+        "query_digest": ("query_digest_match", intent.get("self_digest")),
+        "store_id": ("store_match", intent.get("store_id")),
+        "anchor_scope_id": ("scope_match", intent.get("anchor_scope_id")),
+    }
+    derived_checks = {
+        check_field: (
+            isinstance(response, dict)
+            and response.get(response_field) == expected
+        )
+        for response_field, (check_field, expected) in binding_fields.items()
+    }
+    for response_field, (check_field, _expected) in binding_fields.items():
+        if stored_checks[check_field] is not derived_checks[check_field]:
+            errors.append(
+                f"readback query {response_field} binding does not re-derive"
+            )
+    frame_bound = all(derived_checks.values())
     if (postcheck.get("status") == "FRAME_BOUND") != frame_bound:
         errors.append("readback query postcheck status differs from frame binding")
+    expected_result_status = (
+        "OBSERVED"
+        if isinstance(response, dict)
+        else "EXTERNAL_VERIFICATION_PENDING"
+    )
+    if result.get("status") != expected_result_status:
+        errors.append("readback query result status differs from response")
+    expected_failure_code = (
+        None
+        if frame_bound
+        else "readback_query_fresh_binding_mismatch"
+        if isinstance(response, dict)
+        else result.get("failure_code")
+    )
+    if result.get("failure_code") != expected_failure_code or (
+        response is None
+        and not isinstance(result.get("failure_code"), str)
+    ):
+        errors.append("readback query failure code differs from response")
+    if result.get("effect_attempted") is not True:
+        errors.append("readback query result must record the read-only attempt")
     if rollback.get("status") != "NOT_REQUIRED_READ_ONLY":
         errors.append("readback query rollback status is invalid")
     if rollback.get("mutation_performed") is not False:

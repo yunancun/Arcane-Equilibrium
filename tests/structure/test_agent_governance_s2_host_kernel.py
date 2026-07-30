@@ -11,6 +11,9 @@ import sys
 from copy import deepcopy
 from pathlib import Path
 import pytest
+from s2_5_recovery_readback_socket_scan import (
+    readback_socket_contract_findings,
+)
 ROOT = Path(__file__).resolve().parents[2]
 HELPERS = ROOT / "helper_scripts/maintenance_scripts"
 ML_ROOT = ROOT / "program_code/ml_training"
@@ -271,6 +274,7 @@ def _fold_string(node: ast.AST) -> str | None:
         if left is not None and right is not None:
             return left + right
     return None
+
 
 def _raw_command_findings(path: Path, *, exec_family: bool = True) -> list[str]:
     """Fail closed over imports, raw/dynamic callees, obfuscation and shell use.
@@ -946,6 +950,7 @@ def _raw_command_findings(path: Path, *, exec_family: bool = True) -> list[str]:
                     findings.append(
                         f"line {node.lineno}: ctypes call outside the hardening allowlist"
                     )
+    findings.extend(readback_socket_contract_findings(tree, path))
     return findings
 
 

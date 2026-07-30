@@ -75,6 +75,42 @@ def test_adapter_emits_typed_read_only_chain(deterministic_adapter):
     assert first["rollback"]["mutation_performed"] is False
 
 
+@pytest.mark.parametrize(
+    ("field", "value"),
+    (
+        ("challenge_nonce", "s2-5-readback-challenge-" + "f" * 64),
+        ("query_digest", "sha256:" + "f" * 64),
+        ("store_id", "other-store"),
+        ("anchor_scope_id", "other-scope"),
+    ),
+)
+def test_validator_recomputes_frame_binding_from_resealed_response(
+    deterministic_adapter,
+    field,
+    value,
+):
+    chain = adapter._query_current_anchor_readback(
+        anchor_scope_id="off-root:host-governance",
+    )
+    result = chain["result"]
+    result["response"][field] = value
+    result["response_digest"] = adapter.canonical_digest(result["response"])
+    result["self_digest"] = adapter.artifact_self_digest(result)
+    postcheck = chain["postcheck"]
+    postcheck["result_digest"] = result["self_digest"]
+    postcheck["self_digest"] = adapter.artifact_self_digest(postcheck)
+    rollback = chain["rollback"]
+    rollback["result_digest"] = result["self_digest"]
+    rollback["postcheck_digest"] = postcheck["self_digest"]
+    rollback["self_digest"] = adapter.artifact_self_digest(rollback)
+    chain["self_digest"] = adapter.artifact_self_digest(chain)
+
+    assert any(
+        field in error and "does not re-derive" in error
+        for error in adapter.validate_current_readback_chain(chain)
+    )
+
+
 def test_transport_unavailable_is_a_typed_fail_closed_chain(
     deterministic_adapter,
     monkeypatch,
