@@ -154,9 +154,11 @@ class S2_5RecoveryState:
             errors.append("recovery construction binding capture digest differs")
         if capture.get("host_identity") != binding.host_identity:
             errors.append("recovery construction binding host identity differs")
-        if capture.get("boot_manager_facts", {}).get(
-            "canonical_state_root"
-        ) != str(binding.state_root):
+        boot_manager_facts = capture.get("boot_manager_facts")
+        if (
+            not isinstance(boot_manager_facts, dict)
+            or boot_manager_facts.get("canonical_state_root") != str(binding.state_root)
+        ):
             errors.append("recovery construction binding state root differs")
         expected_root_id = central_validator.canonical_digest({
             "schema_version": "s2_5_state_root_identity_v1",
@@ -222,9 +224,11 @@ class S2_5RecoveryState:
             errors.append("recovery host capture differs from the controller-bound capture")
         if capture.get("host_identity") != binding.host_identity:
             errors.append("recovery host identity differs from the controller binding")
-        if capture.get("boot_manager_facts", {}).get(
-            "canonical_state_root"
-        ) != str(binding.state_root):
+        boot_manager_facts = capture.get("boot_manager_facts")
+        if (
+            not isinstance(boot_manager_facts, dict)
+            or boot_manager_facts.get("canonical_state_root") != str(binding.state_root)
+        ):
             errors.append("recovery host capture state root differs from the controller")
         if capture.get("source_head") != intent_source_head:
             errors.append(

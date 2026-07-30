@@ -107,8 +107,12 @@ def test_operation_revalidates_host_capture_freshness_before_driver(
     assert unit.calls == []
 
 
+@pytest.mark.parametrize(
+    "corrupt_capture",
+    [b"{}", b'{"boot_manager_facts":[]}', b'{"boot_manager_facts":null}'],
+)
 def test_operation_rejects_post_construction_capture_substitution_before_driver(
-    tmp_path, monkeypatch
+    tmp_path, monkeypatch, corrupt_capture
 ):
     _key, intent, permit, unit = kit.a_side_setup(tmp_path, monkeypatch)
     state_root = kit.fresh_state_root(tmp_path, "substituted-capture-state")
@@ -130,7 +134,7 @@ def test_operation_rejects_post_construction_capture_substitution_before_driver(
     binding = controller._binding
     corrupt = type(binding)(
         state_root=binding.state_root,
-        host_capture_bytes=b"{}",
+        host_capture_bytes=corrupt_capture,
         host_capture_digest=binding.host_capture_digest,
         host_identity=binding.host_identity,
         root_id=binding.root_id,
