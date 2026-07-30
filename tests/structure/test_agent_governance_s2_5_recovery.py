@@ -1855,7 +1855,7 @@ def test_host_capture_leaf_and_schema_extend_closure_without_lifecycle_roots():
     # The launch review oracle and its centrally registered disposable-test
     # chain are application-reachable; lifecycle roots remain excluded.
     assert len(closure["python_modules"]) == 56
-    assert len(closure["schema_resources"]) == 90
+    assert len(closure["schema_resources"]) == 91
     assert closure["runtime_lazy_helper_roots"] == [{
         "module": "agent_governance_sealed_build",
         "reason": (

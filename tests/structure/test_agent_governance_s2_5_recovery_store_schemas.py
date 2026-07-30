@@ -282,8 +282,9 @@ def test_local_recovery_store_schemas_reject_effect_or_authority_relabel(
 
 
 def test_local_store_schemas_do_not_expand_central_runtime_closure():
-    # The unrelated S2E disposable-test chain is the sole central increment.
-    assert len(validator.SCHEMA_FILES) == 90
+    # The S2E disposable-test chain and consumption-bootstrap authority are
+    # the unrelated central increments.
+    assert len(validator.SCHEMA_FILES) == 91
     assert set(SAMPLES).isdisjoint(validator.SCHEMA_FILES)
 
 
