@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import copy
 import json
 import os
 import shutil
@@ -9,6 +10,8 @@ import stat
 import sys
 from inspect import signature
 from pathlib import Path
+
+import pytest
 
 
 ROOT = Path(__file__).resolve().parents[2]
@@ -183,7 +186,55 @@ def _write_json(path: Path, value: dict) -> None:
     os.chmod(path, 0o600)
 
 
-def _valid_journal() -> dict:
+def _seed_fixture_manifest(root: Path) -> dict:
+    """Seed a fixture-only genesis; the public store intentionally cannot do this."""
+
+    import agent_governance_s2_5_recovery_store as store
+
+    driver = _PosixFixtureDriver(root)
+    recovery_store = store.S2_5RecoveryStore(driver)
+    observed_root = recovery_store._open_root()
+    try:
+        snapshot = recovery_store._snapshot(observed_root["fd"], observed_root)
+        assert snapshot["manifest_observation"] is None
+        candidate = recovery_store._candidate(
+            snapshot,
+            None,
+            source_head=HEAD,
+            phase="PREPARED",
+            unresolved_state_digest=DIGEST,
+            anchor_head_digest=None,
+        )
+    finally:
+        recovery_store._close(observed_root["fd"])
+    _write_json(root / store.MANIFEST_BASENAME, candidate)
+    assert driver.open_fds == set()
+    return candidate
+
+
+def _snapshot_fixture(root: Path) -> dict:
+    import agent_governance_s2_5_recovery_store as store
+
+    recovery_store = store.S2_5RecoveryStore(_PosixFixtureDriver(root))
+    observed_root = recovery_store._open_root()
+    try:
+        return recovery_store._snapshot(observed_root["fd"], observed_root)
+    finally:
+        recovery_store._close(observed_root["fd"])
+
+
+def _reseal_chain_artifact(value: dict) -> dict:
+    import aiml_gate_receipt_validator as validator
+
+    for entry in value["history"] if "history" in value else value["entries"]:
+        entry["entry_digest"] = validator.canonical_digest({
+            key: item for key, item in entry.items() if key != "entry_digest"
+        })
+    value["self_digest"] = validator.artifact_self_digest(value)
+    return value
+
+
+def _valid_journal(*, replay_ledger_head=None) -> dict:
     import aiml_gate_receipt_validator as validator
 
     entry = {
@@ -204,7 +255,7 @@ def _valid_journal() -> dict:
         "state": "TERMINAL_FAILED",
         "updated_at": "2030-01-01T00:00:00+00:00",
         "history": [entry],
-        "replay_ledger_head": None,
+        "replay_ledger_head": replay_ledger_head,
     })
 
 
@@ -234,29 +285,109 @@ def _valid_ledger() -> dict:
 def _persist_with_inventory(root: Path):
     import agent_governance_s2_5_recovery_store as store
 
+    ledger = _valid_ledger()
+    ledger_head = {
+        "entry_count": len(ledger["entries"]),
+        "tail_entry_digest": ledger["entries"][-1]["entry_digest"],
+    }
+    journal = _valid_journal(replay_ledger_head=ledger_head)
+    _write_json(root / f"{START_ID}.journal.json", journal)
+    _write_json(root / store.REPLAY_LEDGER_BASENAME, ledger)
+    _seed_fixture_manifest(root)
     driver = _PosixFixtureDriver(root)
     recovery_store = store.S2_5RecoveryStore(driver)
-    recovery_store.persist(
-        source_head=HEAD,
-        phase="PREPARED",
-        unresolved_state_digest=DIGEST,
-        anchor_head_digest=None,
-        consumed_authorization_ids=[],
-        issued_at="2030-01-01T00:00:00Z",
-        expires_at="2030-01-01T00:05:00Z",
-    )
-    _write_json(root / f"{START_ID}.journal.json", _valid_journal())
-    _write_json(root / store.REPLAY_LEDGER_BASENAME, _valid_ledger())
     outcome = recovery_store.persist(
         source_head=HEAD,
         phase="PREPARED",
         unresolved_state_digest=DIGEST,
         anchor_head_digest=None,
-        consumed_authorization_ids=[AUTHORIZATION_ID],
         issued_at="2030-01-01T00:00:00Z",
         expires_at="2030-01-01T00:05:00Z",
     )
     return driver, outcome
+
+
+@pytest.mark.parametrize(
+    ("mutation", "value"),
+    [
+        ("append_only", False),
+        ("integrity_broken", True),
+        ("entry_fsynced", False),
+        ("tail_updated_at", "2030-01-01T00:00:01+00:00"),
+        ("nonterminal_state", "APPLYING"),
+    ],
+)
+def test_snapshot_rejects_journal_weaker_than_the_canonical_wal(
+    tmp_path, mutation, value
+) -> None:
+    import agent_governance_s2_5_recovery_store as store
+
+    root = tmp_path / "root"
+    root.mkdir(mode=0o700)
+    journal = _valid_journal()
+    if mutation == "entry_fsynced":
+        journal["history"][-1]["fsynced"] = value
+    elif mutation == "tail_updated_at":
+        journal["updated_at"] = value
+    elif mutation == "nonterminal_state":
+        journal["state"] = value
+        journal["history"][-1]["state"] = value
+    else:
+        journal[mutation] = value
+        if mutation == "integrity_broken":
+            journal["prior_payload_digest"] = DIGEST
+    _write_json(
+        root / f"{START_ID}.journal.json",
+        _reseal_chain_artifact(journal),
+    )
+
+    with pytest.raises(store.RecoveryStoreError) as caught:
+        _snapshot_fixture(root)
+
+    assert caught.value.code == "journal_integrity_failed"
+
+
+@pytest.mark.parametrize(
+    ("field", "value"),
+    [("fsynced", False), ("start_id", "caller-arbitrary")],
+)
+def test_snapshot_rejects_replay_ledger_weaker_than_canonical_attestation(
+    tmp_path, field, value
+) -> None:
+    import agent_governance_s2_5_recovery_store as store
+
+    root = tmp_path / "root"
+    root.mkdir(mode=0o700)
+    ledger = _valid_ledger()
+    ledger["entries"][0][field] = value
+    _write_json(
+        root / store.REPLAY_LEDGER_BASENAME,
+        _reseal_chain_artifact(ledger),
+    )
+
+    with pytest.raises(store.RecoveryStoreError) as caught:
+        _snapshot_fixture(root)
+
+    assert caught.value.code == "replay_ledger_integrity_failed"
+
+
+def test_terminal_journal_head_must_be_covered_by_the_exact_ledger(tmp_path) -> None:
+    import agent_governance_s2_5_recovery_store as store
+
+    root = tmp_path / "root"
+    root.mkdir(mode=0o700)
+    ledger = _valid_ledger()
+    journal = _valid_journal(replay_ledger_head={
+        "entry_count": 1,
+        "tail_entry_digest": "sha256:" + "9" * 64,
+    })
+    _write_json(root / f"{START_ID}.journal.json", journal)
+    _write_json(root / store.REPLAY_LEDGER_BASENAME, ledger)
+
+    with pytest.raises(store.RecoveryStoreError) as caught:
+        _snapshot_fixture(root)
+
+    assert caught.value.code == "journal_replay_ledger_coverage_failed"
 
 
 def test_manifest_schema_binds_root_identity_and_exact_durable_inventory() -> None:
@@ -320,10 +451,62 @@ def test_public_writer_has_no_caller_path_unit_nonce_or_identity_surface() -> No
         "phase",
         "unresolved_state_digest",
         "anchor_head_digest",
-        "consumed_authorization_ids",
         "issued_at",
         "expires_at",
     }
+
+
+def test_public_persist_cannot_bootstrap_an_empty_root(tmp_path) -> None:
+    import agent_governance_s2_5_recovery_store as store
+
+    root = tmp_path / "root"
+    root.mkdir(mode=0o700)
+    driver = _PosixFixtureDriver(root)
+
+    with pytest.raises(store.RecoveryStoreError) as caught:
+        store.S2_5RecoveryStore(driver).persist(
+            source_head=HEAD,
+            phase="PREPARED",
+            unresolved_state_digest=DIGEST,
+            anchor_head_digest=None,
+            issued_at="2030-01-01T00:00:00Z",
+            expires_at="2030-01-01T00:05:00Z",
+        )
+
+    assert caught.value.code == "verified_external_bootstrap_required"
+    assert list(root.iterdir()) == []
+
+
+def test_deleted_manifest_cannot_be_rebuilt_by_ordinary_persist(tmp_path) -> None:
+    import agent_governance_s2_5_recovery_store as store
+
+    root = tmp_path / "root"
+    root.mkdir(mode=0o700)
+    _seed_fixture_manifest(root)
+    driver = _PosixFixtureDriver(root)
+    recovery_store = store.S2_5RecoveryStore(driver)
+    recovery_store.persist(
+        source_head=HEAD,
+        phase="PREPARED",
+        unresolved_state_digest=DIGEST,
+        anchor_head_digest=None,
+        issued_at="2030-01-01T00:00:00Z",
+        expires_at="2030-01-01T00:05:00Z",
+    )
+    (root / store.MANIFEST_BASENAME).unlink()
+
+    with pytest.raises(store.RecoveryStoreError) as caught:
+        recovery_store.persist(
+            source_head=HEAD,
+            phase="PREPARED",
+            unresolved_state_digest=DIGEST,
+            anchor_head_digest=None,
+            issued_at="2030-01-01T00:00:00Z",
+            expires_at="2030-01-01T00:05:00Z",
+        )
+
+    assert caught.value.code == "verified_external_bootstrap_required"
+    assert not (root / store.MANIFEST_BASENAME).exists()
 
 
 def test_store_commits_only_to_code_owned_root_and_returns_typed_chain(tmp_path) -> None:
@@ -331,6 +514,7 @@ def test_store_commits_only_to_code_owned_root_and_returns_typed_chain(tmp_path)
 
     root = tmp_path / "mapped-code-owned-root"
     root.mkdir(mode=0o700)
+    _seed_fixture_manifest(root)
     driver = _PosixFixtureDriver(root)
 
     outcome = store.S2_5RecoveryStore(driver).persist(
@@ -338,7 +522,6 @@ def test_store_commits_only_to_code_owned_root_and_returns_typed_chain(tmp_path)
         phase="PREPARED",
         unresolved_state_digest=DIGEST,
         anchor_head_digest=None,
-        consumed_authorization_ids=[],
         issued_at="2030-01-01T00:00:00Z",
         expires_at="2030-01-01T00:05:00Z",
     )
@@ -382,7 +565,66 @@ def test_manifest_binds_exact_journal_set_and_replay_ledger_head(tmp_path) -> No
         "entry_count": 1,
         "head_digest": _valid_ledger()["entries"][-1]["entry_digest"],
     }
+    assert outcome["manifest"]["consumed_authorization_ids"] == [AUTHORIZATION_ID]
     assert driver.open_fds == set()
+
+
+@pytest.mark.parametrize("removed_basename", ["journal", "ledger"])
+def test_ordinary_persist_rejects_inventory_shrink(tmp_path, removed_basename) -> None:
+    import agent_governance_s2_5_recovery_store as store
+
+    root = tmp_path / "root"
+    root.mkdir(mode=0o700)
+    driver, _ = _persist_with_inventory(root)
+    target = (
+        root / f"{START_ID}.journal.json"
+        if removed_basename == "journal"
+        else root / store.REPLAY_LEDGER_BASENAME
+    )
+    target.unlink()
+
+    with pytest.raises(store.RecoveryStoreError) as caught:
+        store.S2_5RecoveryStore(driver).persist(
+            source_head=HEAD,
+            phase="PREPARED",
+            unresolved_state_digest=DIGEST,
+            anchor_head_digest=None,
+            issued_at="2030-01-01T00:00:00Z",
+            expires_at="2030-01-01T00:05:00Z",
+        )
+
+    assert caught.value.code == {
+        "journal": "manifest_integrity_failed",
+        "ledger": "journal_replay_ledger_coverage_failed",
+    }[removed_basename]
+
+
+def test_ordinary_persist_rejects_unanchored_inventory_growth(tmp_path) -> None:
+    import agent_governance_s2_5_recovery_store as store
+
+    root = tmp_path / "root"
+    root.mkdir(mode=0o700)
+    _seed_fixture_manifest(root)
+    driver = _PosixFixtureDriver(root)
+    added_start_id = "s2-5-" + "3" * 64
+    journal = _valid_journal()
+    journal["start_id"] = added_start_id
+    journal["self_digest"] = __import__(
+        "aiml_gate_receipt_validator"
+    ).artifact_self_digest(journal)
+    _write_json(root / f"{added_start_id}.journal.json", journal)
+
+    with pytest.raises(store.RecoveryStoreError) as caught:
+        store.S2_5RecoveryStore(driver).persist(
+            source_head=HEAD,
+            phase="PREPARED",
+            unresolved_state_digest=DIGEST,
+            anchor_head_digest=None,
+            issued_at="2030-01-01T00:00:00Z",
+            expires_at="2030-01-01T00:05:00Z",
+        )
+
+    assert caught.value.code == "manifest_integrity_failed"
 
 
 def test_unlinked_journal_never_re_admits_the_manifest(tmp_path) -> None:
@@ -440,6 +682,7 @@ def test_corrupt_or_hardlinked_manifest_fails_closed(tmp_path) -> None:
 
     root = tmp_path / "root"
     root.mkdir(mode=0o700)
+    _seed_fixture_manifest(root)
     driver = _PosixFixtureDriver(root)
     persisted = store.S2_5RecoveryStore(driver)
     persisted.persist(
@@ -447,7 +690,6 @@ def test_corrupt_or_hardlinked_manifest_fails_closed(tmp_path) -> None:
         phase="PREPARED",
         unresolved_state_digest=DIGEST,
         anchor_head_digest=None,
-        consumed_authorization_ids=[],
         issued_at="2030-01-01T00:00:00Z",
         expires_at="2030-01-01T00:05:00Z",
     )
@@ -471,13 +713,13 @@ def test_full_root_replacement_is_detected_even_with_copied_manifest(tmp_path) -
 
     original = tmp_path / "original"
     original.mkdir(mode=0o700)
+    _seed_fixture_manifest(original)
     driver = _PosixFixtureDriver(original)
     store.S2_5RecoveryStore(driver).persist(
         source_head=HEAD,
         phase="PREPARED",
         unresolved_state_digest=DIGEST,
         anchor_head_digest=None,
-        consumed_authorization_ids=[],
         issued_at="2030-01-01T00:00:00Z",
         expires_at="2030-01-01T00:05:00Z",
     )
@@ -501,13 +743,13 @@ def test_coherent_local_reseal_remains_explicitly_unverified(tmp_path) -> None:
 
     root = tmp_path / "root"
     root.mkdir(mode=0o700)
+    _seed_fixture_manifest(root)
     driver = _PosixFixtureDriver(root)
     outcome = store.S2_5RecoveryStore(driver).persist(
         source_head=HEAD,
         phase="PREPARED",
         unresolved_state_digest=DIGEST,
         anchor_head_digest=None,
-        consumed_authorization_ids=[],
         issued_at="2030-01-01T00:00:00Z",
         expires_at="2030-01-01T00:05:00Z",
     )

@@ -44,6 +44,69 @@
     "production_effect_count": {"const": 0},
     "self_digest": {"$ref": "#/$defs/digest"}
   },
+  "allOf": [
+    {
+      "if": {"properties": {"generation": {"const": 1}}},
+      "then": {"properties": {"previous_manifest_digest": {"type": "null"}}},
+      "else": {"properties": {"previous_manifest_digest": {"$ref": "#/$defs/digest"}}}
+    },
+    {
+      "if": {"properties": {"phase": {"const": "PREPARED"}}},
+      "then": {"properties": {
+        "unresolved_state_digest": {"$ref": "#/$defs/digest"}
+      }}
+    },
+    {
+      "if": {"properties": {"phase": {"const": "COMMITTED"}}},
+      "then": {"properties": {
+        "unresolved_state_digest": {"$ref": "#/$defs/digest"},
+        "anchor_head_digest": {"$ref": "#/$defs/digest"}
+      }}
+    },
+    {
+      "if": {"properties": {"phase": {"const": "RESOLVED"}}},
+      "then": {"properties": {
+        "unresolved_state_digest": {"type": "null"},
+        "anchor_head_digest": {"$ref": "#/$defs/digest"},
+        "consumed_authorization_ids": {"minItems": 1}
+      }}
+    },
+    {
+      "if": {"properties": {
+        "replay_ledger": {"properties": {"present": {"const": false}}}
+      }},
+      "then": {"properties": {
+        "replay_ledger": {"properties": {
+          "file_digest": {"type": "null"},
+          "entry_count": {"const": 0},
+          "head_digest": {"type": "null"}
+        }}
+      }}
+    },
+    {
+      "if": {"properties": {
+        "replay_ledger": {"properties": {"present": {"const": true}}}
+      }},
+      "then": {"properties": {
+        "replay_ledger": {"properties": {
+          "file_digest": {"$ref": "#/$defs/digest"}
+        }}
+      }}
+    },
+    {
+      "if": {"properties": {
+        "replay_ledger": {"properties": {"entry_count": {"const": 0}}}
+      }},
+      "then": {"properties": {
+        "replay_ledger": {"properties": {"head_digest": {"type": "null"}}}
+      }},
+      "else": {"properties": {
+        "replay_ledger": {"properties": {
+          "head_digest": {"$ref": "#/$defs/digest"}
+        }}
+      }}
+    }
+  ],
   "$defs": {
     "digest": {"type": "string", "pattern": "^sha256:[0-9a-f]{64}$"},
     "nullableDigest": {"anyOf": [{"$ref": "#/$defs/digest"}, {"type": "null"}]},

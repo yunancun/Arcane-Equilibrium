@@ -29,6 +29,31 @@
     "production_effect_count": {"const": 0},
     "self_digest": {"$ref": "#/$defs/digest"}
   },
+  "allOf": [
+    {
+      "if": {"properties": {"status": {"const": "NOT_REQUIRED"}}},
+      "then": {"properties": {
+        "restored_manifest_digest": {"type": "null"},
+        "temp_residue_absent": {"const": true},
+        "operator_action_required": {"const": false}
+      }}
+    },
+    {
+      "if": {"properties": {"status": {"const": "ROLLED_BACK"}}},
+      "then": {"properties": {
+        "restored_manifest_digest": {"$ref": "#/$defs/digest"},
+        "temp_residue_absent": {"const": true},
+        "operator_action_required": {"const": false}
+      }}
+    },
+    {
+      "if": {"properties": {"status": {"const": "RECOVERY_REQUIRED"}}},
+      "then": {"properties": {
+        "restored_manifest_digest": {"type": "null"},
+        "operator_action_required": {"const": true}
+      }}
+    }
+  ],
   "$defs": {
     "digest": {"type": "string", "pattern": "^sha256:[0-9a-f]{64}$"},
     "nullableDigest": {"anyOf": [{"$ref": "#/$defs/digest"}, {"type": "null"}]}

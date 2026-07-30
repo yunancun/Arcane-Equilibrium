@@ -6,7 +6,7 @@
   "additionalProperties": false,
   "required": [
     "schema_version", "result_digest", "manifest_digest", "readback_digest",
-    "manifest_match", "parent_identity_match", "temp_residue_absent",
+    "manifest_match", "manifest_identity_match", "parent_identity_match", "temp_residue_absent",
     "status", "failure_code", "side_effect_class", "target_class", "production_effect",
     "target_profile_id", "production_authority", "production_effect_count",
     "self_digest"
@@ -17,6 +17,7 @@
     "manifest_digest": {"$ref": "#/$defs/nullableDigest"},
     "readback_digest": {"$ref": "#/$defs/nullableDigest"},
     "manifest_match": {"type": "boolean"},
+    "manifest_identity_match": {"type": "boolean"},
     "parent_identity_match": {"type": "boolean"},
     "temp_residue_absent": {"type": "boolean"},
     "status": {"enum": ["PASS", "RECOVERY_REQUIRED", "NOT_PERFORMED"]},
@@ -33,6 +34,37 @@
     "production_effect_count": {"const": 0},
     "self_digest": {"$ref": "#/$defs/digest"}
   },
+  "allOf": [
+    {
+      "if": {"properties": {"status": {"const": "PASS"}}},
+      "then": {"properties": {
+        "manifest_digest": {"$ref": "#/$defs/digest"},
+        "readback_digest": {"$ref": "#/$defs/digest"},
+        "manifest_match": {"const": true},
+        "manifest_identity_match": {"const": true},
+        "parent_identity_match": {"const": true},
+        "temp_residue_absent": {"const": true},
+        "failure_code": {"type": "null"}
+      }}
+    },
+    {
+      "if": {"properties": {"status": {"const": "RECOVERY_REQUIRED"}}},
+      "then": {"properties": {
+        "failure_code": {"type": "string", "minLength": 1}
+      }}
+    },
+    {
+      "if": {"properties": {"status": {"const": "NOT_PERFORMED"}}},
+      "then": {"properties": {
+        "readback_digest": {"type": "null"},
+        "manifest_match": {"const": false},
+        "manifest_identity_match": {"const": false},
+        "parent_identity_match": {"const": false},
+        "temp_residue_absent": {"const": false},
+        "failure_code": {"type": "string", "minLength": 1}
+      }}
+    }
+  ],
   "$defs": {
     "digest": {"type": "string", "pattern": "^sha256:[0-9a-f]{64}$"},
     "nullableDigest": {"anyOf": [{"$ref": "#/$defs/digest"}, {"type": "null"}]}

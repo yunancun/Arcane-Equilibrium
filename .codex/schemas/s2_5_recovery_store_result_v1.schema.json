@@ -7,19 +7,22 @@
   "required": [
     "schema_version", "intent_digest", "status", "manifest_digest",
     "file_fsynced", "atomic_replace", "directory_fsynced",
-    "parent_identity_rechecked", "failure_code", "side_effect_class",
+    "parent_identity_rechecked", "candidate_temp_identity", "failure_code", "side_effect_class",
     "target_class", "target_profile_id", "production_effect", "production_authority",
     "production_effect_count", "self_digest"
   ],
   "properties": {
     "schema_version": {"const": "s2_5_recovery_store_result_v1"},
     "intent_digest": {"$ref": "#/$defs/digest"},
-    "status": {"enum": ["COMMITTED", "EXTERNAL_VERIFICATION_PENDING", "RECOVERY_REQUIRED", "REJECTED"]},
+    "status": {"enum": ["EXTERNAL_VERIFICATION_PENDING", "RECOVERY_REQUIRED", "REJECTED"]},
     "manifest_digest": {"$ref": "#/$defs/nullableDigest"},
     "file_fsynced": {"type": "boolean"},
     "atomic_replace": {"type": "boolean"},
     "directory_fsynced": {"type": "boolean"},
     "parent_identity_rechecked": {"type": "boolean"},
+    "candidate_temp_identity": {
+      "anyOf": [{"$ref": "#/$defs/fileIdentity"}, {"type": "null"}]
+    },
     "failure_code": {"anyOf": [{"type": "string", "minLength": 1}, {"type": "null"}]},
     "side_effect_class": {"const": "DISPOSABLE_TEST"},
     "target_class": {"const": "disposable_systemd"},
@@ -31,8 +34,59 @@
     "production_effect_count": {"const": 0},
     "self_digest": {"$ref": "#/$defs/digest"}
   },
+  "allOf": [
+    {
+      "if": {"properties": {"status": {"const": "EXTERNAL_VERIFICATION_PENDING"}}},
+      "then": {"properties": {
+        "manifest_digest": {"$ref": "#/$defs/digest"},
+        "file_fsynced": {"const": true},
+        "atomic_replace": {"const": true},
+        "directory_fsynced": {"const": true},
+        "parent_identity_rechecked": {"const": true},
+        "candidate_temp_identity": {"$ref": "#/$defs/fileIdentity"},
+        "failure_code": {"const": "UNVERIFIED_EXTERNAL_ANCHOR_REQUIRED"}
+      }}
+    },
+    {
+      "if": {"properties": {"status": {"const": "REJECTED"}}},
+      "then": {"properties": {
+        "manifest_digest": {"type": "null"},
+        "file_fsynced": {"const": false},
+        "atomic_replace": {"const": false},
+        "directory_fsynced": {"const": false},
+        "parent_identity_rechecked": {"const": false},
+        "candidate_temp_identity": {"type": "null"},
+        "failure_code": {"type": "string", "minLength": 1}
+      }}
+    },
+    {
+      "if": {"properties": {"status": {"const": "RECOVERY_REQUIRED"}}},
+      "then": {"properties": {
+        "failure_code": {
+          "type": "string", "minLength": 1,
+          "not": {"const": "UNVERIFIED_EXTERNAL_ANCHOR_REQUIRED"}
+        }
+      }}
+    }
+  ],
   "$defs": {
     "digest": {"type": "string", "pattern": "^sha256:[0-9a-f]{64}$"},
-    "nullableDigest": {"anyOf": [{"$ref": "#/$defs/digest"}, {"type": "null"}]}
+    "nullableDigest": {"anyOf": [{"$ref": "#/$defs/digest"}, {"type": "null"}]},
+    "fileIdentity": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "device", "inode", "mode", "uid", "gid", "nlink", "is_regular_file"
+      ],
+      "properties": {
+        "device": {"type": "integer", "minimum": 0},
+        "inode": {"type": "integer", "minimum": 1},
+        "mode": {"const": "0600"},
+        "uid": {"const": 1000},
+        "gid": {"const": 1000},
+        "nlink": {"const": 1},
+        "is_regular_file": {"const": true}
+      }
+    }
   }
 }

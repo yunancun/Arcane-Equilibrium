@@ -23,16 +23,20 @@ from test_agent_governance_s2_5_recovery_store import (  # noqa: E402
     DIGEST,
     HEAD,
     _PosixFixtureDriver,
+    _seed_fixture_manifest,
 )
 
 
-def _persist(driver):
+def _persist(driver, *, seed_fixture=True):
+    if seed_fixture and not (
+        driver.root / store.MANIFEST_BASENAME
+    ).exists():
+        _seed_fixture_manifest(driver.root)
     return store.S2_5RecoveryStore(driver).persist(
         source_head=HEAD,
         phase="PREPARED",
         unresolved_state_digest=DIGEST,
         anchor_head_digest=None,
-        consumed_authorization_ids=[],
         issued_at="2030-01-01T00:00:00Z",
         expires_at="2030-01-01T00:05:00Z",
     )
@@ -143,7 +147,7 @@ def test_pre_replace_crash_leaves_temp_residue_that_blocks_restart(
     )
 
 
-def test_crash_before_temp_creation_has_zero_files_and_restart_observes_absent(
+def test_crash_before_temp_creation_preserves_seed_and_restart_observes_it(
     tmp_path,
 ) -> None:
     root = tmp_path / "root"
@@ -153,9 +157,9 @@ def test_crash_before_temp_creation_has_zero_files_and_restart_observes_absent(
     with pytest.raises(store.RecoveryStoreCrash):
         _persist(driver)
 
-    assert list(root.iterdir()) == []
+    assert sorted(path.name for path in root.iterdir()) == [store.MANIFEST_BASENAME]
     assert store.S2_5RecoveryStore(driver).inspect(source_head=HEAD)["status"] == (
-        "ABSENT"
+        store.STATUS_UNVERIFIED
     )
 
 
@@ -388,7 +392,7 @@ def test_state_root_identity_or_shape_substitution_is_rejected_before_intent(
     driver = _RootFactDriver(root, field, value)
 
     with pytest.raises(store.RecoveryStoreError) as caught:
-        _persist(driver)
+        _persist(driver, seed_fixture=False)
 
     assert caught.value.code == "state_root_precheck_failed"
     assert list(root.iterdir()) == []
@@ -449,7 +453,45 @@ def test_temp_basename_swap_after_fsync_is_rejected_before_atomic_replace(
     assert outcome["status"] == store.STATUS_RECOVERY_REQUIRED
     assert outcome["result"]["failure_code"] == "manifest_temp_identity_changed"
     assert outcome["result"]["atomic_replace"] is False
-    assert not (root / store.MANIFEST_BASENAME).exists()
+    assert (root / store.MANIFEST_BASENAME).exists()
+    assert (root / store.MANIFEST_TEMP_BASENAME).exists()
+
+
+class _LateExactTempSwapDriver(_PosixFixtureDriver):
+    def __init__(self, root: Path) -> None:
+        super().__init__(root)
+        self.replacement_inode = None
+
+    def atomic_replace(self, **kwargs):
+        temp = self.root / store.MANIFEST_TEMP_BASENAME
+        exact_candidate_bytes = temp.read_bytes()
+        temp.unlink()
+        temp.write_bytes(exact_candidate_bytes)
+        os.chmod(temp, 0o600)
+        self.replacement_inode = temp.stat().st_ino
+        return super().atomic_replace(**kwargs)
+
+
+def test_exact_byte_temp_swap_after_identity_check_requires_recovery(
+    tmp_path,
+) -> None:
+    root = tmp_path / "root"
+    root.mkdir(mode=0o700)
+    driver = _LateExactTempSwapDriver(root)
+
+    outcome = _persist(driver)
+
+    candidate_identity = outcome["result"]["candidate_temp_identity"]
+    assert candidate_identity["inode"] != driver.replacement_inode
+    assert outcome["postcheck"]["manifest_match"] is True
+    assert outcome["postcheck"]["manifest_identity_match"] is False
+    assert outcome["postcheck"]["status"] == "RECOVERY_REQUIRED"
+    assert outcome["postcheck"]["failure_code"] == (
+        "manifest_candidate_identity_mismatch"
+    )
+    assert outcome["rollback"]["status"] == "RECOVERY_REQUIRED"
+    assert outcome["rollback"]["operator_action_required"] is True
+    assert outcome["status"] == store.STATUS_RECOVERY_REQUIRED
 
 
 class _OrderDriver(_PosixFixtureDriver):
@@ -495,9 +537,11 @@ def test_success_order_places_independent_readback_after_directory_fsync(
 
     assert outcome["status"] == store.STATUS_UNVERIFIED
     assert driver.events == [
+        "independent_readback",
         "create_temp",
         "write_full",
         "file_fsync",
+        "independent_readback",
         "atomic_replace",
         "directory_fsync",
         "independent_readback",

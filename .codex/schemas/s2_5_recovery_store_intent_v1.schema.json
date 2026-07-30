@@ -20,8 +20,14 @@
     "operation": {"enum": ["PREPARE", "PROMOTE", "RESOLVE", "ROLLBACK"]},
     "expected_previous_manifest_digest": {"$ref": "#/$defs/nullableDigest"},
     "candidate_manifest_digest": {"$ref": "#/$defs/digest"},
-    "issued_at": {"type": "string", "format": "date-time"},
-    "expires_at": {"type": "string", "format": "date-time"},
+    "issued_at": {
+      "type": "string", "format": "date-time",
+      "description": "Timezone-aware start of the closed positive TTL window."
+    },
+    "expires_at": {
+      "type": "string", "format": "date-time",
+      "description": "Must be later than issued_at and no more than 300 seconds later; enforced by validate_local_artifact."
+    },
     "side_effect_class": {"const": "DISPOSABLE_TEST"},
     "target_class": {"const": "disposable_systemd"},
     "target_profile_id": {

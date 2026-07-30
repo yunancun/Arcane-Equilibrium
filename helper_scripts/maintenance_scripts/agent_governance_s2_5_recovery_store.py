@@ -29,6 +29,7 @@ for _candidate in (Path(__file__).resolve().parent, ML_TRAINING_DIR):
         sys.path.insert(0, str(_candidate))
 
 import aiml_gate_receipt_validator as central_validator  # noqa: E402
+import agent_governance_s2_5_attestation as attestation  # noqa: E402
 from agent_governance_schema import schema_subset_errors  # noqa: E402
 
 
@@ -56,6 +57,11 @@ _HEAD_RE = re.compile(r"^[0-9a-f]{40}$")
 _DIGEST_RE = re.compile(r"^sha256:[0-9a-f]{64}$")
 _AUTHORIZATION_RE = re.compile(r"^s2-5-auth-[0-9a-f]{64}$")
 _JOURNAL_RE = re.compile(r"^(s2-5-[0-9a-f]{64})\.journal\.json$")
+_JOURNAL_TERMINAL_STATES = frozenset({
+    "TERMINAL_SUCCESS",
+    "TERMINAL_ROLLED_BACK",
+    "TERMINAL_FAILED",
+})
 _SCHEMA_DIR = REPO_ROOT / ".codex" / "schemas"
 _LOCAL_SCHEMAS = frozenset({
     "s2_5_recovery_store_manifest_v1",
@@ -135,6 +141,7 @@ def validate_local_artifact(artifact: Any) -> list[str]:
     for key, expected in _COMMON.items():
         if artifact.get(key) != expected:
             errors.append(f"local recovery-store {key} differs from the closed profile")
+    errors.extend(_semantic_errors(artifact))
     return errors
 
 
@@ -160,6 +167,246 @@ def _validate_ttl(issued_at: Any, expires_at: Any) -> None:
 
 def _integer(value: Any, *, minimum: int = 0) -> bool:
     return isinstance(value, int) and not isinstance(value, bool) and value >= minimum
+
+
+def _manifest_semantic_errors(artifact: dict[str, Any]) -> list[str]:
+    errors: list[str] = []
+    generation = artifact.get("generation")
+    previous = artifact.get("previous_manifest_digest")
+    if _integer(generation, minimum=1):
+        if generation == 1 and previous is not None:
+            errors.append("manifest generation one must have no predecessor")
+        if generation > 1 and previous is None:
+            errors.append("manifest generation after one must bind its predecessor")
+    phase = artifact.get("phase")
+    unresolved = artifact.get("unresolved_state_digest")
+    anchor = artifact.get("anchor_head_digest")
+    consumed = artifact.get("consumed_authorization_ids")
+    if isinstance(consumed, list) and consumed != sorted(consumed):
+        errors.append("manifest consumed authorization ids are not canonical-sorted")
+    if phase in {"PREPARED", "COMMITTED"} and unresolved is None:
+        errors.append(f"manifest {phase} phase must retain unresolved state")
+    if phase in {"COMMITTED", "RESOLVED"} and anchor is None:
+        errors.append(f"manifest {phase} phase must bind an external anchor")
+    if phase == "RESOLVED":
+        if unresolved is not None:
+            errors.append("resolved manifest must clear unresolved state")
+        if not isinstance(consumed, list) or not consumed:
+            errors.append("resolved manifest must bind consumed authorization")
+    replay = artifact.get("replay_ledger")
+    if isinstance(replay, dict):
+        present = replay.get("present")
+        count = replay.get("entry_count")
+        file_digest = replay.get("file_digest")
+        head_digest = replay.get("head_digest")
+        if present is False and (
+            count != 0 or file_digest is not None or head_digest is not None
+        ):
+            errors.append("absent replay ledger must have an empty null head")
+        if present is True:
+            if file_digest is None:
+                errors.append("present replay ledger must bind its file digest")
+            if count == 0 and head_digest is not None:
+                errors.append("empty replay ledger must have a null head")
+            if _integer(count, minimum=1) and head_digest is None:
+                errors.append("non-empty replay ledger must bind its head")
+        if isinstance(consumed, list) and _integer(count):
+            if len(consumed) != count:
+                errors.append(
+                    "manifest consumed authorization count differs from replay ledger"
+                )
+    inventory = artifact.get("journal_inventory")
+    if isinstance(inventory, list):
+        if inventory != sorted(
+            inventory,
+            key=lambda entry: (
+                entry.get("basename", "") if isinstance(entry, dict) else ""
+            ),
+        ):
+            errors.append("manifest journal inventory is not canonical-sorted")
+        expected_set_digest = central_validator.canonical_digest({
+            "schema_version": "s2_5_recovery_journal_set_v1",
+            "entries": inventory,
+        })
+        if artifact.get("journal_set_digest") != expected_set_digest:
+            errors.append("manifest journal-set digest does not re-derive")
+        for index, entry in enumerate(inventory):
+            if not isinstance(entry, dict):
+                continue
+            if entry.get("basename") != f"{entry.get('start_id')}.journal.json":
+                errors.append(
+                    f"manifest journal inventory entry {index} basename/start_id differ"
+                )
+    identity = artifact.get("state_root_identity")
+    if isinstance(identity, dict):
+        state_root_id = central_validator.canonical_digest(identity)
+        if artifact.get("state_root_id") != state_root_id:
+            errors.append("manifest state-root id does not re-derive")
+        expected_store_digest = central_validator.canonical_digest({
+            "profile_id": PROFILE_ID,
+            "state_root_id": state_root_id,
+        })
+        expected_store_id = (
+            "s2-5-store-" + expected_store_digest.removeprefix("sha256:")
+        )
+        if artifact.get("store_id") != expected_store_id:
+            errors.append("manifest store id does not re-derive")
+    return errors
+
+
+def _intent_semantic_errors(artifact: dict[str, Any]) -> list[str]:
+    try:
+        _validate_ttl(artifact.get("issued_at"), artifact.get("expires_at"))
+    except RecoveryStoreError as error:
+        return [f"store intent TTL is invalid: {error.code}"]
+    return []
+
+
+def _result_semantic_errors(artifact: dict[str, Any]) -> list[str]:
+    errors: list[str] = []
+    status = artifact.get("status")
+    bits = tuple(
+        artifact.get(field)
+        for field in (
+            "file_fsynced",
+            "atomic_replace",
+            "directory_fsynced",
+            "parent_identity_rechecked",
+        )
+    )
+    failure = artifact.get("failure_code")
+    manifest_digest = artifact.get("manifest_digest")
+    candidate_temp_identity = artifact.get("candidate_temp_identity")
+    if status == "COMMITTED":
+        errors.append("local recovery-store result can never be COMMITTED")
+    elif status == "EXTERNAL_VERIFICATION_PENDING":
+        if bits != (True, True, True, True):
+            errors.append("pending result requires the complete durability chain")
+        if manifest_digest is None:
+            errors.append("pending result must bind a manifest")
+        if not isinstance(candidate_temp_identity, dict):
+            errors.append("pending result must bind the candidate temp identity")
+        if failure != STATUS_UNVERIFIED:
+            errors.append("pending result must retain the external-anchor requirement")
+    elif status == "RECOVERY_REQUIRED":
+        if not isinstance(failure, str) or failure in {"", STATUS_UNVERIFIED}:
+            errors.append("recovery result must carry its concrete failure code")
+        if bits == (True, True, True, True):
+            errors.append("recovery result cannot claim a complete durability chain")
+    elif status == "REJECTED":
+        if bits != (False, False, False, False):
+            errors.append("rejected result cannot claim durability progress")
+        if manifest_digest is not None:
+            errors.append("rejected result cannot bind a committed manifest")
+        if not isinstance(failure, str) or not failure:
+            errors.append("rejected result must carry a failure code")
+    file_fsynced, atomic_replace, directory_fsynced, parent_rechecked = bits
+    if atomic_replace is True and (
+        file_fsynced is not True or parent_rechecked is not True
+    ):
+        errors.append("atomic replace requires file fsync and parent recheck")
+    if atomic_replace is True and not isinstance(candidate_temp_identity, dict):
+        errors.append("atomic replace must bind the candidate temp identity")
+    if parent_rechecked is True and file_fsynced is not True:
+        errors.append("parent recheck cannot precede file fsync")
+    if directory_fsynced is True and atomic_replace is not True:
+        errors.append("directory fsync cannot precede atomic replace")
+    return errors
+
+
+def _postcheck_semantic_errors(artifact: dict[str, Any]) -> list[str]:
+    errors: list[str] = []
+    status = artifact.get("status")
+    safe_bits = (
+        artifact.get("manifest_match"),
+        artifact.get("manifest_identity_match"),
+        artifact.get("parent_identity_match"),
+        artifact.get("temp_residue_absent"),
+    )
+    failure = artifact.get("failure_code")
+    if status == "PASS":
+        if safe_bits != (True, True, True, True):
+            errors.append("PASS postcheck requires every independent safety check")
+        if artifact.get("readback_digest") is None:
+            errors.append("PASS postcheck must bind an independent readback")
+        if failure is not None:
+            errors.append("PASS postcheck cannot carry a failure code")
+    elif status == "RECOVERY_REQUIRED":
+        if not isinstance(failure, str) or not failure:
+            errors.append("recovery postcheck must carry a failure code")
+    elif status == "NOT_PERFORMED":
+        if safe_bits != (False, False, False, False):
+            errors.append("unperformed postcheck cannot claim safety checks")
+        if artifact.get("readback_digest") is not None:
+            errors.append("unperformed postcheck cannot bind a readback")
+        if not isinstance(failure, str) or not failure:
+            errors.append("unperformed postcheck must carry a failure code")
+    if (
+        artifact.get("manifest_match") is True
+        or artifact.get("manifest_identity_match") is True
+    ) and artifact.get("readback_digest") is None:
+        errors.append("postcheck match claims require an independent readback")
+    return errors
+
+
+def _rollback_semantic_errors(artifact: dict[str, Any]) -> list[str]:
+    errors: list[str] = []
+    status = artifact.get("status")
+    restored = artifact.get("restored_manifest_digest")
+    temp_absent = artifact.get("temp_residue_absent")
+    operator_required = artifact.get("operator_action_required")
+    if status == "NOT_REQUIRED" and (
+        restored is not None or temp_absent is not True or operator_required is not False
+    ):
+        errors.append("NOT_REQUIRED rollback must be residue-free and locally safe")
+    elif status == "ROLLED_BACK" and (
+        restored is None or temp_absent is not True or operator_required is not False
+    ):
+        errors.append("ROLLED_BACK receipt must bind restoration and no residue")
+    elif status == "RECOVERY_REQUIRED" and (
+        restored is not None or operator_required is not True
+    ):
+        errors.append("recovery rollback must require an operator and no fake restore")
+    return errors
+
+
+def _anchor_semantic_errors(artifact: dict[str, Any]) -> list[str]:
+    errors: list[str] = []
+    if artifact.get("append_actor_identity") == artifact.get(
+        "readback_verifier_identity"
+    ):
+        errors.append("anchor append and readback identities must differ")
+    sequence = artifact.get("sequence")
+    previous = artifact.get("previous_anchor_digest")
+    if _integer(sequence, minimum=1):
+        if sequence == 1 and previous is not None:
+            errors.append("anchor sequence one must have no predecessor")
+        if sequence > 1 and previous is None:
+            errors.append("anchor sequence after one must bind its predecessor")
+    if artifact.get("entry_status") == "CONSUMED" and artifact.get(
+        "authorization_id"
+    ) is None:
+        errors.append("consumed anchor must bind an authorization")
+    if artifact.get("entry_status") == "RESOLVED" and artifact.get(
+        "unresolved_state_digest"
+    ) is not None:
+        errors.append("resolved anchor must clear unresolved state")
+    if artifact.get("entry_status") != "RESOLVED" and artifact.get(
+        "unresolved_state_digest"
+    ) is None:
+        errors.append("non-resolved anchor must retain unresolved state")
+    return errors
+
+
+def _semantic_errors(artifact: dict[str, Any]) -> list[str]:
+    return {
+        "s2_5_recovery_store_manifest_v1": _manifest_semantic_errors,
+        "s2_5_recovery_store_intent_v1": _intent_semantic_errors,
+        "s2_5_recovery_store_result_v1": _result_semantic_errors,
+        "s2_5_recovery_store_postcheck_v1": _postcheck_semantic_errors,
+        "s2_5_recovery_store_rollback_v1": _rollback_semantic_errors,
+        "s2_5_recovery_anchor_entry_v1": _anchor_semantic_errors,
+    }[artifact["schema_version"]](artifact)
 
 
 def _root_reasons(observed: Any) -> list[str]:
@@ -231,6 +478,18 @@ def _temp_reasons(observed: Any, *, expected_device: int) -> list[str]:
     )
 
 
+def _file_identity(observed: dict[str, Any]) -> dict[str, Any]:
+    return {
+        "device": observed["device"],
+        "inode": observed["inode"],
+        "mode": observed["mode"],
+        "uid": observed["uid"],
+        "gid": observed["gid"],
+        "nlink": observed["nlink"],
+        "is_regular_file": observed["is_regular_file"],
+    }
+
+
 def _decode_object(payload: bytes, *, label: str) -> dict[str, Any]:
     try:
         value = json.loads(payload.decode("utf-8"))
@@ -249,30 +508,35 @@ def _journal_errors(
         errors.append("journal schema_version is not v2")
     if journal.get("start_id") != start_id:
         errors.append("journal embedded start_id differs from its basename")
+    if journal.get("append_only") is not True:
+        errors.append("journal is not append-only")
+    if journal.get("integrity_broken") is not False:
+        errors.append("journal records a sticky broken-integrity latch")
+    if journal.get("prior_payload_digest") is not None:
+        errors.append("journal retains a prior broken-payload digest")
     if journal.get("self_digest") != central_validator.artifact_self_digest(journal):
         errors.append("journal self_digest does not re-derive")
     history = journal.get("history")
     if not isinstance(history, list) or not history:
         errors.append("journal history is absent or empty")
         return errors
-    previous = None
-    for index, entry in enumerate(history):
-        if not isinstance(entry, dict):
-            errors.append(f"journal entry {index} is not an object")
-            continue
-        if entry.get("seq") != index:
-            errors.append(f"journal entry {index} sequence differs")
-        if entry.get("prev_entry_digest") != previous:
-            errors.append(f"journal entry {index} previous digest differs")
-        expected = central_validator.canonical_digest({
-            key: value for key, value in entry.items() if key != "entry_digest"
-        })
-        if entry.get("entry_digest") != expected:
-            errors.append(f"journal entry {index} digest does not re-derive")
-        previous = entry.get("entry_digest")
+    errors.extend(attestation.s2_5_journal_entry_errors(history))
     tail = history[-1] if isinstance(history[-1], dict) else {}
     if journal.get("state") != tail.get("state"):
         errors.append("journal top-level state differs from its tail")
+    if journal.get("updated_at") != tail.get("updated_at"):
+        errors.append("journal top-level timestamp differs from its tail")
+    if journal.get("state") not in _JOURNAL_TERMINAL_STATES:
+        errors.append("journal state is not terminal")
+    replay_head = journal.get("replay_ledger_head")
+    if replay_head is not None and (
+        not isinstance(replay_head, dict)
+        or set(replay_head) != {"entry_count", "tail_entry_digest"}
+        or not _integer(replay_head.get("entry_count"), minimum=1)
+        or not isinstance(replay_head.get("tail_entry_digest"), str)
+        or _DIGEST_RE.fullmatch(replay_head["tail_entry_digest"]) is None
+    ):
+        errors.append("journal replay-ledger head is malformed")
     return errors
 
 
@@ -290,21 +554,12 @@ def _ledger_errors(ledger: dict[str, Any]) -> list[str]:
     entries = ledger.get("entries")
     if not isinstance(entries, list):
         return errors + ["replay ledger entries are not an array"]
-    previous = None
+    errors.extend(attestation.s2_5_replay_ledger_entry_errors(entries))
     seen: set[str] = set()
     for index, entry in enumerate(entries):
         if not isinstance(entry, dict):
             errors.append(f"replay ledger entry {index} is not an object")
             continue
-        if entry.get("seq") != index:
-            errors.append(f"replay ledger entry {index} sequence differs")
-        if entry.get("prev_entry_digest") != previous:
-            errors.append(f"replay ledger entry {index} previous digest differs")
-        expected = central_validator.canonical_digest({
-            key: value for key, value in entry.items() if key != "entry_digest"
-        })
-        if entry.get("entry_digest") != expected:
-            errors.append(f"replay ledger entry {index} digest does not re-derive")
         authorization_id = entry.get("authorization_id")
         if not isinstance(authorization_id, str) or not _AUTHORIZATION_RE.fullmatch(
             authorization_id
@@ -314,7 +569,43 @@ def _ledger_errors(ledger: dict[str, Any]) -> list[str]:
             errors.append("replay ledger contains a duplicate authorization id")
         else:
             seen.add(authorization_id)
-        previous = entry.get("entry_digest")
+        start_id = entry.get("start_id")
+        if not isinstance(start_id, str) or _JOURNAL_RE.fullmatch(
+            f"{start_id}.journal.json"
+        ) is None:
+            errors.append(f"replay ledger entry {index} start id is invalid")
+    return errors
+
+
+def _journal_ledger_coverage_errors(
+    journals: list[dict[str, Any]], ledger_entries: list[dict[str, Any]]
+) -> list[str]:
+    errors: list[str] = []
+    for journal in journals:
+        start_id = journal["start_id"]
+        head = journal.get("replay_ledger_head")
+        start_entry_indexes = [
+            index
+            for index, entry in enumerate(ledger_entries)
+            if entry.get("start_id") == start_id
+        ]
+        if start_entry_indexes and not isinstance(head, dict):
+            errors.append(
+                f"terminal journal {start_id} does not pin its replay-ledger consumption"
+            )
+            continue
+        if not isinstance(head, dict):
+            continue
+        count = head["entry_count"]
+        if (
+            len(ledger_entries) < count
+            or ledger_entries[count - 1].get("entry_digest")
+            != head["tail_entry_digest"]
+            or any(index >= count for index in start_entry_indexes)
+        ):
+            errors.append(
+                f"terminal journal {start_id} replay-ledger head is not covered"
+            )
     return errors
 
 
@@ -413,6 +704,7 @@ class S2_5RecoveryStore:
             parent_fd, root, MANIFEST_BASENAME
         ) if MANIFEST_BASENAME in names else None
         journal_inventory: list[dict[str, Any]] = []
+        journals: list[dict[str, Any]] = []
         for basename in names:
             matched = _JOURNAL_RE.fullmatch(basename)
             if matched is None:
@@ -426,6 +718,7 @@ class S2_5RecoveryStore:
                 raise RecoveryStoreError(
                     "journal_integrity_failed", "; ".join(journal_errors)
                 )
+            journals.append(journal)
             journal_inventory.append({
                 "basename": basename,
                 "start_id": matched.group(1),
@@ -449,6 +742,8 @@ class S2_5RecoveryStore:
                 "entry_count": 0,
                 "head_digest": None,
             }
+            ledger_authorization_ids: list[str] = []
+            ledger_entries: list[dict[str, Any]] = []
         else:
             ledger = _decode_object(ledger_observation["bytes"], label="replay_ledger")
             ledger_errors = _ledger_errors(ledger)
@@ -457,6 +752,7 @@ class S2_5RecoveryStore:
                     "replay_ledger_integrity_failed", "; ".join(ledger_errors)
                 )
             entries = ledger["entries"]
+            ledger_entries = entries
             replay_ledger = {
                 "basename": REPLAY_LEDGER_BASENAME,
                 "present": True,
@@ -464,6 +760,15 @@ class S2_5RecoveryStore:
                 "entry_count": len(entries),
                 "head_digest": entries[-1]["entry_digest"] if entries else None,
             }
+            ledger_authorization_ids = sorted(
+                entry["authorization_id"] for entry in entries
+            )
+        coverage_errors = _journal_ledger_coverage_errors(journals, ledger_entries)
+        if coverage_errors:
+            raise RecoveryStoreError(
+                "journal_replay_ledger_coverage_failed",
+                "; ".join(coverage_errors),
+            )
         identity = _root_identity(root)
         return {
             "state_root_identity": identity,
@@ -471,6 +776,7 @@ class S2_5RecoveryStore:
             "journal_inventory": journal_inventory,
             "journal_set_digest": journal_set_digest,
             "replay_ledger": replay_ledger,
+            "_ledger_authorization_ids": ledger_authorization_ids,
             "manifest_observation": manifest_observation,
         }
 
@@ -480,7 +786,6 @@ class S2_5RecoveryStore:
         snapshot: dict[str, Any],
         *,
         source_head: str | None = None,
-        require_exact_inventory: bool = True,
     ) -> list[str]:
         errors = validate_local_artifact(manifest)
         if manifest.get("state_root_identity") != snapshot["state_root_identity"]:
@@ -490,18 +795,21 @@ class S2_5RecoveryStore:
         expected_store_id = self._store_id(snapshot["state_root_id"])
         if manifest.get("store_id") != expected_store_id:
             errors.append("manifest store id differs from the code-owned root")
-        if require_exact_inventory:
-            if manifest.get("journal_inventory") != snapshot["journal_inventory"]:
-                errors.append("manifest exact journal inventory differs from live root")
-            if manifest.get("journal_set_digest") != snapshot["journal_set_digest"]:
-                errors.append("manifest journal-set digest differs from live root")
-            if manifest.get("replay_ledger") != snapshot["replay_ledger"]:
-                errors.append("manifest replay-ledger head differs from live root")
+        if manifest.get("journal_inventory") != snapshot["journal_inventory"]:
+            errors.append("manifest exact journal inventory differs from live root")
+        if manifest.get("journal_set_digest") != snapshot["journal_set_digest"]:
+            errors.append("manifest journal-set digest differs from live root")
+        if manifest.get("replay_ledger") != snapshot["replay_ledger"]:
+            errors.append("manifest replay-ledger head differs from live root")
         if source_head is not None and manifest.get("source_head") != source_head:
             errors.append("manifest source head differs from current source head")
         consumed = manifest.get("consumed_authorization_ids")
         if isinstance(consumed, list) and consumed != sorted(consumed):
             errors.append("manifest consumed authorization ids are not canonical-sorted")
+        if consumed != snapshot["_ledger_authorization_ids"]:
+            errors.append(
+                "manifest consumed authorization ids differ from the validated replay ledger"
+            )
         return errors
 
     @staticmethod
@@ -517,7 +825,6 @@ class S2_5RecoveryStore:
         snapshot: dict[str, Any],
         *,
         source_head: str,
-        require_exact_inventory: bool = True,
     ) -> dict[str, Any] | None:
         observed = snapshot["manifest_observation"]
         if observed is None:
@@ -527,7 +834,6 @@ class S2_5RecoveryStore:
             manifest,
             snapshot,
             source_head=source_head,
-            require_exact_inventory=require_exact_inventory,
         )
         if errors:
             raise RecoveryStoreError(
@@ -544,7 +850,6 @@ class S2_5RecoveryStore:
         phase: str,
         unresolved_state_digest: str | None,
         anchor_head_digest: str | None,
-        consumed_authorization_ids: list[str],
     ) -> dict[str, Any]:
         if phase not in {"PREPARED", "COMMITTED", "RESOLVED"}:
             raise RecoveryStoreError("manifest_phase_invalid")
@@ -556,15 +861,7 @@ class S2_5RecoveryStore:
                 not isinstance(value, str) or _DIGEST_RE.fullmatch(value) is None
             ):
                 raise RecoveryStoreError(f"{label}_invalid")
-        if (
-            not isinstance(consumed_authorization_ids, list)
-            or consumed_authorization_ids != sorted(set(consumed_authorization_ids))
-            or not all(
-                isinstance(value, str) and _AUTHORIZATION_RE.fullmatch(value)
-                for value in consumed_authorization_ids
-            )
-        ):
-            raise RecoveryStoreError("consumed_authorization_ids_invalid")
+        consumed_authorization_ids = snapshot["_ledger_authorization_ids"]
         candidate = {
             "schema_version": "s2_5_recovery_store_manifest_v1",
             "store_id": self._store_id(snapshot["state_root_id"]),
@@ -644,6 +941,7 @@ class S2_5RecoveryStore:
     ) -> dict[str, Any]:
         root: dict[str, Any] | None = None
         manifest_match = False
+        manifest_identity_match = False
         parent_match = False
         temp_absent = False
         readback_digest = None
@@ -661,6 +959,13 @@ class S2_5RecoveryStore:
                 manifest_match = readback == candidate and not self._validate_manifest(
                     readback, snapshot, source_head=candidate["source_head"]
                 )
+                expected_identity = result.get("candidate_temp_identity")
+                manifest_identity_match = (
+                    isinstance(expected_identity, dict)
+                    and _file_identity(observed) == expected_identity
+                )
+            else:
+                failure_code = "manifest_independent_readback_missing"
             temp_absent = True
         except RecoveryStoreError:
             failure_code = "manifest_independent_readback_failed"
@@ -676,10 +981,20 @@ class S2_5RecoveryStore:
                 "parent_identity_rechecked",
             )
         )
-        if not durability_complete and failure_code is None:
-            failure_code = "manifest_durability_incomplete"
+        if failure_code is None:
+            if not durability_complete:
+                failure_code = "manifest_durability_incomplete"
+            elif not manifest_match:
+                failure_code = "manifest_independent_readback_mismatch"
+            elif not manifest_identity_match:
+                failure_code = "manifest_candidate_identity_mismatch"
+            elif not parent_match:
+                failure_code = "manifest_parent_identity_mismatch"
+            elif not temp_absent:
+                failure_code = "manifest_temp_residue_present"
         status = "PASS" if (
             manifest_match
+            and manifest_identity_match
             and parent_match
             and temp_absent
             and durability_complete
@@ -690,6 +1005,7 @@ class S2_5RecoveryStore:
             "manifest_digest": candidate["self_digest"],
             "readback_digest": readback_digest,
             "manifest_match": manifest_match,
+            "manifest_identity_match": manifest_identity_match,
             "parent_identity_match": parent_match,
             "temp_residue_absent": temp_absent,
             "status": status,
@@ -770,7 +1086,6 @@ class S2_5RecoveryStore:
         phase: str,
         unresolved_state_digest: str | None,
         anchor_head_digest: str | None,
-        consumed_authorization_ids: list[str],
         issued_at: str,
         expires_at: str,
     ) -> dict[str, Any]:
@@ -788,6 +1103,7 @@ class S2_5RecoveryStore:
         atomic_replace = False
         directory_fsynced = False
         parent_identity_rechecked = False
+        candidate_temp_identity: dict[str, Any] | None = None
         try:
             root = self._open_root()
             try:
@@ -806,15 +1122,9 @@ class S2_5RecoveryStore:
                 previous = self._existing_manifest(
                     before,
                     source_head=source_head,
-                    require_exact_inventory=False,
                 )
-                if previous is None and (
-                    before["journal_inventory"]
-                    or before["replay_ledger"]["present"]
-                ):
-                    raise RecoveryStoreError(
-                        "manifest_missing_for_nonempty_state_root"
-                    )
+                if previous is None:
+                    raise RecoveryStoreError("verified_external_bootstrap_required")
                 candidate = self._candidate(
                     before,
                     previous,
@@ -822,7 +1132,6 @@ class S2_5RecoveryStore:
                     phase=phase,
                     unresolved_state_digest=unresolved_state_digest,
                     anchor_head_digest=anchor_head_digest,
-                    consumed_authorization_ids=consumed_authorization_ids,
                 )
                 intent = self._intent(
                     candidate, issued_at=issued_at, expires_at=expires_at
@@ -831,14 +1140,9 @@ class S2_5RecoveryStore:
             previous = self._existing_manifest(
                 before,
                 source_head=source_head,
-                require_exact_inventory=False,
             )
-            if previous is None and (
-                before["journal_inventory"] or before["replay_ledger"]["present"]
-            ):
-                raise RecoveryStoreError(
-                    "manifest_missing_for_nonempty_state_root"
-                )
+            if previous is None:
+                raise RecoveryStoreError("verified_external_bootstrap_required")
             candidate = self._candidate(
                 before,
                 previous,
@@ -846,7 +1150,6 @@ class S2_5RecoveryStore:
                 phase=phase,
                 unresolved_state_digest=unresolved_state_digest,
                 anchor_head_digest=anchor_head_digest,
-                consumed_authorization_ids=consumed_authorization_ids,
             )
             intent = self._intent(
                 candidate, issued_at=issued_at, expires_at=expires_at
@@ -877,6 +1180,7 @@ class S2_5RecoveryStore:
                 raise RecoveryStoreError(
                     "manifest_temp_precheck_failed", "; ".join(temp_reasons)
                 )
+            candidate_temp_identity = _file_identity(temp)
             payload = _canonical_bytes(candidate)
             try:
                 written = self._driver.write_bytes(fd=temp_fd, payload=payload)
@@ -991,6 +1295,7 @@ class S2_5RecoveryStore:
             "atomic_replace": atomic_replace,
             "directory_fsynced": directory_fsynced,
             "parent_identity_rechecked": parent_identity_rechecked,
+            "candidate_temp_identity": candidate_temp_identity,
             "failure_code": (
                 STATUS_UNVERIFIED if local_commit_complete else failure_code
             ),
