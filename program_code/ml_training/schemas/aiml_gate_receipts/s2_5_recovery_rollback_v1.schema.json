@@ -15,11 +15,11 @@
     "recovery_id": {"type": "string", "pattern": "^s2-5-recovery-[0-9a-f]{64}$"},
     "recovery_intent_digest": {"$ref": "#/$defs/digest"},
     "action": {"enum": ["ROLLBACK_TO_PRE_STATE", "REPLAY_JOURNAL", "ABORT_AND_PRESERVE_LATCH"]},
-    "recovery_binding": {"type": "object"},
+    "recovery_binding": {"$ref": "#/$defs/recovery_binding_shape"},
     "actor_identity": {"$ref": "#/$defs/node_identity"},
     "actor_process": {"$ref": "#/$defs/process_identity"},
     "actor_capture_digest": {"$ref": "#/$defs/digest"},
-    "actor_capture": {"type": "object"},
+    "actor_capture": {"$ref": "#/$defs/capture_shape"},
     "pre_state": {"$ref": "#/$defs/unit_state"},
     "post_state": {"$ref": "#/$defs/unit_state"},
     "status": {"enum": ["ROLLBACK_APPLIED", "ROLLBACK_FAILED", "LATCH_PRESERVED"]},
@@ -29,13 +29,54 @@
   },
   "$defs": {
     "digest": {"type": "string", "pattern": "^sha256:[0-9a-f]{64}$"},
+    "recovery_binding_shape": {
+      "type": "object", "additionalProperties": false,
+      "required": [
+        "task_digest", "unresolved_state_digest", "state_root_identity",
+        "journal_set", "replay_ledger_head", "pre_state", "source_head",
+        "host_identity", "authorization", "trusted_anchor", "actor_identity",
+        "actor_process", "kernel_binding_digest", "admission_digest",
+        "side_effect_class", "production_effect", "production_authority",
+        "target_class"
+      ],
+      "properties": {
+        "task_digest": {}, "unresolved_state_digest": {}, "state_root_identity": {},
+        "journal_set": {}, "replay_ledger_head": {}, "pre_state": {},
+        "source_head": {}, "host_identity": {}, "authorization": {},
+        "trusted_anchor": {}, "actor_identity": {}, "actor_process": {},
+        "kernel_binding_digest": {}, "admission_digest": {},
+        "side_effect_class": {}, "production_effect": {},
+        "production_authority": {}, "target_class": {}
+      }
+    },
+    "capture_shape": {
+      "type": "object", "additionalProperties": false,
+      "required": [
+        "schema_version", "capture_kind", "source_head", "host_identity",
+        "bound_state_root_id", "recovery_id", "recovery_intent_digest",
+        "recovery_result_digest", "observed_state", "observed_state_digest",
+        "node_identity", "process_identity", "observed_at", "signer_identity",
+        "signer_fingerprint", "signature_namespace", "signed_binding",
+        "sshsig_armored", "capture_digest"
+      ],
+      "properties": {
+        "schema_version": {}, "capture_kind": {}, "source_head": {},
+        "host_identity": {}, "bound_state_root_id": {}, "recovery_id": {},
+        "recovery_intent_digest": {}, "recovery_result_digest": {},
+        "observed_state": {}, "observed_state_digest": {}, "node_identity": {},
+        "process_identity": {}, "observed_at": {}, "signer_identity": {},
+        "signer_fingerprint": {}, "signature_namespace": {},
+        "signed_binding": {}, "sshsig_armored": {}, "capture_digest": {}
+      }
+    },
     "node_identity": {
       "type": "object", "additionalProperties": false,
-      "required": ["node_id", "role", "permission"],
+      "required": ["node_id", "role", "permission", "key_identity"],
       "properties": {
         "node_id": {"type": "string", "minLength": 1},
         "role": {"type": "string", "minLength": 1},
-        "permission": {"const": "effect"}
+        "permission": {"const": "effect"},
+        "key_identity": {"type": "string", "minLength": 1}
       }
     },
     "process_identity": {

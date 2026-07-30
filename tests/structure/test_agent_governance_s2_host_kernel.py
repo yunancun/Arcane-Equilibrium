@@ -187,7 +187,9 @@ FORBIDDEN_BUILTINS = frozenset({
     "eval", "exec", "compile", "__import__", "globals", "locals", "vars",
 })
 # 動態取名的三個 builtin:名稱參數若是**算出來的**(``"sys"+"tem"`` / f-string / call)一律 finding。
-DYNAMIC_ATTRIBUTE_BUILTINS = frozenset({"getattr", "setattr", "delattr"})
+DYNAMIC_ATTRIBUTE_BUILTINS = frozenset({
+    "getattr", "setattr", "delattr", "__getattribute__",
+})
 # 被字串拼接混淆出來就一定是繞過意圖的識別碼。
 OBFUSCATION_SENSITIVE_LITERALS = (
     FORBIDDEN_RAW_COMMAND_NAMES | FORBIDDEN_BUILTINS
@@ -261,6 +263,15 @@ def _raw_command_findings(path: Path, *, exec_family: bool = True) -> list[str]:
             allowed_modules = allowed_modules | KERNEL_ONLY_IMPORTS
     findings: list[str] = []
     dynamic_callable_aliases: set[str] = set()
+    dynamic_return_functions: set[str] = set()
+    ctypes_handles: set[str] = set()
+    containing_function: dict[int, str] = {}
+    for function in (
+        item for item in ast.walk(tree)
+        if isinstance(item, (ast.FunctionDef, ast.AsyncFunctionDef))
+    ):
+        for child in ast.walk(function):
+            containing_function[id(child)] = function.name
 
     def _check_module(lineno: int, module: str, rendered: str) -> None:
         top = (module or "").split(".")[0]
@@ -282,6 +293,19 @@ def _raw_command_findings(path: Path, *, exec_family: bool = True) -> list[str]:
     def _callee_capability(node: ast.AST) -> str | None:
         """Resolve only execution-capable callees; unknown data stays fail-closed."""
 
+        def _sensitive_receiver(receiver: ast.AST | None) -> bool:
+            return (
+                isinstance(receiver, ast.Name)
+                and receiver.id in {"os", "__builtins__", "builtins", "ctypes"}
+                or isinstance(receiver, ast.Attribute)
+                and (
+                    receiver.attr in {"subprocess", "modules"}
+                    or _sensitive_receiver(receiver.value)
+                )
+                or isinstance(receiver, ast.Subscript)
+                and _sensitive_receiver(receiver.value)
+            )
+
         if isinstance(node, ast.Name):
             if node.id in FORBIDDEN_EXEC_CAPABILITY_NAMES:
                 return node.id
@@ -289,28 +313,98 @@ def _raw_command_findings(path: Path, *, exec_family: bool = True) -> list[str]:
                 return "dynamic callable alias"
             return None
         if isinstance(node, ast.Attribute):
+            if (
+                node.attr in {"run", "Popen"}
+                and isinstance(node.value, ast.Subscript)
+                and isinstance(node.value.value, ast.Attribute)
+                and isinstance(node.value.value.value, ast.Name)
+                and node.value.value.value.id == "sys"
+                and node.value.value.attr == "modules"
+            ):
+                return "dynamic module execution"
+            if (
+                node.attr in {"run", "Popen"}
+                and (
+                    isinstance(node.value, ast.Name)
+                    and node.value.id == "subprocess"
+                    or isinstance(node.value, ast.Attribute)
+                    and node.value.attr == "subprocess"
+                    or isinstance(node.value, ast.Subscript)
+                    and isinstance(node.value.value, ast.Attribute)
+                    and isinstance(node.value.value.value, ast.Name)
+                    and node.value.value.value.id == "sys"
+                    and node.value.value.attr == "modules"
+                )
+            ):
+                return "raw subprocess execution"
             return node.attr if node.attr in FORBIDDEN_EXEC_CAPABILITY_NAMES else None
         if isinstance(node, ast.Subscript):
             key = _fold_string(node.slice)
             if key in FORBIDDEN_EXEC_CAPABILITY_NAMES:
                 return "dynamic execution subscript"
+            if (
+                isinstance(node.value, ast.Name)
+                and (
+                    node.value.id == "__builtins__"
+                    or node.value.id in dynamic_callable_aliases
+                )
+            ):
+                return "dynamic execution subscript"
+            if (
+                isinstance(node.value, ast.Attribute)
+                and isinstance(node.value.value, ast.Name)
+                and node.value.value.id == "sys"
+                and node.value.attr == "modules"
+            ):
+                return "dynamic module execution"
             return None
         if isinstance(node, ast.Call):
             called = (
                 node.func.id if isinstance(node.func, ast.Name)
                 else node.func.attr if isinstance(node.func, ast.Attribute) else None
             )
-            if called == "getattr":
-                name_arg = node.args[1] if len(node.args) >= 2 else None
+            if called in {"getattr", "__getattribute__"}:
+                name_arg = (
+                    node.args[1] if called == "getattr" and len(node.args) >= 2
+                    else node.args[-1] if len(node.args) >= 2 else None
+                )
                 folded = _fold_string(name_arg) if name_arg is not None else None
                 if folded in FORBIDDEN_EXEC_CAPABILITY_NAMES:
                     return folded
-                if folded is None:
+                receiver = (
+                    node.args[0] if called == "getattr" and node.args
+                    else node.func.value if isinstance(node.func, ast.Attribute) else None
+                )
+                if folded is None and _sensitive_receiver(receiver):
                     return "dynamic callable attribute"
+            if isinstance(node.func, ast.Name) and node.func.id in dynamic_return_functions:
+                return "dynamic callable return"
+        if isinstance(node, (ast.List, ast.Tuple, ast.Set)):
+            if any(_callee_capability(item) is not None for item in node.elts):
+                return "dynamic callable container"
+        if isinstance(node, ast.Dict):
+            if any(
+                item is not None and _callee_capability(item) is not None
+                for item in node.values
+            ):
+                return "dynamic callable container"
         return None
 
-    # A dynamic getattr/subscript can be assigned and called later. Propagate simple aliases
-    # to a fixed point so ``f = getattr(os, name); g = f; g(...)`` cannot hide the callee.
+    # A dynamic getter can be returned by a helper and invoked later.
+    for function in (
+        item for item in ast.walk(tree)
+        if isinstance(item, (ast.FunctionDef, ast.AsyncFunctionDef))
+    ):
+        if any(
+            _callee_capability(item.value) is not None
+            for item in ast.walk(function)
+            if isinstance(item, ast.Return) and item.value is not None
+        ):
+            dynamic_return_functions.add(function.name)
+
+    # A dynamic getattr/subscript/container can be assigned and called later. Propagate
+    # aliases to a fixed point so ``f = getattr(os, name); box = [f]; box[0](...)`` cannot
+    # hide the callee.
     changed = True
     while changed:
         changed = False
@@ -323,6 +417,16 @@ def _raw_command_findings(path: Path, *, exec_family: bool = True) -> list[str]:
                 value, targets = node.value, [node.target]
             elif isinstance(node, ast.NamedExpr):
                 value, targets = node.value, [node.target]
+            if (
+                isinstance(value, ast.Call)
+                and isinstance(value.func, ast.Attribute)
+                and isinstance(value.func.value, ast.Name)
+                and value.func.value.id == "ctypes"
+                and value.func.attr == "CDLL"
+            ):
+                for target in targets:
+                    if isinstance(target, ast.Name):
+                        ctypes_handles.add(target.id)
             if value is None or _callee_capability(value) is None:
                 continue
             for target in targets:
@@ -379,7 +483,10 @@ def _raw_command_findings(path: Path, *, exec_family: bool = True) -> list[str]:
                 else func.attr if isinstance(func, ast.Attribute) else None
             )
             if called in DYNAMIC_ATTRIBUTE_BUILTINS:
-                name_arg = node.args[1] if len(node.args) >= 2 else None
+                name_arg = (
+                    node.args[1] if called == "getattr" and len(node.args) >= 2
+                    else node.args[-1] if len(node.args) >= 2 else None
+                )
                 if isinstance(name_arg, ast.Constant) and isinstance(name_arg.value, str):
                     if name_arg.value in OBFUSCATION_SENSITIVE_LITERALS:
                         findings.append(
@@ -396,6 +503,89 @@ def _raw_command_findings(path: Path, *, exec_family: bool = True) -> list[str]:
                 findings.append(f"line {node.lineno}: dynamic execution subscript")
             elif capability == "dynamic callable alias":
                 findings.append(f"line {node.lineno}: dynamic callable alias")
+            elif capability == "dynamic callable return":
+                findings.append(f"line {node.lineno}: dynamic callable return")
+            elif capability == "dynamic module execution":
+                findings.append(f"line {node.lineno}: dynamic module execution")
+            elif capability == "raw subprocess execution":
+                exact_kernel_run = (
+                    is_kernel
+                    and containing_function.get(id(node)) == "_execute"
+                    and isinstance(func, ast.Attribute)
+                    and isinstance(func.value, ast.Name)
+                    and func.value.id == "subprocess"
+                    and func.attr == "run"
+                    and len(node.args) == 1
+                    and isinstance(node.args[0], ast.Call)
+                    and isinstance(node.args[0].func, ast.Name)
+                    and node.args[0].func.id == "list"
+                    and {
+                        keyword.arg for keyword in node.keywords
+                    } == {
+                        "shell", "stdin", "stdout", "stderr", "env", "timeout", "check",
+                    }
+                    and all(
+                        not (
+                            keyword.arg in {"shell", "check"}
+                            and not (
+                                isinstance(keyword.value, ast.Constant)
+                                and keyword.value.value is False
+                            )
+                        )
+                        for keyword in node.keywords
+                    )
+                )
+                if not exact_kernel_run:
+                    findings.append(f"line {node.lineno}: raw subprocess execution")
+            if (
+                isinstance(func, ast.Attribute)
+                and isinstance(func.value, ast.Name)
+                and func.value.id == "ctypes"
+                and func.attr in {"CDLL", "get_errno"}
+            ):
+                exact_cdll = (
+                    is_kernel
+                    and containing_function.get(id(node)) == "enforce_process_hardening"
+                    and (
+                        func.attr == "get_errno"
+                        and not node.args
+                        and not node.keywords
+                        or func.attr == "CDLL"
+                        and len(node.args) == 1
+                        and isinstance(node.args[0], ast.Constant)
+                        and node.args[0].value is None
+                        and len(node.keywords) == 1
+                        and node.keywords[0].arg == "use_errno"
+                        and isinstance(node.keywords[0].value, ast.Constant)
+                        and node.keywords[0].value.value is True
+                    )
+                )
+                if not exact_cdll:
+                    findings.append(
+                        f"line {node.lineno}: ctypes call outside the hardening allowlist"
+                    )
+            if (
+                isinstance(func, ast.Attribute)
+                and isinstance(func.value, ast.Name)
+                and func.value.id in ctypes_handles
+            ):
+                exact_prctl = (
+                    is_kernel
+                    and containing_function.get(id(node)) == "enforce_process_hardening"
+                    and func.attr == "prctl"
+                    and len(node.args) == 5
+                    and isinstance(node.args[0], ast.Name)
+                    and node.args[0].id in {"_PR_SET_DUMPABLE", "_PR_GET_DUMPABLE"}
+                    and all(
+                        isinstance(item, ast.Constant) and item.value == 0
+                        for item in node.args[1:]
+                    )
+                    and not node.keywords
+                )
+                if not exact_prctl:
+                    findings.append(
+                        f"line {node.lineno}: ctypes call outside the hardening allowlist"
+                    )
     return findings
 
 
@@ -625,6 +815,37 @@ AST_SCANNER_MUTATIONS = {
         "    first = getattr(os, name)\n    second = first\n    return second(*argv)\n",
         "dynamic callable alias",
     ),
+    "variable_builtins_key_then_call": (
+        "def f(key, expr):\n    return __builtins__[key](expr)\n",
+        "dynamic execution subscript",
+    ),
+    "variable_sys_modules_key_then_run": (
+        "import sys\n\ndef f(key, argv):\n    return sys.modules[key].run(argv)\n",
+        "dynamic module execution",
+    ),
+    "os_dunder_getattribute_then_call": (
+        "import os\n\ndef f(name, argv):\n"
+        "    return os.__getattribute__(os, name)(*argv)\n",
+        "dynamic callable attribute",
+    ),
+    "computed_getattr_stored_in_container": (
+        "import os\n\ndef f(name, argv):\n"
+        "    calls = [getattr(os, name)]\n    return calls[0](*argv)\n",
+        "dynamic execution subscript",
+    ),
+    "computed_getattr_returned_then_called": (
+        "import os\n\ndef pick(name):\n    return getattr(os, name)\n"
+        "\ndef f(name, argv):\n    return pick(name)(*argv)\n",
+        "dynamic callable return",
+    ),
+    "already_imported_kernel_subprocess_run": (
+        "def f(kernel, argv):\n    return kernel.subprocess.run(argv)\n",
+        "raw subprocess execution",
+    ),
+    "already_imported_kernel_subprocess_popen": (
+        "def f(kernel, argv):\n    return kernel.subprocess.Popen(argv)\n",
+        "raw subprocess execution",
+    ),
     "runpy_import_alias": (
         "import runpy as runner\nrunner.run_path('payload.py')\n",
         "import outside the declared allowlist",
@@ -666,6 +887,20 @@ def test_the_ast_scanner_actually_catches_a_violation(tmp_path, mutation):
     path.write_text(source, encoding="utf-8")
     findings = _raw_command_findings(path)
     assert any(expected in item for item in findings), (source, findings)
+
+
+def test_kernel_ctypes_is_limited_to_the_exact_prctl_hardening_shapes(tmp_path):
+    """Kernel-only import is not a blanket libc FFI capability."""
+
+    path = tmp_path / KERNEL_PATH.name
+    path.write_text(
+        "import ctypes\n"
+        "libc = ctypes.CDLL('/tmp/foreign.so', use_errno=True)\n"
+        "libc.execve(b'/bin/id', (), ())\n",
+        encoding="utf-8",
+    )
+    findings = _raw_command_findings(path)
+    assert any("ctypes call outside the hardening allowlist" in item for item in findings)
 
 
 @pytest.mark.parametrize("mutation", sorted(AST_SCANNER_MUTATIONS))

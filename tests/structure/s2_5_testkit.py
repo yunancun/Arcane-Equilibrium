@@ -60,6 +60,7 @@ OWNER_SIGNALS = {
 OWNER_FINGERPRINT = inventory.compute_owner_fingerprint(**OWNER_SIGNALS)
 _SIGN_SEQ = [0]
 _STATE_SEQ = [0]
+_RECOVERY_CONTROLLERS: dict[str, lifecycle.S2_5RecoveryState] = {}
 
 
 def frozen_clock(offset_minutes: float = 3.0):
@@ -750,6 +751,20 @@ def fresh_state_root(tmp_path: Path, label: str = "state") -> Path:
     return tmp_path / f"{label}-{_STATE_SEQ[0]}"
 
 
+def recovery_controller(state_root: Path) -> lifecycle.S2_5RecoveryState:
+    """Return the one shared controller for a canonical disposable state root."""
+
+    key = str(state_root.resolve(strict=False))
+    controller = _RECOVERY_CONTROLLERS.get(key)
+    if controller is None:
+        controller = lifecycle.S2_5RecoveryState(
+            state_root=state_root,
+            host_identity="host:disposable-systemd:test",
+        )
+        _RECOVERY_CONTROLLERS[key] = controller
+    return controller
+
+
 def apply_kwargs(
     *,
     tmp_path: Path,
@@ -761,6 +776,8 @@ def apply_kwargs(
     """``apply_s2_5_start``/``apply_s2_5_final`` 的 happy-path 共同參數面(可逐鍵覆蓋)。"""
 
     clock = clock or frozen_clock()
+    state_root = overrides.get("state_root", tmp_path / "state")
+    controller_root = state_root if state_root is not None else tmp_path / "absent-state-root"
     kwargs: dict[str, Any] = {
         "now": NOW,
         "replay_ledger": empty_ledger(),
@@ -774,7 +791,8 @@ def apply_kwargs(
         # F3:兩個 lock 面是兩個資源(S2.4 install probe-only / S2.5 lifecycle hold)。
         "install_lock_probe": SimulatedInstallLockProbe(),
         "lifecycle_lock": SimulatedLifecycleLock(),
-        "state_root": tmp_path / "state",
+        "state_root": state_root,
+        "recovery_state": recovery_controller(controller_root),
         "observers": observers or HarnessObserver(unit, clock=clock),
         "owner_fingerprint": OWNER_FINGERPRINT,
         "clock": clock,

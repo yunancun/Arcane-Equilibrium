@@ -14,7 +14,6 @@ from pathlib import Path
 
 import pytest
 
-
 ML_ROOT = Path(__file__).resolve().parents[1]
 if str(ML_ROOT) not in sys.path:
     sys.path.insert(0, str(ML_ROOT))
@@ -31,9 +30,7 @@ from aiml_gate_receipt_validator import (  # noqa: E402
     SCHEMA_FILES,
     validate_aiml_artifact,
 )
-
 import aiml_gate_receipt_validator as _w0  # noqa: E402
-
 
 # ── S2.4 · WP4 · W1 · CP2a(capability-probe + prepare 契約 schema)─────────────
 # 這 14 份 closed schema 皆屬「契約」:round-trip 乾淨、additionalProperties 拒外鍵、
@@ -1024,24 +1021,9 @@ def test_cp2b_schema_files_resolve_to_real_files() -> None:
         assert key in SCHEMA_FILES, key
         assert (SCHEMA_DIR / SCHEMA_FILES[key]).is_file(), key
     assert len(_CP2B_KEYS) == 16
-    # CP2a(14)+ CP2b(16)加上既有基線 → 中央 SCHEMA_FILES 委派表 = 65;
-    # W2a(§2.1)additive 註冊 pg_acl_manifest_v1 → 66;
-    # W2b(§8.1)additive 註冊 application_bundle_runtime_closure_v1 +
-    # application_bundle_manifest_v1 → 68;
-    # W2c(§8.1 #2/#4)additive 註冊 base_runtime_tree_manifest_v1 +
-    # launch_bundle_manifest_v1 → 70;
-    # W5(§9.2)additive 註冊 s2_4_dependency_refresh_attestation_v1 → 71;
-    # S2.5(WP5·design §5/§6)additive 註冊五個 s2_5 schema +
-    # aiml_component_effect_classification_v3 → 77(v1/v2/S0.3 digest 逐位不變,
-    # 由 test_aiml_gate_receipt_validator_s2_5 釘住);
-    # S2.5(WP5 tranche 1b·E3 P1-3)additive 註冊
-    # s2_5_authorization_replay_ledger_v1 → 78;
-    # S2.2B(WP5 tranche 2·design §10)additive 註冊
-    # ingestion_compatibility_receipt_v1 → 79;
-    # S2E launch additive 註冊 s2e_launch_genesis_receipt_v1、
-    # s2e_launch_wave_receipt_v1、receipt_carrier_attestation_v1、
-    # s2e_launch_acceptance_review_bundle_v1 → 83。
-    assert len(SCHEMA_FILES) == 83
+    # CP2a/CP2b + W2/W5 + S2.5 + S2.2B + launch registration reached 83.
+    # S2E.LW1 adds four closed recovery-chain schemas, so the exact table is 87.
+    assert len(SCHEMA_FILES) == 87
     for s2e_key in (
         "s2e_launch_genesis_receipt_v1",
         "s2e_launch_wave_receipt_v1",

@@ -26,11 +26,12 @@
     "timestamp": {"type": "string", "format": "date-time"},
     "node_identity": {
       "type": "object", "additionalProperties": false,
-      "required": ["node_id", "role", "permission"],
+      "required": ["node_id", "role", "permission", "key_identity"],
       "properties": {
         "node_id": {"type": "string", "minLength": 1},
         "role": {"type": "string", "minLength": 1},
-        "permission": {"enum": ["effect", "read_only"]}
+        "permission": {"enum": ["effect", "read_only"]},
+        "key_identity": {"type": "string", "minLength": 1}
       }
     },
     "process_identity": {
@@ -82,23 +83,70 @@
     "authorization": {
       "type": "object", "additionalProperties": false,
       "required": [
-        "authorization_id", "authorization_digest", "issued_at", "expires_at", "consume_once"
+        "schema_version", "authorization_id", "authorization_digest", "issued_at",
+        "expires_at", "consume_once", "signer_identity", "signer_fingerprint",
+        "signature_namespace", "signed_binding", "sshsig_armored"
       ],
       "properties": {
+        "schema_version": {"const": "s2_5_recovery_authorization_v1"},
         "authorization_id": {
           "type": "string", "pattern": "^s2-5-recovery-auth-[0-9a-f]{64}$"
         },
         "authorization_digest": {"$ref": "#/$defs/digest"},
         "issued_at": {"$ref": "#/$defs/timestamp"},
         "expires_at": {"$ref": "#/$defs/timestamp"},
-        "consume_once": {"const": true}
+        "consume_once": {"const": true},
+        "signer_identity": {"const": "aiml-s2-5-recovery-operator-v1"},
+        "signer_fingerprint": {"type": "string", "pattern": "^SHA256:[A-Za-z0-9+/]{43}$"},
+        "signature_namespace": {"const": "arcane-equilibrium-aiml-s2-5-recovery"},
+        "signed_binding": {
+          "type": "object", "additionalProperties": false,
+          "required": [
+            "action", "task_digest", "unresolved_state_digest", "state_root_identity",
+            "journal_set", "replay_ledger_head", "pre_state", "source_head",
+            "host_identity", "authorization_id", "issued_at", "expires_at",
+            "trusted_anchor_digest", "actor_identity", "actor_process",
+            "kernel_binding_digest", "admission_digest", "side_effect_class",
+            "production_effect", "production_authority", "target_class"
+          ],
+          "properties": {
+            "action": {"enum": ["ROLLBACK_TO_PRE_STATE", "REPLAY_JOURNAL", "ABORT_AND_PRESERVE_LATCH"]},
+            "task_digest": {"$ref": "#/$defs/digest"},
+            "unresolved_state_digest": {"$ref": "#/$defs/digest"},
+            "state_root_identity": {"$ref": "#/$defs/state_root_identity"},
+            "journal_set": {"$ref": "#/$defs/journal_set"},
+            "replay_ledger_head": {"$ref": "#/$defs/replay_ledger_head"},
+            "pre_state": {"$ref": "#/$defs/unit_state"},
+            "source_head": {"$ref": "#/$defs/git_sha"},
+            "host_identity": {"type": "string", "minLength": 1},
+            "authorization_id": {"type": "string", "pattern": "^s2-5-recovery-auth-[0-9a-f]{64}$"},
+            "issued_at": {"$ref": "#/$defs/timestamp"},
+            "expires_at": {"$ref": "#/$defs/timestamp"},
+            "trusted_anchor_digest": {"$ref": "#/$defs/digest"},
+            "actor_identity": {"$ref": "#/$defs/node_identity"},
+            "actor_process": {"$ref": "#/$defs/process_identity"},
+            "kernel_binding_digest": {"$ref": "#/$defs/digest"},
+            "admission_digest": {"$ref": "#/$defs/digest"},
+            "side_effect_class": {"const": "DISPOSABLE_TEST"},
+            "production_effect": {"const": false},
+            "production_authority": {"const": false},
+            "target_class": {"const": "disposable_systemd"}
+          }
+        },
+        "sshsig_armored": {"type": "string", "minLength": 1}
       }
     },
     "trusted_anchor": {
       "type": "object", "additionalProperties": false,
       "required": [
         "schema_version", "anchor_id", "anchor_digest", "storage_class", "anchor_scope_id",
-        "bound_state_root_id", "source_head", "host_identity", "reference_digest"
+        "bound_state_root_id", "source_head", "host_identity", "external_sequence",
+        "previous_append_head_digest", "append_entry_digest", "append_head_digest",
+        "append_only", "immutable_readback", "immutable_readback_digest",
+        "append_actor_identity", "readback_verifier_identity", "evidence_class",
+        "signer_identity",
+        "signer_fingerprint", "signature_namespace", "signed_binding",
+        "sshsig_armored", "reference_digest"
       ],
       "properties": {
         "schema_version": {"const": "s2_5_recovery_trusted_anchor_ref_v1"},
@@ -109,6 +157,49 @@
         "bound_state_root_id": {"type": "string", "minLength": 1},
         "source_head": {"$ref": "#/$defs/git_sha"},
         "host_identity": {"type": "string", "minLength": 1},
+        "external_sequence": {"type": "integer", "minimum": 1},
+        "previous_append_head_digest": {"$ref": "#/$defs/digest"},
+        "append_entry_digest": {"$ref": "#/$defs/digest"},
+        "append_head_digest": {"$ref": "#/$defs/digest"},
+        "append_only": {"const": true},
+        "immutable_readback": {"const": true},
+        "immutable_readback_digest": {"$ref": "#/$defs/digest"},
+        "append_actor_identity": {"type": "string", "minLength": 1},
+        "readback_verifier_identity": {"type": "string", "minLength": 1},
+        "evidence_class": {"enum": ["LOCAL_REPRODUCIBLE", "PLATFORM_OR_EXTERNAL_ATTESTED"]},
+        "signer_identity": {"const": "aiml-s2-5-recovery-anchor-owner-v1"},
+        "signer_fingerprint": {"type": "string", "pattern": "^SHA256:[A-Za-z0-9+/]{43}$"},
+        "signature_namespace": {"const": "arcane-equilibrium-aiml-s2-5-recovery-anchor"},
+        "signed_binding": {
+          "type": "object", "additionalProperties": false,
+          "required": [
+            "schema_version", "anchor_id", "storage_class", "anchor_scope_id",
+            "bound_state_root_id", "source_head", "host_identity", "external_sequence",
+            "previous_append_head_digest", "append_entry_digest", "append_head_digest",
+            "append_only", "immutable_readback", "immutable_readback_digest",
+            "append_actor_identity", "readback_verifier_identity", "evidence_class"
+          ],
+          "properties": {
+            "schema_version": {"const": "s2_5_recovery_trusted_anchor_ref_v1"},
+            "anchor_id": {"type": "string", "minLength": 1},
+            "storage_class": {"const": "INDEPENDENT_OFF_STATE_ROOT"},
+            "anchor_scope_id": {"type": "string", "minLength": 1},
+            "bound_state_root_id": {"type": "string", "minLength": 1},
+            "source_head": {"$ref": "#/$defs/git_sha"},
+            "host_identity": {"type": "string", "minLength": 1},
+            "external_sequence": {"type": "integer", "minimum": 1},
+            "previous_append_head_digest": {"$ref": "#/$defs/digest"},
+            "append_entry_digest": {"$ref": "#/$defs/digest"},
+            "append_head_digest": {"$ref": "#/$defs/digest"},
+            "append_only": {"const": true},
+            "immutable_readback": {"const": true},
+            "immutable_readback_digest": {"$ref": "#/$defs/digest"},
+            "append_actor_identity": {"type": "string", "minLength": 1},
+            "readback_verifier_identity": {"type": "string", "minLength": 1},
+            "evidence_class": {"enum": ["LOCAL_REPRODUCIBLE", "PLATFORM_OR_EXTERNAL_ATTESTED"]}
+          }
+        },
+        "sshsig_armored": {"type": "string", "minLength": 1},
         "reference_digest": {"$ref": "#/$defs/digest"}
       }
     },
@@ -118,7 +209,8 @@
         "task_digest", "unresolved_state_digest", "state_root_identity", "journal_set",
         "replay_ledger_head", "pre_state", "source_head", "host_identity", "authorization",
         "trusted_anchor", "actor_identity", "actor_process", "kernel_binding_digest",
-        "admission_digest"
+        "admission_digest", "side_effect_class", "production_effect",
+        "production_authority", "target_class"
       ],
       "properties": {
         "task_digest": {"$ref": "#/$defs/digest"},
@@ -134,7 +226,11 @@
         "actor_identity": {"$ref": "#/$defs/node_identity"},
         "actor_process": {"$ref": "#/$defs/process_identity"},
         "kernel_binding_digest": {"$ref": "#/$defs/digest"},
-        "admission_digest": {"$ref": "#/$defs/digest"}
+        "admission_digest": {"$ref": "#/$defs/digest"},
+        "side_effect_class": {"const": "DISPOSABLE_TEST"},
+        "production_effect": {"const": false},
+        "production_authority": {"const": false},
+        "target_class": {"const": "disposable_systemd"}
       }
     }
   }
