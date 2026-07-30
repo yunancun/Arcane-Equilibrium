@@ -35,7 +35,9 @@ for _candidate in (Path(__file__).resolve().parent, ML_TRAINING_DIR):
 
 import aiml_gate_receipt_validator as central_validator  # noqa: E402
 import agent_governance_s2_5_attestation as attestation  # noqa: E402
+import agent_governance_s2_5_recovery_controller as recovery_controller  # noqa: E402
 import agent_governance_s2_5_recovery_lock as recovery_lock  # noqa: E402
+import agent_governance_s2_5_recovery_store_v2 as recovery_store_v2  # noqa: E402
 from agent_governance_s2_5_disposable_profile import (  # noqa: E402
     DISPOSABLE_STATE_ROOT,
     PROFILE_GID,
@@ -138,6 +140,8 @@ def validate_local_artifact(artifact: Any) -> list[str]:
     if not isinstance(artifact, dict):
         return ["local recovery-store artifact must be an object"]
     schema_version = artifact.get("schema_version")
+    if schema_version == recovery_controller.MANIFEST_SCHEMA:
+        return recovery_controller.validate_controller_artifact(artifact)
     if schema_version not in _LOCAL_SCHEMAS:
         return ["local recovery-store schema_version is unknown"]
     schema = _local_schema(schema_version)
@@ -725,6 +729,7 @@ class S2_5RecoveryStore:
             parent_fd, root, MANIFEST_BASENAME
         ) if MANIFEST_BASENAME in names else None
         journal_inventory: list[dict[str, Any]] = []
+        controller_journal_inventory: list[dict[str, Any]] = []
         journals: list[dict[str, Any]] = []
         for basename in names:
             matched = _JOURNAL_RE.fullmatch(basename)
@@ -746,10 +751,21 @@ class S2_5RecoveryStore:
                 "file_digest": _raw_digest(observed["bytes"]),
                 "journal_head_digest": journal["history"][-1]["entry_digest"],
             })
+            controller_journal_inventory.append({
+                **journal_inventory[-1],
+                "terminal_state": journal["state"],
+            })
         journal_inventory.sort(key=lambda entry: entry["basename"])
+        controller_journal_inventory.sort(
+            key=lambda entry: entry["basename"]
+        )
         journal_set_digest = central_validator.canonical_digest({
             "schema_version": "s2_5_recovery_journal_set_v1",
             "entries": journal_inventory,
+        })
+        controller_journal_set_digest = central_validator.canonical_digest({
+            "schema_version": "s2_5_recovery_journal_set_v2",
+            "entries": controller_journal_inventory,
         })
 
         ledger_observation = self._read(
@@ -784,6 +800,11 @@ class S2_5RecoveryStore:
             ledger_authorization_ids = sorted(
                 entry["authorization_id"] for entry in entries
             )
+        controller_replay_ledger = {
+            "schema_version": "s2_5_recovery_replay_projection_v2",
+            **replay_ledger,
+            "authorization_ids": ledger_authorization_ids,
+        }
         coverage_errors = _journal_ledger_coverage_errors(journals, ledger_entries)
         if coverage_errors:
             raise RecoveryStoreError(
@@ -797,6 +818,11 @@ class S2_5RecoveryStore:
             "journal_inventory": journal_inventory,
             "journal_set_digest": journal_set_digest,
             "replay_ledger": replay_ledger,
+            "controller_journal_inventory": controller_journal_inventory,
+            "controller_journal_set_digest": (
+                controller_journal_set_digest
+            ),
+            "controller_replay_ledger": controller_replay_ledger,
             "_ledger_authorization_ids": ledger_authorization_ids,
             "manifest_observation": manifest_observation,
         }
@@ -851,16 +877,47 @@ class S2_5RecoveryStore:
         if observed is None:
             return None
         manifest = _decode_object(observed["bytes"], label="manifest")
-        errors = self._validate_manifest(
-            manifest,
-            snapshot,
-            source_head=source_head,
-        )
+        if manifest.get("schema_version") == recovery_controller.MANIFEST_SCHEMA:
+            errors = recovery_store_v2.validate_manifest_against_snapshot(
+                manifest,
+                snapshot,
+                source_head=source_head,
+            )
+        else:
+            errors = self._validate_manifest(
+                manifest,
+                snapshot,
+                source_head=source_head,
+            )
         if errors:
             raise RecoveryStoreError(
                 "manifest_integrity_failed", "; ".join(errors)
             )
         return manifest
+
+    def _controller_candidate(
+        self,
+        snapshot: dict[str, Any],
+        previous: dict[str, Any],
+        *,
+        source_head: str,
+        controller_state: dict[str, Any],
+    ) -> dict[str, Any]:
+        if previous.get("schema_version") != recovery_controller.MANIFEST_SCHEMA:
+            raise RecoveryStoreError(
+                "legacy_manifest_external_bootstrap_required"
+            )
+        candidate, errors = recovery_store_v2.build_successor_manifest(
+            controller_state,
+            previous,
+            snapshot,
+            source_head=source_head,
+        )
+        if candidate is None or errors:
+            raise RecoveryStoreError(
+                "controller_successor_invalid", "; ".join(errors)
+            )
+        return candidate
 
     def _candidate(
         self,
@@ -1010,9 +1067,21 @@ class S2_5RecoveryStore:
             if observed is not None:
                 readback_digest = _raw_digest(observed["bytes"])
                 readback = _decode_object(observed["bytes"], label="manifest_readback")
-                manifest_match = readback == candidate and not self._validate_manifest(
-                    readback, snapshot, source_head=candidate["source_head"]
+                readback_errors = (
+                    recovery_store_v2.validate_manifest_against_snapshot(
+                        readback,
+                        snapshot,
+                        source_head=candidate["source_head"],
+                    )
+                    if readback.get("schema_version")
+                    == recovery_controller.MANIFEST_SCHEMA
+                    else self._validate_manifest(
+                        readback,
+                        snapshot,
+                        source_head=candidate["source_head"],
+                    )
                 )
+                manifest_match = readback == candidate and not readback_errors
                 expected_identity = result.get("candidate_temp_identity")
                 manifest_identity_match = (
                     isinstance(expected_identity, dict)
@@ -1119,12 +1188,25 @@ class S2_5RecoveryStore:
                         "manifest_missing_for_nonempty_state_root"
                     )
                 return {"status": "ABSENT", "manifest": None, "reasons": []}
+            if manifest.get("schema_version") == (
+                "s2_5_recovery_store_manifest_v1"
+            ):
+                legacy = recovery_controller.classify_legacy_manifest(
+                    manifest
+                )
+                return {
+                    **legacy,
+                    "manifest": None,
+                    "reasons": [
+                        "legacy_manifest_external_bootstrap_required"
+                    ],
+                }
             return {
                 "status": STATUS_UNVERIFIED,
                 "manifest": manifest,
                 "reasons": [
-                    "the local manifest is internally consistent but has no independently "
-                    "controlled append-only latest anchor"
+                    "the durable controller state is locally reproducible but "
+                    "external anchor trust remains unverified"
                 ],
             }
         except RecoveryStoreError as error:
@@ -1142,9 +1224,10 @@ class S2_5RecoveryStore:
         *,
         session_context: Any,
         source_head: str,
-        phase: str,
-        unresolved_state_digest: str | None,
-        anchor_head_digest: str | None,
+        phase: str | None = None,
+        unresolved_state_digest: str | None = None,
+        anchor_head_digest: str | None = None,
+        controller_state: dict[str, Any] | None = None,
         issued_at: str,
         expires_at: str,
     ) -> dict[str, Any]:
@@ -1200,13 +1283,22 @@ class S2_5RecoveryStore:
                 )
                 if previous is None:
                     raise RecoveryStoreError("verified_external_bootstrap_required")
-                candidate = self._candidate(
-                    before,
-                    previous,
-                    source_head=source_head,
-                    phase=phase,
-                    unresolved_state_digest=unresolved_state_digest,
-                    anchor_head_digest=anchor_head_digest,
+                candidate = (
+                    self._controller_candidate(
+                        before,
+                        previous,
+                        source_head=source_head,
+                        controller_state=controller_state,
+                    )
+                    if controller_state is not None
+                    else self._candidate(
+                        before,
+                        previous,
+                        source_head=source_head,
+                        phase=phase,
+                        unresolved_state_digest=unresolved_state_digest,
+                        anchor_head_digest=anchor_head_digest,
+                    )
                 )
                 intent = self._intent(
                     candidate,
@@ -1223,13 +1315,22 @@ class S2_5RecoveryStore:
             )
             if previous is None:
                 raise RecoveryStoreError("verified_external_bootstrap_required")
-            candidate = self._candidate(
-                before,
-                previous,
-                source_head=source_head,
-                phase=phase,
-                unresolved_state_digest=unresolved_state_digest,
-                anchor_head_digest=anchor_head_digest,
+            candidate = (
+                self._controller_candidate(
+                    before,
+                    previous,
+                    source_head=source_head,
+                    controller_state=controller_state,
+                )
+                if controller_state is not None
+                else self._candidate(
+                    before,
+                    previous,
+                    source_head=source_head,
+                    phase=phase,
+                    unresolved_state_digest=unresolved_state_digest,
+                    anchor_head_digest=anchor_head_digest,
+                )
             )
             intent = self._intent(
                 candidate,
@@ -1819,29 +1920,20 @@ def _build_fixed_profile_writer():
     def persist_fixed_profile(
         *,
         source_head: str,
-        phase: str,
-        unresolved_state_digest: str | None,
-        anchor_head_digest: str | None,
+        controller_state: dict[str, Any],
         issued_at: str,
         expires_at: str,
     ) -> dict[str, Any]:
         if type(source_head) is not str or _HEAD_RE.fullmatch(source_head) is None:
             raise RecoveryStoreError("source_head_invalid")
         _validate_ttl(issued_at, expires_at)
-        if (
-            type(phase) is not str
-            or phase not in {"PREPARED", "COMMITTED", "RESOLVED"}
-        ):
-            raise RecoveryStoreError("manifest_phase_invalid")
-        for label, value in (
-            ("unresolved_state_digest", unresolved_state_digest),
-            ("anchor_head_digest", anchor_head_digest),
-        ):
-            if value is not None and (
-                type(value) is not str
-                or _DIGEST_RE.fullmatch(value) is None
-            ):
-                raise RecoveryStoreError(f"{label}_invalid")
+        controller_errors = recovery_controller.validate_controller_artifact(
+            controller_state
+        )
+        if controller_errors:
+            raise RecoveryStoreError(
+                "controller_state_invalid", "; ".join(controller_errors)
+            )
         driver = FixedPosixRecoveryDriver()
         lock_outcome, lease = recovery_lock._acquire_recovery_dual_lock(
             driver=driver,
@@ -1866,9 +1958,7 @@ def _build_fixed_profile_writer():
             store_outcome = S2_5RecoveryStore(driver)._persist_with_guard(
                 session_context=session,
                 source_head=source_head,
-                phase=phase,
-                unresolved_state_digest=unresolved_state_digest,
-                anchor_head_digest=anchor_head_digest,
+                controller_state=controller_state,
                 issued_at=issued_at,
                 expires_at=expires_at,
             )

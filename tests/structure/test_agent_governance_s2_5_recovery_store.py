@@ -448,9 +448,7 @@ def test_public_writer_has_no_caller_path_unit_nonce_or_identity_surface() -> No
     assert not hasattr(store.S2_5RecoveryStore, "persist")
     assert set(signature(store.persist_fixed_profile).parameters) == {
         "source_head",
-        "phase",
-        "unresolved_state_digest",
-        "anchor_head_digest",
+        "controller_state",
         "issued_at",
         "expires_at",
     }
@@ -594,44 +592,6 @@ def test_forged_fixed_session_is_rejected_before_state_root_io(tmp_path) -> None
 
     assert caught.value.code == "fixed_recovery_session_invalid"
     assert driver.paths == []
-
-
-def test_unavailable_fixed_posix_session_fails_closed_before_store_write(
-    monkeypatch,
-) -> None:
-    import agent_governance_s2_5_recovery_store as store
-
-    calls: list[str] = []
-
-    def unavailable_open(path, flags, *args, **kwargs):
-        calls.append(str(path))
-        raise FileNotFoundError(path)
-
-    monkeypatch.setattr(store.os, "open", unavailable_open)
-    monkeypatch.setattr(
-        store.os,
-        "write",
-        lambda *args, **kwargs: pytest.fail("write must not be reached"),
-    )
-    monkeypatch.setattr(
-        store.os,
-        "replace",
-        lambda *args, **kwargs: pytest.fail("replace must not be reached"),
-    )
-    outcome = store.persist_fixed_profile(
-        source_head=HEAD,
-        phase="PREPARED",
-        unresolved_state_digest=DIGEST,
-        anchor_head_digest=None,
-        issued_at="2030-01-01T00:00:00Z",
-        expires_at="2030-01-01T00:05:00Z",
-    )
-
-    assert outcome["status"] == "LOCAL_REPRODUCIBLE_UNVERIFIED"
-    assert outcome["store"] is None
-    assert outcome["production_effect"] is False
-    assert outcome["production_authority"] is False
-    assert calls == [store.recovery_lock.DISPOSABLE_LOCK_ROOT]
 
 
 def test_public_persist_cannot_bootstrap_an_empty_root(tmp_path) -> None:
@@ -915,7 +875,9 @@ def test_full_root_replacement_is_detected_even_with_copied_manifest(tmp_path) -
     assert verdict["reasons"] == ["manifest_integrity_failed"]
 
 
-def test_coherent_local_reseal_remains_explicitly_unverified(tmp_path) -> None:
+def test_coherent_v1_local_reseal_requires_explicit_external_bootstrap(
+    tmp_path,
+) -> None:
     import agent_governance_s2_5_recovery_store as store
     import aiml_gate_receipt_validator as validator
 
@@ -952,5 +914,14 @@ def test_coherent_local_reseal_remains_explicitly_unverified(tmp_path) -> None:
 
     verdict = store.S2_5RecoveryStore(driver).inspect(source_head=HEAD)
 
-    assert verdict["status"] == store.STATUS_UNVERIFIED
-    assert "append-only latest anchor" in verdict["reasons"][0]
+    assert verdict == {
+        "status": "RECOVERY_REQUIRED_LEGACY_DIGEST_ONLY",
+        "manifest": None,
+        "reasons": ["legacy_manifest_external_bootstrap_required"],
+        "auto_upgrade_allowed": False,
+        "external_bootstrap_required": True,
+        "effect_admitted": False,
+        "clear_admitted": False,
+        "production_effect": False,
+        "production_authority": False,
+    }

@@ -158,9 +158,9 @@ def test_crash_before_temp_creation_preserves_seed_and_restart_observes_it(
         _persist(driver)
 
     assert sorted(path.name for path in root.iterdir()) == [store.MANIFEST_BASENAME]
-    assert store.S2_5RecoveryStore(driver).inspect(source_head=HEAD)["status"] == (
-        store.STATUS_UNVERIFIED
-    )
+    assert store.S2_5RecoveryStore(driver).inspect(source_head=HEAD)[
+        "status"
+    ] == "RECOVERY_REQUIRED_LEGACY_DIGEST_ONLY"
 
 
 @pytest.mark.parametrize("fault", ["after_atomic_replace", "after_directory_fsync"])
@@ -176,9 +176,9 @@ def test_post_replace_crash_never_upgrades_local_bytes_to_trusted(
 
     assert (root / store.MANIFEST_BASENAME).is_file()
     assert not (root / store.MANIFEST_TEMP_BASENAME).exists()
-    assert store.S2_5RecoveryStore(driver).inspect(source_head=HEAD)["status"] == (
-        store.STATUS_UNVERIFIED
-    )
+    assert store.S2_5RecoveryStore(driver).inspect(source_head=HEAD)[
+        "status"
+    ] == "RECOVERY_REQUIRED_LEGACY_DIGEST_ONLY"
 
 
 def test_independent_readback_failure_returns_recovery_chain(tmp_path) -> None:
