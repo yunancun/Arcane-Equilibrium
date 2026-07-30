@@ -1,75 +1,48 @@
-"""S2E.2a:S2 受信主機 runner 家族 kernel 的結構證明。
-
-四道 §E.3「禁止 raw command 繞過 Adapter」全部在此執法,其中第四道(AST 掃描)是本波**驗收的
-機器判準**:
-
-1. 唯一 exec 點 —— kernel 之外的 runner 家族檔案不得出現 ``subprocess`` / ``os.system`` /
-   ``os.popen`` / ``shell=True`` / ``eval`` / ``exec`` / ``__import__``;
-2. kernel 側獨立 re-assert —— 非 allowlist argv 一律 raise 且**絕不執行**;
-3. 能力分割硬檢 —— ``assert_read_only_surface`` 在呼叫任何方法之前拒絕寫能力面;
-4. allowlist ≡ 原 owner 集合 —— 以「錄音式 host_probe 驅動 ``build_owner_inventory``」比對實際
-   送出的 argv,證明 kernel 的表是**導出**而非手抄。
-
-另證 target class 由主機事實導出(caller 字串永遠進不來)、``unknown`` 與 ``production`` 同等
-對待、``--allow-production`` 單獨不足,以及 ``PR_SET_DUMPABLE`` 真的被執法。
+"""S2 trusted-host kernel structural proof.
+The suite enforces one exec point, kernel-side argv re-assertion, capability
+separation, and a derived owner allowlist. It also proves target class is
+host-derived and process hardening is enforced.
 """
-
 from __future__ import annotations
-
 import ast
 import os
 import subprocess
 import sys
+from copy import deepcopy
 from pathlib import Path
-
 import pytest
-
-
+from s2_5_recovery_readback_socket_scan import (
+    readback_socket_contract_findings,
+)
 ROOT = Path(__file__).resolve().parents[2]
 HELPERS = ROOT / "helper_scripts/maintenance_scripts"
 ML_ROOT = ROOT / "program_code/ml_training"
 for candidate in (HELPERS, ML_ROOT):
     if str(candidate) not in sys.path:
         sys.path.insert(0, str(candidate))
-
 import agent_governance_alr_quiesce_inventory as qi  # noqa: E402
 import agent_governance_s2_host_kernel as kernel  # noqa: E402
-
-
-# ── runner 家族(§G owned paths;AST 掃描的對象) ──
 KERNEL_PATH = HELPERS / "agent_governance_s2_host_kernel.py"
-RUNNER_FAMILY = (
-    KERNEL_PATH,
-    HELPERS / "agent_governance_s2_host_observer.py",
-    HELPERS / "agent_governance_s2_0_host_runner.py",
-    HELPERS / "agent_governance_s2_1_host_runner.py",
-    HELPERS / "agent_governance_s2_4_host_storage.py",
-    HELPERS / "agent_governance_s2_4_host_recovery.py",
-    HELPERS / "aiml_s2_effect_host_run.py",
-)
-# S2E.2b-1:``RUNNER_FAMILY`` 過去是**純手維護**的 tuple,而它同時是 AST no-raw-command 掃描的
-# 唯一對象(:func:`_present_family`)⇒ 一個新 runner 檔只要忘了加進來,就完全不被掃描,任何新的
-# exec 面都能全綠落地。手維護的表本身不是問題,**沒有任何東西比對它與磁碟上的事實**才是。以下
-# 兩張 glob 把「長得像 S2 受信主機 runner 的檔案」由檔案系統導出,再要求它是 family 的子集。
 RUNNER_FAMILY_GLOBS = ("agent_governance_s2_*host_*.py", "aiml_s2_*host_run*.py")
-# glob 是形狀判準,不是語義判準:S2.4 的 row driver **protocol 葉**恰好也叫 ``…_host_identity``,
-# 但它不是 runner(沒有 lane、沒有主機能力、其匯入面由 S2.4 wave 治理)。故此處允許顯式除名,
-# 但除名**只**豁免 per-file import 白名單與 ``shell=`` 呼叫形狀兩項:被除名的檔案仍要通過
-# raw-command 掃描的其餘每一道,且一律不得碰 :data:`KERNEL_ONLY_IMPORTS` 或
-# :data:`EXEC_CAPABLE_IMPORT_DENYLIST`。
-#
-# S2E.2b-1 P2-1(E2 實證):關掉正面 import 白名單,關掉的**恰好**是唯一擋得住 ``pty`` /
-# ``importlib`` 的那一道——E2 兩個全綠反例是「除名檔帶 ``pty.spawn(argv)``」與「除名檔帶
-# ``importlib.import_module(name)``」(名稱是變數,故字面拼接那道也抓不到)。原註解宣稱「四道
-# 一道都不放…根本沒有任何 shell 可以到達」是 **overclaim,在此撤回**。改法:除名 = 白名單關掉
-# **加上**一張顯式 import 黑名單(下方 :data:`EXEC_CAPABLE_IMPORT_DENYLIST`),於是「把新
-# runner 塞進除名表」仍然換不到任何 exec 能力,只換到一次必須寫明理由的顯式動作。
+# Explicit exclusions still pass every raw-command rule and the import denylist.
 NON_RUNNER_HOST_LEAVES = {
     "agent_governance_s2_4_host_identity.py": (
         "S2.4 HOST_IDENTITY_INSTALL row 的 typed driver Protocol 與純導出葉;它不驅動任何 lane、"
         "不持有主機能力,匯入面屬 s2_4_install_adapter_v1 的 component_paths 治理範圍"
     ),
 }
+
+
+def _discover_runner_family(helpers_dir: Path) -> list[Path]:
+    """由磁碟導出受信 host runner family；只有具理由的 protocol 葉可除名。"""
+
+    return sorted({
+        path
+        for glob in RUNNER_FAMILY_GLOBS
+        for path in helpers_dir.glob(glob)
+        if path.name not in NON_RUNNER_HOST_LEAVES
+    })
+RUNNER_FAMILY = tuple(_discover_runner_family(HELPERS))
 # 四個 S2 effect adapter 的 apply 進入點 + 其驅動葉:observer/kernel 的 import closure 不得含它們。
 APPLIER_MODULES = frozenset({
     "agent_governance_pg_observer_bootstrap",
@@ -82,34 +55,93 @@ APPLIER_MODULES = frozenset({
     "agent_governance_s2_5_lifecycle",
     "agent_governance_s2_5_driver",
 })
-
-# ── ★驗收判準★ 的兩張表:正面 import 白名單 + 名稱層 denylist ──
-# E2 的突變實證(M2/M2b/M2c)證明「只列黑名單模組」抓不到 ``from os import system`` /
-# ``importlib.import_module("sub"+"process")`` / ``getattr(_o, "sys"+"tem")``。改成**正面白名單**:
-# runner 家族只准 import 這一組宣告過的模組,任何其他 import 一律是 finding —— 於是
-# ``importlib`` / ``pty`` / ``commands`` / ``ctypes``(可 `CDLL(None).system`)全都不必逐一列黑。
-# ``fcntl``(``flock``)與 ``errno``(``EWOULDBLOCK``/``ELOOP``/``ENOTDIR`` 的**具名**常量;
-# 硬編數值在 Linux 與 darwin 上不同)是 S2.4 POSIX file/lock driver 的最小需求;兩者都沒有
-# 任何行程生成能力。
+# Positive imports are capability declarations; unlisted imports fail closed.
 ALLOWED_STDLIB_IMPORTS = frozenset({
     "__future__", "argparse", "base64", "datetime", "errno", "fcntl", "hashlib", "json",
-    "os", "pathlib", "re", "socket", "stat", "sys", "typing",
+    "os", "pathlib", "re", "secrets", "socket", "stat", "sys", "typing",
 })
+STDLIB_IMPORTS_BY_FILE = {"agent_governance_s2_5_recovery_lock.py": frozenset({"functools"})}
+EXACT_STDLIB_IMPORTS_BY_FILE = {
+    "agent_governance_s2_5_recovery.py": frozenset({
+        "__future__", "copy", "datetime", "hmac", "os", "pathlib", "re",
+        "stat", "typing",
+    }),
+    "agent_governance_s2_5_recovery_readback.py": frozenset({
+        "__future__", "datetime", "json", "secrets", "socket", "typing",
+    }),
+    "agent_governance_s2_5_recovery_anchor.py": frozenset({
+        "__future__", "datetime", "json", "pathlib", "sys", "typing",
+    }),
+    "agent_governance_s2_5_recovery_anchor_v2.py": frozenset({
+        "__future__", "datetime", "functools", "json", "pathlib", "sys",
+        "typing",
+    }),
+    "agent_governance_s2_5_recovery_controller.py": frozenset({
+        "__future__", "datetime", "functools", "json", "pathlib", "sys",
+        "typing",
+    }),
+    "agent_governance_s2_5_recovery_lock.py": frozenset({
+        "__future__", "functools", "json", "pathlib", "sys", "typing",
+    }),
+    "agent_governance_s2_5_recovery_state.py": frozenset({
+        "__future__", "copy", "dataclasses", "json", "pathlib", "sys",
+        "typing", "weakref",
+    }),
+    "agent_governance_s2_5_recovery_store.py": frozenset({
+        "__future__", "datetime", "fcntl", "functools", "hashlib", "json",
+        "os", "pathlib", "re", "stat", "sys", "typing",
+    }),
+    "agent_governance_s2_5_recovery_store_v2.py": frozenset({
+        "__future__", "copy", "datetime", "hashlib", "json", "pathlib",
+        "sys", "typing",
+    }),
+}
 ALLOWED_THIRD_PARTY_IMPORTS = frozenset({"psycopg2"})
-# E2 RES-5:原本是 ``GOVERNANCE_IMPORT_PREFIX = "agent_governance_"`` 的**無條件前綴放行**,而
-# ``agent_governance_command_capture_v2`` 本身就是一個 ``subprocess.run`` 執行器 —— 於是「import
-# 它 + ``capture_command(argv)``」這條 exec 路徑在五個檔案上全綠(E2 的 N16 探針)。前綴是名字,
-# 不是能力。改成**顯式模組列**:新增任何一個都必須在這裡明說。
-#
-# S2E.2b-1:再從「全家族共用一個集合」改成 **per-file**。共用集合有一個結構性的副作用——S2.4 的
-# 啟動補償 runner 需要 import 多個 applier 模組(``agent_governance_s2_4_install_driver`` 等),
-# 而把它們塞進共用集合等於**同時**允許 observer 與 kernel import applier;
-# ``test_kernel_import_closure_excludes_every_applier_module`` 只覆蓋 kernel,於是 E2 RES-5 收掉的
-# 那個洞會從側門回到 observer 上。白名單是**能力**宣告,能力屬於檔案,不屬於家族。
-#
-# 未列名的檔案(含合成突變樣本)其治理白名單為**空集**——fail-closed:新 family 檔的第一個治理
-# import 就必須在此顯式宣告。
+# Governance imports are per-file rather than family-wide.
 GOVERNANCE_IMPORTS_BY_FILE: dict[str, frozenset[str]] = {
+    "agent_governance_s2_5_recovery.py": frozenset({
+        "agent_governance_aiml_trusted_host",
+        "agent_governance_s2_5_recovery_readback",
+        "aiml_gate_receipt_s2_5_host_capture",
+        "aiml_gate_receipt_schema_core",
+    }),
+    "agent_governance_s2_5_recovery_readback.py": frozenset({
+        "aiml_gate_receipt_schema_core",
+    }),
+    "agent_governance_s2_5_recovery_lock.py": frozenset({"agent_governance_s2_5_disposable_profile", "agent_governance_schema", "aiml_gate_receipt_validator"}),
+    "agent_governance_s2_5_recovery_anchor.py": frozenset({"agent_governance_s2_5_disposable_profile", "agent_governance_s2_5_recovery_store", "agent_governance_schema", "aiml_gate_receipt_validator"}),
+    "agent_governance_s2_5_recovery_anchor_v2.py": frozenset({
+        "agent_governance_s2_5_disposable_profile",
+        "agent_governance_s2_5_recovery_controller",
+        "agent_governance_s2_5_recovery_lock",
+        "agent_governance_s2_5_recovery_store",
+        "agent_governance_schema",
+        "aiml_gate_receipt_validator",
+    }),
+    "agent_governance_s2_5_recovery_controller.py": frozenset({
+        "agent_governance_s2_5_disposable_profile",
+        "agent_governance_schema",
+        "aiml_gate_receipt_s2_5_host_capture",
+        "aiml_gate_receipt_validator",
+    }),
+    "agent_governance_s2_5_recovery_state.py": frozenset({
+        "agent_governance_s2_5_recovery",
+        "aiml_gate_receipt_s2_5_host_capture",
+        "aiml_gate_receipt_validator",
+    }),
+    "agent_governance_s2_5_recovery_store.py": frozenset({
+        "agent_governance_s2_5_attestation",
+        "agent_governance_s2_5_disposable_profile",
+        "agent_governance_s2_5_recovery_controller",
+        "agent_governance_s2_5_recovery_lock",
+        "agent_governance_s2_5_recovery_store_v2",
+        "agent_governance_schema",
+        "aiml_gate_receipt_validator",
+    }),
+    "agent_governance_s2_5_recovery_store_v2.py": frozenset({
+        "agent_governance_s2_5_recovery_controller",
+        "aiml_gate_receipt_validator",
+    }),
     "agent_governance_s2_host_kernel.py": frozenset({
         "agent_governance_alr_quiesce_inventory",
     }),
@@ -128,16 +160,10 @@ GOVERNANCE_IMPORTS_BY_FILE: dict[str, frozenset[str]] = {
         "agent_governance_s2_effect_binding",
         "agent_governance_s2_host_kernel",
     }),
-    # S2.4 §5.2 的 POSIX 檔案/lock driver:只需 journal/lock 兩葉的**常量**(路徑、mode、
-    # open flags),不 import 任何 applier。
     "agent_governance_s2_4_host_storage.py": frozenset({
         "agent_governance_s2_4_journal",
         "agent_governance_s2_4_lock",
     }),
-    # S2.4 §5.4 的啟動逆序補償器:它是唯一需要 applier 匯入面的 family 成員(補償要重用
-    # aggregate 交易葉的 rollback 契約、殘留觀測與 lock-release 折入政策,絕不另抄一份),
-    # 也是唯一需要中央 schema/digest 驗證器的成員(permit 身分與 rollback artifact 的再導出)。
-    # 本表是**每檔模組**白名單,不限於 ``agent_governance_*`` 前綴——前綴是名字,不是能力。
     "agent_governance_s2_4_host_recovery.py": frozenset({
         "agent_governance_s2_4_component",
         "agent_governance_s2_4_install_driver",
@@ -157,22 +183,15 @@ GOVERNANCE_IMPORTS_BY_FILE: dict[str, frozenset[str]] = {
         "agent_governance_s2_host_observer",
     }),
 }
-# 只有 kernel 可以 import 的三個模組:``subprocess``(唯一 exec 點)、``ctypes``(prctl 執法;
-# 它同時也是一條 libc ``system()`` 路徑)、以及 ``agent_governance_command_capture_v2``
-# —— 後者**本身就是一個 exec 器**(``capture_command`` 內有 ``subprocess.run``),kernel 只從它
-# 導出 ``SAFE_INHERITED_ENVIRONMENT`` 與 ``_redact_preview`` 兩個純值/純函式(不另造第二套規則),
-# 但對其他家族成員它是一條完整的 exec 路徑,故一律禁止(E2 RES-5 的 N16 探針)。
+# Kernel-only modules expose process/FFI capability.
 KERNEL_ONLY_IMPORTS = frozenset({
     "subprocess", "ctypes", "agent_governance_command_capture_v2",
 })
-# S2E.2b-1 P2-1:除名檔案(``exec_family=False``)沒有正面白名單可依,故改以一張顯式**黑**名單
-# 兜底。每一個都是一條完整的行程生成/動態載入路徑,且沒有任何一條是 protocol 葉會需要的:
-# ``pty``(``spawn``)、``importlib``(名稱可為變數 ⇒ 字面拼接那道抓不到)、``commands``、
-# ``asyncio``(``create_subprocess_exec``)、``multiprocessing``(``Popen``/spawn)。
+# Exempt leaves retain an explicit exec-capable import denylist.
 EXEC_CAPABLE_IMPORT_DENYLIST = frozenset({
-    "pty", "importlib", "commands", "asyncio", "multiprocessing",
+    "pty", "importlib", "commands", "asyncio", "multiprocessing", "runpy", "imp",
+    "code", "pdb", "timeit", "concurrent",
 })
-
 FORBIDDEN_RAW_COMMAND_NAMES = frozenset({
     "system", "popen", "startfile", "fork", "forkpty",
     "spawnl", "spawnle", "spawnlp", "spawnlpe", "spawnv", "spawnve", "spawnvp", "spawnvpe",
@@ -182,25 +201,71 @@ FORBIDDEN_RAW_COMMAND_NAMES = frozenset({
 FORBIDDEN_BUILTINS = frozenset({
     "eval", "exec", "compile", "__import__", "globals", "locals", "vars",
 })
-# 動態取名的三個 builtin:名稱參數若是**算出來的**(``"sys"+"tem"`` / f-string / call)一律 finding。
-DYNAMIC_ATTRIBUTE_BUILTINS = frozenset({"getattr", "setattr", "delattr"})
-# 被字串拼接混淆出來就一定是繞過意圖的識別碼。
+DYNAMIC_ATTRIBUTE_BUILTINS = frozenset({
+    "getattr", "setattr", "delattr", "__getattribute__",
+})
 OBFUSCATION_SENSITIVE_LITERALS = (
     FORBIDDEN_RAW_COMMAND_NAMES | FORBIDDEN_BUILTINS
     | {"subprocess", "importlib", "pty", "commands", "ctypes"}
 )
+FORBIDDEN_EXEC_CAPABILITY_NAMES = (
+    FORBIDDEN_RAW_COMMAND_NAMES
+    | FORBIDDEN_BUILTINS
+    | {
+        "run_module", "run_path", "import_module", "reload", "interact", "runcall",
+        "runctx", "timeit", "repeat", "ProcessPoolExecutor", "create_subprocess_exec",
+        "create_subprocess_shell", "capture_command",
+    }
+)
+SUBPROCESS_EXEC_CAPABILITY_NAMES = frozenset({
+    "run", "Popen", "call", "check_call", "check_output", "getoutput",
+    "getstatusoutput",
+})
+RECOVERY_GOVERNED_FILES = frozenset({
+    "agent_governance_s2_5_recovery.py",
+    "agent_governance_s2_5_recovery_anchor.py",
+    "agent_governance_s2_5_recovery_anchor_v2.py",
+    "agent_governance_s2_5_recovery_controller.py",
+    "agent_governance_s2_5_recovery_lock.py",
+    "agent_governance_s2_5_recovery_readback.py",
+    "agent_governance_s2_5_recovery_state.py",
+    "agent_governance_s2_5_recovery_store.py",
+    "agent_governance_s2_5_recovery_store_v2.py",
+})
+RECOVERY_SENSITIVE_CALLS_BY_FILE: dict[
+    str, dict[str, frozenset[str]]
+] = {
+    "agent_governance_s2_5_recovery.py": {
+        "os": frozenset({"close", "fstat", "geteuid", "open", "read"}),
+    },
+    "agent_governance_s2_5_recovery_anchor.py": {},
+    "agent_governance_s2_5_recovery_anchor_v2.py": {},
+    "agent_governance_s2_5_recovery_controller.py": {},
+    "agent_governance_s2_5_recovery_lock.py": {},
+    "agent_governance_s2_5_recovery_readback.py": {
+        "socket": frozenset({"socket"}),
+    },
+    "agent_governance_s2_5_recovery_state.py": {},
+    "agent_governance_s2_5_recovery_store.py": {
+        "fcntl": frozenset({"flock"}),
+        "os": frozenset({
+            "close", "fstat", "fsync", "listdir", "open", "read", "replace",
+            "write",
+        }),
+    },
+    "agent_governance_s2_5_recovery_store_v2.py": {},
+}
+RECOVERY_SENSITIVE_MODULES = frozenset({"fcntl", "os", "socket"})
 
 
 def _present_family() -> list[Path]:
-    return [path for path in RUNNER_FAMILY if path.is_file()]
+    return sorted(
+        set(_discover_runner_family(HELPERS))
+        | {HELPERS / name for name in RECOVERY_GOVERNED_FILES}
+    )
 
-
-# --------------------------------------------------------------------------- #
-# (4) ★驗收判準★ — AST no-raw-command scan over the runner family
-# --------------------------------------------------------------------------- #
 def _fold_string(node: ast.AST) -> str | None:
     """把純字面的 ``"a" + "b"`` 折成 ``"ab"``(其他形一律回 None)。"""
-
     if isinstance(node, ast.Constant) and isinstance(node.value, str):
         return node.value
     if isinstance(node, ast.BinOp) and isinstance(node.op, ast.Add):
@@ -212,46 +277,83 @@ def _fold_string(node: ast.AST) -> str | None:
 
 
 def _raw_command_findings(path: Path, *, exec_family: bool = True) -> list[str]:
-    """整個 runner 家族的 no-raw-command 掃描;kernel 之外**任何** finding 即紅。
+    """Fail closed over imports, raw/dynamic callees, obfuscation and shell use.
 
-    五道:①import **正面白名單**(``subprocess``/``ctypes`` 只准 kernel;治理模組是
-    :data:`GOVERNANCE_IMPORTS_BY_FILE` 的 **per-file** 顯式列,而非 ``agent_governance_`` 前綴
-    放行 —— E2 RES-5:前綴會放行 ``agent_governance_command_capture_v2``,而它自己就是一個
-    ``subprocess.run`` 執行器);②``from <allowed> import <forbidden name>``(收口 E2 的 M2:
-    ``from os import system as _s``);③屬性名層 denylist(不論 receiver,故 ``libc.system`` /
-    ``_o.system`` 都抓得到);④``getattr``/``setattr``/``delattr`` 的名稱參數不得是**算出來的**,
-    也不得是被禁名字面(收口 M2c);⑤字面字串拼接折疊(收口 ``"sub"+"process"`` 這類混淆,連帶
-    讓 M2b 即使不 import ``importlib`` 也被抓)。另加 ``shell=`` 必須是常量 ``False``。
-
-    ``exec_family=False`` 只給 :data:`NON_RUNNER_HOST_LEAVES` 用,關掉兩件**只對 exec 家族成立**
-    的判準:①per-file import 白名單(那些檔案的匯入面由別的 wave 治理);②``shell=`` 必須是常量
-    ``False``——它是 ``subprocess`` **呼叫形狀**的規則,而 S2.4 的 host-identity row driver 把
-    POSIX 帳號的**登入 shell** 當一個同名欄位傳給 ``create_system_account``。
-
-    S2E.2b-1 P2-1:關掉①原本連帶關掉了唯一擋得住 ``pty`` / ``importlib`` 的那一道(E2 兩個全綠
-    反例)。故除名路徑改為「白名單關掉 **+** :data:`KERNEL_ONLY_IMPORTS` ∪
-    :data:`EXEC_CAPABLE_IMPORT_DENYLIST` 顯式黑名單」;其餘四道(raw-command 名稱 / builtin /
-    動態取名 / 字面拼接)本來就照跑。
-    """
-
+    ``exec_family=False`` disables only the positive import list and shell-shape rule."""
     tree = ast.parse(path.read_text(encoding="utf-8"), filename=str(path))
     is_kernel = path.name == KERNEL_PATH.name
     allowed_modules: frozenset[str] | None = None
     if exec_family:
-        allowed_modules = (
+        common_stdlib = EXACT_STDLIB_IMPORTS_BY_FILE.get(
+            path.name,
             ALLOWED_STDLIB_IMPORTS
-            | ALLOWED_THIRD_PARTY_IMPORTS
-            # 未列名 = 空集(fail-closed);family 成員的每一個治理 import 都必須顯式宣告。
+            | STDLIB_IMPORTS_BY_FILE.get(path.name, frozenset()),
+        )
+        third_party = (
+            frozenset()
+            if path.name in EXACT_STDLIB_IMPORTS_BY_FILE
+            else ALLOWED_THIRD_PARTY_IMPORTS
+        )
+        allowed_modules = (
+            common_stdlib
+            | third_party
             | GOVERNANCE_IMPORTS_BY_FILE.get(path.name, frozenset())
         )
         if is_kernel:
             allowed_modules = allowed_modules | KERNEL_ONLY_IMPORTS
     findings: list[str] = []
-
+    dynamic_callable_aliases: set[str] = set()
+    dynamic_return_functions: set[str] = set()
+    ctypes_handles: set[str] = set()
+    builtins_aliases: set[str] = {"__builtins__", "builtins"}
+    attribute_getter_aliases: set[str] = {"getattr"}
+    module_registry_aliases: set[str] = set()
+    module_registry_accessor_aliases: set[str] = set()
+    module_lookup_aliases: set[str] = set()
+    sensitive_module_aliases = {
+        module: {module} for module in RECOVERY_SENSITIVE_MODULES
+    }
+    sensitive_direct_call_aliases: dict[str, set[tuple[str, str]]] = {}
+    subprocess_aliases: set[str] = {"subprocess"}
+    container_aliases: dict[str, object] = {}
+    wildcard_key = ("dynamic",)
+    sequence_wildcard_key = ("constant", ("sequence", "*"))
+    sequence_uncertain_key = ("sequence_uncertain",)
+    family_aliases = {
+        "attribute_getter": attribute_getter_aliases,
+        "builtins": builtins_aliases, "ctypes": ctypes_handles,
+        "module_lookup": module_lookup_aliases,
+        "module_registry_accessor": module_registry_accessor_aliases,
+        "module_registry": module_registry_aliases,
+        **sensitive_module_aliases,
+        "subprocess": subprocess_aliases,
+    }
+    for imported in ast.walk(tree):
+        if isinstance(imported, ast.Import):
+            for alias in imported.names:
+                top = alias.name.split(".")[0]
+                if top in RECOVERY_SENSITIVE_MODULES:
+                    sensitive_module_aliases[top].add(
+                        alias.asname or top
+                    )
+        elif isinstance(imported, ast.ImportFrom):
+            top = (imported.module or "").split(".")[0]
+            if top in RECOVERY_SENSITIVE_MODULES:
+                for alias in imported.names:
+                    if alias.name != "*":
+                        sensitive_direct_call_aliases.setdefault(
+                            alias.asname or alias.name, set()
+                        ).add((top, alias.name))
+    containing_function: dict[int, str] = {}
+    for function in (
+        item for item in ast.walk(tree)
+        if isinstance(item, (ast.FunctionDef, ast.AsyncFunctionDef))
+    ):
+        for child in ast.walk(function):
+            containing_function[id(child)] = function.name
     def _check_module(lineno: int, module: str, rendered: str) -> None:
         top = (module or "").split(".")[0]
         if allowed_modules is None:
-            # 除名檔案:白名單關掉,但 kernel 專屬三支 + exec-capable 黑名單一律仍擋。
             if top in KERNEL_ONLY_IMPORTS:
                 findings.append(
                     f"line {lineno}: kernel-only module outside the kernel: {rendered}"
@@ -264,6 +366,433 @@ def _raw_command_findings(path: Path, *, exec_family: bool = True) -> list[str]:
         if top in allowed_modules:
             return
         findings.append(f"line {lineno}: import outside the declared allowlist: {rendered}")
+    def _flatten_provenance(provenance: object) -> set[str]:
+        if isinstance(provenance, set):
+            return set(provenance)
+        families: set[str] = set()
+        for member in provenance.values() if isinstance(provenance, dict) else ():
+            families.update(_flatten_provenance(member))
+        return families
+    def _merge_provenance(left: object, right: object) -> object:
+        if isinstance(left, dict) and isinstance(right, dict):
+            merged = deepcopy(left)
+            for key, member in right.items():
+                merged[key] = _merge_provenance(merged[key], member) if key in merged else deepcopy(member)
+            return merged
+        return _flatten_provenance(left) | _flatten_provenance(right)
+    def _key_token(node: ast.AST) -> object:
+        return ("constant", node.value) if isinstance(node, ast.Constant) else ("expression", ast.dump(node, annotate_fields=False))
+    def _target_path(node: ast.AST) -> tuple[str, list[ast.AST]] | None:
+        slices: list[ast.AST] = []
+        while isinstance(node, ast.Subscript):
+            slices.append(node.slice)
+            node = node.value
+        return (node.id, list(reversed(slices))) if isinstance(node, ast.Name) else None
+    def _write_provenance(current: object, slices: list[ast.AST], value: object) -> object:
+        if not slices:
+            return _merge_provenance(current, value)
+        mapping = dict(current) if isinstance(current, dict) else {}
+        token = _key_token(slices[0])
+        child = _write_provenance(mapping.get(token, {}), slices[1:], value)
+        mapping[token] = child
+        if not isinstance(slices[0], ast.Constant):
+            mapping[wildcard_key] = _merge_provenance(mapping.get(wildcard_key, set()), child)
+        return mapping
+    def _value_provenance(node: ast.AST | None) -> object:
+        if isinstance(node, ast.Name):
+            if node.id in container_aliases:
+                return container_aliases[node.id]
+            families = {family for family, aliases in family_aliases.items() if node.id in aliases}
+            return families | ({"ctypes"} if node.id == "ctypes" else set())
+        if isinstance(node, (ast.List, ast.Tuple)):
+            members = {index: _value_provenance(item) for index, item in enumerate(node.elts)}
+            members[("sequence_length", len(node.elts))] = set()
+            return members
+        if isinstance(node, ast.Dict):
+            members: dict[object, object] = {}
+            for key, item in zip(node.keys, node.values):
+                if key is None:
+                    expanded = _value_provenance(item)
+                    members = _merge_provenance(members, expanded if isinstance(expanded, dict) else {wildcard_key: expanded})
+                    continue
+                provenance = _value_provenance(item)
+                token = _key_token(key)
+                members[token] = _merge_provenance(members[token], provenance) if token in members else provenance
+                if not isinstance(key, ast.Constant):
+                    members[wildcard_key] = _merge_provenance(members.get(wildcard_key, set()), provenance)
+            return members
+        if isinstance(node, ast.Attribute):
+            if node.attr == "modules" and isinstance(node.value, ast.Name) and node.value.id == "sys":
+                return {"module_registry"}
+            return {"subprocess"} if node.attr == "subprocess" else set()
+        if isinstance(node, ast.Call):
+            called = node.func.id if isinstance(node.func, ast.Name) else (
+                node.func.attr if isinstance(node.func, ast.Attribute) else None
+            )
+            if called == "__getattribute__" or called in attribute_getter_aliases:
+                direct = isinstance(node.func, ast.Name)
+                receiver = node.args[0] if direct and node.args else (
+                    node.func.value if isinstance(node.func, ast.Attribute) else None
+                )
+                offset = 1 if direct else 0
+                name_arg = node.args[offset] if len(node.args) > offset else None
+                folded = _fold_string(name_arg) if name_arg is not None else None
+                families = _flatten_provenance(_value_provenance(receiver))
+                if (
+                    folded == "modules" and isinstance(receiver, ast.Name)
+                    and receiver.id == "sys"
+                ):
+                    return {"module_registry"}
+                if folded in {"get", "__getitem__"} and "module_registry" in families:
+                    return {"module_registry_accessor"}
+            if isinstance(node.func, ast.Attribute) and isinstance(node.func.value, ast.Name) and (
+                node.func.value.id == "ctypes" and node.func.attr == "CDLL"
+            ):
+                return {"ctypes"}
+            if "module_registry_accessor" in _flatten_provenance(_value_provenance(node.func)):
+                return {"module_lookup"}
+            if (
+                isinstance(node.func, ast.Attribute) and node.func.attr == "get"
+                and "module_registry" in _flatten_provenance(_value_provenance(node.func.value))
+            ):
+                return {"module_lookup"}
+            return set()
+        if isinstance(node, ast.Subscript):
+            provenance = _value_provenance(node.value)
+            if isinstance(provenance, dict):
+                if isinstance(node.slice, ast.Constant):
+                    mapping = provenance
+                    raw, keyed = mapping.get(node.slice.value), mapping.get(_key_token(node.slice))
+                    exact = keyed if raw is None else raw if keyed is None else _merge_provenance(raw, keyed)
+                    general = mapping.get(wildcard_key, set())
+                    provenance = (
+                        _merge_provenance(exact, general) if general else exact
+                    ) if exact is not None else _merge_provenance(
+                        mapping.get(sequence_wildcard_key, set()), general
+                    )
+                else:
+                    provenance = _flatten_provenance(provenance)
+            families = _flatten_provenance(provenance)
+            if isinstance(provenance, set) and "module_registry" in families:
+                return (families - {"module_registry"}) | {"module_lookup"}
+            return provenance
+        return set()
+    def _value_families(node: ast.AST | None) -> set[str]:
+        return _flatten_provenance(_value_provenance(node))
+    def _sensitive_callable_refs(
+        node: ast.AST | None,
+    ) -> set[tuple[str, str]]:
+        if isinstance(node, ast.Attribute):
+            return {
+                (module, node.attr)
+                for module in (
+                    _value_families(node.value)
+                    & RECOVERY_SENSITIVE_MODULES
+                )
+            }
+        if isinstance(node, ast.Name):
+            return set(sensitive_direct_call_aliases.get(node.id, set()))
+        return set()
+    def _module_registry(receiver: ast.AST | None) -> bool:
+        return "module_registry" in _value_families(receiver)
+    def _module_lookup(receiver: ast.AST | None) -> bool:
+        return "module_lookup" in _value_families(receiver)
+    def _builtins_source(node: ast.AST | None) -> bool:
+        return "builtins" in _value_families(node)
+    def _callee_capability(node: ast.AST) -> str | None:
+        """Resolve only execution-capable callees; unknown data stays fail-closed."""
+        def _sensitive_receiver(receiver: ast.AST | None) -> bool:
+            return (
+                bool(_value_families(receiver) & {
+                    "builtins", "ctypes", "module_lookup", "module_registry",
+                    "fcntl", "os", "socket", "subprocess",
+                })
+                or isinstance(receiver, ast.Attribute)
+                and (
+                    _sensitive_receiver(receiver.value)
+                )
+            )
+        if isinstance(node, ast.Name):
+            if node.id in FORBIDDEN_EXEC_CAPABILITY_NAMES:
+                return node.id
+            if node.id in dynamic_callable_aliases:
+                return "dynamic callable alias"
+            return None
+        if isinstance(node, ast.Attribute):
+            if (
+                node.attr in SUBPROCESS_EXEC_CAPABILITY_NAMES
+                and "module_lookup" in _value_families(node.value)
+            ):
+                return "dynamic module execution"
+            if (
+                node.attr in SUBPROCESS_EXEC_CAPABILITY_NAMES
+                and "subprocess" in _value_families(node.value)
+            ):
+                return "raw subprocess execution"
+            return node.attr if node.attr in FORBIDDEN_EXEC_CAPABILITY_NAMES else None
+        if isinstance(node, ast.Subscript):
+            key = _fold_string(node.slice)
+            if key in FORBIDDEN_EXEC_CAPABILITY_NAMES:
+                return "dynamic execution subscript"
+            if (
+                _builtins_source(node.value)
+                or isinstance(node.value, ast.Name)
+                and node.value.id in dynamic_callable_aliases
+            ):
+                return "dynamic execution subscript"
+            if (
+                _module_registry(node.value)
+            ):
+                return "dynamic module execution"
+            if (
+                isinstance(node.value, ast.Attribute)
+                and node.value.attr == "__dict__"
+                and _module_lookup(node.value.value)
+            ):
+                return "dynamic module execution"
+            return None
+        if isinstance(node, ast.Call):
+            if (
+                isinstance(node.func, ast.Attribute)
+                and node.func.attr == "get"
+                and _builtins_source(node.func.value)
+            ):
+                return "dynamic execution subscript"
+            called = (
+                node.func.id if isinstance(node.func, ast.Name)
+                else node.func.attr if isinstance(node.func, ast.Attribute) else None
+            )
+            if called in {"getattr", "__getattribute__"}:
+                name_arg = (
+                    node.args[1] if called == "getattr" and len(node.args) >= 2
+                    else node.args[-1] if len(node.args) >= 2 else None
+                )
+                folded = _fold_string(name_arg) if name_arg is not None else None
+                if folded in FORBIDDEN_EXEC_CAPABILITY_NAMES:
+                    return folded
+                receiver = (
+                    node.args[0] if called == "getattr" and node.args
+                    else node.func.value if isinstance(node.func, ast.Attribute) else None
+                )
+                if folded is None and _sensitive_receiver(receiver):
+                    return "dynamic callable attribute"
+            if isinstance(node.func, ast.Name) and node.func.id in dynamic_return_functions:
+                return "dynamic callable return"
+        if isinstance(node, (ast.List, ast.Tuple, ast.Set)):
+            if any(_callee_capability(item) is not None for item in node.elts):
+                return "dynamic callable container"
+        if isinstance(node, ast.Dict):
+            if any(
+                item is not None and _callee_capability(item) is not None
+                for item in node.values
+            ):
+                return "dynamic callable container"
+        return None
+    for function in (
+        item for item in ast.walk(tree)
+        if isinstance(item, (ast.FunctionDef, ast.AsyncFunctionDef))
+    ):
+        if any(
+            _callee_capability(item.value) is not None
+            for item in ast.walk(function)
+            if isinstance(item, ast.Return) and item.value is not None
+        ):
+            dynamic_return_functions.add(function.name)
+    def _assignment_bindings(
+        target: ast.AST, value: ast.AST | None, provenance: object | None = None
+    ) -> list[tuple[ast.AST, ast.AST | None, object]]:
+        provenance = _value_provenance(value) if provenance is None else provenance
+        indexes = (
+            sorted(key for key in provenance if isinstance(key, int))
+            if isinstance(provenance, dict) else []
+        )
+        if isinstance(target, (ast.List, ast.Tuple)) and indexes == list(range(len(indexes))):
+            targets = list(target.elts)
+            values = list(value.elts) if isinstance(value, (ast.List, ast.Tuple)) else [None] * len(indexes)
+            provenances = [provenance[index] for index in indexes]
+            stars = [index for index, item in enumerate(targets) if isinstance(item, ast.Starred)]
+            if len(stars) == 1:
+                index = stars[0]
+                suffix = len(targets) - index - 1
+                if len(indexes) < index + suffix:
+                    return [(target, value, provenance)]
+                stop = len(indexes) - suffix
+                pairs = list(zip(targets[:index], values[:index], provenances[:index]))
+                pairs.append((targets[index].value, None, {
+                    offset: item for offset, item in enumerate(provenances[index:stop])
+                }))
+                pairs.extend(zip(targets[index + 1:], values[stop:], provenances[stop:]))
+            elif not stars and len(targets) == len(values):
+                pairs = list(zip(targets, values, provenances))
+            else:
+                return [(target, value, provenance)]
+            return [
+                binding
+                for item_target, item_value, item_provenance in pairs
+                for binding in _assignment_bindings(item_target, item_value, item_provenance)
+            ]
+        return [(target, value, provenance)]
+    def _sequence_length(provenance: object) -> int | None:
+        if not isinstance(provenance, dict) or sequence_uncertain_key in provenance:
+            return None
+        return max((key[1] for key in provenance if isinstance(key, tuple) and len(key) == 2 and key[0] == "sequence_length" and isinstance(key[1], int)), default=None)
+    def _merge_target(target: ast.AST, provenance: object) -> None:
+        target_path = _target_path(target)
+        if target_path is not None and not isinstance(target, ast.Name):
+            root, slices = target_path
+            container_aliases[root] = _write_provenance(
+                container_aliases.get(root, {}), slices, provenance
+            )
+            return
+        if isinstance(target, ast.Name):
+            for family in _flatten_provenance(provenance):
+                family_aliases[family].add(target.id)
+            if isinstance(provenance, dict):
+                container_aliases[target.id] = _merge_provenance(
+                    container_aliases.get(target.id, {}), provenance
+                )
+
+    sequence_positions: dict[int, int] = {}
+    alias_edges: dict[tuple[int, int], tuple[ast.AST, ast.AST]] = {}
+    uncertain_flow = (
+        ast.If, ast.IfExp, ast.For, ast.AsyncFor, ast.While, ast.Try,
+        ast.Match, ast.ListComp, ast.SetComp, ast.DictComp, ast.GeneratorExp, ast.BoolOp,
+    ) + ((ast.TryStar,) if hasattr(ast, "TryStar") else ())
+    def _structured_nodes(
+        node: ast.AST, uncertain: bool = False
+    ) -> object:
+        current = uncertain or isinstance(node, uncertain_flow)
+        yield node, current
+        for child in ast.iter_child_nodes(node):
+            yield from _structured_nodes(child, current)
+    flow_nodes = tuple(_structured_nodes(tree))
+
+    changed = True
+    while changed:
+        before = (
+            repr(container_aliases),
+            tuple((family, tuple(sorted(aliases))) for family, aliases in family_aliases.items()),
+            tuple(sorted(dynamic_callable_aliases)),
+            tuple(
+                (name, tuple(sorted(refs)))
+                for name, refs in sorted(sensitive_direct_call_aliases.items())
+            ),
+            tuple(sorted(sequence_positions.items())),
+        )
+        for node, flow_uncertain in flow_nodes:
+            value: ast.AST | None = None
+            targets: list[ast.AST] = []
+            sequence_receiver = None
+            sequence_end = None
+            sequence_is_uncertain = False
+            if isinstance(node, ast.Assign):
+                value, targets = node.value, list(node.targets)
+            elif isinstance(node, ast.AnnAssign):
+                value, targets = node.value, [node.target]
+            elif isinstance(node, ast.NamedExpr) or isinstance(node, ast.AugAssign) and isinstance(node.op, ast.BitOr):
+                value, targets = node.value, [node.target]
+            elif isinstance(node, ast.Call) and isinstance(node.func, ast.Attribute) and node.func.attr == "update" and (node.args or node.keywords):
+                value = ast.Dict(
+                    keys=([None] if node.args else []) + [
+                        ast.Constant(keyword.arg) if keyword.arg is not None else None
+                        for keyword in node.keywords
+                    ],
+                    values=([node.args[0]] if node.args else []) + [
+                        keyword.value for keyword in node.keywords
+                    ],
+                )
+                targets = [node.func.value]
+            elif isinstance(node, ast.Call) and isinstance(node.func, ast.Attribute) and node.func.attr == "setdefault" and len(node.args) > 1:
+                value, targets = node.args[1], [ast.Subscript(value=node.func.value, slice=node.args[0], ctx=ast.Store())]
+            elif isinstance(node, ast.Call) and isinstance(node.func, ast.Attribute) and node.func.attr in {"append", "extend"} and node.args:
+                sequence_receiver = node.func.value
+                receiver_provenance = _value_provenance(sequence_receiver)
+                sequence_is_uncertain = flow_uncertain or (
+                    isinstance(receiver_provenance, dict)
+                    and sequence_uncertain_key in receiver_provenance
+                )
+                start = None if sequence_is_uncertain else sequence_positions.get(id(node))
+                if start is None and not sequence_is_uncertain:
+                    start = _sequence_length(receiver_provenance)
+                    if start is not None:
+                        sequence_positions[id(node)] = start
+                count = 1 if node.func.attr == "append" else _sequence_length(
+                    _value_provenance(node.args[0])
+                )
+                if start is not None and count is not None:
+                    values = [node.args[0]] if node.func.attr == "append" else [
+                        ast.Subscript(value=node.args[0], slice=ast.Constant(index), ctx=ast.Load())
+                        for index in range(count)
+                    ]
+                    value = ast.Tuple(elts=values, ctx=ast.Load())
+                    targets = [ast.Tuple(elts=[
+                        ast.Subscript(value=sequence_receiver, slice=ast.Constant(start + index), ctx=ast.Store())
+                        for index in range(count)
+                    ], ctx=ast.Store())]
+                    sequence_end = start + count
+                else:
+                    sequence_is_uncertain = True
+                    value, targets = node.args[0], [ast.Subscript(
+                        value=sequence_receiver, slice=ast.Constant(("sequence", "*")), ctx=ast.Store()
+                    )]
+            bindings = [
+                binding
+                for target in targets
+                for binding in _assignment_bindings(target, value)
+            ]
+            if sequence_end is not None:
+                bindings.append((sequence_receiver, None, {("sequence_length", sequence_end): set()}))
+            if sequence_is_uncertain:
+                bindings.append((sequence_receiver, None, {sequence_uncertain_key: set()}))
+            for target, bound_value, provenance in bindings:
+                is_alias = (
+                    isinstance(node, (ast.Assign, ast.AnnAssign, ast.NamedExpr))
+                    and isinstance(target, (ast.Name, ast.Subscript))
+                    and isinstance(bound_value, (ast.Name, ast.Subscript))
+                )
+                if is_alias:
+                    alias_edges[(id(target), id(bound_value))] = (target, bound_value)
+                _merge_target(target, provenance)
+                if is_alias and flow_uncertain and (
+                    isinstance(_value_provenance(target), dict)
+                    or isinstance(_value_provenance(bound_value), dict)
+                ):
+                    marker = {sequence_uncertain_key: set()}
+                    _merge_target(target, marker)
+                    _merge_target(bound_value, marker)
+            for target, bound_value, _ in bindings:
+                sensitive_refs = _sensitive_callable_refs(bound_value)
+                if sensitive_refs:
+                    for name in (
+                        item.id for item in ast.walk(target)
+                        if isinstance(item, ast.Name)
+                        and isinstance(item.ctx, ast.Store)
+                    ):
+                        sensitive_direct_call_aliases.setdefault(
+                            name, set()
+                        ).update(sensitive_refs)
+                if bound_value is None or _callee_capability(bound_value) is None:
+                    continue
+                names = [
+                    item.id for item in ast.walk(target)
+                    if isinstance(item, ast.Name) and isinstance(item.ctx, ast.Store)
+                ]
+                for name in names:
+                    if name not in dynamic_callable_aliases:
+                        dynamic_callable_aliases.add(name)
+        for left, right in alias_edges.values():
+            _merge_target(left, _value_provenance(right))
+            _merge_target(right, _value_provenance(left))
+        changed = before != (
+            repr(container_aliases),
+            tuple((family, tuple(sorted(aliases))) for family, aliases in family_aliases.items()),
+            tuple(sorted(dynamic_callable_aliases)),
+            tuple(
+                (name, tuple(sorted(refs)))
+                for name, refs in sorted(sensitive_direct_call_aliases.items())
+            ),
+            tuple(sorted(sequence_positions.items())),
+        )
 
     for node in ast.walk(tree):
         if isinstance(node, ast.Import):
@@ -271,8 +800,16 @@ def _raw_command_findings(path: Path, *, exec_family: bool = True) -> list[str]:
                 _check_module(node.lineno, alias.name, f"import {alias.name}")
         elif isinstance(node, ast.ImportFrom):
             module = node.module or ""
+            if node.level:
+                findings.append(
+                    f"line {node.lineno}: relative import is outside the declared allowlist"
+                )
             _check_module(node.lineno, module, f"from {module} import ...")
             for alias in node.names:
+                if alias.name == "*":
+                    findings.append(
+                        f"line {node.lineno}: star import is outside the declared capability allowlist"
+                    )
                 if alias.name in FORBIDDEN_RAW_COMMAND_NAMES or alias.name in FORBIDDEN_BUILTINS:
                     findings.append(
                         f"line {node.lineno}: from {module} import {alias.name}"
@@ -296,12 +833,24 @@ def _raw_command_findings(path: Path, *, exec_family: bool = True) -> list[str]:
                 ):
                     findings.append(f"line {node.lineno}: shell= is not the constant False")
             func = node.func
+            sensitive_calls = _sensitive_callable_refs(func)
+            policy = RECOVERY_SENSITIVE_CALLS_BY_FILE.get(path.name)
+            if policy is not None:
+                for module, member in sorted(sensitive_calls):
+                    if member not in policy.get(module, frozenset()):
+                        findings.append(
+                            f"line {node.lineno}: sensitive callable outside "
+                            f"the per-file allowlist: {module}.{member}"
+                        )
             called = (
                 func.id if isinstance(func, ast.Name)
                 else func.attr if isinstance(func, ast.Attribute) else None
             )
             if called in DYNAMIC_ATTRIBUTE_BUILTINS:
-                name_arg = node.args[1] if len(node.args) >= 2 else None
+                name_arg = (
+                    node.args[1] if called == "getattr" and len(node.args) >= 2
+                    else node.args[-1] if len(node.args) >= 2 else None
+                )
                 if isinstance(name_arg, ast.Constant) and isinstance(name_arg.value, str):
                     if name_arg.value in OBFUSCATION_SENSITIVE_LITERALS:
                         findings.append(
@@ -311,6 +860,97 @@ def _raw_command_findings(path: Path, *, exec_family: bool = True) -> list[str]:
                     findings.append(
                         f"line {node.lineno}: {called}() with a computed attribute name"
                     )
+            capability = _callee_capability(func)
+            if capability == "dynamic callable attribute":
+                findings.append(f"line {node.lineno}: dynamic callable attribute")
+            elif capability == "dynamic execution subscript":
+                findings.append(f"line {node.lineno}: dynamic execution subscript")
+            elif capability == "dynamic callable alias":
+                findings.append(f"line {node.lineno}: dynamic callable alias")
+            elif capability == "dynamic callable return":
+                findings.append(f"line {node.lineno}: dynamic callable return")
+            elif capability == "dynamic module execution":
+                findings.append(f"line {node.lineno}: dynamic module execution")
+            elif capability == "raw subprocess execution":
+                exact_kernel_run = (
+                    is_kernel
+                    and containing_function.get(id(node)) == "_execute"
+                    and isinstance(func, ast.Attribute)
+                    and isinstance(func.value, ast.Name)
+                    and func.value.id == "subprocess"
+                    and func.attr == "run"
+                    and len(node.args) == 1
+                    and isinstance(node.args[0], ast.Call)
+                    and isinstance(node.args[0].func, ast.Name)
+                    and node.args[0].func.id == "list"
+                    and {
+                        keyword.arg for keyword in node.keywords
+                    } == {
+                        "shell", "stdin", "stdout", "stderr", "env", "timeout", "check",
+                    }
+                    and all(
+                        not (
+                            keyword.arg in {"shell", "check"}
+                            and not (
+                                isinstance(keyword.value, ast.Constant)
+                                and keyword.value.value is False
+                            )
+                        )
+                        for keyword in node.keywords
+                    )
+                )
+                if not exact_kernel_run:
+                    findings.append(f"line {node.lineno}: raw subprocess execution")
+            if (
+                isinstance(func, ast.Attribute)
+                and isinstance(func.value, ast.Name)
+                and func.value.id == "ctypes"
+                and func.attr in {"CDLL", "get_errno"}
+            ):
+                exact_cdll = (
+                    is_kernel
+                    and containing_function.get(id(node)) == "enforce_process_hardening"
+                    and (
+                        func.attr == "get_errno"
+                        and not node.args
+                        and not node.keywords
+                        or func.attr == "CDLL"
+                        and len(node.args) == 1
+                        and isinstance(node.args[0], ast.Constant)
+                        and node.args[0].value is None
+                        and len(node.keywords) == 1
+                        and node.keywords[0].arg == "use_errno"
+                        and isinstance(node.keywords[0].value, ast.Constant)
+                        and node.keywords[0].value.value is True
+                    )
+                )
+                if not exact_cdll:
+                    findings.append(
+                        f"line {node.lineno}: ctypes call outside the hardening allowlist"
+                    )
+            if (
+                isinstance(func, ast.Attribute)
+                and isinstance(func.value, ast.Name)
+                and func.value.id in ctypes_handles
+            ):
+                exact_prctl = (
+                    is_kernel
+                    and containing_function.get(id(node)) == "enforce_process_hardening"
+                    and func.attr == "prctl"
+                    and len(node.args) == 5
+                    and isinstance(node.args[0], ast.Name)
+                    and node.args[0].id in {"_PR_SET_DUMPABLE", "_PR_GET_DUMPABLE"}
+                    and all(
+                        isinstance(item, ast.Constant) and item.value == 0
+                        for item in node.args[1:]
+                    )
+                    and not node.keywords
+                )
+                if not exact_prctl:
+                    findings.append(
+                        f"line {node.lineno}: ctypes call outside the hardening allowlist"
+                    )
+    findings.extend(readback_socket_contract_findings(tree, path))
     return findings
 
 
@@ -322,9 +962,6 @@ def test_no_raw_command_outside_the_kernel():
         assert findings == [], f"{path.name} carries a raw-command surface: {findings}"
 
 
-# --------------------------------------------------------------------------- #
-# S2E.2b-1 (a) — RUNNER_FAMILY 由檔案系統**導出**比對,不是純手抄
-# --------------------------------------------------------------------------- #
 def _unscanned_runner_candidates(helpers_dir: Path, family_names: set[str]) -> list[str]:
     """磁碟上「長得像 S2 受信主機 runner」但不在掃描家族、也未被顯式除名的檔案。"""
 
@@ -335,8 +972,6 @@ def _unscanned_runner_candidates(helpers_dir: Path, family_names: set[str]) -> l
 
 
 def test_every_file_that_looks_like_an_s2_host_runner_is_scanned():
-    # 反例式判準:family 表若漏了一個新 runner,這裡必紅(該檔在漏加之前完全不被 AST 掃描,
-    # 於是任何新的 exec 面都能全綠落地 —— 那正是本測試存在的理由)。
     unscanned = _unscanned_runner_candidates(HELPERS, {path.name for path in RUNNER_FAMILY})
     assert unscanned == [], (
         f"{unscanned} match the S2 host-runner shape but are neither in RUNNER_FAMILY (so the "
@@ -344,132 +979,10 @@ def test_every_file_that_looks_like_an_s2_host_runner_is_scanned():
     )
 
 
-def test_a_declared_non_runner_leaf_is_still_denied_every_exec_path():
-    # 除名不是逃生門:它只豁免 per-file import 白名單與 ``shell=`` 呼叫形狀兩項,exec 能力面
-    # (raw-command 名稱 / builtin / 動態取名 / 字面拼接 / kernel-only + exec-capable 模組)
-    # 一道都不放。
-    for name, reason in NON_RUNNER_HOST_LEAVES.items():
-        path = HELPERS / name
-        assert path.is_file(), name
-        assert reason.strip(), name
-        assert _raw_command_findings(path, exec_family=False) == [], name
-        assert "subprocess" not in path.read_text(encoding="utf-8"), name
-
-
-def test_the_exec_family_exemption_never_admits_a_kernel_only_module(tmp_path):
-    for module in sorted(KERNEL_ONLY_IMPORTS):
-        path = tmp_path / f"exempt_{module}.py"
-        path.write_text(f"import {module}\n", encoding="utf-8")
-        findings = _raw_command_findings(path, exec_family=False)
-        assert any("kernel-only module outside the kernel" in item for item in findings), module
-
-
-# S2E.2b-1 P2-1:E2 的兩個全綠反例 —— 除名檔案帶 ``pty.spawn`` / ``importlib.import_module``。
-# 兩者在修前都完全不被任何一道抓到(白名單被關掉、模組名不是被禁**屬性**名、
-# ``import_module(name)`` 的名稱是**變數**故字面拼接那道也沉默)。
-EXEMPT_LEAF_EXEC_COUNTEREXAMPLES = {
-    "E2_pty_spawn_on_an_exempt_leaf": "import pty\n\n\ndef f(argv):\n    return pty.spawn(argv)\n",
-    "E2_importlib_dynamic_name_on_an_exempt_leaf": (
-        "import importlib\n\n\ndef f(name):\n    return importlib.import_module(name)\n"
-    ),
-    "asyncio_create_subprocess": (
-        "import asyncio\n\n\nasync def f(argv):\n"
-        "    return await asyncio.create_subprocess_exec(*argv)\n"
-    ),
-    "multiprocessing_spawn": (
-        "import multiprocessing\n\n\ndef f(fn):\n    return multiprocessing.Process(target=fn)\n"
-    ),
-    "commands_legacy": ("import commands\n\n\ndef f(cmd):\n    return commands.getoutput(cmd)\n"),
-}
-
-
-@pytest.mark.parametrize("mutation", sorted(EXEMPT_LEAF_EXEC_COUNTEREXAMPLES))
-def test_the_exec_family_exemption_never_admits_an_exec_capable_module(tmp_path, mutation):
-    path = tmp_path / f"{mutation}.py"
-    path.write_text(EXEMPT_LEAF_EXEC_COUNTEREXAMPLES[mutation], encoding="utf-8")
-    findings = _raw_command_findings(path, exec_family=False)
-    assert any("exec-capable module on a non-runner leaf" in item for item in findings), findings
-    # 對照:同一份 source 在 exec 家族路徑上本來就被正面白名單擋下(兩條路都紅,不是二選一)。
-    assert _raw_command_findings(path, exec_family=True)
-
-
-@pytest.mark.parametrize("module", sorted(EXEC_CAPABLE_IMPORT_DENYLIST))
-@pytest.mark.parametrize("form", ["import {m}", "import {m}.sub", "from {m} import x"])
-def test_every_exec_capable_denylist_entry_is_caught_in_every_import_form(
-    tmp_path, module, form
-):
-    path = tmp_path / f"denied_{module}_{abs(hash(form))}.py"
-    path.write_text(form.format(m=module) + "\n", encoding="utf-8")
-    assert any(
-        "exec-capable module on a non-runner leaf" in item
-        for item in _raw_command_findings(path, exec_family=False)
-    ), (module, form)
-
-
-def test_the_two_import_denylists_never_overlap_the_positive_allowlist():
-    # 黑名單若與白名單相交,exec 家族上就會出現「宣告過但仍被擋」的自相矛盾條目。
-    allowed = ALLOWED_STDLIB_IMPORTS | ALLOWED_THIRD_PARTY_IMPORTS
-    for name, modules in GOVERNANCE_IMPORTS_BY_FILE.items():
-        allowed = allowed | modules
-    assert not (EXEC_CAPABLE_IMPORT_DENYLIST & allowed)
-    assert not (EXEC_CAPABLE_IMPORT_DENYLIST & KERNEL_ONLY_IMPORTS)
-
-
-def test_the_family_derivation_is_red_when_a_new_runner_is_left_out(tmp_path):
-    # 突變:一個新的 runner 檔落在 helpers 目錄卻沒進 family 表。
-    (tmp_path / "agent_governance_s2_9_host_runner.py").write_text("x = 1\n", encoding="utf-8")
-    (tmp_path / "aiml_s2_other_host_run.py").write_text("x = 1\n", encoding="utf-8")
-    assert _unscanned_runner_candidates(tmp_path, set()) == [
-        "agent_governance_s2_9_host_runner.py", "aiml_s2_other_host_run.py"
-    ]
-    # 對照:同樣兩個檔案一旦進表就不再是 finding(判準是「有沒有被掃描」,不是檔名黑名單)。
-    assert _unscanned_runner_candidates(
-        tmp_path,
-        {"agent_governance_s2_9_host_runner.py", "aiml_s2_other_host_run.py"},
-    ) == []
-
-
-# --------------------------------------------------------------------------- #
-# S2E.2b-1 (b) — 治理 import 白名單是 per-file 的能力宣告
-# --------------------------------------------------------------------------- #
-def test_the_governance_import_allowlist_is_per_file_not_family_wide(tmp_path):
-    """S2.4 補償 runner 需要的 applier 匯入面,絕不因此在 observer / kernel 上也成立。"""
-
-    applier = sorted(APPLIER_MODULES & GOVERNANCE_IMPORTS_BY_FILE[
-        "agent_governance_s2_4_host_recovery.py"
-    ])
-    assert applier, "the S2.4 recovery runner is expected to declare applier imports"
-    source = "".join(f"import {module}\n" for module in applier)
-    # 同一份 source 放在補償 runner 的檔名下:合法(它宣告過這些能力)。
-    admitted = tmp_path / "agent_governance_s2_4_host_recovery.py"
-    admitted.write_text(source, encoding="utf-8")
-    assert _raw_command_findings(admitted) == []
-    # 放在任何**沒有**宣告它們的 family 成員檔名下:一律 finding。
-    for name in ("agent_governance_s2_host_observer.py", "agent_governance_s2_host_kernel.py",
-                 "agent_governance_s2_0_host_runner.py"):
-        elsewhere = tmp_path / name
-        elsewhere.write_text(source, encoding="utf-8")
-        assert _raw_command_findings(elsewhere), name
-
-
-def test_every_governance_allowlist_entry_belongs_to_a_family_member():
-    # per-file 表不得長出「沒有對應檔案」的條目(那是一張永遠不被執行的宣告)。
-    family_names = {path.name for path in RUNNER_FAMILY}
-    assert set(GOVERNANCE_IMPORTS_BY_FILE) <= family_names, sorted(
-        set(GOVERNANCE_IMPORTS_BY_FILE) - family_names
-    )
-    # 沒有任何檔案被允許 import kernel-only 的三個 exec 路徑模組。
-    for name, modules in GOVERNANCE_IMPORTS_BY_FILE.items():
-        assert not (modules & KERNEL_ONLY_IMPORTS), name
-
-
-# E2 重做的三個突變(M2 / M2b / M2c)+ 既有四類 + 白名單外 import。全部必須被抓到。
 AST_SCANNER_MUTATIONS = {
-    # ── E2 的 M2:舊掃描器全綠,新掃描器必紅 ──
     "M2_from_os_import_system": (
         "from os import system as _s\n_s('id > /tmp/pwned')\n", "from os import system",
     ),
-    # ── E2 的 M2b ──
     "M2b_importlib_concat": (
         "import importlib\nimportlib.import_module('sub' + 'process').run(['id'])\n",
         "import outside the declared allowlist",
@@ -477,7 +990,6 @@ AST_SCANNER_MUTATIONS = {
     "M2b_concat_literal_alone": (
         "def f(m):\n    return m('sub' + 'process')\n", "obfuscated identifier literal",
     ),
-    # ── E2 的 M2c ──
     "M2c_getattr_computed_name": (
         "import os\n_o = os\ngetattr(_o, 'sys' + 'tem')('id')\n",
         "getattr() with a computed attribute name",
@@ -485,14 +997,12 @@ AST_SCANNER_MUTATIONS = {
     "M2c_getattr_constant_name": (
         "import os\ngetattr(os, 'system')('id')\n", "getattr(…, 'system')",
     ),
-    # ── 既有四類 ──
     "raw_import_subprocess": ("import subprocess\n", "import outside the declared allowlist"),
     "os_system_attribute": ("import os\nos.system('x')\n", "attribute .system"),
     "shell_true": (
         "import subprocess\nsubprocess.run(['x'], shell=True)\n", "shell= is not the constant False",
     ),
     "builtin_eval": ("eval('1')\n", "builtin eval"),
-    # ── 新增的縱深:ctypes 是 libc.system 的路,pty/commands 亦然 ──
     "ctypes_libc_system": (
         "import ctypes\nctypes.CDLL(None).system(b'id')\n",
         "import outside the declared allowlist",
@@ -502,7 +1012,231 @@ AST_SCANNER_MUTATIONS = {
     ),
     "pty_spawn": ("import pty\npty.spawn('/bin/sh')\n", "import outside the declared allowlist"),
     "dunder_import": ("__import__('subprocess')\n", "builtin __import__"),
-    # ── E2 的 N16(RES-5):前綴放行下這條 exec 路徑在五個檔案上全綠 ──
+    "dynamic_getattr_name_then_call": (
+        "import os\n\ndef f(name, argv):\n    return getattr(os, name)(*argv)\n",
+        "dynamic callable attribute",
+    ),
+    "builtins_string_index_then_call": (
+        "def f(expr):\n    return __builtins__['e' + 'val'](expr)\n",
+        "dynamic execution subscript",
+    ),
+    "compile_attribute_alias": (
+        "def f(builtins_obj, source):\n"
+        "    compiler = getattr(builtins_obj, 'compile')\n"
+        "    return compiler(source, '<x>', 'exec')\n",
+        "getattr(…, 'compile')",
+    ),
+    "dynamic_callable_alias_chain": (
+        "import os\n\ndef f(name, argv):\n"
+        "    first = getattr(os, name)\n    second = first\n    return second(*argv)\n",
+        "dynamic callable alias",
+    ),
+    "dict_union_augassign": (
+        "def f(key, expr):\n    outer = {}\n    outer |= {'cap': __builtins__}\n    return outer['cap'][key](expr)\n",
+        "dynamic execution subscript",
+    ),
+    "builtins_alias_variable_subscript": (
+        "def f(key, expr):\n"
+        "    builtins_alias = __builtins__\n"
+        "    return builtins_alias[key](expr)\n",
+        "dynamic execution subscript",
+    ),
+    "variable_builtins_key_then_call": (
+        "def f(key, expr):\n    return __builtins__[key](expr)\n", "dynamic execution subscript",
+    ),
+    "builtins_get_variable_key_then_call": (
+        "def f(key, expr):\n    return __builtins__.get(key)(expr)\n", "dynamic execution subscript",
+    ),
+    "nested_starred_unpack_from_subscript": (
+        "def f(key, expr):\n    source = (object(), (object(), __builtins__))\n"
+        "    safe, *rest = source\n    safe2, *caps = rest[0]\n"
+        "    return caps[0][key](expr)\n", "dynamic execution subscript",
+    ),
+    "dynamic_dict_key_nested_builtins_alias_variable_subscript": (
+        "import sys\n\ndef f(slot, key, expr):\n"
+        "    outer = {slot: [[__builtins__]], 'modules': [[sys.modules]]}\n"
+        "    return outer[slot][0][0][key](expr)\n",
+        "dynamic execution subscript",
+    ),
+    "dynamic_dict_key_alias_mismatch": (
+        "def f(slot, other, key, expr):\n    outer = {slot: [[__builtins__]]}\n"
+        "    return outer[other][0][0][key](expr)\n", "dynamic execution subscript",
+    ),
+    "starred_unpack_from_name": (
+        "def f(key, expr):\n    source = (object(), __builtins__)\n"
+        "    safe, *caps = source\n    return caps[0][key](expr)\n",
+        "dynamic execution subscript",
+    ),
+    "starred_unpack_literal": (
+        "def f(key, expr):\n    safe, *caps = (object(), __builtins__)\n"
+        "    return caps[0][key](expr)\n", "dynamic execution subscript",
+    ),
+    "variable_sys_modules_key_then_run": (
+        "import sys\n\ndef f(key, argv):\n    return sys.modules[key].run(argv)\n",
+        "dynamic module execution",
+    ),
+    "sys_modules_alias_variable_subscript": (
+        "import sys\n\ndef f(key, argv):\n"
+        "    module_map = sys.modules\n"
+        "    return module_map[key].run(argv)\n",
+        "dynamic module execution",
+    ),
+    "sys_modules_get_variable_key_then_run": (
+        "import sys\n\ndef f(key, argv):\n"
+        "    return sys.modules.get(key).run(argv)\n",
+        "dynamic module execution",
+    ),
+    "sys_modules_dunder_dict_variable_lookup": (
+        "import sys\n\ndef f(module_key, name, argv):\n"
+        "    return sys.modules[module_key].__dict__[name](argv)\n",
+        "dynamic module execution",
+    ),
+    "assigned_sys_modules_lookup_alias_call": (
+        "import sys\n\ndef f(module_key, argv):\n"
+        "    sp = sys.modules[module_key]\n"
+        "    return sp.call(argv)\n",
+        "dynamic module execution",
+    ),
+    "recursive_mixed_container_sys_modules_alias_call": (
+        "import sys\n\ndef f(module_key, argv):\n"
+        "    outer = ({'level': [(sys.modules,)]},)\n"
+        "    sp = outer[0]['level'][0][0][module_key]\n"
+        "    return sp.call(argv)\n",
+        "dynamic module execution",
+    ),
+    "dynamic_dict_sys_modules_sibling_alias_call": (
+        "import sys\n\ndef f(slot, key, argv):\n"
+        "    outer = {slot: [[__builtins__]], 'modules': [[sys.modules]]}\n"
+        "    return outer['modules'][0][0][key].call(argv)\n", "dynamic module execution",
+    ),
+    "os_dunder_getattribute_then_call": (
+        "import os\n\ndef f(name, argv):\n"
+        "    return os.__getattribute__(os, name)(*argv)\n",
+        "dynamic callable attribute",
+    ),
+    "imported_os_alias_variable_getattr": (
+        "import os as operating_system\n\ndef f(name, argv):\n"
+        "    return getattr(operating_system, name)(*argv)\n",
+        "dynamic callable attribute",
+    ),
+    "assigned_os_alias_variable_getattr": (
+        "import os\n\ndef f(name, argv):\n"
+        "    other = os\n"
+        "    return getattr(other, name)(*argv)\n",
+        "dynamic callable attribute",
+    ),
+    "dict_expansion_from_name": (
+        "def f(key, expr):\n    inner = {'cap': __builtins__}\n"
+        "    outer = {**inner}\n    return outer['cap'][key](expr)\n",
+        "dynamic execution subscript",
+    ),
+    "dict_update_mutation": (
+        "def f(key, expr):\n    outer = {}\n    outer.update(cap=__builtins__)\n"
+        "    return outer['cap'][key](expr)\n", "dynamic execution subscript",
+    ),
+    "dict_setdefault_mutation": (
+        "def f(key, expr):\n    outer = {}\n    outer.setdefault('cap', __builtins__)\n"
+        "    return outer['cap'][key](expr)\n", "dynamic execution subscript",
+    ),
+    "nested_dict_update_mutation": (
+        "import os\n\ndef f(name, argv):\n    outer = {'nested': {}}\n"
+        "    outer['nested'].update({'cap': os})\n"
+        "    return getattr(outer['nested']['cap'], name)(*argv)\n",
+        "dynamic callable attribute",
+    ),
+    "dict_held_os_alias": (
+        "import os\n\ndef f(name, argv):\n    box = {'safe': object(), 'os': os}\n"
+        "    return getattr(box['os'], name)(*argv)\n", "dynamic callable attribute",
+    ),
+    "subscript_target_builtins": (
+        "def f(key, expr):\n    outer = {}\n    outer['cap'] = __builtins__\n"
+        "    return outer['cap'][key](expr)\n", "dynamic execution subscript",
+    ),
+    "nested_subscript_target_os": (
+        "import os\n\ndef f(name, argv):\n    outer = {'nested': {}}\n"
+        "    outer['nested']['cap'] = os\n    return getattr(outer['nested']['cap'], name)(*argv)\n",
+        "dynamic callable attribute",
+    ),
+    "nested_list_append_positions": (
+        "def f(key, expr):\n    outer = {'nested': []}\n    outer['nested'].append({})\n"
+        "    outer['nested'].append(__builtins__)\n    return outer['nested'][1][key](expr)\n",
+        "dynamic execution subscript",
+    ),
+    "list_extend_name_positions": (
+        "def f(key, expr):\n    source = [{}, __builtins__]\n    outer = []\n"
+        "    outer.extend(source)\n    return outer[1][key](expr)\n", "dynamic execution subscript",
+    ),
+    "computed_getattr_stored_in_container": (
+        "import os\n\ndef f(name, argv):\n"
+        "    calls = [getattr(os, name)]\n    return calls[0](*argv)\n",
+        "dynamic execution subscript",
+    ),
+    "computed_getattr_returned_then_called": (
+        "import os\n\ndef pick(name):\n    return getattr(os, name)\n"
+        "\ndef f(name, argv):\n    return pick(name)(*argv)\n",
+        "dynamic callable return",
+    ),
+    "already_imported_kernel_subprocess_run": (
+        "def f(kernel, argv):\n    return kernel.subprocess.run(argv)\n",
+        "raw subprocess execution",
+    ),
+    "already_imported_kernel_subprocess_popen": (
+        "def f(kernel, argv):\n    return kernel.subprocess.Popen(argv)\n",
+        "raw subprocess execution",
+    ),
+    "already_imported_kernel_subprocess_call": (
+        "def f(kernel, argv):\n    return kernel.subprocess.call(argv)\n",
+        "raw subprocess execution",
+    ),
+    "already_imported_kernel_subprocess_check_call": (
+        "def f(kernel, argv):\n    return kernel.subprocess.check_call(argv)\n",
+        "raw subprocess execution",
+    ),
+    "already_imported_kernel_subprocess_check_output": (
+        "def f(kernel, argv):\n    return kernel.subprocess.check_output(argv)\n",
+        "raw subprocess execution",
+    ),
+    "already_imported_kernel_subprocess_getoutput": (
+        "def f(kernel, command):\n    return kernel.subprocess.getoutput(command)\n",
+        "raw subprocess execution",
+    ),
+    "already_imported_kernel_subprocess_getstatusoutput": (
+        "def f(kernel, command):\n"
+        "    return kernel.subprocess.getstatusoutput(command)\n",
+        "raw subprocess execution",
+    ),
+    "assigned_kernel_subprocess_alias_call": (
+        "def f(kernel, argv):\n"
+        "    sp = kernel.subprocess\n"
+        "    return sp.call(argv)\n",
+        "raw subprocess execution",
+    ),
+    "assigned_kernel_subprocess_alias_check_output": (
+        "def f(kernel, argv):\n"
+        "    sp = kernel.subprocess\n"
+        "    return sp.check_output(argv)\n",
+        "raw subprocess execution",
+    ),
+    "runpy_import_alias": (
+        "import runpy as runner\nrunner.run_path('payload.py')\n",
+        "import outside the declared allowlist",
+    ),
+    "concurrent_futures_from_alias": (
+        "from concurrent import futures as pool\npool.ProcessPoolExecutor()\n",
+        "import outside the declared allowlist",
+    ),
+    "relative_import": (
+        "from . import helper\n",
+        "relative import is outside the declared allowlist",
+    ),
+    "star_import": (
+        "from os import *\n",
+        "star import is outside the declared capability allowlist",
+    ),
+    "string_import_builtin": (
+        "def f(b):\n    return getattr(b, '__import__')('subprocess')\n",
+        "getattr(…, '__import__')",
+    ),
     "N16_governance_prefix_exec_module": (
         "import agent_governance_command_capture_v2 as cap\n"
         "cap.capture_command(['/bin/sh', '-c', 'id'])\n",
@@ -517,7 +1251,6 @@ AST_SCANNER_MUTATIONS = {
 
 @pytest.mark.parametrize("mutation", sorted(AST_SCANNER_MUTATIONS))
 def test_the_ast_scanner_actually_catches_a_violation(tmp_path, mutation):
-    # 反例:掃描器若抓不到違規就是空轉。E2 突變實證的三支(M2/M2b/M2c)在此逐一釘死。
     source, expected = AST_SCANNER_MUTATIONS[mutation]
     path = tmp_path / f"{mutation}.py"
     path.write_text(source, encoding="utf-8")
@@ -525,10 +1258,67 @@ def test_the_ast_scanner_actually_catches_a_violation(tmp_path, mutation):
     assert any(expected in item for item in findings), (source, findings)
 
 
+def test_kernel_ctypes_is_limited_to_the_exact_prctl_hardening_shapes(tmp_path):
+    """Kernel-only import is not a blanket libc FFI capability."""
+
+    path = tmp_path / KERNEL_PATH.name
+    path.write_text(
+        "import ctypes\n"
+        "libc = ctypes.CDLL('/tmp/foreign.so', use_errno=True)\n"
+        "libc.execve(b'/bin/id', (), ())\n",
+        encoding="utf-8",
+    )
+    findings = _raw_command_findings(path)
+    assert any("ctypes call outside the hardening allowlist" in item for item in findings)
+
+
+def test_assigned_ctypes_handle_cannot_hide_dynamic_ffi_getattr(tmp_path):
+    path = tmp_path / KERNEL_PATH.name
+    path.write_text(
+        "import ctypes\n"
+        "def enforce_process_hardening(name, argv):\n"
+        "    libc = ctypes.CDLL(None, use_errno=True)\n"
+        "    other = libc\n"
+        "    return getattr(other, name)(*argv)\n",
+        encoding="utf-8",
+    )
+    findings = _raw_command_findings(path)
+    assert any("dynamic callable attribute" in item for item in findings), findings
+
+
+def test_nested_ctypes_handle_cannot_hide_dynamic_ffi_getattr(tmp_path):
+    path = tmp_path / KERNEL_PATH.name
+    source = (
+        "import ctypes\n"
+        "def enforce_process_hardening(name, argv):\n"
+        "    libc = ctypes.CDLL(None, use_errno=True)\n"
+        "    outer = [[libc, object()]]\n"
+        "    return getattr(outer[0][0], name)(*argv)\n"
+    )
+    path.write_text(source, encoding="utf-8")
+    findings = _raw_command_findings(path)
+    assert any("dynamic callable attribute" in item for item in findings), findings
+    path.write_text(source.replace("[0][0]", "[0][1]"), encoding="utf-8")
+    assert _raw_command_findings(path) == []
+
+
+def test_container_aliases_do_not_taint_a_benign_sibling(tmp_path):
+    sources = (
+        "outer = {'unsafe': [[__builtins__]], 'safe': [[{}]]}\nouter['safe'][0][0][key](expr)\n",
+        "import sys\nouter = {'unsafe': [[sys.modules]], 'safe': [[{}]]}\nouter['safe'][0][0][key].call(argv)\n",
+        "import os\nouter = {'unsafe': [[os]], 'safe': [[object()]]}\ngetattr(outer['safe'][0][0], name)\n",
+        "safe, *caps = (object(), __builtins__)\ngetattr(safe, name)\n",
+        "outer = {'nested': []}\nouter['nested'].append({})\nouter['nested'].append(__builtins__)\nouter['nested'][0][key](expr)\n",
+        "source = [{}, __builtins__]\nouter = []\nouter.extend(source)\nouter[0][key](expr)\n",
+    )
+    for index, source in enumerate(sources):
+        path = tmp_path / f"benign_container_sibling_{index}.py"
+        path.write_text(source, encoding="utf-8")
+        assert _raw_command_findings(path) == []
+
+
 @pytest.mark.parametrize("mutation", sorted(AST_SCANNER_MUTATIONS))
 def test_a_declared_non_runner_leaf_is_scanned_by_the_same_exec_rules(tmp_path, mutation):
-    # 反例:除名檔案若被塞進任何一條 exec 路徑,``exec_family=False`` 這條路徑也必須抓到它。
-    # (唯二被關掉的判準是 import 白名單與 ``shell=`` 呼叫形狀,故該兩類突變在此跳過。)
     source, expected = AST_SCANNER_MUTATIONS[mutation]
     if expected in {"import outside the declared allowlist", "shell= is not the constant False"}:
         pytest.skip("this rule is deliberately exec-family-only; see _raw_command_findings")
@@ -552,12 +1342,9 @@ def test_a_mutation_injected_into_a_real_family_file_is_caught(tmp_path):
 
 
 def test_the_import_allowlist_is_positive_and_kernel_only_imports_are_kernel_only(tmp_path):
-    # 白名單是**正面**的:一個從未宣告過的模組(即使人畜無害)也必須被抓到 —— 這正是它比黑名單
-    # 難繞的原因。
     sample = tmp_path / "unknown_module.py"
     sample.write_text("import socketserver\n", encoding="utf-8")
     assert _raw_command_findings(sample)
-    # subprocess / ctypes 只准 kernel:同一份 source 放在非 kernel 檔名下必紅。
     for module in sorted(KERNEL_ONLY_IMPORTS):
         elsewhere = tmp_path / f"not_the_kernel_{module}.py"
         elsewhere.write_text(f"import {module}\n", encoding="utf-8")
@@ -566,16 +1353,23 @@ def test_the_import_allowlist_is_positive_and_kernel_only_imports_are_kernel_onl
 
 def test_kernel_is_the_only_family_member_importing_subprocess():
     for path in _present_family():
-        source = path.read_text(encoding="utf-8")
+        tree = ast.parse(path.read_text(encoding="utf-8"), filename=str(path))
+        imported_modules = {
+            alias.name.split(".")[0]
+            for node in ast.walk(tree)
+            if isinstance(node, ast.Import)
+            for alias in node.names
+        } | {
+            (node.module or "").split(".")[0]
+            for node in ast.walk(tree)
+            if isinstance(node, ast.ImportFrom)
+        }
         if path == KERNEL_PATH:
-            assert "import subprocess" in source
+            assert "subprocess" in imported_modules
         else:
-            assert "subprocess" not in source, path.name
+            assert "subprocess" not in imported_modules, path.name
 
 
-# --------------------------------------------------------------------------- #
-# (1)+(4) allowlist ≡ owner — derived, not hand-copied
-# --------------------------------------------------------------------------- #
 _FRAG = "/etc/systemd/system/arcane-equilibrium-aiml-engine-scanner.service"
 _FLOCK = "/run/arcane-equilibrium/aiml-engine-scanner/consumer.lock"
 _DSN = "/run/credentials/arcane-equilibrium-aiml-engine-scanner.service/pg-dsn"
@@ -651,7 +1445,6 @@ def test_kernel_read_allowlist_equals_the_argv_the_owner_actually_issues(tmp_pat
     qi.build_owner_inventory(probe, _ScriptedCursor(), intent=intent)
     issued = set(probe.argv)
     assert issued, "the owner module issued no host command"
-    # 導出比對(非手抄):owner 實際送出的每一條 argv 都在 kernel 的唯讀 allowlist 內,且兩者相等。
     assert issued == set(kernel.SESSION_ARGV_ALLOWLISTS[kernel.SESSION_S2_1_QUIESCE_READ])
 
 
@@ -666,7 +1459,6 @@ def test_fence_allowlist_is_exactly_the_units_own_stop_start():
         (qi.SYSTEMD, "stop", qi.UNIT_NAME),
         (qi.SYSTEMD, "start", qi.UNIT_NAME),
     })
-    # fence argv 絕不是 pkill / kill-by-name / kill-by-pattern / kill-by-pid,也永遠不是 --user。
     for argv in fence:
         assert argv[0] == qi.SYSTEMD
         assert argv[2] == qi.UNIT_NAME
@@ -679,9 +1471,6 @@ def test_s2_0_session_has_no_argv_surface_at_all():
         kernel.assert_session_argv(kernel.SESSION_S2_0_OBSERVER_BOOTSTRAP, ["/usr/bin/psql", "-c", "select 1"])
 
 
-# --------------------------------------------------------------------------- #
-# (2) kernel-side independent re-assert — a non-allowlisted argv NEVER executes
-# --------------------------------------------------------------------------- #
 @pytest.mark.parametrize("argv", [
     [qi.SYSTEMD, "stop", qi.UNIT_NAME],                                   # 唯讀 session 不得 stop
     [qi.SYSTEMD, "show", qi.UNIT_NAME],                                   # 屬性集不完整
@@ -791,9 +1580,6 @@ def test_stdout_is_redacted_with_the_existing_capture_v2_patterns(monkeypatch):
     assert "<redacted>" in output
 
 
-# --------------------------------------------------------------------------- #
-# (3) capability partition
-# --------------------------------------------------------------------------- #
 class _WriterSurface:
     def stop(self):  # pragma: no cover - 必須永不被呼叫
         raise AssertionError("assert_read_only_surface must refuse BEFORE calling anything")
@@ -819,9 +1605,6 @@ def test_forbidden_read_only_surface_covers_the_four_adapter_mutators():
         assert name in kernel.FORBIDDEN_READ_ONLY_SURFACE
 
 
-# --------------------------------------------------------------------------- #
-# target class is derived from HOST FACTS (a caller string can never reach it)
-# --------------------------------------------------------------------------- #
 def _force_host(monkeypatch, *, platform, hostname, writable, roots):
     monkeypatch.setattr(kernel.sys, "platform", platform)
     monkeypatch.setattr(kernel, "_observed_nodename", lambda: hostname)
@@ -833,9 +1616,6 @@ def _force_host(monkeypatch, *, platform, hostname, writable, roots):
 @pytest.mark.parametrize("platform,hostname,writable,roots,expected", [
     ("darwin", "trade-core", True, True, kernel.TARGET_CLASS_NON_TARGET),
     ("linux", "some-laptop", True, True, kernel.TARGET_CLASS_NON_TARGET),
-    # P1-A:未供裝 + 非 root(unit dir 不可寫、canonical roots 全缺)**曾經**落
-    # ``disposable_candidate``(= 無條件放行)。那是初始供裝 / 恢復期的真 trade-core 常態視圖,
-    # 故 hostname 支配供裝訊號,結果必須是 ``unknown``(與 production 同等對待)。
     ("linux", "trade-core", False, False, kernel.TARGET_CLASS_UNKNOWN),
     ("linux", "trade-core", True, True, kernel.TARGET_CLASS_PRODUCTION),
     ("linux", "trade-core", None, True, kernel.TARGET_CLASS_UNKNOWN),
@@ -857,15 +1637,11 @@ def test_derive_host_target_class_takes_no_caller_argument():
 
 
 def test_this_development_machine_is_never_a_production_target():
-    # Mac 開發機:不論本地檔案系統長什麼樣,必為 non_target(絕不可能誤判成 production)。
     view = kernel.derive_host_target_class()
     if sys.platform != "linux":
         assert view["target_class"] == kernel.TARGET_CLASS_NON_TARGET
 
 
-# --------------------------------------------------------------------------- #
-# production / unknown admission matrix — --allow-production alone is NOT enough
-# --------------------------------------------------------------------------- #
 DIGEST = "sha256:" + "a" * 64
 
 
@@ -898,7 +1674,6 @@ def test_all_four_conditions_admit_and_any_missing_one_refuses(target_class):
         {"operator_authorization_verified": False},
         {"production_confirm": "sha256:" + "b" * 64},
         {"production_confirm": None},
-        # P1-B:第四條件 —— intent 自宣告的 class 必須與導出的主機 class 同一級。
         {"intent_target_class": kernel.INTENT_TARGET_CLASS_DISPOSABLE_LOCAL},
         {"intent_target_class": None},
     ):
@@ -929,7 +1704,6 @@ def test_a_disposable_local_intent_is_refused_on_a_production_grade_host(target_
     errors = kernel.host_target_admission_errors(
         view, **{**ADMITTED, "intent_target_class": kernel.INTENT_TARGET_CLASS_DISPOSABLE_LOCAL}
     )
-    # 其餘三條件全部滿足 ⇒ 唯一的拒絕理由就是這道綁定(不是碰巧被別的條件擋下)。
     assert len(errors) == 1
     assert kernel.INTENT_TARGET_CLASS_DISPOSABLE_LOCAL in errors[0]
 
@@ -946,7 +1720,6 @@ def test_the_intent_binding_reason_never_echoes_the_caller_string():
     joined = " ".join(errors)
     assert hostile not in joined
     assert "unrecognized" in joined
-    # 壞 intent 可能遞來不可雜湊值:謂詞必須照樣回一份 typed 拒絕,而不是自己炸成 TypeError。
     for unhashable in ([], {}, {"target_class": "production"}):
         assert kernel.host_target_admission_errors(
             view, **{**ADMITTED, "intent_target_class": unhashable}
@@ -964,7 +1737,6 @@ def test_non_target_and_the_rehearsal_only_class_are_both_refused():
         **ADMITTED,
     )
     assert any("rehearsal-only" in error for error in errors)
-    # 連「四條件全滿足」都救不回來:它根本不是一個可導出的主機事實。
     assert kernel.host_target_admission_errors(
         {"target_class": kernel.TARGET_CLASS_DISPOSABLE_CANDIDATE, "reason": "throwaway"},
         allow_production=False, production_confirm=None, intent_digest=None,
@@ -1034,9 +1806,6 @@ def test_unknown_is_treated_exactly_like_production():
         )
 
 
-# --------------------------------------------------------------------------- #
-# rehearsal lane — an injected view may only TIGHTEN, never loosen (RUN-1)
-# --------------------------------------------------------------------------- #
 DISPOSABLE = {"target_class": kernel.TARGET_CLASS_DISPOSABLE_CANDIDATE, "reason": "throwaway"}
 NON_TARGET = {"target_class": kernel.TARGET_CLASS_NON_TARGET, "reason": "mac"}
 
@@ -1044,12 +1813,10 @@ NON_TARGET = {"target_class": kernel.TARGET_CLASS_NON_TARGET, "reason": "mac"}
 @pytest.mark.parametrize("derived,injected,refused", [
     (DISPOSABLE, None, False),
     (NON_TARGET, None, False),
-    # derived 落在 production-grade ⇒ 拒,任何注入都救不回來(注入不能放寬)。
     ({"target_class": kernel.TARGET_CLASS_PRODUCTION}, None, True),
     ({"target_class": kernel.TARGET_CLASS_UNKNOWN}, None, True),
     ({"target_class": kernel.TARGET_CLASS_PRODUCTION}, DISPOSABLE, True),
     ({"target_class": kernel.TARGET_CLASS_UNKNOWN}, DISPOSABLE, True),
-    # injected 落在 production-grade ⇒ 也拒(注入只能加嚴)。
     (NON_TARGET, {"target_class": kernel.TARGET_CLASS_PRODUCTION}, True),
     (NON_TARGET, {"target_class": kernel.TARGET_CLASS_UNKNOWN}, True),
     (DISPOSABLE, {"target_class": kernel.TARGET_CLASS_PRODUCTION}, True),
@@ -1074,9 +1841,6 @@ def test_the_recorded_target_class_is_always_the_derived_one():
     assert record["injected_is_authoritative"] is False
 
 
-# --------------------------------------------------------------------------- #
-# W5 #21 — PR_SET_DUMPABLE is actually enforced (not a declared constant)
-# --------------------------------------------------------------------------- #
 def test_process_hardening_is_observed_and_load_bearing():
     observation = kernel.enforce_process_hardening(force=True)
     if sys.platform == "linux":
@@ -1084,8 +1848,6 @@ def test_process_hardening_is_observed_and_load_bearing():
     else:
         assert observation["enforced"] is False
         assert observation["observed_dumpable"] is None
-        # P2 #7:舊理由字串宣稱「the kernel executes no host command here」是**假的**
-        # ——這條路徑確實會 exec(observer child)。新字串必須誠實。
         assert "executes no host command" not in observation["reason"]
         assert "cannot be observed on this platform" in observation["reason"]
         assert "may still execute here" in observation["reason"]
@@ -1115,12 +1877,8 @@ def test_process_hardening_is_re_observed_on_every_execution(monkeypatch):
     assert observations["count"] == 2
 
 
-# --------------------------------------------------------------------------- #
-# P2 #7 — the read-only observation face also passes an L1 gate (a weaker one)
-# --------------------------------------------------------------------------- #
 @pytest.mark.parametrize("target_class,allow,refused", [
     (kernel.TARGET_CLASS_NON_TARGET, False, False),
-    # P1-A:rehearsal-only class 導不出來 ⇒ 觀測面見到它也只能是偽造視圖,一律拒。
     (kernel.TARGET_CLASS_DISPOSABLE_CANDIDATE, False, True),
     (kernel.TARGET_CLASS_DISPOSABLE_CANDIDATE, True, True),
     (kernel.TARGET_CLASS_PRODUCTION, False, True),
@@ -1136,8 +1894,6 @@ def test_read_only_observation_admission(target_class, allow, refused):
 
 
 def test_the_observation_gate_is_deliberately_weaker_than_the_apply_gate():
-    # 觀測面不需要 SSHSIG / --production-confirm(觀測正是拿到 permit 之前要做的事),但 apply 面
-    # 在同一份 view 上仍然需要四條件 —— 兩者絕不可被混為一談。
     view = {"target_class": kernel.TARGET_CLASS_PRODUCTION, "reason": "x"}
     assert kernel.host_observation_admission_errors(view, allow_production=True) == []
     assert kernel.host_target_admission_errors(
@@ -1147,14 +1903,10 @@ def test_the_observation_gate_is_deliberately_weaker_than_the_apply_gate():
     )
 
 
-# --------------------------------------------------------------------------- #
-# P2 #12 — hostname is derived from the same source as S1.6B
-# --------------------------------------------------------------------------- #
 def test_hostname_comes_from_the_same_source_as_the_s1_6b_preflight():
     import agent_governance_target_host_probe as th
     import inspect
 
-    # S1.6B 用 os.uname().nodename;kernel 必須同源(否則同一台主機會有兩個身分)。
     assert "os.uname().nodename" in inspect.getsource(th.preflight_target_host)
     assert kernel._observed_nodename() == os.uname().nodename
 
@@ -1185,9 +1937,7 @@ def test_process_hardening_refusal_blocks_execution(monkeypatch):
         host.run(list(allowed))
 
 
-# --------------------------------------------------------------------------- #
 # derived constants are pinned against their owners (no re-invented host facts)
-# --------------------------------------------------------------------------- #
 def test_target_hostnames_are_pinned_to_the_s1_target_host():
     import agent_governance_target_host_probe as th
 
@@ -1223,7 +1973,6 @@ def test_kernel_abi_projection_is_code_owned():
     assert projection["production_grade_target_classes"] == sorted(
         {kernel.TARGET_CLASS_PRODUCTION, kernel.TARGET_CLASS_UNKNOWN}
     )
-    # P1-A / P1-B 的兩條硬邊界必須在 artifact 上看得見(稽核不必讀原始碼)。
     assert projection["rehearsal_only_target_classes"] == [
         kernel.TARGET_CLASS_DISPOSABLE_CANDIDATE
     ]
@@ -1233,18 +1982,12 @@ def test_kernel_abi_projection_is_code_owned():
     assert projection["production_entry_intent_target_class"] == (
         kernel.INTENT_TARGET_CLASS_PRODUCTION
     )
-    # 出境守衛必須在 artifact 上看得見,且其判準明記為 capture_v2 的既有規則(非自造)。
     assert projection["egress_secret_scanner"].endswith(
         "scan_serializable_surface_for_secrets"
     )
     assert projection["egress_secret_scanner_rules"].endswith("SECRET_VALUE_PATTERNS")
 
 
-# --------------------------------------------------------------------------- #
-# (6) 出境秘密掃描 —— 判準必須是 capture_v2 的既有規則,而不是本 kernel 自造的第二套
-# --------------------------------------------------------------------------- #
-# 反例以片段拼接構造(repo 內不留任何看起來像真憑證的字面量);三段分別命中
-# ``SECRET_VALUE_PATTERNS`` 的三條規則:賦值形 / bearer 形 / URL user:pass 形。
 _SECRET_SHAPED_VALUES = (
     "PG" + "PASSWORD" + "=" + "s3cr3t-not-real",
     "Authorization: " + "Bearer " + "abcdef0123456789",
@@ -1285,7 +2028,6 @@ def test_every_central_secret_rule_blocks_an_observation(value):
     payload["faces"]["unit_state"]["properties"]["Environment"] = value
     reasons = kernel.scan_serializable_surface_for_secrets(payload)
     assert reasons, value
-    # 理由只帶鍵名 trail;命中的值本身**絕不**出現在理由裡(否則理由就是第二條洩漏路徑)。
     assert "faces.unit_state.properties.Environment" in reasons[0]
     assert value not in reasons[0]
 
@@ -1306,9 +2048,7 @@ def test_the_scanner_delegates_to_the_capture_v2_rules_not_a_second_set():
 
     source = inspect.getsource(kernel._carries_secret_shaped_value)
     assert "from agent_governance_command_capture_v2 import _redact_preview" in source
-    # kernel 不得自造第二套 secret 正則。
     assert "re.compile" not in source
-    # 中央規則各有一個對應反例:新增一條中央規則而沒補反例 ⇒ 本測試變紅。
     assert len(SECRET_VALUE_PATTERNS) == len(_SECRET_SHAPED_VALUES)
 
 

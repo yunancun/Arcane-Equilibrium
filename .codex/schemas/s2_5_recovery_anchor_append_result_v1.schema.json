@@ -1,0 +1,81 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://arcane-equilibrium.local/schemas/s2_5_recovery_anchor_append_result_v1.schema.json",
+  "title": "s2_5_recovery_anchor_append_result_v1",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "schema_version", "anchor_store_id", "anchor_collection_id",
+    "prepared_packet_digest", "intent_digest", "idempotency_key", "status",
+    "sequence", "head_digest", "object_id", "version_id", "checksum", "entry_digest",
+    "append_actor_identity", "authenticated_response", "failure_code",
+    "completed_at", "evidence_class", "side_effect_class", "target_class",
+    "target_profile_id", "production_effect", "production_authority",
+    "production_effect_count", "self_digest"
+  ],
+  "properties": {
+    "schema_version": {"const": "s2_5_recovery_anchor_append_result_v1"},
+    "anchor_store_id": {"const": "s2-5-recovery-external-anchor-v1"},
+    "anchor_collection_id": {"const": "s2-5-recovery-anchor-chain-v1"},
+    "prepared_packet_digest": {"$ref": "#/$defs/digest"},
+    "intent_digest": {"$ref": "#/$defs/digest"},
+    "idempotency_key": {
+      "type": "string", "pattern": "^s2-5-anchor-idempotency-[0-9a-f]{64}$"
+    },
+    "status": {
+      "enum": [
+        "APPENDED", "IDEMPOTENT_EXACT", "AMBIGUOUS_COMMITTED",
+        "RECONCILED_EXACT_UNVERIFIED", "RECOVERY_REQUIRED"
+      ]
+    },
+    "sequence": {"$ref": "#/$defs/nullableInteger"},
+    "head_digest": {"$ref": "#/$defs/nullableDigest"},
+    "object_id": {"$ref": "#/$defs/nullableObject"},
+    "version_id": {"$ref": "#/$defs/nullableVersion"},
+    "checksum": {"$ref": "#/$defs/nullableDigest"},
+    "entry_digest": {"$ref": "#/$defs/nullableDigest"},
+    "append_actor_identity": {"$ref": "#/$defs/writerIdentity"},
+    "authenticated_response": {"type": "boolean"},
+    "failure_code": {"anyOf": [{"type": "string", "minLength": 1}, {"type": "null"}]},
+    "completed_at": {"type": "string", "format": "date-time"},
+    "evidence_class": {"const": "LOCAL_REPRODUCIBLE"},
+    "side_effect_class": {"const": "DISPOSABLE_TEST"},
+    "target_class": {"const": "disposable_systemd"},
+    "target_profile_id": {"const": "s2_5_recovery_user_systemd_disposable_v1"},
+    "production_effect": {"const": false},
+    "production_authority": {"const": false},
+    "production_effect_count": {"const": 0},
+    "self_digest": {"$ref": "#/$defs/digest"}
+  },
+  "$defs": {
+    "digest": {"type": "string", "pattern": "^sha256:[0-9a-f]{64}$"},
+    "nullableDigest": {"anyOf": [{"$ref": "#/$defs/digest"}, {"type": "null"}]},
+    "nullableInteger": {
+      "anyOf": [{"type": "integer", "minimum": 1}, {"type": "null"}]
+    },
+    "nullableObject": {
+      "anyOf": [
+        {"type": "string", "pattern": "^s2-5-anchor-object-[0-9a-f]{64}$"},
+        {"type": "null"}
+      ]
+    },
+    "nullableVersion": {
+      "anyOf": [
+        {"type": "string", "pattern": "^s2-5-anchor-version-[0-9a-f]{64}$"},
+        {"type": "null"}
+      ]
+    },
+    "writerIdentity": {
+      "type": "object", "additionalProperties": false,
+      "required": ["role", "unit", "cgroup", "key_fingerprint"],
+      "properties": {
+        "role": {"const": "external_anchor_writer"},
+        "unit": {"const": "arcane-equilibrium-aiml-s2-5-anchor-writer.service"},
+        "cgroup": {
+          "const": "/user.slice/user-1000.slice/user@1000.service/app.slice/arcane-equilibrium-aiml-s2-5-anchor-writer.service"
+        },
+        "key_fingerprint": {"type": "null"}
+      }
+    }
+  }
+}

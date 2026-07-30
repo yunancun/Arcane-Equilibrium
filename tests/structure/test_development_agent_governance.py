@@ -4,6 +4,7 @@ import importlib.util
 import hashlib
 import json
 import re
+import shlex
 import subprocess
 try:
     import tomllib
@@ -2691,9 +2692,20 @@ def test_test_evidence_reuse_is_content_addressed_and_fail_closed() -> None:
 
 def test_read_only_bash_policy_denies_effects_and_allows_declared_probes() -> None:
     governance = _load_module()
+    import agent_governance_pytest_provider as pytest_provider
 
     assert governance.authorize_command("E2", "git diff -- rust/openclaw_engine")["allowed"] is True
     assert governance.authorize_command("E2", "python3 -m pytest tests/structure/test_x.py -q")["allowed"] is True
+    governed_pytest = shlex.join([
+        *pytest_provider.GOVERNED_PYTEST_PREFIX,
+        *pytest_provider.GOVERNED_PYTEST_REQUIRED_ARGS,
+        "-q",
+        "tests/structure/test_x.py",
+    ])
+    assert governance.authorize_command("E2", governed_pytest)["allowed"] is True
+    assert governance.authorize_command(
+        "E2", "python3 -S -c 'print(1)'"
+    )["allowed"] is False
     assert governance.authorize_command(
         "OPS", "ssh trade-core 'systemctl --user is-active openclaw-trading-api.service'"
     )["allowed"] is True

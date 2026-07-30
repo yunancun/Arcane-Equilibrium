@@ -92,6 +92,7 @@ from agent_governance_s2_5_wal import (  # noqa: E402  —— §5.7 durability s
     s2_5_replay_ledger_path,
 )
 from agent_governance_s2_5_driver import S2_5_UNIT_NAME  # noqa: E402
+from agent_governance_s2_5_recovery_state import S2_5RecoveryState  # noqa: E402,F401
 from aiml_gate_receipt_s2_5 import (  # noqa: E402
     S2_5_PHASE_EFFECT_CLASS,
     S2_5_START_ID_PREFIX,
@@ -126,22 +127,6 @@ _S2_5_SECRET_LIKE_RE = re.compile(
     re.IGNORECASE,
 )
 _S2_5_SECRET_REDACTED = "<redacted: secret-like content was scrubbed from this reason>"
-
-
-class S2_5RecoveryState:
-    """跨 apply 的 in-process recovery 閂(未解 recovery 擋一切新 effect;§3.1c)。"""
-
-    def __init__(self) -> None:
-        self.unresolved: dict[str, Any] | None = None
-
-    def record(self, *, start_id: str | None, reasons: list[str]) -> None:
-        self.unresolved = {"start_id": start_id, "reasons": list(reasons)}
-
-    def resolve(self, *, resolution_note: str) -> dict[str, Any] | None:
-        resolved, self.unresolved = self.unresolved, None
-        if resolved is not None:
-            resolved["resolution_note"] = resolution_note
-        return resolved
 
 
 class S2_5RunningObserver(Protocol):
@@ -713,6 +698,84 @@ def _unit_state_from_show(properties: dict[str, str]) -> dict[str, Any]:
     }
 
 
+def _state_root_failure_snapshot(
+    state_root: Path,
+    journal_path: Path,
+) -> tuple[str, dict[str, Any]]:
+    """Capture exact failure-time root bytes and journal membership."""
+
+    entries: list[dict[str, str]] = []
+    journal_digests: list[str] = []
+    head_digest: str | None = None
+    if state_root.is_dir():
+        for path in sorted(state_root.rglob("*")):
+            if not path.is_file() or path.is_symlink():
+                continue
+            try:
+                raw = path.read_bytes()
+            except OSError as error:
+                raw_digest = central_validator.canonical_digest({
+                    "read_error": type(error).__name__,
+                })
+            else:
+                raw_digest = central_validator.canonical_digest({
+                    "raw_bytes_hex": raw.hex(),
+                })
+            relative = str(path.relative_to(state_root))
+            entries.append({"relative_path": relative, "raw_digest": raw_digest})
+            if path.name.endswith(".journal.json"):
+                journal_digests.append(raw_digest)
+                if path == journal_path:
+                    head_digest = raw_digest
+    if head_digest is None:
+        head_digest = central_validator.canonical_digest({
+            "journal_absent_at_failure": str(journal_path.name),
+        })
+        journal_digests.append(head_digest)
+    return (
+        central_validator.canonical_digest({
+            "schema_version": "s2_5_state_root_failure_snapshot_v1",
+            "entries": entries,
+        }),
+        {
+            "journal_digests": sorted(set(journal_digests)),
+            "head_digest": head_digest,
+        },
+    )
+
+
+def _record_recovery_failure(
+    recovery_state: S2_5RecoveryState,
+    *,
+    state_root: Path,
+    journal_path: Path,
+    replay_ledger: Any,
+    pre_state: dict[str, Any],
+    intent: dict[str, Any],
+    core: dict[str, Any],
+    reasons: list[str],
+) -> None:
+    """Record one sticky failure from code-owned live values."""
+
+    root_digest, journal_set = _state_root_failure_snapshot(state_root, journal_path)
+    entries = (
+        replay_ledger.get("entries")
+        if isinstance(replay_ledger, dict)
+        and isinstance(replay_ledger.get("entries"), list)
+        else []
+    )
+    recovery_state.record(
+        start_id=intent["start_id"],
+        reasons=reasons,
+        task_digest=intent["self_digest"],
+        journal_set=journal_set,
+        replay_ledger_head=_replay_ledger_head(entries),
+        pre_state=pre_state,
+        source_head=core["source_head"],
+        root_digest=root_digest,
+    )
+
+
 def _common_gate(
     intent: Any,
     authorization: Any,
@@ -723,20 +786,37 @@ def _common_gate(
     replay_ledger: Any,
     target_class: str,
     recovery_state: S2_5RecoveryState | None,
+    state_root: Path | None,
     install_lock_probe: Any,
     precheck_inputs: dict[str, Any],
 ) -> tuple[dict[str, Any] | None, dict[str, Any], datetime]:
     """step 0-6 的共用閘。回 (提前終止的 verdict | None, 導出的 precheck 旗標, now)。"""
 
-    now_dt = _resolve_now(now)
     precheck_flags = {
         "inactive_prestate_verified": False,
         "loader_closure_reverified": False,
         "s2_4_recovery_clear": False,
         "install_lock_free": False,
     }
-    # step 0 —— recovery 閂。
-    if recovery_state is not None and recovery_state.unresolved is not None:
+    # step 0 —— recovery controller 身分與 recovery 閂。這一步刻意先於 clock、
+    # schema、authorization、locks 與 driver；None/替身/跨 root 不能藉由早期其他錯誤掩蓋。
+    if not isinstance(recovery_state, S2_5RecoveryState):
+        return (
+            _verdict(
+                S2_5_STATUS_RECOVERY_REQUIRED,
+                ["S2.5 requires the canonical state_root-bound recovery controller"],
+            ),
+            precheck_flags,
+            datetime.min.replace(tzinfo=timezone.utc),
+        )
+    controller_errors = recovery_state.admission_errors(state_root)
+    if controller_errors:
+        return (
+            _verdict(S2_5_STATUS_RECOVERY_REQUIRED, controller_errors),
+            precheck_flags,
+            datetime.min.replace(tzinfo=timezone.utc),
+        )
+    if recovery_state.unresolved is not None:
         return (
             _verdict(
                 S2_5_STATUS_RECOVERY_REQUIRED,
@@ -746,8 +826,9 @@ def _common_gate(
                 ],
             ),
             precheck_flags,
-            now_dt,
+            datetime.min.replace(tzinfo=timezone.utc),
         )
+    now_dt = _resolve_now(now)
     # step 1 —— intent 結構/身分(中央閘負責 core_digest/start_id/self_digest/新鮮窗)。
     if not isinstance(intent, dict):
         return (
@@ -763,6 +844,24 @@ def _common_gate(
             now_dt,
         )
     core = intent["core"]
+    capture_is_controller_bound = isinstance(
+        recovery_state.host_capture, dict
+    ) and recovery_state.host_capture.get(
+        "self_digest"
+    ) == recovery_state.host_capture_digest
+    capture_source_matches = capture_is_controller_bound and (
+        recovery_state.host_capture.get("source_head") == core.get("source_head")
+    )
+    operation_errors = recovery_state.operation_errors(
+        now=now_dt, intent_source_head=core.get("source_head")
+    )
+    if operation_errors:
+        status = (
+            S2_5_STATUS_REQUEST_REJECTED
+            if capture_is_controller_bound and not capture_source_matches
+            else S2_5_STATUS_RECOVERY_REQUIRED
+        )
+        return _verdict(status, operation_errors), precheck_flags, now_dt
     # step 2 —— phase 綁定(apply_s2_5_start 只收 S2_5A_START;final 只收 S2_5B_FINAL)。
     if core["phase"] != phase:
         return (
@@ -863,7 +962,7 @@ def apply_s2_5_start(
     s2_4_recovery_clear: Any = None,
     install_lock_probe: Any = None,
     lifecycle_lock: Any = None,
-    recovery_state: S2_5RecoveryState | None = None,
+    recovery_state: S2_5RecoveryState,
     state_root: Path | None = None,
     observers: Any = None,
     owner_fingerprint: str | None = None,
@@ -880,6 +979,7 @@ def apply_s2_5_start(
         replay_ledger=replay_ledger,
         target_class=target_class,
         recovery_state=recovery_state,
+        state_root=state_root,
         install_lock_probe=install_lock_probe,
         precheck_inputs={
             "s2_4_install_effect_receipt": s2_4_install_effect_receipt,
@@ -1072,8 +1172,16 @@ def apply_s2_5_start(
             updated_at=_iso(clock()),
             lock_release_status=lock_window["release_status"],
         )
-        if recovery_state is not None:
-            recovery_state.record(start_id=intent["start_id"], reasons=reasons)
+        _record_recovery_failure(
+            recovery_state,
+            state_root=state_root,
+            journal_path=journal_path,
+            replay_ledger=replay_ledger,
+            pre_state=pre_state,
+            intent=intent,
+            core=core,
+            reasons=reasons,
+        )
         return _verdict(
             S2_5_STATUS_RECOVERY_REQUIRED, reasons, lock_window=lock_window
         )
@@ -1091,9 +1199,15 @@ def apply_s2_5_start(
             else "RECOVERY_REQUIRED",
             updated_at=_iso(clock()),
         )
-        if rollback["status"] != "RESTORED_INACTIVE" and recovery_state is not None:
-            recovery_state.record(
-                start_id=intent["start_id"],
+        if rollback["status"] != "RESTORED_INACTIVE":
+            _record_recovery_failure(
+                recovery_state,
+                state_root=state_root,
+                journal_path=journal_path,
+                replay_ledger=replay_ledger,
+                pre_state=pre_state,
+                intent=intent,
+                core=core,
                 reasons=[
                     "start failed and rollback did not restore: "
                     + redact_driver_error(error)
@@ -1126,8 +1240,16 @@ def apply_s2_5_start(
             state="TERMINAL_ROLLED_BACK" if restored else "RECOVERY_REQUIRED",
             updated_at=_iso(clock()),
         )
-        if recovery_state is not None:
-            recovery_state.record(start_id=intent["start_id"], reasons=reasons)
+        _record_recovery_failure(
+            recovery_state,
+            state_root=state_root,
+            journal_path=journal_path,
+            replay_ledger=replay_ledger,
+            pre_state=pre_state,
+            intent=intent,
+            core=core,
+            reasons=reasons,
+        )
         return _verdict(
             S2_5_STATUS_ATTESTATION_FAILED if restored else S2_5_STATUS_RECOVERY_REQUIRED,
             reasons
@@ -1165,8 +1287,16 @@ def apply_s2_5_start(
                 "compute_owner_fingerprint value differs from the caller-supplied claim"
             ]
         if rollback["status"] != "RESTORED_INACTIVE":
-            if recovery_state is not None:
-                recovery_state.record(start_id=intent["start_id"], reasons=reasons)
+            _record_recovery_failure(
+                recovery_state,
+                state_root=state_root,
+                journal_path=journal_path,
+                replay_ledger=replay_ledger,
+                pre_state=pre_state,
+                intent=intent,
+                core=core,
+                reasons=reasons,
+            )
             return _verdict(
                 S2_5_STATUS_RECOVERY_REQUIRED,
                 reasons + ["rollback-to-disabled did not restore the S2.4 pre-state"],
@@ -1335,7 +1465,7 @@ def apply_s2_5_final(
     lifecycle_lock: Any = None,
     s2_1_drill_receipt: Any = None,
     pre_drill_attestation: Any = None,
-    recovery_state: S2_5RecoveryState | None = None,
+    recovery_state: S2_5RecoveryState,
     state_root: Path | None = None,
     observers: Any = None,
     owner_fingerprint: str | None = None,
@@ -1352,6 +1482,7 @@ def apply_s2_5_final(
         replay_ledger=replay_ledger,
         target_class=target_class,
         recovery_state=recovery_state,
+        state_root=state_root,
         install_lock_probe=install_lock_probe,
         precheck_inputs={
             "s2_4_install_effect_receipt": s2_4_install_effect_receipt,
@@ -1507,8 +1638,16 @@ def apply_s2_5_final(
             updated_at=_iso(clock()),
             lock_release_status=lock_window["release_status"],
         )
-        if recovery_state is not None:
-            recovery_state.record(start_id=intent["start_id"], reasons=reasons)
+        _record_recovery_failure(
+            recovery_state,
+            state_root=state_root,
+            journal_path=journal_path,
+            replay_ledger=replay_ledger,
+            pre_state=pre_state,
+            intent=intent,
+            core=core,
+            reasons=reasons,
+        )
         return _verdict(
             S2_5_STATUS_RECOVERY_REQUIRED, reasons, lock_window=lock_window
         )
@@ -1557,11 +1696,16 @@ def apply_s2_5_final(
             journal_path, start_id=intent["start_id"], state="RECOVERY_REQUIRED",
             updated_at=_iso(clock()),
         )
-        if recovery_state is not None:
-            recovery_state.record(
-                start_id=intent["start_id"],
-                reasons=[f"reset-failed failed: {redact_driver_error(error)}"],
-            )
+        _record_recovery_failure(
+            recovery_state,
+            state_root=state_root,
+            journal_path=journal_path,
+            replay_ledger=replay_ledger,
+            pre_state=pre_state,
+            intent=intent,
+            core=core,
+            reasons=[f"reset-failed failed: {redact_driver_error(error)}"],
+        )
         return _verdict(
             S2_5_STATUS_RECOVERY_REQUIRED,
             [f"watchdog reset failed: {redact_driver_error(error)}"],
@@ -1586,14 +1730,19 @@ def apply_s2_5_final(
             journal_path, start_id=intent["start_id"], state="RECOVERY_REQUIRED",
             updated_at=_iso(clock()),
         )
-        if recovery_state is not None:
-            recovery_state.record(
-                start_id=intent["start_id"],
-                reasons=[
-                    "post-reset observation raised; the reset outcome is unproven: "
-                    + redact_driver_error(error)
-                ],
-            )
+        _record_recovery_failure(
+            recovery_state,
+            state_root=state_root,
+            journal_path=journal_path,
+            replay_ledger=replay_ledger,
+            pre_state=pre_state,
+            intent=intent,
+            core=core,
+            reasons=[
+                "post-reset observation raised; the reset outcome is unproven: "
+                + redact_driver_error(error)
+            ],
+        )
         return _verdict(
             S2_5_STATUS_RECOVERY_REQUIRED,
             [

@@ -127,12 +127,13 @@ def test_rollback_to_disabled_restores_the_exact_s2_4_prestate(tmp_path, monkeyp
         unit2, clock=kit.frozen_clock(), faults={"network.listening_sockets_empty": False}
     )
     unit2.fail_rollback = True
-    recovery = lifecycle.S2_5RecoveryState()
+    state_root = kit.fresh_state_root(tmp_path, "state-4b")
+    recovery = kit.recovery_controller(state_root)
     verdict2 = lifecycle.apply_s2_5_start(
         intent2, permit2, unit2,
         **kit.apply_kwargs(
             tmp_path=tmp_path, unit=unit2, observers=observers,
-            state_root=kit.fresh_state_root(tmp_path, "state-4b"),
+            state_root=state_root,
             recovery_state=recovery,
         ),
     )
@@ -146,7 +147,7 @@ def test_rollback_to_disabled_restores_the_exact_s2_4_prestate(tmp_path, monkeyp
         intent3, permit3, unit3,
         **kit.apply_kwargs(
             tmp_path=tmp_path, unit=unit3,
-            state_root=kit.fresh_state_root(tmp_path, "state-4c"),
+            state_root=state_root,
             recovery_state=recovery,
         ),
     )

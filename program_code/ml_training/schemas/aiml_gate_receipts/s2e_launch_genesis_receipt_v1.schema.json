@@ -1,0 +1,57 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://arcane-equilibrium.local/schemas/s2e_launch_genesis_receipt_v1.schema.json",
+  "title": "s2e_launch_genesis_receipt_v1",
+  "description": "Closed W0 launch genesis payload. A pending candidate is source-only; an issued READY receipt binds the exact typed disposable acceptance-test chain digests that were executed before issuance.",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "schema_version",
+    "launch_id",
+    "wave",
+    "predecessor",
+    "baseline_head",
+    "baseline_tree",
+    "schema_carrier_head",
+    "schema_carrier_tree",
+    "launch_contract_digest",
+    "generation_task_contract_digest",
+    "wave_exit_id",
+    "checkpoint_status",
+    "acceptance_review_bundle_digest",
+    "side_effect_class",
+    "disposable_effect_chain_digests",
+    "production_effect_count",
+    "payload_digest"
+  ],
+  "properties": {
+    "schema_version": {"const": "s2e_launch_genesis_receipt_v1"},
+    "launch_id": {"const": "S2E-LW1-LW5"},
+    "wave": {"const": "W0-GENESIS"},
+    "predecessor": {"type": "null"},
+    "baseline_head": {"$ref": "#/$defs/git_sha"},
+    "baseline_tree": {"$ref": "#/$defs/git_sha"},
+    "schema_carrier_head": {"$ref": "#/$defs/git_sha"},
+    "schema_carrier_tree": {"$ref": "#/$defs/git_sha"},
+    "launch_contract_digest": {"$ref": "#/$defs/digest"},
+    "generation_task_contract_digest": {"$ref": "#/$defs/digest"},
+    "wave_exit_id": {"const": "W0_GENESIS_READY"},
+    "checkpoint_status": {"enum": ["PENDING_REVIEW", "W0_GENESIS_READY"]},
+    "acceptance_review_bundle_digest": {
+      "anyOf": [{"$ref": "#/$defs/digest"}, {"type": "null"}]
+    },
+    "side_effect_class": {"enum": ["SOURCE_ONLY", "DISPOSABLE_TEST"]},
+    "disposable_effect_chain_digests": {
+      "type": "array",
+      "maxItems": 64,
+      "uniqueItems": true,
+      "items": {"$ref": "#/$defs/digest"}
+    },
+    "production_effect_count": {"const": 0},
+    "payload_digest": {"$ref": "#/$defs/digest"}
+  },
+  "$defs": {
+    "digest": {"type": "string", "pattern": "^sha256:[0-9a-f]{64}$"},
+    "git_sha": {"type": "string", "pattern": "^[0-9a-f]{40}$"}
+  }
+}

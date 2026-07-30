@@ -1,0 +1,40 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://arcane-equilibrium.local/schemas/s2_5_recovery_anchor_effect_postcheck_v1.schema.json",
+  "title": "s2_5_recovery_anchor_effect_postcheck_v1",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "schema_version", "result_digest", "status", "exact_readback_digest",
+    "enumeration_digest", "latest_digest", "appended_entry_present",
+    "latest_advanced", "checked_at", "failure_code", "evidence_class",
+    "side_effect_class", "target_class", "target_profile_id",
+    "production_effect", "production_authority", "production_effect_count",
+    "self_digest"
+  ],
+  "properties": {
+    "schema_version": {"const": "s2_5_recovery_anchor_effect_postcheck_v1"},
+    "result_digest": {"$ref": "#/$defs/digest"},
+    "status": {"enum": ["NOT_PERFORMED", "LOCAL_EXACT_UNVERIFIED", "RECOVERY_REQUIRED"]},
+    "exact_readback_digest": {"$ref": "#/$defs/nullableDigest"},
+    "enumeration_digest": {"$ref": "#/$defs/nullableDigest"},
+    "latest_digest": {"$ref": "#/$defs/nullableDigest"},
+    "appended_entry_present": {"type": "boolean"},
+    "latest_advanced": {"type": "boolean"},
+    "checked_at": {"type": "string", "format": "date-time"},
+    "failure_code": {"$ref": "#/$defs/nullableString"},
+    "evidence_class": {"const": "LOCAL_REPRODUCIBLE"},
+    "side_effect_class": {"const": "DISPOSABLE_TEST"},
+    "target_class": {"const": "disposable_systemd"},
+    "target_profile_id": {"const": "s2_5_recovery_user_systemd_disposable_v1"},
+    "production_effect": {"const": false},
+    "production_authority": {"const": false},
+    "production_effect_count": {"const": 0},
+    "self_digest": {"$ref": "#/$defs/digest"}
+  },
+  "$defs": {
+    "digest": {"type": "string", "pattern": "^sha256:[0-9a-f]{64}$"},
+    "nullableDigest": {"anyOf": [{"$ref": "#/$defs/digest"}, {"type": "null"}]},
+    "nullableString": {"anyOf": [{"type": "string", "minLength": 1}, {"type": "null"}]}
+  }
+}

@@ -3,10 +3,12 @@
 from __future__ import annotations
 
 import inspect
+import io
 import json
 import os
 import subprocess
 import sys
+import zipfile
 from copy import deepcopy
 from pathlib import Path
 
@@ -19,6 +21,7 @@ if str(IMPLEMENTATION) not in sys.path:
     sys.path.insert(0, str(IMPLEMENTATION))
 
 import agent_governance_command_capture_v2 as capture_v2  # noqa: E402
+import agent_governance as governance  # noqa: E402
 from agent_governance_capture_binding import collect_capture_evidence  # noqa: E402
 from agent_governance_context import capture_repository_baseline  # noqa: E402
 from agent_governance_execution import (  # noqa: E402
@@ -167,6 +170,28 @@ def test_native_node_and_dispatch_scope_are_derived_not_caller_asserted() -> Non
     assert "path_scope" not in inspect.signature(
         capture_v2.capture_governed_command
     ).parameters
+
+
+def test_full_w0_default_capture_ceiling_is_bounded_600_seconds() -> None:
+    assert (
+        inspect.signature(capture_v2.capture_governed_command)
+        .parameters["timeout_seconds"]
+        .default
+        == 600
+    )
+    parsed = governance._build_parser().parse_args([
+        "capture-command",
+        "--native-agent",
+        "E2",
+        "--node-id",
+        "review",
+        "--context-artifact",
+        "{}",
+        "--",
+        "git",
+        "status",
+    ])
+    assert parsed.timeout_seconds == 600
 
 
 def test_verification_scope_binds_read_only_capture_and_closure_replay() -> None:
@@ -361,6 +386,244 @@ def test_secret_environment_is_removed_and_secret_preview_is_redacted(
     assert "fake-secret-value" not in preview
     assert preview == "TOKEN=<redacted>\n"
     assert literal["stdout"]["preview_redacted"] is True
+
+
+def test_controlled_pytest_environment_uses_only_bound_provider_capsule(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    provider_capsule = tmp_path / "provider-capsule"
+    caller_site = tmp_path / "caller-selected-site"
+    for path in (provider_capsule, caller_site):
+        path.mkdir()
+    monkeypatch.setenv("PYTHONPATH", str(caller_site))
+
+    pytest_isolation = tmp_path / "pytest-isolation"
+    pytest_isolation.mkdir()
+    pytest_environment = capture_v2._controlled_environment(
+        pytest_isolation,
+        argv=[
+            *capture_v2.GOVERNED_PYTEST_PREFIX,
+            *capture_v2.GOVERNED_PYTEST_REQUIRED_ARGS,
+            "-q",
+            "tests/test_one.py",
+        ],
+        pytest_provider=provider_capsule,
+    )
+    assert pytest_environment["PYTHONPATH"] == str(provider_capsule)
+    assert str(caller_site) not in pytest_environment["PYTHONPATH"]
+    assert pytest_environment["PYTHONNOUSERSITE"] == "1"
+    assert pytest_environment["PYTEST_DISABLE_PLUGIN_AUTOLOAD"] == "1"
+    assert pytest_environment["PYTHONSAFEPATH"] == "1"
+
+    read_only_isolation = tmp_path / "read-only-isolation"
+    read_only_isolation.mkdir()
+    read_only_environment = capture_v2._controlled_environment(
+        read_only_isolation,
+        argv=["git", "rev-parse", "HEAD"],
+    )
+    assert "PYTHONPATH" not in read_only_environment
+
+
+def test_closed_command_capture_schema_requires_nullable_provider_field() -> None:
+    schema = json.loads(
+        (ROOT / ".codex/schemas/closure_packet_v1.schema.json").read_text(
+            encoding="utf-8"
+        )
+    )
+    command_capture = schema["$defs"]["commandCaptureV2"]
+
+    assert "pytest_provider" in command_capture["required"]
+    assert command_capture["properties"]["pytest_provider"] == {
+        "anyOf": [
+            {"$ref": "#/$defs/governedPytestProvider"},
+            {"type": "null"},
+        ]
+    }
+
+
+def test_nested_capture_recovers_code_owned_pytest_provider(
+    tmp_path: Path,
+) -> None:
+    probe = tmp_path / "test_nested_provider.py"
+    probe.write_text("def test_nested_provider():\n    assert True\n")
+    code = (
+        "import sys;"
+        f"sys.path.insert(0,{str(IMPLEMENTATION)!r});"
+        "import agent_governance_command_capture_v2 as capture;"
+        "result=capture._execute("
+        "[*capture.GOVERNED_PYTEST_PREFIX,"
+        "*capture.GOVERNED_PYTEST_REQUIRED_ARGS,'-q',"
+        f"{str(probe)!r}],"
+        f"root=__import__('pathlib').Path({str(ROOT)!r}),"
+        "timeout_seconds=30,replay_contract='CANONICAL_TEST_OUTPUT_V1');"
+        "print(result['result'],result['exit_code'])"
+    )
+    outer = capture_v2._execute(
+        [sys.executable, "-c", code],
+        root=ROOT,
+        timeout_seconds=45,
+        replay_contract="EXACT_OUTPUT",
+    )
+    assert outer["result"] == "PASS"
+    assert outer["stdout"]["preview_text"] == "PASS 0\n"
+
+
+def test_governed_pytest_bootstrap_rejects_candidate_provider_injection(
+    tmp_path: Path,
+) -> None:
+    repo = tmp_path / "candidate"
+    repo.mkdir()
+    marker = tmp_path / "provider-injection-marker"
+    poison = (
+        "from pathlib import Path\n"
+        f"Path({str(marker)!r}).write_text('executed')\n"
+        "raise RuntimeError('candidate provider injection executed')\n"
+    )
+    (repo / "pytest.py").write_text(poison, encoding="utf-8")
+    (repo / "sitecustomize.py").write_text(poison, encoding="utf-8")
+    (repo / "conftest.py").write_text(poison, encoding="utf-8")
+    (repo / "pyproject.toml").write_text(
+        "[tool.pytest.ini_options]\n"
+        "addopts = '-p candidate_plugin'\n",
+        encoding="utf-8",
+    )
+    (repo / "candidate_plugin.py").write_text(poison, encoding="utf-8")
+    (repo / "packaging.py").write_text(poison, encoding="utf-8")
+    probe = repo / "test_real.py"
+    probe.write_text("def test_real():\n    assert True\n", encoding="utf-8")
+    result = capture_v2._execute(
+        [
+            *capture_v2.GOVERNED_PYTEST_PREFIX,
+            *capture_v2.GOVERNED_PYTEST_REQUIRED_ARGS,
+            "-q",
+            str(probe),
+        ],
+        root=repo,
+        timeout_seconds=30,
+        replay_contract="CANONICAL_TEST_OUTPUT_V1",
+    )
+    assert result["result"] == "PASS"
+    assert marker.exists() is False
+    assert result["pytest_provider"]["provider_stable"] is True
+    assert result["pytest_provider"]["project_config_loading_disabled"] is True
+    assert result["pytest_provider"]["test_import_path_appended"] is True
+    assert result["pytest_provider"]["repository_root_fixed"] is True
+    assert capture_v2._pytest_provider_errors(
+        result["pytest_provider"],
+        argv=[
+            *capture_v2.GOVERNED_PYTEST_PREFIX,
+            *capture_v2.GOVERNED_PYTEST_REQUIRED_ARGS,
+            "-q",
+            str(probe),
+        ],
+    ) == []
+
+
+def test_governed_pytest_requires_the_code_owned_git_provider_lock(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    probe = tmp_path / "test_provider_admission.py"
+    probe.write_text(
+        "def test_provider_admission():\n    assert True\n",
+        encoding="utf-8",
+    )
+    monkeypatch.setattr(
+        capture_v2,
+        "GOVERNED_PYTEST_PROVIDER_LOCK_PATH",
+        ".codex/providers/governed_pytest_v1/missing-lock.json",
+    )
+
+    result = capture_v2._execute(
+        [
+            *capture_v2.GOVERNED_PYTEST_PREFIX,
+            *capture_v2.GOVERNED_PYTEST_REQUIRED_ARGS,
+            "-q",
+            str(probe),
+        ],
+        root=ROOT,
+        timeout_seconds=30,
+        replay_contract="CANONICAL_TEST_OUTPUT_V1",
+    )
+
+    assert result["result"] == "FAIL"
+    assert result["exit_code"] == 127
+    assert "code-owned Git blob" in result["stderr"]["preview_text"]
+    assert result["pytest_provider"] is None
+
+
+@pytest.mark.parametrize("unsafe_member", ["../escape.py", "inject.pth"])
+def test_code_owned_provider_rejects_unsafe_wheel_members(
+    tmp_path: Path, unsafe_member: str,
+) -> None:
+    capsule = tmp_path / "capsule"
+    capsule.mkdir()
+    payload = io.BytesIO()
+    with zipfile.ZipFile(payload, "w") as archive:
+        archive.writestr(unsafe_member, "raise RuntimeError('executed')\n")
+
+    with pytest.raises(ValueError, match="wheel member is unsafe"):
+        capture_v2._extract_provider_wheels(
+            capsule,
+            [(
+                {
+                    "path": (
+                        ".codex/providers/governed_pytest_v1/wheels/"
+                        "unsafe-1-py3-none-any.whl"
+                    )
+                },
+                payload.getvalue(),
+            )],
+        )
+    assert not (tmp_path / "escape.py").exists()
+
+
+def test_governed_provider_identity_binds_the_exact_reviewed_head(
+    tmp_path: Path,
+) -> None:
+    probe = tmp_path / "test_provider_head.py"
+    probe.write_text(
+        "def test_provider_head():\n    assert True\n",
+        encoding="utf-8",
+    )
+    argv = [
+        *capture_v2.GOVERNED_PYTEST_PREFIX,
+        *capture_v2.GOVERNED_PYTEST_REQUIRED_ARGS,
+        "-q",
+        str(probe),
+    ]
+    result = capture_v2._execute(
+        argv,
+        root=ROOT,
+        timeout_seconds=30,
+        replay_contract="CANONICAL_TEST_OUTPUT_V1",
+    )
+    assert result["result"] == "PASS"
+    assert any(
+        "differs from the exact reviewed repository head" in error
+        for error in capture_v2._pytest_provider_errors(
+            result["pytest_provider"],
+            argv=argv,
+            expected_source_head="0" * 40,
+        )
+    )
+
+
+def test_plain_pytest_argv_is_rejected_before_execution(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    repository = _git_repository(tmp_path)
+    _patch_test_binding(monkeypatch)
+    with pytest.raises(PermissionError, match="no-site governed bootstrap"):
+        capture_v2.capture_governed_command(
+            native_agent="E2",
+            node_id="review",
+            context_artifact={
+                "artifact_digest": "sha256:" + "a" * 64,
+                "task_contract_digest": "sha256:" + "b" * 64,
+            },
+            argv=["python3", "-m", "pytest", "-q", "scope.txt"],
+            root=repository,
+        )
 
 
 def test_forged_scope_and_host_attestation_are_rejected() -> None:

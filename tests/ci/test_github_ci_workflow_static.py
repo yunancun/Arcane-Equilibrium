@@ -108,6 +108,11 @@ def test_ci_workflow_classifies_paths_before_expensive_jobs() -> None:
     assert set(expected_gate.values()) == set(GATES)
 
 
+def test_development_agent_governance_budget_covers_the_current_suite() -> None:
+    governance = _job("development-agent-governance")
+    assert "timeout-minutes: 30" in governance
+
+
 def test_ci_workflow_keeps_cheap_guards_unconditional() -> None:
     for job_name in ("migration-immutability-guard", "stable-id-duplication-guard"):
         job = _job(job_name)

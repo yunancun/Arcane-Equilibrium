@@ -1,0 +1,88 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://arcane-equilibrium.local/schemas/s2_5_recovery_lock_result_v1.schema.json",
+  "title": "s2_5_recovery_lock_result_v1",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "schema_version", "intent_digest", "status", "session_class", "acquisition_order",
+    "s2_4_lock_acquired", "s2_5_lock_acquired",
+    "first_lock_released_after_second_failure", "lock_files_unlinked",
+    "driver_engaged", "failure_code", "side_effect_class", "target_class",
+    "target_profile_id", "evidence_class", "runtime_observed",
+    "production_effect", "production_authority", "production_effect_count",
+    "self_digest"
+  ],
+  "properties": {
+    "schema_version": {"const": "s2_5_recovery_lock_result_v1"},
+    "intent_digest": {"$ref": "#/$defs/digest"},
+    "status": {
+      "enum": [
+        "RECOVERY_DUAL_LOCK_ACQUIRED", "RECOVERY_DUAL_LOCK_CONTENDED",
+        "REJECTED", "RECOVERY_REQUIRED", "EXTERNAL_VERIFICATION_PENDING"
+      ]
+    },
+    "session_class": {
+      "enum": ["SIMULATION_ONLY", "FIXED_POSIX_RECOVERY_SESSION"]
+    },
+    "acquisition_order": {
+      "type": "array", "minItems": 2, "maxItems": 2,
+      "items": {"enum": ["S2.4", "S2.5"]}
+    },
+    "s2_4_lock_acquired": {"type": "boolean"},
+    "s2_5_lock_acquired": {"type": "boolean"},
+    "first_lock_released_after_second_failure": {"type": "boolean"},
+    "lock_files_unlinked": {"const": false},
+    "driver_engaged": {"type": "boolean"},
+    "failure_code": {
+      "anyOf": [{"type": "string", "minLength": 1}, {"type": "null"}]
+    },
+    "side_effect_class": {"const": "DISPOSABLE_TEST"},
+    "target_class": {"const": "disposable_systemd"},
+    "target_profile_id": {
+      "const": "s2_5_recovery_user_systemd_disposable_v1"
+    },
+    "evidence_class": {"const": "LOCAL_REPRODUCIBLE"},
+    "runtime_observed": {"const": false},
+    "production_effect": {"const": false},
+    "production_authority": {"const": false},
+    "production_effect_count": {"const": 0},
+    "self_digest": {"$ref": "#/$defs/digest"}
+  },
+  "allOf": [
+    {
+      "if": {
+        "properties": {"status": {"const": "RECOVERY_DUAL_LOCK_ACQUIRED"}}
+      },
+      "then": {
+        "properties": {
+          "s2_4_lock_acquired": {"const": true},
+          "s2_5_lock_acquired": {"const": true},
+          "failure_code": {"type": "null"}
+        }
+      }
+    },
+    {
+      "if": {
+        "properties": {
+          "status": {
+            "enum": [
+              "RECOVERY_DUAL_LOCK_CONTENDED", "REJECTED",
+              "RECOVERY_REQUIRED", "EXTERNAL_VERIFICATION_PENDING"
+            ]
+          }
+        }
+      },
+      "then": {
+        "properties": {
+          "s2_4_lock_acquired": {"const": false},
+          "s2_5_lock_acquired": {"const": false},
+          "failure_code": {"type": "string", "minLength": 1}
+        }
+      }
+    }
+  ],
+  "$defs": {
+    "digest": {"type": "string", "pattern": "^sha256:[0-9a-f]{64}$"}
+  }
+}

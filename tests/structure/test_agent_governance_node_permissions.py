@@ -15,6 +15,7 @@ if str(HELPERS) not in sys.path:
 
 from agent_governance_execution_dag import topological_waves  # noqa: E402
 from agent_governance_execution_policy import requested_execution_binding  # noqa: E402
+from agent_governance_permissions import authorize_native_command  # noqa: E402
 from agent_governance_node_permissions import (  # noqa: E402
     validate_node_scoped_permissions,
 )
@@ -426,3 +427,29 @@ def test_routed_pa_analysis_uses_investigator_permission() -> None:
         {"calls": {"call-pa-write": writer_call}, "commands": {}, "changes": {}},
         {"nodes": []}, admitted_writer,
     ) == []
+
+
+@pytest.mark.parametrize("native_agent", ["PA-investigator", "E4-verifier"])
+def test_exact_git_blob_replay_is_the_only_admitted_cat_file_form(
+    native_agent: str,
+) -> None:
+    source_head = "a" * 40
+    allowed = authorize_native_command(
+        native_agent,
+        (
+            "git cat-file blob "
+            f"{source_head}:program_code/ml_training/validator.py"
+        ),
+    )
+    assert allowed["allowed"] is True
+
+    rejected_commands = [
+        f"git cat-file -e {source_head}:program_code/ml_training/validator.py",
+        f"git cat-file blob {source_head[:12]}:program_code/ml_training/validator.py",
+        f"git cat-file blob {source_head}:../outside.py",
+        f"git cat-file blob {source_head}:.ssh/id_ed25519",
+        "git cat-file --batch",
+    ]
+    for command in rejected_commands:
+        decision = authorize_native_command(native_agent, command)
+        assert decision["allowed"] is False, command

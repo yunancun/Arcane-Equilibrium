@@ -92,6 +92,29 @@ def test_real_tree_closure_verdict_derives_pass_and_is_deterministic() -> None:
         "program_code/ml_training/alr_application_identity.py"
         in closure["python_modules"]
     )
+    assert {
+        "program_code/ml_training/aiml_gate_receipt_s2e_consumption.py",
+        "program_code/ml_training/aiml_gate_receipt_s2e_launch.py",
+        "program_code/ml_training/aiml_gate_receipt_source_compatibility.py",
+    }.issubset(closure["python_modules"])
+    assert (
+        "helper_scripts/maintenance_scripts/"
+        "agent_governance_s2e_launch_receipts.py"
+    ) not in closure["python_modules"]
+    assert {
+        "program_code/ml_training/schemas/aiml_gate_receipts/"
+        "s2e_launch_genesis_receipt_v1.schema.json",
+        "program_code/ml_training/schemas/aiml_gate_receipts/"
+        "s2e_launch_consumption_bootstrap_authority_v1.schema.json",
+        "program_code/ml_training/schemas/aiml_gate_receipts/"
+        "s2e_launch_predecessor_consumption_ledger_v1.schema.json",
+        "program_code/ml_training/schemas/aiml_gate_receipts/"
+        "s2e_launch_wave_receipt_v1.schema.json",
+        "program_code/ml_training/schemas/aiml_gate_receipts/"
+        "receipt_carrier_attestation_v1.schema.json",
+        "program_code/ml_training/schemas/aiml_gate_receipts/"
+        "s2e_launch_acceptance_review_bundle_v1.schema.json",
+    }.issubset(closure["schema_resources"])
     assert first["production_authority_flags"] == {
         "nine_authorities_false": True,
         "production_apply_performed": False,

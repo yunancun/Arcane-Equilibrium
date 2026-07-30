@@ -98,10 +98,31 @@ def test_source_lane_positive_round_trips_the_central_gate(tmp_path, monkeypatch
 
 
 def test_registration_is_additive_and_frozen_surfaces_unmoved():
-    # SCHEMA_FILES 79 + schema 檔在盤;PROGRAM_SCHEMA_PATHS 與 frozen 分類身分未動
-    # (digest 凍結值由既有 s2_5 測試釘住;此處釘 additive 面)。
+    # SCHEMA_FILES 91 + schema 檔在盤:既有 79 加上
+    # s2e_launch_genesis_receipt_v1、s2e_launch_wave_receipt_v1、
+    # receipt_carrier_attestation_v1、s2e_launch_acceptance_review_bundle_v1，以及
+    # signed host capture、四份 identity-bound S2.5 recovery contract，以及
+    # closed disposable-test effect chain、predecessor consume-once ledger，
+    # 以及 purpose-specific signed consumption bootstrap authority；
+    # PROGRAM_SCHEMA_PATHS 與 frozen 分類身分未動(digest 凍結值由既有 s2_5 測試釘住)。
     assert "ingestion_compatibility_receipt_v1" in validator.SCHEMA_FILES
-    assert len(validator.SCHEMA_FILES) == 79
+    assert len(validator.SCHEMA_FILES) == 91
+    for s2e_key in (
+        "s2e_launch_genesis_receipt_v1",
+        "s2e_launch_consumption_bootstrap_authority_v1",
+        "s2e_launch_predecessor_consumption_ledger_v1",
+        "s2e_launch_wave_receipt_v1",
+        "receipt_carrier_attestation_v1",
+        "s2e_launch_acceptance_review_bundle_v1",
+        "s2_5_recovery_host_capture_v1",
+        "s2_5_recovery_intent_v1",
+        "s2_5_recovery_postcheck_v1",
+        "s2_5_recovery_result_v1",
+        "s2_5_recovery_rollback_v1",
+    ):
+        assert (
+            validator.SCHEMA_DIR / validator.SCHEMA_FILES[s2e_key]
+        ).is_file()
     assert (
         validator.SCHEMA_DIR
         / validator.SCHEMA_FILES["ingestion_compatibility_receipt_v1"]

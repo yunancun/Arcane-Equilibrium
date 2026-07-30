@@ -1,0 +1,46 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://arcane-equilibrium.local/schemas/s2_5_recovery_lock_postcheck_v1.schema.json",
+  "title": "s2_5_recovery_lock_postcheck_v1",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "schema_version", "result_digest", "status", "lock_chain_digest",
+    "session_class", "store_write_authority", "both_locks_held", "lock_files_unlinked",
+    "failure_code", "side_effect_class", "target_class", "target_profile_id",
+    "evidence_class", "runtime_observed", "production_effect",
+    "production_authority", "production_effect_count", "self_digest"
+  ],
+  "properties": {
+    "schema_version": {"const": "s2_5_recovery_lock_postcheck_v1"},
+    "result_digest": {"$ref": "#/$defs/digest"},
+    "status": {"enum": ["PASS", "NOT_PERFORMED", "RECOVERY_REQUIRED"]},
+    "lock_chain_digest": {"$ref": "#/$defs/nullableDigest"},
+    "session_class": {
+      "enum": ["SIMULATION_ONLY", "FIXED_POSIX_RECOVERY_SESSION"]
+    },
+    "store_write_authority": {"type": "boolean"},
+    "both_locks_held": {"type": "boolean"},
+    "lock_files_unlinked": {"const": false},
+    "failure_code": {
+      "anyOf": [{"type": "string", "minLength": 1}, {"type": "null"}]
+    },
+    "side_effect_class": {"const": "DISPOSABLE_TEST"},
+    "target_class": {"const": "disposable_systemd"},
+    "target_profile_id": {
+      "const": "s2_5_recovery_user_systemd_disposable_v1"
+    },
+    "evidence_class": {"const": "LOCAL_REPRODUCIBLE"},
+    "runtime_observed": {"const": false},
+    "production_effect": {"const": false},
+    "production_authority": {"const": false},
+    "production_effect_count": {"const": 0},
+    "self_digest": {"$ref": "#/$defs/digest"}
+  },
+  "$defs": {
+    "digest": {"type": "string", "pattern": "^sha256:[0-9a-f]{64}$"},
+    "nullableDigest": {
+      "anyOf": [{"$ref": "#/$defs/digest"}, {"type": "null"}]
+    }
+  }
+}

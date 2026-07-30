@@ -1,9 +1,42 @@
 # CLAUDE_CHANGELOG.md — 開發歷史歸檔
 
 > 從 CLAUDE.md / TODO.md 遷出的 Wave/Sprint/Batch + TODO version-increment 歷史敘事。新 session 不需要讀此文件，僅供回顧歷史時查閱。
-> 最後更新：2026-07-29（AIML S2E-LW1-LW5 launch contract；TODO v862／PROGRESS ledger v16）
+> 最後更新：2026-07-30（AIML S2E launch-gate calibration；PROGRESS ledger v19）
 
 ---
+
+## AIML S2E launch-gate calibration checkpoint（2026-07-30）
+
+在不發行 W0/LW1 receipt、不進 LW2、也不執行任何 production effect 的邊界內，
+修復 launch-gate review debt：predecessor consume-once 的本地雙 copy／lock 被全刪或
+全改名後，必須提交 fixed-root SSHSIG 驗證、綁 candidate/source/wave/review/expected
+entry 且帶 trusted single-use registry claim 的 bootstrap authority；unsigned、
+cross-candidate、valid-empty、symlink、partial-write 路徑均 fail closed，exact signed
+entry 可 crash/retry。Governed pytest provider 不再複製 ambient user-site，改從
+reviewed Git head 的 exact lock 與 8 支 hash-pinned pure-Python wheels 做 bounded
+safe extraction，provider identity 納入 closure schema；S2E source manifest 另做
+candidate Git-blob repo-local import closure，並納入 pytest 會執行的 tracked
+package-parent `__init__.py`；210-test W0 在 300 秒留下 2 項未完成，故 bounded
+capture default 依 exact-head machine evidence 調為 600 秒。
+Frozen-candidate current-head Codex review 後再修兩項：prepared anchor intent
+已過期時在任何 writer 呼叫前產生 typed `RECOVERY_REQUIRED` chain；recovery
+controller 不再依賴可被 GC／restart 清除的 weak registry，改用 strong live
+ownership 與可替換 state root 外的 owner-only append-history durable latch ledger，
+並在每次 admission／更新後重驗 exact readback。ledger effect boundary 固定
+`DISPOSABLE_TEST`、production effect／authority false。
+Delta review 再補 coherent-prefix rollback：process reconstruction 只讀到
+resolved tombstone 時，沒有 external monotonic floor 不得再進 effect；predecessor
+consume-once 改為每次（含 intact-state retry）都必須驗 fresh、candidate-bound、
+single-use external registry authority，Git common directory 內 state＋anchor
+同步 rollback 不再自行取得 consumption authority。
+後續 exact-head review 的兩項 P1（`#discussion_r3685648122`、
+`#discussion_r3685648131`）亦在 publication 前閉合：receipt issuance 在任何
+驗證／effect 前只從 host clock 擷取一次 UTC，API／CLI 不再接受 caller `now`；
+owner/mode-checked off-repository trust-root profile 同時釘住 governed pytest
+provider profile 與 exact lock SHA256，lock 再釘住八支 wheel hash，因此 candidate
+不能用一組同步竄改的 wheel＋lock 自我認證。
+此 checkpoint 不改 5/9 package projection；`S2E.2b-2` 仍 ACTIVE，
+`S2E_2B_2A_SECURITY_RECOVERY_READY` 尚未成立，production effect 仍 0/6。
 
 ## AIML S2E-LW1-LW5 launch contract — TODO v862（2026-07-29）
 

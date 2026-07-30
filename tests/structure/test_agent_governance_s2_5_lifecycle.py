@@ -48,6 +48,119 @@ def test_driver_none_returns_external_verification_pending_with_zero_mutation(
     assert not (tmp_path / "state").exists()  # 零 journal/ledger 寫入(state root 未被建立)。
 
 
+def test_operation_rejects_host_capture_from_a_different_source_before_driver(
+    tmp_path, monkeypatch
+):
+    _key, intent, permit, unit = kit.a_side_setup(tmp_path, monkeypatch)
+    state_root = kit.fresh_state_root(tmp_path, "source-bound-state")
+    controller = lifecycle.S2_5RecoveryState(
+        state_root=state_root,
+        host_capture=kit.signed_recovery_host_capture(
+            state_root, source_head="b" * 40
+        ),
+        now=kit.NOW,
+    )
+    verdict = lifecycle.apply_s2_5_start(
+        intent,
+        permit,
+        unit,
+        **kit.apply_kwargs(
+            tmp_path=tmp_path,
+            unit=unit,
+            state_root=state_root,
+            recovery_state=controller,
+        ),
+    )
+    assert verdict["status"] == lifecycle.S2_5_STATUS_REQUEST_REJECTED
+    assert any("source_head" in reason for reason in verdict["reasons"])
+    assert unit.calls == []
+
+
+def test_operation_revalidates_host_capture_freshness_before_driver(
+    tmp_path, monkeypatch
+):
+    _key, intent, permit, unit = kit.a_side_setup(tmp_path, monkeypatch)
+    state_root = kit.fresh_state_root(tmp_path, "freshness-bound-state")
+    controller = lifecycle.S2_5RecoveryState(
+        state_root=state_root,
+        host_capture=kit.signed_recovery_host_capture(
+            state_root,
+            observed_at="2030-01-01T00:00:00+00:00",
+            expires_at="2030-01-01T00:03:00+00:00",
+        ),
+        now=kit.NOW,
+    )
+    verdict = lifecycle.apply_s2_5_start(
+        intent,
+        permit,
+        unit,
+        **kit.apply_kwargs(
+            tmp_path=tmp_path,
+            unit=unit,
+            state_root=state_root,
+            recovery_state=controller,
+            now="2030-01-01T00:04:00+00:00",
+        ),
+    )
+    assert verdict["status"] == lifecycle.S2_5_STATUS_RECOVERY_REQUIRED
+    assert any("stale" in reason for reason in verdict["reasons"])
+    assert unit.calls == []
+
+
+@pytest.mark.parametrize(
+    "corrupt_capture",
+    [b"{}", b'{"boot_manager_facts":[]}', b'{"boot_manager_facts":null}'],
+)
+def test_operation_rejects_post_construction_capture_substitution_before_driver(
+    tmp_path, monkeypatch, corrupt_capture
+):
+    _key, intent, permit, unit = kit.a_side_setup(tmp_path, monkeypatch)
+    state_root = kit.fresh_state_root(tmp_path, "substituted-capture-state")
+    controller = kit.recovery_controller(state_root)
+    original = controller.host_capture
+    for field, replacement in (
+        ("host_capture", {}),
+        ("host_capture_digest", "sha256:" + "0" * 64),
+        ("host_identity", "foreign-host"),
+        ("state_root", tmp_path / "foreign-root"),
+        ("root_id", "sha256:" + "1" * 64),
+    ):
+        with pytest.raises(AttributeError):
+            setattr(controller, field, replacement)
+    projected = controller.host_capture
+    projected["source_head"] = "b" * 40
+    assert controller.host_capture == original
+
+    binding = controller._binding
+    corrupt = type(binding)(
+        state_root=binding.state_root,
+        host_capture_bytes=corrupt_capture,
+        host_capture_digest=binding.host_capture_digest,
+        host_identity=binding.host_identity,
+        root_id=binding.root_id,
+        binding_digest=binding.binding_digest,
+    )
+    object.__setattr__(controller, "_binding", corrupt)
+    kwargs = kit.apply_kwargs(
+        tmp_path=tmp_path,
+        unit=unit,
+        state_root=state_root,
+        recovery_state=controller,
+    )
+    verdict = lifecycle.apply_s2_5_start(
+        intent,
+        permit,
+        unit,
+        **kwargs,
+    )
+    assert verdict["status"] == lifecycle.S2_5_STATUS_RECOVERY_REQUIRED
+    assert verdict["reasons"]
+    assert unit.calls == []
+    assert kwargs["install_lock_probe"].probes == 0
+    assert kwargs["lifecycle_lock"].acquires == 0
+    assert not state_root.exists()
+
+
 def test_final_driver_none_returns_external_verification_pending(tmp_path, monkeypatch):
     _key, intent, permit, unit, pre_drill = kit.b_side_setup(tmp_path, monkeypatch)
     verdict = lifecycle.apply_s2_5_final(

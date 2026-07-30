@@ -1,0 +1,206 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://arcane-equilibrium.local/schemas/s2e_disposable_test_effect_chain_v1.schema.json",
+  "title": "s2e_disposable_test_effect_chain_v1",
+  "description": "Typed intent/result/postcheck/rollback chain for one governed S2E disposable acceptance-test capture.",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "schema_version",
+    "effect_id",
+    "wave",
+    "wave_exit_id",
+    "source_head",
+    "source_tree",
+    "side_effect_class",
+    "production_effect_count",
+    "intent",
+    "result",
+    "postcheck",
+    "rollback",
+    "chain_digest"
+  ],
+  "properties": {
+    "schema_version": {"const": "s2e_disposable_test_effect_chain_v1"},
+    "effect_id": {"$ref": "#/$defs/digest"},
+    "wave": {"$ref": "#/$defs/wave"},
+    "wave_exit_id": {"$ref": "#/$defs/wave_exit_id"},
+    "source_head": {"$ref": "#/$defs/git_sha"},
+    "source_tree": {"$ref": "#/$defs/git_sha"},
+    "side_effect_class": {"const": "DISPOSABLE_TEST"},
+    "production_effect_count": {"const": 0},
+    "intent": {"$ref": "#/$defs/intent"},
+    "result": {"$ref": "#/$defs/result"},
+    "postcheck": {"$ref": "#/$defs/postcheck"},
+    "rollback": {"$ref": "#/$defs/rollback"},
+    "chain_digest": {"$ref": "#/$defs/digest"}
+  },
+  "$defs": {
+    "digest": {"type": "string", "pattern": "^sha256:[0-9a-f]{64}$"},
+    "git_sha": {"type": "string", "pattern": "^[0-9a-f]{40}$"},
+    "wave": {
+      "enum": [
+        "W0-GENESIS",
+        "S2E-LW1",
+        "S2E-LW2",
+        "S2E-LW3",
+        "S2E-LW4",
+        "S2E-LW5"
+      ]
+    },
+    "wave_exit_id": {
+      "enum": [
+        "W0_GENESIS_READY",
+        "S2E_2B_2A_SECURITY_RECOVERY_READY",
+        "S2E_2B_2B_HOST_RUNNER_CHECKPOINT_READY",
+        "S2E_2B_3_ROW_DRIVERS_CHECKPOINT_READY",
+        "S2E_4_RUNTIME_CLOSURE_CHECKPOINT_READY",
+        "S2E_LW5_IMPLEMENTATION_READY"
+      ]
+    },
+    "argv": {
+      "type": "array",
+      "minItems": 5,
+      "maxItems": 256,
+      "items": {"type": "string", "minLength": 1, "maxLength": 1024}
+    },
+    "intent": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "schema_version",
+        "effect_id",
+        "wave",
+        "wave_exit_id",
+        "source_head",
+        "source_tree",
+        "target_profile_id",
+        "argv",
+        "side_effect_class",
+        "production_effect",
+        "production_authority",
+        "issued_at",
+        "intent_digest"
+      ],
+      "properties": {
+        "schema_version": {"const": "s2e_disposable_test_intent_v1"},
+        "effect_id": {"$ref": "#/$defs/digest"},
+        "wave": {"$ref": "#/$defs/wave"},
+        "wave_exit_id": {"$ref": "#/$defs/wave_exit_id"},
+        "source_head": {"$ref": "#/$defs/git_sha"},
+        "source_tree": {"$ref": "#/$defs/git_sha"},
+        "target_profile_id": {
+          "const": "governed_command_repository_policy_only_v1"
+        },
+        "argv": {"$ref": "#/$defs/argv"},
+        "side_effect_class": {"const": "DISPOSABLE_TEST"},
+        "production_effect": {"const": false},
+        "production_authority": {"const": false},
+        "issued_at": {"type": "string", "format": "date-time"},
+        "intent_digest": {"$ref": "#/$defs/digest"}
+      }
+    },
+    "result": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "schema_version",
+        "effect_id",
+        "intent_digest",
+        "governed_capture_record_digest",
+        "status",
+        "exit_code",
+        "stdout_digest",
+        "stderr_digest",
+        "started_at",
+        "completed_at",
+        "production_effect",
+        "result_digest"
+      ],
+      "properties": {
+        "schema_version": {"const": "s2e_disposable_test_result_v1"},
+        "effect_id": {"$ref": "#/$defs/digest"},
+        "intent_digest": {"$ref": "#/$defs/digest"},
+        "governed_capture_record_digest": {"$ref": "#/$defs/digest"},
+        "status": {"const": "PASS"},
+        "exit_code": {"const": 0},
+        "stdout_digest": {"$ref": "#/$defs/digest"},
+        "stderr_digest": {"$ref": "#/$defs/digest"},
+        "started_at": {"type": "string", "format": "date-time"},
+        "completed_at": {"type": "string", "format": "date-time"},
+        "production_effect": {"const": false},
+        "result_digest": {"$ref": "#/$defs/digest"}
+      }
+    },
+    "postcheck": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "schema_version",
+        "effect_id",
+        "result_digest",
+        "source_head",
+        "repository_generation_before",
+        "repository_generation_after",
+        "repository_unchanged",
+        "isolated_temp_root_cleanup",
+        "repository_residue_count",
+        "production_target_observed",
+        "production_target_observation_scope",
+        "effect_enforcement",
+        "host_sandbox_attestation_ref",
+        "status",
+        "observed_at",
+        "postcheck_digest"
+      ],
+      "properties": {
+        "schema_version": {"const": "s2e_disposable_test_postcheck_v1"},
+        "effect_id": {"$ref": "#/$defs/digest"},
+        "result_digest": {"$ref": "#/$defs/digest"},
+        "source_head": {"$ref": "#/$defs/git_sha"},
+        "repository_generation_before": {"$ref": "#/$defs/digest"},
+        "repository_generation_after": {"$ref": "#/$defs/digest"},
+        "repository_unchanged": {"const": true},
+        "isolated_temp_root_cleanup": {
+          "const": "TEMPORARY_DIRECTORY_CONTEXT_EXITED"
+        },
+        "repository_residue_count": {"const": 0},
+        "production_target_observed": {"const": false},
+        "production_target_observation_scope": {
+          "const": "COMMAND_CAPTURE_REPOSITORY_POLICY_ONLY"
+        },
+        "effect_enforcement": {"const": "repository_policy_only"},
+        "host_sandbox_attestation_ref": {"type": "null"},
+        "status": {"const": "PASS"},
+        "observed_at": {"type": "string", "format": "date-time"},
+        "postcheck_digest": {"$ref": "#/$defs/digest"}
+      }
+    },
+    "rollback": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "schema_version",
+        "effect_id",
+        "result_digest",
+        "postcheck_digest",
+        "status",
+        "rollback_performed",
+        "residue_count",
+        "production_effect",
+        "rollback_digest"
+      ],
+      "properties": {
+        "schema_version": {"const": "s2e_disposable_test_rollback_v1"},
+        "effect_id": {"$ref": "#/$defs/digest"},
+        "result_digest": {"$ref": "#/$defs/digest"},
+        "postcheck_digest": {"$ref": "#/$defs/digest"},
+        "status": {"const": "NOT_REQUIRED_CLEAN_POSTCHECK"},
+        "rollback_performed": {"const": false},
+        "residue_count": {"const": 0},
+        "production_effect": {"const": false},
+        "rollback_digest": {"$ref": "#/$defs/digest"}
+      }
+    }
+  }
+}

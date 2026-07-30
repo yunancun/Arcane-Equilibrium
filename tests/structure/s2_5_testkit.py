@@ -30,6 +30,7 @@ from agent_governance_s2_4_install_evidence import (  # noqa: E402
 import agent_governance_s2_4_install_plan as s2_4_install_plan  # noqa: E402
 import agent_governance_s2_5_attestation as attestation  # noqa: E402
 import agent_governance_s2_5_lifecycle as lifecycle  # noqa: E402
+import aiml_gate_receipt_s2_5_host_capture as host_capture_leaf  # noqa: E402
 import aiml_gate_receipt_validator as validator  # noqa: E402
 
 ANCHOR = datetime(2030, 1, 1, 0, 0, 0, tzinfo=timezone.utc)
@@ -60,6 +61,8 @@ OWNER_SIGNALS = {
 OWNER_FINGERPRINT = inventory.compute_owner_fingerprint(**OWNER_SIGNALS)
 _SIGN_SEQ = [0]
 _STATE_SEQ = [0]
+_RECOVERY_CONTROLLERS: dict[str, lifecycle.S2_5RecoveryState] = {}
+_HOST_CAPTURE_SIGNING_PROFILE: dict[str, Any] = {}
 
 
 def frozen_clock(offset_minutes: float = 3.0):
@@ -83,6 +86,89 @@ def mint_key(tmp_path: Path, name: str = "s2-5-operator"):
         check=True, capture_output=True, text=True,
     ).stdout.split()[1]
     return private_key, public_key, fingerprint
+
+
+def signed_recovery_host_capture(
+    state_root: Path,
+    *,
+    source_head: str = SOURCE_HEAD,
+    observed_at: str = NOW,
+    expires_at: str = EXPIRES,
+) -> dict[str, Any]:
+    """Mint a disposable signed host capture for source-only lifecycle tests."""
+
+    canonical_root = state_root.resolve(strict=False)
+    if not _HOST_CAPTURE_SIGNING_PROFILE:
+        canonical_root.parent.mkdir(parents=True, exist_ok=True)
+        private_key, public_key, fingerprint = mint_key(
+            canonical_root.parent, "s2-5-host-capture"
+        )
+        _HOST_CAPTURE_SIGNING_PROFILE.update(
+            private_key=private_key, public_key=public_key, fingerprint=fingerprint
+        )
+    profile = _HOST_CAPTURE_SIGNING_PROFILE
+    host_capture_leaf._load_recovery_host_capture_trust_root_public_key = (
+        lambda: profile["public_key"]
+    )
+    host_capture_leaf.RECOVERY_HOST_CAPTURE_TRUST_ROOT_FINGERPRINT = profile[
+        "fingerprint"
+    ]
+    signed = {
+        "schema_version": host_capture_leaf.HOST_CAPTURE_SCHEMA_VERSION,
+        "capture_profile": host_capture_leaf.HOST_CAPTURE_PROFILE,
+        "source_head": source_head,
+        "stable_host_facts": {
+            "machine_id_digest": "sha256:" + "8" * 64,
+            "node_name": "disposable-systemd-test",
+            "os_id": "linux",
+            "architecture": "x86_64",
+        },
+        "host_identity": "",
+        "node_identity": {
+            "node_id": "s2-5-host-attestor",
+            "role": "HOST_ATTESTOR",
+            "permission": "read_only",
+            "key_identity": "key:s2-5-host-attestor",
+        },
+        "process_identity": {
+            "uid": 4300,
+            "cgroup": "/system.slice/s2-5-host-capture.service",
+        },
+        "boot_manager_facts": {
+            "boot_id": "boot-disposable-test",
+            "manager": "systemd",
+            "manager_root": "/run/systemd/system",
+            "unit_name": lifecycle.S2_5_UNIT_NAME,
+            "canonical_state_root": str(canonical_root),
+        },
+        "observed_at": observed_at,
+        "expires_at": expires_at,
+        "side_effect_class": "DISPOSABLE_TEST",
+        "production_effect": False,
+        "production_authority": False,
+        "target_class": "disposable_systemd",
+    }
+    signed["host_identity"] = (
+        host_capture_leaf.derive_s2_5_recovery_host_identity(signed)
+    )
+    capture = {
+        **signed,
+        "signer_identity": (
+            host_capture_leaf.RECOVERY_HOST_CAPTURE_SIGNER_IDENTITY
+        ),
+        "signer_fingerprint": profile["fingerprint"],
+        "signature_namespace": (
+            host_capture_leaf.RECOVERY_HOST_CAPTURE_SIGNATURE_NAMESPACE
+        ),
+        "signed_binding": dict(signed),
+        "sshsig_armored": _sign_bytes(
+            profile["private_key"],
+            validator._canonical_bytes(signed),
+            namespace=host_capture_leaf.RECOVERY_HOST_CAPTURE_SIGNATURE_NAMESPACE,
+        ),
+    }
+    capture["self_digest"] = validator.artifact_self_digest(capture)
+    return capture
 
 
 def install_pinned_key(monkeypatch, public_key: str, fingerprint: str) -> None:
@@ -750,6 +836,21 @@ def fresh_state_root(tmp_path: Path, label: str = "state") -> Path:
     return tmp_path / f"{label}-{_STATE_SEQ[0]}"
 
 
+def recovery_controller(state_root: Path) -> lifecycle.S2_5RecoveryState:
+    """Return the one shared controller for a canonical disposable state root."""
+
+    key = str(state_root.resolve(strict=False))
+    controller = _RECOVERY_CONTROLLERS.get(key)
+    if controller is None:
+        controller = lifecycle.S2_5RecoveryState(
+            state_root=state_root,
+            host_capture=signed_recovery_host_capture(state_root),
+            now=NOW,
+        )
+        _RECOVERY_CONTROLLERS[key] = controller
+    return controller
+
+
 def apply_kwargs(
     *,
     tmp_path: Path,
@@ -761,6 +862,12 @@ def apply_kwargs(
     """``apply_s2_5_start``/``apply_s2_5_final`` 的 happy-path 共同參數面(可逐鍵覆蓋)。"""
 
     clock = clock or frozen_clock()
+    state_root = overrides.get("state_root", tmp_path / "state")
+    controller_root = state_root if state_root is not None else tmp_path / "absent-state-root"
+    recovery_state = (
+        overrides["recovery_state"]
+        if "recovery_state" in overrides else recovery_controller(controller_root)
+    )
     kwargs: dict[str, Any] = {
         "now": NOW,
         "replay_ledger": empty_ledger(),
@@ -774,7 +881,8 @@ def apply_kwargs(
         # F3:兩個 lock 面是兩個資源(S2.4 install probe-only / S2.5 lifecycle hold)。
         "install_lock_probe": SimulatedInstallLockProbe(),
         "lifecycle_lock": SimulatedLifecycleLock(),
-        "state_root": tmp_path / "state",
+        "state_root": state_root,
+        "recovery_state": recovery_state,
         "observers": observers or HarnessObserver(unit, clock=clock),
         "owner_fingerprint": OWNER_FINGERPRINT,
         "clock": clock,

@@ -1,0 +1,173 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://arcane-equilibrium.local/schemas/s2_5_recovery_controller_state_v2.schema.json",
+  "title": "s2_5_recovery_controller_state_v2",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "schema_version", "candidate_subject", "candidate_subject_digest",
+    "pending_outbox", "pending_outbox_digest", "attached_anchor_proof",
+    "attached_anchor_proof_digest", "trust_status", "side_effect_class",
+    "target_class", "target_profile_id", "production_effect",
+    "production_authority", "production_effect_count", "self_digest"
+  ],
+  "properties": {
+    "schema_version": {"const": "s2_5_recovery_controller_state_v2"},
+    "candidate_subject": {"$ref": "#/$defs/candidate"},
+    "candidate_subject_digest": {"$ref": "#/$defs/digest"},
+    "pending_outbox": {"anyOf": [{"type": "object"}, {"type": "null"}]},
+    "pending_outbox_digest": {"$ref": "#/$defs/nullableDigest"},
+    "attached_anchor_proof": {"anyOf": [{"type": "object"}, {"type": "null"}]},
+    "attached_anchor_proof_digest": {"$ref": "#/$defs/nullableDigest"},
+    "trust_status": {"const": "UNVERIFIED_EXTERNAL_ANCHOR_REQUIRED"},
+    "side_effect_class": {"const": "DISPOSABLE_TEST"},
+    "target_class": {"const": "disposable_systemd"},
+    "target_profile_id": {"const": "s2_5_recovery_user_systemd_disposable_v1"},
+    "production_effect": {"const": false},
+    "production_authority": {"const": false},
+    "production_effect_count": {"const": 0},
+    "self_digest": {"$ref": "#/$defs/digest"}
+  },
+  "$defs": {
+    "digest": {"type": "string", "pattern": "^sha256:[0-9a-f]{64}$"},
+    "nullableDigest": {"anyOf": [{"$ref": "#/$defs/digest"}, {"type": "null"}]},
+    "head": {"type": "string", "pattern": "^[0-9a-f]{40}$"},
+    "nullableText": {"anyOf": [{"type": "string", "minLength": 1}, {"type": "null"}]},
+    "nullableJson": {"anyOf": [{"type": "string", "minLength": 2}, {"type": "null"}]},
+    "stableHostFacts": {
+      "type": "object", "additionalProperties": false,
+      "required": ["machine_id_digest", "node_name", "os_id", "architecture"],
+      "properties": {
+        "machine_id_digest": {"$ref": "#/$defs/digest"},
+        "node_name": {"type": "string", "minLength": 1},
+        "os_id": {"type": "string", "minLength": 1},
+        "architecture": {"type": "string", "minLength": 1}
+      }
+    },
+    "stateRootIdentity": {
+      "type": "object", "additionalProperties": false,
+      "required": ["canonical_path", "device", "inode", "mode", "uid", "gid", "nlink", "is_directory"],
+      "properties": {
+        "canonical_path": {"const": "/run/user/1000/arcane-equilibrium-aiml-s2e/s2_5-recovery"},
+        "device": {"type": "integer", "minimum": 0},
+        "inode": {"type": "integer", "minimum": 1},
+        "mode": {"const": "0700"},
+        "uid": {"const": 1000},
+        "gid": {"const": 1000},
+        "nlink": {"type": "integer", "minimum": 1},
+        "is_directory": {"const": true}
+      }
+    },
+    "journalEntry": {
+      "type": "object", "additionalProperties": false,
+      "required": ["basename", "start_id", "file_digest", "journal_head_digest", "terminal_state"],
+      "properties": {
+        "basename": {"type": "string", "pattern": "^s2-5-[0-9a-f]{64}\\.journal\\.json$"},
+        "start_id": {"type": "string", "pattern": "^s2-5-[0-9a-f]{64}$"},
+        "file_digest": {"$ref": "#/$defs/digest"},
+        "journal_head_digest": {"$ref": "#/$defs/digest"},
+        "terminal_state": {"enum": ["RECOVERY_REQUIRED", "TERMINAL_SUCCESS", "TERMINAL_ROLLED_BACK", "TERMINAL_FAILED"]}
+      }
+    },
+    "replayLedger": {
+      "type": "object", "additionalProperties": false,
+      "required": ["schema_version", "basename", "present", "authorization_ids", "entry_count", "file_digest", "head_digest"],
+      "properties": {
+        "schema_version": {"const": "s2_5_recovery_replay_projection_v2"},
+        "basename": {"const": "authorization-replay-ledger.json"},
+        "present": {"type": "boolean"},
+        "authorization_ids": {
+          "type": "array", "uniqueItems": true,
+          "items": {"type": "string", "pattern": "^s2-5-auth-[0-9a-f]{64}$"}
+        },
+        "entry_count": {"type": "integer", "minimum": 0},
+        "file_digest": {"$ref": "#/$defs/nullableDigest"},
+        "head_digest": {"$ref": "#/$defs/nullableDigest"}
+      }
+    },
+    "candidate": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "schema_version", "controller_id", "phase", "anchor_progress",
+        "generation", "previous_controller_state_digest",
+        "previous_manifest_digest", "stable_host_facts", "host_identity",
+        "canonical_state_root", "stable_root_id", "state_root_identity",
+        "state_root_id", "source_head", "start_id", "task_digest",
+        "operation", "authorization_id", "unresolved_payload_json",
+        "unresolved_state_digest", "failure_host_capture_json",
+        "failure_host_capture_digest", "recovery_admission_capture_json",
+        "recovery_admission_capture_digest", "journal_inventory",
+        "journal_set_digest", "replay_ledger", "replay_ledger_head_digest",
+        "consumed_authorization_ids", "recovery_intent_json",
+        "recovery_intent_digest", "consumption_proof_json",
+        "consumption_proof_digest", "effect_result_json",
+        "effect_result_digest", "rollback_result_json",
+        "rollback_result_digest", "independent_postcheck_json",
+        "independent_postcheck_digest", "prior_phase_anchor_proof_digest",
+        "previous_external_sequence", "previous_external_head_digest",
+        "external_monotonic_floor", "external_snapshot_id",
+        "external_latest_version_id", "trust_status", "side_effect_class",
+        "target_class", "target_profile_id", "production_effect",
+        "production_authority", "production_effect_count"
+      ],
+      "properties": {
+        "schema_version": {"const": "s2_5_recovery_controller_candidate_v2"},
+        "controller_id": {"type": "string", "pattern": "^s2-5-controller-[0-9a-f]{64}$"},
+        "phase": {"enum": ["PREPARED", "CONSUMED", "COMMITTED", "RESOLVED"]},
+        "anchor_progress": {"enum": ["OUTBOX_PREPARED", "PROOF_ATTACHED_UNVERIFIED"]},
+        "generation": {"type": "integer", "minimum": 1},
+        "previous_controller_state_digest": {"$ref": "#/$defs/nullableDigest"},
+        "previous_manifest_digest": {"$ref": "#/$defs/nullableDigest"},
+        "stable_host_facts": {"$ref": "#/$defs/stableHostFacts"},
+        "host_identity": {"type": "string", "pattern": "^host:[0-9a-f]{64}$"},
+        "canonical_state_root": {"const": "/run/user/1000/arcane-equilibrium-aiml-s2e/s2_5-recovery"},
+        "stable_root_id": {"$ref": "#/$defs/digest"},
+        "state_root_identity": {"$ref": "#/$defs/stateRootIdentity"},
+        "state_root_id": {"$ref": "#/$defs/digest"},
+        "source_head": {"$ref": "#/$defs/head"},
+        "start_id": {"type": "string", "pattern": "^s2-5-[0-9a-f]{64}$"},
+        "task_digest": {"$ref": "#/$defs/digest"},
+        "operation": {"const": "RECOVER_DISPOSABLE_EFFECT"},
+        "authorization_id": {"type": "string", "pattern": "^s2-5-auth-[0-9a-f]{64}$"},
+        "unresolved_payload_json": {"type": "string", "minLength": 2},
+        "unresolved_state_digest": {"$ref": "#/$defs/digest"},
+        "failure_host_capture_json": {"type": "string", "minLength": 2},
+        "failure_host_capture_digest": {"$ref": "#/$defs/digest"},
+        "recovery_admission_capture_json": {"type": "string", "minLength": 2},
+        "recovery_admission_capture_digest": {"$ref": "#/$defs/digest"},
+        "journal_inventory": {"type": "array", "items": {"$ref": "#/$defs/journalEntry"}},
+        "journal_set_digest": {"$ref": "#/$defs/digest"},
+        "replay_ledger": {"$ref": "#/$defs/replayLedger"},
+        "replay_ledger_head_digest": {"$ref": "#/$defs/nullableDigest"},
+        "consumed_authorization_ids": {
+          "type": "array", "uniqueItems": true,
+          "items": {"type": "string", "pattern": "^s2-5-auth-[0-9a-f]{64}$"}
+        },
+        "recovery_intent_json": {"type": "string", "minLength": 2},
+        "recovery_intent_digest": {"$ref": "#/$defs/digest"},
+        "consumption_proof_json": {"$ref": "#/$defs/nullableJson"},
+        "consumption_proof_digest": {"$ref": "#/$defs/nullableDigest"},
+        "effect_result_json": {"$ref": "#/$defs/nullableJson"},
+        "effect_result_digest": {"$ref": "#/$defs/nullableDigest"},
+        "rollback_result_json": {"$ref": "#/$defs/nullableJson"},
+        "rollback_result_digest": {"$ref": "#/$defs/nullableDigest"},
+        "independent_postcheck_json": {"$ref": "#/$defs/nullableJson"},
+        "independent_postcheck_digest": {"$ref": "#/$defs/nullableDigest"},
+        "prior_phase_anchor_proof_digest": {"$ref": "#/$defs/nullableDigest"},
+        "previous_external_sequence": {"type": "integer", "minimum": 0},
+        "previous_external_head_digest": {"$ref": "#/$defs/nullableDigest"},
+        "external_monotonic_floor": {"type": "integer", "minimum": 0},
+        "external_snapshot_id": {"type": "string", "minLength": 1},
+        "external_latest_version_id": {"$ref": "#/$defs/nullableText"},
+        "trust_status": {"const": "UNVERIFIED_EXTERNAL_ANCHOR_REQUIRED"},
+        "side_effect_class": {"const": "DISPOSABLE_TEST"},
+        "target_class": {"const": "disposable_systemd"},
+        "target_profile_id": {"const": "s2_5_recovery_user_systemd_disposable_v1"},
+        "production_effect": {"const": false},
+        "production_authority": {"const": false},
+        "production_effect_count": {"const": 0}
+      }
+    }
+  }
+}

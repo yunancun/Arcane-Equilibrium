@@ -399,7 +399,7 @@ def test_release_failure_blocks_the_effect_window_instead_of_being_swallowed(
 
     _key, intent, permit, unit = kit.a_side_setup(tmp_path, monkeypatch)
     state_root = kit.fresh_state_root(tmp_path, "release-fail-state")
-    recovery = lifecycle.S2_5RecoveryState()
+    recovery = kit.recovery_controller(state_root)
     verdict = lifecycle.apply_s2_5_start(
         intent, permit, unit,
         **kit.apply_kwargs(
