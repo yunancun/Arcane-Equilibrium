@@ -7,7 +7,8 @@
   "required": [
     "schema_version", "result_digest", "manifest_digest", "readback_digest",
     "manifest_match", "manifest_identity_match", "parent_identity_match", "temp_residue_absent",
-    "status", "failure_code", "side_effect_class", "target_class", "production_effect",
+    "status", "failure_code", "session_class", "store_write_authority",
+    "side_effect_class", "target_class", "production_effect",
     "target_profile_id", "production_authority", "production_effect_count",
     "self_digest"
   ],
@@ -24,6 +25,10 @@
     "failure_code": {
       "anyOf": [{"type": "string", "minLength": 1}, {"type": "null"}]
     },
+    "session_class": {
+      "enum": ["SIMULATION_ONLY", "FIXED_POSIX_RECOVERY_SESSION"]
+    },
+    "store_write_authority": {"type": "boolean"},
     "side_effect_class": {"const": "DISPOSABLE_TEST"},
     "target_class": {"const": "disposable_systemd"},
     "target_profile_id": {

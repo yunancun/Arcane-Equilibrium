@@ -296,7 +296,7 @@ def _persist_with_inventory(root: Path):
     _seed_fixture_manifest(root)
     driver = _PosixFixtureDriver(root)
     recovery_store = store.S2_5RecoveryStore(driver)
-    outcome = recovery_store.persist(
+    outcome = recovery_store._exercise_simulation_persist(
         source_head=HEAD,
         phase="PREPARED",
         unresolved_state_digest=DIGEST,
@@ -445,8 +445,8 @@ def test_profile_is_the_code_owned_uid_1000_user_manager_runtime() -> None:
 def test_public_writer_has_no_caller_path_unit_nonce_or_identity_surface() -> None:
     import agent_governance_s2_5_recovery_store as store
 
-    assert set(signature(store.S2_5RecoveryStore.persist).parameters) == {
-        "self",
+    assert not hasattr(store.S2_5RecoveryStore, "persist")
+    assert set(signature(store.persist_fixed_profile).parameters) == {
         "source_head",
         "phase",
         "unresolved_state_digest",
@@ -454,6 +454,184 @@ def test_public_writer_has_no_caller_path_unit_nonce_or_identity_surface() -> No
         "issued_at",
         "expires_at",
     }
+    assert not hasattr(store.S2_5RecoveryStore, "simulate_persist")
+    assert set(signature(store.simulate_persist).parameters) == {
+        "source_head",
+        "phase",
+        "unresolved_state_digest",
+        "anchor_head_digest",
+        "issued_at",
+        "expires_at",
+    }
+
+
+def test_public_simulation_rejects_substituted_callable_without_invocation() -> None:
+    import agent_governance_s2_5_recovery_store as store
+
+    class Trap:
+        invoked = False
+
+        def __call__(self, *args, **kwargs):
+            self.invoked = True
+            raise AssertionError("substituted callable must not run")
+
+    trap = Trap()
+    with pytest.raises(TypeError):
+        store.simulate_persist(
+            source_head=HEAD,
+            phase="PREPARED",
+            unresolved_state_digest=DIGEST,
+            anchor_head_digest=None,
+            issued_at="2030-01-01T00:00:00Z",
+            expires_at="2030-01-01T00:05:00Z",
+            driver=trap,
+        )
+    assert trap.invoked is False
+
+    outcome = store.simulate_persist(
+        source_head=HEAD,
+        phase="PREPARED",
+        unresolved_state_digest=DIGEST,
+        anchor_head_digest=None,
+        issued_at="2030-01-01T00:00:00Z",
+        expires_at="2030-01-01T00:05:00Z",
+    )
+    assert outcome["effect_performed"] is False
+    assert outcome["store_write_authority"] is False
+
+
+def test_simulation_never_mints_a_store_accepted_session_or_authority(
+    tmp_path,
+) -> None:
+    import agent_governance_s2_5_recovery_store as store
+
+    root = tmp_path / "root"
+    root.mkdir(mode=0o700)
+    _seed_fixture_manifest(root)
+    driver = _PosixFixtureDriver(root)
+    outcome = store.S2_5RecoveryStore(driver)._exercise_simulation_persist(
+        source_head=HEAD,
+        phase="PREPARED",
+        unresolved_state_digest=DIGEST,
+        anchor_head_digest=None,
+        issued_at="2030-01-01T00:00:00Z",
+        expires_at="2030-01-01T00:05:00Z",
+    )
+
+    assert outcome["simulation_only"] is True
+    assert outcome["store_write_authority"] is False
+    for name in ("intent", "result", "postcheck", "rollback"):
+        assert outcome[name]["session_class"] == "SIMULATION_ONLY"
+        assert outcome[name]["store_write_authority"] is False
+        assert store.validate_local_artifact(outcome[name]) == []
+
+
+def test_simulation_guards_every_store_effect_boundary(tmp_path) -> None:
+    import agent_governance_s2_5_recovery_store as store
+
+    root = tmp_path / "root"
+    root.mkdir(mode=0o700)
+    _seed_fixture_manifest(root)
+    outcome = store.S2_5RecoveryStore(
+        _PosixFixtureDriver(root)
+    )._exercise_simulation_persist(
+        source_head=HEAD,
+        phase="PREPARED",
+        unresolved_state_digest=DIGEST,
+        anchor_head_digest=None,
+        issued_at="2030-01-01T00:00:00Z",
+        expires_at="2030-01-01T00:05:00Z",
+    )
+
+    assert outcome["result"]["status"] == "EXTERNAL_VERIFICATION_PENDING"
+    assert outcome["guarded_effect_stages"] == [
+        "POST_ACQUIRE_FINAL",
+        "TEMP_CREATE",
+        "TEMP_WRITE",
+        "TEMP_FILE_FSYNC",
+        "ATOMIC_REPLACE",
+        "PARENT_DIRECTORY_FSYNC",
+    ]
+
+
+def test_fixed_writer_source_has_no_injected_driver_callback_or_bearer_token() -> None:
+    import agent_governance_s2_5_recovery_lock as recovery_lock
+    import agent_governance_s2_5_recovery_store as store
+
+    assert not hasattr(recovery_lock, "release_recovery_dual_lock")
+    source = (
+        HELPERS / "agent_governance_s2_5_recovery_store.py"
+    ).read_text(encoding="utf-8")
+    fixed = source[source.index("    def persist_fixed_profile("):]
+    header = fixed[:fixed.index(") -> dict[str, Any]:")]
+    assert "driver:" not in header
+    assert "callback" not in header
+    assert "lock_token" not in source
+    for name in (
+        "FixedPosixRecoveryDriver",
+        "FixedRecoverySession",
+        "active_sessions",
+    ):
+        assert not hasattr(store, name), name
+
+
+def test_forged_fixed_session_is_rejected_before_state_root_io(tmp_path) -> None:
+    import agent_governance_s2_5_recovery_store as store
+
+    root = tmp_path / "root"
+    root.mkdir(mode=0o700)
+    driver = _PosixFixtureDriver(root)
+    with pytest.raises(store.RecoveryStoreError) as caught:
+        store.S2_5RecoveryStore(driver)._persist_with_guard(
+            session_context=object(),
+            source_head=HEAD,
+            phase="PREPARED",
+            unresolved_state_digest=DIGEST,
+            anchor_head_digest=None,
+            issued_at="2030-01-01T00:00:00Z",
+            expires_at="2030-01-01T00:05:00Z",
+        )
+
+    assert caught.value.code == "fixed_recovery_session_invalid"
+    assert driver.paths == []
+
+
+def test_unavailable_fixed_posix_session_fails_closed_before_store_write(
+    monkeypatch,
+) -> None:
+    import agent_governance_s2_5_recovery_store as store
+
+    calls: list[str] = []
+
+    def unavailable_open(path, flags, *args, **kwargs):
+        calls.append(str(path))
+        raise FileNotFoundError(path)
+
+    monkeypatch.setattr(store.os, "open", unavailable_open)
+    monkeypatch.setattr(
+        store.os,
+        "write",
+        lambda *args, **kwargs: pytest.fail("write must not be reached"),
+    )
+    monkeypatch.setattr(
+        store.os,
+        "replace",
+        lambda *args, **kwargs: pytest.fail("replace must not be reached"),
+    )
+    outcome = store.persist_fixed_profile(
+        source_head=HEAD,
+        phase="PREPARED",
+        unresolved_state_digest=DIGEST,
+        anchor_head_digest=None,
+        issued_at="2030-01-01T00:00:00Z",
+        expires_at="2030-01-01T00:05:00Z",
+    )
+
+    assert outcome["status"] == "LOCAL_REPRODUCIBLE_UNVERIFIED"
+    assert outcome["store"] is None
+    assert outcome["production_effect"] is False
+    assert outcome["production_authority"] is False
+    assert calls == [store.recovery_lock.DISPOSABLE_LOCK_ROOT]
 
 
 def test_public_persist_cannot_bootstrap_an_empty_root(tmp_path) -> None:
@@ -464,7 +642,7 @@ def test_public_persist_cannot_bootstrap_an_empty_root(tmp_path) -> None:
     driver = _PosixFixtureDriver(root)
 
     with pytest.raises(store.RecoveryStoreError) as caught:
-        store.S2_5RecoveryStore(driver).persist(
+        store.S2_5RecoveryStore(driver)._exercise_simulation_persist(
             source_head=HEAD,
             phase="PREPARED",
             unresolved_state_digest=DIGEST,
@@ -485,7 +663,7 @@ def test_deleted_manifest_cannot_be_rebuilt_by_ordinary_persist(tmp_path) -> Non
     _seed_fixture_manifest(root)
     driver = _PosixFixtureDriver(root)
     recovery_store = store.S2_5RecoveryStore(driver)
-    recovery_store.persist(
+    recovery_store._exercise_simulation_persist(
         source_head=HEAD,
         phase="PREPARED",
         unresolved_state_digest=DIGEST,
@@ -496,7 +674,7 @@ def test_deleted_manifest_cannot_be_rebuilt_by_ordinary_persist(tmp_path) -> Non
     (root / store.MANIFEST_BASENAME).unlink()
 
     with pytest.raises(store.RecoveryStoreError) as caught:
-        recovery_store.persist(
+        recovery_store._exercise_simulation_persist(
             source_head=HEAD,
             phase="PREPARED",
             unresolved_state_digest=DIGEST,
@@ -517,7 +695,7 @@ def test_store_commits_only_to_code_owned_root_and_returns_typed_chain(tmp_path)
     _seed_fixture_manifest(root)
     driver = _PosixFixtureDriver(root)
 
-    outcome = store.S2_5RecoveryStore(driver).persist(
+    outcome = store.S2_5RecoveryStore(driver)._exercise_simulation_persist(
         source_head=HEAD,
         phase="PREPARED",
         unresolved_state_digest=DIGEST,
@@ -584,7 +762,7 @@ def test_ordinary_persist_rejects_inventory_shrink(tmp_path, removed_basename) -
     target.unlink()
 
     with pytest.raises(store.RecoveryStoreError) as caught:
-        store.S2_5RecoveryStore(driver).persist(
+        store.S2_5RecoveryStore(driver)._exercise_simulation_persist(
             source_head=HEAD,
             phase="PREPARED",
             unresolved_state_digest=DIGEST,
@@ -615,7 +793,7 @@ def test_ordinary_persist_rejects_unanchored_inventory_growth(tmp_path) -> None:
     _write_json(root / f"{added_start_id}.journal.json", journal)
 
     with pytest.raises(store.RecoveryStoreError) as caught:
-        store.S2_5RecoveryStore(driver).persist(
+        store.S2_5RecoveryStore(driver)._exercise_simulation_persist(
             source_head=HEAD,
             phase="PREPARED",
             unresolved_state_digest=DIGEST,
@@ -685,7 +863,7 @@ def test_corrupt_or_hardlinked_manifest_fails_closed(tmp_path) -> None:
     _seed_fixture_manifest(root)
     driver = _PosixFixtureDriver(root)
     persisted = store.S2_5RecoveryStore(driver)
-    persisted.persist(
+    persisted._exercise_simulation_persist(
         source_head=HEAD,
         phase="PREPARED",
         unresolved_state_digest=DIGEST,
@@ -715,7 +893,7 @@ def test_full_root_replacement_is_detected_even_with_copied_manifest(tmp_path) -
     original.mkdir(mode=0o700)
     _seed_fixture_manifest(original)
     driver = _PosixFixtureDriver(original)
-    store.S2_5RecoveryStore(driver).persist(
+    store.S2_5RecoveryStore(driver)._exercise_simulation_persist(
         source_head=HEAD,
         phase="PREPARED",
         unresolved_state_digest=DIGEST,
@@ -745,7 +923,7 @@ def test_coherent_local_reseal_remains_explicitly_unverified(tmp_path) -> None:
     root.mkdir(mode=0o700)
     _seed_fixture_manifest(root)
     driver = _PosixFixtureDriver(root)
-    outcome = store.S2_5RecoveryStore(driver).persist(
+    outcome = store.S2_5RecoveryStore(driver)._exercise_simulation_persist(
         source_head=HEAD,
         phase="PREPARED",
         unresolved_state_digest=DIGEST,

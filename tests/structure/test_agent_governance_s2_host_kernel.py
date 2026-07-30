@@ -17,11 +17,8 @@ ML_ROOT = ROOT / "program_code/ml_training"
 for candidate in (HELPERS, ML_ROOT):
     if str(candidate) not in sys.path:
         sys.path.insert(0, str(candidate))
-
 import agent_governance_alr_quiesce_inventory as qi  # noqa: E402
 import agent_governance_s2_host_kernel as kernel  # noqa: E402
-
-
 KERNEL_PATH = HELPERS / "agent_governance_s2_host_kernel.py"
 RUNNER_FAMILY_GLOBS = ("agent_governance_s2_*host_*.py", "aiml_s2_*host_run*.py")
 # Explicit exclusions still pass every raw-command rule and the import denylist.
@@ -31,6 +28,8 @@ NON_RUNNER_HOST_LEAVES = {
         "不持有主機能力,匯入面屬 s2_4_install_adapter_v1 的 component_paths 治理範圍"
     ),
 }
+
+
 def _discover_runner_family(helpers_dir: Path) -> list[Path]:
     """由磁碟導出受信 host runner family；只有具理由的 protocol 葉可除名。"""
 
@@ -40,8 +39,6 @@ def _discover_runner_family(helpers_dir: Path) -> list[Path]:
         for path in helpers_dir.glob(glob)
         if path.name not in NON_RUNNER_HOST_LEAVES
     })
-
-
 RUNNER_FAMILY = tuple(_discover_runner_family(HELPERS))
 # 四個 S2 effect adapter 的 apply 進入點 + 其驅動葉:observer/kernel 的 import closure 不得含它們。
 APPLIER_MODULES = frozenset({
@@ -55,15 +52,16 @@ APPLIER_MODULES = frozenset({
     "agent_governance_s2_5_lifecycle",
     "agent_governance_s2_5_driver",
 })
-
 # Positive imports are capability declarations; unlisted imports fail closed.
 ALLOWED_STDLIB_IMPORTS = frozenset({
     "__future__", "argparse", "base64", "datetime", "errno", "fcntl", "hashlib", "json",
     "os", "pathlib", "re", "socket", "stat", "sys", "typing",
 })
+STDLIB_IMPORTS_BY_FILE = {"agent_governance_s2_5_recovery_lock.py": frozenset({"functools"})}
 ALLOWED_THIRD_PARTY_IMPORTS = frozenset({"psycopg2"})
 # Governance imports are per-file rather than family-wide.
 GOVERNANCE_IMPORTS_BY_FILE: dict[str, frozenset[str]] = {
+    "agent_governance_s2_5_recovery_lock.py": frozenset({"agent_governance_s2_5_disposable_profile", "agent_governance_schema", "aiml_gate_receipt_validator"}),
     "agent_governance_s2_5_recovery_anchor.py": frozenset({"agent_governance_s2_5_disposable_profile", "agent_governance_s2_5_recovery_store", "agent_governance_schema", "aiml_gate_receipt_validator"}),
     "agent_governance_s2_host_kernel.py": frozenset({
         "agent_governance_alr_quiesce_inventory",
@@ -115,7 +113,6 @@ EXEC_CAPABLE_IMPORT_DENYLIST = frozenset({
     "pty", "importlib", "commands", "asyncio", "multiprocessing", "runpy", "imp",
     "code", "pdb", "timeit", "concurrent",
 })
-
 FORBIDDEN_RAW_COMMAND_NAMES = frozenset({
     "system", "popen", "startfile", "fork", "forkpty",
     "spawnl", "spawnle", "spawnlp", "spawnlpe", "spawnv", "spawnve", "spawnvp", "spawnvpe",
@@ -145,15 +142,11 @@ SUBPROCESS_EXEC_CAPABILITY_NAMES = frozenset({
     "run", "Popen", "call", "check_call", "check_output", "getoutput",
     "getstatusoutput",
 })
-
-
 def _present_family() -> list[Path]:
     return _discover_runner_family(HELPERS)
 
-
 def _fold_string(node: ast.AST) -> str | None:
     """把純字面的 ``"a" + "b"`` 折成 ``"ab"``(其他形一律回 None)。"""
-
     if isinstance(node, ast.Constant) and isinstance(node.value, str):
         return node.value
     if isinstance(node, ast.BinOp) and isinstance(node.op, ast.Add):
@@ -163,19 +156,17 @@ def _fold_string(node: ast.AST) -> str | None:
             return left + right
     return None
 
-
 def _raw_command_findings(path: Path, *, exec_family: bool = True) -> list[str]:
     """Fail closed over imports, raw/dynamic callees, obfuscation and shell use.
 
-    ``exec_family=False`` disables only the positive import list and shell-shape rule.
-    """
-
+    ``exec_family=False`` disables only the positive import list and shell-shape rule."""
     tree = ast.parse(path.read_text(encoding="utf-8"), filename=str(path))
     is_kernel = path.name == KERNEL_PATH.name
     allowed_modules: frozenset[str] | None = None
     if exec_family:
         allowed_modules = (
             ALLOWED_STDLIB_IMPORTS
+            | STDLIB_IMPORTS_BY_FILE.get(path.name, frozenset())
             | ALLOWED_THIRD_PARTY_IMPORTS
             | GOVERNANCE_IMPORTS_BY_FILE.get(path.name, frozenset())
         )
@@ -186,7 +177,9 @@ def _raw_command_findings(path: Path, *, exec_family: bool = True) -> list[str]:
     dynamic_return_functions: set[str] = set()
     ctypes_handles: set[str] = set()
     builtins_aliases: set[str] = {"__builtins__", "builtins"}
+    attribute_getter_aliases: set[str] = {"getattr"}
     module_registry_aliases: set[str] = set()
+    module_registry_accessor_aliases: set[str] = set()
     module_lookup_aliases: set[str] = set()
     os_aliases: set[str] = {"os"}
     subprocess_aliases: set[str] = {"subprocess"}
@@ -195,8 +188,10 @@ def _raw_command_findings(path: Path, *, exec_family: bool = True) -> list[str]:
     sequence_wildcard_key = ("constant", ("sequence", "*"))
     sequence_uncertain_key = ("sequence_uncertain",)
     family_aliases = {
+        "attribute_getter": attribute_getter_aliases,
         "builtins": builtins_aliases, "ctypes": ctypes_handles,
         "module_lookup": module_lookup_aliases,
+        "module_registry_accessor": module_registry_accessor_aliases,
         "module_registry": module_registry_aliases, "os": os_aliases,
         "subprocess": subprocess_aliases,
     }
@@ -211,7 +206,6 @@ def _raw_command_findings(path: Path, *, exec_family: bool = True) -> list[str]:
     ):
         for child in ast.walk(function):
             containing_function[id(child)] = function.name
-
     def _check_module(lineno: int, module: str, rendered: str) -> None:
         top = (module or "").split(".")[0]
         if allowed_modules is None:
@@ -227,7 +221,6 @@ def _raw_command_findings(path: Path, *, exec_family: bool = True) -> list[str]:
         if top in allowed_modules:
             return
         findings.append(f"line {lineno}: import outside the declared allowlist: {rendered}")
-
     def _flatten_provenance(provenance: object) -> set[str]:
         if isinstance(provenance, set):
             return set(provenance)
@@ -235,7 +228,6 @@ def _raw_command_findings(path: Path, *, exec_family: bool = True) -> list[str]:
         for member in provenance.values() if isinstance(provenance, dict) else ():
             families.update(_flatten_provenance(member))
         return families
-
     def _merge_provenance(left: object, right: object) -> object:
         if isinstance(left, dict) and isinstance(right, dict):
             merged = deepcopy(left)
@@ -243,7 +235,6 @@ def _raw_command_findings(path: Path, *, exec_family: bool = True) -> list[str]:
                 merged[key] = _merge_provenance(merged[key], member) if key in merged else deepcopy(member)
             return merged
         return _flatten_provenance(left) | _flatten_provenance(right)
-
     def _key_token(node: ast.AST) -> object:
         return ("constant", node.value) if isinstance(node, ast.Constant) else ("expression", ast.dump(node, annotate_fields=False))
     def _target_path(node: ast.AST) -> tuple[str, list[ast.AST]] | None:
@@ -290,10 +281,31 @@ def _raw_command_findings(path: Path, *, exec_family: bool = True) -> list[str]:
                 return {"module_registry"}
             return {"subprocess"} if node.attr == "subprocess" else set()
         if isinstance(node, ast.Call):
+            called = node.func.id if isinstance(node.func, ast.Name) else (
+                node.func.attr if isinstance(node.func, ast.Attribute) else None
+            )
+            if called == "__getattribute__" or called in attribute_getter_aliases:
+                direct = isinstance(node.func, ast.Name)
+                receiver = node.args[0] if direct and node.args else (
+                    node.func.value if isinstance(node.func, ast.Attribute) else None
+                )
+                offset = 1 if direct else 0
+                name_arg = node.args[offset] if len(node.args) > offset else None
+                folded = _fold_string(name_arg) if name_arg is not None else None
+                families = _flatten_provenance(_value_provenance(receiver))
+                if (
+                    folded == "modules" and isinstance(receiver, ast.Name)
+                    and receiver.id == "sys"
+                ):
+                    return {"module_registry"}
+                if folded in {"get", "__getitem__"} and "module_registry" in families:
+                    return {"module_registry_accessor"}
             if isinstance(node.func, ast.Attribute) and isinstance(node.func.value, ast.Name) and (
                 node.func.value.id == "ctypes" and node.func.attr == "CDLL"
             ):
                 return {"ctypes"}
+            if "module_registry_accessor" in _flatten_provenance(_value_provenance(node.func)):
+                return {"module_lookup"}
             if (
                 isinstance(node.func, ast.Attribute) and node.func.attr == "get"
                 and "module_registry" in _flatten_provenance(_value_provenance(node.func.value))
@@ -320,22 +332,16 @@ def _raw_command_findings(path: Path, *, exec_family: bool = True) -> list[str]:
                 return (families - {"module_registry"}) | {"module_lookup"}
             return provenance
         return set()
-
     def _value_families(node: ast.AST | None) -> set[str]:
         return _flatten_provenance(_value_provenance(node))
-
     def _module_registry(receiver: ast.AST | None) -> bool:
         return "module_registry" in _value_families(receiver)
-
     def _module_lookup(receiver: ast.AST | None) -> bool:
         return "module_lookup" in _value_families(receiver)
-
     def _builtins_source(node: ast.AST | None) -> bool:
         return "builtins" in _value_families(node)
-
     def _callee_capability(node: ast.AST) -> str | None:
         """Resolve only execution-capable callees; unknown data stays fail-closed."""
-
         def _sensitive_receiver(receiver: ast.AST | None) -> bool:
             return (
                 bool(_value_families(receiver) & {
@@ -347,7 +353,6 @@ def _raw_command_findings(path: Path, *, exec_family: bool = True) -> list[str]:
                     _sensitive_receiver(receiver.value)
                 )
             )
-
         if isinstance(node, ast.Name):
             if node.id in FORBIDDEN_EXEC_CAPABILITY_NAMES:
                 return node.id
@@ -424,7 +429,6 @@ def _raw_command_findings(path: Path, *, exec_family: bool = True) -> list[str]:
             ):
                 return "dynamic callable container"
         return None
-
     for function in (
         item for item in ast.walk(tree)
         if isinstance(item, (ast.FunctionDef, ast.AsyncFunctionDef))
@@ -435,7 +439,6 @@ def _raw_command_findings(path: Path, *, exec_family: bool = True) -> list[str]:
             if isinstance(item, ast.Return) and item.value is not None
         ):
             dynamic_return_functions.add(function.name)
-
     def _assignment_bindings(
         target: ast.AST, value: ast.AST | None, provenance: object | None = None
     ) -> list[tuple[ast.AST, ast.AST | None, object]]:
@@ -470,12 +473,10 @@ def _raw_command_findings(path: Path, *, exec_family: bool = True) -> list[str]:
                 for binding in _assignment_bindings(item_target, item_value, item_provenance)
             ]
         return [(target, value, provenance)]
-
     def _sequence_length(provenance: object) -> int | None:
         if not isinstance(provenance, dict) or sequence_uncertain_key in provenance:
             return None
         return max((key[1] for key in provenance if isinstance(key, tuple) and len(key) == 2 and key[0] == "sequence_length" and isinstance(key[1], int)), default=None)
-
     def _merge_target(target: ast.AST, provenance: object) -> None:
         target_path = _target_path(target)
         if target_path is not None and not isinstance(target, ast.Name):
@@ -902,7 +903,7 @@ def test_the_governance_import_allowlist_is_per_file_not_family_wide(tmp_path):
 
 
 def test_every_governance_allowlist_entry_belongs_to_a_family_member():
-    family_names = {path.name for path in RUNNER_FAMILY} | {"agent_governance_s2_5_recovery_anchor.py"}
+    family_names = {path.name for path in RUNNER_FAMILY} | {"agent_governance_s2_5_recovery_anchor.py", "agent_governance_s2_5_recovery_lock.py"}
     assert set(GOVERNANCE_IMPORTS_BY_FILE) <= family_names, sorted(
         set(GOVERNANCE_IMPORTS_BY_FILE) - family_names
     )

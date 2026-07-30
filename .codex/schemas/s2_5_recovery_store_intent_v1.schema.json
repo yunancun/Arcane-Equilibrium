@@ -7,7 +7,10 @@
   "required": [
     "schema_version", "store_id", "state_root_id", "source_head", "operation",
     "expected_previous_manifest_digest", "candidate_manifest_digest",
-    "issued_at", "expires_at", "side_effect_class", "target_class",
+    "issued_at", "expires_at", "recovery_lock_intent_digest",
+    "recovery_lock_result_digest", "recovery_lock_postcheck_digest",
+    "recovery_lock_chain_digest", "session_class", "store_write_authority",
+    "side_effect_class", "target_class",
     "target_profile_id", "production_effect", "production_authority",
     "production_effect_count",
     "self_digest"
@@ -28,6 +31,14 @@
       "type": "string", "format": "date-time",
       "description": "Must be later than issued_at and no more than 300 seconds later; enforced by validate_local_artifact."
     },
+    "recovery_lock_intent_digest": {"$ref": "#/$defs/digest"},
+    "recovery_lock_result_digest": {"$ref": "#/$defs/digest"},
+    "recovery_lock_postcheck_digest": {"$ref": "#/$defs/digest"},
+    "recovery_lock_chain_digest": {"$ref": "#/$defs/digest"},
+    "session_class": {
+      "enum": ["SIMULATION_ONLY", "FIXED_POSIX_RECOVERY_SESSION"]
+    },
+    "store_write_authority": {"type": "boolean"},
     "side_effect_class": {"const": "DISPOSABLE_TEST"},
     "target_class": {"const": "disposable_systemd"},
     "target_profile_id": {

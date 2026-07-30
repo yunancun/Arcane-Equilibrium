@@ -32,7 +32,7 @@ def _persist(driver, *, seed_fixture=True):
         driver.root / store.MANIFEST_BASENAME
     ).exists():
         _seed_fixture_manifest(driver.root)
-    return store.S2_5RecoveryStore(driver).persist(
+    return store.S2_5RecoveryStore(driver)._exercise_simulation_persist(
         source_head=HEAD,
         phase="PREPARED",
         unresolved_state_digest=DIGEST,

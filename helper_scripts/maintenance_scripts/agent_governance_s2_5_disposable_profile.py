@@ -24,11 +24,15 @@ USER_MANAGER_CGROUP_ROOT = (
 PROFILE_RUNTIME_ROOT = XDG_RUNTIME_ROOT + "/arcane-equilibrium-aiml-s2e"
 DISPOSABLE_STATE_ROOT = PROFILE_RUNTIME_ROOT + "/s2_5-recovery"
 DISPOSABLE_LOCK_ROOT = PROFILE_RUNTIME_ROOT + "/locks"
+S2_4_RECOVERY_INSTALL_FENCE_LOCK_BASENAME = (
+    "s2-4-recovery-install-fence.lock"
+)
+S2_5_RECOVERY_LIFECYCLE_LOCK_BASENAME = "s2-5-recovery-lifecycle.lock"
 S2_4_RECOVERY_INSTALL_FENCE_LOCK_PATH = (
-    DISPOSABLE_LOCK_ROOT + "/s2-4-recovery-install-fence.lock"
+    DISPOSABLE_LOCK_ROOT + "/" + S2_4_RECOVERY_INSTALL_FENCE_LOCK_BASENAME
 )
 S2_5_RECOVERY_LIFECYCLE_LOCK_PATH = (
-    DISPOSABLE_LOCK_ROOT + "/s2-5-recovery-lifecycle.lock"
+    DISPOSABLE_LOCK_ROOT + "/" + S2_5_RECOVERY_LIFECYCLE_LOCK_BASENAME
 )
 
 DISPOSABLE_TARGET_UNIT = "arcane-equilibrium-aiml-s2-5-disposable.target"
@@ -73,8 +77,14 @@ def profile_record() -> dict[str, object]:
         "user_manager_cgroup_root": USER_MANAGER_CGROUP_ROOT,
         "state_root": DISPOSABLE_STATE_ROOT,
         "lock_root": DISPOSABLE_LOCK_ROOT,
+        "s2_4_recovery_install_fence_lock_basename": (
+            S2_4_RECOVERY_INSTALL_FENCE_LOCK_BASENAME
+        ),
         "s2_4_recovery_install_fence_lock_path": (
             S2_4_RECOVERY_INSTALL_FENCE_LOCK_PATH
+        ),
+        "s2_5_recovery_lifecycle_lock_basename": (
+            S2_5_RECOVERY_LIFECYCLE_LOCK_BASENAME
         ),
         "s2_5_recovery_lifecycle_lock_path": S2_5_RECOVERY_LIFECYCLE_LOCK_PATH,
         "disposable_target_unit": DISPOSABLE_TARGET_UNIT,

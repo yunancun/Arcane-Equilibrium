@@ -7,6 +7,7 @@
   "required": [
     "schema_version", "intent_digest", "result_digest", "status",
     "restored_manifest_digest", "temp_residue_absent", "operator_action_required",
+    "session_class", "store_write_authority",
     "side_effect_class", "target_class", "production_effect",
     "target_profile_id", "production_authority", "production_effect_count",
     "self_digest"
@@ -19,6 +20,10 @@
     "restored_manifest_digest": {"$ref": "#/$defs/nullableDigest"},
     "temp_residue_absent": {"type": "boolean"},
     "operator_action_required": {"type": "boolean"},
+    "session_class": {
+      "enum": ["SIMULATION_ONLY", "FIXED_POSIX_RECOVERY_SESSION"]
+    },
+    "store_write_authority": {"type": "boolean"},
     "side_effect_class": {"const": "DISPOSABLE_TEST"},
     "target_class": {"const": "disposable_systemd"},
     "target_profile_id": {

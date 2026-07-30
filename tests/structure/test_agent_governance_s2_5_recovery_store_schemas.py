@@ -54,6 +54,10 @@ COMMON = {
     "production_authority": False,
     "production_effect_count": 0,
 }
+SIMULATION_SESSION = {
+    "session_class": "SIMULATION_ONLY",
+    "store_write_authority": False,
+}
 
 
 def _seal(value):
@@ -110,6 +114,11 @@ SAMPLES = {
         "candidate_manifest_digest": DIGEST,
         "issued_at": "2030-01-01T00:00:00Z",
         "expires_at": "2030-01-01T00:05:00Z",
+        "recovery_lock_intent_digest": DIGEST,
+        "recovery_lock_result_digest": DIGEST,
+        "recovery_lock_postcheck_digest": DIGEST,
+        "recovery_lock_chain_digest": DIGEST,
+        **SIMULATION_SESSION,
         **COMMON,
     }),
     "s2_5_recovery_store_result_v1": _seal({
@@ -131,6 +140,7 @@ SAMPLES = {
             "is_regular_file": True,
         },
         "failure_code": "UNVERIFIED_EXTERNAL_ANCHOR_REQUIRED",
+        **SIMULATION_SESSION,
         **COMMON,
     }),
     "s2_5_recovery_store_postcheck_v1": _seal({
@@ -144,6 +154,7 @@ SAMPLES = {
         "temp_residue_absent": True,
         "status": "PASS",
         "failure_code": None,
+        **SIMULATION_SESSION,
         **COMMON,
     }),
     "s2_5_recovery_store_rollback_v1": _seal({
@@ -154,6 +165,7 @@ SAMPLES = {
         "restored_manifest_digest": None,
         "temp_residue_absent": True,
         "operator_action_required": False,
+        **SIMULATION_SESSION,
         **COMMON,
     }),
 }
@@ -270,3 +282,19 @@ def test_local_recovery_store_schemas_reject_effect_or_authority_relabel(
 def test_local_store_schemas_do_not_expand_central_runtime_closure():
     assert len(validator.SCHEMA_FILES) == 88
     assert set(SAMPLES).isdisjoint(validator.SCHEMA_FILES)
+
+
+@pytest.mark.parametrize(
+    "schema_version",
+    [
+        "s2_5_recovery_store_intent_v1",
+        "s2_5_recovery_store_result_v1",
+        "s2_5_recovery_store_postcheck_v1",
+        "s2_5_recovery_store_rollback_v1",
+    ],
+)
+def test_simulation_session_cannot_claim_store_write_authority(schema_version):
+    forged = copy.deepcopy(SAMPLES[schema_version])
+    forged["store_write_authority"] = True
+    forged["self_digest"] = validator.artifact_self_digest(forged)
+    assert store.validate_local_artifact(forged)
