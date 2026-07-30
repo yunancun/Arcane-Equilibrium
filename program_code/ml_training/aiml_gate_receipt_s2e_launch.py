@@ -18,6 +18,11 @@ from aiml_gate_receipt_schema_core import (
     _load_schema,
     canonical_digest,
 )
+from aiml_gate_receipt_s2e_consumption import (
+    consume_s2e_launch_predecessor,
+    validate_s2e_launch_consumption_entry,
+    validate_s2e_launch_consumption_entry_structure,
+)
 from aiml_gate_receipt_s2e_review import (
     build_s2e_disposable_test_effect_chain,
     s2e_review_predicate_results,
@@ -431,15 +436,33 @@ def _common_payload_errors(receipt: dict[str, Any]) -> list[str]:
         str(receipt.get("wave"))
     ):
         errors.append("launch receipt wave_exit_id is not code-owned for its wave")
+    effect_digests = receipt.get("disposable_effect_chain_digests")
+    if checkpoint == "PENDING_REVIEW":
+        if receipt.get("side_effect_class") != "SOURCE_ONLY":
+            errors.append("pending launch candidate must remain source-only")
+        if effect_digests != []:
+            errors.append(
+                "pending launch candidate cannot bind disposable effect chains"
+            )
+    else:
+        if receipt.get("side_effect_class") != "DISPOSABLE_TEST":
+            errors.append(
+                "ready launch receipt must record its disposable test effect"
+            )
+        if not isinstance(effect_digests, list) or not effect_digests:
+            errors.append(
+                "ready launch receipt requires paired typed effect chain digests"
+            )
     if receipt.get("schema_version") == "s2e_launch_wave_receipt_v1":
-        effect_digests = receipt.get("disposable_effect_chain_digests")
-        if receipt.get("side_effect_class") == "SOURCE_ONLY" and effect_digests != []:
-            errors.append("source-only wave cannot bind disposable effect chains")
-        if receipt.get("side_effect_class") == "DISPOSABLE_TEST":
-            if not isinstance(effect_digests, list) or not effect_digests:
-                errors.append(
-                    "DISPOSABLE_TEST wave requires paired typed effect chain digests"
-                )
+        consumption = receipt.get("predecessor_consumption")
+        if checkpoint == "PENDING_REVIEW" and consumption is not None:
+            errors.append("pending wave cannot consume its predecessor")
+        if checkpoint != "PENDING_REVIEW" and not isinstance(
+            consumption, dict
+        ):
+            errors.append(
+                "ready wave must bind one durable predecessor consumption"
+            )
     return errors
 
 
@@ -496,6 +519,12 @@ def validate_s2e_launch_wave_receipt(
         repo_root, receipt["schema_carrier_head"], receipt["source_head"]
     ):
         errors.append("wave source head must descend from the schema carrier")
+    if receipt.get("checkpoint_status") != "PENDING_REVIEW":
+        errors.extend(
+            validate_s2e_launch_consumption_entry_structure(
+                receipt.get("predecessor_consumption")
+            )
+        )
     return errors
 
 
@@ -543,6 +572,17 @@ def validate_s2e_launch_transition_payload(
         "launch_contract_digest"
     ):
         errors.append("wave launch contract differs from its predecessor")
+    if receipt.get("checkpoint_status") != "PENDING_REVIEW":
+        errors.extend(
+            validate_s2e_launch_consumption_entry(
+                receipt.get("predecessor_consumption"),
+                candidate=_pending_candidate_from_issued(receipt),
+                predecessor_receipt=predecessor_receipt,
+                acceptance_review_bundle_digest=str(
+                    receipt.get("acceptance_review_bundle_digest", "")
+                ),
+            )
+        )
     return errors
 
 
@@ -575,6 +615,10 @@ def _pending_candidate_from_issued(receipt: dict[str, Any]) -> dict[str, Any]:
     pending = dict(receipt)
     pending["checkpoint_status"] = "PENDING_REVIEW"
     pending["acceptance_review_bundle_digest"] = None
+    pending["side_effect_class"] = "SOURCE_ONLY"
+    pending["disposable_effect_chain_digests"] = []
+    if pending.get("schema_version") == "s2e_launch_wave_receipt_v1":
+        pending["predecessor_consumption"] = None
     pending["payload_digest"] = launch_payload_digest(pending)
     return pending
 
@@ -725,6 +769,7 @@ def validate_s2e_launch_predecessor_authority(
             ),
             repo_root=repo_root,
             now=now,
+            require_current_generation=False,
         )
     )
     carrier_result = verify_receipt_carrier_attestation(
@@ -1207,6 +1252,7 @@ def validate_s2e_launch_acceptance_review_bundle(
     external_readback_ack: Any,
     repo_root: Path,
     now: str | datetime,
+    require_current_generation: bool = True,
 ) -> list[str]:
     """Validate one signed, capture-bound, externally immutable review bundle."""
 
@@ -1239,6 +1285,20 @@ def validate_s2e_launch_acceptance_review_bundle(
         reviewed_tree = candidate.get("source_tree")
     else:
         return ["acceptance review bundle candidate schema is unsupported"]
+    if require_current_generation:
+        try:
+            _require_clean(repo_root)
+            if (
+                _commit(repo_root, "HEAD") != reviewed_head
+                or _tree(repo_root, "HEAD") != reviewed_tree
+            ):
+                errors.append(
+                    "acceptance review candidate is not the clean current HEAD"
+                )
+        except (OSError, ValueError, subprocess.CalledProcessError) as error:
+            errors.append(
+                f"acceptance review current generation is unavailable: {error}"
+            )
     if candidate.get("checkpoint_status") != "PENDING_REVIEW":
         errors.append("acceptance review bundle requires a pending candidate")
     for field, expected in (
@@ -1605,14 +1665,46 @@ def issue_s2e_launch_receipt(
         )
     )
     issued_receipt = None
+    predecessor_consumption_result = None
     if not errors and ready_status is not None:
         issued_receipt = dict(candidate)
         issued_receipt["checkpoint_status"] = ready_status
         issued_receipt["acceptance_review_bundle_digest"] = (
             acceptance_review_bundle["bundle_digest"]
         )
+        issued_receipt["side_effect_class"] = "DISPOSABLE_TEST"
+        issued_receipt["disposable_effect_chain_digests"] = list(
+            acceptance_review_bundle["disposable_test_effect_chain_digests"]
+        )
+        if ready_status != "W0_GENESIS_READY":
+            try:
+                predecessor_consumption_result = (
+                    consume_s2e_launch_predecessor(
+                        repo_root=repo_root,
+                        candidate=candidate,
+                        predecessor_receipt=predecessor_receipt,
+                        acceptance_review_bundle_digest=(
+                            acceptance_review_bundle["bundle_digest"]
+                        ),
+                        now=now,
+                    )
+                )
+                issued_receipt["predecessor_consumption"] = (
+                    predecessor_consumption_result["entry"]
+                )
+            except (
+                OSError,
+                TypeError,
+                ValueError,
+                subprocess.CalledProcessError,
+            ) as error:
+                errors.append(
+                    f"wave predecessor durable consumption failed: {error}"
+                )
         issued_receipt["payload_digest"] = launch_payload_digest(issued_receipt)
-        if ready_status == "W0_GENESIS_READY":
+        if errors:
+            issued_receipt = None
+        elif ready_status == "W0_GENESIS_READY":
             errors.extend(
                 validate_s2e_launch_genesis_receipt(
                     issued_receipt, repo_root=repo_root
@@ -1644,6 +1736,7 @@ def issue_s2e_launch_receipt(
             if isinstance(acceptance_review_bundle, dict)
             else None
         ),
+        "predecessor_consumption_result": predecessor_consumption_result,
         "issued_receipt": issued_receipt,
         "errors": sorted(set(errors)),
     }
@@ -1675,6 +1768,7 @@ def _build_genesis_candidate_payload(
         "checkpoint_status": "PENDING_REVIEW",
         "acceptance_review_bundle_digest": None,
         "side_effect_class": "SOURCE_ONLY",
+        "disposable_effect_chain_digests": [],
         "production_effect_count": 0,
     }
     receipt["payload_digest"] = launch_payload_digest(receipt)
@@ -1744,6 +1838,7 @@ def _build_wave_candidate_payload(
         "acceptance_review_bundle_digest": None,
         "side_effect_class": side_effect_class,
         "disposable_effect_chain_digests": [],
+        "predecessor_consumption": None,
         "production_effect_count": 0,
     }
     receipt["payload_digest"] = launch_payload_digest(receipt)

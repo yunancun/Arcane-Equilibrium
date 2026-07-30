@@ -396,7 +396,8 @@ def _repo(tmp_path: Path) -> tuple[Path, str, str, str]:
             content = (
                 "| ID | Lane | Dependency | Work | Exit |\n"
                 "|---|---|---|---|---|\n"
-                "| `S2E.2b-2` | **ACTIVE / P0** | ready | LW1 | pending |\n"
+                "| `S2E.2b-2` | **ACTIVE / P0** | ready | LW1 | "
+                "future publication may project `SOURCE_LANDED` |\n"
             )
         elif relative_path.endswith(".json"):
             content = "{}\n"
@@ -1033,7 +1034,7 @@ def _issued_genesis_authority_case(
         review_capture,
         candidate=candidate,
         repo_root=repo,
-        observed_at=issued_at + timedelta(seconds=1),
+        observed_at=review_capture["completed_at"],
     )
     capture_identity = {
         "schema_version": "governed_capture_identity_v1",
@@ -1278,6 +1279,8 @@ def _issued_genesis_authority_case(
         "issued": issued,
         "authority": authority,
         "now": issued_at + timedelta(minutes=3),
+        "private_key": private_key,
+        "fingerprint": fingerprint,
     }
 
 
@@ -1365,7 +1368,7 @@ def test_wave_generation_requires_ready_reviewed_attested_predecessor(
         disposable_label_only
     )
     assert any(
-        "requires paired typed effect chain digests" in error
+        "pending launch candidate must remain source-only" in error
         for error in validator.validate_s2e_launch_wave_receipt(
             disposable_label_only, repo_root=repo
         )
@@ -1427,7 +1430,7 @@ def test_lw1_predicate_oracle_replays_evidence_and_preserves_active_package(
         capture,
         candidate=candidate,
         repo_root=repo,
-        observed_at=case["now"],
+        observed_at=capture["completed_at"],
     )
     manifest = validator.s2e_review_source_blob_manifest(
         candidate, repo_root=repo
@@ -1482,7 +1485,7 @@ def test_lw1_predicate_oracle_replays_evidence_and_preserves_active_package(
         forged_capture,
         candidate=forged_candidate,
         repo_root=repo,
-        observed_at=case["now"],
+        observed_at=forged_capture["completed_at"],
     )
     with pytest.raises(ValueError, match="illegally flips S2E.2b-2"):
         validator.s2e_review_predicate_results(
@@ -1579,8 +1582,13 @@ def test_launch_cli_exposes_full_issue_carrier_authority_and_transition_gates(
         "--external-append-result", str(files["review_result"]),
         "--external-readback-ack", str(files["review_readback"]),
         "--now", now,
-    ]) == 0
-    assert json.loads(capsys.readouterr().out)["status"] == "ISSUED"
+    ]) == 2
+    stale_issue = json.loads(capsys.readouterr().out)
+    assert stale_issue["status"] == "EXTERNAL_VERIFICATION_PENDING"
+    assert any(
+        "not the clean current HEAD" in error
+        for error in stale_issue["errors"]
+    )
 
     assert launch.main([
         "verify-carrier",
@@ -1681,7 +1689,7 @@ def test_verified_review_bundle_issues_ready_genesis_receipt(
         capture,
         candidate=candidate,
         repo_root=repo,
-        observed_at=issued_at + timedelta(seconds=1),
+        observed_at=capture["completed_at"],
     )
     capture_identity = {
         "schema_version": "governed_capture_identity_v1",
@@ -1838,6 +1846,10 @@ def test_verified_review_bundle_issues_ready_genesis_receipt(
     assert issued is not None
     assert issued["checkpoint_status"] == "W0_GENESIS_READY"
     assert issued["wave_exit_id"] == "W0_GENESIS_READY"
+    assert issued["side_effect_class"] == "DISPOSABLE_TEST"
+    assert issued["disposable_effect_chain_digests"] == [
+        disposable_chain["chain_digest"]
+    ]
     assert issued["acceptance_review_bundle_digest"] == bundle["bundle_digest"]
     assert issued["payload_digest"] == validator.launch_payload_digest(issued)
     assert validator.validate_s2e_launch_genesis_receipt(

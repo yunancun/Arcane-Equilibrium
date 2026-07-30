@@ -378,6 +378,9 @@ def test_controlled_pytest_environment_uses_only_interpreter_provider_roots(
     monkeypatch.setattr(
         capture_v2.site, "getusersitepackages", lambda: str(user_site)
     )
+    monkeypatch.setattr(
+        capture_v2, "_account_user_site", lambda: str(user_site)
+    )
 
     pytest_isolation = tmp_path / "pytest-isolation"
     pytest_isolation.mkdir()
@@ -397,6 +400,31 @@ def test_controlled_pytest_environment_uses_only_interpreter_provider_roots(
         argv=["git", "rev-parse", "HEAD"],
     )
     assert "PYTHONPATH" not in read_only_environment
+
+
+def test_nested_capture_recovers_account_anchored_pytest_provider(
+    tmp_path: Path,
+) -> None:
+    probe = tmp_path / "test_nested_provider.py"
+    probe.write_text("def test_nested_provider():\n    assert True\n")
+    code = (
+        "import sys;"
+        f"sys.path.insert(0,{str(IMPLEMENTATION)!r});"
+        "import agent_governance_command_capture_v2 as capture;"
+        "result=capture._execute("
+        f"['python3','-m','pytest','-q',{str(probe)!r}],"
+        f"root=__import__('pathlib').Path({str(ROOT)!r}),"
+        "timeout_seconds=30,replay_contract='CANONICAL_TEST_OUTPUT_V1');"
+        "print(result['result'],result['exit_code'])"
+    )
+    outer = capture_v2._execute(
+        [sys.executable, "-c", code],
+        root=ROOT,
+        timeout_seconds=45,
+        replay_contract="EXACT_OUTPUT",
+    )
+    assert outer["result"] == "PASS"
+    assert outer["stdout"]["preview_text"] == "PASS 0\n"
 
 
 def test_forged_scope_and_host_attestation_are_rejected() -> None:

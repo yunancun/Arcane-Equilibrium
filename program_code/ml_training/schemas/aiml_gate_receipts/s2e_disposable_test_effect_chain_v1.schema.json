@@ -90,7 +90,7 @@
         "source_head": {"$ref": "#/$defs/git_sha"},
         "source_tree": {"$ref": "#/$defs/git_sha"},
         "target_profile_id": {
-          "const": "governed_command_isolated_temp_root_v1"
+          "const": "governed_command_repository_policy_only_v1"
         },
         "argv": {"$ref": "#/$defs/argv"},
         "side_effect_class": {"const": "DISPOSABLE_TEST"},
@@ -146,6 +146,9 @@
         "isolated_temp_root_cleanup",
         "repository_residue_count",
         "production_target_observed",
+        "production_target_observation_scope",
+        "effect_enforcement",
+        "host_sandbox_attestation_ref",
         "status",
         "observed_at",
         "postcheck_digest"
@@ -163,6 +166,11 @@
         },
         "repository_residue_count": {"const": 0},
         "production_target_observed": {"const": false},
+        "production_target_observation_scope": {
+          "const": "COMMAND_CAPTURE_REPOSITORY_POLICY_ONLY"
+        },
+        "effect_enforcement": {"const": "repository_policy_only"},
+        "host_sandbox_attestation_ref": {"type": "null"},
         "status": {"const": "PASS"},
         "observed_at": {"type": "string", "format": "date-time"},
         "postcheck_digest": {"$ref": "#/$defs/digest"}

@@ -44,6 +44,7 @@ S2E_REVIEW_BASE_PATHS = (
     "helper_scripts/maintenance_scripts/agent_governance_permissions.py",
     "helper_scripts/maintenance_scripts/agent_governance_s2e_launch_receipts.py",
     "program_code/ml_training/application_bundle_runtime_closure_v1.json",
+    "program_code/ml_training/aiml_gate_receipt_s2e_consumption.py",
     "program_code/ml_training/aiml_gate_receipt_s2e_launch.py",
     "program_code/ml_training/aiml_gate_receipt_s2e_review.py",
     "program_code/ml_training/aiml_gate_receipt_schema_core.py",
@@ -55,6 +56,10 @@ S2E_REVIEW_BASE_PATHS = (
     (
         "program_code/ml_training/schemas/aiml_gate_receipts/"
         "s2e_disposable_test_effect_chain_v1.schema.json"
+    ),
+    (
+        "program_code/ml_training/schemas/aiml_gate_receipts/"
+        "s2e_launch_predecessor_consumption_ledger_v1.schema.json"
     ),
     (
         "program_code/ml_training/schemas/aiml_gate_receipts/"
@@ -70,7 +75,10 @@ S2E_REVIEW_BASE_PATHS = (
     ),
     "program_code/ml_training/tests/test_aiml_gate_receipt_validator_s2_4.py",
     "tests/structure/test_agent_governance_s2_2b.py",
+    "tests/structure/test_agent_governance_command_capture_v2.py",
+    "tests/structure/test_agent_governance_node_permissions.py",
     "tests/structure/test_agent_governance_s2e_launch_chain.py",
+    "tests/structure/test_agent_governance_s2e_launch_hardening.py",
     "tests/structure/test_agent_governance_s2e_launch_receipts.py",
 )
 S2E_LW1_REVIEW_PREFIXES = (
@@ -276,7 +284,10 @@ def s2e_review_test_argv(
             "program_code/ml_training/tests/"
             "test_aiml_gate_receipt_validator_s2_4.py",
             "tests/structure/test_agent_governance_s2_2b.py",
+            "tests/structure/test_agent_governance_command_capture_v2.py",
+            "tests/structure/test_agent_governance_node_permissions.py",
             "tests/structure/test_agent_governance_s2e_launch_chain.py",
+            "tests/structure/test_agent_governance_s2e_launch_hardening.py",
             "tests/structure/test_agent_governance_s2e_launch_receipts.py",
         ]
     elif wave == "S2E-LW1":
@@ -381,15 +392,21 @@ def _exit_boundary_evidence(
     ]
     if len(rows) != 1:
         raise ValueError("LW1 exit boundary cannot identify one S2E.2b-2 row")
-    row = rows[0]
-    if "ACTIVE" not in row or "SOURCE_LANDED" in row:
+    cells = [cell.strip() for cell in rows[0].split("|")[1:-1]]
+    if len(cells) < 2:
+        raise ValueError("LW1 exit boundary row has no package-state cell")
+    status_cell = cells[1]
+    if not status_cell.startswith("**") or not status_cell.endswith("**"):
+        raise ValueError("LW1 exit boundary package-state cell is not canonical")
+    observed_state = status_cell[2:-2].split("/", 1)[0].strip()
+    if observed_state != "ACTIVE":
         raise ValueError("LW1 illegally flips S2E.2b-2 package state")
     return canonical_digest({
         "schema_version": "s2e_review_exit_boundary_evidence_v1",
         "path": "TODO.md",
         "git_blob": entry["git_blob"],
         "package_id": "S2E.2b-2",
-        "observed_state": "ACTIVE",
+        "observed_state": observed_state,
         "wave_exit_id": candidate.get("wave_exit_id"),
     })
 
@@ -606,7 +623,7 @@ def build_s2e_disposable_test_effect_chain(
         "wave_exit_id": candidate.get("wave_exit_id"),
         "source_head": reviewed_head,
         "source_tree": reviewed_tree,
-        "target_profile_id": "governed_command_isolated_temp_root_v1",
+        "target_profile_id": "governed_command_repository_policy_only_v1",
         "argv": expected_argv,
         "side_effect_class": "DISPOSABLE_TEST",
         "production_effect": False,
@@ -639,6 +656,13 @@ def build_s2e_disposable_test_effect_chain(
         "isolated_temp_root_cleanup": "TEMPORARY_DIRECTORY_CONTEXT_EXITED",
         "repository_residue_count": 0,
         "production_target_observed": False,
+        "production_target_observation_scope": (
+            "COMMAND_CAPTURE_REPOSITORY_POLICY_ONLY"
+        ),
+        "effect_enforcement": capture.get("effect_enforcement"),
+        "host_sandbox_attestation_ref": capture.get(
+            "host_sandbox_attestation_ref"
+        ),
         "status": "PASS",
         "observed_at": _time(observed_at).isoformat(),
     }
@@ -696,7 +720,14 @@ def validate_s2e_disposable_test_effect_chain(
         else {}
     )
     reviewed_head, reviewed_tree = _reviewed_head_tree(candidate)
+    expected_effect_id = canonical_digest({
+        "schema_version": "s2e_disposable_test_effect_identity_v1",
+        "wave": candidate.get("wave"),
+        "source_head": reviewed_head,
+        "capture_record_digest": capture.get("record_digest"),
+    })
     for field, expected in (
+        ("effect_id", expected_effect_id),
         ("wave", candidate.get("wave")),
         ("wave_exit_id", candidate.get("wave_exit_id")),
         ("source_head", reviewed_head),
@@ -724,6 +755,35 @@ def validate_s2e_disposable_test_effect_chain(
             _without_digest(item, digest_field)
         ):
             errors.append(f"disposable test {label} digest is invalid")
+    for label, item in (
+        ("intent", intent),
+        ("result", result),
+        ("postcheck", postcheck),
+        ("rollback", rollback),
+    ):
+        if item.get("effect_id") != expected_effect_id:
+            errors.append(f"disposable test {label} effect_id binding differs")
+    for field, expected in (
+        ("wave", candidate.get("wave")),
+        ("wave_exit_id", candidate.get("wave_exit_id")),
+        ("source_head", reviewed_head),
+        ("source_tree", reviewed_tree),
+        ("target_profile_id", "governed_command_repository_policy_only_v1"),
+        ("issued_at", capture.get("started_at")),
+    ):
+        if intent.get(field) != expected:
+            errors.append(f"disposable test intent {field} binding differs")
+    if result.get("intent_digest") != intent.get("intent_digest"):
+        errors.append("disposable test result does not bind exact intent")
+    if postcheck.get("result_digest") != result.get("result_digest"):
+        errors.append("disposable test postcheck does not bind exact result")
+    if (
+        rollback.get("result_digest") != result.get("result_digest")
+        or rollback.get("postcheck_digest") != postcheck.get(
+            "postcheck_digest"
+        )
+    ):
+        errors.append("disposable test rollback does not bind result and postcheck")
     expected_argv = s2e_review_test_argv(candidate, repo_root=repo_root)
     if intent.get("argv") != expected_argv or capture.get("argv") != expected_argv:
         errors.append("disposable test argv is not the exact code-owned profile")
@@ -741,12 +801,44 @@ def validate_s2e_disposable_test_effect_chain(
     before = capture.get("whole_repository_before", {})
     after = capture.get("whole_repository_after", {})
     if (
-        before.get("generation_digest") != after.get("generation_digest")
+        before.get("source_head") != reviewed_head
+        or after.get("source_head") != reviewed_head
+        or before.get("generation_digest") != after.get("generation_digest")
+        or postcheck.get("source_head") != reviewed_head
+        or postcheck.get("repository_generation_before")
+        != before.get("generation_digest")
+        or postcheck.get("repository_generation_after")
+        != after.get("generation_digest")
         or postcheck.get("repository_unchanged") is not True
         or postcheck.get("repository_residue_count") != 0
         or postcheck.get("production_target_observed") is not False
     ):
         errors.append("disposable test postcheck did not prove zero repository residue")
+    if (
+        postcheck.get("production_target_observation_scope")
+        != "COMMAND_CAPTURE_REPOSITORY_POLICY_ONLY"
+        or postcheck.get("effect_enforcement")
+        != capture.get("effect_enforcement")
+        or postcheck.get("host_sandbox_attestation_ref")
+        != capture.get("host_sandbox_attestation_ref")
+        or capture.get("effect_enforcement") != "repository_policy_only"
+        or capture.get("host_sandbox_attestation_ref") is not None
+    ):
+        errors.append(
+            "disposable test postcheck overstates its command-level evidence scope"
+        )
+    for field in ("started_at", "completed_at"):
+        if result.get(field) != capture.get(field):
+            errors.append(f"disposable test result {field} differs from capture")
+    try:
+        if _time(result.get("started_at")) > _time(result.get("completed_at")):
+            errors.append("disposable test result timestamps are reversed")
+        if _time(postcheck.get("observed_at")) < _time(
+            result.get("completed_at")
+        ):
+            errors.append("disposable test postcheck predates command completion")
+    except (TypeError, ValueError) as error:
+        errors.append(f"disposable test timestamps are invalid: {error}")
     if (
         rollback.get("status") != "NOT_REQUIRED_CLEAN_POSTCHECK"
         or rollback.get("rollback_performed") is not False

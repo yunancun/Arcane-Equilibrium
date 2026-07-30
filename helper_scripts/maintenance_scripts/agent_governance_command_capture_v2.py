@@ -6,9 +6,11 @@ import base64
 import hashlib
 import json
 import os
+import pwd
 import re
 import site
 import subprocess
+import sys
 import tempfile
 from datetime import datetime
 from pathlib import Path
@@ -203,6 +205,35 @@ def _is_pytest_argv(argv: list[str]) -> bool:
     )
 
 
+def _account_user_site() -> str | None:
+    """Derive the real account user-site without trusting the ambient HOME."""
+
+    try:
+        account_home = Path(pwd.getpwuid(os.getuid()).pw_dir).resolve()
+    except (KeyError, OSError, RuntimeError):
+        return None
+    version = f"{sys.version_info.major}.{sys.version_info.minor}"
+    if sys.platform == "darwin":
+        return str(
+            account_home
+            / "Library"
+            / "Python"
+            / version
+            / "lib"
+            / "python"
+            / "site-packages"
+        )
+    if os.name == "posix":
+        return str(
+            account_home
+            / ".local"
+            / "lib"
+            / f"python{version}"
+            / "site-packages"
+        )
+    return None
+
+
 def _controlled_environment(
     isolated_root: Path, *, argv: list[str]
 ) -> dict[str, str]:
@@ -227,7 +258,11 @@ def _controlled_environment(
         # never inherit caller PYTHONPATH or another caller-selected package root.
         provider_paths = sorted({
             str(Path(path).resolve())
-            for path in [*site.getsitepackages(), site.getusersitepackages()]
+            for path in [
+                *site.getsitepackages(),
+                site.getusersitepackages(),
+                _account_user_site(),
+            ]
             if isinstance(path, str) and Path(path).is_dir()
         })
         if provider_paths:

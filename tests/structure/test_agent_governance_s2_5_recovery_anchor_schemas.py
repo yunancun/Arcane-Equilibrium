@@ -99,7 +99,7 @@ def test_anchor_schemas_are_local_only_and_central_schema_count_does_not_change(
     assert anchor._LOCAL_SCHEMAS == SCHEMA_VERSIONS
     assert SCHEMA_VERSIONS.isdisjoint(validator.SCHEMA_FILES)
     # The unrelated S2E disposable-test chain is the sole central increment.
-    assert len(validator.SCHEMA_FILES) == 89
+    assert len(validator.SCHEMA_FILES) == 90
 
 
 @pytest.mark.parametrize("schema_version", sorted(SCHEMA_VERSIONS))

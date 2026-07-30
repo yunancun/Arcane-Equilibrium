@@ -1,0 +1,353 @@
+"""Adversarial closure tests for current-head S2E launch issuance."""
+
+from __future__ import annotations
+
+import hashlib
+import json
+import sys
+from copy import deepcopy
+from datetime import timedelta
+from pathlib import Path
+
+import pytest
+
+
+ROOT = Path(__file__).resolve().parents[2]
+STRUCTURE = ROOT / "tests" / "structure"
+HELPERS = ROOT / "helper_scripts" / "maintenance_scripts"
+ML_ROOT = ROOT / "program_code" / "ml_training"
+for candidate in (STRUCTURE, HELPERS, ML_ROOT):
+    if str(candidate) not in sys.path:
+        sys.path.insert(0, str(candidate))
+
+import test_agent_governance_s2e_launch_receipts as support  # noqa: E402
+import aiml_gate_receipt_s2e_consumption as consumption  # noqa: E402
+
+
+launch = support.launch
+s2e = support.s2e
+validator = support.validator
+LAUNCH_CONTRACT_DIGEST = support.LAUNCH_CONTRACT_DIGEST
+NEXT_GENERATION_TASK_CONTRACT_DIGEST = (
+    support.NEXT_GENERATION_TASK_CONTRACT_DIGEST
+)
+
+
+def _review_for_wave(
+    case: dict,
+    candidate: dict,
+    *,
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+    intent_suffix: str,
+) -> tuple[dict, dict, dict, dict, dict, dict]:
+    repo = case["repo"]
+    capture = support._actual_capture(
+        repo,
+        carrier_path="lw1-current.txt",
+        task_digest=candidate["generation_task_contract_digest"],
+        context_digest="sha256:" + intent_suffix[0] * 64,
+        monkeypatch=monkeypatch,
+        argv=validator.s2e_review_test_argv(candidate, repo_root=repo),
+    )
+    chain = validator.build_s2e_disposable_test_effect_chain(
+        capture,
+        candidate=candidate,
+        repo_root=repo,
+        observed_at=capture["completed_at"],
+    )
+    issued_at = case["now"]
+    manifest = validator.s2e_review_source_blob_manifest(
+        candidate, repo_root=repo
+    )
+    bundle = {
+        "schema_version": "s2e_launch_acceptance_review_bundle_v1",
+        "candidate_payload_digest": candidate["payload_digest"],
+        "launch_id": candidate["launch_id"],
+        "wave": candidate["wave"],
+        "wave_exit_id": candidate["wave_exit_id"],
+        "reviewed_source_head": candidate["source_head"],
+        "reviewed_source_tree": candidate["source_tree"],
+        "generation_task_contract_digest": candidate[
+            "generation_task_contract_digest"
+        ],
+        "source_blob_manifest": manifest,
+        "predicate_results": validator.s2e_review_predicate_results(
+            candidate,
+            source_blob_manifest=manifest,
+            governed_capture_record=capture,
+            disposable_test_effect_chains=[chain],
+            predecessor_chain=[case["issued"]],
+            repo_root=repo,
+        ),
+        "consumed_predecessor_digests": [],
+        "disposable_test_effect_chain_digests": [chain["chain_digest"]],
+        "governed_capture_identity": {
+            "schema_version": "governed_capture_identity_v1",
+            "record_digest": capture["record_digest"],
+            "context_artifact_digest": capture["context_artifact_digest"],
+            "task_contract_digest": capture["task_contract_digest"],
+            "node_id": capture["node_id"],
+            "role_id": capture["role_id"],
+            "native_agent": capture["native_agent"],
+            "permission": capture["permission"],
+        },
+        "governed_capture_record_digest": capture["record_digest"],
+        "reviewer_identity": {
+            field: capture[field]
+            for field in ("node_id", "role_id", "native_agent", "permission")
+        },
+        "issued_at": issued_at.isoformat(),
+        "expires_at": (issued_at + timedelta(minutes=5)).isoformat(),
+        "signer": {
+            "role": "S2E_SIGNER",
+            "identity": s2e.S2E_RECEIPT_SIGNER_IDENTITY,
+            "namespace": s2e.S2E_RECEIPT_SIGNATURE_NAMESPACE,
+            "key_generation": "independent_off_repo_ed25519_v1",
+            "anchor": "fixed_off_repo_public_trust_root_v1",
+            "key_fingerprint": case["fingerprint"],
+        },
+        "external_worm_binding": None,
+    }
+    signed = validator.s2e_acceptance_review_signed_bytes(bundle)
+    bundle["signed_core_digest"] = "sha256:" + hashlib.sha256(signed).hexdigest()
+    bundle["signature"] = {
+        "algorithm": "SSHSIG",
+        "signed_digest": bundle["signed_core_digest"],
+        "signature": support._sign_sshsig(
+            case["private_key"],
+            signed,
+            namespace=s2e.S2E_RECEIPT_SIGNATURE_NAMESPACE,
+            directory=tmp_path,
+        ),
+    }
+    intent, result, readback = support._external_worm_triplet(
+        validator.s2e_acceptance_review_worm_payload(bundle),
+        source_head=candidate["source_head"],
+        landing_scope_id=candidate["payload_digest"],
+        learning_runtime_digest=candidate["launch_contract_digest"],
+        issued_at=issued_at,
+        intent_id=f"s2e-wave-review-{intent_suffix}",
+    )
+    bundle["external_worm_binding"] = {
+        "result_digest": result["result_digest"],
+        "readback_ack_digest": readback["ack_digest"],
+        "record_locator": result["record_locator"],
+        "object_version_id": result["object_version_id"],
+        "checksum_sha256": result["checksum_sha256"],
+    }
+    bundle["bundle_digest"] = validator.s2e_acceptance_review_bundle_digest(
+        bundle
+    )
+    return bundle, capture, chain, intent, result, readback
+
+
+def _issue_wave(case: dict, review: tuple, candidate: dict) -> dict:
+    bundle, capture, chain, intent, result, readback = review
+    return validator.issue_s2e_launch_receipt(
+        candidate,
+        acceptance_review_bundle=bundle,
+        repo_root=case["repo"],
+        now=case["now"] + timedelta(minutes=1),
+        governed_capture_record=capture,
+        disposable_test_effect_chains=[chain],
+        external_append_intent=intent,
+        external_append_result=result,
+        external_readback_ack=readback,
+        predecessor_receipt=case["issued"],
+        predecessor_authority=case["authority"],
+    )
+
+
+def test_typed_effect_chain_rejects_resealed_cross_link_forgery(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    case = support._issued_genesis_authority_case(tmp_path, monkeypatch)
+    candidate = s2e._pending_candidate_from_issued(case["issued"])
+    capture = case["authority"]["review_governed_capture_record"]
+    forged = deepcopy(
+        case["authority"]["review_disposable_test_effect_chains"][0]
+    )
+    forged["effect_id"] = "sha256:" + "1" * 64
+    for index, section in enumerate(
+        ("intent", "result", "postcheck", "rollback"), start=2
+    ):
+        forged[section]["effect_id"] = "sha256:" + str(index) * 64
+    forged["result"]["intent_digest"] = "sha256:" + "6" * 64
+    forged["postcheck"]["result_digest"] = "sha256:" + "7" * 64
+    forged["postcheck"]["source_head"] = "a" * 40
+    forged["postcheck"]["repository_generation_before"] = (
+        "sha256:" + "b" * 64
+    )
+    forged["postcheck"]["repository_generation_after"] = (
+        "sha256:" + "c" * 64
+    )
+    forged["rollback"]["result_digest"] = "sha256:" + "8" * 64
+    forged["rollback"]["postcheck_digest"] = "sha256:" + "9" * 64
+    for section, digest_field in (
+        ("intent", "intent_digest"),
+        ("result", "result_digest"),
+        ("postcheck", "postcheck_digest"),
+        ("rollback", "rollback_digest"),
+    ):
+        forged[section][digest_field] = validator.canonical_digest({
+            key: value
+            for key, value in forged[section].items()
+            if key != digest_field
+        })
+    forged["chain_digest"] = validator.canonical_digest({
+        key: value
+        for key, value in forged.items()
+        if key != "chain_digest"
+    })
+    errors = validator.validate_s2e_disposable_test_effect_chain(
+        forged,
+        candidate=candidate,
+        governed_capture_record=capture,
+        repo_root=case["repo"],
+    )
+    assert any("effect_id binding differs" in error for error in errors)
+    assert any("does not bind exact intent" in error for error in errors)
+    assert any("does not bind result and postcheck" in error for error in errors)
+    assert any("zero repository residue" in error for error in errors)
+
+
+def test_historical_review_cannot_be_reissued_after_head_advances(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    case = support._issued_genesis_authority_case(tmp_path, monkeypatch)
+    pending = s2e._pending_candidate_from_issued(case["issued"])
+    authority = case["authority"]
+    result = validator.issue_s2e_launch_receipt(
+        pending,
+        acceptance_review_bundle=authority["acceptance_review_bundle"],
+        repo_root=case["repo"],
+        now=case["now"],
+        governed_capture_record=authority["review_governed_capture_record"],
+        disposable_test_effect_chains=authority[
+            "review_disposable_test_effect_chains"
+        ],
+        external_append_intent=authority["review_external_append_intent"],
+        external_append_result=authority["review_external_append_result"],
+        external_readback_ack=authority["review_external_readback_ack"],
+    )
+    assert result["status"] == "EXTERNAL_VERIFICATION_PENDING"
+    assert any("not the clean current HEAD" in error for error in result["errors"])
+
+
+def test_wave_issuance_binds_effects_and_consumes_predecessor_once(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    case = support._issued_genesis_authority_case(tmp_path, monkeypatch)
+    repo = case["repo"]
+    source_head = support._commit(
+        repo, "lw1-current.txt", "LW1\n", "LW1 source"
+    )
+    candidate = launch.build_wave_candidate(
+        repo_root=repo,
+        wave="S2E-LW1",
+        source_head=source_head,
+        schema_carrier_head=case["schema_carrier"],
+        predecessor_receipt=case["issued"],
+        predecessor_authority=case["authority"],
+        launch_contract_digest=LAUNCH_CONTRACT_DIGEST,
+        generation_task_contract_digest=NEXT_GENERATION_TASK_CONTRACT_DIGEST,
+        now=case["now"],
+    )
+    profile = validator.s2e_review_test_argv(candidate, repo_root=repo)
+    assert "tests/structure/test_agent_governance_command_capture_v2.py" in profile
+    assert "tests/structure/test_agent_governance_node_permissions.py" in profile
+    review = _review_for_wave(
+        case,
+        candidate,
+        tmp_path=tmp_path,
+        monkeypatch=monkeypatch,
+        intent_suffix="a-first001",
+    )
+    first = _issue_wave(case, review, candidate)
+    assert first["status"] == "ISSUED"
+    issued = first["issued_receipt"]
+    assert issued["side_effect_class"] == "DISPOSABLE_TEST"
+    assert issued["disposable_effect_chain_digests"] == [
+        review[2]["chain_digest"]
+    ]
+    assert issued["predecessor_consumption"] == first[
+        "predecessor_consumption_result"
+    ]["entry"]
+    forged_consumption = deepcopy(issued)
+    forged_consumption["predecessor_consumption"]["entry_digest"] = (
+        "sha256:" + "0" * 64
+    )
+    forged_consumption["payload_digest"] = validator.launch_payload_digest(
+        forged_consumption
+    )
+    assert any(
+        "consumption entry digest is invalid" in error
+        for error in validator.validate_s2e_launch_wave_receipt(
+            forged_consumption, repo_root=repo
+        )
+    )
+    assert first["predecessor_consumption_result"]["status"] == "CONSUMED"
+    assert support._git(repo, "status", "--porcelain=v1") == ""
+    ledger = consumption.FileS2ELaunchConsumptionStore(repo).read()
+    assert consumption.validate_s2e_launch_consumption_ledger(ledger) == []
+    assert len(ledger["entries"]) == 1
+
+    retry = _issue_wave(case, review, candidate)
+    assert retry["status"] == "ISSUED"
+    assert retry["issued_receipt"]["payload_digest"] == issued["payload_digest"]
+    assert retry["predecessor_consumption_result"]["status"] == (
+        "IDEMPOTENT_REPLAY"
+    )
+
+    sibling_head = support._commit(
+        repo, "lw1-sibling.txt", "sibling\n", "LW1 sibling source"
+    )
+    sibling = launch.build_wave_candidate(
+        repo_root=repo,
+        wave="S2E-LW1",
+        source_head=sibling_head,
+        schema_carrier_head=case["schema_carrier"],
+        predecessor_receipt=case["issued"],
+        predecessor_authority=case["authority"],
+        launch_contract_digest=LAUNCH_CONTRACT_DIGEST,
+        generation_task_contract_digest=NEXT_GENERATION_TASK_CONTRACT_DIGEST,
+        now=case["now"],
+    )
+    sibling_review = _review_for_wave(
+        case,
+        sibling,
+        tmp_path=tmp_path,
+        monkeypatch=monkeypatch,
+        intent_suffix="b-second02",
+    )
+    blocked = _issue_wave(case, sibling_review, sibling)
+    assert blocked["status"] == "EXTERNAL_VERIFICATION_PENDING"
+    assert any(
+        "already consumed by another successor" in error
+        for error in blocked["errors"]
+    )
+    assert blocked["issued_receipt"] is None
+    assert len(
+        consumption.FileS2ELaunchConsumptionStore(repo).read()["entries"]
+    ) == 1
+
+
+def test_consumption_store_refuses_a_symlink_state_file(tmp_path: Path) -> None:
+    repo, _, _, _ = support._repo(tmp_path)
+    store = consumption.FileS2ELaunchConsumptionStore(repo)
+    outside = tmp_path / "outside.json"
+    outside.write_text("{}\n", encoding="utf-8")
+    store.state_path.symlink_to(outside)
+    with pytest.raises(OSError):
+        store.read()
+
+
+def test_consumption_store_refuses_a_symlink_lock_file(tmp_path: Path) -> None:
+    repo, _, _, _ = support._repo(tmp_path)
+    store = consumption.FileS2ELaunchConsumptionStore(repo)
+    outside = tmp_path / "outside.lock"
+    outside.write_text("\n", encoding="utf-8")
+    store.lock_path.symlink_to(outside)
+    with pytest.raises(OSError):
+        store.update(lambda ledger: ledger)

@@ -93,6 +93,7 @@ def test_real_tree_closure_verdict_derives_pass_and_is_deterministic() -> None:
         in closure["python_modules"]
     )
     assert {
+        "program_code/ml_training/aiml_gate_receipt_s2e_consumption.py",
         "program_code/ml_training/aiml_gate_receipt_s2e_launch.py",
         "program_code/ml_training/aiml_gate_receipt_source_compatibility.py",
     }.issubset(closure["python_modules"])
@@ -103,6 +104,8 @@ def test_real_tree_closure_verdict_derives_pass_and_is_deterministic() -> None:
     assert {
         "program_code/ml_training/schemas/aiml_gate_receipts/"
         "s2e_launch_genesis_receipt_v1.schema.json",
+        "program_code/ml_training/schemas/aiml_gate_receipts/"
+        "s2e_launch_predecessor_consumption_ledger_v1.schema.json",
         "program_code/ml_training/schemas/aiml_gate_receipts/"
         "s2e_launch_wave_receipt_v1.schema.json",
         "program_code/ml_training/schemas/aiml_gate_receipts/"

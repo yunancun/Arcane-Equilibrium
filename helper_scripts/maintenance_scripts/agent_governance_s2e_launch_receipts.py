@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Generate or validate S2E launch payloads without repository/runtime effects."""
+"""Generate/validate S2E launch payloads and atomically consume wave predecessors."""
 
 from __future__ import annotations
 
@@ -77,11 +77,6 @@ def _parser() -> argparse.ArgumentParser:
     wave.add_argument("--now", required=True)
     wave.add_argument("--launch-contract-digest", required=True)
     wave.add_argument("--generation-task-contract-digest", required=True)
-    wave.add_argument(
-        "--side-effect-class",
-        choices=("SOURCE_ONLY", "DISPOSABLE_TEST"),
-        default="SOURCE_ONLY",
-    )
     validate = subparsers.add_parser("validate")
     validate.add_argument("--repo-root", type=Path, default=REPO_ROOT)
     validate.add_argument("--receipt", type=Path, required=True)
@@ -166,7 +161,6 @@ def main(argv: list[str] | None = None) -> int:
             launch_contract_digest=args.launch_contract_digest,
             generation_task_contract_digest=args.generation_task_contract_digest,
             now=args.now,
-            side_effect_class=args.side_effect_class,
         )
         print(json.dumps(artifact, ensure_ascii=False, sort_keys=True))
         return 0

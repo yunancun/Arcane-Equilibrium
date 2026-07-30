@@ -1,0 +1,117 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://arcane-equilibrium.local/schemas/s2e_launch_predecessor_consumption_ledger_v1.schema.json",
+  "title": "s2e_launch_predecessor_consumption_ledger_v1",
+  "description": "Closed, hash-chained consume-once ledger for S2E launch predecessors. The filesystem Adapter persists this ledger in Git's common directory under an exclusive lock; it is local source-control state and never production authority or a production runtime effect.",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "schema_version",
+    "launch_id",
+    "entries",
+    "ledger_digest"
+  ],
+  "properties": {
+    "schema_version": {
+      "const": "s2e_launch_predecessor_consumption_ledger_v1"
+    },
+    "launch_id": {
+      "const": "S2E-LW1-LW5"
+    },
+    "entries": {
+      "type": "array",
+      "maxItems": 5,
+      "items": {
+        "$ref": "#/$defs/entry"
+      }
+    },
+    "ledger_digest": {
+      "$ref": "#/$defs/digest"
+    }
+  },
+  "$defs": {
+    "digest": {
+      "type": "string",
+      "pattern": "^sha256:[0-9a-f]{64}$"
+    },
+    "git_sha": {
+      "type": "string",
+      "pattern": "^[0-9a-f]{40}$"
+    },
+    "wave": {
+      "enum": [
+        "S2E-LW1",
+        "S2E-LW2",
+        "S2E-LW3",
+        "S2E-LW4",
+        "S2E-LW5"
+      ]
+    },
+    "entry": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "schema_version",
+        "sequence",
+        "previous_entry_digest",
+        "launch_id",
+        "predecessor_payload_digest",
+        "successor_candidate_payload_digest",
+        "successor_wave",
+        "successor_source_head",
+        "acceptance_review_bundle_digest",
+        "consumed_at",
+        "side_effect_class",
+        "production_effect",
+        "entry_digest"
+      ],
+      "properties": {
+        "schema_version": {
+          "const": "s2e_launch_predecessor_consumption_entry_v1"
+        },
+        "sequence": {
+          "type": "integer",
+          "minimum": 1,
+          "maximum": 5
+        },
+        "previous_entry_digest": {
+          "anyOf": [
+            {"$ref": "#/$defs/digest"},
+            {"type": "null"}
+          ]
+        },
+        "launch_id": {
+          "const": "S2E-LW1-LW5"
+        },
+        "predecessor_payload_digest": {
+          "$ref": "#/$defs/digest"
+        },
+        "successor_candidate_payload_digest": {
+          "$ref": "#/$defs/digest"
+        },
+        "successor_wave": {
+          "$ref": "#/$defs/wave"
+        },
+        "successor_source_head": {
+          "$ref": "#/$defs/git_sha"
+        },
+        "acceptance_review_bundle_digest": {
+          "$ref": "#/$defs/digest"
+        },
+        "consumed_at": {
+          "type": "string",
+          "format": "date-time"
+        },
+        "side_effect_class": {
+          "const": "LOCAL_SOURCE_CONTROL_STATE"
+        },
+        "production_effect": {
+          "const": false
+        },
+        "entry_digest": {
+          "$ref": "#/$defs/digest"
+        }
+      }
+    }
+  }
+}

@@ -2,7 +2,7 @@
   "$schema": "https://json-schema.org/draft/2020-12/schema",
   "$id": "https://arcane-equilibrium.local/schemas/s2e_launch_genesis_receipt_v1.schema.json",
   "title": "s2e_launch_genesis_receipt_v1",
-  "description": "Closed, source-only W0 launch genesis payload. It binds a historical W0 baseline separately from the later commit that carries the launch tooling; it never names its eventual carrier commit.",
+  "description": "Closed W0 launch genesis payload. A pending candidate is source-only; an issued READY receipt binds the exact typed disposable acceptance-test chain digests that were executed before issuance.",
   "type": "object",
   "additionalProperties": false,
   "required": [
@@ -20,6 +20,7 @@
     "checkpoint_status",
     "acceptance_review_bundle_digest",
     "side_effect_class",
+    "disposable_effect_chain_digests",
     "production_effect_count",
     "payload_digest"
   ],
@@ -39,7 +40,13 @@
     "acceptance_review_bundle_digest": {
       "anyOf": [{"$ref": "#/$defs/digest"}, {"type": "null"}]
     },
-    "side_effect_class": {"const": "SOURCE_ONLY"},
+    "side_effect_class": {"enum": ["SOURCE_ONLY", "DISPOSABLE_TEST"]},
+    "disposable_effect_chain_digests": {
+      "type": "array",
+      "maxItems": 64,
+      "uniqueItems": true,
+      "items": {"$ref": "#/$defs/digest"}
+    },
     "production_effect_count": {"const": 0},
     "payload_digest": {"$ref": "#/$defs/digest"}
   },
