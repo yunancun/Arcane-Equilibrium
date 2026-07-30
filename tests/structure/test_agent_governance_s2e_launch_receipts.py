@@ -1163,3 +1163,69 @@ def test_verified_review_bundle_issues_ready_genesis_receipt(
     assert validator.validate_s2e_launch_genesis_receipt(
         issued, repo_root=repo
     ) == []
+
+
+def test_generic_validator_never_schema_only_accepts_review_bundle() -> None:
+    digest = "sha256:" + "a" * 64
+    capture_identity = {
+        "schema_version": "governed_capture_identity_v1",
+        "record_digest": digest,
+        "context_artifact_digest": digest,
+        "task_contract_digest": digest,
+        "node_id": "review",
+        "role_id": "E4",
+        "native_agent": "E4-verifier",
+        "permission": "read_only",
+    }
+    bundle = {
+        "schema_version": "s2e_launch_acceptance_review_bundle_v1",
+        "candidate_payload_digest": digest,
+        "launch_id": "S2E-LW1-LW5",
+        "wave": "W0-GENESIS",
+        "reviewed_source_head": "a" * 40,
+        "reviewed_source_tree": "b" * 40,
+        "generation_task_contract_digest": digest,
+        "predicate_results": validator.s2e_review_predicate_results(
+            "W0-GENESIS"
+        ),
+        "governed_capture_identity": capture_identity,
+        "governed_capture_record_digest": digest,
+        "reviewer_identity": {
+            "node_id": "review",
+            "role_id": "E4",
+            "native_agent": "E4-verifier",
+            "permission": "read_only",
+        },
+        "issued_at": "2026-07-30T12:00:00Z",
+        "expires_at": "2026-07-30T12:05:00Z",
+        "signer": {
+            "role": "S2E_SIGNER",
+            "identity": s2e.S2E_RECEIPT_SIGNER_IDENTITY,
+            "namespace": s2e.S2E_RECEIPT_SIGNATURE_NAMESPACE,
+            "key_generation": "independent_off_repo_ed25519_v1",
+            "anchor": "fixed_off_repo_public_trust_root_v1",
+            "key_fingerprint": "SHA256:" + "A" * 43,
+        },
+        "signed_core_digest": digest,
+        "signature": {
+            "algorithm": "SSHSIG",
+            "signed_digest": digest,
+            "signature": "x" * 32,
+        },
+        "external_worm_binding": {
+            "result_digest": digest,
+            "readback_ack_digest": digest,
+            "record_locator": "records/" + "a" * 64 + ".record",
+            "object_version_id": "version-1",
+            "checksum_sha256": digest,
+        },
+        "bundle_digest": digest,
+    }
+
+    assert validator.validate_aiml_artifact(
+        bundle, now="2026-07-30T12:01:00Z"
+    ) == [
+        "s2e acceptance review bundle EXTERNAL_VERIFICATION_PENDING: exact "
+        "candidate, governed capture, fixed-root SSHSIG, and external WORM "
+        "evidence are required"
+    ]

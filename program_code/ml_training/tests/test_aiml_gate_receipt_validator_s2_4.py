@@ -1037,8 +1037,19 @@ def test_cp2b_schema_files_resolve_to_real_files() -> None:
     # S2.5(WP5 tranche 1b·E3 P1-3)additive 註冊
     # s2_5_authorization_replay_ledger_v1 → 78;
     # S2.2B(WP5 tranche 2·design §10)additive 註冊
-    # ingestion_compatibility_receipt_v1 → 79。
-    assert len(SCHEMA_FILES) == 79
+    # ingestion_compatibility_receipt_v1 → 79;
+    # S2E launch additive 註冊 s2e_launch_genesis_receipt_v1、
+    # s2e_launch_wave_receipt_v1、receipt_carrier_attestation_v1、
+    # s2e_launch_acceptance_review_bundle_v1 → 83。
+    assert len(SCHEMA_FILES) == 83
+    for s2e_key in (
+        "s2e_launch_genesis_receipt_v1",
+        "s2e_launch_wave_receipt_v1",
+        "receipt_carrier_attestation_v1",
+        "s2e_launch_acceptance_review_bundle_v1",
+    ):
+        assert s2e_key in SCHEMA_FILES
+        assert (SCHEMA_DIR / SCHEMA_FILES[s2e_key]).is_file()
     assert "s2_4_dependency_refresh_attestation_v1" in SCHEMA_FILES
     assert (
         SCHEMA_DIR / SCHEMA_FILES["s2_4_dependency_refresh_attestation_v1"]

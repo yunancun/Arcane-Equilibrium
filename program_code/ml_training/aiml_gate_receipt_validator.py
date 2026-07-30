@@ -1758,6 +1758,15 @@ def validate_aiml_artifact(
         errors.extend(validate_receipt_carrier_attestation(
             artifact, payload_receipt=None, repo_root=REPO_ROOT, now=now
         ))
+    if schema_version == "s2e_launch_acceptance_review_bundle_v1":
+        # The generic API has no paired candidate, governed capture record,
+        # fixed-root SSHSIG profile, or external WORM result/readback inputs.
+        # Closed-schema validity therefore cannot authenticate acceptance.
+        errors.append(
+            "s2e acceptance review bundle EXTERNAL_VERIFICATION_PENDING: exact "
+            "candidate, governed capture, fixed-root SSHSIG, and external WORM "
+            "evidence are required"
+        )
     if schema_version in {"sealed_build_receipt_v1", "expected_identity_receipt_v1"}:
         # S2.3(LR2)sealed-build / expected-identity 是 BUILD-IDENTITY / source 產物
         # (content-addressed、可重算、production_running_attested=false、observation_owner=

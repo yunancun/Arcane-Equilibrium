@@ -98,10 +98,21 @@ def test_source_lane_positive_round_trips_the_central_gate(tmp_path, monkeypatch
 
 
 def test_registration_is_additive_and_frozen_surfaces_unmoved():
-    # SCHEMA_FILES 79 + schema 檔在盤;PROGRAM_SCHEMA_PATHS 與 frozen 分類身分未動
-    # (digest 凍結值由既有 s2_5 測試釘住;此處釘 additive 面)。
+    # SCHEMA_FILES 83 + schema 檔在盤:既有 79 加上
+    # s2e_launch_genesis_receipt_v1、s2e_launch_wave_receipt_v1、
+    # receipt_carrier_attestation_v1、s2e_launch_acceptance_review_bundle_v1;
+    # PROGRAM_SCHEMA_PATHS 與 frozen 分類身分未動(digest 凍結值由既有 s2_5 測試釘住)。
     assert "ingestion_compatibility_receipt_v1" in validator.SCHEMA_FILES
-    assert len(validator.SCHEMA_FILES) == 79
+    assert len(validator.SCHEMA_FILES) == 83
+    for s2e_key in (
+        "s2e_launch_genesis_receipt_v1",
+        "s2e_launch_wave_receipt_v1",
+        "receipt_carrier_attestation_v1",
+        "s2e_launch_acceptance_review_bundle_v1",
+    ):
+        assert (
+            validator.SCHEMA_DIR / validator.SCHEMA_FILES[s2e_key]
+        ).is_file()
     assert (
         validator.SCHEMA_DIR
         / validator.SCHEMA_FILES["ingestion_compatibility_receipt_v1"]
