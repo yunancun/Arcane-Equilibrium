@@ -1,0 +1,32 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://arcane-equilibrium.local/schemas/s2_5_recovery_store_postcheck_v1.schema.json",
+  "title": "s2_5_recovery_store_postcheck_v1",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "schema_version", "result_digest", "manifest_digest", "readback_digest",
+    "manifest_match", "parent_identity_match", "temp_residue_absent",
+    "status", "side_effect_class", "target_class", "production_effect",
+    "production_authority", "self_digest"
+  ],
+  "properties": {
+    "schema_version": {"const": "s2_5_recovery_store_postcheck_v1"},
+    "result_digest": {"$ref": "#/$defs/digest"},
+    "manifest_digest": {"$ref": "#/$defs/nullableDigest"},
+    "readback_digest": {"$ref": "#/$defs/nullableDigest"},
+    "manifest_match": {"type": "boolean"},
+    "parent_identity_match": {"type": "boolean"},
+    "temp_residue_absent": {"type": "boolean"},
+    "status": {"enum": ["PASS", "RECOVERY_REQUIRED", "NOT_PERFORMED"]},
+    "side_effect_class": {"const": "DISPOSABLE_TEST"},
+    "target_class": {"const": "disposable_systemd"},
+    "production_effect": {"const": false},
+    "production_authority": {"const": false},
+    "self_digest": {"$ref": "#/$defs/digest"}
+  },
+  "$defs": {
+    "digest": {"type": "string", "pattern": "^sha256:[0-9a-f]{64}$"},
+    "nullableDigest": {"anyOf": [{"$ref": "#/$defs/digest"}, {"type": "null"}]}
+  }
+}

@@ -1,0 +1,38 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://arcane-equilibrium.local/schemas/s2_5_recovery_store_manifest_v1.schema.json",
+  "title": "s2_5_recovery_store_manifest_v1",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "schema_version", "store_id", "state_root_id", "source_head", "generation",
+    "phase", "previous_manifest_digest", "unresolved_state_digest",
+    "anchor_head_digest", "consumed_authorization_ids", "side_effect_class",
+    "target_class", "production_effect", "production_authority", "self_digest"
+  ],
+  "properties": {
+    "schema_version": {"const": "s2_5_recovery_store_manifest_v1"},
+    "store_id": {"type": "string", "pattern": "^s2-5-store-[0-9a-f]{64}$"},
+    "state_root_id": {"$ref": "#/$defs/digest"},
+    "source_head": {"$ref": "#/$defs/head"},
+    "generation": {"type": "integer", "minimum": 1},
+    "phase": {"enum": ["PREPARED", "COMMITTED", "RESOLVED"]},
+    "previous_manifest_digest": {"$ref": "#/$defs/nullableDigest"},
+    "unresolved_state_digest": {"$ref": "#/$defs/nullableDigest"},
+    "anchor_head_digest": {"$ref": "#/$defs/nullableDigest"},
+    "consumed_authorization_ids": {
+      "type": "array", "uniqueItems": true,
+      "items": {"type": "string", "pattern": "^s2-5-auth-[0-9a-f]{64}$"}
+    },
+    "side_effect_class": {"const": "DISPOSABLE_TEST"},
+    "target_class": {"const": "disposable_systemd"},
+    "production_effect": {"const": false},
+    "production_authority": {"const": false},
+    "self_digest": {"$ref": "#/$defs/digest"}
+  },
+  "$defs": {
+    "digest": {"type": "string", "pattern": "^sha256:[0-9a-f]{64}$"},
+    "nullableDigest": {"anyOf": [{"$ref": "#/$defs/digest"}, {"type": "null"}]},
+    "head": {"type": "string", "pattern": "^[0-9a-f]{40}$"}
+  }
+}
