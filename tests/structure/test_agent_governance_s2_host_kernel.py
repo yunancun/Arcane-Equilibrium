@@ -1,30 +1,17 @@
-"""S2E.2a:S2 受信主機 runner 家族 kernel 的結構證明。
+"""S2 trusted-host kernel structural proof.
 
-四道 §E.3「禁止 raw command 繞過 Adapter」全部在此執法,其中第四道(AST 掃描)是本波**驗收的
-機器判準**:
-
-1. 唯一 exec 點 —— kernel 之外的 runner 家族檔案不得出現 ``subprocess`` / ``os.system`` /
-   ``os.popen`` / ``shell=True`` / ``eval`` / ``exec`` / ``__import__``;
-2. kernel 側獨立 re-assert —— 非 allowlist argv 一律 raise 且**絕不執行**;
-3. 能力分割硬檢 —— ``assert_read_only_surface`` 在呼叫任何方法之前拒絕寫能力面;
-4. allowlist ≡ 原 owner 集合 —— 以「錄音式 host_probe 驅動 ``build_owner_inventory``」比對實際
-   送出的 argv,證明 kernel 的表是**導出**而非手抄。
-
-另證 target class 由主機事實導出(caller 字串永遠進不來)、``unknown`` 與 ``production`` 同等
-對待、``--allow-production`` 單獨不足,以及 ``PR_SET_DUMPABLE`` 真的被執法。
+The suite enforces one exec point, kernel-side argv re-assertion, capability
+separation, and a derived owner allowlist. It also proves target class is
+host-derived and process hardening is enforced.
 """
 
 from __future__ import annotations
-
 import ast
 import os
 import subprocess
 import sys
 from pathlib import Path
-
 import pytest
-
-
 ROOT = Path(__file__).resolve().parents[2]
 HELPERS = ROOT / "helper_scripts/maintenance_scripts"
 ML_ROOT = ROOT / "program_code/ml_training"
@@ -98,16 +85,10 @@ GOVERNANCE_IMPORTS_BY_FILE: dict[str, frozenset[str]] = {
         "agent_governance_s2_effect_binding",
         "agent_governance_s2_host_kernel",
     }),
-    # S2.4 §5.2 的 POSIX 檔案/lock driver:只需 journal/lock 兩葉的**常量**(路徑、mode、
-    # open flags),不 import 任何 applier。
     "agent_governance_s2_4_host_storage.py": frozenset({
         "agent_governance_s2_4_journal",
         "agent_governance_s2_4_lock",
     }),
-    # S2.4 §5.4 的啟動逆序補償器:它是唯一需要 applier 匯入面的 family 成員(補償要重用
-    # aggregate 交易葉的 rollback 契約、殘留觀測與 lock-release 折入政策,絕不另抄一份),
-    # 也是唯一需要中央 schema/digest 驗證器的成員(permit 身分與 rollback artifact 的再導出)。
-    # 本表是**每檔模組**白名單,不限於 ``agent_governance_*`` 前綴——前綴是名字,不是能力。
     "agent_governance_s2_4_host_recovery.py": frozenset({
         "agent_governance_s2_4_component",
         "agent_governance_s2_4_install_driver",
@@ -146,11 +127,9 @@ FORBIDDEN_RAW_COMMAND_NAMES = frozenset({
 FORBIDDEN_BUILTINS = frozenset({
     "eval", "exec", "compile", "__import__", "globals", "locals", "vars",
 })
-# 動態取名的三個 builtin:名稱參數若是**算出來的**(``"sys"+"tem"`` / f-string / call)一律 finding。
 DYNAMIC_ATTRIBUTE_BUILTINS = frozenset({
     "getattr", "setattr", "delattr", "__getattribute__",
 })
-# 被字串拼接混淆出來就一定是繞過意圖的識別碼。
 OBFUSCATION_SENSITIVE_LITERALS = (
     FORBIDDEN_RAW_COMMAND_NAMES | FORBIDDEN_BUILTINS
     | {"subprocess", "importlib", "pty", "commands", "ctypes"}
@@ -200,7 +179,6 @@ def _raw_command_findings(path: Path, *, exec_family: bool = True) -> list[str]:
         allowed_modules = (
             ALLOWED_STDLIB_IMPORTS
             | ALLOWED_THIRD_PARTY_IMPORTS
-            # 未列名 = 空集(fail-closed);family 成員的每一個治理 import 都必須顯式宣告。
             | GOVERNANCE_IMPORTS_BY_FILE.get(path.name, frozenset())
         )
         if is_kernel:
@@ -237,7 +215,6 @@ def _raw_command_findings(path: Path, *, exec_family: bool = True) -> list[str]:
     def _check_module(lineno: int, module: str, rendered: str) -> None:
         top = (module or "").split(".")[0]
         if allowed_modules is None:
-            # 除名檔案:白名單關掉,但 kernel 專屬三支 + exec-capable 黑名單一律仍擋。
             if top in KERNEL_ONLY_IMPORTS:
                 findings.append(
                     f"line {lineno}: kernel-only module outside the kernel: {rendered}"
@@ -317,6 +294,8 @@ def _raw_command_findings(path: Path, *, exec_family: bool = True) -> list[str]:
             members: dict[object, object] = {}
             for key, item in zip(node.keys, node.values):
                 if key is None:
+                    expanded = _value_provenance(item)
+                    members = _merge_provenance(members, expanded if isinstance(expanded, dict) else {wildcard_key: expanded})
                     continue
                 provenance = _value_provenance(item)
                 token = _key_token(key)
@@ -355,10 +334,15 @@ def _raw_command_findings(path: Path, *, exec_family: bool = True) -> list[str]:
             provenance = _value_provenance(node.value)
             if isinstance(provenance, dict):
                 if isinstance(node.slice, ast.Constant):
-                    raw, keyed = provenance.get(node.slice.value), provenance.get(_key_token(node.slice))
-                    provenance = (
+                    mapping = provenance
+                    raw, keyed = mapping.get(node.slice.value), mapping.get(_key_token(node.slice))
+                    exact = (
                         keyed if raw is None else raw if keyed is None
                         else _merge_provenance(raw, keyed)
+                    )
+                    provenance = (
+                        exact if exact is not None
+                        else mapping.get(("constant", ("sequence", "*")), set())
                     )
                 elif all(isinstance(key, tuple) for key in provenance):
                     provenance = _merge_provenance(
@@ -477,7 +461,6 @@ def _raw_command_findings(path: Path, *, exec_family: bool = True) -> list[str]:
                 return "dynamic callable container"
         return None
 
-    # A dynamic getter can be returned by a helper and invoked later.
     for function in (
         item for item in ast.walk(tree)
         if isinstance(item, (ast.FunctionDef, ast.AsyncFunctionDef))
@@ -490,34 +473,39 @@ def _raw_command_findings(path: Path, *, exec_family: bool = True) -> list[str]:
             dynamic_return_functions.add(function.name)
 
     def _assignment_bindings(
-        target: ast.AST, value: ast.AST | None
-    ) -> list[tuple[ast.AST, ast.AST | None]]:
-        if isinstance(target, (ast.List, ast.Tuple)) and isinstance(
-            value, (ast.List, ast.Tuple)
-        ):
-            targets, values = list(target.elts), list(value.elts)
+        target: ast.AST, value: ast.AST | None, provenance: object | None = None
+    ) -> list[tuple[ast.AST, ast.AST | None, object]]:
+        provenance = _value_provenance(value) if provenance is None else provenance
+        indexes = (
+            sorted(key for key in provenance if isinstance(key, int))
+            if isinstance(provenance, dict) else []
+        )
+        if isinstance(target, (ast.List, ast.Tuple)) and indexes == list(range(len(indexes))):
+            targets = list(target.elts)
+            values = list(value.elts) if isinstance(value, (ast.List, ast.Tuple)) else [None] * len(indexes)
+            provenances = [provenance[index] for index in indexes]
             stars = [index for index, item in enumerate(targets) if isinstance(item, ast.Starred)]
             if len(stars) == 1:
                 index = stars[0]
                 suffix = len(targets) - index - 1
-                if len(values) < index + suffix:
-                    return [(target, value)]
-                pairs = list(zip(targets[:index], values[:index]))
-                pairs.append((
-                    targets[index].value,
-                    ast.List(elts=values[index:len(values) - suffix or None], ctx=ast.Load()),
-                ))
-                pairs.extend(zip(targets[index + 1:], values[len(values) - suffix:]))
+                if len(indexes) < index + suffix:
+                    return [(target, value, provenance)]
+                stop = len(indexes) - suffix
+                pairs = list(zip(targets[:index], values[:index], provenances[:index]))
+                pairs.append((targets[index].value, None, {
+                    offset: item for offset, item in enumerate(provenances[index:stop])
+                }))
+                pairs.extend(zip(targets[index + 1:], values[stop:], provenances[stop:]))
             elif not stars and len(targets) == len(values):
-                pairs = list(zip(targets, values))
+                pairs = list(zip(targets, values, provenances))
             else:
-                return [(target, value)]
+                return [(target, value, provenance)]
             return [
                 binding
-                for item_target, item_value in pairs
-                for binding in _assignment_bindings(item_target, item_value)
+                for item_target, item_value, item_provenance in pairs
+                for binding in _assignment_bindings(item_target, item_value, item_provenance)
             ]
-        return [(target, value)]
+        return [(target, value, provenance)]
 
     changed = True
     while changed:
@@ -534,15 +522,21 @@ def _raw_command_findings(path: Path, *, exec_family: bool = True) -> list[str]:
                 value, targets = node.value, list(node.targets)
             elif isinstance(node, ast.AnnAssign):
                 value, targets = node.value, [node.target]
-            elif isinstance(node, ast.NamedExpr):
+            elif isinstance(node, ast.NamedExpr) or isinstance(node, ast.AugAssign) and isinstance(node.op, ast.BitOr):
                 value, targets = node.value, [node.target]
+            elif isinstance(node, ast.Call) and isinstance(node.func, ast.Attribute) and node.func.attr == "update" and node.args:
+                value, targets = node.args[0], [node.func.value]
+            elif isinstance(node, ast.Call) and isinstance(node.func, ast.Attribute) and node.func.attr == "setdefault" and len(node.args) > 1:
+                value, targets = node.args[1], [ast.Subscript(value=node.func.value, slice=node.args[0], ctx=ast.Store())]
+            elif isinstance(node, ast.Call) and isinstance(node.func, ast.Attribute) and node.func.attr in {"append", "extend"} and node.args:
+                value, targets = node.args[0], [ast.Subscript(value=node.func.value,
+                    slice=ast.Constant(value=("sequence", "*")), ctx=ast.Store())]
             bindings = [
                 binding
                 for target in targets
                 for binding in _assignment_bindings(target, value)
             ]
-            for target, bound_value in bindings:
-                provenance = _value_provenance(bound_value)
+            for target, bound_value, provenance in bindings:
                 target_path = _target_path(target)
                 if target_path is not None and not isinstance(target, ast.Name):
                     root, slices = target_path
@@ -569,7 +563,7 @@ def _raw_command_findings(path: Path, *, exec_family: bool = True) -> list[str]:
                     if container_aliases.get(target.id) != merged:
                         container_aliases[target.id] = merged
                         changed = True
-            for target, bound_value in bindings:
+            for target, bound_value, _ in bindings:
                 if bound_value is None or _callee_capability(bound_value) is None:
                     continue
                 names = [
@@ -744,7 +738,6 @@ def test_no_raw_command_outside_the_kernel():
         assert findings == [], f"{path.name} carries a raw-command surface: {findings}"
 
 
-# S2E.2b-1 (a) — RUNNER_FAMILY 由檔案系統**導出**比對,不是純手抄
 def _unscanned_runner_candidates(helpers_dir: Path, family_names: set[str]) -> list[str]:
     """磁碟上「長得像 S2 受信主機 runner」但不在掃描家族、也未被顯式除名的檔案。"""
 
@@ -755,8 +748,6 @@ def _unscanned_runner_candidates(helpers_dir: Path, family_names: set[str]) -> l
 
 
 def test_every_file_that_looks_like_an_s2_host_runner_is_scanned():
-    # 反例式判準:family 表若漏了一個新 runner,這裡必紅(該檔在漏加之前完全不被 AST 掃描,
-    # 於是任何新的 exec 面都能全綠落地 —— 那正是本測試存在的理由)。
     unscanned = _unscanned_runner_candidates(HELPERS, {path.name for path in RUNNER_FAMILY})
     assert unscanned == [], (
         f"{unscanned} match the S2 host-runner shape but are neither in RUNNER_FAMILY (so the "
@@ -765,9 +756,6 @@ def test_every_file_that_looks_like_an_s2_host_runner_is_scanned():
 
 
 def test_a_declared_non_runner_leaf_is_still_denied_every_exec_path():
-    # 除名不是逃生門:它只豁免 per-file import 白名單與 ``shell=`` 呼叫形狀兩項,exec 能力面
-    # (raw-command 名稱 / builtin / 動態取名 / 字面拼接 / kernel-only + exec-capable 模組)
-    # 一道都不放。
     for name, reason in NON_RUNNER_HOST_LEAVES.items():
         path = HELPERS / name
         assert path.is_file(), name
@@ -784,9 +772,6 @@ def test_the_exec_family_exemption_never_admits_a_kernel_only_module(tmp_path):
         assert any("kernel-only module outside the kernel" in item for item in findings), module
 
 
-# S2E.2b-1 P2-1:E2 的兩個全綠反例 —— 除名檔案帶 ``pty.spawn`` / ``importlib.import_module``。
-# 兩者在修前都完全不被任何一道抓到(白名單被關掉、模組名不是被禁**屬性**名、
-# ``import_module(name)`` 的名稱是**變數**故字面拼接那道也沉默)。
 EXEMPT_LEAF_EXEC_COUNTEREXAMPLES = {
     "E2_pty_spawn_on_an_exempt_leaf": "import pty\n\n\ndef f(argv):\n    return pty.spawn(argv)\n",
     "E2_importlib_dynamic_name_on_an_exempt_leaf": (
@@ -809,7 +794,6 @@ def test_the_exec_family_exemption_never_admits_an_exec_capable_module(tmp_path,
     path.write_text(EXEMPT_LEAF_EXEC_COUNTEREXAMPLES[mutation], encoding="utf-8")
     findings = _raw_command_findings(path, exec_family=False)
     assert any("exec-capable module on a non-runner leaf" in item for item in findings), findings
-    # 對照:同一份 source 在 exec 家族路徑上本來就被正面白名單擋下(兩條路都紅,不是二選一)。
     assert _raw_command_findings(path, exec_family=True)
 
 
@@ -827,7 +811,6 @@ def test_every_exec_capable_denylist_entry_is_caught_in_every_import_form(
 
 
 def test_the_two_import_denylists_never_overlap_the_positive_allowlist():
-    # 黑名單若與白名單相交,exec 家族上就會出現「宣告過但仍被擋」的自相矛盾條目。
     allowed = ALLOWED_STDLIB_IMPORTS | ALLOWED_THIRD_PARTY_IMPORTS
     for name, modules in GOVERNANCE_IMPORTS_BY_FILE.items():
         allowed = allowed | modules
@@ -836,13 +819,11 @@ def test_the_two_import_denylists_never_overlap_the_positive_allowlist():
 
 
 def test_the_family_derivation_is_red_when_a_new_runner_is_left_out(tmp_path):
-    # 突變:一個新的 runner 檔落在 helpers 目錄卻沒進 family 表。
     (tmp_path / "agent_governance_s2_9_host_runner.py").write_text("x = 1\n", encoding="utf-8")
     (tmp_path / "aiml_s2_other_host_run.py").write_text("x = 1\n", encoding="utf-8")
     assert _unscanned_runner_candidates(tmp_path, set()) == [
         "agent_governance_s2_9_host_runner.py", "aiml_s2_other_host_run.py"
     ]
-    # 對照:同樣兩個檔案一旦進表就不再是 finding(判準是「有沒有被掃描」,不是檔名黑名單)。
     assert _unscanned_runner_candidates(
         tmp_path,
         {"agent_governance_s2_9_host_runner.py", "aiml_s2_other_host_run.py"},
@@ -860,14 +841,12 @@ def test_the_runner_family_is_auto_discovered_not_copied_into_a_tuple(tmp_path):
         path = tmp_path / name
         path.write_text("x = 1\n", encoding="utf-8")
         expected.append(path)
-    # 形似 host protocol 的已解釋除名葉不進 exec family。
     (tmp_path / "agent_governance_s2_4_host_identity.py").write_text(
         "x = 1\n", encoding="utf-8"
     )
     assert _discover_runner_family(tmp_path) == sorted(expected)
 
 
-# S2E.2b-1 (b) — 治理 import 白名單是 per-file 的能力宣告
 def test_the_governance_import_allowlist_is_per_file_not_family_wide(tmp_path):
     """S2.4 補償 runner 需要的 applier 匯入面,絕不因此在 observer / kernel 上也成立。"""
 
@@ -876,11 +855,9 @@ def test_the_governance_import_allowlist_is_per_file_not_family_wide(tmp_path):
     ])
     assert applier, "the S2.4 recovery runner is expected to declare applier imports"
     source = "".join(f"import {module}\n" for module in applier)
-    # 同一份 source 放在補償 runner 的檔名下:合法(它宣告過這些能力)。
     admitted = tmp_path / "agent_governance_s2_4_host_recovery.py"
     admitted.write_text(source, encoding="utf-8")
     assert _raw_command_findings(admitted) == []
-    # 放在任何**沒有**宣告它們的 family 成員檔名下:一律 finding。
     for name in ("agent_governance_s2_host_observer.py", "agent_governance_s2_host_kernel.py",
                  "agent_governance_s2_0_host_runner.py"):
         elsewhere = tmp_path / name
@@ -889,23 +866,18 @@ def test_the_governance_import_allowlist_is_per_file_not_family_wide(tmp_path):
 
 
 def test_every_governance_allowlist_entry_belongs_to_a_family_member():
-    # per-file 表不得長出「沒有對應檔案」的條目(那是一張永遠不被執行的宣告)。
     family_names = {path.name for path in RUNNER_FAMILY}
     assert set(GOVERNANCE_IMPORTS_BY_FILE) <= family_names, sorted(
         set(GOVERNANCE_IMPORTS_BY_FILE) - family_names
     )
-    # 沒有任何檔案被允許 import kernel-only 的三個 exec 路徑模組。
     for name, modules in GOVERNANCE_IMPORTS_BY_FILE.items():
         assert not (modules & KERNEL_ONLY_IMPORTS), name
 
 
-# E2 重做的三個突變(M2 / M2b / M2c)+ 既有四類 + 白名單外 import。全部必須被抓到。
 AST_SCANNER_MUTATIONS = {
-    # ── E2 的 M2:舊掃描器全綠,新掃描器必紅 ──
     "M2_from_os_import_system": (
         "from os import system as _s\n_s('id > /tmp/pwned')\n", "from os import system",
     ),
-    # ── E2 的 M2b ──
     "M2b_importlib_concat": (
         "import importlib\nimportlib.import_module('sub' + 'process').run(['id'])\n",
         "import outside the declared allowlist",
@@ -913,7 +885,6 @@ AST_SCANNER_MUTATIONS = {
     "M2b_concat_literal_alone": (
         "def f(m):\n    return m('sub' + 'process')\n", "obfuscated identifier literal",
     ),
-    # ── E2 的 M2c ──
     "M2c_getattr_computed_name": (
         "import os\n_o = os\ngetattr(_o, 'sys' + 'tem')('id')\n",
         "getattr() with a computed attribute name",
@@ -921,14 +892,12 @@ AST_SCANNER_MUTATIONS = {
     "M2c_getattr_constant_name": (
         "import os\ngetattr(os, 'system')('id')\n", "getattr(…, 'system')",
     ),
-    # ── 既有四類 ──
     "raw_import_subprocess": ("import subprocess\n", "import outside the declared allowlist"),
     "os_system_attribute": ("import os\nos.system('x')\n", "attribute .system"),
     "shell_true": (
         "import subprocess\nsubprocess.run(['x'], shell=True)\n", "shell= is not the constant False",
     ),
     "builtin_eval": ("eval('1')\n", "builtin eval"),
-    # ── 新增的縱深:ctypes 是 libc.system 的路,pty/commands 亦然 ──
     "ctypes_libc_system": (
         "import ctypes\nctypes.CDLL(None).system(b'id')\n",
         "import outside the declared allowlist",
@@ -938,7 +907,6 @@ AST_SCANNER_MUTATIONS = {
     ),
     "pty_spawn": ("import pty\npty.spawn('/bin/sh')\n", "import outside the declared allowlist"),
     "dunder_import": ("__import__('subprocess')\n", "builtin __import__"),
-    # ── S2E.LW1:callee alias / dynamic attribute / string-index execution escapes ──
     "dynamic_getattr_name_then_call": (
         "import os\n\ndef f(name, argv):\n    return getattr(os, name)(*argv)\n",
         "dynamic callable attribute",
@@ -958,8 +926,8 @@ AST_SCANNER_MUTATIONS = {
         "    first = getattr(os, name)\n    second = first\n    return second(*argv)\n",
         "dynamic callable alias",
     ),
-    "variable_builtins_key_then_call": (
-        "def f(key, expr):\n    return __builtins__[key](expr)\n",
+    "dict_union_augassign": (
+        "def f(key, expr):\n    outer = {}\n    outer |= {'cap': __builtins__}\n    return outer['cap'][key](expr)\n",
         "dynamic execution subscript",
     ),
     "builtins_alias_variable_subscript": (
@@ -968,9 +936,16 @@ AST_SCANNER_MUTATIONS = {
         "    return builtins_alias[key](expr)\n",
         "dynamic execution subscript",
     ),
+    "variable_builtins_key_then_call": (
+        "def f(key, expr):\n    return __builtins__[key](expr)\n", "dynamic execution subscript",
+    ),
     "builtins_get_variable_key_then_call": (
-        "def f(key, expr):\n    return __builtins__.get(key)(expr)\n",
-        "dynamic execution subscript",
+        "def f(key, expr):\n    return __builtins__.get(key)(expr)\n", "dynamic execution subscript",
+    ),
+    "nested_starred_unpack_from_subscript": (
+        "def f(key, expr):\n    source = (object(), (object(), __builtins__))\n"
+        "    safe, *rest = source\n    safe2, *caps = rest[0]\n"
+        "    return caps[0][key](expr)\n", "dynamic execution subscript",
     ),
     "dynamic_dict_key_nested_builtins_alias_variable_subscript": (
         "import sys\n\ndef f(slot, key, expr):\n"
@@ -982,11 +957,14 @@ AST_SCANNER_MUTATIONS = {
         "def f(slot, other, key, expr):\n    outer = {slot: [[__builtins__]]}\n"
         "    return outer[other][0][0][key](expr)\n", "dynamic execution subscript",
     ),
-    "starred_unpack_builtins_alias_variable_subscript": (
-        "def f(key, expr):\n"
-        "    safe, *caps = (object(), __builtins__)\n"
-        "    return caps[0][key](expr)\n",
+    "starred_unpack_from_name": (
+        "def f(key, expr):\n    source = (object(), __builtins__)\n"
+        "    safe, *caps = source\n    return caps[0][key](expr)\n",
         "dynamic execution subscript",
+    ),
+    "starred_unpack_literal": (
+        "def f(key, expr):\n    safe, *caps = (object(), __builtins__)\n"
+        "    return caps[0][key](expr)\n", "dynamic execution subscript",
     ),
     "variable_sys_modules_key_then_run": (
         "import sys\n\ndef f(key, argv):\n    return sys.modules[key].run(argv)\n",
@@ -1042,21 +1020,45 @@ AST_SCANNER_MUTATIONS = {
         "    return getattr(other, name)(*argv)\n",
         "dynamic callable attribute",
     ),
-    "dict_held_os_alias_variable_getattr": (
-        "import os\n\ndef f(name, argv):\n"
-        "    box = {'safe': object(), 'os': os}\n"
-        "    return getattr(box['os'], name)(*argv)\n",
+    "dict_expansion_from_name": (
+        "def f(key, expr):\n    inner = {'cap': __builtins__}\n"
+        "    outer = {**inner}\n    return outer['cap'][key](expr)\n",
+        "dynamic execution subscript",
+    ),
+    "dict_update_mutation": (
+        "def f(key, expr):\n    outer = {}\n    outer.update({'cap': __builtins__})\n"
+        "    return outer['cap'][key](expr)\n", "dynamic execution subscript",
+    ),
+    "dict_setdefault_mutation": (
+        "def f(key, expr):\n    outer = {}\n    outer.setdefault('cap', __builtins__)\n"
+        "    return outer['cap'][key](expr)\n", "dynamic execution subscript",
+    ),
+    "nested_dict_update_mutation": (
+        "import os\n\ndef f(name, argv):\n    outer = {'nested': {}}\n"
+        "    outer['nested'].update({'cap': os})\n"
+        "    return getattr(outer['nested']['cap'], name)(*argv)\n",
         "dynamic callable attribute",
     ),
-    "subscript_target_builtins_mutation": (
+    "dict_held_os_alias": (
+        "import os\n\ndef f(name, argv):\n    box = {'safe': object(), 'os': os}\n"
+        "    return getattr(box['os'], name)(*argv)\n", "dynamic callable attribute",
+    ),
+    "subscript_target_builtins": (
         "def f(key, expr):\n    outer = {}\n    outer['cap'] = __builtins__\n"
         "    return outer['cap'][key](expr)\n", "dynamic execution subscript",
     ),
-    "nested_subscript_target_os_mutation": (
+    "nested_subscript_target_os": (
         "import os\n\ndef f(name, argv):\n    outer = {'nested': {}}\n"
-        "    outer['nested']['cap'] = os\n"
-        "    return getattr(outer['nested']['cap'], name)(*argv)\n",
+        "    outer['nested']['cap'] = os\n    return getattr(outer['nested']['cap'], name)(*argv)\n",
         "dynamic callable attribute",
+    ),
+    "list_append_mutation": (
+        "def f(key, expr):\n    outer = []\n    outer.append(__builtins__)\n"
+        "    return outer[0][key](expr)\n", "dynamic execution subscript",
+    ),
+    "list_extend_mutation": (
+        "def f(key, expr):\n    outer = []\n    outer.extend([__builtins__])\n"
+        "    return outer[0][key](expr)\n", "dynamic execution subscript",
     ),
     "computed_getattr_stored_in_container": (
         "import os\n\ndef f(name, argv):\n"
@@ -1129,7 +1131,6 @@ AST_SCANNER_MUTATIONS = {
         "def f(b):\n    return getattr(b, '__import__')('subprocess')\n",
         "getattr(…, '__import__')",
     ),
-    # ── E2 的 N16(RES-5):前綴放行下這條 exec 路徑在五個檔案上全綠 ──
     "N16_governance_prefix_exec_module": (
         "import agent_governance_command_capture_v2 as cap\n"
         "cap.capture_command(['/bin/sh', '-c', 'id'])\n",
@@ -1144,7 +1145,6 @@ AST_SCANNER_MUTATIONS = {
 
 @pytest.mark.parametrize("mutation", sorted(AST_SCANNER_MUTATIONS))
 def test_the_ast_scanner_actually_catches_a_violation(tmp_path, mutation):
-    # 反例:掃描器若抓不到違規就是空轉。E2 突變實證的三支(M2/M2b/M2c)在此逐一釘死。
     source, expected = AST_SCANNER_MUTATIONS[mutation]
     path = tmp_path / f"{mutation}.py"
     path.write_text(source, encoding="utf-8")
@@ -1202,6 +1202,8 @@ def test_container_aliases_do_not_taint_a_benign_sibling(tmp_path):
         "import sys\nouter = {slot: [[sys.modules]], 'safe': [[{}]]}\nouter['safe'][0][0][key].call(argv)\n",
         "import os\nouter = {slot: [[os]], 'safe': [[object()]]}\ngetattr(outer['safe'][0][0], name)\n",
         "safe, *caps = (object(), __builtins__)\ngetattr(safe, name)\n",
+        "outer = []\nouter.append({})\nouter[0][key](expr)\n",
+        "outer = []\nouter.extend([{}])\nouter[0][key](expr)\n",
     )
     for index, source in enumerate(sources):
         path = tmp_path / f"benign_container_sibling_{index}.py"
@@ -1211,8 +1213,6 @@ def test_container_aliases_do_not_taint_a_benign_sibling(tmp_path):
 
 @pytest.mark.parametrize("mutation", sorted(AST_SCANNER_MUTATIONS))
 def test_a_declared_non_runner_leaf_is_scanned_by_the_same_exec_rules(tmp_path, mutation):
-    # 反例:除名檔案若被塞進任何一條 exec 路徑,``exec_family=False`` 這條路徑也必須抓到它。
-    # (唯二被關掉的判準是 import 白名單與 ``shell=`` 呼叫形狀,故該兩類突變在此跳過。)
     source, expected = AST_SCANNER_MUTATIONS[mutation]
     if expected in {"import outside the declared allowlist", "shell= is not the constant False"}:
         pytest.skip("this rule is deliberately exec-family-only; see _raw_command_findings")
