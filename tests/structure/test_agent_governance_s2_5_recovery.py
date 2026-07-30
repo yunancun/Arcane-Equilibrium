@@ -20,6 +20,7 @@ for candidate in (HELPERS, ML_ROOT):
 
 import agent_governance_s2_5_lifecycle as lifecycle  # noqa: E402
 import agent_governance_s2_5_recovery as recovery  # noqa: E402
+import aiml_gate_receipt_s2_5_host_capture as host_capture_leaf  # noqa: E402
 import aiml_gate_receipt_validator as validator  # noqa: E402
 
 
@@ -42,7 +43,7 @@ def _fixed_loader(public_key: str):
 
 @pytest.fixture(autouse=True)
 def _install_independent_recovery_trust_root(tmp_path, monkeypatch):
-    """Install five independent disposable keys at the fixed loader seams."""
+    """Install six independent disposable keys at the fixed loader seams."""
 
     kit = __import__("s2_5_testkit")
     profiles = (
@@ -65,6 +66,21 @@ def _install_independent_recovery_trust_root(tmp_path, monkeypatch):
         )
         _RECOVERY_PRIVATE_KEYS[profile] = private_key
         _RECOVERY_FINGERPRINTS[profile] = fingerprint
+    private_key, public_key, fingerprint = kit.mint_key(
+        tmp_path, "s2-5-recovery-host-capture"
+    )
+    monkeypatch.setattr(
+        host_capture_leaf,
+        "_load_recovery_host_capture_trust_root_public_key",
+        _fixed_loader(public_key),
+    )
+    monkeypatch.setattr(
+        host_capture_leaf,
+        "RECOVERY_HOST_CAPTURE_TRUST_ROOT_FINGERPRINT",
+        fingerprint,
+    )
+    _RECOVERY_PRIVATE_KEYS["host_capture"] = private_key
+    _RECOVERY_FINGERPRINTS["host_capture"] = fingerprint
     yield
     _RECOVERY_PRIVATE_KEYS.clear()
     _RECOVERY_FINGERPRINTS.clear()
@@ -116,11 +132,71 @@ def _replace_signature_with_profile(artifact: dict, profile: str) -> None:
     )
 
 
-def _kernel_binding() -> dict:
+def _host_capture(state_root: Path, *, source_head: str = HEAD) -> dict:
+    signed = {
+        "schema_version": host_capture_leaf.HOST_CAPTURE_SCHEMA_VERSION,
+        "capture_profile": host_capture_leaf.HOST_CAPTURE_PROFILE,
+        "source_head": source_head,
+        "stable_host_facts": {
+            "machine_id_digest": "sha256:" + "8" * 64,
+            "node_name": "trade-core",
+            "os_id": "linux",
+            "architecture": "x86_64",
+        },
+        "host_identity": "",
+        "node_identity": {
+            "node_id": "s2-5-host-attestor",
+            "role": "HOST_ATTESTOR",
+            "permission": "read_only",
+            "key_identity": "key:s2-5-host-attestor",
+        },
+        "process_identity": {
+            "uid": 4300,
+            "cgroup": "/system.slice/s2-5-host-capture.service",
+        },
+        "boot_manager_facts": {
+            "boot_id": "boot-disposable-1",
+            "manager": "systemd",
+            "manager_root": "/run/systemd/system",
+            "unit_name": lifecycle.S2_5_UNIT_NAME,
+            "canonical_state_root": str(state_root.resolve(strict=False)),
+        },
+        "observed_at": NOW,
+        "expires_at": LATER,
+        "side_effect_class": "DISPOSABLE_TEST",
+        "production_effect": False,
+        "production_authority": False,
+        "target_class": "disposable_systemd",
+    }
+    signed["host_identity"] = (
+        host_capture_leaf.derive_s2_5_recovery_host_identity(signed)
+    )
+    payload = {
+        **signed,
+        "signer_identity": (
+            host_capture_leaf.RECOVERY_HOST_CAPTURE_SIGNER_IDENTITY
+        ),
+        "signer_fingerprint": _RECOVERY_FINGERPRINTS["host_capture"],
+        "signature_namespace": (
+            host_capture_leaf.RECOVERY_HOST_CAPTURE_SIGNATURE_NAMESPACE
+        ),
+        "signed_binding": copy.deepcopy(signed),
+        "sshsig_armored": __import__("s2_5_testkit")._sign_bytes(
+            _RECOVERY_PRIVATE_KEYS["host_capture"],
+            validator._canonical_bytes(signed),
+            namespace=host_capture_leaf.RECOVERY_HOST_CAPTURE_SIGNATURE_NAMESPACE,
+        ),
+    }
+    payload["self_digest"] = validator.artifact_self_digest(payload)
+    return payload
+
+
+def _kernel_binding(unresolved: dict) -> dict:
     return _sealed({
         "schema_version": "s2_5_recovery_kernel_binding_v1",
-        "source_head": HEAD,
-        "host_identity": "host:trade-core",
+        "source_head": unresolved["source_head"],
+        "host_identity": unresolved["host_identity"],
+        "host_capture_digest": unresolved["host_capture_digest"],
         "node_identity": {
             "node_id": "s2-5-recovery-actor",
             "role": "OPS_APPLIER",
@@ -145,8 +221,9 @@ def _capture(
     signed_binding = {
         "schema_version": "s2_5_recovery_capture_v1",
         "capture_kind": "INDEPENDENT_POSTCHECK" if verifier else "ACTOR_EFFECT",
-        "source_head": HEAD,
-        "host_identity": "host:trade-core",
+        "source_head": binding["source_head"],
+        "host_identity": binding["host_identity"],
+        "host_capture_digest": binding["host_capture_digest"],
         "bound_state_root_id": binding["state_root_identity"]["root_id"],
         "recovery_id": intent["recovery_id"],
         "recovery_intent_digest": intent["intent_digest"],
@@ -205,6 +282,7 @@ def _admission(unresolved: dict) -> dict:
         "pre_state": copy.deepcopy(unresolved["pre_state"]),
         "source_head": unresolved["source_head"],
         "host_identity": unresolved["host_identity"],
+        "host_capture_digest": unresolved["host_capture_digest"],
     }
     return _sealed(payload, "admission_digest")
 
@@ -229,6 +307,7 @@ def _authorization(
         "pre_state": copy.deepcopy(admission["pre_state"]),
         "source_head": admission["source_head"],
         "host_identity": admission["host_identity"],
+        "host_capture_digest": admission["host_capture_digest"],
         "authorization_id": authorization_id,
         "issued_at": NOW,
         "expires_at": LATER,
@@ -270,8 +349,9 @@ def _trusted_anchor(unresolved: dict) -> dict:
         "storage_class": "INDEPENDENT_OFF_STATE_ROOT",
         "anchor_scope_id": "off-root:host-governance",
         "bound_state_root_id": unresolved["state_root_identity"]["root_id"],
-        "source_head": HEAD,
-        "host_identity": "host:trade-core",
+        "source_head": unresolved["source_head"],
+        "host_identity": unresolved["host_identity"],
+        "host_capture_digest": unresolved["host_capture_digest"],
         "external_sequence": 7,
         "previous_append_head_digest": D1,
         "append_entry_digest": append_entry_digest,
@@ -368,16 +448,18 @@ def _record_state(state: lifecycle.S2_5RecoveryState, *, start: str = "4") -> No
 
 
 def _state(tmp_path: Path) -> lifecycle.S2_5RecoveryState:
+    state_root = tmp_path / "state"
     state = lifecycle.S2_5RecoveryState(
-        state_root=tmp_path / "state",
-        host_identity="host:trade-core",
+        state_root=state_root,
+        host_capture=_host_capture(state_root),
+        now=NOW,
     )
     _record_state(state)
     return state
 
 
 def _chain(state: lifecycle.S2_5RecoveryState):
-    kernel = _kernel_binding()
+    kernel = _kernel_binding(state.unresolved)
     admission = _admission(state.unresolved)
     anchor = _trusted_anchor(state.unresolved)
     intent = recovery.build_recovery_intent(
@@ -402,6 +484,7 @@ def _chain(state: lifecycle.S2_5RecoveryState):
         actor_capture=actor_capture,
         post_state=post_state,
         status="LATCH_PRESERVED",
+        now=NOW,
     )
     result = recovery.build_recovery_result(
         intent=intent,
@@ -410,6 +493,7 @@ def _chain(state: lifecycle.S2_5RecoveryState):
         post_state=rollback["post_state"],
         status="RECOVERY_ABORTED",
         authorization_consumption_proof=_consumption_proof(intent),
+        now=NOW,
     )
     postcheck = recovery.build_recovery_postcheck(
         intent=intent,
@@ -422,6 +506,7 @@ def _chain(state: lifecycle.S2_5RecoveryState):
         ),
         observed_state=result["post_state"],
         status="RECOVERY_UNRESOLVED",
+        now=NOW,
     )
     return intent, rollback, result, postcheck
 
@@ -430,7 +515,7 @@ def _intent_materials(
     state: lifecycle.S2_5RecoveryState,
     action: str = "ROLLBACK_TO_PRE_STATE",
 ) -> tuple[dict, dict, dict, dict]:
-    kernel = _kernel_binding()
+    kernel = _kernel_binding(state.unresolved)
     admission = _admission(state.unresolved)
     anchor = _trusted_anchor(state.unresolved)
     authorization = _authorization(
@@ -456,6 +541,32 @@ def test_four_closed_schemas_are_dispatched_through_the_central_validator(tmp_pa
         assert validator.validate_aiml_artifact(artifact, now=NOW) == []
         extra = dict(artifact, raw_command="systemctl restart anything")
         assert validator.validate_aiml_artifact(extra, now=NOW)
+    intent, rollback, result, postcheck = artifacts
+    binding = intent["recovery_binding"]
+    assert binding["host_capture"] == state.host_capture
+    assert binding["host_capture_digest"] == state.host_capture_digest
+    assert binding["authorization"]["signed_binding"]["host_capture_digest"] == (
+        state.host_capture_digest
+    )
+    assert binding["trusted_anchor"]["signed_binding"]["host_capture_digest"] == (
+        state.host_capture_digest
+    )
+    assert rollback["actor_capture"]["signed_binding"]["host_capture_digest"] == (
+        state.host_capture_digest
+    )
+    assert result["actor_capture"]["signed_binding"]["host_capture_digest"] == (
+        state.host_capture_digest
+    )
+    assert postcheck["verifier_capture"]["signed_binding"][
+        "host_capture_digest"
+    ] == state.host_capture_digest
+    kernel, admission, anchor, authorization = _intent_materials(state)
+    assert kernel["host_capture_digest"] == state.host_capture_digest
+    assert admission["host_capture_digest"] == state.host_capture_digest
+    assert anchor["signed_binding"]["host_capture_digest"] == state.host_capture_digest
+    assert authorization["signed_binding"]["host_capture_digest"] == (
+        state.host_capture_digest
+    )
 
 
 def test_public_builders_never_accept_caller_identity_or_nonce_strings():
@@ -505,7 +616,8 @@ def test_a_fresh_controller_cannot_replace_the_registered_controller_for_one_roo
     state_root = tmp_path / "state"
     shared = lifecycle.S2_5RecoveryState(
         state_root=state_root,
-        host_identity="host:disposable-systemd:test",
+        host_capture=_host_capture(state_root),
+        now=NOW,
     )
     first = lifecycle.apply_s2_5_start(
         intent,
@@ -521,7 +633,8 @@ def test_a_fresh_controller_cannot_replace_the_registered_controller_for_one_roo
     assert first["status"] == lifecycle.S2_5_STATUS_PENDING
     substituted = lifecycle.S2_5RecoveryState(
         state_root=state_root,
-        host_identity="host:disposable-systemd:test",
+        host_capture=_host_capture(state_root),
+        now=NOW,
     )
     second = lifecycle.apply_s2_5_start(
         intent,
@@ -544,7 +657,8 @@ def test_record_is_sticky_and_captures_failure_time_state_instead_of_posthoc_adm
     state_root = tmp_path / "state"
     state = lifecycle.S2_5RecoveryState(
         state_root=state_root,
-        host_identity="host:disposable-systemd:test",
+        host_capture=_host_capture(state_root),
+        now=NOW,
     )
     failure = {
         "task_digest": D1,
@@ -572,7 +686,9 @@ def test_record_is_sticky_and_captures_failure_time_state_instead_of_posthoc_adm
     assert captured["replay_ledger_head"] == failure["replay_ledger_head"]
     assert captured["pre_state"] == failure["pre_state"]
     assert captured["source_head"] == HEAD
-    assert captured["host_identity"] == "host:disposable-systemd:test"
+    assert captured["host_identity"] == state.host_identity
+    assert captured["host_capture"] == state.host_capture
+    assert captured["host_capture_digest"] == state.host_capture_digest
     assert captured["side_effect_class"] == "DISPOSABLE_TEST"
     assert captured["production_effect"] is False
     assert captured["production_authority"] is False
@@ -756,7 +872,7 @@ def test_canonical_hash_only_authority_and_anchor_can_never_clear_recovery(tmp_p
     with pytest.raises(ValueError, match="SSHSIG|authenticated|anchor"):
         recovery.build_recovery_intent(
             unresolved_state=state.unresolved,
-            kernel_binding=_kernel_binding(),
+            kernel_binding=_kernel_binding(state.unresolved),
             admission=_admission(state.unresolved),
             authorization=old_authorization,
             trusted_anchor=old_anchor,
@@ -960,6 +1076,7 @@ def test_verifier_capture_key_cannot_forge_actor_capture(tmp_path):
             actor_capture=actor_capture,
             post_state=post_state,
             status="LATCH_PRESERVED",
+            now=NOW,
         )
 
 
@@ -980,6 +1097,7 @@ def test_authorization_key_cannot_forge_consumption_signature(tmp_path):
             post_state=rollback["post_state"],
             status="RECOVERY_ABORTED",
             authorization_consumption_proof=proof,
+            now=NOW,
         )
 
 
@@ -1001,6 +1119,7 @@ def test_actor_capture_key_cannot_forge_verifier_capture(tmp_path):
             verifier_capture=verifier_capture,
             observed_state=result["post_state"],
             status="RECOVERY_UNRESOLVED",
+            now=NOW,
         )
 
 
@@ -1022,9 +1141,15 @@ def test_recovery_trust_root_reader_rejects_writable_or_multiply_linked_key(
 
 
 def test_intent_requires_explicit_time_and_resolve_uses_closed_central_schema(tmp_path):
-    assert inspect.signature(recovery.build_recovery_intent).parameters[
-        "now"
-    ].default is inspect.Parameter.empty
+    for builder in (
+        recovery.build_recovery_intent,
+        recovery.build_recovery_rollback,
+        recovery.build_recovery_result,
+        recovery.build_recovery_postcheck,
+    ):
+        assert inspect.signature(builder).parameters[
+            "now"
+        ].default is inspect.Parameter.empty
     state = _state(tmp_path)
     _intent, _rollback, result, postcheck = _chain(state)
     result["unexpected_root_field"] = "must be rejected by the closed schema"
@@ -1061,6 +1186,7 @@ def test_signed_capture_timestamp_must_be_fresh_at_central_validation(tmp_path):
         actor_capture=future_capture,
         post_state=post_state,
         status="LATCH_PRESERVED",
+        now=NOW,
     )
     assert any(
         "future" in error or "authorization window" in error
@@ -1068,18 +1194,35 @@ def test_signed_capture_timestamp_must_be_fresh_at_central_validation(tmp_path):
     )
 
 
-def test_recovery_schemas_are_resources_but_not_runtime_import_roots():
+def test_host_capture_leaf_and_schema_extend_closure_without_lifecycle_roots():
     closure = json.loads(
         (ML_ROOT / "application_bundle_runtime_closure_v1.json").read_text()
     )
     expected_resources = {
         "program_code/ml_training/schemas/aiml_gate_receipts/"
         f"s2_5_recovery_{kind}_v1.schema.json"
-        for kind in ("intent", "postcheck", "result", "rollback")
+        for kind in ("host_capture", "intent", "postcheck", "result", "rollback")
     }
     assert expected_resources <= set(closure["schema_resources"])
+    assert len(closure["python_modules"]) == 53
+    assert len(closure["schema_resources"]) == 88
+    assert closure["runtime_lazy_helper_roots"] == [{
+        "module": "agent_governance_sealed_build",
+        "reason": (
+            "learning_runtime_manifest._dependency_lock_v2 lazily imports "
+            "verify_lock_closure/lock_target_platform at v2 preflight time; "
+            "the import is runtime-reachable on every production start"
+        ),
+    }]
+    assert (
+        "program_code/ml_training/aiml_gate_receipt_s2_5_host_capture.py"
+        in closure["python_modules"]
+    )
     assert not any(
-        path.endswith("agent_governance_s2_5_recovery.py")
+        path.endswith((
+            "agent_governance_s2_5_recovery.py",
+            "agent_governance_s2_5_lifecycle.py",
+        ))
         for path in closure["python_modules"]
     )
     assert not any(
@@ -1174,6 +1317,7 @@ def test_capture_signature_action_semantics_and_secret_values_fail_closed(tmp_pa
                 actor_capture=actor_capture,
                 post_state=post_state,
                 status="ROLLBACK_APPLIED",
+                now=NOW,
             )
 
     with pytest.raises(ValueError, match="explicit.*current time"):

@@ -1022,8 +1022,8 @@ def test_cp2b_schema_files_resolve_to_real_files() -> None:
         assert (SCHEMA_DIR / SCHEMA_FILES[key]).is_file(), key
     assert len(_CP2B_KEYS) == 16
     # CP2a/CP2b + W2/W5 + S2.5 + S2.2B + launch registration reached 83.
-    # S2E.LW1 adds four closed recovery-chain schemas, so the exact table is 87.
-    assert len(SCHEMA_FILES) == 87
+    # S2E.LW1 adds four recovery-chain schemas plus the signed host-capture ABI:88.
+    assert len(SCHEMA_FILES) == 88
     for s2e_key in (
         "s2e_launch_genesis_receipt_v1",
         "s2e_launch_wave_receipt_v1",

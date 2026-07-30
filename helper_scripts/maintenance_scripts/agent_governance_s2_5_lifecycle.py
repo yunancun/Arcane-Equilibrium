@@ -34,6 +34,7 @@ production driver 只在 S2.5 EFFECT session 由 OPS 注入。九項 authority �
 """
 from __future__ import annotations
 
+import copy
 import re
 import sys
 import weakref
@@ -141,16 +142,36 @@ class S2_5RecoveryState:
         str, "S2_5RecoveryState"
     ] = weakref.WeakValueDictionary()
 
-    def __init__(self, *, state_root: Path | str, host_identity: str) -> None:
+    def __init__(
+        self, *, state_root: Path | str, host_capture: dict[str, Any], now: Any
+    ) -> None:
+        import aiml_gate_receipt_s2_5_host_capture as host_capture_leaf
+
         canonical_root = Path(state_root).resolve(strict=False)
-        if not str(host_identity).startswith("host:"):
-            raise ValueError("recovery controller host_identity must be a typed host identity")
+        capture_errors = host_capture_leaf.validate_s2_5_recovery_host_capture(
+            host_capture, now=now
+        )
+        capture_root = (
+            host_capture.get("boot_manager_facts", {}).get("canonical_state_root")
+            if isinstance(host_capture, dict) else None
+        )
+        if capture_root != str(canonical_root):
+            capture_errors.append(
+                "recovery host capture is bound to a different canonical state_root"
+            )
+        if capture_errors:
+            raise ValueError("; ".join(capture_errors))
         self.state_root = canonical_root
+        self.host_capture = copy.deepcopy(host_capture)
+        self.host_capture_digest = host_capture["self_digest"]
+        self.host_identity = host_capture_leaf.derive_s2_5_recovery_host_identity(
+            host_capture
+        )
         self.root_id = central_validator.canonical_digest({
             "schema_version": "s2_5_state_root_identity_v1",
+            "stable_host_identity": self.host_identity,
             "canonical_path": str(canonical_root),
         })
-        self.host_identity = str(host_identity)
         self.unresolved: dict[str, Any] | None = None
         self._consumed_authorization_ids: set[str] = set()
         self._recorded_unresolved_digest: str | None = None
@@ -204,6 +225,8 @@ class S2_5RecoveryState:
 
         if self.unresolved is not None:
             raise ValueError("an unresolved S2.5 recovery latch already exists")
+        if source_head != self.host_capture.get("source_head"):
+            raise ValueError("recovery failure source_head differs from signed host capture")
         self._generation += 1
         unresolved = {
             "start_id": start_id,
@@ -220,6 +243,8 @@ class S2_5RecoveryState:
             "pre_state": dict(pre_state),
             "source_head": source_head,
             "host_identity": self.host_identity,
+            "host_capture": copy.deepcopy(self.host_capture),
+            "host_capture_digest": self.host_capture_digest,
             "side_effect_class": "DISPOSABLE_TEST",
             "production_effect": False,
             "production_authority": False,

@@ -98,18 +98,19 @@ def test_source_lane_positive_round_trips_the_central_gate(tmp_path, monkeypatch
 
 
 def test_registration_is_additive_and_frozen_surfaces_unmoved():
-    # SCHEMA_FILES 87 + schema 檔在盤:既有 79 加上
+    # SCHEMA_FILES 88 + schema 檔在盤:既有 79 加上
     # s2e_launch_genesis_receipt_v1、s2e_launch_wave_receipt_v1、
     # receipt_carrier_attestation_v1、s2e_launch_acceptance_review_bundle_v1，以及
-    # 四份 identity-bound S2.5 recovery contract；
+    # signed host capture 與四份 identity-bound S2.5 recovery contract；
     # PROGRAM_SCHEMA_PATHS 與 frozen 分類身分未動(digest 凍結值由既有 s2_5 測試釘住)。
     assert "ingestion_compatibility_receipt_v1" in validator.SCHEMA_FILES
-    assert len(validator.SCHEMA_FILES) == 87
+    assert len(validator.SCHEMA_FILES) == 88
     for s2e_key in (
         "s2e_launch_genesis_receipt_v1",
         "s2e_launch_wave_receipt_v1",
         "receipt_carrier_attestation_v1",
         "s2e_launch_acceptance_review_bundle_v1",
+        "s2_5_recovery_host_capture_v1",
         "s2_5_recovery_intent_v1",
         "s2_5_recovery_postcheck_v1",
         "s2_5_recovery_result_v1",

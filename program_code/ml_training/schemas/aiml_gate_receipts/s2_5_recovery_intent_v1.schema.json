@@ -104,8 +104,9 @@
           "required": [
             "action", "task_digest", "unresolved_state_digest", "state_root_identity",
             "journal_set", "replay_ledger_head", "pre_state", "source_head",
-            "host_identity", "authorization_id", "issued_at", "expires_at",
-            "trusted_anchor_digest", "actor_identity", "actor_process",
+            "host_identity", "host_capture_digest", "authorization_id",
+            "issued_at", "expires_at", "trusted_anchor_digest",
+            "actor_identity", "actor_process",
             "kernel_binding_digest", "admission_digest", "side_effect_class",
             "production_effect", "production_authority", "target_class"
           ],
@@ -119,6 +120,7 @@
             "pre_state": {"$ref": "#/$defs/unit_state"},
             "source_head": {"$ref": "#/$defs/git_sha"},
             "host_identity": {"type": "string", "minLength": 1},
+            "host_capture_digest": {"$ref": "#/$defs/digest"},
             "authorization_id": {"type": "string", "pattern": "^s2-5-recovery-auth-[0-9a-f]{64}$"},
             "issued_at": {"$ref": "#/$defs/timestamp"},
             "expires_at": {"$ref": "#/$defs/timestamp"},
@@ -140,8 +142,9 @@
       "type": "object", "additionalProperties": false,
       "required": [
         "schema_version", "anchor_id", "anchor_digest", "storage_class", "anchor_scope_id",
-        "bound_state_root_id", "source_head", "host_identity", "external_sequence",
-        "previous_append_head_digest", "append_entry_digest", "append_head_digest",
+        "bound_state_root_id", "source_head", "host_identity", "host_capture_digest",
+        "external_sequence", "previous_append_head_digest", "append_entry_digest",
+        "append_head_digest",
         "append_only", "immutable_readback", "immutable_readback_digest",
         "append_actor_identity", "readback_verifier_identity", "evidence_class",
         "signer_identity",
@@ -157,6 +160,7 @@
         "bound_state_root_id": {"type": "string", "minLength": 1},
         "source_head": {"$ref": "#/$defs/git_sha"},
         "host_identity": {"type": "string", "minLength": 1},
+        "host_capture_digest": {"$ref": "#/$defs/digest"},
         "external_sequence": {"type": "integer", "minimum": 1},
         "previous_append_head_digest": {"$ref": "#/$defs/digest"},
         "append_entry_digest": {"$ref": "#/$defs/digest"},
@@ -174,7 +178,8 @@
           "type": "object", "additionalProperties": false,
           "required": [
             "schema_version", "anchor_id", "storage_class", "anchor_scope_id",
-            "bound_state_root_id", "source_head", "host_identity", "external_sequence",
+            "bound_state_root_id", "source_head", "host_identity",
+            "host_capture_digest", "external_sequence",
             "previous_append_head_digest", "append_entry_digest", "append_head_digest",
             "append_only", "immutable_readback", "immutable_readback_digest",
             "append_actor_identity", "readback_verifier_identity", "evidence_class"
@@ -187,6 +192,7 @@
             "bound_state_root_id": {"type": "string", "minLength": 1},
             "source_head": {"$ref": "#/$defs/git_sha"},
             "host_identity": {"type": "string", "minLength": 1},
+            "host_capture_digest": {"$ref": "#/$defs/digest"},
             "external_sequence": {"type": "integer", "minimum": 1},
             "previous_append_head_digest": {"$ref": "#/$defs/digest"},
             "append_entry_digest": {"$ref": "#/$defs/digest"},
@@ -207,8 +213,9 @@
       "type": "object", "additionalProperties": false,
       "required": [
         "task_digest", "unresolved_state_digest", "state_root_identity", "journal_set",
-        "replay_ledger_head", "pre_state", "source_head", "host_identity", "authorization",
-        "trusted_anchor", "actor_identity", "actor_process", "kernel_binding_digest",
+        "replay_ledger_head", "pre_state", "source_head", "host_identity",
+        "host_capture", "host_capture_digest", "authorization", "trusted_anchor",
+        "actor_identity", "actor_process", "kernel_binding_digest",
         "admission_digest", "side_effect_class", "production_effect",
         "production_authority", "target_class"
       ],
@@ -221,6 +228,8 @@
         "pre_state": {"$ref": "#/$defs/unit_state"},
         "source_head": {"$ref": "#/$defs/git_sha"},
         "host_identity": {"type": "string", "minLength": 1},
+        "host_capture": {"type": "object"},
+        "host_capture_digest": {"$ref": "#/$defs/digest"},
         "authorization": {"$ref": "#/$defs/authorization"},
         "trusted_anchor": {"$ref": "#/$defs/trusted_anchor"},
         "actor_identity": {"$ref": "#/$defs/node_identity"},

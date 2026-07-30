@@ -242,6 +242,9 @@ SCHEMA_FILES = {
     ),
     # S2E.LW1:identity-bound S2.5 unresolved-recovery chain.  These are source contracts;
     # off-root anchor/unresolved-manifest persistence remains a later host-runtime slice.
+    "s2_5_recovery_host_capture_v1": (
+        "s2_5_recovery_host_capture_v1.schema.json"
+    ),
     "s2_5_recovery_intent_v1": "s2_5_recovery_intent_v1.schema.json",
     "s2_5_recovery_result_v1": "s2_5_recovery_result_v1.schema.json",
     "s2_5_recovery_postcheck_v1": "s2_5_recovery_postcheck_v1.schema.json",

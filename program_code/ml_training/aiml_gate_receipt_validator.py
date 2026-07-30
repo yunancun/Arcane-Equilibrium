@@ -27,6 +27,7 @@ if str(_ML_TRAINING_DIR) not in sys.path:
     sys.path.insert(0, str(_ML_TRAINING_DIR))
 
 from agent_governance_schema import schema_subset_errors  # noqa: E402
+import aiml_gate_receipt_s2_5_host_capture as _s2_5_host_capture  # noqa: E402
 # 唯讀消費 S2.4 §9.1 SSHSIG 信任根與離線公鑰驗簽基元(_verify_ssh_signature /
 # ssh_public_key_fingerprint)。此為葉層信任根 facade,不反向匯入本 validator(無循環);
 # CP4 僅呼叫其驗證基元,「絕不」修改該模組或其測試(§9.1:trust-root 輪替屬獨立授權 session)。
@@ -1962,7 +1963,11 @@ def validate_aiml_artifact(
             )
         else:
             errors.extend(_dependency_refresh_structural_errors(artifact))
-    if schema_version == "aiml_component_effect_classification_v3" or (
+    if schema_version == "s2_5_recovery_host_capture_v1":
+        errors.extend(_s2_5_host_capture.validate_s2_5_recovery_host_capture(
+            artifact, now=now
+        ))
+    elif schema_version == "aiml_component_effect_classification_v3" or (
         schema_version.startswith("s2_5_")
     ):
         # S2.5(WP5)委派葉:v3 分類重算 + 五個 s2_5 schema 的整合/新鮮度/attestor 驗簽面。

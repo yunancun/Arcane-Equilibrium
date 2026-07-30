@@ -20,6 +20,7 @@ from pathlib import Path
 from typing import Any
 
 import agent_governance_aiml_trusted_host as _trusted_host
+import aiml_gate_receipt_s2_5_host_capture as _host_capture
 from aiml_gate_receipt_schema_core import (
     _canonical_bytes,
     _parse_timestamp,
@@ -96,10 +97,10 @@ RECOVERY_VERIFIER_CAPTURE_TRUST_ROOT_FINGERPRINT = (
 )
 _BINDING_KEYS = frozenset({
     "task_digest", "unresolved_state_digest", "state_root_identity", "journal_set",
-    "replay_ledger_head", "pre_state", "source_head", "host_identity", "authorization",
-    "trusted_anchor", "actor_identity", "actor_process", "kernel_binding_digest",
-    "admission_digest", "side_effect_class", "production_effect",
-    "production_authority", "target_class",
+    "replay_ledger_head", "pre_state", "source_head", "host_identity", "host_capture",
+    "host_capture_digest", "authorization", "trusted_anchor", "actor_identity",
+    "actor_process", "kernel_binding_digest", "admission_digest",
+    "side_effect_class", "production_effect", "production_authority", "target_class",
 })
 _ROOT_KEYS = frozenset({
     "root_id", "root_digest", "generation", "previous_root_digest",
@@ -116,8 +117,9 @@ _AUTH_KEYS = frozenset({
 })
 _ANCHOR_KEYS = frozenset({
     "schema_version", "anchor_id", "anchor_digest", "storage_class", "anchor_scope_id",
-    "bound_state_root_id", "source_head", "host_identity", "external_sequence",
-    "previous_append_head_digest", "append_entry_digest", "append_head_digest",
+    "bound_state_root_id", "source_head", "host_identity", "host_capture_digest",
+    "external_sequence", "previous_append_head_digest", "append_entry_digest",
+    "append_head_digest",
     "append_only", "immutable_readback", "immutable_readback_digest",
     "append_actor_identity", "readback_verifier_identity", "evidence_class",
     "signer_identity",
@@ -126,17 +128,19 @@ _ANCHOR_KEYS = frozenset({
 })
 _ANCHOR_SIGNED_BINDING_KEYS = frozenset({
     "schema_version", "anchor_id", "storage_class", "anchor_scope_id",
-    "bound_state_root_id", "source_head", "host_identity", "external_sequence",
-    "previous_append_head_digest", "append_entry_digest", "append_head_digest",
+    "bound_state_root_id", "source_head", "host_identity", "host_capture_digest",
+    "external_sequence", "previous_append_head_digest", "append_entry_digest",
+    "append_head_digest",
     "append_only", "immutable_readback", "immutable_readback_digest",
     "append_actor_identity", "readback_verifier_identity", "evidence_class",
 })
 _AUTH_BINDING_KEYS = frozenset({
     "action", "task_digest", "unresolved_state_digest", "state_root_identity",
     "journal_set", "replay_ledger_head", "pre_state", "source_head", "host_identity",
-    "authorization_id", "issued_at", "expires_at", "trusted_anchor_digest",
-    "actor_identity", "actor_process", "kernel_binding_digest", "admission_digest",
-    "side_effect_class", "production_effect", "production_authority", "target_class",
+    "host_capture_digest", "authorization_id", "issued_at", "expires_at",
+    "trusted_anchor_digest", "actor_identity", "actor_process",
+    "kernel_binding_digest", "admission_digest", "side_effect_class",
+    "production_effect", "production_authority", "target_class",
 })
 _CONSUMPTION_KEYS = frozenset({
     "schema_version", "authorization_id", "recovery_id", "recovery_intent_digest",
@@ -158,7 +162,8 @@ _NODE_KEYS = frozenset({"node_id", "role", "permission", "key_identity"})
 _PROCESS_KEYS = frozenset({"uid", "cgroup"})
 _CAPTURE_KEYS = frozenset({
     "schema_version", "capture_kind", "source_head", "host_identity",
-    "bound_state_root_id", "recovery_id", "recovery_intent_digest",
+    "host_capture_digest", "bound_state_root_id", "recovery_id",
+    "recovery_intent_digest",
     "recovery_result_digest", "observed_state", "observed_state_digest",
     "node_identity", "process_identity", "observed_at", "signer_identity",
     "signer_fingerprint", "signature_namespace", "signed_binding",
@@ -166,18 +171,19 @@ _CAPTURE_KEYS = frozenset({
 })
 _CAPTURE_SIGNED_BINDING_KEYS = frozenset({
     "schema_version", "capture_kind", "source_head", "host_identity",
-    "bound_state_root_id", "recovery_id", "recovery_intent_digest",
+    "host_capture_digest", "bound_state_root_id", "recovery_id",
+    "recovery_intent_digest",
     "recovery_result_digest", "observed_state", "observed_state_digest",
     "node_identity", "process_identity", "observed_at",
 })
 _KERNEL_KEYS = frozenset({
-    "schema_version", "source_head", "host_identity", "node_identity",
-    "process_identity", "binding_digest",
+    "schema_version", "source_head", "host_identity", "host_capture_digest",
+    "node_identity", "process_identity", "binding_digest",
 })
 _ADMISSION_KEYS = frozenset({
     "schema_version", "task_digest", "unresolved_state_digest", "state_root_identity",
     "journal_set", "replay_ledger_head", "pre_state", "source_head", "host_identity",
-    "admission_digest",
+    "host_capture_digest", "admission_digest",
 })
 _FORBIDDEN_KEYS = frozenset({
     "argv", "command", "raw_command", "shell", "script", "password", "credential",
@@ -317,6 +323,8 @@ def _anchor_errors(anchor: Any, root: Any, binding: dict[str, Any]) -> list[str]
         errors.append("trusted anchor source_head differs from the recovery binding")
     if anchor.get("host_identity") != binding.get("host_identity"):
         errors.append("trusted anchor host_identity differs from the recovery binding")
+    if anchor.get("host_capture_digest") != binding.get("host_capture_digest"):
+        errors.append("trusted anchor host_capture_digest differs from recovery")
     sequence = anchor.get("external_sequence")
     if not isinstance(sequence, int) or isinstance(sequence, bool) or sequence < 1:
         errors.append("trusted anchor external monotonic sequence is invalid")
@@ -358,7 +366,9 @@ def _anchor_errors(anchor: Any, root: Any, binding: dict[str, Any]) -> list[str]
     return errors
 
 
-def _binding_errors(binding: Any, *, action: str | None = None) -> list[str]:
+def _binding_errors(
+    binding: Any, *, action: str | None = None, now: Any = None
+) -> list[str]:
     errors = _exact(binding, _BINDING_KEYS, "recovery_binding")
     if not isinstance(binding, dict):
         return errors
@@ -369,6 +379,7 @@ def _binding_errors(binding: Any, *, action: str | None = None) -> list[str]:
     authorization = binding.get("authorization")
     actor = binding.get("actor_identity")
     process = binding.get("actor_process")
+    host_capture = binding.get("host_capture")
     errors.extend(_exact(root, _ROOT_KEYS, "state_root_identity"))
     errors.extend(_exact(journals, _JOURNAL_KEYS, "journal_set"))
     errors.extend(_exact(ledger, _LEDGER_KEYS, "replay_ledger_head"))
@@ -377,6 +388,28 @@ def _binding_errors(binding: Any, *, action: str | None = None) -> list[str]:
     errors.extend(_exact(actor, _NODE_KEYS, "bound actor_identity"))
     errors.extend(_exact(process, _PROCESS_KEYS, "bound actor_process"))
     errors.extend(_sealed(authorization, "authorization_digest", "authorization"))
+    errors.extend(_host_capture.validate_s2_5_recovery_host_capture(
+        host_capture, now=now
+    ))
+    if isinstance(host_capture, dict):
+        if binding.get("host_capture_digest") != host_capture.get("self_digest"):
+            errors.append("recovery host_capture_digest differs from full capture")
+        if binding.get("host_identity") != host_capture.get("host_identity"):
+            errors.append("recovery host_identity differs from signed host capture")
+        if binding.get("source_head") != host_capture.get("source_head"):
+            errors.append("recovery source_head differs from signed host capture")
+        canonical_root = host_capture.get("boot_manager_facts", {}).get(
+            "canonical_state_root"
+        )
+        expected_root_id = canonical_digest({
+            "schema_version": "s2_5_state_root_identity_v1",
+            "stable_host_identity": host_capture.get("host_identity"),
+            "canonical_path": canonical_root,
+        })
+        if isinstance(root, dict) and root.get("root_id") != expected_root_id:
+            errors.append(
+                "state-root identity does not derive from host identity and canonical root"
+            )
     errors.extend(_anchor_errors(binding.get("trusted_anchor"), root, binding))
     errors.extend(_authorization_errors(binding, action=action))
     if isinstance(journals, dict) and journals.get("head_digest") not in (
@@ -488,6 +521,7 @@ def _authorization_errors(
         "pre_state": binding.get("pre_state"),
         "source_head": binding.get("source_head"),
         "host_identity": binding.get("host_identity"),
+        "host_capture_digest": binding.get("host_capture_digest"),
         "authorization_id": authorization.get("authorization_id"),
         "issued_at": authorization.get("issued_at"),
         "expires_at": authorization.get("expires_at"),
@@ -719,6 +753,10 @@ def _capture_errors(
         expected = {
             "source_head": binding.get("source_head") if isinstance(binding, dict) else None,
             "host_identity": binding.get("host_identity") if isinstance(binding, dict) else None,
+            "host_capture_digest": (
+                binding.get("host_capture_digest")
+                if isinstance(binding, dict) else None
+            ),
             "bound_state_root_id": root.get("root_id") if isinstance(root, dict) else None,
             "recovery_id": intent.get("recovery_id"),
             "recovery_intent_digest": intent.get("intent_digest"),
@@ -816,7 +854,7 @@ def build_recovery_intent(
         errors.append("unresolved state digest does not re-derive")
     if admission.get("unresolved_state_digest") != unresolved_digest:
         errors.append("admission does not bind the current unresolved state")
-    for field in ("source_head", "host_identity"):
+    for field in ("source_head", "host_identity", "host_capture_digest"):
         if kernel_binding.get(field) != admission.get(field):
             errors.append(f"kernel/admission {field} mismatch")
         if trusted_anchor.get(field) != admission.get(field):
@@ -830,6 +868,8 @@ def build_recovery_intent(
         "pre_state": _validated_copy(admission.get("pre_state")),
         "source_head": admission.get("source_head"),
         "host_identity": admission.get("host_identity"),
+        "host_capture": _validated_copy(unresolved_state.get("host_capture")),
+        "host_capture_digest": admission.get("host_capture_digest"),
         "authorization": _validated_copy(authorization),
         "trusted_anchor": _validated_copy(trusted_anchor),
         "actor_identity": _validated_copy(kernel_binding["node_identity"]),
@@ -841,7 +881,7 @@ def build_recovery_intent(
         "production_authority": unresolved_state.get("production_authority"),
         "target_class": unresolved_state.get("target_class"),
     }
-    errors.extend(_binding_errors(binding, action=action))
+    errors.extend(_binding_errors(binding, action=action, now=now))
     errors.extend(_fresh_authorization_errors(binding, now))
     if errors:
         raise ValueError("; ".join(errors))
@@ -873,8 +913,9 @@ def build_recovery_rollback(
     actor_capture: dict[str, Any],
     post_state: dict[str, Any],
     status: str,
+    now: Any,
 ) -> dict[str, Any]:
-    errors = validate_recovery_artifact(intent)
+    errors = validate_recovery_artifact(intent, now=now)
     errors.extend(_capture_errors(
         actor_capture,
         permission="effect",
@@ -947,9 +988,10 @@ def build_recovery_result(
     post_state: dict[str, Any],
     status: str,
     authorization_consumption_proof: dict[str, Any],
+    now: Any,
 ) -> dict[str, Any]:
-    errors = validate_recovery_artifact(intent)
-    errors.extend(validate_recovery_artifact(rollback))
+    errors = validate_recovery_artifact(intent, now=now)
+    errors.extend(validate_recovery_artifact(rollback, now=now))
     errors.extend(_capture_errors(
         actor_capture,
         permission="effect",
@@ -1018,9 +1060,10 @@ def build_recovery_postcheck(
     verifier_capture: dict[str, Any],
     observed_state: dict[str, Any],
     status: str,
+    now: Any,
 ) -> dict[str, Any]:
-    errors = validate_recovery_artifact(intent)
-    errors.extend(validate_recovery_artifact(result))
+    errors = validate_recovery_artifact(intent, now=now)
+    errors.extend(validate_recovery_artifact(result, now=now))
     errors.extend(_capture_errors(
         verifier_capture,
         permission="read_only",
@@ -1085,7 +1128,9 @@ def validate_recovery_artifact(artifact: Any, *, now: Any = None) -> list[str]:
             authorization, dict
         ) else None
         action = signed.get("action") if isinstance(signed, dict) else None
-    errors.extend(_binding_errors(artifact.get("recovery_binding"), action=action))
+    errors.extend(_binding_errors(
+        artifact.get("recovery_binding"), action=action, now=now
+    ))
     if isinstance(artifact.get("recovery_binding"), dict) and now is not None:
         errors.extend(_fresh_authorization_errors(artifact["recovery_binding"], now))
     hits = _sensitive_key_hits(artifact)
@@ -1329,6 +1374,10 @@ def validate_recovery_transition(
     binding = recovery_result["recovery_binding"]
     if binding["unresolved_state_digest"] != unresolved_state.get("unresolved_state_digest"):
         errors.append("recovery result binds a stale or different unresolved state")
+    for field in ("source_head", "host_identity", "host_capture",
+                  "host_capture_digest", "state_root_identity"):
+        if binding.get(field) != unresolved_state.get(field):
+            errors.append(f"recovery result {field} differs from unresolved state")
     if independent_postcheck["recovery_binding"] != binding:
         errors.append("independent postcheck recovery binding differs from result")
     if independent_postcheck["recovery_id"] != recovery_result["recovery_id"]:

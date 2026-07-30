@@ -34,16 +34,18 @@
       "required": [
         "task_digest", "unresolved_state_digest", "state_root_identity",
         "journal_set", "replay_ledger_head", "pre_state", "source_head",
-        "host_identity", "authorization", "trusted_anchor", "actor_identity",
-        "actor_process", "kernel_binding_digest", "admission_digest",
+        "host_identity", "host_capture", "host_capture_digest", "authorization",
+        "trusted_anchor", "actor_identity", "actor_process",
+        "kernel_binding_digest", "admission_digest",
         "side_effect_class", "production_effect", "production_authority",
         "target_class"
       ],
       "properties": {
         "task_digest": {}, "unresolved_state_digest": {}, "state_root_identity": {},
         "journal_set": {}, "replay_ledger_head": {}, "pre_state": {},
-        "source_head": {}, "host_identity": {}, "authorization": {},
-        "trusted_anchor": {}, "actor_identity": {}, "actor_process": {},
+        "source_head": {}, "host_identity": {}, "host_capture": {},
+        "host_capture_digest": {}, "authorization": {}, "trusted_anchor": {},
+        "actor_identity": {}, "actor_process": {},
         "kernel_binding_digest": {}, "admission_digest": {},
         "side_effect_class": {}, "production_effect": {},
         "production_authority": {}, "target_class": {}
@@ -53,7 +55,8 @@
       "type": "object", "additionalProperties": false,
       "required": [
         "schema_version", "capture_kind", "source_head", "host_identity",
-        "bound_state_root_id", "recovery_id", "recovery_intent_digest",
+        "host_capture_digest", "bound_state_root_id", "recovery_id",
+        "recovery_intent_digest",
         "recovery_result_digest", "observed_state", "observed_state_digest",
         "node_identity", "process_identity", "observed_at", "signer_identity",
         "signer_fingerprint", "signature_namespace", "signed_binding",
@@ -61,7 +64,8 @@
       ],
       "properties": {
         "schema_version": {}, "capture_kind": {}, "source_head": {},
-        "host_identity": {}, "bound_state_root_id": {}, "recovery_id": {},
+        "host_identity": {}, "host_capture_digest": {},
+        "bound_state_root_id": {}, "recovery_id": {},
         "recovery_intent_digest": {}, "recovery_result_digest": {},
         "observed_state": {}, "observed_state_digest": {}, "node_identity": {},
         "process_identity": {}, "observed_at": {}, "signer_identity": {},
