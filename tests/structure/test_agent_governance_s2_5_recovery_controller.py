@@ -21,6 +21,9 @@ import aiml_gate_receipt_validator as validator  # noqa: E402
 import agent_governance_s2_5_disposable_profile as profile  # noqa: E402
 import agent_governance_s2_5_recovery_anchor_v2 as anchor_v2  # noqa: E402
 import agent_governance_s2_5_recovery_controller as controller  # noqa: E402
+from s2_5_recovery_anchor_test_support import (  # noqa: E402
+    FixedManifestEffectSession,
+)
 
 
 HEAD = "1" * 40
@@ -109,6 +112,14 @@ def _fixed_capture_trust_root(tmp_path, monkeypatch):
         host_capture,
         "RECOVERY_HOST_CAPTURE_TRUST_ROOT_FINGERPRINT",
         fingerprint,
+    )
+    monkeypatch.setattr(
+        anchor_v2,
+        "_open_fixed_effect_session",
+        lambda *, source_head: FixedManifestEffectSession(
+            source_head=source_head,
+            observation=anchor_v2._fixed_manifest_observation,
+        ),
     )
     _SIGNING_PROFILE = (private_key, public_key, fingerprint)
     yield
@@ -727,6 +738,17 @@ class _ControllerAnchorClock:
         return self.value
 
 
+class _AdvancingControllerAnchorClock:
+    def __init__(self, *values: str) -> None:
+        self.values = [datetime.fromisoformat(value) for value in values]
+        self.calls = 0
+
+    def now(self) -> datetime:
+        value = self.values[self.calls]
+        self.calls += 1
+        return value
+
+
 class _FixedManifestObservation:
     def __init__(self, manifest: dict) -> None:
         self.manifest = manifest
@@ -816,6 +838,37 @@ def test_controller_anchor_rechecks_transition_freshness_at_effect_time(
     assert anchor_v2.validate_effect_chain(chain) == []
 
 
+def test_controller_anchor_rechecks_time_after_final_manifest_observation(
+    monkeypatch,
+):
+    _transition_value, _outbox_value, _state, manifest = _genesis()
+    writer = _NeverCalledControllerAnchorWriter()
+    clock = _AdvancingControllerAnchorClock(
+        "2030-01-01T00:25:00+00:00",
+        "2030-01-01T00:27:00+00:00",
+    )
+    observation = _FixedManifestObservation(manifest)
+    monkeypatch.setattr(anchor_v2, "_trusted_now", clock.now)
+    monkeypatch.setattr(
+        anchor_v2, "_fixed_manifest_observation", observation
+    )
+    adapter = anchor_v2.ControllerAnchorEffectAdapter(
+        writer=writer,
+        reader=_UnusedControllerAnchorReader(),
+        verifier=_UnusedControllerAnchorVerifier(),
+    )
+
+    chain = adapter.execute_fixed_profile(source_head=HEAD)
+
+    assert writer.requests == []
+    assert clock.calls == 2
+    assert observation.calls == 2
+    assert chain["status"] == "PRECHECK_REJECTED"
+    assert chain["failure_code"] == "pending_transition_expired"
+    assert chain["intent"]["checked_at"] == "2030-01-01T00:27:00+00:00"
+    assert anchor_v2.validate_effect_chain(chain) == []
+
+
 def _controller_anchor_protocol_artifact(**values) -> dict:
     return _seal({
         **values,
@@ -843,7 +896,7 @@ class _ControllerAnchorWriter:
         self.response: dict | None = None
 
     def compare_append_controller(self, *, request: dict) -> dict:
-        assert self.clock.calls == 1
+        assert self.clock.calls == 2
         self.requests.append(copy.deepcopy(request))
         checksum = self.outbox["prepared_payload_digest"]
         head_digest = anchor_v2.derive_controller_anchor_head(
@@ -989,7 +1042,7 @@ def test_controller_anchor_dispatches_only_the_exact_persisted_request(
     chain = adapter.execute_fixed_profile(source_head=HEAD)
 
     assert writer.requests == [json.loads(outbox["prepared_payload_json"])]
-    assert clock.calls == 1
+    assert clock.calls == 2
     assert observation.calls == 2
     assert chain["intent"]["manifest_discriminator_digest"] == (
         observation.discriminator_digest

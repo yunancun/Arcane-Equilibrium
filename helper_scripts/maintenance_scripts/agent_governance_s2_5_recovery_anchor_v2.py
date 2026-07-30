@@ -24,6 +24,7 @@ for _candidate in (Path(__file__).resolve().parent, ML_TRAINING_DIR):
 
 import aiml_gate_receipt_validator as central_validator  # noqa: E402
 import agent_governance_s2_5_recovery_controller as controller  # noqa: E402
+import agent_governance_s2_5_recovery_lock as recovery_lock  # noqa: E402
 import agent_governance_s2_5_recovery_store as recovery_store  # noqa: E402
 from agent_governance_schema import schema_subset_errors  # noqa: E402
 from agent_governance_s2_5_disposable_profile import (  # noqa: E402
@@ -166,6 +167,7 @@ _CHAIN_KEYS = frozenset({
     "postcheck",
     "rollback",
     "proof",
+    "session_lock",
     *_COMMON,
 })
 
@@ -196,6 +198,28 @@ def _trusted_now() -> datetime:
     return datetime.now(timezone.utc)
 
 
+def _observe_manifest_from_root(
+    *,
+    store: recovery_store.S2_5RecoveryStore,
+    root: dict[str, Any],
+    source_head: str,
+) -> dict[str, Any]:
+    snapshot = store._snapshot(root["fd"], root)
+    manifest = store._existing_manifest(snapshot, source_head=source_head)
+    if (
+        not isinstance(manifest, dict)
+        or manifest.get("schema_version") != controller.MANIFEST_SCHEMA
+    ):
+        raise ControllerAnchorEffectError(
+            "anchor_effect_current_v2_manifest_absent"
+        )
+    return {
+        "manifest": manifest,
+        "manifest_discriminator_digest": store._prior_discriminator(snapshot),
+        "state_root_id": snapshot["state_root_id"],
+    }
+
+
 def _fixed_manifest_observation(*, source_head: str) -> dict[str, Any]:
     """Read the exact current manifest from the code-owned fixed POSIX store."""
 
@@ -204,24 +228,11 @@ def _fixed_manifest_observation(*, source_head: str) -> dict[str, Any]:
     root: dict[str, Any] | None = None
     try:
         root = store._open_root()
-        snapshot = store._snapshot(root["fd"], root)
-        manifest = store._existing_manifest(
-            snapshot, source_head=source_head
+        return _observe_manifest_from_root(
+            store=store,
+            root=root,
+            source_head=source_head,
         )
-        if (
-            not isinstance(manifest, dict)
-            or manifest.get("schema_version") != controller.MANIFEST_SCHEMA
-        ):
-            raise ControllerAnchorEffectError(
-                "anchor_effect_current_v2_manifest_absent"
-            )
-        return {
-            "manifest": manifest,
-            "manifest_discriminator_digest": store._prior_discriminator(
-                snapshot
-            ),
-            "state_root_id": snapshot["state_root_id"],
-        }
     except recovery_store.RecoveryStoreError as error:
         raise ControllerAnchorEffectError(
             "anchor_effect_fixed_store_observation_failed"
@@ -229,6 +240,133 @@ def _fixed_manifest_observation(*, source_head: str) -> dict[str, Any]:
     finally:
         if root is not None:
             store._close(root.get("fd"))
+
+
+class _FixedEffectSession:
+    """Retain the fixed state root and recovery dual lock through dispatch."""
+
+    def __init__(self, *, source_head: str) -> None:
+        self.source_head = source_head
+        self.driver = recovery_store._FIXED_POSIX_RECOVERY_DRIVER()
+        self.store = recovery_store.S2_5RecoveryStore(self.driver)
+        self.lock_outcome, self.lease = (
+            recovery_lock._acquire_recovery_dual_lock(
+                driver=self.driver,
+                source_head=source_head,
+                session_class="FIXED_POSIX_RECOVERY_SESSION",
+            )
+        )
+        self.root: dict[str, Any] | None = None
+        self.active = False
+        self.closed = False
+        self.failure_code: str | None = None
+        if self.lease is None:
+            self.failure_code = self.lock_outcome["result"]["failure_code"]
+            return
+        self.lease["transaction_active"] = True
+        try:
+            self.root = self.store._open_root()
+            recovery_lock._verify_lease(
+                self.lease,
+                driver=self.driver,
+                source_head=self.source_head,
+                require_transaction=True,
+            )
+            self.active = True
+        except (
+            recovery_store.RecoveryStoreError,
+            recovery_lock.RecoveryDualLockError,
+        ) as error:
+            self.failure_code = error.code
+            self.close()
+        except Exception as error:
+            self.failure_code = (
+                "anchor_effect_session_open_" + type(error).__name__
+            )
+            self.close()
+
+    def _require_active(self) -> dict[str, Any]:
+        if (
+            self.active is not True
+            or self.lease is None
+            or self.root is None
+        ):
+            raise ControllerAnchorEffectError(
+                self.failure_code or "anchor_effect_session_inactive"
+            )
+        try:
+            recovery_lock._verify_lease(
+                self.lease,
+                driver=self.driver,
+                source_head=self.source_head,
+                require_transaction=True,
+            )
+        except recovery_lock.RecoveryDualLockError as error:
+            raise ControllerAnchorEffectError(error.code) from error
+        return self.root
+
+    def _recheck_root(self, retained: dict[str, Any]) -> None:
+        current: dict[str, Any] | None = None
+        try:
+            current = self.store._open_root()
+            if not recovery_store._same_root(current, retained):
+                raise ControllerAnchorEffectError(
+                    "anchor_effect_state_root_replaced"
+                )
+        except recovery_store.RecoveryStoreError as error:
+            raise ControllerAnchorEffectError(
+                "anchor_effect_state_root_recheck_failed"
+            ) from error
+        finally:
+            if current is not None:
+                self.store._close(current.get("fd"))
+
+    def observe(self) -> dict[str, Any]:
+        retained = self._require_active()
+        self._recheck_root(retained)
+        try:
+            return _observe_manifest_from_root(
+                store=self.store,
+                root=retained,
+                source_head=self.source_head,
+            )
+        except recovery_store.RecoveryStoreError as error:
+            raise ControllerAnchorEffectError(
+                "anchor_effect_fixed_store_observation_failed"
+            ) from error
+
+    def guard_effect(
+        self, *, expected_observation: dict[str, Any]
+    ) -> None:
+        current = self.observe()
+        if current != expected_observation:
+            raise ControllerAnchorEffectError(
+                "anchor_effect_manifest_changed_before_effect"
+            )
+
+    def close(self) -> dict[str, Any]:
+        if self.closed:
+            return self.lock_outcome
+        if self.root is not None:
+            try:
+                self.driver.close(fd=self.root["fd"])
+            except Exception:
+                self.failure_code = (
+                    "anchor_effect_state_root_release_incomplete"
+                )
+            self.root = None
+        self.active = False
+        if self.lease is not None:
+            self.lease["transaction_active"] = False
+            self.lock_outcome["rollback"] = recovery_lock._release_lease(
+                self.lease
+            )
+        self.closed = True
+        return self.lock_outcome
+
+
+def _open_fixed_effect_session(*, source_head: str) -> _FixedEffectSession:
+    return _FixedEffectSession(source_head=source_head)
 
 
 def derive_controller_anchor_head(
@@ -294,6 +432,43 @@ def validate_effect_artifact(artifact: Any) -> list[str]:
     return errors
 
 
+def _validate_session_lock(outcome: Any) -> list[str]:
+    if outcome is None:
+        return []
+    if not isinstance(outcome, dict) or set(outcome) != {
+        "status",
+        "intent",
+        "result",
+        "postcheck",
+        "rollback",
+    }:
+        return ["session lock outcome fields are not closed"]
+    errors: list[str] = []
+    for name in ("intent", "result", "postcheck", "rollback"):
+        errors.extend(
+            f"session_lock.{name}: {error}"
+            for error in recovery_lock.validate_local_artifact(
+                outcome.get(name)
+            )
+        )
+    intent = outcome.get("intent", {})
+    result = outcome.get("result", {})
+    postcheck = outcome.get("postcheck", {})
+    rollback = outcome.get("rollback", {})
+    if outcome.get("status") != result.get("status"):
+        errors.append("session lock outcome status differs from result")
+    if result.get("intent_digest") != intent.get("self_digest"):
+        errors.append("session lock result does not bind intent")
+    if postcheck.get("result_digest") != result.get("self_digest"):
+        errors.append("session lock postcheck does not bind result")
+    if (
+        rollback.get("intent_digest") != intent.get("self_digest")
+        or rollback.get("result_digest") != result.get("self_digest")
+    ):
+        errors.append("session lock rollback does not bind acquisition")
+    return errors
+
+
 def validate_effect_chain(chain: Any) -> list[str]:
     """Validate a closed intent/result/postcheck/rollback adapter chain."""
 
@@ -323,6 +498,8 @@ def validate_effect_chain(chain: Any) -> list[str]:
     result = artifacts.get("result", {})
     postcheck = artifacts.get("postcheck", {})
     rollback = artifacts.get("rollback", {})
+    session_lock = chain.get("session_lock")
+    errors.extend(_validate_session_lock(session_lock))
     state_digest = chain.get("outbox_prepared_state_digest")
     if intent.get("outbox_prepared_state_digest") != state_digest:
         errors.append("intent does not bind exact pending controller state")
@@ -399,6 +576,28 @@ def validate_effect_chain(chain: Any) -> list[str]:
             errors.append("recovery-required chain semantics are invalid")
     else:
         errors.append("anchor effect chain status is invalid")
+    effect_attempted = result.get("effect_attempted")
+    if isinstance(session_lock, dict) and (
+        session_lock.get("intent", {}).get("source_head")
+        != intent.get("source_head")
+    ):
+        errors.append("session lock does not bind the anchor source head")
+    if effect_attempted is True:
+        if not isinstance(session_lock, dict):
+            errors.append("attempted anchor effect requires a session lock")
+        elif (
+            session_lock.get("status") != recovery_lock.STATUS_ACQUIRED
+            or session_lock.get("postcheck", {}).get("status") != "PASS"
+            or session_lock.get("rollback", {}).get("status") != "RELEASED"
+        ):
+            errors.append(
+                "attempted anchor effect requires acquired and released dual lock"
+            )
+    elif isinstance(session_lock, dict) and (
+        session_lock.get("status") == recovery_lock.STATUS_ACQUIRED
+        and session_lock.get("rollback", {}).get("status") != "RELEASED"
+    ):
+        errors.append("acquired precheck session lock was not released")
     return errors
 
 
@@ -587,6 +786,7 @@ class ControllerAnchorEffectAdapter:
         *,
         code: str,
         moment: datetime,
+        session_lock: dict[str, Any] | None = None,
     ) -> dict[str, Any]:
         result = _seal({
             "schema_version": "s2_5_recovery_anchor_effect_result_v1",
@@ -641,13 +841,9 @@ class ControllerAnchorEffectAdapter:
             "postcheck": postcheck,
             "rollback": rollback,
             "proof": None,
+            "session_lock": session_lock,
             **_COMMON,
         }
-        errors = validate_effect_chain(chain)
-        if errors:
-            raise ControllerAnchorEffectError(
-                "anchor_effect_generated_chain_invalid"
-            )
         return chain
 
     @staticmethod
@@ -657,6 +853,7 @@ class ControllerAnchorEffectAdapter:
         *,
         code: str,
         moment: datetime,
+        session_lock: dict[str, Any],
     ) -> dict[str, Any]:
         result = _seal({
             "schema_version": "s2_5_recovery_anchor_effect_result_v1",
@@ -711,13 +908,9 @@ class ControllerAnchorEffectAdapter:
             "postcheck": postcheck,
             "rollback": rollback,
             "proof": None,
+            "session_lock": session_lock,
             **_COMMON,
         }
-        errors = validate_effect_chain(chain)
-        if errors:
-            raise ControllerAnchorEffectError(
-                "anchor_effect_generated_chain_invalid"
-            )
         return chain
 
     def _execute_fresh(
@@ -728,6 +921,7 @@ class ControllerAnchorEffectAdapter:
         intent: dict[str, Any],
         moment: datetime,
         confirmed_candidate_subject_digest: str,
+        session_lock: dict[str, Any],
     ) -> dict[str, Any]:
         envelope = self._writer.compare_append_controller(request=request)
         response = self._verify_protocol(
@@ -940,13 +1134,9 @@ class ControllerAnchorEffectAdapter:
             "postcheck": postcheck,
             "rollback": rollback,
             "proof": proof,
+            "session_lock": session_lock,
             **_COMMON,
         }
-        errors = validate_effect_chain(chain)
-        if errors:
-            raise ControllerAnchorEffectError(
-                "anchor_effect_generated_chain_invalid"
-            )
         return chain
 
     def _execute_pending(
@@ -974,52 +1164,125 @@ class ControllerAnchorEffectAdapter:
             state, trusted_now=moment
         )
         if admission_errors or transition_errors:
-            return self._precheck_rejection(
+            chain = self._precheck_rejection(
                 state,
                 intent,
                 code=_failure_code(admission_errors, transition_errors),
                 moment=moment,
             )
+            errors = validate_effect_chain(chain)
+            if errors:
+                raise ControllerAnchorEffectError(
+                    "anchor_effect_generated_chain_invalid"
+                )
+            return chain
+
+        session = _open_fixed_effect_session(source_head=source_head)
+        chain: dict[str, Any] | None = None
         try:
-            current = _fixed_manifest_observation(
-                source_head=source_head
+            if session.active is not True:
+                chain = self._precheck_rejection(
+                    state,
+                    intent,
+                    code=(
+                        getattr(session, "failure_code", None)
+                        or "anchor_effect_session_unavailable"
+                    ),
+                    moment=moment,
+                    session_lock=session.lock_outcome,
+                )
+            else:
+                try:
+                    current = session.observe()
+                    if (
+                        current.get("manifest_discriminator_digest")
+                        != manifest_discriminator_digest
+                        or current.get("state_root_id")
+                        != manifest.get("state_root_id")
+                        or current.get("manifest") != manifest
+                    ):
+                        raise ControllerAnchorEffectError(
+                            "anchor_effect_manifest_changed_before_effect"
+                        )
+                    session.guard_effect(expected_observation=current)
+                except ControllerAnchorEffectError as error:
+                    chain = self._precheck_rejection(
+                        state,
+                        intent,
+                        code=error.code,
+                        moment=moment,
+                        session_lock=session.lock_outcome,
+                    )
+                if chain is None:
+                    moment = self._now()
+                    intent = self._intent(
+                        state,
+                        outbox,
+                        request,
+                        manifest_discriminator_digest,
+                        moment,
+                    )
+                    admission_errors = (
+                        controller.validate_fresh_controller_admission(
+                            state, trusted_now=moment
+                        )
+                    )
+                    transition_errors = (
+                        controller.validate_fresh_pending_transition(
+                            state, trusted_now=moment
+                        )
+                    )
+                    if admission_errors or transition_errors:
+                        chain = self._precheck_rejection(
+                            state,
+                            intent,
+                            code=_failure_code(
+                                admission_errors, transition_errors
+                            ),
+                            moment=moment,
+                            session_lock=session.lock_outcome,
+                        )
+                    else:
+                        try:
+                            chain = self._execute_fresh(
+                                state,
+                                outbox,
+                                request,
+                                intent,
+                                moment,
+                                confirmed_candidate_subject_digest,
+                                session.lock_outcome,
+                            )
+                        except ControllerAnchorEffectError as error:
+                            chain = self._effect_recovery(
+                                state,
+                                intent,
+                                code=error.code,
+                                moment=moment,
+                                session_lock=session.lock_outcome,
+                            )
+                        except Exception:
+                            chain = self._effect_recovery(
+                                state,
+                                intent,
+                                code="anchor_effect_dispatch_failed",
+                                moment=moment,
+                                session_lock=session.lock_outcome,
+                            )
+        finally:
+            closed_lock = session.close()
+            if chain is not None:
+                chain["session_lock"] = closed_lock
+        if chain is None:
+            raise ControllerAnchorEffectError(
+                "anchor_effect_session_closed_without_chain"
             )
-        except ControllerAnchorEffectError as error:
-            return self._precheck_rejection(
-                state, intent, code=error.code, moment=moment
+        errors = validate_effect_chain(chain)
+        if errors:
+            raise ControllerAnchorEffectError(
+                "anchor_effect_generated_chain_invalid"
             )
-        if (
-            current.get("manifest_discriminator_digest")
-            != manifest_discriminator_digest
-            or current.get("state_root_id") != manifest.get("state_root_id")
-            or current.get("manifest") != manifest
-        ):
-            return self._precheck_rejection(
-                state,
-                intent,
-                code="anchor_effect_manifest_changed_before_effect",
-                moment=moment,
-            )
-        try:
-            return self._execute_fresh(
-                state,
-                outbox,
-                request,
-                intent,
-                moment,
-                confirmed_candidate_subject_digest,
-            )
-        except ControllerAnchorEffectError as error:
-            return self._effect_recovery(
-                state, intent, code=error.code, moment=moment
-            )
-        except Exception:
-            return self._effect_recovery(
-                state,
-                intent,
-                code="anchor_effect_dispatch_failed",
-                moment=moment,
-            )
+        return chain
 
     def execute_pending_state(self, state: dict[str, Any]) -> dict[str, Any]:
         """Refuse caller-supplied raw state as an effect entry."""
