@@ -62,14 +62,37 @@ RECOVERY_VERIFIER_CAPTURE_SIGNER_IDENTITY = (
 RECOVERY_VERIFIER_CAPTURE_SIGNATURE_NAMESPACE = (
     "arcane-equilibrium-aiml-s2-5-recovery-verifier-capture"
 )
-# Recovery has a distinct capability owner and therefore a distinct, fixed,
-# off-repository trust root.  This is deliberately not the S2.5 permit/attestor
-# key and no public API accepts an alternate path or loader callback.
-RECOVERY_TRUST_ROOT_PUBLIC_KEY_PATH = Path(
-    "/etc/arcane-equilibrium/trust/s2-5-recovery-owner.pub"
+# Each recovery capability has a distinct fixed off-repository trust root.  No
+# public builder accepts a key, path, profile, or loader callback.
+RECOVERY_AUTHORIZATION_TRUST_ROOT_PUBLIC_KEY_PATH = Path(
+    "/etc/arcane-equilibrium/trust/s2-5-recovery-authorization.pub"
 )
-RECOVERY_TRUST_ROOT_FINGERPRINT = (
-    "SHA256:DdQf8oXH/YuVIM5V6jUa2hGvtd3qQbdItZpKx3V7l0A"
+RECOVERY_AUTHORIZATION_TRUST_ROOT_FINGERPRINT = (
+    "SHA256:sJ9ORYOXbpR9NqrNxpPXyQcliBG1j/idb9lLzrTPRdc"
+)
+RECOVERY_ANCHOR_TRUST_ROOT_PUBLIC_KEY_PATH = Path(
+    "/etc/arcane-equilibrium/trust/s2-5-recovery-anchor.pub"
+)
+RECOVERY_ANCHOR_TRUST_ROOT_FINGERPRINT = (
+    "SHA256:RUYp2kjHqzfmMSWnHFOlxBBj7vS9ws+OPAeJNKTUeLA"
+)
+RECOVERY_CONSUMPTION_TRUST_ROOT_PUBLIC_KEY_PATH = Path(
+    "/etc/arcane-equilibrium/trust/s2-5-recovery-consumption.pub"
+)
+RECOVERY_CONSUMPTION_TRUST_ROOT_FINGERPRINT = (
+    "SHA256:zanTk+tXTHROIEqNHC5miSIsd+Z3V3NOdZW/mLz1PcY"
+)
+RECOVERY_ACTOR_CAPTURE_TRUST_ROOT_PUBLIC_KEY_PATH = Path(
+    "/etc/arcane-equilibrium/trust/s2-5-recovery-actor-capture.pub"
+)
+RECOVERY_ACTOR_CAPTURE_TRUST_ROOT_FINGERPRINT = (
+    "SHA256:3u7dOQhWe22HlXBECoqbYC9tje+SZ5AI47Bwy1fZ2aQ"
+)
+RECOVERY_VERIFIER_CAPTURE_TRUST_ROOT_PUBLIC_KEY_PATH = Path(
+    "/etc/arcane-equilibrium/trust/s2-5-recovery-verifier-capture.pub"
+)
+RECOVERY_VERIFIER_CAPTURE_TRUST_ROOT_FINGERPRINT = (
+    "SHA256:cWa7aFhQougPNj98pCDzjvHKKOdaFgKPaEplyZ5zFVA"
 )
 _BINDING_KEYS = frozenset({
     "task_digest", "unresolved_state_digest", "state_root_identity", "journal_set",
@@ -195,11 +218,11 @@ def _sealed(value: Any, digest_key: str, label: str) -> list[str]:
     ]
 
 
-def _load_recovery_trust_root_public_key() -> str:
-    """Load the one fixed recovery-owner public key without following symlinks."""
+def _read_fixed_recovery_public_key(path: Path) -> str:
+    """Read one code-owned fixed public-key path without following symlinks."""
 
     flags = os.O_RDONLY | getattr(os, "O_CLOEXEC", 0) | getattr(os, "O_NOFOLLOW", 0)
-    descriptor = os.open(RECOVERY_TRUST_ROOT_PUBLIC_KEY_PATH, flags)
+    descriptor = os.open(path, flags)
     try:
         metadata = os.fstat(descriptor)
         if not stat.S_ISREG(metadata.st_mode):
@@ -223,6 +246,36 @@ def _load_recovery_trust_root_public_key() -> str:
     if len(parts) < 2 or parts[0] != "ssh-ed25519":
         raise ValueError("recovery trust root must be an ssh-ed25519 public key")
     return " ".join(parts[:2])
+
+
+def _load_recovery_authorization_trust_root_public_key() -> str:
+    return _read_fixed_recovery_public_key(
+        RECOVERY_AUTHORIZATION_TRUST_ROOT_PUBLIC_KEY_PATH
+    )
+
+
+def _load_recovery_anchor_trust_root_public_key() -> str:
+    return _read_fixed_recovery_public_key(
+        RECOVERY_ANCHOR_TRUST_ROOT_PUBLIC_KEY_PATH
+    )
+
+
+def _load_recovery_consumption_trust_root_public_key() -> str:
+    return _read_fixed_recovery_public_key(
+        RECOVERY_CONSUMPTION_TRUST_ROOT_PUBLIC_KEY_PATH
+    )
+
+
+def _load_recovery_actor_capture_trust_root_public_key() -> str:
+    return _read_fixed_recovery_public_key(
+        RECOVERY_ACTOR_CAPTURE_TRUST_ROOT_PUBLIC_KEY_PATH
+    )
+
+
+def _load_recovery_verifier_capture_trust_root_public_key() -> str:
+    return _read_fixed_recovery_public_key(
+        RECOVERY_VERIFIER_CAPTURE_TRUST_ROOT_PUBLIC_KEY_PATH
+    )
 
 
 def recovery_anchor_signed_bytes(anchor: dict[str, Any]) -> bytes:
@@ -359,18 +412,44 @@ def _fixed_root_signature_errors(
     namespace: str,
     label: str,
 ) -> list[str]:
-    """Verify one domain-separated SSHSIG against the fixed recovery-owner root."""
+    """Verify SSHSIG with the fixed trust root selected only by code-owned identity."""
 
     errors: list[str] = []
+    profiles = {
+        RECOVERY_SIGNER_IDENTITY: (
+            _load_recovery_authorization_trust_root_public_key,
+            RECOVERY_AUTHORIZATION_TRUST_ROOT_FINGERPRINT,
+        ),
+        RECOVERY_ANCHOR_SIGNER_IDENTITY: (
+            _load_recovery_anchor_trust_root_public_key,
+            RECOVERY_ANCHOR_TRUST_ROOT_FINGERPRINT,
+        ),
+        RECOVERY_CONSUMPTION_SIGNER_IDENTITY: (
+            _load_recovery_consumption_trust_root_public_key,
+            RECOVERY_CONSUMPTION_TRUST_ROOT_FINGERPRINT,
+        ),
+        RECOVERY_ACTOR_CAPTURE_SIGNER_IDENTITY: (
+            _load_recovery_actor_capture_trust_root_public_key,
+            RECOVERY_ACTOR_CAPTURE_TRUST_ROOT_FINGERPRINT,
+        ),
+        RECOVERY_VERIFIER_CAPTURE_SIGNER_IDENTITY: (
+            _load_recovery_verifier_capture_trust_root_public_key,
+            RECOVERY_VERIFIER_CAPTURE_TRUST_ROOT_FINGERPRINT,
+        ),
+    }
+    profile = profiles.get(identity)
+    if profile is None:
+        return [f"{label} has no code-owned recovery trust profile"]
+    loader, expected_fingerprint = profile
     try:
-        public_key = _load_recovery_trust_root_public_key()
+        public_key = loader()
         actual = _trusted_host.ssh_public_key_fingerprint(public_key)
     except (OSError, ValueError) as error:
         return [f"{label} fixed recovery trust root is unavailable or invalid: {error}"]
-    if not hmac.compare_digest(actual, str(RECOVERY_TRUST_ROOT_FINGERPRINT)):
+    if not hmac.compare_digest(actual, str(expected_fingerprint)):
         errors.append(f"{label} fixed recovery trust-root fingerprint mismatch")
     if not hmac.compare_digest(
-        str(signer_fingerprint), str(RECOVERY_TRUST_ROOT_FINGERPRINT)
+        str(signer_fingerprint), str(expected_fingerprint)
     ):
         errors.append(f"{label} signer fingerprint is invalid")
     signature_bytes = str(signature or "").encode("ascii", "replace")
@@ -1026,8 +1105,17 @@ def validate_recovery_artifact(artifact: Any, *, now: Any = None) -> list[str]:
             errors.append("recovery action is not code-owned")
     elif schema == "s2_5_recovery_rollback_v1":
         actor_capture = artifact.get("actor_capture")
+        bound_intent = {
+            "recovery_binding": artifact.get("recovery_binding"),
+            "recovery_id": artifact.get("recovery_id"),
+            "intent_digest": artifact.get("recovery_intent_digest"),
+        }
         errors.extend(_capture_errors(
-            actor_capture, permission="effect", now=now
+            actor_capture,
+            permission="effect",
+            intent=bound_intent,
+            observed_state=artifact.get("post_state"),
+            now=now,
         ))
         capture = actor_capture if isinstance(actor_capture, dict) else {}
         if artifact.get("actor_capture_digest") != capture.get("capture_digest"):
@@ -1109,7 +1197,11 @@ def validate_recovery_artifact(artifact: Any, *, now: Any = None) -> list[str]:
         if embedded_rollback.get("post_state") != artifact.get("post_state"):
             errors.append("result post-state differs from embedded rollback")
         errors.extend(_capture_errors(
-            artifact.get("actor_capture"), permission="effect", now=now
+            artifact.get("actor_capture"),
+            permission="effect",
+            intent=embedded_intent if isinstance(embedded_intent, dict) else None,
+            observed_state=artifact.get("post_state"),
+            now=now,
         ))
         if artifact.get("actor_capture_digest") != artifact.get("actor_capture", {}).get(
             "capture_digest"
@@ -1169,8 +1261,18 @@ def validate_recovery_artifact(artifact: Any, *, now: Any = None) -> list[str]:
             binding=artifact.get("recovery_binding"),
         ))
     elif schema == "s2_5_recovery_postcheck_v1":
+        bound_intent = {
+            "recovery_binding": artifact.get("recovery_binding"),
+            "recovery_id": artifact.get("recovery_id"),
+            "intent_digest": artifact.get("recovery_intent_digest"),
+        }
         errors.extend(_capture_errors(
-            artifact.get("verifier_capture"), permission="read_only", now=now
+            artifact.get("verifier_capture"),
+            permission="read_only",
+            intent=bound_intent,
+            recovery_result_digest=artifact.get("recovery_result_digest"),
+            observed_state=artifact.get("observed_state"),
+            now=now,
         ))
         verifier_capture = artifact.get("verifier_capture")
         capture = verifier_capture if isinstance(verifier_capture, dict) else {}

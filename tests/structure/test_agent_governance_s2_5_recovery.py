@@ -28,26 +28,46 @@ LATER = "2026-07-30T12:10:00Z"
 HEAD = "a" * 40
 D1 = "sha256:" + "1" * 64
 D2 = "sha256:" + "2" * 64
-_RECOVERY_PRIVATE_KEY: Path | None = None
-_ORIGINAL_RECOVERY_TRUST_LOADER = recovery._load_recovery_trust_root_public_key
+_RECOVERY_PRIVATE_KEYS: dict[str, Path] = {}
+_RECOVERY_FINGERPRINTS: dict[str, str] = {}
+_ORIGINAL_RECOVERY_PUBLIC_KEY_READER = recovery._read_fixed_recovery_public_key
+
+
+def _fixed_loader(public_key: str):
+    def load() -> str:
+        return public_key
+
+    return load
 
 
 @pytest.fixture(autouse=True)
 def _install_independent_recovery_trust_root(tmp_path, monkeypatch):
-    """Recovery uses a second key, never the S2.5 permit/attestor test key."""
+    """Install five independent disposable keys at the fixed loader seams."""
 
     kit = __import__("s2_5_testkit")
-    private_key, public_key, fingerprint = kit.mint_key(
-        tmp_path, "s2-5-recovery-owner"
+    profiles = (
+        "authorization", "anchor", "consumption", "actor_capture",
+        "verifier_capture",
     )
-    monkeypatch.setattr(
-        recovery, "_load_recovery_trust_root_public_key", lambda: public_key
-    )
-    monkeypatch.setattr(recovery, "RECOVERY_TRUST_ROOT_FINGERPRINT", fingerprint)
-    global _RECOVERY_PRIVATE_KEY
-    _RECOVERY_PRIVATE_KEY = private_key
+    for profile in profiles:
+        private_key, public_key, fingerprint = kit.mint_key(
+            tmp_path, "s2-5-recovery-" + profile.replace("_", "-")
+        )
+        monkeypatch.setattr(
+            recovery,
+            f"_load_recovery_{profile}_trust_root_public_key",
+            _fixed_loader(public_key),
+        )
+        monkeypatch.setattr(
+            recovery,
+            f"RECOVERY_{profile.upper()}_TRUST_ROOT_FINGERPRINT",
+            fingerprint,
+        )
+        _RECOVERY_PRIVATE_KEYS[profile] = private_key
+        _RECOVERY_FINGERPRINTS[profile] = fingerprint
     yield
-    _RECOVERY_PRIVATE_KEY = None
+    _RECOVERY_PRIVATE_KEYS.clear()
+    _RECOVERY_FINGERPRINTS.clear()
 
 
 def _sealed(payload: dict, digest_key: str) -> dict:
@@ -60,6 +80,16 @@ def _reseal_capture(capture: dict) -> None:
     capture["capture_digest"] = validator.canonical_digest({
         key: value for key, value in capture.items() if key != "capture_digest"
     })
+
+
+def _reseal_rollback(rollback: dict) -> None:
+    rollback["rollback_result_digest"] = validator.canonical_digest({
+        "rollback_intent_digest": rollback["rollback_intent_digest"],
+        "post_state": rollback["post_state"],
+        "status": rollback["status"],
+        "actor_capture_digest": rollback["actor_capture_digest"],
+    })
+    rollback["self_digest"] = validator.artifact_self_digest(rollback)
 
 
 def _reseal_result(result: dict) -> None:
@@ -76,6 +106,14 @@ def _reseal_postcheck(postcheck: dict) -> None:
         if key not in {"postcheck_id", "self_digest"}
     })
     postcheck["self_digest"] = validator.artifact_self_digest(postcheck)
+
+
+def _replace_signature_with_profile(artifact: dict, profile: str) -> None:
+    artifact["sshsig_armored"] = __import__("s2_5_testkit")._sign_bytes(
+        _RECOVERY_PRIVATE_KEYS[profile],
+        validator._canonical_bytes(artifact["signed_binding"]),
+        namespace=artifact["signature_namespace"],
+    )
 
 
 def _kernel_binding() -> dict:
@@ -101,7 +139,8 @@ def _capture(
     verifier: bool = False,
     observed_at: str = NOW,
 ) -> dict:
-    assert _RECOVERY_PRIVATE_KEY is not None
+    profile = "verifier_capture" if verifier else "actor_capture"
+    private_key = _RECOVERY_PRIVATE_KEYS[profile]
     binding = intent["recovery_binding"]
     signed_binding = {
         "schema_version": "s2_5_recovery_capture_v1",
@@ -143,11 +182,11 @@ def _capture(
     payload = {
         **signed_binding,
         "signer_identity": signer_identity,
-        "signer_fingerprint": recovery.RECOVERY_TRUST_ROOT_FINGERPRINT,
+        "signer_fingerprint": _RECOVERY_FINGERPRINTS[profile],
         "signature_namespace": namespace,
         "signed_binding": copy.deepcopy(signed_binding),
         "sshsig_armored": __import__("s2_5_testkit")._sign_bytes(
-            _RECOVERY_PRIVATE_KEY,
+            private_key,
             validator._canonical_bytes(signed_binding),
             namespace=namespace,
         ),
@@ -178,7 +217,7 @@ def _authorization(
     admission: dict,
     trusted_anchor: dict,
 ) -> dict:
-    assert _RECOVERY_PRIVATE_KEY is not None
+    private_key = _RECOVERY_PRIVATE_KEYS["authorization"]
     authorization_id = "s2-5-recovery-auth-" + "3" * 64
     signed_binding = {
         "action": action,
@@ -210,11 +249,11 @@ def _authorization(
         "expires_at": LATER,
         "consume_once": True,
         "signer_identity": recovery.RECOVERY_SIGNER_IDENTITY,
-        "signer_fingerprint": recovery.RECOVERY_TRUST_ROOT_FINGERPRINT,
+        "signer_fingerprint": _RECOVERY_FINGERPRINTS["authorization"],
         "signature_namespace": recovery.RECOVERY_SIGNATURE_NAMESPACE,
         "signed_binding": signed_binding,
         "sshsig_armored": __import__("s2_5_testkit")._sign_bytes(
-            _RECOVERY_PRIVATE_KEY,
+            private_key,
             validator._canonical_bytes(signed_binding),
             namespace=recovery.RECOVERY_SIGNATURE_NAMESPACE,
         ),
@@ -223,7 +262,7 @@ def _authorization(
 
 
 def _trusted_anchor(unresolved: dict) -> dict:
-    assert _RECOVERY_PRIVATE_KEY is not None
+    private_key = _RECOVERY_PRIVATE_KEYS["anchor"]
     append_entry_digest = validator.canonical_digest(unresolved)
     signed_binding = {
         "schema_version": "s2_5_recovery_trusted_anchor_ref_v1",
@@ -252,11 +291,11 @@ def _trusted_anchor(unresolved: dict) -> dict:
         **signed_binding,
         "anchor_digest": validator.canonical_digest(signed_binding),
         "signer_identity": recovery.RECOVERY_ANCHOR_SIGNER_IDENTITY,
-        "signer_fingerprint": recovery.RECOVERY_TRUST_ROOT_FINGERPRINT,
+        "signer_fingerprint": _RECOVERY_FINGERPRINTS["anchor"],
         "signature_namespace": recovery.RECOVERY_ANCHOR_SIGNATURE_NAMESPACE,
         "signed_binding": copy.deepcopy(signed_binding),
         "sshsig_armored": __import__("s2_5_testkit")._sign_bytes(
-            _RECOVERY_PRIVATE_KEY,
+            private_key,
             validator._canonical_bytes(signed_binding),
             namespace=recovery.RECOVERY_ANCHOR_SIGNATURE_NAMESPACE,
         ),
@@ -265,7 +304,7 @@ def _trusted_anchor(unresolved: dict) -> dict:
 
 
 def _consumption_proof(intent: dict, *, evidence_class: str = "LOCAL_REPRODUCIBLE"):
-    assert _RECOVERY_PRIVATE_KEY is not None
+    private_key = _RECOVERY_PRIVATE_KEYS["consumption"]
     binding = intent["recovery_binding"]
     anchor = binding["trusted_anchor"]
     entry = validator.canonical_digest({
@@ -298,11 +337,11 @@ def _consumption_proof(intent: dict, *, evidence_class: str = "LOCAL_REPRODUCIBL
     proof = {
         **signed_binding,
         "signer_identity": recovery.RECOVERY_CONSUMPTION_SIGNER_IDENTITY,
-        "signer_fingerprint": recovery.RECOVERY_TRUST_ROOT_FINGERPRINT,
+        "signer_fingerprint": _RECOVERY_FINGERPRINTS["consumption"],
         "signature_namespace": recovery.RECOVERY_CONSUMPTION_SIGNATURE_NAMESPACE,
         "signed_binding": copy.deepcopy(signed_binding),
         "sshsig_armored": __import__("s2_5_testkit")._sign_bytes(
-            _RECOVERY_PRIVATE_KEY,
+            private_key,
             validator._canonical_bytes(signed_binding),
             namespace=recovery.RECOVERY_CONSUMPTION_SIGNATURE_NAMESPACE,
         ),
@@ -740,35 +779,246 @@ def test_source_only_chain_can_never_clear_the_latch(tmp_path):
     assert state.unresolved is not None
 
 
-def test_dedicated_recovery_root_has_no_caller_selected_path_or_shared_key():
+def test_signed_actor_capture_from_chain_b_cannot_be_rewrapped_as_chain_a_rollback(
+    tmp_path,
+):
+    _intent_a, rollback_a, _result_a, _postcheck_a = _chain(
+        _state(tmp_path / "chain-a")
+    )
+    _intent_b, _rollback_b, result_b, _postcheck_b = _chain(
+        _state(tmp_path / "chain-b")
+    )
+    forged = copy.deepcopy(rollback_a)
+    forged["actor_capture"] = copy.deepcopy(result_b["actor_capture"])
+    forged["actor_capture_digest"] = forged["actor_capture"]["capture_digest"]
+    forged["actor_identity"] = copy.deepcopy(
+        forged["actor_capture"]["node_identity"]
+    )
+    forged["actor_process"] = copy.deepcopy(
+        forged["actor_capture"]["process_identity"]
+    )
+    _reseal_rollback(forged)
+    errors = validator.validate_aiml_artifact(forged, now=NOW)
+    assert any(
+        "capture bound_state_root_id differs from the recovery intent" in error
+        for error in errors
+    ), errors
+    assert any(
+        "capture recovery_intent_digest differs from the recovery intent" in error
+        for error in errors
+    ), errors
+
+
+def test_chain_b_actor_capture_is_checked_against_chain_a_result_intent_and_state(
+    tmp_path,
+):
+    _intent_a, _rollback_a, result_a, _postcheck_a = _chain(
+        _state(tmp_path / "result-chain-a")
+    )
+    _intent_b, _rollback_b, result_b, _postcheck_b = _chain(
+        _state(tmp_path / "result-chain-b")
+    )
+    forged = copy.deepcopy(result_a)
+    forged["actor_capture"] = copy.deepcopy(result_b["actor_capture"])
+    forged["actor_capture_digest"] = forged["actor_capture"]["capture_digest"]
+    forged["actor_identity"] = copy.deepcopy(
+        forged["actor_capture"]["node_identity"]
+    )
+    forged["actor_process"] = copy.deepcopy(
+        forged["actor_capture"]["process_identity"]
+    )
+    _reseal_result(forged)
+    errors = validator.validate_aiml_artifact(forged, now=NOW)
+    assert any(
+        "capture bound_state_root_id differs from the recovery intent" in error
+        for error in errors
+    ), errors
+
+
+def test_signed_verifier_capture_from_chain_b_cannot_be_rewrapped_in_chain_a(
+    tmp_path,
+):
+    _intent_a, _rollback_a, _result_a, postcheck_a = _chain(
+        _state(tmp_path / "postcheck-chain-a")
+    )
+    _intent_b, _rollback_b, _result_b, postcheck_b = _chain(
+        _state(tmp_path / "postcheck-chain-b")
+    )
+    forged = copy.deepcopy(postcheck_a)
+    forged["verifier_capture"] = copy.deepcopy(
+        postcheck_b["verifier_capture"]
+    )
+    forged["verifier_capture_digest"] = forged["verifier_capture"][
+        "capture_digest"
+    ]
+    forged["verifier_identity"] = copy.deepcopy(
+        forged["verifier_capture"]["node_identity"]
+    )
+    forged["verifier_process"] = copy.deepcopy(
+        forged["verifier_capture"]["process_identity"]
+    )
+    _reseal_postcheck(forged)
+    errors = validator.validate_aiml_artifact(forged, now=NOW)
+    assert any(
+        "capture bound_state_root_id differs from the recovery intent" in error
+        for error in errors
+    ), errors
+    assert any(
+        "capture recovery_result_digest differs from result" in error
+        for error in errors
+    ), errors
+
+
+def test_each_recovery_capability_has_a_distinct_fixed_trust_profile():
     import agent_governance_s2_5_attestation as attestation
 
-    assert recovery.RECOVERY_TRUST_ROOT_PUBLIC_KEY_PATH.is_absolute()
-    assert recovery.RECOVERY_TRUST_ROOT_FINGERPRINT != (
-        attestation.S2_5_TRUST_ROOT_FINGERPRINT
+    prefixes = (
+        "RECOVERY_AUTHORIZATION", "RECOVERY_ANCHOR",
+        "RECOVERY_CONSUMPTION", "RECOVERY_ACTOR_CAPTURE",
+        "RECOVERY_VERIFIER_CAPTURE",
     )
-    assert set(inspect.signature(
-        recovery._load_recovery_trust_root_public_key
-    ).parameters) == set()
+    paths = [
+        getattr(recovery, prefix + "_TRUST_ROOT_PUBLIC_KEY_PATH")
+        for prefix in prefixes
+    ]
+    fingerprints = [
+        getattr(recovery, prefix + "_TRUST_ROOT_FINGERPRINT")
+        for prefix in prefixes
+    ]
+    assert all(path.is_absolute() for path in paths)
+    assert len(set(paths)) == len(paths)
+    assert len(set(fingerprints)) == len(fingerprints)
+    assert attestation.S2_5_TRUST_ROOT_FINGERPRINT not in fingerprints
+    for prefix in prefixes:
+        loader = getattr(
+            recovery,
+            "_load_" + prefix.lower() + "_trust_root_public_key",
+        )
+        assert not inspect.signature(loader).parameters
+    assert not hasattr(recovery, "_load_recovery_trust_root_public_key")
     assert not hasattr(recovery, "RECOVERY_TRUST_ROOT_PUBLIC_KEY")
 
 
-def test_recovery_trust_root_rejects_writable_or_multiply_linked_key(
-    tmp_path, monkeypatch
+def test_authorization_key_cannot_forge_anchor_signature(tmp_path):
+    state = _state(tmp_path)
+    kernel, admission, anchor, authorization = _intent_materials(state)
+    _replace_signature_with_profile(anchor, "authorization")
+    anchor["reference_digest"] = validator.canonical_digest({
+        key: value for key, value in anchor.items() if key != "reference_digest"
+    })
+    with pytest.raises(ValueError, match="trusted anchor SSHSIG"):
+        recovery.build_recovery_intent(
+            unresolved_state=state.unresolved,
+            kernel_binding=kernel,
+            admission=admission,
+            authorization=authorization,
+            trusted_anchor=anchor,
+            action="ROLLBACK_TO_PRE_STATE",
+            now=NOW,
+        )
+
+
+def test_anchor_key_cannot_forge_authorization_signature(tmp_path):
+    state = _state(tmp_path)
+    kernel, admission, anchor, authorization = _intent_materials(state)
+    _replace_signature_with_profile(authorization, "anchor")
+    authorization["authorization_digest"] = validator.canonical_digest({
+        key: value for key, value in authorization.items()
+        if key != "authorization_digest"
+    })
+    with pytest.raises(ValueError, match="recovery authorization SSHSIG"):
+        recovery.build_recovery_intent(
+            unresolved_state=state.unresolved,
+            kernel_binding=kernel,
+            admission=admission,
+            authorization=authorization,
+            trusted_anchor=anchor,
+            action="ROLLBACK_TO_PRE_STATE",
+            now=NOW,
+        )
+
+
+def test_verifier_capture_key_cannot_forge_actor_capture(tmp_path):
+    state = _state(tmp_path)
+    kernel, admission, anchor, authorization = _intent_materials(state)
+    intent = recovery.build_recovery_intent(
+        unresolved_state=state.unresolved,
+        kernel_binding=kernel,
+        admission=admission,
+        authorization=authorization,
+        trusted_anchor=anchor,
+        action="ROLLBACK_TO_PRE_STATE",
+        now=NOW,
+    )
+    post_state = copy.deepcopy(intent["recovery_binding"]["pre_state"])
+    actor_capture = _capture(intent=intent, observed_state=post_state)
+    _replace_signature_with_profile(actor_capture, "verifier_capture")
+    _reseal_capture(actor_capture)
+    with pytest.raises(ValueError, match="recovery capture SSHSIG"):
+        recovery.build_recovery_rollback(
+            intent=intent,
+            actor_capture=actor_capture,
+            post_state=post_state,
+            status="LATCH_PRESERVED",
+        )
+
+
+def test_authorization_key_cannot_forge_consumption_signature(tmp_path):
+    state = _state(tmp_path)
+    intent, rollback, _result, _postcheck = _chain(state)
+    actor_capture = copy.deepcopy(rollback["actor_capture"])
+    proof = _consumption_proof(intent)
+    _replace_signature_with_profile(proof, "authorization")
+    proof["proof_digest"] = validator.canonical_digest({
+        key: value for key, value in proof.items() if key != "proof_digest"
+    })
+    with pytest.raises(ValueError, match="authorization consumption SSHSIG"):
+        recovery.build_recovery_result(
+            intent=intent,
+            actor_capture=actor_capture,
+            rollback=rollback,
+            post_state=rollback["post_state"],
+            status="RECOVERY_ABORTED",
+            authorization_consumption_proof=proof,
+        )
+
+
+def test_actor_capture_key_cannot_forge_verifier_capture(tmp_path):
+    state = _state(tmp_path)
+    intent, _rollback, result, _postcheck = _chain(state)
+    verifier_capture = _capture(
+        intent=intent,
+        result=result,
+        observed_state=result["post_state"],
+        verifier=True,
+    )
+    _replace_signature_with_profile(verifier_capture, "actor_capture")
+    _reseal_capture(verifier_capture)
+    with pytest.raises(ValueError, match="recovery capture SSHSIG"):
+        recovery.build_recovery_postcheck(
+            intent=intent,
+            result=result,
+            verifier_capture=verifier_capture,
+            observed_state=result["post_state"],
+            status="RECOVERY_UNRESOLVED",
+        )
+
+
+def test_recovery_trust_root_reader_rejects_writable_or_multiply_linked_key(
+    tmp_path,
 ):
     public_key = __import__("s2_5_testkit").mint_key(
         tmp_path, "loader-check"
     )[1]
     key_path = tmp_path / "recovery-owner.pub"
     key_path.write_text(public_key + "\n", encoding="ascii")
-    monkeypatch.setattr(recovery, "RECOVERY_TRUST_ROOT_PUBLIC_KEY_PATH", key_path)
     key_path.chmod(0o666)
     with pytest.raises(ValueError, match="writable"):
-        _ORIGINAL_RECOVERY_TRUST_LOADER()
+        _ORIGINAL_RECOVERY_PUBLIC_KEY_READER(key_path)
     key_path.chmod(0o600)
     (tmp_path / "second-link.pub").hardlink_to(key_path)
     with pytest.raises(ValueError, match="hard link"):
-        _ORIGINAL_RECOVERY_TRUST_LOADER()
+        _ORIGINAL_RECOVERY_PUBLIC_KEY_READER(key_path)
 
 
 def test_intent_requires_explicit_time_and_resolve_uses_closed_central_schema(tmp_path):
