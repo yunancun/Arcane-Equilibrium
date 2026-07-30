@@ -8,6 +8,7 @@ import ast
 import os
 import subprocess
 import sys
+from copy import deepcopy
 from pathlib import Path
 import pytest
 ROOT = Path(__file__).resolve().parents[2]
@@ -192,6 +193,8 @@ def _raw_command_findings(path: Path, *, exec_family: bool = True) -> list[str]:
     subprocess_aliases: set[str] = {"subprocess"}
     container_aliases: dict[str, object] = {}
     wildcard_key = ("dynamic",)
+    sequence_wildcard_key = ("constant", ("sequence", "*"))
+    sequence_uncertain_key = ("sequence_uncertain",)
     family_aliases = {
         "builtins": builtins_aliases, "ctypes": ctypes_handles,
         "module_lookup": module_lookup_aliases,
@@ -230,39 +233,27 @@ def _raw_command_findings(path: Path, *, exec_family: bool = True) -> list[str]:
         if isinstance(provenance, set):
             return set(provenance)
         families: set[str] = set()
-        if isinstance(provenance, dict):
-            for member in provenance.values():
-                families.update(_flatten_provenance(member))
+        for member in provenance.values() if isinstance(provenance, dict) else ():
+            families.update(_flatten_provenance(member))
         return families
 
     def _merge_provenance(left: object, right: object) -> object:
         if isinstance(left, dict) and isinstance(right, dict):
-            merged = dict(left)
+            merged = deepcopy(left)
             for key, member in right.items():
-                merged[key] = (
-                    _merge_provenance(merged[key], member)
-                    if key in merged else member
-                )
+                merged[key] = _merge_provenance(merged[key], member) if key in merged else deepcopy(member)
             return merged
         return _flatten_provenance(left) | _flatten_provenance(right)
 
     def _key_token(node: ast.AST) -> object:
-        return (
-            ("constant", node.value) if isinstance(node, ast.Constant)
-            else ("expression", ast.dump(node, annotate_fields=False))
-        )
+        return ("constant", node.value) if isinstance(node, ast.Constant) else ("expression", ast.dump(node, annotate_fields=False))
     def _target_path(node: ast.AST) -> tuple[str, list[ast.AST]] | None:
         slices: list[ast.AST] = []
         while isinstance(node, ast.Subscript):
             slices.append(node.slice)
             node = node.value
-        return (
-            (node.id, list(reversed(slices)))
-            if isinstance(node, ast.Name) else None
-        )
-    def _write_provenance(
-        current: object, slices: list[ast.AST], value: object
-    ) -> object:
+        return (node.id, list(reversed(slices))) if isinstance(node, ast.Name) else None
+    def _write_provenance(current: object, slices: list[ast.AST], value: object) -> object:
         if not slices:
             return _merge_provenance(current, value)
         mapping = dict(current) if isinstance(current, dict) else {}
@@ -270,18 +261,13 @@ def _raw_command_findings(path: Path, *, exec_family: bool = True) -> list[str]:
         child = _write_provenance(mapping.get(token, {}), slices[1:], value)
         mapping[token] = child
         if not isinstance(slices[0], ast.Constant):
-            mapping[wildcard_key] = _merge_provenance(
-                mapping.get(wildcard_key, set()), child
-            )
+            mapping[wildcard_key] = _merge_provenance(mapping.get(wildcard_key, set()), child)
         return mapping
     def _value_provenance(node: ast.AST | None) -> object:
         if isinstance(node, ast.Name):
             if node.id in container_aliases:
                 return container_aliases[node.id]
-            families = {
-                family for family, aliases in family_aliases.items()
-                if node.id in aliases
-            }
+            families = {family for family, aliases in family_aliases.items() if node.id in aliases}
             return families | ({"ctypes"} if node.id == "ctypes" else set())
         if isinstance(node, (ast.List, ast.Tuple)):
             members = {index: _value_provenance(item) for index, item in enumerate(node.elts)}
@@ -296,35 +282,22 @@ def _raw_command_findings(path: Path, *, exec_family: bool = True) -> list[str]:
                     continue
                 provenance = _value_provenance(item)
                 token = _key_token(key)
-                members[token] = (
-                    _merge_provenance(members[token], provenance)
-                    if token in members else provenance
-                )
+                members[token] = _merge_provenance(members[token], provenance) if token in members else provenance
                 if not isinstance(key, ast.Constant):
-                    members[wildcard_key] = _merge_provenance(
-                        members.get(wildcard_key, set()), provenance
-                    )
+                    members[wildcard_key] = _merge_provenance(members.get(wildcard_key, set()), provenance)
             return members
         if isinstance(node, ast.Attribute):
-            if (
-                node.attr == "modules" and isinstance(node.value, ast.Name)
-                and node.value.id == "sys"
-            ):
+            if node.attr == "modules" and isinstance(node.value, ast.Name) and node.value.id == "sys":
                 return {"module_registry"}
             return {"subprocess"} if node.attr == "subprocess" else set()
         if isinstance(node, ast.Call):
-            if (
-                isinstance(node.func, ast.Attribute)
-                and isinstance(node.func.value, ast.Name)
-                and node.func.value.id == "ctypes"
-                and node.func.attr == "CDLL"
+            if isinstance(node.func, ast.Attribute) and isinstance(node.func.value, ast.Name) and (
+                node.func.value.id == "ctypes" and node.func.attr == "CDLL"
             ):
                 return {"ctypes"}
             if (
                 isinstance(node.func, ast.Attribute) and node.func.attr == "get"
-                and "module_registry" in _flatten_provenance(
-                    _value_provenance(node.func.value)
-                )
+                and "module_registry" in _flatten_provenance(_value_provenance(node.func.value))
             ):
                 return {"module_lookup"}
             return set()
@@ -334,13 +307,12 @@ def _raw_command_findings(path: Path, *, exec_family: bool = True) -> list[str]:
                 if isinstance(node.slice, ast.Constant):
                     mapping = provenance
                     raw, keyed = mapping.get(node.slice.value), mapping.get(_key_token(node.slice))
-                    exact = (
-                        keyed if raw is None else raw if keyed is None
-                        else _merge_provenance(raw, keyed)
-                    )
+                    exact = keyed if raw is None else raw if keyed is None else _merge_provenance(raw, keyed)
+                    general = mapping.get(wildcard_key, set())
                     provenance = (
-                        exact if exact is not None
-                        else mapping.get(("constant", ("sequence", "*")), set())
+                        _merge_provenance(exact, general) if general else exact
+                    ) if exact is not None else _merge_provenance(
+                        mapping.get(sequence_wildcard_key, set()), general
                     )
                 else:
                     provenance = _flatten_provenance(provenance)
@@ -501,11 +473,40 @@ def _raw_command_findings(path: Path, *, exec_family: bool = True) -> list[str]:
         return [(target, value, provenance)]
 
     def _sequence_length(provenance: object) -> int | None:
-        if not isinstance(provenance, dict):
+        if not isinstance(provenance, dict) or sequence_uncertain_key in provenance:
             return None
         return max((key[1] for key in provenance if isinstance(key, tuple) and len(key) == 2 and key[0] == "sequence_length" and isinstance(key[1], int)), default=None)
 
+    def _merge_target(target: ast.AST, provenance: object) -> None:
+        target_path = _target_path(target)
+        if target_path is not None and not isinstance(target, ast.Name):
+            root, slices = target_path
+            container_aliases[root] = _write_provenance(
+                container_aliases.get(root, {}), slices, provenance
+            )
+            return
+        if isinstance(target, ast.Name):
+            for family in _flatten_provenance(provenance):
+                family_aliases[family].add(target.id)
+            if isinstance(provenance, dict):
+                container_aliases[target.id] = _merge_provenance(
+                    container_aliases.get(target.id, {}), provenance
+                )
+
     sequence_positions: dict[int, int] = {}
+    alias_edges: dict[tuple[int, int], tuple[ast.AST, ast.AST]] = {}
+    uncertain_flow = (
+        ast.If, ast.IfExp, ast.For, ast.AsyncFor, ast.While, ast.Try,
+        ast.Match, ast.ListComp, ast.SetComp, ast.DictComp, ast.GeneratorExp, ast.BoolOp,
+    ) + ((ast.TryStar,) if hasattr(ast, "TryStar") else ())
+    def _structured_nodes(
+        node: ast.AST, uncertain: bool = False
+    ) -> object:
+        current = uncertain or isinstance(node, uncertain_flow)
+        yield node, current
+        for child in ast.iter_child_nodes(node):
+            yield from _structured_nodes(child, current)
+    flow_nodes = tuple(_structured_nodes(tree))
 
     changed = True
     while changed:
@@ -515,12 +516,12 @@ def _raw_command_findings(path: Path, *, exec_family: bool = True) -> list[str]:
             tuple(sorted(dynamic_callable_aliases)),
             tuple(sorted(sequence_positions.items())),
         )
-        changed = False
-        for node in ast.walk(tree):
+        for node, flow_uncertain in flow_nodes:
             value: ast.AST | None = None
             targets: list[ast.AST] = []
             sequence_receiver = None
             sequence_end = None
+            sequence_is_uncertain = False
             if isinstance(node, ast.Assign):
                 value, targets = node.value, list(node.targets)
             elif isinstance(node, ast.AnnAssign):
@@ -542,9 +543,14 @@ def _raw_command_findings(path: Path, *, exec_family: bool = True) -> list[str]:
                 value, targets = node.args[1], [ast.Subscript(value=node.func.value, slice=node.args[0], ctx=ast.Store())]
             elif isinstance(node, ast.Call) and isinstance(node.func, ast.Attribute) and node.func.attr in {"append", "extend"} and node.args:
                 sequence_receiver = node.func.value
-                start = sequence_positions.get(id(node))
-                if start is None:
-                    start = _sequence_length(_value_provenance(sequence_receiver))
+                receiver_provenance = _value_provenance(sequence_receiver)
+                sequence_is_uncertain = flow_uncertain or (
+                    isinstance(receiver_provenance, dict)
+                    and sequence_uncertain_key in receiver_provenance
+                )
+                start = None if sequence_is_uncertain else sequence_positions.get(id(node))
+                if start is None and not sequence_is_uncertain:
+                    start = _sequence_length(receiver_provenance)
                     if start is not None:
                         sequence_positions[id(node)] = start
                 count = 1 if node.func.attr == "append" else _sequence_length(
@@ -562,6 +568,7 @@ def _raw_command_findings(path: Path, *, exec_family: bool = True) -> list[str]:
                     ], ctx=ast.Store())]
                     sequence_end = start + count
                 else:
+                    sequence_is_uncertain = True
                     value, targets = node.args[0], [ast.Subscript(
                         value=sequence_receiver, slice=ast.Constant(("sequence", "*")), ctx=ast.Store()
                     )]
@@ -572,33 +579,24 @@ def _raw_command_findings(path: Path, *, exec_family: bool = True) -> list[str]:
             ]
             if sequence_end is not None:
                 bindings.append((sequence_receiver, None, {("sequence_length", sequence_end): set()}))
+            if sequence_is_uncertain:
+                bindings.append((sequence_receiver, None, {sequence_uncertain_key: set()}))
             for target, bound_value, provenance in bindings:
-                target_path = _target_path(target)
-                if target_path is not None and not isinstance(target, ast.Name):
-                    root, slices = target_path
-                    updated = _write_provenance(
-                        container_aliases.get(root, {}), slices, provenance
-                    )
-                    if container_aliases.get(root) != updated:
-                        container_aliases[root] = updated
-                        changed = True
-                    continue
-                if not isinstance(target, ast.Name):
-                    continue
-                for family in _flatten_provenance(provenance):
-                    aliases = family_aliases[family]
-                    if target.id not in aliases:
-                        aliases.add(target.id)
-                        changed = True
-                if (
-                    isinstance(provenance, dict)
+                is_alias = (
+                    isinstance(node, (ast.Assign, ast.AnnAssign, ast.NamedExpr))
+                    and isinstance(target, (ast.Name, ast.Subscript))
+                    and isinstance(bound_value, (ast.Name, ast.Subscript))
+                )
+                if is_alias:
+                    alias_edges[(id(target), id(bound_value))] = (target, bound_value)
+                _merge_target(target, provenance)
+                if is_alias and flow_uncertain and (
+                    isinstance(_value_provenance(target), dict)
+                    or isinstance(_value_provenance(bound_value), dict)
                 ):
-                    merged = _merge_provenance(
-                        container_aliases.get(target.id, {}), provenance
-                    )
-                    if container_aliases.get(target.id) != merged:
-                        container_aliases[target.id] = merged
-                        changed = True
+                    marker = {sequence_uncertain_key: set()}
+                    _merge_target(target, marker)
+                    _merge_target(bound_value, marker)
             for target, bound_value, _ in bindings:
                 if bound_value is None or _callee_capability(bound_value) is None:
                     continue
@@ -609,7 +607,9 @@ def _raw_command_findings(path: Path, *, exec_family: bool = True) -> list[str]:
                 for name in names:
                     if name not in dynamic_callable_aliases:
                         dynamic_callable_aliases.add(name)
-                        changed = True
+        for left, right in alias_edges.values():
+            _merge_target(left, _value_provenance(right))
+            _merge_target(right, _value_provenance(left))
         changed = before != (
             repr(container_aliases),
             tuple((family, tuple(sorted(aliases))) for family, aliases in family_aliases.items()),
@@ -1236,9 +1236,9 @@ def test_nested_ctypes_handle_cannot_hide_dynamic_ffi_getattr(tmp_path):
 
 def test_container_aliases_do_not_taint_a_benign_sibling(tmp_path):
     sources = (
-        "outer = {slot: [[__builtins__]], 'safe': [[{}]]}\nouter['safe'][0][0][key](expr)\n",
-        "import sys\nouter = {slot: [[sys.modules]], 'safe': [[{}]]}\nouter['safe'][0][0][key].call(argv)\n",
-        "import os\nouter = {slot: [[os]], 'safe': [[object()]]}\ngetattr(outer['safe'][0][0], name)\n",
+        "outer = {'unsafe': [[__builtins__]], 'safe': [[{}]]}\nouter['safe'][0][0][key](expr)\n",
+        "import sys\nouter = {'unsafe': [[sys.modules]], 'safe': [[{}]]}\nouter['safe'][0][0][key].call(argv)\n",
+        "import os\nouter = {'unsafe': [[os]], 'safe': [[object()]]}\ngetattr(outer['safe'][0][0], name)\n",
         "safe, *caps = (object(), __builtins__)\ngetattr(safe, name)\n",
         "outer = {'nested': []}\nouter['nested'].append({})\nouter['nested'].append(__builtins__)\nouter['nested'][0][key](expr)\n",
         "source = [{}, __builtins__]\nouter = []\nouter.extend(source)\nouter[0][key](expr)\n",
