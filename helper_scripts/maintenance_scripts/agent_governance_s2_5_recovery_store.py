@@ -1,15 +1,9 @@
 #!/usr/bin/env python3
 """Strict local manifest store for disposable S2.5 recovery rehearsals.
 
-The fixed writer has one code-owned path and no unit/path/identity/nonce/driver
-input.  Its closure-private POSIX session owns both recovery locks and store I/O
-for the whole critical section, revalidating that exact session before every
-write, fsync, and replace effect.  Injected drivers are simulation/read-only
-only and never mint a store-accepted session or write authority.  A successful
-local commit remains
-``UNVERIFIED_EXTERNAL_ANCHOR_REQUIRED``: local checksums cannot detect a coherent
-rewrite by the same writer.  The external append-only anchor/controller is the
-next checkpoint and is deliberately not implemented here.
+The fixed writer owns one code-owned path, exact POSIX driver, dual lock, and
+typed durability chain.  Injected drivers remain simulation/read-only.  Every
+local commit stays ``UNVERIFIED_EXTERNAL_ANCHOR_REQUIRED``.
 """
 
 from __future__ import annotations
@@ -25,7 +19,6 @@ from datetime import datetime
 from functools import lru_cache
 from pathlib import Path
 from typing import Any
-
 
 REPO_ROOT = Path(__file__).resolve().parents[2]
 ML_TRAINING_DIR = REPO_ROOT / "program_code" / "ml_training"
@@ -45,7 +38,6 @@ from agent_governance_s2_5_disposable_profile import (  # noqa: E402
     PROFILE_UID,
 )
 from agent_governance_schema import schema_subset_errors  # noqa: E402
-
 
 MANIFEST_BASENAME = "recovery-store-manifest.json"
 MANIFEST_TEMP_BASENAME = ".recovery-store-manifest.json.tmp"
@@ -88,7 +80,6 @@ _COMMON = {
     "production_effect_count": 0,
 }
 
-
 class RecoveryStoreError(RuntimeError):
     """Typed fail-closed store error with a stable, non-secret code."""
 
@@ -97,26 +88,21 @@ class RecoveryStoreError(RuntimeError):
         self.code = code
         self.detail = detail
 
-
 class RecoveryStoreCrash(RuntimeError):
     """Test-injected process-crash marker; never converted into a success."""
 
-
 def _raw_digest(payload: bytes) -> str:
     return "sha256:" + hashlib.sha256(payload).hexdigest()
-
 
 def _canonical_bytes(value: dict[str, Any]) -> bytes:
     return json.dumps(
         value, ensure_ascii=False, sort_keys=True, separators=(",", ":")
     ).encode("utf-8")
 
-
 def _seal(value: dict[str, Any]) -> dict[str, Any]:
     sealed = dict(value)
     sealed["self_digest"] = central_validator.artifact_self_digest(sealed)
     return sealed
-
 
 @lru_cache(maxsize=None)
 def _local_schema(schema_version: str) -> dict[str, Any]:
@@ -133,7 +119,6 @@ def _local_schema(schema_version: str) -> dict[str, Any]:
         raise RecoveryStoreError("local_schema_is_not_an_object")
     return schema
 
-
 def validate_local_artifact(artifact: Any) -> list[str]:
     """Validate one of the six local schemas without central ``SCHEMA_FILES``."""
 
@@ -142,7 +127,7 @@ def validate_local_artifact(artifact: Any) -> list[str]:
     schema_version = artifact.get("schema_version")
     if schema_version == recovery_controller.MANIFEST_SCHEMA:
         return recovery_controller.validate_controller_artifact(artifact)
-    if schema_version not in _LOCAL_SCHEMAS:
+    if type(schema_version) is not str or schema_version not in _LOCAL_SCHEMAS:
         return ["local recovery-store schema_version is unknown"]
     schema = _local_schema(schema_version)
     errors = schema_subset_errors(artifact, schema, schema)
@@ -153,7 +138,6 @@ def validate_local_artifact(artifact: Any) -> list[str]:
             errors.append(f"local recovery-store {key} differs from the closed profile")
     errors.extend(_semantic_errors(artifact))
     return errors
-
 
 def _aware_timestamp(value: Any, *, field: str) -> datetime:
     if type(value) is not str:
@@ -166,7 +150,6 @@ def _aware_timestamp(value: Any, *, field: str) -> datetime:
         raise RecoveryStoreError(f"{field}_timezone_missing")
     return parsed
 
-
 def _validate_ttl(issued_at: Any, expires_at: Any) -> None:
     issued = _aware_timestamp(issued_at, field="issued_at")
     expires = _aware_timestamp(expires_at, field="expires_at")
@@ -174,10 +157,8 @@ def _validate_ttl(issued_at: Any, expires_at: Any) -> None:
     if seconds <= 0 or seconds > 300:
         raise RecoveryStoreError("intent_ttl_outside_closed_five_minute_window")
 
-
 def _integer(value: Any, *, minimum: int = 0) -> bool:
     return isinstance(value, int) and not isinstance(value, bool) and value >= minimum
-
 
 def _manifest_semantic_errors(artifact: dict[str, Any]) -> list[str]:
     errors: list[str] = []
@@ -263,14 +244,12 @@ def _manifest_semantic_errors(artifact: dict[str, Any]) -> list[str]:
             errors.append("manifest store id does not re-derive")
     return errors
 
-
 def _intent_semantic_errors(artifact: dict[str, Any]) -> list[str]:
     try:
         _validate_ttl(artifact.get("issued_at"), artifact.get("expires_at"))
     except RecoveryStoreError as error:
         return [f"store intent TTL is invalid: {error.code}"]
     return []
-
 
 def _result_semantic_errors(artifact: dict[str, Any]) -> list[str]:
     errors: list[str] = []
@@ -323,7 +302,6 @@ def _result_semantic_errors(artifact: dict[str, Any]) -> list[str]:
         errors.append("directory fsync cannot precede atomic replace")
     return errors
 
-
 def _postcheck_semantic_errors(artifact: dict[str, Any]) -> list[str]:
     errors: list[str] = []
     status = artifact.get("status")
@@ -358,7 +336,6 @@ def _postcheck_semantic_errors(artifact: dict[str, Any]) -> list[str]:
         errors.append("postcheck match claims require an independent readback")
     return errors
 
-
 def _rollback_semantic_errors(artifact: dict[str, Any]) -> list[str]:
     errors: list[str] = []
     status = artifact.get("status")
@@ -378,7 +355,6 @@ def _rollback_semantic_errors(artifact: dict[str, Any]) -> list[str]:
     ):
         errors.append("recovery rollback must require an operator and no fake restore")
     return errors
-
 
 def _anchor_semantic_errors(artifact: dict[str, Any]) -> list[str]:
     errors: list[str] = []
@@ -407,13 +383,11 @@ def _anchor_semantic_errors(artifact: dict[str, Any]) -> list[str]:
         errors.append("non-resolved anchor must retain unresolved state")
     return errors
 
-
 def _session_semantic_errors(artifact: dict[str, Any]) -> list[str]:
     expected = artifact.get("session_class") == "FIXED_POSIX_RECOVERY_SESSION"
     if artifact.get("store_write_authority") is not expected:
         return ["store write authority contradicts the session class"]
     return []
-
 
 def _semantic_errors(artifact: dict[str, Any]) -> list[str]:
     errors = {
@@ -432,7 +406,6 @@ def _semantic_errors(artifact: dict[str, Any]) -> list[str]:
     }:
         errors.extend(_session_semantic_errors(artifact))
     return errors
-
 
 def _root_reasons(observed: Any) -> list[str]:
     if not isinstance(observed, dict):
@@ -456,7 +429,6 @@ def _root_reasons(observed: Any) -> list[str]:
         reasons.append("state root directory descriptor is absent")
     return reasons
 
-
 def _root_identity(observed: dict[str, Any]) -> dict[str, Any]:
     return {
         "canonical_path": DISPOSABLE_STATE_ROOT,
@@ -468,7 +440,6 @@ def _root_identity(observed: dict[str, Any]) -> dict[str, Any]:
         "nlink": int(observed["nlink"]),
         "is_directory": True,
     }
-
 
 def _file_reasons(
     observed: Any, *, basename: str, expected_device: int
@@ -492,7 +463,6 @@ def _file_reasons(
         reasons.append(f"{basename} bytes are absent")
     return reasons
 
-
 def _temp_reasons(observed: Any, *, expected_device: int) -> list[str]:
     if not isinstance(observed, dict):
         return ["manifest temp observation is not an object"]
@@ -501,7 +471,6 @@ def _temp_reasons(observed: Any, *, expected_device: int) -> list[str]:
     return _file_reasons(
         facts, basename=MANIFEST_TEMP_BASENAME, expected_device=expected_device
     )
-
 
 def _file_identity(observed: dict[str, Any]) -> dict[str, Any]:
     return {
@@ -514,7 +483,6 @@ def _file_identity(observed: dict[str, Any]) -> dict[str, Any]:
         "is_regular_file": observed["is_regular_file"],
     }
 
-
 def _decode_object(payload: bytes, *, label: str) -> dict[str, Any]:
     try:
         value = json.loads(payload.decode("utf-8"))
@@ -523,7 +491,6 @@ def _decode_object(payload: bytes, *, label: str) -> dict[str, Any]:
     if not isinstance(value, dict):
         raise RecoveryStoreError(f"{label}_is_not_an_object")
     return value
-
 
 def _journal_errors(
     journal: dict[str, Any], *, start_id: str
@@ -564,7 +531,6 @@ def _journal_errors(
         errors.append("journal replay-ledger head is malformed")
     return errors
 
-
 def _ledger_errors(ledger: dict[str, Any]) -> list[str]:
     errors: list[str] = []
     if ledger.get("schema_version") != "s2_5_authorization_replay_ledger_v1":
@@ -601,7 +567,6 @@ def _ledger_errors(ledger: dict[str, Any]) -> list[str]:
             errors.append(f"replay ledger entry {index} start id is invalid")
     return errors
 
-
 def _journal_ledger_coverage_errors(
     journals: list[dict[str, Any]], ledger_entries: list[dict[str, Any]]
 ) -> list[str]:
@@ -633,10 +598,8 @@ def _journal_ledger_coverage_errors(
             )
     return errors
 
-
 def _same_root(left: dict[str, Any], right: dict[str, Any]) -> bool:
     return _root_identity(left) == _root_identity(right)
-
 
 class S2_5RecoveryStore:
     """Atomic local manifest writer over one injected, capability-narrow driver."""
@@ -872,17 +835,19 @@ class S2_5RecoveryStore:
         snapshot: dict[str, Any],
         *,
         source_head: str,
+        permit_controller_projection_advance: bool = False,
     ) -> dict[str, Any] | None:
         observed = snapshot["manifest_observation"]
         if observed is None:
             return None
         manifest = _decode_object(observed["bytes"], label="manifest")
         if manifest.get("schema_version") == recovery_controller.MANIFEST_SCHEMA:
-            errors = recovery_store_v2.validate_manifest_against_snapshot(
-                manifest,
-                snapshot,
-                source_head=source_head,
+            validator = (
+                recovery_store_v2.validate_manifest_predecessor_against_root
+                if permit_controller_projection_advance
+                else recovery_store_v2.validate_manifest_against_snapshot
             )
+            errors = validator(manifest, snapshot, source_head=source_head)
         else:
             errors = self._validate_manifest(
                 manifest,
@@ -918,6 +883,18 @@ class S2_5RecoveryStore:
                 "controller_successor_invalid", "; ".join(errors)
             )
         return candidate
+
+    @staticmethod
+    def _prior_discriminator(snapshot: dict[str, Any]) -> str:
+        digest, errors = recovery_store_v2.manifest_observation_discriminator(
+            snapshot["manifest_observation"],
+            state_root_id=snapshot["state_root_id"],
+        )
+        if errors or digest is None:
+            raise RecoveryStoreError(
+                "prior_manifest_discriminator_invalid", "; ".join(errors)
+            )
+        return digest
 
     def _candidate(
         self,
@@ -971,6 +948,7 @@ class S2_5RecoveryStore:
     def _operation(phase: str) -> str:
         return {
             "PREPARED": "PREPARE",
+            "CONSUMED": "CONSUME",
             "COMMITTED": "PROMOTE",
             "RESOLVED": "RESOLVE",
         }[phase]
@@ -979,6 +957,7 @@ class S2_5RecoveryStore:
         self,
         manifest: dict[str, Any],
         *,
+        prior_manifest_discriminator_digest: str,
         issued_at: str,
         expires_at: str,
         lock_binding: dict[str, str],
@@ -994,6 +973,9 @@ class S2_5RecoveryStore:
             "expected_previous_manifest_digest": manifest[
                 "previous_manifest_digest"
             ],
+            "prior_manifest_discriminator_digest": (
+                prior_manifest_discriminator_digest
+            ),
             "candidate_manifest_digest": manifest["self_digest"],
             "issued_at": issued_at,
             "expires_at": expires_at,
@@ -1201,6 +1183,19 @@ class S2_5RecoveryStore:
                         "legacy_manifest_external_bootstrap_required"
                     ],
                 }
+            freshness = recovery_store_v2.classify_current_transition(
+                manifest.get("controller_state")
+            )
+            if freshness is not None:
+                return {
+                    **freshness,
+                    "manifest": (
+                        manifest
+                        if freshness["status"]
+                        == "OUTBOX_EXPIRED_REFRESH_REQUIRED"
+                        else None
+                    ),
+                }
             return {
                 "status": STATUS_UNVERIFIED,
                 "manifest": manifest,
@@ -1262,6 +1257,7 @@ class S2_5RecoveryStore:
         directory_fsynced = False
         parent_identity_rechecked = False
         candidate_temp_identity: dict[str, Any] | None = None
+        prior_manifest_discriminator_digest: str | None = None
         try:
             root = self._open_root()
             try:
@@ -1269,20 +1265,23 @@ class S2_5RecoveryStore:
             except RecoveryStoreError as precheck_error:
                 if precheck_error.code != "manifest_temp_residue_recovery_required":
                     raise
-                # A restarted process must be able to issue a typed recovery chain
-                # without trusting or deleting the stranded temp.  Re-enumerate while
-                # explicitly excluding only the code-owned temp basename, derive the
-                # candidate/intent from the remaining verified state, then carry the
-                # original residue failure into result/postcheck/rollback.
+                # Re-enumerate without deleting the code-owned stranded temp,
+                # then carry its failure into the typed recovery chain.
                 before = self._snapshot(
                     root["fd"], root, permit_own_temp=True
                 )
                 previous = self._existing_manifest(
                     before,
                     source_head=source_head,
+                    permit_controller_projection_advance=(
+                        controller_state is not None
+                    ),
                 )
                 if previous is None:
                     raise RecoveryStoreError("verified_external_bootstrap_required")
+                prior_manifest_discriminator_digest = (
+                    self._prior_discriminator(before)
+                )
                 candidate = (
                     self._controller_candidate(
                         before,
@@ -1302,6 +1301,9 @@ class S2_5RecoveryStore:
                 )
                 intent = self._intent(
                     candidate,
+                    prior_manifest_discriminator_digest=(
+                        prior_manifest_discriminator_digest
+                    ),
                     issued_at=issued_at,
                     expires_at=expires_at,
                     lock_binding=lock_binding,
@@ -1312,9 +1314,15 @@ class S2_5RecoveryStore:
             previous = self._existing_manifest(
                 before,
                 source_head=source_head,
+                permit_controller_projection_advance=(
+                    controller_state is not None
+                ),
             )
             if previous is None:
                 raise RecoveryStoreError("verified_external_bootstrap_required")
+            prior_manifest_discriminator_digest = self._prior_discriminator(
+                before
+            )
             candidate = (
                 self._controller_candidate(
                     before,
@@ -1334,6 +1342,9 @@ class S2_5RecoveryStore:
             )
             intent = self._intent(
                 candidate,
+                prior_manifest_discriminator_digest=(
+                    prior_manifest_discriminator_digest
+                ),
                 issued_at=issued_at,
                 expires_at=expires_at,
                 lock_binding=lock_binding,
@@ -1433,13 +1444,34 @@ class S2_5RecoveryStore:
             ):
                 raise RecoveryStoreError("manifest_temp_identity_changed")
             current_manifest = current["manifest_observation"]
-            current_digest = None
-            if current_manifest is not None:
-                current_payload = _decode_object(
-                    current_manifest["bytes"], label="current_manifest"
+            try:
+                current_payload = self._existing_manifest(
+                    current,
+                    source_head=source_head,
+                    permit_controller_projection_advance=(
+                        controller_state is not None
+                    ),
                 )
-                current_digest = current_payload.get("self_digest")
-            if current_digest != candidate["previous_manifest_digest"]:
+                (
+                    current_discriminator_digest,
+                    current_discriminator_errors,
+                ) = recovery_store_v2.manifest_observation_discriminator(
+                    current_manifest,
+                    state_root_id=current["state_root_id"],
+                )
+            except RecoveryStoreError as error:
+                raise RecoveryStoreError(
+                    "manifest_changed_during_manifest_write",
+                    error.code,
+                ) from error
+            if (
+                current_payload is None
+                or current_discriminator_errors
+                or current_discriminator_digest
+                != prior_manifest_discriminator_digest
+                or current_payload.get("self_digest")
+                != candidate["previous_manifest_digest"]
+            ):
                 raise RecoveryStoreError("manifest_changed_during_manifest_write")
 
             self._guard_effect(
@@ -1497,6 +1529,9 @@ class S2_5RecoveryStore:
         result = _seal({
             "schema_version": "s2_5_recovery_store_result_v1",
             "intent_digest": intent["self_digest"],
+            "prior_manifest_discriminator_digest": intent[
+                "prior_manifest_discriminator_digest"
+            ],
             "status": (
                 "EXTERNAL_VERIFICATION_PENDING"
                 if local_commit_complete else "RECOVERY_REQUIRED"
@@ -1560,7 +1595,6 @@ class S2_5RecoveryStore:
         outcome["store_write_authority"] = False
         return outcome
 
-
 def simulate_persist(
     *,
     source_head: str,
@@ -1598,15 +1632,11 @@ def simulate_persist(
         "production_authority": False,
     }
 
-
-def _build_fixed_profile_writer():
-    """Build the only store-accepted session boundary with private state."""
-
-    active_sessions: dict[int, Any] = {}
+def _build_fixed_profile_types():
+    """Build exact fixed-path types without treating closure state as authority."""
 
     class FixedPosixRecoveryDriver:
         __slots__ = ("_open_fds", "_locked_fds")
-
         def __init__(self) -> None:
             self._open_fds: set[int] = set()
             self._locked_fds: set[int] = set()
@@ -1614,16 +1644,13 @@ def _build_fixed_profile_writer():
         @staticmethod
         def _mode(observed: os.stat_result) -> str:
             return f"{stat.S_IMODE(observed.st_mode):04o}"
-
         def _track(self, fd: int) -> int:
             self._open_fds.add(fd)
             return fd
-
         def _require(self, fd: int) -> int:
             if fd not in self._open_fds:
                 raise RecoveryStoreError("fixed_posix_foreign_fd")
             return fd
-
         def _facts(self, fd: int) -> dict[str, Any]:
             observed = os.fstat(self._require(fd))
             return {
@@ -1634,7 +1661,6 @@ def _build_fixed_profile_writer():
                 "gid": observed.st_gid,
                 "nlink": observed.st_nlink,
             }
-
         def open_parent_directory(self, *, path: str, flags: tuple[str, ...]):
             if path not in {
                 DISPOSABLE_STATE_ROOT,
@@ -1654,7 +1680,6 @@ def _build_fixed_profile_writer():
                 "is_directory": stat.S_ISDIR(os.fstat(fd).st_mode),
                 "is_symlink": False,
             }
-
         def openat_lock_file(
             self,
             *,
@@ -1677,14 +1702,12 @@ def _build_fixed_profile_writer():
                 dir_fd=parent_fd,
             ))
             return {"fd": fd, "created": not existed}
-
         def fstat_lock_file(self, *, fd: int):
             observed = os.fstat(self._require(fd))
             return {
                 **self._facts(fd),
                 "is_regular_file": stat.S_ISREG(observed.st_mode),
             }
-
         def openat_existing_lock_file(
             self,
             *,
@@ -1705,7 +1728,6 @@ def _build_fixed_profile_writer():
                 dir_fd=self._require(parent_fd),
             ))
             return {"fd": fd}
-
         def flock_exclusive_nonblocking(self, *, fd: int) -> bool:
             try:
                 fcntl.flock(
@@ -1716,7 +1738,6 @@ def _build_fixed_profile_writer():
                 return False
             self._locked_fds.add(fd)
             return True
-
         def lock_is_held(self, *, fd: int) -> bool:
             if fd not in self._locked_fds:
                 return False
@@ -1725,12 +1746,10 @@ def _build_fixed_profile_writer():
                 fcntl.LOCK_EX | fcntl.LOCK_NB,
             )
             return True
-
         def close(self, *, fd: int) -> None:
             os.close(self._require(fd))
             self._open_fds.remove(fd)
             self._locked_fds.discard(fd)
-
         def read_file_observation(
             self,
             *,
@@ -1769,10 +1788,8 @@ def _build_fixed_profile_writer():
                 }
             finally:
                 os.close(fd)
-
         def list_basenames(self, *, parent_fd: int) -> list[str]:
             return list(os.listdir(self._require(parent_fd)))
-
         def create_temp_file(
             self,
             *,
@@ -1800,13 +1817,10 @@ def _build_fixed_profile_writer():
                 **self._facts(fd),
                 "is_regular_file": stat.S_ISREG(observed.st_mode),
             }
-
         def write_bytes(self, *, fd: int, payload: bytes) -> int:
             return os.write(self._require(fd), payload)
-
         def fsync_file(self, *, fd: int) -> None:
             os.fsync(self._require(fd))
-
         def atomic_replace(
             self,
             *,
@@ -1826,13 +1840,11 @@ def _build_fixed_profile_writer():
                 src_dir_fd=root_fd,
                 dst_dir_fd=root_fd,
             )
-
         def fsync_parent_dir(self, *, fd: int) -> None:
             os.fsync(self._require(fd))
 
     class FixedRecoverySession:
         __slots__ = ("driver", "lease", "source_head", "active")
-
         def __init__(
             self,
             driver: FixedPosixRecoveryDriver,
@@ -1844,149 +1856,144 @@ def _build_fixed_profile_writer():
             self.source_head = source_head
             self.active = True
 
-    def resolve_session(
-        *,
-        driver: Any,
-        source_head: str,
-        session_context: Any,
-    ):
-        guarded_stages: list[str] = []
-        if session_context is None:
-            binding = {
-                f"recovery_lock_{name}_digest": (
-                    central_validator.canonical_digest({
-                        "schema_version": (
-                            "s2_5_recovery_simulation_binding_v1"
-                        ),
-                        "source_head": source_head,
-                        "component": name,
-                    })
-                )
-                for name in ("intent", "result", "postcheck", "chain")
-            }
+    return FixedPosixRecoveryDriver, FixedRecoverySession
 
-            def simulation_guard(stage: str) -> dict[str, str]:
-                if not isinstance(stage, str):
-                    raise RecoveryStoreError("simulation_guard_stage_invalid")
-                guarded_stages.append(stage)
-                return binding
+_FIXED_POSIX_RECOVERY_DRIVER, _FIXED_RECOVERY_SESSION = (
+    _build_fixed_profile_types()
+)
 
-            return (
-                "SIMULATION_ONLY",
-                False,
-                simulation_guard,
-                binding,
-                guarded_stages,
+def _resolve_recovery_session(
+    *,
+    driver: Any,
+    source_head: str,
+    session_context: Any,
+):
+    guarded_stages: list[str] = []
+    if session_context is None:
+        binding = {
+            f"recovery_lock_{name}_digest": (
+                central_validator.canonical_digest({
+                    "schema_version": "s2_5_recovery_simulation_binding_v1",
+                    "source_head": source_head,
+                    "component": name,
+                })
             )
-        session = session_context
-        if (
-            active_sessions.get(id(session)) is not session
-            or not isinstance(session, FixedRecoverySession)
-            or session.active is not True
-            or session.driver is not driver
-            or session.source_head != source_head
-        ):
-            raise RecoveryStoreError("fixed_recovery_session_invalid")
-
-        def fixed_guard(stage: str) -> dict[str, str]:
-            if (
-                active_sessions.get(id(session)) is not session
-                or session.active is not True
-                or session.driver is not driver
-                or session.lease.get("transaction_active") is not True
-                or not isinstance(stage, str)
-            ):
-                raise RecoveryStoreError("fixed_recovery_session_invalid")
-            try:
-                binding = recovery_lock._verify_lease(
-                    session.lease,
-                    driver=driver,
-                    source_head=source_head,
-                    require_transaction=True,
-                )
-            except recovery_lock.RecoveryDualLockError as error:
-                raise RecoveryStoreError(error.code) from error
+            for name in ("intent", "result", "postcheck", "chain")
+        }
+        def simulation_guard(stage: str) -> dict[str, str]:
+            if not isinstance(stage, str):
+                raise RecoveryStoreError("simulation_guard_stage_invalid")
             guarded_stages.append(stage)
             return binding
 
         return (
-            "FIXED_POSIX_RECOVERY_SESSION",
-            True,
-            fixed_guard,
-            recovery_lock._lease_binding(session.lease),
+            "SIMULATION_ONLY",
+            False,
+            simulation_guard,
+            binding,
             guarded_stages,
         )
+    session = session_context
+    if (
+        type(driver) is not _FIXED_POSIX_RECOVERY_DRIVER
+        or type(session) is not _FIXED_RECOVERY_SESSION
+        or session.active is not True
+        or session.driver is not driver
+        or session.source_head != source_head
+    ):
+        raise RecoveryStoreError("fixed_recovery_session_invalid")
 
-    def persist_fixed_profile(
-        *,
-        source_head: str,
-        controller_state: dict[str, Any],
-        issued_at: str,
-        expires_at: str,
-    ) -> dict[str, Any]:
-        if type(source_head) is not str or _HEAD_RE.fullmatch(source_head) is None:
-            raise RecoveryStoreError("source_head_invalid")
-        _validate_ttl(issued_at, expires_at)
-        controller_errors = recovery_controller.validate_controller_artifact(
-            controller_state
-        )
-        if controller_errors:
-            raise RecoveryStoreError(
-                "controller_state_invalid", "; ".join(controller_errors)
-            )
-        driver = FixedPosixRecoveryDriver()
-        lock_outcome, lease = recovery_lock._acquire_recovery_dual_lock(
-            driver=driver,
-            source_head=source_head,
-            session_class="FIXED_POSIX_RECOVERY_SESSION",
-        )
-        if lease is None:
-            return {
-                "status": "LOCAL_REPRODUCIBLE_UNVERIFIED",
-                "lock": lock_outcome,
-                "store": None,
-                "production_effect": False,
-                "production_authority": False,
-            }
-        session = FixedRecoverySession(driver, lease, source_head)
-        active_sessions[id(session)] = session
-        lease["transaction_active"] = True
-
-        store_outcome: dict[str, Any] | None = None
-        store_failure: str | None = None
+    def fixed_guard(stage: str) -> dict[str, str]:
+        if (
+            session.active is not True
+            or session.driver is not driver
+            or session.lease.get("transaction_active") is not True
+            or not isinstance(stage, str)
+        ):
+            raise RecoveryStoreError("fixed_recovery_session_invalid")
         try:
-            store_outcome = S2_5RecoveryStore(driver)._persist_with_guard(
-                session_context=session,
+            binding = recovery_lock._verify_lease(
+                session.lease,
+                driver=driver,
                 source_head=source_head,
-                controller_state=controller_state,
-                issued_at=issued_at,
-                expires_at=expires_at,
+                require_transaction=True,
             )
-        except (RecoveryStoreError, recovery_lock.RecoveryDualLockError) as error:
-            store_failure = error.code
-        finally:
-            session.active = False
-            lease["transaction_active"] = False
-            release = recovery_lock._release_lease(lease)
-            active_sessions.pop(id(session), None)
-            lock_outcome["rollback"] = release
-        status = (
-            STATUS_RECOVERY_REQUIRED
-            if store_failure is not None
-            or release["status"] == "RECOVERY_REQUIRED"
-            or store_outcome is None
-            else store_outcome["status"]
+        except recovery_lock.RecoveryDualLockError as error:
+            raise RecoveryStoreError(error.code) from error
+        guarded_stages.append(stage)
+        return binding
+
+    return (
+        "FIXED_POSIX_RECOVERY_SESSION",
+        True,
+        fixed_guard,
+        recovery_lock._lease_binding(session.lease),
+        guarded_stages,
+    )
+
+def persist_fixed_profile(
+    *,
+    source_head: str,
+    controller_state: dict[str, Any],
+) -> dict[str, Any]:
+    if type(source_head) is not str or _HEAD_RE.fullmatch(source_head) is None:
+        raise RecoveryStoreError("source_head_invalid")
+    controller_errors = recovery_controller.validate_controller_artifact(
+        controller_state
+    )
+    if controller_errors:
+        raise RecoveryStoreError(
+            "controller_state_invalid", "; ".join(controller_errors)
         )
+    driver = _FIXED_POSIX_RECOVERY_DRIVER()
+    lock_outcome, lease = recovery_lock._acquire_recovery_dual_lock(
+        driver=driver,
+        source_head=source_head,
+        session_class="FIXED_POSIX_RECOVERY_SESSION",
+    )
+    if lease is None:
         return {
-            "status": status,
+            "status": "LOCAL_REPRODUCIBLE_UNVERIFIED",
             "lock": lock_outcome,
-            "store": store_outcome,
-            "store_failure": store_failure,
+            "store": None,
             "production_effect": False,
             "production_authority": False,
         }
-
-    return persist_fixed_profile, resolve_session
-
-
-persist_fixed_profile, _resolve_recovery_session = _build_fixed_profile_writer()
+    session = _FIXED_RECOVERY_SESSION(driver, lease, source_head)
+    lease["transaction_active"] = True
+    store_outcome: dict[str, Any] | None = None
+    store_failure: str | None = None
+    store_failure_detail: str | None = None
+    try:
+        issued_at, expires_at = recovery_store_v2.code_owned_intent_window()
+        store_outcome = S2_5RecoveryStore(driver)._persist_with_guard(
+            session_context=session,
+            source_head=source_head,
+            controller_state=controller_state,
+            issued_at=issued_at,
+            expires_at=expires_at,
+        )
+    except (RecoveryStoreError, recovery_lock.RecoveryDualLockError) as error:
+        store_failure = error.code
+        store_failure_detail = getattr(error, "detail", None)
+    finally:
+        session.active = False
+        lease["transaction_active"] = False
+        release = recovery_lock._release_lease(lease)
+        lock_outcome["rollback"] = release
+    status = (
+        STATUS_RECOVERY_REQUIRED
+        if store_failure is not None
+        or release["status"] == "RECOVERY_REQUIRED"
+        or store_outcome is None
+        else store_outcome["status"]
+    )
+    return {
+        "status": status,
+        "lock": lock_outcome,
+        "store": store_outcome,
+        "store_failure": store_failure,
+        "store_failure_detail": store_failure_detail,
+        "production_effect": False,
+        "production_authority": False,
+    }

@@ -33,6 +33,7 @@ from test_agent_governance_s2_5_recovery_store import (  # noqa: E402
     HEAD as LEGACY_HEAD,
     _PosixFixtureDriver,
     _seed_fixture_manifest,
+    _snapshot_fixture,
     _write_json,
 )
 
@@ -220,11 +221,17 @@ def _map_fixed_profile_to_fixture(
 
 def test_inspect_reconstructs_exact_external_bootstrap_v2_genesis(
     tmp_path,
+    monkeypatch,
     controller_case_signing,
 ) -> None:
     root = tmp_path / "root"
     root.mkdir(mode=0o700)
     expected = _seed_v2_genesis(root)
+    monkeypatch.setattr(
+        store_v2,
+        "_trusted_now",
+        lambda: controller_cases.TRUSTED_NOW,
+    )
 
     verdict = store.S2_5RecoveryStore(
         _PosixFixtureDriver(root)
@@ -238,6 +245,330 @@ def test_inspect_reconstructs_exact_external_bootstrap_v2_genesis(
             "external anchor trust remains unverified"
         ],
     }
+
+
+@pytest.mark.parametrize("schema_version", ([], {}))
+def test_inspect_types_non_string_manifest_schema_as_recovery_required(
+    tmp_path,
+    controller_case_signing,
+    schema_version,
+) -> None:
+    root = tmp_path / "root"
+    root.mkdir(mode=0o700)
+    manifest = _seed_v2_genesis(root)
+    manifest["schema_version"] = schema_version
+    _write_json(root / store.MANIFEST_BASENAME, manifest)
+
+    verdict = store.S2_5RecoveryStore(
+        _PosixFixtureDriver(root)
+    ).inspect(source_head=controller_cases.HEAD)
+
+    assert verdict["status"] == "RECOVERY_REQUIRED"
+    assert verdict["manifest"] is None
+    assert verdict["reasons"] == ["manifest_integrity_failed"]
+
+
+def test_inspect_rejects_boolean_manifest_wrapper_sequences(
+    tmp_path,
+    controller_case_signing,
+) -> None:
+    root = tmp_path / "root"
+    root.mkdir(mode=0o700)
+    manifest = _seed_v2_genesis(root)
+    manifest["pending_outbox"]["expected_external_sequence"] = False
+    manifest["pending_outbox"]["candidate_external_sequence"] = True
+    manifest["self_digest"] = validator.artifact_self_digest(manifest)
+    _write_json(root / store.MANIFEST_BASENAME, manifest)
+
+    verdict = store.S2_5RecoveryStore(
+        _PosixFixtureDriver(root)
+    ).inspect(source_head=controller_cases.HEAD)
+
+    assert verdict["status"] == "RECOVERY_REQUIRED"
+    assert verdict["manifest"] is None
+    assert verdict["reasons"] == ["manifest_integrity_failed"]
+
+
+@pytest.mark.parametrize(
+    ("path", "value"),
+    (
+        (("replay_ledger", "entry_count"), False),
+        (("production_effect_count",), False),
+    ),
+)
+def test_inspect_rejects_boolean_manifest_wrapper_integer_fields(
+    tmp_path,
+    controller_case_signing,
+    path,
+    value,
+) -> None:
+    root = tmp_path / "root"
+    root.mkdir(mode=0o700)
+    manifest = _seed_v2_genesis(root)
+    target = manifest
+    for key in path[:-1]:
+        target = target[key]
+    target[path[-1]] = value
+    manifest["self_digest"] = validator.artifact_self_digest(manifest)
+    _write_json(root / store.MANIFEST_BASENAME, manifest)
+
+    verdict = store.S2_5RecoveryStore(
+        _PosixFixtureDriver(root)
+    ).inspect(source_head=controller_cases.HEAD)
+
+    assert verdict["status"] == "RECOVERY_REQUIRED"
+    assert verdict["manifest"] is None
+    assert verdict["reasons"] == ["manifest_integrity_failed"]
+
+
+def test_v2_successor_rejects_expired_pending_transition(
+    monkeypatch,
+    controller_case_signing,
+) -> None:
+    _transition, _outbox, pending, first = controller_cases._genesis()
+    _proof, attached = controller_cases._proof_state(
+        pending,
+        previous_manifest_digest=first["self_digest"],
+    )
+    attached_manifest = controller_cases._manifest(
+        attached,
+        previous_manifest_digest=first["self_digest"],
+    )
+    _transition, _outbox, consumed = controller_cases._next_phase_pending(
+        attached,
+        phase="CONSUMED",
+        previous_manifest_digest=attached_manifest["self_digest"],
+    )
+    subject = consumed["candidate_subject"]
+    snapshot = {
+        "state_root_identity": copy.deepcopy(
+            subject["state_root_identity"]
+        ),
+        "state_root_id": subject["state_root_id"],
+        "controller_journal_inventory": copy.deepcopy(
+            subject["journal_inventory"]
+        ),
+        "controller_journal_set_digest": subject["journal_set_digest"],
+        "controller_replay_ledger": copy.deepcopy(
+            subject["replay_ledger"]
+        ),
+    }
+    monkeypatch.setattr(
+        store_v2,
+        "_trusted_now",
+        lambda: "2030-01-01T00:27:00+00:00",
+    )
+
+    candidate, errors = store_v2.build_successor_manifest(
+        consumed,
+        attached_manifest,
+        snapshot,
+        source_head=controller_cases.HEAD,
+    )
+
+    assert candidate is None
+    assert any("pending transition is expired" in error for error in errors)
+
+
+def test_inspect_classifies_historical_expired_outbox_without_corruption(
+    tmp_path,
+    monkeypatch,
+    controller_case_signing,
+) -> None:
+    root = tmp_path / "root"
+    root.mkdir(mode=0o700)
+    expected = _seed_v2_genesis(root)
+    monkeypatch.setattr(
+        store_v2,
+        "_trusted_now",
+        lambda: "2030-01-01T00:27:00+00:00",
+    )
+
+    verdict = store.S2_5RecoveryStore(
+        _PosixFixtureDriver(root)
+    ).inspect(source_head=controller_cases.HEAD)
+
+    assert verdict == {
+        "status": "OUTBOX_EXPIRED_REFRESH_REQUIRED",
+        "manifest": expected,
+        "reasons": ["pending transition is expired"],
+    }
+
+
+def test_proof_attachment_can_persist_after_original_admission_expiry(
+    monkeypatch,
+    controller_case_signing,
+) -> None:
+    _transition, _outbox, pending, first = controller_cases._genesis()
+    _proof, attached = controller_cases._proof_state(
+        pending,
+        previous_manifest_digest=first["self_digest"],
+    )
+    subject = attached["candidate_subject"]
+    snapshot = {
+        "state_root_identity": copy.deepcopy(
+            subject["state_root_identity"]
+        ),
+        "state_root_id": subject["state_root_id"],
+        "controller_journal_inventory": copy.deepcopy(
+            subject["journal_inventory"]
+        ),
+        "controller_journal_set_digest": subject["journal_set_digest"],
+        "controller_replay_ledger": copy.deepcopy(
+            subject["replay_ledger"]
+        ),
+    }
+    monkeypatch.setattr(
+        store_v2,
+        "_trusted_now",
+        lambda: "2030-01-01T00:31:00+00:00",
+    )
+
+    candidate, errors = store_v2.build_successor_manifest(
+        attached,
+        first,
+        snapshot,
+        source_head=controller_cases.HEAD,
+    )
+
+    assert errors == []
+    assert candidate is not None
+    assert candidate["controller_state"] == attached
+
+
+def test_live_prepared_to_consumed_projection_is_durably_reachable(
+    tmp_path,
+    monkeypatch,
+    controller_case_signing,
+) -> None:
+    state_root = tmp_path / "state"
+    lock_root = tmp_path / "locks"
+    state_root.mkdir(mode=0o700)
+    lock_root.mkdir(mode=0o700)
+    first = _seed_v2_genesis(state_root)
+    _proof, attached = controller_cases._proof_state(
+        first["controller_state"],
+        previous_manifest_digest=first["self_digest"],
+    )
+    _map_fixed_profile_to_fixture(
+        monkeypatch=monkeypatch,
+        state_root=state_root,
+        lock_root=lock_root,
+    )
+    monkeypatch.setattr(
+        store_v2,
+        "_trusted_now",
+        lambda: controller_cases.TRUSTED_NOW,
+    )
+    proof_outcome = store.persist_fixed_profile(
+        source_head=controller_cases.HEAD,
+        controller_state=attached,
+    )
+    assert proof_outcome["status"] == (
+        "UNVERIFIED_EXTERNAL_ANCHOR_REQUIRED"
+    )
+    previous = proof_outcome["store"]["manifest"]
+
+    ledger_entry = {
+        "seq": 0,
+        "prev_entry_digest": None,
+        "authorization_id": controller_cases.AUTHORIZATION_ID,
+        "start_id": controller_cases.START,
+        "consumed_at": "2030-01-01T00:25:00+00:00",
+        "fsynced": True,
+    }
+    ledger_entry["entry_digest"] = validator.canonical_digest(ledger_entry)
+    ledger = _seal({
+        "schema_version": "s2_5_authorization_replay_ledger_v1",
+        "ledger_path": (
+            f"{store.DISPOSABLE_STATE_ROOT}/"
+            f"{store.REPLAY_LEDGER_BASENAME}"
+        ),
+        "entries": [ledger_entry],
+        "append_only": True,
+    })
+    _write_json(
+        state_root / store.REPLAY_LEDGER_BASENAME,
+        ledger,
+    )
+    journal_path = (
+        state_root / f"{controller_cases.START}.journal.json"
+    )
+    journal = json.loads(journal_path.read_text(encoding="utf-8"))
+    journal["replay_ledger_head"] = {
+        "entry_count": 1,
+        "tail_entry_digest": ledger_entry["entry_digest"],
+    }
+    journal["self_digest"] = validator.artifact_self_digest(journal)
+    _write_json(journal_path, journal)
+    snapshot = _snapshot_fixture(state_root)
+
+    _transition, _outbox, consumed = (
+        controller_cases._next_phase_pending(
+            previous["controller_state"],
+            phase="CONSUMED",
+            previous_manifest_digest=previous["self_digest"],
+        )
+    )
+    subject = copy.deepcopy(consumed["candidate_subject"])
+    previous_subject = previous["controller_state"]["candidate_subject"]
+    subject.update({
+        "state_root_identity": copy.deepcopy(
+            previous_subject["state_root_identity"]
+        ),
+        "state_root_id": previous_subject["state_root_id"],
+        "journal_inventory": copy.deepcopy(
+            snapshot["controller_journal_inventory"]
+        ),
+        "journal_set_digest": snapshot[
+            "controller_journal_set_digest"
+        ],
+        "replay_ledger": copy.deepcopy(
+            snapshot["controller_replay_ledger"]
+        ),
+        "replay_ledger_head_digest": snapshot[
+            "controller_replay_ledger"
+        ]["head_digest"],
+        "consumed_authorization_ids": list(
+            snapshot["_ledger_authorization_ids"]
+        ),
+        "unresolved_payload_json": previous_subject[
+            "unresolved_payload_json"
+        ],
+        "unresolved_state_digest": previous_subject[
+            "unresolved_state_digest"
+        ],
+    })
+    subject = controller_cases._replace_embedded_subject_artifact(
+        subject,
+        json_field="consumption_proof_json",
+        digest_field="consumption_proof_digest",
+        updates={
+            "replay_ledger_head_digest": subject[
+                "replay_ledger_head_digest"
+            ],
+        },
+    )
+    _transition, _outbox, consumed = controller_cases._pending_state(
+        subject,
+        from_phase="PREPARED",
+    )
+
+    assert controller.validate_controller_artifact(consumed) == []
+    assert controller.validate_controller_state_successor(
+        previous["controller_state"],
+        consumed,
+    ) == []
+    outcome = store.persist_fixed_profile(
+        source_head=controller_cases.HEAD,
+        controller_state=consumed,
+    )
+    assert outcome["store_failure_detail"] is None, outcome[
+        "store_failure_detail"
+    ]
+    assert outcome["store_failure"] is None
+    assert outcome["status"] == "UNVERIFIED_EXTERNAL_ANCHOR_REQUIRED"
+    assert outcome["store"]["manifest"]["phase"] == "CONSUMED"
 
 
 def test_fixed_writer_durably_attaches_exact_unverified_anchor_proof(
@@ -273,14 +604,22 @@ def test_fixed_writer_durably_attaches_exact_unverified_anchor_proof(
     outcome = store.persist_fixed_profile(
         source_head=controller_cases.HEAD,
         controller_state=successor,
-        issued_at="2030-01-01T00:21:00+00:00",
-        expires_at="2030-01-01T00:26:00+00:00",
     )
 
     assert outcome["status"] == "UNVERIFIED_EXTERNAL_ANCHOR_REQUIRED"
     assert outcome["store_failure"] is None
     persisted = outcome["store"]
     assert persisted["manifest"]["controller_state"] == successor
+    assert persisted["intent"]["issued_at"] == controller_cases.TRUSTED_NOW
+    assert persisted["intent"]["expires_at"] == (
+        "2030-01-01T00:30:00+00:00"
+    )
+    assert persisted["intent"]["prior_manifest_discriminator_digest"].startswith(
+        "sha256:"
+    )
+    assert persisted["result"]["prior_manifest_discriminator_digest"] == (
+        persisted["intent"]["prior_manifest_discriminator_digest"]
+    )
     assert persisted["result"]["status"] == "EXTERNAL_VERIFICATION_PENDING"
     assert persisted["postcheck"]["status"] == "PASS"
     assert persisted["rollback"]["status"] == "NOT_REQUIRED"
@@ -318,8 +657,6 @@ def test_unavailable_fixed_profile_stops_before_store_write(
     outcome = store.persist_fixed_profile(
         source_head=controller_cases.HEAD,
         controller_state=controller_state,
-        issued_at="2030-01-01T00:21:00+00:00",
-        expires_at="2030-01-01T00:26:00+00:00",
     )
 
     assert outcome["status"] == "LOCAL_REPRODUCIBLE_UNVERIFIED"
@@ -330,7 +667,7 @@ def test_unavailable_fixed_profile_stops_before_store_write(
     assert (root / store.MANIFEST_BASENAME).read_bytes() == manifest_bytes
 
 
-def test_fixed_writer_rejects_stale_admission_without_manifest_change(
+def test_fixed_writer_allows_late_proof_attachment_but_requires_anchor(
     tmp_path,
     monkeypatch,
     controller_case_signing,
@@ -359,15 +696,16 @@ def test_fixed_writer_rejects_stale_admission_without_manifest_change(
     outcome = store.persist_fixed_profile(
         source_head=controller_cases.HEAD,
         controller_state=successor,
-        issued_at="2030-01-01T00:21:00+00:00",
-        expires_at="2030-01-01T00:26:00+00:00",
     )
 
-    assert outcome["status"] == "RECOVERY_REQUIRED"
-    assert outcome["store"] is None
-    assert outcome["store_failure"] == "controller_successor_invalid"
+    assert outcome["status"] == "UNVERIFIED_EXTERNAL_ANCHOR_REQUIRED"
+    assert outcome["store_failure"] is None
+    assert outcome["store"]["manifest"]["controller_state"] == successor
+    assert outcome["store"]["result"]["status"] == (
+        "EXTERNAL_VERIFICATION_PENDING"
+    )
     assert outcome["lock"]["rollback"]["status"] == "RELEASED"
-    assert (state_root / store.MANIFEST_BASENAME).read_bytes() == before
+    assert (state_root / store.MANIFEST_BASENAME).read_bytes() != before
     assert not (state_root / store.MANIFEST_TEMP_BASENAME).exists()
 
 
@@ -401,8 +739,6 @@ def test_fixed_writer_rejects_structurally_valid_manifest_fork(
     outcome = store.persist_fixed_profile(
         source_head=controller_cases.HEAD,
         controller_state=fork,
-        issued_at="2030-01-01T00:21:00+00:00",
-        expires_at="2030-01-01T00:26:00+00:00",
     )
 
     assert outcome["status"] == "RECOVERY_REQUIRED"
@@ -440,8 +776,6 @@ def test_fixed_writer_never_auto_upgrades_v1_manifest(
     outcome = store.persist_fixed_profile(
         source_head=LEGACY_HEAD,
         controller_state=successor,
-        issued_at="2030-01-01T00:21:00+00:00",
-        expires_at="2030-01-01T00:26:00+00:00",
     )
 
     assert outcome["status"] == "RECOVERY_REQUIRED"
@@ -499,8 +833,6 @@ def test_v2_short_write_returns_typed_recovery_and_visible_residue(
     outcome = store.persist_fixed_profile(
         source_head=controller_cases.HEAD,
         controller_state=successor,
-        issued_at="2030-01-01T00:21:00+00:00",
-        expires_at="2030-01-01T00:26:00+00:00",
     )
 
     assert outcome["status"] == "RECOVERY_REQUIRED"
@@ -521,3 +853,73 @@ def test_v2_short_write_returns_typed_recovery_and_visible_residue(
     ).inspect(source_head=controller_cases.HEAD)["status"] == (
         "RECOVERY_REQUIRED"
     )
+
+
+@pytest.mark.parametrize(
+    "mutation_kind",
+    ("changed_bytes_with_old_digest", "identical_bytes_on_new_inode"),
+)
+def test_v2_pre_replace_cas_rejects_prior_discriminator_change(
+    tmp_path, monkeypatch, controller_case_signing, mutation_kind
+) -> None:
+    state_root = tmp_path / "state"
+    lock_root = tmp_path / "locks"
+    state_root.mkdir(mode=0o700)
+    lock_root.mkdir(mode=0o700)
+    previous = _seed_v2_genesis(state_root)
+    _proof, successor = controller_cases._proof_state(
+        previous["controller_state"],
+        previous_manifest_digest=previous["self_digest"],
+    )
+    manifest_path = state_root / store.MANIFEST_BASENAME
+    prior_inode = manifest_path.stat().st_ino
+    replacement_path = tmp_path / "replacement-manifest.json"
+    if mutation_kind == "identical_bytes_on_new_inode":
+        replacement_path.write_bytes(manifest_path.read_bytes())
+        os.chmod(replacement_path, 0o600)
+    _map_fixed_profile_to_fixture(
+        monkeypatch=monkeypatch,
+        state_root=state_root,
+        lock_root=lock_root,
+    )
+    monkeypatch.setattr(
+        store_v2, "_trusted_now", lambda: controller_cases.TRUSTED_NOW
+    )
+    mapped_open = store.os.open
+    real_fsync = os.fsync
+    temp_fd: list[int] = []
+    changed: list[bool] = []
+
+    def tracking_open(path, flags, mode=0o777, *, dir_fd=None):
+        fd = mapped_open(path, flags, mode, dir_fd=dir_fd)
+        if str(path) == store.MANIFEST_TEMP_BASENAME:
+            temp_fd[:] = [fd]
+        return fd
+
+    def mutate_prior_after_temp_fsync(fd):
+        real_fsync(fd)
+        if temp_fd and fd == temp_fd[0] and not changed:
+            if mutation_kind == "identical_bytes_on_new_inode":
+                os.replace(replacement_path, manifest_path)
+            else:
+                prior = json.loads(manifest_path.read_text(encoding="utf-8"))
+                prior["phase"] = "RESOLVED"
+                _write_json(manifest_path, prior)
+            changed.append(True)
+
+    monkeypatch.setattr(store.os, "open", tracking_open)
+    monkeypatch.setattr(store.os, "fsync", mutate_prior_after_temp_fsync)
+
+    outcome = store.persist_fixed_profile(
+        source_head=controller_cases.HEAD, controller_state=successor
+    )
+
+    assert changed == [True]
+    if mutation_kind == "identical_bytes_on_new_inode":
+        assert manifest_path.stat().st_ino != prior_inode
+    assert outcome["status"] == "RECOVERY_REQUIRED"
+    assert outcome["store_failure"] is None
+    failed = outcome["store"]
+    assert failed["result"]["failure_code"] == "manifest_changed_during_manifest_write"
+    assert failed["result"]["atomic_replace"] is False
+    assert failed["postcheck"]["status"] == "RECOVERY_REQUIRED"

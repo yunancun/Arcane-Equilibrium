@@ -6,7 +6,8 @@
   "additionalProperties": false,
   "required": [
     "schema_version", "store_id", "state_root_id", "source_head", "operation",
-    "expected_previous_manifest_digest", "candidate_manifest_digest",
+    "expected_previous_manifest_digest",
+    "prior_manifest_discriminator_digest", "candidate_manifest_digest",
     "issued_at", "expires_at", "recovery_lock_intent_digest",
     "recovery_lock_result_digest", "recovery_lock_postcheck_digest",
     "recovery_lock_chain_digest", "session_class", "store_write_authority",
@@ -20,8 +21,11 @@
     "store_id": {"type": "string", "pattern": "^s2-5-store-[0-9a-f]{64}$"},
     "state_root_id": {"$ref": "#/$defs/digest"},
     "source_head": {"$ref": "#/$defs/head"},
-    "operation": {"enum": ["PREPARE", "PROMOTE", "RESOLVE", "ROLLBACK"]},
+    "operation": {
+      "enum": ["PREPARE", "CONSUME", "PROMOTE", "RESOLVE", "ROLLBACK"]
+    },
     "expected_previous_manifest_digest": {"$ref": "#/$defs/nullableDigest"},
+    "prior_manifest_discriminator_digest": {"$ref": "#/$defs/digest"},
     "candidate_manifest_digest": {"$ref": "#/$defs/digest"},
     "issued_at": {
       "type": "string", "format": "date-time",

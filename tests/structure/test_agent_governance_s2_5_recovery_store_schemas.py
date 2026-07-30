@@ -111,6 +111,7 @@ SAMPLES = {
         "source_head": HEAD,
         "operation": "PREPARE",
         "expected_previous_manifest_digest": None,
+        "prior_manifest_discriminator_digest": DIGEST,
         "candidate_manifest_digest": DIGEST,
         "issued_at": "2030-01-01T00:00:00Z",
         "expires_at": "2030-01-01T00:05:00Z",
@@ -124,6 +125,7 @@ SAMPLES = {
     "s2_5_recovery_store_result_v1": _seal({
         "schema_version": "s2_5_recovery_store_result_v1",
         "intent_digest": DIGEST,
+        "prior_manifest_discriminator_digest": DIGEST,
         "status": "EXTERNAL_VERIFICATION_PENDING",
         "manifest_digest": DIGEST,
         "file_fsynced": True,

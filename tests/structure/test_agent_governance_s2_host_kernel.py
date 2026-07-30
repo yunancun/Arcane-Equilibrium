@@ -58,11 +58,34 @@ ALLOWED_STDLIB_IMPORTS = frozenset({
     "os", "pathlib", "re", "socket", "stat", "sys", "typing",
 })
 STDLIB_IMPORTS_BY_FILE = {"agent_governance_s2_5_recovery_lock.py": frozenset({"functools"})}
+EXACT_STDLIB_IMPORTS_BY_FILE = {
+    "agent_governance_s2_5_recovery_store.py": frozenset({
+        "__future__", "datetime", "fcntl", "functools", "hashlib", "json",
+        "os", "pathlib", "re", "stat", "sys", "typing",
+    }),
+    "agent_governance_s2_5_recovery_store_v2.py": frozenset({
+        "__future__", "copy", "datetime", "hashlib", "json", "pathlib",
+        "sys", "typing",
+    }),
+}
 ALLOWED_THIRD_PARTY_IMPORTS = frozenset({"psycopg2"})
 # Governance imports are per-file rather than family-wide.
 GOVERNANCE_IMPORTS_BY_FILE: dict[str, frozenset[str]] = {
     "agent_governance_s2_5_recovery_lock.py": frozenset({"agent_governance_s2_5_disposable_profile", "agent_governance_schema", "aiml_gate_receipt_validator"}),
     "agent_governance_s2_5_recovery_anchor.py": frozenset({"agent_governance_s2_5_disposable_profile", "agent_governance_s2_5_recovery_store", "agent_governance_schema", "aiml_gate_receipt_validator"}),
+    "agent_governance_s2_5_recovery_store.py": frozenset({
+        "agent_governance_s2_5_attestation",
+        "agent_governance_s2_5_disposable_profile",
+        "agent_governance_s2_5_recovery_controller",
+        "agent_governance_s2_5_recovery_lock",
+        "agent_governance_s2_5_recovery_store_v2",
+        "agent_governance_schema",
+        "aiml_gate_receipt_validator",
+    }),
+    "agent_governance_s2_5_recovery_store_v2.py": frozenset({
+        "agent_governance_s2_5_recovery_controller",
+        "aiml_gate_receipt_validator",
+    }),
     "agent_governance_s2_host_kernel.py": frozenset({
         "agent_governance_alr_quiesce_inventory",
     }),
@@ -142,8 +165,19 @@ SUBPROCESS_EXEC_CAPABILITY_NAMES = frozenset({
     "run", "Popen", "call", "check_call", "check_output", "getoutput",
     "getstatusoutput",
 })
+RECOVERY_GOVERNED_FILES = frozenset({
+    "agent_governance_s2_5_recovery_anchor.py",
+    "agent_governance_s2_5_recovery_lock.py",
+    "agent_governance_s2_5_recovery_store.py",
+    "agent_governance_s2_5_recovery_store_v2.py",
+})
+
+
 def _present_family() -> list[Path]:
-    return _discover_runner_family(HELPERS)
+    return sorted(
+        set(_discover_runner_family(HELPERS))
+        | {HELPERS / name for name in RECOVERY_GOVERNED_FILES}
+    )
 
 def _fold_string(node: ast.AST) -> str | None:
     """把純字面的 ``"a" + "b"`` 折成 ``"ab"``(其他形一律回 None)。"""
@@ -164,10 +198,19 @@ def _raw_command_findings(path: Path, *, exec_family: bool = True) -> list[str]:
     is_kernel = path.name == KERNEL_PATH.name
     allowed_modules: frozenset[str] | None = None
     if exec_family:
-        allowed_modules = (
+        common_stdlib = EXACT_STDLIB_IMPORTS_BY_FILE.get(
+            path.name,
             ALLOWED_STDLIB_IMPORTS
-            | STDLIB_IMPORTS_BY_FILE.get(path.name, frozenset())
-            | ALLOWED_THIRD_PARTY_IMPORTS
+            | STDLIB_IMPORTS_BY_FILE.get(path.name, frozenset()),
+        )
+        third_party = (
+            frozenset()
+            if path.name in EXACT_STDLIB_IMPORTS_BY_FILE
+            else ALLOWED_THIRD_PARTY_IMPORTS
+        )
+        allowed_modules = (
+            common_stdlib
+            | third_party
             | GOVERNANCE_IMPORTS_BY_FILE.get(path.name, frozenset())
         )
         if is_kernel:
@@ -792,6 +835,34 @@ def test_every_file_that_looks_like_an_s2_host_runner_is_scanned():
     )
 
 
+def test_recovery_store_effect_and_pure_builder_are_scanned_per_file():
+    present = {path.name for path in _present_family()}
+    assert {
+        "agent_governance_s2_5_recovery_store.py",
+        "agent_governance_s2_5_recovery_store_v2.py",
+    } <= present
+
+
+@pytest.mark.parametrize(
+    "source",
+    (
+        "import os\n",
+        "from fcntl import flock\n",
+        "import socket as network\n",
+        "from os import *\n",
+        "import importlib\nimportlib.import_module('os')\n",
+    ),
+)
+def test_pure_recovery_store_builder_denies_every_effect_import_form(
+    tmp_path,
+    source,
+):
+    path = tmp_path / "agent_governance_s2_5_recovery_store_v2.py"
+    path.write_text(source, encoding="utf-8")
+
+    assert _raw_command_findings(path)
+
+
 def test_a_declared_non_runner_leaf_is_still_denied_every_exec_path():
     for name, reason in NON_RUNNER_HOST_LEAVES.items():
         path = HELPERS / name
@@ -903,7 +974,7 @@ def test_the_governance_import_allowlist_is_per_file_not_family_wide(tmp_path):
 
 
 def test_every_governance_allowlist_entry_belongs_to_a_family_member():
-    family_names = {path.name for path in RUNNER_FAMILY} | {"agent_governance_s2_5_recovery_anchor.py", "agent_governance_s2_5_recovery_lock.py"}
+    family_names = {path.name for path in RUNNER_FAMILY} | RECOVERY_GOVERNED_FILES
     assert set(GOVERNANCE_IMPORTS_BY_FILE) <= family_names, sorted(
         set(GOVERNANCE_IMPORTS_BY_FILE) - family_names
     )

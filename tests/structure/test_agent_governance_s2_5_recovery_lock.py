@@ -364,8 +364,6 @@ def test_cc_e3_b2_002_public_api_cannot_issue_authority_from_a_driver():
     assert set(signature(recovery_store.persist_fixed_profile).parameters) == {
         "source_head",
         "controller_state",
-        "issued_at",
-        "expires_at",
     }
 
 

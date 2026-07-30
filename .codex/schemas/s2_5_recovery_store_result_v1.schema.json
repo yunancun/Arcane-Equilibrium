@@ -5,7 +5,8 @@
   "type": "object",
   "additionalProperties": false,
   "required": [
-    "schema_version", "intent_digest", "status", "manifest_digest",
+    "schema_version", "intent_digest", "prior_manifest_discriminator_digest",
+    "status", "manifest_digest",
     "file_fsynced", "atomic_replace", "directory_fsynced",
     "parent_identity_rechecked", "candidate_temp_identity", "failure_code",
     "session_class", "store_write_authority", "side_effect_class",
@@ -15,6 +16,7 @@
   "properties": {
     "schema_version": {"const": "s2_5_recovery_store_result_v1"},
     "intent_digest": {"$ref": "#/$defs/digest"},
+    "prior_manifest_discriminator_digest": {"$ref": "#/$defs/digest"},
     "status": {"enum": ["EXTERNAL_VERIFICATION_PENDING", "RECOVERY_REQUIRED", "REJECTED"]},
     "manifest_digest": {"$ref": "#/$defs/nullableDigest"},
     "file_fsynced": {"type": "boolean"},

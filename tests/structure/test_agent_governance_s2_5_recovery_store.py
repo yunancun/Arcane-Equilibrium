@@ -10,6 +10,7 @@ import stat
 import sys
 from inspect import signature
 from pathlib import Path
+from types import SimpleNamespace
 
 import pytest
 
@@ -449,8 +450,6 @@ def test_public_writer_has_no_caller_path_unit_nonce_or_identity_surface() -> No
     assert set(signature(store.persist_fixed_profile).parameters) == {
         "source_head",
         "controller_state",
-        "issued_at",
-        "expires_at",
     }
     assert not hasattr(store.S2_5RecoveryStore, "simulate_persist")
     assert set(signature(store.simulate_persist).parameters) == {
@@ -560,7 +559,7 @@ def test_fixed_writer_source_has_no_injected_driver_callback_or_bearer_token() -
     source = (
         HELPERS / "agent_governance_s2_5_recovery_store.py"
     ).read_text(encoding="utf-8")
-    fixed = source[source.index("    def persist_fixed_profile("):]
+    fixed = source[source.index("def persist_fixed_profile("):]
     header = fixed[:fixed.index(") -> dict[str, Any]:")]
     assert "driver:" not in header
     assert "callback" not in header
@@ -571,6 +570,34 @@ def test_fixed_writer_source_has_no_injected_driver_callback_or_bearer_token() -
         "active_sessions",
     ):
         assert not hasattr(store, name), name
+
+
+def test_public_fixed_writer_has_no_closure_capability_registry() -> None:
+    import agent_governance_s2_5_recovery_store as store
+
+    assert store.persist_fixed_profile.__closure__ is None
+
+
+def test_arbitrary_driver_cannot_resolve_fixed_store_write_authority() -> None:
+    import agent_governance_s2_5_recovery_store as store
+
+    class ArbitraryDriver:
+        pass
+
+    session = SimpleNamespace(
+        active=True,
+        driver=ArbitraryDriver(),
+        source_head=HEAD,
+        lease={"transaction_active": True},
+    )
+    with pytest.raises(store.RecoveryStoreError) as caught:
+        store._resolve_recovery_session(
+            driver=session.driver,
+            source_head=HEAD,
+            session_context=session,
+        )
+
+    assert caught.value.code == "fixed_recovery_session_invalid"
 
 
 def test_forged_fixed_session_is_rejected_before_state_root_io(tmp_path) -> None:

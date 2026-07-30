@@ -988,6 +988,140 @@ def test_phase_chain_consumes_exactly_once_then_freezes_replay():
     )
 
 
+def _prepared_proof_and_consumed():
+    _transition_value, _outbox_value, pending, first = _genesis()
+    _proof_value, prepared_proof = _proof_state(
+        pending,
+        previous_manifest_digest=first["self_digest"],
+    )
+    prepared_proof_manifest = _manifest(
+        prepared_proof,
+        previous_manifest_digest=first["self_digest"],
+    )
+    _transition_value, _outbox_value, consumed = _next_phase_pending(
+        prepared_proof,
+        phase="CONSUMED",
+        previous_manifest_digest=prepared_proof_manifest["self_digest"],
+    )
+    return prepared_proof, consumed
+
+
+def test_phase_transition_accepts_newer_signed_admission_for_same_host():
+    prepared_proof, consumed = _prepared_proof_and_consumed()
+    subject = copy.deepcopy(consumed["candidate_subject"])
+    newer = _capture(
+        boot_id="boot-new",
+        observed_at="2030-01-01T00:21:00+00:00",
+        expires_at="2030-01-01T00:31:00+00:00",
+    )
+    assert newer["host_identity"] == subject["host_identity"]
+    subject["recovery_admission_capture_json"] = _canonical_json(newer)
+    subject["recovery_admission_capture_digest"] = newer["self_digest"]
+    _transition_value, _outbox_value, refreshed = _pending_state(
+        subject,
+        from_phase="PREPARED",
+    )
+
+    assert controller.validate_fresh_controller_admission(
+        refreshed, trusted_now=TRUSTED_NOW
+    ) == []
+    assert controller.validate_controller_state_successor(
+        prepared_proof, refreshed
+    ) == []
+
+
+@pytest.mark.parametrize(
+    ("observed_at", "expires_at"),
+    (
+        (ADMISSION_OBSERVED, "2030-01-01T00:31:00+00:00"),
+        ("2030-01-01T00:19:00+00:00", "2030-01-01T00:29:00+00:00"),
+    ),
+)
+def test_phase_transition_rejects_nonmonotonic_admission_refresh(
+    observed_at,
+    expires_at,
+):
+    prepared_proof, consumed = _prepared_proof_and_consumed()
+    subject = copy.deepcopy(consumed["candidate_subject"])
+    replacement = _capture(
+        boot_id="boot-new",
+        observed_at=observed_at,
+        expires_at=expires_at,
+    )
+    subject["recovery_admission_capture_json"] = _canonical_json(replacement)
+    subject["recovery_admission_capture_digest"] = replacement["self_digest"]
+    _transition_value, _outbox_value, refreshed = _pending_state(
+        subject,
+        from_phase="PREPARED",
+    )
+
+    assert controller.validate_fresh_controller_admission(
+        refreshed, trusted_now=TRUSTED_NOW
+    ) == []
+    errors = controller.validate_controller_state_successor(
+        prepared_proof, refreshed
+    )
+    assert "refreshed recovery admission is not monotonic" in errors
+
+
+def test_proof_attachment_cannot_replace_recovery_admission_capture():
+    _transition_value, _outbox_value, pending, first = _genesis()
+    _proof_value, attached = _proof_state(
+        pending,
+        previous_manifest_digest=first["self_digest"],
+    )
+    subject = copy.deepcopy(attached["candidate_subject"])
+    replacement = _capture(
+        boot_id="boot-new",
+        observed_at="2030-01-01T00:21:00+00:00",
+        expires_at="2030-01-01T00:31:00+00:00",
+    )
+    subject["recovery_admission_capture_json"] = _canonical_json(replacement)
+    subject["recovery_admission_capture_digest"] = replacement["self_digest"]
+    subject_digest = controller.derive_candidate_subject_digest(subject)
+    proof = copy.deepcopy(attached["attached_anchor_proof"])
+    proof["confirmed_candidate_subject_digest"] = subject_digest
+    proof["self_digest"] = validator.artifact_self_digest(proof)
+    mutated = copy.deepcopy(attached)
+    mutated.update({
+        "candidate_subject": subject,
+        "candidate_subject_digest": subject_digest,
+        "attached_anchor_proof": proof,
+        "attached_anchor_proof_digest": proof["self_digest"],
+    })
+    mutated["self_digest"] = validator.artifact_self_digest(mutated)
+
+    errors = controller.validate_controller_artifact(mutated)
+    assert any("proof-attached candidate changed immutable "
+               "recovery_admission_capture_json" in error for error in errors)
+
+
+def test_phase_transition_cannot_add_journal_identity():
+    prepared_proof, consumed = _prepared_proof_and_consumed()
+    subject = copy.deepcopy(consumed["candidate_subject"])
+    subject["journal_inventory"].append({
+        "basename": "s2-5-" + "6" * 64 + ".journal.json",
+        "start_id": "s2-5-" + "6" * 64,
+        "file_digest": D5,
+        "journal_head_digest": D6,
+        "terminal_state": "RECOVERY_REQUIRED",
+    })
+    subject["journal_set_digest"] = validator.canonical_digest({
+        "schema_version": "s2_5_recovery_journal_set_v2",
+        "entries": subject["journal_inventory"],
+    })
+    _transition_value, _outbox_value, added = _pending_state(
+        subject,
+        from_phase="PREPARED",
+    )
+
+    assert controller.validate_controller_artifact(added) == []
+    errors = controller.validate_controller_state_successor(
+        prepared_proof, added
+    )
+    assert "phase transition changed the exact journal identity set" in errors
+
+
 def test_resolved_requires_committed_result_rollback_and_independent_postcheck():
     resolved_subject = _subject(
         phase="RESOLVED",
@@ -1174,6 +1308,69 @@ def test_embedded_recovery_intent_cannot_hide_production_authority():
     )
     errors = controller.validate_controller_artifact(state)
     assert any("recovery intent" in error and "boundary" in error for error in errors)
+
+
+def test_boolean_is_never_admitted_as_production_effect_count() -> None:
+    subject = _subject()
+    subject["production_effect_count"] = False
+    transition = _transition(subject, from_phase="GENESIS")
+    transition["production_effect_count"] = False
+    transition["transition_id"] = controller.derive_transition_id(transition)
+    transition["self_digest"] = validator.artifact_self_digest(transition)
+    outbox = _outbox(transition)
+    outbox["production_effect_count"] = False
+    outbox["self_digest"] = validator.artifact_self_digest(outbox)
+    state = _seal({
+        "schema_version": "s2_5_recovery_controller_state_v2",
+        "candidate_subject": copy.deepcopy(subject),
+        "candidate_subject_digest": (
+            controller.derive_candidate_subject_digest(subject)
+        ),
+        "pending_outbox": outbox,
+        "pending_outbox_digest": outbox["self_digest"],
+        "attached_anchor_proof": None,
+        "attached_anchor_proof_digest": None,
+        "trust_status": "UNVERIFIED_EXTERNAL_ANCHOR_REQUIRED",
+        "side_effect_class": "DISPOSABLE_TEST",
+        "target_class": "disposable_systemd",
+        "target_profile_id": profile.PROFILE_ID,
+        "production_effect": False,
+        "production_authority": False,
+        "production_effect_count": False,
+    })
+
+    errors = controller.validate_controller_artifact(state)
+
+    assert any("production_effect_count" in error for error in errors)
+
+
+def test_boolean_is_never_admitted_as_replay_entry_count() -> None:
+    subject = _subject()
+    subject["replay_ledger"]["entry_count"] = False
+    _transition_value, _outbox_value, state = _pending_state(
+        subject,
+        from_phase="GENESIS",
+    )
+
+    errors = controller.validate_controller_artifact(state)
+
+    assert any("entry_count" in error for error in errors)
+
+
+def test_boolean_is_never_admitted_as_outer_outbox_sequence() -> None:
+    _transition_value, _outbox_value, state, _manifest_value = _genesis()
+    state["pending_outbox"]["expected_external_sequence"] = False
+    state["pending_outbox"]["candidate_external_sequence"] = True
+    state["pending_outbox"]["self_digest"] = validator.artifact_self_digest(
+        state["pending_outbox"]
+    )
+    state["pending_outbox_digest"] = state["pending_outbox"]["self_digest"]
+    state["self_digest"] = validator.artifact_self_digest(state)
+
+    errors = controller.validate_controller_artifact(state)
+
+    assert any("expected_external_sequence" in error for error in errors), errors
+    assert any("candidate_external_sequence" in error for error in errors), errors
 
 
 @pytest.mark.parametrize(

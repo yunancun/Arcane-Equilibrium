@@ -10,8 +10,10 @@ live snapshot for comparison.
 from __future__ import annotations
 
 import copy
+import hashlib
+import json
 import sys
-from datetime import datetime, timezone
+from datetime import datetime, timedelta, timezone
 from pathlib import Path
 from typing import Any
 
@@ -32,6 +34,103 @@ def _trusted_now() -> str:
     return datetime.now(timezone.utc).isoformat()
 
 
+def code_owned_intent_window() -> tuple[str, str]:
+    """Mint the fixed five-minute store intent window from trusted UTC."""
+
+    issued = datetime.fromisoformat(_trusted_now().replace("Z", "+00:00"))
+    if issued.tzinfo is None:
+        raise ValueError("trusted recovery-store time must be timezone-aware")
+    return (
+        issued.isoformat(),
+        (issued + timedelta(minutes=5)).isoformat(),
+    )
+
+
+def current_transition_freshness_errors(state: Any) -> list[str]:
+    """Classify a persisted pending transition using code-owned UTC."""
+
+    return controller.validate_fresh_pending_transition(
+        state,
+        trusted_now=_trusted_now(),
+    )
+
+
+def classify_current_transition(state: Any) -> dict[str, Any] | None:
+    """Return a typed historical freshness classification when needed."""
+
+    errors = current_transition_freshness_errors(state)
+    if not errors:
+        return None
+    return {
+        "status": (
+            "OUTBOX_EXPIRED_REFRESH_REQUIRED"
+            if errors == ["pending transition is expired"]
+            else "RECOVERY_REQUIRED"
+        ),
+        "reasons": errors,
+    }
+
+
+def manifest_observation_discriminator(
+    observation: Any, *, state_root_id: str
+) -> tuple[str | None, list[str]]:
+    """Bind exact validated prior bytes, file identity, and parent root."""
+
+    if not isinstance(observation, dict) or not isinstance(
+        observation.get("bytes"), bytes
+    ):
+        return None, ["prior manifest observation is absent"]
+    payload = observation["bytes"]
+    try:
+        manifest = json.loads(payload.decode("utf-8"))
+    except (UnicodeDecodeError, ValueError):
+        return None, ["prior manifest JSON is invalid"]
+    if not isinstance(manifest, dict):
+        return None, ["prior manifest is not an object"]
+    canonical = json.dumps(
+        manifest,
+        ensure_ascii=False,
+        sort_keys=True,
+        separators=(",", ":"),
+    ).encode("utf-8")
+    errors: list[str] = []
+    if canonical != payload:
+        errors.append("prior manifest bytes are not canonical")
+    rederived = central_validator.artifact_self_digest(manifest)
+    if manifest.get("self_digest") != rederived:
+        errors.append("prior manifest self digest does not re-derive")
+    identity = {
+        key: observation.get(key)
+        for key in (
+            "device",
+            "inode",
+            "mode",
+            "uid",
+            "gid",
+            "nlink",
+            "is_regular_file",
+        )
+    }
+    discriminator = {
+        "schema_version": "s2_5_prior_manifest_discriminator_v1",
+        "state_root_id": state_root_id,
+        "raw_bytes_digest": (
+            "sha256:" + hashlib.sha256(payload).hexdigest()
+        ),
+        "canonical_object_digest": central_validator.canonical_digest(
+            manifest
+        ),
+        "claimed_self_digest": manifest.get("self_digest"),
+        "rederived_self_digest": rederived,
+        "file_identity": identity,
+        "size": len(payload),
+    }
+    return (
+        None if errors else central_validator.canonical_digest(discriminator),
+        errors,
+    )
+
+
 def build_successor_manifest(
     controller_state: Any,
     previous_manifest: Any,
@@ -41,11 +140,18 @@ def build_successor_manifest(
 ) -> tuple[dict[str, Any] | None, list[str]]:
     """Build one exact v2 wrapper after validating every predecessor edge."""
 
+    trusted_now = _trusted_now()
     errors = controller.validate_controller_artifact(controller_state)
     errors.extend(
         controller.validate_fresh_controller_admission(
             controller_state,
-            trusted_now=_trusted_now(),
+            trusted_now=trusted_now,
+        )
+    )
+    errors.extend(
+        controller.validate_fresh_pending_transition(
+            controller_state,
+            trusted_now=trusted_now,
         )
     )
     errors.extend(controller.validate_controller_artifact(previous_manifest))
@@ -180,4 +286,34 @@ def validate_manifest_against_snapshot(
         manifest
     ):
         errors.append("v2 manifest self digest does not re-derive")
+    return errors
+
+
+def validate_manifest_predecessor_against_root(
+    manifest: Any,
+    snapshot: dict[str, Any],
+    *,
+    source_head: str,
+) -> list[str]:
+    """Validate an intrinsic predecessor while its live projection advances."""
+
+    errors = controller.validate_controller_artifact(manifest)
+    if errors or not isinstance(manifest, dict):
+        return errors
+    expected = {
+        "state_root_identity": snapshot["state_root_identity"],
+        "state_root_id": snapshot["state_root_id"],
+        "source_head": source_head,
+    }
+    for key, value in expected.items():
+        if manifest.get(key) != value:
+            errors.append(f"v2 predecessor {key} differs from live root")
+    if manifest.get("store_id") != controller.derive_store_id(
+        snapshot["state_root_id"]
+    ):
+        errors.append("v2 predecessor store id differs from live root")
+    if manifest.get("self_digest") != central_validator.artifact_self_digest(
+        manifest
+    ):
+        errors.append("v2 predecessor self digest does not re-derive")
     return errors

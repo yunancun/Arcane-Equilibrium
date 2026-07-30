@@ -181,10 +181,6 @@ _CHAIN_IMMUTABLE_SUBJECT_KEYS = (
     "unresolved_state_digest",
     "failure_host_capture_json",
     "failure_host_capture_digest",
-    "recovery_admission_capture_json",
-    "recovery_admission_capture_digest",
-    "journal_inventory",
-    "journal_set_digest",
     "recovery_intent_json",
     "recovery_intent_digest",
     "trust_status",
@@ -196,6 +192,10 @@ _CHAIN_IMMUTABLE_SUBJECT_KEYS = (
     "production_effect_count",
 )
 _PROOF_ATTACH_IMMUTABLE_KEYS = _CHAIN_IMMUTABLE_SUBJECT_KEYS + (
+    "recovery_admission_capture_json",
+    "recovery_admission_capture_digest",
+    "journal_inventory",
+    "journal_set_digest",
     "phase",
     "replay_ledger",
     "replay_ledger_head_digest",
@@ -233,6 +233,21 @@ def _exact(value: Any, keys: frozenset[str], label: str) -> list[str]:
         f"{label} keys are not closed: missing={sorted(keys - actual)}, "
         f"extra={sorted(actual - keys)}"
     ]
+
+
+def _integer(value: Any, *, minimum: int = 0) -> bool:
+    return type(value) is int and value >= minimum
+
+
+def _same_json_value(left: Any, right: Any) -> bool:
+    try:
+        return json.dumps(
+            left, ensure_ascii=False, sort_keys=True, separators=(",", ":")
+        ) == json.dumps(
+            right, ensure_ascii=False, sort_keys=True, separators=(",", ":")
+        )
+    except (TypeError, ValueError):
+        return False
 
 
 def _parse_canonical_object(
@@ -453,6 +468,8 @@ def _subject_errors(subject: Any) -> list[str]:
         errors.append("candidate live state-root id does not re-derive")
 
     generation = subject.get("generation")
+    if not _integer(generation, minimum=1):
+        errors.append("candidate generation must be a positive integer")
     previous_state = subject.get("previous_controller_state_digest")
     previous_manifest = subject.get("previous_manifest_digest")
     if generation == 1:
@@ -538,12 +555,20 @@ def _subject_errors(subject: Any) -> list[str]:
             "task_digest",
             "stable_root_id",
             "state_root_id",
-            "journal_set_digest",
             "source_head",
             "failure_host_capture_digest",
         ):
             if unresolved.get(key) != subject.get(key):
                 errors.append(f"unresolved payload {key} differs from candidate")
+        if (
+            subject.get("generation") == 1
+            and unresolved.get("journal_set_digest")
+            != subject.get("journal_set_digest")
+        ):
+            errors.append(
+                "genesis unresolved payload journal_set_digest "
+                "differs from candidate"
+            )
         if (
             subject.get("phase") == "PREPARED"
             and unresolved.get("replay_ledger_head_digest")
@@ -614,6 +639,8 @@ def _subject_errors(subject: Any) -> list[str]:
         errors.append("consumed authorization ids are not canonical-sorted")
     if isinstance(replay, dict):
         ids = replay.get("authorization_ids")
+        if not _integer(replay.get("entry_count")):
+            errors.append("replay entry_count must be an integer")
         if isinstance(ids, list) and ids != sorted(ids):
             errors.append("replay authorization ids are not canonical-sorted")
         if ids != consumed:
@@ -708,17 +735,22 @@ def _subject_errors(subject: Any) -> list[str]:
         errors.append(f"{phase} candidate has an invalid consumption set")
     sequence = subject.get("previous_external_sequence")
     floor = subject.get("external_monotonic_floor")
-    if (
-        isinstance(sequence, int)
-        and isinstance(floor, int)
-        and sequence < floor
-    ):
+    if not _integer(sequence) or not _integer(floor):
+        errors.append("candidate external sequence and floor must be integers")
+    elif sequence < floor:
         errors.append("candidate external sequence is below monotonic floor")
     return errors
 
 
 def _transition_errors(transition: dict[str, Any]) -> list[str]:
     errors: list[str] = []
+    for key in (
+        "generation",
+        "expected_external_sequence",
+        "external_monotonic_floor",
+    ):
+        if not _integer(transition.get(key), minimum=1 if key == "generation" else 0):
+            errors.append(f"transition {key} must be an integer")
     subject = transition.get("candidate_subject")
     subject_schema_errors = _candidate_schema_errors(subject)
     subject_errors = _subject_errors(subject)
@@ -781,6 +813,10 @@ def _transition_errors(transition: dict[str, Any]) -> list[str]:
 
 def _outbox_errors(outbox: dict[str, Any]) -> list[str]:
     errors: list[str] = []
+    if not _integer(outbox.get("expected_external_sequence")) or not _integer(
+        outbox.get("candidate_external_sequence"), minimum=1
+    ):
+        errors.append("outbox sequences must be integers")
     transition, transition_errors = _parse_canonical_object(
         outbox.get("transition_json"), label="outbox transition"
     )
@@ -907,11 +943,9 @@ def _proof_errors(proof: dict[str, Any]) -> list[str]:
                 errors.append(f"anchor proof {proof_key} differs from candidate")
     sequence = proof.get("sequence")
     floor = proof.get("external_monotonic_floor")
-    if (
-        isinstance(sequence, int)
-        and isinstance(floor, int)
-        and sequence < floor
-    ):
+    if not _integer(sequence, minimum=1) or not _integer(floor):
+        errors.append("anchor proof sequence and floor must be integers")
+    elif sequence < floor:
         errors.append("anchor proof sequence is below monotonic floor")
     identities = {
         proof.get("writer_identity_digest"),
@@ -1028,6 +1062,8 @@ def _manifest_errors(manifest: dict[str, Any]) -> list[str]:
         errors.append("manifest store id does not re-derive")
     generation = manifest.get("generation")
     previous = manifest.get("previous_manifest_digest")
+    if not _integer(generation, minimum=1):
+        errors.append("manifest generation must be a positive integer")
     if generation == 1 and previous is not None:
         errors.append("manifest generation one must have no predecessor")
     if isinstance(generation, int) and generation > 1 and previous is None:
@@ -1041,7 +1077,7 @@ def _manifest_errors(manifest: dict[str, Any]) -> list[str]:
             "attached_anchor_proof",
             "attached_anchor_proof_digest",
         ):
-            if manifest.get(key) != state.get(key):
+            if not _same_json_value(manifest.get(key), state.get(key)):
                 errors.append(f"manifest {key} differs from controller state")
     if isinstance(subject, dict):
         pairs = (
@@ -1058,9 +1094,11 @@ def _manifest_errors(manifest: dict[str, Any]) -> list[str]:
             "replay_ledger",
         )
         for key in pairs:
-            if manifest.get(key) != subject.get(key):
+            if not _same_json_value(manifest.get(key), subject.get(key)):
                 errors.append(f"manifest {key} differs from candidate subject")
-        if manifest.get("generation") != subject.get("generation"):
+        if not _same_json_value(
+            manifest.get("generation"), subject.get("generation")
+        ):
             errors.append("manifest generation differs from controller generation")
     outbox = manifest.get("pending_outbox")
     if isinstance(outbox, dict) and outbox.get(
@@ -1133,7 +1171,8 @@ def validate_controller_artifact(artifact: Any) -> list[str]:
     ):
         errors.append("controller self_digest does not re-derive")
     for key, expected in _COMMON.items():
-        if artifact.get(key) != expected:
+        actual = artifact.get(key)
+        if type(actual) is not type(expected) or actual != expected:
             errors.append(f"controller {key} differs from fixed profile")
     if artifact.get("trust_status", STATUS_UNVERIFIED_EXTERNAL_ANCHOR_REQUIRED) != (
         STATUS_UNVERIFIED_EXTERNAL_ANCHOR_REQUIRED
@@ -1165,6 +1204,8 @@ def validate_fresh_controller_admission(
     subject = state.get("candidate_subject")
     if not isinstance(subject, dict):
         return errors
+    if subject.get("anchor_progress") != "OUTBOX_PREPARED":
+        return errors
     admission, parse_errors = _parse_canonical_object(
         subject.get("recovery_admission_capture_json"),
         label="recovery admission capture",
@@ -1177,6 +1218,47 @@ def validate_fresh_controller_admission(
                 admission, now=trusted_now
             )
         )
+    return errors
+
+
+def validate_fresh_pending_transition(
+    state: Any, *, trusted_now: Any
+) -> list[str]:
+    """Validate current freshness only for an undispatched pending outbox."""
+
+    errors = validate_controller_artifact(state)
+    if errors or not isinstance(state, dict):
+        return errors
+    subject = state.get("candidate_subject")
+    if not isinstance(subject, dict) or subject.get(
+        "anchor_progress"
+    ) != "OUTBOX_PREPARED":
+        return errors
+    outbox = state.get("pending_outbox")
+    if not isinstance(outbox, dict):
+        return errors + ["pending transition outbox is absent"]
+    transition, parse_errors = _parse_canonical_object(
+        outbox.get("transition_json"), label="fresh pending transition"
+    )
+    errors.extend(parse_errors)
+    if not transition:
+        return errors
+    issued, issued_errors = _aware_time(
+        transition.get("issued_at"), label="pending transition issued_at"
+    )
+    expires, expiry_errors = _aware_time(
+        transition.get("expires_at"), label="pending transition expires_at"
+    )
+    now, now_errors = _aware_time(
+        trusted_now, label="pending transition trusted_now"
+    )
+    errors.extend(issued_errors)
+    errors.extend(expiry_errors)
+    errors.extend(now_errors)
+    if issued is not None and now is not None and now < issued:
+        errors.append("pending transition is not yet valid")
+    if expires is not None and now is not None and now > expires:
+        errors.append("pending transition is expired")
     return errors
 
 
@@ -1227,6 +1309,57 @@ def validate_controller_transition(
     for key in _CHAIN_IMMUTABLE_SUBJECT_KEYS:
         if candidate.get(key) != previous_subject.get(key):
             errors.append(f"phase transition changed immutable {key}")
+    previous_journals = previous_subject.get("journal_inventory")
+    candidate_journals = candidate.get("journal_inventory")
+    if isinstance(previous_journals, list) and isinstance(
+        candidate_journals, list
+    ):
+        previous_ids = {
+            (item.get("basename"), item.get("start_id"))
+            for item in previous_journals
+            if isinstance(item, dict)
+        }
+        candidate_ids = {
+            (item.get("basename"), item.get("start_id"))
+            for item in candidate_journals
+            if isinstance(item, dict)
+        }
+        if (
+            len(previous_ids) != len(previous_journals)
+            or len(candidate_ids) != len(candidate_journals)
+            or candidate_ids != previous_ids
+        ):
+            errors.append(
+                "phase transition changed the exact journal identity set"
+            )
+    previous_admission, previous_admission_errors = _parse_canonical_object(
+        previous_subject.get("recovery_admission_capture_json"),
+        label="previous recovery admission capture",
+    )
+    candidate_admission, candidate_admission_errors = _parse_canonical_object(
+        candidate.get("recovery_admission_capture_json"),
+        label="candidate recovery admission capture",
+    )
+    errors.extend(previous_admission_errors)
+    errors.extend(candidate_admission_errors)
+    previous_observed, previous_time_errors = _aware_time(
+        previous_admission.get("observed_at"),
+        label="previous recovery admission observed_at",
+    )
+    candidate_observed, candidate_time_errors = _aware_time(
+        candidate_admission.get("observed_at"),
+        label="candidate recovery admission observed_at",
+    )
+    errors.extend(previous_time_errors)
+    errors.extend(candidate_time_errors)
+    if (
+        candidate.get("recovery_admission_capture_digest")
+        != previous_subject.get("recovery_admission_capture_digest")
+        and previous_observed is not None
+        and candidate_observed is not None
+        and candidate_observed <= previous_observed
+    ):
+        errors.append("refreshed recovery admission is not monotonic")
     proof = (
         previous.get("attached_anchor_proof")
         if isinstance(previous, dict)
