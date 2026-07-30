@@ -234,7 +234,7 @@ def compile_context(
         for record in provenance if record["source"] in evidence_debt
     ]
 
-    routed = route_task(facts)
+    routed = route_task(facts, registry=registry)
     envelope_name = routed["budget_envelope"]
     registry_envelope = dict(registry["budget_envelopes"][envelope_name])
     envelope = {

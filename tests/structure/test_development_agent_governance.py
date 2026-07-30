@@ -333,6 +333,18 @@ def test_subagent_model_routing_and_project_concurrency_are_explicit() -> None:
         "default_subagent_reasoning_effort": "medium",
         "interrupt_message": False,
     }
+    execution_rules = (
+        ROOT / ".codex/SUBAGENT_EXECUTION_RULES.md"
+    ).read_text(encoding="utf-8")
+    assert 'All native presets set `model_reasoning_effort = "high"`' not in (
+        execution_rules
+    )
+    assert "`gpt-5.6-sol` / `high`" in execution_rules
+    assert "`gpt-5.6-terra` / `medium`" in execution_rules
+    workspace_readme = (ROOT / ".codex/README.md").read_text(encoding="utf-8")
+    assert "max_threads=4" not in workspace_readme
+    assert "max_depth=1" not in workspace_readme
+    assert "max_concurrent_threads_per_session=3" in workspace_readme
 
 
 def test_registry_owns_one_exact_native_operating_contract() -> None:

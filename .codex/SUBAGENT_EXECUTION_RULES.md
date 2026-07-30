@@ -1,6 +1,6 @@
 # Codex Sub-Agent Execution Rules
 
-Last updated: 2026-07-20
+Last updated: 2026-07-31
 Registry: `.codex/agent_registry_v1.json`
 
 ## Dispatch record
@@ -29,10 +29,14 @@ Temporary runtime nicknames are implementation detail. User-facing updates use
 
 ## Intelligence and context
 
-All native presets set `model_reasoning_effort = "high"`. Consumption is reduced
-by routing fewer agents, loading less irrelevant context, and stopping when
-evidence closes—not by lowering a role's reasoning ceiling. Do not use runtime
-type, prompt length, or budget target as a proxy for intelligence.
+The Registry owns the per-role model route. Judgment-critical roles `CC`, `E2`,
+`E3`, `MIT`, `PA`, `PM`, and `QC` use `gpt-5.6-sol` / `high`; all other
+delegated roles use `gpt-5.6-terra` / `medium`. Generated native TOML must match
+that mapping exactly, and callers may not upgrade or downgrade it ad hoc.
+Consumption is reduced by routing fewer agents, loading less irrelevant
+context, using the Registry-selected model, and stopping when evidence closes.
+Do not use runtime type, prompt length, or budget target as a proxy for
+intelligence.
 
 The PM-supplied capsule is the starting point, not a ceiling on autonomous source
 inspection. Mandatory objective/acceptance/hard-boundary/current-diff facts are

@@ -10,7 +10,7 @@ Purpose:
 Recommended layout:
 - `../AGENTS.md` - git-root auto-load entry rules for new Codex sessions
 - `agent_registry_v1.json` - canonical development-agent capability/permission registry
-- `config.toml` - native Codex fan-out bound (`max_threads=4`, `max_depth=1`)
+- `config.toml` - native Codex fan-out bound (`max_concurrent_threads_per_session=3`); governed workflow policy separately forbids recursive child fan-out
 - `agents/*.toml` - generated native Codex identities; Markdown siblings are human views
 - `schemas/closure_packet_v1.schema.json` - one machine-checkable task closure contract
 - `schemas/closure_quality_followup_v1.schema.json` - immutable closure-digest follow-up state; unknown telemetry stays scheduled/unavailable

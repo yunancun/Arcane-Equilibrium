@@ -28,6 +28,10 @@ from agent_governance_execution_policy import (  # noqa: E402
 from agent_governance_execution import (  # noqa: E402
     capture_repository_baseline,
     compile_context,
+    materialize_context_artifact,
+)
+from agent_governance_context_validation import (  # noqa: E402
+    validate_context_artifact,
 )
 from agent_governance_registry import load_registry  # noqa: E402
 from agent_governance_routing import route_task  # noqa: E402
@@ -132,6 +136,54 @@ def test_route_and_context_share_exact_execution_budget_policy() -> None:
     assert plan["budget"]["authority_digest"] == route[
         "execution_budget_policy_digest"
     ]
+
+
+def test_injected_registry_is_one_route_context_and_validation_authority() -> None:
+    registry = deepcopy(load_registry())
+    registry["budget_envelopes"]["narrow"]["max_unique_nodes"] = 2
+    registry["native_agent_adapters"]["E1"] = [{
+        "name": "E1-test-injected",
+        "node_class": "work",
+        "permission": registry["roles"]["E1"]["permission"],
+    }]
+    scope = ["helper_scripts/maintenance_scripts/agent_governance_execution.py"]
+    facts = {
+        "task_shape": "implementation",
+        "surfaces": ["python"],
+        "risk": "low",
+        "uncertainty": "low",
+        "runtime_claim": False,
+        "end_to_end_claim": False,
+        "side_effect_class": "repo_write",
+        "objective": "bind one injected Registry across route and Context",
+        "scope": scope,
+        "dirty_scope": scope,
+        "verification_scope": scope,
+        "acceptance_criteria": ["three delegated nodes promote beyond narrow"],
+        "hard_stops": ["no ambient Registry reload"],
+        "baseline": capture_repository_baseline(ROOT),
+        "direct_interfaces": ["Development-Agent Governance Module"],
+        "previous_failure": "Context used injected caps after ambient routing",
+        "task_prompt": "compile one custom-registry route and Context",
+    }
+
+    route = route_task(facts, registry=registry)
+    plan = compile_context("E2", facts, registry, ROOT)
+    artifact = materialize_context_artifact(plan)
+    validated = validate_context_artifact(
+        artifact,
+        registry=registry,
+        root=ROOT,
+    )
+
+    assert len(route["required_role_nodes"]) == 3
+    assert route["budget_envelope"] == plan["budget"]["envelope"] == "standard"
+    assert next(
+        node for node in route["required_role_nodes"]
+        if node["node_id"] == "implementation"
+    )["native_agent"] == "E1-test-injected"
+    assert plan["budget"]["authority"] == route["execution_budget_policy"]
+    assert validated["errors"] == []
 
 
 def test_history_defaults_none_and_rejects_missing_all_or_unbound_bounded_mode() -> None:

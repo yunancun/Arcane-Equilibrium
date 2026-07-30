@@ -55,6 +55,7 @@ def delegated_execution_projection(
     admitted_nodes: Any,
     *,
     excluded_nodes: set[str] | None = None,
+    registry: dict[str, Any] | None = None,
 ) -> tuple[list[dict[str, Any]], list[str]]:
     """Compile the exact call-producing subgraph from closure dispatch nodes.
 
@@ -128,12 +129,16 @@ def delegated_execution_projection(
         for node in combined
         if node["node_id"] not in excluded
     ]
-    _, topology_errors = topological_waves(projected)
+    _, topology_errors = topological_waves(projected, registry=registry)
     errors.extend(topology_errors)
     return projected, errors
 
 
-def topological_waves(tasks: list[dict[str, Any]]) -> tuple[list[list[str]], list[str]]:
+def topological_waves(
+    tasks: list[dict[str, Any]],
+    *,
+    registry: dict[str, Any] | None = None,
+) -> tuple[list[list[str]], list[str]]:
     node_ids = [task.get("node_id") for task in tasks]
     errors: list[str] = []
     if any(not isinstance(node, str) or not node for node in node_ids):
@@ -141,7 +146,8 @@ def topological_waves(tasks: list[dict[str, Any]]) -> tuple[list[list[str]], lis
     if len(node_ids) != len(set(node_ids)):
         return [], ["execution DAG node ids are not unique"]
     node_set = set(node_ids)
-    roles = load_registry()["roles"]
+    registry = registry or load_registry()
+    roles = registry["roles"]
     for index, task in enumerate(tasks):
         requires = task.get("requires")
         if (
@@ -168,7 +174,7 @@ def topological_waves(tasks: list[dict[str, Any]]) -> tuple[list[list[str]], lis
             errors.append(f"execution DAG work node {node_ids[index]} permission differs from Registry")
         else:
             try:
-                binding = native_agent_binding(role, node_class)
+                binding = native_agent_binding(role, node_class, registry)
             except ValueError as exc:
                 errors.append(f"execution DAG node {node_ids[index]} native binding is invalid: {exc}")
             else:

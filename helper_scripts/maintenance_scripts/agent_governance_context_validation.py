@@ -653,7 +653,7 @@ def validate_context_artifact(
     if not isinstance(budget, dict) or set(budget) != BUDGET_FIELDS:
         errors.append("context budget fields are not exact")
         return result
-    envelope_name = route_task(contract)["budget_envelope"]
+    envelope_name = route_task(contract, registry=registry)["budget_envelope"]
     try:
         envelope = registry["budget_envelopes"][envelope_name]
     except (KeyError, TypeError):

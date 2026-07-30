@@ -888,9 +888,14 @@ def _normalize_task_facts(task_facts: dict[str, Any]) -> dict[str, Any]:
     return normalized
 
 
-def route_task(task_facts: dict[str, Any]) -> dict[str, Any]:
+def route_task(
+    task_facts: dict[str, Any],
+    *,
+    registry: dict[str, Any] | None = None,
+) -> dict[str, Any]:
     """Compile task facts into the mandatory hybrid DAG."""
 
+    registry = registry or load_registry()
     facts = _normalize_task_facts(task_facts)
     surfaces, shape, risk = set(facts["surfaces"]), facts["task_shape"], facts["risk"]
     uncertainty = facts["uncertainty"]
@@ -974,7 +979,9 @@ def route_task(task_facts: dict[str, Any]) -> dict[str, Any]:
             node["role"] = role
             if role != "PM":
                 node.update(native_agent_binding(
-                    role, "work" if node_id in ROUTED_WORK_NODES else "verification"
+                    role,
+                    "work" if node_id in ROUTED_WORK_NODES else "verification",
+                    registry,
                 ))
         node.update(metadata)
         nodes.append(node)
@@ -1214,7 +1221,6 @@ def route_task(task_facts: dict[str, Any]) -> dict[str, Any]:
         if risk == "low" and uncertainty == "low"
         else "standard"
     )
-    registry = load_registry()
     budget_envelope = promote_execution_envelope(
         base_envelope,
         required_nodes=len(required_role_nodes),
@@ -1244,6 +1250,7 @@ def route_task(task_facts: dict[str, Any]) -> dict[str, Any]:
         required_role_nodes,
         [],
         excluded_nodes=non_call_controller_node_ids(facts),
+        registry=registry,
     )
     if dag_errors:
         raise ValueError("invalid delegated execution projection: " + "; ".join(dag_errors))
