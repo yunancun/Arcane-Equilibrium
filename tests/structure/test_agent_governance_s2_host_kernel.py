@@ -60,8 +60,8 @@ ALLOWED_STDLIB_IMPORTS = frozenset({
 STDLIB_IMPORTS_BY_FILE = {"agent_governance_s2_5_recovery_lock.py": frozenset({"functools"})}
 EXACT_STDLIB_IMPORTS_BY_FILE = {
     "agent_governance_s2_5_recovery.py": frozenset({
-        "__future__", "copy", "datetime", "hmac", "os", "pathlib", "re",
-        "stat", "typing",
+        "__future__", "copy", "datetime", "hmac", "json", "os", "pathlib",
+        "re", "stat", "typing",
     }),
     "agent_governance_s2_5_recovery_anchor.py": frozenset({
         "__future__", "datetime", "json", "pathlib", "sys", "typing",

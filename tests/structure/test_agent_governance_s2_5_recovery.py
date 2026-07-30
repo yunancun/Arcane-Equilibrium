@@ -31,6 +31,7 @@ D1 = "sha256:" + "1" * 64
 D2 = "sha256:" + "2" * 64
 _RECOVERY_PRIVATE_KEYS: dict[str, Path] = {}
 _RECOVERY_FINGERPRINTS: dict[str, str] = {}
+_CURRENT_ANCHOR_READBACK: dict = {}
 _ORIGINAL_RECOVERY_PUBLIC_KEY_READER = recovery._read_fixed_recovery_public_key
 
 
@@ -47,8 +48,8 @@ def _install_independent_recovery_trust_root(tmp_path, monkeypatch):
 
     kit = __import__("s2_5_testkit")
     profiles = (
-        "authorization", "anchor", "consumption", "actor_capture",
-        "verifier_capture",
+        "authorization", "anchor", "anchor_readback", "consumption",
+        "actor_capture", "verifier_capture",
     )
     for profile in profiles:
         private_key, public_key, fingerprint = kit.mint_key(
@@ -81,9 +82,16 @@ def _install_independent_recovery_trust_root(tmp_path, monkeypatch):
     )
     _RECOVERY_PRIVATE_KEYS["host_capture"] = private_key
     _RECOVERY_FINGERPRINTS["host_capture"] = fingerprint
+    monkeypatch.setattr(
+        recovery,
+        "_load_recovery_anchor_current_readback",
+        lambda: copy.deepcopy(_CURRENT_ANCHOR_READBACK),
+        raising=False,
+    )
     yield
     _RECOVERY_PRIVATE_KEYS.clear()
     _RECOVERY_FINGERPRINTS.clear()
+    _CURRENT_ANCHOR_READBACK.clear()
 
 
 def _sealed(payload: dict, digest_key: str) -> dict:
@@ -371,11 +379,51 @@ def _trusted_anchor(
         "previous_append_head_digest": D1,
         "append_entry_digest": append_entry_digest,
     })
+    anchor_scope_id = "off-root:host-governance"
+    readback_signed_binding = {
+        "schema_version": "s2_5_recovery_anchor_external_readback_v2",
+        "store_id": recovery.RECOVERY_ANCHOR_EXTERNAL_STORE_ID,
+        "anchor_scope_id": anchor_scope_id,
+        "snapshot_id": f"snapshot:s2-5:{snapshot_version}",
+        "snapshot_version": snapshot_version,
+        "monotonic_floor": monotonic_floor,
+        "monotonic_floor_durable": True,
+        "latest_version": latest_version,
+        "latest_object_id": f"object:s2-5:{latest_version}",
+        "latest_version_id": f"version:s2-5:{latest_version}",
+        "latest_append_head_digest": append_head_digest,
+        "latest_append_entry_digest": append_entry_digest,
+        "immutable": True,
+        "retention_mode": "COMPLIANCE_WORM",
+        "full_chain_valid": True,
+        "delete_denied": True,
+        "evidence_class": "PLATFORM_OR_EXTERNAL_ATTESTED",
+        "observed_at": issued_at,
+        "expires_at": expires_at,
+        "side_effect_class": "DISPOSABLE_TEST",
+        "target_class": "disposable_systemd",
+        "production_effect": False,
+        "production_authority": False,
+    }
+    external_readback = _sealed({
+        **readback_signed_binding,
+        "signer_identity": recovery.RECOVERY_ANCHOR_READBACK_SIGNER_IDENTITY,
+        "signer_fingerprint": _RECOVERY_FINGERPRINTS["anchor_readback"],
+        "signature_namespace": (
+            recovery.RECOVERY_ANCHOR_READBACK_SIGNATURE_NAMESPACE
+        ),
+        "signed_binding": copy.deepcopy(readback_signed_binding),
+        "sshsig_armored": __import__("s2_5_testkit")._sign_bytes(
+            _RECOVERY_PRIVATE_KEYS["anchor_readback"],
+            validator._canonical_bytes(readback_signed_binding),
+            namespace=recovery.RECOVERY_ANCHOR_READBACK_SIGNATURE_NAMESPACE,
+        ),
+    }, "readback_digest")
     signed_binding = {
         "schema_version": "s2_5_recovery_trusted_anchor_ref_v2",
         "anchor_id": "trusted-anchor:s2-5:7",
         "storage_class": "INDEPENDENT_OFF_STATE_ROOT",
-        "anchor_scope_id": "off-root:host-governance",
+        "anchor_scope_id": anchor_scope_id,
         "bound_unresolved_state_digest": unresolved["unresolved_state_digest"],
         "bound_state_root_id": unresolved["state_root_identity"]["root_id"],
         "bound_state_root_generation": unresolved["state_root_identity"][
@@ -393,22 +441,14 @@ def _trusted_anchor(
         "previous_append_head_digest": D1,
         "append_entry_digest": append_entry_digest,
         "append_head_digest": append_head_digest,
-        "external_readback": {
-            "schema_version": "s2_5_recovery_anchor_external_readback_v1",
-            "snapshot_version": snapshot_version,
-            "monotonic_floor": monotonic_floor,
-            "latest_version": latest_version,
-            "latest_append_head_digest": append_head_digest,
-            "latest_append_entry_digest": append_entry_digest,
-            "immutable": True,
-            "observed_at": issued_at,
-            "expires_at": expires_at,
-        },
+        "external_readback": external_readback,
         "append_only": True,
         "immutable_readback": True,
         "immutable_readback_digest": append_entry_digest,
         "append_actor_identity": "key:recovery-anchor-writer",
-        "readback_verifier_identity": "key:recovery-anchor-reader",
+        "readback_verifier_identity": (
+            recovery.RECOVERY_ANCHOR_READBACK_SIGNER_IDENTITY
+        ),
         "evidence_class": "LOCAL_REPRODUCIBLE",
     }
     payload = {
@@ -424,6 +464,10 @@ def _trusted_anchor(
             namespace=recovery.RECOVERY_ANCHOR_SIGNATURE_NAMESPACE,
         ),
     }
+    _CURRENT_ANCHOR_READBACK.clear()
+    _CURRENT_ANCHOR_READBACK.update(
+        copy.deepcopy(signed_binding["external_readback"])
+    )
     return _sealed(payload, "reference_digest")
 
 
@@ -623,6 +667,7 @@ def test_public_builders_never_accept_caller_identity_or_nonce_strings():
         parameters = set(inspect.signature(builder).parameters)
         assert not parameters & {
             "actor", "actor_node_id", "verifier", "verifier_node_id", "nonce",
+            "current_readback", "readback_path", "monotonic_floor",
         }
 
 
@@ -1052,6 +1097,87 @@ def test_fully_resigned_anchor_entry_rewrite_cannot_replace_current_state(
         )
 
 
+@pytest.mark.parametrize("rewrite", ("sequence", "prior_head"))
+def test_anchor_owner_cannot_coherently_rewrite_current_external_history(
+    tmp_path,
+    rewrite,
+):
+    state = _state(tmp_path)
+    kernel = _kernel_binding(state.unresolved)
+    admission = _admission(state.unresolved)
+    anchor = _trusted_anchor(state.unresolved)
+    if rewrite == "sequence":
+        anchor["external_sequence"] = 8
+        anchor["external_readback"]["snapshot_version"] = 8
+        anchor["external_readback"]["monotonic_floor"] = 8
+        anchor["external_readback"]["latest_version"] = 8
+        anchor["anchor_id"] = "trusted-anchor:s2-5:8"
+    else:
+        anchor["previous_append_head_digest"] = D2
+    anchor["append_head_digest"] = validator.canonical_digest({
+        "external_sequence": anchor["external_sequence"],
+        "previous_append_head_digest": anchor["previous_append_head_digest"],
+        "append_entry_digest": anchor["append_entry_digest"],
+    })
+    anchor["external_readback"]["latest_append_head_digest"] = anchor[
+        "append_head_digest"
+    ]
+    _resign_anchor(anchor)
+
+    with pytest.raises(
+        ValueError,
+        match="current external readback|independent readback|durable monotonic",
+    ):
+        recovery.build_recovery_intent(
+            unresolved_state=state.unresolved,
+            kernel_binding=kernel,
+            admission=admission,
+            authorization=_authorization(
+                state.unresolved,
+                action="ROLLBACK_TO_PRE_STATE",
+                kernel_binding=kernel,
+                admission=admission,
+                trusted_anchor=anchor,
+            ),
+            trusted_anchor=anchor,
+            action="ROLLBACK_TO_PRE_STATE",
+            now=NOW,
+        )
+
+
+def test_old_legal_anchor_is_rejected_after_external_floor_advances(tmp_path):
+    state = _state(tmp_path)
+    kernel = _kernel_binding(state.unresolved)
+    admission = _admission(state.unresolved)
+    old_anchor = _trusted_anchor(state.unresolved)
+    _trusted_anchor(
+        state.unresolved,
+        snapshot_version=8,
+        monotonic_floor=8,
+        latest_version=8,
+    )
+
+    with pytest.raises(
+        ValueError,
+        match="current external readback|durable monotonic",
+    ):
+        recovery.build_recovery_intent(
+            unresolved_state=state.unresolved,
+            kernel_binding=kernel,
+            admission=admission,
+            authorization=_authorization(
+                state.unresolved,
+                action="ROLLBACK_TO_PRE_STATE",
+                kernel_binding=kernel,
+                admission=admission,
+                trusted_anchor=old_anchor,
+            ),
+            trusted_anchor=old_anchor,
+            action="ROLLBACK_TO_PRE_STATE",
+            now=NOW,
+        )
+
+
 def test_canonical_hash_only_authority_and_anchor_can_never_clear_recovery(tmp_path):
     """Self-digests are integrity only; the old hash-only pair must stay pending."""
 
@@ -1193,8 +1319,8 @@ def test_each_recovery_capability_has_a_distinct_fixed_trust_profile():
 
     prefixes = (
         "RECOVERY_AUTHORIZATION", "RECOVERY_ANCHOR",
-        "RECOVERY_CONSUMPTION", "RECOVERY_ACTOR_CAPTURE",
-        "RECOVERY_VERIFIER_CAPTURE",
+        "RECOVERY_ANCHOR_READBACK", "RECOVERY_CONSUMPTION",
+        "RECOVERY_ACTOR_CAPTURE", "RECOVERY_VERIFIER_CAPTURE",
     )
     paths = [
         getattr(recovery, prefix + "_TRUST_ROOT_PUBLIC_KEY_PATH")
@@ -1214,6 +1340,10 @@ def test_each_recovery_capability_has_a_distinct_fixed_trust_profile():
             "_load_" + prefix.lower() + "_trust_root_public_key",
         )
         assert not inspect.signature(loader).parameters
+    assert recovery.RECOVERY_ANCHOR_CURRENT_READBACK_PATH.is_absolute()
+    assert not inspect.signature(
+        recovery._load_recovery_anchor_current_readback
+    ).parameters
     assert not hasattr(recovery, "_load_recovery_trust_root_public_key")
     assert not hasattr(recovery, "RECOVERY_TRUST_ROOT_PUBLIC_KEY")
 
@@ -1226,6 +1356,60 @@ def test_authorization_key_cannot_forge_anchor_signature(tmp_path):
         key: value for key, value in anchor.items() if key != "reference_digest"
     })
     with pytest.raises(ValueError, match="trusted anchor SSHSIG"):
+        recovery.build_recovery_intent(
+            unresolved_state=state.unresolved,
+            kernel_binding=kernel,
+            admission=admission,
+            authorization=authorization,
+            trusted_anchor=anchor,
+            action="ROLLBACK_TO_PRE_STATE",
+            now=NOW,
+        )
+
+
+def test_anchor_owner_key_cannot_forge_current_readback_signature(tmp_path):
+    state = _state(tmp_path)
+    kernel, admission, anchor, _authorization_artifact = _intent_materials(state)
+    readback = anchor["external_readback"]
+    _replace_signature_with_profile(readback, "anchor")
+    readback["readback_digest"] = validator.canonical_digest({
+        key: value for key, value in readback.items()
+        if key != "readback_digest"
+    })
+    _CURRENT_ANCHOR_READBACK.clear()
+    _CURRENT_ANCHOR_READBACK.update(copy.deepcopy(readback))
+    _resign_anchor(anchor)
+    with pytest.raises(ValueError, match="external readback SSHSIG"):
+        recovery.build_recovery_intent(
+            unresolved_state=state.unresolved,
+            kernel_binding=kernel,
+            admission=admission,
+            authorization=_authorization(
+                state.unresolved,
+                action="ROLLBACK_TO_PRE_STATE",
+                kernel_binding=kernel,
+                admission=admission,
+                trusted_anchor=anchor,
+            ),
+            trusted_anchor=anchor,
+            action="ROLLBACK_TO_PRE_STATE",
+            now=NOW,
+        )
+
+
+def test_current_readback_unavailable_fails_closed(tmp_path, monkeypatch):
+    state = _state(tmp_path)
+    kernel, admission, anchor, authorization = _intent_materials(state)
+
+    def unavailable():
+        raise OSError("independent current witness unavailable")
+
+    monkeypatch.setattr(
+        recovery,
+        "_load_recovery_anchor_current_readback",
+        unavailable,
+    )
+    with pytest.raises(ValueError, match="current external readback.*unavailable"):
         recovery.build_recovery_intent(
             unresolved_state=state.unresolved,
             kernel_binding=kernel,
@@ -1341,6 +1525,28 @@ def test_recovery_trust_root_reader_rejects_writable_or_multiply_linked_key(
     (tmp_path / "second-link.pub").hardlink_to(key_path)
     with pytest.raises(ValueError, match="hard link"):
         _ORIGINAL_RECOVERY_PUBLIC_KEY_READER(key_path)
+
+
+def test_current_readback_reader_rejects_writable_or_multiply_linked_file(
+    tmp_path,
+):
+    state = _state(tmp_path)
+    _trusted_anchor(state.unresolved)
+    readback_path = tmp_path / "current-readback.json"
+    readback_path.write_text(
+        json.dumps(_CURRENT_ANCHOR_READBACK),
+        encoding="utf-8",
+    )
+    readback_path.chmod(0o600)
+    with pytest.raises(ValueError, match="immutable"):
+        recovery._read_fixed_recovery_current_readback(readback_path)
+    readback_path.chmod(0o400)
+    assert recovery._read_fixed_recovery_current_readback(
+        readback_path
+    ) == _CURRENT_ANCHOR_READBACK
+    (tmp_path / "second-readback-link.json").hardlink_to(readback_path)
+    with pytest.raises(ValueError, match="hard link"):
+        recovery._read_fixed_recovery_current_readback(readback_path)
 
 
 def test_intent_requires_explicit_time_and_resolve_uses_closed_central_schema(tmp_path):

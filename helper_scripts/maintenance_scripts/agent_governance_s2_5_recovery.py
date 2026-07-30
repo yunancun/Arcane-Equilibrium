@@ -1,17 +1,19 @@
 #!/usr/bin/env python3
 """S2.5 recovery contract leaf.
 
-This module is source/contract only.  It binds a recovery chain to one unresolved
-state, exact state-root generation, journal/replay heads, consume-once authority,
-trusted off-root anchor reference, host/source/process identity, rollback, and an
-independent postcheck.  It performs no command, process, service, or durable-state
-operation; materializing the off-root anchor and unresolved manifest is a later slice.
+This module binds a recovery chain to one unresolved state, exact state-root
+generation, journal/replay heads, consume-once authority, trusted off-root anchor
+reference, host/source/process identity, rollback, and an independent postcheck.
+It performs no command, process, service, or durable-state mutation.  Anchor
+validation does read one code-owned fixed current-witness file so an old, otherwise
+valid anchor cannot be replayed after the independently attested external floor moves.
 """
 
 from __future__ import annotations
 
 import copy
 import hmac
+import json
 import os
 import re
 import stat
@@ -45,6 +47,12 @@ RECOVERY_ANCHOR_SIGNER_IDENTITY = "aiml-s2-5-recovery-anchor-owner-v1"
 RECOVERY_ANCHOR_SIGNATURE_NAMESPACE = (
     "arcane-equilibrium-aiml-s2-5-recovery-anchor"
 )
+RECOVERY_ANCHOR_READBACK_SIGNER_IDENTITY = (
+    "aiml-s2-5-recovery-anchor-readback-verifier-v1"
+)
+RECOVERY_ANCHOR_READBACK_SIGNATURE_NAMESPACE = (
+    "arcane-equilibrium-aiml-s2-5-recovery-anchor-readback"
+)
 RECOVERY_CONSUMPTION_SIGNER_IDENTITY = (
     "aiml-s2-5-recovery-consumption-ledger-v1"
 )
@@ -77,6 +85,17 @@ RECOVERY_ANCHOR_TRUST_ROOT_PUBLIC_KEY_PATH = Path(
 RECOVERY_ANCHOR_TRUST_ROOT_FINGERPRINT = (
     "SHA256:RUYp2kjHqzfmMSWnHFOlxBBj7vS9ws+OPAeJNKTUeLA"
 )
+RECOVERY_ANCHOR_READBACK_TRUST_ROOT_PUBLIC_KEY_PATH = Path(
+    "/etc/arcane-equilibrium/trust/s2-5-recovery-anchor-readback.pub"
+)
+RECOVERY_ANCHOR_READBACK_TRUST_ROOT_FINGERPRINT = (
+    "SHA256:f4cGt6LzU8quxQUmrfd6wg9Xx+hBPrWcCXhbZ+mTguI"
+)
+RECOVERY_ANCHOR_CURRENT_READBACK_PATH = Path(
+    "/var/lib/arcane-equilibrium/trusted-readbacks/"
+    "s2-5-recovery-anchor-current.json"
+)
+RECOVERY_ANCHOR_EXTERNAL_STORE_ID = "s2-5-recovery-anchor-worm-v1"
 RECOVERY_CONSUMPTION_TRUST_ROOT_PUBLIC_KEY_PATH = Path(
     "/etc/arcane-equilibrium/trust/s2-5-recovery-consumption.pub"
 )
@@ -141,9 +160,24 @@ _ANCHOR_SIGNED_BINDING_KEYS = frozenset({
     "append_actor_identity", "readback_verifier_identity", "evidence_class",
 })
 _ANCHOR_READBACK_KEYS = frozenset({
-    "schema_version", "snapshot_version", "monotonic_floor", "latest_version",
+    "schema_version", "store_id", "anchor_scope_id", "snapshot_id",
+    "snapshot_version", "monotonic_floor", "monotonic_floor_durable",
+    "latest_version", "latest_object_id", "latest_version_id",
     "latest_append_head_digest", "latest_append_entry_digest", "immutable",
-    "observed_at", "expires_at",
+    "retention_mode", "full_chain_valid", "delete_denied", "evidence_class",
+    "observed_at", "expires_at", "side_effect_class", "target_class",
+    "production_effect", "production_authority", "signer_identity",
+    "signer_fingerprint", "signature_namespace", "signed_binding",
+    "sshsig_armored", "readback_digest",
+})
+_ANCHOR_READBACK_SIGNED_BINDING_KEYS = frozenset({
+    "schema_version", "store_id", "anchor_scope_id", "snapshot_id",
+    "snapshot_version", "monotonic_floor", "monotonic_floor_durable",
+    "latest_version", "latest_object_id", "latest_version_id",
+    "latest_append_head_digest", "latest_append_entry_digest", "immutable",
+    "retention_mode", "full_chain_valid", "delete_denied", "evidence_class",
+    "observed_at", "expires_at", "side_effect_class", "target_class",
+    "production_effect", "production_authority",
 })
 _AUTH_BINDING_KEYS = frozenset({
     "action", "task_digest", "unresolved_state_digest", "state_root_identity",
@@ -265,6 +299,48 @@ def _read_fixed_recovery_public_key(path: Path) -> str:
     return " ".join(parts[:2])
 
 
+def _read_fixed_recovery_current_readback(path: Path) -> dict[str, Any]:
+    """Read one immutable current-witness file without following links."""
+
+    flags = os.O_RDONLY | getattr(os, "O_CLOEXEC", 0) | getattr(os, "O_NOFOLLOW", 0)
+    descriptor = os.open(path, flags)
+    try:
+        metadata = os.fstat(descriptor)
+        if not stat.S_ISREG(metadata.st_mode):
+            raise ValueError("recovery anchor current readback is not a regular file")
+        if metadata.st_nlink != 1:
+            raise ValueError(
+                "recovery anchor current readback must have exactly one hard link"
+            )
+        if metadata.st_uid not in {0, os.geteuid()}:
+            raise ValueError("recovery anchor current readback owner is not trusted")
+        if stat.S_IMODE(metadata.st_mode) & 0o222:
+            raise ValueError(
+                "recovery anchor current readback file must be immutable to writers"
+            )
+        if metadata.st_size < 2 or metadata.st_size > 65536:
+            raise ValueError("recovery anchor current readback size is invalid")
+        chunks: list[bytes] = []
+        remaining = metadata.st_size
+        while remaining:
+            chunk = os.read(descriptor, remaining)
+            if not chunk:
+                raise ValueError("recovery anchor current readback was truncated")
+            chunks.append(chunk)
+            remaining -= len(chunk)
+        if os.read(descriptor, 1):
+            raise ValueError("recovery anchor current readback grew during observation")
+    finally:
+        os.close(descriptor)
+    try:
+        value = json.loads(b"".join(chunks).decode("utf-8"))
+    except (UnicodeDecodeError, ValueError) as error:
+        raise ValueError("recovery anchor current readback is not canonical JSON") from error
+    if not isinstance(value, dict):
+        raise ValueError("recovery anchor current readback must be an object")
+    return value
+
+
 def _load_recovery_authorization_trust_root_public_key() -> str:
     return _read_fixed_recovery_public_key(
         RECOVERY_AUTHORIZATION_TRUST_ROOT_PUBLIC_KEY_PATH
@@ -274,6 +350,20 @@ def _load_recovery_authorization_trust_root_public_key() -> str:
 def _load_recovery_anchor_trust_root_public_key() -> str:
     return _read_fixed_recovery_public_key(
         RECOVERY_ANCHOR_TRUST_ROOT_PUBLIC_KEY_PATH
+    )
+
+
+def _load_recovery_anchor_readback_trust_root_public_key() -> str:
+    return _read_fixed_recovery_public_key(
+        RECOVERY_ANCHOR_READBACK_TRUST_ROOT_PUBLIC_KEY_PATH
+    )
+
+
+def _load_recovery_anchor_current_readback() -> dict[str, Any]:
+    """Load the sole code-owned current external floor witness."""
+
+    return _read_fixed_recovery_current_readback(
+        RECOVERY_ANCHOR_CURRENT_READBACK_PATH
     )
 
 
@@ -301,6 +391,131 @@ def recovery_anchor_signed_bytes(anchor: dict[str, Any]) -> bytes:
     return _canonical_bytes(anchor["signed_binding"])
 
 
+def recovery_anchor_readback_signed_bytes(readback: dict[str, Any]) -> bytes:
+    """Canonical external latest/floor witness authenticated by its own key."""
+
+    return _canonical_bytes(readback["signed_binding"])
+
+
+def _anchor_readback_errors(readback: Any, *, now: Any) -> list[str]:
+    errors = _exact(
+        readback,
+        _ANCHOR_READBACK_KEYS,
+        "trusted anchor external readback",
+    )
+    if not isinstance(readback, dict):
+        return errors
+    errors.extend(_exact(
+        readback.get("signed_binding"),
+        _ANCHOR_READBACK_SIGNED_BINDING_KEYS,
+        "trusted anchor external readback signed_binding",
+    ))
+    errors.extend(_sealed(
+        readback,
+        "readback_digest",
+        "trusted anchor external readback",
+    ))
+    signed = readback.get("signed_binding")
+    if isinstance(signed, dict) and signed != {
+        key: readback.get(key)
+        for key in _ANCHOR_READBACK_SIGNED_BINDING_KEYS
+    }:
+        errors.append(
+            "trusted anchor external readback signed_binding differs from "
+            "the exact readback"
+        )
+    if (
+        readback.get("schema_version")
+        != "s2_5_recovery_anchor_external_readback_v2"
+    ):
+        errors.append("trusted anchor external readback schema is invalid")
+    if readback.get("store_id") != RECOVERY_ANCHOR_EXTERNAL_STORE_ID:
+        errors.append("trusted anchor external readback store is invalid")
+    for field in (
+        "anchor_scope_id",
+        "snapshot_id",
+        "latest_object_id",
+        "latest_version_id",
+    ):
+        if not isinstance(readback.get(field), str) or not readback[field]:
+            errors.append(
+                f"trusted anchor external readback {field} is invalid"
+            )
+    versions = (
+        readback.get("snapshot_version"),
+        readback.get("monotonic_floor"),
+        readback.get("latest_version"),
+    )
+    if any(
+        not isinstance(value, int) or isinstance(value, bool) or value < 1
+        for value in versions
+    ):
+        errors.append("trusted anchor external readback versions are invalid")
+    else:
+        snapshot, floor, latest = versions
+        if latest != snapshot:
+            errors.append("trusted anchor snapshot is not the latest version")
+        if floor != latest:
+            errors.append(
+                "trusted anchor latest version does not equal the durable "
+                "monotonic floor"
+            )
+    expected_constants = {
+        "monotonic_floor_durable": True,
+        "immutable": True,
+        "retention_mode": "COMPLIANCE_WORM",
+        "full_chain_valid": True,
+        "delete_denied": True,
+        "evidence_class": "PLATFORM_OR_EXTERNAL_ATTESTED",
+        "side_effect_class": "DISPOSABLE_TEST",
+        "target_class": "disposable_systemd",
+        "production_effect": False,
+        "production_authority": False,
+    }
+    for field, expected in expected_constants.items():
+        if type(readback.get(field)) is not type(expected) or (
+            readback.get(field) != expected
+        ):
+            if field == "immutable":
+                errors.append("trusted anchor external readback is not immutable")
+            else:
+                errors.append(
+                    f"trusted anchor external readback {field} is not {expected!r}"
+                )
+    errors.extend(_fresh_window_errors(
+        readback,
+        now=now,
+        label="trusted anchor external readback",
+        issued_key="observed_at",
+        expires_key="expires_at",
+    ))
+    if (
+        readback.get("signer_identity")
+        != RECOVERY_ANCHOR_READBACK_SIGNER_IDENTITY
+    ):
+        errors.append(
+            "trusted anchor external readback signer identity is invalid"
+        )
+    if (
+        readback.get("signature_namespace")
+        != RECOVERY_ANCHOR_READBACK_SIGNATURE_NAMESPACE
+    ):
+        errors.append("trusted anchor external readback SSHSIG namespace is invalid")
+    try:
+        signed_bytes = recovery_anchor_readback_signed_bytes(readback)
+    except (KeyError, TypeError, ValueError):
+        signed_bytes = b""
+    errors.extend(_fixed_root_signature_errors(
+        signer_fingerprint=readback.get("signer_fingerprint"),
+        signed_bytes=signed_bytes,
+        signature=readback.get("sshsig_armored"),
+        identity=RECOVERY_ANCHOR_READBACK_SIGNER_IDENTITY,
+        namespace=RECOVERY_ANCHOR_READBACK_SIGNATURE_NAMESPACE,
+        label="trusted anchor external readback",
+    ))
+    return errors
+
+
 def _anchor_errors(
     anchor: Any,
     root: Any,
@@ -317,11 +532,21 @@ def _anchor_errors(
         "trusted_anchor signed_binding",
     ))
     readback = anchor.get("external_readback")
-    errors.extend(_exact(
-        readback,
-        _ANCHOR_READBACK_KEYS,
-        "trusted_anchor external_readback",
-    ))
+    errors.extend(_anchor_readback_errors(readback, now=now))
+    try:
+        current_readback = _load_recovery_anchor_current_readback()
+    except (OSError, ValueError) as error:
+        errors.append(
+            "trusted anchor code-owned current external readback is unavailable "
+            f"or invalid: {error}"
+        )
+    else:
+        errors.extend(_anchor_readback_errors(current_readback, now=now))
+        if current_readback != readback:
+            errors.append(
+                "trusted anchor does not carry the code-owned current external "
+                "readback; durable monotonic floor or immutable history differs"
+            )
     errors.extend(_sealed(anchor, "reference_digest", "trusted_anchor"))
     signed = anchor.get("signed_binding")
     if not isinstance(signed, dict):
@@ -367,21 +592,11 @@ def _anchor_errors(
         issued_key="issued_at",
         expires_key="expires_at",
     ))
-    errors.extend(_fresh_window_errors(
-        readback,
-        now=now,
-        label="trusted anchor external readback",
-        issued_key="observed_at",
-        expires_key="expires_at",
-    ))
     if isinstance(readback, dict):
-        if (
-            readback.get("schema_version")
-            != "s2_5_recovery_anchor_external_readback_v1"
-        ):
-            errors.append("trusted anchor external readback schema is invalid")
-        if readback.get("immutable") is not True:
-            errors.append("trusted anchor external readback is not immutable")
+        if readback.get("anchor_scope_id") != anchor.get("anchor_scope_id"):
+            errors.append(
+                "trusted anchor external readback scope differs from the anchor"
+            )
         if readback.get("observed_at") != anchor.get("issued_at"):
             errors.append("trusted anchor/readback observation times differ")
         if readback.get("expires_at") != anchor.get("expires_at"):
@@ -401,28 +616,10 @@ def _anchor_errors(
     if anchor.get("append_head_digest") != expected_head:
         errors.append("trusted anchor append-only head does not re-derive")
     if isinstance(readback, dict):
-        versions = (
-            readback.get("snapshot_version"),
-            readback.get("monotonic_floor"),
-            readback.get("latest_version"),
-        )
-        if any(
-            not isinstance(value, int) or isinstance(value, bool) or value < 1
-            for value in versions
-        ):
-            errors.append("trusted anchor external readback versions are invalid")
-        else:
-            snapshot, floor, latest = versions
-            if snapshot != sequence:
-                errors.append(
-                    "trusted anchor snapshot version differs from external sequence"
-                )
-            if latest != snapshot:
-                errors.append("trusted anchor snapshot is not the latest version")
-            if floor != snapshot:
-                errors.append(
-                    "trusted anchor snapshot does not equal the monotonic floor"
-                )
+        if readback.get("snapshot_version") != sequence:
+            errors.append(
+                "trusted anchor snapshot version differs from external sequence"
+            )
         if (
             readback.get("latest_append_head_digest")
             != anchor.get("append_head_digest")
@@ -441,6 +638,13 @@ def _anchor_errors(
         errors.append("trusted anchor immutable readback differs from appended entry")
     if anchor.get("append_actor_identity") == anchor.get("readback_verifier_identity"):
         errors.append("trusted anchor append and readback identities must differ")
+    if (
+        anchor.get("readback_verifier_identity")
+        != RECOVERY_ANCHOR_READBACK_SIGNER_IDENTITY
+    ):
+        errors.append(
+            "trusted anchor readback verifier is not the fixed external verifier"
+        )
     if anchor.get("evidence_class") not in {
         "LOCAL_REPRODUCIBLE", "PLATFORM_OR_EXTERNAL_ATTESTED"
     }:
@@ -559,6 +763,10 @@ def _fixed_root_signature_errors(
         RECOVERY_ANCHOR_SIGNER_IDENTITY: (
             _load_recovery_anchor_trust_root_public_key,
             RECOVERY_ANCHOR_TRUST_ROOT_FINGERPRINT,
+        ),
+        RECOVERY_ANCHOR_READBACK_SIGNER_IDENTITY: (
+            _load_recovery_anchor_readback_trust_root_public_key,
+            RECOVERY_ANCHOR_READBACK_TRUST_ROOT_FINGERPRINT,
         ),
         RECOVERY_CONSUMPTION_SIGNER_IDENTITY: (
             _load_recovery_consumption_trust_root_public_key,

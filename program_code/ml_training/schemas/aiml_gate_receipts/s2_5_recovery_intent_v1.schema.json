@@ -141,22 +141,92 @@
     "anchor_external_readback": {
       "type": "object", "additionalProperties": false,
       "required": [
-        "schema_version", "snapshot_version", "monotonic_floor",
-        "latest_version", "latest_append_head_digest",
-        "latest_append_entry_digest", "immutable", "observed_at", "expires_at"
+        "schema_version", "store_id", "anchor_scope_id", "snapshot_id",
+        "snapshot_version", "monotonic_floor", "monotonic_floor_durable",
+        "latest_version", "latest_object_id", "latest_version_id",
+        "latest_append_head_digest", "latest_append_entry_digest", "immutable",
+        "retention_mode", "full_chain_valid", "delete_denied", "evidence_class",
+        "observed_at", "expires_at", "side_effect_class", "target_class",
+        "production_effect", "production_authority", "signer_identity",
+        "signer_fingerprint", "signature_namespace", "signed_binding",
+        "sshsig_armored", "readback_digest"
       ],
       "properties": {
         "schema_version": {
-          "const": "s2_5_recovery_anchor_external_readback_v1"
+          "const": "s2_5_recovery_anchor_external_readback_v2"
         },
+        "store_id": {"const": "s2-5-recovery-anchor-worm-v1"},
+        "anchor_scope_id": {"type": "string", "minLength": 1},
+        "snapshot_id": {"type": "string", "minLength": 1},
         "snapshot_version": {"type": "integer", "minimum": 1},
         "monotonic_floor": {"type": "integer", "minimum": 1},
+        "monotonic_floor_durable": {"const": true},
         "latest_version": {"type": "integer", "minimum": 1},
+        "latest_object_id": {"type": "string", "minLength": 1},
+        "latest_version_id": {"type": "string", "minLength": 1},
         "latest_append_head_digest": {"$ref": "#/$defs/digest"},
         "latest_append_entry_digest": {"$ref": "#/$defs/digest"},
         "immutable": {"const": true},
+        "retention_mode": {"const": "COMPLIANCE_WORM"},
+        "full_chain_valid": {"const": true},
+        "delete_denied": {"const": true},
+        "evidence_class": {"const": "PLATFORM_OR_EXTERNAL_ATTESTED"},
         "observed_at": {"$ref": "#/$defs/timestamp"},
-        "expires_at": {"$ref": "#/$defs/timestamp"}
+        "expires_at": {"$ref": "#/$defs/timestamp"},
+        "side_effect_class": {"const": "DISPOSABLE_TEST"},
+        "target_class": {"const": "disposable_systemd"},
+        "production_effect": {"const": false},
+        "production_authority": {"const": false},
+        "signer_identity": {
+          "const": "aiml-s2-5-recovery-anchor-readback-verifier-v1"
+        },
+        "signer_fingerprint": {
+          "type": "string", "pattern": "^SHA256:[A-Za-z0-9+/]{43}$"
+        },
+        "signature_namespace": {
+          "const": "arcane-equilibrium-aiml-s2-5-recovery-anchor-readback"
+        },
+        "signed_binding": {
+          "type": "object", "additionalProperties": false,
+          "required": [
+            "schema_version", "store_id", "anchor_scope_id", "snapshot_id",
+            "snapshot_version", "monotonic_floor", "monotonic_floor_durable",
+            "latest_version", "latest_object_id", "latest_version_id",
+            "latest_append_head_digest", "latest_append_entry_digest", "immutable",
+            "retention_mode", "full_chain_valid", "delete_denied", "evidence_class",
+            "observed_at", "expires_at", "side_effect_class", "target_class",
+            "production_effect", "production_authority"
+          ],
+          "properties": {
+            "schema_version": {
+              "const": "s2_5_recovery_anchor_external_readback_v2"
+            },
+            "store_id": {"const": "s2-5-recovery-anchor-worm-v1"},
+            "anchor_scope_id": {"type": "string", "minLength": 1},
+            "snapshot_id": {"type": "string", "minLength": 1},
+            "snapshot_version": {"type": "integer", "minimum": 1},
+            "monotonic_floor": {"type": "integer", "minimum": 1},
+            "monotonic_floor_durable": {"const": true},
+            "latest_version": {"type": "integer", "minimum": 1},
+            "latest_object_id": {"type": "string", "minLength": 1},
+            "latest_version_id": {"type": "string", "minLength": 1},
+            "latest_append_head_digest": {"$ref": "#/$defs/digest"},
+            "latest_append_entry_digest": {"$ref": "#/$defs/digest"},
+            "immutable": {"const": true},
+            "retention_mode": {"const": "COMPLIANCE_WORM"},
+            "full_chain_valid": {"const": true},
+            "delete_denied": {"const": true},
+            "evidence_class": {"const": "PLATFORM_OR_EXTERNAL_ATTESTED"},
+            "observed_at": {"$ref": "#/$defs/timestamp"},
+            "expires_at": {"$ref": "#/$defs/timestamp"},
+            "side_effect_class": {"const": "DISPOSABLE_TEST"},
+            "target_class": {"const": "disposable_systemd"},
+            "production_effect": {"const": false},
+            "production_authority": {"const": false}
+          }
+        },
+        "sshsig_armored": {"type": "string", "minLength": 1},
+        "readback_digest": {"$ref": "#/$defs/digest"}
       }
     },
     "trusted_anchor": {
