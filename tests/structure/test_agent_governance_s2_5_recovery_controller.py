@@ -896,7 +896,7 @@ class _ControllerAnchorWriter:
         self.response: dict | None = None
 
     def compare_append_controller(self, *, request: dict) -> dict:
-        assert self.clock.calls == 2
+        assert self.clock.calls == 3
         self.requests.append(copy.deepcopy(request))
         checksum = self.outbox["prepared_payload_digest"]
         head_digest = anchor_v2.derive_controller_anchor_head(
@@ -1042,7 +1042,7 @@ def test_controller_anchor_dispatches_only_the_exact_persisted_request(
     chain = adapter.execute_fixed_profile(source_head=HEAD)
 
     assert writer.requests == [json.loads(outbox["prepared_payload_json"])]
-    assert clock.calls == 2
+    assert clock.calls == 3
     assert observation.calls == 2
     assert chain["intent"]["manifest_discriminator_digest"] == (
         observation.discriminator_digest

@@ -83,3 +83,68 @@ def test_controller_anchor_root_replacement_at_dispatch_never_appends(
     assert chain["failure_code"] == "anchor_effect_state_root_replaced"
     assert chain["session_lock"]["rollback"]["status"] == "RELEASED"
     assert anchor_v2.validate_effect_chain(chain) == []
+
+
+def test_controller_anchor_rechecks_time_after_blocking_integrity_validation(
+    monkeypatch,
+):
+    _transition, _outbox, _state, manifest = cases._genesis()
+    clock = cases._AdvancingControllerAnchorClock(
+        "2030-01-01T00:25:00+00:00",
+        "2030-01-01T00:25:59+00:00",
+        "2030-01-01T00:26:01+00:00",
+    )
+    observation = cases._FixedManifestObservation(manifest)
+    session = FixedManifestEffectSession(
+        source_head=cases.HEAD,
+        observation=observation,
+    )
+    writer = cases._NeverCalledControllerAnchorWriter()
+    monkeypatch.setattr(anchor_v2, "_trusted_now", clock.now)
+    monkeypatch.setattr(
+        anchor_v2, "_fixed_manifest_observation", observation
+    )
+    monkeypatch.setattr(
+        anchor_v2,
+        "_open_fixed_effect_session",
+        lambda *, source_head: session,
+    )
+    adapter = anchor_v2.ControllerAnchorEffectAdapter(
+        writer=writer,
+        reader=cases._UnusedControllerAnchorReader(),
+        verifier=cases._UnusedControllerAnchorVerifier(),
+    )
+
+    chain = adapter.execute_fixed_profile(source_head=cases.HEAD)
+
+    assert writer.requests == []
+    assert clock.calls == 3
+    assert chain["status"] == "PRECHECK_REJECTED"
+    assert chain["failure_code"] == "pending_transition_expired"
+    assert chain["intent"]["checked_at"] == "2030-01-01T00:26:01+00:00"
+    assert chain["session_lock"]["rollback"]["status"] == "RELEASED"
+    assert anchor_v2.validate_effect_chain(chain) == []
+
+
+def test_final_controller_freshness_predicates_do_not_reverify_integrity(
+    monkeypatch,
+):
+    _transition, _outbox, state, _manifest = cases._genesis()
+
+    def forbidden_integrity_recheck(_artifact):
+        raise AssertionError("final freshness predicate performed integrity I/O")
+
+    monkeypatch.setattr(
+        cases.controller,
+        "validate_controller_artifact",
+        forbidden_integrity_recheck,
+    )
+
+    assert cases.controller.validate_controller_admission_freshness_only(
+        state,
+        trusted_now=cases.TRUSTED_NOW,
+    ) == []
+    assert cases.controller.validate_pending_transition_freshness_only(
+        state,
+        trusted_now=cases.TRUSTED_NOW,
+    ) == []

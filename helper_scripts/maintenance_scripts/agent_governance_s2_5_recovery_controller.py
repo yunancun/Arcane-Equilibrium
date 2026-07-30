@@ -1199,11 +1199,29 @@ def validate_fresh_controller_admission(
     errors = validate_controller_artifact(state)
     if errors:
         return errors
+    errors.extend(
+        validate_controller_admission_freshness_only(
+            state, trusted_now=trusted_now
+        )
+    )
+    return errors
+
+
+def validate_controller_admission_freshness_only(
+    state: Any, *, trusted_now: Any
+) -> list[str]:
+    """Check admission time only after exact-state integrity already passed.
+
+    This predicate performs no signature verification, filesystem access, or
+    subprocess work.  Callers must first validate the exact controller state.
+    """
+
+    errors: list[str] = []
     if not isinstance(state, dict):
-        return errors
+        return ["recovery admission state is not an object"]
     subject = state.get("candidate_subject")
     if not isinstance(subject, dict):
-        return errors
+        return ["recovery admission candidate is not an object"]
     if subject.get("anchor_progress") != "OUTBOX_PREPARED":
         return errors
     admission, parse_errors = _parse_canonical_object(
@@ -1212,12 +1230,29 @@ def validate_fresh_controller_admission(
     )
     errors.extend(parse_errors)
     if admission:
-        errors.extend(
-            f"fresh recovery admission: {error}"
-            for error in host_capture.validate_s2_5_recovery_host_capture(
-                admission, now=trusted_now
-            )
+        observed, observed_errors = _aware_time(
+            admission.get("observed_at"),
+            label="recovery admission observed_at",
         )
+        expires, expiry_errors = _aware_time(
+            admission.get("expires_at"),
+            label="recovery admission expires_at",
+        )
+        now, now_errors = _aware_time(
+            trusted_now,
+            label="recovery admission trusted_now",
+        )
+        errors.extend(observed_errors)
+        errors.extend(expiry_errors)
+        errors.extend(now_errors)
+        if observed is not None and now is not None and now < observed:
+            errors.append(
+                "fresh recovery admission: host capture observed_at is in the future"
+            )
+        if expires is not None and now is not None and now >= expires:
+            errors.append(
+                "fresh recovery admission: host capture is stale"
+            )
     return errors
 
 
@@ -1227,8 +1262,24 @@ def validate_fresh_pending_transition(
     """Validate current freshness only for an undispatched pending outbox."""
 
     errors = validate_controller_artifact(state)
-    if errors or not isinstance(state, dict):
+    if errors:
         return errors
+    errors.extend(
+        validate_pending_transition_freshness_only(
+            state, trusted_now=trusted_now
+        )
+    )
+    return errors
+
+
+def validate_pending_transition_freshness_only(
+    state: Any, *, trusted_now: Any
+) -> list[str]:
+    """Check pending-transition time only after exact-state integrity passed."""
+
+    errors: list[str] = []
+    if not isinstance(state, dict):
+        return ["pending transition state is not an object"]
     subject = state.get("candidate_subject")
     if not isinstance(subject, dict) or subject.get(
         "anchor_progress"

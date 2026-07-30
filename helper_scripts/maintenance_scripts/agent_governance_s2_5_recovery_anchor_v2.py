@@ -1243,6 +1243,37 @@ class ControllerAnchorEffectAdapter:
                             session_lock=session.lock_outcome,
                         )
                     else:
+                        moment = self._now()
+                        intent = self._intent(
+                            state,
+                            outbox,
+                            request,
+                            manifest_discriminator_digest,
+                            moment,
+                        )
+                        admission_errors = (
+                            controller
+                            .validate_controller_admission_freshness_only(
+                                state, trusted_now=moment
+                            )
+                        )
+                        transition_errors = (
+                            controller
+                            .validate_pending_transition_freshness_only(
+                                state, trusted_now=moment
+                            )
+                        )
+                        if admission_errors or transition_errors:
+                            chain = self._precheck_rejection(
+                                state,
+                                intent,
+                                code=_failure_code(
+                                    admission_errors, transition_errors
+                                ),
+                                moment=moment,
+                                session_lock=session.lock_outcome,
+                            )
+                    if chain is None:
                         try:
                             chain = self._execute_fresh(
                                 state,
