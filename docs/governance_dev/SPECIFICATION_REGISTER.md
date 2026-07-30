@@ -1,7 +1,7 @@
 # Governance Specification Register / 治理規範註冊表
 
 **Project:** 玄衡 · Arcane Equilibrium
-**Last Updated:** 2026-07-11 (AMD-2026-07-11-01 IBKR full live-capability development / explicit activation separation)
+**Last Updated:** 2026-07-30 (ADR-0052 GPT-5.6 bounded multi-agent execution)
 **Maintained By:** R4 (Document Auditor) · TW catch-up（2026-04-29）· FA Sign-off path A（2026-05-02 AMD-2026-05-02-01）
 
 ---
@@ -251,9 +251,9 @@ does not authorize IBKR contact by itself.
 | ARCH-05 | Alpha Tournament SSOT | docs/execution_plan/2026-05-26--alpha_tournament_ssot_spec.md | ✅ Active / IMPL-PENDING | Sprint 2 profit-spine SSOT. Fills v5.8 implicit Alpha Tournament slot with required read order, candidate pool, fee-adjusted scoring, minimum evidence gates, Stage output lanes, role chain, and cross-document pointers. Does not grant trading authority or relax Stage/5-gate constraints. **狀態拆分（P1-16）**：source scaffold = done（`alpha_tournament/` package）；active = false（orchestrator 仍 stub）；Stage 0R evidence = pending；M11 Stage-A smoke cron = installed（liveness-only）；M11 Stage-B divergence output = pending（`replay_divergence_log=0`）。scaffold 落地非「mostly done」，Stage-A smoke 非 promotion/divergence evidence。 |
 | ARCH-06 | Alpha-Edge Regime Evidence Governance | docs/adr/0047-alpha-edge-regime-evidence-governance.md<br>docs/governance_dev/amendments/2026-05-31--AMD-2026-05-31-01-alpha-edge-evidence-governance.md | ✅ Active | Math-primary evidence governance for Alpha-Edge S1-Sx. Bull data is allowed but must be labeled; S4 is a global regime/falsification overlay; Bybit market endpoints are raw state inputs, not prediction; future news/X/Reddit agents are secondary context only. |
 
-### Architecture Decision Records (ADR-0034 ~ ADR-0051)
+### Architecture Decision Records (ADR-0034 ~ ADR-0052)
 
-> v5.8 13-module thesis Sprint 1A 系列 ADR：M1 LAL 起步 / M5/M12/M13 Y3+ trait stub / M8+M10 安全機制 / M9 A/B / M11 counterfactual replay / ContextDistiller v4 / M3/M6/M7 health+reward+decay / M4 hypothesis discovery / funding_arb V3 redesign slot；ADR-0047 追加 Alpha-Edge evidence governance；ADR-0048 追加 IBKR Stock/ETF paper+shadow lane；ADR-0049 追加 scanner-driven ALR shadow；ADR-0050 收斂 development-agent governance；ADR-0051 已接受為 registry-authorized advisory serving source-policy authority，S0.3 必須消費 exact S0.2 receipt 而非由 policy status 推論 adoption。
+> v5.8 13-module thesis Sprint 1A 系列 ADR：M1 LAL 起步 / M5/M12/M13 Y3+ trait stub / M8+M10 安全機制 / M9 A/B / M11 counterfactual replay / ContextDistiller v4 / M3/M6/M7 health+reward+decay / M4 hypothesis discovery / funding_arb V3 redesign slot；ADR-0047 追加 Alpha-Edge evidence governance；ADR-0048 追加 IBKR Stock/ETF paper+shadow lane；ADR-0049 追加 scanner-driven ALR shadow；ADR-0050 收斂 development-agent governance；ADR-0051 已接受為 registry-authorized advisory serving source-policy authority，S0.3 必須消費 exact S0.2 receipt 而非由 policy status 推論 adoption；ADR-0052 在同一 development-agent Module 中加入 GPT-5.6 bounded execution/context/model/memory amendment。
 >
 > **註**：ADR-0001 ~ ADR-0033 直接索引於 `docs/adr/`（檔名即 ID），不在本 register 重複登錄；本表僅追蹤 ADR-0034+（v5.8 系列）。完整 ADR 清單見 `docs/adr/` 目錄與 `docs/README.md` 索引。
 
@@ -279,6 +279,7 @@ does not authorize IBKR contact by itself.
 | ADR-0049 | Scanner-Driven ALR Operational Shadow | docs/adr/0049-scanner-driven-alr-operational-shadow.md | ✅ Active | P2 local shadow loop consumes existing Rust scanner snapshots as evidence-only read input. Requires canonical cycle hash/watermark, append-only ALR-owned provenance, challenger-only training/evaluation, safe derived-cache retention, and a fresh E3/BB gate before migration/service/runtime actions. ALR/trainer/controller/challenger retain no trading, serving, promotion, Cost Gate, Decision Lease, or scanner authority; the accepted ADR-0051 narrow independent-consumer interpretation does not relax these denials. |
 | ADR-0050 | Development-Agent Governance Module | docs/adr/0050-development-agent-governance.md | ✅ Accepted | One deep Registry/Context/Dispatch/Closure module, generated capability presets, hybrid risk-DAG, lossless role fragments, route-bound closure, elastic context budgets, content-addressed evidence, OPS/IB seams, and explicit consumption/coverage debt. No trading/runtime/order authority is granted. |
 | ADR-0051 | Registry-Authorized Advisory Model Serving | docs/adr/0051-registry-authorized-advisory-model-serving.md | ✅ Accepted — S0.2 source-policy authority; no runtime/adoption effect | Defines the future single hash-bound Rust `IntentProcessor + EdgePredictorStore` consumer, monotone `NO_OP/VETO/SIZE_DOWN`, exact scope/qualification/CAS/ACK, retraining separation and fail-closed rollback. ADR-0049 and historical AMD actor/direct-trading denials remain current. The immutable S0.3 dependency is the exact S0.2 receipt; S0.3 must consume it rather than infer adoption from policy status. No ML5/ML6 implementation, runtime, broker/order or program-adoption authority is granted. |
+| ADR-0052 | GPT-5.6 Bounded Multi-Agent Execution | docs/adr/0052-gpt56-bounded-multi-agent-execution.md | ✅ Accepted | ADR-0050 amendment: exact execution-event/history/model/surface binding, post-DAG envelopes, bounded scheduler, adaptive/full quality gate, OPS dedup, reversible hot-memory policy and quality-first A/B evaluation. Provider token cap and host cancellation remain explicit `EXTERNAL_LIMIT`; no runtime/trading authority is granted. |
 
 ### v5.8 13-Module Thesis (M1 ~ M13)
 

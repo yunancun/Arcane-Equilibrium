@@ -155,8 +155,9 @@ def test_ghost_wave_cannot_be_omitted_from_accounting_or_dispatch() -> None:
                 "logical_role": "E2", "native_agent": "E2",
                 "node_class": "verification", "permission": "read_only",
             },
-            "model": None,
-            "effort": None, "isolation": None,
+            **governance.requested_execution_binding(governance.load_registry()),
+            "model": governance.load_registry()["saved_workflow_model_policy"]["model"],
+            "effort": governance.load_registry()["saved_workflow_model_policy"]["role_efforts"]["E2"], "isolation": None,
             "node_class": "verification", "permission": "read_only",
         },
         prompt_digest=support._canonical_digest("ghost"),
@@ -198,14 +199,7 @@ def test_ghost_wave_cannot_be_omitted_from_accounting_or_dispatch() -> None:
         budget_authority={
             "authority_digest": artifact["budget_authority_digest"],
             "authority_canonical": artifact["budget_authority_canonical"],
-            "admitted_caps": {
-                field: budget_value[field] for field in (
-                    "max_context_tokens_per_call",
-                    "max_prompt_utf8_bytes_per_call",
-                    "max_workflow_planned_input_tokens",
-                    "max_unique_nodes", "max_call_attempts", "retry_budget",
-                )
-            },
+            "admitted_caps": governance.execution_admitted_caps(budget_value),
         },
         result_fragment_digests={"ghost-review": support._canonical_digest(judgment)},
     )
@@ -253,8 +247,9 @@ def test_high_cost_standalone_call_cannot_bypass_manifest_wave_accounting() -> N
                 "logical_role": "E2", "native_agent": "E2",
                 "node_class": "verification", "permission": "read_only",
             },
-            "model": None,
-            "effort": None, "isolation": None,
+            **governance.requested_execution_binding(governance.load_registry()),
+            "model": governance.load_registry()["saved_workflow_model_policy"]["model"],
+            "effort": governance.load_registry()["saved_workflow_model_policy"]["role_efforts"]["E2"], "isolation": None,
             "node_class": "verification", "permission": "read_only",
         },
         prompt_digest=support._canonical_digest("orphan review"),

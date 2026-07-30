@@ -32,19 +32,16 @@ runtime/live claim without fresh runtime identity cannot PASS.
 
 ## Scheduler modes
 
-- `adaptive_shadow` (default): execute the full requested backstop while also
-  calculating the scope-selected adaptive subset. This measures recall without
-  paying a second discovery wave.
-- `full`: execute every requested axis.
-- `adaptive`: execute the selected subset + rotating negative-space axis; allowed
-  only with `adaptive_recall_approved=true` plus a hash-pinned
-  `adaptive_recall_authority_digest` after the benchmark below. Mandatory axes
-  come from the canonical Dispatch role projection, then add CC/FA and one
-  rotating negative-space axis. Full Audit does not maintain a second
-  surface-to-role table. Selection surfaces and run sequence are closure-bound
-  and recomputed; CC/FA-only cannot PASS.
+- `full` is the only currently executable scheduler. It executes all 13
+  canonical discovery axes.
+- `adaptive_shadow`, `adaptive`, and any `full` axes subset are unavailable
+  until a separate `PLATFORM_OR_EXTERNAL_ATTESTED` recall/non-inferiority
+  Adapter and out-of-band host verifier exist. A task claim, boolean,
+  self-digest, `claim_evidence`, or ordinary execution attestation cannot grant
+  this authority. The workflow returns `EXTERNAL_LIMIT_RECALL_AUTHORITY` before
+  its first model call.
 
-Default full axes include CC/FA/E2/E3/BB/IB/OPS/QC/MIT/AI-E/E5/A3/R4. E4
+The full axes are CC/FA/E2/E3/BB/IB/OPS/QC/MIT/AI-E/E5/A3/R4. E4
 regression evidence belongs to the post-integration pipeline outside this
 workflow (claim-0011) and TW is a writer, so neither is a discovery axis.
 IBKR never routes to BB; runtime/deploy evidence gets OPS.
@@ -52,10 +49,15 @@ IBKR never routes to BB; runtime/deploy evidence gets OPS.
 ## Elastic admission envelope
 
 The compiler-produced `context_budget_authority_v1` is required. Its canonical
-bytes and digest supply the exact `max_agents`, `retry_budget`, and
-`max_input_tokens`; caller-local values cannot override them. The current
-Registry `full_audit` authority is 20 agents, 2 total retries, and 96,000 planned
-input tokens.
+bytes and digest supply every execution cap; caller-local values cannot
+override them. The current Registry `full_audit` authority is:
+
+- `max_unique_nodes` = `44`
+- `max_call_attempts` = `46`
+- `max_context_tokens_per_call` = `96000`
+- `max_workflow_planned_input_tokens` = `4416000`
+- `retry_budget` = `2`
+- `max_concurrent_calls` = `3`
 
 Tunable args inside that authority:
 
@@ -69,19 +71,20 @@ Tunable args inside that authority:
 | `estimated_review_tokens` | 4,000 | Independent E2 fix-review reserve |
 | `max_fixes` | 5 | Optional fix-mode source patches |
 | `admission_now_ms` | wall clock | Dispatch-side epoch-ms admission clock; mandatory where the sandbox denies `Date.now()` |
-| `judgment_model` | inherit session model | Explicit strong-judgment override; derive from `settings/ai_pricing.yaml` active entries, `null` = inherit |
 | `stop_when` | decision-value rule | Mandatory coverage closed and next novelty/verdict-reversal value below marginal cost |
 
-If the envelope cannot admit an axis/claim/fix, it becomes explicit
-`coverage_debt`. Deferred or unverified debt makes `pass_eligible=false`; the
-scheduler never truncates it into PASS. Increase the envelope or split scope when
-the debt is decision-critical.
+If the envelope cannot admit all 13 discovery axes, the workflow returns
+`EXTERNAL_LIMIT_RECALL_AUTHORITY` before its first model call. Later
+claim/fix-stage capacity shortfalls become explicit `coverage_debt`; deferred
+or unverified debt makes `pass_eligible=false` and never truncates into PASS.
+Increase the envelope or split scope when the debt is decision-critical.
 
 Call and token accounting reserves every phase: audit axes, one shared total
 retry budget across audit and verification, seam critic, verifier quorum with
-risk-conditioned third votes, and optional E1/E2 fix pairs. The 20/96k authority is a ceiling,
-not a target; unused reserves are not actual usage. If full backstop plus claims
-cannot fit, split scope and preserve coverage debt rather than lowering evidence.
+risk-conditioned third votes, and optional E1/E2 fix pairs. The Registry
+authority is a ceiling, not a target; unused reserves are not actual usage. If
+full backstop plus claims cannot fit, split scope and preserve coverage debt
+rather than lowering evidence.
 
 ## Audit phase
 
@@ -134,8 +137,8 @@ views, coverage holes/debt, assumptions, seam re-probes, fixes (in-run
 regression is retired; result fields stay null), and
 partial or measured consumption. PM must copy controller/admissions/fragments and
 the canonical unverified projection into one `closure_packet_v1`. Closure
-recomputes adaptive selection, eligibility and axis parity; validates canonical
-JSON debt projection, seam result digest, axis fragment digests and hash-pinned
+requires the full scheduler and exact 13-axis parity; validates canonical JSON
+debt projection, seam result digest, axis fragment digests and hash-pinned
 verification outcomes. Omitting an axis/debt or overwriting dissent fails.
 
 ## Recall benchmark before adaptive default
@@ -155,9 +158,10 @@ Required before `adaptive_recall_approved=true`:
 - median token per durable closure and p75 closure lead time improve without
   quality regression
 
-Until proven, `adaptive_shadow` remains the default. After approval, run a full
-backstop at least every 10 adaptive runs or 30 days and rotate the negative-space
-axis.
+This benchmark is a future design input, not current execution authority. Even
+after it is satisfied, reduced scheduling remains disabled until an independent
+platform/external Adapter and out-of-band verifier are implemented and admitted.
+Until then every run uses `full`.
 
 ## Standard invocation
 
@@ -176,7 +180,7 @@ Workflow({
     dirty_scope: ["<sorted-repo-path>"],
     surfaces: ["full_audit", "agent_workflow", "authority", "runtime", "bybit", "ibkr", "ml", "gui", "docs"],
     focus,
-    scheduler: "adaptive_shadow",
+    scheduler: "full",
     task_contract_digest: "sha256:<64-hex>",
     context_artifact_digest: "sha256:<64-hex>",
     route_required_roles: ["CC", "AI-E", "QC", "MIT", "OPS", "BB", "IB"],

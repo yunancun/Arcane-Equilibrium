@@ -2,6 +2,23 @@
 # parallelism captures read-heavy speedups without recursive fan-out or
 # write-heavy coordination debt. Role-specific sandbox overrides live in the
 # generated custom-agent TOML adapters under `.codex/agents/`.
+[features]
+memories = true
+
 [agents]
-max_threads = 4
-max_depth = 1
+enabled = true
+max_concurrent_threads_per_session = 3
+default_subagent_model = "gpt-5.6-terra"
+default_subagent_reasoning_effort = "medium"
+interrupt_message = false
+
+# Memory extraction is intentionally kept off external-context threads so web,
+# MCP, and tool-search transcripts cannot silently become durable project
+# memory. Luna handles the narrow extraction/consolidation work; PM owns lesson
+# eligibility, while actual promotion also requires trusted-host attestation.
+[memories]
+generate_memories = true
+use_memories = true
+disable_on_external_context = true
+extract_model = "gpt-5.6-luna"
+consolidation_model = "gpt-5.6-luna"

@@ -14,7 +14,6 @@ from agent_governance_full_audit_dag import (
     adaptive_axes as _adaptive_axes,
     nested_admission_inventory as _nested_admission_inventory,
     nonnegative_integer as _integer,
-    parse_time as _parse_time,
 )
 from agent_governance_registry import load_registry, native_agent_binding
 
@@ -195,6 +194,7 @@ def validate_full_audit_binding(
     errors: list[str] = []
     contract = load_registry()["workflow_contracts"]["full_audit_v3"]
     axes_contract = contract["axes"]
+    recall_authority_policy = contract["recall_authority"]
     allowed_axes = set(axes_contract)
     controller_node = contract["controller_node_id"]
     controller_role = contract["controller_role"]
@@ -265,52 +265,36 @@ def validate_full_audit_binding(
         errors.append("full audit run_sequence must be a non-negative integer")
         run_sequence = 0
     if scheduler in {"full", "adaptive_shadow"} and expected_axes != axes_contract:
-        errors.append("full/adaptive_shadow audit expected_axes must equal the Registry backstop")
+        errors.append(
+            "full/adaptive-shadow audit expected_axes must equal the Registry backstop"
+        )
     if scheduler == "adaptive":
-        if control.get("adaptive_recall_approved") is not True:
-            errors.append("adaptive full audit requires recall approval in the controller")
         recomputed_axes = _adaptive_axes(expected_route, run_sequence, axes_contract)
         if expected_axes != recomputed_axes:
             errors.append("adaptive full audit expected_axes do not match deterministic selection")
-        approval_digest = control.get("adaptive_recall_authority_digest")
-        if not DIGEST_RE.fullmatch(str(approval_digest or "")):
-            errors.append("adaptive full audit lacks hash-pinned recall authority")
-        approval_refs = [
-            ref for ref in packet.get("authority_refs", [])
-            if ref.get("subject") == "adaptive_full_audit_recall"
-        ]
-        if (
-            len(approval_refs) != 1
-            or approval_refs[0].get("class") not in {"normative_policy", "claim_evidence"}
-            or approval_refs[0].get("digest") != approval_digest
-        ):
-            errors.append("adaptive full audit recall authority is not closure-bound")
-        else:
-            if approval_refs[0].get("scope") != "full_audit:adaptive_recall":
-                errors.append("adaptive full audit recall authority scope is invalid")
-            if (
-                approval_refs[0].get("subject") != "adaptive_full_audit_recall"
-                or approval_refs[0].get("value") != {"approved": True}
-            ):
-                errors.append(
-                    "adaptive full audit recall authority does not approve recall"
-                )
-            expiry_value = approval_refs[0].get("expiry")
-            if not expiry_value:
-                errors.append("adaptive full audit recall authority requires expiry")
-            try:
-                observed = _parse_time(str(approval_refs[0].get("observed_at", "")))
-                adjudicated = _parse_time(str(packet.get("adjudicated_at", "")))
-                expiry = _parse_time(str(expiry_value))
-                if observed > adjudicated or adjudicated >= expiry:
-                    errors.append("adaptive full audit recall authority is stale at closure")
-            except (TypeError, ValueError):
-                errors.append("adaptive full audit recall authority timestamp is invalid")
-    else:
-        if control.get("adaptive_recall_approved") not in {False, True}:
-            errors.append("full audit adaptive_recall_approved must be boolean")
-        if control.get("adaptive_recall_authority_digest") is not None:
-            errors.append("non-adaptive full audit cannot carry adaptive recall authority")
+    reduced_execution = (
+        scheduler != "full"
+        or expected_axes != axes_contract
+        or admitted_axes != axes_contract
+        or bool(deferred_axes)
+    )
+    if reduced_execution:
+        errors.append(recall_authority_policy["status"])
+    if control.get("adaptive_recall_approved") is not False:
+        errors.append(
+            "caller-declared adaptive recall approval cannot authorize reduced execution"
+        )
+    if control.get("adaptive_recall_authority_digest") is not None:
+        errors.append(
+            "self-digested adaptive recall authority cannot authorize reduced execution"
+        )
+    if any(
+        ref.get("subject") == "adaptive_full_audit_recall"
+        for ref in packet.get("authority_refs", [])
+    ):
+        errors.append(
+            "claim_evidence cannot authorize adaptive full audit recall"
+        )
     if set(admitted_axes) & set(deferred_axes):
         errors.append("full audit admitted_axes and deferred_axes overlap")
     if set(admitted_axes) | set(deferred_axes) != set(expected_axes):

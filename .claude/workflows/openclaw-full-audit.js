@@ -4,8 +4,8 @@
 // never turn unverified residual scope into PASS.
 export const meta = {
   name: 'openclaw-full-audit',
-  description: 'Full-system adversarial audit with adaptive-shadow axis selection, claim-centric verification, elastic quality reserve, immutable fragments, and explicit coverage debt',
-  whenToUse: 'Operator requests full audit/cold audit/multi-perspective optimization. Default adaptive_shadow executes the full backstop while measuring the proposed adaptive subset.',
+  description: 'Full-system 13-axis adversarial audit with claim-centric verification, elastic quality reserve, immutable fragments, and explicit coverage debt',
+  whenToUse: 'Operator requests full audit/cold audit/multi-perspective optimization. The saved workflow executes the full 13-axis backstop; adaptive or reduced execution is EXTERNAL_LIMIT until a platform-attested recall/non-inferiority verifier exists.',
   phases: [
     { title: 'Admit', detail: 'freeze scope, axes, scheduler mode, and elastic consumption envelope' },
     { title: 'Audit', detail: 'independent read-only discovery with negative-space self-audit' },
@@ -134,19 +134,101 @@ function resolveAdmissionNowMs(value) {
 const CONTEXT_ADMISSION_V1 = Object.freeze({
   artifactFields: Object.freeze(['schema_version', 'artifact_digest', 'task_contract_digest', 'budget_authority_digest', 'budget_authority_canonical', 'canonical_plan', 'shared_task_context_digest', 'shared_task_context_canonical', 'role_context_delta_digest', 'role_context_delta_canonical', 'semantic_input_tokens']),
   planFields: Object.freeze(['schema_version', 'registry_schema_version', 'role', 'role_permission', 'task_contract', 'task_contract_digest', 'mandatory_content', 'omitted_mandatory', 'baseline_errors', 'selected_packs', 'shared_packs', 'role_packs', 'sources', 'unresolved_sources', 'blocking_sources', 'evidence_debt', 'required_for_verdict', 'acquisition_plan', 'budget']),
-  contractFields: Object.freeze(['task_shape', 'surfaces', 'risk', 'runtime_claim', 'end_to_end_claim', 'uncertainty', 'side_effect_class', 'objective', 'scope', 'acceptance_criteria', 'hard_stops', 'baseline', 'dirty_scope', 'verification_scope', 'direct_interfaces', 'previous_failure', 'focus', 'claim_inputs', 'task_prompt', 'task_prompt_digest', 'continuation_mode', 'operator_loop_request_digest']),
+  contractFields: Object.freeze(['task_shape', 'surfaces', 'risk', 'runtime_claim', 'end_to_end_claim', 'uncertainty', 'side_effect_class', 'objective', 'scope', 'acceptance_criteria', 'hard_stops', 'baseline', 'dirty_scope', 'verification_scope', 'direct_interfaces', 'previous_failure', 'focus', 'claim_inputs', 'task_prompt', 'task_prompt_digest', 'continuation_mode', 'operator_loop_request_digest', 'history_refs']),
   mandatoryFields: Object.freeze(['objective', 'scope', 'acceptance_criteria', 'hard_stops', 'baseline', 'direct_interfaces', 'previous_failure', 'task_prompt', 'task_prompt_digest']),
   budgetFields: Object.freeze(['envelope', 'target_context_tokens', 'quality_reserve_context_tokens', 'accounting_basis', 'max_context_tokens_per_call', 'max_prompt_utf8_bytes_per_call', 'estimated_tokens', 'compiler_estimated_input_tokens', 'action', 'review_required', 'review_rationale', 'mandatory_truncated', 'quality_reserve_reasons', 'authority', 'authority_canonical', 'authority_digest', 'call_allowed', 'claim_pass_eligible', 'pass_allowed']),
-  authorityFields: Object.freeze(['schema_version', 'envelope', 'accounting_basis', 'max_context_tokens_per_call', 'max_prompt_utf8_bytes_per_call', 'max_workflow_planned_input_tokens', 'max_unique_nodes', 'max_call_attempts', 'retry_budget']),
+  authorityFields: Object.freeze(['schema_version', 'envelope', 'target_context_tokens', 'quality_reserve_context_tokens', 'accounting_basis', 'max_context_tokens_per_call', 'max_prompt_utf8_bytes_per_call', 'max_workflow_planned_input_tokens', 'max_unique_nodes', 'max_call_attempts', 'retry_budget', 'max_followup_attempts', 'max_total_model_turns', 'max_wait_cycles', 'max_no_delta_wakeups', 'max_wall_clock_ms', 'max_call_duration_ms', 'max_wave_duration_ms', 'max_concurrent_calls', 'max_spawn_depth_from_root', 'platform_token_cap']),
+  executionCapFields: Object.freeze(['max_context_tokens_per_call', 'max_prompt_utf8_bytes_per_call', 'max_workflow_planned_input_tokens', 'max_unique_nodes', 'max_call_attempts', 'retry_budget', 'max_followup_attempts', 'max_total_model_turns', 'max_wait_cycles', 'max_no_delta_wakeups', 'max_wall_clock_ms', 'max_call_duration_ms', 'max_wave_duration_ms', 'max_concurrent_calls', 'max_spawn_depth_from_root']),
   admissibleStatuses: Object.freeze(['pinned', 'pinned_verified', 'resolved_artifact', 'trusted_producer']),
   evidenceDebtStatuses: Object.freeze(['resolve_on_demand', 'stale_context_artifact', 'trusted_producer_unavailable', 'available_unattested_evidence']),
-  trustedKinds: Object.freeze({"CONTEXT.md":"repository_inventory","current GUI entry":"repository_inventory","current IBKR gate artifacts":"repository_inventory","current data lineage":"repository_inventory","current diff":"diff_snapshot","direct callers":"caller_inventory","direct interfaces":"interface_inventory","docs/references/2026-04-04--bybit_api_reference.md relevant section":"repository_inventory","feature/label contract":"repository_inventory","focused acceptance tests":"test_inventory","latest directly relevant closure/report":"repository_inventory","relevant docs/_indexes/*":"repository_inventory","relevant docs/adr/*":"repository_inventory","relevant role memory shard":"repository_inventory","screenshots or browser trace when available":"repository_inventory","validation protocol":"repository_inventory"}),
+  trustedKinds: Object.freeze({"CONTEXT.md":"repository_inventory","current GUI entry":"repository_inventory","current IBKR gate artifacts":"repository_inventory","current data lineage":"repository_inventory","current diff":"diff_snapshot","direct callers":"caller_inventory","direct interfaces":"interface_inventory","docs/references/2026-04-04--bybit_api_reference.md relevant section":"repository_inventory","feature/label contract":"repository_inventory","focused acceptance tests":"test_inventory","relevant docs/_indexes/*":"repository_inventory","relevant docs/adr/*":"repository_inventory","screenshots or browser trace when available":"repository_inventory","validation protocol":"repository_inventory"}),
   producerByKind: Object.freeze({runtime_observation: 'runtime_observation_adapter_v1', external_policy_snapshot: 'external_policy_capture_adapter_v1', source_snapshot: 'repository_snapshot_adapter_v1'}),
   ttlMs: Object.freeze({runtime_observation: 900000, external_policy_snapshot: 2592000000, source_snapshot: 14400000, diff_snapshot: 3600000, interface_inventory: 3600000, caller_inventory: 3600000, test_inventory: 3600000, repository_inventory: 3600000}),
-  authorityProfiles: Object.freeze({"complex":{"accounting_basis":"utf8_bytes_div4_planned_lower_bound_v1","max_call_attempts":14,"max_context_tokens_per_call":42000,"max_prompt_utf8_bytes_per_call":167996,"max_unique_nodes":12,"max_workflow_planned_input_tokens":588000,"quality_reserve_context_tokens":18000,"retry_budget":2,"target_context_tokens":12000},"full_audit":{"accounting_basis":"utf8_bytes_div4_planned_lower_bound_v1","max_call_attempts":46,"max_context_tokens_per_call":96000,"max_prompt_utf8_bytes_per_call":383996,"max_unique_nodes":44,"max_workflow_planned_input_tokens":4416000,"quality_reserve_context_tokens":48000,"retry_budget":2,"target_context_tokens":24000},"narrow":{"accounting_basis":"utf8_bytes_div4_planned_lower_bound_v1","max_call_attempts":5,"max_context_tokens_per_call":12000,"max_prompt_utf8_bytes_per_call":47996,"max_unique_nodes":4,"max_workflow_planned_input_tokens":60000,"quality_reserve_context_tokens":4000,"retry_budget":1,"target_context_tokens":4000},"profit_diagnosis":{"accounting_basis":"utf8_bytes_div4_planned_lower_bound_v1","max_call_attempts":22,"max_context_tokens_per_call":480000,"max_prompt_utf8_bytes_per_call":1919996,"max_unique_nodes":20,"max_workflow_planned_input_tokens":10560000,"quality_reserve_context_tokens":240000,"retry_budget":2,"target_context_tokens":120000},"standard":{"accounting_basis":"utf8_bytes_div4_planned_lower_bound_v1","max_call_attempts":9,"max_context_tokens_per_call":24000,"max_prompt_utf8_bytes_per_call":95996,"max_unique_nodes":8,"max_workflow_planned_input_tokens":216000,"quality_reserve_context_tokens":9000,"retry_budget":1,"target_context_tokens":7000}}),
+  authorityProfiles: Object.freeze({"complex":{"accounting_basis":"utf8_bytes_div4_planned_lower_bound_v1","envelope":"complex","max_call_attempts":14,"max_call_duration_ms":1200000,"max_concurrent_calls":3,"max_context_tokens_per_call":42000,"max_followup_attempts":1,"max_no_delta_wakeups":1,"max_prompt_utf8_bytes_per_call":167996,"max_spawn_depth_from_root":1,"max_total_model_turns":16,"max_unique_nodes":12,"max_wait_cycles":3,"max_wall_clock_ms":7200000,"max_wave_duration_ms":3600000,"max_workflow_planned_input_tokens":588000,"platform_token_cap":{"max_total_tokens":null,"required_metric":"platform_attested_total_tokens","status":"EXTERNAL_LIMIT"},"quality_reserve_context_tokens":18000,"retry_budget":2,"schema_version":"execution_budget_policy_v1","target_context_tokens":12000},"full_audit":{"accounting_basis":"utf8_bytes_div4_planned_lower_bound_v1","envelope":"full_audit","max_call_attempts":46,"max_call_duration_ms":1800000,"max_concurrent_calls":3,"max_context_tokens_per_call":96000,"max_followup_attempts":1,"max_no_delta_wakeups":1,"max_prompt_utf8_bytes_per_call":383996,"max_spawn_depth_from_root":1,"max_total_model_turns":48,"max_unique_nodes":44,"max_wait_cycles":4,"max_wall_clock_ms":10800000,"max_wave_duration_ms":5400000,"max_workflow_planned_input_tokens":4416000,"platform_token_cap":{"max_total_tokens":null,"required_metric":"platform_attested_total_tokens","status":"EXTERNAL_LIMIT"},"quality_reserve_context_tokens":48000,"retry_budget":2,"schema_version":"execution_budget_policy_v1","target_context_tokens":24000},"narrow":{"accounting_basis":"utf8_bytes_div4_planned_lower_bound_v1","envelope":"narrow","max_call_attempts":5,"max_call_duration_ms":600000,"max_concurrent_calls":2,"max_context_tokens_per_call":12000,"max_followup_attempts":0,"max_no_delta_wakeups":0,"max_prompt_utf8_bytes_per_call":47996,"max_spawn_depth_from_root":1,"max_total_model_turns":6,"max_unique_nodes":4,"max_wait_cycles":1,"max_wall_clock_ms":1800000,"max_wave_duration_ms":900000,"max_workflow_planned_input_tokens":60000,"platform_token_cap":{"max_total_tokens":null,"required_metric":"platform_attested_total_tokens","status":"EXTERNAL_LIMIT"},"quality_reserve_context_tokens":4000,"retry_budget":1,"schema_version":"execution_budget_policy_v1","target_context_tokens":4000},"profit_diagnosis":{"accounting_basis":"utf8_bytes_div4_planned_lower_bound_v1","envelope":"profit_diagnosis","max_call_attempts":22,"max_call_duration_ms":1800000,"max_concurrent_calls":3,"max_context_tokens_per_call":480000,"max_followup_attempts":1,"max_no_delta_wakeups":1,"max_prompt_utf8_bytes_per_call":1919996,"max_spawn_depth_from_root":1,"max_total_model_turns":24,"max_unique_nodes":20,"max_wait_cycles":4,"max_wall_clock_ms":10800000,"max_wave_duration_ms":5400000,"max_workflow_planned_input_tokens":10560000,"platform_token_cap":{"max_total_tokens":null,"required_metric":"platform_attested_total_tokens","status":"EXTERNAL_LIMIT"},"quality_reserve_context_tokens":240000,"retry_budget":2,"schema_version":"execution_budget_policy_v1","target_context_tokens":120000},"standard":{"accounting_basis":"utf8_bytes_div4_planned_lower_bound_v1","envelope":"standard","max_call_attempts":9,"max_call_duration_ms":900000,"max_concurrent_calls":3,"max_context_tokens_per_call":24000,"max_followup_attempts":1,"max_no_delta_wakeups":1,"max_prompt_utf8_bytes_per_call":95996,"max_spawn_depth_from_root":1,"max_total_model_turns":11,"max_unique_nodes":8,"max_wait_cycles":2,"max_wall_clock_ms":3600000,"max_wave_duration_ms":1800000,"max_workflow_planned_input_tokens":216000,"platform_token_cap":{"max_total_tokens":null,"required_metric":"platform_attested_total_tokens","status":"EXTERNAL_LIMIT"},"quality_reserve_context_tokens":9000,"retry_budget":1,"schema_version":"execution_budget_policy_v1","target_context_tokens":7000}}),
+  surfaceBindings: Object.freeze({"claude_saved_workflow_v1":{"digest":"sha256:de87a0995e5357baabc5c782bb7cf49475e7c0cbf8ee1e5b0406e78dfd5f65ce","profile":{"call_deadline":"unavailable","concurrency_limit":"enforced","ephemeral_fork":"enforced","event_coverage":["model_call","retry"],"history_selection":"enforced","mandatory_role_eligible":true,"model_visible_interruptions":"disabled","native_selector_binding":"enforced","platform":"claude_saved_workflow","profile_id":"claude_saved_workflow_v1","schema_version":"execution_surface_profile_v1","usage_telemetry":"unavailable","wave_deadline":"unavailable"}},"codex_native_collaboration_v1":{"digest":"sha256:0f9103acfb9de1b57d2db54c47b3eade0ee11aa6968f9a776e861cf13e71ae6d","profile":{"call_deadline":"unavailable","concurrency_limit":"enforced","ephemeral_fork":"reported_only","event_coverage":[],"history_selection":"reported_only","mandatory_role_eligible":false,"model_visible_interruptions":"disabled","native_selector_binding":"reported_only","platform":"codex_native_collaboration","profile_id":"codex_native_collaboration_v1","schema_version":"execution_surface_profile_v1","usage_telemetry":"unavailable","wave_deadline":"unavailable"}},"generic_host_v1":{"digest":"sha256:3a106e9cf0795b0f2f9a51c40d2334318efb495b90417a9f0efab5f5439545c1","profile":{"call_deadline":"unavailable","concurrency_limit":"unavailable","ephemeral_fork":"unavailable","event_coverage":[],"history_selection":"unavailable","mandatory_role_eligible":false,"model_visible_interruptions":"unavailable","native_selector_binding":"reported_only","platform":"generic_host","profile_id":"generic_host_v1","schema_version":"execution_surface_profile_v1","usage_telemetry":"unavailable","wave_deadline":"unavailable"}}}),
+  defaultHistory: Object.freeze({"boundary_turn_id":null,"ephemeral":true,"exception_digest":null,"mode":"none","schema_version":"requested_history_v1","source_thread_id":null}),
+  savedWorkflowModelPolicy: Object.freeze({"allow_inheritance":false,"model":"claude-sonnet-5","role_efforts":{"A3":"medium","AI-E":"medium","BB":"medium","CC":"high","E1":"medium","E1a":"medium","E2":"high","E3":"high","E4":"medium","E5":"medium","FA":"medium","IB":"medium","MIT":"high","OPS":"medium","PA":"high","PM":"high","QA":"medium","QC":"high","R4":"medium","TW":"medium"},"schema_version":"saved_workflow_model_policy_v1","surface_profile_id":"claude_saved_workflow_v1"}),
 })
 const validVerificationScopeV1 = value => Array.isArray(value) && new Set(value).size === value.length && canonicalJson(value) === canonicalJson([...value].sort()) && value.every(path => typeof path === 'string' && path && path === path.trim() && path !== '.' && !path.startsWith('/') && !path.startsWith('~') && !path.startsWith('-') && !path.startsWith('!') && !path.startsWith(':') && !path.includes('\\') && !/[\0\n\r*?\[]/.test(path) && !path.split('/').some(part => !part || part === '.' || part === '..'))
 const contextPrefixV1 = artifact => artifact.shared_task_context_canonical + '\n\n' + artifact.role_context_delta_canonical + '\n\n' + canonicalJson({schema_version: 'context_prompt_binding_v1', artifact_digest: artifact.artifact_digest, task_contract_digest: artifact.task_contract_digest, budget_authority_digest: artifact.budget_authority_digest, shared_task_context_digest: artifact.shared_task_context_digest, role_context_delta_digest: artifact.role_context_delta_digest})
+const executionCapsV1 = authority => Object.fromEntries(CONTEXT_ADMISSION_V1.executionCapFields.map(field => [field, authority[field]]))
+const requestedExecutionBindingV1 = () => {
+  const binding = CONTEXT_ADMISSION_V1.surfaceBindings.claude_saved_workflow_v1
+  return {
+    surface_profile_id: binding.profile.profile_id,
+    surface_profile_digest: binding.digest,
+    history: { ...CONTEXT_ADMISSION_V1.defaultHistory },
+  }
+}
+const savedWorkflowTierV1 = logicalRole => {
+  const policy = CONTEXT_ADMISSION_V1.savedWorkflowModelPolicy
+  const effort = policy.role_efforts && policy.role_efforts[logicalRole]
+  if (
+    policy.schema_version !== 'saved_workflow_model_policy_v1' ||
+    policy.surface_profile_id !== 'claude_saved_workflow_v1' ||
+    policy.allow_inheritance !== false ||
+    typeof policy.model !== 'string' || !policy.model ||
+    typeof effort !== 'string' || !effort
+  ) {
+    throw new Error(`logical role ${logicalRole} lacks an exact saved-workflow model tier`)
+  }
+  return { model: policy.model, effort }
+}
+const admittedSavedWorkflowTierV1 = (logicalRole, requested = {}) => {
+  const tier = savedWorkflowTierV1(logicalRole)
+  for (const field of ['model', 'effort']) {
+    if (requested[field] !== undefined && requested[field] !== tier[field]) {
+      throw new Error(`logical role ${logicalRole} ${field} differs from Registry saved-workflow policy`)
+    }
+  }
+  return tier
+}
+const executionEventLedgerV1 = async (workflowId, policyDigest, surfaceProfileDigest, callRecords) => {
+  const watcherId = `${workflowId}:watcher`
+  const rootEventId = `${workflowId}:root-turn`
+  const events = [{
+    sequence: 0,
+    event_id: rootEventId,
+    kind: 'root_turn',
+    parent_event_id: null,
+    node_id: 'PM',
+    spawn_depth: 0,
+    watcher_id: watcherId,
+    outcome: 'completed',
+    call_record_digest: null,
+  }, ...callRecords.map((record, index) => ({
+    sequence: index + 1,
+    event_id: record.logical_call_id,
+    kind: record.attempt > 1 ? 'retry' : 'model_call',
+    parent_event_id: record.retry_parent_call_id || rootEventId,
+    node_id: record.node_id,
+    spawn_depth: 1,
+    watcher_id: watcherId,
+    outcome: record.returned_null ? 'null' : 'completed',
+    call_record_digest: record.record_digest,
+  }))]
+  const core = {
+    schema_version: 'execution_event_ledger_v1',
+    root_execution_id: `${workflowId}:root`,
+    policy_digest: policyDigest,
+    surface_profile_digest: surfaceProfileDigest,
+    watcher_id: watcherId,
+    events,
+    terminal_reason: null,
+  }
+  return { ...core, ledger_digest: await contextSha256TextV1(canonicalJson(core)) }
+}
+const boundedParallelV1 = async (factories, capacity) => {
+  if (!Array.isArray(factories) || !Number.isInteger(capacity) || capacity <= 0) {
+    throw new Error('bounded scheduler requires task factories and a positive capacity')
+  }
+  const results = []
+  for (let index = 0; index < factories.length; index += capacity) {
+    const batch = await parallel(factories.slice(index, index + capacity))
+    results.push(...batch)
+  }
+  return results
+}
 const contextUtf8LengthV1 = value => new TextEncoder().encode(value).length
 const contextSha256TextV1 = async value => {
   const digest = await crypto.subtle.digest('SHA-256', new TextEncoder().encode(value))
@@ -165,6 +247,19 @@ async function validateSemanticContextV1(artifact, plan) {
   const delta = {schema_version: 'role_context_delta_v1', shared_task_context_digest: sharedDigest, logical_role: plan.role, permission: plan.role_permission, role_packs: plan.role_packs, sources: roleSources, evidence_debt: plan.evidence_debt.filter(name => roleSources.some(source => source.source === name))}
   const deltaCanonical = canonicalJson(delta)
   return artifact.shared_task_context_canonical === sharedCanonical && artifact.shared_task_context_digest === sharedDigest && artifact.role_context_delta_canonical === deltaCanonical && artifact.role_context_delta_digest === await contextSha256TextV1(deltaCanonical) && artifact.semantic_input_tokens === Math.max(1, Math.ceil(contextUtf8LengthV1(sharedCanonical + '\n\n' + deltaCanonical) / 4))
+}
+const promotedEnvelopeV1 = (baseEnvelope, requiredNodes) => {
+  if (!Number.isInteger(requiredNodes) || requiredNodes <= 0) throw new Error('required node count must be positive')
+  if (baseEnvelope === 'profit_diagnosis') {
+    if (CONTEXT_ADMISSION_V1.authorityProfiles.profit_diagnosis.max_unique_nodes < requiredNodes) throw new Error('profit diagnosis exceeds its dedicated envelope')
+    return baseEnvelope
+  }
+  const order = ['narrow', 'standard', 'complex', 'full_audit']
+  const start = order.indexOf(baseEnvelope)
+  if (start < 0) throw new Error(`unknown base envelope=${baseEnvelope}`)
+  const selected = order.slice(start).find(name => CONTEXT_ADMISSION_V1.authorityProfiles[name].max_unique_nodes >= requiredNodes)
+  if (!selected) throw new Error('required DAG exceeds the largest execution envelope')
+  return selected
 }
 // END GENERATED CONTEXT_ADMISSION_V1
 
@@ -610,16 +705,7 @@ async function validateInlineContextArtifact(artifact, admissionNow) {
     throw new Error('inline Context budget authority canonical bytes are invalid')
   }
   const profile = CONTEXT_ADMISSION_V1.authorityProfiles.full_audit
-  const expectedAuthority = {
-    schema_version: 'context_budget_authority_v1', envelope: 'full_audit',
-    accounting_basis: profile.accounting_basis,
-    max_context_tokens_per_call: profile.max_context_tokens_per_call,
-    max_prompt_utf8_bytes_per_call: profile.max_prompt_utf8_bytes_per_call,
-    max_workflow_planned_input_tokens: profile.max_workflow_planned_input_tokens,
-    max_unique_nodes: profile.max_unique_nodes,
-    max_call_attempts: profile.max_call_attempts,
-    retry_budget: profile.retry_budget,
-  }
+  const expectedAuthority = profile
   const authorityDigest = await sha256Text(budget.authority_canonical)
   if (
     !exactKeys(parsedAuthority, CONTEXT_ADMISSION_V1.authorityFields) ||
@@ -710,7 +796,7 @@ const hardStops = taskContract.hard_stops
 // The authenticated shared semantic projection plus role delta is the common
 // cache prefix; the full canonical envelope remains independently hash-bound.
 const contextPrefix = contextPrefixV1(contextArtifact)
-const scheduler = config.scheduler || 'adaptive_shadow'
+const scheduler = config.scheduler || 'full'
 if (!['full', 'adaptive_shadow', 'adaptive'].includes(scheduler)) throw new Error('scheduler must be full, adaptive_shadow, or adaptive')
 const routeRequiredRoles = config.route_required_roles
 if (
@@ -724,16 +810,24 @@ const routeRequiredRolesDigest = await sha256Canonical(routeRequiredRoles)
 if (config.continuation !== undefined) {
   throw new Error('Full Audit continuation is unsupported; start a new task with a newly admitted Context')
 }
-if (scheduler === 'adaptive' && config.adaptive_recall_approved !== true) {
-  throw new Error('adaptive scheduler requires adaptive_recall_approved=true after recall non-inferiority benchmark')
+const configuredAxes = config.axes
+const fullBackstopRequested = (
+  configuredAxes === undefined ||
+  (
+    Array.isArray(configuredAxes) &&
+    (
+      configuredAxes.length === 0 ||
+      sameJson(configuredAxes, ALL_AXES)
+    )
+  )
+)
+if (scheduler !== 'full' || !fullBackstopRequested) {
+  // A task claim, boolean, self-digest, or closure claim_evidence is caller
+  // data, not recall/non-inferiority attestation. This saved-workflow surface
+  // has no out-of-band verifier capability, so reduced execution is disabled.
+  throw new Error('EXTERNAL_LIMIT_RECALL_AUTHORITY')
 }
-const adaptiveRecallAuthorityDigest = config.adaptive_recall_authority_digest || null
-if (
-  scheduler === 'adaptive' &&
-  !/^sha256:[0-9a-f]{64}$/.test(adaptiveRecallAuthorityDigest || '')
-) {
-  throw new Error('adaptive scheduler requires hash-pinned adaptive_recall_authority_digest')
-}
+const adaptiveRecallAuthorityDigest = null
 const runSequence = nonnegativeInt(config.run_sequence, 0, 'run_sequence')
 
 const budgetAuthority = contextAdmission.authority
@@ -775,47 +869,16 @@ if ([auditCallTokens, verificationCallTokens, seamCallTokens, fixCallTokens, rev
 const stopWhen = config.stop_when || 'mandatory coverage closed and next expected novelty or verdict-reversal value is below marginal token/time/opportunity cost'
 const maxFixes = positiveInt(config.max_fixes, 5, 'max_fixes')
 const doFix = config.fix === true
-// 分層資源:機械/收斂節點(verify 票、seam critic、E2 review)往下釘到中階模型 + 中 effort;
-// 判斷核心(discovery 軸、third 裁決、E1 fix)省略 model 以繼承 session 強模型。config.cheap_model=null 可還原繼承。
-// claim-0009 家族:cheap tier 的意義是降檔,默認保留一個 active pin;其派生權威=
-// settings/ai_pricing.yaml active 條目(claude-sonnet-5 active:true),該條目退役
-// 時必須同步改此默認。顯式覆蓋 fail-closed:空字串不再靜默回落默認、非字串不再直通 runner。
-if (
-  config.cheap_model !== undefined && config.cheap_model !== null &&
-  (typeof config.cheap_model !== 'string' || !config.cheap_model.trim())
-) {
-  throw new Error('cheap_model must be null (inherit session model) or a non-empty model id derived from settings/ai_pricing.yaml active entries')
+// Model and effort are one Registry-owned, role-specific policy. Saved
+// workflows never inherit the host session tier and callers cannot override it.
+for (const field of ['cheap_model', 'cheap_effort', 'judgment_model', 'judgment_effort']) {
+  if (config[field] !== undefined) {
+    throw new Error(`${field} cannot override Registry saved-workflow model policy`)
+  }
 }
-if (
-  config.cheap_effort !== undefined && config.cheap_effort !== null &&
-  (typeof config.cheap_effort !== 'string' || !config.cheap_effort.trim())
-) {
-  throw new Error('cheap_effort must be null (inherit session effort) or a non-empty effort tier string')
-}
-const cheapTier = () => ({
-  ...(config.cheap_model === null ? {} : { model: config.cheap_model === undefined ? 'claude-sonnet-5' : config.cheap_model }),
-  ...(config.cheap_effort === null ? {} : { effort: config.cheap_effort === undefined ? 'medium' : config.cheap_effort }),
-})
-// C-3(claim-0009):判斷層不再硬 pin 具體型號——舊 pin claude-opus-4-6 已在
-// settings/ai_pricing.yaml 退役(active:false),run0 部分 verify 呼叫實跑退役 pin。
-// 默認省略 model 繼承 session 強模型(唯一不隨型號退役漂移的派生點);派發側如需
-// 顯式覆蓋,judgment_model 必須自 settings/ai_pricing.yaml active 條目或 Registry
-// model map 派生後傳入。judgment_model=null 為顯式繼承 escape(與 cheap_model 同語義)。
-if (
-  config.judgment_model !== undefined && config.judgment_model !== null &&
-  (typeof config.judgment_model !== 'string' || !config.judgment_model.trim())
-) {
-  throw new Error('judgment_model must be null (inherit session model) or a non-empty model id derived from settings/ai_pricing.yaml active entries')
-}
-const strongJudgmentTier = () => ({
-  ...(config.judgment_model === undefined || config.judgment_model === null ? {} : { model: config.judgment_model }),
-  effort: config.judgment_effort || 'high',
-})
-const verificationTier = finding => (
-  ['CRITICAL', 'HIGH'].includes(finding.severity) || isHighRisk(finding)
-    ? strongJudgmentTier()
-    : cheapTier()
-)
+const cheapTier = () => ({})
+const strongJudgmentTier = () => ({})
+const verificationTier = _finding => ({})
 const workflowContract = {
   schema_version: 'workflow_receipt_contract_v1', workflow: 'openclaw-full-audit',
   task_contract_digest: taskContractDigest, context_artifact_digest: contextArtifactDigest,
@@ -844,6 +907,22 @@ const producerByNode = new Map()
 let runtimeAdmittedAttempts = 0
 let runtimeAdmittedInputTokensLowerBound = 0
 let runtimePromptUtf8Bytes = 0
+const modelCallWaiters = []
+let activeModelCalls = 0
+async function withGlobalModelCallSlot(factory) {
+  if (activeModelCalls >= budgetAuthority.max_concurrent_calls) {
+    await new Promise(resolve => modelCallWaiters.push(resolve))
+  } else {
+    activeModelCalls += 1
+  }
+  try {
+    return await factory()
+  } finally {
+    const next = modelCallWaiters.shift()
+    if (next) next()
+    else activeModelCalls -= 1
+  }
+}
 const requestedBy = (logicalRole, runnerOptions, binding) => ({
   logical_role: logicalRole,
   platform: 'claude_saved_workflow',
@@ -852,6 +931,7 @@ const requestedBy = (logicalRole, runnerOptions, binding) => ({
     logical_role: logicalRole, native_agent: binding.native_agent,
     node_class: runnerOptions.nodeClass || 'verification', permission: binding.permission,
   },
+  ...requestedExecutionBindingV1(),
   model: runnerOptions.model === undefined ? null : runnerOptions.model,
   effort: runnerOptions.effort === undefined ? null : runnerOptions.effort,
   isolation: runnerOptions.isolation === undefined ? null : runnerOptions.isolation,
@@ -864,7 +944,8 @@ async function invoke({ prompt, options, nodeId, payloadKind, attempt = 1, retry
   const logicalRole = options.agentType
   const binding = nativeBinding(logicalRole, options.nodeClass)
   if (!binding.permission || (options.permission || 'read_only') !== binding.permission) throw new Error(`call ${nodeId} native class/permission binding is invalid`)
-  const runnerOptions = {...options, agentType: binding.native_agent}
+  const tier = admittedSavedWorkflowTierV1(logicalRole, options)
+  const runnerOptions = {...options, agentType: binding.native_agent, ...tier}
   if (runnerOptions.agentType !== binding.native_agent) throw new Error(`call ${nodeId} platform selector differs from native binding`)
   if (
     !Array.isArray(requires) || requires.some(node => typeof node !== 'string' || !node) ||
@@ -891,7 +972,9 @@ async function invoke({ prompt, options, nodeId, payloadKind, attempt = 1, retry
   runtimePromptUtf8Bytes += finalPromptBytes
   const logicalCallId = `openclaw-full-audit:${nodeId}:attempt:${attempt}`
   const startedAt = admissionClockIso
-  const result = await agent(boundPrompt, runnerOptions)
+  const result = await withGlobalModelCallSlot(
+    () => agent(boundPrompt, runnerOptions)
+  )
   const endedAt = admissionClockIso
   const core = {
     schema_version: 'workflow_call_record_v1', workflow_contract_digest: workflowContractDigest,
@@ -915,8 +998,9 @@ async function invoke({ prompt, options, nodeId, payloadKind, attempt = 1, retry
   callRecords.push(record)
   return { result, record }
 }
+const HARD_EDGE_AXES = ['CC', 'FA']
 function adaptiveAxes() {
-  const selected = new Set(['CC', 'FA'])
+  const selected = new Set(HARD_EDGE_AXES)
   routeRequiredRoles.forEach(role => {
     if (ALL_AXES.includes(role)) selected.add(role)
   })
@@ -930,9 +1014,9 @@ function adaptiveAxes() {
 const requestedAxes = Array.isArray(config.axes) && config.axes.length ? config.axes : ALL_AXES
 requestedAxes.forEach(axis => { if (!ALL_AXES.includes(axis)) throw new Error(`unknown audit axis ${axis}`) })
 if (new Set(requestedAxes).size !== requestedAxes.length) throw new Error('configured audit axes must be unique')
-const shadowSelectedAxes = adaptiveAxes()
-const candidateAxes = scheduler === 'adaptive' ? shadowSelectedAxes : requestedAxes
-const expectedAxes = scheduler === 'adaptive' ? candidateAxes : ALL_AXES
+const adaptiveSelectedAxes = adaptiveAxes()
+const candidateAxes = requestedAxes
+const expectedAxes = ALL_AXES
 const auditTokenReserve = Math.floor(maxWorkflowPlannedInputTokens * 0.80)
 const axisCapacityByTokens = Math.max(0, Math.floor(
   (auditTokenReserve - seamCallTokens - retryBudget * auditCallTokens) / auditCallTokens,
@@ -942,12 +1026,13 @@ const admittedAxisCount = Math.min(candidateAxes.length, axisCapacityByTokens, a
 const axes = candidateAxes.slice(0, admittedAxisCount)
 const deferredAxes = expectedAxes.filter(axis => !axes.includes(axis))
 const capacityDeferredAxes = candidateAxes.slice(admittedAxisCount)
-const coverageDebt = capacityDeferredAxes.map(axis => ({ kind: 'axis', id: axis, reason: 'audit admission envelope exhausted' }))
-if (scheduler !== 'adaptive') {
-  ALL_AXES.filter(axis => !requestedAxes.includes(axis)).forEach(axis => {
-    coverageDebt.push({ kind: 'axis', id: axis, reason: 'configured subset omitted a full-audit backstop axis' })
-  })
+if (axes.length !== ALL_AXES.length || deferredAxes.length !== 0) {
+  throw new Error('EXTERNAL_LIMIT_RECALL_AUTHORITY')
 }
+const coverageDebt = capacityDeferredAxes.map(axis => ({ kind: 'axis', id: axis, reason: 'audit admission envelope exhausted' }))
+ALL_AXES.filter(axis => !requestedAxes.includes(axis)).forEach(axis => {
+  coverageDebt.push({ kind: 'axis', id: axis, reason: 'configured subset omitted a full-audit backstop axis' })
+})
 
 const READONLY = 'Read-only audit: no source/report/memory write; no git mutation; no PG/service/runtime mutation; no private broker effect or unauthorized external contact. Linux evidence is allowlisted read-only only. Return an immutable audit_fragment_v2.'
 const ANNOTATE = `After forming each claim, add defect_type, symbol_anchor, and optional root_anchor. This is post-hoc indexing, not an investigation menu. Severity prices both avoided loss and suppressed valid edge/rework annuity; live hard boundaries never loosen.`
@@ -960,16 +1045,16 @@ function auditPrompt(axis) {
 }
 
 phase('Admit')
-log(`scheduler=${scheduler}; axes=${axes.join(',')}; shadow_selected_axes=${shadowSelectedAxes.join(',')}; max_unique_nodes=${maxUniqueNodes}; max_call_attempts=${maxCallAttempts}; max_verification_calls=${maxVerificationCalls}; max_workflow_planned_input_tokens=${maxWorkflowPlannedInputTokens}; retry_budget=${retryBudget}; stop_when=${stopWhen}`)
+log(`scheduler=${scheduler}; axes=${axes.join(',')}; adaptive_selected_axes=${adaptiveSelectedAxes.join(',')}; max_unique_nodes=${maxUniqueNodes}; max_call_attempts=${maxCallAttempts}; max_verification_calls=${maxVerificationCalls}; max_workflow_planned_input_tokens=${maxWorkflowPlannedInputTokens}; retry_budget=${retryBudget}; stop_when=${stopWhen}`)
 
 phase('Audit')
-const firstAudits = await parallel(axes.map(axis => () =>
+const firstAudits = await boundedParallelV1(axes.map(axis => () =>
   invoke({
     prompt: auditPrompt(axis), nodeId: `audit:${axis}`, payloadKind: ROLE_PAYLOAD_KIND[axis],
     admittedTokens: estimatedAuditTokens,
     options: { agentType: axis, label: `audit:${axis}`, phase: 'Audit', schema: FINDINGS_SCHEMA },
   })
-))
+), budgetAuthority.max_concurrent_calls)
 const auditResults = axes.map((axis, index) => {
   producerByNode.set(`audit:${axis}`, firstAudits[index].record)
   return firstAudits[index].result
@@ -979,14 +1064,14 @@ const retryAxisIndexes = deadAxisIndexes.slice(0, retryBudget)
 const retryDebtIndexes = deadAxisIndexes.slice(retryBudget)
 if (retryAxisIndexes.length) {
   const relay = 'Infrastructure null retry only. Resume from read-only evidence already acquired; do not duplicate work.\n\n'
-  const retried = await parallel(retryAxisIndexes.map(index => () =>
+  const retried = await boundedParallelV1(retryAxisIndexes.map(index => () =>
     invoke({
       prompt: relay + auditPrompt(axes[index]), nodeId: `audit:${axes[index]}`,
       payloadKind: ROLE_PAYLOAD_KIND[axes[index]], attempt: 2,
       retryParent: firstAudits[index].record.logical_call_id, admittedTokens: estimatedAuditTokens,
       options: { agentType: axes[index], label: `audit-relay:${axes[index]}`, phase: 'Audit', schema: FINDINGS_SCHEMA },
     })
-  ))
+  ), budgetAuthority.max_concurrent_calls)
   retryAxisIndexes.forEach((originalIndex, retryIndex) => {
     auditResults[originalIndex] = retried[retryIndex].result
     producerByNode.set(`audit:${axes[originalIndex]}`, retried[retryIndex].record)
@@ -1120,7 +1205,7 @@ function verificationJob(claim) {
       `Try to refute claim ${claim.claim_id} without contrarian theater. Verify the cited source/output and whether FACT/INFERENCE/ASSUMPTION is honest.\nClaim: ${finding.assertion}\nEvidence: ${finding.evidence}\nFile: ${finding.file}\n${READONLY}`,
       `Try to refute claim ${claim.claim_id} from outcome/impact and severity. Reproduce enough evidence to decide whether the problem and claimed consequence are real.\nClaim: ${finding.assertion}\nImpact: ${finding.impact}\nEvidence: ${finding.evidence}\n${READONLY}`,
     ]
-    const firstInvocations = await parallel(prompts.map((prompt, index) => () =>
+    const firstInvocations = await boundedParallelV1(prompts.map((prompt, index) => () =>
       invoke({
         prompt, nodeId: `verify:${claim.claim_id}:${index === 0 ? 'source' : 'impact'}`,
         payloadKind: ROLE_PAYLOAD_KIND[index === 0 ? 'E2' : 'PA'], admittedTokens: estimatedVerificationTokens,
@@ -1130,7 +1215,7 @@ function verificationJob(claim) {
           phase: 'Verify', schema: VERDICT_SCHEMA, ...verificationTier(finding),
         },
       })
-    ))
+    ), budgetAuthority.max_concurrent_calls)
     // B-1:verify 票的基礎設施 null 有界重試(audit 軸本有此保護,verify 票先前沒有→infra 抖動會把真 finding
     // 靜默降級成 disputed)。共用 verifyInfraRetries 計數,單執行緒 JS 於 await 間無競態。
     let voteRetries = 0
@@ -1224,9 +1309,9 @@ function verificationJob(claim) {
   }
 }
 const seamPrompt = `Cross-axis seam critic. Review the independently discovered claim titles below and identify material ownerless seams without repeating claims. Return targeted re-probe instructions only; they are coverage debt until an assigned role brings evidence.\n${allFindings.map(finding => `- [${finding.axis}] ${finding.title}`).join('\n') || '(none)'}\n${READONLY}`
-const verifiedRawPromise = parallel([
+const verifiedRawPromise = boundedParallelV1([
   ...admittedClaims.map(verificationJob),
-])
+], budgetAuthority.max_concurrent_calls)
 const seamInvocationPromise = invoke({
     prompt: seamPrompt, nodeId: 'seam:critic', payloadKind: ROLE_PAYLOAD_KIND.CC,
     admittedTokens: estimatedSeamTokens,
@@ -1508,6 +1593,12 @@ orderedCallRecords.forEach(record => {
 const waveDebt = [...finalRecordsByNode.entries()].filter(([, record]) => record.returned_null).map(([node]) => ({
   node, reason: 'final admitted call returned infrastructure null', disposition: 'UNVERIFIED',
 }))
+const executionEventLedger = await executionEventLedgerV1(
+  'full-audit',
+  budgetAuthorityDigest,
+  requestedExecutionBindingV1().surface_profile_digest,
+  orderedCallRecords,
+)
 const waveRecordCore = {
   schema_version: 'workflow_wave_record_v1', workflow_contract_digest: workflowContractDigest,
   context_artifact_digests: Object.fromEntries(firstAttempts.map(record => [record.node_id, contextArtifactDigest])),
@@ -1536,7 +1627,7 @@ const waveRecordCore = {
   coverage_debt: waveDebt,
   budget_authority: {
     authority_digest: budgetAuthorityDigest, authority_canonical: budgetAuthorityCanonical,
-    admitted_caps: { max_context_tokens_per_call: maxContextTokensPerCall, max_prompt_utf8_bytes_per_call: maxPromptUtf8BytesPerCall, max_unique_nodes: maxUniqueNodes, max_call_attempts: maxCallAttempts, retry_budget: retryBudget, max_workflow_planned_input_tokens: maxWorkflowPlannedInputTokens },
+    admitted_caps: executionCapsV1(budgetAuthority),
   },
   result_fragment_digests: Object.fromEntries(firstAttempts.map(record => {
     const finalRecord = finalRecordsByNode.get(record.node_id)
@@ -1544,6 +1635,7 @@ const waveRecordCore = {
       finalRecord && !finalRecord.returned_null ? finalRecord.parsed_result_digest : null
     )]
   })),
+  execution_event_ledger: executionEventLedger,
   accounting_boundary: {
     usage_measurement_status: 'unavailable', controller_overhead_status: 'unavailable',
     excluded_from_token_lower_bounds: ['model output, cache, and tool usage', 'controller orchestration and hashing', 'provider overhead not exposed by platform telemetry'],
@@ -1563,7 +1655,7 @@ const controllerPayload = {
   scheduler,
   selection_surfaces: [...surfaces].sort(),
   run_sequence: runSequence,
-  adaptive_recall_approved: config.adaptive_recall_approved === true,
+  adaptive_recall_approved: false,
   adaptive_recall_authority_digest: adaptiveRecallAuthorityDigest,
   expected_axes: expectedAxes,
   admitted_axes: axes,
@@ -1636,7 +1728,8 @@ return {
   baseline_identity: baselineIdentity,
   scheduler,
   axes,
-  shadow_selected_axes: shadowSelectedAxes,
+  adaptive_selected_axes: adaptiveSelectedAxes,
+  shadow_selected_axes: adaptiveSelectedAxes,
   stop_when: stopWhen,
   pass_eligible: passEligible,
   coverage_holes: coverageHoles,

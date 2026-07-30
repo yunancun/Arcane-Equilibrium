@@ -12,6 +12,18 @@ The prompt declares role/type, owned scope, task shape, expected fragment/patch,
 context digest, acceptance, hard stops, and verification surface. Unknown or
 colliding ownership stops before edits.
 
+Every governed spawn also binds exact native agent, model/effort, execution
+surface, ephemeral history mode, policy digest, parent/root execution IDs, and
+spawn depth. Default history is `none`; do not use full-parent history as a
+convenience. A Codex native receipt is currently caller-reported and cannot
+satisfy mandatory-role closure until a host adapter attests the exact tool-call
+and fork boundary. Saved workflows derive exact model and role effort from
+`saved_workflow_model_policy_v1`; session inheritance and caller overrides are
+forbidden. `narrow` waves admit at most two in-flight model calls, other
+current envelopes at most three, and child agents may not spawn grandchildren.
+One watcher owns waits/follow-ups for the wave; a no-delta or budget terminal
+state is not a reason to respawn.
+
 ## Mac source vs Linux runtime
 
 - E1/E2/E4 source and cargo verification runs on Mac.
@@ -101,16 +113,24 @@ cannot stand in for runtime, and repo writes require an exact before/after
 
 For desktop saved workflows, a pause may kill in-flight agents. Stay in-turn
 while a wave runs. Resume from journal/checkpoint; no unchanged blind retry.
-Platform transcript activity is preferred over worktree silence as liveness
-evidence. Exact platform-specific handling belongs in `agent-wave`, not every
-role prompt.
+`agent_governance_liveness.adjudicate_agent_liveness` is currently a pure
+contract, not a connected controller. It specifies that supported
+collaboration/thread activity outranks transcript diagnostics; worktree silence
+and private transcript layout never override a supported `RUNNING` or terminal
+state. When supported activity is unavailable the result remains `UNKNOWN`;
+private JSONL existence, size, and mtime are diagnostic fallback only. The
+platform activity-acquisition plus wait/cancel/stop Adapter is still
+`EXTERNAL_LIMIT` and must not be inferred from this helper.
 
 When statting the session's `subagents/agent-*.jsonl` for liveness, also check
 byte size. A transcript growing past a threshold (suggested 10 MB) is a
 `RUNAWAY_SUSPECT`: apply the existing TaskStop preconditions and let PM
-adjudicate the stop. Transcript bytes are a proxy monitoring signal only; they
-must never stand in for actual-usage accounting (see the development-agent
-governance consumption truth contract).
+adjudicate the stop. It never requests or performs an automatic stop. A missing
+private JSONL is `UNAVAILABLE` diagnostic evidence, not a liveness failure.
+Transcript bytes are a proxy monitoring signal only; they must never stand in
+for actual-usage accounting (see the development-agent governance consumption
+truth contract). The exact output contract is
+`.codex/schemas/agent_liveness_adjudication_v1.schema.json`.
 
 Every workflow retains one canonical call record per attempt and a complete
 wave ledger for admitted nodes, retries, nulls, planned input lower bounds,

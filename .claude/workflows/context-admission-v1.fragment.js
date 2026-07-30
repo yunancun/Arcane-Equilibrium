@@ -4,19 +4,101 @@
 const CONTEXT_ADMISSION_V1 = Object.freeze({
   artifactFields: Object.freeze(['schema_version', 'artifact_digest', 'task_contract_digest', 'budget_authority_digest', 'budget_authority_canonical', 'canonical_plan', 'shared_task_context_digest', 'shared_task_context_canonical', 'role_context_delta_digest', 'role_context_delta_canonical', 'semantic_input_tokens']),
   planFields: Object.freeze(['schema_version', 'registry_schema_version', 'role', 'role_permission', 'task_contract', 'task_contract_digest', 'mandatory_content', 'omitted_mandatory', 'baseline_errors', 'selected_packs', 'shared_packs', 'role_packs', 'sources', 'unresolved_sources', 'blocking_sources', 'evidence_debt', 'required_for_verdict', 'acquisition_plan', 'budget']),
-  contractFields: Object.freeze(['task_shape', 'surfaces', 'risk', 'runtime_claim', 'end_to_end_claim', 'uncertainty', 'side_effect_class', 'objective', 'scope', 'acceptance_criteria', 'hard_stops', 'baseline', 'dirty_scope', 'verification_scope', 'direct_interfaces', 'previous_failure', 'focus', 'claim_inputs', 'task_prompt', 'task_prompt_digest', 'continuation_mode', 'operator_loop_request_digest']),
+  contractFields: Object.freeze(['task_shape', 'surfaces', 'risk', 'runtime_claim', 'end_to_end_claim', 'uncertainty', 'side_effect_class', 'objective', 'scope', 'acceptance_criteria', 'hard_stops', 'baseline', 'dirty_scope', 'verification_scope', 'direct_interfaces', 'previous_failure', 'focus', 'claim_inputs', 'task_prompt', 'task_prompt_digest', 'continuation_mode', 'operator_loop_request_digest', 'history_refs']),
   mandatoryFields: Object.freeze(['objective', 'scope', 'acceptance_criteria', 'hard_stops', 'baseline', 'direct_interfaces', 'previous_failure', 'task_prompt', 'task_prompt_digest']),
   budgetFields: Object.freeze(['envelope', 'target_context_tokens', 'quality_reserve_context_tokens', 'accounting_basis', 'max_context_tokens_per_call', 'max_prompt_utf8_bytes_per_call', 'estimated_tokens', 'compiler_estimated_input_tokens', 'action', 'review_required', 'review_rationale', 'mandatory_truncated', 'quality_reserve_reasons', 'authority', 'authority_canonical', 'authority_digest', 'call_allowed', 'claim_pass_eligible', 'pass_allowed']),
-  authorityFields: Object.freeze(['schema_version', 'envelope', 'accounting_basis', 'max_context_tokens_per_call', 'max_prompt_utf8_bytes_per_call', 'max_workflow_planned_input_tokens', 'max_unique_nodes', 'max_call_attempts', 'retry_budget']),
+  authorityFields: Object.freeze(['schema_version', 'envelope', 'target_context_tokens', 'quality_reserve_context_tokens', 'accounting_basis', 'max_context_tokens_per_call', 'max_prompt_utf8_bytes_per_call', 'max_workflow_planned_input_tokens', 'max_unique_nodes', 'max_call_attempts', 'retry_budget', 'max_followup_attempts', 'max_total_model_turns', 'max_wait_cycles', 'max_no_delta_wakeups', 'max_wall_clock_ms', 'max_call_duration_ms', 'max_wave_duration_ms', 'max_concurrent_calls', 'max_spawn_depth_from_root', 'platform_token_cap']),
+  executionCapFields: Object.freeze(['max_context_tokens_per_call', 'max_prompt_utf8_bytes_per_call', 'max_workflow_planned_input_tokens', 'max_unique_nodes', 'max_call_attempts', 'retry_budget', 'max_followup_attempts', 'max_total_model_turns', 'max_wait_cycles', 'max_no_delta_wakeups', 'max_wall_clock_ms', 'max_call_duration_ms', 'max_wave_duration_ms', 'max_concurrent_calls', 'max_spawn_depth_from_root']),
   admissibleStatuses: Object.freeze(['pinned', 'pinned_verified', 'resolved_artifact', 'trusted_producer']),
   evidenceDebtStatuses: Object.freeze(['resolve_on_demand', 'stale_context_artifact', 'trusted_producer_unavailable', 'available_unattested_evidence']),
   trustedKinds: Object.freeze(__CONTEXT_TRUSTED_KINDS__),
   producerByKind: Object.freeze({runtime_observation: 'runtime_observation_adapter_v1', external_policy_snapshot: 'external_policy_capture_adapter_v1', source_snapshot: 'repository_snapshot_adapter_v1'}),
   ttlMs: Object.freeze({runtime_observation: 900000, external_policy_snapshot: 2592000000, source_snapshot: 14400000, diff_snapshot: 3600000, interface_inventory: 3600000, caller_inventory: 3600000, test_inventory: 3600000, repository_inventory: 3600000}),
   authorityProfiles: Object.freeze(__CONTEXT_AUTHORITY_PROFILES__),
+  surfaceBindings: Object.freeze(__EXECUTION_SURFACE_BINDINGS__),
+  defaultHistory: Object.freeze(__DEFAULT_REQUESTED_HISTORY__),
+  savedWorkflowModelPolicy: Object.freeze(__SAVED_WORKFLOW_MODEL_POLICY__),
 })
 const validVerificationScopeV1 = value => Array.isArray(value) && new Set(value).size === value.length && canonicalJson(value) === canonicalJson([...value].sort()) && value.every(path => typeof path === 'string' && path && path === path.trim() && path !== '.' && !path.startsWith('/') && !path.startsWith('~') && !path.startsWith('-') && !path.startsWith('!') && !path.startsWith(':') && !path.includes('\\') && !/[\0\n\r*?\[]/.test(path) && !path.split('/').some(part => !part || part === '.' || part === '..'))
 const contextPrefixV1 = artifact => artifact.shared_task_context_canonical + '\n\n' + artifact.role_context_delta_canonical + '\n\n' + canonicalJson({schema_version: 'context_prompt_binding_v1', artifact_digest: artifact.artifact_digest, task_contract_digest: artifact.task_contract_digest, budget_authority_digest: artifact.budget_authority_digest, shared_task_context_digest: artifact.shared_task_context_digest, role_context_delta_digest: artifact.role_context_delta_digest})
+const executionCapsV1 = authority => Object.fromEntries(CONTEXT_ADMISSION_V1.executionCapFields.map(field => [field, authority[field]]))
+const requestedExecutionBindingV1 = () => {
+  const binding = CONTEXT_ADMISSION_V1.surfaceBindings.claude_saved_workflow_v1
+  return {
+    surface_profile_id: binding.profile.profile_id,
+    surface_profile_digest: binding.digest,
+    history: { ...CONTEXT_ADMISSION_V1.defaultHistory },
+  }
+}
+const savedWorkflowTierV1 = logicalRole => {
+  const policy = CONTEXT_ADMISSION_V1.savedWorkflowModelPolicy
+  const effort = policy.role_efforts && policy.role_efforts[logicalRole]
+  if (
+    policy.schema_version !== 'saved_workflow_model_policy_v1' ||
+    policy.surface_profile_id !== 'claude_saved_workflow_v1' ||
+    policy.allow_inheritance !== false ||
+    typeof policy.model !== 'string' || !policy.model ||
+    typeof effort !== 'string' || !effort
+  ) {
+    throw new Error(`logical role ${logicalRole} lacks an exact saved-workflow model tier`)
+  }
+  return { model: policy.model, effort }
+}
+const admittedSavedWorkflowTierV1 = (logicalRole, requested = {}) => {
+  const tier = savedWorkflowTierV1(logicalRole)
+  for (const field of ['model', 'effort']) {
+    if (requested[field] !== undefined && requested[field] !== tier[field]) {
+      throw new Error(`logical role ${logicalRole} ${field} differs from Registry saved-workflow policy`)
+    }
+  }
+  return tier
+}
+const executionEventLedgerV1 = async (workflowId, policyDigest, surfaceProfileDigest, callRecords) => {
+  const watcherId = `${workflowId}:watcher`
+  const rootEventId = `${workflowId}:root-turn`
+  const events = [{
+    sequence: 0,
+    event_id: rootEventId,
+    kind: 'root_turn',
+    parent_event_id: null,
+    node_id: 'PM',
+    spawn_depth: 0,
+    watcher_id: watcherId,
+    outcome: 'completed',
+    call_record_digest: null,
+  }, ...callRecords.map((record, index) => ({
+    sequence: index + 1,
+    event_id: record.logical_call_id,
+    kind: record.attempt > 1 ? 'retry' : 'model_call',
+    parent_event_id: record.retry_parent_call_id || rootEventId,
+    node_id: record.node_id,
+    spawn_depth: 1,
+    watcher_id: watcherId,
+    outcome: record.returned_null ? 'null' : 'completed',
+    call_record_digest: record.record_digest,
+  }))]
+  const core = {
+    schema_version: 'execution_event_ledger_v1',
+    root_execution_id: `${workflowId}:root`,
+    policy_digest: policyDigest,
+    surface_profile_digest: surfaceProfileDigest,
+    watcher_id: watcherId,
+    events,
+    terminal_reason: null,
+  }
+  return { ...core, ledger_digest: await contextSha256TextV1(canonicalJson(core)) }
+}
+const boundedParallelV1 = async (factories, capacity) => {
+  if (!Array.isArray(factories) || !Number.isInteger(capacity) || capacity <= 0) {
+    throw new Error('bounded scheduler requires task factories and a positive capacity')
+  }
+  const results = []
+  for (let index = 0; index < factories.length; index += capacity) {
+    const batch = await parallel(factories.slice(index, index + capacity))
+    results.push(...batch)
+  }
+  return results
+}
 const contextUtf8LengthV1 = value => new TextEncoder().encode(value).length
 const contextSha256TextV1 = async value => {
   const digest = await crypto.subtle.digest('SHA-256', new TextEncoder().encode(value))
@@ -35,4 +117,17 @@ async function validateSemanticContextV1(artifact, plan) {
   const delta = {schema_version: 'role_context_delta_v1', shared_task_context_digest: sharedDigest, logical_role: plan.role, permission: plan.role_permission, role_packs: plan.role_packs, sources: roleSources, evidence_debt: plan.evidence_debt.filter(name => roleSources.some(source => source.source === name))}
   const deltaCanonical = canonicalJson(delta)
   return artifact.shared_task_context_canonical === sharedCanonical && artifact.shared_task_context_digest === sharedDigest && artifact.role_context_delta_canonical === deltaCanonical && artifact.role_context_delta_digest === await contextSha256TextV1(deltaCanonical) && artifact.semantic_input_tokens === Math.max(1, Math.ceil(contextUtf8LengthV1(sharedCanonical + '\n\n' + deltaCanonical) / 4))
+}
+const promotedEnvelopeV1 = (baseEnvelope, requiredNodes) => {
+  if (!Number.isInteger(requiredNodes) || requiredNodes <= 0) throw new Error('required node count must be positive')
+  if (baseEnvelope === 'profit_diagnosis') {
+    if (CONTEXT_ADMISSION_V1.authorityProfiles.profit_diagnosis.max_unique_nodes < requiredNodes) throw new Error('profit diagnosis exceeds its dedicated envelope')
+    return baseEnvelope
+  }
+  const order = ['narrow', 'standard', 'complex', 'full_audit']
+  const start = order.indexOf(baseEnvelope)
+  if (start < 0) throw new Error(`unknown base envelope=${baseEnvelope}`)
+  const selected = order.slice(start).find(name => CONTEXT_ADMISSION_V1.authorityProfiles[name].max_unique_nodes >= requiredNodes)
+  if (!selected) throw new Error('required DAG exceeds the largest execution envelope')
+  return selected
 }

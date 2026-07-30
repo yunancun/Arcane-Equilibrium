@@ -14,6 +14,8 @@ from typing import Any
 from agent_governance_registry import REPO_ROOT, load_registry
 from agent_governance_context_specs import trusted_derived_kinds
 from agent_governance_context_projection import materialize_semantic_context
+from agent_governance_execution_policy import compile_execution_budget_policy
+from agent_governance_routing import route_task
 from agent_governance_task_control import compile_task_execution_policy
 
 
@@ -76,6 +78,7 @@ CONTRACT_FIELDS = {
     "task_prompt_digest",
     "continuation_mode",
     "operator_loop_request_digest",
+    "history_refs",
 }
 MANDATORY_FIELDS = {
     "objective",
@@ -213,7 +216,7 @@ def _expected_facts_errors(
     optional_projection = {
         "direct_interfaces", "dirty_scope", "verification_scope", "previous_failure", "focus",
         "claim_inputs", "runtime_claim", "end_to_end_claim", "continuation_mode",
-        "operator_loop_request_digest",
+        "operator_loop_request_digest", "history_refs",
     }
     for field in optional_projection & set(expected):
         if contract.get(field) != expected.get(field):
@@ -650,23 +653,13 @@ def validate_context_artifact(
     if not isinstance(budget, dict) or set(budget) != BUDGET_FIELDS:
         errors.append("context budget fields are not exact")
         return result
-    envelope_name = _envelope(contract)
+    envelope_name = route_task(contract)["budget_envelope"]
     try:
         envelope = registry["budget_envelopes"][envelope_name]
     except (KeyError, TypeError):
         errors.append(f"Registry budget authority is missing envelope {envelope_name}")
         return result
-    authority = {
-        "schema_version": "context_budget_authority_v1",
-        "envelope": envelope_name,
-        "accounting_basis": envelope["accounting_basis"],
-        "max_context_tokens_per_call": envelope["max_context_tokens_per_call"],
-        "max_prompt_utf8_bytes_per_call": envelope["max_prompt_utf8_bytes_per_call"],
-        "max_workflow_planned_input_tokens": envelope["max_workflow_planned_input_tokens"],
-        "max_unique_nodes": envelope["max_unique_nodes"],
-        "max_call_attempts": envelope["max_call_attempts"],
-        "retry_budget": envelope["retry_budget"],
-    }
+    authority = compile_execution_budget_policy(envelope_name, registry)
     authority_canonical = _canonical(authority)
     authority_digest = _digest(authority_canonical.encode("utf-8"))
     if budget.get("authority") != authority:

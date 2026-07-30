@@ -16,6 +16,10 @@ ADMITTED_CAP_FIELDS = (
     "max_context_tokens_per_call", "max_prompt_utf8_bytes_per_call",
     "max_workflow_planned_input_tokens", "max_unique_nodes",
     "max_call_attempts", "retry_budget",
+    "max_followup_attempts", "max_total_model_turns", "max_wait_cycles",
+    "max_no_delta_wakeups", "max_wall_clock_ms", "max_call_duration_ms",
+    "max_wave_duration_ms", "max_concurrent_calls",
+    "max_spawn_depth_from_root",
 )
 NODE_STDIN_ARGS = "JSON.parse(fs.readFileSync(0, 'utf8'))"
 
@@ -190,7 +194,10 @@ def _refresh_full_lineage(governance: object, packet: dict, contract: dict) -> N
                     "node_class": task["node_class"],
                     "permission": task["permission"],
                 },
-                "model": None, "effort": None, "isolation": None,
+                **governance.requested_execution_binding(governance.load_registry()),
+                "model": governance.load_registry()["saved_workflow_model_policy"]["model"],
+                "effort": governance.load_registry()["saved_workflow_model_policy"]["role_efforts"][role],
+                "isolation": None,
                 "node_class": task["node_class"], "permission": task["permission"],
             },
             prompt_digest=_digest({"prompt": node}), context_artifact_digest=context_digest,
@@ -493,7 +500,7 @@ def _clean_packet() -> tuple[object, dict, dict]:
     controller_payload = {
             "schema_version": "full_audit_control_v1",
         "baseline": deepcopy(baseline),
-        "scheduler": "adaptive_shadow",
+        "scheduler": "full",
         "selection_surfaces": ["agent_workflow", "full_audit"],
         "run_sequence": 0,
         "adaptive_recall_approved": False,
@@ -1009,57 +1016,51 @@ def _adaptive_packet(
     return variant
 
 
-def test_adaptive_recall_authority_requires_exact_scope_and_live_expiry() -> None:
+def test_adaptive_recall_self_digest_cannot_replace_platform_authority() -> None:
     governance, contract, packet = _clean_packet()
     adjudicated = datetime.fromisoformat(
         packet["adjudicated_at"].replace("Z", "+00:00")
     )
     live_expiry = _z(adjudicated + timedelta(minutes=30))
 
-    wrong_scope = _adaptive_packet(
-        governance,
-        packet,
-        contract,
-        scope="unrelated:scope",
-        expiry=live_expiry,
-    )
-    assert "adaptive full audit recall authority scope is invalid" in governance.validate_closure(
-        wrong_scope
-    )
-
-    missing_expiry = _adaptive_packet(
-        governance,
-        packet,
-        contract,
-        scope="full_audit:adaptive_recall",
-        expiry=None,
-    )
-    assert "adaptive full audit recall authority requires expiry" in governance.validate_closure(
-        missing_expiry
-    )
-
-    valid = _adaptive_packet(
-        governance,
-        packet,
-        contract,
-        scope="full_audit:adaptive_recall",
-        expiry=live_expiry,
-    )
-    assert governance.validate_closure(
-        valid, execution_attestation_verifier=_host_execution_verifier(valid)
-    ) == []
-
-    denied = deepcopy(valid)
-    approval = next(
-        ref
-        for ref in denied["authority_refs"]
-        if ref["subject"] == "adaptive_full_audit_recall"
-    )
-    approval["value"] = {"approved": False}
-    approval["claim_digest"] = governance.authority_claim_digest(approval)
-    assert "adaptive full audit recall authority does not approve recall" in (
-        governance.validate_closure(denied)
-    )
+    variants = [
+        _adaptive_packet(
+            governance,
+            packet,
+            contract,
+            scope="unrelated:scope",
+            expiry=live_expiry,
+        ),
+        _adaptive_packet(
+            governance,
+            packet,
+            contract,
+            scope="full_audit:adaptive_recall",
+            expiry=None,
+        ),
+        _adaptive_packet(
+            governance,
+            packet,
+            contract,
+            scope="full_audit:adaptive_recall",
+            expiry=live_expiry,
+        ),
+    ]
+    for variant in variants:
+        errors = governance.validate_closure(
+            variant,
+            execution_attestation_verifier=_host_execution_verifier(variant),
+        )
+        assert "EXTERNAL_LIMIT_RECALL_AUTHORITY" in errors
+        assert (
+            "caller-declared adaptive recall approval cannot authorize "
+            "reduced execution"
+        ) in errors
+        assert (
+            "self-digested adaptive recall authority cannot authorize "
+            "reduced execution"
+        ) in errors
+        assert "claim_evidence cannot authorize adaptive full audit recall" in errors
 
 
 def test_adaptive_full_audit_inherits_mandatory_axes_from_canonical_route() -> None:
@@ -1174,35 +1175,39 @@ def test_saved_workflow_binds_e2_and_never_regresses_unintegrated_fix_candidates
     assert "const regression = null" in source
 
 
-def _full_audit_workflow_context() -> tuple[object, dict, dict, list[str]]:
+def _full_audit_workflow_context(
+    *,
+    claim_inputs: dict[str, str] | None = None,
+) -> tuple[object, dict, dict, list[str]]:
     governance = _load_governance()
     source_baseline = governance.capture_repository_baseline()
     task_prompt = "audit the admitted Full Audit workflow without widening authority"
-    routed = governance.route_task(
-        {
-            "task_shape": "audit",
-            "surfaces": ["agent_workflow", "full_audit", "profitability"],
-            "risk": "high",
-            "uncertainty": "high",
-            "side_effect_class": "none",
-            "task_prompt": task_prompt,
-            "objective": task_prompt,
-            "scope": [
-                ".claude/workflows/openclaw-full-audit.js",
-                "tests/structure/test_agent_governance_full_audit_adversarial.py",
-            ],
-            "acceptance_criteria": [
-                "reject forged Context authority before any agent call"
-            ],
-            "hard_stops": [
-                "no agent call before Context admission",
-                "no runtime, external, or broker effect",
-            ],
-            "baseline": source_baseline,
-            "direct_interfaces": ["context_artifact_v1", "full_audit_v3"],
-            "previous_failure": "self-signed budget authority reached agent calls",
-        }
-    )
+    task_facts = {
+        "task_shape": "audit",
+        "surfaces": ["agent_workflow", "full_audit", "profitability"],
+        "risk": "high",
+        "uncertainty": "high",
+        "side_effect_class": "none",
+        "task_prompt": task_prompt,
+        "objective": task_prompt,
+        "scope": [
+            ".claude/workflows/openclaw-full-audit.js",
+            "tests/structure/test_agent_governance_full_audit_adversarial.py",
+        ],
+        "acceptance_criteria": [
+            "reject forged Context authority before any agent call"
+        ],
+        "hard_stops": [
+            "no agent call before Context admission",
+            "no runtime, external, or broker effect",
+        ],
+        "baseline": source_baseline,
+        "direct_interfaces": ["context_artifact_v1", "full_audit_v3"],
+        "previous_failure": "self-signed budget authority reached agent calls",
+    }
+    if claim_inputs is not None:
+        task_facts["claim_inputs"] = claim_inputs
+    routed = governance.route_task(task_facts)
     plan = governance.compile_context("PM", routed["task_facts"])
     assert plan["budget"]["pass_allowed"] is True
     artifact = governance.materialize_context_artifact(plan)
@@ -1374,14 +1379,7 @@ const pipeline = async () => [];
     assert wave["budget_authority"] == {
         "authority_digest": context_artifact["budget_authority_digest"],
         "authority_canonical": budget_authority_canonical,
-        "admitted_caps": {
-            "max_context_tokens_per_call": budget_authority["max_context_tokens_per_call"],
-            "max_prompt_utf8_bytes_per_call": budget_authority["max_prompt_utf8_bytes_per_call"],
-            "max_workflow_planned_input_tokens": budget_authority["max_workflow_planned_input_tokens"],
-            "max_unique_nodes": budget_authority["max_unique_nodes"],
-            "max_call_attempts": budget_authority["max_call_attempts"],
-            "retry_budget": budget_authority["retry_budget"],
-        },
+        "admitted_caps": _admitted_caps(budget_authority),
     }
     assert {"CC", "FA", "AI-E", "QC"}.issubset(
         result["shadow_selected_axes"]
@@ -1429,13 +1427,197 @@ const agent = async () => { calls += 1; return null; };
     assert "full_audit_continuation_v1" not in source
 
 
+def test_full_audit_defaults_to_full_and_reduced_mode_is_external_limit() -> None:
+    import subprocess
+
+    source = (ROOT / ".claude/workflows/openclaw-full-audit.js").read_text(
+        encoding="utf-8"
+    )
+    assert "const scheduler = config.scheduler || 'full'" in source
+    assert "const candidateAxes = requestedAxes" in source
+    assert "throw new Error('EXTERNAL_LIMIT_RECALL_AUTHORITY')" in source
+
+    _governance, artifact, baseline, route_roles = _full_audit_workflow_context()
+    script = r"""
+const fs = require('node:fs');
+if (!globalThis.crypto) globalThis.crypto = require('node:crypto').webcrypto;
+const AsyncFunction = Object.getPrototypeOf(async function () {}).constructor;
+const source = fs.readFileSync(__WORKFLOW__, 'utf8').replace('export const meta =', 'const meta =');
+const runner = new AsyncFunction('args', 'phase', 'log', 'parallel', 'pipeline', 'agent', source);
+let calls = 0;
+const agent = async (_prompt, options) => {
+  calls += 1;
+  if (options.label === 'seam-critic') return {reprobes: []};
+  if (options.label.startsWith('audit')) return {
+    schema_version: 'audit_fragment_v2', verdict: 'PASS', confidence: 'high',
+    findings: [], assumptions: [],
+    consumption: {measurement_status: 'unavailable', unavailable_reason: 'harness'},
+  };
+  throw new Error(`unexpected call ${options.label}`);
+};
+const parallel = async jobs => Promise.all(jobs.map(job => job()));
+(async () => {
+  const result = await runner(__ARGS__, () => {}, () => {}, parallel, async () => [], agent);
+  console.log(JSON.stringify({calls, result}));
+})()
+  .catch(error => { console.error(error); process.exit(1); });
+""".replace(
+        "__WORKFLOW__", json.dumps(str(ROOT / ".claude/workflows/openclaw-full-audit.js")),
+    ).replace("__ARGS__", NODE_STDIN_ARGS)
+
+    args = {
+        "context_artifact": artifact,
+        "baseline": baseline,
+        "route_required_roles": route_roles,
+    }
+    completed = subprocess.run(
+        ["node", "-e", script], cwd=ROOT, input=json.dumps(args), text=True,
+        capture_output=True, check=False,
+    )
+    assert completed.returncode == 0, completed.stderr
+    outcome = json.loads(completed.stdout)
+    assert outcome["result"]["scheduler"] == "full"
+    assert outcome["result"]["axes"] == [
+        "CC", "FA", "E2", "E3", "BB", "IB", "OPS",
+        "QC", "MIT", "AI-E", "E5", "A3", "R4",
+    ]
+    assert outcome["calls"] == 14
+    assert outcome["result"]["coverage_debt"] == []
+    assert outcome["result"]["pass_eligible"] is True
+
+    tier_override = subprocess.run(
+        ["node", "-e", script], cwd=ROOT,
+        input=json.dumps({**args, "cheap_model": "claude-sonnet-5"}),
+        text=True, capture_output=True, check=False,
+    )
+    assert tier_override.returncode != 0
+    assert "cannot override Registry saved-workflow model policy" in tier_override.stderr
+
+    denied = subprocess.run(
+        ["node", "-e", script], cwd=ROOT,
+        input=json.dumps({**args, "scheduler": "adaptive"}),
+        text=True, capture_output=True, check=False,
+    )
+    assert denied.returncode != 0
+    assert "EXTERNAL_LIMIT_RECALL_AUTHORITY" in denied.stderr
+
+
+def test_registry_declares_reduced_full_audit_external_limit() -> None:
+    governance = _load_governance()
+    registry = governance.load_registry()
+    policy = registry["workflow_contracts"]["full_audit_v3"][
+        "recall_authority"
+    ]
+
+    assert policy == {
+        "schema_version": "full_audit_recall_authority_policy_v1",
+        "status": "EXTERNAL_LIMIT_RECALL_AUTHORITY",
+        "required_trust_tier": "PLATFORM_OR_EXTERNAL_ATTESTED",
+        "saved_workflow_verifier": "unavailable",
+        "closure_verifier": "unavailable",
+    }
+    assert governance.validate_registry(registry, ROOT) == []
+    closure_schema = json.loads(
+        (ROOT / ".codex/schemas/closure_packet_v1.schema.json").read_text(
+            encoding="utf-8"
+        )
+    )
+    control = closure_schema["$defs"]["fullAuditControl"]["properties"]
+    assert control["scheduler"] == {"const": "full"}
+    assert control["adaptive_recall_approved"] == {"const": False}
+    assert control["adaptive_recall_authority_digest"] == {"type": "null"}
+
+
+def test_adaptive_or_reduced_full_audit_self_authority_fails_before_calls() -> None:
+    import subprocess
+
+    approval_digest = _digest({"approved": True})
+    _governance, artifact, baseline, route_roles = _full_audit_workflow_context(
+        claim_inputs={"adaptive_recall_approval": approval_digest},
+    )
+    base = {
+        "context_artifact": artifact,
+        "baseline": baseline,
+        "route_required_roles": route_roles,
+    }
+    cases = [
+        {
+            **base,
+            "scheduler": "adaptive",
+            "adaptive_recall_approved": True,
+            "adaptive_recall_authority_digest": approval_digest,
+        },
+        {**base, "scheduler": "adaptive_shadow"},
+        {**base, "scheduler": "full", "axes": ["CC", "FA"]},
+    ]
+    script = r"""
+const fs = require('node:fs');
+if (!globalThis.crypto) globalThis.crypto = require('node:crypto').webcrypto;
+const AsyncFunction = Object.getPrototypeOf(async function () {}).constructor;
+const source = fs.readFileSync(__WORKFLOW__, 'utf8').replace('export const meta =', 'const meta =');
+const runner = new AsyncFunction('args', 'phase', 'log', 'parallel', 'pipeline', 'agent', source);
+let calls = 0;
+const agent = async () => { calls += 1; return null; };
+(async () => {
+  try {
+    await runner(__ARGS__, () => {}, () => {}, async jobs => Promise.all(jobs.map(job => job())), async () => [], agent);
+    console.log(JSON.stringify({calls, error: null}));
+  } catch (error) {
+    console.log(JSON.stringify({calls, error: String(error.message || error)}));
+  }
+})().catch(error => { console.error(error); process.exit(1); });
+""".replace(
+        "__WORKFLOW__",
+        json.dumps(str(ROOT / ".claude/workflows/openclaw-full-audit.js")),
+    ).replace("__ARGS__", NODE_STDIN_ARGS)
+
+    for run_args in cases:
+        completed = subprocess.run(
+            ["node", "-e", script],
+            cwd=ROOT,
+            input=json.dumps(run_args),
+            text=True,
+            capture_output=True,
+            check=False,
+        )
+        assert completed.returncode == 0, completed.stderr
+        outcome = json.loads(completed.stdout)
+        assert outcome["calls"] == 0, outcome
+        assert outcome["error"] == "EXTERNAL_LIMIT_RECALL_AUTHORITY"
+
+
+def test_canonical_full_audit_skill_matches_executable_registry_contract() -> None:
+    governance = _load_governance()
+    registry = governance.load_registry()
+    budget = registry["budget_envelopes"]["full_audit"]
+    skill = (
+        ROOT / ".claude/skills/ultracode-full-audit/SKILL.md"
+    ).read_text(encoding="utf-8")
+
+    assert "`full` is the only currently executable scheduler" in skill
+    assert 'scheduler: "full"' in skill
+    assert 'scheduler: "adaptive_shadow"' not in skill
+    assert "judgment_model" not in skill
+    assert "20 agents" not in skill
+    assert "20/96k" not in skill
+    for field in (
+        "max_unique_nodes",
+        "max_call_attempts",
+        "max_context_tokens_per_call",
+        "max_workflow_planned_input_tokens",
+        "retry_budget",
+        "max_concurrent_calls",
+    ):
+        assert f"`{field}` = `{budget[field]}`" in skill
+
+
 def test_full_audit_no_findings_is_lazy_fourteen_call_backstop() -> None:
     import subprocess
 
     _governance, artifact, baseline, route_roles = _full_audit_workflow_context()
     args = {
         "context_artifact": artifact, "baseline": baseline,
-        "route_required_roles": route_roles,
+        "route_required_roles": route_roles, "scheduler": "full",
     }
     script = r"""
 const fs = require('node:fs');
@@ -1480,7 +1662,7 @@ def test_full_audit_44_node_ceiling_covers_thirteen_two_view_claims() -> None:
     _governance, artifact, baseline, route_roles = _full_audit_workflow_context()
     args = {
         "context_artifact": artifact, "baseline": baseline,
-        "route_required_roles": route_roles,
+        "route_required_roles": route_roles, "scheduler": "full",
     }
     script = r"""
 const fs = require('node:fs');
@@ -1489,24 +1671,36 @@ const AsyncFunction = Object.getPrototypeOf(async function () {}).constructor;
 const source = fs.readFileSync(__WORKFLOW__, 'utf8').replace('export const meta =', 'const meta =');
 const runner = new AsyncFunction('args', 'phase', 'log', 'parallel', 'pipeline', 'agent', source);
 const consumption = {measurement_status: 'unavailable', unavailable_reason: 'harness'};
+let active = 0;
+let peak = 0;
 const agent = async (_prompt, options) => {
-  if (options.label === 'seam-critic') return {reprobes: []};
-  if (options.label.startsWith('audit')) {
-    const axis = options.label.split(':').at(-1);
-    return {schema_version: 'audit_fragment_v2', verdict: 'FINDINGS', confidence: 'high', findings: [{
-      title: `${axis} claim`, assertion: `${axis} assertion`, severity: 'HIGH',
-      classification: 'FACT', confidence: 'high', evidence: `${axis} evidence`,
-      impact: 'material', file: `src/${axis}.py`, defect_type: ['other'],
-      symbol_anchor: `${axis}.fn`, fix_hint: 'fix',
-    }], assumptions: [], consumption};
+  active += 1;
+  peak = Math.max(peak, active);
+  try {
+    await new Promise(resolve => setTimeout(resolve, 5));
+    if (options.label === 'seam-critic') return {reprobes: []};
+    if (options.label.startsWith('audit')) {
+      const axis = options.label.split(':').at(-1);
+      return {schema_version: 'audit_fragment_v2', verdict: 'FINDINGS', confidence: 'high', findings: [{
+        title: `${axis} claim`, assertion: `${axis} assertion`, severity: 'HIGH',
+        classification: 'FACT', confidence: 'high', evidence: `${axis} evidence`,
+        impact: 'material', file: `src/${axis}.py`, defect_type: ['other'],
+        symbol_anchor: `${axis}.fn`, fix_hint: 'fix',
+      }], assumptions: [], consumption};
+    }
+    if (options.label.startsWith('verify-')) return {
+      refuted: true, confidence: 'high', reason: 'independently refuted', evidence: 'bound evidence',
+    };
+    throw new Error(`unexpected call ${options.label}`);
+  } finally {
+    active -= 1;
   }
-  if (options.label.startsWith('verify-')) return {
-    refuted: true, confidence: 'high', reason: 'independently refuted', evidence: 'bound evidence',
-  };
-  throw new Error(`unexpected call ${options.label}`);
 };
 const parallel = async jobs => Promise.all(jobs.map(job => job()));
-(async () => console.log(JSON.stringify(await runner(__ARGS__, () => {}, () => {}, parallel, async () => [], agent))))()
+(async () => {
+  const result = await runner(__ARGS__, () => {}, () => {}, parallel, async () => [], agent);
+  console.log(JSON.stringify({result, peak}));
+})()
   .catch(error => { console.error(error); process.exit(1); });
 """.replace(
         "__WORKFLOW__", json.dumps(str(ROOT / ".claude/workflows/openclaw-full-audit.js")),
@@ -1516,7 +1710,12 @@ const parallel = async jobs => Promise.all(jobs.map(job => job()));
         capture_output=True, check=False,
     )
     assert completed.returncode == 0, completed.stderr
-    result = json.loads(completed.stdout)
+    outcome = json.loads(completed.stdout)
+    result = outcome["result"]
+    admitted_concurrency = json.loads(
+        artifact["budget_authority_canonical"]
+    )["max_concurrent_calls"]
+    assert outcome["peak"] <= admitted_concurrency
     assert result["totals"]["distinct_decision_claims"] == 13
     assert result["totals"]["deferred_claims"] == 0
     assert result["totals"]["refuted"] == 13
@@ -1534,7 +1733,7 @@ def test_full_audit_overflow_emits_exact_cold_restart_recommendation() -> None:
     _governance, artifact, baseline, route_roles = _full_audit_workflow_context()
     args = {
         "context_artifact": artifact, "baseline": baseline,
-        "route_required_roles": route_roles,
+        "route_required_roles": route_roles, "scheduler": "full",
     }
     script = r"""
 const fs = require('node:fs');

@@ -16,7 +16,13 @@ from agent_governance_execution_dag import (
     execution_dag_digest,
     non_call_controller_node_ids,
 )
-from agent_governance_registry import native_agent_binding
+from agent_governance_execution_policy import (
+    compile_execution_budget_policy,
+    execution_policy_digest,
+    promote_execution_envelope,
+)
+from agent_governance_context_refs import normalize_history_refs
+from agent_governance_registry import load_registry, native_agent_binding
 from agent_governance_task_control import (
     CONTINUATION_MODES,
     DEFAULT_CONTINUATION_MODE,
@@ -33,7 +39,7 @@ TASK_FACT_FIELDS = {
     "side_effect_class", "uncertainty", "dirty_scope", "operator_risk_acceptance",
     "verification_scope", "focus", "claim_inputs",
     "task_prompt", "task_prompt_digest", "continuation_mode",
-    "operator_loop_request_digest",
+    "operator_loop_request_digest", "history_refs",
 }
 SOURCE_REVIEW_SURFACES = {"python", "rust", "gui", "ml_data", "implementation", "runtime"}
 OPERATION_SURFACES = {"deploy", "service", "cron", "pg", "operations", "runtime_effect", "incident_rca"}
@@ -307,7 +313,7 @@ TASK_CONTRACT_FIELDS = (
     "uncertainty", "side_effect_class", "objective", "scope", "acceptance_criteria", "hard_stops",
     "baseline", "dirty_scope", "verification_scope", "direct_interfaces", "previous_failure", "focus",
     "claim_inputs", "task_prompt", "task_prompt_digest", "continuation_mode",
-    "operator_loop_request_digest",
+    "operator_loop_request_digest", "history_refs",
 )
 
 
@@ -559,6 +565,7 @@ def _normalize_task_facts(task_facts: dict[str, Any]) -> dict[str, Any]:
         surfaces=sorted(normalized_surfaces),
         runtime_claim=task_facts.get("runtime_claim", False),
         end_to_end_claim=task_facts.get("end_to_end_claim", False),
+        history_refs=normalize_history_refs(task_facts.get("history_refs")),
     )
     continuation_mode = task_facts.get(
         "continuation_mode", DEFAULT_CONTINUATION_MODE
@@ -1054,7 +1061,25 @@ def route_task(task_facts: dict[str, Any]) -> dict[str, Any]:
         add("broker_ibkr_gate", role="IB", requires=[predecessor], reason="IBKR Adapter selected")
         gates.append("broker_ibkr_gate")
 
-    if operations_needed:
+    effect_adapter_admitted = (
+        deploy or effect == "target_host_probe" or s2_effect_step is not None
+    )
+    if (
+        operations_needed
+        and not effect_adapter_admitted
+        and not unsupported_effect
+    ):
+        add(
+            "ops_observation",
+            role="OPS",
+            requires=[predecessor, *gates],
+            reason=(
+                "one read-only operational observation; no effect adapter is "
+                "admitted"
+            ),
+        )
+        predecessor = "ops_observation"
+    elif operations_needed and effect_adapter_admitted:
         add("ops_preflight", role="OPS", requires=[predecessor, *gates], reason="runtime/deploy preflight hard edge")
         postcheck_requires = ["ops_preflight"]
         if deploy:
@@ -1123,8 +1148,8 @@ def route_task(task_facts: dict[str, Any]) -> dict[str, Any]:
             postcheck_requires = [contract["adapter_id"]]
         # S2 六段 route class(S2.0 pg_observer_bootstrap / S2.1 quiesce_fence / S2.4 三類 /
         # S2.5 s2_5_start_intent / S2.2B s2_2b_ingestion_check_intent)在 SOURCE lane(selector
-        # 缺席)仍「絕不」注入 effect 節點——這些任務走 ops_preflight -> ops_postcheck(中間無
-        # effect adapter),生產/live 施加恆 fail-closed(EXTERNAL_VERIFICATION_PENDING)。
+        # 缺席)仍「絕不」注入 effect 節點——上方 observation-only 分支只派一個
+        # ops_observation；生產/live 施加恆 fail-closed(EXTERNAL_VERIFICATION_PENDING)。
         # S2E.1 起,「EFFECT session」有了 route 層機器可判定的定義:上方 elif 分支的 selector
         # claim admission(exact selector digest + exact per-step claim inventory + class 互鎖,
         # 見 S2_EFFECT_STEPS/_s2_effect_step)。effect lane 注入的節點鏈為
@@ -1178,6 +1203,26 @@ def route_task(task_facts: dict[str, Any]) -> dict[str, Any]:
         for role in sorted(possible - set(roles))
     ]
     required_role_nodes = _required_role_projection(nodes, facts)
+    base_envelope = (
+        "profit_diagnosis"
+        if "profit_diagnosis" in surfaces
+        else "full_audit"
+        if "full_audit" in surfaces or unknown_risk or unknown_uncertainty
+        else "complex"
+        if risk in {"high", "critical"} or uncertainty == "high"
+        else "narrow"
+        if risk == "low" and uncertainty == "low"
+        else "standard"
+    )
+    registry = load_registry()
+    budget_envelope = promote_execution_envelope(
+        base_envelope,
+        required_nodes=len(required_role_nodes),
+        registry=registry,
+    )
+    execution_budget_policy = compile_execution_budget_policy(
+        budget_envelope, registry
+    )
     result = {
         "schema_version": "hybrid_execution_dag_v1",
         "task_facts": facts,
@@ -1185,16 +1230,10 @@ def route_task(task_facts: dict[str, Any]) -> dict[str, Any]:
             task_contract_projection(facts)
         ),
         "risk_state": "UNKNOWN" if unknown_risk else risk.upper(),
-        "budget_envelope": (
-            "profit_diagnosis"
-            if "profit_diagnosis" in surfaces
-            else "full_audit"
-            if unknown_risk or unknown_uncertainty
-            else "complex"
-            if risk in {"high", "critical"} or uncertainty == "high"
-            else "narrow"
-            if risk == "low" and uncertainty == "low"
-            else "standard"
+        "budget_envelope": budget_envelope,
+        "execution_budget_policy": execution_budget_policy,
+        "execution_budget_policy_digest": execution_policy_digest(
+            execution_budget_policy
         ),
         "roles": roles,
         "nodes": nodes,

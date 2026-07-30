@@ -132,19 +132,101 @@ function resolveAdmissionNowMs(value) {
 const CONTEXT_ADMISSION_V1 = Object.freeze({
   artifactFields: Object.freeze(['schema_version', 'artifact_digest', 'task_contract_digest', 'budget_authority_digest', 'budget_authority_canonical', 'canonical_plan', 'shared_task_context_digest', 'shared_task_context_canonical', 'role_context_delta_digest', 'role_context_delta_canonical', 'semantic_input_tokens']),
   planFields: Object.freeze(['schema_version', 'registry_schema_version', 'role', 'role_permission', 'task_contract', 'task_contract_digest', 'mandatory_content', 'omitted_mandatory', 'baseline_errors', 'selected_packs', 'shared_packs', 'role_packs', 'sources', 'unresolved_sources', 'blocking_sources', 'evidence_debt', 'required_for_verdict', 'acquisition_plan', 'budget']),
-  contractFields: Object.freeze(['task_shape', 'surfaces', 'risk', 'runtime_claim', 'end_to_end_claim', 'uncertainty', 'side_effect_class', 'objective', 'scope', 'acceptance_criteria', 'hard_stops', 'baseline', 'dirty_scope', 'verification_scope', 'direct_interfaces', 'previous_failure', 'focus', 'claim_inputs', 'task_prompt', 'task_prompt_digest', 'continuation_mode', 'operator_loop_request_digest']),
+  contractFields: Object.freeze(['task_shape', 'surfaces', 'risk', 'runtime_claim', 'end_to_end_claim', 'uncertainty', 'side_effect_class', 'objective', 'scope', 'acceptance_criteria', 'hard_stops', 'baseline', 'dirty_scope', 'verification_scope', 'direct_interfaces', 'previous_failure', 'focus', 'claim_inputs', 'task_prompt', 'task_prompt_digest', 'continuation_mode', 'operator_loop_request_digest', 'history_refs']),
   mandatoryFields: Object.freeze(['objective', 'scope', 'acceptance_criteria', 'hard_stops', 'baseline', 'direct_interfaces', 'previous_failure', 'task_prompt', 'task_prompt_digest']),
   budgetFields: Object.freeze(['envelope', 'target_context_tokens', 'quality_reserve_context_tokens', 'accounting_basis', 'max_context_tokens_per_call', 'max_prompt_utf8_bytes_per_call', 'estimated_tokens', 'compiler_estimated_input_tokens', 'action', 'review_required', 'review_rationale', 'mandatory_truncated', 'quality_reserve_reasons', 'authority', 'authority_canonical', 'authority_digest', 'call_allowed', 'claim_pass_eligible', 'pass_allowed']),
-  authorityFields: Object.freeze(['schema_version', 'envelope', 'accounting_basis', 'max_context_tokens_per_call', 'max_prompt_utf8_bytes_per_call', 'max_workflow_planned_input_tokens', 'max_unique_nodes', 'max_call_attempts', 'retry_budget']),
+  authorityFields: Object.freeze(['schema_version', 'envelope', 'target_context_tokens', 'quality_reserve_context_tokens', 'accounting_basis', 'max_context_tokens_per_call', 'max_prompt_utf8_bytes_per_call', 'max_workflow_planned_input_tokens', 'max_unique_nodes', 'max_call_attempts', 'retry_budget', 'max_followup_attempts', 'max_total_model_turns', 'max_wait_cycles', 'max_no_delta_wakeups', 'max_wall_clock_ms', 'max_call_duration_ms', 'max_wave_duration_ms', 'max_concurrent_calls', 'max_spawn_depth_from_root', 'platform_token_cap']),
+  executionCapFields: Object.freeze(['max_context_tokens_per_call', 'max_prompt_utf8_bytes_per_call', 'max_workflow_planned_input_tokens', 'max_unique_nodes', 'max_call_attempts', 'retry_budget', 'max_followup_attempts', 'max_total_model_turns', 'max_wait_cycles', 'max_no_delta_wakeups', 'max_wall_clock_ms', 'max_call_duration_ms', 'max_wave_duration_ms', 'max_concurrent_calls', 'max_spawn_depth_from_root']),
   admissibleStatuses: Object.freeze(['pinned', 'pinned_verified', 'resolved_artifact', 'trusted_producer']),
   evidenceDebtStatuses: Object.freeze(['resolve_on_demand', 'stale_context_artifact', 'trusted_producer_unavailable', 'available_unattested_evidence']),
-  trustedKinds: Object.freeze({"CONTEXT.md":"repository_inventory","current GUI entry":"repository_inventory","current IBKR gate artifacts":"repository_inventory","current data lineage":"repository_inventory","current diff":"diff_snapshot","direct callers":"caller_inventory","direct interfaces":"interface_inventory","docs/references/2026-04-04--bybit_api_reference.md relevant section":"repository_inventory","feature/label contract":"repository_inventory","focused acceptance tests":"test_inventory","latest directly relevant closure/report":"repository_inventory","relevant docs/_indexes/*":"repository_inventory","relevant docs/adr/*":"repository_inventory","relevant role memory shard":"repository_inventory","screenshots or browser trace when available":"repository_inventory","validation protocol":"repository_inventory"}),
+  trustedKinds: Object.freeze({"CONTEXT.md":"repository_inventory","current GUI entry":"repository_inventory","current IBKR gate artifacts":"repository_inventory","current data lineage":"repository_inventory","current diff":"diff_snapshot","direct callers":"caller_inventory","direct interfaces":"interface_inventory","docs/references/2026-04-04--bybit_api_reference.md relevant section":"repository_inventory","feature/label contract":"repository_inventory","focused acceptance tests":"test_inventory","relevant docs/_indexes/*":"repository_inventory","relevant docs/adr/*":"repository_inventory","screenshots or browser trace when available":"repository_inventory","validation protocol":"repository_inventory"}),
   producerByKind: Object.freeze({runtime_observation: 'runtime_observation_adapter_v1', external_policy_snapshot: 'external_policy_capture_adapter_v1', source_snapshot: 'repository_snapshot_adapter_v1'}),
   ttlMs: Object.freeze({runtime_observation: 900000, external_policy_snapshot: 2592000000, source_snapshot: 14400000, diff_snapshot: 3600000, interface_inventory: 3600000, caller_inventory: 3600000, test_inventory: 3600000, repository_inventory: 3600000}),
-  authorityProfiles: Object.freeze({"complex":{"accounting_basis":"utf8_bytes_div4_planned_lower_bound_v1","max_call_attempts":14,"max_context_tokens_per_call":42000,"max_prompt_utf8_bytes_per_call":167996,"max_unique_nodes":12,"max_workflow_planned_input_tokens":588000,"quality_reserve_context_tokens":18000,"retry_budget":2,"target_context_tokens":12000},"full_audit":{"accounting_basis":"utf8_bytes_div4_planned_lower_bound_v1","max_call_attempts":46,"max_context_tokens_per_call":96000,"max_prompt_utf8_bytes_per_call":383996,"max_unique_nodes":44,"max_workflow_planned_input_tokens":4416000,"quality_reserve_context_tokens":48000,"retry_budget":2,"target_context_tokens":24000},"narrow":{"accounting_basis":"utf8_bytes_div4_planned_lower_bound_v1","max_call_attempts":5,"max_context_tokens_per_call":12000,"max_prompt_utf8_bytes_per_call":47996,"max_unique_nodes":4,"max_workflow_planned_input_tokens":60000,"quality_reserve_context_tokens":4000,"retry_budget":1,"target_context_tokens":4000},"profit_diagnosis":{"accounting_basis":"utf8_bytes_div4_planned_lower_bound_v1","max_call_attempts":22,"max_context_tokens_per_call":480000,"max_prompt_utf8_bytes_per_call":1919996,"max_unique_nodes":20,"max_workflow_planned_input_tokens":10560000,"quality_reserve_context_tokens":240000,"retry_budget":2,"target_context_tokens":120000},"standard":{"accounting_basis":"utf8_bytes_div4_planned_lower_bound_v1","max_call_attempts":9,"max_context_tokens_per_call":24000,"max_prompt_utf8_bytes_per_call":95996,"max_unique_nodes":8,"max_workflow_planned_input_tokens":216000,"quality_reserve_context_tokens":9000,"retry_budget":1,"target_context_tokens":7000}}),
+  authorityProfiles: Object.freeze({"complex":{"accounting_basis":"utf8_bytes_div4_planned_lower_bound_v1","envelope":"complex","max_call_attempts":14,"max_call_duration_ms":1200000,"max_concurrent_calls":3,"max_context_tokens_per_call":42000,"max_followup_attempts":1,"max_no_delta_wakeups":1,"max_prompt_utf8_bytes_per_call":167996,"max_spawn_depth_from_root":1,"max_total_model_turns":16,"max_unique_nodes":12,"max_wait_cycles":3,"max_wall_clock_ms":7200000,"max_wave_duration_ms":3600000,"max_workflow_planned_input_tokens":588000,"platform_token_cap":{"max_total_tokens":null,"required_metric":"platform_attested_total_tokens","status":"EXTERNAL_LIMIT"},"quality_reserve_context_tokens":18000,"retry_budget":2,"schema_version":"execution_budget_policy_v1","target_context_tokens":12000},"full_audit":{"accounting_basis":"utf8_bytes_div4_planned_lower_bound_v1","envelope":"full_audit","max_call_attempts":46,"max_call_duration_ms":1800000,"max_concurrent_calls":3,"max_context_tokens_per_call":96000,"max_followup_attempts":1,"max_no_delta_wakeups":1,"max_prompt_utf8_bytes_per_call":383996,"max_spawn_depth_from_root":1,"max_total_model_turns":48,"max_unique_nodes":44,"max_wait_cycles":4,"max_wall_clock_ms":10800000,"max_wave_duration_ms":5400000,"max_workflow_planned_input_tokens":4416000,"platform_token_cap":{"max_total_tokens":null,"required_metric":"platform_attested_total_tokens","status":"EXTERNAL_LIMIT"},"quality_reserve_context_tokens":48000,"retry_budget":2,"schema_version":"execution_budget_policy_v1","target_context_tokens":24000},"narrow":{"accounting_basis":"utf8_bytes_div4_planned_lower_bound_v1","envelope":"narrow","max_call_attempts":5,"max_call_duration_ms":600000,"max_concurrent_calls":2,"max_context_tokens_per_call":12000,"max_followup_attempts":0,"max_no_delta_wakeups":0,"max_prompt_utf8_bytes_per_call":47996,"max_spawn_depth_from_root":1,"max_total_model_turns":6,"max_unique_nodes":4,"max_wait_cycles":1,"max_wall_clock_ms":1800000,"max_wave_duration_ms":900000,"max_workflow_planned_input_tokens":60000,"platform_token_cap":{"max_total_tokens":null,"required_metric":"platform_attested_total_tokens","status":"EXTERNAL_LIMIT"},"quality_reserve_context_tokens":4000,"retry_budget":1,"schema_version":"execution_budget_policy_v1","target_context_tokens":4000},"profit_diagnosis":{"accounting_basis":"utf8_bytes_div4_planned_lower_bound_v1","envelope":"profit_diagnosis","max_call_attempts":22,"max_call_duration_ms":1800000,"max_concurrent_calls":3,"max_context_tokens_per_call":480000,"max_followup_attempts":1,"max_no_delta_wakeups":1,"max_prompt_utf8_bytes_per_call":1919996,"max_spawn_depth_from_root":1,"max_total_model_turns":24,"max_unique_nodes":20,"max_wait_cycles":4,"max_wall_clock_ms":10800000,"max_wave_duration_ms":5400000,"max_workflow_planned_input_tokens":10560000,"platform_token_cap":{"max_total_tokens":null,"required_metric":"platform_attested_total_tokens","status":"EXTERNAL_LIMIT"},"quality_reserve_context_tokens":240000,"retry_budget":2,"schema_version":"execution_budget_policy_v1","target_context_tokens":120000},"standard":{"accounting_basis":"utf8_bytes_div4_planned_lower_bound_v1","envelope":"standard","max_call_attempts":9,"max_call_duration_ms":900000,"max_concurrent_calls":3,"max_context_tokens_per_call":24000,"max_followup_attempts":1,"max_no_delta_wakeups":1,"max_prompt_utf8_bytes_per_call":95996,"max_spawn_depth_from_root":1,"max_total_model_turns":11,"max_unique_nodes":8,"max_wait_cycles":2,"max_wall_clock_ms":3600000,"max_wave_duration_ms":1800000,"max_workflow_planned_input_tokens":216000,"platform_token_cap":{"max_total_tokens":null,"required_metric":"platform_attested_total_tokens","status":"EXTERNAL_LIMIT"},"quality_reserve_context_tokens":9000,"retry_budget":1,"schema_version":"execution_budget_policy_v1","target_context_tokens":7000}}),
+  surfaceBindings: Object.freeze({"claude_saved_workflow_v1":{"digest":"sha256:de87a0995e5357baabc5c782bb7cf49475e7c0cbf8ee1e5b0406e78dfd5f65ce","profile":{"call_deadline":"unavailable","concurrency_limit":"enforced","ephemeral_fork":"enforced","event_coverage":["model_call","retry"],"history_selection":"enforced","mandatory_role_eligible":true,"model_visible_interruptions":"disabled","native_selector_binding":"enforced","platform":"claude_saved_workflow","profile_id":"claude_saved_workflow_v1","schema_version":"execution_surface_profile_v1","usage_telemetry":"unavailable","wave_deadline":"unavailable"}},"codex_native_collaboration_v1":{"digest":"sha256:0f9103acfb9de1b57d2db54c47b3eade0ee11aa6968f9a776e861cf13e71ae6d","profile":{"call_deadline":"unavailable","concurrency_limit":"enforced","ephemeral_fork":"reported_only","event_coverage":[],"history_selection":"reported_only","mandatory_role_eligible":false,"model_visible_interruptions":"disabled","native_selector_binding":"reported_only","platform":"codex_native_collaboration","profile_id":"codex_native_collaboration_v1","schema_version":"execution_surface_profile_v1","usage_telemetry":"unavailable","wave_deadline":"unavailable"}},"generic_host_v1":{"digest":"sha256:3a106e9cf0795b0f2f9a51c40d2334318efb495b90417a9f0efab5f5439545c1","profile":{"call_deadline":"unavailable","concurrency_limit":"unavailable","ephemeral_fork":"unavailable","event_coverage":[],"history_selection":"unavailable","mandatory_role_eligible":false,"model_visible_interruptions":"unavailable","native_selector_binding":"reported_only","platform":"generic_host","profile_id":"generic_host_v1","schema_version":"execution_surface_profile_v1","usage_telemetry":"unavailable","wave_deadline":"unavailable"}}}),
+  defaultHistory: Object.freeze({"boundary_turn_id":null,"ephemeral":true,"exception_digest":null,"mode":"none","schema_version":"requested_history_v1","source_thread_id":null}),
+  savedWorkflowModelPolicy: Object.freeze({"allow_inheritance":false,"model":"claude-sonnet-5","role_efforts":{"A3":"medium","AI-E":"medium","BB":"medium","CC":"high","E1":"medium","E1a":"medium","E2":"high","E3":"high","E4":"medium","E5":"medium","FA":"medium","IB":"medium","MIT":"high","OPS":"medium","PA":"high","PM":"high","QA":"medium","QC":"high","R4":"medium","TW":"medium"},"schema_version":"saved_workflow_model_policy_v1","surface_profile_id":"claude_saved_workflow_v1"}),
 })
 const validVerificationScopeV1 = value => Array.isArray(value) && new Set(value).size === value.length && canonicalJson(value) === canonicalJson([...value].sort()) && value.every(path => typeof path === 'string' && path && path === path.trim() && path !== '.' && !path.startsWith('/') && !path.startsWith('~') && !path.startsWith('-') && !path.startsWith('!') && !path.startsWith(':') && !path.includes('\\') && !/[\0\n\r*?\[]/.test(path) && !path.split('/').some(part => !part || part === '.' || part === '..'))
 const contextPrefixV1 = artifact => artifact.shared_task_context_canonical + '\n\n' + artifact.role_context_delta_canonical + '\n\n' + canonicalJson({schema_version: 'context_prompt_binding_v1', artifact_digest: artifact.artifact_digest, task_contract_digest: artifact.task_contract_digest, budget_authority_digest: artifact.budget_authority_digest, shared_task_context_digest: artifact.shared_task_context_digest, role_context_delta_digest: artifact.role_context_delta_digest})
+const executionCapsV1 = authority => Object.fromEntries(CONTEXT_ADMISSION_V1.executionCapFields.map(field => [field, authority[field]]))
+const requestedExecutionBindingV1 = () => {
+  const binding = CONTEXT_ADMISSION_V1.surfaceBindings.claude_saved_workflow_v1
+  return {
+    surface_profile_id: binding.profile.profile_id,
+    surface_profile_digest: binding.digest,
+    history: { ...CONTEXT_ADMISSION_V1.defaultHistory },
+  }
+}
+const savedWorkflowTierV1 = logicalRole => {
+  const policy = CONTEXT_ADMISSION_V1.savedWorkflowModelPolicy
+  const effort = policy.role_efforts && policy.role_efforts[logicalRole]
+  if (
+    policy.schema_version !== 'saved_workflow_model_policy_v1' ||
+    policy.surface_profile_id !== 'claude_saved_workflow_v1' ||
+    policy.allow_inheritance !== false ||
+    typeof policy.model !== 'string' || !policy.model ||
+    typeof effort !== 'string' || !effort
+  ) {
+    throw new Error(`logical role ${logicalRole} lacks an exact saved-workflow model tier`)
+  }
+  return { model: policy.model, effort }
+}
+const admittedSavedWorkflowTierV1 = (logicalRole, requested = {}) => {
+  const tier = savedWorkflowTierV1(logicalRole)
+  for (const field of ['model', 'effort']) {
+    if (requested[field] !== undefined && requested[field] !== tier[field]) {
+      throw new Error(`logical role ${logicalRole} ${field} differs from Registry saved-workflow policy`)
+    }
+  }
+  return tier
+}
+const executionEventLedgerV1 = async (workflowId, policyDigest, surfaceProfileDigest, callRecords) => {
+  const watcherId = `${workflowId}:watcher`
+  const rootEventId = `${workflowId}:root-turn`
+  const events = [{
+    sequence: 0,
+    event_id: rootEventId,
+    kind: 'root_turn',
+    parent_event_id: null,
+    node_id: 'PM',
+    spawn_depth: 0,
+    watcher_id: watcherId,
+    outcome: 'completed',
+    call_record_digest: null,
+  }, ...callRecords.map((record, index) => ({
+    sequence: index + 1,
+    event_id: record.logical_call_id,
+    kind: record.attempt > 1 ? 'retry' : 'model_call',
+    parent_event_id: record.retry_parent_call_id || rootEventId,
+    node_id: record.node_id,
+    spawn_depth: 1,
+    watcher_id: watcherId,
+    outcome: record.returned_null ? 'null' : 'completed',
+    call_record_digest: record.record_digest,
+  }))]
+  const core = {
+    schema_version: 'execution_event_ledger_v1',
+    root_execution_id: `${workflowId}:root`,
+    policy_digest: policyDigest,
+    surface_profile_digest: surfaceProfileDigest,
+    watcher_id: watcherId,
+    events,
+    terminal_reason: null,
+  }
+  return { ...core, ledger_digest: await contextSha256TextV1(canonicalJson(core)) }
+}
+const boundedParallelV1 = async (factories, capacity) => {
+  if (!Array.isArray(factories) || !Number.isInteger(capacity) || capacity <= 0) {
+    throw new Error('bounded scheduler requires task factories and a positive capacity')
+  }
+  const results = []
+  for (let index = 0; index < factories.length; index += capacity) {
+    const batch = await parallel(factories.slice(index, index + capacity))
+    results.push(...batch)
+  }
+  return results
+}
 const contextUtf8LengthV1 = value => new TextEncoder().encode(value).length
 const contextSha256TextV1 = async value => {
   const digest = await crypto.subtle.digest('SHA-256', new TextEncoder().encode(value))
@@ -163,6 +245,19 @@ async function validateSemanticContextV1(artifact, plan) {
   const delta = {schema_version: 'role_context_delta_v1', shared_task_context_digest: sharedDigest, logical_role: plan.role, permission: plan.role_permission, role_packs: plan.role_packs, sources: roleSources, evidence_debt: plan.evidence_debt.filter(name => roleSources.some(source => source.source === name))}
   const deltaCanonical = canonicalJson(delta)
   return artifact.shared_task_context_canonical === sharedCanonical && artifact.shared_task_context_digest === sharedDigest && artifact.role_context_delta_canonical === deltaCanonical && artifact.role_context_delta_digest === await contextSha256TextV1(deltaCanonical) && artifact.semantic_input_tokens === Math.max(1, Math.ceil(contextUtf8LengthV1(sharedCanonical + '\n\n' + deltaCanonical) / 4))
+}
+const promotedEnvelopeV1 = (baseEnvelope, requiredNodes) => {
+  if (!Number.isInteger(requiredNodes) || requiredNodes <= 0) throw new Error('required node count must be positive')
+  if (baseEnvelope === 'profit_diagnosis') {
+    if (CONTEXT_ADMISSION_V1.authorityProfiles.profit_diagnosis.max_unique_nodes < requiredNodes) throw new Error('profit diagnosis exceeds its dedicated envelope')
+    return baseEnvelope
+  }
+  const order = ['narrow', 'standard', 'complex', 'full_audit']
+  const start = order.indexOf(baseEnvelope)
+  if (start < 0) throw new Error(`unknown base envelope=${baseEnvelope}`)
+  const selected = order.slice(start).find(name => CONTEXT_ADMISSION_V1.authorityProfiles[name].max_unique_nodes >= requiredNodes)
+  if (!selected) throw new Error('required DAG exceeds the largest execution envelope')
+  return selected
 }
 // END GENERATED CONTEXT_ADMISSION_V1
 
@@ -441,7 +536,7 @@ const profitProfile = CONTEXT_ADMISSION_V1.authorityProfiles.profit_diagnosis
 const estimatedContextTokens = Math.max(1, Math.ceil(new TextEncoder().encode(pythonJsonForEstimate(contextPlan.mandatory_content)).length / 4)) + sourceTokens
 const profitReserveEnd = budget.target_context_tokens + budget.quality_reserve_context_tokens
 const expectedContextAction = estimatedContextTokens <= budget.target_context_tokens ? 'within_target' : estimatedContextTokens <= profitReserveEnd ? 'use_quality_reserve' : estimatedContextTokens < budget.max_context_tokens_per_call ? 'review_required' : 'split_or_escalate'
-if (!exactKeys(budget, CONTEXT_ADMISSION_V1.budgetFields) || !exactKeys(contextAuthority, CONTEXT_ADMISSION_V1.authorityFields) || contextAuthority.schema_version !== 'context_budget_authority_v1' || contextAuthority.envelope !== 'profit_diagnosis' || contextAuthority.accounting_basis !== profitProfile.accounting_basis || budget.envelope !== 'profit_diagnosis' || budget.accounting_basis !== profitProfile.accounting_basis || contextAuthority.max_context_tokens_per_call !== profitProfile.max_context_tokens_per_call || contextAuthority.max_prompt_utf8_bytes_per_call !== profitProfile.max_prompt_utf8_bytes_per_call || contextAuthority.max_workflow_planned_input_tokens !== profitProfile.max_workflow_planned_input_tokens || contextAuthority.max_unique_nodes !== profitProfile.max_unique_nodes || contextAuthority.max_call_attempts !== profitProfile.max_call_attempts || contextAuthority.retry_budget !== profitProfile.retry_budget || budget.target_context_tokens !== profitProfile.target_context_tokens || budget.quality_reserve_context_tokens !== profitProfile.quality_reserve_context_tokens || budget.max_context_tokens_per_call !== profitProfile.max_context_tokens_per_call || budget.max_prompt_utf8_bytes_per_call !== profitProfile.max_prompt_utf8_bytes_per_call || budget.estimated_tokens !== estimatedContextTokens || budget.compiler_estimated_input_tokens !== estimatedContextTokens || budget.action !== expectedContextAction || budget.review_required !== (expectedContextAction === 'review_required') || expectedContextAction === 'split_or_escalate' || budget.call_allowed !== true || budget.claim_pass_eligible !== true || budget.pass_allowed !== true || budget.mandatory_truncated !== false || !Array.isArray(budget.quality_reserve_reasons)) throw new Error('Context profit budget is not an exact claim-eligible compiler result')
+if (!exactKeys(budget, CONTEXT_ADMISSION_V1.budgetFields) || !exactKeys(contextAuthority, CONTEXT_ADMISSION_V1.authorityFields) || canonicalJson(contextAuthority) !== canonicalJson(profitProfile) || budget.envelope !== 'profit_diagnosis' || budget.accounting_basis !== profitProfile.accounting_basis || budget.target_context_tokens !== profitProfile.target_context_tokens || budget.quality_reserve_context_tokens !== profitProfile.quality_reserve_context_tokens || budget.max_context_tokens_per_call !== profitProfile.max_context_tokens_per_call || budget.max_prompt_utf8_bytes_per_call !== profitProfile.max_prompt_utf8_bytes_per_call || budget.estimated_tokens !== estimatedContextTokens || budget.compiler_estimated_input_tokens !== estimatedContextTokens || budget.action !== expectedContextAction || budget.review_required !== (expectedContextAction === 'review_required') || expectedContextAction === 'split_or_escalate' || budget.call_allowed !== true || budget.claim_pass_eligible !== true || budget.pass_allowed !== true || budget.mandatory_truncated !== false || !Array.isArray(budget.quality_reserve_reasons)) throw new Error('Context profit budget is not an exact claim-eligible compiler result')
 if (canonicalJson(contextAuthority) !== contextArtifact.budget_authority_canonical || budget.authority_canonical !== contextArtifact.budget_authority_canonical || await sha256Text(contextArtifact.budget_authority_canonical) !== contextArtifact.budget_authority_digest || budget.authority_digest !== contextArtifact.budget_authority_digest || canonicalJson(budget.authority) !== canonicalJson(contextAuthority)) throw new Error('Context budget authority is not exact/cross-bound')
 if (!config.baseline) throw new Error('baseline is required; profit claims cannot float across source/runtime generations')
 if (config.priors === undefined || !/^sha256:[0-9a-f]{64}$/.test(String(config.priors_digest || ''))) {
@@ -495,27 +590,14 @@ if (maxUniqueNodes < 4 || maxWorkflowPlannedInputTokens < 3 * evidenceEstimate +
 const READONLY = 'Read-only: no source/report/memory write; no strategy/risk/gate/config/runtime/auth mutation; no trading or private broker effect. Use fresh, reproducible evidence; missing facts stay gaps.'
 const PROFIT_RULE = 'Optimize expected risk-adjusted net PnL and durable workflow value. Price avoided loss, false-positive gate friction, after-cost edge, token/time/rework, and opportunity cost. Hard boundaries remain constraints, not weighted tradeoffs.'
 const EVIDENCE_RULE = 'FACT requires evidence_ref equal to an existing typed closure capture id; observation prose is descriptive only, never proof. source/data FACT needs exact repository/command capture. runtime/external cannot be FACT without platform/external-attested runtime/outcome/policy capture. observed_at must equal the capture and never exceed adjudication time. Missing attestation stays INFERENCE/ASSUMPTION plus an explicit gap. Bull/stale/single-regime evidence carries caveat.'
-// 分層資源:證據收集(OPS/MIT/AI-E,讀+報事實)往下釘到中階模型 + 中 effort;
-// probes 與 PA map 是判斷/alpha 搜尋核心,省略 model 以繼承 session 強模型。config.cheap_model=null 可還原繼承。
-// claim-0009 家族:cheap tier 的意義是降檔,默認保留一個 active pin;其派生權威=
-// settings/ai_pricing.yaml active 條目(claude-sonnet-5 active:true),該條目退役
-// 時必須同步改此默認。顯式覆蓋 fail-closed:空字串不再靜默回落默認、非字串不再直通 runner。
-if (
-  config.cheap_model !== undefined && config.cheap_model !== null &&
-  (typeof config.cheap_model !== 'string' || !config.cheap_model.trim())
-) {
-  throw new Error('cheap_model must be null (inherit session model) or a non-empty model id derived from settings/ai_pricing.yaml active entries')
+// Model and effort are one Registry-owned, role-specific policy. Saved
+// workflows never inherit the host session tier and callers cannot override it.
+for (const field of ['cheap_model', 'cheap_effort', 'judgment_model', 'judgment_effort']) {
+  if (config[field] !== undefined) {
+    throw new Error(`${field} cannot override Registry saved-workflow model policy`)
+  }
 }
-if (
-  config.cheap_effort !== undefined && config.cheap_effort !== null &&
-  (typeof config.cheap_effort !== 'string' || !config.cheap_effort.trim())
-) {
-  throw new Error('cheap_effort must be null (inherit session effort) or a non-empty effort tier string')
-}
-const cheapTier = () => ({
-  ...(config.cheap_model === null ? {} : { model: config.cheap_model === undefined ? 'claude-sonnet-5' : config.cheap_model }),
-  ...(config.cheap_effort === null ? {} : { effort: config.cheap_effort === undefined ? 'medium' : config.cheap_effort }),
-})
+const cheapTier = () => ({})
 const nativeAgent = role => role === 'PA' ? 'PA-investigator' : role === 'E4' ? 'E4-verifier' : role
 const workflowContract = {
   schema_version: 'workflow_receipt_contract_v1',
@@ -555,6 +637,7 @@ const requestedBy = (logicalRole, runnerOptions) => ({
     logical_role: logicalRole, native_agent: nativeAgent(logicalRole),
     node_class: 'verification', permission: 'read_only',
   },
+  ...requestedExecutionBindingV1(),
   model: runnerOptions.model === undefined ? null : runnerOptions.model,
   effort: runnerOptions.effort === undefined ? null : runnerOptions.effort,
   isolation: runnerOptions.isolation === undefined ? null : runnerOptions.isolation,
@@ -566,7 +649,8 @@ async function invoke({ prompt, options, nodeId, payloadKind, attempt = 1, retry
   const logicalRole = options.agentType
   const executionTask = executionTasks.find(task => task.node_id === nodeId)
   if (!executionTask || executionTask.role !== logicalRole || executionTask.native_agent !== nativeAgent(logicalRole)) throw new Error(`call ${nodeId} native role binding is invalid`)
-  const runnerOptions = {...options, agentType: executionTask.native_agent}
+  const tier = admittedSavedWorkflowTierV1(logicalRole, options)
+  const runnerOptions = {...options, agentType: executionTask.native_agent, ...tier}
   if (runnerOptions.agentType !== executionTask.native_agent) throw new Error(`call ${nodeId} platform selector differs from native binding`)
   const producerGeneration = Object.fromEntries(executionTask.requires.map(node => [node, producerByNode.get(node).record_digest]))
   const boundPrompt = contextPrefix + '\n\n' + prompt
@@ -676,14 +760,14 @@ phase('Admit')
 log(`baseline frozen; priors_digest=${priorsDigest}; max_unique_nodes=${maxUniqueNodes}; max_call_attempts=${maxCallAttempts}; max_workflow_planned_input_tokens=${maxWorkflowPlannedInputTokens}; retry_budget=${retryBudget}; admitted_advisors=${admittedAdvisors.map(a => a.axis).join(',')}`)
 
 phase('Evidence')
-const evidenceFirst = await parallel(evidenceSpecs.map(spec => () =>
+const evidenceFirst = await boundedParallelV1(evidenceSpecs.map(spec => () =>
   invoke({
     prompt: spec.prompt, nodeId: `evidence:${spec.axis}`,
     payloadKind: spec.axis === 'OPS' ? 'operation_review_fragment_v1' : 'finding_fragment_v1',
     admittedTokens: evidenceEstimate,
     options: { agentType: spec.agentType, label: `evidence:${spec.axis}`, phase: 'Evidence', schema: EVIDENCE_SCHEMA, ...cheapTier() },
   })
-))
+), contextAuthority.max_concurrent_calls)
 const evidenceResults = evidenceSpecs.map((spec, index) => {
   producerByNode.set(`evidence:${spec.axis}`, evidenceFirst[index].record)
   return evidenceFirst[index].result
@@ -692,7 +776,7 @@ let retriesUsed = 0
 const deadEvidence = evidenceSpecs.map((_, index) => index).filter(index => evidenceResults[index] === null)
 const evidenceRetries = deadEvidence.slice(0, retryCapacity)
 if (evidenceRetries.length) {
-  const retried = await parallel(evidenceRetries.map(index => () =>
+  const retried = await boundedParallelV1(evidenceRetries.map(index => () =>
     invoke({
       prompt: `Infrastructure null relay; resume evidence already acquired and do not repeat.\n\n${evidenceSpecs[index].prompt}`,
       nodeId: `evidence:${evidenceSpecs[index].axis}`,
@@ -703,12 +787,22 @@ if (evidenceRetries.length) {
         phase: 'Evidence', schema: EVIDENCE_SCHEMA, ...cheapTier(),
       },
     })
-  ))
+  ), contextAuthority.max_concurrent_calls)
   evidenceRetries.forEach((original, retryIndex) => {
     evidenceResults[original] = retried[retryIndex].result
     producerByNode.set(`evidence:${evidenceSpecs[original].axis}`, retried[retryIndex].record)
   })
   retriesUsed += evidenceRetries.length
+}
+const incompleteMandatoryEvidenceNodes = evidenceSpecs
+  .filter((_, index) => evidenceResults[index] === null)
+  .map(spec => `evidence:${spec.axis}`)
+if (incompleteMandatoryEvidenceNodes.length) {
+  throw new Error(
+    `mandatory profit evidence did not complete; refusing to emit ` +
+    `workflow_wave_record_v1 or call dependent probes/map; incomplete ` +
+    `predecessors: ${incompleteMandatoryEvidenceNodes.join(',')}`
+  )
 }
 const evidence = evidenceResults.filter(Boolean)
 evidenceSpecs.forEach((spec, index) => {
@@ -737,7 +831,7 @@ function probePrompt(advisor) {
 }
 
 phase('Probe')
-const probeFirst = await parallel(admittedAdvisors.map(advisor => () =>
+const probeFirst = await boundedParallelV1(admittedAdvisors.map(advisor => () =>
   invoke({
     prompt: probePrompt(advisor), nodeId: `probe:${advisor.axis}`,
     payloadKind: ['BB', 'IB'].includes(advisor.axis) ? 'gate_fragment_v1' : 'finding_fragment_v1', admittedTokens: probeEstimate,
@@ -746,7 +840,7 @@ const probeFirst = await parallel(admittedAdvisors.map(advisor => () =>
       schema: advisor.external ? EXT_SCHEMA : PROBE_SCHEMA,
     },
   })
-))
+), contextAuthority.max_concurrent_calls)
 const probeResults = admittedAdvisors.map((advisor, index) => {
   producerByNode.set(`probe:${advisor.axis}`, probeFirst[index].record)
   return probeFirst[index].result
@@ -755,7 +849,7 @@ const remainingRetry = Math.max(0, retryCapacity - retriesUsed)
 const deadProbe = admittedAdvisors.map((_, index) => index).filter(index => probeResults[index] === null)
 const probeRetries = deadProbe.slice(0, remainingRetry)
 if (probeRetries.length) {
-  const retried = await parallel(probeRetries.map(index => () =>
+  const retried = await boundedParallelV1(probeRetries.map(index => () =>
     invoke({
       prompt: `Infrastructure null relay only; resume, do not invent or repeat.\n\n${probePrompt(admittedAdvisors[index])}`,
       nodeId: `probe:${admittedAdvisors[index].axis}`,
@@ -766,12 +860,22 @@ if (probeRetries.length) {
         phase: 'Probe', schema: admittedAdvisors[index].external ? EXT_SCHEMA : PROBE_SCHEMA,
       },
     })
-  ))
+  ), contextAuthority.max_concurrent_calls)
   probeRetries.forEach((original, retryIndex) => {
     probeResults[original] = retried[retryIndex].result
     producerByNode.set(`probe:${admittedAdvisors[original].axis}`, retried[retryIndex].record)
   })
   retriesUsed += probeRetries.length
+}
+const incompleteMandatoryProbeNodes = admittedAdvisors
+  .filter((_, index) => probeResults[index] === null)
+  .map(advisor => `probe:${advisor.axis}`)
+if (incompleteMandatoryProbeNodes.length) {
+  throw new Error(
+    `mandatory profit probe did not complete; refusing to call dependent ` +
+    `map or emit workflow_wave_record_v1; incomplete predecessors: ` +
+    incompleteMandatoryProbeNodes.join(',')
+  )
 }
 const probes = probeResults.filter(Boolean)
 admittedAdvisors.forEach((advisor, index) => {
@@ -951,6 +1055,12 @@ const firstAttempts = orderedCallRecords.filter(record => record.attempt === 1)
 const waveDebt = [...producerByNode.entries()].filter(([, record]) => record.returned_null).map(([node]) => ({
   node, reason: 'final admitted call returned infrastructure null', disposition: 'UNVERIFIED',
 }))
+const executionEventLedger = await executionEventLedgerV1(
+  'profit-diagnosis',
+  contextArtifact.budget_authority_digest,
+  requestedExecutionBindingV1().surface_profile_digest,
+  orderedCallRecords,
+)
 const waveRecordCore = {
   schema_version: 'workflow_wave_record_v1', workflow_contract_digest: workflowContractDigest,
   dag_digest: executionDagDigest,
@@ -981,11 +1091,12 @@ const waveRecordCore = {
   budget_authority: {
     authority_digest: contextArtifact.budget_authority_digest,
     authority_canonical: contextArtifact.budget_authority_canonical,
-    admitted_caps: { max_context_tokens_per_call: maxContextTokensPerCall, max_prompt_utf8_bytes_per_call: maxPromptUtf8BytesPerCall, max_unique_nodes: maxUniqueNodes, max_call_attempts: maxCallAttempts, retry_budget: retryBudget, max_workflow_planned_input_tokens: maxWorkflowPlannedInputTokens },
+    admitted_caps: executionCapsV1(contextAuthority),
   },
   result_fragment_digests: Object.fromEntries(firstAttempts.map(record => [
     record.node_id, fragmentDigests[record.node_id] || null,
   ])),
+  execution_event_ledger: executionEventLedger,
   accounting_boundary: {
     usage_measurement_status: 'unavailable', controller_overhead_status: 'unavailable',
     excluded_from_token_lower_bounds: ['model output, cache, and tool usage', 'controller orchestration and hashing', 'provider overhead not exposed by platform telemetry'],

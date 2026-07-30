@@ -17,6 +17,7 @@ from agent_governance_execution import (  # noqa: E402
     materialize_context_artifact,
 )
 from agent_governance_registry import load_registry  # noqa: E402
+from agent_governance_execution_policy import requested_execution_binding  # noqa: E402
 from agent_governance_workflow_receipts import (  # noqa: E402
     canonical_digest,
     validate_workflow_call_manifest,
@@ -80,7 +81,12 @@ def _wave_args(tmp_path: Path) -> dict:
     ]
     tasks[0]["requires"] = []
     tasks[1]["requires"] = ["node-a"]
-    tasks[1].update({"model": "sonnet", "effort": "high", "isolation": "worktree"})
+    model_policy = load_registry()["saved_workflow_model_policy"]
+    tasks[1].update({
+        "model": model_policy["model"],
+        "effort": model_policy["role_efforts"]["E2"],
+        "isolation": "worktree",
+    })
     dag_core = {
         "schema_version": "agent_wave_execution_dag_v1",
         "nodes": [
@@ -139,21 +145,27 @@ const judgment = option => ({
 async function execute(mode) {
   const seenSchemas = [];
   const seenCalls = [];
+  let activeCalls = 0;
+  let peakCalls = 0;
   const agent = async (_prompt, option) => {
     seenSchemas.push(option.schema);
     seenCalls.push(option.label);
-    if (mode === 'blocked' && option.label.includes('node-a')) return null;
-    if (mode === 'retry' && option.phase === 'Wave' && option.label === 'node-a') return null;
-    const value = judgment(option);
-    if (mode === 'identity') return { ...value, role: 'spoofed-role' };
-    if (mode === 'consumption') return { ...value, consumption: { measurement_status: 'measured', input_tokens: 1 } };
+    activeCalls += 1;
+    peakCalls = Math.max(peakCalls, activeCalls);
+    await Promise.resolve();
+    let value = judgment(option);
+    if (mode === 'blocked' && option.label.includes('node-a')) value = null;
+    else if (mode === 'retry' && option.phase === 'Wave' && option.label === 'node-a') value = null;
+    else if (mode === 'identity') value = { ...value, role: 'spoofed-role' };
+    else if (mode === 'consumption') value = { ...value, consumption: { measurement_status: 'measured', input_tokens: 1 } };
+    activeCalls -= 1;
     return value;
   };
   try {
     const result = await runner(JSON.parse(JSON.stringify(baseArgs)), () => {}, () => {}, parallel, agent);
-    return { ok: true, result, seenSchemas, seenCalls };
+    return { ok: true, result, seenSchemas, seenCalls, peakCalls };
   } catch (error) {
-    return { ok: false, error: String(error.message || error), seenSchemas, seenCalls };
+    return { ok: false, error: String(error.message || error), seenSchemas, seenCalls, peakCalls };
   }
 }
 (async () => {
@@ -266,7 +278,10 @@ def test_wave_controller_owns_identity_and_records_every_retry(tmp_path: Path) -
             "logical_role": "E2", "platform": "claude_saved_workflow",
             "platform_requested_agent": "E2",
             "native_binding": {"logical_role": "E2", "native_agent": "E2", "node_class": "verification", "permission": "read_only"},
-            "model": None, "effort": None, "isolation": None,
+            **requested_execution_binding(load_registry()),
+            "model": load_registry()["saved_workflow_model_policy"]["model"],
+            "effort": load_registry()["saved_workflow_model_policy"]["role_efforts"]["E2"],
+            "isolation": None,
             "node_class": "verification", "permission": "read_only",
         }
         for record in records
@@ -276,8 +291,9 @@ def test_wave_controller_owns_identity_and_records_every_retry(tmp_path: Path) -
         "logical_role": "E2", "platform": "claude_saved_workflow",
         "platform_requested_agent": "E2",
         "native_binding": {"logical_role": "E2", "native_agent": "E2", "node_class": "verification", "permission": "read_only"},
-        "model": "sonnet",
-        "effort": "high",
+        **requested_execution_binding(load_registry()),
+        "model": load_registry()["saved_workflow_model_policy"]["model"],
+        "effort": load_registry()["saved_workflow_model_policy"]["role_efforts"]["E2"],
         "isolation": "worktree",
         "node_class": "verification",
         "permission": "read_only",
@@ -291,6 +307,10 @@ def test_wave_controller_owns_identity_and_records_every_retry(tmp_path: Path) -
     assert wave["retry_call_count"] == 1
     assert wave["null_call_count"] == 1
     assert wave["final_null_node_count"] == 0
+    assert [
+        event["outcome"]
+        for event in wave["execution_event_ledger"]["events"]
+    ] == ["completed", "null", "completed", "completed"]
     assert wave["coverage_debt"] == []
     assert wave["dag_digest"] == wave_args["dag_digest"]
     assert wave["execution_waves"] == [["node-a"], ["node-b"]]
@@ -373,19 +393,78 @@ def test_wave_rejects_identity_and_consumption_in_model_judgment(tmp_path: Path)
     assert "schema: JUDGMENT_SCHEMA" in workflow
 
 
+def test_wave_scheduler_never_exceeds_context_authority_capacity(
+    tmp_path: Path,
+) -> None:
+    wave_args = _wave_args(tmp_path)
+    template = wave_args["tasks"][0]
+    wave_args["tasks"] = [
+        {
+            **deepcopy(template),
+            "node_id": f"node-{suffix}",
+            "description": f"bounded-parallel-{suffix}",
+            "requires": [],
+        }
+        for suffix in ("a", "b", "c", "d")
+    ]
+    dag = {
+        "schema_version": "agent_wave_execution_dag_v1",
+        "nodes": [
+            {
+                "node_id": task["node_id"],
+                "role": task["agentType"],
+                "native_agent": task["native_agent"],
+                "requires": [],
+                "node_class": task["node_class"],
+                "permission": task["permission"],
+            }
+            for task in wave_args["tasks"]
+        ],
+    }
+    wave_args["dag_digest"] = canonical_digest(dag)
+
+    outcome = _run_harness(wave_args)["retry"]
+
+    assert outcome["ok"] is True
+    assert outcome["peakCalls"] == 2
+    assert outcome["result"]["wave_record"]["budget_authority"]["admitted_caps"][
+        "max_concurrent_calls"
+    ] == 2
+
+
+def test_wave_rejects_caller_model_or_effort_override_before_agent_call(
+    tmp_path: Path,
+) -> None:
+    wave_args = _wave_args(tmp_path)
+    wave_args["tasks"][0]["effort"] = "max"
+
+    outcome = _run_harness(wave_args)["retry"]
+
+    assert outcome["ok"] is False
+    assert outcome["seenCalls"] == []
+    assert "differs from Registry saved-workflow policy" in outcome["error"]
+
+
 def test_wave_rejects_unbound_or_cyclic_dag_and_never_runs_blocked_dependents(
     tmp_path: Path,
 ) -> None:
     wave_args = _wave_args(tmp_path)
     outcome = _run_harness(wave_args)
     blocked = outcome["blocked"]
-    assert blocked["ok"] is True
     assert blocked["seenCalls"] == ["node-a", "relay:node-a"]
-    assert blocked["result"]["results"] == {"node-a": None, "node-b": None}
-    assert {item["node"] for item in blocked["result"]["retry_coverage_debt"]} == {
-        "node-a",
-        "node-b",
-    }
+    if blocked["ok"]:
+        errors = validate_workflow_wave_record(
+            blocked["result"]["wave_record"],
+            blocked["result"]["call_manifest"],
+        )
+        assert errors == [], (
+            "a blocked workflow must never emit a workflow_wave_record_v1 that "
+            f"its canonical validator rejects: {errors}"
+        )
+    assert blocked["ok"] is False
+    assert "required predecessor did not complete" in blocked["error"]
+    assert "workflow_wave_record_v1" in blocked["error"]
+    assert "result" not in blocked
 
     forged = deepcopy(wave_args)
     forged["dag_digest"] = "sha256:" + "0" * 64

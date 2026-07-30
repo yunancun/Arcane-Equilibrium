@@ -286,17 +286,7 @@ def test_profit_route_and_context_share_the_profit_budget_authority() -> None:
     assert routed["budget_envelope"] == "profit_diagnosis"
     plan = compile_context("AI-E", routed["task_facts"])
     assert plan["budget"]["envelope"] == routed["budget_envelope"]
-    assert plan["budget"]["authority"] == {
-        "schema_version": "context_budget_authority_v1",
-        "envelope": "profit_diagnosis",
-        "accounting_basis": "utf8_bytes_div4_planned_lower_bound_v1",
-        "max_context_tokens_per_call": 480_000,
-        "max_prompt_utf8_bytes_per_call": 1_919_996,
-        "max_workflow_planned_input_tokens": 10_560_000,
-        "max_unique_nodes": 20,
-        "max_call_attempts": 22,
-        "retry_budget": 2,
-    }
+    assert plan["budget"]["authority"] == routed["execution_budget_policy"]
 
 
 def _test_facts() -> dict:
@@ -1014,6 +1004,195 @@ def test_public_context_validator_recomputes_and_binds_expected_contract(
         "canonical_plan digest" in error
         for error in validate_context_artifact(forged)["errors"]
     )
+
+
+def test_exact_history_ref_is_reachable_digest_bound_and_unselected_bytes_are_cold(
+    tmp_path: Path,
+) -> None:
+    repo = tmp_path / "repo"
+    memory = repo / "docs/CCAgentWorkSpace/E2/memory.md"
+    memory.parent.mkdir(parents=True)
+    selected = "## Durable rule\n\nUse bounded waves.\n\n"
+    memory.write_text(
+        "# E2 Memory\n\n"
+        f"{selected}"
+        "## Unrelated ledger\n\n"
+        "large historical detail v1\n",
+        encoding="utf-8",
+    )
+    _git(repo, "init")
+    _git(repo, "config", "user.email", "context-test@example.invalid")
+    _git(repo, "config", "user.name", "Context Test")
+    _git(repo, "add", ".")
+    _git(repo, "commit", "-m", "baseline")
+    selected_digest = "sha256:" + hashlib.sha256(selected.encode()).hexdigest()
+    registry = deepcopy(__import__("agent_governance_registry").load_registry())
+    registry["roles"]["E2"]["context_packs"] = []
+    registry["context_packs"]["history_on_demand"] = [
+        {"source": "task-bound history refs", "kind": "history_refs"}
+    ]
+
+    def facts() -> dict:
+        return {
+            "task_shape": "review",
+            "surfaces": ["comments"],
+            "risk": "low",
+            "uncertainty": "low",
+            "side_effect_class": "none",
+            "objective": "review one exact durable rule",
+            "scope": ["docs/CCAgentWorkSpace/E2/memory.md"],
+            "acceptance_criteria": ["only the selected section is model-visible"],
+            "hard_stops": ["do not preload role history"],
+            "baseline": capture_repository_baseline(repo),
+            "direct_interfaces": ["history_refs"],
+            "previous_failure": "whole role memories were preloaded",
+            "history_refs": [{
+                "path": "docs/CCAgentWorkSpace/E2/memory.md",
+                "heading": "## Durable rule",
+                "digest": selected_digest,
+            }],
+        }
+
+    first = compile_context("E2", facts(), registry, repo)
+    history = next(
+        source for source in first["sources"]
+        if source["source"] == "task-bound history refs"
+    )
+    assert history["status"] == "pinned"
+    assert history["content"]["sections"] == [{
+        "path": "docs/CCAgentWorkSpace/E2/memory.md",
+        "heading": "## Durable rule",
+        "digest": selected_digest,
+        "content": selected,
+    }]
+    first_artifact = materialize_context_artifact(first)
+
+    memory.write_text(
+        "# E2 Memory\n\n"
+        f"{selected}"
+        "## Unrelated ledger\n\n"
+        "large historical detail v2 that must stay cold\n",
+        encoding="utf-8",
+    )
+    second = compile_context("E2", facts(), registry, repo)
+    second_artifact = materialize_context_artifact(second)
+    assert second["sources"][0]["planned_tokens"] == history["planned_tokens"]
+    assert (
+        second_artifact["shared_task_context_digest"]
+        == first_artifact["shared_task_context_digest"]
+    )
+    assert second_artifact["semantic_input_tokens"] == first_artifact["semantic_input_tokens"]
+
+
+def test_history_refs_reject_whole_file_glob_traversal_and_digest_mismatch(
+    tmp_path: Path,
+) -> None:
+    repo = tmp_path / "repo"
+    memory = repo / "docs/CCAgentWorkSpace/E2/memory.md"
+    memory.parent.mkdir(parents=True)
+    memory.write_text(
+        "# E2 Memory\n\n## Durable rule\n\nUse bounded waves.\n",
+        encoding="utf-8",
+    )
+    _git(repo, "init")
+    _git(repo, "config", "user.email", "context-test@example.invalid")
+    _git(repo, "config", "user.name", "Context Test")
+    _git(repo, "add", ".")
+    _git(repo, "commit", "-m", "baseline")
+    registry = deepcopy(__import__("agent_governance_registry").load_registry())
+    registry["roles"]["E2"]["context_packs"] = []
+    registry["context_packs"]["history_on_demand"] = [
+        {"source": "task-bound history refs", "kind": "history_refs"}
+    ]
+    base = {
+        "task_shape": "review",
+        "surfaces": ["comments"],
+        "risk": "low",
+        "uncertainty": "low",
+        "side_effect_class": "none",
+        "objective": "reject ambient history",
+        "scope": ["docs/CCAgentWorkSpace/E2/memory.md"],
+        "acceptance_criteria": ["history is exact and digest-bound"],
+        "hard_stops": ["no whole-memory preload"],
+        "baseline": capture_repository_baseline(repo),
+        "direct_interfaces": ["history_refs"],
+        "previous_failure": "whole role memories were preloaded",
+    }
+    for path in (
+        "docs/CCAgentWorkSpace/*/memory.md",
+        "../memory.md",
+        "docs/CCAgentWorkSpace/E2/memory.md#Durable rule",
+    ):
+        with pytest.raises(ValueError, match="history_refs"):
+            route_task({
+                **base,
+                "history_refs": [{
+                    "path": path,
+                    "heading": "## Durable rule",
+                    "digest": "sha256:" + "0" * 64,
+                }],
+            })
+
+    mismatch = compile_context(
+        "E2",
+        {
+            **base,
+            "history_refs": [{
+                "path": "docs/CCAgentWorkSpace/E2/memory.md",
+                "heading": "## Durable rule",
+                "digest": "sha256:" + "0" * 64,
+            }],
+        },
+        registry,
+        repo,
+    )
+    history = next(
+        source for source in mismatch["sources"]
+        if source["source"] == "task-bound history refs"
+    )
+    assert history["status"] == "history_ref_invalid"
+    assert "digest mismatch" in history["artifact_error"]
+    assert mismatch["budget"]["call_allowed"] is False
+    with pytest.raises(ValueError, match="not call_allowed"):
+        materialize_context_artifact(mismatch)
+
+
+def test_history_pack_is_absent_without_explicit_refs(tmp_path: Path) -> None:
+    repo = tmp_path / "repo"
+    repo.mkdir()
+    (repo / "local.md").write_text("stable\n", encoding="utf-8")
+    _git(repo, "init")
+    _git(repo, "config", "user.email", "context-test@example.invalid")
+    _git(repo, "config", "user.name", "Context Test")
+    _git(repo, "add", ".")
+    _git(repo, "commit", "-m", "baseline")
+    registry = deepcopy(__import__("agent_governance_registry").load_registry())
+    registry["roles"]["E2"]["context_packs"] = ["context_test"]
+    registry["context_packs"]["context_test"] = ["local.md"]
+    registry["context_packs"]["history_on_demand"] = [
+        {"source": "task-bound history refs", "kind": "history_refs"}
+    ]
+    plan = compile_context(
+        "E2",
+        {
+            "task_shape": "review",
+            "surfaces": ["comments"],
+            "risk": "low",
+            "uncertainty": "low",
+            "side_effect_class": "none",
+            "objective": "review without history",
+            "scope": ["local.md"],
+            "acceptance_criteria": ["no implicit memory pack"],
+            "hard_stops": ["no history preload"],
+            "baseline": capture_repository_baseline(repo),
+            "direct_interfaces": ["local"],
+            "previous_failure": "implicit history",
+        },
+        registry,
+        repo,
+    )
+    assert "history_on_demand" not in plan["selected_packs"]
+    assert all(source["source"] != "task-bound history refs" for source in plan["sources"])
 
 
 def test_public_context_validator_recaptures_registry_selected_repository_bytes(

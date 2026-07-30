@@ -3,6 +3,7 @@ from __future__ import annotations
 import hashlib
 import importlib.util
 import json
+import re
 import subprocess
 import sys
 from copy import deepcopy
@@ -28,6 +29,10 @@ ADMITTED_CAP_FIELDS = (
     "max_context_tokens_per_call", "max_prompt_utf8_bytes_per_call",
     "max_workflow_planned_input_tokens", "max_unique_nodes",
     "max_call_attempts", "retry_budget",
+    "max_followup_attempts", "max_total_model_turns", "max_wait_cycles",
+    "max_no_delta_wakeups", "max_wall_clock_ms", "max_call_duration_ms",
+    "max_wave_duration_ms", "max_concurrent_calls",
+    "max_spawn_depth_from_root",
 )
 NODE_STDIN_ARGS = "JSON.parse(fs.readFileSync(0, 'utf8'))"
 
@@ -307,9 +312,12 @@ def _refresh_profit_lineage(governance: object, packet: dict) -> None:
                     "node_class": task_spec["node_class"],
                     "permission": task_spec["permission"],
                 },
+                **governance.requested_execution_binding(governance.load_registry()),
                 "node_class": task_spec["node_class"],
                 "permission": task_spec["permission"],
-                "model": None, "effort": None, "isolation": None,
+                "model": governance.load_registry()["saved_workflow_model_policy"]["model"],
+                "effort": governance.load_registry()["saved_workflow_model_policy"]["role_efforts"][fragment["role"]],
+                "isolation": None,
             },
             prompt_digest=_digest({"prompt": node}), context_artifact_digest=context_digest,
             task_contract_digest=task_digest, dirty_scope_digest=_digest(dirty_scope),
@@ -352,34 +360,20 @@ def _refresh_profit_lineage(governance: object, packet: dict) -> None:
         "compiler_estimated_input_tokens": 0, "admitted_input_tokens_lower_bound": 0,
     } for task_spec in dag_nodes]
     authority = __import__("json").loads(context["budget_authority_canonical"])
-    wave_core = {
-        "schema_version": "workflow_wave_record_v1", "workflow_contract_digest": workflow_digest,
-        "dag_digest": dag_digest,
-        "execution_waves": execution_waves,
-        "context_artifact_digests": {item["node_id"]: context_digest for item in admitted_tasks},
-        "compiler_planned_input_tokens_lower_bound": 0,
-        "admitted_planned_input_tokens_lower_bound": 0,
-        "scheduled_call_compiler_input_tokens_lower_bound": 0,
-        "scheduled_call_admitted_input_tokens_lower_bound": 0,
-        "admitted_tasks": admitted_tasks, "call_manifest_digest": manifest["manifest_digest"],
-        "call_record_digests": [call["record_digest"] for call in calls],
-        "first_attempt_call_count": len(calls), "retry_call_count": 0,
-        "null_call_count": 0, "final_null_node_count": 0,
-        "coverage_debt": [],
-        "budget_authority": {
+    wave = governance.build_workflow_wave_record(
+        manifest=manifest,
+        admitted_tasks=admitted_tasks,
+        budget_authority={
             "authority_digest": context["budget_authority_digest"],
             "authority_canonical": context["budget_authority_canonical"],
-            "admitted_caps": {
-                field: authority[field] for field in ADMITTED_CAP_FIELDS
-            },
+            "admitted_caps": governance.execution_admitted_caps(authority),
         },
-        "result_fragment_digests": result_fragments,
-        "accounting_boundary": {
+        result_fragment_digests=result_fragments,
+        accounting_boundary={
             "usage_measurement_status": "unavailable", "controller_overhead_status": "unavailable",
             "excluded_from_token_lower_bounds": ["semantic fixture has no platform telemetry or compiler estimate"],
         },
-    }
-    wave = {**wave_core, "record_digest": _digest(wave_core)}
+    )
     control = controller["payload"]
     control.update({
         "workflow_contract_digest": workflow_digest,
@@ -1484,12 +1478,18 @@ const source = fs.readFileSync(__WORKFLOW__, 'utf8').replace('export const meta 
 const runner = new AsyncFunction('args', 'phase', 'log', 'parallel', 'agent', source);
 const prompts = [];
 const injectNull = __INJECT_NULL__;
+const persistentNull = __PERSISTENT_NULL__;
+const persistentProbeNull = __PERSISTENT_PROBE_NULL__;
 const runtimeFact = __RUNTIME_FACT__;
 const oversizedProbe = __OVERSIZED_PROBE__;
 const consumption = { measurement_status: 'unavailable', unavailable_reason: 'harness' };
 const agent = async (prompt, options) => {
   prompts.push({ prompt, label: options.label });
   if (injectNull && options.label === 'evidence:OPS') return null;
+  if (
+    persistentNull &&
+    ['evidence:OPS', 'evidence-relay:OPS'].includes(options.label)
+  ) return null;
   if (options.label.startsWith('evidence:') || options.label.startsWith('evidence-relay:')) {
     const axis = options.label.split(':').at(-1);
     const unattested = runtimeFact && axis === 'OPS';
@@ -1497,6 +1497,7 @@ const agent = async (prompt, options) => {
   }
   if (options.label.startsWith('probe:') || options.label.startsWith('probe-relay:')) {
     const axis = options.label.split(':').at(-1);
+    if (persistentProbeNull && axis === 'QC') return null;
     const negative = oversizedProbe && axis === 'QC' ? 'Z'.repeat(2000000) : `${axis} searched with no supported move`;
     return { schema_version: 'profit_probe_fragment_v2', axis, work_status: 'DONE', verdict: 'NO_EVIDENCE', diagnoses: [], opportunities: [], evidence_refs: ['ev-repo-authority'], negative_search_summary: negative, next_experiments: [`repeat ${axis} after fresh evidence`], consumption };
   }
@@ -1505,14 +1506,19 @@ const agent = async (prompt, options) => {
 };
 const parallel = async jobs => Promise.all(jobs.map(job => job()));
 (async () => {
-  const result = await runner(__ARGS__, () => {}, () => {}, parallel, agent);
-  console.log(JSON.stringify({ result, prompts }));
-})().catch(error => { console.error(error); process.exit(1); });
+  try {
+    const result = await runner(__ARGS__, () => {}, () => {}, parallel, agent);
+    console.log(JSON.stringify({ result, prompts }));
+  } catch (error) {
+    console.log(JSON.stringify({ _error: String(error.message || error), prompts }));
+  }
+})();
 """
 
     def run(
         run_args: dict, *, map_ready: bool, null_first: bool = False,
-        runtime_fact: bool = False, oversized_probe: bool = False,
+        persistent_null: bool = False, runtime_fact: bool = False,
+        persistent_probe_null: bool = False, oversized_probe: bool = False,
     ) -> dict:
         script = (
             script_template.replace(
@@ -1522,6 +1528,13 @@ const parallel = async jobs => Promise.all(jobs.map(job => job()));
             .replace("__ARGS__", NODE_STDIN_ARGS)
             .replace("__MAP_READY__", "true" if map_ready else "false")
             .replace("__INJECT_NULL__", "true" if null_first else "false")
+            .replace(
+                "__PERSISTENT_NULL__", "true" if persistent_null else "false"
+            )
+            .replace(
+                "__PERSISTENT_PROBE_NULL__",
+                "true" if persistent_probe_null else "false",
+            )
             .replace("__RUNTIME_FACT__", "true" if runtime_fact else "false")
             .replace("__OVERSIZED_PROBE__", "true" if oversized_probe else "false")
         )
@@ -1538,6 +1551,13 @@ const parallel = async jobs => Promise.all(jobs.map(job => job()));
         return json.loads(completed.stdout)
 
     output = run(args, map_ready=True)
+    tier_override = run(
+        {**args, "cheap_model": "claude-sonnet-5"}, map_ready=True
+    )
+    assert (
+        "cannot override Registry saved-workflow model policy"
+        in tier_override["_error"]
+    )
     oversized = run(args, map_ready=False, oversized_probe=True)
     assert "call map:PA final bound prompt exceeds" in oversized["_error"]
     assert governance.validate_workflow_call_manifest(
@@ -1567,6 +1587,42 @@ const parallel = async jobs => Promise.all(jobs.map(job => job()));
     assert retried["workflow_wave_record"]["null_call_count"] == 1
     assert retried["workflow_wave_record"]["retry_call_count"] == 1
     assert retried["workflow_wave_record"]["final_null_node_count"] == 0
+    persistent_null = run(args, map_ready=True, persistent_null=True)
+    assert "result" not in persistent_null
+    assert (
+        "mandatory profit evidence did not complete; refusing to emit "
+        "workflow_wave_record_v1"
+    ) in persistent_null["_error"]
+    assert "evidence:OPS" in persistent_null["_error"]
+    persistent_labels = [item["label"] for item in persistent_null["prompts"]]
+    assert persistent_labels == [
+        "evidence:OPS",
+        "evidence:MIT",
+        "evidence:AI-E",
+        "evidence-relay:OPS",
+    ]
+    assert not any(
+        label.startswith(("probe:", "probe-relay:"))
+        or label.startswith("profit-map")
+        for label in persistent_labels
+    )
+    persistent_probe = run(
+        args, map_ready=True, persistent_probe_null=True
+    )
+    assert "result" not in persistent_probe
+    assert (
+        "mandatory profit probe did not complete; refusing to call dependent "
+        "map or emit workflow_wave_record_v1"
+    ) in persistent_probe["_error"]
+    assert "probe:QC" in persistent_probe["_error"]
+    persistent_probe_labels = [
+        item["label"] for item in persistent_probe["prompts"]
+    ]
+    assert "probe:QC" in persistent_probe_labels
+    assert "probe-relay:QC" in persistent_probe_labels
+    assert not any(
+        label.startswith("profit-map") for label in persistent_probe_labels
+    )
     unattested = run(args, map_ready=False, runtime_fact=True)["result"]
     assert {
         "kind": "evidence_fact", "id": "OPS:OPS-fact-1",
@@ -1642,7 +1698,7 @@ const parallel = async jobs => Promise.all(jobs.map(job => job()));
     assert any(_canonical(priors) in prompt for prompt in rendered_prompts)
     workflow_source = (ROOT / ".claude/workflows/profit-diagnosis.js").read_text()
     assert all(token in workflow_source for token in ("measurement_source", "telemetry_digest", "missing_metrics", "retry_count", "wall_time_ms", "rework_count"))
-    assert "720000" not in workflow_source
+    assert re.search(r"(?<!\d)720000(?!\d)", workflow_source) is None
     assert "maxAgents > 24" not in workflow_source
     assert "retryBudget > 4" not in workflow_source
     assert all(

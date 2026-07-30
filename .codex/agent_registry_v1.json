@@ -42,6 +42,7 @@
   "external_evidence_schema_path": ".codex/schemas/external_evidence_capture_v1.schema.json",
   "closure_quality_followup_schema_path": ".codex/schemas/closure_quality_followup_v1.schema.json",
   "closure_quality_attestation_schema_path": ".codex/schemas/closure_quality_attestation_v1.schema.json",
+  "efficiency_evaluation_attestation_schema_path": ".codex/schemas/multi_agent_efficiency_attestation_index_v1.schema.json",
   "generated_views": [
     ".claude/agents/<NATIVE_AGENT>.md",
     ".codex/agents/<ROLE>.md",
@@ -50,6 +51,155 @@
     ".codex/agents/INDEX.md",
     ".codex/skills/INDEX.md"
   ],
+  "model_routing": {
+    "schema_version": "model_routing_v1",
+    "roles": {
+      "A3": {"model": "gpt-5.6-terra", "model_reasoning_effort": "medium"},
+      "AI-E": {"model": "gpt-5.6-terra", "model_reasoning_effort": "medium"},
+      "BB": {"model": "gpt-5.6-terra", "model_reasoning_effort": "medium"},
+      "CC": {"model": "gpt-5.6-sol", "model_reasoning_effort": "high"},
+      "E1": {"model": "gpt-5.6-terra", "model_reasoning_effort": "medium"},
+      "E1a": {"model": "gpt-5.6-terra", "model_reasoning_effort": "medium"},
+      "E2": {"model": "gpt-5.6-sol", "model_reasoning_effort": "high"},
+      "E3": {"model": "gpt-5.6-sol", "model_reasoning_effort": "high"},
+      "E4": {"model": "gpt-5.6-terra", "model_reasoning_effort": "medium"},
+      "E5": {"model": "gpt-5.6-terra", "model_reasoning_effort": "medium"},
+      "FA": {"model": "gpt-5.6-terra", "model_reasoning_effort": "medium"},
+      "IB": {"model": "gpt-5.6-terra", "model_reasoning_effort": "medium"},
+      "MIT": {"model": "gpt-5.6-sol", "model_reasoning_effort": "high"},
+      "OPS": {"model": "gpt-5.6-terra", "model_reasoning_effort": "medium"},
+      "PA": {"model": "gpt-5.6-sol", "model_reasoning_effort": "high"},
+      "PM": {"model": "gpt-5.6-sol", "model_reasoning_effort": "high"},
+      "QA": {"model": "gpt-5.6-terra", "model_reasoning_effort": "medium"},
+      "QC": {"model": "gpt-5.6-sol", "model_reasoning_effort": "high"},
+      "R4": {"model": "gpt-5.6-terra", "model_reasoning_effort": "medium"},
+      "TW": {"model": "gpt-5.6-terra", "model_reasoning_effort": "medium"}
+    }
+  },
+  "saved_workflow_model_policy": {
+    "schema_version": "saved_workflow_model_policy_v1",
+    "surface_profile_id": "claude_saved_workflow_v1",
+    "model": "claude-sonnet-5",
+    "allow_inheritance": false,
+    "role_efforts": {
+      "A3": "medium",
+      "AI-E": "medium",
+      "BB": "medium",
+      "CC": "high",
+      "E1": "medium",
+      "E1a": "medium",
+      "E2": "high",
+      "E3": "high",
+      "E4": "medium",
+      "E5": "medium",
+      "FA": "medium",
+      "IB": "medium",
+      "MIT": "high",
+      "OPS": "medium",
+      "PA": "high",
+      "PM": "high",
+      "QA": "medium",
+      "QC": "high",
+      "R4": "medium",
+      "TW": "medium"
+    }
+  },
+  "native_operating_contract": {
+    "schema_version": "native_operating_contract_v1",
+    "registry_authority": "Authority: `.codex/agent_registry_v1.json`.",
+    "context_rule": "Context first; load only task-needed evidence/packs.",
+    "economy_rule": "Shortest durable risk-adjusted closure; save tokens only without more false closure/rework.",
+    "permission_rules": {
+      "read_only": "Read-only: no edits, report/memory writes, or git mutation; sandbox is filesystem-only.",
+      "writer": "Write only task-owned `{permission}` files; no scope expansion/self-approval."
+    },
+    "external_effect_rule": "No service mutation, private/authenticated contact/effect, or broker effect.",
+    "web_rules": {
+      "public": "Web tools require public_web_read in the task_contract and an owned evidence-acquisition node; claims need opened public URLs in external_evidence_capture_v1 with citation/provenance.",
+      "unavailable": "This identity has no admitted public-web tool.",
+      "broker_freshness": "Broker policy: open current official source; search snippets/training memory are not evidence."
+    },
+    "capture_rule": "Verification argv only via `python3 helper_scripts/maintenance_scripts/agent_governance.py capture-command --native-agent {native_agent} --node-id <admitted-node-id> --context-artifact @<context.json> -- <argv...>`; never run the argv separately; effect boundary is repository_policy_only, not host no-contact attestation.",
+    "skill_rule": "Activated skill: read full `SKILL.md`. Bindings: {skill_bindings}. Never preload.",
+    "completion_rules": {
+      "pm": "Return validated `closure_packet_v1`; preserve independent dissent.",
+      "delegated": "Return immutable `{output}` evidence; payload kind `{payload_kind}`; bind admitted task-contract digest."
+    }
+  },
+  "execution_policy": {
+    "schema_version": "development_agent_execution_policy_v1",
+    "default_history": {
+      "schema_version": "requested_history_v1",
+      "mode": "none",
+      "source_thread_id": null,
+      "boundary_turn_id": null,
+      "ephemeral": true,
+      "exception_digest": null
+    },
+    "platform_token_cap": {
+      "status": "EXTERNAL_LIMIT",
+      "max_total_tokens": null,
+      "required_metric": "platform_attested_total_tokens"
+    },
+    "surface_profiles": {
+      "claude_saved_workflow_v1": {
+        "schema_version": "execution_surface_profile_v1",
+        "profile_id": "claude_saved_workflow_v1",
+        "platform": "claude_saved_workflow",
+        "native_selector_binding": "enforced",
+        "usage_telemetry": "unavailable",
+        "call_deadline": "unavailable",
+        "wave_deadline": "unavailable",
+        "history_selection": "enforced",
+        "ephemeral_fork": "enforced",
+        "concurrency_limit": "enforced",
+        "model_visible_interruptions": "disabled",
+        "event_coverage": ["model_call", "retry"],
+        "mandatory_role_eligible": true
+      },
+      "codex_native_collaboration_v1": {
+        "schema_version": "execution_surface_profile_v1",
+        "profile_id": "codex_native_collaboration_v1",
+        "platform": "codex_native_collaboration",
+        "native_selector_binding": "reported_only",
+        "usage_telemetry": "unavailable",
+        "call_deadline": "unavailable",
+        "wave_deadline": "unavailable",
+        "history_selection": "reported_only",
+        "ephemeral_fork": "reported_only",
+        "concurrency_limit": "enforced",
+        "model_visible_interruptions": "disabled",
+        "event_coverage": [],
+        "mandatory_role_eligible": false
+      },
+      "generic_host_v1": {
+        "schema_version": "execution_surface_profile_v1",
+        "profile_id": "generic_host_v1",
+        "platform": "generic_host",
+        "native_selector_binding": "reported_only",
+        "usage_telemetry": "unavailable",
+        "call_deadline": "unavailable",
+        "wave_deadline": "unavailable",
+        "history_selection": "unavailable",
+        "ephemeral_fork": "unavailable",
+        "concurrency_limit": "unavailable",
+        "model_visible_interruptions": "unavailable",
+        "event_coverage": [],
+        "mandatory_role_eligible": false
+      }
+    }
+  },
+  "efficiency_evaluation_policy": {
+    "schema_version": "efficiency_evaluation_policy_v1",
+    "policy_id": "gpt56_multi_agent_quality_noninferiority_v1",
+    "thresholds": {
+      "max_closure_quality_score_drop": 0.0,
+      "max_reopen_count_increase": 0,
+      "minimum_decision_changing_findings_retention_ratio": 1.0
+    },
+    "synthetic_measured_claim_allowed": false,
+    "policy_digest": "sha256:eeb06619213f3b1eece0a897ef4e63f56e8173d5daa07483c397f6b3c855ee49"
+  },
   "native_agent_adapters": {
     "PA": [
       {
@@ -121,7 +271,14 @@
     "full_audit_v3": {
       "controller_node_id": "ai_economics_review",
       "controller_role": "AI-E",
-      "axes": ["CC", "FA", "E2", "E3", "BB", "IB", "OPS", "QC", "MIT", "AI-E", "E5", "A3", "R4"]
+      "axes": ["CC", "FA", "E2", "E3", "BB", "IB", "OPS", "QC", "MIT", "AI-E", "E5", "A3", "R4"],
+      "recall_authority": {
+        "schema_version": "full_audit_recall_authority_policy_v1",
+        "status": "EXTERNAL_LIMIT_RECALL_AUTHORITY",
+        "required_trust_tier": "PLATFORM_OR_EXTERNAL_ATTESTED",
+        "saved_workflow_verifier": "unavailable",
+        "closure_verifier": "unavailable"
+      }
     },
     "profit_diagnosis_v1": {
       "controller_node_id": "profit_control",
@@ -197,7 +354,7 @@
   },
   "context_packs": {
     "core": ["AGENTS.md", "CLAUDE.md#Product Boundary", "CLAUDE.md#Root Principles", "CLAUDE.md#Hard Boundaries"],
-    "active_state": [{"source": "TODO.md#AI/ML 一分鐘派發看板", "kind": "repository_source", "required_when": {"surfaces_any": ["operations", "runtime", "deploy", "service", "cron", "pg", "full_audit", "profit_diagnosis", "incident_rca"], "claims_any": ["runtime_claim", "end_to_end_claim"], "uncertainty_any": ["high", "unknown"]}}],
+    "active_state": [{"source": "TODO.md#S2E 當前 ACTIVE 派發", "kind": "todo_active_rows", "heading": "S2E 當前 ACTIVE 派發", "id_column": "ID", "status_column": "Lane／狀態", "dependency_column": "依賴", "dependency_depth": 1, "required_when": {"surfaces_any": ["operations", "runtime", "deploy", "service", "cron", "pg", "full_audit", "profit_diagnosis", "incident_rca"], "claims_any": ["runtime_claim", "end_to_end_claim"], "uncertainty_any": ["high", "unknown"]}}],
     "architecture": [
       {"source": "CONTEXT.md", "kind": "repository_inventory", "paths": ["CONTEXT.md"], "min_matches": 1},
       {"source": "relevant docs/adr/*", "kind": "repository_inventory", "paths": ["docs/adr/*.md"], "min_matches": 1}
@@ -236,16 +393,15 @@
       {"source": "relevant docs/_indexes/*", "kind": "repository_inventory", "paths": ["docs/_indexes/*.md"], "min_matches": 1}
     ],
     "history_on_demand": [
-      {"source": "relevant role memory shard", "kind": "repository_inventory", "paths": ["docs/CCAgentWorkSpace/*/memory.md"], "min_matches": 0},
-      {"source": "latest directly relevant closure/report", "kind": "repository_inventory", "paths": ["docs/CCAgentWorkSpace/*/workspace/reports/*.md"], "min_matches": 0}
+      {"source": "task-bound history refs", "kind": "history_refs"}
     ]
   },
   "budget_envelopes": {
-    "narrow": {"target_context_tokens": 4000, "quality_reserve_context_tokens": 4000, "accounting_basis": "utf8_bytes_div4_planned_lower_bound_v1", "max_context_tokens_per_call": 12000, "max_prompt_utf8_bytes_per_call": 47996, "max_workflow_planned_input_tokens": 60000, "max_unique_nodes": 4, "max_call_attempts": 5, "retry_budget": 1},
-    "standard": {"target_context_tokens": 7000, "quality_reserve_context_tokens": 9000, "accounting_basis": "utf8_bytes_div4_planned_lower_bound_v1", "max_context_tokens_per_call": 24000, "max_prompt_utf8_bytes_per_call": 95996, "max_workflow_planned_input_tokens": 216000, "max_unique_nodes": 8, "max_call_attempts": 9, "retry_budget": 1},
-    "complex": {"target_context_tokens": 12000, "quality_reserve_context_tokens": 18000, "accounting_basis": "utf8_bytes_div4_planned_lower_bound_v1", "max_context_tokens_per_call": 42000, "max_prompt_utf8_bytes_per_call": 167996, "max_workflow_planned_input_tokens": 588000, "max_unique_nodes": 12, "max_call_attempts": 14, "retry_budget": 2},
-    "full_audit": {"target_context_tokens": 24000, "quality_reserve_context_tokens": 48000, "accounting_basis": "utf8_bytes_div4_planned_lower_bound_v1", "max_context_tokens_per_call": 96000, "max_prompt_utf8_bytes_per_call": 383996, "max_workflow_planned_input_tokens": 4416000, "max_unique_nodes": 44, "max_call_attempts": 46, "retry_budget": 2},
-    "profit_diagnosis": {"target_context_tokens": 120000, "quality_reserve_context_tokens": 240000, "accounting_basis": "utf8_bytes_div4_planned_lower_bound_v1", "max_context_tokens_per_call": 480000, "max_prompt_utf8_bytes_per_call": 1919996, "max_workflow_planned_input_tokens": 10560000, "max_unique_nodes": 20, "max_call_attempts": 22, "retry_budget": 2}
+    "narrow": {"target_context_tokens": 4000, "quality_reserve_context_tokens": 4000, "accounting_basis": "utf8_bytes_div4_planned_lower_bound_v1", "max_context_tokens_per_call": 12000, "max_prompt_utf8_bytes_per_call": 47996, "max_workflow_planned_input_tokens": 60000, "max_unique_nodes": 4, "max_call_attempts": 5, "retry_budget": 1, "max_followup_attempts": 0, "max_total_model_turns": 6, "max_wait_cycles": 1, "max_no_delta_wakeups": 0, "max_wall_clock_ms": 1800000, "max_call_duration_ms": 600000, "max_wave_duration_ms": 900000, "max_concurrent_calls": 2, "max_spawn_depth_from_root": 1},
+    "standard": {"target_context_tokens": 7000, "quality_reserve_context_tokens": 9000, "accounting_basis": "utf8_bytes_div4_planned_lower_bound_v1", "max_context_tokens_per_call": 24000, "max_prompt_utf8_bytes_per_call": 95996, "max_workflow_planned_input_tokens": 216000, "max_unique_nodes": 8, "max_call_attempts": 9, "retry_budget": 1, "max_followup_attempts": 1, "max_total_model_turns": 11, "max_wait_cycles": 2, "max_no_delta_wakeups": 1, "max_wall_clock_ms": 3600000, "max_call_duration_ms": 900000, "max_wave_duration_ms": 1800000, "max_concurrent_calls": 3, "max_spawn_depth_from_root": 1},
+    "complex": {"target_context_tokens": 12000, "quality_reserve_context_tokens": 18000, "accounting_basis": "utf8_bytes_div4_planned_lower_bound_v1", "max_context_tokens_per_call": 42000, "max_prompt_utf8_bytes_per_call": 167996, "max_workflow_planned_input_tokens": 588000, "max_unique_nodes": 12, "max_call_attempts": 14, "retry_budget": 2, "max_followup_attempts": 1, "max_total_model_turns": 16, "max_wait_cycles": 3, "max_no_delta_wakeups": 1, "max_wall_clock_ms": 7200000, "max_call_duration_ms": 1200000, "max_wave_duration_ms": 3600000, "max_concurrent_calls": 3, "max_spawn_depth_from_root": 1},
+    "full_audit": {"target_context_tokens": 24000, "quality_reserve_context_tokens": 48000, "accounting_basis": "utf8_bytes_div4_planned_lower_bound_v1", "max_context_tokens_per_call": 96000, "max_prompt_utf8_bytes_per_call": 383996, "max_workflow_planned_input_tokens": 4416000, "max_unique_nodes": 44, "max_call_attempts": 46, "retry_budget": 2, "max_followup_attempts": 1, "max_total_model_turns": 48, "max_wait_cycles": 4, "max_no_delta_wakeups": 1, "max_wall_clock_ms": 10800000, "max_call_duration_ms": 1800000, "max_wave_duration_ms": 5400000, "max_concurrent_calls": 3, "max_spawn_depth_from_root": 1},
+    "profit_diagnosis": {"target_context_tokens": 120000, "quality_reserve_context_tokens": 240000, "accounting_basis": "utf8_bytes_div4_planned_lower_bound_v1", "max_context_tokens_per_call": 480000, "max_prompt_utf8_bytes_per_call": 1919996, "max_workflow_planned_input_tokens": 10560000, "max_unique_nodes": 20, "max_call_attempts": 22, "retry_budget": 2, "max_followup_attempts": 1, "max_total_model_turns": 24, "max_wait_cycles": 4, "max_no_delta_wakeups": 1, "max_wall_clock_ms": 10800000, "max_call_duration_ms": 1800000, "max_wave_duration_ms": 5400000, "max_concurrent_calls": 3, "max_spawn_depth_from_root": 1}
   },
   "capability_packs": {
     "orchestration": "把目標轉成最小充分 DAG，整合 dissent、成本、證據與最終裁決",

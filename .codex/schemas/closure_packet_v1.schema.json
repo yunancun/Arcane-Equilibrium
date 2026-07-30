@@ -591,13 +591,11 @@
         "call_manifest_digest": {"$ref": "#/$defs/digest"},
         "workflow_wave_record_digest": {"$ref": "#/$defs/digest"},
         "baseline": {"$ref": "#/properties/baseline"},
-        "scheduler": {"enum": ["full", "adaptive_shadow", "adaptive"]},
+        "scheduler": {"const": "full"},
         "selection_surfaces": {"type": "array", "items": {"type": "string", "minLength": 1}},
         "run_sequence": {"type": "integer", "minimum": 0},
-        "adaptive_recall_approved": {"type": "boolean"},
-        "adaptive_recall_authority_digest": {
-          "anyOf": [{"$ref": "#/$defs/digest"}, {"type": "null"}]
-        },
+        "adaptive_recall_approved": {"const": false},
+        "adaptive_recall_authority_digest": {"type": "null"},
         "expected_axes": {"type": "array", "items": {"type": "string", "minLength": 1}},
         "admitted_axes": {"type": "array", "items": {"type": "string", "minLength": 1}},
         "deferred_axes": {"type": "array", "items": {"type": "string", "minLength": 1}},
@@ -1204,10 +1202,10 @@
     "requestedAgent": {
       "type": "object",
       "additionalProperties": false,
-      "required": ["logical_role", "platform", "platform_requested_agent", "native_binding", "model", "effort", "isolation", "node_class", "permission"],
+      "required": ["logical_role", "platform", "platform_requested_agent", "native_binding", "surface_profile_id", "surface_profile_digest", "history", "model", "effort", "isolation", "node_class", "permission"],
       "properties": {
         "logical_role": {"type": "string", "minLength": 1},
-        "platform": {"const": "claude_saved_workflow"},
+        "platform": {"enum": ["claude_saved_workflow", "codex_native_collaboration", "generic_host"]},
         "platform_requested_agent": {"type": "string", "minLength": 1},
         "native_binding": {
           "type": "object", "additionalProperties": false,
@@ -1217,6 +1215,23 @@
             "native_agent": {"type": "string", "minLength": 1},
             "node_class": {"enum": ["work", "verification"]},
             "permission": {"type": "string", "minLength": 1}
+          }
+        },
+        "surface_profile_id": {"type": "string", "minLength": 1},
+        "surface_profile_digest": {"$ref": "#/$defs/digest"},
+        "history": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": ["schema_version", "mode", "source_thread_id", "boundary_turn_id", "ephemeral", "exception_digest"],
+          "properties": {
+            "schema_version": {"const": "requested_history_v1"},
+            "mode": {"enum": ["none", "bounded"]},
+            "source_thread_id": {"type": ["string", "null"]},
+            "boundary_turn_id": {"type": ["string", "null"]},
+            "ephemeral": {"const": true},
+            "exception_digest": {
+              "anyOf": [{"$ref": "#/$defs/digest"}, {"type": "null"}]
+            }
           }
         },
         "model": {"type": ["string", "null"]},
@@ -1340,6 +1355,61 @@
         "disposition": {"enum": ["DEFERRED", "UNVERIFIED"]}
       }
     },
+    "executionEvent": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "sequence", "event_id", "kind", "parent_event_id", "node_id",
+        "spawn_depth", "watcher_id", "outcome", "call_record_digest"
+      ],
+      "properties": {
+        "sequence": {"type": "integer", "minimum": 0},
+        "event_id": {"type": "string", "minLength": 1},
+        "kind": {
+          "enum": [
+            "root_turn", "spawn", "model_call", "retry", "follow_up",
+            "wait", "no_delta_wakeup", "terminate"
+          ]
+        },
+        "parent_event_id": {"type": ["string", "null"]},
+        "node_id": {"type": "string", "minLength": 1},
+        "spawn_depth": {"type": "integer", "minimum": 0},
+        "watcher_id": {"type": "string", "minLength": 1},
+        "outcome": {"enum": ["completed", "null", "timeout", "no_delta", "rejected", "terminated"]},
+        "call_record_digest": {
+          "anyOf": [{"$ref": "#/$defs/digest"}, {"type": "null"}]
+        }
+      }
+    },
+    "executionEventLedger": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "schema_version", "root_execution_id", "policy_digest",
+        "surface_profile_digest", "watcher_id", "events",
+        "terminal_reason", "ledger_digest"
+      ],
+      "properties": {
+        "schema_version": {"const": "execution_event_ledger_v1"},
+        "root_execution_id": {"type": "string", "minLength": 1},
+        "policy_digest": {"$ref": "#/$defs/digest"},
+        "surface_profile_digest": {"$ref": "#/$defs/digest"},
+        "watcher_id": {"type": "string", "minLength": 1},
+        "events": {
+          "type": "array",
+          "minItems": 1,
+          "items": {"$ref": "#/$defs/executionEvent"}
+        },
+        "terminal_reason": {
+          "enum": [
+            null, "BUDGET_EXHAUSTED", "SPAWN_DEPTH_EXCEEDED",
+            "WAIT_BUDGET_EXHAUSTED", "NO_DELTA_BUDGET_EXHAUSTED",
+            "DEADLINE_EXCEEDED"
+          ]
+        },
+        "ledger_digest": {"$ref": "#/$defs/digest"}
+      }
+    },
     "workflowWaveRecord": {
       "type": "object",
       "additionalProperties": false,
@@ -1353,7 +1423,7 @@
         "call_manifest_digest", "call_record_digests", "first_attempt_call_count",
         "retry_call_count", "null_call_count", "final_null_node_count",
         "coverage_debt", "budget_authority", "result_fragment_digests",
-        "accounting_boundary", "record_digest"
+        "execution_event_ledger", "accounting_boundary", "record_digest"
       ],
       "properties": {
         "schema_version": {"const": "workflow_wave_record_v1"},
@@ -1403,14 +1473,23 @@
             "admitted_caps": {
               "type": "object",
               "additionalProperties": false,
-              "required": ["max_context_tokens_per_call", "max_prompt_utf8_bytes_per_call", "max_workflow_planned_input_tokens", "max_unique_nodes", "max_call_attempts", "retry_budget"],
+              "required": ["max_context_tokens_per_call", "max_prompt_utf8_bytes_per_call", "max_workflow_planned_input_tokens", "max_unique_nodes", "max_call_attempts", "retry_budget", "max_followup_attempts", "max_total_model_turns", "max_wait_cycles", "max_no_delta_wakeups", "max_wall_clock_ms", "max_call_duration_ms", "max_wave_duration_ms", "max_concurrent_calls", "max_spawn_depth_from_root"],
               "properties": {
                 "max_context_tokens_per_call": {"type": "integer", "minimum": 1},
                 "max_prompt_utf8_bytes_per_call": {"type": "integer", "minimum": 1},
                 "max_workflow_planned_input_tokens": {"type": "integer", "minimum": 1},
                 "max_unique_nodes": {"type": "integer", "minimum": 1},
                 "max_call_attempts": {"type": "integer", "minimum": 1},
-                "retry_budget": {"type": "integer", "minimum": 0}
+                "retry_budget": {"type": "integer", "minimum": 0},
+                "max_followup_attempts": {"type": "integer", "minimum": 0},
+                "max_total_model_turns": {"type": "integer", "minimum": 1},
+                "max_wait_cycles": {"type": "integer", "minimum": 1},
+                "max_no_delta_wakeups": {"type": "integer", "minimum": 0},
+                "max_wall_clock_ms": {"type": "integer", "minimum": 1},
+                "max_call_duration_ms": {"type": "integer", "minimum": 1},
+                "max_wave_duration_ms": {"type": "integer", "minimum": 1},
+                "max_concurrent_calls": {"type": "integer", "minimum": 1},
+                "max_spawn_depth_from_root": {"type": "integer", "minimum": 1}
               }
             }
           }
@@ -1424,6 +1503,7 @@
             ]
           }
         },
+        "execution_event_ledger": {"$ref": "#/$defs/executionEventLedger"},
         "accounting_boundary": {
           "type": "object",
           "additionalProperties": false,

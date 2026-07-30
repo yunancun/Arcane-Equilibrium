@@ -3,6 +3,9 @@
 Status: Accepted
 Date: 2026-07-10
 
+2026-07-30 execution/context/model/memory amendment:
+`docs/adr/0052-gpt56-bounded-multi-agent-execution.md`.
+
 ## Context
 
 開發 sub-agent 已形成 18 個名稱、Claude/Codex/profile 三層定義、固定 chain、每角色

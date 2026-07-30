@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import sys
+import subprocess
 from copy import deepcopy
 from pathlib import Path
 
@@ -22,6 +23,7 @@ from agent_governance_execution import (  # noqa: E402
 )
 from agent_governance_execution import context_plan_digest  # noqa: E402
 import agent_governance_context as context_producer  # noqa: E402
+from agent_governance_context_refs import project_todo_active_rows  # noqa: E402
 from agent_governance_registry import load_registry, validate_registry  # noqa: E402
 
 
@@ -187,9 +189,121 @@ def test_full_profit_and_incident_context_activate_bounded_current_todo() -> Non
         )
         todo = next(
             source for source in plan["sources"]
-            if source["source"] == "TODO.md#AI/ML 一分鐘派發看板"
+            if source["source"] == "TODO.md#S2E 當前 ACTIVE 派發"
         )
         assert todo["planned_tokens"] < todo["full_file_token_estimate"]
+
+
+def test_active_state_contains_only_unique_active_row_and_direct_dependencies() -> None:
+    plan = compile_context(
+        "PM",
+        _facts(
+            surfaces=["runtime"],
+            risk="high",
+            objective="select the one current AI/ML work package",
+        ),
+    )
+    todo = next(
+        source for source in plan["sources"]
+        if source["source"] == "TODO.md#S2E 當前 ACTIVE 派發"
+    )
+    content = todo["content"]
+    assert "`S2E.2b-1`" in content
+    assert "`S2E.2b-2`" in content
+    assert "`S2E.0`" not in content
+    assert "`S2E.4`" not in content
+    assert content.count("\n|") == 3
+    assert todo["bytes"] < 8_192
+    assert todo["planned_tokens"] < 2_048
+    assert todo["digest"] == todo["content_digest"]
+
+
+def test_active_state_projection_fails_closed_for_duplicate_active_or_missing_dependency() -> None:
+    table = (
+        "### S2E 當前 ACTIVE 派發\n\n"
+        "| ID | Lane／狀態 | 依賴 | 精確工作 | 驗收／下一步 |\n"
+        "|---|---|---|---|---|\n"
+        "| `S2E.1` | SOURCE_LANDED | none | done | done |\n"
+        "| `S2E.2` | ACTIVE | S2E.1 | work | pass |\n"
+    ).encode()
+    spec = {
+        "source": "TODO.md#S2E 當前 ACTIVE 派發",
+        "kind": "todo_active_rows",
+        "heading": "S2E 當前 ACTIVE 派發",
+        "id_column": "ID",
+        "status_column": "Lane／狀態",
+        "dependency_column": "依賴",
+        "dependency_depth": 1,
+        "required_when": {"surfaces_any": ["runtime"]},
+    }
+    assert b"`S2E.1`" in project_todo_active_rows(table, spec)
+
+    duplicate = table + b"| `S2E.3` | ACTIVE | S2E.1 | work | pass |\n"
+    with pytest.raises(ValueError, match="exactly one ACTIVE"):
+        project_todo_active_rows(duplicate, spec)
+
+    missing = table.replace(b"S2E.1 | work", b"S2E.9 | work")
+    with pytest.raises(ValueError, match="missing dependency"):
+        project_todo_active_rows(missing, spec)
+
+
+def test_unrelated_todo_row_does_not_change_model_visible_context(
+    tmp_path: Path,
+) -> None:
+    repo = tmp_path / "repo"
+    repo.mkdir()
+    todo = repo / "TODO.md"
+    prefix = (
+        "# TODO\n\n### S2E 當前 ACTIVE 派發\n\n"
+        "| ID | Lane／狀態 | 依賴 | 精確工作 | 驗收／下一步 |\n"
+        "|---|---|---|---|---|\n"
+        "| `S2E.1` | SOURCE_LANDED | none | dependency | done |\n"
+        "| `S2E.2` | ACTIVE | S2E.1 | current work | pass |\n"
+    )
+    todo.write_text(
+        prefix + "| `S2E.3` | WAITING | S2E.2 | unrelated v1 | later |\n",
+        encoding="utf-8",
+    )
+    for args in (
+        ("init",),
+        ("config", "user.email", "context-test@example.invalid"),
+        ("config", "user.name", "Context Test"),
+        ("add", "."),
+        ("commit", "-m", "baseline"),
+    ):
+        subprocess.run(["git", *args], cwd=repo, check=True, capture_output=True)
+    registry = deepcopy(load_registry())
+    registry["roles"]["PM"]["context_packs"] = ["active_state"]
+
+    def facts() -> dict:
+        return _facts(
+            surfaces=["comments"],
+            risk="medium",
+            uncertainty="high",
+            scope=["TODO.md"],
+            dirty_scope=["TODO.md"],
+            baseline=capture_repository_baseline(repo),
+            objective="select the unique active work package",
+        )
+
+    first = compile_context("PM", facts(), registry, repo)
+    first_artifact = materialize_context_artifact(first)
+    first_source = first["sources"][0]
+    todo.write_text(
+        prefix
+        + "| `S2E.3` | WAITING | S2E.2 | unrelated v2 with more bytes | later |\n",
+        encoding="utf-8",
+    )
+    second = compile_context("PM", facts(), registry, repo)
+    second_artifact = materialize_context_artifact(second)
+    second_source = second["sources"][0]
+    assert second_source["content_digest"] == first_source["content_digest"]
+    assert second_source["planned_tokens"] == first_source["planned_tokens"]
+    assert (
+        second_artifact["shared_task_context_digest"]
+        == first_artifact["shared_task_context_digest"]
+    )
+    assert second_artifact["semantic_input_tokens"] == first_artifact["semantic_input_tokens"]
 
 
 def test_high_cardinality_interface_inventory_is_bounded_and_spawnable() -> None:

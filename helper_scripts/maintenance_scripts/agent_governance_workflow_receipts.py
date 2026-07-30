@@ -9,6 +9,11 @@ from datetime import datetime
 from typing import Any
 
 from agent_governance_registry import load_registry
+from agent_governance_execution_policy import (
+    admit_execution_event,
+    new_execution_event_ledger,
+    validate_execution_event_ledger,
+)
 from agent_governance_workflow_identity import (
     REQUESTED_FIELDS,
     requested_identity_errors,
@@ -47,7 +52,7 @@ WAVE_FIELDS = {
     "call_manifest_digest", "call_record_digests", "first_attempt_call_count",
     "retry_call_count", "null_call_count", "final_null_node_count",
     "coverage_debt", "budget_authority", "result_fragment_digests",
-    "accounting_boundary", "record_digest",
+    "execution_event_ledger", "accounting_boundary", "record_digest",
 }
 ADMITTED_TASK_FIELDS = {
     "node_id", "role", "native_agent", "requires", "node_class", "permission", "payload_kind", "task_contract_digest",
@@ -568,6 +573,33 @@ def validate_workflow_wave_record(
             errors.append("workflow wave budget authority digest differs from admitted Context")
         if expected_budget_authority_canonical is not None and budget.get("authority_canonical") != expected_budget_authority_canonical:
             errors.append("workflow wave budget authority canonical bytes differ from admitted Context")
+        try:
+            execution_policy = json.loads(str(budget.get("authority_canonical", "")))
+        except (TypeError, ValueError, json.JSONDecodeError):
+            execution_policy = None
+        if isinstance(execution_policy, dict):
+            errors.extend(
+                validate_execution_event_ledger(
+                    execution_policy,
+                    wave.get("execution_event_ledger"),
+                    call_record_digests=actual_record_digests,
+                )
+            )
+            surface_digests = {
+                record.get("requested", {}).get("surface_profile_digest")
+                for record in records
+                if isinstance(record, dict)
+                and isinstance(record.get("requested"), dict)
+            }
+            ledger = wave.get("execution_event_ledger")
+            if (
+                len(surface_digests) != 1
+                or not isinstance(ledger, dict)
+                or ledger.get("surface_profile_digest") not in surface_digests
+            ):
+                errors.append(
+                    "workflow wave execution ledger surface differs from call records"
+                )
     boundary = wave.get("accounting_boundary")
     if not isinstance(boundary, dict) or set(boundary) != ACCOUNTING_BOUNDARY_FIELDS:
         errors.append("workflow wave accounting boundary fields do not match contract")
@@ -621,6 +653,63 @@ def build_workflow_wave_record(
             node_records, key=lambda record: record.get("attempt", 0)
         ).get("returned_null") is True:
             final_null += 1
+    try:
+        execution_policy = json.loads(budget_authority["authority_canonical"])
+        policy_digest = str(budget_authority["authority_digest"])
+        first_requested = next(
+            record["requested"]
+            for record in records
+            if isinstance(record, dict) and isinstance(record.get("requested"), dict)
+        )
+        surface_digest = first_requested["surface_profile_digest"]
+    except (KeyError, StopIteration, TypeError, ValueError, json.JSONDecodeError) as exc:
+        raise ValueError("cannot build execution ledger from wave authority/calls") from exc
+    watcher_id = f"workflow-wave:{manifest.get('manifest_digest')}"
+    execution_ledger = new_execution_event_ledger(
+        root_execution_id=f"workflow-root:{manifest.get('manifest_digest')}",
+        policy_digest=policy_digest,
+        surface_profile_digest=surface_digest,
+        watcher_id=watcher_id,
+    )
+    _, execution_ledger = admit_execution_event(
+        execution_policy,
+        execution_ledger,
+        {
+            "event_id": "workflow-root-turn",
+            "kind": "root_turn",
+            "parent_event_id": None,
+            "node_id": "PM",
+            "spawn_depth": 0,
+            "watcher_id": watcher_id,
+            "outcome": "completed",
+            "call_record_digest": None,
+        },
+    )
+    for record in records:
+        if not isinstance(record, dict):
+            continue
+        allowed, execution_ledger = admit_execution_event(
+            execution_policy,
+            execution_ledger,
+            {
+                "event_id": str(record["logical_call_id"]),
+                "kind": "retry" if record.get("attempt", 1) > 1 else "model_call",
+                "parent_event_id": (
+                    record.get("retry_parent_call_id") or "workflow-root-turn"
+                ),
+                "node_id": str(record["node_id"]),
+                "spawn_depth": 1,
+                "watcher_id": watcher_id,
+                "outcome": (
+                    "null" if record.get("returned_null") is True else "completed"
+                ),
+                "call_record_digest": str(record["record_digest"]),
+            },
+        )
+        if not allowed:
+            raise ValueError(
+                "execution policy denied a call already present in the manifest"
+            )
     core: dict[str, Any] = {
         "schema_version": "workflow_wave_record_v1",
         "workflow_contract_digest": manifest.get("workflow_contract_digest"),
@@ -668,6 +757,7 @@ def build_workflow_wave_record(
         "coverage_debt": coverage_debt or [],
         "budget_authority": budget_authority,
         "result_fragment_digests": result_fragment_digests,
+        "execution_event_ledger": execution_ledger,
         "accounting_boundary": accounting_boundary or {
             "usage_measurement_status": "unavailable",
             "controller_overhead_status": "unavailable",

@@ -18,6 +18,7 @@ from agent_governance_context import (
 from agent_governance_context_validation import validate_context_artifact
 from agent_governance_context_specs import activated_source_specs, source_name
 from agent_governance_context_projection import materialize_semantic_context
+from agent_governance_execution_policy import compile_execution_budget_policy
 from agent_governance_registry import REPO_ROOT, load_registry
 from agent_governance_external_evidence import ExternalEvidenceVerifier
 from agent_governance_routing import (
@@ -151,6 +152,7 @@ def compile_context(
         ({"gui"} & surfaces, "gui_visual"),
         (surfaces & {"docs", "governance"}, "docs"),
         (surfaces & {"architecture", "authority", "cross_interface"}, "architecture"),
+        (bool(facts.get("history_refs")), "history_on_demand"),
     )
     shared_packs = [
         pack for pack in role["context_packs"]
@@ -232,7 +234,8 @@ def compile_context(
         for record in provenance if record["source"] in evidence_debt
     ]
 
-    envelope_name = _select_envelope(facts)
+    routed = route_task(facts)
+    envelope_name = routed["budget_envelope"]
     registry_envelope = dict(registry["budget_envelopes"][envelope_name])
     envelope = {
         field: registry_envelope[field]
@@ -282,17 +285,7 @@ def compile_context(
             allow_nan=False,
         ).encode("utf-8")
     )
-    authority = {
-        "schema_version": "context_budget_authority_v1",
-        "envelope": envelope_name,
-        "accounting_basis": registry_envelope["accounting_basis"],
-        "max_context_tokens_per_call": registry_envelope["max_context_tokens_per_call"],
-        "max_prompt_utf8_bytes_per_call": registry_envelope["max_prompt_utf8_bytes_per_call"],
-        "max_workflow_planned_input_tokens": registry_envelope["max_workflow_planned_input_tokens"],
-        "max_unique_nodes": registry_envelope["max_unique_nodes"],
-        "max_call_attempts": registry_envelope["max_call_attempts"],
-        "retry_budget": registry_envelope["retry_budget"],
-    }
+    authority = compile_execution_budget_policy(envelope_name, registry)
     authority_canonical = json.dumps(
         authority,
         ensure_ascii=False,

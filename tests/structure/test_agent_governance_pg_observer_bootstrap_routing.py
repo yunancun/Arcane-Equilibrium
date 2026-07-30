@@ -1,8 +1,8 @@
 """Routing behavior for the S2.0 observer-bootstrap effect class (SOURCE lane).
 
 Mirrors the sibling ``target_host_probe`` routing tests: it pins the WP2 registry
-invariant that a ``pg_observer_bootstrap`` task routes ``... -> ops_preflight ->
-ops_postcheck`` with the effect-adapter node DELIBERATELY NOT injected (the real
+invariant that a ``pg_observer_bootstrap`` source-lane task routes one
+``ops_observation`` with the effect-adapter node DELIBERATELY NOT injected (the real
 route_task effect node is deferred to the S2.0 EFFECT session), and the FORWARD-only
 surface-consistency rule (pg/runtime_effect surface + runtime_claim=true + high/critical
 risk).  This is the routing-side guarantee behind the "no effect node before the EFFECT
@@ -45,7 +45,7 @@ def _facts(**overrides):
     return facts
 
 
-def test_route_pg_observer_bootstrap_has_no_effect_adapter_and_ops_preflight_then_postcheck():
+def test_route_pg_observer_bootstrap_has_no_effect_adapter_and_one_ops_observation():
     route = routing.route_task(_facts())
     node_ids = [node["id"] for node in route["nodes"]]
     # 效果類已宣告 + 表面一致性已驗,但 WP2 SOURCE 波刻意 NOT 注入任何 effect adapter 節點。
@@ -53,11 +53,11 @@ def test_route_pg_observer_bootstrap_has_no_effect_adapter_and_ops_preflight_the
     assert effect_nodes == []
     assert routing.PG_OBSERVER_BOOTSTRAP_ADAPTER_ID == obs.ADAPTER_ID
     assert routing.PG_OBSERVER_BOOTSTRAP_ADAPTER_ID not in node_ids
-    # 一個 pg_observer_bootstrap 任務走 ops_preflight -> ops_postcheck(中間無 effect adapter)。
-    assert "ops_preflight" in node_ids and "ops_postcheck" in node_ids
+    # SOURCE lane 未 admitted effect adapter，故只需要一個唯讀 OPS observation。
+    assert "ops_observation" in node_ids
+    assert "ops_preflight" not in node_ids and "ops_postcheck" not in node_ids
     by_id = {node["id"]: node for node in route["nodes"]}
-    assert by_id["ops_postcheck"]["requires"] == ["ops_preflight"]
-    assert by_id["ops_preflight"]["role"] == "OPS" and by_id["ops_postcheck"]["role"] == "OPS"
+    assert by_id["ops_observation"]["role"] == "OPS"
     # 亦不得意外選中鄰接的 target-host / 通用 deploy / P0-B effect adapter。
     assert routing.TARGET_HOST_PROBE_ADAPTER_ID not in node_ids
     assert "deploy_adapter_v1" not in node_ids

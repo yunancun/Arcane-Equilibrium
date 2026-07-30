@@ -1,0 +1,93 @@
+{
+  "schema_version": "multi_agent_efficiency_evaluation_v1",
+  "evaluation_id": "synthetic-gpt56-multi-agent-regression-v1",
+  "created_at": "2026-07-30T12:00:00Z",
+  "evidence_kind": "synthetic_fixture",
+  "workload": {
+    "workload_id": "governance-source-change-with-independent-review",
+    "workload_digest": "sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+    "description": "Synthetic source-change workload with one independent quality review."
+  },
+  "baseline": {
+    "baseline_id": "current-unbounded-multi-agent-profile",
+    "baseline_digest": "sha256:bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb",
+    "profile": "current"
+  },
+  "profiles": [
+    {
+      "profile": "current",
+      "workload_digest": "sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+      "baseline_digest": "sha256:bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb",
+      "measurement_status": "synthetic",
+      "evidence_ref": null,
+      "evidence_digest": null,
+      "unavailable_reason": null,
+      "metrics": {
+        "closure_quality_score": 0.96,
+        "elapsed_time_ms": 7200000,
+        "input_tokens": 2000000,
+        "output_tokens": 200000,
+        "cache_read_tokens": 8000000,
+        "calls": 24,
+        "waits": 90,
+        "retries": 3,
+        "compactions": 2,
+        "reopen_count": 1,
+        "decision_changing_findings": 5
+      }
+    },
+    {
+      "profile": "single_agent",
+      "workload_digest": "sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+      "baseline_digest": "sha256:bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb",
+      "measurement_status": "synthetic",
+      "evidence_ref": null,
+      "evidence_digest": null,
+      "unavailable_reason": null,
+      "metrics": {
+        "closure_quality_score": 0.88,
+        "elapsed_time_ms": 1800000,
+        "input_tokens": 450000,
+        "output_tokens": 50000,
+        "cache_read_tokens": 900000,
+        "calls": 1,
+        "waits": 0,
+        "retries": 0,
+        "compactions": 0,
+        "reopen_count": 3,
+        "decision_changing_findings": 2
+      }
+    },
+    {
+      "profile": "bounded_role",
+      "workload_digest": "sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+      "baseline_digest": "sha256:bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb",
+      "measurement_status": "synthetic",
+      "evidence_ref": null,
+      "evidence_digest": null,
+      "unavailable_reason": null,
+      "metrics": {
+        "closure_quality_score": 0.96,
+        "elapsed_time_ms": 2700000,
+        "input_tokens": 700000,
+        "output_tokens": 80000,
+        "cache_read_tokens": 1500000,
+        "calls": 8,
+        "waits": 6,
+        "retries": 1,
+        "compactions": 0,
+        "reopen_count": 1,
+        "decision_changing_findings": 5
+      }
+    }
+  ],
+  "quality_noninferiority_policy": {
+    "policy_id": "gpt56_multi_agent_quality_noninferiority_v1",
+    "policy_digest": "sha256:eeb06619213f3b1eece0a897ef4e63f56e8173d5daa07483c397f6b3c855ee49"
+  },
+  "limitations": [
+    "This synthetic fixture is not measured evidence and cannot support an adoption or savings claim.",
+    "Populate the same contract with caller-attested telemetry before making a measured comparison."
+  ],
+  "record_digest": "sha256:102a0f20f7916977a7bbf48331734365be3d07c86b2a2a9653989ef868f7f567"
+}

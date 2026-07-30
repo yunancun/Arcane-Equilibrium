@@ -44,6 +44,15 @@ empty, and before the `dirty_scope` fallback. This field is not writer ownership
 mutation authority, or an ACL, and it never replaces writer `dirty_scope` or
 whole-repository generation checks.
 
+`history_refs` is an optional list of at most four exact historical sections.
+Each ref binds one allowlisted repository-relative Markdown path, one exact H2
+heading, and the current section digest. The compiler rejects globs, directory
+selection, path traversal, symlinks, whole-file fallbacks, duplicate refs,
+sections above 16 KiB, and an aggregate above 32 KiB. Omission normalizes to an
+empty list. History can inform judgment only through these pinned bytes; it
+cannot silently inherit the parent task, an entire conversation, or every role
+memory.
+
 ## Source-of-truth routing
 
 | Need | Read | Authority class |
@@ -85,7 +94,10 @@ external/actual-usage claims require the third tier.
 The Registry defines packs; the compiler selects and deduplicates pointers:
 
 - `core`: relevant product/root/hard-boundary sections
-- `active_state`: TODO only when current state can change the answer
+- `active_state`: exact rows from the `S2E 當前 ACTIVE 派發` table only when
+  current state can change the answer; the compiler selects the unique ACTIVE
+  task row plus direct dependency rows, caps the projection at 8 KiB, and hashes
+  the projected bytes rather than all of `TODO.md`
 - `architecture`: CONTEXT + relevant ADR
 - `source_change`: diff, direct interfaces/callers, focused acceptance tests
 - `runtime`: active evidence + sub-agent hygiene
@@ -93,9 +105,12 @@ The Registry defines packs; the compiler selects and deduplicates pointers:
 - `ml_data`: lineage, feature/label/CV, training/serving evidence
 - `gui_visual`: browser/viewport/keyboard/accessibility/screenshot evidence
 - `docs`: placement and relevant indexes
-- `history_on_demand`: only the directly relevant memory/report shard
+- `history_on_demand`: only exact sections named by validated `history_refs`;
+  empty refs mean the pack is inactive
 
 Role memory is historical judgment support, not an automatic startup dependency.
+Unrelated TODO rows and unselected history must not change Context bytes, digest,
+or planned tokens.
 
 ## Elastic budget
 
@@ -138,9 +153,10 @@ The loader evaluates one standalone `AsyncFunction` and has no stable
 module-relative import contract. Therefore `agent-wave`, Full Audit, and Profit
 Diagnosis embed a generated `CONTEXT_ADMISSION_V1` block from
 `.claude/workflows/context-admission-v1.fragment.js`. Its checker projects
-Registry budget profiles and rejects byte drift, shadow declarations, real
-import/require statements, or an unused common-prefix helper. Every call begins
-with the exact `canonical_plan` bytes already recorded by `artifact_digest`,
+Registry budget profiles, execution surfaces, default history, and exact
+saved-workflow model/role-effort policy; it rejects byte drift, shadow
+declarations, real import/require statements, or an unused common-prefix helper.
+Every call begins with the exact `canonical_plan` bytes already recorded by `artifact_digest`,
 then adds only the node-specific suffix after one blank line. This preserves
 cache reuse without truncating Context.
 Inline context can still be ingested per agent; actual token/cache/tool/time
@@ -187,6 +203,7 @@ Cargo, Linux, PG, deploy, cron, service, or broker work:
 - Stable architecture -> README/CONTEXT/ADR.
 - Agent Interface -> Registry, renderer, this router when pack routing changes.
 - Evidence -> closure/report/archive, linked rather than pasted.
-- Durable new lesson -> memory promotion at PM closure only.
+- Durable new lesson -> candidate at PM closure; mutate memory only with the
+  typed trusted-host promotion attestation.
 - Generated `.claude/agents/*.md`, `.codex/agents/*.md`, and
   `docs/CCAgentWorkSpace/*/profile.md` views are never hand-edited.

@@ -11,7 +11,13 @@ from agent_governance_vocabulary import (
 )
 
 
-SOURCE_KINDS = {"repository_source", "repository_inventory", "evidence_artifact"}
+SOURCE_KINDS = {
+    "repository_source",
+    "repository_inventory",
+    "evidence_artifact",
+    "todo_active_rows",
+    "history_refs",
+}
 CAPTURE_KINDS = {
     "runtime_observation", "external_policy_snapshot", "source_snapshot",
 }
@@ -63,6 +69,14 @@ def context_source_spec_errors(value: Any) -> list[str]:
         "repository_source": common,
         "repository_inventory": common | {"paths", "min_matches"},
         "evidence_artifact": common | {"capture_kind"},
+        "todo_active_rows": common | {
+            "heading",
+            "id_column",
+            "status_column",
+            "dependency_column",
+            "dependency_depth",
+        },
+        "history_refs": {"source", "kind"},
     }.get(kind)
     if allowed is None:
         return [f"Context source kind is invalid: {kind}"]
@@ -72,6 +86,15 @@ def context_source_spec_errors(value: Any) -> list[str]:
         required |= {"paths", "min_matches"}
     if kind == "evidence_artifact":
         required |= {"capture_kind", "required_when"}
+    if kind == "todo_active_rows":
+        required |= {
+            "heading",
+            "id_column",
+            "status_column",
+            "dependency_column",
+            "dependency_depth",
+            "required_when",
+        }
     if set(value) - allowed or not required <= set(value):
         errors.append(f"{kind} Context source fields are not exact")
     if not isinstance(value.get("source"), str) or not value["source"].strip():
@@ -93,10 +116,18 @@ def context_source_spec_errors(value: Any) -> list[str]:
             errors.append("repository_inventory min_matches must be non-negative int")
     if kind == "evidence_artifact" and value.get("capture_kind") not in CAPTURE_KINDS:
         errors.append("evidence_artifact capture_kind is invalid")
+    if kind == "todo_active_rows":
+        for field in ("heading", "id_column", "status_column", "dependency_column"):
+            if not isinstance(value.get(field), str) or not value[field].strip():
+                errors.append(f"todo_active_rows {field} must be non-empty")
+        if value.get("dependency_depth") != 1:
+            errors.append("todo_active_rows dependency_depth must equal one")
     return errors
 
 
 def source_is_active(spec: str | dict[str, Any], facts: dict[str, Any]) -> bool:
+    if isinstance(spec, dict) and spec.get("kind") == "history_refs":
+        return bool(facts.get("history_refs"))
     if isinstance(spec, str) or "required_when" not in spec:
         return True
     condition = spec["required_when"]

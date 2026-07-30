@@ -17,6 +17,10 @@ from agent_governance_external_evidence import (
 )
 
 from agent_governance_registry import REPO_ROOT
+from agent_governance_context_refs import (
+    project_history_refs,
+    project_todo_active_rows,
+)
 from agent_governance_context_specs import source_name
 from agent_governance_routing import TASK_CONTRACT_FIELDS, _sha256_bytes
 from agent_governance_schema import schema_subset_errors
@@ -490,6 +494,118 @@ def _repository_inventory_record(
     }
 
 
+def _todo_active_rows_record(
+    spec: dict[str, Any], *, root: Path, evidence_state: dict[str, Any],
+    actual_baseline: dict[str, str] | None,
+) -> dict[str, Any]:
+    """Capture only the unique active TODO row and its direct dependencies."""
+
+    source = source_name(spec)
+    raw_path, _, selector = source.partition("#")
+    base = {"source": source, "selector": selector or spec.get("heading")}
+    if evidence_state.get(source) is not None:
+        return {
+            **base,
+            "status": "trusted_producer_override_rejected",
+            "digest": None,
+            "planned_tokens": 32,
+            "artifact_error": (
+                "todo_active_rows is locally produced and cannot be caller-supplied"
+            ),
+        }
+    local_file, local_error = _safe_artifact(raw_path, root)
+    if local_file is None:
+        return {
+            **base,
+            "status": "todo_active_rows_invalid",
+            "digest": None,
+            "planned_tokens": 32,
+            "artifact_error": local_error,
+        }
+    data = local_file.read_bytes()
+    try:
+        projection = project_todo_active_rows(data, spec)
+    except ValueError as error:
+        return {
+            **base,
+            "status": "todo_active_rows_invalid",
+            "digest": None,
+            "planned_tokens": 32,
+            "artifact_error": str(error),
+        }
+    digest = _sha256_bytes(projection)
+    observed_at, expires_at = _capture_times("source_snapshot")
+    return {
+        **base,
+        "status": "pinned",
+        "capture_kind": "source_snapshot",
+        "producer": "repository_bytes_v1",
+        "baseline": actual_baseline,
+        "observed_at": observed_at,
+        "expires_at": expires_at,
+        "content_encoding": "utf-8",
+        "content": projection.decode("utf-8"),
+        "digest": digest,
+        "content_digest": digest,
+        "bytes": len(projection),
+        "source_bytes": len(data),
+        "full_file_token_estimate": max(1, (len(data) + 3) // 4),
+        "planned_tokens": max(1, (len(projection) + 3) // 4),
+    }
+
+
+def _history_refs_record(
+    spec: dict[str, Any], *, root: Path, evidence_state: dict[str, Any],
+    normalized_facts: dict[str, Any],
+    actual_baseline: dict[str, str] | None,
+) -> dict[str, Any]:
+    """Capture only exact task-bound role-memory/report sections."""
+
+    source = source_name(spec)
+    base = {"source": source, "selector": None}
+    if evidence_state.get(source) is not None:
+        return {
+            **base,
+            "status": "trusted_producer_override_rejected",
+            "digest": None,
+            "planned_tokens": 32,
+            "artifact_error": (
+                "history_refs is locally produced and cannot be caller-supplied"
+            ),
+        }
+    try:
+        content, raw = project_history_refs(
+            root, normalized_facts.get("history_refs", [])
+        )
+    except ValueError as error:
+        return {
+            **base,
+            "status": "history_ref_invalid",
+            "digest": None,
+            "planned_tokens": 32,
+            "artifact_error": str(error),
+        }
+    digest = _sha256_bytes(raw)
+    tokens = max(1, (len(raw) + 3) // 4)
+    observed_at, expires_at = _capture_times("source_snapshot")
+    return {
+        **base,
+        "status": "pinned",
+        "capture_kind": "source_snapshot",
+        "producer": "repository_bytes_v1",
+        "baseline": actual_baseline,
+        "observed_at": observed_at,
+        "expires_at": expires_at,
+        "content_encoding": "json",
+        "content": content,
+        "digest": digest,
+        "content_digest": digest,
+        "bytes": len(raw),
+        "full_file_token_estimate": tokens,
+        "planned_tokens": tokens,
+    }
+
+
 def _valid_observed_at(value: Any) -> bool:
     if not isinstance(value, str):
         return False
@@ -538,6 +654,21 @@ def _source_provenance_record(
 ) -> dict[str, Any]:
     source = source_name(source_spec)
     spec_kind = source_spec.get("kind") if isinstance(source_spec, dict) else None
+    if spec_kind == "todo_active_rows":
+        return _todo_active_rows_record(
+            source_spec,
+            root=root,
+            evidence_state=evidence_state,
+            actual_baseline=actual_baseline,
+        )
+    if spec_kind == "history_refs":
+        return _history_refs_record(
+            source_spec,
+            root=root,
+            evidence_state=evidence_state,
+            normalized_facts=normalized_facts,
+            actual_baseline=actual_baseline,
+        )
     if spec_kind == "repository_inventory":
         if evidence_state.get(source) is not None:
             return {

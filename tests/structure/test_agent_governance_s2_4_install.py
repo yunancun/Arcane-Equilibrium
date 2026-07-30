@@ -459,10 +459,11 @@ def test_s2_4_route_classes_inject_no_effect_node_in_source_lane(effect) -> None
         routing.S2_4_INSTALL_ADAPTER_ID,
     ):
         assert adapter_id not in node_ids
-    # 同 observer/quiesce 姿態:走 ops_preflight -> ops_postcheck(中間無 effect adapter)。
-    assert "ops_preflight" in node_ids and "ops_postcheck" in node_ids
+    # 同 observer/quiesce 姿態:SOURCE lane 未 admitted adapter，只派一個 OPS observation。
+    assert "ops_observation" in node_ids
+    assert "ops_preflight" not in node_ids and "ops_postcheck" not in node_ids
     by_id = {node["id"]: node for node in route["nodes"]}
-    assert by_id["ops_postcheck"]["requires"] == ["ops_preflight"]
+    assert by_id["ops_observation"]["role"] == "OPS"
 
 
 def test_s2_4_routing_adapter_ids_match_registry_frozen_abi() -> None:

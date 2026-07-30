@@ -1,0 +1,111 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "agent_liveness_adjudication_v1.schema.json",
+  "title": "Development-agent liveness adjudication",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "schema_version",
+    "liveness_state",
+    "primary_evidence",
+    "activity_state",
+    "diagnostic_state",
+    "transcript_diagnostic",
+    "automatic_stop"
+  ],
+  "properties": {
+    "schema_version": {
+      "const": "agent_liveness_adjudication_v1"
+    },
+    "liveness_state": {
+      "enum": ["RUNNING", "TERMINAL", "UNKNOWN"]
+    },
+    "primary_evidence": {
+      "enum": [
+        "SUPPORTED_COLLABORATION_ACTIVITY",
+        "SUPPORTED_THREAD_ACTIVITY"
+      ]
+    },
+    "activity_state": {
+      "enum": [
+        "RUNNING",
+        "WAITING",
+        "COMPLETED",
+        "FAILED",
+        "CANCELLED",
+        "UNAVAILABLE"
+      ]
+    },
+    "diagnostic_state": {
+      "enum": ["AVAILABLE", "UNAVAILABLE", "RUNAWAY_SUSPECT"]
+    },
+    "transcript_diagnostic": {
+      "$ref": "#/$defs/private_jsonl_liveness_diagnostic_v1"
+    },
+    "automatic_stop": {
+      "const": false
+    }
+  },
+  "$defs": {
+    "private_jsonl_liveness_diagnostic_v1": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "schema_version",
+        "exists",
+        "size_bytes",
+        "mtime_ms"
+      ],
+      "properties": {
+        "schema_version": {
+          "const": "private_jsonl_liveness_diagnostic_v1"
+        },
+        "exists": {
+          "type": "boolean"
+        },
+        "size_bytes": {
+          "type": ["integer", "null"],
+          "minimum": 0
+        },
+        "mtime_ms": {
+          "type": ["integer", "null"],
+          "minimum": 0
+        }
+      },
+      "allOf": [
+        {
+          "if": {
+            "properties": {
+              "exists": {
+                "const": false
+              }
+            },
+            "required": ["exists"]
+          },
+          "then": {
+            "properties": {
+              "size_bytes": {
+                "type": "null"
+              },
+              "mtime_ms": {
+                "type": "null"
+              }
+            }
+          },
+          "else": {
+            "properties": {
+              "size_bytes": {
+                "type": "integer",
+                "minimum": 0
+              },
+              "mtime_ms": {
+                "type": "integer",
+                "minimum": 0
+              }
+            }
+          }
+        }
+      ]
+    }
+  }
+}

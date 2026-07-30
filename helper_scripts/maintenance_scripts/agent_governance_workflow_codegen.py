@@ -11,6 +11,11 @@ from typing import Any
 
 from agent_governance_registry import REPO_ROOT, load_registry
 from agent_governance_context_specs import trusted_derived_kinds
+from agent_governance_execution_policy import (
+    compile_execution_budget_policy,
+    default_history_binding,
+    surface_profile_binding,
+)
 
 
 TEMPLATE = REPO_ROOT / ".claude/workflows/context-admission-v1.fragment.js"
@@ -23,6 +28,9 @@ BEGIN = "// BEGIN GENERATED CONTEXT_ADMISSION_V1"
 END = "// END GENERATED CONTEXT_ADMISSION_V1"
 TOKEN = "__CONTEXT_AUTHORITY_PROFILES__"
 TRUSTED_KINDS_TOKEN = "__CONTEXT_TRUSTED_KINDS__"
+SURFACE_BINDINGS_TOKEN = "__EXECUTION_SURFACE_BINDINGS__"
+DEFAULT_HISTORY_TOKEN = "__DEFAULT_REQUESTED_HISTORY__"
+SAVED_WORKFLOW_MODEL_POLICY_TOKEN = "__SAVED_WORKFLOW_MODEL_POLICY__"
 SHADOW_RE = re.compile(
     r"\b(?:AUTHORITY_PROFILES|CONTEXT_(?:ARTIFACT|PLAN|BUDGET)_FIELDS|"
     r"TASK_CONTRACT_FIELDS|MANDATORY_CONTEXT_FIELDS)\b|"
@@ -32,22 +40,12 @@ SHADOW_RE = re.compile(
 )
 
 
-def authority_profiles(registry: dict[str, Any]) -> dict[str, dict[str, int]]:
+def authority_profiles(registry: dict[str, Any]) -> dict[str, dict[str, Any]]:
     """Project the one Registry budget authority into saved-workflow JS."""
 
     return {
-        name: {
-            "accounting_basis": envelope["accounting_basis"],
-            "max_context_tokens_per_call": envelope["max_context_tokens_per_call"],
-            "max_prompt_utf8_bytes_per_call": envelope["max_prompt_utf8_bytes_per_call"],
-            "max_workflow_planned_input_tokens": envelope["max_workflow_planned_input_tokens"],
-            "max_unique_nodes": envelope["max_unique_nodes"],
-            "max_call_attempts": envelope["max_call_attempts"],
-            "retry_budget": envelope["retry_budget"],
-            "target_context_tokens": envelope["target_context_tokens"],
-            "quality_reserve_context_tokens": envelope["quality_reserve_context_tokens"],
-        }
-        for name, envelope in sorted(registry["budget_envelopes"].items())
+        name: compile_execution_budget_policy(name, registry)
+        for name in sorted(registry["budget_envelopes"])
     }
 
 
@@ -56,7 +54,14 @@ def render_context_admission_block(
 ) -> str:
     registry = registry or load_registry()
     template = TEMPLATE.read_text(encoding="utf-8").rstrip()
-    if template.count(TOKEN) != 1 or template.count(TRUSTED_KINDS_TOKEN) != 1:
+    tokens = (
+        TOKEN,
+        TRUSTED_KINDS_TOKEN,
+        SURFACE_BINDINGS_TOKEN,
+        DEFAULT_HISTORY_TOKEN,
+        SAVED_WORKFLOW_MODEL_POLICY_TOKEN,
+    )
+    if any(template.count(token) != 1 for token in tokens):
         raise ValueError("Context admission template tokens must each occur once")
     profiles = json.dumps(
         authority_profiles(registry),
@@ -72,8 +77,41 @@ def render_context_admission_block(
         separators=(",", ":"),
         allow_nan=False,
     )
-    rendered = template.replace(TOKEN, profiles).replace(
-        TRUSTED_KINDS_TOKEN, trusted_kinds
+    surface_bindings = json.dumps(
+        {
+            profile_id: surface_profile_binding(profile_id, registry)
+            for profile_id in sorted(
+                registry["execution_policy"]["surface_profiles"]
+            )
+        },
+        ensure_ascii=False,
+        sort_keys=True,
+        separators=(",", ":"),
+        allow_nan=False,
+    )
+    history = json.dumps(
+        default_history_binding(registry),
+        ensure_ascii=False,
+        sort_keys=True,
+        separators=(",", ":"),
+        allow_nan=False,
+    )
+    saved_workflow_model_policy = json.dumps(
+        registry["saved_workflow_model_policy"],
+        ensure_ascii=False,
+        sort_keys=True,
+        separators=(",", ":"),
+        allow_nan=False,
+    )
+    rendered = (
+        template.replace(TOKEN, profiles)
+        .replace(TRUSTED_KINDS_TOKEN, trusted_kinds)
+        .replace(SURFACE_BINDINGS_TOKEN, surface_bindings)
+        .replace(DEFAULT_HISTORY_TOKEN, history)
+        .replace(
+            SAVED_WORKFLOW_MODEL_POLICY_TOKEN,
+            saved_workflow_model_policy,
+        )
     )
     return f"{BEGIN}\n{rendered}\n{END}"
 
