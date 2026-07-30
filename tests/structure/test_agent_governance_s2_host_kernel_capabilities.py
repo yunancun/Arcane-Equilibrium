@@ -19,9 +19,25 @@ import test_agent_governance_s2_host_kernel as scanner  # noqa: E402
 def test_recovery_store_effect_and_pure_builder_are_scanned_per_file():
     present = {path.name for path in scanner._present_family()}
     assert {
+        "agent_governance_s2_5_recovery_anchor_v2.py",
         "agent_governance_s2_5_recovery_store.py",
         "agent_governance_s2_5_recovery_store_v2.py",
     } <= present
+
+
+def test_controller_anchor_effect_adapter_has_a_positive_import_allowlist(
+    tmp_path,
+):
+    name = "agent_governance_s2_5_recovery_anchor_v2.py"
+    assert name in scanner.GOVERNANCE_IMPORTS_BY_FILE
+    path = scanner.HELPERS / name
+    assert scanner._raw_command_findings(path, exec_family=True) == []
+    mutated = tmp_path / name
+    mutated.write_text(
+        path.read_text(encoding="utf-8") + "\nimport runpy\n",
+        encoding="utf-8",
+    )
+    assert scanner._raw_command_findings(mutated, exec_family=True)
 
 
 @pytest.mark.parametrize(

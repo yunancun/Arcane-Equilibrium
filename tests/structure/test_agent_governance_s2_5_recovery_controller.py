@@ -3,6 +3,7 @@ from __future__ import annotations
 import copy
 import json
 import sys
+from datetime import datetime
 from pathlib import Path
 
 import pytest
@@ -18,6 +19,7 @@ for candidate in (MAINTENANCE, ML_TRAINING):
 import aiml_gate_receipt_s2_5_host_capture as host_capture  # noqa: E402
 import aiml_gate_receipt_validator as validator  # noqa: E402
 import agent_governance_s2_5_disposable_profile as profile  # noqa: E402
+import agent_governance_s2_5_recovery_anchor_v2 as anchor_v2  # noqa: E402
 import agent_governance_s2_5_recovery_controller as controller  # noqa: E402
 
 
@@ -713,6 +715,299 @@ def _genesis() -> tuple[dict, dict, dict, dict]:
         from_phase="GENESIS",
     )
     return transition, outbox, state, _manifest(state)
+
+
+class _ControllerAnchorClock:
+    def __init__(self, value: str) -> None:
+        self.value = datetime.fromisoformat(value)
+        self.calls = 0
+
+    def now(self) -> datetime:
+        self.calls += 1
+        return self.value
+
+
+class _NeverCalledControllerAnchorWriter:
+    def __init__(self) -> None:
+        self.requests: list[dict] = []
+
+    def compare_append_controller(self, *, request: dict) -> dict:
+        self.requests.append(copy.deepcopy(request))
+        raise AssertionError("expired outbox reached the writer")
+
+
+class _UnusedControllerAnchorReader:
+    def read_controller_exact(self, **_kwargs) -> dict:
+        raise AssertionError("expired outbox reached exact readback")
+
+    def enumerate_controller_chain(self, **_kwargs) -> dict:
+        raise AssertionError("expired outbox reached enumeration")
+
+    def read_controller_latest(self) -> dict:
+        raise AssertionError("expired outbox reached latest readback")
+
+
+class _UnusedControllerAnchorVerifier:
+    def verify_signed(self, **_kwargs) -> dict:
+        raise AssertionError("expired outbox reached verification")
+
+
+def test_controller_anchor_rechecks_transition_freshness_at_effect_time():
+    _transition_value, _outbox_value, state, manifest = _genesis()
+    writer = _NeverCalledControllerAnchorWriter()
+    adapter = anchor_v2.ControllerAnchorEffectAdapter(
+        writer=writer,
+        reader=_UnusedControllerAnchorReader(),
+        verifier=_UnusedControllerAnchorVerifier(),
+        clock=_ControllerAnchorClock("2030-01-01T00:27:00+00:00"),
+    )
+
+    chain = adapter.execute_pending_manifest(manifest)
+
+    assert writer.requests == []
+    assert chain["status"] == "PRECHECK_REJECTED"
+    assert chain["proof"] is None
+    assert chain["result"]["effect_attempted"] is False
+    assert chain["result"]["effect_confirmed"] is False
+    assert chain["postcheck"]["status"] == "NOT_PERFORMED"
+    assert chain["rollback"]["status"] == "NOT_REQUIRED"
+    assert chain["failure_code"] == "pending_transition_expired"
+    assert anchor_v2.validate_effect_chain(chain) == []
+
+
+def _controller_anchor_protocol_artifact(**values) -> dict:
+    return _seal({
+        **values,
+        "evidence_class": "LOCAL_REPRODUCIBLE",
+        "side_effect_class": "DISPOSABLE_TEST",
+        "target_class": "disposable_systemd",
+        "target_profile_id": profile.PROFILE_ID,
+        "production_effect": False,
+        "production_authority": False,
+        "production_effect_count": 0,
+    })
+
+
+class _ControllerAnchorVerifier:
+    def verify_signed(self, *, purpose: str, envelope: dict) -> dict:
+        assert envelope["purpose"] == purpose
+        return copy.deepcopy(envelope["payload"])
+
+
+class _ControllerAnchorWriter:
+    def __init__(self, *, outbox: dict, clock: _ControllerAnchorClock) -> None:
+        self.outbox = outbox
+        self.clock = clock
+        self.requests: list[dict] = []
+        self.response: dict | None = None
+
+    def compare_append_controller(self, *, request: dict) -> dict:
+        assert self.clock.calls == 1
+        self.requests.append(copy.deepcopy(request))
+        checksum = self.outbox["prepared_payload_digest"]
+        head_digest = anchor_v2.derive_controller_anchor_head(
+            request_digest=self.outbox["request_digest"],
+            sequence=request["candidate_external_sequence"],
+            previous_head_digest=request["expected_external_head_digest"],
+            checksum=checksum,
+        )
+        self.response = _controller_anchor_protocol_artifact(
+            schema_version=(
+                "s2_5_recovery_anchor_compare_append_response_v2"
+            ),
+            request_digest=self.outbox["request_digest"],
+            prepared_payload_digest=self.outbox["prepared_payload_digest"],
+            idempotency_key=request["idempotency_key"],
+            status="APPENDED",
+            object_id="controller-object-1",
+            version_id="controller-version-1",
+            checksum=checksum,
+            sequence=request["candidate_external_sequence"],
+            previous_head_digest=request["expected_external_head_digest"],
+            head_digest=head_digest,
+            external_monotonic_floor=request[
+                "candidate_external_sequence"
+            ],
+            snapshot_id="controller-snapshot-1",
+            latest_version_id="controller-version-1",
+            signer_identity_digest=anchor_v2.WRITER_IDENTITY_DIGEST,
+            issued_at="2030-01-01T00:24:30+00:00",
+            expires_at="2030-01-01T00:29:30+00:00",
+        )
+        return {
+            "purpose": "controller_anchor_compare_append",
+            "payload": copy.deepcopy(self.response),
+        }
+
+
+class _InvalidFloorControllerAnchorWriter(_ControllerAnchorWriter):
+    def compare_append_controller(self, *, request: dict) -> dict:
+        envelope = super().compare_append_controller(request=request)
+        payload = envelope["payload"]
+        payload["external_monotonic_floor"] = False
+        payload["self_digest"] = validator.artifact_self_digest(payload)
+        self.response = copy.deepcopy(payload)
+        return envelope
+
+
+class _ControllerAnchorReader:
+    def __init__(self, writer: _ControllerAnchorWriter) -> None:
+        self.writer = writer
+
+    def _response(self) -> dict:
+        assert self.writer.response is not None
+        return self.writer.response
+
+    def read_controller_exact(
+        self, *, object_id: str, version_id: str
+    ) -> dict:
+        response = self._response()
+        assert object_id == response["object_id"]
+        assert version_id == response["version_id"]
+        payload = _controller_anchor_protocol_artifact(
+            schema_version="s2_5_recovery_anchor_exact_read_v2",
+            writer_response_digest=response["self_digest"],
+            request_digest=response["request_digest"],
+            object_id=object_id,
+            version_id=version_id,
+            checksum=response["checksum"],
+            sequence=response["sequence"],
+            head_digest=response["head_digest"],
+            reader_identity_digest=anchor_v2.READER_IDENTITY_DIGEST,
+            issued_at="2030-01-01T00:24:31+00:00",
+            expires_at="2030-01-01T00:29:31+00:00",
+        )
+        return {
+            "purpose": "controller_anchor_exact_read",
+            "payload": payload,
+        }
+
+    def enumerate_controller_chain(self, *, snapshot_id: str) -> dict:
+        response = self._response()
+        assert snapshot_id == response["snapshot_id"]
+        payload = _controller_anchor_protocol_artifact(
+            schema_version="s2_5_recovery_anchor_enumeration_v2",
+            request_digest=response["request_digest"],
+            sequence=response["sequence"],
+            head_digest=response["head_digest"],
+            external_monotonic_floor=response[
+                "external_monotonic_floor"
+            ],
+            snapshot_id=snapshot_id,
+            latest_version_id=response["latest_version_id"],
+            writer_response_digests=[response["self_digest"]],
+            reader_identity_digest=anchor_v2.READER_IDENTITY_DIGEST,
+            issued_at="2030-01-01T00:24:32+00:00",
+            expires_at="2030-01-01T00:29:32+00:00",
+        )
+        return {
+            "purpose": "controller_anchor_enumeration",
+            "payload": payload,
+        }
+
+    def read_controller_latest(self) -> dict:
+        response = self._response()
+        payload = _controller_anchor_protocol_artifact(
+            schema_version="s2_5_recovery_anchor_latest_v2",
+            request_digest=response["request_digest"],
+            sequence=response["sequence"],
+            head_digest=response["head_digest"],
+            external_monotonic_floor=response[
+                "external_monotonic_floor"
+            ],
+            snapshot_id=response["snapshot_id"],
+            latest_version_id=response["latest_version_id"],
+            reader_identity_digest=anchor_v2.READER_IDENTITY_DIGEST,
+            issued_at="2030-01-01T00:24:33+00:00",
+            expires_at="2030-01-01T00:29:33+00:00",
+        )
+        return {
+            "purpose": "controller_anchor_latest",
+            "payload": payload,
+        }
+
+
+def test_controller_anchor_dispatches_only_the_exact_persisted_request():
+    _transition_value, outbox, state, manifest = _genesis()
+    clock = _ControllerAnchorClock("2030-01-01T00:25:00+00:00")
+    writer = _ControllerAnchorWriter(outbox=outbox, clock=clock)
+    reader = _ControllerAnchorReader(writer)
+    adapter = anchor_v2.ControllerAnchorEffectAdapter(
+        writer=writer,
+        reader=reader,
+        verifier=_ControllerAnchorVerifier(),
+        clock=clock,
+    )
+
+    chain = adapter.execute_pending_manifest(manifest)
+
+    assert writer.requests == [json.loads(outbox["prepared_payload_json"])]
+    assert clock.calls == 1
+    assert chain["status"] == "UNVERIFIED_EXTERNAL_ANCHOR_REQUIRED"
+    assert chain["result"]["status"] == "APPENDED"
+    assert chain["result"]["effect_attempted"] is True
+    assert chain["result"]["effect_confirmed"] is True
+    assert chain["postcheck"]["status"] == "LOCAL_EXACT_UNVERIFIED"
+    assert chain["rollback"]["status"] == "NOT_REQUIRED"
+    assert chain["proof"]["failure_code"] == (
+        "UNVERIFIED_EXTERNAL_ANCHOR_REQUIRED"
+    )
+    assert controller.validate_controller_artifact(chain["proof"]) == []
+    successor_subject = copy.deepcopy(state["candidate_subject"])
+    successor_subject.update({
+        "anchor_progress": "PROOF_ATTACHED_UNVERIFIED",
+        "generation": successor_subject["generation"] + 1,
+        "previous_controller_state_digest": state["self_digest"],
+        "previous_manifest_digest": manifest["self_digest"],
+    })
+    successor = _seal({
+        "schema_version": "s2_5_recovery_controller_state_v2",
+        "candidate_subject": successor_subject,
+        "candidate_subject_digest": (
+            controller.derive_candidate_subject_digest(successor_subject)
+        ),
+        "pending_outbox": None,
+        "pending_outbox_digest": None,
+        "attached_anchor_proof": chain["proof"],
+        "attached_anchor_proof_digest": chain["proof"]["self_digest"],
+        "trust_status": "UNVERIFIED_EXTERNAL_ANCHOR_REQUIRED",
+        "side_effect_class": "DISPOSABLE_TEST",
+        "target_class": "disposable_systemd",
+        "target_profile_id": profile.PROFILE_ID,
+        "production_effect": False,
+        "production_authority": False,
+        "production_effect_count": 0,
+    })
+    assert controller.validate_controller_state_successor(
+        state, successor
+    ) == []
+    assert anchor_v2.validate_effect_chain(chain) == []
+
+
+def test_controller_anchor_returns_typed_recovery_on_invalid_effect_response():
+    _transition_value, outbox, state, manifest = _genesis()
+    clock = _ControllerAnchorClock("2030-01-01T00:25:00+00:00")
+    writer = _InvalidFloorControllerAnchorWriter(
+        outbox=outbox, clock=clock
+    )
+    adapter = anchor_v2.ControllerAnchorEffectAdapter(
+        writer=writer,
+        reader=_ControllerAnchorReader(writer),
+        verifier=_ControllerAnchorVerifier(),
+        clock=clock,
+    )
+
+    chain = adapter.execute_pending_manifest(manifest)
+
+    assert len(writer.requests) == 1
+    assert chain["status"] == "RECOVERY_REQUIRED"
+    assert chain["proof"] is None
+    assert chain["result"]["effect_attempted"] is True
+    assert chain["result"]["effect_confirmed"] is False
+    assert chain["postcheck"]["status"] == "RECOVERY_REQUIRED"
+    assert chain["rollback"]["status"] == "RECOVERY_REQUIRED"
+    assert chain["rollback"]["operator_action_required"] is True
+    assert anchor_v2.validate_effect_chain(chain) == []
 
 
 def test_v1_digest_only_manifest_is_never_auto_migrated():

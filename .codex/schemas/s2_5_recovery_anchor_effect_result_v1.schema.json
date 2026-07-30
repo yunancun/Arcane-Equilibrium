@@ -1,0 +1,46 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://arcane-equilibrium.local/schemas/s2_5_recovery_anchor_effect_result_v1.schema.json",
+  "title": "s2_5_recovery_anchor_effect_result_v1",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "schema_version", "intent_digest", "request_digest", "status",
+    "effect_attempted", "effect_confirmed", "writer_response_digest",
+    "object_id", "version_id", "checksum", "sequence", "head_digest",
+    "failure_code", "completed_at", "evidence_class", "side_effect_class",
+    "target_class", "target_profile_id", "production_effect",
+    "production_authority", "production_effect_count", "self_digest"
+  ],
+  "properties": {
+    "schema_version": {"const": "s2_5_recovery_anchor_effect_result_v1"},
+    "intent_digest": {"$ref": "#/$defs/digest"},
+    "request_digest": {"$ref": "#/$defs/digest"},
+    "status": {
+      "enum": ["PRECHECK_REJECTED", "APPENDED", "IDEMPOTENT_EXACT", "RECOVERY_REQUIRED"]
+    },
+    "effect_attempted": {"type": "boolean"},
+    "effect_confirmed": {"type": "boolean"},
+    "writer_response_digest": {"$ref": "#/$defs/nullableDigest"},
+    "object_id": {"$ref": "#/$defs/nullableString"},
+    "version_id": {"$ref": "#/$defs/nullableString"},
+    "checksum": {"$ref": "#/$defs/nullableDigest"},
+    "sequence": {"anyOf": [{"type": "integer", "minimum": 1}, {"type": "null"}]},
+    "head_digest": {"$ref": "#/$defs/nullableDigest"},
+    "failure_code": {"$ref": "#/$defs/nullableString"},
+    "completed_at": {"type": "string", "format": "date-time"},
+    "evidence_class": {"const": "LOCAL_REPRODUCIBLE"},
+    "side_effect_class": {"const": "DISPOSABLE_TEST"},
+    "target_class": {"const": "disposable_systemd"},
+    "target_profile_id": {"const": "s2_5_recovery_user_systemd_disposable_v1"},
+    "production_effect": {"const": false},
+    "production_authority": {"const": false},
+    "production_effect_count": {"const": 0},
+    "self_digest": {"$ref": "#/$defs/digest"}
+  },
+  "$defs": {
+    "digest": {"type": "string", "pattern": "^sha256:[0-9a-f]{64}$"},
+    "nullableDigest": {"anyOf": [{"$ref": "#/$defs/digest"}, {"type": "null"}]},
+    "nullableString": {"anyOf": [{"type": "string", "minLength": 1}, {"type": "null"}]}
+  }
+}

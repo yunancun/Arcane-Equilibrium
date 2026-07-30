@@ -59,6 +59,10 @@ ALLOWED_STDLIB_IMPORTS = frozenset({
 })
 STDLIB_IMPORTS_BY_FILE = {"agent_governance_s2_5_recovery_lock.py": frozenset({"functools"})}
 EXACT_STDLIB_IMPORTS_BY_FILE = {
+    "agent_governance_s2_5_recovery_anchor_v2.py": frozenset({
+        "__future__", "datetime", "functools", "json", "pathlib", "sys",
+        "typing",
+    }),
     "agent_governance_s2_5_recovery_store.py": frozenset({
         "__future__", "datetime", "fcntl", "functools", "hashlib", "json",
         "os", "pathlib", "re", "stat", "sys", "typing",
@@ -73,6 +77,12 @@ ALLOWED_THIRD_PARTY_IMPORTS = frozenset({"psycopg2"})
 GOVERNANCE_IMPORTS_BY_FILE: dict[str, frozenset[str]] = {
     "agent_governance_s2_5_recovery_lock.py": frozenset({"agent_governance_s2_5_disposable_profile", "agent_governance_schema", "aiml_gate_receipt_validator"}),
     "agent_governance_s2_5_recovery_anchor.py": frozenset({"agent_governance_s2_5_disposable_profile", "agent_governance_s2_5_recovery_store", "agent_governance_schema", "aiml_gate_receipt_validator"}),
+    "agent_governance_s2_5_recovery_anchor_v2.py": frozenset({
+        "agent_governance_s2_5_disposable_profile",
+        "agent_governance_s2_5_recovery_controller",
+        "agent_governance_schema",
+        "aiml_gate_receipt_validator",
+    }),
     "agent_governance_s2_5_recovery_store.py": frozenset({
         "agent_governance_s2_5_attestation",
         "agent_governance_s2_5_disposable_profile",
@@ -167,6 +177,7 @@ SUBPROCESS_EXEC_CAPABILITY_NAMES = frozenset({
 })
 RECOVERY_GOVERNED_FILES = frozenset({
     "agent_governance_s2_5_recovery_anchor.py",
+    "agent_governance_s2_5_recovery_anchor_v2.py",
     "agent_governance_s2_5_recovery_lock.py",
     "agent_governance_s2_5_recovery_store.py",
     "agent_governance_s2_5_recovery_store_v2.py",
