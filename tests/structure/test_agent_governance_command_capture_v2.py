@@ -363,6 +363,42 @@ def test_secret_environment_is_removed_and_secret_preview_is_redacted(
     assert literal["stdout"]["preview_redacted"] is True
 
 
+def test_controlled_pytest_environment_uses_only_interpreter_provider_roots(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    system_site = tmp_path / "system-site"
+    user_site = tmp_path / "user-site"
+    caller_site = tmp_path / "caller-selected-site"
+    for path in (system_site, user_site, caller_site):
+        path.mkdir()
+    monkeypatch.setenv("PYTHONPATH", str(caller_site))
+    monkeypatch.setattr(
+        capture_v2.site, "getsitepackages", lambda: [str(system_site)]
+    )
+    monkeypatch.setattr(
+        capture_v2.site, "getusersitepackages", lambda: str(user_site)
+    )
+
+    pytest_isolation = tmp_path / "pytest-isolation"
+    pytest_isolation.mkdir()
+    pytest_environment = capture_v2._controlled_environment(
+        pytest_isolation,
+        argv=["python3", "-m", "pytest", "-q", "tests/test_one.py"],
+    )
+    assert pytest_environment["PYTHONPATH"].split(os.pathsep) == sorted(
+        [str(system_site.resolve()), str(user_site.resolve())]
+    )
+    assert str(caller_site) not in pytest_environment["PYTHONPATH"]
+
+    read_only_isolation = tmp_path / "read-only-isolation"
+    read_only_isolation.mkdir()
+    read_only_environment = capture_v2._controlled_environment(
+        read_only_isolation,
+        argv=["git", "rev-parse", "HEAD"],
+    )
+    assert "PYTHONPATH" not in read_only_environment
+
+
 def test_forged_scope_and_host_attestation_are_rejected() -> None:
     artifact, _ = _review_context()
     record = capture_v2.capture_governed_command(

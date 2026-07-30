@@ -52,6 +52,7 @@
     "program_code/ml_training/aiml_gate_receipt_s2_4_contracts.py",
     "program_code/ml_training/aiml_gate_receipt_s2_5_host_capture.py",
     "program_code/ml_training/aiml_gate_receipt_s2e_launch.py",
+    "program_code/ml_training/aiml_gate_receipt_s2e_review.py",
     "program_code/ml_training/aiml_gate_receipt_schema_core.py",
     "program_code/ml_training/aiml_gate_receipt_source_compatibility.py",
     "program_code/ml_training/aiml_gate_receipt_validator.py",
@@ -175,6 +176,7 @@
     "program_code/ml_training/schemas/aiml_gate_receipts/s2_5_running_attestation_v1.schema.json",
     "program_code/ml_training/schemas/aiml_gate_receipts/s2_5_start_core_v1.schema.json",
     "program_code/ml_training/schemas/aiml_gate_receipts/s2_5_start_intent_v1.schema.json",
+    "program_code/ml_training/schemas/aiml_gate_receipts/s2e_disposable_test_effect_chain_v1.schema.json",
     "program_code/ml_training/schemas/aiml_gate_receipts/s2e_launch_acceptance_review_bundle_v1.schema.json",
     "program_code/ml_training/schemas/aiml_gate_receipts/s2e_launch_genesis_receipt_v1.schema.json",
     "program_code/ml_training/schemas/aiml_gate_receipts/s2e_launch_wave_receipt_v1.schema.json",
@@ -190,7 +192,7 @@
     "program_code/ml_training/schemas/aiml_gate_receipts/terminal_receipt_sink_v1.schema.json"
   ],
   "schema_version": "application_bundle_runtime_closure_v1",
-  "self_digest": "sha256:46fbc863ba2bde3e4f3ad28d4629f5b7a62b8d6a4b5b1dbaa835bd094602711b",
+  "self_digest": "sha256:347823857dd138f00532a3c17056efe6be47eabe15e338813d6a28fe233e3ed3",
   "sql_fingerprints": [
     "sql/migrations/V151__alr_persistence_foundation.sql",
     "sql/migrations/V152__alr_operational_artifacts.sql",

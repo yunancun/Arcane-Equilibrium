@@ -54,6 +54,9 @@ SCHEMA_FILES = {
     "s2e_launch_acceptance_review_bundle_v1": (
         "s2e_launch_acceptance_review_bundle_v1.schema.json"
     ),
+    "s2e_disposable_test_effect_chain_v1": (
+        "s2e_disposable_test_effect_chain_v1.schema.json"
+    ),
     "aiml_required_effect_classification_v1": "aiml_required_effect_classification_v1.schema.json",
     "github_repository_policy_attestation_v1": "github_repository_policy_attestation_v1.schema.json",
     "aiml_receipt_dependency_graph_v1": "aiml_receipt_dependency_graph_v1.schema.json",

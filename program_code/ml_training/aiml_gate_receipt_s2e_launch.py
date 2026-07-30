@@ -18,6 +18,13 @@ from aiml_gate_receipt_schema_core import (
     _load_schema,
     canonical_digest,
 )
+from aiml_gate_receipt_s2e_review import (
+    build_s2e_disposable_test_effect_chain,
+    s2e_review_predicate_results,
+    s2e_review_source_blob_manifest,
+    s2e_review_test_argv,
+    validate_s2e_disposable_test_effect_chain,
+)
 
 
 LAUNCH_ID = "S2E-LW1-LW5"
@@ -41,13 +48,14 @@ _S2E_RECEIPT_TRUST_ROOT_FIELDS = {
     "key_fingerprint",
 }
 _S2E_RECEIPT_TRUST_ROOT_MAX_BYTES = 16 * 1024
-_S2E_REVIEW_COMMON_PREDICATES = (
-    "CANDIDATE_SCHEMA_VALID",
-    "EXACT_SOURCE_HEAD_TREE_VALID",
-    "EXTERNAL_WORM_IMMUTABLE_READBACK_VALID",
-    "INDEPENDENT_GOVERNED_REVIEW_VALID",
-    "INDEPENDENT_SSHSIG_VALID",
-)
+S2E_WAVE_EXIT_IDS = {
+    GENESIS_WAVE: "W0_GENESIS_READY",
+    "S2E-LW1": "S2E_2B_2A_SECURITY_RECOVERY_READY",
+    "S2E-LW2": "S2E_2B_2B_HOST_RUNNER_CHECKPOINT_READY",
+    "S2E-LW3": "S2E_2B_3_ROW_DRIVERS_CHECKPOINT_READY",
+    "S2E-LW4": "S2E_4_RUNTIME_CLOSURE_CHECKPOINT_READY",
+    "S2E-LW5": "S2E_LW5_IMPLEMENTATION_READY",
+}
 
 
 def launch_payload_digest(receipt: dict[str, Any]) -> str:
@@ -150,21 +158,19 @@ def s2e_carrier_worm_payload(
     )
 
 
-def s2e_review_predicate_results(wave: str) -> list[dict[str, str]]:
-    """Return the exact code-owned acceptance predicates for one launch wave."""
+def s2e_carrier_verification_argv(attestation: dict[str, Any]) -> list[str]:
+    """One shell-free Git-blob replay command for an exact carrier."""
 
-    if wave == GENESIS_WAVE:
-        predicates = _S2E_REVIEW_COMMON_PREDICATES
-    elif wave in LAUNCH_WAVES:
-        predicates = _S2E_REVIEW_COMMON_PREDICATES + (
-            "PREDECESSOR_CHAIN_VALID",
-        )
-    else:
-        raise ValueError("unknown S2E launch wave")
     return [
-        {"predicate_id": predicate_id, "result": "PASS"}
-        for predicate_id in predicates
+        "git",
+        "cat-file",
+        "blob",
+        f"{attestation.get('carrier_head')}:{attestation.get('carrier_path')}",
     ]
+
+
+def _without_digest(value: dict[str, Any], field: str) -> dict[str, Any]:
+    return {key: item for key, item in value.items() if key != field}
 
 
 def s2e_acceptance_review_signed_bytes(bundle: dict[str, Any]) -> bytes:
@@ -421,6 +427,19 @@ def _common_payload_errors(receipt: dict[str, Any]) -> list[str]:
         errors.append("pending launch candidate cannot bind an acceptance review")
     if checkpoint != "PENDING_REVIEW" and review_digest is None:
         errors.append("ready launch receipt must bind an acceptance review bundle")
+    if receipt.get("wave_exit_id") != S2E_WAVE_EXIT_IDS.get(
+        str(receipt.get("wave"))
+    ):
+        errors.append("launch receipt wave_exit_id is not code-owned for its wave")
+    if receipt.get("schema_version") == "s2e_launch_wave_receipt_v1":
+        effect_digests = receipt.get("disposable_effect_chain_digests")
+        if receipt.get("side_effect_class") == "SOURCE_ONLY" and effect_digests != []:
+            errors.append("source-only wave cannot bind disposable effect chains")
+        if receipt.get("side_effect_class") == "DISPOSABLE_TEST":
+            if not isinstance(effect_digests, list) or not effect_digests:
+                errors.append(
+                    "DISPOSABLE_TEST wave requires paired typed effect chain digests"
+                )
     return errors
 
 
@@ -480,13 +499,15 @@ def validate_s2e_launch_wave_receipt(
     return errors
 
 
-def validate_s2e_launch_transition(
+def validate_s2e_launch_transition_payload(
     receipt: Any,
     *,
     predecessor_receipt: Any,
     repo_root: Path,
-    consumed_predecessor_digests: set[str] | frozenset[str] = frozenset(),
+    consumed_predecessor_digests: set[str] | frozenset[str],
 ) -> list[str]:
+    """Validate payload topology only; this function never grants Advance."""
+
     errors = validate_s2e_launch_wave_receipt(receipt, repo_root=repo_root)
     if errors or not isinstance(receipt, dict):
         return errors
@@ -523,6 +544,302 @@ def validate_s2e_launch_transition(
     ):
         errors.append("wave launch contract differs from its predecessor")
     return errors
+
+
+_S2E_PREDECESSOR_AUTHORITY_FIELDS = {
+    "schema_version",
+    "predecessor_payload_digest",
+    "launch_chain_before_predecessor",
+    "acceptance_review_bundle",
+    "review_governed_capture_record",
+    "review_disposable_test_effect_chains",
+    "review_external_append_intent",
+    "review_external_append_result",
+    "review_external_readback_ack",
+    "carrier_attestation",
+    "carrier_governed_capture_record",
+    "carrier_external_append_intent",
+    "carrier_external_append_result",
+    "carrier_external_readback_ack",
+    "authority_digest",
+}
+
+
+def s2e_predecessor_authority_digest(authority: dict[str, Any]) -> str:
+    return canonical_digest(
+        _without_digest(authority, "authority_digest")
+    )
+
+
+def _pending_candidate_from_issued(receipt: dict[str, Any]) -> dict[str, Any]:
+    pending = dict(receipt)
+    pending["checkpoint_status"] = "PENDING_REVIEW"
+    pending["acceptance_review_bundle_digest"] = None
+    pending["payload_digest"] = launch_payload_digest(pending)
+    return pending
+
+
+def _ready_status_for(receipt: dict[str, Any]) -> str | None:
+    if receipt.get("schema_version") == "s2e_launch_genesis_receipt_v1":
+        return "W0_GENESIS_READY"
+    if receipt.get("schema_version") == "s2e_launch_wave_receipt_v1":
+        return "TASK_BRANCH_CHECKPOINT_READY"
+    return None
+
+
+def _launch_chain_errors(
+    chain: Any,
+    *,
+    predecessor_receipt: dict[str, Any],
+    repo_root: Path,
+) -> list[str]:
+    if not isinstance(chain, list):
+        return ["predecessor authority launch chain must be a list"]
+    expected_predecessor_wave = str(predecessor_receipt.get("wave", ""))
+    if expected_predecessor_wave == GENESIS_WAVE:
+        expected_waves: list[str] = []
+    elif expected_predecessor_wave in LAUNCH_WAVES:
+        expected_waves = [
+            GENESIS_WAVE,
+            *LAUNCH_WAVES[: LAUNCH_WAVES.index(expected_predecessor_wave)],
+        ]
+    else:
+        return ["predecessor authority names an unknown predecessor wave"]
+    errors: list[str] = []
+    actual_waves = [
+        item.get("wave") if isinstance(item, dict) else None for item in chain
+    ]
+    if actual_waves != expected_waves:
+        errors.append("predecessor authority launch chain wave order differs")
+    payload_digests = [
+        item.get("payload_digest") if isinstance(item, dict) else None
+        for item in chain
+    ]
+    if len(payload_digests) != len(set(payload_digests)):
+        errors.append("predecessor authority launch chain contains duplicate payloads")
+    prior: dict[str, Any] | None = None
+    consumed: set[str] = set()
+    for index, item in enumerate(chain):
+        if not isinstance(item, dict):
+            errors.append(f"predecessor authority chain item {index} is not an object")
+            continue
+        expected_ready = _ready_status_for(item)
+        if item.get("checkpoint_status") != expected_ready:
+            errors.append(f"predecessor authority chain item {index} is not READY")
+        if expected_ready == "W0_GENESIS_READY":
+            errors.extend(
+                f"predecessor authority chain item {index}: {error}"
+                for error in validate_s2e_launch_genesis_receipt(
+                    item, repo_root=repo_root
+                )
+            )
+        elif prior is not None:
+            errors.extend(
+                f"predecessor authority chain item {index}: {error}"
+                for error in validate_s2e_launch_transition_payload(
+                    item,
+                    predecessor_receipt=prior,
+                    repo_root=repo_root,
+                    consumed_predecessor_digests=frozenset(consumed),
+                )
+            )
+            consumed.add(str(prior.get("payload_digest")))
+        prior = item
+    if chain:
+        last = chain[-1]
+        if isinstance(last, dict):
+            if predecessor_receipt.get("predecessor") != last.get("payload_digest"):
+                errors.append(
+                    "predecessor authority immediate receipt does not extend chain tail"
+                )
+    elif predecessor_receipt.get("wave") != GENESIS_WAVE:
+        errors.append("non-genesis predecessor authority chain is empty")
+    return errors
+
+
+def validate_s2e_launch_predecessor_authority(
+    authority: Any,
+    *,
+    predecessor_receipt: Any,
+    repo_root: Path,
+    now: str | datetime,
+) -> list[str]:
+    """Recompute the immediate predecessor's signed review and carrier proof."""
+
+    if not isinstance(authority, dict):
+        return ["S2E predecessor authority must be an object"]
+    errors: list[str] = []
+    if set(authority) != _S2E_PREDECESSOR_AUTHORITY_FIELDS:
+        errors.append("S2E predecessor authority fields differ from closed contract")
+    if authority.get("schema_version") != "s2e_launch_predecessor_authority_v1":
+        errors.append("S2E predecessor authority schema_version is invalid")
+    if not isinstance(predecessor_receipt, dict):
+        return errors + ["S2E predecessor authority requires exact predecessor receipt"]
+    if authority.get("predecessor_payload_digest") != predecessor_receipt.get(
+        "payload_digest"
+    ):
+        errors.append("S2E predecessor authority payload binding differs")
+    if authority.get("authority_digest") != s2e_predecessor_authority_digest(
+        authority
+    ):
+        errors.append("S2E predecessor authority digest is invalid")
+    expected_ready = _ready_status_for(predecessor_receipt)
+    if predecessor_receipt.get("checkpoint_status") != expected_ready:
+        errors.append("S2E predecessor receipt is not an issued READY checkpoint")
+    chain = authority.get("launch_chain_before_predecessor")
+    errors.extend(
+        _launch_chain_errors(
+            chain,
+            predecessor_receipt=predecessor_receipt,
+            repo_root=repo_root,
+        )
+    )
+    pending_candidate = _pending_candidate_from_issued(predecessor_receipt)
+    review_bundle = authority.get("acceptance_review_bundle")
+    if (
+        not isinstance(review_bundle, dict)
+        or review_bundle.get("bundle_digest")
+        != predecessor_receipt.get("acceptance_review_bundle_digest")
+    ):
+        errors.append("S2E predecessor READY receipt review binding differs")
+    errors.extend(
+        f"S2E predecessor review: {error}"
+        for error in validate_s2e_launch_acceptance_review_bundle(
+            review_bundle,
+            candidate=pending_candidate,
+            governed_capture_record=authority.get(
+                "review_governed_capture_record"
+            ),
+            disposable_test_effect_chains=authority.get(
+                "review_disposable_test_effect_chains"
+            ),
+            predecessor_chain=chain,
+            external_append_intent=authority.get(
+                "review_external_append_intent"
+            ),
+            external_append_result=authority.get(
+                "review_external_append_result"
+            ),
+            external_readback_ack=authority.get(
+                "review_external_readback_ack"
+            ),
+            repo_root=repo_root,
+            now=now,
+        )
+    )
+    carrier_result = verify_receipt_carrier_attestation(
+        authority.get("carrier_attestation"),
+        payload_receipt=predecessor_receipt,
+        repo_root=repo_root,
+        now=now,
+        governed_capture_record=authority.get(
+            "carrier_governed_capture_record"
+        ),
+        external_append_intent=authority.get(
+            "carrier_external_append_intent"
+        ),
+        external_append_result=authority.get(
+            "carrier_external_append_result"
+        ),
+        external_readback_ack=authority.get(
+            "carrier_external_readback_ack"
+        ),
+    )
+    if carrier_result.get("status") != "VERIFIED":
+        errors.extend(
+            f"S2E predecessor carrier: {error}"
+            for error in carrier_result.get("errors", [])
+        )
+        if not carrier_result.get("errors"):
+            errors.append("S2E predecessor carrier is not VERIFIED")
+    return sorted(set(errors))
+
+
+def build_s2e_launch_predecessor_authority(
+    *,
+    predecessor_receipt: dict[str, Any],
+    launch_chain_before_predecessor: list[dict[str, Any]],
+    acceptance_review_bundle: dict[str, Any],
+    review_governed_capture_record: dict[str, Any],
+    review_disposable_test_effect_chains: list[dict[str, Any]],
+    review_external_append_intent: dict[str, Any],
+    review_external_append_result: dict[str, Any],
+    review_external_readback_ack: dict[str, Any],
+    carrier_attestation: dict[str, Any],
+    carrier_governed_capture_record: dict[str, Any],
+    carrier_external_append_intent: dict[str, Any],
+    carrier_external_append_result: dict[str, Any],
+    carrier_external_readback_ack: dict[str, Any],
+    repo_root: Path,
+    now: str | datetime,
+) -> dict[str, Any]:
+    authority = {
+        "schema_version": "s2e_launch_predecessor_authority_v1",
+        "predecessor_payload_digest": predecessor_receipt.get("payload_digest"),
+        "launch_chain_before_predecessor": launch_chain_before_predecessor,
+        "acceptance_review_bundle": acceptance_review_bundle,
+        "review_governed_capture_record": review_governed_capture_record,
+        "review_disposable_test_effect_chains": (
+            review_disposable_test_effect_chains
+        ),
+        "review_external_append_intent": review_external_append_intent,
+        "review_external_append_result": review_external_append_result,
+        "review_external_readback_ack": review_external_readback_ack,
+        "carrier_attestation": carrier_attestation,
+        "carrier_governed_capture_record": carrier_governed_capture_record,
+        "carrier_external_append_intent": carrier_external_append_intent,
+        "carrier_external_append_result": carrier_external_append_result,
+        "carrier_external_readback_ack": carrier_external_readback_ack,
+    }
+    authority["authority_digest"] = s2e_predecessor_authority_digest(authority)
+    errors = validate_s2e_launch_predecessor_authority(
+        authority,
+        predecessor_receipt=predecessor_receipt,
+        repo_root=repo_root,
+        now=now,
+    )
+    if errors:
+        raise ValueError("; ".join(errors))
+    return authority
+
+
+def validate_s2e_launch_transition(
+    receipt: Any,
+    *,
+    predecessor_receipt: Any,
+    predecessor_authority: Any,
+    repo_root: Path,
+    now: str | datetime,
+    consumed_predecessor_digests: set[str] | frozenset[str],
+) -> list[str]:
+    """Authority-bearing Advance gate; structural validation alone never enters."""
+
+    errors = validate_s2e_launch_transition_payload(
+        receipt,
+        predecessor_receipt=predecessor_receipt,
+        repo_root=repo_root,
+        consumed_predecessor_digests=consumed_predecessor_digests,
+    )
+    errors.extend(
+        validate_s2e_launch_predecessor_authority(
+            predecessor_authority,
+            predecessor_receipt=predecessor_receipt,
+            repo_root=repo_root,
+            now=now,
+        )
+    )
+    if isinstance(predecessor_authority, dict):
+        chain = predecessor_authority.get("launch_chain_before_predecessor")
+        expected_consumed = {
+            str(item.get("payload_digest"))
+            for item in chain
+            if isinstance(chain, list) and isinstance(item, dict)
+        } if isinstance(chain, list) else set()
+        if set(consumed_predecessor_digests) != expected_consumed:
+            errors.append(
+                "transition consumed-predecessor set differs from authenticated chain"
+            )
+    return sorted(set(errors))
 
 
 def validate_receipt_carrier_attestation(
@@ -709,6 +1026,10 @@ def verify_receipt_carrier_attestation(
         expected_task_contract_digest=verification_digest,
         expected_source_head=carrier_head,
         root=repo_root,
+        reexecute=(
+            isinstance(carrier_head, str)
+            and _commit(repo_root, "HEAD") == carrier_head
+        ),
     )
     errors.extend(f"governed command capture: {error}" for error in capture_errors)
     if isinstance(governed_capture_record, dict):
@@ -728,6 +1049,19 @@ def verify_receipt_carrier_attestation(
         }
         if projection != identity:
             errors.append("governed command capture identity projection mismatch")
+        expected_argv = (
+            s2e_carrier_verification_argv(attestation)
+            if isinstance(attestation, dict)
+            else []
+        )
+        if governed_capture_record.get("argv") != expected_argv:
+            errors.append("carrier governed capture argv is not code-owned")
+        if governed_capture_record.get("stdout", {}).get("digest") != (
+            attestation.get("carrier_raw_digest")
+            if isinstance(attestation, dict)
+            else None
+        ):
+            errors.append("carrier governed capture did not replay exact carrier bytes")
         signer_role = (
             attestation.get("signer", {}).get("role")
             if isinstance(attestation, dict)
@@ -866,6 +1200,8 @@ def validate_s2e_launch_acceptance_review_bundle(
     *,
     candidate: Any,
     governed_capture_record: Any,
+    disposable_test_effect_chains: Any,
+    predecessor_chain: Any,
     external_append_intent: Any,
     external_append_result: Any,
     external_readback_ack: Any,
@@ -909,6 +1245,7 @@ def validate_s2e_launch_acceptance_review_bundle(
         ("candidate_payload_digest", candidate.get("payload_digest")),
         ("launch_id", candidate.get("launch_id")),
         ("wave", candidate.get("wave")),
+        ("wave_exit_id", candidate.get("wave_exit_id")),
         ("reviewed_source_head", reviewed_head),
         ("reviewed_source_tree", reviewed_tree),
         (
@@ -918,10 +1255,62 @@ def validate_s2e_launch_acceptance_review_bundle(
     ):
         if bundle.get(field) != expected:
             errors.append(f"acceptance review bundle {field} binding differs")
-    if bundle.get("predicate_results") != s2e_review_predicate_results(
-        str(candidate.get("wave"))
-    ):
-        errors.append("acceptance review bundle predicates are not the exact code-owned set")
+    try:
+        expected_blob_manifest = s2e_review_source_blob_manifest(
+            candidate, repo_root=repo_root
+        )
+    except (OSError, ValueError, subprocess.CalledProcessError) as error:
+        expected_blob_manifest = []
+        errors.append(f"acceptance review Git blob replay failed: {error}")
+    if bundle.get("source_blob_manifest") != expected_blob_manifest:
+        errors.append("acceptance review source blob manifest differs from Git")
+    if not isinstance(predecessor_chain, list):
+        errors.append("acceptance review predecessor chain must be a list")
+        predecessor_chain = []
+    expected_consumed = [
+        item.get("payload_digest")
+        for item in predecessor_chain[:-1]
+        if isinstance(item, dict)
+    ]
+    if bundle.get("consumed_predecessor_digests") != expected_consumed:
+        errors.append(
+            "acceptance review consumed predecessor digests differ from exact chain"
+        )
+    if candidate.get("wave") == GENESIS_WAVE:
+        if predecessor_chain:
+            errors.append("genesis acceptance review cannot carry a predecessor chain")
+    else:
+        if not predecessor_chain:
+            errors.append("wave acceptance review requires the full predecessor chain")
+        elif (
+            not isinstance(predecessor_chain[-1], dict)
+            or predecessor_chain[-1].get("payload_digest")
+            != candidate.get("predecessor")
+        ):
+            errors.append(
+                "acceptance review predecessor chain does not end at exact predecessor"
+            )
+    try:
+        expected_predicate_results = s2e_review_predicate_results(
+            candidate,
+            source_blob_manifest=bundle.get("source_blob_manifest"),
+            governed_capture_record=governed_capture_record,
+            disposable_test_effect_chains=disposable_test_effect_chains,
+            predecessor_chain=predecessor_chain,
+            repo_root=repo_root,
+        )
+    except (
+        OSError,
+        TypeError,
+        ValueError,
+        subprocess.CalledProcessError,
+    ) as error:
+        expected_predicate_results = []
+        errors.append(f"acceptance review predicate oracle failed: {error}")
+    if bundle.get("predicate_results") != expected_predicate_results:
+        errors.append(
+            "acceptance review predicate evidence is not the exact code-owned result"
+        )
     if bundle.get("bundle_digest") != s2e_acceptance_review_bundle_digest(bundle):
         errors.append("acceptance review bundle digest is invalid")
     signed_bytes = s2e_acceptance_review_signed_bytes(bundle)
@@ -949,9 +1338,15 @@ def validate_s2e_launch_acceptance_review_bundle(
         expected_context_artifact_digest=capture_identity.get(
             "context_artifact_digest"
         ),
-        expected_task_contract_digest=capture_identity.get("task_contract_digest"),
+        expected_task_contract_digest=candidate.get(
+            "generation_task_contract_digest"
+        ),
         expected_source_head=reviewed_head,
         root=repo_root,
+        reexecute=(
+            isinstance(reviewed_head, str)
+            and _commit(repo_root, "HEAD") == reviewed_head
+        ),
     )
     errors.extend(f"acceptance review governed capture: {error}" for error in capture_errors)
     if isinstance(governed_capture_record, dict):
@@ -983,10 +1378,49 @@ def validate_s2e_launch_acceptance_review_bundle(
             errors.append("acceptance review reviewer identity differs from capture")
         if governed_capture_record.get("result") != "PASS":
             errors.append("acceptance review governed capture did not PASS")
+        try:
+            expected_argv = s2e_review_test_argv(
+                candidate, repo_root=repo_root
+            )
+        except (OSError, ValueError, subprocess.CalledProcessError) as error:
+            expected_argv = []
+            errors.append(f"acceptance review test profile failed: {error}")
+        if governed_capture_record.get("argv") != expected_argv:
+            errors.append(
+                "acceptance review governed capture argv is not code-owned"
+            )
+        if governed_capture_record.get("task_contract_digest") != candidate.get(
+            "generation_task_contract_digest"
+        ):
+            errors.append(
+                "acceptance review capture task generation differs from candidate"
+            )
         if bundle.get("signer", {}).get("role") == governed_capture_record.get(
             "role_id"
         ):
             errors.append("acceptance review signer role must differ from reviewer role")
+    if not isinstance(disposable_test_effect_chains, list):
+        errors.append("acceptance review disposable test chains must be a list")
+        disposable_test_effect_chains = []
+    chain_digests = [
+        chain.get("chain_digest")
+        for chain in disposable_test_effect_chains
+        if isinstance(chain, dict)
+    ]
+    if not chain_digests:
+        errors.append("acceptance review requires typed disposable test evidence")
+    if bundle.get("disposable_test_effect_chain_digests") != chain_digests:
+        errors.append("acceptance review disposable test chain digests differ")
+    for index, chain in enumerate(disposable_test_effect_chains):
+        errors.extend(
+            f"acceptance review disposable chain {index}: {error}"
+            for error in validate_s2e_disposable_test_effect_chain(
+                chain,
+                candidate=candidate,
+                governed_capture_record=governed_capture_record,
+                repo_root=repo_root,
+            )
+        )
     now_text = _time(now).isoformat()
     errors.extend(
         f"acceptance review external worm intent: {error}"
@@ -1104,10 +1538,12 @@ def issue_s2e_launch_receipt(
     repo_root: Path,
     now: str | datetime,
     governed_capture_record: Any = None,
+    disposable_test_effect_chains: Any = None,
     external_append_intent: Any = None,
     external_append_result: Any = None,
     external_readback_ack: Any = None,
     predecessor_receipt: Any = None,
+    predecessor_authority: Any = None,
 ) -> dict[str, Any]:
     """Issue one ready receipt only after the complete review path verifies."""
 
@@ -1116,26 +1552,51 @@ def issue_s2e_launch_receipt(
     ):
         errors = validate_s2e_launch_genesis_receipt(candidate, repo_root=repo_root)
         ready_status = "W0_GENESIS_READY"
+        review_predecessor_chain: list[dict[str, Any]] = []
     elif isinstance(candidate, dict) and candidate.get("schema_version") == (
         "s2e_launch_wave_receipt_v1"
     ):
-        if predecessor_receipt is None:
-            errors = ["wave receipt issuance requires its exact predecessor receipt"]
+        if predecessor_receipt is None or not isinstance(
+            predecessor_authority, dict
+        ):
+            errors = [
+                "wave receipt issuance requires exact predecessor authority"
+            ]
+            review_predecessor_chain = []
         else:
+            chain_before = predecessor_authority.get(
+                "launch_chain_before_predecessor"
+            )
+            review_predecessor_chain = (
+                [*chain_before, predecessor_receipt]
+                if isinstance(chain_before, list)
+                else []
+            )
+            consumed = {
+                str(item.get("payload_digest"))
+                for item in chain_before
+                if isinstance(item, dict)
+            } if isinstance(chain_before, list) else set()
             errors = validate_s2e_launch_transition(
                 candidate,
                 predecessor_receipt=predecessor_receipt,
+                predecessor_authority=predecessor_authority,
                 repo_root=repo_root,
+                now=now,
+                consumed_predecessor_digests=frozenset(consumed),
             )
         ready_status = "TASK_BRANCH_CHECKPOINT_READY"
     else:
         errors = ["launch receipt candidate schema is unsupported"]
         ready_status = None
+        review_predecessor_chain = []
     errors.extend(
         validate_s2e_launch_acceptance_review_bundle(
             acceptance_review_bundle,
             candidate=candidate,
             governed_capture_record=governed_capture_record,
+            disposable_test_effect_chains=disposable_test_effect_chains,
+            predecessor_chain=review_predecessor_chain,
             external_append_intent=external_append_intent,
             external_append_result=external_append_result,
             external_readback_ack=external_readback_ack,
@@ -1162,7 +1623,10 @@ def issue_s2e_launch_receipt(
                 validate_s2e_launch_transition(
                     issued_receipt,
                     predecessor_receipt=predecessor_receipt,
+                    predecessor_authority=predecessor_authority,
                     repo_root=repo_root,
+                    now=now,
+                    consumed_predecessor_digests=frozenset(consumed),
                 )
             )
         if errors:
@@ -1187,7 +1651,7 @@ def issue_s2e_launch_receipt(
     return result
 
 
-def build_genesis_candidate(
+def _build_genesis_candidate_payload(
     *,
     repo_root: Path,
     baseline_head: str,
@@ -1207,6 +1671,7 @@ def build_genesis_candidate(
         "schema_carrier_tree": _tree(repo_root, schema_carrier_head),
         "launch_contract_digest": launch_contract_digest,
         "generation_task_contract_digest": generation_task_contract_digest,
+        "wave_exit_id": S2E_WAVE_EXIT_IDS[GENESIS_WAVE],
         "checkpoint_status": "PENDING_REVIEW",
         "acceptance_review_bundle_digest": None,
         "side_effect_class": "SOURCE_ONLY",
@@ -1219,7 +1684,31 @@ def build_genesis_candidate(
     return receipt
 
 
-def build_wave_candidate(
+def build_genesis_candidate(
+    *,
+    repo_root: Path,
+    baseline_head: str,
+    schema_carrier_head: str,
+    launch_contract_digest: str,
+    generation_task_contract_digest: str,
+) -> dict[str, Any]:
+    """Generate W0 only from the clean, current tooling generation."""
+
+    resolved_carrier = _commit(repo_root, schema_carrier_head)
+    if resolved_carrier != _commit(repo_root, "HEAD"):
+        raise ValueError(
+            "genesis schema_carrier_head must equal current repository HEAD"
+        )
+    return _build_genesis_candidate_payload(
+        repo_root=repo_root,
+        baseline_head=baseline_head,
+        schema_carrier_head=resolved_carrier,
+        launch_contract_digest=launch_contract_digest,
+        generation_task_contract_digest=generation_task_contract_digest,
+    )
+
+
+def _build_wave_candidate_payload(
     *,
     repo_root: Path,
     wave: str,
@@ -1231,25 +1720,82 @@ def build_wave_candidate(
     side_effect_class: str = "SOURCE_ONLY",
 ) -> dict[str, Any]:
     _require_clean(repo_root)
+    resolved_source_head = _commit(repo_root, source_head)
+    current_head = _commit(repo_root, "HEAD")
+    if resolved_source_head != current_head:
+        raise ValueError("wave candidate source_head must equal current repository HEAD")
+    if side_effect_class != "SOURCE_ONLY":
+        raise ValueError(
+            "DISPOSABLE_TEST wave candidates require a paired typed effect-chain binder"
+        )
     receipt: dict[str, Any] = {
         "schema_version": "s2e_launch_wave_receipt_v1",
         "launch_id": LAUNCH_ID,
         "wave": wave,
         "predecessor": predecessor_receipt.get("payload_digest"),
-        "source_head": _commit(repo_root, source_head),
+        "source_head": resolved_source_head,
         "source_tree": _tree(repo_root, source_head),
         "schema_carrier_head": _commit(repo_root, schema_carrier_head),
         "schema_carrier_tree": _tree(repo_root, schema_carrier_head),
         "launch_contract_digest": launch_contract_digest,
         "generation_task_contract_digest": generation_task_contract_digest,
+        "wave_exit_id": S2E_WAVE_EXIT_IDS[wave],
         "checkpoint_status": "PENDING_REVIEW",
         "acceptance_review_bundle_digest": None,
         "side_effect_class": side_effect_class,
+        "disposable_effect_chain_digests": [],
         "production_effect_count": 0,
     }
     receipt["payload_digest"] = launch_payload_digest(receipt)
+    errors = validate_s2e_launch_transition_payload(
+        receipt,
+        predecessor_receipt=predecessor_receipt,
+        repo_root=repo_root,
+        consumed_predecessor_digests=frozenset(),
+    )
+    if errors:
+        raise ValueError("; ".join(errors))
+    return receipt
+
+
+def build_wave_candidate(
+    *,
+    repo_root: Path,
+    wave: str,
+    source_head: str,
+    schema_carrier_head: str,
+    predecessor_receipt: dict[str, Any],
+    predecessor_authority: dict[str, Any],
+    launch_contract_digest: str,
+    generation_task_contract_digest: str,
+    now: str | datetime,
+    side_effect_class: str = "SOURCE_ONLY",
+) -> dict[str, Any]:
+    """Build only after the predecessor review and carrier reverify."""
+
+    receipt = _build_wave_candidate_payload(
+        repo_root=repo_root,
+        wave=wave,
+        source_head=source_head,
+        schema_carrier_head=schema_carrier_head,
+        predecessor_receipt=predecessor_receipt,
+        launch_contract_digest=launch_contract_digest,
+        generation_task_contract_digest=generation_task_contract_digest,
+        side_effect_class=side_effect_class,
+    )
+    chain = predecessor_authority.get("launch_chain_before_predecessor")
+    consumed = {
+        str(item.get("payload_digest"))
+        for item in chain
+        if isinstance(item, dict)
+    } if isinstance(chain, list) else set()
     errors = validate_s2e_launch_transition(
-        receipt, predecessor_receipt=predecessor_receipt, repo_root=repo_root
+        receipt,
+        predecessor_receipt=predecessor_receipt,
+        predecessor_authority=predecessor_authority,
+        repo_root=repo_root,
+        now=now,
+        consumed_predecessor_digests=frozenset(consumed),
     )
     if errors:
         raise ValueError("; ".join(errors))

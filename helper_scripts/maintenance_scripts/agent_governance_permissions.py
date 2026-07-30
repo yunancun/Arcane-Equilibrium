@@ -15,7 +15,7 @@ REPO_ROOT = Path(__file__).resolve().parents[2]
 REGISTRY_PATH = REPO_ROOT / ".codex/agent_registry_v1.json"
 LOCAL_READONLY_COMMAND_RE = re.compile(
     r"^(?:"
-    r"git\s+(?:status|diff|log|show|rev-parse|ls-files|branch\s+--show-current)\b|"
+    r"git\s+(?:status|diff|log|show|rev-parse|ls-files|cat-file|branch\s+--show-current)\b|"
     r"rg\b|grep\b|head\b|tail\b|wc\b|ls\b|find\b|stat\b|"
     r"python3?\s+-m\s+pytest\b|pytest\b|cargo\s+(?:test|check|clippy)\b|cargo\s+fmt\s+--check\b|"
     r"node\s+--check\b|bash\s+-n\b"
@@ -212,6 +212,23 @@ def _safe_pytest_allowed(tokens: list[str]) -> bool:
     return True
 
 
+def _safe_git_cat_file_allowed(tokens: list[str]) -> bool:
+    if len(tokens) != 4 or tokens[:3] != ["git", "cat-file", "blob"]:
+        return False
+    object_path = tokens[3]
+    if ":" not in object_path:
+        return False
+    source_head, relative_path = object_path.split(":", 1)
+    return (
+        re.fullmatch(r"[0-9a-f]{40}", source_head) is not None
+        and relative_path
+        and not relative_path.startswith(("/", "~", "."))
+        and ".." not in PurePosixPath(relative_path).parts
+        and re.fullmatch(r"[A-Za-z0-9._/-]+", relative_path) is not None
+        and SENSITIVE_PATH_RE.search(relative_path) is None
+    )
+
+
 def _safe_target_host_observation_allowed(
     tokens: list[str],
     *,
@@ -399,6 +416,17 @@ def authorize_command(
             "allowed": False,
             "policy_class": "repo_or_local_test_read",
             "reason": "pytest flags are limited to non-persistent selection/display controls",
+        }
+    if outer_tokens[:2] == ["git", "cat-file"] and not _safe_git_cat_file_allowed(
+        outer_tokens
+    ):
+        return {
+            "allowed": False,
+            "policy_class": "repo_read",
+            "reason": (
+                "git cat-file is limited to one exact regular candidate blob "
+                "selected by full commit and safe repository path"
+            ),
         }
     if local_test_executor:
         safe_test = bool(

@@ -17,17 +17,45 @@ if str(ML_ROOT) not in sys.path:
 
 from aiml_gate_receipt_s2e_launch import (  # noqa: E402,F401
     build_genesis_candidate,
+    build_s2e_launch_predecessor_authority,
     build_wave_candidate,
     issue_s2e_launch_receipt,
     validate_receipt_carrier_attestation,
     validate_s2e_launch_genesis_receipt,
     validate_s2e_launch_transition,
+    validate_s2e_launch_transition_payload,
     validate_s2e_launch_wave_receipt,
+    verify_receipt_carrier_attestation,
 )
 
 
 def _read(path: Path) -> Any:
     return json.loads(path.read_text(encoding="utf-8"))
+
+
+def _add_external_triplet(
+    parser: argparse.ArgumentParser, *, prefix: str = ""
+) -> None:
+    option_prefix = f"{prefix}-" if prefix else ""
+    destination_prefix = f"{prefix}_" if prefix else ""
+    parser.add_argument(
+        f"--{option_prefix}external-append-intent",
+        dest=f"{destination_prefix}external_append_intent",
+        type=Path,
+        required=True,
+    )
+    parser.add_argument(
+        f"--{option_prefix}external-append-result",
+        dest=f"{destination_prefix}external_append_result",
+        type=Path,
+        required=True,
+    )
+    parser.add_argument(
+        f"--{option_prefix}external-readback-ack",
+        dest=f"{destination_prefix}external_readback_ack",
+        type=Path,
+        required=True,
+    )
 
 
 def _parser() -> argparse.ArgumentParser:
@@ -45,6 +73,8 @@ def _parser() -> argparse.ArgumentParser:
     wave.add_argument("--source-head", required=True)
     wave.add_argument("--schema-carrier-head", required=True)
     wave.add_argument("--predecessor-receipt", type=Path, required=True)
+    wave.add_argument("--predecessor-authority", type=Path, required=True)
+    wave.add_argument("--now", required=True)
     wave.add_argument("--launch-contract-digest", required=True)
     wave.add_argument("--generation-task-contract-digest", required=True)
     wave.add_argument(
@@ -56,8 +86,60 @@ def _parser() -> argparse.ArgumentParser:
     validate.add_argument("--repo-root", type=Path, default=REPO_ROOT)
     validate.add_argument("--receipt", type=Path, required=True)
     validate.add_argument("--predecessor-receipt", type=Path)
+    validate.add_argument("--predecessor-authority", type=Path)
     validate.add_argument("--payload-receipt", type=Path)
     validate.add_argument("--now")
+    issue = subparsers.add_parser("issue")
+    issue.add_argument("--repo-root", type=Path, default=REPO_ROOT)
+    issue.add_argument("--candidate", type=Path, required=True)
+    issue.add_argument("--acceptance-review-bundle", type=Path, required=True)
+    issue.add_argument("--governed-capture-record", type=Path, required=True)
+    issue.add_argument(
+        "--disposable-test-effect-chains", type=Path, required=True
+    )
+    issue.add_argument("--predecessor-receipt", type=Path)
+    issue.add_argument("--predecessor-authority", type=Path)
+    issue.add_argument("--now", required=True)
+    _add_external_triplet(issue)
+    carrier = subparsers.add_parser("verify-carrier")
+    carrier.add_argument("--repo-root", type=Path, default=REPO_ROOT)
+    carrier.add_argument("--attestation", type=Path, required=True)
+    carrier.add_argument("--payload-receipt", type=Path, required=True)
+    carrier.add_argument("--governed-capture-record", type=Path, required=True)
+    carrier.add_argument("--now", required=True)
+    _add_external_triplet(carrier)
+    authority = subparsers.add_parser("build-predecessor-authority")
+    authority.add_argument("--repo-root", type=Path, default=REPO_ROOT)
+    authority.add_argument("--predecessor-receipt", type=Path, required=True)
+    authority.add_argument(
+        "--launch-chain-before-predecessor", type=Path, required=True
+    )
+    authority.add_argument(
+        "--acceptance-review-bundle", type=Path, required=True
+    )
+    authority.add_argument(
+        "--review-governed-capture-record", type=Path, required=True
+    )
+    authority.add_argument(
+        "--review-disposable-test-effect-chains", type=Path, required=True
+    )
+    authority.add_argument("--carrier-attestation", type=Path, required=True)
+    authority.add_argument(
+        "--carrier-governed-capture-record", type=Path, required=True
+    )
+    authority.add_argument("--now", required=True)
+    _add_external_triplet(authority, prefix="review")
+    _add_external_triplet(authority, prefix="carrier")
+    transition = subparsers.add_parser("transition-gate")
+    transition.add_argument("--repo-root", type=Path, default=REPO_ROOT)
+    transition.add_argument("--receipt", type=Path, required=True)
+    transition.add_argument(
+        "--predecessor-receipt", type=Path, required=True
+    )
+    transition.add_argument(
+        "--predecessor-authority", type=Path, required=True
+    )
+    transition.add_argument("--now", required=True)
     return parser
 
 
@@ -80,13 +162,116 @@ def main(argv: list[str] | None = None) -> int:
             source_head=args.source_head,
             schema_carrier_head=args.schema_carrier_head,
             predecessor_receipt=_read(args.predecessor_receipt),
+            predecessor_authority=_read(args.predecessor_authority),
             launch_contract_digest=args.launch_contract_digest,
             generation_task_contract_digest=args.generation_task_contract_digest,
+            now=args.now,
             side_effect_class=args.side_effect_class,
         )
         print(json.dumps(artifact, ensure_ascii=False, sort_keys=True))
         return 0
+    if args.action == "issue":
+        result = issue_s2e_launch_receipt(
+            _read(args.candidate),
+            acceptance_review_bundle=_read(args.acceptance_review_bundle),
+            repo_root=args.repo_root,
+            now=args.now,
+            governed_capture_record=_read(args.governed_capture_record),
+            disposable_test_effect_chains=_read(
+                args.disposable_test_effect_chains
+            ),
+            external_append_intent=_read(args.external_append_intent),
+            external_append_result=_read(args.external_append_result),
+            external_readback_ack=_read(args.external_readback_ack),
+            predecessor_receipt=(
+                _read(args.predecessor_receipt)
+                if args.predecessor_receipt is not None
+                else None
+            ),
+            predecessor_authority=(
+                _read(args.predecessor_authority)
+                if args.predecessor_authority is not None
+                else None
+            ),
+        )
+        print(json.dumps(result, ensure_ascii=False, sort_keys=True))
+        return 0 if result.get("status") == "ISSUED" else 2
+    if args.action == "verify-carrier":
+        result = verify_receipt_carrier_attestation(
+            _read(args.attestation),
+            payload_receipt=_read(args.payload_receipt),
+            repo_root=args.repo_root,
+            now=args.now,
+            governed_capture_record=_read(args.governed_capture_record),
+            external_append_intent=_read(args.external_append_intent),
+            external_append_result=_read(args.external_append_result),
+            external_readback_ack=_read(args.external_readback_ack),
+        )
+        print(json.dumps(result, ensure_ascii=False, sort_keys=True))
+        return 0 if result.get("status") == "VERIFIED" else 2
+    if args.action == "build-predecessor-authority":
+        artifact = build_s2e_launch_predecessor_authority(
+            predecessor_receipt=_read(args.predecessor_receipt),
+            launch_chain_before_predecessor=_read(
+                args.launch_chain_before_predecessor
+            ),
+            acceptance_review_bundle=_read(args.acceptance_review_bundle),
+            review_governed_capture_record=_read(
+                args.review_governed_capture_record
+            ),
+            review_disposable_test_effect_chains=_read(
+                args.review_disposable_test_effect_chains
+            ),
+            review_external_append_intent=_read(
+                args.review_external_append_intent
+            ),
+            review_external_append_result=_read(
+                args.review_external_append_result
+            ),
+            review_external_readback_ack=_read(
+                args.review_external_readback_ack
+            ),
+            carrier_attestation=_read(args.carrier_attestation),
+            carrier_governed_capture_record=_read(
+                args.carrier_governed_capture_record
+            ),
+            carrier_external_append_intent=_read(
+                args.carrier_external_append_intent
+            ),
+            carrier_external_append_result=_read(
+                args.carrier_external_append_result
+            ),
+            carrier_external_readback_ack=_read(
+                args.carrier_external_readback_ack
+            ),
+            repo_root=args.repo_root,
+            now=args.now,
+        )
+        print(json.dumps(artifact, ensure_ascii=False, sort_keys=True))
+        return 0
+    if args.action == "transition-gate":
+        artifact = _read(args.receipt)
+        predecessor = _read(args.predecessor_receipt)
+        authority = _read(args.predecessor_authority)
+        chain = authority.get("launch_chain_before_predecessor", [])
+        consumed = {
+            str(item.get("payload_digest"))
+            for item in chain
+            if isinstance(item, dict)
+        } if isinstance(chain, list) else set()
+        errors = validate_s2e_launch_transition(
+            artifact,
+            predecessor_receipt=predecessor,
+            predecessor_authority=authority,
+            repo_root=args.repo_root,
+            now=args.now,
+            consumed_predecessor_digests=frozenset(consumed),
+        )
+        status = "ADVANCE" if not errors else "FAIL"
+        print(json.dumps({"status": status, "errors": errors}))
+        return 0 if not errors else 2
     artifact = _read(args.receipt)
+    status = "FAIL"
     if artifact.get("schema_version") == "s2e_launch_genesis_receipt_v1":
         errors = validate_s2e_launch_genesis_receipt(
             artifact, repo_root=args.repo_root
@@ -103,13 +288,37 @@ def main(argv: list[str] | None = None) -> int:
             )
     elif args.predecessor_receipt is None:
         errors = validate_s2e_launch_wave_receipt(artifact, repo_root=args.repo_root)
+        status = "STRUCTURAL_PASS_NOT_ADVANCE" if not errors else "FAIL"
     else:
-        errors = validate_s2e_launch_transition(
-            artifact,
-            predecessor_receipt=_read(args.predecessor_receipt),
-            repo_root=args.repo_root,
-        )
-    print(json.dumps({"status": "PASS" if not errors else "FAIL", "errors": errors}))
+        predecessor = _read(args.predecessor_receipt)
+        if args.predecessor_authority is None or args.now is None:
+            errors = validate_s2e_launch_transition_payload(
+                artifact,
+                predecessor_receipt=predecessor,
+                repo_root=args.repo_root,
+                consumed_predecessor_digests=frozenset(),
+            )
+            status = "STRUCTURAL_PASS_NOT_ADVANCE" if not errors else "FAIL"
+        else:
+            authority = _read(args.predecessor_authority)
+            chain = authority.get("launch_chain_before_predecessor", [])
+            consumed = {
+                str(item.get("payload_digest"))
+                for item in chain
+                if isinstance(item, dict)
+            } if isinstance(chain, list) else set()
+            errors = validate_s2e_launch_transition(
+                artifact,
+                predecessor_receipt=predecessor,
+                predecessor_authority=authority,
+                repo_root=args.repo_root,
+                now=args.now,
+                consumed_predecessor_digests=frozenset(consumed),
+            )
+            status = "ADVANCE" if not errors else "FAIL"
+    if artifact.get("schema_version") != "s2e_launch_wave_receipt_v1":
+        status = "PASS" if not errors else "FAIL"
+    print(json.dumps({"status": status, "errors": errors}))
     return 0 if not errors else 2
 
 

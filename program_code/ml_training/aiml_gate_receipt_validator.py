@@ -183,6 +183,8 @@ from aiml_gate_receipt_adoption import (  # noqa: E402,F401
     validate_program_adoption_receipt,
 )
 from aiml_gate_receipt_s2e_launch import (  # noqa: E402,F401
+    build_s2e_launch_predecessor_authority,
+    build_s2e_disposable_test_effect_chain,
     canonical_launch_payload_bytes,
     issue_s2e_launch_receipt,
     launch_payload_digest,
@@ -193,13 +195,19 @@ from aiml_gate_receipt_s2e_launch import (  # noqa: E402,F401
     s2e_carrier_attestation_digest,
     s2e_carrier_attested_core_digest,
     s2e_carrier_signed_bytes,
+    s2e_carrier_verification_argv,
     s2e_carrier_worm_payload,
     s2e_review_predicate_results,
+    s2e_review_source_blob_manifest,
+    s2e_review_test_argv,
+    validate_s2e_disposable_test_effect_chain,
     validate_receipt_carrier_attestation,
     validate_s2e_launch_acceptance_review_bundle,
+    validate_s2e_launch_predecessor_authority,
     verify_receipt_carrier_attestation,
     validate_s2e_launch_genesis_receipt,
     validate_s2e_launch_transition,
+    validate_s2e_launch_transition_payload,
     validate_s2e_launch_wave_receipt,
 )
 from aiml_gate_receipt_source_compatibility import (  # noqa: E402,F401

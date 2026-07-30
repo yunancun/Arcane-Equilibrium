@@ -16,6 +16,7 @@
     "schema_carrier_tree",
     "launch_contract_digest",
     "generation_task_contract_digest",
+    "wave_exit_id",
     "checkpoint_status",
     "acceptance_review_bundle_digest",
     "side_effect_class",
@@ -33,6 +34,7 @@
     "schema_carrier_tree": {"$ref": "#/$defs/git_sha"},
     "launch_contract_digest": {"$ref": "#/$defs/digest"},
     "generation_task_contract_digest": {"$ref": "#/$defs/digest"},
+    "wave_exit_id": {"const": "W0_GENESIS_READY"},
     "checkpoint_status": {"enum": ["PENDING_REVIEW", "W0_GENESIS_READY"]},
     "acceptance_review_bundle_digest": {
       "anyOf": [{"$ref": "#/$defs/digest"}, {"type": "null"}]

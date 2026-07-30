@@ -16,9 +16,11 @@
     "schema_carrier_tree",
     "launch_contract_digest",
     "generation_task_contract_digest",
+    "wave_exit_id",
     "checkpoint_status",
     "acceptance_review_bundle_digest",
     "side_effect_class",
+    "disposable_effect_chain_digests",
     "production_effect_count",
     "payload_digest"
   ],
@@ -33,6 +35,15 @@
     "schema_carrier_tree": {"$ref": "#/$defs/git_sha"},
     "launch_contract_digest": {"$ref": "#/$defs/digest"},
     "generation_task_contract_digest": {"$ref": "#/$defs/digest"},
+    "wave_exit_id": {
+      "enum": [
+        "S2E_2B_2A_SECURITY_RECOVERY_READY",
+        "S2E_2B_2B_HOST_RUNNER_CHECKPOINT_READY",
+        "S2E_2B_3_ROW_DRIVERS_CHECKPOINT_READY",
+        "S2E_4_RUNTIME_CLOSURE_CHECKPOINT_READY",
+        "S2E_LW5_IMPLEMENTATION_READY"
+      ]
+    },
     "checkpoint_status": {
       "enum": ["PENDING_REVIEW", "TASK_BRANCH_CHECKPOINT_READY"]
     },
@@ -40,6 +51,12 @@
       "anyOf": [{"$ref": "#/$defs/digest"}, {"type": "null"}]
     },
     "side_effect_class": {"enum": ["SOURCE_ONLY", "DISPOSABLE_TEST"]},
+    "disposable_effect_chain_digests": {
+      "type": "array",
+      "maxItems": 64,
+      "uniqueItems": true,
+      "items": {"$ref": "#/$defs/digest"}
+    },
     "production_effect_count": {"const": 0},
     "payload_digest": {"$ref": "#/$defs/digest"}
   },

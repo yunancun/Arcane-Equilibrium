@@ -7,6 +7,7 @@ import hashlib
 import json
 import os
 import re
+import site
 import subprocess
 import tempfile
 from datetime import datetime
@@ -195,7 +196,16 @@ def _output_summary(handle: BinaryIO, replay_contract: str) -> dict[str, Any]:
     }
 
 
-def _controlled_environment(isolated_root: Path) -> dict[str, str]:
+def _is_pytest_argv(argv: list[str]) -> bool:
+    return (
+        argv[:3] in (["python", "-m", "pytest"], ["python3", "-m", "pytest"])
+        or (argv and argv[0].lower() == "pytest")
+    )
+
+
+def _controlled_environment(
+    isolated_root: Path, *, argv: list[str]
+) -> dict[str, str]:
     environment = {
         key: value for key, value in os.environ.items()
         if key in SAFE_INHERITED_ENVIRONMENT
@@ -210,6 +220,18 @@ def _controlled_environment(isolated_root: Path) -> dict[str, str]:
         "PYTHONDONTWRITEBYTECODE": "1",
         "PYTEST_ADDOPTS": "-p no:cacheprovider",
     })
+    if _is_pytest_argv(argv):
+        # HOME is deliberately replaced above, so Python would otherwise lose a
+        # user-site pytest provider that the already-admitted host interpreter
+        # resolved before isolation.  Re-add only interpreter-derived site roots;
+        # never inherit caller PYTHONPATH or another caller-selected package root.
+        provider_paths = sorted({
+            str(Path(path).resolve())
+            for path in [*site.getsitepackages(), site.getusersitepackages()]
+            if isinstance(path, str) and Path(path).is_dir()
+        })
+        if provider_paths:
+            environment["PYTHONPATH"] = os.pathsep.join(provider_paths)
     for directory in ("home", "tmp", "config", "cache"):
         (isolated_root / directory).mkdir(mode=0o700)
     return environment
@@ -230,7 +252,8 @@ def _execute(
             completed = subprocess.run(
                 argv, cwd=root, shell=False, stdin=subprocess.DEVNULL,
                 stdout=stdout_file, stderr=stderr_file, timeout=timeout_seconds,
-                check=False, env=_controlled_environment(isolated_root),
+                check=False,
+                env=_controlled_environment(isolated_root, argv=argv),
             )
             exit_code = completed.returncode
         except subprocess.TimeoutExpired:

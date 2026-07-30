@@ -10,10 +10,14 @@
     "candidate_payload_digest",
     "launch_id",
     "wave",
+    "wave_exit_id",
     "reviewed_source_head",
     "reviewed_source_tree",
     "generation_task_contract_digest",
+    "source_blob_manifest",
     "predicate_results",
+    "consumed_predecessor_digests",
+    "disposable_test_effect_chain_digests",
     "governed_capture_identity",
     "governed_capture_record_digest",
     "reviewer_identity",
@@ -32,17 +36,24 @@
     "wave": {
       "enum": ["W0-GENESIS", "S2E-LW1", "S2E-LW2", "S2E-LW3", "S2E-LW4", "S2E-LW5"]
     },
+    "wave_exit_id": {"$ref": "#/$defs/wave_exit_id"},
     "reviewed_source_head": {"$ref": "#/$defs/git_sha"},
     "reviewed_source_tree": {"$ref": "#/$defs/git_sha"},
     "generation_task_contract_digest": {"$ref": "#/$defs/digest"},
+    "source_blob_manifest": {
+      "type": "array",
+      "minItems": 7,
+      "maxItems": 256,
+      "items": {"$ref": "#/$defs/source_blob"}
+    },
     "predicate_results": {
       "type": "array",
       "minItems": 5,
-      "maxItems": 6,
+      "maxItems": 15,
       "items": {
         "type": "object",
         "additionalProperties": false,
-        "required": ["predicate_id", "result"],
+        "required": ["predicate_id", "result", "evidence_digests"],
         "properties": {
           "predicate_id": {
             "enum": [
@@ -51,12 +62,41 @@
               "EXTERNAL_WORM_IMMUTABLE_READBACK_VALID",
               "INDEPENDENT_GOVERNED_REVIEW_VALID",
               "INDEPENDENT_SSHSIG_VALID",
-              "PREDECESSOR_CHAIN_VALID"
+              "PREDECESSOR_CHAIN_VALID",
+              "OWNED_GIT_BLOB_REPLAY_VALID",
+              "LW1_PRIVATE_PENETRATION_GUARD_VALID",
+              "LW1_RECOVERY_CONTRACT_FAMILY_VALID",
+              "LW1_TRUSTED_ANCHOR_ROLLBACK_PROTECTION_VALID",
+              "LW1_DUAL_LOCK_DURABLE_STORE_VALID",
+              "LW1_DERIVED_IDENTITY_EXACT_COMPLETION_VALID",
+              "LW1_DISPOSABLE_EFFECT_CHAIN_VALID",
+              "LW1_VALIDATOR_LINE_POLICY_VALID",
+              "LW1_EXIT_BOUNDARY_VALID"
             ]
           },
-          "result": {"const": "PASS"}
+          "result": {"const": "PASS"},
+          "evidence_digests": {
+            "type": "array",
+            "minItems": 1,
+            "maxItems": 16,
+            "uniqueItems": true,
+            "items": {"$ref": "#/$defs/digest"}
+          }
         }
       }
+    },
+    "consumed_predecessor_digests": {
+      "type": "array",
+      "maxItems": 4,
+      "uniqueItems": true,
+      "items": {"$ref": "#/$defs/digest"}
+    },
+    "disposable_test_effect_chain_digests": {
+      "type": "array",
+      "minItems": 1,
+      "maxItems": 16,
+      "uniqueItems": true,
+      "items": {"$ref": "#/$defs/digest"}
     },
     "governed_capture_identity": {"$ref": "#/$defs/capture_identity"},
     "governed_capture_record_digest": {"$ref": "#/$defs/digest"},
@@ -72,6 +112,32 @@
   "$defs": {
     "digest": {"type": "string", "pattern": "^sha256:[0-9a-f]{64}$"},
     "git_sha": {"type": "string", "pattern": "^[0-9a-f]{40}$"},
+    "wave_exit_id": {
+      "enum": [
+        "W0_GENESIS_READY",
+        "S2E_2B_2A_SECURITY_RECOVERY_READY",
+        "S2E_2B_2B_HOST_RUNNER_CHECKPOINT_READY",
+        "S2E_2B_3_ROW_DRIVERS_CHECKPOINT_READY",
+        "S2E_4_RUNTIME_CLOSURE_CHECKPOINT_READY",
+        "S2E_LW5_IMPLEMENTATION_READY"
+      ]
+    },
+    "source_blob": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["path", "mode", "git_blob", "sha256"],
+      "properties": {
+        "path": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 512,
+          "pattern": "^[A-Za-z0-9._/-]+$"
+        },
+        "mode": {"enum": ["100644", "100755"]},
+        "git_blob": {"$ref": "#/$defs/git_sha"},
+        "sha256": {"$ref": "#/$defs/digest"}
+      }
+    },
     "capture_identity": {
       "type": "object",
       "additionalProperties": false,
