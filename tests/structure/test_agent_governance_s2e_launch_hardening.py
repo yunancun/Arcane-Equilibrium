@@ -37,13 +37,14 @@ _DEFAULT_BOOTSTRAP = object()
 def test_review_manifest_closes_oracle_and_offline_provider_dependencies() -> None:
     head = support._git(ROOT, "rev-parse", "HEAD")
     tree = support._git(ROOT, "rev-parse", "HEAD^{tree}")
+    genesis_candidate = {
+        "schema_version": "s2e_launch_genesis_receipt_v1",
+        "wave": "W0-GENESIS",
+        "schema_carrier_head": head,
+        "schema_carrier_tree": tree,
+    }
     manifest = validator.s2e_review_source_blob_manifest(
-        {
-            "schema_version": "s2e_launch_genesis_receipt_v1",
-            "wave": "W0-GENESIS",
-            "schema_carrier_head": head,
-            "schema_carrier_tree": tree,
-        },
+        genesis_candidate,
         repo_root=ROOT,
     )
     paths = {entry["path"] for entry in manifest}
@@ -83,7 +84,34 @@ def test_review_manifest_closes_oracle_and_offline_provider_dependencies() -> No
             "helper_scripts/maintenance_scripts/"
             "agent_governance_workflow_receipts.py"
         ),
+        "program_code/ml_training/tests/__init__.py",
     } <= paths
+
+    lw1_candidate = {
+        "schema_version": "s2e_launch_wave_receipt_v1",
+        "wave": "S2E-LW1",
+        "source_head": head,
+        "source_tree": tree,
+    }
+    lw1_manifest = validator.s2e_review_source_blob_manifest(
+        lw1_candidate,
+        repo_root=ROOT,
+    )
+    assert "program_code/ml_training/tests/__init__.py" in {
+        entry["path"] for entry in lw1_manifest
+    }
+    assert len(manifest) <= 256
+    assert len(lw1_manifest) <= 256
+    genesis_argv = validator.s2e_review_test_argv(
+        genesis_candidate,
+        repo_root=ROOT,
+    )
+    lw1_argv = validator.s2e_review_test_argv(
+        lw1_candidate,
+        repo_root=ROOT,
+    )
+    assert len(genesis_argv[genesis_argv.index("-q") + 1:]) == 7
+    assert len(lw1_argv[lw1_argv.index("-q") + 1:]) == 36
 
 
 def _review_for_wave(

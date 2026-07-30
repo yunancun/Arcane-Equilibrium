@@ -325,8 +325,28 @@ def _repo_python_import_closure(
         for name in _python_module_names(path):
             module_index.setdefault(name, set()).add(path)
 
-    queue = sorted(path for path in selected if path in python_paths)
+    queue: list[str] = []
+    queued: set[str] = set()
     parsed: set[str] = set()
+
+    def enqueue_with_package_initializers(path: str) -> None:
+        if path not in python_paths:
+            return
+        dependencies = {path}
+        parent = PurePath(path).parent
+        while parent.parts:
+            initializer = (parent / "__init__.py").as_posix()
+            if initializer in python_paths:
+                dependencies.add(initializer)
+            parent = parent.parent
+        for dependency in sorted(dependencies):
+            selected.add(dependency)
+            if dependency not in queued:
+                queued.add(dependency)
+                queue.append(dependency)
+
+    for path in sorted(selected):
+        enqueue_with_package_initializers(path)
     while queue:
         path = queue.pop(0)
         if path in parsed:
@@ -396,9 +416,7 @@ def _repo_python_import_closure(
                 candidates = module_index.get(name.rsplit(".", 1)[-1], set())
             discovered.update(candidates)
         for dependency in sorted(discovered):
-            if dependency not in selected:
-                selected.add(dependency)
-                queue.append(dependency)
+            enqueue_with_package_initializers(dependency)
     return selected
 
 
