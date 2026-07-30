@@ -1,7 +1,7 @@
 # CLAUDE_CHANGELOG.md — 開發歷史歸檔
 
 > 從 CLAUDE.md / TODO.md 遷出的 Wave/Sprint/Batch + TODO version-increment 歷史敘事。新 session 不需要讀此文件，僅供回顧歷史時查閱。
-> 最後更新：2026-07-30（AIML S2E launch-gate calibration；PROGRESS ledger v18）
+> 最後更新：2026-07-30（AIML S2E launch-gate calibration；PROGRESS ledger v19）
 
 ---
 
@@ -29,6 +29,12 @@ resolved tombstone 時，沒有 external monotonic floor 不得再進 effect；p
 consume-once 改為每次（含 intact-state retry）都必須驗 fresh、candidate-bound、
 single-use external registry authority，Git common directory 內 state＋anchor
 同步 rollback 不再自行取得 consumption authority。
+後續 exact-head review 的兩項 P1（`#discussion_r3685648122`、
+`#discussion_r3685648131`）亦在 publication 前閉合：receipt issuance 在任何
+驗證／effect 前只從 host clock 擷取一次 UTC，API／CLI 不再接受 caller `now`；
+owner/mode-checked off-repository trust-root profile 同時釘住 governed pytest
+provider profile 與 exact lock SHA256，lock 再釘住八支 wheel hash，因此 candidate
+不能用一組同步竄改的 wheel＋lock 自我認證。
 此 checkpoint 不改 5/9 package projection；`S2E.2b-2` 仍 ACTIVE，
 `S2E_2B_2A_SECURITY_RECOVERY_READY` 尚未成立，production effect 仍 0/6。
 

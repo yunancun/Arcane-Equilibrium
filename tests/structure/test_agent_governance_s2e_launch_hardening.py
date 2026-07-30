@@ -260,6 +260,11 @@ def _review_for_wave(
                 bootstrap
             )
         )
+    monkeypatch.setattr(
+        s2e,
+        "_trusted_issuance_now",
+        lambda: case["now"] + timedelta(minutes=1),
+    )
     return bundle, capture, chain, intent, result, readback, bootstrap
 
 
@@ -280,7 +285,6 @@ def _issue_wave(
         candidate,
         acceptance_review_bundle=bundle,
         repo_root=case["repo"],
-        now=case["now"] + timedelta(minutes=1),
         governed_capture_record=capture,
         disposable_test_effect_chains=[chain],
         external_append_intent=intent,
@@ -355,7 +359,6 @@ def test_historical_review_cannot_be_reissued_after_head_advances(
         pending,
         acceptance_review_bundle=authority["acceptance_review_bundle"],
         repo_root=case["repo"],
-        now=case["now"],
         governed_capture_record=authority["review_governed_capture_record"],
         disposable_test_effect_chains=authority[
             "review_disposable_test_effect_chains"

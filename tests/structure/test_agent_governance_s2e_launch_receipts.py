@@ -65,6 +65,18 @@ def _install_disposable_s2e_trust_root(
                 "anchor": "fixed_off_repo_public_trust_root_v1",
                 "public_key": public_key,
                 "key_fingerprint": fingerprint,
+                "governed_pytest_provider_profile_id": (
+                    capture_v2.GOVERNED_PYTEST_PROVIDER_PROFILE_ID
+                ),
+                "governed_pytest_provider_lock_sha256": (
+                    "sha256:"
+                    + hashlib.sha256(
+                        (
+                            ROOT
+                            / capture_v2.GOVERNED_PYTEST_PROVIDER_LOCK_PATH
+                        ).read_bytes()
+                    ).hexdigest()
+                ),
             },
             ensure_ascii=False,
             sort_keys=True,
@@ -94,6 +106,27 @@ def test_code_owned_s2e_trust_root_loads_independent_disposable_key(
     assert profile is not None
     assert profile["public_key"] == public_key
     assert profile["key_fingerprint"] == fingerprint
+    assert profile["governed_pytest_provider_profile_id"] == (
+        capture_v2.GOVERNED_PYTEST_PROVIDER_PROFILE_ID
+    )
+    assert profile["governed_pytest_provider_lock_sha256"] == (
+        "sha256:"
+        + hashlib.sha256(
+            (ROOT / capture_v2.GOVERNED_PYTEST_PROVIDER_LOCK_PATH).read_bytes()
+        ).hexdigest()
+    )
+
+
+def test_receipt_issuance_has_no_caller_controlled_time() -> None:
+    assert "now" not in inspect.signature(
+        validator.issue_s2e_launch_receipt
+    ).parameters
+    parser = launch._parser()
+    action = next(
+        item for item in parser._actions if item.dest == "action"
+    )
+    issue_parser = action.choices["issue"]
+    assert all(item.dest != "now" for item in issue_parser._actions)
 
 
 class _NotFound(Exception):
@@ -946,7 +979,6 @@ def test_candidates_remain_pending_and_fake_review_bundle_cannot_issue(
         candidate,
         acceptance_review_bundle={"schema_version": "caller-shaped"},
         repo_root=repo,
-        now=datetime(2026, 7, 30, 12, 1, tzinfo=timezone.utc),
     )
 
     assert result["schema_version"] == "launch_receipt_issuance_result_v1"
@@ -1126,11 +1158,15 @@ def _issued_genesis_authority_case(
     review_bundle["bundle_digest"] = (
         validator.s2e_acceptance_review_bundle_digest(review_bundle)
     )
+    monkeypatch.setattr(
+        s2e,
+        "_trusted_issuance_now",
+        lambda: issued_at + timedelta(minutes=1),
+    )
     issuance = validator.issue_s2e_launch_receipt(
         candidate,
         acceptance_review_bundle=review_bundle,
         repo_root=repo,
-        now=issued_at + timedelta(minutes=1),
         governed_capture_record=review_capture,
         disposable_test_effect_chains=[disposable_chain],
         external_append_intent=review_intent,
@@ -1380,7 +1416,6 @@ def test_wave_generation_requires_ready_reviewed_attested_predecessor(
         predecessor_receipt=case["issued"],
         predecessor_authority=None,
         repo_root=repo,
-        now=case["now"],
     )
     assert missing_authority["status"] == "EXTERNAL_VERIFICATION_PENDING"
     assert any(
@@ -1581,7 +1616,6 @@ def test_launch_cli_exposes_full_issue_carrier_authority_and_transition_gates(
         "--external-append-intent", str(files["review_intent"]),
         "--external-append-result", str(files["review_result"]),
         "--external-readback-ack", str(files["review_readback"]),
-        "--now", now,
     ]) == 2
     stale_issue = json.loads(capsys.readouterr().out)
     assert stale_issue["status"] == "EXTERNAL_VERIFICATION_PENDING"
@@ -1829,11 +1863,61 @@ def test_verified_review_bundle_issues_ready_genesis_receipt(
         for error in predicate_errors
     )
 
+    monkeypatch.setattr(
+        s2e,
+        "_trusted_issuance_now",
+        lambda: issued_at + timedelta(minutes=1),
+    )
+    trust_root_path = s2e.S2E_RECEIPT_TRUST_ROOT_PATH
+    trust_profile = json.loads(trust_root_path.read_text(encoding="utf-8"))
+    trusted_provider_lock = trust_profile[
+        "governed_pytest_provider_lock_sha256"
+    ]
+    trust_profile["governed_pytest_provider_lock_sha256"] = (
+        "sha256:" + "0" * 64
+    )
+    trust_root_path.write_text(
+        json.dumps(
+            trust_profile,
+            ensure_ascii=False,
+            sort_keys=True,
+            separators=(",", ":"),
+        )
+        + "\n",
+        encoding="utf-8",
+    )
+    rejected = validator.issue_s2e_launch_receipt(
+        candidate,
+        acceptance_review_bundle=bundle,
+        repo_root=repo,
+        governed_capture_record=capture,
+        external_append_intent=intent,
+        external_append_result=append_result,
+        external_readback_ack=readback,
+        disposable_test_effect_chains=[disposable_chain],
+    )
+    assert rejected["status"] == "EXTERNAL_VERIFICATION_PENDING"
+    assert any(
+        "pytest provider lock differs from fixed off-repository trust root"
+        in error
+        for error in rejected["errors"]
+    )
+    trust_profile["governed_pytest_provider_lock_sha256"] = trusted_provider_lock
+    trust_root_path.write_text(
+        json.dumps(
+            trust_profile,
+            ensure_ascii=False,
+            sort_keys=True,
+            separators=(",", ":"),
+        )
+        + "\n",
+        encoding="utf-8",
+    )
+
     issuance = validator.issue_s2e_launch_receipt(
         candidate,
         acceptance_review_bundle=bundle,
         repo_root=repo,
-        now=issued_at + timedelta(minutes=1),
         governed_capture_record=capture,
         external_append_intent=intent,
         external_append_result=append_result,

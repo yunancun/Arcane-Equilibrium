@@ -97,7 +97,6 @@ def _parser() -> argparse.ArgumentParser:
     issue.add_argument(
         "--predecessor-consumption-bootstrap-authority", type=Path
     )
-    issue.add_argument("--now", required=True)
     _add_external_triplet(issue)
     carrier = subparsers.add_parser("verify-carrier")
     carrier.add_argument("--repo-root", type=Path, default=REPO_ROOT)
@@ -172,7 +171,6 @@ def main(argv: list[str] | None = None) -> int:
             _read(args.candidate),
             acceptance_review_bundle=_read(args.acceptance_review_bundle),
             repo_root=args.repo_root,
-            now=args.now,
             governed_capture_record=_read(args.governed_capture_record),
             disposable_test_effect_chains=_read(
                 args.disposable_test_effect_chains

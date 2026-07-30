@@ -1,7 +1,7 @@
 # AI/ML Landing Progress Ledger
 
 **Program**: `AIML-LONG-LIVED-LANDING-V2`
-**Ledger version**: 18
+**Ledger version**: 19
 **Updated**: 2026-07-30
 **Overall state**: `PROGRAM_ADOPTED` · **`S1_CLOSED`** · every S2 effect-session
 source-seam predicate is narrowly `SOURCE_READY` (S2.0 + S2.1 + S2.2A + S2.3 +
@@ -40,7 +40,13 @@ a reconstructed resolved tombstone cannot admit lifecycle work without an
 external monotonic floor, and every predecessor consumption—including an
 intact-state retry—requires fresh candidate-bound authority from the signed
 external single-use registry rather than trusting the co-rollbackable Git
-common-directory pair. This checkpoint issues no W0/LW1 receipt,
+common-directory pair. The next exact-head review closed two additional P1s:
+issuance captures trusted host time once before validation/effects and no longer
+accepts caller/CLI time, while the owner/mode-checked off-repository trust-root
+profile pins the governed pytest profile plus exact lock SHA256 (and thereby
+all eight wheel hashes), so a candidate cannot self-authenticate a replacement
+provider by changing wheels and lock together. This checkpoint issues no
+W0/LW1 receipt,
 does not satisfy `S2E_2B_2A_SECURITY_RECOVERY_READY`, does not unlock LW2, and
 does not change the 5/9 package projection or production effect 0/6.
 A fresh Linux run at H_effect

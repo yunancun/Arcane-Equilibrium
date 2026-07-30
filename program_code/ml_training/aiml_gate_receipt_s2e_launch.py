@@ -55,6 +55,8 @@ _S2E_RECEIPT_TRUST_ROOT_FIELDS = {
     "anchor",
     "public_key",
     "key_fingerprint",
+    "governed_pytest_provider_profile_id",
+    "governed_pytest_provider_lock_sha256",
 }
 _S2E_RECEIPT_TRUST_ROOT_MAX_BYTES = 16 * 1024
 S2E_WAVE_EXIT_IDS = {
@@ -260,6 +262,9 @@ def load_s2e_receipt_signer_trust_root() -> tuple[dict[str, Any] | None, list[st
     """Securely load the one code-owned off-repository public signer root."""
 
     import agent_governance_aiml_trusted_host as trusted_host
+    from agent_governance_pytest_provider import (
+        GOVERNED_PYTEST_PROVIDER_PROFILE_ID,
+    )
 
     path = S2E_RECEIPT_TRUST_ROOT_PATH
     errors: list[str] = []
@@ -343,12 +348,30 @@ def load_s2e_receipt_signer_trust_root() -> tuple[dict[str, Any] | None, list[st
         "algorithm": "SSH-ED25519",
         "key_generation": "independent_off_repo_ed25519_v1",
         "anchor": "fixed_off_repo_public_trust_root_v1",
+        "governed_pytest_provider_profile_id": (
+            GOVERNED_PYTEST_PROVIDER_PROFILE_ID
+        ),
     }
     for field, expected in expected_values.items():
         if profile.get(field) != expected:
             errors.append(f"S2E receipt trust root {field} is invalid")
     public_key = profile.get("public_key")
     fingerprint = profile.get("key_fingerprint")
+    provider_lock_sha256 = profile.get(
+        "governed_pytest_provider_lock_sha256"
+    )
+    if (
+        not isinstance(provider_lock_sha256, str)
+        or len(provider_lock_sha256) != 71
+        or not provider_lock_sha256.startswith("sha256:")
+        or any(
+            character not in "0123456789abcdef"
+            for character in provider_lock_sha256[7:]
+        )
+    ):
+        errors.append(
+            "S2E receipt trust root governed pytest provider lock digest is invalid"
+        )
     try:
         derived = trusted_host.ssh_public_key_fingerprint(str(public_key))
     except ValueError as error:
@@ -406,6 +429,12 @@ def _time(value: str | datetime) -> datetime:
     if parsed.tzinfo is None:
         raise ValueError("timestamp must be timezone-aware")
     return parsed.astimezone(timezone.utc)
+
+
+def _trusted_issuance_now() -> datetime:
+    """Capture receipt-issuance time from the host clock, never a caller."""
+
+    return datetime.now(timezone.utc)
 
 
 def _git_binding_errors(
@@ -1570,6 +1599,30 @@ def validate_s2e_launch_acceptance_review_bundle(
     profile, trust_errors = load_s2e_receipt_signer_trust_root()
     errors.extend(trust_errors)
     if profile is not None:
+        pytest_provider = (
+            governed_capture_record.get("pytest_provider")
+            if isinstance(governed_capture_record, dict)
+            else None
+        )
+        if not isinstance(pytest_provider, dict):
+            errors.append(
+                "acceptance review governed pytest provider is absent"
+            )
+        else:
+            if pytest_provider.get("profile_id") != profile.get(
+                "governed_pytest_provider_profile_id"
+            ):
+                errors.append(
+                    "acceptance review governed pytest provider profile differs "
+                    "from fixed off-repository trust root"
+                )
+            if pytest_provider.get("lock_sha256") != profile.get(
+                "governed_pytest_provider_lock_sha256"
+            ):
+                errors.append(
+                    "acceptance review pytest provider lock differs from fixed "
+                    "off-repository trust root"
+                )
         signer = bundle.get("signer", {})
         for field, profile_field in (
             ("identity", "signer_identity"),
@@ -1600,7 +1653,6 @@ def issue_s2e_launch_receipt(
     *,
     acceptance_review_bundle: Any,
     repo_root: Path,
-    now: str | datetime,
     governed_capture_record: Any = None,
     disposable_test_effect_chains: Any = None,
     external_append_intent: Any = None,
@@ -1612,6 +1664,7 @@ def issue_s2e_launch_receipt(
 ) -> dict[str, Any]:
     """Issue one ready receipt only after the complete review path verifies."""
 
+    trusted_now = _time(_trusted_issuance_now())
     if isinstance(candidate, dict) and candidate.get("schema_version") == (
         "s2e_launch_genesis_receipt_v1"
     ):
@@ -1647,7 +1700,7 @@ def issue_s2e_launch_receipt(
                 predecessor_receipt=predecessor_receipt,
                 predecessor_authority=predecessor_authority,
                 repo_root=repo_root,
-                now=now,
+                now=trusted_now,
                 consumed_predecessor_digests=frozenset(consumed),
             )
         ready_status = "TASK_BRANCH_CHECKPOINT_READY"
@@ -1666,7 +1719,7 @@ def issue_s2e_launch_receipt(
             external_append_result=external_append_result,
             external_readback_ack=external_readback_ack,
             repo_root=repo_root,
-            now=now,
+            now=trusted_now,
         )
     )
     issued_receipt = None
@@ -1692,7 +1745,7 @@ def issue_s2e_launch_receipt(
                         acceptance_review_bundle_digest=(
                             acceptance_review_bundle["bundle_digest"]
                         ),
-                        now=now,
+                        now=trusted_now,
                         bootstrap_authority=(
                             predecessor_consumption_bootstrap_authority
                         ),
@@ -1726,7 +1779,7 @@ def issue_s2e_launch_receipt(
                     predecessor_receipt=predecessor_receipt,
                     predecessor_authority=predecessor_authority,
                     repo_root=repo_root,
-                    now=now,
+                    now=trusted_now,
                     consumed_predecessor_digests=frozenset(consumed),
                 )
             )
