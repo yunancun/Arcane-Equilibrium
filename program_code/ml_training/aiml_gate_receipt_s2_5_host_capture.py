@@ -162,17 +162,20 @@ def _signature_errors(capture: dict[str, Any]) -> list[str]:
     return errors
 
 
-def validate_s2_5_recovery_host_capture(
-    capture: Any, *, now: str | datetime | None = None
+def validate_s2_5_recovery_host_capture_integrity(
+    capture: Any,
 ) -> list[str]:
-    """Validate closed shape, derivations, freshness, and fixed-profile SSHSIG."""
+    """Validate exact historical bytes and SSHSIG without replaying freshness.
+
+    This is the safe restart/recovery verifier for a capture that was already
+    admitted while fresh.  It omits only comparison with a current trusted
+    clock; the signed time ordering and maximum TTL remain mandatory.
+    """
 
     errors = _checked_in_schema_errors(capture)
     errors.extend(_exact(capture, _HOST_CAPTURE_KEYS, "host capture"))
     if not isinstance(capture, dict):
         return errors
-    if now is None:
-        errors.append("host capture validation requires explicit trusted current time")
     errors.extend(_exact(
         capture.get("signed_binding"), _SIGNED_BINDING_KEYS,
         "host capture signed_binding",
@@ -236,18 +239,36 @@ def validate_s2_5_recovery_host_capture(
             errors.append("host capture observed_at must precede expires_at")
         if expires - observed > MAX_HOST_CAPTURE_TTL:
             errors.append("host capture validity window exceeds 15 minutes")
-        if now is not None:
-            current = _parse_timestamp(now) if isinstance(now, str) else now
-            if not isinstance(current, datetime) or current.tzinfo is None:
-                raise ValueError("now must be timezone-aware")
-            if current < observed:
-                errors.append("host capture observed_at is in the future")
-            if current >= expires:
-                errors.append("host capture is stale")
     except (TypeError, ValueError) as error:
         errors.append(f"host capture timestamps are invalid: {error}")
     if capture.get("self_digest") != artifact_self_digest(capture):
         errors.append("host capture self_digest does not bind the canonical artifact")
     if isinstance(signed, dict):
         errors.extend(_signature_errors(capture))
+    return errors
+
+
+def validate_s2_5_recovery_host_capture(
+    capture: Any, *, now: str | datetime | None = None
+) -> list[str]:
+    """Validate integrity plus freshness against an explicit trusted clock."""
+
+    errors = validate_s2_5_recovery_host_capture_integrity(capture)
+    if not isinstance(capture, dict):
+        return errors
+    if now is None:
+        errors.append("host capture validation requires explicit trusted current time")
+        return errors
+    try:
+        observed = _parse_timestamp(str(capture.get("observed_at")))
+        expires = _parse_timestamp(str(capture.get("expires_at")))
+        current = _parse_timestamp(now) if isinstance(now, str) else now
+        if not isinstance(current, datetime) or current.tzinfo is None:
+            raise ValueError("now must be timezone-aware")
+        if current < observed:
+            errors.append("host capture observed_at is in the future")
+        if current >= expires:
+            errors.append("host capture is stale")
+    except (TypeError, ValueError) as error:
+        errors.append(f"host capture timestamps are invalid: {error}")
     return errors

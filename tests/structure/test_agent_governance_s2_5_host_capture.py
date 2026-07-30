@@ -262,6 +262,41 @@ def test_stale_and_future_host_capture_windows_are_rejected(
     assert any(needle in error for error in errors), errors
 
 
+def test_historical_integrity_rechecks_signature_without_reapplying_freshness(
+    tmp_path, signing_profile
+):
+    artifact = _signed_capture(tmp_path / "state", signing_profile)
+
+    assert host_capture.validate_s2_5_recovery_host_capture_integrity(
+        artifact
+    ) == []
+    assert any(
+        "stale" in error
+        for error in host_capture.validate_s2_5_recovery_host_capture(
+            artifact, now="2026-07-31T12:00:00Z"
+        )
+    )
+
+    rewritten = copy.deepcopy(artifact)
+    rewritten["stable_host_facts"]["node_name"] = "coherent-rewrite"
+    rewritten["signed_binding"]["stable_host_facts"]["node_name"] = (
+        "coherent-rewrite"
+    )
+    rewritten["host_identity"] = (
+        host_capture.derive_s2_5_recovery_host_identity(rewritten)
+    )
+    rewritten["signed_binding"]["host_identity"] = rewritten["host_identity"]
+    _reseal(rewritten)
+    assert any(
+        "SSHSIG is invalid" in error
+        for error in (
+            host_capture.validate_s2_5_recovery_host_capture_integrity(
+                rewritten
+            )
+        )
+    )
+
+
 @pytest.mark.parametrize(
     "mutate",
     [
