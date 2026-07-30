@@ -21,6 +21,7 @@ LAUNCH_WAVES = ("S2E-LW1", "S2E-LW2", "S2E-LW3", "S2E-LW4", "S2E-LW5")
 LEDGER_SCHEMA = "s2e_launch_predecessor_consumption_ledger_v1"
 ENTRY_SCHEMA = "s2e_launch_predecessor_consumption_entry_v1"
 STATE_BASENAME = "codex-s2e-launch-consumption-v1.json"
+ANCHOR_BASENAME = "codex-s2e-launch-consumption-v1.anchor.json"
 LOCK_BASENAME = "codex-s2e-launch-consumption-v1.lock"
 MAX_STATE_BYTES = 512 * 1024
 
@@ -168,30 +169,42 @@ def _private_regular_file(descriptor: int, *, label: str) -> None:
         raise ValueError(f"{label} must be one owner-only regular file")
 
 
+def _path_entry_exists(path: Path) -> bool:
+    try:
+        path.lstat()
+    except FileNotFoundError:
+        return False
+    return True
+
+
 class FileS2ELaunchConsumptionStore:
-    """Atomic JSON ledger in Git's common directory."""
+    """Atomic ledger plus an independent local reset-evident tombstone copy."""
 
     def __init__(self, repo_root: Path) -> None:
         self.common_dir = _git_common_dir(repo_root)
         self.state_path = self.common_dir / STATE_BASENAME
+        self.anchor_path = self.common_dir / ANCHOR_BASENAME
         self.lock_path = self.common_dir / LOCK_BASENAME
+        self.last_state_recovery_performed = False
 
-    def read(self) -> dict[str, Any]:
+    def _read_file(
+        self, path: Path, *, label: str
+    ) -> dict[str, Any] | None:
         flags = (
             os.O_RDONLY
             | getattr(os, "O_NOFOLLOW", 0)
             | getattr(os, "O_CLOEXEC", 0)
         )
         try:
-            descriptor = os.open(self.state_path, flags)
+            descriptor = os.open(path, flags)
         except FileNotFoundError:
-            return _empty_ledger()
+            return None
         try:
             metadata = os.fstat(descriptor)
-            _private_regular_file(descriptor, label="consumption ledger")
+            _private_regular_file(descriptor, label=label)
             if metadata.st_size > MAX_STATE_BYTES:
                 raise ValueError(
-                    "S2E launch consumption ledger exceeds size limit"
+                    f"S2E launch {label} exceeds size limit"
                 )
             chunks: list[bytes] = []
             total = 0
@@ -202,7 +215,7 @@ class FileS2ELaunchConsumptionStore:
                 total += len(chunk)
                 if total > MAX_STATE_BYTES:
                     raise ValueError(
-                        "S2E launch consumption ledger exceeds size limit"
+                        f"S2E launch {label} exceeds size limit"
                     )
                 chunks.append(chunk)
             raw = b"".join(chunks)
@@ -212,61 +225,146 @@ class FileS2ELaunchConsumptionStore:
             ledger = json.loads(raw.decode("utf-8"))
         except (UnicodeDecodeError, json.JSONDecodeError) as error:
             raise ValueError(
-                f"S2E launch consumption ledger is unreadable: {error}"
+                f"S2E launch {label} is unreadable: {error}"
             ) from error
         errors = validate_s2e_launch_consumption_ledger(ledger)
         if errors:
             raise ValueError("; ".join(errors))
         return ledger
 
-    def update(
-        self, mutation: Callable[[dict[str, Any]], dict[str, Any]]
-    ) -> dict[str, Any]:
-        lock_flags = (
+    def _read_pair(
+        self, *, allow_uninitialized: bool
+    ) -> tuple[dict[str, Any], bool]:
+        state = self._read_file(
+            self.state_path, label="consumption ledger"
+        )
+        anchor = self._read_file(
+            self.anchor_path, label="consumption tombstone anchor"
+        )
+        if state is None and anchor is None:
+            if allow_uninitialized:
+                return _empty_ledger(), False
+            raise ValueError(
+                "S2E launch consumption state and tombstone anchor were reset"
+            )
+        if anchor is None:
+            raise ValueError(
+                "S2E launch consumption tombstone anchor is missing"
+            )
+        if state is None:
+            return anchor, True
+        if state != anchor:
+            raise ValueError(
+                "S2E launch consumption ledger differs from tombstone anchor"
+            )
+        return state, False
+
+    def _atomic_write(self, path: Path, ledger: dict[str, Any]) -> None:
+        fd, temporary_name = tempfile.mkstemp(
+            prefix=f"{path.name}.", suffix=".tmp", dir=self.common_dir
+        )
+        temporary = Path(temporary_name)
+        try:
+            os.fchmod(fd, 0o600)
+            with os.fdopen(fd, "w", encoding="utf-8") as handle:
+                json.dump(ledger, handle, ensure_ascii=False, sort_keys=True)
+                handle.write("\n")
+                handle.flush()
+                os.fsync(handle.fileno())
+            os.replace(temporary, path)
+            parent_fd = os.open(
+                self.common_dir,
+                os.O_RDONLY
+                | getattr(os, "O_DIRECTORY", 0)
+                | getattr(os, "O_NOFOLLOW", 0),
+            )
+            try:
+                os.fsync(parent_fd)
+            finally:
+                os.close(parent_fd)
+        finally:
+            temporary.unlink(missing_ok=True)
+
+    def _open_lock(self) -> tuple[int, bool]:
+        base_flags = (
             os.O_RDWR
-            | os.O_CREAT
             | getattr(os, "O_NOFOLLOW", 0)
             | getattr(os, "O_CLOEXEC", 0)
         )
-        lock_fd = os.open(self.lock_path, lock_flags, 0o600)
         try:
-            os.fchmod(lock_fd, 0o600)
-            _private_regular_file(lock_fd, label="consumption ledger lock")
+            descriptor = os.open(
+                self.lock_path,
+                base_flags | os.O_CREAT | os.O_EXCL,
+                0o600,
+            )
+            created = True
+            os.fchmod(descriptor, 0o600)
+        except FileExistsError:
+            descriptor = os.open(self.lock_path, base_flags)
+            created = False
+        try:
+            _private_regular_file(
+                descriptor, label="consumption ledger tombstone lock"
+            )
+        except Exception:
+            os.close(descriptor)
+            raise
+        return descriptor, created
+
+    def read(self) -> dict[str, Any]:
+        try:
+            lock_fd = os.open(
+                self.lock_path,
+                os.O_RDONLY
+                | getattr(os, "O_NOFOLLOW", 0)
+                | getattr(os, "O_CLOEXEC", 0),
+            )
+        except FileNotFoundError:
+            if _path_entry_exists(self.state_path) or _path_entry_exists(
+                self.anchor_path
+            ):
+                raise ValueError(
+                    "S2E launch consumption tombstone lock is missing"
+                )
+            return _empty_ledger()
+        try:
+            _private_regular_file(
+                lock_fd, label="consumption ledger tombstone lock"
+            )
+            fcntl.flock(lock_fd, fcntl.LOCK_SH)
+            ledger, _ = self._read_pair(allow_uninitialized=False)
+            return ledger
+        finally:
+            os.close(lock_fd)
+
+    def update(
+        self, mutation: Callable[[dict[str, Any]], dict[str, Any]]
+    ) -> dict[str, Any]:
+        lock_fd, lock_created = self._open_lock()
+        try:
             fcntl.flock(lock_fd, fcntl.LOCK_EX)
-            current = self.read()
+            current, recovery_required = self._read_pair(
+                allow_uninitialized=lock_created
+            )
+            self.last_state_recovery_performed = recovery_required
+            if lock_created:
+                self._atomic_write(self.anchor_path, current)
+                self._atomic_write(self.state_path, current)
+            if recovery_required:
+                self._atomic_write(self.state_path, current)
             candidate = mutation(current)
             errors = validate_s2e_launch_consumption_ledger(candidate)
             if errors:
                 raise ValueError("; ".join(errors))
             if candidate == current:
                 return current
-            fd, temporary_name = tempfile.mkstemp(
-                prefix=f"{STATE_BASENAME}.", suffix=".tmp", dir=self.common_dir
-            )
-            temporary = Path(temporary_name)
-            try:
-                os.fchmod(fd, 0o600)
-                with os.fdopen(fd, "w", encoding="utf-8") as handle:
-                    json.dump(
-                        candidate, handle, ensure_ascii=False, sort_keys=True
-                    )
-                    handle.write("\n")
-                    handle.flush()
-                    os.fsync(handle.fileno())
-                os.replace(temporary, self.state_path)
-                parent_fd = os.open(
-                    self.common_dir,
-                    os.O_RDONLY
-                    | getattr(os, "O_DIRECTORY", 0)
-                    | getattr(os, "O_NOFOLLOW", 0),
-                )
-                try:
-                    os.fsync(parent_fd)
-                finally:
-                    os.close(parent_fd)
-            finally:
-                temporary.unlink(missing_ok=True)
-            if self.read() != candidate:
+            # Anchor first: a crash before the state replace leaves both
+            # generations visible, so the next caller fails closed instead of
+            # silently accepting a reset or partial commit.
+            self._atomic_write(self.anchor_path, candidate)
+            self._atomic_write(self.state_path, candidate)
+            readback, _ = self._read_pair(allow_uninitialized=False)
+            if readback != candidate:
                 raise ValueError("S2E launch consumption durable readback differs")
             return candidate
         finally:
@@ -349,6 +447,10 @@ def consume_s2e_launch_predecessor(
         "entry": selected,
         "ledger_digest": ledger["ledger_digest"],
         "state_location_class": "GIT_COMMON_DIRECTORY",
+        "reset_evidence_class": "LOCAL_DUAL_COPY_TOMBSTONE_V1",
+        "tombstone_anchor_ledger_digest": ledger["ledger_digest"],
+        "state_recovery_performed": store.last_state_recovery_performed,
+        "external_immutability_proven": False,
         "file_fsynced": True,
         "parent_directory_fsynced": True,
         "mutation_performed": status == "CONSUMED",

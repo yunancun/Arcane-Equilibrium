@@ -14,6 +14,8 @@ from collections.abc import Callable
 from pathlib import Path
 from typing import Any, Protocol
 
+from agent_governance_pytest_provider import GOVERNED_PYTEST_PREFIX
+
 
 class RepositoryCapture(Protocol):
     """Shape required from the canonical repository-capture producer."""
@@ -65,6 +67,7 @@ def _is_test_command(argv: list[str]) -> bool:
         and (
             argv[0].lower() == "pytest"
             or argv[:3] in (["python", "-m", "pytest"], ["python3", "-m", "pytest"])
+            or tuple(argv[:4]) == GOVERNED_PYTEST_PREFIX
             or argv[:2] in (
                 ["cargo", "test"],
                 ["cargo", "check"],

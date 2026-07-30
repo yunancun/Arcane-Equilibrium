@@ -363,35 +363,32 @@ def test_secret_environment_is_removed_and_secret_preview_is_redacted(
     assert literal["stdout"]["preview_redacted"] is True
 
 
-def test_controlled_pytest_environment_uses_only_interpreter_provider_roots(
+def test_controlled_pytest_environment_uses_only_bound_provider_capsule(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    system_site = tmp_path / "system-site"
-    user_site = tmp_path / "user-site"
+    provider_capsule = tmp_path / "provider-capsule"
     caller_site = tmp_path / "caller-selected-site"
-    for path in (system_site, user_site, caller_site):
+    for path in (provider_capsule, caller_site):
         path.mkdir()
     monkeypatch.setenv("PYTHONPATH", str(caller_site))
-    monkeypatch.setattr(
-        capture_v2.site, "getsitepackages", lambda: [str(system_site)]
-    )
-    monkeypatch.setattr(
-        capture_v2.site, "getusersitepackages", lambda: str(user_site)
-    )
-    monkeypatch.setattr(
-        capture_v2, "_account_user_site", lambda: str(user_site)
-    )
 
     pytest_isolation = tmp_path / "pytest-isolation"
     pytest_isolation.mkdir()
     pytest_environment = capture_v2._controlled_environment(
         pytest_isolation,
-        argv=["python3", "-m", "pytest", "-q", "tests/test_one.py"],
+        argv=[
+            *capture_v2.GOVERNED_PYTEST_PREFIX,
+            *capture_v2.GOVERNED_PYTEST_REQUIRED_ARGS,
+            "-q",
+            "tests/test_one.py",
+        ],
+        pytest_provider=provider_capsule,
     )
-    assert pytest_environment["PYTHONPATH"].split(os.pathsep) == sorted(
-        [str(system_site.resolve()), str(user_site.resolve())]
-    )
+    assert pytest_environment["PYTHONPATH"] == str(provider_capsule)
     assert str(caller_site) not in pytest_environment["PYTHONPATH"]
+    assert pytest_environment["PYTHONNOUSERSITE"] == "1"
+    assert pytest_environment["PYTEST_DISABLE_PLUGIN_AUTOLOAD"] == "1"
+    assert pytest_environment["PYTHONSAFEPATH"] == "1"
 
     read_only_isolation = tmp_path / "read-only-isolation"
     read_only_isolation.mkdir()
@@ -412,7 +409,9 @@ def test_nested_capture_recovers_account_anchored_pytest_provider(
         f"sys.path.insert(0,{str(IMPLEMENTATION)!r});"
         "import agent_governance_command_capture_v2 as capture;"
         "result=capture._execute("
-        f"['python3','-m','pytest','-q',{str(probe)!r}],"
+        "[*capture.GOVERNED_PYTEST_PREFIX,"
+        "*capture.GOVERNED_PYTEST_REQUIRED_ARGS,'-q',"
+        f"{str(probe)!r}],"
         f"root=__import__('pathlib').Path({str(ROOT)!r}),"
         "timeout_seconds=30,replay_contract='CANONICAL_TEST_OUTPUT_V1');"
         "print(result['result'],result['exit_code'])"
@@ -425,6 +424,74 @@ def test_nested_capture_recovers_account_anchored_pytest_provider(
     )
     assert outer["result"] == "PASS"
     assert outer["stdout"]["preview_text"] == "PASS 0\n"
+
+
+def test_governed_pytest_bootstrap_rejects_candidate_provider_injection(
+    tmp_path: Path,
+) -> None:
+    repo = tmp_path / "candidate"
+    repo.mkdir()
+    marker = tmp_path / "provider-injection-marker"
+    poison = (
+        "from pathlib import Path\n"
+        f"Path({str(marker)!r}).write_text('executed')\n"
+        "raise RuntimeError('candidate provider injection executed')\n"
+    )
+    (repo / "pytest.py").write_text(poison, encoding="utf-8")
+    (repo / "sitecustomize.py").write_text(poison, encoding="utf-8")
+    (repo / "conftest.py").write_text(poison, encoding="utf-8")
+    (repo / "pyproject.toml").write_text(
+        "[tool.pytest.ini_options]\n"
+        "addopts = '-p candidate_plugin'\n",
+        encoding="utf-8",
+    )
+    (repo / "candidate_plugin.py").write_text(poison, encoding="utf-8")
+    (repo / "packaging.py").write_text(poison, encoding="utf-8")
+    probe = repo / "test_real.py"
+    probe.write_text("def test_real():\n    assert True\n", encoding="utf-8")
+    result = capture_v2._execute(
+        [
+            *capture_v2.GOVERNED_PYTEST_PREFIX,
+            *capture_v2.GOVERNED_PYTEST_REQUIRED_ARGS,
+            "-q",
+            str(probe),
+        ],
+        root=repo,
+        timeout_seconds=30,
+        replay_contract="CANONICAL_TEST_OUTPUT_V1",
+    )
+    assert result["result"] == "PASS"
+    assert marker.exists() is False
+    assert result["pytest_provider"]["provider_stable"] is True
+    assert result["pytest_provider"]["project_config_loading_disabled"] is True
+    assert result["pytest_provider"]["test_import_mode_isolated"] is True
+    assert capture_v2._pytest_provider_errors(
+        result["pytest_provider"],
+        argv=[
+            *capture_v2.GOVERNED_PYTEST_PREFIX,
+            *capture_v2.GOVERNED_PYTEST_REQUIRED_ARGS,
+            "-q",
+            str(probe),
+        ],
+    ) == []
+
+
+def test_plain_pytest_argv_is_rejected_before_execution(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    repository = _git_repository(tmp_path)
+    _patch_test_binding(monkeypatch)
+    with pytest.raises(PermissionError, match="no-site governed bootstrap"):
+        capture_v2.capture_governed_command(
+            native_agent="E2",
+            node_id="review",
+            context_artifact={
+                "artifact_digest": "sha256:" + "a" * 64,
+                "task_contract_digest": "sha256:" + "b" * 64,
+            },
+            argv=["python3", "-m", "pytest", "-q", "scope.txt"],
+            root=repository,
+        )
 
 
 def test_forged_scope_and_host_attestation_are_rejected() -> None:

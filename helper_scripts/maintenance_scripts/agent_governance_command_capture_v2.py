@@ -4,11 +4,13 @@ from __future__ import annotations
 
 import base64
 import hashlib
+import importlib.metadata
 import json
 import os
 import pwd
 import re
 import site
+import stat
 import subprocess
 import sys
 import tempfile
@@ -30,6 +32,11 @@ from agent_governance_command_replay import (
 from agent_governance_context_validation import validate_context_artifact
 from agent_governance_generation_summary import capture_generation_summary
 from agent_governance_permissions import authorize_native_command
+from agent_governance_pytest_provider import (
+    GOVERNED_PYTEST_BOOTSTRAP,
+    GOVERNED_PYTEST_PREFIX,
+    GOVERNED_PYTEST_REQUIRED_ARGS,
+)
 from agent_governance_registry import native_agent_contract
 from agent_governance_routing import route_task
 from agent_governance_workflow_receipts import canonical_digest
@@ -62,8 +69,35 @@ RECORD_FIELDS = {
     "timeout_seconds", "started_at", "completed_at", "exit_code",
     "timed_out", "result", "stdout", "stderr", "repository_before",
     "repository_after", "whole_repository_before", "whole_repository_after",
-    "effect_enforcement", "host_sandbox_attestation_ref", "record_digest",
+    "pytest_provider", "effect_enforcement", "host_sandbox_attestation_ref",
+    "record_digest",
 }
+LEGACY_RECORD_FIELDS = RECORD_FIELDS - {"pytest_provider"}
+PYTEST_PROVIDER_FIELDS = {
+    "schema_version", "profile_id", "bootstrap_digest", "interpreter_path",
+    "interpreter_digest_before", "interpreter_digest_after",
+    "distribution_manifest", "file_manifest", "provider_digest_before",
+    "provider_digest_after", "provider_stable", "site_import_disabled",
+    "candidate_cwd_removed_by_bootstrap", "plugin_autoload_disabled",
+    "conftest_loading_disabled", "project_config_loading_disabled",
+    "test_import_mode_isolated",
+}
+PYTEST_PROVIDER_REQUIRED_DISTRIBUTIONS = (
+    "iniconfig",
+    "packaging",
+    "pluggy",
+    "Pygments",
+    "pytest",
+)
+PYTEST_PROVIDER_OPTIONAL_DISTRIBUTIONS = (
+    "exceptiongroup",
+    "tomli",
+    "typing_extensions",
+)
+PYTEST_PROVIDER_DISTRIBUTIONS = (
+    *PYTEST_PROVIDER_REQUIRED_DISTRIBUTIONS,
+    *PYTEST_PROVIDER_OPTIONAL_DISTRIBUTIONS,
+)
 SAFE_INHERITED_ENVIRONMENT = {
     "PATH", "LANG", "LC_ALL", "LC_CTYPE", "TERM", "SYSTEMROOT",
 }
@@ -200,8 +234,16 @@ def _output_summary(handle: BinaryIO, replay_contract: str) -> dict[str, Any]:
 
 def _is_pytest_argv(argv: list[str]) -> bool:
     return (
-        argv[:3] in (["python", "-m", "pytest"], ["python3", "-m", "pytest"])
+        tuple(argv[:4]) == GOVERNED_PYTEST_PREFIX
+        or argv[:3] in (["python", "-m", "pytest"], ["python3", "-m", "pytest"])
         or (argv and argv[0].lower() == "pytest")
+    )
+
+
+def _is_governed_pytest_argv(argv: list[str]) -> bool:
+    return (
+        tuple(argv[:4]) == GOVERNED_PYTEST_PREFIX
+        and tuple(argv[4:8]) == GOVERNED_PYTEST_REQUIRED_ARGS
     )
 
 
@@ -234,8 +276,217 @@ def _account_user_site() -> str | None:
     return None
 
 
-def _controlled_environment(
+def _provider_roots() -> list[Path]:
+    return sorted({
+        Path(path).resolve()
+        for path in [
+            *site.getsitepackages(),
+            site.getusersitepackages(),
+            _account_user_site(),
+        ]
+        if isinstance(path, str) and Path(path).is_dir()
+    })
+
+
+def _raw_file_digest(path: Path) -> str:
+    digest = hashlib.sha256()
+    with path.open("rb") as handle:
+        while True:
+            chunk = handle.read(64 * 1024)
+            if not chunk:
+                break
+            digest.update(chunk)
+    return "sha256:" + digest.hexdigest()
+
+
+def _capsule_file_manifest(capsule: Path) -> list[dict[str, Any]]:
+    manifest: list[dict[str, Any]] = []
+    for path in sorted(capsule.rglob("*")):
+        metadata = path.lstat()
+        if stat.S_ISDIR(metadata.st_mode):
+            continue
+        if not stat.S_ISREG(metadata.st_mode) or metadata.st_nlink != 1:
+            raise ValueError("pytest provider capsule contains a non-regular file")
+        manifest.append({
+            "path": path.relative_to(capsule).as_posix(),
+            "bytes": metadata.st_size,
+            "sha256": _raw_file_digest(path),
+        })
+    return sorted(manifest, key=lambda item: item["path"])
+
+
+def _pytest_provider_digest(
+    distributions: list[dict[str, str]],
+    files: list[dict[str, Any]],
+) -> str:
+    return canonical_digest({
+        "schema_version": "governed_pytest_provider_payload_v1",
+        "distribution_manifest": distributions,
+        "file_manifest": files,
+    })
+
+
+def _prepare_pytest_provider(
     isolated_root: Path, *, argv: list[str]
+) -> tuple[Path | None, dict[str, Any] | None]:
+    if not _is_pytest_argv(argv):
+        return None, None
+    if not _is_governed_pytest_argv(argv):
+        raise ValueError(
+            "pytest execution requires the complete governed isolation argv"
+        )
+    roots = _provider_roots()
+    available: dict[str, importlib.metadata.Distribution] = {}
+    for distribution in importlib.metadata.distributions(path=roots):
+        name = re.sub(
+            r"[-_.]+",
+            "-",
+            str(distribution.metadata.get("Name", "")).lower(),
+        )
+        if name and name not in available:
+            available[name] = distribution
+    capsule = isolated_root / "pytest-provider"
+    capsule.mkdir(mode=0o700)
+    distribution_manifest: list[dict[str, str]] = []
+    for requested_name in PYTEST_PROVIDER_DISTRIBUTIONS:
+        canonical_name = re.sub(r"[-_.]+", "-", requested_name.lower())
+        distribution = available.get(canonical_name)
+        if distribution is None:
+            if requested_name in PYTEST_PROVIDER_OPTIONAL_DISTRIBUTIONS:
+                continue
+            raise ValueError(
+                f"governed pytest provider distribution is absent: {requested_name}"
+            )
+        source_root = Path(distribution.locate_file("")).resolve(strict=True)
+        distribution_manifest.append({
+            "name": requested_name,
+            "version": str(distribution.version),
+        })
+        for packaged_path in distribution.files or []:
+            source = Path(distribution.locate_file(packaged_path))
+            try:
+                source_metadata = source.lstat()
+                resolved_source = source.resolve(strict=True)
+            except FileNotFoundError as error:
+                raise ValueError(
+                    f"governed pytest provider file is unsafe: {packaged_path}"
+                ) from error
+            try:
+                relative = resolved_source.relative_to(source_root)
+            except ValueError:
+                # Console entrypoints outside site-packages are never imported by
+                # the no-site bootstrap and therefore do not enter the capsule.
+                continue
+            if (
+                not stat.S_ISREG(source_metadata.st_mode)
+                or stat.S_ISLNK(source_metadata.st_mode)
+                or source_metadata.st_nlink != 1
+            ):
+                raise ValueError(
+                    f"governed pytest provider file is not regular: {packaged_path}"
+                )
+            destination = capsule / relative
+            destination.parent.mkdir(parents=True, exist_ok=True, mode=0o700)
+            if destination.exists():
+                if _raw_file_digest(destination) != _raw_file_digest(source):
+                    raise ValueError(
+                        "governed pytest provider distributions overlap unequally"
+                    )
+                continue
+            with source.open("rb") as source_handle, destination.open(
+                "xb"
+            ) as destination_handle:
+                while True:
+                    chunk = source_handle.read(64 * 1024)
+                    if not chunk:
+                        break
+                    destination_handle.write(chunk)
+                destination_handle.flush()
+                os.fsync(destination_handle.fileno())
+            destination.chmod(0o400)
+    distribution_manifest.sort(key=lambda item: item["name"].lower())
+    file_manifest = _capsule_file_manifest(capsule)
+    interpreter = Path(sys.executable).resolve(strict=True)
+    interpreter_digest = _raw_file_digest(interpreter)
+    for directory in sorted(
+        (path for path in capsule.rglob("*") if path.is_dir()),
+        key=lambda path: len(path.parts),
+        reverse=True,
+    ):
+        directory.chmod(0o500)
+    capsule.chmod(0o500)
+    provider_digest = _pytest_provider_digest(
+        distribution_manifest, file_manifest
+    )
+    identity: dict[str, Any] = {
+        "schema_version": "governed_pytest_provider_v1",
+        "profile_id": "isolated_distribution_capsule_no_site_v1",
+        "bootstrap_digest": _digest_bytes(
+            GOVERNED_PYTEST_BOOTSTRAP.encode("utf-8")
+        ),
+        "interpreter_path": str(interpreter),
+        "interpreter_digest_before": interpreter_digest,
+        "interpreter_digest_after": interpreter_digest,
+        "distribution_manifest": distribution_manifest,
+        "file_manifest": file_manifest,
+        "provider_digest_before": provider_digest,
+        "provider_digest_after": provider_digest,
+        "provider_stable": True,
+        "site_import_disabled": _is_governed_pytest_argv(argv),
+        "candidate_cwd_removed_by_bootstrap": _is_governed_pytest_argv(argv),
+        "plugin_autoload_disabled": True,
+        "conftest_loading_disabled": (
+            _is_governed_pytest_argv(argv)
+        ),
+        "project_config_loading_disabled": _is_governed_pytest_argv(argv),
+        "test_import_mode_isolated": _is_governed_pytest_argv(argv),
+    }
+    return capsule, identity
+
+
+def _finalize_pytest_provider(
+    capsule: Path | None,
+    identity: dict[str, Any] | None,
+) -> dict[str, Any] | None:
+    if capsule is None or identity is None:
+        return None
+    after_manifest = _capsule_file_manifest(capsule)
+    after_digest = _pytest_provider_digest(
+        identity["distribution_manifest"], after_manifest
+    )
+    interpreter_after = _raw_file_digest(
+        Path(identity["interpreter_path"])
+    )
+    finalized = dict(identity)
+    finalized["provider_digest_after"] = after_digest
+    finalized["interpreter_digest_after"] = interpreter_after
+    finalized["provider_stable"] = (
+        after_manifest == identity["file_manifest"]
+        and after_digest == identity["provider_digest_before"]
+        and interpreter_after == identity["interpreter_digest_before"]
+    )
+    return finalized
+
+
+def _make_capsule_removable(capsule: Path | None) -> None:
+    if capsule is None:
+        return
+    for path in capsule.rglob("*"):
+        try:
+            path.chmod(0o700 if path.is_dir() else 0o600)
+        except OSError:
+            pass
+    try:
+        capsule.chmod(0o700)
+    except OSError:
+        pass
+
+
+def _controlled_environment(
+    isolated_root: Path,
+    *,
+    argv: list[str],
+    pytest_provider: Path | None = None,
 ) -> dict[str, str]:
     environment = {
         key: value for key, value in os.environ.items()
@@ -250,23 +501,14 @@ def _controlled_environment(
         "GIT_CONFIG_GLOBAL": os.devnull,
         "PYTHONDONTWRITEBYTECODE": "1",
         "PYTEST_ADDOPTS": "-p no:cacheprovider",
+        "PYTEST_DISABLE_PLUGIN_AUTOLOAD": "1",
+        "PYTHONNOUSERSITE": "1",
+        "PYTHONSAFEPATH": "1",
     })
     if _is_pytest_argv(argv):
-        # HOME is deliberately replaced above, so Python would otherwise lose a
-        # user-site pytest provider that the already-admitted host interpreter
-        # resolved before isolation.  Re-add only interpreter-derived site roots;
-        # never inherit caller PYTHONPATH or another caller-selected package root.
-        provider_paths = sorted({
-            str(Path(path).resolve())
-            for path in [
-                *site.getsitepackages(),
-                site.getusersitepackages(),
-                _account_user_site(),
-            ]
-            if isinstance(path, str) and Path(path).is_dir()
-        })
-        if provider_paths:
-            environment["PYTHONPATH"] = os.pathsep.join(provider_paths)
+        if pytest_provider is None:
+            raise ValueError("governed pytest provider capsule is absent")
+        environment["PYTHONPATH"] = str(pytest_provider)
     for directory in ("home", "tmp", "config", "cache"):
         (isolated_root / directory).mkdir(mode=0o700)
     return environment
@@ -283,19 +525,40 @@ def _execute(
         isolated_root = Path(isolated)
         started_at = _now()
         timed_out = False
+        provider_capsule: Path | None = None
+        pytest_provider: dict[str, Any] | None = None
         try:
+            provider_capsule, pytest_provider = _prepare_pytest_provider(
+                isolated_root, argv=argv
+            )
+            execution_argv = (
+                [pytest_provider["interpreter_path"], *argv[1:]]
+                if pytest_provider is not None
+                else argv
+            )
             completed = subprocess.run(
-                argv, cwd=root, shell=False, stdin=subprocess.DEVNULL,
+                execution_argv, cwd=root, shell=False, stdin=subprocess.DEVNULL,
                 stdout=stdout_file, stderr=stderr_file, timeout=timeout_seconds,
                 check=False,
-                env=_controlled_environment(isolated_root, argv=argv),
+                env=_controlled_environment(
+                    isolated_root,
+                    argv=argv,
+                    pytest_provider=provider_capsule,
+                ),
             )
             exit_code = completed.returncode
         except subprocess.TimeoutExpired:
             timed_out, exit_code = True, -1
-        except OSError as error:
+        except (OSError, ValueError) as error:
             exit_code = 127
             stderr_file.write(str(error).encode("utf-8", errors="replace"))
+        finally:
+            try:
+                pytest_provider = _finalize_pytest_provider(
+                    provider_capsule, pytest_provider
+                )
+            finally:
+                _make_capsule_removable(provider_capsule)
         completed_at = _now()
         return {
             "started_at": started_at, "completed_at": completed_at,
@@ -303,6 +566,7 @@ def _execute(
             "result": "TIMED_OUT" if timed_out else "PASS" if exit_code == 0 else "FAIL",
             "stdout": _output_summary(stdout_file, replay_contract),
             "stderr": _output_summary(stderr_file, replay_contract),
+            "pytest_provider": pytest_provider,
         }
 
 
@@ -360,6 +624,13 @@ def capture_governed_command(
         context_artifact, native_agent, node_id, repository,
     )
     command_argv_value, command = command_argv(argv)
+    if _is_pytest_argv(command_argv_value) and not _is_governed_pytest_argv(
+        command_argv_value
+    ):
+        raise PermissionError(
+            "pytest capture requires the no-site governed bootstrap and "
+            "--noconftest"
+        )
     authorization = authorize_native_command(native_agent, command)
     if not authorization.get("allowed"):
         raise PermissionError(f"command is not authorized: {authorization.get('reason')}")
@@ -396,6 +667,7 @@ def capture_governed_command(
         "repository_after": repository_after,
         "whole_repository_before": whole_before,
         "whole_repository_after": whole_after,
+        "pytest_provider": executed["pytest_provider"],
         "effect_enforcement": "repository_policy_only",
         "host_sandbox_attestation_ref": None,
     }
@@ -482,6 +754,124 @@ def _output_errors(output: Any, label: str) -> list[str]:
     return errors
 
 
+def _pytest_provider_errors(
+    provider: Any, *, argv: list[str]
+) -> list[str]:
+    if _is_pytest_argv(argv) and not _is_governed_pytest_argv(argv):
+        return ["pytest argv does not use the governed provider isolation profile"]
+    governed = _is_governed_pytest_argv(argv)
+    if not governed:
+        return (
+            []
+            if provider is None
+            else ["non-pytest command cannot bind a pytest provider capsule"]
+        )
+    if not isinstance(provider, dict):
+        return ["governed pytest provider capsule is absent"]
+    errors: list[str] = []
+    if set(provider) != PYTEST_PROVIDER_FIELDS:
+        errors.append("governed pytest provider fields are invalid")
+        return errors
+    for field, expected in (
+        ("schema_version", "governed_pytest_provider_v1"),
+        ("profile_id", "isolated_distribution_capsule_no_site_v1"),
+        (
+            "bootstrap_digest",
+            _digest_bytes(GOVERNED_PYTEST_BOOTSTRAP.encode("utf-8")),
+        ),
+        ("site_import_disabled", True),
+        ("candidate_cwd_removed_by_bootstrap", True),
+        ("plugin_autoload_disabled", True),
+        ("conftest_loading_disabled", True),
+        ("project_config_loading_disabled", True),
+        ("test_import_mode_isolated", True),
+        ("provider_stable", True),
+    ):
+        if provider.get(field) != expected:
+            errors.append(f"governed pytest provider {field} is invalid")
+    interpreter_path = provider.get("interpreter_path")
+    if (
+        not isinstance(interpreter_path, str)
+        or not Path(interpreter_path).is_absolute()
+    ):
+        errors.append("governed pytest interpreter path is invalid")
+    for field in (
+        "interpreter_digest_before",
+        "interpreter_digest_after",
+        "provider_digest_before",
+        "provider_digest_after",
+    ):
+        if not DIGEST_RE.fullmatch(str(provider.get(field, ""))):
+            errors.append(f"governed pytest provider {field} is invalid")
+    if provider.get("interpreter_digest_before") != provider.get(
+        "interpreter_digest_after"
+    ):
+        errors.append("governed pytest interpreter changed during execution")
+    distributions = provider.get("distribution_manifest")
+    required_names = set(PYTEST_PROVIDER_REQUIRED_DISTRIBUTIONS)
+    allowed_names = set(PYTEST_PROVIDER_DISTRIBUTIONS)
+    distribution_entries_valid = (
+        isinstance(distributions, list)
+        and all(
+            isinstance(item, dict)
+            and set(item) == {"name", "version"}
+            and isinstance(item.get("name"), str)
+            and bool(item["name"])
+            and isinstance(item.get("version"), str)
+            and bool(item["version"])
+            for item in distributions
+        )
+    )
+    observed_names = (
+        [item["name"] for item in distributions]
+        if distribution_entries_valid
+        else []
+    )
+    if (
+        not distribution_entries_valid
+        or observed_names
+        != sorted(observed_names, key=lambda name: name.lower())
+        or not required_names <= set(observed_names) <= allowed_names
+        or len(observed_names) != len(set(observed_names))
+    ):
+        errors.append(
+            "governed pytest provider distribution manifest is invalid"
+        )
+        distributions = []
+    files = provider.get("file_manifest")
+    if not isinstance(files, list) or not files:
+        errors.append("governed pytest provider file manifest is empty")
+        files = []
+    else:
+        observed_paths: list[str] = []
+        for item in files:
+            if (
+                not isinstance(item, dict)
+                or set(item) != {"path", "bytes", "sha256"}
+                or not isinstance(item.get("path"), str)
+                or not item["path"]
+                or item["path"].startswith("/")
+                or ".." in Path(item["path"]).parts
+                or not isinstance(item.get("bytes"), int)
+                or isinstance(item.get("bytes"), bool)
+                or item["bytes"] < 0
+                or not DIGEST_RE.fullmatch(str(item.get("sha256", "")))
+            ):
+                errors.append("governed pytest provider file entry is invalid")
+                continue
+            observed_paths.append(item["path"])
+        if observed_paths != sorted(set(observed_paths)):
+            errors.append(
+                "governed pytest provider file manifest is not canonical"
+            )
+    expected_provider_digest = _pytest_provider_digest(distributions, files)
+    if provider.get("provider_digest_before") != expected_provider_digest:
+        errors.append("governed pytest provider digest does not re-derive")
+    if provider.get("provider_digest_after") != expected_provider_digest:
+        errors.append("governed pytest provider changed during execution")
+    return sorted(set(errors))
+
+
 def validate_governed_command_capture(
     record: Any,
     *,
@@ -498,7 +888,10 @@ def validate_governed_command_capture(
     if not isinstance(record, dict):
         return ["governed command capture must be an object"]
     errors: list[str] = []
-    if set(record) != RECORD_FIELDS:
+    if frozenset(record) not in {
+        frozenset(RECORD_FIELDS),
+        frozenset(LEGACY_RECORD_FIELDS),
+    }:
         errors.append("governed command capture fields do not match contract")
     if record.get("schema_version") != "command_capture_v2":
         errors.append("governed command capture schema_version is invalid")
@@ -544,6 +937,9 @@ def validate_governed_command_capture(
     except ValueError as error:
         argv, command = [], ""
         errors.append(f"governed command argv is invalid: {error}")
+    errors.extend(
+        _pytest_provider_errors(record.get("pytest_provider"), argv=argv)
+    )
     authorization = record.get("authorization")
     expected_authorization = authorize_native_command(str(record.get("native_agent", "")), command)
     if authorization != expected_authorization:
@@ -605,6 +1001,8 @@ def _replay_errors(record: dict[str, Any], *, root: Path) -> list[str]:
         replay_contract=record["replay_contract"],
     )
     errors: list[str] = []
+    if replay["pytest_provider"] != record.get("pytest_provider"):
+        errors.append("governed pytest provider does not reproduce")
     if any(replay[field] != record[field] for field in ("exit_code", "timed_out", "result")):
         errors.append("governed command result does not reproduce")
     for stream in ("stdout", "stderr"):

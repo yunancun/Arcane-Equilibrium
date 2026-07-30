@@ -8,6 +8,10 @@ from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any
 
+from agent_governance_pytest_provider import (
+    GOVERNED_PYTEST_BOOTSTRAP,
+    GOVERNED_PYTEST_REQUIRED_ARGS,
+)
 from agent_governance_schema import schema_subset_errors
 from aiml_gate_receipt_schema_core import (
     _load_schema,
@@ -40,8 +44,11 @@ _S2E_LW1_REVIEW_PREDICATES = (
 )
 
 S2E_REVIEW_BASE_PATHS = (
+    ".codex/schemas/closure_packet_v1.schema.json",
     "helper_scripts/maintenance_scripts/agent_governance_command_capture_v2.py",
+    "helper_scripts/maintenance_scripts/agent_governance_command_replay.py",
     "helper_scripts/maintenance_scripts/agent_governance_permissions.py",
+    "helper_scripts/maintenance_scripts/agent_governance_pytest_provider.py",
     "helper_scripts/maintenance_scripts/agent_governance_s2e_launch_receipts.py",
     "program_code/ml_training/application_bundle_runtime_closure_v1.json",
     "program_code/ml_training/aiml_gate_receipt_s2e_consumption.py",
@@ -303,7 +310,15 @@ def s2e_review_test_argv(
         )
     else:
         raise ValueError(f"{wave} acceptance test profile is not implemented")
-    return ["python3", "-m", "pytest", "-q", *tests]
+    return [
+        "python3",
+        "-S",
+        "-c",
+        GOVERNED_PYTEST_BOOTSTRAP,
+        *GOVERNED_PYTEST_REQUIRED_ARGS,
+        "-q",
+        *tests,
+    ]
 
 
 def _manifest_evidence_digest(

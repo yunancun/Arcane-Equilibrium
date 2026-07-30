@@ -293,12 +293,45 @@ def test_wave_issuance_binds_effects_and_consumes_predecessor_once(
     assert consumption.validate_s2e_launch_consumption_ledger(ledger) == []
     assert len(ledger["entries"]) == 1
 
+    store = consumption.FileS2ELaunchConsumptionStore(repo)
+    store.state_path.unlink()
     retry = _issue_wave(case, review, candidate)
     assert retry["status"] == "ISSUED"
     assert retry["issued_receipt"]["payload_digest"] == issued["payload_digest"]
     assert retry["predecessor_consumption_result"]["status"] == (
         "IDEMPOTENT_REPLAY"
     )
+    assert retry["predecessor_consumption_result"][
+        "state_recovery_performed"
+    ] is True
+    assert store.state_path.is_file()
+
+    moved_state = store.state_path.with_suffix(".moved")
+    store.state_path.rename(moved_state)
+    renamed_retry = _issue_wave(case, review, candidate)
+    assert renamed_retry["status"] == "ISSUED"
+    assert renamed_retry["predecessor_consumption_result"][
+        "state_recovery_performed"
+    ] is True
+    moved_state.unlink()
+
+    store.state_path.write_text(
+        json.dumps(consumption._empty_ledger()) + "\n",
+        encoding="utf-8",
+    )
+    store.state_path.chmod(0o600)
+    reset = _issue_wave(case, review, candidate)
+    assert reset["status"] == "EXTERNAL_VERIFICATION_PENDING"
+    assert any(
+        "differs from tombstone anchor" in error
+        for error in reset["errors"]
+    )
+    store.state_path.unlink()
+    recovered_retry = _issue_wave(case, review, candidate)
+    assert recovered_retry["status"] == "ISSUED"
+    assert recovered_retry["predecessor_consumption_result"][
+        "state_recovery_performed"
+    ] is True
 
     sibling_head = support._commit(
         repo, "lw1-sibling.txt", "sibling\n", "LW1 sibling source"
@@ -332,10 +365,27 @@ def test_wave_issuance_binds_effects_and_consumes_predecessor_once(
         consumption.FileS2ELaunchConsumptionStore(repo).read()["entries"]
     ) == 1
 
+    store.anchor_path.unlink()
+    missing_anchor = _issue_wave(case, sibling_review, sibling)
+    assert missing_anchor["status"] == "EXTERNAL_VERIFICATION_PENDING"
+    assert any(
+        "tombstone anchor is missing" in error
+        for error in missing_anchor["errors"]
+    )
+    store.state_path.unlink()
+    reset_pair = _issue_wave(case, sibling_review, sibling)
+    assert reset_pair["status"] == "EXTERNAL_VERIFICATION_PENDING"
+    assert any(
+        "state and tombstone anchor were reset" in error
+        for error in reset_pair["errors"]
+    )
+
 
 def test_consumption_store_refuses_a_symlink_state_file(tmp_path: Path) -> None:
     repo, _, _, _ = support._repo(tmp_path)
     store = consumption.FileS2ELaunchConsumptionStore(repo)
+    store.update(lambda ledger: ledger)
+    store.state_path.unlink()
     outside = tmp_path / "outside.json"
     outside.write_text("{}\n", encoding="utf-8")
     store.state_path.symlink_to(outside)
@@ -351,3 +401,30 @@ def test_consumption_store_refuses_a_symlink_lock_file(tmp_path: Path) -> None:
     store.lock_path.symlink_to(outside)
     with pytest.raises(OSError):
         store.update(lambda ledger: ledger)
+
+
+def test_consumption_store_refuses_a_symlink_anchor_file(tmp_path: Path) -> None:
+    repo, _, _, _ = support._repo(tmp_path)
+    store = consumption.FileS2ELaunchConsumptionStore(repo)
+    store.update(lambda ledger: ledger)
+    store.anchor_path.unlink()
+    outside = tmp_path / "outside-anchor.json"
+    outside.write_text("{}\n", encoding="utf-8")
+    store.anchor_path.symlink_to(outside)
+    with pytest.raises(OSError):
+        store.read()
+
+
+def test_consumption_store_initialization_survives_failed_mutation(
+    tmp_path: Path,
+) -> None:
+    repo, _, _, _ = support._repo(tmp_path)
+    store = consumption.FileS2ELaunchConsumptionStore(repo)
+
+    def fail(_ledger: dict) -> dict:
+        raise RuntimeError("injected mutation failure")
+
+    with pytest.raises(RuntimeError, match="injected mutation failure"):
+        store.update(fail)
+    assert store.read() == consumption._empty_ledger()
+    assert store.update(lambda ledger: ledger) == consumption._empty_ledger()

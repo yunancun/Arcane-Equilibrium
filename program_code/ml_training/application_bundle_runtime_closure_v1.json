@@ -45,6 +45,7 @@
     "helper_scripts/maintenance_scripts/agent_governance_aiml_trusted_github_pr.py",
     "helper_scripts/maintenance_scripts/agent_governance_aiml_trusted_host.py",
     "helper_scripts/maintenance_scripts/agent_governance_identity_acl_contract.py",
+    "helper_scripts/maintenance_scripts/agent_governance_pytest_provider.py",
     "helper_scripts/maintenance_scripts/agent_governance_schema.py",
     "helper_scripts/maintenance_scripts/agent_governance_sealed_build.py",
     "program_code/ml_training/aiml_gate_receipt_adoption.py",
@@ -194,7 +195,7 @@
     "program_code/ml_training/schemas/aiml_gate_receipts/terminal_receipt_sink_v1.schema.json"
   ],
   "schema_version": "application_bundle_runtime_closure_v1",
-  "self_digest": "sha256:5a50cfa28e8baaf319fa2b2c689c2ee6fa3b7271ec99ef73cd9fae4ce87faebf",
+  "self_digest": "sha256:2d3938f6e69bfd91a921d14cc21d94d66e49b6f45cde58a42754eb555973c0e8",
   "sql_fingerprints": [
     "sql/migrations/V151__alr_persistence_foundation.sql",
     "sql/migrations/V152__alr_operational_artifacts.sql",

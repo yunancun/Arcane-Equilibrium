@@ -8,6 +8,10 @@ import shlex
 from pathlib import Path, PurePosixPath
 from typing import Any
 
+from agent_governance_pytest_provider import (
+    GOVERNED_PYTEST_PREFIX,
+    GOVERNED_PYTEST_REQUIRED_ARGS,
+)
 from agent_governance_registry import native_agent_contract
 
 
@@ -17,7 +21,8 @@ LOCAL_READONLY_COMMAND_RE = re.compile(
     r"^(?:"
     r"git\s+(?:status|diff|log|show|rev-parse|ls-files|cat-file|branch\s+--show-current)\b|"
     r"rg\b|grep\b|head\b|tail\b|wc\b|ls\b|find\b|stat\b|"
-    r"python3?\s+-m\s+pytest\b|pytest\b|cargo\s+(?:test|check|clippy)\b|cargo\s+fmt\s+--check\b|"
+    r"python3?\s+-m\s+pytest\b|pytest\b|"
+    r"cargo\s+(?:test|check|clippy)\b|cargo\s+fmt\s+--check\b|"
     r"node\s+--check\b|bash\s+-n\b"
     r")",
     re.IGNORECASE,
@@ -73,6 +78,8 @@ def _path_scope_error(tokens: list[str], *, remote: bool) -> str | None:
         for candidate in candidates:
             candidate = candidate.split("::", 1)[0]
             if not candidate or candidate.startswith("-") or "://" in candidate:
+                continue
+            if candidate == "/dev/null":
                 continue
             if SENSITIVE_PATH_RE.search(candidate):
                 return f"sensitive path is outside reviewer scope: {candidate}"
@@ -180,7 +187,14 @@ def _safe_process_probe_allowed(tokens: list[str]) -> bool:
 
 
 def _safe_pytest_allowed(tokens: list[str]) -> bool:
-    if tokens[:3] in (["python", "-m", "pytest"], ["python3", "-m", "pytest"]):
+    if tuple(tokens[:4]) == GOVERNED_PYTEST_PREFIX:
+        if tuple(tokens[4:8]) != GOVERNED_PYTEST_REQUIRED_ARGS:
+            return False
+        arguments = tokens[8:]
+    elif tokens[:3] in (
+        ["python", "-m", "pytest"],
+        ["python3", "-m", "pytest"],
+    ):
         arguments = tokens[3:]
     elif tokens and tokens[0].lower() == "pytest":
         arguments = tokens[1:]
@@ -411,6 +425,7 @@ def authorize_command(
     if outer_tokens and (
         outer_tokens[0].lower() == "pytest"
         or outer_tokens[:3] in (["python", "-m", "pytest"], ["python3", "-m", "pytest"])
+        or tuple(outer_tokens[:4]) == GOVERNED_PYTEST_PREFIX
     ) and not _safe_pytest_allowed(outer_tokens):
         return {
             "allowed": False,
@@ -428,6 +443,7 @@ def authorize_command(
                 "selected by full commit and safe repository path"
             ),
         }
+    governed_pytest = tuple(outer_tokens[:4]) == GOVERNED_PYTEST_PREFIX
     if local_test_executor:
         safe_test = bool(
             outer_tokens
@@ -437,6 +453,7 @@ def authorize_command(
                     ["python", "-m", "pytest"],
                     ["python3", "-m", "pytest"],
                 )
+                or tuple(outer_tokens[:4]) == GOVERNED_PYTEST_PREFIX
                 or outer_tokens[:2] in (
                     ["cargo", "test"], ["cargo", "check"],
                     ["cargo", "clippy"], ["node", "--check"],
@@ -445,7 +462,9 @@ def authorize_command(
                 or outer_tokens[:3] == ["cargo", "fmt", "--check"]
             )
         )
-        if safe_test and LOCAL_READONLY_COMMAND_RE.match(stripped):
+        if safe_test and (
+            governed_pytest or LOCAL_READONLY_COMMAND_RE.match(stripped)
+        ):
             return {
                 "allowed": True,
                 "policy_class": "local_test_adapter",
@@ -456,7 +475,7 @@ def authorize_command(
             "policy_class": "local_test_adapter",
             "reason": "E4 is limited to conservative local test/check commands",
         }
-    if LOCAL_READONLY_COMMAND_RE.match(stripped):
+    if governed_pytest or LOCAL_READONLY_COMMAND_RE.match(stripped):
         if writer_verification:
             return {
                 "allowed": True,
