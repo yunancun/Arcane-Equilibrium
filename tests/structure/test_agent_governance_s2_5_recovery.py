@@ -132,6 +132,21 @@ def _replace_signature_with_profile(artifact: dict, profile: str) -> None:
     )
 
 
+def _resign_anchor(anchor: dict) -> None:
+    anchor["signed_binding"] = {
+        key: copy.deepcopy(anchor[key])
+        for key in recovery._ANCHOR_SIGNED_BINDING_KEYS
+    }
+    anchor["anchor_digest"] = validator.canonical_digest(
+        anchor["signed_binding"]
+    )
+    _replace_signature_with_profile(anchor, "anchor")
+    anchor["reference_digest"] = validator.canonical_digest({
+        key: value for key, value in anchor.items()
+        if key != "reference_digest"
+    })
+
+
 def _host_capture(state_root: Path, *, source_head: str = HEAD) -> dict:
     signed = {
         "schema_version": host_capture_leaf.HOST_CAPTURE_SCHEMA_VERSION,
@@ -340,26 +355,55 @@ def _authorization(
     return _sealed(payload, "authorization_digest")
 
 
-def _trusted_anchor(unresolved: dict) -> dict:
+def _trusted_anchor(
+    unresolved: dict,
+    *,
+    issued_at: str = NOW,
+    expires_at: str = LATER,
+    snapshot_version: int = 7,
+    monotonic_floor: int = 7,
+    latest_version: int = 7,
+) -> dict:
     private_key = _RECOVERY_PRIVATE_KEYS["anchor"]
-    append_entry_digest = validator.canonical_digest(unresolved)
+    append_entry_digest = unresolved["unresolved_state_digest"]
+    append_head_digest = validator.canonical_digest({
+        "external_sequence": snapshot_version,
+        "previous_append_head_digest": D1,
+        "append_entry_digest": append_entry_digest,
+    })
     signed_binding = {
-        "schema_version": "s2_5_recovery_trusted_anchor_ref_v1",
+        "schema_version": "s2_5_recovery_trusted_anchor_ref_v2",
         "anchor_id": "trusted-anchor:s2-5:7",
         "storage_class": "INDEPENDENT_OFF_STATE_ROOT",
         "anchor_scope_id": "off-root:host-governance",
+        "bound_unresolved_state_digest": unresolved["unresolved_state_digest"],
         "bound_state_root_id": unresolved["state_root_identity"]["root_id"],
+        "bound_state_root_generation": unresolved["state_root_identity"][
+            "generation"
+        ],
+        "bound_state_root_digest": unresolved["state_root_identity"][
+            "root_digest"
+        ],
         "source_head": unresolved["source_head"],
         "host_identity": unresolved["host_identity"],
         "host_capture_digest": unresolved["host_capture_digest"],
-        "external_sequence": 7,
+        "issued_at": issued_at,
+        "expires_at": expires_at,
+        "external_sequence": snapshot_version,
         "previous_append_head_digest": D1,
         "append_entry_digest": append_entry_digest,
-        "append_head_digest": validator.canonical_digest({
-            "external_sequence": 7,
-            "previous_append_head_digest": D1,
-            "append_entry_digest": append_entry_digest,
-        }),
+        "append_head_digest": append_head_digest,
+        "external_readback": {
+            "schema_version": "s2_5_recovery_anchor_external_readback_v1",
+            "snapshot_version": snapshot_version,
+            "monotonic_floor": monotonic_floor,
+            "latest_version": latest_version,
+            "latest_append_head_digest": append_head_digest,
+            "latest_append_entry_digest": append_entry_digest,
+            "immutable": True,
+            "observed_at": issued_at,
+            "expires_at": expires_at,
+        },
         "append_only": True,
         "immutable_readback": True,
         "immutable_readback_digest": append_entry_digest,
@@ -832,6 +876,165 @@ def test_stale_authorization_and_replaceable_anchor_are_rejected(tmp_path):
         key: value for key, value in anchor.items() if key != "reference_digest"
     })
     with pytest.raises(ValueError):
+        recovery.build_recovery_intent(
+            unresolved_state=state.unresolved,
+            kernel_binding=kernel,
+            admission=admission,
+            authorization=_authorization(
+                state.unresolved,
+                action="ROLLBACK_TO_PRE_STATE",
+                kernel_binding=kernel,
+                admission=admission,
+                trusted_anchor=anchor,
+            ),
+            trusted_anchor=anchor,
+            action="ROLLBACK_TO_PRE_STATE",
+            now=NOW,
+        )
+
+
+def test_signed_anchor_for_an_unrelated_unresolved_generation_is_rejected(
+    tmp_path,
+):
+    state = _state(tmp_path)
+    kernel = _kernel_binding(state.unresolved)
+    admission = _admission(state.unresolved)
+    unrelated = copy.deepcopy(state.unresolved)
+    unrelated["reasons"] = ["a different unresolved failure"]
+    unrelated["state_root_identity"]["generation"] += 1
+    unrelated["state_root_identity"]["root_digest"] = D1
+    unrelated["unresolved_state_digest"] = validator.canonical_digest({
+        key: value for key, value in unrelated.items()
+        if key != "unresolved_state_digest"
+    })
+    unrelated_anchor = _trusted_anchor(unrelated)
+    with pytest.raises(ValueError, match="unresolved|generation|latest"):
+        recovery.build_recovery_intent(
+            unresolved_state=state.unresolved,
+            kernel_binding=kernel,
+            admission=admission,
+            authorization=_authorization(
+                state.unresolved,
+                action="ROLLBACK_TO_PRE_STATE",
+                kernel_binding=kernel,
+                admission=admission,
+                trusted_anchor=unrelated_anchor,
+            ),
+            trusted_anchor=unrelated_anchor,
+            action="ROLLBACK_TO_PRE_STATE",
+            now=NOW,
+        )
+
+
+def test_signed_anchor_and_latest_readback_must_be_fresh(tmp_path):
+    state = _state(tmp_path)
+    kernel = _kernel_binding(state.unresolved)
+    admission = _admission(state.unresolved)
+    stale_anchor = _trusted_anchor(
+        state.unresolved,
+        issued_at="2026-07-30T11:40:00Z",
+        expires_at="2026-07-30T11:50:00Z",
+    )
+    with pytest.raises(ValueError, match="stale|valid|expired|fresh"):
+        recovery.build_recovery_intent(
+            unresolved_state=state.unresolved,
+            kernel_binding=kernel,
+            admission=admission,
+            authorization=_authorization(
+                state.unresolved,
+                action="ROLLBACK_TO_PRE_STATE",
+                kernel_binding=kernel,
+                admission=admission,
+                trusted_anchor=stale_anchor,
+            ),
+            trusted_anchor=stale_anchor,
+            action="ROLLBACK_TO_PRE_STATE",
+            now=NOW,
+        )
+
+
+@pytest.mark.parametrize(
+    ("mutation", "needle"),
+    (
+        (
+            lambda anchor: anchor["external_readback"].update(
+                latest_version=8
+            ),
+            "not the latest",
+        ),
+        (
+            lambda anchor: anchor["external_readback"].update(
+                monotonic_floor=8
+            ),
+            "monotonic floor",
+        ),
+        (
+            lambda anchor: anchor["external_readback"].update(
+                latest_append_head_digest=D2
+            ),
+            "latest head readback",
+        ),
+        (
+            lambda anchor: anchor["external_readback"].update(
+                latest_append_entry_digest=D2
+            ),
+            "latest entry readback",
+        ),
+        (
+            lambda anchor: anchor["external_readback"].update(immutable=False),
+            "not immutable",
+        ),
+    ),
+)
+def test_fully_resigned_anchor_cannot_forge_latest_immutable_readback(
+    tmp_path,
+    mutation,
+    needle,
+):
+    state = _state(tmp_path)
+    kernel = _kernel_binding(state.unresolved)
+    admission = _admission(state.unresolved)
+    anchor = _trusted_anchor(state.unresolved)
+    mutation(anchor)
+    _resign_anchor(anchor)
+    with pytest.raises(ValueError, match=needle):
+        recovery.build_recovery_intent(
+            unresolved_state=state.unresolved,
+            kernel_binding=kernel,
+            admission=admission,
+            authorization=_authorization(
+                state.unresolved,
+                action="ROLLBACK_TO_PRE_STATE",
+                kernel_binding=kernel,
+                admission=admission,
+                trusted_anchor=anchor,
+            ),
+            trusted_anchor=anchor,
+            action="ROLLBACK_TO_PRE_STATE",
+            now=NOW,
+        )
+
+
+def test_fully_resigned_anchor_entry_rewrite_cannot_replace_current_state(
+    tmp_path,
+):
+    state = _state(tmp_path)
+    kernel = _kernel_binding(state.unresolved)
+    admission = _admission(state.unresolved)
+    anchor = _trusted_anchor(state.unresolved)
+    anchor["append_entry_digest"] = D1
+    anchor["append_head_digest"] = validator.canonical_digest({
+        "external_sequence": anchor["external_sequence"],
+        "previous_append_head_digest": anchor["previous_append_head_digest"],
+        "append_entry_digest": D1,
+    })
+    anchor["immutable_readback_digest"] = D1
+    anchor["external_readback"]["latest_append_entry_digest"] = D1
+    anchor["external_readback"]["latest_append_head_digest"] = anchor[
+        "append_head_digest"
+    ]
+    _resign_anchor(anchor)
+    with pytest.raises(ValueError, match="current unresolved"):
         recovery.build_recovery_intent(
             unresolved_state=state.unresolved,
             kernel_binding=kernel,

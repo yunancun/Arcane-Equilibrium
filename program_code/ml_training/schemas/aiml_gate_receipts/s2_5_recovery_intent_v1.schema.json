@@ -138,11 +138,35 @@
         "sshsig_armored": {"type": "string", "minLength": 1}
       }
     },
+    "anchor_external_readback": {
+      "type": "object", "additionalProperties": false,
+      "required": [
+        "schema_version", "snapshot_version", "monotonic_floor",
+        "latest_version", "latest_append_head_digest",
+        "latest_append_entry_digest", "immutable", "observed_at", "expires_at"
+      ],
+      "properties": {
+        "schema_version": {
+          "const": "s2_5_recovery_anchor_external_readback_v1"
+        },
+        "snapshot_version": {"type": "integer", "minimum": 1},
+        "monotonic_floor": {"type": "integer", "minimum": 1},
+        "latest_version": {"type": "integer", "minimum": 1},
+        "latest_append_head_digest": {"$ref": "#/$defs/digest"},
+        "latest_append_entry_digest": {"$ref": "#/$defs/digest"},
+        "immutable": {"const": true},
+        "observed_at": {"$ref": "#/$defs/timestamp"},
+        "expires_at": {"$ref": "#/$defs/timestamp"}
+      }
+    },
     "trusted_anchor": {
       "type": "object", "additionalProperties": false,
       "required": [
         "schema_version", "anchor_id", "anchor_digest", "storage_class", "anchor_scope_id",
-        "bound_state_root_id", "source_head", "host_identity", "host_capture_digest",
+        "bound_unresolved_state_digest", "bound_state_root_id",
+        "bound_state_root_generation", "bound_state_root_digest",
+        "source_head", "host_identity", "host_capture_digest",
+        "issued_at", "expires_at", "external_readback",
         "external_sequence", "previous_append_head_digest", "append_entry_digest",
         "append_head_digest",
         "append_only", "immutable_readback", "immutable_readback_digest",
@@ -152,15 +176,21 @@
         "sshsig_armored", "reference_digest"
       ],
       "properties": {
-        "schema_version": {"const": "s2_5_recovery_trusted_anchor_ref_v1"},
+        "schema_version": {"const": "s2_5_recovery_trusted_anchor_ref_v2"},
         "anchor_id": {"type": "string", "minLength": 1},
         "anchor_digest": {"$ref": "#/$defs/digest"},
         "storage_class": {"const": "INDEPENDENT_OFF_STATE_ROOT"},
         "anchor_scope_id": {"type": "string", "minLength": 1},
+        "bound_unresolved_state_digest": {"$ref": "#/$defs/digest"},
         "bound_state_root_id": {"type": "string", "minLength": 1},
+        "bound_state_root_generation": {"type": "integer", "minimum": 1},
+        "bound_state_root_digest": {"$ref": "#/$defs/digest"},
         "source_head": {"$ref": "#/$defs/git_sha"},
         "host_identity": {"type": "string", "minLength": 1},
         "host_capture_digest": {"$ref": "#/$defs/digest"},
+        "issued_at": {"$ref": "#/$defs/timestamp"},
+        "expires_at": {"$ref": "#/$defs/timestamp"},
+        "external_readback": {"$ref": "#/$defs/anchor_external_readback"},
         "external_sequence": {"type": "integer", "minimum": 1},
         "previous_append_head_digest": {"$ref": "#/$defs/digest"},
         "append_entry_digest": {"$ref": "#/$defs/digest"},
@@ -178,21 +208,30 @@
           "type": "object", "additionalProperties": false,
           "required": [
             "schema_version", "anchor_id", "storage_class", "anchor_scope_id",
-            "bound_state_root_id", "source_head", "host_identity",
-            "host_capture_digest", "external_sequence",
+            "bound_unresolved_state_digest", "bound_state_root_id",
+            "bound_state_root_generation", "bound_state_root_digest",
+            "source_head", "host_identity",
+            "host_capture_digest", "issued_at", "expires_at",
+            "external_readback", "external_sequence",
             "previous_append_head_digest", "append_entry_digest", "append_head_digest",
             "append_only", "immutable_readback", "immutable_readback_digest",
             "append_actor_identity", "readback_verifier_identity", "evidence_class"
           ],
           "properties": {
-            "schema_version": {"const": "s2_5_recovery_trusted_anchor_ref_v1"},
+            "schema_version": {"const": "s2_5_recovery_trusted_anchor_ref_v2"},
             "anchor_id": {"type": "string", "minLength": 1},
             "storage_class": {"const": "INDEPENDENT_OFF_STATE_ROOT"},
             "anchor_scope_id": {"type": "string", "minLength": 1},
+            "bound_unresolved_state_digest": {"$ref": "#/$defs/digest"},
             "bound_state_root_id": {"type": "string", "minLength": 1},
+            "bound_state_root_generation": {"type": "integer", "minimum": 1},
+            "bound_state_root_digest": {"$ref": "#/$defs/digest"},
             "source_head": {"$ref": "#/$defs/git_sha"},
             "host_identity": {"type": "string", "minLength": 1},
             "host_capture_digest": {"$ref": "#/$defs/digest"},
+            "issued_at": {"$ref": "#/$defs/timestamp"},
+            "expires_at": {"$ref": "#/$defs/timestamp"},
+            "external_readback": {"$ref": "#/$defs/anchor_external_readback"},
             "external_sequence": {"type": "integer", "minimum": 1},
             "previous_append_head_digest": {"$ref": "#/$defs/digest"},
             "append_entry_digest": {"$ref": "#/$defs/digest"},

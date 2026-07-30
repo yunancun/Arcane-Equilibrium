@@ -117,7 +117,10 @@ _AUTH_KEYS = frozenset({
 })
 _ANCHOR_KEYS = frozenset({
     "schema_version", "anchor_id", "anchor_digest", "storage_class", "anchor_scope_id",
-    "bound_state_root_id", "source_head", "host_identity", "host_capture_digest",
+    "bound_unresolved_state_digest", "bound_state_root_id",
+    "bound_state_root_generation", "bound_state_root_digest",
+    "source_head", "host_identity", "host_capture_digest",
+    "issued_at", "expires_at", "external_readback",
     "external_sequence", "previous_append_head_digest", "append_entry_digest",
     "append_head_digest",
     "append_only", "immutable_readback", "immutable_readback_digest",
@@ -128,11 +131,19 @@ _ANCHOR_KEYS = frozenset({
 })
 _ANCHOR_SIGNED_BINDING_KEYS = frozenset({
     "schema_version", "anchor_id", "storage_class", "anchor_scope_id",
-    "bound_state_root_id", "source_head", "host_identity", "host_capture_digest",
+    "bound_unresolved_state_digest", "bound_state_root_id",
+    "bound_state_root_generation", "bound_state_root_digest",
+    "source_head", "host_identity", "host_capture_digest",
+    "issued_at", "expires_at", "external_readback",
     "external_sequence", "previous_append_head_digest", "append_entry_digest",
     "append_head_digest",
     "append_only", "immutable_readback", "immutable_readback_digest",
     "append_actor_identity", "readback_verifier_identity", "evidence_class",
+})
+_ANCHOR_READBACK_KEYS = frozenset({
+    "schema_version", "snapshot_version", "monotonic_floor", "latest_version",
+    "latest_append_head_digest", "latest_append_entry_digest", "immutable",
+    "observed_at", "expires_at",
 })
 _AUTH_BINDING_KEYS = frozenset({
     "action", "task_digest", "unresolved_state_digest", "state_root_identity",
@@ -290,7 +301,13 @@ def recovery_anchor_signed_bytes(anchor: dict[str, Any]) -> bytes:
     return _canonical_bytes(anchor["signed_binding"])
 
 
-def _anchor_errors(anchor: Any, root: Any, binding: dict[str, Any]) -> list[str]:
+def _anchor_errors(
+    anchor: Any,
+    root: Any,
+    binding: dict[str, Any],
+    *,
+    now: Any,
+) -> list[str]:
     errors = _exact(anchor, _ANCHOR_KEYS, "trusted_anchor")
     if not isinstance(anchor, dict):
         return errors
@@ -298,6 +315,12 @@ def _anchor_errors(anchor: Any, root: Any, binding: dict[str, Any]) -> list[str]
         anchor.get("signed_binding"),
         _ANCHOR_SIGNED_BINDING_KEYS,
         "trusted_anchor signed_binding",
+    ))
+    readback = anchor.get("external_readback")
+    errors.extend(_exact(
+        readback,
+        _ANCHOR_READBACK_KEYS,
+        "trusted_anchor external_readback",
     ))
     errors.extend(_sealed(anchor, "reference_digest", "trusted_anchor"))
     signed = anchor.get("signed_binding")
@@ -311,23 +334,65 @@ def _anchor_errors(anchor: Any, root: Any, binding: dict[str, Any]) -> list[str]
     expected_anchor_digest = canonical_digest(signed)
     if anchor.get("anchor_digest") != expected_anchor_digest:
         errors.append("trusted anchor digest does not bind its signed entry")
+    if anchor.get("schema_version") != "s2_5_recovery_trusted_anchor_ref_v2":
+        errors.append("trusted anchor schema_version is invalid")
     if anchor.get("storage_class") != "INDEPENDENT_OFF_STATE_ROOT":
         errors.append("trusted anchor is not independently stored off the state root")
     if anchor.get("anchor_scope_id") == anchor.get("bound_state_root_id"):
         errors.append("trusted anchor scope must differ from the replaceable state root")
+    if (
+        anchor.get("bound_unresolved_state_digest")
+        != binding.get("unresolved_state_digest")
+    ):
+        errors.append("trusted anchor does not bind the current unresolved state")
     if not isinstance(root, dict):
         errors.append("trusted anchor cannot bind a malformed state-root identity")
-    elif anchor.get("bound_state_root_id") != root.get("root_id"):
-        errors.append("trusted anchor does not bind the exact state-root identity")
+    else:
+        if anchor.get("bound_state_root_id") != root.get("root_id"):
+            errors.append("trusted anchor does not bind the exact state-root identity")
+        if anchor.get("bound_state_root_generation") != root.get("generation"):
+            errors.append("trusted anchor does not bind the current root generation")
+        if anchor.get("bound_state_root_digest") != root.get("root_digest"):
+            errors.append("trusted anchor does not bind the current root digest")
     if anchor.get("source_head") != binding.get("source_head"):
         errors.append("trusted anchor source_head differs from the recovery binding")
     if anchor.get("host_identity") != binding.get("host_identity"):
         errors.append("trusted anchor host_identity differs from the recovery binding")
     if anchor.get("host_capture_digest") != binding.get("host_capture_digest"):
         errors.append("trusted anchor host_capture_digest differs from recovery")
+    errors.extend(_fresh_window_errors(
+        anchor,
+        now=now,
+        label="trusted anchor",
+        issued_key="issued_at",
+        expires_key="expires_at",
+    ))
+    errors.extend(_fresh_window_errors(
+        readback,
+        now=now,
+        label="trusted anchor external readback",
+        issued_key="observed_at",
+        expires_key="expires_at",
+    ))
+    if isinstance(readback, dict):
+        if (
+            readback.get("schema_version")
+            != "s2_5_recovery_anchor_external_readback_v1"
+        ):
+            errors.append("trusted anchor external readback schema is invalid")
+        if readback.get("immutable") is not True:
+            errors.append("trusted anchor external readback is not immutable")
+        if readback.get("observed_at") != anchor.get("issued_at"):
+            errors.append("trusted anchor/readback observation times differ")
+        if readback.get("expires_at") != anchor.get("expires_at"):
+            errors.append("trusted anchor/readback expiry times differ")
     sequence = anchor.get("external_sequence")
     if not isinstance(sequence, int) or isinstance(sequence, bool) or sequence < 1:
         errors.append("trusted anchor external monotonic sequence is invalid")
+    if anchor.get("append_entry_digest") != binding.get(
+        "unresolved_state_digest"
+    ):
+        errors.append("trusted anchor append entry is not the current unresolved state")
     expected_head = canonical_digest({
         "external_sequence": sequence,
         "previous_append_head_digest": anchor.get("previous_append_head_digest"),
@@ -335,6 +400,39 @@ def _anchor_errors(anchor: Any, root: Any, binding: dict[str, Any]) -> list[str]
     })
     if anchor.get("append_head_digest") != expected_head:
         errors.append("trusted anchor append-only head does not re-derive")
+    if isinstance(readback, dict):
+        versions = (
+            readback.get("snapshot_version"),
+            readback.get("monotonic_floor"),
+            readback.get("latest_version"),
+        )
+        if any(
+            not isinstance(value, int) or isinstance(value, bool) or value < 1
+            for value in versions
+        ):
+            errors.append("trusted anchor external readback versions are invalid")
+        else:
+            snapshot, floor, latest = versions
+            if snapshot != sequence:
+                errors.append(
+                    "trusted anchor snapshot version differs from external sequence"
+                )
+            if latest != snapshot:
+                errors.append("trusted anchor snapshot is not the latest version")
+            if floor != snapshot:
+                errors.append(
+                    "trusted anchor snapshot does not equal the monotonic floor"
+                )
+        if (
+            readback.get("latest_append_head_digest")
+            != anchor.get("append_head_digest")
+        ):
+            errors.append("trusted anchor latest head readback differs from append head")
+        if (
+            readback.get("latest_append_entry_digest")
+            != anchor.get("append_entry_digest")
+        ):
+            errors.append("trusted anchor latest entry readback differs from append entry")
     if anchor.get("append_only") is not True:
         errors.append("trusted anchor does not prove append-only storage")
     if anchor.get("immutable_readback") is not True:
@@ -410,7 +508,12 @@ def _binding_errors(
             errors.append(
                 "state-root identity does not derive from host identity and canonical root"
             )
-    errors.extend(_anchor_errors(binding.get("trusted_anchor"), root, binding))
+    errors.extend(_anchor_errors(
+        binding.get("trusted_anchor"),
+        root,
+        binding,
+        now=now,
+    ))
     errors.extend(_authorization_errors(binding, action=action))
     if isinstance(journals, dict) and journals.get("head_digest") not in (
         journals.get("journal_digests") if isinstance(journals.get("journal_digests"), list)
@@ -800,26 +903,42 @@ def _capture_errors(
     return errors
 
 
-def _fresh_authorization_errors(binding: dict[str, Any], now: Any) -> list[str]:
-    authorization = binding.get("authorization")
-    if not isinstance(authorization, dict):
-        return ["recovery authorization must be an object"]
+def _fresh_window_errors(
+    value: Any,
+    *,
+    now: Any,
+    label: str,
+    issued_key: str,
+    expires_key: str,
+) -> list[str]:
+    if not isinstance(value, dict):
+        return [f"{label} must be an object"]
     if now is None:
-        return ["recovery authorization validation requires an explicit current time"]
+        return [f"{label} validation requires an explicit current time"]
     try:
-        issued = _parse_timestamp(str(authorization["issued_at"]))
-        expires = _parse_timestamp(str(authorization["expires_at"]))
+        issued = _parse_timestamp(str(value[issued_key]))
+        expires = _parse_timestamp(str(value[expires_key]))
         current = _parse_timestamp(now) if isinstance(now, str) else now
         if not isinstance(current, datetime) or current.tzinfo is None:
             raise ValueError("now must be a timezone-aware datetime or timestamp")
-    except (TypeError, ValueError) as error:
-        return [f"recovery authorization timestamps are invalid: {error}"]
+    except (KeyError, TypeError, ValueError) as error:
+        return [f"{label} timestamps are invalid: {error}"]
     errors = []
     if issued >= expires:
-        errors.append("recovery authorization issued_at must precede expires_at")
+        errors.append(f"{label} {issued_key} must precede {expires_key}")
     if current < issued or current >= expires:
-        errors.append("recovery authorization is stale or not yet valid")
+        errors.append(f"{label} is stale or not yet valid")
     return errors
+
+
+def _fresh_authorization_errors(binding: dict[str, Any], now: Any) -> list[str]:
+    return _fresh_window_errors(
+        binding.get("authorization"),
+        now=now,
+        label="recovery authorization",
+        issued_key="issued_at",
+        expires_key="expires_at",
+    )
 
 
 def _validated_copy(value: dict[str, Any]) -> dict[str, Any]:
