@@ -28,7 +28,8 @@ successor; governed pytest is reconstructed from exact reviewed-head,
 hash-pinned Git wheel blobs; the closure schema requires its provider identity;
 the review manifest includes transitive repo-local Python dependencies and every
 tracked package-parent `__init__.py` pytest can execute; and the W0 capture
-default is 300 seconds. This checkpoint issues no W0/LW1 receipt,
+default is 600 seconds after the 210-test profile left two tests incomplete at
+the old 300-second bound. This checkpoint issues no W0/LW1 receipt,
 does not satisfy `S2E_2B_2A_SECURITY_RECOVERY_READY`, does not unlock LW2, and
 does not change the 5/9 package projection or production effect 0/6.
 A fresh Linux run at H_effect

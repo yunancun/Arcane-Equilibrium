@@ -841,7 +841,7 @@ def capture_governed_command(
     context_artifact: dict[str, Any],
     argv: list[str] | tuple[str, ...],
     root: Path = REPO_ROOT,
-    timeout_seconds: int = 300,
+    timeout_seconds: int = 600,
 ) -> dict[str, Any]:
     """Derive identity/scope from Context and execute exactly one local argv."""
 

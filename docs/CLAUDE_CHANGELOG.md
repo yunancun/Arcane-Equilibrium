@@ -16,7 +16,8 @@ entry 可 crash/retry。Governed pytest provider 不再複製 ambient user-site�
 reviewed Git head 的 exact lock 與 8 支 hash-pinned pure-Python wheels 做 bounded
 safe extraction，provider identity 納入 closure schema；S2E source manifest 另做
 candidate Git-blob repo-local import closure，並納入 pytest 會執行的 tracked
-package-parent `__init__.py`；W0 bounded capture default 調為 300 秒。
+package-parent `__init__.py`；210-test W0 在 300 秒留下 2 項未完成，故 bounded
+capture default 依 exact-head machine evidence 調為 600 秒。
 此 checkpoint 不改 5/9 package projection；`S2E.2b-2` 仍 ACTIVE，
 `S2E_2B_2A_SECURITY_RECOVERY_READY` 尚未成立，production effect 仍 0/6。
 

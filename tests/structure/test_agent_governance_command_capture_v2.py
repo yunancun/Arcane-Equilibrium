@@ -21,6 +21,7 @@ if str(IMPLEMENTATION) not in sys.path:
     sys.path.insert(0, str(IMPLEMENTATION))
 
 import agent_governance_command_capture_v2 as capture_v2  # noqa: E402
+import agent_governance as governance  # noqa: E402
 from agent_governance_capture_binding import collect_capture_evidence  # noqa: E402
 from agent_governance_context import capture_repository_baseline  # noqa: E402
 from agent_governance_execution import (  # noqa: E402
@@ -169,6 +170,28 @@ def test_native_node_and_dispatch_scope_are_derived_not_caller_asserted() -> Non
     assert "path_scope" not in inspect.signature(
         capture_v2.capture_governed_command
     ).parameters
+
+
+def test_full_w0_default_capture_ceiling_is_bounded_600_seconds() -> None:
+    assert (
+        inspect.signature(capture_v2.capture_governed_command)
+        .parameters["timeout_seconds"]
+        .default
+        == 600
+    )
+    parsed = governance._build_parser().parse_args([
+        "capture-command",
+        "--native-agent",
+        "E2",
+        "--node-id",
+        "review",
+        "--context-artifact",
+        "{}",
+        "--",
+        "git",
+        "status",
+    ])
+    assert parsed.timeout_seconds == 600
 
 
 def test_verification_scope_binds_read_only_capture_and_closure_replay() -> None:

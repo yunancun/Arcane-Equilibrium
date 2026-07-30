@@ -1022,9 +1022,10 @@ def test_cp2b_schema_files_resolve_to_real_files() -> None:
         assert (SCHEMA_DIR / SCHEMA_FILES[key]).is_file(), key
     assert len(_CP2B_KEYS) == 16
     # CP2a/CP2b + W2/W5 + S2.5 + S2.2B + launch registration reached 83.
-    # S2E.LW1 adds four recovery-chain schemas, signed host-capture ABI, and
-    # the closed disposable-test chain and predecessor-consumption ABI:90.
-    assert len(SCHEMA_FILES) == 90
+    # S2E.LW1 adds four recovery-chain schemas, signed host-capture ABI, the
+    # closed disposable-test chain and predecessor-consumption ABI, and the
+    # purpose-specific consumption bootstrap authority:91.
+    assert len(SCHEMA_FILES) == 91
     for s2e_key in (
         "s2e_launch_genesis_receipt_v1",
         "s2e_launch_predecessor_consumption_ledger_v1",

@@ -78,7 +78,8 @@ consumption bootstrap authority，使 state＋anchor＋lock 全刪／全改名�
 governed pytest provider 改由 reviewed Git head 的 exact lock＋8 支 hash-pinned wheels
 離線建立，不再信任 ambient user-site，closure schema 強制記錄 provider，source manifest
 遞迴納入 repo-local Python dependencies 與 pytest 會執行的 tracked package-parent
-`__init__.py`，W0 capture 的預設 bounded timeout 為 300 秒。
+`__init__.py`；210-test W0 在 300 秒留下 2 項未完成，故預設 bounded timeout
+依 exact-head machine evidence 校正為 600 秒。
 這只關閉 launch tooling 的 `PA-S2E-LW1-P2-006`、`F-LW1-04`、
 `F-LW1-04-schema` 與 `LAUNCH-04` review debt；**尚未發行 W0 genesis 或 LW1 wave
 receipt，尚未取得 `S2E_2B_2A_SECURITY_RECOVERY_READY`，不得解鎖 LW2**。
