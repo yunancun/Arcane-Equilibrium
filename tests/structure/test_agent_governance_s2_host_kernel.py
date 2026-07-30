@@ -284,10 +284,9 @@ def _raw_command_findings(path: Path, *, exec_family: bool = True) -> list[str]:
             }
             return families | ({"ctypes"} if node.id == "ctypes" else set())
         if isinstance(node, (ast.List, ast.Tuple)):
-            return {
-                index: _value_provenance(item)
-                for index, item in enumerate(node.elts)
-            }
+            members = {index: _value_provenance(item) for index, item in enumerate(node.elts)}
+            members[("sequence_length", len(node.elts))] = set()
+            return members
         if isinstance(node, ast.Dict):
             members: dict[object, object] = {}
             for key, item in zip(node.keys, node.values):
@@ -297,8 +296,9 @@ def _raw_command_findings(path: Path, *, exec_family: bool = True) -> list[str]:
                     continue
                 provenance = _value_provenance(item)
                 token = _key_token(key)
-                members[token] = _merge_provenance(
-                    members.get(token, set()), provenance
+                members[token] = (
+                    _merge_provenance(members[token], provenance)
+                    if token in members else provenance
                 )
                 if not isinstance(key, ast.Constant):
                     members[wildcard_key] = _merge_provenance(
@@ -500,31 +500,12 @@ def _raw_command_findings(path: Path, *, exec_family: bool = True) -> list[str]:
             ]
         return [(target, value, provenance)]
 
-    sequence_lengths: dict[str, int | None] = {}
+    def _sequence_length(provenance: object) -> int | None:
+        if not isinstance(provenance, dict):
+            return None
+        return max((key[1] for key in provenance if isinstance(key, tuple) and len(key) == 2 and key[0] == "sequence_length" and isinstance(key[1], int)), default=None)
+
     sequence_positions: dict[int, int] = {}
-    for item in sorted(ast.walk(tree), key=lambda node: (
-        getattr(node, "lineno", -1), getattr(node, "col_offset", -1)
-    )):
-        if isinstance(item, (ast.Assign, ast.AnnAssign)):
-            targets = item.targets if isinstance(item, ast.Assign) else [item.target]
-            if isinstance(item.value, (ast.List, ast.Tuple)):
-                for target in targets:
-                    if isinstance(target, ast.Name):
-                        sequence_lengths[target.id] = len(item.value.elts)
-        if (
-            isinstance(item, ast.Call) and isinstance(item.func, ast.Attribute)
-            and isinstance(item.func.value, ast.Name)
-            and item.func.attr in {"append", "extend"} and item.args
-        ):
-            name = item.func.value.id
-            start = sequence_lengths.get(name)
-            if start is not None:
-                sequence_positions[id(item)] = start
-                added = 1 if item.func.attr == "append" else (
-                    len(item.args[0].elts)
-                    if isinstance(item.args[0], (ast.List, ast.Tuple)) else None
-                )
-                sequence_lengths[name] = start + added if added is not None else None
 
     changed = True
     while changed:
@@ -532,11 +513,14 @@ def _raw_command_findings(path: Path, *, exec_family: bool = True) -> list[str]:
             repr(container_aliases),
             tuple((family, tuple(sorted(aliases))) for family, aliases in family_aliases.items()),
             tuple(sorted(dynamic_callable_aliases)),
+            tuple(sorted(sequence_positions.items())),
         )
         changed = False
         for node in ast.walk(tree):
             value: ast.AST | None = None
             targets: list[ast.AST] = []
+            sequence_receiver = None
+            sequence_end = None
             if isinstance(node, ast.Assign):
                 value, targets = node.value, list(node.targets)
             elif isinstance(node, ast.AnnAssign):
@@ -557,23 +541,37 @@ def _raw_command_findings(path: Path, *, exec_family: bool = True) -> list[str]:
             elif isinstance(node, ast.Call) and isinstance(node.func, ast.Attribute) and node.func.attr == "setdefault" and len(node.args) > 1:
                 value, targets = node.args[1], [ast.Subscript(value=node.func.value, slice=node.args[0], ctx=ast.Store())]
             elif isinstance(node, ast.Call) and isinstance(node.func, ast.Attribute) and node.func.attr in {"append", "extend"} and node.args:
+                sequence_receiver = node.func.value
                 start = sequence_positions.get(id(node))
-                if start is not None and node.func.attr == "extend" and isinstance(node.args[0], (ast.List, ast.Tuple)):
-                    value = node.args[0]
+                if start is None:
+                    start = _sequence_length(_value_provenance(sequence_receiver))
+                    if start is not None:
+                        sequence_positions[id(node)] = start
+                count = 1 if node.func.attr == "append" else _sequence_length(
+                    _value_provenance(node.args[0])
+                )
+                if start is not None and count is not None:
+                    values = [node.args[0]] if node.func.attr == "append" else [
+                        ast.Subscript(value=node.args[0], slice=ast.Constant(index), ctx=ast.Load())
+                        for index in range(count)
+                    ]
+                    value = ast.Tuple(elts=values, ctx=ast.Load())
                     targets = [ast.Tuple(elts=[
-                        ast.Subscript(value=node.func.value, slice=ast.Constant(start + index), ctx=ast.Store())
-                        for index in range(len(node.args[0].elts))
+                        ast.Subscript(value=sequence_receiver, slice=ast.Constant(start + index), ctx=ast.Store())
+                        for index in range(count)
                     ], ctx=ast.Store())]
+                    sequence_end = start + count
                 else:
-                    index = start if start is not None else ("sequence", "*")
                     value, targets = node.args[0], [ast.Subscript(
-                        value=node.func.value, slice=ast.Constant(index), ctx=ast.Store()
+                        value=sequence_receiver, slice=ast.Constant(("sequence", "*")), ctx=ast.Store()
                     )]
             bindings = [
                 binding
                 for target in targets
                 for binding in _assignment_bindings(target, value)
             ]
+            if sequence_end is not None:
+                bindings.append((sequence_receiver, None, {("sequence_length", sequence_end): set()}))
             for target, bound_value, provenance in bindings:
                 target_path = _target_path(target)
                 if target_path is not None and not isinstance(target, ast.Name):
@@ -616,6 +614,7 @@ def _raw_command_findings(path: Path, *, exec_family: bool = True) -> list[str]:
             repr(container_aliases),
             tuple((family, tuple(sorted(aliases))) for family, aliases in family_aliases.items()),
             tuple(sorted(dynamic_callable_aliases)),
+            tuple(sorted(sequence_positions.items())),
         )
 
     for node in ast.walk(tree):
@@ -1090,13 +1089,14 @@ AST_SCANNER_MUTATIONS = {
         "    outer['nested']['cap'] = os\n    return getattr(outer['nested']['cap'], name)(*argv)\n",
         "dynamic callable attribute",
     ),
-    "list_append_mutation": (
-        "def f(key, expr):\n    outer = []\n    outer.append(__builtins__)\n"
-        "    return outer[index][key](expr)\n", "dynamic execution subscript",
+    "nested_list_append_positions": (
+        "def f(key, expr):\n    outer = {'nested': []}\n    outer['nested'].append({})\n"
+        "    outer['nested'].append(__builtins__)\n    return outer['nested'][1][key](expr)\n",
+        "dynamic execution subscript",
     ),
-    "list_extend_mutation": (
-        "def f(key, expr):\n    outer = []\n    outer.extend([__builtins__])\n"
-        "    return outer[0][key](expr)\n", "dynamic execution subscript",
+    "list_extend_name_positions": (
+        "def f(key, expr):\n    source = [{}, __builtins__]\n    outer = []\n"
+        "    outer.extend(source)\n    return outer[1][key](expr)\n", "dynamic execution subscript",
     ),
     "computed_getattr_stored_in_container": (
         "import os\n\ndef f(name, argv):\n"
@@ -1240,8 +1240,8 @@ def test_container_aliases_do_not_taint_a_benign_sibling(tmp_path):
         "import sys\nouter = {slot: [[sys.modules]], 'safe': [[{}]]}\nouter['safe'][0][0][key].call(argv)\n",
         "import os\nouter = {slot: [[os]], 'safe': [[object()]]}\ngetattr(outer['safe'][0][0], name)\n",
         "safe, *caps = (object(), __builtins__)\ngetattr(safe, name)\n",
-        "outer = []\nouter.append({})\nouter.append(__builtins__)\nouter[0][key](expr)\n",
-        "outer = []\nouter.extend([{}])\nouter[0][key](expr)\n",
+        "outer = {'nested': []}\nouter['nested'].append({})\nouter['nested'].append(__builtins__)\nouter['nested'][0][key](expr)\n",
+        "source = [{}, __builtins__]\nouter = []\nouter.extend(source)\nouter[0][key](expr)\n",
     )
     for index, source in enumerate(sources):
         path = tmp_path / f"benign_container_sibling_{index}.py"
