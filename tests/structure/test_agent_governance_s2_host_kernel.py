@@ -1,10 +1,8 @@
 """S2 trusted-host kernel structural proof.
-
 The suite enforces one exec point, kernel-side argv re-assertion, capability
 separation, and a derived owner allowlist. It also proves target class is
 host-derived and process hardening is enforced.
 """
-
 from __future__ import annotations
 import ast
 import os
@@ -344,11 +342,6 @@ def _raw_command_findings(path: Path, *, exec_family: bool = True) -> list[str]:
                         exact if exact is not None
                         else mapping.get(("constant", ("sequence", "*")), set())
                     )
-                elif all(isinstance(key, tuple) for key in provenance):
-                    provenance = _merge_provenance(
-                        provenance.get(_key_token(node.slice), set()),
-                        provenance.get(wildcard_key, set()),
-                    )
                 else:
                     provenance = _flatten_provenance(provenance)
             families = _flatten_provenance(provenance)
@@ -507,6 +500,32 @@ def _raw_command_findings(path: Path, *, exec_family: bool = True) -> list[str]:
             ]
         return [(target, value, provenance)]
 
+    sequence_lengths: dict[str, int | None] = {}
+    sequence_positions: dict[int, int] = {}
+    for item in sorted(ast.walk(tree), key=lambda node: (
+        getattr(node, "lineno", -1), getattr(node, "col_offset", -1)
+    )):
+        if isinstance(item, (ast.Assign, ast.AnnAssign)):
+            targets = item.targets if isinstance(item, ast.Assign) else [item.target]
+            if isinstance(item.value, (ast.List, ast.Tuple)):
+                for target in targets:
+                    if isinstance(target, ast.Name):
+                        sequence_lengths[target.id] = len(item.value.elts)
+        if (
+            isinstance(item, ast.Call) and isinstance(item.func, ast.Attribute)
+            and isinstance(item.func.value, ast.Name)
+            and item.func.attr in {"append", "extend"} and item.args
+        ):
+            name = item.func.value.id
+            start = sequence_lengths.get(name)
+            if start is not None:
+                sequence_positions[id(item)] = start
+                added = 1 if item.func.attr == "append" else (
+                    len(item.args[0].elts)
+                    if isinstance(item.args[0], (ast.List, ast.Tuple)) else None
+                )
+                sequence_lengths[name] = start + added if added is not None else None
+
     changed = True
     while changed:
         before = (
@@ -524,13 +543,32 @@ def _raw_command_findings(path: Path, *, exec_family: bool = True) -> list[str]:
                 value, targets = node.value, [node.target]
             elif isinstance(node, ast.NamedExpr) or isinstance(node, ast.AugAssign) and isinstance(node.op, ast.BitOr):
                 value, targets = node.value, [node.target]
-            elif isinstance(node, ast.Call) and isinstance(node.func, ast.Attribute) and node.func.attr == "update" and node.args:
-                value, targets = node.args[0], [node.func.value]
+            elif isinstance(node, ast.Call) and isinstance(node.func, ast.Attribute) and node.func.attr == "update" and (node.args or node.keywords):
+                value = ast.Dict(
+                    keys=([None] if node.args else []) + [
+                        ast.Constant(keyword.arg) if keyword.arg is not None else None
+                        for keyword in node.keywords
+                    ],
+                    values=([node.args[0]] if node.args else []) + [
+                        keyword.value for keyword in node.keywords
+                    ],
+                )
+                targets = [node.func.value]
             elif isinstance(node, ast.Call) and isinstance(node.func, ast.Attribute) and node.func.attr == "setdefault" and len(node.args) > 1:
                 value, targets = node.args[1], [ast.Subscript(value=node.func.value, slice=node.args[0], ctx=ast.Store())]
             elif isinstance(node, ast.Call) and isinstance(node.func, ast.Attribute) and node.func.attr in {"append", "extend"} and node.args:
-                value, targets = node.args[0], [ast.Subscript(value=node.func.value,
-                    slice=ast.Constant(value=("sequence", "*")), ctx=ast.Store())]
+                start = sequence_positions.get(id(node))
+                if start is not None and node.func.attr == "extend" and isinstance(node.args[0], (ast.List, ast.Tuple)):
+                    value = node.args[0]
+                    targets = [ast.Tuple(elts=[
+                        ast.Subscript(value=node.func.value, slice=ast.Constant(start + index), ctx=ast.Store())
+                        for index in range(len(node.args[0].elts))
+                    ], ctx=ast.Store())]
+                else:
+                    index = start if start is not None else ("sequence", "*")
+                    value, targets = node.args[0], [ast.Subscript(
+                        value=node.func.value, slice=ast.Constant(index), ctx=ast.Store()
+                    )]
             bindings = [
                 binding
                 for target in targets
@@ -1026,7 +1064,7 @@ AST_SCANNER_MUTATIONS = {
         "dynamic execution subscript",
     ),
     "dict_update_mutation": (
-        "def f(key, expr):\n    outer = {}\n    outer.update({'cap': __builtins__})\n"
+        "def f(key, expr):\n    outer = {}\n    outer.update(cap=__builtins__)\n"
         "    return outer['cap'][key](expr)\n", "dynamic execution subscript",
     ),
     "dict_setdefault_mutation": (
@@ -1054,7 +1092,7 @@ AST_SCANNER_MUTATIONS = {
     ),
     "list_append_mutation": (
         "def f(key, expr):\n    outer = []\n    outer.append(__builtins__)\n"
-        "    return outer[0][key](expr)\n", "dynamic execution subscript",
+        "    return outer[index][key](expr)\n", "dynamic execution subscript",
     ),
     "list_extend_mutation": (
         "def f(key, expr):\n    outer = []\n    outer.extend([__builtins__])\n"
@@ -1202,7 +1240,7 @@ def test_container_aliases_do_not_taint_a_benign_sibling(tmp_path):
         "import sys\nouter = {slot: [[sys.modules]], 'safe': [[{}]]}\nouter['safe'][0][0][key].call(argv)\n",
         "import os\nouter = {slot: [[os]], 'safe': [[object()]]}\ngetattr(outer['safe'][0][0], name)\n",
         "safe, *caps = (object(), __builtins__)\ngetattr(safe, name)\n",
-        "outer = []\nouter.append({})\nouter[0][key](expr)\n",
+        "outer = []\nouter.append({})\nouter.append(__builtins__)\nouter[0][key](expr)\n",
         "outer = []\nouter.extend([{}])\nouter[0][key](expr)\n",
     )
     for index, source in enumerate(sources):
@@ -1236,12 +1274,9 @@ def test_a_mutation_injected_into_a_real_family_file_is_caught(tmp_path):
 
 
 def test_the_import_allowlist_is_positive_and_kernel_only_imports_are_kernel_only(tmp_path):
-    # 白名單是**正面**的:一個從未宣告過的模組(即使人畜無害)也必須被抓到 —— 這正是它比黑名單
-    # 難繞的原因。
     sample = tmp_path / "unknown_module.py"
     sample.write_text("import socketserver\n", encoding="utf-8")
     assert _raw_command_findings(sample)
-    # subprocess / ctypes 只准 kernel:同一份 source 放在非 kernel 檔名下必紅。
     for module in sorted(KERNEL_ONLY_IMPORTS):
         elsewhere = tmp_path / f"not_the_kernel_{module}.py"
         elsewhere.write_text(f"import {module}\n", encoding="utf-8")
@@ -1257,7 +1292,6 @@ def test_kernel_is_the_only_family_member_importing_subprocess():
             assert "subprocess" not in source, path.name
 
 
-# (1)+(4) allowlist ≡ owner — derived, not hand-copied
 _FRAG = "/etc/systemd/system/arcane-equilibrium-aiml-engine-scanner.service"
 _FLOCK = "/run/arcane-equilibrium/aiml-engine-scanner/consumer.lock"
 _DSN = "/run/credentials/arcane-equilibrium-aiml-engine-scanner.service/pg-dsn"
@@ -1333,7 +1367,6 @@ def test_kernel_read_allowlist_equals_the_argv_the_owner_actually_issues(tmp_pat
     qi.build_owner_inventory(probe, _ScriptedCursor(), intent=intent)
     issued = set(probe.argv)
     assert issued, "the owner module issued no host command"
-    # 導出比對(非手抄):owner 實際送出的每一條 argv 都在 kernel 的唯讀 allowlist 內,且兩者相等。
     assert issued == set(kernel.SESSION_ARGV_ALLOWLISTS[kernel.SESSION_S2_1_QUIESCE_READ])
 
 
@@ -1348,7 +1381,6 @@ def test_fence_allowlist_is_exactly_the_units_own_stop_start():
         (qi.SYSTEMD, "stop", qi.UNIT_NAME),
         (qi.SYSTEMD, "start", qi.UNIT_NAME),
     })
-    # fence argv 絕不是 pkill / kill-by-name / kill-by-pattern / kill-by-pid,也永遠不是 --user。
     for argv in fence:
         assert argv[0] == qi.SYSTEMD
         assert argv[2] == qi.UNIT_NAME
@@ -1361,7 +1393,6 @@ def test_s2_0_session_has_no_argv_surface_at_all():
         kernel.assert_session_argv(kernel.SESSION_S2_0_OBSERVER_BOOTSTRAP, ["/usr/bin/psql", "-c", "select 1"])
 
 
-# (2) kernel-side independent re-assert — a non-allowlisted argv NEVER executes
 @pytest.mark.parametrize("argv", [
     [qi.SYSTEMD, "stop", qi.UNIT_NAME],                                   # 唯讀 session 不得 stop
     [qi.SYSTEMD, "show", qi.UNIT_NAME],                                   # 屬性集不完整
@@ -1471,7 +1502,6 @@ def test_stdout_is_redacted_with_the_existing_capture_v2_patterns(monkeypatch):
     assert "<redacted>" in output
 
 
-# (3) capability partition
 class _WriterSurface:
     def stop(self):  # pragma: no cover - 必須永不被呼叫
         raise AssertionError("assert_read_only_surface must refuse BEFORE calling anything")
@@ -1497,7 +1527,6 @@ def test_forbidden_read_only_surface_covers_the_four_adapter_mutators():
         assert name in kernel.FORBIDDEN_READ_ONLY_SURFACE
 
 
-# target class is derived from HOST FACTS (a caller string can never reach it)
 def _force_host(monkeypatch, *, platform, hostname, writable, roots):
     monkeypatch.setattr(kernel.sys, "platform", platform)
     monkeypatch.setattr(kernel, "_observed_nodename", lambda: hostname)
@@ -1509,9 +1538,6 @@ def _force_host(monkeypatch, *, platform, hostname, writable, roots):
 @pytest.mark.parametrize("platform,hostname,writable,roots,expected", [
     ("darwin", "trade-core", True, True, kernel.TARGET_CLASS_NON_TARGET),
     ("linux", "some-laptop", True, True, kernel.TARGET_CLASS_NON_TARGET),
-    # P1-A:未供裝 + 非 root(unit dir 不可寫、canonical roots 全缺)**曾經**落
-    # ``disposable_candidate``(= 無條件放行)。那是初始供裝 / 恢復期的真 trade-core 常態視圖,
-    # 故 hostname 支配供裝訊號,結果必須是 ``unknown``(與 production 同等對待)。
     ("linux", "trade-core", False, False, kernel.TARGET_CLASS_UNKNOWN),
     ("linux", "trade-core", True, True, kernel.TARGET_CLASS_PRODUCTION),
     ("linux", "trade-core", None, True, kernel.TARGET_CLASS_UNKNOWN),
@@ -1533,13 +1559,11 @@ def test_derive_host_target_class_takes_no_caller_argument():
 
 
 def test_this_development_machine_is_never_a_production_target():
-    # Mac 開發機:不論本地檔案系統長什麼樣,必為 non_target(絕不可能誤判成 production)。
     view = kernel.derive_host_target_class()
     if sys.platform != "linux":
         assert view["target_class"] == kernel.TARGET_CLASS_NON_TARGET
 
 
-# production / unknown admission matrix — --allow-production alone is NOT enough
 DIGEST = "sha256:" + "a" * 64
 
 
@@ -1572,7 +1596,6 @@ def test_all_four_conditions_admit_and_any_missing_one_refuses(target_class):
         {"operator_authorization_verified": False},
         {"production_confirm": "sha256:" + "b" * 64},
         {"production_confirm": None},
-        # P1-B:第四條件 —— intent 自宣告的 class 必須與導出的主機 class 同一級。
         {"intent_target_class": kernel.INTENT_TARGET_CLASS_DISPOSABLE_LOCAL},
         {"intent_target_class": None},
     ):
@@ -1603,7 +1626,6 @@ def test_a_disposable_local_intent_is_refused_on_a_production_grade_host(target_
     errors = kernel.host_target_admission_errors(
         view, **{**ADMITTED, "intent_target_class": kernel.INTENT_TARGET_CLASS_DISPOSABLE_LOCAL}
     )
-    # 其餘三條件全部滿足 ⇒ 唯一的拒絕理由就是這道綁定(不是碰巧被別的條件擋下)。
     assert len(errors) == 1
     assert kernel.INTENT_TARGET_CLASS_DISPOSABLE_LOCAL in errors[0]
 
@@ -1620,7 +1642,6 @@ def test_the_intent_binding_reason_never_echoes_the_caller_string():
     joined = " ".join(errors)
     assert hostile not in joined
     assert "unrecognized" in joined
-    # 壞 intent 可能遞來不可雜湊值:謂詞必須照樣回一份 typed 拒絕,而不是自己炸成 TypeError。
     for unhashable in ([], {}, {"target_class": "production"}):
         assert kernel.host_target_admission_errors(
             view, **{**ADMITTED, "intent_target_class": unhashable}
@@ -1638,7 +1659,6 @@ def test_non_target_and_the_rehearsal_only_class_are_both_refused():
         **ADMITTED,
     )
     assert any("rehearsal-only" in error for error in errors)
-    # 連「四條件全滿足」都救不回來:它根本不是一個可導出的主機事實。
     assert kernel.host_target_admission_errors(
         {"target_class": kernel.TARGET_CLASS_DISPOSABLE_CANDIDATE, "reason": "throwaway"},
         allow_production=False, production_confirm=None, intent_digest=None,
@@ -1708,7 +1728,6 @@ def test_unknown_is_treated_exactly_like_production():
         )
 
 
-# rehearsal lane — an injected view may only TIGHTEN, never loosen (RUN-1)
 DISPOSABLE = {"target_class": kernel.TARGET_CLASS_DISPOSABLE_CANDIDATE, "reason": "throwaway"}
 NON_TARGET = {"target_class": kernel.TARGET_CLASS_NON_TARGET, "reason": "mac"}
 
@@ -1716,12 +1735,10 @@ NON_TARGET = {"target_class": kernel.TARGET_CLASS_NON_TARGET, "reason": "mac"}
 @pytest.mark.parametrize("derived,injected,refused", [
     (DISPOSABLE, None, False),
     (NON_TARGET, None, False),
-    # derived 落在 production-grade ⇒ 拒,任何注入都救不回來(注入不能放寬)。
     ({"target_class": kernel.TARGET_CLASS_PRODUCTION}, None, True),
     ({"target_class": kernel.TARGET_CLASS_UNKNOWN}, None, True),
     ({"target_class": kernel.TARGET_CLASS_PRODUCTION}, DISPOSABLE, True),
     ({"target_class": kernel.TARGET_CLASS_UNKNOWN}, DISPOSABLE, True),
-    # injected 落在 production-grade ⇒ 也拒(注入只能加嚴)。
     (NON_TARGET, {"target_class": kernel.TARGET_CLASS_PRODUCTION}, True),
     (NON_TARGET, {"target_class": kernel.TARGET_CLASS_UNKNOWN}, True),
     (DISPOSABLE, {"target_class": kernel.TARGET_CLASS_PRODUCTION}, True),
@@ -1746,7 +1763,6 @@ def test_the_recorded_target_class_is_always_the_derived_one():
     assert record["injected_is_authoritative"] is False
 
 
-# W5 #21 — PR_SET_DUMPABLE is actually enforced (not a declared constant)
 def test_process_hardening_is_observed_and_load_bearing():
     observation = kernel.enforce_process_hardening(force=True)
     if sys.platform == "linux":
@@ -1754,8 +1770,6 @@ def test_process_hardening_is_observed_and_load_bearing():
     else:
         assert observation["enforced"] is False
         assert observation["observed_dumpable"] is None
-        # P2 #7:舊理由字串宣稱「the kernel executes no host command here」是**假的**
-        # ——這條路徑確實會 exec(observer child)。新字串必須誠實。
         assert "executes no host command" not in observation["reason"]
         assert "cannot be observed on this platform" in observation["reason"]
         assert "may still execute here" in observation["reason"]
@@ -1785,10 +1799,8 @@ def test_process_hardening_is_re_observed_on_every_execution(monkeypatch):
     assert observations["count"] == 2
 
 
-# P2 #7 — the read-only observation face also passes an L1 gate (a weaker one)
 @pytest.mark.parametrize("target_class,allow,refused", [
     (kernel.TARGET_CLASS_NON_TARGET, False, False),
-    # P1-A:rehearsal-only class 導不出來 ⇒ 觀測面見到它也只能是偽造視圖,一律拒。
     (kernel.TARGET_CLASS_DISPOSABLE_CANDIDATE, False, True),
     (kernel.TARGET_CLASS_DISPOSABLE_CANDIDATE, True, True),
     (kernel.TARGET_CLASS_PRODUCTION, False, True),
@@ -1804,8 +1816,6 @@ def test_read_only_observation_admission(target_class, allow, refused):
 
 
 def test_the_observation_gate_is_deliberately_weaker_than_the_apply_gate():
-    # 觀測面不需要 SSHSIG / --production-confirm(觀測正是拿到 permit 之前要做的事),但 apply 面
-    # 在同一份 view 上仍然需要四條件 —— 兩者絕不可被混為一談。
     view = {"target_class": kernel.TARGET_CLASS_PRODUCTION, "reason": "x"}
     assert kernel.host_observation_admission_errors(view, allow_production=True) == []
     assert kernel.host_target_admission_errors(
@@ -1815,12 +1825,10 @@ def test_the_observation_gate_is_deliberately_weaker_than_the_apply_gate():
     )
 
 
-# P2 #12 — hostname is derived from the same source as S1.6B
 def test_hostname_comes_from_the_same_source_as_the_s1_6b_preflight():
     import agent_governance_target_host_probe as th
     import inspect
 
-    # S1.6B 用 os.uname().nodename;kernel 必須同源(否則同一台主機會有兩個身分)。
     assert "os.uname().nodename" in inspect.getsource(th.preflight_target_host)
     assert kernel._observed_nodename() == os.uname().nodename
 
@@ -1887,7 +1895,6 @@ def test_kernel_abi_projection_is_code_owned():
     assert projection["production_grade_target_classes"] == sorted(
         {kernel.TARGET_CLASS_PRODUCTION, kernel.TARGET_CLASS_UNKNOWN}
     )
-    # P1-A / P1-B 的兩條硬邊界必須在 artifact 上看得見(稽核不必讀原始碼)。
     assert projection["rehearsal_only_target_classes"] == [
         kernel.TARGET_CLASS_DISPOSABLE_CANDIDATE
     ]
@@ -1897,16 +1904,12 @@ def test_kernel_abi_projection_is_code_owned():
     assert projection["production_entry_intent_target_class"] == (
         kernel.INTENT_TARGET_CLASS_PRODUCTION
     )
-    # 出境守衛必須在 artifact 上看得見,且其判準明記為 capture_v2 的既有規則(非自造)。
     assert projection["egress_secret_scanner"].endswith(
         "scan_serializable_surface_for_secrets"
     )
     assert projection["egress_secret_scanner_rules"].endswith("SECRET_VALUE_PATTERNS")
 
 
-# (6) 出境秘密掃描 —— 判準必須是 capture_v2 的既有規則,而不是本 kernel 自造的第二套
-# 反例以片段拼接構造(repo 內不留任何看起來像真憑證的字面量);三段分別命中
-# ``SECRET_VALUE_PATTERNS`` 的三條規則:賦值形 / bearer 形 / URL user:pass 形。
 _SECRET_SHAPED_VALUES = (
     "PG" + "PASSWORD" + "=" + "s3cr3t-not-real",
     "Authorization: " + "Bearer " + "abcdef0123456789",
@@ -1947,7 +1950,6 @@ def test_every_central_secret_rule_blocks_an_observation(value):
     payload["faces"]["unit_state"]["properties"]["Environment"] = value
     reasons = kernel.scan_serializable_surface_for_secrets(payload)
     assert reasons, value
-    # 理由只帶鍵名 trail;命中的值本身**絕不**出現在理由裡(否則理由就是第二條洩漏路徑)。
     assert "faces.unit_state.properties.Environment" in reasons[0]
     assert value not in reasons[0]
 
@@ -1968,9 +1970,7 @@ def test_the_scanner_delegates_to_the_capture_v2_rules_not_a_second_set():
 
     source = inspect.getsource(kernel._carries_secret_shaped_value)
     assert "from agent_governance_command_capture_v2 import _redact_preview" in source
-    # kernel 不得自造第二套 secret 正則。
     assert "re.compile" not in source
-    # 中央規則各有一個對應反例:新增一條中央規則而沒補反例 ⇒ 本測試變紅。
     assert len(SECRET_VALUE_PATTERNS) == len(_SECRET_SHAPED_VALUES)
 
 
