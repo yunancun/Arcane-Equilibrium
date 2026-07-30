@@ -48,6 +48,21 @@ def resolve_facade():
 
 SCHEMA_DIR = Path(__file__).resolve().parent / "schemas" / "aiml_gate_receipts"
 SCHEMA_FILES = {
+    "s2e_launch_genesis_receipt_v1": "s2e_launch_genesis_receipt_v1.schema.json",
+    "s2e_launch_wave_receipt_v1": "s2e_launch_wave_receipt_v1.schema.json",
+    "receipt_carrier_attestation_v1": "receipt_carrier_attestation_v1.schema.json",
+    "s2e_launch_acceptance_review_bundle_v1": (
+        "s2e_launch_acceptance_review_bundle_v1.schema.json"
+    ),
+    "s2e_disposable_test_effect_chain_v1": (
+        "s2e_disposable_test_effect_chain_v1.schema.json"
+    ),
+    "s2e_launch_predecessor_consumption_ledger_v1": (
+        "s2e_launch_predecessor_consumption_ledger_v1.schema.json"
+    ),
+    "s2e_launch_consumption_bootstrap_authority_v1": (
+        "s2e_launch_consumption_bootstrap_authority_v1.schema.json"
+    ),
     "aiml_required_effect_classification_v1": "aiml_required_effect_classification_v1.schema.json",
     "github_repository_policy_attestation_v1": "github_repository_policy_attestation_v1.schema.json",
     "aiml_receipt_dependency_graph_v1": "aiml_receipt_dependency_graph_v1.schema.json",
@@ -234,6 +249,15 @@ SCHEMA_FILES = {
     "s2_5_authorization_replay_ledger_v1": (
         "s2_5_authorization_replay_ledger_v1.schema.json"
     ),
+    # S2E.LW1:identity-bound S2.5 unresolved-recovery chain.  These are source contracts;
+    # off-root anchor/unresolved-manifest persistence remains a later host-runtime slice.
+    "s2_5_recovery_host_capture_v1": (
+        "s2_5_recovery_host_capture_v1.schema.json"
+    ),
+    "s2_5_recovery_intent_v1": "s2_5_recovery_intent_v1.schema.json",
+    "s2_5_recovery_result_v1": "s2_5_recovery_result_v1.schema.json",
+    "s2_5_recovery_postcheck_v1": "s2_5_recovery_postcheck_v1.schema.json",
+    "s2_5_recovery_rollback_v1": "s2_5_recovery_rollback_v1.schema.json",
     "aiml_component_effect_classification_v3": (
         "aiml_component_effect_classification_v3.schema.json"
     ),

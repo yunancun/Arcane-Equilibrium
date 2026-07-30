@@ -1,6 +1,6 @@
 # 玄衡 TODO - 活躍派發佇列
 
-**版本** v862 | **校正日期** 2026-07-29 | **W0 intake source 基線** `83dc0ec3017e541e156e557c2e2d16f1704682a3` | **W1-W5 launch audit 基線** `815eff545980d9a51fbbb084eaf46c5ab4a67f15`
+**版本** v863 | **校正日期** 2026-07-30 | **W0 intake source 基線** `83dc0ec3017e541e156e557c2e2d16f1704682a3` | **W1-W5 launch audit 基線** `815eff545980d9a51fbbb084eaf46c5ab4a67f15`
 **來源／runtime 指針**：S0=`PROGRAM_ADOPTED`；S1=`S1_CLOSED`；S2 七個窄義 source seams 已 landed。2026-07-29 Linux 唯讀複核：`openclaw-learning.service` 與 `arcane-equilibrium-aiml-engine-scanner.service` 均 `not-found/inactive`，兩個 canonical AIML roots 均不存在；source sync 不等於 deploy。
 **W0 驗證結論**：`SOURCE_SYNCED_WITH_REVIEW_DEBT`，不是完整 PASS。PR #160 已 exact-head merge，Mac／GitHub／Linux source 均為 `815eff545980d9a51fbbb084eaf46c5ab4a67f15`，但 merge 後 review 留下 2 個 P1＋1 個 P2：S2.0 lazy membership mutation 尚無 Adapter、S2E.4 未逐項承接全部 S2E.1 residual、CodeQL #95 缺 durable evidence pin。三項分別綁入 `S2E-LW4`／`S2E-LW5`；舊 packet 的 out-of-band `GRANT/REVOKE` 指示不得執行。
 **當前唯一 AI/ML 派發**：`S2_EFFECT_EXECUTION_READINESS_ACTIVE`，九個 effect-readiness 拆分包已完成 **5/9**：`S2E.0`、`S2E.1`、`S2E.2a`、`S2E.2b-1`、`S2E.3`。唯一 ACTIVE 入口是 **`S2E.2b-2`**；後續只按 `S2E.2b-2 → S2E.2b-3 → S2E.4 → S2E.5` 前進，不重派已完成包。W0 source/ledger projection 為 `admitted_production_effect_receipt_count=0/6`、九項 authority artifacts 均 false；這是 W0 scope 的 machine projection，不是全局 runtime 不存在性證明。S2 未關閉，舊 `S2-operator-action-packet-v1.md` 保持 `DRAFT_NOT_EXECUTABLE`；fresh Operator authorization 不是唯一 blocker，S1 disposable authority 不可沿用。
@@ -16,7 +16,7 @@
 
 ## AI/ML 一分鐘派發看板
 
-本節只負責回答四件事：**現在做哪個 Sprint、包含哪些 Session、哪些可並行、何時停止**。S0 已關閉，S1=`S1_CLOSED`；S2 七個窄義 source seams 均 landed，但 effect-execution readiness 尚未完成。九個拆分包已完成 **5/9**：`S2E.0`、`S2E.1`、`S2E.2a`、`S2E.2b-1`、`S2E.3`；**現在唯一派發 `S2E.2b-2`**，其後 `S2E.2b-3 → S2E.4 → S2E.5`。不得重開 WP1-WP5 或五個已完成包，不得執行 `DRAFT_NOT_EXECUTABLE` packet，不得把 source/CI 當 runtime。28 條 obligations 必須從 live ABI 枚舉並逐條關閉或裁決。詳細 scope 以本 TODO 的 S2E 表與 `PROGRESS.md` ledger v16 為準；兩者衝突時停止，由 PM 綁定 current generation。
+本節只負責回答四件事：**現在做哪個 Sprint、包含哪些 Session、哪些可並行、何時停止**。S0 已關閉，S1=`S1_CLOSED`；S2 七個窄義 source seams 均 landed，但 effect-execution readiness 尚未完成。九個拆分包已完成 **5/9**：`S2E.0`、`S2E.1`、`S2E.2a`、`S2E.2b-1`、`S2E.3`；**現在唯一派發 `S2E.2b-2`**，其後 `S2E.2b-3 → S2E.4 → S2E.5`。不得重開 WP1-WP5 或五個已完成包，不得執行 `DRAFT_NOT_EXECUTABLE` packet，不得把 source/CI 當 runtime。28 條 obligations 必須從 live ABI 枚舉並逐條關閉或裁決。詳細 scope 以本 TODO 的 S2E 表與 `PROGRESS.md` ledger v19 為準；兩者衝突時停止，由 PM 綁定 current generation。
 
 ### 命令解析
 
@@ -70,6 +70,37 @@
 這五個 ID 是本次剩餘 S2E source 工作的**唯一 launch-wave 別名**，不得縮寫成
 `W1-W5`。固定依賴為 `LW1 → LW2 → LW3 → LW4 → LW5`；shared kernel／route／closure
 writer 全部串行，只有凍結 exact generation 後的 read-only reviewer 可並行。
+
+**2026-07-30 校準 checkpoint（不是 LW1 exit）**：launch-gate source 已補上
+purpose-specific、candidate/source/wave/review/expected-entry 綁定的 trusted-signer
+consumption bootstrap authority，使 state＋anchor＋lock 全刪／全改名後，無 authority
+或 cross-candidate authority 均 fail closed，而 exact signed entry 可 crash-retry；
+governed pytest provider 改由 reviewed Git head 的 exact lock＋8 支 hash-pinned wheels
+離線建立，不再信任 ambient user-site，closure schema 強制記錄 provider，source manifest
+遞迴納入 repo-local Python dependencies 與 pytest 會執行的 tracked package-parent
+`__init__.py`；210-test W0 在 300 秒留下 2 項未完成，故預設 bounded timeout
+依 exact-head machine evidence 校正為 600 秒。
+同一 frozen candidate 的 current-head Codex review 再發現兩個 recovery 缺口：
+prepared anchor intent 過期後仍可能先進 writer effect window，以及 unresolved latch
+只活在 weak in-process registry。兩者已在本 checkpoint 以 effect 前 freshness
+拒絕、strong controller ownership，及位於可替換 state root 外的 owner-only
+append-history durable latch ledger＋exact readback 修復；root rename／process
+reconstruction 不再清閂，所有 ledger entry 仍固定為 `DISPOSABLE_TEST` 且
+production effect／authority 均 false。Delta review 再證明本地合法 prefix 仍可
+rollback；因此 resolved tombstone 在 process reconstruction 後若無 external monotonic
+floor 一律 fail closed，且每次 predecessor consumption（含 intact-state retry）均
+強制 fresh、candidate-bound、single-use external registry authority，不能只信
+Git common directory 內可一併 rollback 的 state＋anchor。
+後續 exact-head review 的兩項 P1（`#discussion_r3685648122`、
+`#discussion_r3685648131`）亦在 publication 前閉合：receipt issuance 在任何
+驗證／effect 前只從 host clock 擷取一次 UTC，API／CLI 不再接受 caller `now`；
+owner/mode-checked off-repository trust-root profile 同時釘住 governed pytest
+provider profile 與 exact lock SHA256，lock 再釘住八支 wheel hash，因此 candidate
+不能用一組同步竄改的 wheel＋lock 自我認證。
+這只關閉 launch tooling 的 `PA-S2E-LW1-P2-006`、`F-LW1-04`、
+`F-LW1-04-schema` 與 `LAUNCH-04` review debt；**尚未發行 W0 genesis 或 LW1 wave
+receipt，尚未取得 `S2E_2B_2A_SECURITY_RECOVERY_READY`，不得解鎖 LW2**。
+`S2E.2b-2` 保持 ACTIVE，production effect=0，九項 authority 仍全 false。
 
 `S2E-LW1` 必須先建立並審核共用 closed `s2e_launch_genesis_receipt_v1`／
 `s2e_launch_wave_receipt_v1` schema、generator、validator，再由該 tooling 對 W0 exact

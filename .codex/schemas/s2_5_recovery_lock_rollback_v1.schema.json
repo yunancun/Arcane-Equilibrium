@@ -1,0 +1,105 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://arcane-equilibrium.local/schemas/s2_5_recovery_lock_rollback_v1.schema.json",
+  "title": "s2_5_recovery_lock_rollback_v1",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "schema_version", "intent_digest", "result_digest", "status",
+    "release_order", "s2_5_release_attempted", "s2_5_released",
+    "s2_4_release_attempted", "s2_4_released", "session_closed",
+    "lock_files_unlinked", "failure_code", "side_effect_class",
+    "target_class", "target_profile_id", "evidence_class",
+    "runtime_observed", "production_effect", "production_authority",
+    "production_effect_count", "self_digest"
+  ],
+  "properties": {
+    "schema_version": {"const": "s2_5_recovery_lock_rollback_v1"},
+    "intent_digest": {"$ref": "#/$defs/digest"},
+    "result_digest": {"$ref": "#/$defs/digest"},
+    "status": {
+      "enum": [
+        "NOT_REQUIRED", "RELEASED_AFTER_PARTIAL_ACQUIRE", "RELEASED",
+        "RECOVERY_REQUIRED"
+      ]
+    },
+    "release_order": {
+      "type": "array", "minItems": 2, "maxItems": 2,
+      "items": {"enum": ["S2.5", "S2.4"]}
+    },
+    "s2_5_release_attempted": {"type": "boolean"},
+    "s2_5_released": {"type": "boolean"},
+    "s2_4_release_attempted": {"type": "boolean"},
+    "s2_4_released": {"type": "boolean"},
+    "session_closed": {"type": "boolean"},
+    "lock_files_unlinked": {"const": false},
+    "failure_code": {
+      "anyOf": [{"type": "string", "minLength": 1}, {"type": "null"}]
+    },
+    "side_effect_class": {"const": "DISPOSABLE_TEST"},
+    "target_class": {"const": "disposable_systemd"},
+    "target_profile_id": {
+      "const": "s2_5_recovery_user_systemd_disposable_v1"
+    },
+    "evidence_class": {"const": "LOCAL_REPRODUCIBLE"},
+    "runtime_observed": {"const": false},
+    "production_effect": {"const": false},
+    "production_authority": {"const": false},
+    "production_effect_count": {"const": 0},
+    "self_digest": {"$ref": "#/$defs/digest"}
+  },
+  "allOf": [
+    {
+      "if": {"properties": {"status": {"const": "NOT_REQUIRED"}}},
+      "then": {
+        "properties": {
+          "s2_5_release_attempted": {"const": false},
+          "s2_5_released": {"const": false},
+          "s2_4_release_attempted": {"const": false},
+          "s2_4_released": {"const": false},
+          "failure_code": {"type": "null"}
+        }
+      }
+    },
+    {
+      "if": {
+        "properties": {"status": {"const": "RELEASED_AFTER_PARTIAL_ACQUIRE"}}
+      },
+      "then": {
+        "properties": {
+          "s2_5_release_attempted": {"const": false},
+          "s2_5_released": {"const": false},
+          "s2_4_release_attempted": {"const": true},
+          "s2_4_released": {"const": true},
+          "session_closed": {"const": true},
+          "failure_code": {"type": "null"}
+        }
+      }
+    },
+    {
+      "if": {"properties": {"status": {"const": "RELEASED"}}},
+      "then": {
+        "properties": {
+          "s2_5_release_attempted": {"const": true},
+          "s2_5_released": {"const": true},
+          "s2_4_release_attempted": {"const": true},
+          "s2_4_released": {"const": true},
+          "session_closed": {"const": true},
+          "failure_code": {"type": "null"}
+        }
+      }
+    },
+    {
+      "if": {"properties": {"status": {"const": "RECOVERY_REQUIRED"}}},
+      "then": {
+        "properties": {
+          "session_closed": {"const": false},
+          "failure_code": {"type": "string", "minLength": 1}
+        }
+      }
+    }
+  ],
+  "$defs": {
+    "digest": {"type": "string", "pattern": "^sha256:[0-9a-f]{64}$"}
+  }
+}

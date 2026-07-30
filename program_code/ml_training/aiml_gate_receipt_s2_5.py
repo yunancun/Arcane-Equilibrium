@@ -607,6 +607,14 @@ def validate_s2_5_artifact(artifact: Any, *, now: Any = None) -> list[str]:
         errors.extend(
             _freshness_errors("s2_5 rollback drill", artifact.get("expires_at"), now_text)
         )
+    elif schema_version in {
+        "s2_5_recovery_intent_v1", "s2_5_recovery_result_v1",
+        "s2_5_recovery_postcheck_v1", "s2_5_recovery_rollback_v1",
+    }:
+        if str(_HELPER_DIR) not in sys.path:
+            sys.path.insert(0, str(_HELPER_DIR))
+        import agent_governance_s2_5_recovery as _recovery
+        errors.extend(_recovery.validate_recovery_artifact(artifact, now=now_text))
     else:
         errors.append(f"unsupported s2_5 schema_version: {schema_version!r}")
     return errors

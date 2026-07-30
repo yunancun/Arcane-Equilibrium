@@ -1,0 +1,113 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://arcane-equilibrium.local/schemas/s2_5_recovery_host_capture_v1.schema.json",
+  "title": "s2_5_recovery_host_capture_v1",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "schema_version", "capture_profile", "source_head", "stable_host_facts",
+    "host_identity", "node_identity", "process_identity", "boot_manager_facts",
+    "observed_at", "expires_at", "side_effect_class", "production_effect",
+    "production_authority", "target_class", "signer_identity",
+    "signer_fingerprint", "signature_namespace", "signed_binding",
+    "sshsig_armored", "self_digest"
+  ],
+  "properties": {
+    "schema_version": {"const": "s2_5_recovery_host_capture_v1"},
+    "capture_profile": {"const": "DISPOSABLE_SYSTEMD_RECOVERY_HOST"},
+    "source_head": {"$ref": "#/$defs/git_sha"},
+    "stable_host_facts": {"$ref": "#/$defs/stable_host_facts"},
+    "host_identity": {"type": "string", "pattern": "^host:[0-9a-f]{64}$"},
+    "node_identity": {"$ref": "#/$defs/node_identity"},
+    "process_identity": {"$ref": "#/$defs/process_identity"},
+    "boot_manager_facts": {"$ref": "#/$defs/boot_manager_facts"},
+    "observed_at": {"$ref": "#/$defs/timestamp"},
+    "expires_at": {"$ref": "#/$defs/timestamp"},
+    "side_effect_class": {"const": "DISPOSABLE_TEST"},
+    "production_effect": {"const": false},
+    "production_authority": {"const": false},
+    "target_class": {"const": "disposable_systemd"},
+    "signer_identity": {"const": "aiml-s2-5-recovery-host-capture-attestor-v1"},
+    "signer_fingerprint": {
+      "type": "string", "pattern": "^SHA256:[A-Za-z0-9+/]{43}$"
+    },
+    "signature_namespace": {
+      "const": "arcane-equilibrium-aiml-s2-5-recovery-host-capture"
+    },
+    "signed_binding": {"$ref": "#/$defs/signed_binding"},
+    "sshsig_armored": {"type": "string", "minLength": 1},
+    "self_digest": {"$ref": "#/$defs/digest"}
+  },
+  "$defs": {
+    "digest": {"type": "string", "pattern": "^sha256:[0-9a-f]{64}$"},
+    "git_sha": {"type": "string", "pattern": "^[0-9a-f]{40}$"},
+    "timestamp": {"type": "string", "format": "date-time"},
+    "stable_host_facts": {
+      "type": "object", "additionalProperties": false,
+      "required": ["machine_id_digest", "node_name", "os_id", "architecture"],
+      "properties": {
+        "machine_id_digest": {"$ref": "#/$defs/digest"},
+        "node_name": {"type": "string", "minLength": 1},
+        "os_id": {"type": "string", "minLength": 1},
+        "architecture": {"type": "string", "minLength": 1}
+      }
+    },
+    "node_identity": {
+      "type": "object", "additionalProperties": false,
+      "required": ["node_id", "role", "permission", "key_identity"],
+      "properties": {
+        "node_id": {"type": "string", "minLength": 1},
+        "role": {"const": "HOST_ATTESTOR"},
+        "permission": {"const": "read_only"},
+        "key_identity": {"type": "string", "minLength": 1}
+      }
+    },
+    "process_identity": {
+      "type": "object", "additionalProperties": false,
+      "required": ["uid", "cgroup"],
+      "properties": {
+        "uid": {"type": "integer", "minimum": 0},
+        "cgroup": {"type": "string", "minLength": 1}
+      }
+    },
+    "boot_manager_facts": {
+      "type": "object", "additionalProperties": false,
+      "required": [
+        "boot_id", "manager", "manager_root", "unit_name", "canonical_state_root"
+      ],
+      "properties": {
+        "boot_id": {"type": "string", "minLength": 1},
+        "manager": {"const": "systemd"},
+        "manager_root": {"const": "/run/systemd/system"},
+        "unit_name": {"const": "arcane-equilibrium-aiml-engine-scanner.service"},
+        "canonical_state_root": {"type": "string", "pattern": "^/"}
+      }
+    },
+    "signed_binding": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "schema_version", "capture_profile", "source_head", "stable_host_facts",
+        "host_identity", "node_identity", "process_identity", "boot_manager_facts",
+        "observed_at", "expires_at", "side_effect_class", "production_effect",
+        "production_authority", "target_class"
+      ],
+      "properties": {
+        "schema_version": {"const": "s2_5_recovery_host_capture_v1"},
+        "capture_profile": {"const": "DISPOSABLE_SYSTEMD_RECOVERY_HOST"},
+        "source_head": {"$ref": "#/$defs/git_sha"},
+        "stable_host_facts": {"$ref": "#/$defs/stable_host_facts"},
+        "host_identity": {"type": "string", "pattern": "^host:[0-9a-f]{64}$"},
+        "node_identity": {"$ref": "#/$defs/node_identity"},
+        "process_identity": {"$ref": "#/$defs/process_identity"},
+        "boot_manager_facts": {"$ref": "#/$defs/boot_manager_facts"},
+        "observed_at": {"$ref": "#/$defs/timestamp"},
+        "expires_at": {"$ref": "#/$defs/timestamp"},
+        "side_effect_class": {"const": "DISPOSABLE_TEST"},
+        "production_effect": {"const": false},
+        "production_authority": {"const": false},
+        "target_class": {"const": "disposable_systemd"}
+      }
+    }
+  }
+}

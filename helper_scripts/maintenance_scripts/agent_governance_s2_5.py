@@ -110,15 +110,19 @@ def _main(argv: list[str] | None = None) -> int:
         _print({"status": "PASS" if not errors else "REJECTED", "errors": errors})
         return 0 if not errors else 2
     if args.action in {"apply-start", "apply-final"}:
-        applier = (
-            lifecycle.apply_s2_5_start
-            if args.action == "apply-start"
-            else lifecycle.apply_s2_5_final
-        )
-        # CLI 沒有 driver 注入縫:恆 driver=None(reachable 但 authority-locked)。
-        verdict = applier(_load_json(args.intent), None, None, now=args.now)
+        # CLI 沒有 canonical state_root-bound recovery controller，也沒有 driver/evidence
+        # 注入縫。它因此不呼叫 lifecycle applier；少了不可替換 controller 時，連 source
+        # preview 都必須在任何 clock/auth/lock/driver 前 typed 拒絕。
+        _load_json(args.intent)
+        verdict = {
+            "status": lifecycle.S2_5_STATUS_RECOVERY_REQUIRED,
+            "reasons": [
+                "CLI apply has no canonical state_root-bound recovery controller; "
+                "no lifecycle applier was invoked and no effect was attempted"
+            ],
+        }
         _print(verdict)
-        return 0 if verdict["status"] == lifecycle.S2_5_STATUS_PENDING else 2
+        return 2
     return 2
 
 

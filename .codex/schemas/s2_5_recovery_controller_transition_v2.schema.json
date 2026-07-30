@@ -1,0 +1,48 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://arcane-equilibrium.local/schemas/s2_5_recovery_controller_transition_v2.schema.json",
+  "title": "s2_5_recovery_controller_transition_v2",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "schema_version", "transition_id", "from_phase", "to_phase",
+    "generation", "previous_controller_state_digest", "candidate_subject",
+    "candidate_subject_digest", "expected_external_sequence",
+    "expected_external_head_digest", "external_monotonic_floor",
+    "expected_snapshot_id", "expected_latest_version_id", "issued_at",
+    "expires_at", "evidence_class", "side_effect_class", "target_class",
+    "target_profile_id", "production_effect", "production_authority",
+    "production_effect_count", "self_digest"
+  ],
+  "properties": {
+    "schema_version": {"const": "s2_5_recovery_controller_transition_v2"},
+    "transition_id": {"type": "string", "pattern": "^s2-5-transition-[0-9a-f]{64}$"},
+    "from_phase": {"enum": ["GENESIS", "PREPARED", "CONSUMED", "COMMITTED"]},
+    "to_phase": {"enum": ["PREPARED", "CONSUMED", "COMMITTED", "RESOLVED"]},
+    "generation": {"type": "integer", "minimum": 1},
+    "previous_controller_state_digest": {"$ref": "#/$defs/nullableDigest"},
+    "candidate_subject": {"type": "object"},
+    "candidate_subject_digest": {"$ref": "#/$defs/digest"},
+    "expected_external_sequence": {"type": "integer", "minimum": 0},
+    "expected_external_head_digest": {"$ref": "#/$defs/nullableDigest"},
+    "external_monotonic_floor": {"type": "integer", "minimum": 0},
+    "expected_snapshot_id": {"type": "string", "minLength": 1},
+    "expected_latest_version_id": {
+      "anyOf": [{"type": "string", "minLength": 1}, {"type": "null"}]
+    },
+    "issued_at": {"type": "string", "format": "date-time"},
+    "expires_at": {"type": "string", "format": "date-time"},
+    "evidence_class": {"const": "LOCAL_REPRODUCIBLE"},
+    "side_effect_class": {"const": "DISPOSABLE_TEST"},
+    "target_class": {"const": "disposable_systemd"},
+    "target_profile_id": {"const": "s2_5_recovery_user_systemd_disposable_v1"},
+    "production_effect": {"const": false},
+    "production_authority": {"const": false},
+    "production_effect_count": {"const": 0},
+    "self_digest": {"$ref": "#/$defs/digest"}
+  },
+  "$defs": {
+    "digest": {"type": "string", "pattern": "^sha256:[0-9a-f]{64}$"},
+    "nullableDigest": {"anyOf": [{"$ref": "#/$defs/digest"}, {"type": "null"}]}
+  }
+}

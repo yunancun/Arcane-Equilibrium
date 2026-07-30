@@ -1,0 +1,56 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://arcane-equilibrium.local/schemas/s2_5_recovery_lock_intent_v1.schema.json",
+  "title": "s2_5_recovery_lock_intent_v1",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "schema_version", "source_head", "operation", "session_class", "state_root", "lock_root",
+    "lock_order", "lock_paths", "side_effect_class", "target_class",
+    "target_profile_id", "evidence_class", "runtime_observed",
+    "production_effect", "production_authority", "production_effect_count",
+    "self_digest"
+  ],
+  "properties": {
+    "schema_version": {"const": "s2_5_recovery_lock_intent_v1"},
+    "source_head": {"$ref": "#/$defs/head"},
+    "operation": {"const": "ACQUIRE_RECOVERY_DUAL_LOCK"},
+    "session_class": {
+      "enum": ["SIMULATION_ONLY", "FIXED_POSIX_RECOVERY_SESSION"]
+    },
+    "state_root": {
+      "const": "/run/user/1000/arcane-equilibrium-aiml-s2e/s2_5-recovery"
+    },
+    "lock_root": {
+      "const": "/run/user/1000/arcane-equilibrium-aiml-s2e/locks"
+    },
+    "lock_order": {
+      "type": "array", "minItems": 2, "maxItems": 2,
+      "items": {"enum": ["S2.4", "S2.5"]}
+    },
+    "lock_paths": {
+      "type": "array", "minItems": 2, "maxItems": 2,
+      "items": {
+        "enum": [
+          "/run/user/1000/arcane-equilibrium-aiml-s2e/locks/s2-4-recovery-install-fence.lock",
+          "/run/user/1000/arcane-equilibrium-aiml-s2e/locks/s2-5-recovery-lifecycle.lock"
+        ]
+      }
+    },
+    "side_effect_class": {"const": "DISPOSABLE_TEST"},
+    "target_class": {"const": "disposable_systemd"},
+    "target_profile_id": {
+      "const": "s2_5_recovery_user_systemd_disposable_v1"
+    },
+    "evidence_class": {"const": "LOCAL_REPRODUCIBLE"},
+    "runtime_observed": {"const": false},
+    "production_effect": {"const": false},
+    "production_authority": {"const": false},
+    "production_effect_count": {"const": 0},
+    "self_digest": {"$ref": "#/$defs/digest"}
+  },
+  "$defs": {
+    "digest": {"type": "string", "pattern": "^sha256:[0-9a-f]{64}$"},
+    "head": {"type": "string", "pattern": "^[0-9a-f]{40}$"}
+  }
+}

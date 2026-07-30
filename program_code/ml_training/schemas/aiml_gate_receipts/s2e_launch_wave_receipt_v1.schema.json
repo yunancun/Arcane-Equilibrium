@@ -1,0 +1,117 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://arcane-equilibrium.local/schemas/s2e_launch_wave_receipt_v1.schema.json",
+  "title": "s2e_launch_wave_receipt_v1",
+  "description": "Closed checkpoint payload for exactly one S2E launch wave. A pending candidate is source-only. A READY receipt binds the exact disposable test chains and the atomic, Git-common-directory consume-once entry for its immediate predecessor.",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "schema_version",
+    "launch_id",
+    "wave",
+    "predecessor",
+    "source_head",
+    "source_tree",
+    "schema_carrier_head",
+    "schema_carrier_tree",
+    "launch_contract_digest",
+    "generation_task_contract_digest",
+    "wave_exit_id",
+    "checkpoint_status",
+    "acceptance_review_bundle_digest",
+    "side_effect_class",
+    "disposable_effect_chain_digests",
+    "predecessor_consumption",
+    "production_effect_count",
+    "payload_digest"
+  ],
+  "properties": {
+    "schema_version": {"const": "s2e_launch_wave_receipt_v1"},
+    "launch_id": {"const": "S2E-LW1-LW5"},
+    "wave": {"enum": ["S2E-LW1", "S2E-LW2", "S2E-LW3", "S2E-LW4", "S2E-LW5"]},
+    "predecessor": {"$ref": "#/$defs/digest"},
+    "source_head": {"$ref": "#/$defs/git_sha"},
+    "source_tree": {"$ref": "#/$defs/git_sha"},
+    "schema_carrier_head": {"$ref": "#/$defs/git_sha"},
+    "schema_carrier_tree": {"$ref": "#/$defs/git_sha"},
+    "launch_contract_digest": {"$ref": "#/$defs/digest"},
+    "generation_task_contract_digest": {"$ref": "#/$defs/digest"},
+    "wave_exit_id": {
+      "enum": [
+        "S2E_2B_2A_SECURITY_RECOVERY_READY",
+        "S2E_2B_2B_HOST_RUNNER_CHECKPOINT_READY",
+        "S2E_2B_3_ROW_DRIVERS_CHECKPOINT_READY",
+        "S2E_4_RUNTIME_CLOSURE_CHECKPOINT_READY",
+        "S2E_LW5_IMPLEMENTATION_READY"
+      ]
+    },
+    "checkpoint_status": {
+      "enum": ["PENDING_REVIEW", "TASK_BRANCH_CHECKPOINT_READY"]
+    },
+    "acceptance_review_bundle_digest": {
+      "anyOf": [{"$ref": "#/$defs/digest"}, {"type": "null"}]
+    },
+    "side_effect_class": {"enum": ["SOURCE_ONLY", "DISPOSABLE_TEST"]},
+    "disposable_effect_chain_digests": {
+      "type": "array",
+      "maxItems": 64,
+      "uniqueItems": true,
+      "items": {"$ref": "#/$defs/digest"}
+    },
+    "predecessor_consumption": {
+      "anyOf": [
+        {"$ref": "#/$defs/consumption_entry"},
+        {"type": "null"}
+      ]
+    },
+    "production_effect_count": {"const": 0},
+    "payload_digest": {"$ref": "#/$defs/digest"}
+  },
+  "$defs": {
+    "digest": {"type": "string", "pattern": "^sha256:[0-9a-f]{64}$"},
+    "git_sha": {"type": "string", "pattern": "^[0-9a-f]{40}$"},
+    "consumption_entry": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "schema_version",
+        "sequence",
+        "previous_entry_digest",
+        "launch_id",
+        "predecessor_payload_digest",
+        "successor_candidate_payload_digest",
+        "successor_wave",
+        "successor_source_head",
+        "acceptance_review_bundle_digest",
+        "consumed_at",
+        "side_effect_class",
+        "production_effect",
+        "entry_digest"
+      ],
+      "properties": {
+        "schema_version": {
+          "const": "s2e_launch_predecessor_consumption_entry_v1"
+        },
+        "sequence": {"type": "integer", "minimum": 1, "maximum": 5},
+        "previous_entry_digest": {
+          "anyOf": [
+            {"$ref": "#/$defs/digest"},
+            {"type": "null"}
+          ]
+        },
+        "launch_id": {"const": "S2E-LW1-LW5"},
+        "predecessor_payload_digest": {"$ref": "#/$defs/digest"},
+        "successor_candidate_payload_digest": {"$ref": "#/$defs/digest"},
+        "successor_wave": {
+          "enum": ["S2E-LW1", "S2E-LW2", "S2E-LW3", "S2E-LW4", "S2E-LW5"]
+        },
+        "successor_source_head": {"$ref": "#/$defs/git_sha"},
+        "acceptance_review_bundle_digest": {"$ref": "#/$defs/digest"},
+        "consumed_at": {"type": "string", "format": "date-time"},
+        "side_effect_class": {"const": "LOCAL_SOURCE_CONTROL_STATE"},
+        "production_effect": {"const": false},
+        "entry_digest": {"$ref": "#/$defs/digest"}
+      }
+    }
+  }
+}

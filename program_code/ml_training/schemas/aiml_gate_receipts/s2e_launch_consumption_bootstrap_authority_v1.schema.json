@@ -1,0 +1,169 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://arcane-equilibrium.local/schemas/s2e_launch_consumption_bootstrap_authority_v1.schema.json",
+  "title": "s2e_launch_consumption_bootstrap_authority_v1",
+  "description": "Purpose-specific, independently signed authority for initializing a resettable local S2E predecessor-consumption store with one exact already-consumed ledger generation.",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "schema_version",
+    "purpose",
+    "launch_id",
+    "predecessor_payload_digest",
+    "successor_candidate_payload_digest",
+    "successor_wave",
+    "successor_source_head",
+    "acceptance_review_bundle_digest",
+    "prior_consumption_ledger_digest",
+    "expected_consumption_entry",
+    "expected_result_ledger_digest",
+    "registry_receipt",
+    "issued_at",
+    "expires_at",
+    "side_effect_class",
+    "production_authority",
+    "production_effect",
+    "signer",
+    "signed_core_digest",
+    "signature",
+    "authority_digest"
+  ],
+  "properties": {
+    "schema_version": {
+      "const": "s2e_launch_consumption_bootstrap_authority_v1"
+    },
+    "purpose": {
+      "const": "AUTHORIZE_PREDECESSOR_SINGLE_USE_CONSUMPTION"
+    },
+    "launch_id": {"const": "S2E-LW1-LW5"},
+    "predecessor_payload_digest": {"$ref": "#/$defs/digest"},
+    "successor_candidate_payload_digest": {"$ref": "#/$defs/digest"},
+    "successor_wave": {"$ref": "#/$defs/wave"},
+    "successor_source_head": {"$ref": "#/$defs/git_sha"},
+    "acceptance_review_bundle_digest": {"$ref": "#/$defs/digest"},
+    "prior_consumption_ledger_digest": {"$ref": "#/$defs/digest"},
+    "expected_consumption_entry": {"$ref": "#/$defs/entry"},
+    "expected_result_ledger_digest": {"$ref": "#/$defs/digest"},
+    "registry_receipt": {"$ref": "#/$defs/registry_receipt"},
+    "issued_at": {"type": "string", "format": "date-time"},
+    "expires_at": {"type": "string", "format": "date-time"},
+    "side_effect_class": {"const": "LOCAL_SOURCE_CONTROL_STATE"},
+    "production_authority": {"const": false},
+    "production_effect": {"const": false},
+    "signer": {"$ref": "#/$defs/signer"},
+    "signed_core_digest": {"$ref": "#/$defs/digest"},
+    "signature": {"$ref": "#/$defs/signature"},
+    "authority_digest": {"$ref": "#/$defs/digest"}
+  },
+  "$defs": {
+    "digest": {
+      "type": "string",
+      "pattern": "^sha256:[0-9a-f]{64}$"
+    },
+    "git_sha": {
+      "type": "string",
+      "pattern": "^[0-9a-f]{40}$"
+    },
+    "wave": {
+      "enum": ["S2E-LW1", "S2E-LW2", "S2E-LW3", "S2E-LW4", "S2E-LW5"]
+    },
+    "entry": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "schema_version",
+        "sequence",
+        "previous_entry_digest",
+        "launch_id",
+        "predecessor_payload_digest",
+        "successor_candidate_payload_digest",
+        "successor_wave",
+        "successor_source_head",
+        "acceptance_review_bundle_digest",
+        "consumed_at",
+        "side_effect_class",
+        "production_effect",
+        "entry_digest"
+      ],
+      "properties": {
+        "schema_version": {
+          "const": "s2e_launch_predecessor_consumption_entry_v1"
+        },
+        "sequence": {"type": "integer", "minimum": 1, "maximum": 5},
+        "previous_entry_digest": {
+          "anyOf": [
+            {"$ref": "#/$defs/digest"},
+            {"type": "null"}
+          ]
+        },
+        "launch_id": {"const": "S2E-LW1-LW5"},
+        "predecessor_payload_digest": {"$ref": "#/$defs/digest"},
+        "successor_candidate_payload_digest": {"$ref": "#/$defs/digest"},
+        "successor_wave": {"$ref": "#/$defs/wave"},
+        "successor_source_head": {"$ref": "#/$defs/git_sha"},
+        "acceptance_review_bundle_digest": {"$ref": "#/$defs/digest"},
+        "consumed_at": {"type": "string", "format": "date-time"},
+        "side_effect_class": {"const": "LOCAL_SOURCE_CONTROL_STATE"},
+        "production_effect": {"const": false},
+        "entry_digest": {"$ref": "#/$defs/digest"}
+      }
+    },
+    "registry_receipt": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "schema_version",
+        "registry_class",
+        "slot_id",
+        "decision",
+        "conflicting_grant_absent",
+        "observed_at"
+      ],
+      "properties": {
+        "schema_version": {
+          "const": "s2e_launch_predecessor_single_use_registry_receipt_v1"
+        },
+        "registry_class": {
+          "const": "TRUSTED_SIGNER_PREDECESSOR_SINGLE_USE_REGISTRY_V1"
+        },
+        "slot_id": {"$ref": "#/$defs/digest"},
+        "decision": {"const": "GRANTED_ONCE"},
+        "conflicting_grant_absent": {"const": true},
+        "observed_at": {"type": "string", "format": "date-time"}
+      }
+    },
+    "signer": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "role",
+        "identity",
+        "namespace",
+        "key_generation",
+        "anchor",
+        "key_fingerprint"
+      ],
+      "properties": {
+        "role": {"const": "S2E_SIGNER"},
+        "identity": {"const": "aiml-s2e-receipt-signer-v1"},
+        "namespace": {"const": "arcane-equilibrium-aiml-s2e-receipts"},
+        "key_generation": {"const": "independent_off_repo_ed25519_v1"},
+        "anchor": {"const": "fixed_off_repo_public_trust_root_v1"},
+        "key_fingerprint": {
+          "type": "string",
+          "pattern": "^SHA256:[A-Za-z0-9+/=]{40,64}$"
+        }
+      }
+    },
+    "signature": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["algorithm", "signed_digest", "signature"],
+      "properties": {
+        "algorithm": {"const": "SSHSIG"},
+        "signed_digest": {"$ref": "#/$defs/digest"},
+        "signature": {"type": "string", "minLength": 32, "maxLength": 16384}
+      }
+    }
+  }
+}

@@ -52,7 +52,7 @@ def test_observer_exception_rolls_back_latches_recovery_and_stays_typed(
         raise RuntimeError("observer backend lost")
 
     observers.observe_running_dimensions = _boom
-    recovery = lifecycle.S2_5RecoveryState()
+    recovery = kit.recovery_controller(tmp_path / "state")
     verdict = lifecycle.apply_s2_5_start(
         intent, permit, unit,
         **kit.apply_kwargs(
@@ -75,7 +75,7 @@ def test_bad_oldest_evidence_timestamp_rolls_back_instead_of_escaping(
     _key, intent, permit, unit = kit.a_side_setup(tmp_path, monkeypatch)
     observers = kit.HarnessObserver(unit, clock=kit.frozen_clock())
     observers.oldest_evidence_at = lambda: "not-a-timestamp"
-    recovery = lifecycle.S2_5RecoveryState()
+    recovery = kit.recovery_controller(tmp_path / "state")
     verdict = lifecycle.apply_s2_5_start(
         intent, permit, unit,
         **kit.apply_kwargs(
@@ -97,7 +97,7 @@ def test_observation_exception_with_failed_rollback_is_recovery_required(
         RuntimeError("observer backend lost")
     )
     unit.fail_rollback = True
-    recovery = lifecycle.S2_5RecoveryState()
+    recovery = kit.recovery_controller(tmp_path / "state")
     verdict = lifecycle.apply_s2_5_start(
         intent, permit, unit,
         **kit.apply_kwargs(
@@ -143,7 +143,7 @@ def test_final_post_reset_observation_exception_latches_recovery(tmp_path, monke
     observers.observe_post_reset = lambda: (_ for _ in ()).throw(
         RuntimeError("post-reset probe lost")
     )
-    recovery = lifecycle.S2_5RecoveryState()
+    recovery = kit.recovery_controller(tmp_path / "state")
     verdict = lifecycle.apply_s2_5_final(
         intent, permit, unit,
         **kit.final_apply_kwargs(
@@ -445,7 +445,7 @@ def test_rollback_identity_drift_is_not_restored(tmp_path, monkeypatch):
         unit.properties["FragmentDigest"] = "sha256:" + "9" * 64  # 替身 unit 滑入。
 
     unit.stop = _stop_and_swap_fragment
-    recovery = lifecycle.S2_5RecoveryState()
+    recovery = kit.recovery_controller(tmp_path / "state")
     verdict = lifecycle.apply_s2_5_start(
         intent, permit, unit,
         **kit.apply_kwargs(

@@ -1,0 +1,45 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://arcane-equilibrium.local/schemas/s2_5_recovery_anchor_prepared_append_v1.schema.json",
+  "title": "s2_5_recovery_anchor_prepared_append_v1",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "schema_version", "anchor_store_id", "anchor_collection_id", "store_id",
+    "state_root_id", "source_head", "manifest_digest", "baseline_latest_digest",
+    "prepared_payload_json", "prepared_payload_digest", "prepared_at", "status",
+    "effect_executed", "monotonic_floor_status", "evidence_class",
+    "side_effect_class", "target_class", "target_profile_id",
+    "production_effect", "production_authority", "production_effect_count",
+    "self_digest"
+  ],
+  "properties": {
+    "schema_version": {"const": "s2_5_recovery_anchor_prepared_append_v1"},
+    "anchor_store_id": {"const": "s2-5-recovery-external-anchor-v1"},
+    "anchor_collection_id": {"const": "s2-5-recovery-anchor-chain-v1"},
+    "store_id": {"type": "string", "pattern": "^s2-5-store-[0-9a-f]{64}$"},
+    "state_root_id": {"$ref": "#/$defs/digest"},
+    "source_head": {"type": "string", "pattern": "^[0-9a-f]{40}$"},
+    "manifest_digest": {"$ref": "#/$defs/digest"},
+    "baseline_latest_digest": {"$ref": "#/$defs/digest"},
+    "prepared_payload_json": {"type": "string", "minLength": 2, "maxLength": 262144},
+    "prepared_payload_digest": {"$ref": "#/$defs/digest"},
+    "prepared_at": {"type": "string", "format": "date-time"},
+    "status": {"const": "PREPARED_NO_EFFECT"},
+    "effect_executed": {"const": false},
+    "monotonic_floor_status": {
+      "const": "UNVERIFIED_DURABLE_MONOTONIC_FLOOR_REQUIRED"
+    },
+    "evidence_class": {"const": "LOCAL_REPRODUCIBLE"},
+    "side_effect_class": {"const": "DISPOSABLE_TEST"},
+    "target_class": {"const": "disposable_systemd"},
+    "target_profile_id": {"const": "s2_5_recovery_user_systemd_disposable_v1"},
+    "production_effect": {"const": false},
+    "production_authority": {"const": false},
+    "production_effect_count": {"const": 0},
+    "self_digest": {"$ref": "#/$defs/digest"}
+  },
+  "$defs": {
+    "digest": {"type": "string", "pattern": "^sha256:[0-9a-f]{64}$"}
+  }
+}
