@@ -183,6 +183,7 @@ from aiml_gate_receipt_adoption import (  # noqa: E402,F401
     validate_program_adoption_receipt,
 )
 from aiml_gate_receipt_s2e_launch import (  # noqa: E402,F401
+    build_s2e_launch_consumption_bootstrap_authority_core,
     build_s2e_launch_predecessor_authority,
     build_s2e_disposable_test_effect_chain,
     canonical_launch_payload_bytes,
@@ -197,12 +198,15 @@ from aiml_gate_receipt_s2e_launch import (  # noqa: E402,F401
     s2e_carrier_signed_bytes,
     s2e_carrier_verification_argv,
     s2e_carrier_worm_payload,
+    s2e_launch_consumption_bootstrap_authority_digest,
+    s2e_launch_consumption_bootstrap_signed_bytes,
     s2e_review_predicate_results,
     s2e_review_source_blob_manifest,
     s2e_review_test_argv,
     validate_s2e_disposable_test_effect_chain,
     validate_receipt_carrier_attestation,
     validate_s2e_launch_acceptance_review_bundle,
+    validate_s2e_launch_consumption_bootstrap_authority,
     validate_s2e_launch_predecessor_authority,
     verify_receipt_carrier_attestation,
     validate_s2e_launch_genesis_receipt,
@@ -1775,6 +1779,17 @@ def validate_aiml_artifact(
             "s2e acceptance review bundle EXTERNAL_VERIFICATION_PENDING: exact "
             "candidate, governed capture, fixed-root SSHSIG, and external WORM "
             "evidence are required"
+        )
+    if schema_version == "s2e_launch_consumption_bootstrap_authority_v1":
+        # The generic API has no exact candidate/predecessor chain, current
+        # acceptance-review digest, trusted-root SSHSIG evaluation time, or
+        # external single-use registry context.  Structural validity alone
+        # must never be presented as authenticated bootstrap authority.
+        errors.append(
+            "s2e consumption bootstrap authority "
+            "EXTERNAL_VERIFICATION_PENDING: exact candidate, predecessor "
+            "chain, acceptance review, fixed-root SSHSIG, and trusted "
+            "single-use registry evidence are required"
         )
     if schema_version in {"sealed_build_receipt_v1", "expected_identity_receipt_v1"}:
         # S2.3(LR2)sealed-build / expected-identity 是 BUILD-IDENTITY / source 產物

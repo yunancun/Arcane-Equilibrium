@@ -4,18 +4,17 @@ from __future__ import annotations
 
 import base64
 import hashlib
-import importlib.metadata
+import io
 import json
 import os
-import pwd
 import re
-import site
 import stat
 import subprocess
 import sys
 import tempfile
+import zipfile
 from datetime import datetime
-from pathlib import Path
+from pathlib import Path, PurePosixPath
 from typing import Any, BinaryIO
 
 from agent_governance_capture import (
@@ -35,6 +34,9 @@ from agent_governance_permissions import authorize_native_command
 from agent_governance_pytest_provider import (
     GOVERNED_PYTEST_BOOTSTRAP,
     GOVERNED_PYTEST_PREFIX,
+    GOVERNED_PYTEST_PROVIDER_LOCK_PATH,
+    GOVERNED_PYTEST_PROVIDER_PROFILE_ID,
+    GOVERNED_PYTEST_PROVIDER_WHEEL_PREFIX,
     GOVERNED_PYTEST_REQUIRED_ARGS,
 )
 from agent_governance_registry import native_agent_contract
@@ -76,8 +78,10 @@ LEGACY_RECORD_FIELDS = RECORD_FIELDS - {"pytest_provider"}
 PYTEST_PROVIDER_FIELDS = {
     "schema_version", "profile_id", "bootstrap_digest", "interpreter_path",
     "interpreter_digest_before", "interpreter_digest_after",
-    "distribution_manifest", "file_manifest", "provider_digest_before",
-    "provider_digest_after", "provider_stable", "site_import_disabled",
+    "source_kind", "source_head", "lock_path", "lock_blob", "lock_sha256",
+    "distribution_manifest", "wheel_manifest", "file_manifest",
+    "provider_digest_before", "provider_digest_after", "provider_stable",
+    "site_import_disabled",
     "candidate_cwd_removed_by_bootstrap", "plugin_autoload_disabled",
     "conftest_loading_disabled", "project_config_loading_disabled",
     "test_import_path_appended", "repository_root_fixed",
@@ -98,6 +102,24 @@ PYTEST_PROVIDER_DISTRIBUTIONS = (
     *PYTEST_PROVIDER_REQUIRED_DISTRIBUTIONS,
     *PYTEST_PROVIDER_OPTIONAL_DISTRIBUTIONS,
 )
+PYTEST_PROVIDER_LOCK_FIELDS = {
+    "schema_version", "profile_id", "required_distributions",
+    "optional_distributions", "wheel_tag", "limits", "wheels",
+}
+PYTEST_PROVIDER_LIMIT_FIELDS = {
+    "max_wheels", "max_members_per_wheel", "max_member_bytes",
+    "max_total_uncompressed_bytes",
+}
+PYTEST_PROVIDER_WHEEL_FIELDS = {"name", "version", "path", "sha256"}
+PYTEST_PROVIDER_WHEEL_IDENTITY_FIELDS = {
+    "name", "version", "path", "git_blob", "bytes", "sha256",
+}
+PYTEST_PROVIDER_HARD_LIMITS = {
+    "max_wheels": 8,
+    "max_members_per_wheel": 2048,
+    "max_member_bytes": 8 * 1024 * 1024,
+    "max_total_uncompressed_bytes": 32 * 1024 * 1024,
+}
 SAFE_INHERITED_ENVIRONMENT = {
     "PATH", "LANG", "LC_ALL", "LC_CTYPE", "TERM", "SYSTEMROOT",
 }
@@ -248,47 +270,6 @@ def _is_governed_pytest_argv(argv: list[str]) -> bool:
     )
 
 
-def _account_user_site() -> str | None:
-    """Derive the real account user-site without trusting the ambient HOME."""
-
-    try:
-        account_home = Path(pwd.getpwuid(os.getuid()).pw_dir).resolve()
-    except (KeyError, OSError, RuntimeError):
-        return None
-    version = f"{sys.version_info.major}.{sys.version_info.minor}"
-    if sys.platform == "darwin":
-        return str(
-            account_home
-            / "Library"
-            / "Python"
-            / version
-            / "lib"
-            / "python"
-            / "site-packages"
-        )
-    if os.name == "posix":
-        return str(
-            account_home
-            / ".local"
-            / "lib"
-            / f"python{version}"
-            / "site-packages"
-        )
-    return None
-
-
-def _provider_roots() -> list[Path]:
-    return sorted({
-        Path(path).resolve()
-        for path in [
-            *site.getsitepackages(),
-            site.getusersitepackages(),
-            _account_user_site(),
-        ]
-        if isinstance(path, str) and Path(path).is_dir()
-    })
-
-
 def _raw_file_digest(path: Path) -> str:
     digest = hashlib.sha256()
     with path.open("rb") as handle:
@@ -318,17 +299,292 @@ def _capsule_file_manifest(capsule: Path) -> list[dict[str, Any]]:
 
 def _pytest_provider_digest(
     distributions: list[dict[str, str]],
+    wheels: list[dict[str, Any]],
     files: list[dict[str, Any]],
+    *,
+    source_head: str,
+    lock_blob: str,
+    lock_sha256: str,
 ) -> str:
     return canonical_digest({
         "schema_version": "governed_pytest_provider_payload_v1",
+        "source_kind": "CODE_OWNED_GIT_BLOB",
+        "source_head": source_head,
+        "lock_path": GOVERNED_PYTEST_PROVIDER_LOCK_PATH,
+        "lock_blob": lock_blob,
+        "lock_sha256": lock_sha256,
         "distribution_manifest": distributions,
+        "wheel_manifest": wheels,
         "file_manifest": files,
     })
 
 
+def _strict_json_object(raw: bytes) -> Any:
+    def pairs(items: list[tuple[str, Any]]) -> dict[str, Any]:
+        value: dict[str, Any] = {}
+        for key, item in items:
+            if key in value:
+                raise ValueError(f"duplicate JSON key: {key}")
+            value[key] = item
+        return value
+
+    return json.loads(raw.decode("utf-8"), object_pairs_hook=pairs)
+
+
+def _git_blob_at_head(
+    source_head: str, path: str,
+) -> tuple[str, bytes]:
+    if re.fullmatch(r"[0-9a-f]{40}", source_head) is None:
+        raise ValueError("governed pytest provider source head is invalid")
+    repository = Path(__file__).resolve().parents[2]
+    listing = subprocess.run(
+        ["git", "ls-tree", source_head, "--", path],
+        cwd=repository,
+        check=True,
+        capture_output=True,
+        text=True,
+    ).stdout.rstrip("\n")
+    if not listing:
+        raise ValueError(
+            f"governed pytest provider code-owned Git blob is missing: {path}"
+        )
+    metadata, listed_path = listing.split("\t", 1)
+    mode, object_type, blob = metadata.split()
+    if (
+        listed_path != path
+        or mode != "100644"
+        or object_type != "blob"
+        or re.fullmatch(r"[0-9a-f]{40}", blob) is None
+    ):
+        raise ValueError(
+            f"governed pytest provider path is not one regular 100644 Git blob: {path}"
+        )
+    raw = subprocess.run(
+        ["git", "show", f"{source_head}:{path}"],
+        cwd=repository,
+        check=True,
+        capture_output=True,
+    ).stdout
+    return blob, raw
+
+
+def _provider_tree_paths(source_head: str) -> list[str]:
+    repository = Path(__file__).resolve().parents[2]
+    return subprocess.run(
+        [
+            "git", "ls-tree", "-r", "--name-only", source_head, "--",
+            GOVERNED_PYTEST_PROVIDER_WHEEL_PREFIX,
+        ],
+        cwd=repository,
+        check=True,
+        capture_output=True,
+        text=True,
+    ).stdout.splitlines()
+
+
+def _load_pytest_provider_bundle(
+    source_head: str,
+) -> tuple[
+    dict[str, Any],
+    list[dict[str, str]],
+    list[dict[str, Any]],
+    list[tuple[dict[str, Any], bytes]],
+]:
+    lock_blob, lock_raw = _git_blob_at_head(
+        source_head, GOVERNED_PYTEST_PROVIDER_LOCK_PATH
+    )
+    try:
+        lock = _strict_json_object(lock_raw)
+    except (UnicodeDecodeError, json.JSONDecodeError, ValueError) as error:
+        raise ValueError(
+            f"governed pytest provider lock is invalid JSON: {error}"
+        ) from error
+    if not isinstance(lock, dict) or set(lock) != PYTEST_PROVIDER_LOCK_FIELDS:
+        raise ValueError("governed pytest provider lock fields are invalid")
+    expected_values = {
+        "schema_version": "governed_pytest_provider_lock_v1",
+        "profile_id": GOVERNED_PYTEST_PROVIDER_PROFILE_ID,
+        "required_distributions": list(
+            PYTEST_PROVIDER_REQUIRED_DISTRIBUTIONS
+        ),
+        "optional_distributions": list(
+            PYTEST_PROVIDER_OPTIONAL_DISTRIBUTIONS
+        ),
+        "wheel_tag": "py3-none-any",
+        "limits": PYTEST_PROVIDER_HARD_LIMITS,
+    }
+    for field, expected in expected_values.items():
+        if lock.get(field) != expected:
+            raise ValueError(
+                f"governed pytest provider lock {field} is not code-owned"
+            )
+    wheels = lock.get("wheels")
+    if (
+        not isinstance(wheels, list)
+        or len(wheels) != len(PYTEST_PROVIDER_DISTRIBUTIONS)
+        or len(wheels) > PYTEST_PROVIDER_HARD_LIMITS["max_wheels"]
+    ):
+        raise ValueError("governed pytest provider wheel set is incomplete")
+    expected_names = sorted(
+        PYTEST_PROVIDER_DISTRIBUTIONS, key=str.lower
+    )
+    observed_names: list[str] = []
+    observed_paths: list[str] = []
+    distribution_manifest: list[dict[str, str]] = []
+    wheel_manifest: list[dict[str, Any]] = []
+    wheel_payloads: list[tuple[dict[str, Any], bytes]] = []
+    for wheel in wheels:
+        if (
+            not isinstance(wheel, dict)
+            or set(wheel) != PYTEST_PROVIDER_WHEEL_FIELDS
+        ):
+            raise ValueError("governed pytest provider wheel entry is invalid")
+        name, version, path, expected_digest = (
+            wheel.get("name"),
+            wheel.get("version"),
+            wheel.get("path"),
+            wheel.get("sha256"),
+        )
+        if (
+            not isinstance(name, str)
+            or not name
+            or not isinstance(version, str)
+            or not version
+            or not isinstance(path, str)
+            or not path.startswith(GOVERNED_PYTEST_PROVIDER_WHEEL_PREFIX)
+            or "\\" in path
+            or "\x00" in path
+            or PurePosixPath(path).is_absolute()
+            or ".." in PurePosixPath(path).parts
+            or not path.endswith("-py3-none-any.whl")
+            or not DIGEST_RE.fullmatch(str(expected_digest))
+        ):
+            raise ValueError(
+                "governed pytest provider wheel binding is unsafe"
+            )
+        blob, raw = _git_blob_at_head(source_head, path)
+        actual_digest = _digest_bytes(raw)
+        if actual_digest != expected_digest:
+            raise ValueError(
+                f"governed pytest provider wheel hash differs: {path}"
+            )
+        observed_names.append(name)
+        observed_paths.append(path)
+        distribution_manifest.append({"name": name, "version": version})
+        identity = {
+            "name": name,
+            "version": version,
+            "path": path,
+            "git_blob": blob,
+            "bytes": len(raw),
+            "sha256": actual_digest,
+        }
+        wheel_manifest.append(identity)
+        wheel_payloads.append((identity, raw))
+    if (
+        observed_names != expected_names
+        or observed_paths != sorted(set(observed_paths))
+        or _provider_tree_paths(source_head) != observed_paths
+    ):
+        raise ValueError(
+            "governed pytest provider wheel paths are missing, extra, or unsorted"
+        )
+    lock_identity = {
+        "path": GOVERNED_PYTEST_PROVIDER_LOCK_PATH,
+        "git_blob": lock_blob,
+        "sha256": _digest_bytes(lock_raw),
+    }
+    return (
+        lock_identity,
+        distribution_manifest,
+        wheel_manifest,
+        wheel_payloads,
+    )
+
+
+def _extract_provider_wheels(
+    capsule: Path,
+    wheel_payloads: list[tuple[dict[str, Any], bytes]],
+) -> None:
+    observed_paths: set[str] = set()
+    total_uncompressed = 0
+    for identity, raw in wheel_payloads:
+        try:
+            archive = zipfile.ZipFile(io.BytesIO(raw))
+        except (OSError, zipfile.BadZipFile) as error:
+            raise ValueError(
+                f"governed pytest provider wheel is not a ZIP: {identity['path']}"
+            ) from error
+        with archive:
+            members = archive.infolist()
+            if len(members) > PYTEST_PROVIDER_HARD_LIMITS[
+                "max_members_per_wheel"
+            ]:
+                raise ValueError(
+                    "governed pytest provider wheel exceeds member limit"
+                )
+            for member in members:
+                name = member.filename
+                relative = PurePosixPath(name)
+                mode = member.external_attr >> 16
+                file_type = stat.S_IFMT(mode)
+                if (
+                    not name
+                    or "\\" in name
+                    or "\x00" in name
+                    or relative.is_absolute()
+                    or ".." in relative.parts
+                    or name.lower().endswith(".pth")
+                    or member.flag_bits & 0x1
+                    or (
+                        file_type
+                        and file_type not in {stat.S_IFREG, stat.S_IFDIR}
+                    )
+                ):
+                    raise ValueError(
+                        f"governed pytest provider wheel member is unsafe: {name!r}"
+                    )
+                if member.is_dir():
+                    continue
+                if (
+                    name in observed_paths
+                    or member.file_size
+                    > PYTEST_PROVIDER_HARD_LIMITS["max_member_bytes"]
+                ):
+                    raise ValueError(
+                        "governed pytest provider wheel has duplicate or oversized member"
+                    )
+                total_uncompressed += member.file_size
+                if total_uncompressed > PYTEST_PROVIDER_HARD_LIMITS[
+                    "max_total_uncompressed_bytes"
+                ]:
+                    raise ValueError(
+                        "governed pytest provider exceeds uncompressed byte limit"
+                    )
+                content = archive.read(member)
+                if len(content) != member.file_size:
+                    raise ValueError(
+                        "governed pytest provider wheel member size differs"
+                    )
+                destination = capsule.joinpath(*relative.parts)
+                destination.parent.mkdir(
+                    parents=True, exist_ok=True, mode=0o700
+                )
+                try:
+                    with destination.open("xb") as handle:
+                        handle.write(content)
+                        handle.flush()
+                        os.fsync(handle.fileno())
+                except FileExistsError as error:
+                    raise ValueError(
+                        "governed pytest provider wheel path overlaps"
+                    ) from error
+                destination.chmod(0o400)
+                observed_paths.add(name)
+
+
 def _prepare_pytest_provider(
-    isolated_root: Path, *, argv: list[str]
+    isolated_root: Path, *, argv: list[str], source_head: str
 ) -> tuple[Path | None, dict[str, Any] | None]:
     if not _is_pytest_argv(argv):
         return None, None
@@ -336,76 +592,15 @@ def _prepare_pytest_provider(
         raise ValueError(
             "pytest execution requires the complete governed isolation argv"
         )
-    roots = _provider_roots()
-    available: dict[str, importlib.metadata.Distribution] = {}
-    for distribution in importlib.metadata.distributions(path=roots):
-        name = re.sub(
-            r"[-_.]+",
-            "-",
-            str(distribution.metadata.get("Name", "")).lower(),
-        )
-        if name and name not in available:
-            available[name] = distribution
+    (
+        lock_identity,
+        distribution_manifest,
+        wheel_manifest,
+        wheel_payloads,
+    ) = _load_pytest_provider_bundle(source_head)
     capsule = isolated_root / "pytest-provider"
     capsule.mkdir(mode=0o700)
-    distribution_manifest: list[dict[str, str]] = []
-    for requested_name in PYTEST_PROVIDER_DISTRIBUTIONS:
-        canonical_name = re.sub(r"[-_.]+", "-", requested_name.lower())
-        distribution = available.get(canonical_name)
-        if distribution is None:
-            if requested_name in PYTEST_PROVIDER_OPTIONAL_DISTRIBUTIONS:
-                continue
-            raise ValueError(
-                f"governed pytest provider distribution is absent: {requested_name}"
-            )
-        source_root = Path(distribution.locate_file("")).resolve(strict=True)
-        distribution_manifest.append({
-            "name": requested_name,
-            "version": str(distribution.version),
-        })
-        for packaged_path in distribution.files or []:
-            source = Path(distribution.locate_file(packaged_path))
-            try:
-                source_metadata = source.lstat()
-                resolved_source = source.resolve(strict=True)
-            except FileNotFoundError as error:
-                raise ValueError(
-                    f"governed pytest provider file is unsafe: {packaged_path}"
-                ) from error
-            try:
-                relative = resolved_source.relative_to(source_root)
-            except ValueError:
-                # Console entrypoints outside site-packages are never imported by
-                # the no-site bootstrap and therefore do not enter the capsule.
-                continue
-            if (
-                not stat.S_ISREG(source_metadata.st_mode)
-                or stat.S_ISLNK(source_metadata.st_mode)
-                or source_metadata.st_nlink != 1
-            ):
-                raise ValueError(
-                    f"governed pytest provider file is not regular: {packaged_path}"
-                )
-            destination = capsule / relative
-            destination.parent.mkdir(parents=True, exist_ok=True, mode=0o700)
-            if destination.exists():
-                if _raw_file_digest(destination) != _raw_file_digest(source):
-                    raise ValueError(
-                        "governed pytest provider distributions overlap unequally"
-                    )
-                continue
-            with source.open("rb") as source_handle, destination.open(
-                "xb"
-            ) as destination_handle:
-                while True:
-                    chunk = source_handle.read(64 * 1024)
-                    if not chunk:
-                        break
-                    destination_handle.write(chunk)
-                destination_handle.flush()
-                os.fsync(destination_handle.fileno())
-            destination.chmod(0o400)
-    distribution_manifest.sort(key=lambda item: item["name"].lower())
+    _extract_provider_wheels(capsule, wheel_payloads)
     file_manifest = _capsule_file_manifest(capsule)
     interpreter = Path(sys.executable).resolve(strict=True)
     interpreter_digest = _raw_file_digest(interpreter)
@@ -417,18 +612,29 @@ def _prepare_pytest_provider(
         directory.chmod(0o500)
     capsule.chmod(0o500)
     provider_digest = _pytest_provider_digest(
-        distribution_manifest, file_manifest
+        distribution_manifest,
+        wheel_manifest,
+        file_manifest,
+        source_head=source_head,
+        lock_blob=lock_identity["git_blob"],
+        lock_sha256=lock_identity["sha256"],
     )
     identity: dict[str, Any] = {
         "schema_version": "governed_pytest_provider_v1",
-        "profile_id": "isolated_distribution_capsule_no_site_v1",
+        "profile_id": GOVERNED_PYTEST_PROVIDER_PROFILE_ID,
         "bootstrap_digest": _digest_bytes(
             GOVERNED_PYTEST_BOOTSTRAP.encode("utf-8")
         ),
         "interpreter_path": str(interpreter),
         "interpreter_digest_before": interpreter_digest,
         "interpreter_digest_after": interpreter_digest,
+        "source_kind": "CODE_OWNED_GIT_BLOB",
+        "source_head": source_head,
+        "lock_path": lock_identity["path"],
+        "lock_blob": lock_identity["git_blob"],
+        "lock_sha256": lock_identity["sha256"],
         "distribution_manifest": distribution_manifest,
+        "wheel_manifest": wheel_manifest,
         "file_manifest": file_manifest,
         "provider_digest_before": provider_digest,
         "provider_digest_after": provider_digest,
@@ -454,7 +660,12 @@ def _finalize_pytest_provider(
         return None
     after_manifest = _capsule_file_manifest(capsule)
     after_digest = _pytest_provider_digest(
-        identity["distribution_manifest"], after_manifest
+        identity["distribution_manifest"],
+        identity["wheel_manifest"],
+        after_manifest,
+        source_head=identity["source_head"],
+        lock_blob=identity["lock_blob"],
+        lock_sha256=identity["lock_sha256"],
     )
     interpreter_after = _raw_file_digest(
         Path(identity["interpreter_path"])
@@ -517,7 +728,12 @@ def _controlled_environment(
 
 
 def _execute(
-    argv: list[str], *, root: Path, timeout_seconds: int, replay_contract: str,
+    argv: list[str],
+    *,
+    root: Path,
+    timeout_seconds: int,
+    replay_contract: str,
+    provider_source_head: str | None = None,
 ) -> dict[str, Any]:
     with (
         tempfile.TemporaryDirectory(prefix="governed-command-") as isolated,
@@ -530,8 +746,18 @@ def _execute(
         provider_capsule: Path | None = None
         pytest_provider: dict[str, Any] | None = None
         try:
+            if _is_governed_pytest_argv(argv) and provider_source_head is None:
+                provider_source_head = subprocess.run(
+                    ["git", "rev-parse", "--verify", "HEAD^{commit}"],
+                    cwd=Path(__file__).resolve().parents[2],
+                    check=True,
+                    capture_output=True,
+                    text=True,
+                ).stdout.strip()
             provider_capsule, pytest_provider = _prepare_pytest_provider(
-                isolated_root, argv=argv
+                isolated_root,
+                argv=argv,
+                source_head=str(provider_source_head or ""),
             )
             execution_argv = (
                 [pytest_provider["interpreter_path"], *argv[1:]]
@@ -615,7 +841,7 @@ def capture_governed_command(
     context_artifact: dict[str, Any],
     argv: list[str] | tuple[str, ...],
     root: Path = REPO_ROOT,
-    timeout_seconds: int = 120,
+    timeout_seconds: int = 300,
 ) -> dict[str, Any]:
     """Derive identity/scope from Context and execute exactly one local argv."""
 
@@ -646,9 +872,22 @@ def capture_governed_command(
     )
     whole_before = _generation_summary(["."], repository)
     repository_before = _generation_summary(path_scope, repository)
+    provider_repository = Path(__file__).resolve().parents[2]
+    provider_source_head = (
+        whole_before["source_head"]
+        if repository == provider_repository
+        else subprocess.run(
+            ["git", "rev-parse", "--verify", "HEAD^{commit}"],
+            cwd=provider_repository,
+            check=True,
+            capture_output=True,
+            text=True,
+        ).stdout.strip()
+    )
     executed = _execute(
         command_argv_value, root=repository, timeout_seconds=timeout_seconds,
         replay_contract=replay_contract,
+        provider_source_head=provider_source_head,
     )
     repository_after = _generation_summary(path_scope, repository)
     whole_after = _generation_summary(["."], repository)
@@ -678,6 +917,7 @@ def capture_governed_command(
         record, expected_context_artifact_digest=context_artifact["artifact_digest"],
         expected_task_contract_digest=context_artifact["task_contract_digest"],
         expected_execution_task=execution_task, expected_path_scope=path_scope,
+        root=repository,
     )
     if errors:
         raise RuntimeError("governed command capture failed: " + "; ".join(errors))
@@ -757,7 +997,10 @@ def _output_errors(output: Any, label: str) -> list[str]:
 
 
 def _pytest_provider_errors(
-    provider: Any, *, argv: list[str]
+    provider: Any,
+    *,
+    argv: list[str],
+    expected_source_head: str | None = None,
 ) -> list[str]:
     if _is_pytest_argv(argv) and not _is_governed_pytest_argv(argv):
         return ["pytest argv does not use the governed provider isolation profile"]
@@ -776,11 +1019,13 @@ def _pytest_provider_errors(
         return errors
     for field, expected in (
         ("schema_version", "governed_pytest_provider_v1"),
-        ("profile_id", "isolated_distribution_capsule_no_site_v1"),
+        ("profile_id", GOVERNED_PYTEST_PROVIDER_PROFILE_ID),
         (
             "bootstrap_digest",
             _digest_bytes(GOVERNED_PYTEST_BOOTSTRAP.encode("utf-8")),
         ),
+        ("source_kind", "CODE_OWNED_GIT_BLOB"),
+        ("lock_path", GOVERNED_PYTEST_PROVIDER_LOCK_PATH),
         ("site_import_disabled", True),
         ("candidate_cwd_removed_by_bootstrap", True),
         ("plugin_autoload_disabled", True),
@@ -792,6 +1037,45 @@ def _pytest_provider_errors(
     ):
         if provider.get(field) != expected:
             errors.append(f"governed pytest provider {field} is invalid")
+    for field in ("source_head", "lock_blob"):
+        if re.fullmatch(r"[0-9a-f]{40}", str(provider.get(field, ""))) is None:
+            errors.append(f"governed pytest provider {field} is invalid")
+    if (
+        expected_source_head is not None
+        and provider.get("source_head") != expected_source_head
+    ):
+        errors.append(
+            "governed pytest provider source head differs from the exact "
+            "reviewed repository head"
+        )
+    if not DIGEST_RE.fullmatch(str(provider.get("lock_sha256", ""))):
+        errors.append("governed pytest provider lock_sha256 is invalid")
+    try:
+        (
+            expected_lock,
+            expected_distributions,
+            expected_wheels,
+            _,
+        ) = _load_pytest_provider_bundle(str(provider.get("source_head", "")))
+    except (
+        OSError,
+        TypeError,
+        ValueError,
+        subprocess.CalledProcessError,
+    ) as error:
+        expected_lock, expected_distributions, expected_wheels = {}, [], []
+        errors.append(
+            f"governed pytest provider code-owned Git source is invalid: {error}"
+        )
+    for field, expected in (
+        ("lock_path", expected_lock.get("path")),
+        ("lock_blob", expected_lock.get("git_blob")),
+        ("lock_sha256", expected_lock.get("sha256")),
+    ):
+        if expected is not None and provider.get(field) != expected:
+            errors.append(
+                f"governed pytest provider {field} differs from code-owned Git"
+            )
     interpreter_path = provider.get("interpreter_path")
     if (
         not isinstance(interpreter_path, str)
@@ -841,6 +1125,33 @@ def _pytest_provider_errors(
             "governed pytest provider distribution manifest is invalid"
         )
         distributions = []
+    elif distributions != expected_distributions:
+        errors.append(
+            "governed pytest provider distributions differ from code-owned lock"
+        )
+    wheels = provider.get("wheel_manifest")
+    if (
+        not isinstance(wheels, list)
+        or any(
+            not isinstance(item, dict)
+            or set(item) != PYTEST_PROVIDER_WHEEL_IDENTITY_FIELDS
+            or not isinstance(item.get("name"), str)
+            or not isinstance(item.get("version"), str)
+            or not isinstance(item.get("path"), str)
+            or not re.fullmatch(r"[0-9a-f]{40}", str(item.get("git_blob", "")))
+            or not isinstance(item.get("bytes"), int)
+            or isinstance(item.get("bytes"), bool)
+            or item["bytes"] < 1
+            or not DIGEST_RE.fullmatch(str(item.get("sha256", "")))
+            for item in wheels
+        )
+    ):
+        errors.append("governed pytest provider wheel manifest is invalid")
+        wheels = []
+    elif wheels != expected_wheels:
+        errors.append(
+            "governed pytest provider wheels differ from code-owned Git"
+        )
     files = provider.get("file_manifest")
     if not isinstance(files, list) or not files:
         errors.append("governed pytest provider file manifest is empty")
@@ -867,7 +1178,14 @@ def _pytest_provider_errors(
             errors.append(
                 "governed pytest provider file manifest is not canonical"
             )
-    expected_provider_digest = _pytest_provider_digest(distributions, files)
+    expected_provider_digest = _pytest_provider_digest(
+        distributions,
+        wheels,
+        files,
+        source_head=str(provider.get("source_head", "")),
+        lock_blob=str(provider.get("lock_blob", "")),
+        lock_sha256=str(provider.get("lock_sha256", "")),
+    )
     if provider.get("provider_digest_before") != expected_provider_digest:
         errors.append("governed pytest provider digest does not re-derive")
     if provider.get("provider_digest_after") != expected_provider_digest:
@@ -940,9 +1258,21 @@ def validate_governed_command_capture(
     except ValueError as error:
         argv, command = [], ""
         errors.append(f"governed command argv is invalid: {error}")
-    errors.extend(
-        _pytest_provider_errors(record.get("pytest_provider"), argv=argv)
-    )
+    provider_expected_source_head = None
+    try:
+        if Path(root).resolve() == Path(__file__).resolve().parents[2]:
+            whole_before = record.get("whole_repository_before")
+            if isinstance(whole_before, dict):
+                provider_expected_source_head = whole_before.get(
+                    "source_head"
+                )
+    except OSError:
+        pass
+    errors.extend(_pytest_provider_errors(
+        record.get("pytest_provider"),
+        argv=argv,
+        expected_source_head=provider_expected_source_head,
+    ))
     authorization = record.get("authorization")
     expected_authorization = authorize_native_command(str(record.get("native_agent", "")), command)
     if authorization != expected_authorization:
@@ -1002,6 +1332,11 @@ def _replay_errors(record: dict[str, Any], *, root: Path) -> list[str]:
     replay = _execute(
         record["argv"], root=root, timeout_seconds=record["timeout_seconds"],
         replay_contract=record["replay_contract"],
+        provider_source_head=(
+            record.get("pytest_provider", {}).get("source_head")
+            if isinstance(record.get("pytest_provider"), dict)
+            else None
+        ),
     )
     errors: list[str] = []
     if replay["pytest_provider"] != record.get("pytest_provider"):

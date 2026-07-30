@@ -105,6 +105,8 @@ def test_real_tree_closure_verdict_derives_pass_and_is_deterministic() -> None:
         "program_code/ml_training/schemas/aiml_gate_receipts/"
         "s2e_launch_genesis_receipt_v1.schema.json",
         "program_code/ml_training/schemas/aiml_gate_receipts/"
+        "s2e_launch_consumption_bootstrap_authority_v1.schema.json",
+        "program_code/ml_training/schemas/aiml_gate_receipts/"
         "s2e_launch_predecessor_consumption_ledger_v1.schema.json",
         "program_code/ml_training/schemas/aiml_gate_receipts/"
         "s2e_launch_wave_receipt_v1.schema.json",

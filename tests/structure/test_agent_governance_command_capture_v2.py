@@ -3,10 +3,12 @@
 from __future__ import annotations
 
 import inspect
+import io
 import json
 import os
 import subprocess
 import sys
+import zipfile
 from copy import deepcopy
 from pathlib import Path
 
@@ -399,7 +401,24 @@ def test_controlled_pytest_environment_uses_only_bound_provider_capsule(
     assert "PYTHONPATH" not in read_only_environment
 
 
-def test_nested_capture_recovers_account_anchored_pytest_provider(
+def test_closed_command_capture_schema_requires_nullable_provider_field() -> None:
+    schema = json.loads(
+        (ROOT / ".codex/schemas/closure_packet_v1.schema.json").read_text(
+            encoding="utf-8"
+        )
+    )
+    command_capture = schema["$defs"]["commandCaptureV2"]
+
+    assert "pytest_provider" in command_capture["required"]
+    assert command_capture["properties"]["pytest_provider"] == {
+        "anyOf": [
+            {"$ref": "#/$defs/governedPytestProvider"},
+            {"type": "null"},
+        ]
+    }
+
+
+def test_nested_capture_recovers_code_owned_pytest_provider(
     tmp_path: Path,
 ) -> None:
     probe = tmp_path / "test_nested_provider.py"
@@ -475,6 +494,95 @@ def test_governed_pytest_bootstrap_rejects_candidate_provider_injection(
             str(probe),
         ],
     ) == []
+
+
+def test_governed_pytest_requires_the_code_owned_git_provider_lock(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    probe = tmp_path / "test_provider_admission.py"
+    probe.write_text(
+        "def test_provider_admission():\n    assert True\n",
+        encoding="utf-8",
+    )
+    monkeypatch.setattr(
+        capture_v2,
+        "GOVERNED_PYTEST_PROVIDER_LOCK_PATH",
+        ".codex/providers/governed_pytest_v1/missing-lock.json",
+    )
+
+    result = capture_v2._execute(
+        [
+            *capture_v2.GOVERNED_PYTEST_PREFIX,
+            *capture_v2.GOVERNED_PYTEST_REQUIRED_ARGS,
+            "-q",
+            str(probe),
+        ],
+        root=ROOT,
+        timeout_seconds=30,
+        replay_contract="CANONICAL_TEST_OUTPUT_V1",
+    )
+
+    assert result["result"] == "FAIL"
+    assert result["exit_code"] == 127
+    assert "code-owned Git blob" in result["stderr"]["preview_text"]
+    assert result["pytest_provider"] is None
+
+
+@pytest.mark.parametrize("unsafe_member", ["../escape.py", "inject.pth"])
+def test_code_owned_provider_rejects_unsafe_wheel_members(
+    tmp_path: Path, unsafe_member: str,
+) -> None:
+    capsule = tmp_path / "capsule"
+    capsule.mkdir()
+    payload = io.BytesIO()
+    with zipfile.ZipFile(payload, "w") as archive:
+        archive.writestr(unsafe_member, "raise RuntimeError('executed')\n")
+
+    with pytest.raises(ValueError, match="wheel member is unsafe"):
+        capture_v2._extract_provider_wheels(
+            capsule,
+            [(
+                {
+                    "path": (
+                        ".codex/providers/governed_pytest_v1/wheels/"
+                        "unsafe-1-py3-none-any.whl"
+                    )
+                },
+                payload.getvalue(),
+            )],
+        )
+    assert not (tmp_path / "escape.py").exists()
+
+
+def test_governed_provider_identity_binds_the_exact_reviewed_head(
+    tmp_path: Path,
+) -> None:
+    probe = tmp_path / "test_provider_head.py"
+    probe.write_text(
+        "def test_provider_head():\n    assert True\n",
+        encoding="utf-8",
+    )
+    argv = [
+        *capture_v2.GOVERNED_PYTEST_PREFIX,
+        *capture_v2.GOVERNED_PYTEST_REQUIRED_ARGS,
+        "-q",
+        str(probe),
+    ]
+    result = capture_v2._execute(
+        argv,
+        root=ROOT,
+        timeout_seconds=30,
+        replay_contract="CANONICAL_TEST_OUTPUT_V1",
+    )
+    assert result["result"] == "PASS"
+    assert any(
+        "differs from the exact reviewed repository head" in error
+        for error in capture_v2._pytest_provider_errors(
+            result["pytest_provider"],
+            argv=argv,
+            expected_source_head="0" * 40,
+        )
+    )
 
 
 def test_plain_pytest_argv_is_rejected_before_execution(

@@ -1,9 +1,23 @@
 # CLAUDE_CHANGELOG.md — 開發歷史歸檔
 
 > 從 CLAUDE.md / TODO.md 遷出的 Wave/Sprint/Batch + TODO version-increment 歷史敘事。新 session 不需要讀此文件，僅供回顧歷史時查閱。
-> 最後更新：2026-07-29（AIML S2E-LW1-LW5 launch contract；TODO v862／PROGRESS ledger v16）
+> 最後更新：2026-07-30（AIML S2E launch-gate calibration；PROGRESS ledger v17）
 
 ---
+
+## AIML S2E launch-gate calibration checkpoint（2026-07-30）
+
+在不發行 W0/LW1 receipt、不進 LW2、也不執行任何 production effect 的邊界內，
+修復 launch-gate review debt：predecessor consume-once 的本地雙 copy／lock 被全刪或
+全改名後，必須提交 fixed-root SSHSIG 驗證、綁 candidate/source/wave/review/expected
+entry 且帶 trusted single-use registry claim 的 bootstrap authority；unsigned、
+cross-candidate、valid-empty、symlink、partial-write 路徑均 fail closed，exact signed
+entry 可 crash/retry。Governed pytest provider 不再複製 ambient user-site，改從
+reviewed Git head 的 exact lock 與 8 支 hash-pinned pure-Python wheels 做 bounded
+safe extraction，provider identity 納入 closure schema；S2E source manifest 另做
+candidate Git-blob repo-local import closure，W0 bounded capture default 調為 300 秒。
+此 checkpoint 不改 5/9 package projection；`S2E.2b-2` 仍 ACTIVE，
+`S2E_2B_2A_SECURITY_RECOVERY_READY` 尚未成立，production effect 仍 0/6。
 
 ## AIML S2E-LW1-LW5 launch contract — TODO v862（2026-07-29）
 

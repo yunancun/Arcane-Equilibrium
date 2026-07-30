@@ -31,6 +31,59 @@ LAUNCH_CONTRACT_DIGEST = support.LAUNCH_CONTRACT_DIGEST
 NEXT_GENERATION_TASK_CONTRACT_DIGEST = (
     support.NEXT_GENERATION_TASK_CONTRACT_DIGEST
 )
+_DEFAULT_BOOTSTRAP = object()
+
+
+def test_review_manifest_closes_oracle_and_offline_provider_dependencies() -> None:
+    head = support._git(ROOT, "rev-parse", "HEAD")
+    tree = support._git(ROOT, "rev-parse", "HEAD^{tree}")
+    manifest = validator.s2e_review_source_blob_manifest(
+        {
+            "schema_version": "s2e_launch_genesis_receipt_v1",
+            "wave": "W0-GENESIS",
+            "schema_carrier_head": head,
+            "schema_carrier_tree": tree,
+        },
+        repo_root=ROOT,
+    )
+    paths = {entry["path"] for entry in manifest}
+
+    assert {
+        ".codex/agent_registry_v1.json",
+        ".codex/providers/governed_pytest_v1/lock.json",
+        (
+            ".codex/providers/governed_pytest_v1/wheels/"
+            "pytest-9.0.3-py3-none-any.whl"
+        ),
+        (
+            "helper_scripts/maintenance_scripts/"
+            "agent_governance_capture.py"
+        ),
+        (
+            "helper_scripts/maintenance_scripts/"
+            "agent_governance_context_validation.py"
+        ),
+        (
+            "helper_scripts/maintenance_scripts/"
+            "agent_governance_generation_summary.py"
+        ),
+        (
+            "helper_scripts/maintenance_scripts/"
+            "agent_governance_registry.py"
+        ),
+        (
+            "helper_scripts/maintenance_scripts/"
+            "agent_governance_routing.py"
+        ),
+        (
+            "helper_scripts/maintenance_scripts/"
+            "agent_governance_schema.py"
+        ),
+        (
+            "helper_scripts/maintenance_scripts/"
+            "agent_governance_workflow_receipts.py"
+        ),
+    } <= paths
 
 
 def _review_for_wave(
@@ -40,7 +93,8 @@ def _review_for_wave(
     tmp_path: Path,
     monkeypatch: pytest.MonkeyPatch,
     intent_suffix: str,
-) -> tuple[dict, dict, dict, dict, dict, dict]:
+    grant_bootstrap: bool = True,
+) -> tuple[dict, dict, dict, dict, dict, dict, dict | None]:
     repo = case["repo"]
     capture = support._actual_capture(
         repo,
@@ -139,11 +193,61 @@ def _review_for_wave(
     bundle["bundle_digest"] = validator.s2e_acceptance_review_bundle_digest(
         bundle
     )
-    return bundle, capture, chain, intent, result, readback
+    bootstrap = None
+    if grant_bootstrap:
+        bootstrap_core = (
+            validator.build_s2e_launch_consumption_bootstrap_authority_core(
+                candidate=candidate,
+                predecessor_receipt=case["issued"],
+                predecessor_chain=[case["issued"]],
+                acceptance_review_bundle_digest=bundle["bundle_digest"],
+                signer=bundle["signer"],
+                issued_at=case["now"] + timedelta(minutes=1),
+                expires_at=case["now"] + timedelta(minutes=5),
+            )
+        )
+        bootstrap_signed = (
+            validator.s2e_launch_consumption_bootstrap_signed_bytes(
+                bootstrap_core
+            )
+        )
+        bootstrap = {
+            **bootstrap_core,
+            "signed_core_digest": (
+                "sha256:" + hashlib.sha256(bootstrap_signed).hexdigest()
+            ),
+        }
+        bootstrap["signature"] = {
+            "algorithm": "SSHSIG",
+            "signed_digest": bootstrap["signed_core_digest"],
+            "signature": support._sign_sshsig(
+                case["private_key"],
+                bootstrap_signed,
+                namespace=s2e.S2E_RECEIPT_SIGNATURE_NAMESPACE,
+                directory=tmp_path,
+            ),
+        }
+        bootstrap["authority_digest"] = (
+            validator.s2e_launch_consumption_bootstrap_authority_digest(
+                bootstrap
+            )
+        )
+    return bundle, capture, chain, intent, result, readback, bootstrap
 
 
-def _issue_wave(case: dict, review: tuple, candidate: dict) -> dict:
-    bundle, capture, chain, intent, result, readback = review
+def _issue_wave(
+    case: dict,
+    review: tuple,
+    candidate: dict,
+    *,
+    bootstrap_authority: object = _DEFAULT_BOOTSTRAP,
+) -> dict:
+    bundle, capture, chain, intent, result, readback, bootstrap = review
+    selected_bootstrap = (
+        bootstrap
+        if bootstrap_authority is _DEFAULT_BOOTSTRAP
+        else bootstrap_authority
+    )
     return validator.issue_s2e_launch_receipt(
         candidate,
         acceptance_review_bundle=bundle,
@@ -156,6 +260,7 @@ def _issue_wave(case: dict, review: tuple, candidate: dict) -> dict:
         external_readback_ack=readback,
         predecessor_receipt=case["issued"],
         predecessor_authority=case["authority"],
+        predecessor_consumption_bootstrap_authority=selected_bootstrap,
     )
 
 
@@ -333,6 +438,31 @@ def test_wave_issuance_binds_effects_and_consumes_predecessor_once(
         "state_recovery_performed"
     ] is True
 
+    moved_paths = []
+    for path in (store.state_path, store.anchor_path, store.lock_path):
+        moved = path.with_name(path.name + ".moved")
+        path.rename(moved)
+        moved_paths.append(moved)
+    renamed_all = _issue_wave(
+        case, review, candidate, bootstrap_authority=None
+    )
+    assert renamed_all["status"] == "EXTERNAL_VERIFICATION_PENDING"
+    assert any(
+        "explicit signed bootstrap authority is required" in error
+        for error in renamed_all["errors"]
+    )
+    restored_from_authority = _issue_wave(case, review, candidate)
+    assert restored_from_authority["status"] == "ISSUED"
+    assert (
+        restored_from_authority["issued_receipt"]["payload_digest"]
+        == issued["payload_digest"]
+    )
+    assert restored_from_authority["predecessor_consumption_result"][
+        "bootstrap_authority_applied"
+    ] is True
+    for moved in moved_paths:
+        moved.unlink()
+
     sibling_head = support._commit(
         repo, "lw1-sibling.txt", "sibling\n", "LW1 sibling source"
     )
@@ -353,6 +483,7 @@ def test_wave_issuance_binds_effects_and_consumes_predecessor_once(
         tmp_path=tmp_path,
         monkeypatch=monkeypatch,
         intent_suffix="b-second02",
+        grant_bootstrap=False,
     )
     blocked = _issue_wave(case, sibling_review, sibling)
     assert blocked["status"] == "EXTERNAL_VERIFICATION_PENDING"
@@ -379,12 +510,99 @@ def test_wave_issuance_binds_effects_and_consumes_predecessor_once(
         "state and tombstone anchor were reset" in error
         for error in reset_pair["errors"]
     )
+    store.lock_path.unlink()
+    triple_reset = _issue_wave(
+        case,
+        sibling_review,
+        sibling,
+        bootstrap_authority=None,
+    )
+    assert triple_reset["status"] == "EXTERNAL_VERIFICATION_PENDING"
+    assert any(
+        "explicit signed bootstrap authority is required" in error
+        for error in triple_reset["errors"]
+    )
+    assert triple_reset["issued_receipt"] is None
+    cross_candidate_authority = _issue_wave(
+        case,
+        sibling_review,
+        sibling,
+        bootstrap_authority=review[6],
+    )
+    assert cross_candidate_authority["status"] == (
+        "EXTERNAL_VERIFICATION_PENDING"
+    )
+    assert any(
+        "candidate_payload_digest binding differs" in error
+        for error in cross_candidate_authority["errors"]
+    )
+
+    support._git(repo, "checkout", "--detach", candidate["source_head"])
+    restored_after_delete = _issue_wave(case, review, candidate)
+    assert restored_after_delete["status"] == "ISSUED"
+    assert (
+        restored_after_delete["issued_receipt"]["payload_digest"]
+        == issued["payload_digest"]
+    )
+    support._git(repo, "checkout", "--detach", sibling["source_head"])
+    sibling_still_blocked = _issue_wave(
+        case, sibling_review, sibling, bootstrap_authority=None
+    )
+    assert sibling_still_blocked["status"] == "EXTERNAL_VERIFICATION_PENDING"
+    assert any(
+        "already consumed by another successor" in error
+        for error in sibling_still_blocked["errors"]
+    )
+
+
+def _one_entry_consumption_ledger() -> dict:
+    entry = {
+        "schema_version": (
+            "s2e_launch_predecessor_consumption_entry_v1"
+        ),
+        "sequence": 1,
+        "previous_entry_digest": None,
+        "launch_id": "S2E-LW1-LW5",
+        "predecessor_payload_digest": "sha256:" + "1" * 64,
+        "successor_candidate_payload_digest": "sha256:" + "2" * 64,
+        "successor_wave": "S2E-LW1",
+        "successor_source_head": "3" * 40,
+        "acceptance_review_bundle_digest": "sha256:" + "4" * 64,
+        "consumed_at": "2026-07-30T12:00:00+00:00",
+        "side_effect_class": "LOCAL_SOURCE_CONTROL_STATE",
+        "production_effect": False,
+    }
+    entry["entry_digest"] = (
+        consumption.s2e_launch_consumption_entry_digest(entry)
+    )
+    ledger = {
+        "schema_version": (
+            "s2e_launch_predecessor_consumption_ledger_v1"
+        ),
+        "launch_id": "S2E-LW1-LW5",
+        "entries": [entry],
+    }
+    ledger["ledger_digest"] = (
+        consumption.s2e_launch_consumption_ledger_digest(ledger)
+    )
+    return ledger
+
+
+def _seed_consumption_store(
+    store: consumption.FileS2ELaunchConsumptionStore,
+) -> dict:
+    ledger = _one_entry_consumption_ledger()
+    store._atomic_write(store.anchor_path, ledger)
+    store._atomic_write(store.state_path, ledger)
+    store.lock_path.touch(mode=0o600)
+    store.lock_path.chmod(0o600)
+    return ledger
 
 
 def test_consumption_store_refuses_a_symlink_state_file(tmp_path: Path) -> None:
     repo, _, _, _ = support._repo(tmp_path)
     store = consumption.FileS2ELaunchConsumptionStore(repo)
-    store.update(lambda ledger: ledger)
+    _seed_consumption_store(store)
     store.state_path.unlink()
     outside = tmp_path / "outside.json"
     outside.write_text("{}\n", encoding="utf-8")
@@ -406,7 +624,7 @@ def test_consumption_store_refuses_a_symlink_lock_file(tmp_path: Path) -> None:
 def test_consumption_store_refuses_a_symlink_anchor_file(tmp_path: Path) -> None:
     repo, _, _, _ = support._repo(tmp_path)
     store = consumption.FileS2ELaunchConsumptionStore(repo)
-    store.update(lambda ledger: ledger)
+    _seed_consumption_store(store)
     store.anchor_path.unlink()
     outside = tmp_path / "outside-anchor.json"
     outside.write_text("{}\n", encoding="utf-8")
@@ -425,6 +643,67 @@ def test_consumption_store_initialization_survives_failed_mutation(
         raise RuntimeError("injected mutation failure")
 
     with pytest.raises(RuntimeError, match="injected mutation failure"):
-        store.update(fail)
-    assert store.read() == consumption._empty_ledger()
-    assert store.update(lambda ledger: ledger) == consumption._empty_ledger()
+        store.update(
+            fail,
+            bootstrap_prior_ledger=consumption._empty_ledger(),
+            bootstrap_result_ledger_digest=(
+                _one_entry_consumption_ledger()["ledger_digest"]
+            ),
+        )
+    assert store.lock_path.is_file()
+    assert not store.state_path.exists()
+    assert not store.anchor_path.exists()
+    with pytest.raises(ValueError, match="state and tombstone anchor were reset"):
+        store.read()
+    with pytest.raises(ValueError, match="state and tombstone anchor were reset"):
+        store.update(lambda ledger: ledger)
+
+
+def test_consumption_store_rejects_a_persisted_valid_empty_generation(
+    tmp_path: Path,
+) -> None:
+    repo, _, _, _ = support._repo(tmp_path)
+    store = consumption.FileS2ELaunchConsumptionStore(repo)
+    empty = consumption._empty_ledger()
+    store._atomic_write(store.anchor_path, empty)
+    store._atomic_write(store.state_path, empty)
+    store.lock_path.touch(mode=0o600)
+    store.lock_path.chmod(0o600)
+
+    with pytest.raises(ValueError, match="valid-empty durable"):
+        store.read()
+    with pytest.raises(ValueError, match="valid-empty durable"):
+        store.update(lambda ledger: ledger)
+
+
+def test_consumption_store_crash_after_anchor_recovers_exact_entry(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    repo, _, _, _ = support._repo(tmp_path)
+    store = consumption.FileS2ELaunchConsumptionStore(repo)
+    expected = _one_entry_consumption_ledger()
+    atomic_write = store._atomic_write
+    injected = False
+
+    def fail_first_state_write(path: Path, ledger: dict) -> None:
+        nonlocal injected
+        if path == store.state_path and not injected:
+            injected = True
+            raise OSError("injected state write failure")
+        atomic_write(path, ledger)
+
+    monkeypatch.setattr(store, "_atomic_write", fail_first_state_write)
+    with pytest.raises(OSError, match="injected state write failure"):
+        store.update(
+            lambda _ledger: expected,
+            bootstrap_prior_ledger=consumption._empty_ledger(),
+            bootstrap_result_ledger_digest=expected["ledger_digest"],
+        )
+    assert store.anchor_path.is_file()
+    assert not store.state_path.exists()
+
+    monkeypatch.setattr(store, "_atomic_write", atomic_write)
+    recovered = store.update(lambda ledger: ledger)
+    assert recovered == expected
+    assert store.last_state_recovery_performed is True
+    assert store.read() == expected

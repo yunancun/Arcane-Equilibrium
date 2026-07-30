@@ -94,6 +94,9 @@ def _parser() -> argparse.ArgumentParser:
     )
     issue.add_argument("--predecessor-receipt", type=Path)
     issue.add_argument("--predecessor-authority", type=Path)
+    issue.add_argument(
+        "--predecessor-consumption-bootstrap-authority", type=Path
+    )
     issue.add_argument("--now", required=True)
     _add_external_triplet(issue)
     carrier = subparsers.add_parser("verify-carrier")
@@ -185,6 +188,12 @@ def main(argv: list[str] | None = None) -> int:
             predecessor_authority=(
                 _read(args.predecessor_authority)
                 if args.predecessor_authority is not None
+                else None
+            ),
+            predecessor_consumption_bootstrap_authority=(
+                _read(args.predecessor_consumption_bootstrap_authority)
+                if args.predecessor_consumption_bootstrap_authority
+                is not None
                 else None
             ),
         )

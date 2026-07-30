@@ -1,8 +1,8 @@
 # AI/ML Landing Progress Ledger
 
 **Program**: `AIML-LONG-LIVED-LANDING-V2`
-**Ledger version**: 16
-**Updated**: 2026-07-29
+**Ledger version**: 17
+**Updated**: 2026-07-30
 **Overall state**: `PROGRAM_ADOPTED` · **`S1_CLOSED`** · every S2 effect-session
 source-seam predicate is narrowly `SOURCE_READY` (S2.0 + S2.1 + S2.2A + S2.3 +
 S2.4 + S2.5 + S2.2B), while Sprint 2 remains
@@ -21,6 +21,15 @@ observation at
 `not-found/inactive/dead`, and both canonical AIML install/state roots absent.
 Nine authorities remain false; no production effect may start before the S2E
 source waves close and a newly emitted packet receives fresh exact authority.
+The 2026-07-30 calibration checkpoint closes only the launch-gate review debt:
+signed external single-use bootstrap authority now survives local
+state/anchor/lock reset without permitting an unsigned or cross-candidate
+successor; governed pytest is reconstructed from exact reviewed-head,
+hash-pinned Git wheel blobs; the closure schema requires its provider identity;
+the review manifest includes transitive repo-local Python dependencies; and the
+W0 capture default is 300 seconds. This checkpoint issues no W0/LW1 receipt,
+does not satisfy `S2E_2B_2A_SECURITY_RECOVERY_READY`, does not unlock LW2, and
+does not change the 5/9 package projection or production effect 0/6.
 A fresh Linux run at H_effect
 `6e1ea957af35544a844f704978366d11aa6c2364` passed all eight target-host seams
 with `binding=BINDING` and zero residue; the complete `closure_packet_v1`

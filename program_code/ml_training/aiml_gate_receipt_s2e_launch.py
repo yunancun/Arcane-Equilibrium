@@ -19,9 +19,13 @@ from aiml_gate_receipt_schema_core import (
     canonical_digest,
 )
 from aiml_gate_receipt_s2e_consumption import (
+    build_s2e_launch_consumption_bootstrap_authority_core,
     consume_s2e_launch_predecessor,
+    s2e_launch_consumption_bootstrap_authority_digest,
+    s2e_launch_consumption_bootstrap_signed_bytes,
     validate_s2e_launch_consumption_entry,
     validate_s2e_launch_consumption_entry_structure,
+    validate_s2e_launch_consumption_bootstrap_authority,
 )
 from aiml_gate_receipt_s2e_review import (
     build_s2e_disposable_test_effect_chain,
@@ -1604,6 +1608,7 @@ def issue_s2e_launch_receipt(
     external_readback_ack: Any = None,
     predecessor_receipt: Any = None,
     predecessor_authority: Any = None,
+    predecessor_consumption_bootstrap_authority: Any = None,
 ) -> dict[str, Any]:
     """Issue one ready receipt only after the complete review path verifies."""
 
@@ -1683,10 +1688,14 @@ def issue_s2e_launch_receipt(
                         repo_root=repo_root,
                         candidate=candidate,
                         predecessor_receipt=predecessor_receipt,
+                        predecessor_chain=review_predecessor_chain,
                         acceptance_review_bundle_digest=(
                             acceptance_review_bundle["bundle_digest"]
                         ),
                         now=now,
+                        bootstrap_authority=(
+                            predecessor_consumption_bootstrap_authority
+                        ),
                     )
                 )
                 issued_receipt["predecessor_consumption"] = (

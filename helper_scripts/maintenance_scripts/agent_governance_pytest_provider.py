@@ -3,6 +3,15 @@
 from __future__ import annotations
 
 
+GOVERNED_PYTEST_PROVIDER_PROFILE_ID = "code_owned_git_wheels_no_site_v1"
+GOVERNED_PYTEST_PROVIDER_LOCK_PATH = (
+    ".codex/providers/governed_pytest_v1/lock.json"
+)
+GOVERNED_PYTEST_PROVIDER_WHEEL_PREFIX = (
+    ".codex/providers/governed_pytest_v1/wheels/"
+)
+
+
 GOVERNED_PYTEST_BOOTSTRAP = (
     "import importlib.util,os,sys;"
     "_cwd=os.path.realpath(os.getcwd());"

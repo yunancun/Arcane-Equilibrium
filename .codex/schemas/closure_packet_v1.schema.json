@@ -1075,20 +1075,29 @@
       "required": [
         "schema_version", "profile_id", "bootstrap_digest",
         "interpreter_path", "interpreter_digest_before",
-        "interpreter_digest_after", "distribution_manifest",
-        "file_manifest", "provider_digest_before", "provider_digest_after",
-        "provider_stable", "site_import_disabled",
+        "interpreter_digest_after", "source_kind", "source_head",
+        "lock_path", "lock_blob", "lock_sha256",
+        "distribution_manifest", "wheel_manifest", "file_manifest",
+        "provider_digest_before", "provider_digest_after", "provider_stable",
+        "site_import_disabled",
         "candidate_cwd_removed_by_bootstrap", "plugin_autoload_disabled",
         "conftest_loading_disabled", "project_config_loading_disabled",
         "test_import_path_appended", "repository_root_fixed"
       ],
       "properties": {
         "schema_version": {"const": "governed_pytest_provider_v1"},
-        "profile_id": {"const": "isolated_distribution_capsule_no_site_v1"},
+        "profile_id": {"const": "code_owned_git_wheels_no_site_v1"},
         "bootstrap_digest": {"$ref": "#/$defs/digest"},
         "interpreter_path": {"type": "string", "minLength": 1},
         "interpreter_digest_before": {"$ref": "#/$defs/digest"},
         "interpreter_digest_after": {"$ref": "#/$defs/digest"},
+        "source_kind": {"const": "CODE_OWNED_GIT_BLOB"},
+        "source_head": {"type": "string", "pattern": "^[0-9a-f]{40}$"},
+        "lock_path": {
+          "const": ".codex/providers/governed_pytest_v1/lock.json"
+        },
+        "lock_blob": {"type": "string", "pattern": "^[0-9a-f]{40}$"},
+        "lock_sha256": {"$ref": "#/$defs/digest"},
         "distribution_manifest": {
           "type": "array", "minItems": 5, "maxItems": 8,
           "items": {
@@ -1097,6 +1106,26 @@
             "properties": {
               "name": {"type": "string", "minLength": 1},
               "version": {"type": "string", "minLength": 1}
+            }
+          }
+        },
+        "wheel_manifest": {
+          "type": "array", "minItems": 8, "maxItems": 8,
+          "items": {
+            "type": "object", "additionalProperties": false,
+            "required": [
+              "name", "version", "path", "git_blob", "bytes", "sha256"
+            ],
+            "properties": {
+              "name": {"type": "string", "minLength": 1},
+              "version": {"type": "string", "minLength": 1},
+              "path": {
+                "type": "string",
+                "pattern": "^\\.codex/providers/governed_pytest_v1/wheels/[A-Za-z0-9_.-]+-py3-none-any\\.whl$"
+              },
+              "git_blob": {"type": "string", "pattern": "^[0-9a-f]{40}$"},
+              "bytes": {"type": "integer", "minimum": 1},
+              "sha256": {"$ref": "#/$defs/digest"}
             }
           }
         },
@@ -1135,7 +1164,8 @@
         "timeout_seconds", "started_at", "completed_at", "exit_code",
         "timed_out", "result", "stdout", "stderr", "repository_before",
         "repository_after", "whole_repository_before", "whole_repository_after",
-        "effect_enforcement", "host_sandbox_attestation_ref", "record_digest"
+        "pytest_provider", "effect_enforcement",
+        "host_sandbox_attestation_ref", "record_digest"
       ],
       "properties": {
         "schema_version": {"const": "command_capture_v2"},

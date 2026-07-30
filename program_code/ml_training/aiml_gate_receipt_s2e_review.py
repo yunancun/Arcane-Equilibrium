@@ -2,10 +2,11 @@
 
 from __future__ import annotations
 
+import ast
 import hashlib
 import subprocess
 from datetime import datetime, timezone
-from pathlib import Path
+from pathlib import Path, PurePath
 from typing import Any
 
 from agent_governance_pytest_provider import (
@@ -44,12 +45,62 @@ _S2E_LW1_REVIEW_PREDICATES = (
 )
 
 S2E_REVIEW_BASE_PATHS = (
+    ".codex/agent_registry_v1.json",
+    ".codex/providers/governed_pytest_v1/lock.json",
+    (
+        ".codex/providers/governed_pytest_v1/wheels/"
+        "exceptiongroup-1.3.1-py3-none-any.whl"
+    ),
+    (
+        ".codex/providers/governed_pytest_v1/wheels/"
+        "iniconfig-2.3.0-py3-none-any.whl"
+    ),
+    (
+        ".codex/providers/governed_pytest_v1/wheels/"
+        "packaging-26.1-py3-none-any.whl"
+    ),
+    (
+        ".codex/providers/governed_pytest_v1/wheels/"
+        "pluggy-1.6.0-py3-none-any.whl"
+    ),
+    (
+        ".codex/providers/governed_pytest_v1/wheels/"
+        "pygments-2.20.0-py3-none-any.whl"
+    ),
+    (
+        ".codex/providers/governed_pytest_v1/wheels/"
+        "pytest-9.0.3-py3-none-any.whl"
+    ),
+    (
+        ".codex/providers/governed_pytest_v1/wheels/"
+        "tomli-2.4.1-py3-none-any.whl"
+    ),
+    (
+        ".codex/providers/governed_pytest_v1/wheels/"
+        "typing_extensions-4.15.0-py3-none-any.whl"
+    ),
     ".codex/schemas/closure_packet_v1.schema.json",
+    "helper_scripts/maintenance_scripts/agent_governance_capture.py",
     "helper_scripts/maintenance_scripts/agent_governance_command_capture_v2.py",
     "helper_scripts/maintenance_scripts/agent_governance_command_replay.py",
+    (
+        "helper_scripts/maintenance_scripts/"
+        "agent_governance_context_validation.py"
+    ),
+    (
+        "helper_scripts/maintenance_scripts/"
+        "agent_governance_generation_summary.py"
+    ),
     "helper_scripts/maintenance_scripts/agent_governance_permissions.py",
     "helper_scripts/maintenance_scripts/agent_governance_pytest_provider.py",
+    "helper_scripts/maintenance_scripts/agent_governance_registry.py",
+    "helper_scripts/maintenance_scripts/agent_governance_routing.py",
+    "helper_scripts/maintenance_scripts/agent_governance_schema.py",
     "helper_scripts/maintenance_scripts/agent_governance_s2e_launch_receipts.py",
+    (
+        "helper_scripts/maintenance_scripts/"
+        "agent_governance_workflow_receipts.py"
+    ),
     "program_code/ml_training/application_bundle_runtime_closure_v1.json",
     "program_code/ml_training/aiml_gate_receipt_s2e_consumption.py",
     "program_code/ml_training/aiml_gate_receipt_s2e_launch.py",
@@ -63,6 +114,10 @@ S2E_REVIEW_BASE_PATHS = (
     (
         "program_code/ml_training/schemas/aiml_gate_receipts/"
         "s2e_disposable_test_effect_chain_v1.schema.json"
+    ),
+    (
+        "program_code/ml_training/schemas/aiml_gate_receipts/"
+        "s2e_launch_consumption_bootstrap_authority_v1.schema.json"
     ),
     (
         "program_code/ml_training/schemas/aiml_gate_receipts/"
@@ -224,19 +279,142 @@ def _reviewed_head_tree(candidate: dict[str, Any]) -> tuple[str, str]:
     raise ValueError("unsupported S2E launch candidate schema")
 
 
+def _python_module_names(path: str) -> set[str]:
+    relative = path.removesuffix(".py")
+    parts = relative.split("/")
+    if parts[-1] == "__init__":
+        parts = parts[:-1]
+    dotted = ".".join(parts)
+    names = {dotted}
+    if parts:
+        names.add(parts[-1])
+    for prefix in (
+        ("helper_scripts", "maintenance_scripts"),
+        ("program_code", "ml_training"),
+        ("tests", "structure"),
+        ("program_code", "ml_training", "tests"),
+    ):
+        if tuple(parts[: len(prefix)]) == prefix and len(parts) > len(prefix):
+            names.add(".".join(parts[len(prefix):]))
+    return {name for name in names if name}
+
+
+def _repo_python_import_closure(
+    selected: set[str],
+    *,
+    tracked: list[str],
+    reviewed_head: str,
+    repo_root: Path,
+) -> set[str]:
+    """Expand every repo-local import from exact candidate Git blobs."""
+
+    python_paths = {
+        path
+        for path in tracked
+        if path.endswith(".py")
+        and path.startswith(
+            (
+                "helper_scripts/maintenance_scripts/",
+                "program_code/ml_training/",
+                "tests/structure/",
+            )
+        )
+    }
+    module_index: dict[str, set[str]] = {}
+    for path in python_paths:
+        for name in _python_module_names(path):
+            module_index.setdefault(name, set()).add(path)
+
+    queue = sorted(path for path in selected if path in python_paths)
+    parsed: set[str] = set()
+    while queue:
+        path = queue.pop(0)
+        if path in parsed:
+            continue
+        parsed.add(path)
+        try:
+            tree = ast.parse(
+                _git_bytes(repo_root, "show", f"{reviewed_head}:{path}"),
+                filename=path,
+            )
+        except (SyntaxError, UnicodeDecodeError) as error:
+            raise ValueError(
+                f"S2E review dependency blob is not parseable Python: {path}: {error}"
+            ) from error
+        imported_names: set[str] = set()
+        relative_paths: set[str] = set()
+        for node in ast.walk(tree):
+            if isinstance(node, ast.Import):
+                imported_names.update(alias.name for alias in node.names)
+            elif isinstance(node, ast.ImportFrom):
+                if node.level:
+                    parent = PurePath(path).parent
+                    for _ in range(max(node.level - 1, 0)):
+                        parent = parent.parent
+                    if node.module:
+                        relative_paths.add(
+                            (parent / f"{node.module.replace('.', '/')}.py")
+                            .as_posix()
+                        )
+                    for alias in node.names:
+                        module = (
+                            f"{node.module}.{alias.name}"
+                            if node.module
+                            else alias.name
+                        )
+                        relative_paths.add(
+                            (parent / f"{module.replace('.', '/')}.py")
+                            .as_posix()
+                        )
+                elif node.module:
+                    imported_names.add(node.module)
+                    imported_names.update(
+                        f"{node.module}.{alias.name}"
+                        for alias in node.names
+                    )
+            elif (
+                isinstance(node, ast.Call)
+                and node.args
+                and isinstance(node.args[0], ast.Constant)
+                and isinstance(node.args[0].value, str)
+                and (
+                    (
+                        isinstance(node.func, ast.Name)
+                        and node.func.id == "__import__"
+                    )
+                    or (
+                        isinstance(node.func, ast.Attribute)
+                        and node.func.attr == "import_module"
+                    )
+                )
+            ):
+                imported_names.add(node.args[0].value)
+        discovered = set(relative_paths) & python_paths
+        for name in imported_names:
+            candidates = module_index.get(name, set())
+            if not candidates and "." in name:
+                candidates = module_index.get(name.rsplit(".", 1)[-1], set())
+            discovered.update(candidates)
+        for dependency in sorted(discovered):
+            if dependency not in selected:
+                selected.add(dependency)
+                queue.append(dependency)
+    return selected
+
+
 def _s2e_review_source_paths(
     candidate: dict[str, Any], *, repo_root: Path
 ) -> list[str]:
     wave = str(candidate.get("wave", ""))
     reviewed_head, _ = _reviewed_head_tree(candidate)
+    tracked = _git(
+        repo_root, "ls-tree", "-r", "--name-only", reviewed_head
+    ).stdout.splitlines()
     if wave == GENESIS_WAVE:
         selected = set(S2E_REVIEW_BASE_PATHS)
     elif wave == "S2E-LW1":
         selected = set(S2E_REVIEW_BASE_PATHS)
         selected.update(S2E_LW1_REVIEW_PATHS)
-        tracked = _git(
-            repo_root, "ls-tree", "-r", "--name-only", reviewed_head
-        ).stdout.splitlines()
         selected.update(
             path
             for path in tracked
@@ -244,7 +422,12 @@ def _s2e_review_source_paths(
         )
     else:
         raise ValueError(f"{wave} acceptance review profile is not implemented")
-    return sorted(selected)
+    return sorted(_repo_python_import_closure(
+        selected,
+        tracked=tracked,
+        reviewed_head=reviewed_head,
+        repo_root=repo_root,
+    ))
 
 
 def s2e_review_source_blob_manifest(
@@ -285,7 +468,6 @@ def s2e_review_test_argv(
     """Return the one exact, shell-free pytest argv accepted for a wave."""
 
     wave = str(candidate.get("wave", ""))
-    paths = _s2e_review_source_paths(candidate, repo_root=repo_root)
     if wave == GENESIS_WAVE:
         tests = [
             "program_code/ml_training/tests/"
@@ -298,9 +480,23 @@ def s2e_review_test_argv(
             "tests/structure/test_agent_governance_s2e_launch_receipts.py",
         ]
     elif wave == "S2E-LW1":
+        reviewed_head, _ = _reviewed_head_tree(candidate)
+        tracked = _git(
+            repo_root, "ls-tree", "-r", "--name-only", reviewed_head
+        ).stdout.splitlines()
+        owned_paths = set(S2E_REVIEW_BASE_PATHS)
+        owned_paths.update(S2E_LW1_REVIEW_PATHS)
+        owned_paths.update(
+            path
+            for path in tracked
+            if any(
+                path.startswith(prefix)
+                for prefix in S2E_LW1_REVIEW_PREFIXES
+            )
+        )
         tests = sorted(
             path
-            for path in paths
+            for path in owned_paths
             if (
                 path.startswith("tests/")
                 or path.startswith("program_code/ml_training/tests/")

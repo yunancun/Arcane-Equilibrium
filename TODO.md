@@ -71,6 +71,18 @@
 `W1-W5`。固定依賴為 `LW1 → LW2 → LW3 → LW4 → LW5`；shared kernel／route／closure
 writer 全部串行，只有凍結 exact generation 後的 read-only reviewer 可並行。
 
+**2026-07-30 校準 checkpoint（不是 LW1 exit）**：launch-gate source 已補上
+purpose-specific、candidate/source/wave/review/expected-entry 綁定的 trusted-signer
+consumption bootstrap authority，使 state＋anchor＋lock 全刪／全改名後，無 authority
+或 cross-candidate authority 均 fail closed，而 exact signed entry 可 crash-retry；
+governed pytest provider 改由 reviewed Git head 的 exact lock＋8 支 hash-pinned wheels
+離線建立，不再信任 ambient user-site，closure schema 強制記錄 provider，source manifest
+遞迴納入 repo-local Python dependencies，W0 capture 的預設 bounded timeout 為 300 秒。
+這只關閉 launch tooling 的 `PA-S2E-LW1-P2-006`、`F-LW1-04`、
+`F-LW1-04-schema` 與 `LAUNCH-04` review debt；**尚未發行 W0 genesis 或 LW1 wave
+receipt，尚未取得 `S2E_2B_2A_SECURITY_RECOVERY_READY`，不得解鎖 LW2**。
+`S2E.2b-2` 保持 ACTIVE，production effect=0，九項 authority 仍全 false。
+
 `S2E-LW1` 必須先建立並審核共用 closed `s2e_launch_genesis_receipt_v1`／
 `s2e_launch_wave_receipt_v1` schema、generator、validator，再由該 tooling 對 W0 exact
 head 發行 genesis；只有 genesis 可用 `predecessor=null`，LW1-LW5 各 receipt 必須精確

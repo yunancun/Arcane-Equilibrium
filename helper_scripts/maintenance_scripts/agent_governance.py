@@ -308,7 +308,7 @@ def _build_parser() -> argparse.ArgumentParser:
     capture.add_argument("--native-agent", required=True)
     capture.add_argument("--node-id", required=True)
     capture.add_argument("--context-artifact", required=True)
-    capture.add_argument("--timeout-seconds", type=int, default=120)
+    capture.add_argument("--timeout-seconds", type=int, default=300)
     capture.add_argument("command_argv", nargs=argparse.REMAINDER)
     return parser
 
