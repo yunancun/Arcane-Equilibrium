@@ -55,13 +55,16 @@ APPLIER_MODULES = frozenset({
 # Positive imports are capability declarations; unlisted imports fail closed.
 ALLOWED_STDLIB_IMPORTS = frozenset({
     "__future__", "argparse", "base64", "datetime", "errno", "fcntl", "hashlib", "json",
-    "os", "pathlib", "re", "socket", "stat", "sys", "typing",
+    "os", "pathlib", "re", "secrets", "socket", "stat", "sys", "typing",
 })
 STDLIB_IMPORTS_BY_FILE = {"agent_governance_s2_5_recovery_lock.py": frozenset({"functools"})}
 EXACT_STDLIB_IMPORTS_BY_FILE = {
     "agent_governance_s2_5_recovery.py": frozenset({
-        "__future__", "copy", "datetime", "hmac", "json", "os", "pathlib",
-        "re", "stat", "typing",
+        "__future__", "copy", "datetime", "hmac", "os", "pathlib", "re",
+        "stat", "typing",
+    }),
+    "agent_governance_s2_5_recovery_readback.py": frozenset({
+        "__future__", "datetime", "json", "secrets", "socket", "typing",
     }),
     "agent_governance_s2_5_recovery_anchor.py": frozenset({
         "__future__", "datetime", "json", "pathlib", "sys", "typing",
@@ -95,7 +98,11 @@ ALLOWED_THIRD_PARTY_IMPORTS = frozenset({"psycopg2"})
 GOVERNANCE_IMPORTS_BY_FILE: dict[str, frozenset[str]] = {
     "agent_governance_s2_5_recovery.py": frozenset({
         "agent_governance_aiml_trusted_host",
+        "agent_governance_s2_5_recovery_readback",
         "aiml_gate_receipt_s2_5_host_capture",
+        "aiml_gate_receipt_schema_core",
+    }),
+    "agent_governance_s2_5_recovery_readback.py": frozenset({
         "aiml_gate_receipt_schema_core",
     }),
     "agent_governance_s2_5_recovery_lock.py": frozenset({"agent_governance_s2_5_disposable_profile", "agent_governance_schema", "aiml_gate_receipt_validator"}),
@@ -217,6 +224,7 @@ RECOVERY_GOVERNED_FILES = frozenset({
     "agent_governance_s2_5_recovery_anchor_v2.py",
     "agent_governance_s2_5_recovery_controller.py",
     "agent_governance_s2_5_recovery_lock.py",
+    "agent_governance_s2_5_recovery_readback.py",
     "agent_governance_s2_5_recovery_state.py",
     "agent_governance_s2_5_recovery_store.py",
     "agent_governance_s2_5_recovery_store_v2.py",
@@ -231,6 +239,9 @@ RECOVERY_SENSITIVE_CALLS_BY_FILE: dict[
     "agent_governance_s2_5_recovery_anchor_v2.py": {},
     "agent_governance_s2_5_recovery_controller.py": {},
     "agent_governance_s2_5_recovery_lock.py": {},
+    "agent_governance_s2_5_recovery_readback.py": {
+        "socket": frozenset({"socket"}),
+    },
     "agent_governance_s2_5_recovery_state.py": {},
     "agent_governance_s2_5_recovery_store.py": {
         "fcntl": frozenset({"flock"}),

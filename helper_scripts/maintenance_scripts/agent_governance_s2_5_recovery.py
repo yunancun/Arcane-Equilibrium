@@ -5,15 +5,15 @@ This module binds a recovery chain to one unresolved state, exact state-root
 generation, journal/replay heads, consume-once authority, trusted off-root anchor
 reference, host/source/process identity, rollback, and an independent postcheck.
 It performs no command, process, service, or durable-state mutation.  Anchor
-validation does read one code-owned fixed current-witness file so an old, otherwise
-valid anchor cannot be replayed after the independently attested external floor moves.
+validation performs a fresh challenged read-only query through one code-owned
+attestor Adapter so a cached old witness cannot be replayed after the independently
+attested external floor moves.
 """
 
 from __future__ import annotations
 
 import copy
 import hmac
-import json
 import os
 import re
 import stat
@@ -22,6 +22,7 @@ from pathlib import Path
 from typing import Any
 
 import agent_governance_aiml_trusted_host as _trusted_host
+import agent_governance_s2_5_recovery_readback as _anchor_readback_adapter
 import aiml_gate_receipt_s2_5_host_capture as _host_capture
 from aiml_gate_receipt_schema_core import (
     _canonical_bytes,
@@ -90,10 +91,6 @@ RECOVERY_ANCHOR_READBACK_TRUST_ROOT_PUBLIC_KEY_PATH = Path(
 )
 RECOVERY_ANCHOR_READBACK_TRUST_ROOT_FINGERPRINT = (
     "SHA256:f4cGt6LzU8quxQUmrfd6wg9Xx+hBPrWcCXhbZ+mTguI"
-)
-RECOVERY_ANCHOR_CURRENT_READBACK_PATH = Path(
-    "/var/lib/arcane-equilibrium/trusted-readbacks/"
-    "s2-5-recovery-anchor-current.json"
 )
 RECOVERY_ANCHOR_EXTERNAL_STORE_ID = "s2-5-recovery-anchor-worm-v1"
 RECOVERY_CONSUMPTION_TRUST_ROOT_PUBLIC_KEY_PATH = Path(
@@ -178,6 +175,37 @@ _ANCHOR_READBACK_SIGNED_BINDING_KEYS = frozenset({
     "retention_mode", "full_chain_valid", "delete_denied", "evidence_class",
     "observed_at", "expires_at", "side_effect_class", "target_class",
     "production_effect", "production_authority",
+})
+_CURRENT_ANCHOR_READBACK_KEYS = frozenset({
+    "schema_version", "adapter_id", "store_id", "anchor_scope_id",
+    "query_digest", "challenge_nonce", "snapshot_id", "snapshot_version",
+    "monotonic_floor", "monotonic_floor_durable", "latest_version",
+    "latest_object_id", "latest_version_id", "latest_append_head_digest",
+    "latest_append_entry_digest", "immutable", "retention_mode",
+    "full_chain_valid", "delete_denied", "evidence_class", "observed_at",
+    "expires_at", "side_effect_class", "target_class", "production_effect",
+    "production_authority", "signer_identity", "signer_fingerprint",
+    "signature_namespace", "signed_binding", "sshsig_armored",
+    "readback_digest",
+})
+_CURRENT_ANCHOR_READBACK_SIGNED_BINDING_KEYS = frozenset({
+    "schema_version", "adapter_id", "store_id", "anchor_scope_id",
+    "query_digest", "challenge_nonce", "snapshot_id", "snapshot_version",
+    "monotonic_floor", "monotonic_floor_durable", "latest_version",
+    "latest_object_id", "latest_version_id", "latest_append_head_digest",
+    "latest_append_entry_digest", "immutable", "retention_mode",
+    "full_chain_valid", "delete_denied", "evidence_class", "observed_at",
+    "expires_at", "side_effect_class", "target_class", "production_effect",
+    "production_authority",
+})
+_ANCHOR_READBACK_STATE_FIELDS = frozenset({
+    "store_id", "anchor_scope_id", "snapshot_id", "snapshot_version",
+    "monotonic_floor", "monotonic_floor_durable", "latest_version",
+    "latest_object_id", "latest_version_id", "latest_append_head_digest",
+    "latest_append_entry_digest", "immutable", "retention_mode",
+    "full_chain_valid", "delete_denied", "evidence_class",
+    "side_effect_class", "target_class", "production_effect",
+    "production_authority",
 })
 _AUTH_BINDING_KEYS = frozenset({
     "action", "task_digest", "unresolved_state_digest", "state_root_identity",
@@ -299,48 +327,6 @@ def _read_fixed_recovery_public_key(path: Path) -> str:
     return " ".join(parts[:2])
 
 
-def _read_fixed_recovery_current_readback(path: Path) -> dict[str, Any]:
-    """Read one immutable current-witness file without following links."""
-
-    flags = os.O_RDONLY | getattr(os, "O_CLOEXEC", 0) | getattr(os, "O_NOFOLLOW", 0)
-    descriptor = os.open(path, flags)
-    try:
-        metadata = os.fstat(descriptor)
-        if not stat.S_ISREG(metadata.st_mode):
-            raise ValueError("recovery anchor current readback is not a regular file")
-        if metadata.st_nlink != 1:
-            raise ValueError(
-                "recovery anchor current readback must have exactly one hard link"
-            )
-        if metadata.st_uid not in {0, os.geteuid()}:
-            raise ValueError("recovery anchor current readback owner is not trusted")
-        if stat.S_IMODE(metadata.st_mode) & 0o222:
-            raise ValueError(
-                "recovery anchor current readback file must be immutable to writers"
-            )
-        if metadata.st_size < 2 or metadata.st_size > 65536:
-            raise ValueError("recovery anchor current readback size is invalid")
-        chunks: list[bytes] = []
-        remaining = metadata.st_size
-        while remaining:
-            chunk = os.read(descriptor, remaining)
-            if not chunk:
-                raise ValueError("recovery anchor current readback was truncated")
-            chunks.append(chunk)
-            remaining -= len(chunk)
-        if os.read(descriptor, 1):
-            raise ValueError("recovery anchor current readback grew during observation")
-    finally:
-        os.close(descriptor)
-    try:
-        value = json.loads(b"".join(chunks).decode("utf-8"))
-    except (UnicodeDecodeError, ValueError) as error:
-        raise ValueError("recovery anchor current readback is not canonical JSON") from error
-    if not isinstance(value, dict):
-        raise ValueError("recovery anchor current readback must be an object")
-    return value
-
-
 def _load_recovery_authorization_trust_root_public_key() -> str:
     return _read_fixed_recovery_public_key(
         RECOVERY_AUTHORIZATION_TRUST_ROOT_PUBLIC_KEY_PATH
@@ -356,14 +342,6 @@ def _load_recovery_anchor_trust_root_public_key() -> str:
 def _load_recovery_anchor_readback_trust_root_public_key() -> str:
     return _read_fixed_recovery_public_key(
         RECOVERY_ANCHOR_READBACK_TRUST_ROOT_PUBLIC_KEY_PATH
-    )
-
-
-def _load_recovery_anchor_current_readback() -> dict[str, Any]:
-    """Load the sole code-owned current external floor witness."""
-
-    return _read_fixed_recovery_current_readback(
-        RECOVERY_ANCHOR_CURRENT_READBACK_PATH
     )
 
 
@@ -516,6 +494,225 @@ def _anchor_readback_errors(readback: Any, *, now: Any) -> list[str]:
     return errors
 
 
+def recovery_current_anchor_readback_signed_bytes(
+    readback: dict[str, Any],
+) -> bytes:
+    """Canonical live query response authenticated by the readback verifier."""
+
+    return _canonical_bytes(readback["signed_binding"])
+
+
+def _current_anchor_readback_errors(
+    readback: Any,
+    *,
+    query_chain: Any,
+    now: Any,
+) -> list[str]:
+    errors = _exact(
+        readback,
+        _CURRENT_ANCHOR_READBACK_KEYS,
+        "trusted anchor current readback response",
+    )
+    if not isinstance(readback, dict):
+        return errors
+    errors.extend(_exact(
+        readback.get("signed_binding"),
+        _CURRENT_ANCHOR_READBACK_SIGNED_BINDING_KEYS,
+        "trusted anchor current readback signed_binding",
+    ))
+    errors.extend(_sealed(
+        readback,
+        "readback_digest",
+        "trusted anchor current readback response",
+    ))
+    signed = readback.get("signed_binding")
+    if isinstance(signed, dict) and signed != {
+        key: readback.get(key)
+        for key in _CURRENT_ANCHOR_READBACK_SIGNED_BINDING_KEYS
+    }:
+        errors.append(
+            "trusted anchor current readback signed_binding differs from "
+            "the exact response"
+        )
+    if (
+        readback.get("schema_version")
+        != "s2_5_recovery_anchor_current_readback_response_v1"
+    ):
+        errors.append("trusted anchor current readback schema is invalid")
+    if (
+        readback.get("adapter_id")
+        != _anchor_readback_adapter.ADAPTER_ID
+    ):
+        errors.append("trusted anchor current readback Adapter identity is invalid")
+    if readback.get("store_id") != RECOVERY_ANCHOR_EXTERNAL_STORE_ID:
+        errors.append("trusted anchor current readback store is invalid")
+    intent = (
+        query_chain.get("intent")
+        if isinstance(query_chain, dict)
+        else None
+    )
+    if not isinstance(intent, dict):
+        errors.append("trusted anchor current readback query intent is absent")
+    else:
+        expected_query = {
+            "query_digest": intent.get("self_digest"),
+            "challenge_nonce": intent.get("challenge_nonce"),
+            "store_id": intent.get("store_id"),
+            "anchor_scope_id": intent.get("anchor_scope_id"),
+        }
+        for field, expected in expected_query.items():
+            if readback.get(field) != expected:
+                errors.append(
+                    "trusted anchor current readback does not bind the fresh "
+                    f"query {field}"
+                )
+        errors.extend(_fresh_window_errors(
+            intent,
+            now=now,
+            label="trusted anchor current readback query",
+            issued_key="requested_at",
+            expires_key="expires_at",
+        ))
+    for field in (
+        "anchor_scope_id",
+        "query_digest",
+        "challenge_nonce",
+        "snapshot_id",
+        "latest_object_id",
+        "latest_version_id",
+    ):
+        if not isinstance(readback.get(field), str) or not readback[field]:
+            errors.append(f"trusted anchor current readback {field} is invalid")
+    versions = (
+        readback.get("snapshot_version"),
+        readback.get("monotonic_floor"),
+        readback.get("latest_version"),
+    )
+    if any(
+        not isinstance(value, int) or isinstance(value, bool) or value < 1
+        for value in versions
+    ):
+        errors.append("trusted anchor current readback versions are invalid")
+    else:
+        snapshot, floor, latest = versions
+        if latest != snapshot:
+            errors.append("trusted anchor current snapshot is not latest")
+        if floor != latest:
+            errors.append(
+                "trusted anchor current latest does not equal the durable "
+                "monotonic floor"
+            )
+    expected_constants = {
+        "monotonic_floor_durable": True,
+        "immutable": True,
+        "retention_mode": "COMPLIANCE_WORM",
+        "full_chain_valid": True,
+        "delete_denied": True,
+        "evidence_class": "PLATFORM_OR_EXTERNAL_ATTESTED",
+        "side_effect_class": "DISPOSABLE_TEST",
+        "target_class": "disposable_systemd",
+        "production_effect": False,
+        "production_authority": False,
+    }
+    for field, expected in expected_constants.items():
+        if type(readback.get(field)) is not type(expected) or (
+            readback.get(field) != expected
+        ):
+            errors.append(
+                f"trusted anchor current readback {field} is not {expected!r}"
+            )
+    errors.extend(_fresh_window_errors(
+        readback,
+        now=now,
+        label="trusted anchor current readback response",
+        issued_key="observed_at",
+        expires_key="expires_at",
+    ))
+    if isinstance(intent, dict):
+        try:
+            requested_at = _parse_timestamp(str(intent.get("requested_at")))
+            query_expires_at = _parse_timestamp(str(intent.get("expires_at")))
+            observed_at = _parse_timestamp(str(readback.get("observed_at")))
+            response_expires_at = _parse_timestamp(
+                str(readback.get("expires_at"))
+            )
+        except (TypeError, ValueError) as error:
+            errors.append(
+                "trusted anchor current readback query/response times are "
+                f"invalid: {error}"
+            )
+        else:
+            if observed_at < requested_at or observed_at >= query_expires_at:
+                errors.append(
+                    "trusted anchor current readback was not observed inside "
+                    "the fresh query window"
+                )
+            if response_expires_at > query_expires_at:
+                errors.append(
+                    "trusted anchor current readback outlives the fresh query"
+                )
+    if (
+        readback.get("signer_identity")
+        != RECOVERY_ANCHOR_READBACK_SIGNER_IDENTITY
+    ):
+        errors.append("trusted anchor current readback signer identity is invalid")
+    if (
+        readback.get("signature_namespace")
+        != RECOVERY_ANCHOR_READBACK_SIGNATURE_NAMESPACE
+    ):
+        errors.append("trusted anchor current readback SSHSIG namespace is invalid")
+    try:
+        signed_bytes = recovery_current_anchor_readback_signed_bytes(readback)
+    except (KeyError, TypeError, ValueError):
+        signed_bytes = b""
+    errors.extend(_fixed_root_signature_errors(
+        signer_fingerprint=readback.get("signer_fingerprint"),
+        signed_bytes=signed_bytes,
+        signature=readback.get("sshsig_armored"),
+        identity=RECOVERY_ANCHOR_READBACK_SIGNER_IDENTITY,
+        namespace=RECOVERY_ANCHOR_READBACK_SIGNATURE_NAMESPACE,
+        label="trusted anchor current readback",
+    ))
+    return errors
+
+
+def _query_current_anchor_readback(
+    *,
+    anchor_scope_id: Any,
+    now: Any,
+) -> tuple[list[str], dict[str, Any] | None]:
+    if not isinstance(anchor_scope_id, str) or not anchor_scope_id:
+        return ["trusted anchor cannot query a malformed external scope"], None
+    try:
+        chain = _anchor_readback_adapter._query_current_anchor_readback(
+            anchor_scope_id=anchor_scope_id,
+        )
+    except _anchor_readback_adapter.RecoveryAnchorReadbackError as error:
+        return [
+            "trusted anchor fresh current readback query failed: "
+            f"{error.code}"
+        ], None
+    errors = _anchor_readback_adapter.validate_current_readback_chain(chain)
+    if errors:
+        return [
+            "trusted anchor fresh current readback Adapter chain is invalid: "
+            + "; ".join(errors)
+        ], None
+    if chain.get("status") != "OBSERVED_UNVERIFIED_SIGNATURE":
+        failure = chain.get("result", {}).get("failure_code")
+        return [
+            "trusted anchor fresh current readback is unavailable: "
+            f"{failure or chain.get('status')}"
+        ], None
+    response = chain.get("result", {}).get("response")
+    errors.extend(_current_anchor_readback_errors(
+        response,
+        query_chain=chain,
+        now=now,
+    ))
+    return errors, response if isinstance(response, dict) else None
+
+
 def _anchor_errors(
     anchor: Any,
     root: Any,
@@ -533,20 +730,6 @@ def _anchor_errors(
     ))
     readback = anchor.get("external_readback")
     errors.extend(_anchor_readback_errors(readback, now=now))
-    try:
-        current_readback = _load_recovery_anchor_current_readback()
-    except (OSError, ValueError) as error:
-        errors.append(
-            "trusted anchor code-owned current external readback is unavailable "
-            f"or invalid: {error}"
-        )
-    else:
-        errors.extend(_anchor_readback_errors(current_readback, now=now))
-        if current_readback != readback:
-            errors.append(
-                "trusted anchor does not carry the code-owned current external "
-                "readback; durable monotonic floor or immutable history differs"
-            )
     errors.extend(_sealed(anchor, "reference_digest", "trusted_anchor"))
     signed = anchor.get("signed_binding")
     if not isinstance(signed, dict):
@@ -665,6 +848,19 @@ def _anchor_errors(
         namespace=RECOVERY_ANCHOR_SIGNATURE_NAMESPACE,
         label="trusted anchor",
     ))
+    if not errors:
+        current_errors, current_readback = _query_current_anchor_readback(
+            anchor_scope_id=anchor.get("anchor_scope_id"),
+            now=now,
+        )
+        errors.extend(current_errors)
+        if isinstance(current_readback, dict) and isinstance(readback, dict):
+            for field in sorted(_ANCHOR_READBACK_STATE_FIELDS):
+                if current_readback.get(field) != readback.get(field):
+                    errors.append(
+                        "trusted anchor does not match the fresh current "
+                        f"external readback {field}"
+                    )
     return errors
 
 

@@ -22,6 +22,7 @@ EXPECTED_RECOVERY_LEAVES = frozenset({
     "agent_governance_s2_5_recovery_anchor_v2.py",
     "agent_governance_s2_5_recovery_controller.py",
     "agent_governance_s2_5_recovery_lock.py",
+    "agent_governance_s2_5_recovery_readback.py",
     "agent_governance_s2_5_recovery_state.py",
     "agent_governance_s2_5_recovery_store.py",
     "agent_governance_s2_5_recovery_store_v2.py",

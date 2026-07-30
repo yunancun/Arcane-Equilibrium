@@ -7,6 +7,7 @@ import copy
 import inspect
 import json
 import sys
+from datetime import datetime
 from pathlib import Path
 
 import pytest
@@ -20,6 +21,7 @@ for candidate in (HELPERS, ML_ROOT):
 
 import agent_governance_s2_5_lifecycle as lifecycle  # noqa: E402
 import agent_governance_s2_5_recovery as recovery  # noqa: E402
+import agent_governance_s2_5_recovery_readback as readback_adapter  # noqa: E402
 import aiml_gate_receipt_s2_5_host_capture as host_capture_leaf  # noqa: E402
 import aiml_gate_receipt_validator as validator  # noqa: E402
 
@@ -82,11 +84,26 @@ def _install_independent_recovery_trust_root(tmp_path, monkeypatch):
     )
     _RECOVERY_PRIVATE_KEYS["host_capture"] = private_key
     _RECOVERY_FINGERPRINTS["host_capture"] = fingerprint
+    nonce_counter = [0]
+
+    def fresh_nonce() -> str:
+        nonce_counter[0] += 1
+        return "s2-5-readback-challenge-" + f"{nonce_counter[0]:064x}"
+
     monkeypatch.setattr(
-        recovery,
-        "_load_recovery_anchor_current_readback",
-        lambda: copy.deepcopy(_CURRENT_ANCHOR_READBACK),
-        raising=False,
+        readback_adapter,
+        "_trusted_now",
+        lambda: datetime.fromisoformat(NOW.replace("Z", "+00:00")),
+    )
+    monkeypatch.setattr(
+        readback_adapter,
+        "_fresh_challenge_nonce",
+        fresh_nonce,
+    )
+    monkeypatch.setattr(
+        readback_adapter,
+        "_fixed_transport_exchange",
+        _fresh_current_readback_response,
     )
     yield
     _RECOVERY_PRIVATE_KEYS.clear()
@@ -98,6 +115,42 @@ def _sealed(payload: dict, digest_key: str) -> dict:
     sealed = copy.deepcopy(payload)
     sealed[digest_key] = validator.canonical_digest(payload)
     return sealed
+
+
+def _fresh_current_readback_response(request_bytes: bytes) -> dict:
+    request = json.loads(request_bytes)
+    current = _CURRENT_ANCHOR_READBACK
+    signed_binding = {
+        "schema_version": (
+            "s2_5_recovery_anchor_current_readback_response_v1"
+        ),
+        "adapter_id": readback_adapter.ADAPTER_ID,
+        "store_id": current["store_id"],
+        "anchor_scope_id": current["anchor_scope_id"],
+        "query_digest": request["self_digest"],
+        "challenge_nonce": request["challenge_nonce"],
+        **{
+            field: copy.deepcopy(current[field])
+            for field in recovery._ANCHOR_READBACK_STATE_FIELDS
+            if field not in {"store_id", "anchor_scope_id"}
+        },
+        "observed_at": NOW,
+        "expires_at": request["expires_at"],
+    }
+    return _sealed({
+        **signed_binding,
+        "signer_identity": recovery.RECOVERY_ANCHOR_READBACK_SIGNER_IDENTITY,
+        "signer_fingerprint": _RECOVERY_FINGERPRINTS["anchor_readback"],
+        "signature_namespace": (
+            recovery.RECOVERY_ANCHOR_READBACK_SIGNATURE_NAMESPACE
+        ),
+        "signed_binding": copy.deepcopy(signed_binding),
+        "sshsig_armored": __import__("s2_5_testkit")._sign_bytes(
+            _RECOVERY_PRIVATE_KEYS["anchor_readback"],
+            validator._canonical_bytes(signed_binding),
+            namespace=recovery.RECOVERY_ANCHOR_READBACK_SIGNATURE_NAMESPACE,
+        ),
+    }, "readback_digest")
 
 
 def _reseal_capture(capture: dict) -> None:
@@ -152,6 +205,27 @@ def _resign_anchor(anchor: dict) -> None:
     anchor["reference_digest"] = validator.canonical_digest({
         key: value for key, value in anchor.items()
         if key != "reference_digest"
+    })
+
+
+def _resign_current_readback(
+    readback: dict,
+    *,
+    profile: str = "anchor_readback",
+) -> None:
+    readback["signed_binding"] = {
+        key: copy.deepcopy(readback[key])
+        for key in recovery._CURRENT_ANCHOR_READBACK_SIGNED_BINDING_KEYS
+    }
+    readback["signer_fingerprint"] = _RECOVERY_FINGERPRINTS[profile]
+    readback["sshsig_armored"] = __import__("s2_5_testkit")._sign_bytes(
+        _RECOVERY_PRIVATE_KEYS[profile],
+        validator._canonical_bytes(readback["signed_binding"]),
+        namespace=recovery.RECOVERY_ANCHOR_READBACK_SIGNATURE_NAMESPACE,
+    )
+    readback["readback_digest"] = validator.canonical_digest({
+        key: value for key, value in readback.items()
+        if key != "readback_digest"
     })
 
 
@@ -1126,7 +1200,7 @@ def test_anchor_owner_cannot_coherently_rewrite_current_external_history(
 
     with pytest.raises(
         ValueError,
-        match="current external readback|independent readback|durable monotonic",
+        match="external readback|independent readback|durable monotonic",
     ):
         recovery.build_recovery_intent(
             unresolved_state=state.unresolved,
@@ -1340,10 +1414,10 @@ def test_each_recovery_capability_has_a_distinct_fixed_trust_profile():
             "_load_" + prefix.lower() + "_trust_root_public_key",
         )
         assert not inspect.signature(loader).parameters
-    assert recovery.RECOVERY_ANCHOR_CURRENT_READBACK_PATH.is_absolute()
-    assert not inspect.signature(
-        recovery._load_recovery_anchor_current_readback
-    ).parameters
+    assert readback_adapter.FIXED_ATTESTOR_SOCKET_PATH.startswith("/")
+    assert set(inspect.signature(
+        readback_adapter._query_current_anchor_readback
+    ).parameters) == {"anchor_scope_id"}
     assert not hasattr(recovery, "_load_recovery_trust_root_public_key")
     assert not hasattr(recovery, "RECOVERY_TRUST_ROOT_PUBLIC_KEY")
 
@@ -1401,15 +1475,46 @@ def test_current_readback_unavailable_fails_closed(tmp_path, monkeypatch):
     state = _state(tmp_path)
     kernel, admission, anchor, authorization = _intent_materials(state)
 
-    def unavailable():
-        raise OSError("independent current witness unavailable")
+    def unavailable(_request_bytes):
+        raise readback_adapter.RecoveryAnchorReadbackError(
+            "independent_current_witness_unavailable"
+        )
 
     monkeypatch.setattr(
-        recovery,
-        "_load_recovery_anchor_current_readback",
+        readback_adapter,
+        "_fixed_transport_exchange",
         unavailable,
     )
-    with pytest.raises(ValueError, match="current external readback.*unavailable"):
+    with pytest.raises(ValueError, match="current readback.*unavailable"):
+        recovery.build_recovery_intent(
+            unresolved_state=state.unresolved,
+            kernel_binding=kernel,
+            admission=admission,
+            authorization=authorization,
+            trusted_anchor=anchor,
+            action="ROLLBACK_TO_PRE_STATE",
+            now=NOW,
+        )
+
+
+def test_anchor_owner_key_cannot_forge_fresh_challenge_response(
+    tmp_path,
+    monkeypatch,
+):
+    state = _state(tmp_path)
+    kernel, admission, anchor, authorization = _intent_materials(state)
+
+    def forged_response(request_bytes):
+        response = _fresh_current_readback_response(request_bytes)
+        _resign_current_readback(response, profile="anchor")
+        return response
+
+    monkeypatch.setattr(
+        readback_adapter,
+        "_fixed_transport_exchange",
+        forged_response,
+    )
+    with pytest.raises(ValueError, match="current readback.*SSHSIG|fingerprint"):
         recovery.build_recovery_intent(
             unresolved_state=state.unresolved,
             kernel_binding=kernel,
@@ -1527,26 +1632,101 @@ def test_recovery_trust_root_reader_rejects_writable_or_multiply_linked_key(
         _ORIGINAL_RECOVERY_PUBLIC_KEY_READER(key_path)
 
 
-def test_current_readback_reader_rejects_writable_or_multiply_linked_file(
+def test_prior_signed_current_response_cannot_answer_a_fresh_challenge(
     tmp_path,
+    monkeypatch,
 ):
     state = _state(tmp_path)
-    _trusted_anchor(state.unresolved)
-    readback_path = tmp_path / "current-readback.json"
-    readback_path.write_text(
-        json.dumps(_CURRENT_ANCHOR_READBACK),
-        encoding="utf-8",
+    kernel = _kernel_binding(state.unresolved)
+    admission = _admission(state.unresolved)
+    old_anchor = _trusted_anchor(state.unresolved)
+    old_query = readback_adapter._query_current_anchor_readback(
+        anchor_scope_id=old_anchor["anchor_scope_id"],
     )
-    readback_path.chmod(0o600)
-    with pytest.raises(ValueError, match="immutable"):
-        recovery._read_fixed_recovery_current_readback(readback_path)
-    readback_path.chmod(0o400)
-    assert recovery._read_fixed_recovery_current_readback(
-        readback_path
-    ) == _CURRENT_ANCHOR_READBACK
-    (tmp_path / "second-readback-link.json").hardlink_to(readback_path)
-    with pytest.raises(ValueError, match="hard link"):
-        recovery._read_fixed_recovery_current_readback(readback_path)
+    replayed_response = copy.deepcopy(old_query["result"]["response"])
+    _trusted_anchor(
+        state.unresolved,
+        snapshot_version=8,
+        monotonic_floor=8,
+        latest_version=8,
+    )
+    monkeypatch.setattr(
+        readback_adapter,
+        "_fixed_transport_exchange",
+        lambda _request_bytes: copy.deepcopy(replayed_response),
+    )
+    with pytest.raises(
+        ValueError,
+        match="fresh current readback|fresh_binding|challenge|query_digest",
+    ):
+        recovery.build_recovery_intent(
+            unresolved_state=state.unresolved,
+            kernel_binding=kernel,
+            admission=admission,
+            authorization=_authorization(
+                state.unresolved,
+                action="ROLLBACK_TO_PRE_STATE",
+                kernel_binding=kernel,
+                admission=admission,
+                trusted_anchor=old_anchor,
+            ),
+            trusted_anchor=old_anchor,
+            action="ROLLBACK_TO_PRE_STATE",
+            now=NOW,
+        )
+
+
+@pytest.mark.parametrize(
+    ("field", "value"),
+    (
+        ("store_id", "other-store"),
+        ("anchor_scope_id", "other-scope"),
+        ("snapshot_version", 8),
+        ("monotonic_floor", 8),
+        ("latest_version", 8),
+        ("latest_object_id", "object:s2-5:8"),
+        ("latest_version_id", "version:s2-5:8"),
+        ("latest_append_head_digest", D2),
+        ("latest_append_entry_digest", D2),
+        ("monotonic_floor_durable", False),
+        ("retention_mode", "GOVERNANCE"),
+        ("full_chain_valid", False),
+        ("delete_denied", False),
+        ("production_effect", True),
+        ("production_authority", True),
+        ("expires_at", LATER),
+    ),
+)
+def test_fresh_signed_current_response_mutations_fail_closed(
+    tmp_path,
+    monkeypatch,
+    field,
+    value,
+):
+    state = _state(tmp_path)
+    kernel, admission, anchor, authorization = _intent_materials(state)
+
+    def mutated_response(request_bytes):
+        response = _fresh_current_readback_response(request_bytes)
+        response[field] = value
+        _resign_current_readback(response)
+        return response
+
+    monkeypatch.setattr(
+        readback_adapter,
+        "_fixed_transport_exchange",
+        mutated_response,
+    )
+    with pytest.raises(ValueError):
+        recovery.build_recovery_intent(
+            unresolved_state=state.unresolved,
+            kernel_binding=kernel,
+            admission=admission,
+            authorization=authorization,
+            trusted_anchor=anchor,
+            action="ROLLBACK_TO_PRE_STATE",
+            now=NOW,
+        )
 
 
 def test_intent_requires_explicit_time_and_resolve_uses_closed_central_schema(tmp_path):
