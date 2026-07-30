@@ -1122,6 +1122,29 @@ def test_phase_transition_cannot_add_journal_identity():
     assert "phase transition changed the exact journal identity set" in errors
 
 
+def test_phase_transition_rejects_coherent_terminal_journal_rewrite():
+    prepared_proof, consumed = _prepared_proof_and_consumed()
+    subject = copy.deepcopy(consumed["candidate_subject"])
+    subject["journal_inventory"][0].update({
+        "file_digest": D5,
+        "journal_head_digest": D6,
+        "terminal_state": "TERMINAL_SUCCESS",
+    })
+    subject["journal_set_digest"] = validator.canonical_digest({
+        "schema_version": "s2_5_recovery_journal_set_v2",
+        "entries": subject["journal_inventory"],
+    })
+    _transition_value, _outbox_value, rewritten = _pending_state(
+        subject, from_phase="PREPARED"
+    )
+
+    assert controller.validate_controller_artifact(rewritten) == []
+    errors = controller.validate_controller_state_successor(
+        prepared_proof, rewritten
+    )
+    assert "phase transition changed immutable journal history or state" in errors
+
+
 def test_resolved_requires_committed_result_rollback_and_independent_postcheck():
     resolved_subject = _subject(
         phase="RESOLVED",

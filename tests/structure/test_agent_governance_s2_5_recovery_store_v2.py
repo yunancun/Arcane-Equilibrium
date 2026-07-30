@@ -436,10 +436,12 @@ def test_proof_attachment_can_persist_after_original_admission_expiry(
     assert candidate["controller_state"] == attached
 
 
+@pytest.mark.parametrize("rewrite_terminal_state", (False, True))
 def test_live_prepared_to_consumed_projection_is_durably_reachable(
     tmp_path,
     monkeypatch,
     controller_case_signing,
+    rewrite_terminal_state,
 ) -> None:
     state_root = tmp_path / "state"
     lock_root = tmp_path / "locks"
@@ -499,6 +501,14 @@ def test_live_prepared_to_consumed_projection_is_durably_reachable(
         "entry_count": 1,
         "tail_entry_digest": ledger_entry["entry_digest"],
     }
+    if rewrite_terminal_state:
+        journal["state"] = "TERMINAL_SUCCESS"
+        journal["history"][-1]["state"] = "TERMINAL_SUCCESS"
+        journal["history"][-1]["entry_digest"] = validator.canonical_digest({
+            key: value
+            for key, value in journal["history"][-1].items()
+            if key != "entry_digest"
+        })
     journal["self_digest"] = validator.artifact_self_digest(journal)
     _write_json(journal_path, journal)
     snapshot = _snapshot_fixture(state_root)
@@ -555,14 +565,25 @@ def test_live_prepared_to_consumed_projection_is_durably_reachable(
     )
 
     assert controller.validate_controller_artifact(consumed) == []
-    assert controller.validate_controller_state_successor(
+    successor_errors = controller.validate_controller_state_successor(
         previous["controller_state"],
         consumed,
-    ) == []
+    )
+    if rewrite_terminal_state:
+        assert "phase transition changed immutable journal history or state" in (
+            successor_errors
+        )
+    else:
+        assert successor_errors == []
     outcome = store.persist_fixed_profile(
         source_head=controller_cases.HEAD,
         controller_state=consumed,
     )
+    if rewrite_terminal_state:
+        assert outcome["status"] == "RECOVERY_REQUIRED"
+        assert outcome["store"] is None
+        assert outcome["store_failure"] == "controller_successor_invalid"
+        return
     assert outcome["store_failure_detail"] is None, outcome[
         "store_failure_detail"
     ]

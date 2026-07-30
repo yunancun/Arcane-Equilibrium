@@ -1332,6 +1332,24 @@ def validate_controller_transition(
             errors.append(
                 "phase transition changed the exact journal identity set"
             )
+        else:
+            previous_by_id = {
+                (item["basename"], item["start_id"]): item
+                for item in previous_journals
+            }
+            candidate_by_id = {
+                (item["basename"], item["start_id"]): item
+                for item in candidate_journals
+            }
+            if any(
+                candidate_by_id[identity].get(field)
+                != previous_by_id[identity].get(field)
+                for identity in previous_ids
+                for field in ("journal_head_digest", "terminal_state")
+            ):
+                errors.append(
+                    "phase transition changed immutable journal history or state"
+                )
     previous_admission, previous_admission_errors = _parse_canonical_object(
         previous_subject.get("recovery_admission_capture_json"),
         label="previous recovery admission capture",
