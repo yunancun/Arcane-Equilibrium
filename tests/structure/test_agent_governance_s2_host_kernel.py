@@ -38,19 +38,8 @@ import agent_governance_s2_host_kernel as kernel  # noqa: E402
 
 # ── runner 家族(§G owned paths;AST 掃描的對象) ──
 KERNEL_PATH = HELPERS / "agent_governance_s2_host_kernel.py"
-RUNNER_FAMILY = (
-    KERNEL_PATH,
-    HELPERS / "agent_governance_s2_host_observer.py",
-    HELPERS / "agent_governance_s2_0_host_runner.py",
-    HELPERS / "agent_governance_s2_1_host_runner.py",
-    HELPERS / "agent_governance_s2_4_host_storage.py",
-    HELPERS / "agent_governance_s2_4_host_recovery.py",
-    HELPERS / "aiml_s2_effect_host_run.py",
-)
-# S2E.2b-1:``RUNNER_FAMILY`` 過去是**純手維護**的 tuple,而它同時是 AST no-raw-command 掃描的
-# 唯一對象(:func:`_present_family`)⇒ 一個新 runner 檔只要忘了加進來,就完全不被掃描,任何新的
-# exec 面都能全綠落地。手維護的表本身不是問題,**沒有任何東西比對它與磁碟上的事實**才是。以下
-# 兩張 glob 把「長得像 S2 受信主機 runner 的檔案」由檔案系統導出,再要求它是 family 的子集。
+# S2E.2b-1 曾以手維護 tuple 當 AST scanner 的唯一輸入；新 runner 若漏加便完全不被看見。
+# 現在 family 直接由磁碟形狀導出，新增符合命名契約的 runner 在同一個 test run 即進 scanner。
 RUNNER_FAMILY_GLOBS = ("agent_governance_s2_*host_*.py", "aiml_s2_*host_run*.py")
 # glob 是形狀判準,不是語義判準:S2.4 的 row driver **protocol 葉**恰好也叫 ``…_host_identity``,
 # 但它不是 runner(沒有 lane、沒有主機能力、其匯入面由 S2.4 wave 治理)。故此處允許顯式除名,
@@ -70,6 +59,20 @@ NON_RUNNER_HOST_LEAVES = {
         "不持有主機能力,匯入面屬 s2_4_install_adapter_v1 的 component_paths 治理範圍"
     ),
 }
+
+
+def _discover_runner_family(helpers_dir: Path) -> list[Path]:
+    """由磁碟導出受信 host runner family；只有具理由的 protocol 葉可除名。"""
+
+    return sorted({
+        path
+        for glob in RUNNER_FAMILY_GLOBS
+        for path in helpers_dir.glob(glob)
+        if path.name not in NON_RUNNER_HOST_LEAVES
+    })
+
+
+RUNNER_FAMILY = tuple(_discover_runner_family(HELPERS))
 # 四個 S2 effect adapter 的 apply 進入點 + 其驅動葉:observer/kernel 的 import closure 不得含它們。
 APPLIER_MODULES = frozenset({
     "agent_governance_pg_observer_bootstrap",
@@ -170,7 +173,8 @@ KERNEL_ONLY_IMPORTS = frozenset({
 # ``pty``(``spawn``)、``importlib``(名稱可為變數 ⇒ 字面拼接那道抓不到)、``commands``、
 # ``asyncio``(``create_subprocess_exec``)、``multiprocessing``(``Popen``/spawn)。
 EXEC_CAPABLE_IMPORT_DENYLIST = frozenset({
-    "pty", "importlib", "commands", "asyncio", "multiprocessing",
+    "pty", "importlib", "commands", "asyncio", "multiprocessing", "runpy", "imp",
+    "code", "pdb", "timeit", "concurrent",
 })
 
 FORBIDDEN_RAW_COMMAND_NAMES = frozenset({
@@ -189,10 +193,19 @@ OBFUSCATION_SENSITIVE_LITERALS = (
     FORBIDDEN_RAW_COMMAND_NAMES | FORBIDDEN_BUILTINS
     | {"subprocess", "importlib", "pty", "commands", "ctypes"}
 )
+FORBIDDEN_EXEC_CAPABILITY_NAMES = (
+    FORBIDDEN_RAW_COMMAND_NAMES
+    | FORBIDDEN_BUILTINS
+    | {
+        "run_module", "run_path", "import_module", "reload", "interact", "runcall",
+        "runctx", "timeit", "repeat", "ProcessPoolExecutor", "create_subprocess_exec",
+        "create_subprocess_shell", "capture_command",
+    }
+)
 
 
 def _present_family() -> list[Path]:
-    return [path for path in RUNNER_FAMILY if path.is_file()]
+    return _discover_runner_family(HELPERS)
 
 
 # --------------------------------------------------------------------------- #
@@ -247,6 +260,7 @@ def _raw_command_findings(path: Path, *, exec_family: bool = True) -> list[str]:
         if is_kernel:
             allowed_modules = allowed_modules | KERNEL_ONLY_IMPORTS
     findings: list[str] = []
+    dynamic_callable_aliases: set[str] = set()
 
     def _check_module(lineno: int, module: str, rendered: str) -> None:
         top = (module or "").split(".")[0]
@@ -265,14 +279,78 @@ def _raw_command_findings(path: Path, *, exec_family: bool = True) -> list[str]:
             return
         findings.append(f"line {lineno}: import outside the declared allowlist: {rendered}")
 
+    def _callee_capability(node: ast.AST) -> str | None:
+        """Resolve only execution-capable callees; unknown data stays fail-closed."""
+
+        if isinstance(node, ast.Name):
+            if node.id in FORBIDDEN_EXEC_CAPABILITY_NAMES:
+                return node.id
+            if node.id in dynamic_callable_aliases:
+                return "dynamic callable alias"
+            return None
+        if isinstance(node, ast.Attribute):
+            return node.attr if node.attr in FORBIDDEN_EXEC_CAPABILITY_NAMES else None
+        if isinstance(node, ast.Subscript):
+            key = _fold_string(node.slice)
+            if key in FORBIDDEN_EXEC_CAPABILITY_NAMES:
+                return "dynamic execution subscript"
+            return None
+        if isinstance(node, ast.Call):
+            called = (
+                node.func.id if isinstance(node.func, ast.Name)
+                else node.func.attr if isinstance(node.func, ast.Attribute) else None
+            )
+            if called == "getattr":
+                name_arg = node.args[1] if len(node.args) >= 2 else None
+                folded = _fold_string(name_arg) if name_arg is not None else None
+                if folded in FORBIDDEN_EXEC_CAPABILITY_NAMES:
+                    return folded
+                if folded is None:
+                    return "dynamic callable attribute"
+        return None
+
+    # A dynamic getattr/subscript can be assigned and called later. Propagate simple aliases
+    # to a fixed point so ``f = getattr(os, name); g = f; g(...)`` cannot hide the callee.
+    changed = True
+    while changed:
+        changed = False
+        for node in ast.walk(tree):
+            value: ast.AST | None = None
+            targets: list[ast.AST] = []
+            if isinstance(node, ast.Assign):
+                value, targets = node.value, list(node.targets)
+            elif isinstance(node, ast.AnnAssign):
+                value, targets = node.value, [node.target]
+            elif isinstance(node, ast.NamedExpr):
+                value, targets = node.value, [node.target]
+            if value is None or _callee_capability(value) is None:
+                continue
+            for target in targets:
+                names = [
+                    item.id for item in ast.walk(target)
+                    if isinstance(item, ast.Name) and isinstance(item.ctx, ast.Store)
+                ]
+                for name in names:
+                    if name not in dynamic_callable_aliases:
+                        dynamic_callable_aliases.add(name)
+                        changed = True
+
     for node in ast.walk(tree):
         if isinstance(node, ast.Import):
             for alias in node.names:
                 _check_module(node.lineno, alias.name, f"import {alias.name}")
         elif isinstance(node, ast.ImportFrom):
             module = node.module or ""
+            if node.level:
+                findings.append(
+                    f"line {node.lineno}: relative import is outside the declared allowlist"
+                )
             _check_module(node.lineno, module, f"from {module} import ...")
             for alias in node.names:
+                if alias.name == "*":
+                    findings.append(
+                        f"line {node.lineno}: star import is outside the declared capability allowlist"
+                    )
                 if alias.name in FORBIDDEN_RAW_COMMAND_NAMES or alias.name in FORBIDDEN_BUILTINS:
                     findings.append(
                         f"line {node.lineno}: from {module} import {alias.name}"
@@ -311,6 +389,13 @@ def _raw_command_findings(path: Path, *, exec_family: bool = True) -> list[str]:
                     findings.append(
                         f"line {node.lineno}: {called}() with a computed attribute name"
                     )
+            capability = _callee_capability(func)
+            if capability == "dynamic callable attribute":
+                findings.append(f"line {node.lineno}: dynamic callable attribute")
+            elif capability == "dynamic execution subscript":
+                findings.append(f"line {node.lineno}: dynamic execution subscript")
+            elif capability == "dynamic callable alias":
+                findings.append(f"line {node.lineno}: dynamic callable alias")
     return findings
 
 
@@ -429,6 +514,24 @@ def test_the_family_derivation_is_red_when_a_new_runner_is_left_out(tmp_path):
     ) == []
 
 
+def test_the_runner_family_is_auto_discovered_not_copied_into_a_tuple(tmp_path):
+    """新增 runner 不需第二次手改表；檔案一出現就立刻進 scanner 的輸入集合。"""
+
+    expected = []
+    for name in (
+        "agent_governance_s2_9_host_runner.py",
+        "aiml_s2_other_host_run.py",
+    ):
+        path = tmp_path / name
+        path.write_text("x = 1\n", encoding="utf-8")
+        expected.append(path)
+    # 形似 host protocol 的已解釋除名葉不進 exec family。
+    (tmp_path / "agent_governance_s2_4_host_identity.py").write_text(
+        "x = 1\n", encoding="utf-8"
+    )
+    assert _discover_runner_family(tmp_path) == sorted(expected)
+
+
 # --------------------------------------------------------------------------- #
 # S2E.2b-1 (b) — 治理 import 白名單是 per-file 的能力宣告
 # --------------------------------------------------------------------------- #
@@ -502,6 +605,46 @@ AST_SCANNER_MUTATIONS = {
     ),
     "pty_spawn": ("import pty\npty.spawn('/bin/sh')\n", "import outside the declared allowlist"),
     "dunder_import": ("__import__('subprocess')\n", "builtin __import__"),
+    # ── S2E.LW1:callee alias / dynamic attribute / string-index execution escapes ──
+    "dynamic_getattr_name_then_call": (
+        "import os\n\ndef f(name, argv):\n    return getattr(os, name)(*argv)\n",
+        "dynamic callable attribute",
+    ),
+    "builtins_string_index_then_call": (
+        "def f(expr):\n    return __builtins__['e' + 'val'](expr)\n",
+        "dynamic execution subscript",
+    ),
+    "compile_attribute_alias": (
+        "def f(builtins_obj, source):\n"
+        "    compiler = getattr(builtins_obj, 'compile')\n"
+        "    return compiler(source, '<x>', 'exec')\n",
+        "getattr(…, 'compile')",
+    ),
+    "dynamic_callable_alias_chain": (
+        "import os\n\ndef f(name, argv):\n"
+        "    first = getattr(os, name)\n    second = first\n    return second(*argv)\n",
+        "dynamic callable alias",
+    ),
+    "runpy_import_alias": (
+        "import runpy as runner\nrunner.run_path('payload.py')\n",
+        "import outside the declared allowlist",
+    ),
+    "concurrent_futures_from_alias": (
+        "from concurrent import futures as pool\npool.ProcessPoolExecutor()\n",
+        "import outside the declared allowlist",
+    ),
+    "relative_import": (
+        "from . import helper\n",
+        "relative import is outside the declared allowlist",
+    ),
+    "star_import": (
+        "from os import *\n",
+        "star import is outside the declared capability allowlist",
+    ),
+    "string_import_builtin": (
+        "def f(b):\n    return getattr(b, '__import__')('subprocess')\n",
+        "getattr(…, '__import__')",
+    ),
     # ── E2 的 N16(RES-5):前綴放行下這條 exec 路徑在五個檔案上全綠 ──
     "N16_governance_prefix_exec_module": (
         "import agent_governance_command_capture_v2 as cap\n"

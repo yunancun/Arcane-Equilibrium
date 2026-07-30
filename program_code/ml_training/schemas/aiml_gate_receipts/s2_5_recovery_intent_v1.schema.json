@@ -1,0 +1,141 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://arcane-equilibrium.local/schemas/s2_5_recovery_intent_v1.schema.json",
+  "title": "s2_5_recovery_intent_v1",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "schema_version", "recovery_id", "action", "recovery_binding", "actor_identity",
+    "actor_process", "kernel_binding_digest", "admission_digest", "intent_digest", "self_digest"
+  ],
+  "properties": {
+    "schema_version": {"const": "s2_5_recovery_intent_v1"},
+    "recovery_id": {"type": "string", "pattern": "^s2-5-recovery-[0-9a-f]{64}$"},
+    "action": {"enum": ["ROLLBACK_TO_PRE_STATE", "REPLAY_JOURNAL", "ABORT_AND_PRESERVE_LATCH"]},
+    "recovery_binding": {"$ref": "#/$defs/recovery_binding"},
+    "actor_identity": {"$ref": "#/$defs/node_identity"},
+    "actor_process": {"$ref": "#/$defs/process_identity"},
+    "kernel_binding_digest": {"$ref": "#/$defs/digest"},
+    "admission_digest": {"$ref": "#/$defs/digest"},
+    "intent_digest": {"$ref": "#/$defs/digest"},
+    "self_digest": {"$ref": "#/$defs/digest"}
+  },
+  "$defs": {
+    "digest": {"type": "string", "pattern": "^sha256:[0-9a-f]{64}$"},
+    "git_sha": {"type": "string", "pattern": "^[0-9a-f]{40}$"},
+    "timestamp": {"type": "string", "format": "date-time"},
+    "node_identity": {
+      "type": "object", "additionalProperties": false,
+      "required": ["node_id", "role", "permission"],
+      "properties": {
+        "node_id": {"type": "string", "minLength": 1},
+        "role": {"type": "string", "minLength": 1},
+        "permission": {"enum": ["effect", "read_only"]}
+      }
+    },
+    "process_identity": {
+      "type": "object", "additionalProperties": false, "required": ["uid", "cgroup"],
+      "properties": {
+        "uid": {"type": "integer", "minimum": 0},
+        "cgroup": {"type": "string", "minLength": 1}
+      }
+    },
+    "unit_state": {
+      "type": "object", "additionalProperties": false,
+      "required": ["active_state", "unit_file_state", "n_restarts", "invocation_id"],
+      "properties": {
+        "active_state": {"type": "string", "minLength": 1},
+        "unit_file_state": {"type": "string", "minLength": 1},
+        "n_restarts": {"type": "integer", "minimum": 0},
+        "invocation_id": {"type": "string", "minLength": 1}
+      }
+    },
+    "state_root_identity": {
+      "type": "object", "additionalProperties": false,
+      "required": ["root_id", "root_digest", "generation", "previous_root_digest"],
+      "properties": {
+        "root_id": {"type": "string", "minLength": 1},
+        "root_digest": {"$ref": "#/$defs/digest"},
+        "generation": {"type": "integer", "minimum": 1},
+        "previous_root_digest": {"$ref": "#/$defs/digest"}
+      }
+    },
+    "journal_set": {
+      "type": "object", "additionalProperties": false,
+      "required": ["journal_digests", "head_digest"],
+      "properties": {
+        "journal_digests": {
+          "type": "array", "minItems": 1, "uniqueItems": true,
+          "items": {"$ref": "#/$defs/digest"}
+        },
+        "head_digest": {"$ref": "#/$defs/digest"}
+      }
+    },
+    "replay_ledger_head": {
+      "type": "object", "additionalProperties": false,
+      "required": ["entry_count", "tail_digest"],
+      "properties": {
+        "entry_count": {"type": "integer", "minimum": 1},
+        "tail_digest": {"$ref": "#/$defs/digest"}
+      }
+    },
+    "authorization": {
+      "type": "object", "additionalProperties": false,
+      "required": [
+        "authorization_id", "authorization_digest", "issued_at", "expires_at", "consume_once"
+      ],
+      "properties": {
+        "authorization_id": {
+          "type": "string", "pattern": "^s2-5-recovery-auth-[0-9a-f]{64}$"
+        },
+        "authorization_digest": {"$ref": "#/$defs/digest"},
+        "issued_at": {"$ref": "#/$defs/timestamp"},
+        "expires_at": {"$ref": "#/$defs/timestamp"},
+        "consume_once": {"const": true}
+      }
+    },
+    "trusted_anchor": {
+      "type": "object", "additionalProperties": false,
+      "required": [
+        "schema_version", "anchor_id", "anchor_digest", "storage_class", "anchor_scope_id",
+        "bound_state_root_id", "source_head", "host_identity", "reference_digest"
+      ],
+      "properties": {
+        "schema_version": {"const": "s2_5_recovery_trusted_anchor_ref_v1"},
+        "anchor_id": {"type": "string", "minLength": 1},
+        "anchor_digest": {"$ref": "#/$defs/digest"},
+        "storage_class": {"const": "INDEPENDENT_OFF_STATE_ROOT"},
+        "anchor_scope_id": {"type": "string", "minLength": 1},
+        "bound_state_root_id": {"type": "string", "minLength": 1},
+        "source_head": {"$ref": "#/$defs/git_sha"},
+        "host_identity": {"type": "string", "minLength": 1},
+        "reference_digest": {"$ref": "#/$defs/digest"}
+      }
+    },
+    "recovery_binding": {
+      "type": "object", "additionalProperties": false,
+      "required": [
+        "task_digest", "unresolved_state_digest", "state_root_identity", "journal_set",
+        "replay_ledger_head", "pre_state", "source_head", "host_identity", "authorization",
+        "trusted_anchor", "actor_identity", "actor_process", "kernel_binding_digest",
+        "admission_digest"
+      ],
+      "properties": {
+        "task_digest": {"$ref": "#/$defs/digest"},
+        "unresolved_state_digest": {"$ref": "#/$defs/digest"},
+        "state_root_identity": {"$ref": "#/$defs/state_root_identity"},
+        "journal_set": {"$ref": "#/$defs/journal_set"},
+        "replay_ledger_head": {"$ref": "#/$defs/replay_ledger_head"},
+        "pre_state": {"$ref": "#/$defs/unit_state"},
+        "source_head": {"$ref": "#/$defs/git_sha"},
+        "host_identity": {"type": "string", "minLength": 1},
+        "authorization": {"$ref": "#/$defs/authorization"},
+        "trusted_anchor": {"$ref": "#/$defs/trusted_anchor"},
+        "actor_identity": {"$ref": "#/$defs/node_identity"},
+        "actor_process": {"$ref": "#/$defs/process_identity"},
+        "kernel_binding_digest": {"$ref": "#/$defs/digest"},
+        "admission_digest": {"$ref": "#/$defs/digest"}
+      }
+    }
+  }
+}

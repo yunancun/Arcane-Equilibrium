@@ -1,0 +1,59 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://arcane-equilibrium.local/schemas/s2_5_recovery_rollback_v1.schema.json",
+  "title": "s2_5_recovery_rollback_v1",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "schema_version", "recovery_id", "recovery_intent_digest", "action",
+    "recovery_binding", "actor_identity", "actor_process", "actor_capture_digest", "actor_capture",
+    "pre_state", "post_state", "status", "rollback_intent_digest",
+    "rollback_result_digest", "self_digest"
+  ],
+  "properties": {
+    "schema_version": {"const": "s2_5_recovery_rollback_v1"},
+    "recovery_id": {"type": "string", "pattern": "^s2-5-recovery-[0-9a-f]{64}$"},
+    "recovery_intent_digest": {"$ref": "#/$defs/digest"},
+    "action": {"enum": ["ROLLBACK_TO_PRE_STATE", "REPLAY_JOURNAL", "ABORT_AND_PRESERVE_LATCH"]},
+    "recovery_binding": {"type": "object"},
+    "actor_identity": {"$ref": "#/$defs/node_identity"},
+    "actor_process": {"$ref": "#/$defs/process_identity"},
+    "actor_capture_digest": {"$ref": "#/$defs/digest"},
+    "actor_capture": {"type": "object"},
+    "pre_state": {"$ref": "#/$defs/unit_state"},
+    "post_state": {"$ref": "#/$defs/unit_state"},
+    "status": {"enum": ["ROLLBACK_APPLIED", "ROLLBACK_FAILED", "LATCH_PRESERVED"]},
+    "rollback_intent_digest": {"$ref": "#/$defs/digest"},
+    "rollback_result_digest": {"$ref": "#/$defs/digest"},
+    "self_digest": {"$ref": "#/$defs/digest"}
+  },
+  "$defs": {
+    "digest": {"type": "string", "pattern": "^sha256:[0-9a-f]{64}$"},
+    "node_identity": {
+      "type": "object", "additionalProperties": false,
+      "required": ["node_id", "role", "permission"],
+      "properties": {
+        "node_id": {"type": "string", "minLength": 1},
+        "role": {"type": "string", "minLength": 1},
+        "permission": {"const": "effect"}
+      }
+    },
+    "process_identity": {
+      "type": "object", "additionalProperties": false, "required": ["uid", "cgroup"],
+      "properties": {
+        "uid": {"type": "integer", "minimum": 0},
+        "cgroup": {"type": "string", "minLength": 1}
+      }
+    },
+    "unit_state": {
+      "type": "object", "additionalProperties": false,
+      "required": ["active_state", "unit_file_state", "n_restarts", "invocation_id"],
+      "properties": {
+        "active_state": {"type": "string", "minLength": 1},
+        "unit_file_state": {"type": "string", "minLength": 1},
+        "n_restarts": {"type": "integer", "minimum": 0},
+        "invocation_id": {"type": "string", "minLength": 1}
+      }
+    }
+  }
+}

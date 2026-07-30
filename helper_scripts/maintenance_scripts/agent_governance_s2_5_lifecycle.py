@@ -129,18 +129,49 @@ _S2_5_SECRET_REDACTED = "<redacted: secret-like content was scrubbed from this r
 
 
 class S2_5RecoveryState:
-    """跨 apply 的 in-process recovery 閂(未解 recovery 擋一切新 effect;§3.1c)。"""
+    """Recovery 閂；只有 identity-bound result + 獨立 postcheck 可清除。
+
+    這個 class 仍是 source-lane 的 in-process enforcement seam。跨 restart / 人工刪除仍需
+    下一 slice 的 off-root trusted-anchor 與 durable unresolved manifest；本 slice 不把
+    in-memory 物件誤報為 durable host truth。
+    """
 
     def __init__(self) -> None:
         self.unresolved: dict[str, Any] | None = None
+        self._consumed_authorization_ids: set[str] = set()
 
     def record(self, *, start_id: str | None, reasons: list[str]) -> None:
-        self.unresolved = {"start_id": start_id, "reasons": list(reasons)}
+        unresolved = {"start_id": start_id, "reasons": list(reasons)}
+        unresolved["unresolved_state_digest"] = central_validator.canonical_digest(unresolved)
+        self.unresolved = unresolved
 
-    def resolve(self, *, resolution_note: str) -> dict[str, Any] | None:
-        resolved, self.unresolved = self.unresolved, None
-        if resolved is not None:
-            resolved["resolution_note"] = resolution_note
+    def resolve(
+        self,
+        *,
+        recovery_result: dict[str, Any],
+        independent_postcheck: dict[str, Any],
+        now: Any = None,
+    ) -> dict[str, Any]:
+        """Apply the sole legal unresolved→clear transition; every mismatch preserves latch."""
+
+        import agent_governance_s2_5_recovery as recovery
+
+        errors = recovery.validate_recovery_transition(
+            unresolved_state=self.unresolved,
+            recovery_result=recovery_result,
+            independent_postcheck=independent_postcheck,
+            consumed_authorization_ids=self._consumed_authorization_ids,
+            now=now,
+        )
+        if errors:
+            raise ValueError("; ".join(errors))
+        assert self.unresolved is not None
+        resolved = self.unresolved
+        authorization_id = recovery_result["recovery_binding"]["authorization"][
+            "authorization_id"
+        ]
+        self._consumed_authorization_ids.add(authorization_id)
+        self.unresolved = None
         return resolved
 
 

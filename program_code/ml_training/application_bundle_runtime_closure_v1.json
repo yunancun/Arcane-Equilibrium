@@ -165,6 +165,10 @@
     "program_code/ml_training/schemas/aiml_gate_receipts/s2_4_wave_exit_receipt_v1.schema.json",
     "program_code/ml_training/schemas/aiml_gate_receipts/s2_5_authorization_replay_ledger_v1.schema.json",
     "program_code/ml_training/schemas/aiml_gate_receipts/s2_5_final_attestation_v1.schema.json",
+    "program_code/ml_training/schemas/aiml_gate_receipts/s2_5_recovery_intent_v1.schema.json",
+    "program_code/ml_training/schemas/aiml_gate_receipts/s2_5_recovery_postcheck_v1.schema.json",
+    "program_code/ml_training/schemas/aiml_gate_receipts/s2_5_recovery_result_v1.schema.json",
+    "program_code/ml_training/schemas/aiml_gate_receipts/s2_5_recovery_rollback_v1.schema.json",
     "program_code/ml_training/schemas/aiml_gate_receipts/s2_5_rollback_drill_receipt_v1.schema.json",
     "program_code/ml_training/schemas/aiml_gate_receipts/s2_5_running_attestation_v1.schema.json",
     "program_code/ml_training/schemas/aiml_gate_receipts/s2_5_start_core_v1.schema.json",
@@ -184,7 +188,7 @@
     "program_code/ml_training/schemas/aiml_gate_receipts/terminal_receipt_sink_v1.schema.json"
   ],
   "schema_version": "application_bundle_runtime_closure_v1",
-  "self_digest": "sha256:c147a1314e9a2bfbd2acb0d49b190e8723b357b9bbaa44df85720e7e0d09af3c",
+  "self_digest": "sha256:c8a0dc1b925d6a6b672c2e3517ac2a14eb8b6af77e7ce7d55a907632c397a747",
   "sql_fingerprints": [
     "sql/migrations/V151__alr_persistence_foundation.sql",
     "sql/migrations/V152__alr_operational_artifacts.sql",

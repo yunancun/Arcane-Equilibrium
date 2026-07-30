@@ -240,6 +240,12 @@ SCHEMA_FILES = {
     "s2_5_authorization_replay_ledger_v1": (
         "s2_5_authorization_replay_ledger_v1.schema.json"
     ),
+    # S2E.LW1:identity-bound S2.5 unresolved-recovery chain.  These are source contracts;
+    # off-root anchor/unresolved-manifest persistence remains a later host-runtime slice.
+    "s2_5_recovery_intent_v1": "s2_5_recovery_intent_v1.schema.json",
+    "s2_5_recovery_result_v1": "s2_5_recovery_result_v1.schema.json",
+    "s2_5_recovery_postcheck_v1": "s2_5_recovery_postcheck_v1.schema.json",
+    "s2_5_recovery_rollback_v1": "s2_5_recovery_rollback_v1.schema.json",
     "aiml_component_effect_classification_v3": (
         "aiml_component_effect_classification_v3.schema.json"
     ),
