@@ -59,9 +59,27 @@ ALLOWED_STDLIB_IMPORTS = frozenset({
 })
 STDLIB_IMPORTS_BY_FILE = {"agent_governance_s2_5_recovery_lock.py": frozenset({"functools"})}
 EXACT_STDLIB_IMPORTS_BY_FILE = {
+    "agent_governance_s2_5_recovery.py": frozenset({
+        "__future__", "copy", "datetime", "hmac", "os", "pathlib", "re",
+        "stat", "typing",
+    }),
+    "agent_governance_s2_5_recovery_anchor.py": frozenset({
+        "__future__", "datetime", "json", "pathlib", "sys", "typing",
+    }),
     "agent_governance_s2_5_recovery_anchor_v2.py": frozenset({
         "__future__", "datetime", "functools", "json", "pathlib", "sys",
         "typing",
+    }),
+    "agent_governance_s2_5_recovery_controller.py": frozenset({
+        "__future__", "datetime", "functools", "json", "pathlib", "sys",
+        "typing",
+    }),
+    "agent_governance_s2_5_recovery_lock.py": frozenset({
+        "__future__", "functools", "json", "pathlib", "sys", "typing",
+    }),
+    "agent_governance_s2_5_recovery_state.py": frozenset({
+        "__future__", "copy", "dataclasses", "json", "pathlib", "sys",
+        "typing", "weakref",
     }),
     "agent_governance_s2_5_recovery_store.py": frozenset({
         "__future__", "datetime", "fcntl", "functools", "hashlib", "json",
@@ -75,6 +93,11 @@ EXACT_STDLIB_IMPORTS_BY_FILE = {
 ALLOWED_THIRD_PARTY_IMPORTS = frozenset({"psycopg2"})
 # Governance imports are per-file rather than family-wide.
 GOVERNANCE_IMPORTS_BY_FILE: dict[str, frozenset[str]] = {
+    "agent_governance_s2_5_recovery.py": frozenset({
+        "agent_governance_aiml_trusted_host",
+        "aiml_gate_receipt_s2_5_host_capture",
+        "aiml_gate_receipt_schema_core",
+    }),
     "agent_governance_s2_5_recovery_lock.py": frozenset({"agent_governance_s2_5_disposable_profile", "agent_governance_schema", "aiml_gate_receipt_validator"}),
     "agent_governance_s2_5_recovery_anchor.py": frozenset({"agent_governance_s2_5_disposable_profile", "agent_governance_s2_5_recovery_store", "agent_governance_schema", "aiml_gate_receipt_validator"}),
     "agent_governance_s2_5_recovery_anchor_v2.py": frozenset({
@@ -83,6 +106,17 @@ GOVERNANCE_IMPORTS_BY_FILE: dict[str, frozenset[str]] = {
         "agent_governance_s2_5_recovery_lock",
         "agent_governance_s2_5_recovery_store",
         "agent_governance_schema",
+        "aiml_gate_receipt_validator",
+    }),
+    "agent_governance_s2_5_recovery_controller.py": frozenset({
+        "agent_governance_s2_5_disposable_profile",
+        "agent_governance_schema",
+        "aiml_gate_receipt_s2_5_host_capture",
+        "aiml_gate_receipt_validator",
+    }),
+    "agent_governance_s2_5_recovery_state.py": frozenset({
+        "agent_governance_s2_5_recovery",
+        "aiml_gate_receipt_s2_5_host_capture",
         "aiml_gate_receipt_validator",
     }),
     "agent_governance_s2_5_recovery_store.py": frozenset({
@@ -178,12 +212,36 @@ SUBPROCESS_EXEC_CAPABILITY_NAMES = frozenset({
     "getstatusoutput",
 })
 RECOVERY_GOVERNED_FILES = frozenset({
+    "agent_governance_s2_5_recovery.py",
     "agent_governance_s2_5_recovery_anchor.py",
     "agent_governance_s2_5_recovery_anchor_v2.py",
+    "agent_governance_s2_5_recovery_controller.py",
     "agent_governance_s2_5_recovery_lock.py",
+    "agent_governance_s2_5_recovery_state.py",
     "agent_governance_s2_5_recovery_store.py",
     "agent_governance_s2_5_recovery_store_v2.py",
 })
+RECOVERY_SENSITIVE_CALLS_BY_FILE: dict[
+    str, dict[str, frozenset[str]]
+] = {
+    "agent_governance_s2_5_recovery.py": {
+        "os": frozenset({"close", "fstat", "geteuid", "open", "read"}),
+    },
+    "agent_governance_s2_5_recovery_anchor.py": {},
+    "agent_governance_s2_5_recovery_anchor_v2.py": {},
+    "agent_governance_s2_5_recovery_controller.py": {},
+    "agent_governance_s2_5_recovery_lock.py": {},
+    "agent_governance_s2_5_recovery_state.py": {},
+    "agent_governance_s2_5_recovery_store.py": {
+        "fcntl": frozenset({"flock"}),
+        "os": frozenset({
+            "close", "fstat", "fsync", "listdir", "open", "read", "replace",
+            "write",
+        }),
+    },
+    "agent_governance_s2_5_recovery_store_v2.py": {},
+}
+RECOVERY_SENSITIVE_MODULES = frozenset({"fcntl", "os", "socket"})
 
 
 def _present_family() -> list[Path]:
@@ -237,7 +295,10 @@ def _raw_command_findings(path: Path, *, exec_family: bool = True) -> list[str]:
     module_registry_aliases: set[str] = set()
     module_registry_accessor_aliases: set[str] = set()
     module_lookup_aliases: set[str] = set()
-    os_aliases: set[str] = {"os"}
+    sensitive_module_aliases = {
+        module: {module} for module in RECOVERY_SENSITIVE_MODULES
+    }
+    sensitive_direct_call_aliases: dict[str, set[tuple[str, str]]] = {}
     subprocess_aliases: set[str] = {"subprocess"}
     container_aliases: dict[str, object] = {}
     wildcard_key = ("dynamic",)
@@ -248,13 +309,26 @@ def _raw_command_findings(path: Path, *, exec_family: bool = True) -> list[str]:
         "builtins": builtins_aliases, "ctypes": ctypes_handles,
         "module_lookup": module_lookup_aliases,
         "module_registry_accessor": module_registry_accessor_aliases,
-        "module_registry": module_registry_aliases, "os": os_aliases,
+        "module_registry": module_registry_aliases,
+        **sensitive_module_aliases,
         "subprocess": subprocess_aliases,
     }
-    for imported in (item for item in ast.walk(tree) if isinstance(item, ast.Import)):
-        for alias in imported.names:
-            if alias.name.split(".")[0] == "os":
-                os_aliases.add(alias.asname or alias.name.split(".")[0])
+    for imported in ast.walk(tree):
+        if isinstance(imported, ast.Import):
+            for alias in imported.names:
+                top = alias.name.split(".")[0]
+                if top in RECOVERY_SENSITIVE_MODULES:
+                    sensitive_module_aliases[top].add(
+                        alias.asname or top
+                    )
+        elif isinstance(imported, ast.ImportFrom):
+            top = (imported.module or "").split(".")[0]
+            if top in RECOVERY_SENSITIVE_MODULES:
+                for alias in imported.names:
+                    if alias.name != "*":
+                        sensitive_direct_call_aliases.setdefault(
+                            alias.asname or alias.name, set()
+                        ).add((top, alias.name))
     containing_function: dict[int, str] = {}
     for function in (
         item for item in ast.walk(tree)
@@ -390,6 +464,20 @@ def _raw_command_findings(path: Path, *, exec_family: bool = True) -> list[str]:
         return set()
     def _value_families(node: ast.AST | None) -> set[str]:
         return _flatten_provenance(_value_provenance(node))
+    def _sensitive_callable_refs(
+        node: ast.AST | None,
+    ) -> set[tuple[str, str]]:
+        if isinstance(node, ast.Attribute):
+            return {
+                (module, node.attr)
+                for module in (
+                    _value_families(node.value)
+                    & RECOVERY_SENSITIVE_MODULES
+                )
+            }
+        if isinstance(node, ast.Name):
+            return set(sensitive_direct_call_aliases.get(node.id, set()))
+        return set()
     def _module_registry(receiver: ast.AST | None) -> bool:
         return "module_registry" in _value_families(receiver)
     def _module_lookup(receiver: ast.AST | None) -> bool:
@@ -402,7 +490,7 @@ def _raw_command_findings(path: Path, *, exec_family: bool = True) -> list[str]:
             return (
                 bool(_value_families(receiver) & {
                     "builtins", "ctypes", "module_lookup", "module_registry",
-                    "os", "subprocess",
+                    "fcntl", "os", "socket", "subprocess",
                 })
                 or isinstance(receiver, ast.Attribute)
                 and (
@@ -570,6 +658,10 @@ def _raw_command_findings(path: Path, *, exec_family: bool = True) -> list[str]:
             repr(container_aliases),
             tuple((family, tuple(sorted(aliases))) for family, aliases in family_aliases.items()),
             tuple(sorted(dynamic_callable_aliases)),
+            tuple(
+                (name, tuple(sorted(refs)))
+                for name, refs in sorted(sensitive_direct_call_aliases.items())
+            ),
             tuple(sorted(sequence_positions.items())),
         )
         for node, flow_uncertain in flow_nodes:
@@ -654,6 +746,16 @@ def _raw_command_findings(path: Path, *, exec_family: bool = True) -> list[str]:
                     _merge_target(target, marker)
                     _merge_target(bound_value, marker)
             for target, bound_value, _ in bindings:
+                sensitive_refs = _sensitive_callable_refs(bound_value)
+                if sensitive_refs:
+                    for name in (
+                        item.id for item in ast.walk(target)
+                        if isinstance(item, ast.Name)
+                        and isinstance(item.ctx, ast.Store)
+                    ):
+                        sensitive_direct_call_aliases.setdefault(
+                            name, set()
+                        ).update(sensitive_refs)
                 if bound_value is None or _callee_capability(bound_value) is None:
                     continue
                 names = [
@@ -670,6 +772,10 @@ def _raw_command_findings(path: Path, *, exec_family: bool = True) -> list[str]:
             repr(container_aliases),
             tuple((family, tuple(sorted(aliases))) for family, aliases in family_aliases.items()),
             tuple(sorted(dynamic_callable_aliases)),
+            tuple(
+                (name, tuple(sorted(refs)))
+                for name, refs in sorted(sensitive_direct_call_aliases.items())
+            ),
             tuple(sorted(sequence_positions.items())),
         )
 
@@ -712,6 +818,15 @@ def _raw_command_findings(path: Path, *, exec_family: bool = True) -> list[str]:
                 ):
                     findings.append(f"line {node.lineno}: shell= is not the constant False")
             func = node.func
+            sensitive_calls = _sensitive_callable_refs(func)
+            policy = RECOVERY_SENSITIVE_CALLS_BY_FILE.get(path.name)
+            if policy is not None:
+                for module, member in sorted(sensitive_calls):
+                    if member not in policy.get(module, frozenset()):
+                        findings.append(
+                            f"line {node.lineno}: sensitive callable outside "
+                            f"the per-file allowlist: {module}.{member}"
+                        )
             called = (
                 func.id if isinstance(func, ast.Name)
                 else func.attr if isinstance(func, ast.Attribute) else None
@@ -1222,11 +1337,21 @@ def test_the_import_allowlist_is_positive_and_kernel_only_imports_are_kernel_onl
 
 def test_kernel_is_the_only_family_member_importing_subprocess():
     for path in _present_family():
-        source = path.read_text(encoding="utf-8")
+        tree = ast.parse(path.read_text(encoding="utf-8"), filename=str(path))
+        imported_modules = {
+            alias.name.split(".")[0]
+            for node in ast.walk(tree)
+            if isinstance(node, ast.Import)
+            for alias in node.names
+        } | {
+            (node.module or "").split(".")[0]
+            for node in ast.walk(tree)
+            if isinstance(node, ast.ImportFrom)
+        }
         if path == KERNEL_PATH:
-            assert "import subprocess" in source
+            assert "subprocess" in imported_modules
         else:
-            assert "subprocess" not in source, path.name
+            assert "subprocess" not in imported_modules, path.name
 
 
 _FRAG = "/etc/systemd/system/arcane-equilibrium-aiml-engine-scanner.service"

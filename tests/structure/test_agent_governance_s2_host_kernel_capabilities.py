@@ -16,6 +16,107 @@ if str(STRUCTURE) not in sys.path:
 import test_agent_governance_s2_host_kernel as scanner  # noqa: E402
 
 
+EXPECTED_RECOVERY_LEAVES = frozenset({
+    "agent_governance_s2_5_recovery.py",
+    "agent_governance_s2_5_recovery_anchor.py",
+    "agent_governance_s2_5_recovery_anchor_v2.py",
+    "agent_governance_s2_5_recovery_controller.py",
+    "agent_governance_s2_5_recovery_lock.py",
+    "agent_governance_s2_5_recovery_state.py",
+    "agent_governance_s2_5_recovery_store.py",
+    "agent_governance_s2_5_recovery_store_v2.py",
+})
+
+
+def test_every_recovery_leaf_has_exact_import_and_callable_policy():
+    assert scanner.RECOVERY_GOVERNED_FILES == EXPECTED_RECOVERY_LEAVES
+    assert set(scanner.EXACT_STDLIB_IMPORTS_BY_FILE) >= EXPECTED_RECOVERY_LEAVES
+    assert set(scanner.GOVERNANCE_IMPORTS_BY_FILE) >= EXPECTED_RECOVERY_LEAVES
+    assert set(scanner.RECOVERY_SENSITIVE_CALLS_BY_FILE) == EXPECTED_RECOVERY_LEAVES
+
+
+@pytest.mark.parametrize("name", sorted(EXPECTED_RECOVERY_LEAVES))
+def test_every_recovery_leaf_rejects_an_undeclared_os_unlink_call(
+    tmp_path,
+    name,
+):
+    original = scanner.HELPERS / name
+    mutated = tmp_path / name
+    mutated.write_text(
+        original.read_text(encoding="utf-8")
+        + "\n\nimport os\nos.unlink('/tmp/s2e-scanner-mutation')\n",
+        encoding="utf-8",
+    )
+    findings = scanner._raw_command_findings(mutated)
+    assert any(
+        "sensitive callable outside the per-file allowlist: os.unlink" in item
+        for item in findings
+    ), findings
+
+
+@pytest.mark.parametrize("name", sorted(EXPECTED_RECOVERY_LEAVES))
+def test_every_recovery_leaf_rejects_an_aliased_socket_callable(
+    tmp_path,
+    name,
+):
+    original = scanner.HELPERS / name
+    mutated = tmp_path / name
+    mutated.write_text(
+        original.read_text(encoding="utf-8")
+        + "\n\nimport socket as network\n"
+        + "connect = network.create_connection\n"
+        + "aliased_connect = connect\n"
+        + "aliased_connect(('127.0.0.1', 9))\n",
+        encoding="utf-8",
+    )
+    findings = scanner._raw_command_findings(mutated)
+    assert any(
+        "sensitive callable outside the per-file allowlist: "
+        "socket.create_connection" in item
+        for item in findings
+    ), findings
+
+
+@pytest.mark.parametrize("name", sorted(EXPECTED_RECOVERY_LEAVES))
+@pytest.mark.parametrize(
+    ("source", "expected"),
+    (
+        (
+            "import socket\nsocket.create_connection(('127.0.0.1', 9))\n",
+            "socket.create_connection",
+        ),
+        (
+            "import os as filesystem\n"
+            "filesystem.unlink('/tmp/s2e-scanner-mutation')\n",
+            "os.unlink",
+        ),
+        (
+            "from os import unlink as erase\n"
+            "erase('/tmp/s2e-scanner-mutation')\n",
+            "os.unlink",
+        ),
+    ),
+)
+def test_recovery_sensitive_call_policy_covers_import_forms(
+    tmp_path,
+    name,
+    source,
+    expected,
+):
+    original = scanner.HELPERS / name
+    mutated = tmp_path / name
+    mutated.write_text(
+        original.read_text(encoding="utf-8") + "\n\n" + source,
+        encoding="utf-8",
+    )
+    findings = scanner._raw_command_findings(mutated)
+    assert any(
+        "sensitive callable outside the per-file allowlist: "
+        + expected in item
+        for item in findings
+    ), findings
+
+
 def test_recovery_store_effect_and_pure_builder_are_scanned_per_file():
     present = {path.name for path in scanner._present_family()}
     assert {
