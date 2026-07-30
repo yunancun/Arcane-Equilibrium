@@ -271,7 +271,16 @@ def _raw_command_findings(path: Path, *, exec_family: bool = True) -> list[str]:
     ctypes_handles: set[str] = set()
     builtins_aliases: set[str] = {"__builtins__", "builtins"}
     module_registry_aliases: set[str] = set()
+    module_lookup_aliases: set[str] = set()
     os_aliases: set[str] = {"os"}
+    subprocess_aliases: set[str] = {"subprocess"}
+    container_aliases: dict[str, dict[object, set[str]]] = {}
+    family_aliases = {
+        "builtins": builtins_aliases, "ctypes": ctypes_handles,
+        "module_lookup": module_lookup_aliases,
+        "module_registry": module_registry_aliases, "os": os_aliases,
+        "subprocess": subprocess_aliases,
+    }
     for imported in (item for item in ast.walk(tree) if isinstance(item, ast.Import)):
         for alias in imported.names:
             if alias.name.split(".")[0] == "os":
@@ -301,42 +310,71 @@ def _raw_command_findings(path: Path, *, exec_family: bool = True) -> list[str]:
             return
         findings.append(f"line {lineno}: import outside the declared allowlist: {rendered}")
 
+    def _value_families(node: ast.AST | None) -> set[str]:
+        if isinstance(node, ast.Name):
+            families = {
+                family for family, aliases in family_aliases.items()
+                if node.id in aliases
+            }
+            return families | ({"ctypes"} if node.id == "ctypes" else set())
+        if isinstance(node, ast.Attribute):
+            if (
+                node.attr == "modules" and isinstance(node.value, ast.Name)
+                and node.value.id == "sys"
+            ):
+                return {"module_registry"}
+            return {"subprocess"} if node.attr == "subprocess" else set()
+        if isinstance(node, ast.Call):
+            if (
+                isinstance(node.func, ast.Attribute)
+                and isinstance(node.func.value, ast.Name)
+                and node.func.value.id == "ctypes"
+                and node.func.attr == "CDLL"
+            ):
+                return {"ctypes"}
+            if (
+                isinstance(node.func, ast.Attribute) and node.func.attr == "get"
+                and "module_registry" in _value_families(node.func.value)
+            ):
+                return {"module_lookup"}
+            return set()
+        if isinstance(node, ast.Subscript):
+            families = set()
+            base_families = _value_families(node.value)
+            if "module_registry" in base_families:
+                families.add("module_lookup")
+            if isinstance(node.value, ast.Name):
+                members = container_aliases.get(node.value.id, {})
+                if isinstance(node.slice, ast.Constant):
+                    families.update(members.get(node.slice.value, set()))
+                else:
+                    for member_families in members.values():
+                        families.update(member_families)
+            return families
+        return set()
+
+    def _module_registry(receiver: ast.AST | None) -> bool:
+        return "module_registry" in _value_families(receiver)
+
+    def _module_lookup(receiver: ast.AST | None) -> bool:
+        return "module_lookup" in _value_families(receiver)
+
+    def _builtins_source(node: ast.AST | None) -> bool:
+        return "builtins" in _value_families(node)
+
     def _callee_capability(node: ast.AST) -> str | None:
         """Resolve only execution-capable callees; unknown data stays fail-closed."""
 
-        def _module_registry(receiver: ast.AST) -> bool:
-            return (
-                isinstance(receiver, ast.Name)
-                and receiver.id in module_registry_aliases
-                or isinstance(receiver, ast.Attribute)
-                and receiver.attr == "modules"
-                and isinstance(receiver.value, ast.Name)
-                and receiver.value.id == "sys"
-            )
-
-        def _module_lookup(receiver: ast.AST) -> bool:
-            return (
-                isinstance(receiver, ast.Subscript)
-                and _module_registry(receiver.value)
-                or isinstance(receiver, ast.Call)
-                and isinstance(receiver.func, ast.Attribute)
-                and receiver.func.attr == "get"
-                and _module_registry(receiver.func.value)
-            )
-
         def _sensitive_receiver(receiver: ast.AST | None) -> bool:
             return (
-                isinstance(receiver, ast.Name)
-                and receiver.id in (
-                    {"ctypes"} | builtins_aliases | os_aliases | ctypes_handles
-                )
+                bool(_value_families(receiver) & {
+                    "builtins", "ctypes", "module_lookup", "module_registry",
+                    "os", "subprocess",
+                })
                 or isinstance(receiver, ast.Attribute)
                 and (
-                    receiver.attr in {"subprocess", "modules"}
-                    or _sensitive_receiver(receiver.value)
+                    _sensitive_receiver(receiver.value)
                 )
-                or isinstance(receiver, ast.Subscript)
-                and _sensitive_receiver(receiver.value)
             )
 
         if isinstance(node, ast.Name):
@@ -348,24 +386,12 @@ def _raw_command_findings(path: Path, *, exec_family: bool = True) -> list[str]:
         if isinstance(node, ast.Attribute):
             if (
                 node.attr in SUBPROCESS_EXEC_CAPABILITY_NAMES
-                and (
-                    _module_lookup(node.value)
-                )
+                and "module_lookup" in _value_families(node.value)
             ):
                 return "dynamic module execution"
             if (
                 node.attr in SUBPROCESS_EXEC_CAPABILITY_NAMES
-                and (
-                    isinstance(node.value, ast.Name)
-                    and node.value.id == "subprocess"
-                    or isinstance(node.value, ast.Attribute)
-                    and node.value.attr == "subprocess"
-                    or isinstance(node.value, ast.Subscript)
-                    and isinstance(node.value.value, ast.Attribute)
-                    and isinstance(node.value.value.value, ast.Name)
-                    and node.value.value.value.id == "sys"
-                    and node.value.value.attr == "modules"
-                )
+                and "subprocess" in _value_families(node.value)
             ):
                 return "raw subprocess execution"
             return node.attr if node.attr in FORBIDDEN_EXEC_CAPABILITY_NAMES else None
@@ -374,11 +400,9 @@ def _raw_command_findings(path: Path, *, exec_family: bool = True) -> list[str]:
             if key in FORBIDDEN_EXEC_CAPABILITY_NAMES:
                 return "dynamic execution subscript"
             if (
-                isinstance(node.value, ast.Name)
-                and (
-                    node.value.id in builtins_aliases
-                    or node.value.id in dynamic_callable_aliases
-                )
+                _builtins_source(node.value)
+                or isinstance(node.value, ast.Name)
+                and node.value.id in dynamic_callable_aliases
             ):
                 return "dynamic execution subscript"
             if (
@@ -396,8 +420,7 @@ def _raw_command_findings(path: Path, *, exec_family: bool = True) -> list[str]:
             if (
                 isinstance(node.func, ast.Attribute)
                 and node.func.attr == "get"
-                and isinstance(node.func.value, ast.Name)
-                and node.func.value.id in builtins_aliases
+                and _builtins_source(node.func.value)
             ):
                 return "dynamic execution subscript"
             called = (
@@ -446,6 +469,21 @@ def _raw_command_findings(path: Path, *, exec_family: bool = True) -> list[str]:
     # A dynamic getattr/subscript/container can be assigned and called later. Propagate
     # aliases to a fixed point so ``f = getattr(os, name); box = [f]; box[0](...)`` cannot
     # hide the callee.
+    def _assignment_bindings(
+        target: ast.AST, value: ast.AST | None
+    ) -> list[tuple[ast.AST, ast.AST | None]]:
+        if (
+            isinstance(target, (ast.List, ast.Tuple))
+            and isinstance(value, (ast.List, ast.Tuple))
+            and len(target.elts) == len(value.elts)
+        ):
+            return [
+                binding
+                for item_target, item_value in zip(target.elts, value.elts)
+                for binding in _assignment_bindings(item_target, item_value)
+            ]
+        return [(target, value)]
+
     changed = True
     while changed:
         changed = False
@@ -458,42 +496,47 @@ def _raw_command_findings(path: Path, *, exec_family: bool = True) -> list[str]:
                 value, targets = node.value, [node.target]
             elif isinstance(node, ast.NamedExpr):
                 value, targets = node.value, [node.target]
-            if (
-                isinstance(value, ast.Call)
-                and isinstance(value.func, ast.Attribute)
-                and isinstance(value.func.value, ast.Name)
-                and value.func.value.id == "ctypes"
-                and value.func.attr == "CDLL"
-            ):
-                for target in targets:
-                    if isinstance(target, ast.Name):
-                        ctypes_handles.add(target.id)
-            if isinstance(value, ast.Name) and value.id in builtins_aliases:
-                for target in targets:
-                    if (
-                        isinstance(target, ast.Name)
-                        and target.id not in builtins_aliases
-                    ):
-                        builtins_aliases.add(target.id)
+            bindings = [
+                binding
+                for target in targets
+                for binding in _assignment_bindings(target, value)
+            ]
+            for target, bound_value in bindings:
+                if not isinstance(target, ast.Name):
+                    continue
+                for family in _value_families(bound_value):
+                    aliases = family_aliases[family]
+                    if target.id not in aliases:
+                        aliases.add(target.id)
                         changed = True
-            if (
-                isinstance(value, ast.Name)
-                and value.id in module_registry_aliases
-                or isinstance(value, ast.Attribute)
-                and value.attr == "modules"
-                and isinstance(value.value, ast.Name)
-                and value.value.id == "sys"
-            ):
-                for target in targets:
-                    if (
-                        isinstance(target, ast.Name)
-                        and target.id not in module_registry_aliases
-                    ):
-                        module_registry_aliases.add(target.id)
-                        changed = True
-            if value is None or _callee_capability(value) is None:
-                continue
+            members: dict[object, set[str]] = {}
+            if isinstance(value, (ast.List, ast.Tuple)):
+                members = {
+                    index: _value_families(item)
+                    for index, item in enumerate(value.elts)
+                }
+            elif isinstance(value, ast.Dict):
+                members = {
+                    key.value: _value_families(item)
+                    for key, item in zip(value.keys, value.values)
+                    if isinstance(key, ast.Constant)
+                }
             for target in targets:
+                if not isinstance(target, ast.Name):
+                    continue
+                inherited = (
+                    container_aliases.get(value.id)
+                    if isinstance(value, ast.Name) else None
+                )
+                candidate = members or inherited
+                if candidate and container_aliases.get(target.id) != candidate:
+                    container_aliases[target.id] = {
+                        key: set(families) for key, families in candidate.items()
+                    }
+                    changed = True
+            for target, bound_value in bindings:
+                if bound_value is None or _callee_capability(bound_value) is None:
+                    continue
                 names = [
                     item.id for item in ast.walk(target)
                     if isinstance(item, ast.Name) and isinstance(item.ctx, ast.Store)
@@ -893,6 +936,18 @@ AST_SCANNER_MUTATIONS = {
         "def f(key, expr):\n    return __builtins__.get(key)(expr)\n",
         "dynamic execution subscript",
     ),
+    "list_held_builtins_alias_variable_subscript": (
+        "def f(key, expr):\n"
+        "    box = [__builtins__]\n"
+        "    return box[0][key](expr)\n",
+        "dynamic execution subscript",
+    ),
+    "tuple_unpacked_builtins_alias_variable_subscript": (
+        "def f(key, expr):\n"
+        "    harmless, builtins_alias = (object(), __builtins__)\n"
+        "    return builtins_alias[key](expr)\n",
+        "dynamic execution subscript",
+    ),
     "variable_sys_modules_key_then_run": (
         "import sys\n\ndef f(key, argv):\n    return sys.modules[key].run(argv)\n",
         "dynamic module execution",
@@ -913,6 +968,19 @@ AST_SCANNER_MUTATIONS = {
         "    return sys.modules[module_key].__dict__[name](argv)\n",
         "dynamic module execution",
     ),
+    "assigned_sys_modules_lookup_alias_call": (
+        "import sys\n\ndef f(module_key, argv):\n"
+        "    sp = sys.modules[module_key]\n"
+        "    return sp.call(argv)\n",
+        "dynamic module execution",
+    ),
+    "tuple_held_sys_modules_alias_call": (
+        "import sys\n\ndef f(module_key, argv):\n"
+        "    box = (object(), sys.modules)\n"
+        "    sp = box[1][module_key]\n"
+        "    return sp.call(argv)\n",
+        "dynamic module execution",
+    ),
     "os_dunder_getattribute_then_call": (
         "import os\n\ndef f(name, argv):\n"
         "    return os.__getattribute__(os, name)(*argv)\n",
@@ -921,6 +989,18 @@ AST_SCANNER_MUTATIONS = {
     "imported_os_alias_variable_getattr": (
         "import os as operating_system\n\ndef f(name, argv):\n"
         "    return getattr(operating_system, name)(*argv)\n",
+        "dynamic callable attribute",
+    ),
+    "assigned_os_alias_variable_getattr": (
+        "import os\n\ndef f(name, argv):\n"
+        "    other = os\n"
+        "    return getattr(other, name)(*argv)\n",
+        "dynamic callable attribute",
+    ),
+    "dict_held_os_alias_variable_getattr": (
+        "import os\n\ndef f(name, argv):\n"
+        "    box = {'safe': object(), 'os': os}\n"
+        "    return getattr(box['os'], name)(*argv)\n",
         "dynamic callable attribute",
     ),
     "computed_getattr_stored_in_container": (
@@ -960,6 +1040,18 @@ AST_SCANNER_MUTATIONS = {
     "already_imported_kernel_subprocess_getstatusoutput": (
         "def f(kernel, command):\n"
         "    return kernel.subprocess.getstatusoutput(command)\n",
+        "raw subprocess execution",
+    ),
+    "assigned_kernel_subprocess_alias_call": (
+        "def f(kernel, argv):\n"
+        "    sp = kernel.subprocess\n"
+        "    return sp.call(argv)\n",
+        "raw subprocess execution",
+    ),
+    "assigned_kernel_subprocess_alias_check_output": (
+        "def f(kernel, argv):\n"
+        "    sp = kernel.subprocess\n"
+        "    return sp.check_output(argv)\n",
         "raw subprocess execution",
     ),
     "runpy_import_alias": (
@@ -1030,6 +1122,32 @@ def test_allowlisted_ctypes_handle_cannot_hide_dynamic_ffi_getattr(tmp_path):
     )
     findings = _raw_command_findings(path)
     assert any("dynamic callable attribute" in item for item in findings), findings
+
+
+def test_assigned_ctypes_handle_alias_cannot_hide_dynamic_ffi_getattr(tmp_path):
+    path = tmp_path / KERNEL_PATH.name
+    path.write_text(
+        "import ctypes\n"
+        "def enforce_process_hardening(name, argv):\n"
+        "    libc = ctypes.CDLL(None, use_errno=True)\n"
+        "    other = libc\n"
+        "    return getattr(other, name)(*argv)\n",
+        encoding="utf-8",
+    )
+    findings = _raw_command_findings(path)
+    assert any("dynamic callable attribute" in item for item in findings), findings
+
+
+def test_container_aliases_do_not_taint_a_benign_sibling(tmp_path):
+    sources = (
+        "import os\nbox = [os, object()]\ngetattr(box[1], name)\n",
+        "import os\nos_alias, safe = (os, object())\ngetattr(safe, name)\n",
+        "import os\nbox = {'os': os, 'safe': object()}\ngetattr(box['safe'], name)\n",
+    )
+    for index, source in enumerate(sources):
+        path = tmp_path / f"benign_container_sibling_{index}.py"
+        path.write_text(source, encoding="utf-8")
+        assert _raw_command_findings(path) == []
 
 
 @pytest.mark.parametrize("mutation", sorted(AST_SCANNER_MUTATIONS))
