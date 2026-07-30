@@ -392,7 +392,18 @@ def test_wave_issuance_binds_effects_and_consumes_predecessor_once(
             forged_consumption, repo_root=repo
         )
     )
-    assert first["predecessor_consumption_result"]["status"] == "CONSUMED"
+    assert first["predecessor_consumption_result"]["status"] == (
+        "IDEMPOTENT_AUTHORITY_RESTORE"
+    )
+    assert first["predecessor_consumption_result"][
+        "state_recovery_performed"
+    ] is True
+    assert first["predecessor_consumption_result"][
+        "physical_state_write_performed"
+    ] is True
+    assert first["predecessor_consumption_result"][
+        "mutation_performed"
+    ] is False
     assert support._git(repo, "status", "--porcelain=v1") == ""
     ledger = consumption.FileS2ELaunchConsumptionStore(repo).read()
     assert consumption.validate_s2e_launch_consumption_ledger(ledger) == []
@@ -460,6 +471,18 @@ def test_wave_issuance_binds_effects_and_consumes_predecessor_once(
     assert restored_from_authority["predecessor_consumption_result"][
         "bootstrap_authority_applied"
     ] is True
+    assert restored_from_authority["predecessor_consumption_result"][
+        "status"
+    ] == "IDEMPOTENT_AUTHORITY_RESTORE"
+    assert restored_from_authority["predecessor_consumption_result"][
+        "state_recovery_performed"
+    ] is True
+    assert restored_from_authority["predecessor_consumption_result"][
+        "physical_state_write_performed"
+    ] is True
+    assert restored_from_authority["predecessor_consumption_result"][
+        "mutation_performed"
+    ] is False
     for moved in moved_paths:
         moved.unlink()
 
@@ -544,6 +567,15 @@ def test_wave_issuance_binds_effects_and_consumes_predecessor_once(
         restored_after_delete["issued_receipt"]["payload_digest"]
         == issued["payload_digest"]
     )
+    assert restored_after_delete["predecessor_consumption_result"][
+        "status"
+    ] == "IDEMPOTENT_AUTHORITY_RESTORE"
+    assert restored_after_delete["predecessor_consumption_result"][
+        "physical_state_write_performed"
+    ] is True
+    assert restored_after_delete["predecessor_consumption_result"][
+        "mutation_performed"
+    ] is False
     support._git(repo, "checkout", "--detach", sibling["source_head"])
     sibling_still_blocked = _issue_wave(
         case, sibling_review, sibling, bootstrap_authority=None

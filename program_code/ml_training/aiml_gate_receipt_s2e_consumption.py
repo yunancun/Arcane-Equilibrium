@@ -852,6 +852,17 @@ def consume_s2e_launch_predecessor(
         bootstrap_prior_ledger=bootstrap_prior_ledger,
         bootstrap_result_ledger_digest=bootstrap_result_ledger_digest,
     )
+    if store.last_bootstrap_authority_applied:
+        # The external registry's signed GRANTED_ONCE claim is the authority
+        # event.  Reconstructing its exact entry in the resettable local cache
+        # is an idempotent physical recovery write, never a second logical
+        # predecessor consumption.
+        status = "IDEMPOTENT_AUTHORITY_RESTORE"
+    physical_state_write_performed = bool(
+        store.last_bootstrap_authority_applied
+        or store.last_state_recovery_performed
+        or status == "CONSUMED"
+    )
     result = {
         "schema_version": "s2e_launch_predecessor_consumption_result_v1",
         "status": status,
@@ -862,7 +873,13 @@ def consume_s2e_launch_predecessor(
             "SIGNED_EXTERNAL_BOOTSTRAP_PLUS_LOCAL_DUAL_COPY_V1"
         ),
         "tombstone_anchor_ledger_digest": ledger["ledger_digest"],
-        "state_recovery_performed": store.last_state_recovery_performed,
+        "state_recovery_performed": bool(
+            store.last_state_recovery_performed
+            or store.last_bootstrap_authority_applied
+        ),
+        "physical_state_write_performed": (
+            physical_state_write_performed
+        ),
         "bootstrap_authority_applied": (
             store.last_bootstrap_authority_applied
         ),
@@ -870,7 +887,10 @@ def consume_s2e_launch_predecessor(
         "external_immutability_proven": False,
         "file_fsynced": True,
         "parent_directory_fsynced": True,
-        "mutation_performed": status == "CONSUMED",
+        "mutation_performed": (
+            status == "CONSUMED"
+            and not store.last_bootstrap_authority_applied
+        ),
         "production_effect": False,
     }
     result["result_digest"] = canonical_digest(result)
