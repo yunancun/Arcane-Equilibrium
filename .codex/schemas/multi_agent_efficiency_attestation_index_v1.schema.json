@@ -2,7 +2,7 @@
   "$schema": "https://json-schema.org/draft/2020-12/schema",
   "$id": "https://arcane-equilibrium.local/schemas/multi_agent_efficiency_attestation_index_v1.schema.json",
   "title": "multi_agent_efficiency_attestation_index_v1",
-  "description": "Structurally binds platform/external efficiency telemetry to immutable run IDs, exact call-record inventories, and profile metrics digests. A valid self-digest does not confer platform trust; the embedding host must independently verify the exact index digest.",
+  "description": "Structurally binds platform/external efficiency telemetry to immutable run IDs, per-profile call-record inventories whose length exactly equals every reported metrics.calls (including an empty inventory for zero calls); an unavailable call count requires an empty inventory. It also binds profile metrics digests. A valid self-digest does not confer platform trust; the embedding host must independently verify the exact index digest.",
   "type": "object",
   "additionalProperties": false,
   "required": [
@@ -127,7 +127,7 @@
         },
         "call_record_digests": {
           "type": "array",
-          "minItems": 1,
+          "minItems": 0,
           "uniqueItems": true,
           "items": {
             "$ref": "#/$defs/digest"

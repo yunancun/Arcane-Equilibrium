@@ -33,6 +33,14 @@ ALLOWED_H2 = (
     "## Topical pointers",
     "## Archive pointer",
 )
+POLICY: dict[str, object] = {
+    "allowed_h2": list(ALLOWED_H2),
+    "max_hot_bytes": MAX_HOT_BYTES,
+    "max_hot_lines": MAX_HOT_LINES,
+    "archive_payload_encoding": "raw_bytes",
+    "archive_prefix_policy": "immutable",
+    "active_history_policy": "no_date_or_task_ledger",
+}
 ROLE_NAMES = (
     "A3",
     "AI-E",
@@ -77,6 +85,41 @@ MANIFEST_FIELDS = {
     "roles",
     "manifest_digest",
 }
+LEGACY_MANIFEST_FIELDS = MANIFEST_FIELDS - {
+    "generation",
+    "supersedes_manifest_digest",
+    "promotions",
+}
+ROLE_ENTRY_FIELDS = {
+    "role",
+    "active_path",
+    "archive_path",
+    "archive_prefix_bytes",
+    "archive_prefix_sha256",
+    "record_offset",
+    "record_bytes",
+    "record_sha256",
+    "payload_offset",
+    "payload_bytes",
+    "payload_sha256",
+    "original_lines",
+    "durable_lessons",
+    "archive_pointer_digest",
+    "active_bytes",
+    "active_lines",
+    "active_sha256",
+}
+LEGACY_ROLE_ENTRY_FIELDS = ROLE_ENTRY_FIELDS - {"durable_lessons"}
+ROLE_ENTRY_NONNEGATIVE_INTEGER_FIELDS = (
+    "archive_prefix_bytes",
+    "record_offset",
+    "record_bytes",
+    "payload_offset",
+    "payload_bytes",
+    "original_lines",
+    "active_bytes",
+    "active_lines",
+)
 PROMOTION_FIELDS = {
     "schema_version",
     "role",
@@ -99,6 +142,15 @@ PROMOTION_FIELDS = {
     "prior_manifest_sha256",
     "promotion_digest",
 }
+PROMOTION_NONNEGATIVE_INTEGER_FIELDS = (
+    "archive_record_offset",
+    "archive_record_bytes",
+    "prior_active_offset",
+    "prior_active_bytes",
+    "prior_manifest_offset",
+    "prior_manifest_bytes",
+)
+PROMOTION_POSITIVE_INTEGER_FIELDS = ("prior_generation",)
 
 
 COMMON_USAGE = (
@@ -468,6 +520,18 @@ def _canonical_json(value: Any) -> bytes:
     ).encode("utf-8")
 
 
+_CANONICAL_POLICY_JSON = _canonical_json(POLICY)
+
+
+def _policy_matches_contract(value: Any) -> bool:
+    if not isinstance(value, dict):
+        return False
+    try:
+        return _canonical_json(value) == _CANONICAL_POLICY_JSON
+    except (TypeError, ValueError):
+        return False
+
+
 def _digest_record(value: dict[str, Any], field: str) -> str:
     canonical = {key: item for key, item in value.items() if key != field}
     return _sha256(_canonical_json(canonical))
@@ -475,6 +539,122 @@ def _digest_record(value: dict[str, Any], field: str) -> str:
 
 def _relative(path: Path, root: Path) -> str:
     return path.relative_to(root).as_posix()
+
+
+def _canonical_role_paths(role: str) -> tuple[str, str]:
+    base = f"docs/CCAgentWorkSpace/{role}"
+    return f"{base}/memory.md", f"{base}/memory-archive.md"
+
+
+def _has_symlink_component(repo_root: Path, relative_path: str) -> bool:
+    candidate = repo_root
+    for part in Path(relative_path).parts:
+        candidate /= part
+        if candidate.is_symlink():
+            return True
+    return False
+
+
+def _role_entry_path_errors(
+    repo_root: Path,
+    entries: Sequence[Any],
+) -> list[tuple[str, str]]:
+    """Validate literal paths first, then lstat only canonical paths."""
+
+    literal_errors: list[tuple[str, str]] = []
+    canonical_entries: list[tuple[str, str, str]] = []
+    for entry in entries:
+        if not isinstance(entry, dict):
+            continue
+        role = entry.get("role")
+        if not isinstance(role, str) or role not in ROLE_NAMES:
+            literal_errors.append(
+                (str(role or "<unknown>"), "role is not governed")
+            )
+            continue
+        expected_active, expected_archive = _canonical_role_paths(role)
+        active_path = entry.get("active_path")
+        archive_path = entry.get("archive_path")
+        if active_path != expected_active:
+            literal_errors.append(
+                (
+                    role,
+                    "active_path differs from canonical role memory path",
+                )
+            )
+        if archive_path != expected_archive:
+            literal_errors.append(
+                (
+                    role,
+                    "archive_path differs from canonical role memory path",
+                )
+            )
+        canonical_entries.append((role, expected_active, expected_archive))
+    if literal_errors:
+        return literal_errors
+
+    errors: list[tuple[str, str]] = []
+    for role, active_path, archive_path in canonical_entries:
+        try:
+            if _has_symlink_component(repo_root, active_path):
+                errors.append(
+                    (role, "active_path has a symlink component")
+                )
+            if _has_symlink_component(repo_root, archive_path):
+                errors.append(
+                    (role, "archive_path has a symlink component")
+                )
+        except OSError:
+            errors.append((role, "role path symlink preflight failed"))
+    return errors
+
+
+def _exact_integer_contract_errors(
+    record: dict[str, Any],
+    *,
+    nonnegative_fields: Sequence[str],
+    positive_fields: Sequence[str] = (),
+) -> list[str]:
+    """Reject Python bool/float coercion at every JSON integer boundary."""
+
+    errors: list[str] = []
+    for field in nonnegative_fields:
+        value = record.get(field)
+        if type(value) is not int or value < 0:
+            errors.append(f"{field} must be a nonnegative integer")
+    for field in positive_fields:
+        value = record.get(field)
+        if type(value) is not int or value < 1:
+            errors.append(f"{field} must be a positive integer")
+    return errors
+
+
+def _role_entry_numeric_errors(
+    entries: Sequence[Any],
+) -> list[tuple[str, str]]:
+    errors: list[tuple[str, str]] = []
+    for entry in entries:
+        if not isinstance(entry, dict):
+            continue
+        role = str(entry.get("role", "<unknown>"))
+        errors.extend(
+            (role, error)
+            for error in _exact_integer_contract_errors(
+                entry,
+                nonnegative_fields=ROLE_ENTRY_NONNEGATIVE_INTEGER_FIELDS,
+            )
+        )
+    return errors
+
+
+def _promotion_numeric_errors(
+    promotion: dict[str, Any],
+) -> list[str]:
+    return _exact_integer_contract_errors(
+        promotion,
+        nonnegative_fields=PROMOTION_NONNEGATIVE_INTEGER_FIELDS,
+        positive_fields=PROMOTION_POSITIVE_INTEGER_FIELDS,
+    )
 
 
 def _atomic_write(path: Path, data: bytes) -> None:
@@ -493,11 +673,16 @@ def discover_role_memories(repo_root: Path) -> list[Path]:
     """Return the exact governed active-memory set in canonical role order."""
 
     base = repo_root / "docs/CCAgentWorkSpace"
-    found = {
-        path.parent.name: path
-        for path in base.glob("*/memory.md")
-        if path.is_file()
-    }
+    if _has_symlink_component(repo_root, "docs/CCAgentWorkSpace"):
+        return []
+    found: dict[str, Path] = {}
+    for role in ROLE_NAMES:
+        role_dir = base / role
+        path = role_dir / "memory.md"
+        if role_dir.is_symlink() or path.is_symlink():
+            continue
+        if path.is_file():
+            found[role] = path
     return [found[role] for role in ROLE_NAMES if role in found]
 
 
@@ -794,6 +979,9 @@ def _promotion_archive_payloads(
 ) -> tuple[bytes, bytes]:
     """Exact-parse one promotion record and recover both predecessor payloads."""
 
+    numeric_errors = _promotion_numeric_errors(promotion)
+    if numeric_errors:
+        raise ValueError("; ".join(numeric_errors))
     header = {
         "schema_version": PROMOTION_ARCHIVE_SCHEMA_VERSION,
         "role": promotion["role"],
@@ -882,6 +1070,32 @@ def recover_original_bytes(
     if _sha256(payload) != entry["payload_sha256"]:
         raise ValueError(f"{entry['role']}: archive payload digest mismatch")
     return payload
+
+
+def _role_entry_derived_errors(
+    entry: dict[str, Any],
+    *,
+    active: bytes,
+    original: bytes,
+) -> list[str]:
+    expected = {
+        "active_bytes": len(active),
+        "active_lines": len(active.decode("utf-8").splitlines()),
+        "original_lines": len(original.decode("utf-8").splitlines()),
+    }
+    messages = {
+        "active_bytes": "active_bytes differs from exact active byte length",
+        "active_lines": "active_lines differs from exact active line count",
+        "original_lines": (
+            "original_lines differs from recovered original line count"
+        ),
+    }
+    return [
+        messages[field]
+        for field, expected_value in expected.items()
+        if type(entry.get(field)) is not int
+        or entry[field] != expected_value
+    ]
 
 
 def _validated_durable_lesson(lesson: str) -> str:
@@ -1043,6 +1257,8 @@ def _verify_manifest_with_active_overrides(
         manifest, "manifest_digest"
     ):
         errors.append("manifest digest mismatch")
+    if not _policy_matches_contract(manifest.get("policy")):
+        errors.append("manifest policy differs from the canonical contract")
     promotions = manifest.get("promotions")
     if not isinstance(promotions, list):
         promotions = []
@@ -1065,6 +1281,25 @@ def _verify_manifest_with_active_overrides(
     entries = manifest.get("roles")
     if not isinstance(entries, list):
         return errors + ["manifest roles must be a list"]
+    entry_shape_errors: list[str] = []
+    for entry in entries:
+        if not isinstance(entry, dict):
+            entry_shape_errors.append("manifest role entry must be an object")
+        elif set(entry) != ROLE_ENTRY_FIELDS:
+            entry_shape_errors.append(
+                f"{entry.get('role', '<unknown>')}: role entry fields "
+                "differ from the v3 contract"
+            )
+    if entry_shape_errors:
+        return errors + entry_shape_errors
+    path_errors = _role_entry_path_errors(repo_root, entries)
+    errors.extend(f"{role}: {error}" for role, error in path_errors)
+    if path_errors:
+        return errors
+    numeric_errors = _role_entry_numeric_errors(entries)
+    errors.extend(f"{role}: {error}" for role, error in numeric_errors)
+    if numeric_errors:
+        return errors
     expected_roles = tuple(
         path.parent.name for path in discover_role_memories(repo_root)
     )
@@ -1098,6 +1333,12 @@ def _verify_manifest_with_active_overrides(
                 errors.append(
                     f"{role}: promotion fields differ from the v2 contract"
                 )
+            promotion_numeric_errors = _promotion_numeric_errors(promotion)
+            errors.extend(
+                f"{role}: {error}" for error in promotion_numeric_errors
+            )
+            if promotion_numeric_errors:
+                continue
             authority = promotion["closure_authority"]
             errors.extend(
                 f"{role}: {error}"
@@ -1164,7 +1405,66 @@ def _verify_manifest_with_active_overrides(
                 errors.append(f"{role}: prior manifest fields differ")
             if prior_manifest.get("schema_version") != SCHEMA_VERSION:
                 errors.append(f"{role}: prior manifest schema is invalid")
+            if not _policy_matches_contract(prior_manifest.get("policy")):
+                errors.append(
+                    f"{role}: prior manifest generation {index} policy "
+                    "differs from the canonical contract"
+                )
             prior_entries = prior_manifest.get("roles")
+            prior_path_errors: list[tuple[str, str]] = []
+            prior_numeric_errors: list[tuple[str, str]] = []
+            if isinstance(prior_entries, list):
+                prior_path_errors = _role_entry_path_errors(
+                    repo_root,
+                    prior_entries,
+                )
+                errors.extend(
+                    f"{role}: prior manifest generation {index} "
+                    f"role {prior_role} {error}"
+                    for prior_role, error in prior_path_errors
+                )
+                prior_numeric_errors = _role_entry_numeric_errors(
+                    prior_entries
+                )
+                errors.extend(
+                    f"{role}: prior manifest generation {index} "
+                    f"role {prior_role} {error}"
+                    for prior_role, error in prior_numeric_errors
+                )
+                for prior_entry in prior_entries:
+                    prior_role = (
+                        prior_entry.get("role", "<unknown>")
+                        if isinstance(prior_entry, dict)
+                        else "<unknown>"
+                    )
+                    if (
+                        not isinstance(prior_entry, dict)
+                        or set(prior_entry) != ROLE_ENTRY_FIELDS
+                    ):
+                        errors.append(
+                            f"{role}: prior manifest generation {index} "
+                            f"role {prior_role} fields differ from the v3 "
+                            "contract"
+                        )
+                    if (
+                        isinstance(prior_entry, dict)
+                        and not prior_path_errors
+                        and not prior_numeric_errors
+                    ):
+                        prior_rendered_active = _render_hot_memory(prior_entry)
+                        prior_original = recover_original_bytes(
+                            repo_root,
+                            prior_entry,
+                        )
+                        errors.extend(
+                            f"{role}: prior manifest generation {index} "
+                            f"role {prior_role} {error}"
+                            for error in _role_entry_derived_errors(
+                                prior_entry,
+                                active=prior_rendered_active,
+                                original=prior_original,
+                            )
+                        )
             prior_roles = (
                 tuple(
                     candidate.get("role")
@@ -1260,6 +1560,10 @@ def _verify_manifest_with_active_overrides(
             errors.append("manifest role entry must be an object")
             continue
         role = entry.get("role", "<unknown>")
+        if set(entry) != ROLE_ENTRY_FIELDS:
+            errors.append(
+                f"{role}: role entry fields differ from the v3 contract"
+            )
         try:
             archive = (repo_root / entry["archive_path"]).read_bytes()
             prefix_end = entry["archive_prefix_bytes"]
@@ -1269,10 +1573,18 @@ def _verify_manifest_with_active_overrides(
             record_end = record_start + entry["record_bytes"]
             if _sha256(archive[record_start:record_end]) != entry["record_sha256"]:
                 errors.append(f"{role}: archive record changed")
-            recover_original_bytes(repo_root, entry)
+            original = recover_original_bytes(repo_root, entry)
             active = active_overrides.get(entry["active_path"])
             if active is None:
                 active = (repo_root / entry["active_path"]).read_bytes()
+            errors.extend(
+                f"{role}: {error}"
+                for error in _role_entry_derived_errors(
+                    entry,
+                    active=active,
+                    original=original,
+                )
+            )
             if _sha256(active) != entry["active_sha256"]:
                 errors.append(f"{role}: active compact memory digest mismatch")
             expected_lessons = list(ROLE_LESSONS[role]) + promoted_lessons.get(
@@ -1340,6 +1652,19 @@ def _upgrade_legacy_manifest(
         INTERMEDIATE_SCHEMA_VERSION,
     }:
         raise ValueError("manifest is not a supported legacy generation")
+    expected_manifest_fields = (
+        LEGACY_MANIFEST_FIELDS
+        if schema_version == LEGACY_SCHEMA_VERSION
+        else MANIFEST_FIELDS
+    )
+    if set(manifest) != expected_manifest_fields:
+        raise ValueError(
+            "legacy manifest fields differ from the exact schema contract"
+        )
+    if not _policy_matches_contract(manifest.get("policy")):
+        raise ValueError(
+            "legacy manifest policy differs from the canonical contract"
+        )
     if manifest.get("manifest_digest") != _digest_record(
         manifest, "manifest_digest"
     ):
@@ -1347,11 +1672,35 @@ def _upgrade_legacy_manifest(
     entries = manifest.get("roles")
     if not isinstance(entries, list):
         raise ValueError("manifest roles must be a list")
+    expected_role_entry_fields = (
+        LEGACY_ROLE_ENTRY_FIELDS
+        if schema_version == LEGACY_SCHEMA_VERSION
+        else ROLE_ENTRY_FIELDS
+    )
+    if any(
+        not isinstance(entry, dict)
+        or set(entry) != expected_role_entry_fields
+        for entry in entries
+    ):
+        raise ValueError(
+            "legacy manifest role entry fields differ from the exact "
+            "schema contract"
+        )
     if tuple(
         entry.get("role") if isinstance(entry, dict) else None
         for entry in entries
     ) != roles:
         raise ValueError("existing compaction manifest does not match requested roles")
+    path_errors = _role_entry_path_errors(repo_root, entries)
+    if path_errors:
+        raise ValueError(
+            "; ".join(f"{role}: {error}" for role, error in path_errors)
+        )
+    numeric_errors = _role_entry_numeric_errors(entries)
+    if numeric_errors:
+        raise ValueError(
+            "; ".join(f"{role}: {error}" for role, error in numeric_errors)
+        )
 
     upgraded = json.loads(json.dumps(manifest, ensure_ascii=False))
     upgraded["schema_version"] = SCHEMA_VERSION
@@ -1478,6 +1827,16 @@ def _resume_or_return(
         manifest, "manifest_digest"
     ):
         raise ValueError("manifest digest mismatch")
+    path_errors = _role_entry_path_errors(repo_root, entries)
+    if path_errors:
+        raise ValueError(
+            "; ".join(f"{role}: {error}" for role, error in path_errors)
+        )
+    numeric_errors = _role_entry_numeric_errors(entries)
+    if numeric_errors:
+        raise ValueError(
+            "; ".join(f"{role}: {error}" for role, error in numeric_errors)
+        )
     archive_errors: list[str] = []
     for entry in entries:
         try:
@@ -1560,6 +1919,22 @@ def compact_repository(
         for role in selected
     ):
         raise ValueError("every selected role requires lessons and pointers")
+    selected_path_entries = [
+        {
+            "role": role,
+            "active_path": _canonical_role_paths(role)[0],
+            "archive_path": _canonical_role_paths(role)[1],
+        }
+        for role in selected
+    ]
+    path_errors = _role_entry_path_errors(
+        repo_root,
+        selected_path_entries,
+    )
+    if path_errors:
+        raise ValueError(
+            "; ".join(f"{role}: {error}" for role, error in path_errors)
+        )
 
     existing = _existing_manifest(repo_root)
     if existing is not None:
@@ -1628,14 +2003,7 @@ def compact_repository(
         "generation": 1,
         "supersedes_manifest_digest": None,
         "promotions": [],
-        "policy": {
-            "allowed_h2": list(ALLOWED_H2),
-            "max_hot_bytes": MAX_HOT_BYTES,
-            "max_hot_lines": MAX_HOT_LINES,
-            "archive_payload_encoding": "raw_bytes",
-            "archive_prefix_policy": "immutable",
-            "active_history_policy": "no_date_or_task_ledger",
-        },
+        "policy": json.loads(json.dumps(POLICY, ensure_ascii=False)),
         "roles": entries,
     }
     manifest["manifest_digest"] = _digest_record(manifest, "manifest_digest")

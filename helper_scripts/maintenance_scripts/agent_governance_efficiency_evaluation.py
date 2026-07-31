@@ -3,17 +3,18 @@
 The evaluation envelope compares exactly three execution profiles against one
 immutable workload and one current-profile baseline.  It deliberately keeps
 token classes separate, preserves unavailable values as ``null``, and applies
-the exact Registry-owned quality non-inferiority policy before any efficiency
-candidate can be reported. Evaluation records bind that policy by ID and digest;
-they cannot supply or relax thresholds.
+the exact Registry-owned quality non-inferiority and Pareto-improvement policy
+before any efficiency candidate can be reported. Evaluation records bind that
+policy by ID and digest; they cannot supply or relax thresholds or axes.
 
 Checked-in synthetic fixtures exercise the contract and regression logic only.
 They can never produce a measured-efficiency claim. Observed measured records
-bind a typed attestation index containing immutable run IDs, exact call-record
-inventories, and metrics payload digests. Even a structurally valid index and
-self-digest remain untrusted until an out-of-band host verifier authenticates
-the exact index and inventory binding. The standalone CLI has no such verifier
-and therefore reports ``EXTERNAL_LIMIT``.
+bind a typed attestation index containing immutable run IDs, call-record
+inventories whose per-profile length equals every reported ``metrics.calls``;
+an unavailable call count binds an empty inventory. Even a structurally valid
+index and self-digest remain untrusted until an out-of-band host verifier
+authenticates the exact index and inventory binding. The standalone CLI has no
+such verifier and therefore reports ``EXTERNAL_LIMIT``.
 """
 
 from __future__ import annotations
@@ -126,9 +127,11 @@ POLICY_FIELDS = {
     "schema_version",
     "policy_id",
     "thresholds",
+    "efficiency_improvement",
     "synthetic_measured_claim_allowed",
     "policy_digest",
 }
+EFFICIENCY_IMPROVEMENT_FIELDS = {"predicate", "axes"}
 POLICY_BINDING_FIELDS = {"policy_id", "policy_digest"}
 ATTESTATION_INDEX_FIELDS = {
     "schema_version",
@@ -166,6 +169,10 @@ EXPECTED_POLICY_UNSIGNED = {
         "max_false_closure_count_increase": 0,
         "minimum_p0_p1_recall_ratio": 1.0,
         "minimum_decision_changing_findings_retention_ratio": 1.0,
+    },
+    "efficiency_improvement": {
+        "predicate": "all_axes_non_worse_and_one_strictly_better_v1",
+        "axes": list(EFFICIENCY_METRICS),
     },
     "synthetic_measured_claim_allowed": False,
 }
@@ -270,16 +277,33 @@ def registry_efficiency_evaluation_policy_errors(
         errors.append(
             "efficiency_evaluation_policy.thresholds fields differ from authority"
         )
+    efficiency_improvement = policy.get("efficiency_improvement")
+    if (
+        not isinstance(efficiency_improvement, dict)
+        or set(efficiency_improvement) != EFFICIENCY_IMPROVEMENT_FIELDS
+    ):
+        errors.append(
+            "efficiency_evaluation_policy.efficiency_improvement fields "
+            "differ from authority"
+        )
     unsigned = {
         key: value for key, value in policy.items() if key != "policy_digest"
     }
-    if unsigned != EXPECTED_POLICY_UNSIGNED:
+    try:
+        exact_policy_match = (
+            _canonical_bytes(unsigned)
+            == _canonical_bytes(EXPECTED_POLICY_UNSIGNED)
+        )
+    except (TypeError, ValueError):
+        exact_policy_match = False
+    if not exact_policy_match:
         errors.append(
-            "efficiency_evaluation_policy must preserve zero quality-score "
-            "drop, complete required coverage and P0/P1 recall, zero reopen "
-            "increase, zero rework increase, zero false-closure increase, "
-            "full decision-changing finding retention, and no synthetic "
-            "measured claim"
+            "efficiency_evaluation_policy must preserve exact JSON types and "
+            "values for zero quality-score drop, complete required coverage "
+            "and P0/P1 recall, zero reopen increase, zero rework increase, "
+            "zero false-closure increase, full decision-changing finding "
+            "retention, an all-axes non-worse and at-least-one-strictly-better "
+            "efficiency predicate, and no synthetic measured claim"
         )
     try:
         expected_digest = efficiency_evaluation_policy_digest(policy)
@@ -448,7 +472,6 @@ def validate_efficiency_attestation_index(
         call_digests = attestation.get("call_record_digests")
         if (
             not isinstance(call_digests, list)
-            or not call_digests
             or not all(
                 isinstance(digest, str)
                 and digest.startswith("sha256:")
@@ -461,9 +484,28 @@ def validate_efficiency_attestation_index(
             errors.append(
                 f"{label} call_record_digests must be a sorted unique inventory"
             )
-        elif isinstance(run_id, str) and run_id:
-            for digest in call_digests:
-                call_digest_run_ids.setdefault(digest, set()).add(run_id)
+        else:
+            metrics = profile.get("metrics")
+            reported_calls = (
+                metrics.get("calls") if isinstance(metrics, dict) else None
+            )
+            if reported_calls is None and call_digests:
+                errors.append(
+                    f"{label} unavailable metrics.calls requires an empty "
+                    "call-record inventory"
+                )
+            elif (
+                isinstance(reported_calls, int)
+                and not isinstance(reported_calls, bool)
+                and len(call_digests) != reported_calls
+            ):
+                errors.append(
+                    f"{label} call_record_digests must exactly cover "
+                    f"metrics.calls={reported_calls}; observed {len(call_digests)}"
+                )
+            if isinstance(run_id, str) and run_id:
+                for digest in call_digests:
+                    call_digest_run_ids.setdefault(digest, set()).add(run_id)
         try:
             expected_metrics_digest = (
                 "sha256:"
@@ -530,6 +572,16 @@ def _profile_errors(
     if not isinstance(metrics, dict) or set(metrics) != METRIC_FIELDS:
         errors.append(f"{label} metric fields differ from the contract")
         return errors
+    calls = metrics.get("calls")
+    retries = metrics.get("retries")
+    if (
+        isinstance(calls, int)
+        and not isinstance(calls, bool)
+        and isinstance(retries, int)
+        and not isinstance(retries, bool)
+        and retries > calls
+    ):
+        errors.append(f"{label} retries cannot exceed calls")
 
     evidence_ref = profile.get("evidence_ref")
     evidence_digest = profile.get("evidence_digest")
@@ -862,6 +914,63 @@ def _quality_noninferiority(
     }
 
 
+def _efficiency_improvement(
+    baseline_metrics: dict[str, Any],
+    candidate_metrics: dict[str, Any],
+    policy: dict[str, Any],
+) -> dict[str, Any]:
+    axes = policy["axes"]
+    checks = {
+        axis: {
+            "status": (
+                "UNAVAILABLE"
+                if baseline_metrics.get(axis) is None
+                or candidate_metrics.get(axis) is None
+                else (
+                    "IMPROVED"
+                    if candidate_metrics[axis] < baseline_metrics[axis]
+                    else (
+                        "WORSE"
+                        if candidate_metrics[axis] > baseline_metrics[axis]
+                        else "EQUAL"
+                    )
+                )
+            ),
+            "baseline": baseline_metrics.get(axis),
+            "candidate": candidate_metrics.get(axis),
+            "ratio": _ratio(
+                candidate_metrics.get(axis),
+                baseline_metrics.get(axis),
+            ),
+        }
+        for axis in axes
+    }
+    strictly_improved_axes = sorted(
+        axis for axis, check in checks.items() if check["status"] == "IMPROVED"
+    )
+    worse_axes = sorted(
+        axis for axis, check in checks.items() if check["status"] == "WORSE"
+    )
+    unavailable_axes = sorted(
+        axis for axis, check in checks.items() if check["status"] == "UNAVAILABLE"
+    )
+    return {
+        "status": (
+            "UNAVAILABLE"
+            if unavailable_axes
+            else (
+                "PASS"
+                if strictly_improved_axes and not worse_axes
+                else "FAIL"
+            )
+        ),
+        "predicate": policy["predicate"],
+        "strictly_improved_axes": strictly_improved_axes,
+        "worse_axes": worse_axes,
+        "checks": checks,
+    }
+
+
 def evaluate_multi_agent_efficiency(
     record: dict[str, Any],
     *,
@@ -945,6 +1054,11 @@ def evaluate_multi_agent_efficiency(
             candidate["metrics"],
             quality_policy["thresholds"],
         )
+        improvement = _efficiency_improvement(
+            baseline["metrics"],
+            candidate["metrics"],
+            quality_policy["efficiency_improvement"],
+        )
         ratios = {
             metric: _ratio(
                 candidate["metrics"].get(metric),
@@ -955,9 +1069,12 @@ def evaluate_multi_agent_efficiency(
         comparisons[name] = {
             "measurement_status": candidate["measurement_status"],
             "quality_noninferiority": quality,
+            "efficiency_improvement": improvement,
             "efficiency_ratios": ratios,
             "efficiency_claim_allowed": (
-                all_measured and quality["status"] == "PASS"
+                all_measured
+                and quality["status"] == "PASS"
+                and improvement["status"] == "PASS"
             ),
         }
 
@@ -966,6 +1083,7 @@ def evaluate_multi_agent_efficiency(
         for name, comparison in comparisons.items()
         if comparison["measurement_status"] == "synthetic"
         and comparison["quality_noninferiority"]["status"] == "PASS"
+        and comparison["efficiency_improvement"]["status"] == "PASS"
     )
     measured_candidates = sorted(
         name

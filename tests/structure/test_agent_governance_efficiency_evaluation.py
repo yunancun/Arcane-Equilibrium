@@ -18,6 +18,7 @@ ROOT = Path(__file__).resolve().parents[2]
 HELPERS = ROOT / "helper_scripts/maintenance_scripts"
 MODULE_PATH = HELPERS / "agent_governance_efficiency_evaluation.py"
 SCHEMA_PATH = ROOT / ".codex/schemas/multi_agent_efficiency_evaluation_v1.schema.json"
+GOVERNANCE_DOC_PATH = ROOT / "docs/agents/development-agent-governance.md"
 FIXTURE_PATH = (
     ROOT
     / "tests/fixtures/agent_governance/multi_agent_efficiency_evaluation_v1.json"
@@ -80,10 +81,13 @@ def _measured_with_attestation_index(module) -> tuple[dict, dict]:
             "workload_digest": profile["workload_digest"],
             "baseline_digest": profile["baseline_digest"],
             "observed_at": "2026-07-30T12:05:00Z",
-            "call_record_digests": [
-                "sha256:" + str(index + 1) * 64,
-                "sha256:" + str(index + 4) * 64,
-            ],
+            "call_record_digests": sorted(
+                "sha256:"
+                + hashlib.sha256(
+                    f"profile-{index}-call-{call_index}".encode("utf-8")
+                ).hexdigest()
+                for call_index in range(profile["metrics"]["calls"])
+            ),
             "metrics_payload_digest": _canonical_digest(profile["metrics"]),
             "producer": producer,
         }
@@ -193,6 +197,19 @@ def test_registry_owns_and_validates_the_exact_quality_policy() -> None:
         "minimum_p0_p1_recall_ratio": 1.0,
         "minimum_decision_changing_findings_retention_ratio": 1.0,
     }
+    assert policy["efficiency_improvement"] == {
+        "predicate": "all_axes_non_worse_and_one_strictly_better_v1",
+        "axes": [
+            "elapsed_time_ms",
+            "input_tokens",
+            "output_tokens",
+            "cache_read_tokens",
+            "calls",
+            "waits",
+            "retries",
+            "compactions",
+        ],
+    }
     assert governance.registry_efficiency_evaluation_policy_errors(registry) == []
     assert policy["policy_digest"] == governance.efficiency_evaluation_policy_digest(
         policy
@@ -217,6 +234,79 @@ def test_registry_owns_and_validates_the_exact_quality_policy() -> None:
         "efficiency_evaluation_attestation_schema_path" in error
         for error in governance.validate_registry(bad_schema_path, ROOT)
     )
+
+
+@pytest.mark.parametrize(
+    ("field_path", "replacement"),
+    (
+        (("thresholds", "max_closure_quality_score_drop"), 0),
+        (("synthetic_measured_claim_allowed",), 0),
+    ),
+)
+def test_registry_policy_rejects_json_type_substitution_after_resigning(
+    field_path: tuple[str, ...],
+    replacement: object,
+) -> None:
+    import agent_governance as governance
+
+    registry = governance.load_registry()
+    policy = registry["efficiency_evaluation_policy"]
+    target = policy
+    for field in field_path[:-1]:
+        target = target[field]
+    target[field_path[-1]] = replacement
+    policy["policy_digest"] = governance.efficiency_evaluation_policy_digest(
+        policy
+    )
+
+    assert any(
+        "exact JSON types" in error
+        for error in governance.validate_registry(registry, ROOT)
+    )
+
+
+@pytest.mark.parametrize(
+    "mutation",
+    ("predicate", "axes_remove", "axes_reorder", "axes_add"),
+)
+def test_registry_policy_rejects_relaxed_pareto_authority_after_resigning(
+    mutation: str,
+) -> None:
+    import agent_governance as governance
+
+    registry = governance.load_registry()
+    policy = registry["efficiency_evaluation_policy"]
+    improvement = policy["efficiency_improvement"]
+    if mutation == "predicate":
+        improvement["predicate"] = "any_axis_strictly_better_v1"
+    elif mutation == "axes_remove":
+        improvement["axes"].remove("output_tokens")
+    elif mutation == "axes_reorder":
+        improvement["axes"] = list(reversed(improvement["axes"]))
+    else:
+        improvement["axes"].append("tool_calls")
+    policy["policy_digest"] = governance.efficiency_evaluation_policy_digest(
+        policy
+    )
+
+    assert any(
+        "all-axes non-worse" in error
+        for error in governance.validate_registry(registry, ROOT)
+    )
+
+
+def test_governance_doc_names_every_registry_threshold_and_pareto_axis() -> None:
+    import agent_governance as governance
+
+    policy = governance.load_registry()["efficiency_evaluation_policy"]
+    documented = GOVERNANCE_DOC_PATH.read_text(encoding="utf-8")
+
+    for threshold in policy["thresholds"]:
+        assert f"`{threshold}=" in documented
+    improvement = policy["efficiency_improvement"]
+    assert f"`{improvement['predicate']}`" in documented
+    for axis in improvement["axes"]:
+        assert f"`{axis}`" in documented
 
 
 def test_profiles_must_bind_the_same_workload_and_baseline() -> None:
@@ -288,6 +378,19 @@ def test_unavailable_metrics_remain_null_and_are_never_zero_filled() -> None:
     )
 
 
+def test_profile_retries_cannot_exceed_reported_calls() -> None:
+    module = _load_module()
+    fixture = _fixture()
+    bounded = _profile(fixture, "bounded_role")
+    bounded["metrics"]["calls"] = 0
+    _resign(module, fixture)
+
+    assert any(
+        "retries cannot exceed calls" in error
+        for error in module.validate_multi_agent_efficiency_evaluation(fixture)
+    )
+
+
 def test_quality_noninferiority_blocks_a_cheaper_but_degraded_profile() -> None:
     module = _load_module()
     result = module.evaluate_multi_agent_efficiency(_fixture())
@@ -310,6 +413,100 @@ def test_quality_noninferiority_blocks_a_cheaper_but_degraded_profile() -> None:
         "decision_changing_findings",
     }
     assert single["efficiency_claim_allowed"] is False
+
+
+def test_efficiency_claim_requires_at_least_one_strict_improvement() -> None:
+    module = _load_module()
+    fixture, attestation_index = _measured_with_attestation_index(module)
+    current = _profile(fixture, "current")
+    bounded = _profile(fixture, "bounded_role")
+    for metric in module.EFFICIENCY_METRICS:
+        bounded["metrics"][metric] = current["metrics"][metric]
+    attestation = attestation_index["records"][bounded["evidence_ref"]]
+    attestation["call_record_digests"] = sorted(
+        "sha256:"
+        + hashlib.sha256(f"profile-2-call-{index}".encode("utf-8")).hexdigest()
+        for index in range(bounded["metrics"]["calls"])
+    )
+    attestation["metrics_payload_digest"] = _canonical_digest(bounded["metrics"])
+    attestation.pop("record_digest")
+    attestation["record_digest"] = _canonical_digest(attestation)
+    bounded["evidence_digest"] = attestation["record_digest"]
+    _resign(module, fixture)
+    attestation_index.pop("record_digest")
+    attestation_index["record_digest"] = _canonical_digest(attestation_index)
+
+    class ExactVerifier:
+        def verify_efficiency_attestation_index(self, **_binding) -> bool:
+            return True
+
+    result = module.evaluate_multi_agent_efficiency(
+        fixture,
+        attestation_index=attestation_index,
+        attestation_verifier=ExactVerifier(),
+    )
+    comparison = result["comparisons"]["bounded_role"]
+
+    assert comparison["efficiency_improvement"]["status"] == "FAIL"
+    assert comparison["efficiency_improvement"]["strictly_improved_axes"] == []
+    assert comparison["efficiency_improvement"]["worse_axes"] == []
+    assert comparison["efficiency_claim_allowed"] is False
+    assert result["measured_efficiency_candidates"] == []
+
+
+def test_synthetic_benchmark_candidate_also_requires_pareto_improvement() -> None:
+    module = _load_module()
+    fixture = _fixture()
+    current = _profile(fixture, "current")
+    bounded = _profile(fixture, "bounded_role")
+    for metric in module.EFFICIENCY_METRICS:
+        bounded["metrics"][metric] = current["metrics"][metric]
+    _resign(module, fixture)
+
+    result = module.evaluate_multi_agent_efficiency(fixture)
+
+    assert (
+        result["comparisons"]["bounded_role"]["efficiency_improvement"]["status"]
+        == "FAIL"
+    )
+    assert result["benchmark_only_candidates"] == []
+
+
+def test_efficiency_claim_rejects_any_worse_efficiency_axis() -> None:
+    module = _load_module()
+    fixture, attestation_index = _measured_with_attestation_index(module)
+    current = _profile(fixture, "current")
+    bounded = _profile(fixture, "bounded_role")
+    bounded["metrics"]["output_tokens"] = (
+        current["metrics"]["output_tokens"] + 1
+    )
+    attestation = attestation_index["records"][bounded["evidence_ref"]]
+    attestation["metrics_payload_digest"] = _canonical_digest(bounded["metrics"])
+    attestation.pop("record_digest")
+    attestation["record_digest"] = _canonical_digest(attestation)
+    bounded["evidence_digest"] = attestation["record_digest"]
+    _resign(module, fixture)
+    attestation_index.pop("record_digest")
+    attestation_index["record_digest"] = _canonical_digest(attestation_index)
+
+    class ExactVerifier:
+        def verify_efficiency_attestation_index(self, **_binding) -> bool:
+            return True
+
+    result = module.evaluate_multi_agent_efficiency(
+        fixture,
+        attestation_index=attestation_index,
+        attestation_verifier=ExactVerifier(),
+    )
+    comparison = result["comparisons"]["bounded_role"]
+
+    assert comparison["efficiency_improvement"]["status"] == "FAIL"
+    assert comparison["efficiency_improvement"]["worse_axes"] == [
+        "output_tokens"
+    ]
+    assert comparison["efficiency_improvement"]["strictly_improved_axes"]
+    assert comparison["efficiency_claim_allowed"] is False
+    assert result["measured_efficiency_candidates"] == []
 
 
 def test_quality_noninferiority_requires_complete_required_coverage() -> None:
@@ -592,7 +789,11 @@ def test_trusted_host_verifier_unlocks_only_the_exact_attestation_index() -> Non
             "immutable-platform-run-2",
         ),
         "call_record_digests": tuple(
-            "sha256:" + str(index) * 64 for index in range(1, 7)
+            sorted(
+                digest
+                for attestation in attestation_index["records"].values()
+                for digest in attestation["call_record_digests"]
+            )
         ),
         "metrics_payload_digests": tuple(
             sorted(
@@ -635,6 +836,105 @@ def test_attestation_index_rejects_metrics_or_call_inventory_drift() -> None:
             fixture,
             changed_inventory,
         )
+    )
+
+
+def test_attestation_index_exactly_covers_each_profiles_reported_calls() -> None:
+    module = _load_module()
+    fixture, attestation_index = _measured_with_attestation_index(module)
+    reference = next(iter(attestation_index["records"]))
+    attestation = attestation_index["records"][reference]
+    attestation["call_record_digests"].pop()
+    attestation["record_digest"] = _canonical_digest(attestation)
+    _profile(fixture, attestation["profile"])["evidence_digest"] = attestation[
+        "record_digest"
+    ]
+    _resign(module, fixture)
+    attestation_index["record_digest"] = _canonical_digest(attestation_index)
+
+    assert any(
+        "must exactly cover metrics.calls" in error
+        for error in module.validate_efficiency_attestation_index(
+            fixture,
+            attestation_index,
+        )
+    )
+
+
+def test_partial_profile_with_unavailable_calls_rejects_nonempty_inventory() -> None:
+    module = _load_module()
+    fixture, attestation_index = _measured_with_attestation_index(module)
+    bounded = _profile(fixture, "bounded_role")
+    bounded["measurement_status"] = "partial"
+    bounded["unavailable_reason"] = "platform call total unavailable"
+    bounded["metrics"]["calls"] = None
+    attestation = attestation_index["records"][bounded["evidence_ref"]]
+    attestation["metrics_payload_digest"] = _canonical_digest(bounded["metrics"])
+    attestation.pop("record_digest")
+    attestation["record_digest"] = _canonical_digest(attestation)
+    bounded["evidence_digest"] = attestation["record_digest"]
+    _resign(module, fixture)
+    attestation_index.pop("record_digest")
+    attestation_index["record_digest"] = _canonical_digest(attestation_index)
+
+    assert any(
+        "unavailable metrics.calls requires an empty call-record inventory"
+        in error
+        for error in module.validate_efficiency_attestation_index(
+            fixture,
+            attestation_index,
+        )
+    )
+
+
+def test_partial_profile_with_unavailable_calls_accepts_empty_inventory() -> None:
+    module = _load_module()
+    fixture, attestation_index = _measured_with_attestation_index(module)
+    bounded = _profile(fixture, "bounded_role")
+    bounded["measurement_status"] = "partial"
+    bounded["unavailable_reason"] = "platform call total unavailable"
+    bounded["metrics"]["calls"] = None
+    attestation = attestation_index["records"][bounded["evidence_ref"]]
+    attestation["call_record_digests"] = []
+    attestation["metrics_payload_digest"] = _canonical_digest(bounded["metrics"])
+    attestation.pop("record_digest")
+    attestation["record_digest"] = _canonical_digest(attestation)
+    bounded["evidence_digest"] = attestation["record_digest"]
+    _resign(module, fixture)
+    attestation_index.pop("record_digest")
+    attestation_index["record_digest"] = _canonical_digest(attestation_index)
+
+    assert (
+        module.validate_efficiency_attestation_index(
+            fixture,
+            attestation_index,
+        )
+        == []
+    )
+
+
+def test_zero_reported_calls_require_an_exact_empty_call_inventory() -> None:
+    module = _load_module()
+    fixture, attestation_index = _measured_with_attestation_index(module)
+    bounded = _profile(fixture, "bounded_role")
+    bounded["metrics"]["calls"] = 0
+    bounded["metrics"]["retries"] = 0
+    attestation = attestation_index["records"][bounded["evidence_ref"]]
+    attestation["call_record_digests"] = []
+    attestation["metrics_payload_digest"] = _canonical_digest(bounded["metrics"])
+    attestation.pop("record_digest")
+    attestation["record_digest"] = _canonical_digest(attestation)
+    bounded["evidence_digest"] = attestation["record_digest"]
+    _resign(module, fixture)
+    attestation_index.pop("record_digest")
+    attestation_index["record_digest"] = _canonical_digest(attestation_index)
+
+    assert (
+        module.validate_efficiency_attestation_index(
+            fixture,
+            attestation_index,
+        )
+        == []
     )
 
 

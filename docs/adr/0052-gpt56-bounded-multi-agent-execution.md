@@ -199,12 +199,24 @@ thresholds are an exact Registry policy: complete required coverage and P0/P1
 recall, zero closure-quality drop, zero reopen/rework/false-closure increase,
 and full decision-changing-finding retention. Missing or inferior quality
 evidence blocks an efficiency claim; callers cannot relax the gate. Synthetic
-fixtures validate the schema and adjudicator only.
-Actual savings require a typed attestation index that binds unique immutable
-run IDs, exact non-reused call-record inventories, metrics digests, and record
-digests; an out-of-band trusted-host verifier must authenticate the exact index.
-A free-form reference or self-digest never unlocks a measured claim, and the
-standalone CLI remains `EXTERNAL_LIMIT`.
+fixtures validate the schema and adjudicator only. Exact policy comparison uses
+`allow_nan=false` canonical JSON bytes, so a recomputed digest cannot substitute
+integer zero for `0.0` or for boolean `false`.
+Quality non-inferiority is necessary but not sufficient. The same Registry
+policy owns `all_axes_non_worse_and_one_strictly_better_v1`: elapsed time,
+input/output/cache-read tokens, calls, waits, retries, and compactions use their
+raw values; every axis must be no worse than current and at least one must be
+strictly better. Missing axes, equality on every axis, or one worse axis reject
+both measured efficiency and synthetic benchmark candidacy.
+
+Actual savings require a typed attestation index that binds unique immutable run
+IDs, exact non-reused call-record inventories whose per-profile length equals
+every reported `metrics.calls`, metrics digests, and record digests; zero calls
+bind an empty inventory, an unavailable partial-profile call count also requires
+an empty inventory, and `retries` cannot exceed a reported `calls`. An
+out-of-band trusted-host verifier must authenticate the exact index. A free-form
+reference or self-digest never unlocks a measured claim, and the standalone CLI
+remains `EXTERNAL_LIMIT`.
 
 ## Consequences
 

@@ -201,8 +201,21 @@
       "minimum_p0_p1_recall_ratio": 1.0,
       "minimum_decision_changing_findings_retention_ratio": 1.0
     },
+    "efficiency_improvement": {
+      "predicate": "all_axes_non_worse_and_one_strictly_better_v1",
+      "axes": [
+        "elapsed_time_ms",
+        "input_tokens",
+        "output_tokens",
+        "cache_read_tokens",
+        "calls",
+        "waits",
+        "retries",
+        "compactions"
+      ]
+    },
     "synthetic_measured_claim_allowed": false,
-    "policy_digest": "sha256:6e7848b5f9826dbee965928955b7b21a14de0180be8e6ad34c8e545d3073bd47"
+    "policy_digest": "sha256:bec62dfd2f581a3bb22c79edc14ef48eab17b161d5a642d45f6160e5f59b6a6e"
   },
   "native_agent_adapters": {
     "PA": [

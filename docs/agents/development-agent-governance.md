@@ -635,12 +635,33 @@ recall 與 lead time；不得用低報 usage 或少開 verifier 製造虛假效�
 bounded-role 三個 profile。先判 closure quality/required coverage/decision-changing
 finding 的 non-inferiority，再比較 elapsed、input/output/cached tokens、calls、waits、
 retries、compactions、reopen/rework。Non-inferiority threshold 由 Registry exact policy
-固定為 quality drop=0、reopen increase=0、decision-changing finding retention=1.0，
-evaluation payload 不可自訂。Synthetic fixture 只驗 schema 與演算法，狀態永遠不能成為
-measured savings；實際節省需 typed attestation index 綁唯一 run IDs、不可跨 run 重用的
-exact call-record inventory、metrics/attestation/index digests，再由帶外 trusted-host
-verifier 認證 exact index。Free-form ref 或 packet self-digest 永不解鎖 measured；
-standalone CLI 固定 `EXTERNAL_LIMIT`。
+固定為：
+
+- `max_closure_quality_score_drop=0.0`
+- `minimum_required_coverage_ratio=1.0`
+- `max_reopen_count_increase=0`
+- `max_rework_count_increase=0`
+- `max_false_closure_count_increase=0`
+- `minimum_p0_p1_recall_ratio=1.0`
+- `minimum_decision_changing_findings_retention_ratio=1.0`
+
+Registry authority 以 `allow_nan=false` canonical JSON bytes 做 type-sensitive 比對；
+重簽 digest 不能把 `0.0` 換成 integer `0`，也不能把 boolean `false` 換成 integer
+`0`。evaluation payload 不可自訂。Quality PASS 仍不等於 efficiency：Registry 的
+`all_axes_non_worse_and_one_strictly_better_v1` 要求 `elapsed_time_ms`、
+`input_tokens`、`output_tokens`、`cache_read_tokens`、`calls`、`waits`、`retries`
+與 `compactions` 八個 raw-value 軸全部小於或等於 current baseline，且至少一軸嚴格
+較小；任一軸缺值、全部相等或任一軸變差都不產生 efficiency candidate。這個 Pareto
+門同時約束 synthetic `benchmark_only_candidates` 與 measured claim；synthetic fixture
+仍只驗 schema 與 adjudicator，永遠不能成為 measured savings。
+
+實際節省另需 typed attestation index 綁唯一 run IDs、不可跨 run 重用且逐 profile
+長度 exact 等於已報告 `metrics.calls` 的 call-record inventory、metrics/attestation/index
+digests，再由帶外 trusted-host verifier 認證 exact index。`metrics.calls=0` 唯一匹配
+空 inventory；partial profile 的 `metrics.calls=null` 也只能綁空 inventory，不能一面
+聲稱 call count 不可得、一面列出未能 exact-cover 的 calls。每個已報告 call count 的
+profile 另須滿足 `retries <= calls`。Free-form ref 或 packet self-digest 永不解鎖
+measured；standalone CLI 固定 `EXTERNAL_LIMIT`。
 
 ## 7. Full Audit controller and consumption policy
 

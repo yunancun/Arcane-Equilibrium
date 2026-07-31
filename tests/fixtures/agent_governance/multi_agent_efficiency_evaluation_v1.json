@@ -95,11 +95,11 @@
   ],
   "quality_noninferiority_policy": {
     "policy_id": "gpt56_multi_agent_quality_noninferiority_v1",
-    "policy_digest": "sha256:6e7848b5f9826dbee965928955b7b21a14de0180be8e6ad34c8e545d3073bd47"
+    "policy_digest": "sha256:bec62dfd2f581a3bb22c79edc14ef48eab17b161d5a642d45f6160e5f59b6a6e"
   },
   "limitations": [
     "This synthetic fixture is not measured evidence and cannot support an adoption or savings claim.",
     "Populate the same contract with caller-attested telemetry before making a measured comparison."
   ],
-  "record_digest": "sha256:f2dc868f6a130c3d314f8cfddfd1986ddf6e63c5ad8deb9041e0258fe8877948"
+  "record_digest": "sha256:74272aba7a89e89c3db6472094c88d6d2a27293dd4de88ec8a6779140e754654"
 }

@@ -124,6 +124,23 @@ Each archived generation reconstructs exactly one authorized transition: only
 the named durable lesson and its derived active byte/line/digest metadata may
 change. Policy, paths, archive/payload source fields, pointer binding, unrelated
 roles, and every other predecessor field remain byte-semantically identical.
+The current v3 manifest and every archived v3 predecessor must also carry the
+exact canonical policy values and exact v3 role-entry field set; recomputing a
+self-digest cannot authorize changed policy, missing fields, or unknown fields.
+Policy equality is canonical-JSON and type-sensitive, so a numeric float cannot
+stand in for the required integer. `active_bytes` and `active_lines` are derived
+again from the exact active bytes, while `original_lines` is derived from the
+recovered original archive slice. Every role-entry offset, byte count, and line
+count is an exact nonnegative JSON integer; promotion predecessor generation is
+an exact positive integer and every promotion offset or byte count is an exact
+nonnegative integer. Booleans and floats are rejected before the corresponding
+archive or active-memory I/O. Each role entry must use the literal
+`docs/CCAgentWorkSpace/<ROLE>/memory.md` and `memory-archive.md` paths, with no
+symlink component; verifier and apply paths reject these violations before
+using a manifest-provided role path for I/O.
+An unpromoted v1/v2 manifest is checked against its exact schema-specific
+top-level and role-entry field sets plus the same canonical policy before any
+upgrade.
 Standalone `--apply` has no verifier and therefore fails closed for an
 interrupted promoted successor; arbitrary drift also fails closed. Original
 archive slices remain independently recoverable without granting mutation

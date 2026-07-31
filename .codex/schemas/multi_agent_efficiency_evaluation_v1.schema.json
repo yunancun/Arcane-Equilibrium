@@ -2,7 +2,7 @@
   "$schema": "https://json-schema.org/draft/2020-12/schema",
   "$id": "https://arcane-equilibrium.local/schemas/multi_agent_efficiency_evaluation_v1.schema.json",
   "title": "multi_agent_efficiency_evaluation_v1",
-  "description": "One workload- and baseline-bound comparison of current, single-agent, and bounded-role execution profiles, bound to the exact Registry-owned quality policy by ID and digest. Synthetic fixtures are benchmark inputs, never measured telemetry.",
+  "description": "One workload- and baseline-bound comparison of current, single-agent, and bounded-role execution profiles, bound to the exact Registry-owned quality and Pareto-improvement policy by ID and digest. Synthetic fixtures are benchmark inputs, never measured telemetry.",
   "type": "object",
   "additionalProperties": false,
   "required": [
@@ -591,7 +591,7 @@
           "const": "gpt56_multi_agent_quality_noninferiority_v1"
         },
         "policy_digest": {
-          "const": "sha256:6e7848b5f9826dbee965928955b7b21a14de0180be8e6ad34c8e545d3073bd47"
+          "const": "sha256:bec62dfd2f581a3bb22c79edc14ef48eab17b161d5a642d45f6160e5f59b6a6e"
         }
       }
     }
