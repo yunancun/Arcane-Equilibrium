@@ -18,7 +18,16 @@ from agent_governance_context import (
 from agent_governance_context_validation import validate_context_artifact
 from agent_governance_context_specs import activated_source_specs, source_name
 from agent_governance_context_projection import materialize_semantic_context
-from agent_governance_execution_policy import compile_execution_budget_policy
+from agent_governance_execution_dag import (
+    _compiler_derived_zero_call_context_execution_dag_binding,
+    compile_context_execution_dag_binding,
+    explicit_execution_dag_route_errors,
+    task_execution_projection,
+)
+from agent_governance_execution_policy import (
+    compile_execution_budget_policy,
+    promote_execution_envelope,
+)
 from agent_governance_registry import REPO_ROOT, load_registry
 from agent_governance_external_evidence import ExternalEvidenceVerifier
 from agent_governance_routing import (
@@ -105,6 +114,8 @@ def compile_context(
     registry: dict[str, Any] | None = None,
     root: Path = REPO_ROOT,
     external_evidence_verifier: ExternalEvidenceVerifier | None = None,
+    *,
+    execution_dag: list[dict[str, Any]] | None = None,
 ) -> dict[str, Any]:
     """Compile a lossless content-addressed context plan."""
 
@@ -235,7 +246,43 @@ def compile_context(
     ]
 
     routed = route_task(facts, registry=registry)
-    envelope_name = routed["budget_envelope"]
+    compiler_derived_execution_dag = execution_dag is None
+    if compiler_derived_execution_dag:
+        execution_dag, dag_errors = task_execution_projection(
+            routed["required_role_nodes"],
+            [],
+            task_facts=facts,
+            registry=registry,
+        )
+        if dag_errors:
+            raise ValueError(
+                "invalid routed Context execution DAG: "
+                + "; ".join(dag_errors)
+            )
+    else:
+        route_binding_errors = explicit_execution_dag_route_errors(
+            execution_dag,
+            routed["required_role_nodes"],
+            facts,
+            registry=registry,
+        )
+        if route_binding_errors:
+            raise ValueError("; ".join(route_binding_errors))
+    execution_dag_binding = (
+        _compiler_derived_zero_call_context_execution_dag_binding(
+            registry=registry,
+        )
+        if compiler_derived_execution_dag and not execution_dag
+        else compile_context_execution_dag_binding(
+            execution_dag,
+            registry=registry,
+        )
+    )
+    envelope_name = promote_execution_envelope(
+        _select_envelope(facts),
+        required_nodes=execution_dag_binding["node_count"],
+        registry=registry,
+    )
     registry_envelope = dict(registry["budget_envelopes"][envelope_name])
     envelope = {
         field: registry_envelope[field]
@@ -299,6 +346,7 @@ def compile_context(
         "registry_schema_version": registry["schema_version"],
         "role": role_id,
         "role_permission": role["permission"],
+        "execution_dag_binding": execution_dag_binding,
         "task_contract": contract,
         "task_contract_digest": contract_digest,
         "mandatory_content": mandatory,
@@ -354,14 +402,82 @@ def context_plan_digest(plan: dict[str, Any]) -> str:
     )
 
 
-def materialize_context_artifact(plan: dict[str, Any]) -> dict[str, Any]:
+def _validate_plan_execution_dag_authority(
+    plan: dict[str, Any],
+    registry: dict[str, Any],
+) -> None:
+    binding = plan.get("execution_dag_binding")
+    if not isinstance(binding, dict) or not isinstance(binding.get("nodes"), list):
+        raise ValueError("context plan lacks an exact execution DAG binding")
+    expected_binding = (
+        _compiler_derived_zero_call_context_execution_dag_binding(
+            registry=registry,
+        )
+        if not binding["nodes"]
+        else compile_context_execution_dag_binding(
+            binding["nodes"],
+            registry=registry,
+        )
+    )
+    if binding != expected_binding:
+        raise ValueError("context plan execution DAG binding is forged")
+    task_contract = plan.get("task_contract")
+    if not isinstance(task_contract, dict):
+        raise ValueError("context plan lacks an exact task contract")
+    routed = route_task(task_contract, registry=registry)
+    route_errors = explicit_execution_dag_route_errors(
+        binding["nodes"],
+        routed["required_role_nodes"],
+        task_contract,
+        registry=registry,
+    )
+    if route_errors:
+        raise ValueError(
+            "context plan execution DAG binding does not authorize the task contract: "
+            + "; ".join(route_errors)
+        )
+    expected_envelope = promote_execution_envelope(
+        _select_envelope(plan.get("task_contract", {})),
+        required_nodes=expected_binding["node_count"],
+        registry=registry,
+    )
+    budget = plan.get("budget")
+    if not isinstance(budget, dict) or budget.get("envelope") != expected_envelope:
+        raise ValueError(
+            "context budget envelope is not justified by the exact execution DAG"
+        )
+    expected_authority = compile_execution_budget_policy(expected_envelope, registry)
+    expected_canonical = json.dumps(
+        expected_authority,
+        ensure_ascii=False,
+        sort_keys=True,
+        separators=(",", ":"),
+        allow_nan=False,
+    )
+    if (
+        budget.get("authority") != expected_authority
+        or budget.get("authority_canonical") != expected_canonical
+        or budget.get("authority_digest")
+        != _sha256_bytes(expected_canonical.encode("utf-8"))
+    ):
+        raise ValueError(
+            "context budget authority is not justified by the exact execution DAG"
+        )
+
+
+def materialize_context_artifact(
+    plan: dict[str, Any],
+    registry: dict[str, Any] | None = None,
+) -> dict[str, Any]:
     """Freeze Python-canonical plan bytes for cross-runtime admission/retry."""
 
+    registry = registry or load_registry()
     expected_digest = context_plan_digest(plan)
     if plan.get("context_digest") != expected_digest:
         raise ValueError("context plan self-digest is stale or forged")
     if not isinstance(plan.get("budget"), dict) or plan["budget"].get("call_allowed") is not True:
         raise ValueError("context plan is not call_allowed and cannot be materialized")
+    _validate_plan_execution_dag_authority(plan, registry)
     unsigned = {key: value for key, value in plan.items() if key != "context_digest"}
     canonical_plan = json.dumps(
         unsigned,
@@ -372,7 +488,7 @@ def materialize_context_artifact(plan: dict[str, Any]) -> dict[str, Any]:
     )
     if _sha256_bytes(canonical_plan.encode("utf-8")) != expected_digest:
         raise ValueError("context plan canonical bytes do not match plan digest")
-    semantic = materialize_semantic_context(plan, load_registry())
+    semantic = materialize_semantic_context(plan, registry)
     return {
         "schema_version": "context_artifact_v1",
         "artifact_digest": expected_digest,

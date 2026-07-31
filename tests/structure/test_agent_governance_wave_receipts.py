@@ -6,19 +6,32 @@ from pathlib import Path
 import subprocess
 import sys
 
+import pytest
+
 
 ROOT = Path(__file__).resolve().parents[2]
 HELPERS = ROOT / "helper_scripts" / "maintenance_scripts"
 sys.path.insert(0, str(HELPERS))
 
+import agent_governance_workflow_receipts as workflow_receipts  # noqa: E402
 from agent_governance_context import capture_repository_baseline  # noqa: E402
 from agent_governance_execution import (  # noqa: E402
     compile_context,
     materialize_context_artifact,
+    route_task,
 )
 from agent_governance_registry import load_registry  # noqa: E402
-from agent_governance_execution_policy import requested_execution_binding  # noqa: E402
+from agent_governance_execution_policy import (  # noqa: E402
+    requested_execution_binding,
+    surface_profile_binding,
+)
+from agent_governance_execution_dag import (  # noqa: E402
+    compile_context_execution_dag_binding,
+    delegated_execution_projection,
+    non_call_controller_node_ids,
+)
 from agent_governance_workflow_receipts import (  # noqa: E402
+    build_workflow_wave_record,
     canonical_digest,
     validate_workflow_call_manifest,
     validate_workflow_wave_record,
@@ -31,22 +44,38 @@ def _git(repo: Path, *args: str) -> None:
     )
 
 
-def _wave_args(tmp_path: Path, *, risk: str = "low") -> dict:
+def _wave_args(
+    tmp_path: Path,
+    *,
+    risk: str = "low",
+    node_count: int = 2,
+    independent: bool = False,
+) -> dict:
     repo = tmp_path / "repo"
     repo.mkdir()
     _git(repo, "init")
     _git(repo, "config", "user.email", "wave-test@example.invalid")
     _git(repo, "config", "user.name", "Wave Test")
     (repo / "local.md").write_text("controller-owned wave input\n", encoding="utf-8")
+    (repo / "docs" / "_indexes").mkdir(parents=True)
+    (repo / "docs" / "README.md").write_text(
+        "wave fixture documentation\n",
+        encoding="utf-8",
+    )
+    (repo / "docs" / "_indexes" / "wave.md").write_text(
+        "wave fixture index\n",
+        encoding="utf-8",
+    )
     _git(repo, "add", ".")
     _git(repo, "commit", "-m", "baseline")
 
     registry = deepcopy(load_registry())
     registry["context_packs"]["wave_test"] = ["local.md"]
     registry["roles"]["E2"]["context_packs"] = ["wave_test"]
+    registry["roles"]["R4"]["context_packs"] = ["wave_test"]
     facts = {
-        "task_shape": "review",
-        "surfaces": ["agent_workflow"],
+        "task_shape": "query" if risk == "low" else "review",
+        "surfaces": ["governance"],
         "risk": risk,
         "uncertainty": "low",
         "runtime_claim": False,
@@ -59,47 +88,86 @@ def _wave_args(tmp_path: Path, *, risk: str = "low") -> dict:
         "acceptance_criteria": ["every agent call is content-addressed"],
         "hard_stops": ["no runtime effect"],
         "baseline": capture_repository_baseline(repo),
-        "direct_interfaces": ["agent-wave"],
+        "direct_interfaces": [] if risk == "low" else ["agent-wave"],
         "previous_failure": "model output could spoof controller identity",
         "task_prompt": "Review immutable call binding for the admitted node.",
     }
-    plan = compile_context("E2", facts, registry, repo)
-    artifact = materialize_context_artifact(plan)
-    tasks = [
-        {
-            "node_id": node_id,
-            "payload_kind": "review_fragment_v1",
-            "agentType": "E2",
+    routed = route_task(facts, registry=registry)
+    execution_dag, projection_errors = delegated_execution_projection(
+        routed["required_role_nodes"],
+        [],
+        excluded_nodes=non_call_controller_node_ids(facts),
+        registry=registry,
+    )
+    assert projection_errors == []
+    assert len(execution_dag) <= node_count
+    for index in range(len(execution_dag), node_count):
+        execution_dag.append({
+            "node_id": f"node-{chr(ord('a') + index)}",
+            "role": "E2",
             "native_agent": "E2",
+            "requires": (
+                []
+                if independent or not execution_dag
+                else [execution_dag[-1]["node_id"]]
+            ),
             "node_class": "verification",
             "permission": "read_only",
+        })
+    task_specs = [
+        {
+            "node_id": task["node_id"],
+            "payload_kind": registry["roles"][task["role"]]["payload_kind"],
+            "agentType": task["role"],
+            "native_agent": task["native_agent"],
+            "requires": task["requires"],
+            "node_class": task["node_class"],
+            "permission": task["permission"],
             "prompt": "Review immutable call binding for the admitted node.",
-            "description": f"wave-receipt-{node_id}",
-            "contextArtifact": artifact,
+            "description": f"wave-receipt-{task['node_id']}",
         }
-        for node_id in ("node-a", "node-b")
+        for task in execution_dag
     ]
-    tasks[0]["requires"] = []
-    tasks[1]["requires"] = ["node-a"]
+    plan = compile_context(
+        "E2",
+        facts,
+        registry,
+        repo,
+        execution_dag=execution_dag,
+    )
+    artifacts_by_role = {
+        "E2": materialize_context_artifact(plan, registry),
+    }
+    for role in {task["role"] for task in execution_dag} - {"E2"}:
+        role_plan = compile_context(
+            role,
+            facts,
+            registry,
+            repo,
+            execution_dag=execution_dag,
+        )
+        assert (
+            role_plan["budget"]["authority_digest"]
+            == plan["budget"]["authority_digest"]
+        )
+        artifacts_by_role[role] = materialize_context_artifact(
+            role_plan,
+            registry,
+        )
+    tasks = [
+        {**task, "contextArtifact": artifacts_by_role[task["agentType"]]}
+        for task in task_specs
+    ]
     model_policy = load_registry()["saved_workflow_model_policy"]
-    tasks[1].update({
-        "model": model_policy["model"],
-        "effort": model_policy["role_efforts"]["E2"],
-        "isolation": "worktree",
-    })
+    if len(tasks) > 1:
+        tasks[1].update({
+            "model": model_policy["model"],
+            "effort": model_policy["role_efforts"][tasks[1]["agentType"]],
+            "isolation": "worktree",
+        })
     dag_core = {
         "schema_version": "agent_wave_execution_dag_v1",
-        "nodes": [
-            {
-                "node_id": task["node_id"],
-                "role": task["agentType"],
-                "native_agent": task["native_agent"],
-                "requires": task["requires"],
-                "node_class": task["node_class"],
-                "permission": task["permission"],
-            }
-            for task in tasks
-        ],
+        "nodes": execution_dag,
     }
     authority = plan["budget"]["authority"]
     return {
@@ -123,6 +191,7 @@ const AsyncFunction = Object.getPrototypeOf(async function () {}).constructor;
 const source = fs.readFileSync(__WORKFLOW__, 'utf8').replace('export const meta =', 'const meta =');
 const runner = new AsyncFunction('args', 'phase', 'log', 'parallel', 'agent', source);
 const baseArgs = __ARGS__;
+const retryNode = baseArgs.tasks[0].node_id;
 const parallel = async jobs => Promise.all(jobs.map(job => job()));
 const canonical = value => {
   if (value === null || typeof value === 'boolean' || typeof value === 'string') return JSON.stringify(value);
@@ -154,8 +223,8 @@ async function execute(mode) {
     peakCalls = Math.max(peakCalls, activeCalls);
     await Promise.resolve();
     let value = judgment(option);
-    if (mode === 'blocked' && option.label.includes('node-a')) value = null;
-    else if (mode === 'retry' && option.phase === 'Wave' && option.label === 'node-a') value = null;
+    if (mode === 'blocked' && option.label.includes(retryNode)) value = null;
+    else if (mode === 'retry' && option.phase === 'Wave' && option.label === retryNode) value = null;
     else if (mode === 'identity') value = { ...value, role: 'spoofed-role' };
     else if (mode === 'consumption') value = { ...value, consumption: { measurement_status: 'measured', input_tokens: 1 } };
     activeCalls -= 1;
@@ -230,6 +299,153 @@ async function execute(mode) {
     )
     assert completed.returncode == 0, completed.stderr
     return json.loads(completed.stdout)
+
+
+def _python_wave_kwargs(result: dict) -> dict:
+    wave = result["wave_record"]
+    return {
+        "manifest": result["call_manifest"],
+        "admitted_tasks": wave["admitted_tasks"],
+        "budget_authority": wave["budget_authority"],
+        "result_fragment_digests": wave["result_fragment_digests"],
+        "coverage_debt": wave["coverage_debt"],
+        "accounting_boundary": wave["accounting_boundary"],
+    }
+
+
+def test_python_wave_builder_supplies_registry_surface_to_structural_assembler(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    result = _run_harness(_wave_args(tmp_path))["retry"]["result"]
+    canonical_surface = surface_profile_binding(
+        "claude_saved_workflow_v1",
+        load_registry(),
+    )
+    assembled_profiles: list[dict | None] = []
+    assembled_event_counts: list[int] = []
+    real_assemble = (
+        workflow_receipts._assemble_structural_execution_event_ledger
+    )
+
+    def record_assembly(*args, **kwargs):
+        assembled_profiles.append(deepcopy(kwargs.get("surface_profile")))
+        assembled_event_counts.append(len(args[2]))
+        return real_assemble(*args, **kwargs)
+
+    monkeypatch.setattr(
+        workflow_receipts,
+        "_assemble_structural_execution_event_ledger",
+        record_assembly,
+    )
+
+    wave = build_workflow_wave_record(**_python_wave_kwargs(result))
+
+    assert assembled_profiles == [
+        canonical_surface["profile"]
+    ]
+    assert assembled_event_counts == [
+        1 + len(result["call_manifest"]["records"])
+    ]
+    assert (
+        wave["execution_event_ledger"]["surface_profile_digest"]
+        == canonical_surface["digest"]
+    )
+    assert validate_workflow_wave_record(wave, result["call_manifest"]) == []
+
+
+def test_wave_validator_exactly_binds_context_execution_dag(
+    tmp_path: Path,
+) -> None:
+    wave_args = _wave_args(tmp_path)
+    context_plan = json.loads(
+        wave_args["tasks"][0]["contextArtifact"]["canonical_plan"]
+    )
+    result = _run_harness(wave_args)["retry"]["result"]
+    wave = result["wave_record"]
+    manifest = result["call_manifest"]
+    binding = context_plan["execution_dag_binding"]
+
+    assert validate_workflow_wave_record(
+        wave,
+        manifest,
+        expected_execution_dag_binding=binding,
+    ) == []
+
+    smaller_binding = compile_context_execution_dag_binding(
+        binding["nodes"][:-1],
+    )
+    errors = validate_workflow_wave_record(
+        wave,
+        manifest,
+        expected_execution_dag_binding=smaller_binding,
+    )
+    assert any(
+        "admitted task core differs from Context execution DAG binding" in error
+        for error in errors
+    )
+    assert any(
+        "dag_digest differs from Context execution DAG binding" in error
+        for error in errors
+    )
+
+
+def test_python_wave_receipt_rebuild_is_deterministic_and_structural_only(
+    tmp_path: Path,
+) -> None:
+    result = _run_harness(_wave_args(tmp_path))["retry"]["result"]
+    kwargs = _python_wave_kwargs(result)
+
+    first = build_workflow_wave_record(**kwargs)
+    rebuilt = build_workflow_wave_record(**kwargs)
+
+    assert rebuilt == first
+    assert rebuilt["record_digest"] == first["record_digest"]
+
+
+def test_python_wave_builder_rejects_invalid_manifest_before_assembly(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    result = _run_harness(_wave_args(tmp_path))["retry"]["result"]
+    forged_manifest = deepcopy(result["call_manifest"])
+    generic_surface = surface_profile_binding("generic_host_v1", load_registry())
+    requested = forged_manifest["records"][0]["requested"]
+    requested["surface_profile_id"] = "generic_host_v1"
+    requested["surface_profile_digest"] = generic_surface["digest"]
+    record = forged_manifest["records"][0]
+    record["record_digest"] = canonical_digest(
+        {key: value for key, value in record.items() if key != "record_digest"}
+    )
+    forged_manifest["manifest_digest"] = canonical_digest(
+        {
+            key: value
+            for key, value in forged_manifest.items()
+            if key != "manifest_digest"
+        }
+    )
+    assemblies = 0
+
+    def reject_assembly(*args, **kwargs):
+        nonlocal assemblies
+        assemblies += 1
+        raise AssertionError("invalid manifest reached receipt assembly")
+
+    monkeypatch.setattr(
+        workflow_receipts,
+        "_assemble_structural_execution_event_ledger",
+        reject_assembly,
+    )
+
+    with pytest.raises(ValueError, match="invalid workflow call manifest"):
+        build_workflow_wave_record(
+            **{
+                **_python_wave_kwargs(result),
+                "manifest": forged_manifest,
+            }
+        )
+
+    assert assemblies == 0
 
 
 def test_wave_controller_owns_identity_and_records_every_retry(tmp_path: Path) -> None:
@@ -363,6 +579,63 @@ def test_wave_controller_owns_identity_and_records_every_retry(tmp_path: Path) -
     }
 
 
+def test_wave_uses_compiler_bound_standard_authority_for_five_exact_nodes(
+    tmp_path: Path,
+) -> None:
+    wave_args = _wave_args(tmp_path, node_count=5, independent=True)
+    plans = [
+        json.loads(task["contextArtifact"]["canonical_plan"])
+        for task in wave_args["tasks"]
+    ]
+    assert all(
+        plan["execution_dag_binding"]["node_count"] == 5
+        and plan["execution_dag_binding"]["edge_count"] == 0
+        and plan["budget"]["envelope"] == "standard"
+        for plan in plans
+    )
+
+    admitted = _run_harness(wave_args)["retry"]
+
+    assert admitted["ok"] is True
+    assert admitted["seenCalls"] == [
+        "node-a", "node-b", "node-c", "node-d", "node-e", "relay:node-a",
+    ]
+    authority = json.loads(
+        admitted["result"]["wave_record"]["budget_authority"][
+            "authority_canonical"
+        ]
+    )
+    assert authority["envelope"] == "standard"
+    assert authority["max_unique_nodes"] == 8
+
+    forged = deepcopy(wave_args)
+    four_node_dag = plans[0]["execution_dag_binding"]["nodes"][:4]
+    forged_binding = {
+        "schema_version": "context_execution_dag_binding_v1",
+        "dag_digest": __import__(
+            "agent_governance_execution_dag"
+        ).execution_dag_digest(four_node_dag),
+        "node_count": 4,
+        "edge_count": 0,
+        "nodes": four_node_dag,
+    }
+    for task in forged["tasks"]:
+        artifact = task["contextArtifact"]
+        plan = json.loads(artifact["canonical_plan"])
+        plan["execution_dag_binding"] = forged_binding
+        artifact["canonical_plan"] = json.dumps(
+            plan,
+            ensure_ascii=False,
+            sort_keys=True,
+            separators=(",", ":"),
+        )
+        artifact["artifact_digest"] = canonical_digest(plan)
+    rejected = _run_harness(forged)["retry"]
+    assert rejected["ok"] is False
+    assert rejected["seenCalls"] == []
+    assert "DAG-bound" in rejected["error"]
+
+
 def test_wave_rejects_identity_and_consumption_in_model_judgment(tmp_path: Path) -> None:
     outcome = _run_harness(_wave_args(tmp_path))
     assert outcome["identity"]["ok"] is False
@@ -396,32 +669,7 @@ def test_wave_rejects_identity_and_consumption_in_model_judgment(tmp_path: Path)
 def test_wave_scheduler_never_exceeds_context_authority_capacity(
     tmp_path: Path,
 ) -> None:
-    wave_args = _wave_args(tmp_path)
-    template = wave_args["tasks"][0]
-    wave_args["tasks"] = [
-        {
-            **deepcopy(template),
-            "node_id": f"node-{suffix}",
-            "description": f"bounded-parallel-{suffix}",
-            "requires": [],
-        }
-        for suffix in ("a", "b", "c", "d")
-    ]
-    dag = {
-        "schema_version": "agent_wave_execution_dag_v1",
-        "nodes": [
-            {
-                "node_id": task["node_id"],
-                "role": task["agentType"],
-                "native_agent": task["native_agent"],
-                "requires": [],
-                "node_class": task["node_class"],
-                "permission": task["permission"],
-            }
-            for task in wave_args["tasks"]
-        ],
-    }
-    wave_args["dag_digest"] = canonical_digest(dag)
+    wave_args = _wave_args(tmp_path, node_count=4, independent=True)
 
     outcome = _run_harness(wave_args)["retry"]
 
@@ -435,32 +683,7 @@ def test_wave_scheduler_never_exceeds_context_authority_capacity(
 def test_wave_scheduler_refills_capacity_before_slower_calls_finish(
     tmp_path: Path,
 ) -> None:
-    wave_args = _wave_args(tmp_path)
-    template = wave_args["tasks"][0]
-    wave_args["tasks"] = [
-        {
-            **deepcopy(template),
-            "node_id": f"node-{suffix}",
-            "description": f"rolling-pool-{suffix}",
-            "requires": [],
-        }
-        for suffix in ("a", "b", "c", "d")
-    ]
-    dag = {
-        "schema_version": "agent_wave_execution_dag_v1",
-        "nodes": [
-            {
-                "node_id": task["node_id"],
-                "role": task["agentType"],
-                "native_agent": task["native_agent"],
-                "requires": [],
-                "node_class": task["node_class"],
-                "permission": task["permission"],
-            }
-            for task in wave_args["tasks"]
-        ],
-    }
-    wave_args["dag_digest"] = canonical_digest(dag)
+    wave_args = _wave_args(tmp_path, node_count=4, independent=True)
     script = r"""
 const fs = require('node:fs');
 if (!globalThis.crypto) globalThis.crypto = require('node:crypto').webcrypto;
@@ -533,32 +756,7 @@ const agent = async (_prompt, option) => {
 def test_wave_scheduler_stops_dequeue_and_settles_in_flight_calls_on_error(
     tmp_path: Path,
 ) -> None:
-    wave_args = _wave_args(tmp_path)
-    template = wave_args["tasks"][0]
-    wave_args["tasks"] = [
-        {
-            **deepcopy(template),
-            "node_id": f"node-{suffix}",
-            "description": f"rolling-error-{suffix}",
-            "requires": [],
-        }
-        for suffix in ("a", "b", "c", "d")
-    ]
-    dag = {
-        "schema_version": "agent_wave_execution_dag_v1",
-        "nodes": [
-            {
-                "node_id": task["node_id"],
-                "role": task["agentType"],
-                "native_agent": task["native_agent"],
-                "requires": [],
-                "node_class": task["node_class"],
-                "permission": task["permission"],
-            }
-            for task in wave_args["tasks"]
-        ],
-    }
-    wave_args["dag_digest"] = canonical_digest(dag)
+    wave_args = _wave_args(tmp_path, node_count=4, independent=True)
     script = r"""
 const fs = require('node:fs');
 if (!globalThis.crypto) globalThis.crypto = require('node:crypto').webcrypto;
@@ -680,6 +878,26 @@ def test_wave_rejects_unbound_or_cyclic_dag_and_never_runs_blocked_dependents(
         ],
     }
     cyclic["dag_digest"] = canonical_digest(dag_core)
+    cyclic_binding = {
+        "schema_version": "context_execution_dag_binding_v1",
+        "dag_digest": cyclic["dag_digest"],
+        "node_count": len(dag_core["nodes"]),
+        "edge_count": sum(
+            len(node["requires"]) for node in dag_core["nodes"]
+        ),
+        "nodes": dag_core["nodes"],
+    }
+    for task in cyclic["tasks"]:
+        artifact = task["contextArtifact"]
+        plan = json.loads(artifact["canonical_plan"])
+        plan["execution_dag_binding"] = cyclic_binding
+        artifact["canonical_plan"] = json.dumps(
+            plan,
+            ensure_ascii=False,
+            sort_keys=True,
+            separators=(",", ":"),
+        )
+        artifact["artifact_digest"] = canonical_digest(plan)
     rejected = _run_harness(cyclic)["retry"]
     assert rejected["ok"] is False
     assert "contains a cycle" in rejected["error"]
@@ -782,4 +1000,47 @@ def test_wave_validator_binds_sampling_event_semantics_to_manifest(
     ) == [
         "workflow wave sampling event 1 kind differs from manifest call",
         "workflow wave sampling event 1 parent_event_id differs from manifest call",
+    ]
+
+
+def test_wave_validator_rejects_a_self_signed_forged_execution_policy(
+    tmp_path: Path,
+) -> None:
+    result = _run_harness(_wave_args(tmp_path))["retry"]["result"]
+    wave = deepcopy(result["wave_record"])
+    authority = json.loads(wave["budget_authority"]["authority_canonical"])
+    authority["max_wall_clock_ms"] += 1
+    authority_canonical = json.dumps(
+        authority,
+        ensure_ascii=False,
+        sort_keys=True,
+        separators=(",", ":"),
+        allow_nan=False,
+    )
+    authority_digest = canonical_digest(authority)
+    wave["budget_authority"]["authority_canonical"] = authority_canonical
+    wave["budget_authority"]["authority_digest"] = authority_digest
+    wave["budget_authority"]["admitted_caps"]["max_wall_clock_ms"] += 1
+    ledger = wave["execution_event_ledger"]
+    ledger["policy_digest"] = authority_digest
+    ledger["ledger_digest"] = canonical_digest(
+        {
+            key: value
+            for key, value in ledger.items()
+            if key != "ledger_digest"
+        }
+    )
+    wave["record_digest"] = canonical_digest(
+        {
+            key: value
+            for key, value in wave.items()
+            if key != "record_digest"
+        }
+    )
+
+    assert validate_workflow_wave_record(
+        wave,
+        result["call_manifest"],
+    ) == [
+        "workflow wave execution budget policy differs from the live Registry authority"
     ]

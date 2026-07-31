@@ -3,7 +3,9 @@
 from __future__ import annotations
 
 from copy import deepcopy
+from datetime import datetime, timedelta, timezone
 import importlib.util
+import json
 from pathlib import Path
 import sys
 
@@ -40,6 +42,74 @@ def _passing_packet():
         ),
     ) == []
     return support, governance, packet
+
+
+def test_refresh_rebinds_delayed_packet_to_new_context_generation_clock() -> None:
+    support, governance, packet = _passing_packet()
+    packet["adjudicated_at"] = "2000-01-01T00:00:00Z"
+
+    support._refresh_standard_workflow_lineage(governance, packet)
+
+    plan = json.loads(packet["dispatch"]["context_artifact"]["canonical_plan"])
+    source_observed = [
+        datetime.fromisoformat(source["observed_at"].replace("Z", "+00:00"))
+        for source in plan["sources"]
+        if source.get("observed_at")
+    ]
+    source_expiry = [
+        datetime.fromisoformat(source["expires_at"].replace("Z", "+00:00"))
+        for source in plan["sources"]
+        if source.get("expires_at")
+    ]
+    adjudicated = datetime.fromisoformat(
+        packet["adjudicated_at"].replace("Z", "+00:00")
+    )
+    call_manifest = next(
+        evidence["artifact"]
+        for evidence in packet["evidence"]
+        if evidence["kind"] == "workflow_call_manifest_v1"
+    )
+
+    assert max(source_observed) < adjudicated < min(source_expiry)
+    assert all(
+        call["started_at"] == packet["adjudicated_at"]
+        and call["ended_at"] == packet["adjudicated_at"]
+        for call in call_manifest["records"]
+    )
+    assert governance.validate_closure(
+        packet,
+        execution_attestation_verifier=support._test_execution_attestation_verifier(
+            packet
+        ),
+        trusted_evaluated_at=adjudicated.astimezone(timezone.utc),
+    ) == []
+
+
+def test_trusted_clock_before_refreshed_context_generation_still_fails_closed() -> None:
+    support, governance, packet = _passing_packet()
+    plan = json.loads(packet["dispatch"]["context_artifact"]["canonical_plan"])
+    rolled_back = min(
+        datetime.fromisoformat(source["observed_at"].replace("Z", "+00:00"))
+        for source in plan["sources"]
+        if source.get("observed_at")
+    ) - timedelta(microseconds=1)
+    stale = deepcopy(packet)
+    stale["adjudicated_at"] = rolled_back.isoformat().replace("+00:00", "Z")
+
+    errors = governance.validate_closure(
+        stale,
+        execution_attestation_verifier=support._test_execution_attestation_verifier(
+            stale
+        ),
+        trusted_evaluated_at=rolled_back.astimezone(timezone.utc),
+    )
+
+    assert any(
+        "dispatch context artifact invalid" in error
+        and "expired or not yet valid" in error
+        for error in errors
+    )
+    assert any("authority claim is observed after adjudication" in error for error in errors)
 
 
 def test_self_rehashed_authority_cannot_replace_pinned_source() -> None:

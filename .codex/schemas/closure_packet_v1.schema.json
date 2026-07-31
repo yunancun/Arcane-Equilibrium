@@ -627,7 +627,17 @@
               "id": {"type": "string", "minLength": 1},
               "reason": {"type": "string", "minLength": 1},
               "owner": {"type": "string", "minLength": 1},
-              "claim_key": {"type": "string", "minLength": 1}
+              "claim_key": {"type": "string", "minLength": 1},
+              "remediation_id": {"const": "MAE-005"},
+              "verification_state": {
+                "const": "REQUIRES_HOST_CAPABILITY_PHASE"
+              },
+              "bound_axes": {
+                "type": "array",
+                "minItems": 1,
+                "uniqueItems": true,
+                "items": {"type": "string", "minLength": 1}
+              }
             }
           }
         },
@@ -1474,6 +1484,7 @@
     },
     "executionEventLedger": {
       "type": "object",
+      "description": "Offline structural record only. Deterministic receipt reconstruction mints no controller, and its self-digest grants no resume authority; separate live admission requires an original internal, process-lifetime single-issue, non-serializable Registry-bound controller capability with a monotonic private head, policy/surface authority derived from one Registry-generation snapshot, and one locked canonical plain-JSON snapshot of each supplied ledger/event before validation.",
       "additionalProperties": false,
       "required": [
         "schema_version", "root_execution_id", "policy_digest",

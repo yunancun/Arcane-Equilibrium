@@ -259,13 +259,9 @@ def _fragment(
 
 
 def _refresh_profit_lineage(governance: object, packet: dict) -> None:
-    context = packet["dispatch"]["context_artifact"]
     task = packet["dispatch"]["task_facts"]
-    task_digest = context["task_contract_digest"]
-    context_digest = context["artifact_digest"]
     dirty_scope = task["dirty_scope"]
     focus = task.get("focus", "")
-    workflow_digest = _digest({"workflow": "profit-fixture", "context": context_digest})
     observed = packet["adjudicated_at"]
     controller = _controller_fragment(packet)
     fragment_by_node = {
@@ -273,12 +269,56 @@ def _refresh_profit_lineage(governance: object, packet: dict) -> None:
         for fragment in packet["role_fragments"]
         if fragment is not controller
     }
-    dag_nodes, projection_errors = governance.delegated_execution_projection(
+    dag_nodes, projection_errors = governance.task_execution_projection(
         packet["dispatch"]["required_role_nodes"],
         packet["dispatch"]["admitted_role_nodes"],
-        excluded_nodes=governance.non_call_controller_node_ids(task),
+        task_facts=task,
     )
     assert projection_errors == [], projection_errors
+    context_plan = governance.compile_context(
+        "PM",
+        task,
+        execution_dag=dag_nodes,
+    )
+    context = governance.materialize_context_artifact(context_plan)
+    packet["dispatch"]["context_artifact"] = context
+    source_by_name = {
+        source["source"]: source
+        for source in context_plan["sources"]
+    }
+    packet["authority_refs"] = [
+        governance.build_authority_claim(
+            authority_class=claim["class"],
+            subject=claim["subject"],
+            value=claim["value"],
+            source=claim["source"],
+            source_ref=claim["source_ref"],
+            source_digest=source_by_name[claim["source"]]["content_digest"],
+            observed_at=source_by_name[claim["source"]]["observed_at"],
+            scope=claim["scope"],
+            strength=claim["strength"],
+            expiry=claim["expiry"],
+        )
+        if (
+            isinstance(claim, dict)
+            and claim.get("source_ref") == f"context:{claim.get('source')}"
+            and claim.get("source") in source_by_name
+        )
+        else claim
+        for claim in packet["authority_refs"]
+    ]
+    task_digest = context["task_contract_digest"]
+    context_digest = context["artifact_digest"]
+    workflow_digest = _digest(
+        {"workflow": "profit-fixture", "context": context_digest}
+    )
+    for fragment in packet["role_fragments"]:
+        fragment["task_contract_digest"] = task_digest
+    controller["payload"].update({
+        "task_contract_digest": task_digest,
+        "context_artifact_digest": context_digest,
+        "budget_authority_digest": context["budget_authority_digest"],
+    })
     execution_waves, topology_errors = governance.topological_waves(dag_nodes)
     assert topology_errors == [], topology_errors
     dag_digest = governance.execution_dag_digest(dag_nodes)
@@ -502,15 +542,7 @@ def _clean_packet() -> tuple[object, dict, dict]:
     evidence_axes = contract["evidence_axes"]
     probe_axes = contract["probe_axes"]
     role_by_probe = {axis: ("QC" if axis == "EXT" else axis) for axis in probe_axes}
-    role_fragments = [
-        _fragment(
-            registry,
-            node_id="pa_design",
-            role="PA",
-            task_contract_digest=task_contract_digest,
-            payload={"node": "pa_design"},
-        )
-    ]
+    role_fragments = []
     diagnosis_fragments = []
     for axis in evidence_axes:
         diagnosis_fragments.append(
@@ -621,15 +653,17 @@ def _clean_packet() -> tuple[object, dict, dict]:
         }
         for fragment in diagnosis_fragments
     ]
-    diagnosis_node_ids = [binding["node_id"] for binding in bindings]
+    fixed_dag, fixed_dag_errors = governance.task_execution_projection(
+        route["required_role_nodes"],
+        [],
+        task_facts=route["task_facts"],
+    )
+    assert fixed_dag_errors == [], fixed_dag_errors
+    fixed_by_node = {node["node_id"]: node for node in fixed_dag}
     admissions = [
         {
             **binding,
-            "requires": (
-                sorted(node for node in diagnosis_node_ids if node != "map:PA")
-                if binding["node_id"] == "map:PA"
-                else ["pa_design"]
-            ),
+            "requires": fixed_by_node[binding["node_id"]]["requires"],
             "path_scope": [], "result_binding": "role_fragment",
         }
         for binding in bindings
@@ -856,7 +890,6 @@ def _defer_probe(packet: dict, axis: str) -> None:
             "unverified": [projection],
         }
     )
-    _refresh_profit_lineage(_load_governance(), packet)
 
 
 def test_profit_control_clean_packet_passes_public_closure_validation() -> None:
@@ -1189,7 +1222,11 @@ def test_profit_control_rejects_rehashed_non_contract_fragment_payloads() -> Non
 def test_profit_control_cannot_cherry_pick_a_deferred_probe_or_omit_its_debt() -> None:
     governance, _contract, packet = _clean_packet()
     _defer_probe(packet, "EXT")
-    assert governance.validate_closure(packet) == []
+    assert any(
+        "specialized profit_diagnosis dispatch omits fixed call admission probe:EXT"
+        in error
+        for error in governance.validate_closure(packet)
+    )
 
     control = _control(packet)
     control["coverage_debt"] = []
@@ -1565,6 +1602,23 @@ const parallel = async jobs => Promise.all(jobs.map(job => job()));
         return json.loads(completed.stdout)
 
     output = run(args, map_ready=True)
+    divergent_artifact = deepcopy(context_artifact)
+    divergent_plan = json.loads(divergent_artifact["canonical_plan"])
+    bound_nodes = divergent_plan["execution_dag_binding"]["nodes"]
+    divergent_plan["execution_dag_binding"] = __import__(
+        "agent_governance_execution_dag"
+    ).compile_context_execution_dag_binding(bound_nodes[:1])
+    divergent_artifact["canonical_plan"] = _canonical(divergent_plan)
+    divergent_artifact["artifact_digest"] = governance.context_plan_digest(
+        divergent_plan
+    )
+    divergent = run(
+        {**args, "context_artifact": divergent_artifact},
+        map_ready=True,
+    )
+    assert divergent["prompts"] == []
+    assert "execution DAG binding differs" in divergent["_error"]
+
     tier_override = run(
         {**args, "cheap_model": "claude-sonnet-5"}, map_ready=True
     )

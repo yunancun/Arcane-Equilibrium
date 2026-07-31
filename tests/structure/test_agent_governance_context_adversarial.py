@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import hashlib
+import inspect
 import json
 import subprocess
 import sys
@@ -561,6 +562,619 @@ def _git(repo: Path, *args: str) -> str:
     return subprocess.run(
         ["git", *args], cwd=repo, check=True, text=True, capture_output=True
     ).stdout.strip()
+
+
+def test_context_compiler_promotes_an_exact_five_node_dag_before_materialization(
+    tmp_path: Path,
+) -> None:
+    repo = tmp_path / "repo"
+    repo.mkdir()
+    _git(repo, "init")
+    _git(repo, "config", "user.email", "context-test@example.invalid")
+    _git(repo, "config", "user.name", "Context Test")
+    (repo / "local.md").write_text("bound execution DAG\n", encoding="utf-8")
+    _git(repo, "add", ".")
+    _git(repo, "commit", "-m", "baseline")
+    registry = deepcopy(__import__("agent_governance_registry").load_registry())
+    registry["context_packs"]["dag_test"] = ["local.md"]
+    registry["roles"]["E2"]["context_packs"] = ["dag_test"]
+    facts = {
+        "task_shape": "review",
+        "surfaces": ["agent_workflow"],
+        "risk": "low",
+        "uncertainty": "low",
+        "side_effect_class": "none",
+        "objective": "compile the exact five-node review wave",
+        "scope": ["local.md"],
+        "acceptance_criteria": ["the compiler promotes beyond narrow capacity"],
+        "hard_stops": ["no runtime effect"],
+        "baseline": capture_repository_baseline(repo),
+        "direct_interfaces": ["agent-wave"],
+        "previous_failure": "JS requested an authority Python could not compile",
+    }
+    dag_module = __import__("agent_governance_execution_dag")
+    routed = route_task(facts, registry=registry)
+    required_dag, projection_errors = dag_module.delegated_execution_projection(
+        routed["required_role_nodes"],
+        [],
+        excluded_nodes=dag_module.non_call_controller_node_ids(facts),
+        registry=registry,
+    )
+    assert projection_errors == []
+    assert len(required_dag) < 5
+    additional_dag = [
+        {
+            "node_id": f"additional-review-{index}",
+            "role": "E2",
+            "native_agent": "E2",
+            "requires": [],
+            "node_class": "verification",
+            "permission": "read_only",
+        }
+        for index in range(5 - len(required_dag))
+    ]
+    execution_dag = [*required_dag, *additional_dag]
+
+    plan = compile_context(
+        "E2", facts, registry, repo, execution_dag=execution_dag,
+    )
+
+    assert plan["execution_dag_binding"] == {
+        "schema_version": "context_execution_dag_binding_v1",
+        "dag_digest": dag_module.execution_dag_digest(execution_dag),
+        "node_count": 5,
+        "edge_count": sum(len(node["requires"]) for node in execution_dag),
+        "nodes": execution_dag,
+    }
+    assert plan["budget"]["envelope"] == "standard"
+    assert (
+        json.loads(
+            materialize_context_artifact(plan)["budget_authority_canonical"]
+        )["envelope"]
+        == "standard"
+    )
+    validated = validate_context_artifact(
+        materialize_context_artifact(plan, registry),
+        expected_task_facts=facts,
+        registry=registry,
+        root=repo,
+    )
+    assert validated["errors"] == []
+
+    forged = deepcopy(plan)
+    forged["execution_dag_binding"] = (
+        dag_module.compile_context_execution_dag_binding(
+            execution_dag[:4],
+            registry=registry,
+        )
+    )
+    forged["context_digest"] = context_plan_digest(forged)
+    with pytest.raises(
+        ValueError,
+        match="budget envelope is not justified by the exact execution DAG",
+    ):
+        materialize_context_artifact(forged)
+
+    valid_artifact = materialize_context_artifact(plan, registry)
+    malformed_bindings = [
+        {
+            "schema_version": "context_execution_dag_binding_v1",
+            "dag_digest": "sha256:" + "0" * 64,
+            "node_count": 1,
+            "edge_count": 0,
+            "nodes": [None],
+        },
+        [],
+    ]
+    for malformed_binding in malformed_bindings:
+        malformed_artifact = deepcopy(valid_artifact)
+        malformed_plan = json.loads(malformed_artifact["canonical_plan"])
+        malformed_plan["execution_dag_binding"] = malformed_binding
+        malformed_artifact["canonical_plan"] = json.dumps(
+            malformed_plan,
+            ensure_ascii=False,
+            sort_keys=True,
+            separators=(",", ":"),
+        )
+        malformed_artifact["artifact_digest"] = context_plan_digest(malformed_plan)
+        malformed_result = validate_context_artifact(
+            malformed_artifact,
+            expected_task_facts=facts,
+            registry=registry,
+            root=repo,
+        )
+        assert any(
+            "execution DAG" in error
+            for error in malformed_result["errors"]
+        )
+
+    with pytest.raises(ValueError, match="omits routed call-producing node"):
+        compile_context(
+            "E2",
+            facts,
+            registry,
+            repo,
+            execution_dag=[],
+        )
+
+    unknown_field_dag = deepcopy(execution_dag)
+    unknown_field_dag[0]["caller_asserted_capacity"] = 99
+    with pytest.raises(ValueError, match="fields must be exact"):
+        compile_context(
+            "E2",
+            facts,
+            registry,
+            repo,
+            execution_dag=unknown_field_dag,
+        )
+
+
+def test_execution_dag_compiler_exposes_no_public_empty_override() -> None:
+    compiler = __import__(
+        "agent_governance_execution_dag"
+    ).compile_context_execution_dag_binding
+
+    assert "allow_empty" not in inspect.signature(compiler).parameters
+    with pytest.raises(TypeError, match="unexpected keyword argument"):
+        compiler([], allow_empty=True)
+    with pytest.raises(ValueError, match="must contain at least one node"):
+        compiler([])
+
+
+def test_materializer_rejects_rehashed_empty_binding_for_routed_call() -> None:
+    facts = {
+        "task_shape": "review",
+        "surfaces": ["agent_workflow"],
+        "risk": "low",
+        "uncertainty": "low",
+        "side_effect_class": "none",
+        "objective": "materialize the routed economics review",
+        "scope": ["AGENTS.md"],
+        "acceptance_criteria": ["materializer retains compiler route authority"],
+        "hard_stops": ["no runtime effect"],
+        "baseline": capture_repository_baseline(),
+        "direct_interfaces": ["compile_context", "materialize_context_artifact"],
+        "previous_failure": "caller rehashed an empty binding after compilation",
+    }
+    plan = compile_context("E2", facts)
+    assert [
+        node["node_id"]
+        for node in plan["execution_dag_binding"]["nodes"]
+    ] == ["ai_economics_review"]
+    forged = deepcopy(plan)
+    forged["execution_dag_binding"] = __import__(
+        "agent_governance_execution_dag"
+    )._compiler_derived_zero_call_context_execution_dag_binding()
+    forged["context_digest"] = context_plan_digest(forged)
+
+    with pytest.raises(
+        ValueError,
+        match="execution DAG binding does not authorize the task contract",
+    ):
+        materialize_context_artifact(forged)
+
+
+def test_materializer_rejects_rehashed_routed_node_omission() -> None:
+    facts = {
+        "task_shape": "review",
+        "surfaces": ["agent_workflow", "hard_boundary"],
+        "risk": "medium",
+        "uncertainty": "low",
+        "side_effect_class": "none",
+        "objective": "retain both routed hard-boundary reviews",
+        "scope": ["AGENTS.md"],
+        "acceptance_criteria": ["materializer rejects a cheaper partial route"],
+        "hard_stops": ["no runtime effect"],
+        "baseline": capture_repository_baseline(),
+        "direct_interfaces": ["compile_context", "materialize_context_artifact"],
+        "previous_failure": "caller omitted the economics review after compilation",
+    }
+    plan = compile_context("E2", facts)
+    nodes = plan["execution_dag_binding"]["nodes"]
+    assert [node["node_id"] for node in nodes] == [
+        "constitutional_gate",
+        "ai_economics_review",
+    ]
+    forged = deepcopy(plan)
+    forged["execution_dag_binding"] = __import__(
+        "agent_governance_execution_dag"
+    ).compile_context_execution_dag_binding(nodes[:-1])
+    forged["context_digest"] = context_plan_digest(forged)
+
+    with pytest.raises(
+        ValueError,
+        match="omits routed call-producing node ai_economics_review",
+    ):
+        materialize_context_artifact(forged)
+
+
+def test_materializer_rejects_rehashed_routed_node_substitution() -> None:
+    facts = {
+        "task_shape": "review",
+        "surfaces": ["agent_workflow"],
+        "risk": "low",
+        "uncertainty": "low",
+        "side_effect_class": "none",
+        "objective": "retain the exact routed economics identity",
+        "scope": ["AGENTS.md"],
+        "acceptance_criteria": ["materializer rejects role substitution"],
+        "hard_stops": ["no runtime effect"],
+        "baseline": capture_repository_baseline(),
+        "direct_interfaces": ["compile_context", "materialize_context_artifact"],
+        "previous_failure": "caller substituted a cheaper role after compilation",
+    }
+    plan = compile_context("E2", facts)
+    substituted = deepcopy(plan["execution_dag_binding"]["nodes"])
+    substituted[0].update({"role": "E2", "native_agent": "E2"})
+    forged = deepcopy(plan)
+    forged["execution_dag_binding"] = __import__(
+        "agent_governance_execution_dag"
+    ).compile_context_execution_dag_binding(substituted)
+    forged["context_digest"] = context_plan_digest(forged)
+
+    with pytest.raises(
+        ValueError,
+        match="substitutes routed call-producing node ai_economics_review",
+    ):
+        materialize_context_artifact(forged)
+
+
+def test_materializer_rejects_rehashed_specialized_surface_dag_mismatch() -> None:
+    facts = {
+        "task_shape": "audit",
+        "surfaces": ["full_audit"],
+        "risk": "high",
+        "uncertainty": "low",
+        "side_effect_class": "none",
+        "objective": "run the fixed full audit graph",
+        "scope": [".claude/workflows/openclaw-full-audit.js"],
+        "acceptance_criteria": ["all fixed axes and seam remain authorized"],
+        "hard_stops": ["no runtime effect"],
+        "baseline": capture_repository_baseline(),
+        "direct_interfaces": ["full_audit_v3", "materialize_context_artifact"],
+        "previous_failure": "caller swapped in another specialized workflow DAG",
+    }
+    dag_module = __import__("agent_governance_execution_dag")
+    plan = compile_context("PM", facts)
+    assert plan["execution_dag_binding"]["nodes"] == (
+        dag_module.full_audit_execution_dag()
+    )
+    assert materialize_context_artifact(plan)["artifact_digest"] == (
+        plan["context_digest"]
+    )
+    forged = deepcopy(plan)
+    forged["execution_dag_binding"] = (
+        dag_module.compile_context_execution_dag_binding(
+            dag_module.profit_diagnosis_execution_dag()
+        )
+    )
+    forged["context_digest"] = context_plan_digest(forged)
+
+    with pytest.raises(
+        ValueError,
+        match="does not authorize specialized full_audit workflow",
+    ):
+        materialize_context_artifact(forged)
+
+
+def test_specialized_context_rejects_fixed_role_omission_and_substitution() -> None:
+    facts = {
+        "task_shape": "audit",
+        "surfaces": ["full_audit"],
+        "risk": "high",
+        "uncertainty": "low",
+        "side_effect_class": "none",
+        "objective": "retain every fixed full audit role",
+        "scope": [".claude/workflows/openclaw-full-audit.js"],
+        "acceptance_criteria": ["fixed route roles are exact"],
+        "hard_stops": ["no runtime effect"],
+        "baseline": capture_repository_baseline(),
+        "direct_interfaces": ["full_audit_v3", "materialize_context_artifact"],
+        "previous_failure": "a fixed route representative was erased",
+    }
+    dag_module = __import__("agent_governance_execution_dag")
+    plan = compile_context("PM", facts)
+    fixed = plan["execution_dag_binding"]["nodes"]
+
+    omitted = deepcopy(plan)
+    omitted_nodes = [
+        deepcopy(node) for node in fixed if node["node_id"] != "audit:CC"
+    ]
+    next(
+        node for node in omitted_nodes if node["node_id"] == "seam:critic"
+    )["requires"].remove("audit:CC")
+    omitted["execution_dag_binding"] = (
+        dag_module.compile_context_execution_dag_binding(
+            omitted_nodes
+        )
+    )
+    omitted["context_digest"] = context_plan_digest(omitted)
+    with pytest.raises(
+        ValueError,
+        match="omits fixed call node audit:CC",
+    ):
+        materialize_context_artifact(omitted)
+
+    substituted_nodes = deepcopy(fixed)
+    substituted = next(
+        node for node in substituted_nodes if node["node_id"] == "audit:CC"
+    )
+    substituted.update({"role": "E2", "native_agent": "E2"})
+    forged = deepcopy(plan)
+    forged["execution_dag_binding"] = (
+        dag_module.compile_context_execution_dag_binding(substituted_nodes)
+    )
+    forged["context_digest"] = context_plan_digest(forged)
+    with pytest.raises(
+        ValueError,
+        match="substitutes fixed call node audit:CC",
+    ):
+        materialize_context_artifact(forged)
+
+
+def test_specialized_context_accepts_an_exact_fixed_dag_superset() -> None:
+    facts = {
+        "task_shape": "audit",
+        "surfaces": ["full_audit"],
+        "risk": "high",
+        "uncertainty": "low",
+        "side_effect_class": "none",
+        "objective": "bind a separately admitted post-audit check",
+        "scope": [".claude/workflows/openclaw-full-audit.js"],
+        "acceptance_criteria": ["fixed graph remains an exact core"],
+        "hard_stops": ["no runtime effect"],
+        "baseline": capture_repository_baseline(),
+        "direct_interfaces": ["full_audit_v3", "materialize_context_artifact"],
+        "previous_failure": "valid specialized supersets were rejected",
+    }
+    dag_module = __import__("agent_governance_execution_dag")
+    fixed = dag_module.full_audit_execution_dag()
+    extra = {
+        "node_id": "post_audit_source_check",
+        "role": "E2",
+        "native_agent": "E2",
+        "requires": ["seam:critic"],
+        "node_class": "verification",
+        "permission": "read_only",
+    }
+    plan = compile_context(
+        "PM",
+        facts,
+        execution_dag=[*fixed, extra],
+    )
+    assert plan["execution_dag_binding"]["node_count"] == 15
+    assert materialize_context_artifact(plan)["artifact_digest"] == (
+        plan["context_digest"]
+    )
+
+
+@pytest.mark.parametrize("risk", ["low", "medium", "high"])
+def test_profit_specialized_projection_reuses_fixed_qc_probe_across_risk(
+    risk: str,
+) -> None:
+    facts = {
+        "task_shape": "analysis",
+        "surfaces": ["profit_diagnosis", "profitability"],
+        "risk": risk,
+        "uncertainty": "low",
+        "side_effect_class": "none",
+        "objective": "run the fixed profit diagnosis graph",
+        "scope": [".claude/workflows/profit-diagnosis.js"],
+        "acceptance_criteria": ["quant review is represented once"],
+        "hard_stops": ["no runtime effect"],
+        "baseline": capture_repository_baseline(),
+        "direct_interfaces": ["profit_diagnosis_v1"],
+        "previous_failure": "quant review became an eleventh duplicate call",
+    }
+    route = route_task(facts)
+    assert any(
+        node["node_id"] == "quant_review" and node["role"] == "QC"
+        for node in route["required_role_nodes"]
+    )
+    dag_module = __import__("agent_governance_execution_dag")
+    projection, errors = dag_module.task_execution_projection(
+        route["required_role_nodes"],
+        [],
+        task_facts=route["task_facts"],
+    )
+    assert errors == []
+    assert len(projection) == 10
+    assert [node["node_id"] for node in projection].count("probe:QC") == 1
+    assert "quant_review" not in {
+        node["node_id"] for node in projection
+    }
+    plan = compile_context("PM", route["task_facts"])
+    assert plan["execution_dag_binding"]["nodes"] == projection
+
+
+def test_profit_quant_route_rejects_omitted_fixed_qc_representative() -> None:
+    facts = {
+        "task_shape": "analysis",
+        "surfaces": ["profit_diagnosis", "profitability"],
+        "risk": "high",
+        "uncertainty": "low",
+        "side_effect_class": "none",
+        "objective": "retain the fixed quantitative profit probe",
+        "scope": [".claude/workflows/profit-diagnosis.js"],
+        "acceptance_criteria": ["quant route remains call-bound"],
+        "hard_stops": ["no runtime effect"],
+        "baseline": capture_repository_baseline(),
+        "direct_interfaces": ["profit_diagnosis_v1", "materialize_context_artifact"],
+        "previous_failure": "mapped QC semantics vanished from the fixed graph",
+    }
+    dag_module = __import__("agent_governance_execution_dag")
+    plan = compile_context("PM", facts)
+    nodes = [
+        deepcopy(node)
+        for node in plan["execution_dag_binding"]["nodes"]
+        if node["node_id"] != "probe:QC"
+    ]
+    next(node for node in nodes if node["node_id"] == "map:PA")[
+        "requires"
+    ].remove("probe:QC")
+    forged = deepcopy(plan)
+    forged["execution_dag_binding"] = (
+        dag_module.compile_context_execution_dag_binding(nodes)
+    )
+    forged["context_digest"] = context_plan_digest(forged)
+
+    with pytest.raises(
+        ValueError,
+        match="omits fixed call node probe:QC",
+    ):
+        materialize_context_artifact(forged)
+
+
+def test_explicit_execution_dag_must_include_exact_routed_call_nodes() -> None:
+    registry = __import__("agent_governance_registry").load_registry()
+    facts = {
+        "task_shape": "review",
+        "surfaces": ["agent_workflow"],
+        "risk": "low",
+        "uncertainty": "low",
+        "side_effect_class": "none",
+        "objective": "bind every routed call before admitting extra reviewers",
+        "scope": ["AGENTS.md"],
+        "acceptance_criteria": ["caller DAG cannot erase routed work"],
+        "hard_stops": ["no runtime effect"],
+        "baseline": capture_repository_baseline(),
+        "direct_interfaces": ["compile_context", "agent-wave"],
+        "previous_failure": "caller supplied only a cheaper substitute node",
+    }
+    routed = route_task(facts, registry=registry)
+    dag_module = __import__("agent_governance_execution_dag")
+    required, projection_errors = dag_module.delegated_execution_projection(
+        routed["required_role_nodes"],
+        [],
+        excluded_nodes=dag_module.non_call_controller_node_ids(facts),
+        registry=registry,
+    )
+    assert required and projection_errors == []
+    extra = {
+        "node_id": "additional_read_only_review",
+        "role": "E2",
+        "native_agent": "E2",
+        "requires": [required[-1]["node_id"]],
+        "node_class": "verification",
+        "permission": "read_only",
+    }
+
+    with pytest.raises(
+        ValueError,
+        match="omits routed call-producing node",
+    ):
+        compile_context(
+            "PM",
+            facts,
+            registry=registry,
+            execution_dag=[{**extra, "requires": []}],
+        )
+
+    substituted = deepcopy(required)
+    substituted[0].update({"role": "E2", "native_agent": "E2"})
+    with pytest.raises(
+        ValueError,
+        match="substitutes routed call-producing node",
+    ):
+        compile_context(
+            "PM",
+            facts,
+            registry=registry,
+            execution_dag=substituted,
+        )
+
+    plan = compile_context(
+        "PM",
+        facts,
+        registry=registry,
+        execution_dag=[*required, extra],
+    )
+    assert plan["execution_dag_binding"]["nodes"] == [*required, extra]
+
+
+def test_context_cli_rejects_explicit_null_execution_dag_as_typed_failure() -> None:
+    facts = {
+        "task_shape": "review",
+        "surfaces": ["agent_workflow"],
+        "risk": "low",
+        "uncertainty": "low",
+        "side_effect_class": "none",
+        "objective": "reject an explicitly null execution DAG",
+        "scope": ["AGENTS.md"],
+        "acceptance_criteria": ["CLI returns typed FAIL without traceback"],
+        "hard_stops": ["no agent call"],
+        "baseline": capture_repository_baseline(ROOT),
+        "direct_interfaces": ["agent_governance.py context"],
+        "previous_failure": "explicit null was treated as omitted",
+    }
+    completed = subprocess.run(
+        [
+            "python3",
+            str(HELPERS / "agent_governance.py"),
+            "context",
+            "--role",
+            "E2",
+            "--execution-dag",
+            "null",
+            json.dumps(facts),
+        ],
+        cwd=ROOT,
+        text=True,
+        capture_output=True,
+        check=False,
+    )
+
+    assert completed.returncode == 2
+    assert completed.stderr == ""
+    assert json.loads(completed.stdout) == {
+        "status": "FAIL",
+        "error": "--execution-dag must be a non-null JSON array",
+    }
+
+
+@pytest.mark.parametrize(
+    "execution_dag",
+    ("{}", "[]", '"not-an-array"', "["),
+)
+def test_context_cli_rejects_malformed_execution_dag_without_traceback(
+    execution_dag: str,
+) -> None:
+    facts = {
+        "task_shape": "review",
+        "surfaces": ["agent_workflow"],
+        "risk": "low",
+        "uncertainty": "low",
+        "side_effect_class": "none",
+        "objective": "reject malformed execution DAG input",
+        "scope": ["AGENTS.md"],
+        "acceptance_criteria": ["CLI emits typed failure"],
+        "hard_stops": ["no agent call"],
+        "baseline": capture_repository_baseline(ROOT),
+        "direct_interfaces": ["agent_governance.py context"],
+        "previous_failure": "malformed DAG input emitted a traceback",
+    }
+    completed = subprocess.run(
+        [
+            "python3",
+            str(HELPERS / "agent_governance.py"),
+            "context",
+            "--role",
+            "E2",
+            "--execution-dag",
+            execution_dag,
+            json.dumps(facts),
+        ],
+        cwd=ROOT,
+        text=True,
+        capture_output=True,
+        check=False,
+    )
+
+    assert completed.returncode == 2
+    assert completed.stderr == ""
+    payload = json.loads(completed.stdout)
+    assert payload["status"] == "FAIL"
+    assert isinstance(payload["error"], str) and payload["error"]
 
 
 def test_external_policy_context_requires_current_host_verified_capture(
@@ -1334,7 +1948,7 @@ def test_agent_wave_enforces_bundle_freshness_estimate_floor_and_budget_authorit
     registry["context_packs"]["context_test"] = ["local.md"]
     registry["roles"]["E2"]["context_packs"] = ["context_test"]
     facts = {
-        "task_shape": "review",
+        "task_shape": "query",
         "surfaces": ["comments"],
         "risk": "low",
         "uncertainty": "low",
@@ -1344,11 +1958,21 @@ def test_agent_wave_enforces_bundle_freshness_estimate_floor_and_budget_authorit
         "acceptance_criteria": ["budget and freshness fail closed"],
         "hard_stops": ["no runtime effect"],
         "baseline": capture_repository_baseline(repo),
-        "direct_interfaces": ["local context"],
+        "direct_interfaces": [],
         "previous_failure": "caller under-reported token estimate",
         "task_prompt": "Review only the bound immutable bytes.",
     }
-    plan = compile_context("E2", facts, registry, repo)
+    execution_dag = [{
+        "node_id": "independent_review",
+        "role": "E2",
+        "native_agent": "E2",
+        "requires": [],
+        "node_class": "verification",
+        "permission": "read_only",
+    }]
+    plan = compile_context(
+        "E2", facts, registry, repo, execution_dag=execution_dag,
+    )
     artifact = materialize_context_artifact(plan)
     authority = plan["budget"]["authority"]
     assert plan["mandatory_content"]["task_prompt"] == facts["task_prompt"]
@@ -1357,7 +1981,7 @@ def test_agent_wave_enforces_bundle_freshness_estimate_floor_and_budget_authorit
     )
     longer_plan = compile_context(
         "E2", {**facts, "task_prompt": facts["task_prompt"] + "x" * 4000},
-        registry, repo,
+        registry, repo, execution_dag=execution_dag,
     )
     assert longer_plan["budget"]["compiler_estimated_input_tokens"] > (
         plan["budget"]["compiler_estimated_input_tokens"] + 900
@@ -1408,7 +2032,11 @@ def test_agent_wave_enforces_bundle_freshness_estimate_floor_and_budget_authorit
     for prompt_bytes in range(46_000, 30_000, -500):
         candidate_prompt = "x" * prompt_bytes
         candidate_plan = compile_context(
-            "E2", {**facts, "task_prompt": candidate_prompt}, registry, repo,
+            "E2",
+            {**facts, "task_prompt": candidate_prompt},
+            registry,
+            repo,
+            execution_dag=execution_dag,
         )
         if candidate_plan["budget"]["call_allowed"]:
             near_cap_artifact = materialize_context_artifact(candidate_plan)

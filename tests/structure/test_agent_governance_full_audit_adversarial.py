@@ -32,11 +32,16 @@ def _load_governance():
     return module
 
 
-def _host_execution_verifier(packet: dict):
+def _load_support():
     spec = importlib.util.spec_from_file_location("full_audit_attestation_support", SUPPORT_PATH)
     assert spec is not None and spec.loader is not None
     support = importlib.util.module_from_spec(spec)
     spec.loader.exec_module(support)
+    return support
+
+
+def _host_execution_verifier(packet: dict):
+    support = _load_support()
     return support._test_execution_attestation_verifier(packet)
 
 
@@ -89,20 +94,18 @@ def _role_fragment(
     }
 
 
-def _refresh_full_lineage(governance: object, packet: dict, contract: dict) -> None:
-    context = packet["dispatch"]["context_artifact"]
+def _refresh_full_lineage(
+    governance: object,
+    packet: dict,
+    contract: dict,
+    *,
+    recompile_context: bool = True,
+) -> None:
     task = packet["dispatch"]["task_facts"]
-    task_digest = context["task_contract_digest"]
-    context_digest = context["artifact_digest"]
     dirty_scope = task["dirty_scope"]
     focus = task.get("focus", "")
-    workflow_digest = _digest({"workflow": "full-audit-fixture", "context": context_digest})
-    observed = packet["adjudicated_at"]
-    calls = []
-    results = {}
     controller = _controller(packet, contract)
     registry = governance.load_registry()
-    call_tasks: dict[str, dict] = {}
     nested_admissions: list[dict] = []
 
     def admit_nested(node: str, role: str, requires: list[str], reason: str) -> None:
@@ -157,12 +160,60 @@ def _refresh_full_lineage(governance: object, packet: dict, contract: dict) -> N
     packet["dispatch"]["admitted_role_nodes"] = [
         *axis_admissions, *nested_admissions,
     ]
-    dag_nodes, projection_errors = governance.delegated_execution_projection(
+    dag_nodes, projection_errors = governance.task_execution_projection(
         packet["dispatch"]["required_role_nodes"],
         packet["dispatch"]["admitted_role_nodes"],
-        excluded_nodes=governance.non_call_controller_node_ids(task),
+        task_facts=task,
     )
     assert projection_errors == [], projection_errors
+    if recompile_context:
+        context_plan = governance.compile_context(
+            "PM",
+            task,
+            execution_dag=dag_nodes,
+        )
+        context = governance.materialize_context_artifact(context_plan)
+        packet["dispatch"]["context_artifact"] = context
+    else:
+        context = packet["dispatch"]["context_artifact"]
+        context_plan = json.loads(context["canonical_plan"])
+    observed = _load_support()._bind_fixture_evaluation_clock(packet, context_plan)
+    source_by_name = {
+        source["source"]: source
+        for source in context_plan["sources"]
+        if isinstance(source, dict) and isinstance(source.get("source"), str)
+    }
+    packet["authority_refs"] = [
+        governance.build_authority_claim(
+            authority_class=claim["class"],
+            subject=claim["subject"],
+            value=source_by_name[claim["source"]]["content"],
+            source=claim["source"],
+            source_ref=f"context:{claim['source']}",
+            source_digest=source_by_name[claim["source"]]["content_digest"],
+            observed_at=source_by_name[claim["source"]]["observed_at"],
+            scope=claim["scope"],
+            strength="direct",
+            expiry=claim.get("expiry"),
+        )
+        if (
+            isinstance(claim, dict)
+            and claim.get("class") in {
+                "normative_policy", "implementation_contract", "active_work_state",
+            }
+            and claim.get("source_ref") == f"context:{claim.get('source')}"
+            and claim.get("source") in source_by_name
+        )
+        else claim
+        for claim in packet["authority_refs"]
+    ]
+    task_digest = context["task_contract_digest"]
+    context_digest = context["artifact_digest"]
+    workflow_digest = _digest(
+        {"workflow": "full-audit-fixture", "context": context_digest}
+    )
+    calls = []
+    results = {}
     call_tasks = {item["node_id"]: item for item in dag_nodes}
     dag_digest = governance.execution_dag_digest(dag_nodes)
     packet["dispatch"]["dag_digest"] = dag_digest
@@ -521,21 +572,20 @@ def _clean_packet() -> tuple[object, dict, dict]:
         "pass_eligible": True,
         "unverified_projection": [],
     }
-    for requirement in route["required_role_nodes"]:
-        payload = (
-            deepcopy(controller_payload)
-            if requirement["node_id"] == contract["controller_node_id"]
-            else {"node": requirement["node_id"]}
+    controller_requirement = next(
+        requirement
+        for requirement in route["required_role_nodes"]
+        if requirement["node_id"] == contract["controller_node_id"]
+    )
+    packet["role_fragments"].append(
+        _role_fragment(
+            registry,
+            controller_requirement["node_id"],
+            controller_requirement["role"],
+            deepcopy(controller_payload),
+            context_plan["task_contract_digest"],
         )
-        packet["role_fragments"].append(
-            _role_fragment(
-                registry,
-                requirement["node_id"],
-                requirement["role"],
-                payload,
-                context_plan["task_contract_digest"],
-            )
-        )
+    )
     for axis in axes:
         packet["role_fragments"].append(
             _role_fragment(
@@ -607,6 +657,354 @@ def _raw_high_finding() -> dict:
         "defect_type": ["other"],
         "symbol_anchor": "target",
     }
+
+
+def _finding_claim_key(finding: dict) -> str:
+    return "::".join(
+        str(finding[field]).strip().lower()
+        for field in ("file", "symbol_anchor", "assertion", "evidence")
+    )
+
+
+def _staged_claim_debt(claim_id: str, members: list[tuple[str, dict]]) -> dict:
+    claim_key = _finding_claim_key(members[0][1])
+    bound_axes = sorted({axis for axis, _finding in members})
+    return {
+        "kind": "staged_claim_verification",
+        "id": claim_id,
+        "owner": bound_axes[0],
+        "claim_key": claim_key,
+        "remediation_id": "MAE-005",
+        "verification_state": "REQUIRES_HOST_CAPABILITY_PHASE",
+        "bound_axes": bound_axes,
+        "reason": (
+            "dynamic claim verification requires a separately admitted "
+            "host-capability verification phase"
+        ),
+    }
+
+
+def _packet_with_staged_claim(
+    members: list[tuple[str, dict]],
+) -> tuple[object, dict, dict, dict]:
+    governance, contract, packet = _clean_packet()
+    for axis, raw in members:
+        fragment = _axis(packet, axis)
+        fragment["payload"]["audit"].update(
+            {"verdict": "FINDINGS", "findings": [raw]}
+        )
+    debt = _staged_claim_debt("claim-0001", members)
+    projection = _debt_projection(debt)
+    for axis, _raw in members:
+        fragment = _axis(packet, axis)
+        fragment["payload"].update(
+            {
+                "confirmed_decision_claim_ids": [],
+                "disputed_claim_ids": [],
+                "verification_outcomes": [],
+                "coverage_debt_count": 1,
+            }
+        )
+        fragment.update(
+            {
+                "work_status": "DONE_WITH_CONCERNS",
+                "gate_verdict": "UNVERIFIED",
+                "classification": "INFERENCE",
+                "concerns": [projection],
+            }
+        )
+    controller = _controller(packet, contract)
+    controller["payload"].update(
+        {
+            "coverage_debt": [debt],
+            "disputed_count": 0,
+            "decision_changing_findings": 0,
+            "pass_eligible": False,
+            "unverified_projection": [projection],
+        }
+    )
+    controller.update(
+        {
+            "work_status": "DONE_WITH_CONCERNS",
+            "gate_verdict": "UNVERIFIED",
+            "classification": "INFERENCE",
+            "concerns": [projection],
+        }
+    )
+    packet.update(
+        {
+            "work_status": "DONE_WITH_CONCERNS",
+            "gate_verdict": "UNVERIFIED",
+            "unverified": [projection],
+        }
+    )
+    _rehash_axis(packet, contract, "FA")
+    return governance, contract, packet, debt
+
+
+def test_full_audit_refresh_rebinds_delayed_context_generation_clock() -> None:
+    governance, contract, packet = _clean_packet()
+    packet["adjudicated_at"] = "2000-01-01T00:00:00Z"
+
+    _refresh_full_lineage(governance, packet, contract)
+
+    plan = json.loads(packet["dispatch"]["context_artifact"]["canonical_plan"])
+    source_observed = [
+        datetime.fromisoformat(source["observed_at"].replace("Z", "+00:00"))
+        for source in plan["sources"]
+        if source.get("observed_at")
+    ]
+    source_expiry = [
+        datetime.fromisoformat(source["expires_at"].replace("Z", "+00:00"))
+        for source in plan["sources"]
+        if source.get("expires_at")
+    ]
+    adjudicated = datetime.fromisoformat(
+        packet["adjudicated_at"].replace("Z", "+00:00")
+    )
+    call_manifest = next(
+        evidence["artifact"]
+        for evidence in packet["evidence"]
+        if evidence["kind"] == "workflow_call_manifest_v1"
+    )
+
+    assert max(source_observed) < adjudicated < min(source_expiry)
+    assert all(
+        call["started_at"] == packet["adjudicated_at"]
+        and call["ended_at"] == packet["adjudicated_at"]
+        for call in call_manifest["records"]
+    )
+    assert governance.validate_closure(
+        packet,
+        execution_attestation_verifier=_host_execution_verifier(packet),
+        trusted_evaluated_at=adjudicated,
+    ) == []
+
+
+def test_full_audit_accepts_exact_mae005_staged_high_claim_without_outcome() -> None:
+    governance, _contract, packet, _debt = _packet_with_staged_claim(
+        [("FA", _raw_high_finding())]
+    )
+
+    assert governance.validate_closure(
+        packet, execution_attestation_verifier=_host_execution_verifier(packet)
+    ) == []
+
+
+def test_full_audit_stages_critical_and_goal_medium_without_false_verification() -> None:
+    for severity, defect_type in (
+        ("CRITICAL", ["other"]),
+        ("MEDIUM", ["over-gate"]),
+    ):
+        raw = {**_raw_high_finding(), "severity": severity, "defect_type": defect_type}
+        governance, _contract, packet, debt = _packet_with_staged_claim(
+            [("FA", raw)]
+        )
+        fragment = _axis(packet, "FA")
+        controller = next(
+            item for item in packet["role_fragments"]
+            if item["node_id"] == "ai_economics_review"
+        )
+
+        assert fragment["payload"]["verification_outcomes"] == []
+        assert fragment["payload"]["confirmed_decision_claim_ids"] == []
+        assert fragment["payload"]["disputed_claim_ids"] == []
+        assert fragment["gate_verdict"] == "UNVERIFIED"
+        assert controller["payload"]["coverage_debt"] == [debt]
+        assert controller["payload"]["disputed_count"] == 0
+        assert controller["payload"]["decision_changing_findings"] == 0
+        assert controller["gate_verdict"] == "UNVERIFIED"
+        assert governance.validate_closure(
+            packet,
+            execution_attestation_verifier=_host_execution_verifier(packet),
+        ) == []
+
+
+def test_full_audit_one_staged_claim_exact_covers_two_identical_high_axes() -> None:
+    raw = _raw_high_finding()
+    governance, _contract, packet, debt = _packet_with_staged_claim(
+        [("CC", deepcopy(raw)), ("FA", deepcopy(raw))]
+    )
+
+    assert debt["bound_axes"] == ["CC", "FA"]
+    assert [
+        item for item in _controller(packet, _contract)["payload"]["coverage_debt"]
+        if item["kind"] == "staged_claim_verification"
+    ] == [debt]
+    for axis in debt["bound_axes"]:
+        fragment = _axis(packet, axis)
+        assert fragment["payload"]["coverage_debt_count"] == 1
+        assert fragment["payload"]["verification_outcomes"] == []
+        assert fragment["payload"]["confirmed_decision_claim_ids"] == []
+        assert fragment["payload"]["disputed_claim_ids"] == []
+        assert fragment["gate_verdict"] == "UNVERIFIED"
+    assert governance.validate_closure(
+        packet, execution_attestation_verifier=_host_execution_verifier(packet)
+    ) == []
+
+
+def test_full_audit_rejects_missing_staged_claim_axis_binding() -> None:
+    raw = _raw_high_finding()
+    governance, contract, packet, debt = _packet_with_staged_claim(
+        [("CC", deepcopy(raw)), ("FA", deepcopy(raw))]
+    )
+    debt["bound_axes"] = ["CC"]
+    projection = _debt_projection(debt)
+    controller = _controller(packet, contract)
+    controller["payload"]["unverified_projection"] = [projection]
+    controller["concerns"] = [projection]
+    packet["unverified"] = [projection]
+    cc_fragment = _axis(packet, "CC")
+    cc_fragment["concerns"] = [projection]
+    fa_fragment = _axis(packet, "FA")
+    fa_fragment["payload"]["coverage_debt_count"] = 0
+    fa_fragment.update(
+        {
+            "work_status": "DONE",
+            "gate_verdict": "PASS",
+            "classification": "FACT",
+            "concerns": [],
+        }
+    )
+    _rehash_axis(packet, contract, "FA")
+
+    errors = governance.validate_closure(
+        packet, execution_attestation_verifier=_host_execution_verifier(packet)
+    )
+    assert any(
+        "bound_axes do not exact-cover raw findings" in error
+        and "missing=['FA']; extra=[]" in error
+        for error in errors
+    )
+
+
+def test_full_audit_rejects_forged_staged_claim_axis_binding() -> None:
+    raw = _raw_high_finding()
+    governance, contract, packet, debt = _packet_with_staged_claim(
+        [("CC", deepcopy(raw)), ("FA", deepcopy(raw))]
+    )
+    debt["bound_axes"] = ["CC", "E2", "FA"]
+    projection = _debt_projection(debt)
+    controller = _controller(packet, contract)
+    controller["payload"]["unverified_projection"] = [projection]
+    controller["concerns"] = [projection]
+    packet["unverified"] = [projection]
+    for axis in debt["bound_axes"]:
+        fragment = _axis(packet, axis)
+        fragment["payload"]["coverage_debt_count"] = 1
+        fragment.update(
+            {
+                "work_status": "DONE_WITH_CONCERNS",
+                "gate_verdict": "UNVERIFIED",
+                "classification": "INFERENCE",
+                "concerns": [projection],
+            }
+        )
+    _rehash_axis(packet, contract, "E2")
+
+    errors = governance.validate_closure(
+        packet, execution_attestation_verifier=_host_execution_verifier(packet)
+    )
+    assert any(
+        "bound_axes do not exact-cover raw findings" in error
+        and "missing=[]; extra=['E2']" in error
+        for error in errors
+    )
+
+
+def test_closure_rejects_sixteen_node_wave_bound_to_fourteen_node_context() -> None:
+    governance, contract, packet = _clean_packet()
+    task = packet["dispatch"]["task_facts"]
+    registry = governance.load_registry()
+    task_digest = packet["dispatch"]["context_artifact"]["task_contract_digest"]
+    extras = [
+        {
+            "node_id": "legacy-extra:PA",
+            "role": "PA",
+            "requires": ["audit:FA"],
+        },
+        {
+            "node_id": "legacy-extra:CC",
+            "role": "CC",
+            "requires": ["legacy-extra:PA"],
+        },
+    ]
+    for extra in extras:
+        packet["dispatch"]["admitted_role_nodes"].append({
+            "node_id": extra["node_id"],
+            "role": extra["role"],
+            **governance.native_agent_binding(extra["role"], "verification"),
+            "node_class": "verification",
+            "requires": extra["requires"],
+            "path_scope": [],
+            "reason": "legacy unbound extra call regression fixture",
+            "result_binding": "role_fragment",
+        })
+        packet["role_fragments"].append(
+            _role_fragment(
+                registry,
+                extra["node_id"],
+                extra["role"],
+                {"node": extra["node_id"]},
+                task_digest,
+            )
+        )
+    fixed_plan = governance.compile_context("PM", task)
+    assert fixed_plan["execution_dag_binding"]["node_count"] == 14
+    packet["dispatch"]["context_artifact"] = (
+        governance.materialize_context_artifact(fixed_plan)
+    )
+
+    _refresh_full_lineage(
+        governance,
+        packet,
+        contract,
+        recompile_context=False,
+    )
+
+    wave = next(
+        item["artifact"]
+        for item in packet["evidence"]
+        if item["kind"] == "workflow_wave_record_v1"
+    )
+    assert len(wave["admitted_tasks"]) == 16
+    errors = governance.validate_closure(
+        packet,
+        execution_attestation_verifier=_host_execution_verifier(packet),
+    )
+    assert any(
+        "admitted task core differs from Context execution DAG binding" in error
+        for error in errors
+    )
+    assert any(
+        "dag_digest differs from Context execution DAG binding" in error
+        for error in errors
+    )
+
+
+def test_full_audit_closure_rejects_missing_fixed_route_representative() -> None:
+    governance, _contract, packet = _clean_packet()
+    packet["dispatch"]["admitted_role_nodes"] = [
+        node
+        for node in packet["dispatch"]["admitted_role_nodes"]
+        if node["node_id"] != "audit:CC"
+    ]
+    packet["role_fragments"] = [
+        fragment
+        for fragment in packet["role_fragments"]
+        if fragment["node_id"] != "audit:CC"
+    ]
+
+    errors = governance.validate_closure(
+        packet,
+        execution_attestation_verifier=_host_execution_verifier(packet),
+    )
+
+    assert any(
+        "specialized full_audit dispatch omits fixed call admission audit:CC"
+        in error
+        for error in errors
+    )
 
 
 def test_full_audit_recomputes_aggregate_outcome_from_typed_votes() -> None:
@@ -805,6 +1203,11 @@ def _debt_projection(debt: dict) -> str:
         "owner": debt.get("owner"),
         "reason": debt.get("reason"),
     }
+    for field in (
+        "claim_key", "remediation_id", "verification_state", "bound_axes",
+    ):
+        if debt.get(field) is not None:
+            canonical[field] = debt[field]
     return "full_audit_debt:" + json.dumps(
         canonical, ensure_ascii=False, sort_keys=True, separators=(",", ":")
     )
@@ -983,22 +1386,6 @@ def _adaptive_packet(
             },
         }
     )
-    variant["dispatch"]["admitted_role_nodes"] = [
-        {
-            **binding, "requires": [], "path_scope": [],
-            "result_binding": "role_fragment",
-        }
-        for binding in bindings
-    ]
-    variant["role_fragments"] = [
-        fragment
-        for fragment in variant["role_fragments"]
-        if not fragment["node_id"].startswith("audit:")
-        or fragment["role"] in selected_set
-    ]
-    variant["skipped_roles"] = [
-        item for item in route["skipped"] if item["role"] not in selected_set
-    ]
     authority = governance.build_authority_claim(
         authority_class="claim_evidence",
         subject="adaptive_full_audit_recall",
@@ -1132,19 +1519,19 @@ def test_full_audit_rejects_a_locally_reissued_budget_authority() -> None:
 def test_full_audit_does_not_relax_normal_required_fragment_lineage() -> None:
     governance, _, packet = _clean_packet()
     fragment = next(
-        item for item in packet["role_fragments"] if item["node_id"] == "pa_design"
+        item for item in packet["role_fragments"] if item["node_id"] == "audit:CC"
     )
-    fragment["summary"] = "substituted after the PA call"
-    fragment["payload"] = {"unrelated": True}
+    fragment["payload"]["audit"]["confidence"] = "low"
 
     errors = governance.validate_closure(packet)
 
     assert any(
-        "projection differs from producer call result" in error for error in errors
+        "full audit audit:CC producer call/result binding is invalid" in error
+        for error in errors
     )
 
 
-def test_saved_workflow_binds_e2_and_never_regresses_unintegrated_fix_candidates() -> None:
+def test_saved_workflow_has_no_unbound_dynamic_verify_or_fix_call_path() -> None:
     source = (ROOT / ".claude/workflows/openclaw-full-audit.js").read_text(
         encoding="utf-8"
     )
@@ -1153,22 +1540,26 @@ def test_saved_workflow_binds_e2_and_never_regresses_unintegrated_fix_candidates
     assert "E2: 'review_fragment_v1'" in source
     assert "classification: gateVerdict === 'PASS' ? 'FACT'" in source
 
-    for field in (
-        "worktree_id",
-        "base_head",
-        "candidate_head",
-        "patch_digest",
-        "diff_digest",
-        "review_evidence_digest",
+    for forbidden in (
+        "function verificationJob(",
+        "label: `verify-",
+        "label: `fix:",
+        "label: `review:",
+        "CANDIDATE_READY",
+        "CANDIDATE_REVIEWED_NOT_INTEGRATED",
+        "reviewMatchesCandidate",
+        "integration_status: 'NOT_INTEGRATED'",
     ):
-        assert field in source
-    assert "CANDIDATE_READY" in source
-    assert "CANDIDATE_REVIEWED_NOT_INTEGRATED" in source
-    assert "reviewMatchesCandidate" in source
-    assert "integration_status: 'NOT_INTEGRATED'" in source
-    assert ".fix.status === 'FIXED'" not in source
-    # claim-0011(2026-07-24 run0):fix 產物依設計永不在 run 內 integration,
-    # in-run regression 呼叫路徑不得復活;result 保留 regression 欄位恆 null
+        assert forbidden not in source
+    assert "const admittedClaims = []" in source
+    assert (
+        "dynamic claim verification requires a separately admitted "
+        "host-capability verification phase"
+    ) in source
+    assert (
+        "dynamic fix/review requires a separately admitted "
+        "host-capability phase"
+    ) in source
     assert "integration_status === 'APPLIED_VERIFIED'" not in source
     assert "if (integratedFixes.length)" not in source
     assert "label: 'audit-regression'" not in source
@@ -1249,9 +1640,19 @@ def test_full_audit_rejects_malformed_or_self_signed_context_before_agent_calls(
     forged["budget_authority_canonical"] = _canonical(forged_authority)
     forged["budget_authority_digest"] = _digest(forged_authority)
 
+    divergent = deepcopy(artifact)
+    divergent_plan = json.loads(divergent["canonical_plan"])
+    bound_nodes = divergent_plan["execution_dag_binding"]["nodes"]
+    divergent_plan["execution_dag_binding"] = __import__(
+        "agent_governance_execution_dag"
+    ).compile_context_execution_dag_binding(bound_nodes[:1])
+    divergent["canonical_plan"] = _canonical(divergent_plan)
+    divergent["artifact_digest"] = _digest(divergent_plan)
+
     cases = [
         ({"schema_version": "context_artifact_v1"}, json.loads(artifact["budget_authority_canonical"])),
         (forged, forged_authority),
+        (divergent, json.loads(artifact["budget_authority_canonical"])),
     ]
     script = r"""
 const fs = require('node:fs');
@@ -1390,6 +1791,75 @@ const pipeline = async () => [];
     )
 
 
+def test_full_audit_persistent_null_aborts_before_unbound_seam_call() -> None:
+    import subprocess
+
+    _governance, context_artifact, baseline, route_roles = (
+        _full_audit_workflow_context()
+    )
+    run_args = {
+        "context_artifact": context_artifact,
+        "baseline": baseline,
+        "route_required_roles": route_roles,
+    }
+    script = r"""
+const fs = require('node:fs');
+if (!globalThis.crypto) globalThis.crypto = require('node:crypto').webcrypto;
+const AsyncFunction = Object.getPrototypeOf(async function () {}).constructor;
+const source = fs.readFileSync(__WORKFLOW__, 'utf8').replace('export const meta =', 'const meta =');
+const runner = new AsyncFunction('args', 'phase', 'log', 'parallel', 'pipeline', 'agent', source);
+const calls = [];
+const agent = async (_prompt, options) => {
+  calls.push(options.label);
+  if (['audit:CC', 'audit-relay:CC'].includes(options.label)) return null;
+  if (options.label === 'seam-critic') return { reprobes: [] };
+  if (options.label.startsWith('audit')) return {
+    schema_version: 'audit_fragment_v2', verdict: 'PASS', confidence: 'high',
+    findings: [], assumptions: [],
+    consumption: { measurement_status: 'unavailable', unavailable_reason: 'harness' },
+  };
+  throw new Error(`unexpected call ${options.label}`);
+};
+const parallel = async jobs => Promise.all(jobs.map(job => job()));
+(async () => {
+  try {
+    await runner(__ARGS__, () => {}, () => {}, parallel, async () => [], agent);
+    console.log(JSON.stringify({ calls, error: null }));
+  } catch (error) {
+    console.log(JSON.stringify({ calls, error: String(error.message || error) }));
+  }
+})().catch(error => { console.error(error); process.exit(1); });
+""".replace(
+        "__WORKFLOW__",
+        json.dumps(str(ROOT / ".claude/workflows/openclaw-full-audit.js")),
+    ).replace("__ARGS__", NODE_STDIN_ARGS)
+    completed = subprocess.run(
+        ["node", "-e", script],
+        cwd=ROOT,
+        input=json.dumps(run_args),
+        text=True,
+        capture_output=True,
+        check=False,
+    )
+    assert completed.returncode == 0, completed.stderr
+    outcome = json.loads(completed.stdout)
+    assert outcome["error"].startswith("FULL_AUDIT_TERMINAL_NULL_V1:")
+    terminal = json.loads(outcome["error"].split(":", 1)[1])
+    assert terminal == {
+        "disposition": "ABORTED_BEFORE_SEAM",
+        "node_ids": ["audit:CC"],
+        "reason": (
+            "fixed pre-call DAG cannot emit a complete axes+seam wave "
+            "after final null"
+        ),
+        "schema_version": "full_audit_terminal_null_v1",
+    }
+    assert outcome["calls"].count("audit:CC") == 1
+    assert outcome["calls"].count("audit-relay:CC") == 1
+    assert "seam-critic" not in outcome["calls"]
+    assert len(outcome["calls"]) == 14
+
+
 def test_full_audit_rejects_legacy_continuation_before_any_agent_call() -> None:
     import subprocess
 
@@ -1457,7 +1927,8 @@ const agent = async (_prompt, options) => {
 };
 const parallel = async jobs => Promise.all(jobs.map(job => job()));
 (async () => {
-  const result = await runner(__ARGS__, () => {}, () => {}, parallel, async () => [], agent);
+  const pipeline = async () => { throw new Error('saved Full Audit must not invoke dynamic fix/review pipeline'); };
+  const result = await runner(__ARGS__, () => {}, () => {}, parallel, pipeline, agent);
   console.log(JSON.stringify({calls, result}));
 })()
   .catch(error => { console.error(error); process.exit(1); });
@@ -1587,6 +2058,8 @@ const agent = async () => { calls += 1; return null; };
 
 
 def test_canonical_full_audit_skill_matches_executable_registry_contract() -> None:
+    import subprocess
+
     governance = _load_governance()
     registry = governance.load_registry()
     budget = registry["budget_envelopes"]["full_audit"]
@@ -1609,6 +2082,70 @@ def test_canonical_full_audit_skill_matches_executable_registry_contract() -> No
         "max_concurrent_calls",
     ):
         assert f"`{field}` = `{budget[field]}`" in skill
+    invocation = re.search(r"```javascript\n(.*?)\n```", skill, re.DOTALL)
+    assert invocation
+    harness = r"""
+const fs = require('node:fs');
+const input = JSON.parse(fs.readFileSync(0, 'utf8'));
+const dispatchFullAudit = new Function(
+  `${input.source}\nreturn dispatchFullAudit;`
+)();
+const contextArtifact = { schema_version: 'context_artifact_v1', marker: 'exact' };
+const result = dispatchFullAudit({
+  Workflow: value => value,
+  contextArtifact,
+  admissionNowMs: 1760000000000,
+  baseline: { source_head: 'a'.repeat(40) },
+  scope: ['AGENTS.md'],
+  dirtyScope: ['AGENTS.md'],
+  surfaces: ['agent_workflow', 'full_audit'],
+  focus: 'bounded',
+  routeRequiredRoles: ['CC', 'AI-E'],
+});
+let invalidClockError = null;
+try {
+  dispatchFullAudit({
+    Workflow: value => value, contextArtifact, admissionNowMs: 0,
+    baseline: {}, scope: [], dirtyScope: [], surfaces: [],
+    routeRequiredRoles: [],
+  });
+} catch (error) {
+  invalidClockError = String(error.message || error);
+}
+console.log(JSON.stringify({ result, invalidClockError }));
+"""
+    completed = subprocess.run(
+        ["node", "-e", harness],
+        cwd=ROOT,
+        input=json.dumps({"source": invocation.group(1)}),
+        text=True,
+        capture_output=True,
+        check=False,
+    )
+    assert completed.returncode == 0, completed.stderr
+    evaluated = json.loads(completed.stdout)
+    assert evaluated["result"] == {
+        "name": "openclaw-full-audit",
+        "args": {
+            "context_artifact": {
+                "schema_version": "context_artifact_v1",
+                "marker": "exact",
+            },
+            "admission_now_ms": 1760000000000,
+            "baseline": {"source_head": "a" * 40},
+            "scope": ["AGENTS.md"],
+            "dirty_scope": ["AGENTS.md"],
+            "surfaces": ["agent_workflow", "full_audit"],
+            "focus": "bounded",
+            "scheduler": "full",
+            "route_required_roles": ["CC", "AI-E"],
+            "run_sequence": 0,
+            "fix": False,
+        },
+    }
+    assert evaluated["invalidClockError"] == (
+        "dispatch-side admissionNowMs must be positive epoch-ms"
+    )
 
 
 def test_full_audit_no_findings_is_lazy_fourteen_call_backstop() -> None:
@@ -1656,10 +2193,92 @@ const parallel = async jobs => Promise.all(jobs.map(job => job()));
     assert outcome["result"]["split_recommendation"] is None
 
 
-def test_full_audit_44_node_ceiling_covers_thirteen_two_view_claims() -> None:
+def test_full_audit_scheduler_refills_a_slot_before_a_slow_axis_finishes() -> None:
     import subprocess
 
     _governance, artifact, baseline, route_roles = _full_audit_workflow_context()
+    args = {
+        "context_artifact": artifact,
+        "baseline": baseline,
+        "route_required_roles": route_roles,
+        "scheduler": "full",
+    }
+    script = r"""
+const fs = require('node:fs');
+if (!globalThis.crypto) globalThis.crypto = require('node:crypto').webcrypto;
+const AsyncFunction = Object.getPrototypeOf(async function () {}).constructor;
+const source = fs.readFileSync(__WORKFLOW__, 'utf8').replace('export const meta =', 'const meta =');
+const runner = new AsyncFunction('args', 'phase', 'log', 'parallel', 'pipeline', 'agent', source);
+const events = [];
+let active = 0;
+let peak = 0;
+let releaseReplacement;
+let slowTimedOut = false;
+const replacementStarted = new Promise(resolve => { releaseReplacement = resolve; });
+const agent = async (_prompt, options) => {
+  events.push(`start:${options.label}`);
+  active += 1;
+  peak = Math.max(peak, active);
+  if (options.label === 'audit:E3') releaseReplacement();
+  if (options.label === 'audit:CC') {
+    const release = await Promise.race([
+      replacementStarted.then(() => 'replacement'),
+      new Promise(resolve => setTimeout(() => resolve('timeout'), 100)),
+    ]);
+    slowTimedOut = release === 'timeout';
+  } else {
+    await Promise.resolve();
+  }
+  active -= 1;
+  events.push(`end:${options.label}`);
+  if (options.label === 'seam-critic') return {reprobes: []};
+  if (options.label.startsWith('audit')) return {
+    schema_version: 'audit_fragment_v2', verdict: 'PASS', confidence: 'high',
+    findings: [], assumptions: [],
+    consumption: {measurement_status: 'unavailable', unavailable_reason: 'harness'},
+  };
+  throw new Error(`unexpected call ${options.label}`);
+};
+const parallel = async jobs => Promise.all(jobs.map(job => job()));
+(async () => {
+  const result = await runner(__ARGS__, () => {}, () => {}, parallel, async () => [], agent);
+  console.log(JSON.stringify({result, events, peak, slowTimedOut}));
+})()
+  .catch(error => { console.error(error); process.exit(1); });
+""".replace(
+        "__WORKFLOW__",
+        json.dumps(str(ROOT / ".claude/workflows/openclaw-full-audit.js")),
+    ).replace("__ARGS__", NODE_STDIN_ARGS)
+    completed = subprocess.run(
+        ["node", "-e", script],
+        cwd=ROOT,
+        input=json.dumps(args),
+        text=True,
+        capture_output=True,
+        check=False,
+    )
+    assert completed.returncode == 0, completed.stderr
+    outcome = json.loads(completed.stdout)
+
+    assert outcome["slowTimedOut"] is False
+    assert outcome["events"].index("start:audit:E3") < outcome["events"].index(
+        "end:audit:CC"
+    )
+    assert outcome["peak"] == json.loads(
+        artifact["budget_authority_canonical"]
+    )["max_concurrent_calls"] == 3
+    assert outcome["result"]["pass_eligible"] is True
+
+
+def test_full_audit_real_workflow_closes_with_exact_fixed_admissions() -> None:
+    import subprocess
+
+    governance, contract, packet = _clean_packet()
+    artifact = packet["dispatch"]["context_artifact"]
+    baseline = packet["baseline"]
+    route_roles = list(dict.fromkeys(
+        item["role"] for item in packet["dispatch"]["required_role_nodes"]
+    ))
     args = {
         "context_artifact": artifact, "baseline": baseline,
         "route_required_roles": route_roles, "scheduler": "full",
@@ -1673,7 +2292,9 @@ const runner = new AsyncFunction('args', 'phase', 'log', 'parallel', 'pipeline',
 const consumption = {measurement_status: 'unavailable', unavailable_reason: 'harness'};
 let active = 0;
 let peak = 0;
+const labels = [];
 const agent = async (_prompt, options) => {
+  labels.push(options.label);
   active += 1;
   peak = Math.max(peak, active);
   try {
@@ -1681,16 +2302,16 @@ const agent = async (_prompt, options) => {
     if (options.label === 'seam-critic') return {reprobes: []};
     if (options.label.startsWith('audit')) {
       const axis = options.label.split(':').at(-1);
+      const claimAxis = ['CC', 'FA'].includes(axis) ? 'shared' : axis;
+      const severity = axis === 'E2' ? 'CRITICAL' : axis === 'E3' ? 'MEDIUM' : 'HIGH';
+      const defectType = axis === 'E3' ? ['over-gate'] : ['other'];
       return {schema_version: 'audit_fragment_v2', verdict: 'FINDINGS', confidence: 'high', findings: [{
-        title: `${axis} claim`, assertion: `${axis} assertion`, severity: 'HIGH',
-        classification: 'FACT', confidence: 'high', evidence: `${axis} evidence`,
-        impact: 'material', file: `src/${axis}.py`, defect_type: ['other'],
-        symbol_anchor: `${axis}.fn`, fix_hint: 'fix',
+        title: `${claimAxis} claim`, assertion: `${claimAxis} assertion`, severity,
+        classification: 'FACT', confidence: 'high', evidence: `${claimAxis} evidence`,
+        impact: 'material', file: `src/${claimAxis}.py`, defect_type: defectType,
+        symbol_anchor: `${claimAxis}.fn`, fix_hint: 'fix',
       }], assumptions: [], consumption};
     }
-    if (options.label.startsWith('verify-')) return {
-      refuted: true, confidence: 'high', reason: 'independently refuted', evidence: 'bound evidence',
-    };
     throw new Error(`unexpected call ${options.label}`);
   } finally {
     active -= 1;
@@ -1698,8 +2319,9 @@ const agent = async (_prompt, options) => {
 };
 const parallel = async jobs => Promise.all(jobs.map(job => job()));
 (async () => {
-  const result = await runner(__ARGS__, () => {}, () => {}, parallel, async () => [], agent);
-  console.log(JSON.stringify({result, peak}));
+  const pipeline = async () => { throw new Error('saved Full Audit must not invoke dynamic fix/review pipeline'); };
+  const result = await runner(__ARGS__, () => {}, () => {}, parallel, pipeline, agent);
+  console.log(JSON.stringify({result, peak, labels}));
 })()
   .catch(error => { console.error(error); process.exit(1); });
 """.replace(
@@ -1716,15 +2338,200 @@ const parallel = async jobs => Promise.all(jobs.map(job => job()));
         artifact["budget_authority_canonical"]
     )["max_concurrent_calls"]
     assert outcome["peak"] <= admitted_concurrency
-    assert result["totals"]["distinct_decision_claims"] == 13
-    assert result["totals"]["deferred_claims"] == 0
-    assert result["totals"]["refuted"] == 13
-    assert result["coverage_debt"] == []
-    assert result["split_recommendation"] is None
-    assert result["pass_eligible"] is True
+    assert len(outcome["labels"]) == 14
+    assert set(outcome["labels"]) == {
+        *{f"audit:{axis}" for axis in _load_governance().load_registry()[
+            "workflow_contracts"
+        ]["full_audit_v3"]["axes"]},
+        "seam-critic",
+    }
+    binding = json.loads(artifact["canonical_plan"])["execution_dag_binding"]
+    wave = result["workflow_wave_record"]
+    actual_nodes = [
+        {
+            field: task[field]
+            for field in (
+                "node_id", "role", "native_agent", "requires",
+                "node_class", "permission",
+            )
+        }
+        for task in wave["admitted_tasks"]
+    ]
+    assert actual_nodes == binding["nodes"]
+    assert wave["dag_digest"] == binding["dag_digest"]
+    assert wave["first_attempt_call_count"] == binding["node_count"]
+    closure_admissions = result["closure_admissions"]
+    closure_core = [
+        {
+            field: admission[field]
+            for field in (
+                "node_id", "role", "native_agent", "requires",
+                "node_class", "permission",
+            )
+        }
+        for admission in closure_admissions
+    ]
+    assert closure_core == binding["nodes"]
+    assert closure_admissions[-1] == {
+        "node_id": "seam:critic",
+        "role": "CC",
+        **governance.native_agent_binding("CC", "verification"),
+        "node_class": "verification",
+        "requires": sorted(
+            f"audit:{axis}"
+            for axis in governance.load_registry()["workflow_contracts"][
+                "full_audit_v3"
+            ]["axes"]
+        ),
+        "path_scope": [],
+        "reason": "full audit cross-axis seam critic",
+        "result_binding": "nested_payload",
+    }
+    assert result["totals"]["distinct_decision_claims"] == 12
+    assert result["totals"]["exact_duplicate_claims_saved"] == 1
+    assert result["totals"]["deferred_claims"] == 12
+    assert result["totals"]["refuted"] == 0
+    assert result["totals"]["disputed"] == 0
+    assert {
+        fragment["payload"]["audit"]["findings"][0]["severity"]
+        for fragment in result["role_fragments"][1:]
+    } == {"CRITICAL", "HIGH", "MEDIUM"}
+    assert all(
+        item["kind"] == "staged_claim_verification"
+        and item["remediation_id"] == "MAE-005"
+        and item["verification_state"] == "REQUIRES_HOST_CAPABILITY_PHASE"
+        and item["bound_axes"] == sorted(set(item["bound_axes"]))
+        and item["owner"] == item["bound_axes"][0]
+        and "host-capability verification phase" in item["reason"]
+        for item in result["coverage_debt"]
+    )
+    shared_debt = next(
+        item for item in result["coverage_debt"]
+        if item["claim_key"].startswith("src/shared.py::shared.fn::")
+    )
+    assert shared_debt["bound_axes"] == ["CC", "FA"]
+    assert sum(
+        item["claim_key"] == shared_debt["claim_key"]
+        for item in result["coverage_debt"]
+    ) == 1
+    controller = result["role_fragments"][0]
+    assert controller["payload"]["disputed_count"] == 0
+    assert controller["payload"]["decision_changing_findings"] == 0
+    assert controller["gate_verdict"] == "UNVERIFIED"
+    for fragment in result["role_fragments"][1:]:
+        assert fragment["payload"]["confirmed_decision_claim_ids"] == []
+        assert fragment["payload"]["disputed_claim_ids"] == []
+        assert fragment["payload"]["verification_outcomes"] == []
+        assert fragment["payload"]["coverage_debt_count"] == 1
+        assert fragment["gate_verdict"] == "UNVERIFIED"
+    assert result["pass_eligible"] is False
+    assert result["fixes"] == []
+    assert result["regression"] is None
+    assert result["envelope"]["max_verification_calls"] == 0
+    assert result["envelope"]["reserved_verification_calls"] == 0
+    assert result["envelope"]["reserved_fix_pairs"] == 0
+    assert result["envelope"]["verification_calls"] == 0
     assert result["envelope"]["max_unique_nodes"] == 44
     assert result["envelope"]["max_call_attempts"] == 46
     assert result["envelope"]["max_workflow_planned_input_tokens"] == 4_416_000
+
+    packet["role_fragments"] = result["role_fragments"]
+    packet["dispatch"]["admitted_role_nodes"] = deepcopy(closure_admissions)
+    workflow_evidence = []
+    for fragment in result["role_fragments"]:
+        for index, evidence_id in enumerate(fragment["evidence_refs"]):
+            if any(item["id"] == evidence_id for item in workflow_evidence):
+                continue
+            artifact = (
+                {
+                    "axis": fragment["role"],
+                    "finding": fragment["payload"]["audit"]["findings"][index],
+                }
+                if fragment["node_id"].startswith("audit:")
+                and fragment["payload"]["audit"]["findings"]
+                else {"baseline": baseline}
+            )
+            workflow_evidence.append(
+                {
+                    "id": evidence_id,
+                    "scope": "data",
+                    "kind": "full_audit_immutable_evidence_v1",
+                    "digest": _digest(artifact),
+                }
+            )
+    packet["evidence"] = [
+        item for item in packet["evidence"]
+        if item["kind"] not in {
+            "workflow_call_manifest_v1", "workflow_wave_record_v1",
+        }
+    ] + workflow_evidence + [
+        {
+            "id": "ev-full-call-manifest",
+            "scope": "data",
+            "kind": "workflow_call_manifest_v1",
+            "digest": result["call_manifest"]["manifest_digest"],
+            "artifact": result["call_manifest"],
+        },
+        {
+            "id": "ev-full-wave",
+            "scope": "data",
+            "kind": "workflow_wave_record_v1",
+            "digest": result["workflow_wave_record"]["record_digest"],
+            "artifact": result["workflow_wave_record"],
+        },
+    ]
+    packet.update(
+        {
+            "work_status": "DONE_WITH_CONCERNS",
+            "gate_verdict": "UNVERIFIED",
+            "unverified": controller["payload"]["unverified_projection"],
+            "acceptance": [
+                {
+                    "criterion": packet["acceptance"][0]["criterion"],
+                    "status": "UNVERIFIED",
+                    "evidence_refs": controller["evidence_refs"],
+                }
+            ],
+            "consumption": {
+                **result["consumption"],
+                "wave_record_refs": ["ev-full-wave"],
+            },
+        }
+    )
+    assert governance.validate_closure(
+        packet, execution_attestation_verifier=_host_execution_verifier(packet)
+    ) == []
+
+    missing_seam = deepcopy(packet)
+    missing_seam["dispatch"]["admitted_role_nodes"] = [
+        admission
+        for admission in missing_seam["dispatch"]["admitted_role_nodes"]
+        if admission["node_id"] != "seam:critic"
+    ]
+    missing_errors = governance.validate_closure(
+        missing_seam,
+        execution_attestation_verifier=_host_execution_verifier(missing_seam),
+    )
+    assert any(
+        "omits fixed call admission seam:critic" in error
+        for error in missing_errors
+    )
+
+    tampered_seam = deepcopy(packet)
+    seam_admission = next(
+        admission
+        for admission in tampered_seam["dispatch"]["admitted_role_nodes"]
+        if admission["node_id"] == "seam:critic"
+    )
+    seam_admission["requires"] = seam_admission["requires"][1:]
+    tamper_errors = governance.validate_closure(
+        tampered_seam,
+        execution_attestation_verifier=_host_execution_verifier(tampered_seam),
+    )
+    assert any(
+        "substitutes fixed call node seam:critic" in error
+        for error in tamper_errors
+    )
 
 
 def test_full_audit_overflow_emits_exact_cold_restart_recommendation() -> None:
@@ -1775,7 +2582,8 @@ const parallel = async jobs => Promise.all(jobs.map(job => job()));
     recommendation = result["split_recommendation"]
     deferred = [
         item for item in result["coverage_debt"]
-        if item["kind"] == "claim" and "verification admission" in item["reason"]
+        if item["kind"] == "staged_claim_verification"
+        and "host-capability verification phase" in item["reason"]
     ]
     assert result["totals"]["deferred_claims"] == len(deferred) > 0
     assert result["pass_eligible"] is False

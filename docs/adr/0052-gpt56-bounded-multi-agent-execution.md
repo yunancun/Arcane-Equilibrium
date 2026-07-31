@@ -82,6 +82,20 @@ model turns, calls, follow-ups, waits, no-delta wakeups, concurrency, unique
 nodes, and spawn depth reject the next admitted action. Budget exhaustion is
 terminal debt, never PASS.
 
+The serialized ledger and its self-digest are structural evidence, not resume
+authority. Post-hoc wave receipt construction uses a deterministic
+structural-only assembler and may rebuild the same manifest bytes without
+minting or consuming a controller. Live pre-action admission is a separate
+internal seam: its non-serializable controller starts only from a pristine,
+live-Registry-bound root, claims that root once for the process lifetime, and
+locks head comparison through advancement. The controller privately freezes the
+exact Registry policy and surface as canonical bytes; all cap and coverage
+decisions reconstruct ordinary mappings from that state, never from a caller's
+mutable object. One Registry-generation snapshot derives both authorities, and
+each admission canonical-detaches the entire ledger and event once under the
+controller lock before validation. No public facade accepts a caller-named root;
+generalized minting waits for managed-host task/root authority.
+
 Default requested history is ephemeral `none`. Bounded history requires an
 exact source thread, boundary turn, and task-admitted exception digest. Missing
 history, `all`, implicit parent inheritance, and recursion beyond one child
@@ -163,6 +177,21 @@ Envelope selection occurs after DAG construction. `narrow` permits two
 in-flight model calls; other current envelopes permit three. Generated
 workflows use a bounded scheduler rather than launching the full runnable set.
 
+Context additionally binds the complete pre-call execution DAG: exact node
+identity, native role, predecessors, class, permission, node/edge counts, and
+digest. Profit Diagnosis has one fixed 10-node graph (3 evidence, 6 probes,
+1 PA map). The saved Full Audit has one fixed 14-node graph (13 axes plus the
+seam critic). Either workflow exact-compares that binding before its first
+model call; it cannot append a post-call node or promote its own envelope.
+Explicit caller `execution_dag=[]`, non-array/malformed values, and unknown
+node fields fail closed. A zero-node binding exists only for a
+compiler-derived zero-delegation query, not through a caller switch. A
+non-empty explicit DAG may add nodes only as a faithful superset of the
+canonical route: omission or substitution of any routed call-producing node
+core fails. Closure then exact-binds the ordered wave admitted-task core and
+wave `dag_digest` to the Context binding; an internally consistent rehash of a
+larger post-Context wave remains invalid until Context is freshly compiled.
+
 Full Audit defaults to the complete 13-axis backstop. Reduced adaptive selection
 uses `CC`, `FA`, route-required axes, and one deterministic rotating
 negative-space axis only after a future independent platform/external Adapter
@@ -173,16 +202,29 @@ and verifier exist, saved-workflow and Closure paths reject adaptive,
 adaptive-shadow, and any reduced axis set as
 `EXTERNAL_LIMIT_RECALL_AUTHORITY` before the first model call.
 
+Full Audit findings are staged, not verified or fixed inside that saved
+workflow. Every data-dependent verifier/fix/review action requires a new
+Context whose exact DAG is knowable and a supported host-native selector
+attestation under existing `MAE-005 /
+EXTERNAL_LIMIT_NATIVE_SELECTOR_ATTESTATION`. Until then the workflow makes zero
+such calls and records coverage debt, so this phase does not create a ninth
+external limit. The Registry's 44-node/46-attempt Full Audit policy remains an
+authority ceiling for a future separately admitted phase, not a reservation or
+usage claim for the current fixed 14-node workflow.
+
 Read-only/source operational lanes use one `ops_observation`. Preflight and
 postcheck remain separate only around an admitted effect Adapter.
 
-`agent_governance_liveness` defines a pure adjudication contract in which
-supported collaboration/thread activity would be primary and private JSONL
+`agent_governance_liveness` defines a pure adjudication contract. Every
+caller-supplied collaboration/thread activity mapping, including a fresh
+`RUNNING`, `WAITING`, or terminal value, is unverified and therefore adjudicates
+to `UNKNOWN + CALLER_ACTIVITY_UNVERIFIED + EXTERNAL_LIMIT`; private JSONL
 existence/mtime/size is diagnostic only. The repository does not currently have
-a host activity-acquisition/controller Adapter, so actual controller liveness
-integration remains `EXTERNAL_LIMIT`; the helper alone does not wait, cancel, or
-stop an agent. Missing JSONL never declares an agent dead, and transcript size
-never represents token usage.
+a host activity-acquisition/controller Adapter with monotonic
+identity/sequence/head verification, so actual controller liveness integration
+remains `EXTERNAL_LIMIT`; the helper alone does not wait, cancel, or stop an
+agent. Missing JSONL never declares an agent dead, and transcript size never
+represents token usage.
 
 ### 6. Efficiency is quality-first and measurable
 
@@ -223,8 +265,10 @@ remains `EXTERNAL_LIMIT`.
 Expected structural effects:
 
 - focused/no-finding adaptive Full Audit has a synthetic 14-to-6 candidate
-  (57.1%), but executable calls remain at the 14-call backstop until exact
-  platform recall attestation and its host verifier exist;
+  (57.1%), but executable execution remains at the 14-unique-node backstop
+  (13 axes plus one seam critic) until exact platform recall attestation and
+  its host verifier exist; the two bounded infrastructure retries can raise
+  the attempt count to 16 without creating additional DAG nodes;
 - read-only OPS review falls from two calls to one (50%);
 - generated native prompt bytes fall from 47,047 to 38,477 (18.22%) while
   exact-once tests retain required invariants;

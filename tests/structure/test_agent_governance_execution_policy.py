@@ -2,9 +2,15 @@
 
 from __future__ import annotations
 
+from concurrent.futures import ThreadPoolExecutor
 from copy import deepcopy
+import gc
+import hashlib
+import json
 from pathlib import Path
 import sys
+from threading import Event
+import time
 
 import pytest
 
@@ -14,17 +20,22 @@ HELPERS = ROOT / "helper_scripts" / "maintenance_scripts"
 sys.path.insert(0, str(HELPERS))
 
 from agent_governance_execution_policy import (  # noqa: E402
-    admit_execution_event,
+    _issue_execution_admission_controller,
+    admit_execution_event as _admit_execution_event,
     compile_execution_budget_policy,
     default_history_binding,
     execution_policy_digest,
     new_execution_event_ledger,
     registry_execution_policy_errors,
     requested_history_errors,
+    _start_registry_execution_admission as start_registry_execution_admission,
     surface_allows_mandatory_role,
     surface_profile_binding,
-    validate_execution_event_ledger,
+    validate_execution_event_ledger as _validate_execution_event_ledger,
 )
+import agent_governance_execution_policy as execution_policy  # noqa: E402
+import agent_governance as governance_facade  # noqa: E402
+import agent_governance_registry as registry_module  # noqa: E402
 from agent_governance_execution import (  # noqa: E402
     capture_repository_baseline,
     compile_context,
@@ -41,6 +52,8 @@ from agent_governance_workflow_identity import requested_identity_errors  # noqa
 DIGEST_A = "sha256:" + "a" * 64
 DIGEST_B = "sha256:" + "b" * 64
 DIGEST_C = "sha256:" + "c" * 64
+_TEST_SURFACE_PROFILES: dict[str, dict] = {}
+_TEST_EXECUTION_CONTROLLERS: dict[tuple[object, ...], object] = {}
 
 
 def _event(
@@ -60,6 +73,127 @@ def _event(
         "outcome": "completed",
         "call_record_digest": call_digest,
     }
+
+
+def _reseal_ledger(ledger: dict) -> None:
+    canonical = json.dumps(
+        {
+            key: value
+            for key, value in ledger.items()
+            if key != "ledger_digest"
+        },
+        ensure_ascii=False,
+        sort_keys=True,
+        separators=(",", ":"),
+        allow_nan=False,
+    ).encode("utf-8")
+    ledger["ledger_digest"] = "sha256:" + hashlib.sha256(canonical).hexdigest()
+
+
+def _canonical_digest(value: object) -> str:
+    canonical = json.dumps(
+        value,
+        ensure_ascii=False,
+        sort_keys=True,
+        separators=(",", ":"),
+        allow_nan=False,
+    ).encode("utf-8")
+    return "sha256:" + hashlib.sha256(canonical).hexdigest()
+
+
+def _structural_test_surface(binding: dict) -> dict:
+    profile = deepcopy(binding["profile"])
+    profile["profile_id"] = "test_structural_surface_v1"
+    profile["event_coverage"] = [
+        "spawn",
+        "model_call",
+        "retry",
+        "follow_up",
+        "wait",
+        "no_delta_wakeup",
+        "terminate",
+    ]
+    digest = _canonical_digest(profile)
+    _TEST_SURFACE_PROFILES[digest] = profile
+    return {"profile": profile, "digest": digest}
+
+
+def _canonical_surface_for_ledger(ledger: dict) -> dict:
+    ledger_digest = ledger.get("surface_profile_digest")
+    if ledger_digest in _TEST_SURFACE_PROFILES:
+        return _TEST_SURFACE_PROFILES[ledger_digest]
+    registry = load_registry()
+    bindings = [
+        surface_profile_binding(profile_id, registry)
+        for profile_id in registry["execution_policy"]["surface_profiles"]
+    ]
+    matches = [
+        binding for binding in bindings if binding["digest"] == ledger_digest
+    ]
+    assert len(matches) == 1
+    return matches[0]["profile"]
+
+
+def admit_execution_event(
+    policy: dict,
+    ledger: dict,
+    event: dict,
+    *,
+    surface_profile: dict | None = None,
+):
+    """Keep unrelated policy tests on one exact Registry-canonical surface."""
+
+    resolved_surface = (
+        _canonical_surface_for_ledger(ledger)
+        if surface_profile is None
+        else surface_profile
+    )
+    controller_key = (
+        ledger.get("root_execution_id"),
+        ledger.get("watcher_id"),
+        ledger.get("policy_digest"),
+        ledger.get("surface_profile_digest"),
+    )
+    if (
+        ledger.get("events") == []
+        and controller_key not in _TEST_EXECUTION_CONTROLLERS
+    ):
+        _TEST_EXECUTION_CONTROLLERS[controller_key] = (
+            _issue_execution_admission_controller(
+                policy,
+                ledger,
+                surface_profile=resolved_surface,
+            )
+        )
+    controller = _TEST_EXECUTION_CONTROLLERS.get(controller_key)
+    return _admit_execution_event(
+        policy,
+        ledger,
+        event,
+        surface_profile=resolved_surface,
+        controller=controller,
+    )
+
+
+def validate_execution_event_ledger(
+    policy: dict,
+    ledger: dict,
+    *,
+    call_record_digests: list[str],
+    surface_profile: dict | None = None,
+):
+    """Keep unrelated validator tests on one exact Registry-canonical surface."""
+
+    return _validate_execution_event_ledger(
+        policy,
+        ledger,
+        call_record_digests=call_record_digests,
+        surface_profile=(
+            _canonical_surface_for_ledger(ledger)
+            if surface_profile is None
+            else surface_profile
+        ),
+    )
 
 
 def test_registry_compiles_one_digest_bound_execution_budget_policy() -> None:
@@ -170,7 +304,7 @@ def test_injected_registry_is_one_route_context_and_validation_authority() -> No
 
     route = route_task(facts, registry=registry)
     plan = compile_context("E2", facts, registry, ROOT)
-    artifact = materialize_context_artifact(plan)
+    artifact = materialize_context_artifact(plan, registry)
     validated = validate_context_artifact(
         artifact,
         registry=registry,
@@ -341,7 +475,9 @@ def test_event_ledger_denies_next_call_at_cap_and_rejects_child_spawn() -> None:
     policy["max_total_model_turns"] = (
         1 + policy["max_call_attempts"] + policy["max_followup_attempts"]
     )
-    surface = surface_profile_binding("claude_saved_workflow_v1", registry)
+    surface = _structural_test_surface(
+        surface_profile_binding("claude_saved_workflow_v1", registry)
+    )
     ledger = new_execution_event_ledger(
         root_execution_id="root-exec-1",
         policy_digest=execution_policy_digest(policy),
@@ -387,6 +523,1134 @@ def test_event_ledger_denies_next_call_at_cap_and_rejects_child_spawn() -> None:
     )
     assert not allowed
     assert child_ledger["terminal_reason"] == "SPAWN_DEPTH_EXCEEDED"
+
+
+def test_event_admission_rejects_root_only_truncation_of_a_capped_ledger() -> None:
+    registry = load_registry()
+    policy = deepcopy(compile_execution_budget_policy("narrow", registry))
+    policy["max_call_attempts"] = 1
+    policy["max_total_model_turns"] = (
+        1 + policy["max_call_attempts"] + policy["max_followup_attempts"]
+    )
+    surface = surface_profile_binding("claude_saved_workflow_v1", registry)
+    ledger = new_execution_event_ledger(
+        root_execution_id="root-exec-truncated-cap",
+        policy_digest=execution_policy_digest(policy),
+        surface_profile_digest=surface["digest"],
+        watcher_id="watcher-1",
+    )
+    _, ledger = admit_execution_event(
+        policy, ledger, _event("root:1", "root_turn", depth=0)
+    )
+    _, ledger = admit_execution_event(
+        policy,
+        ledger,
+        _event("call:1", "model_call", depth=1, call_digest=DIGEST_A),
+    )
+    _, ledger = admit_execution_event(
+        policy,
+        ledger,
+        _event("call:cap", "model_call", depth=1, call_digest=DIGEST_B),
+    )
+    assert ledger["terminal_reason"] == "BUDGET_EXHAUSTED"
+
+    truncated = deepcopy(ledger)
+    truncated["events"] = truncated["events"][:1]
+    truncated["terminal_reason"] = None
+
+    with pytest.raises(ValueError, match="execution ledger.*digest"):
+        admit_execution_event(
+            policy,
+            truncated,
+            _event("call:replayed", "model_call", depth=1, call_digest=DIGEST_C),
+        )
+
+
+def test_event_admission_rejects_resealed_truncation_that_resets_budget() -> None:
+    registry = load_registry()
+    policy = deepcopy(compile_execution_budget_policy("narrow", registry))
+    policy["max_call_attempts"] = 1
+    policy["max_total_model_turns"] = (
+        1 + policy["max_call_attempts"] + policy["max_followup_attempts"]
+    )
+    surface = surface_profile_binding("claude_saved_workflow_v1", registry)
+    ledger = new_execution_event_ledger(
+        root_execution_id="root-exec-resealed-truncation",
+        policy_digest=execution_policy_digest(policy),
+        surface_profile_digest=surface["digest"],
+        watcher_id="watcher-1",
+    )
+    _, ledger = admit_execution_event(
+        policy, ledger, _event("root:1", "root_turn", depth=0)
+    )
+    _, ledger = admit_execution_event(
+        policy,
+        ledger,
+        _event("call:1", "model_call", depth=1, call_digest=DIGEST_A),
+    )
+
+    truncated = deepcopy(ledger)
+    truncated["events"] = truncated["events"][:1]
+    _reseal_ledger(truncated)
+
+    with pytest.raises(ValueError, match="controller-owned monotonic anchor"):
+        admit_execution_event(
+            policy,
+            truncated,
+            _event("call:replayed", "model_call", depth=1, call_digest=DIGEST_B),
+        )
+
+
+def test_persisted_ledger_has_no_public_resume_authority() -> None:
+    registry = load_registry()
+    policy = compile_execution_budget_policy("narrow", registry)
+    surface = surface_profile_binding("claude_saved_workflow_v1", registry)
+    ledger = new_execution_event_ledger(
+        root_execution_id="root-exec-no-public-resume",
+        policy_digest=execution_policy_digest(policy),
+        surface_profile_digest=surface["digest"],
+        watcher_id="watcher-1",
+    )
+    controller = start_registry_execution_admission(
+        policy,
+        ledger,
+        surface_profile=surface["profile"],
+    )
+    with pytest.raises(TypeError, match="cannot be copied"):
+        deepcopy(controller)
+    _, rooted = _admit_execution_event(
+        policy,
+        ledger,
+        _event("root:1", "root_turn", depth=0),
+        surface_profile=surface["profile"],
+        controller=controller,
+    )
+
+    with pytest.raises(ValueError, match="pristine empty execution ledger"):
+        start_registry_execution_admission(
+            policy,
+            rooted,
+            surface_profile=surface["profile"],
+        )
+    with pytest.raises(ValueError, match="opaque controller capability"):
+        _admit_execution_event(
+            policy,
+            rooted,
+            _event("call:1", "model_call", depth=1, call_digest=DIGEST_A),
+            surface_profile=surface["profile"],
+        )
+
+
+def test_controller_rejects_a_self_signed_policy_outside_registry_authority() -> None:
+    registry = load_registry()
+    policy = deepcopy(compile_execution_budget_policy("narrow", registry))
+    policy["max_call_attempts"] += 1
+    policy["max_total_model_turns"] += 1
+    surface = surface_profile_binding("claude_saved_workflow_v1", registry)
+    ledger = new_execution_event_ledger(
+        root_execution_id="root-exec-forged-policy",
+        policy_digest=execution_policy_digest(policy),
+        surface_profile_digest=surface["digest"],
+        watcher_id="watcher-1",
+    )
+
+    with pytest.raises(ValueError, match="differs from the live Registry"):
+        start_registry_execution_admission(
+            policy,
+            ledger,
+            surface_profile=surface["profile"],
+        )
+
+
+def test_public_facade_cannot_mint_a_caller_named_execution_root() -> None:
+    assert "start_registry_execution_admission" not in governance_facade.__all__
+    assert not hasattr(
+        governance_facade,
+        "start_registry_execution_admission",
+    )
+
+
+def test_controller_genesis_uses_one_frozen_ledger_snapshot() -> None:
+    class AlternatingLedger(dict):
+        def __init__(self, original: dict, alternate: dict) -> None:
+            super().__init__(original)
+            self._alternate = alternate
+            self._item_reads = 0
+
+        def items(self):
+            self._item_reads += 1
+            if self._item_reads > 1:
+                return self._alternate.items()
+            return super().items()
+
+    registry = load_registry()
+    policy = compile_execution_budget_policy("narrow", registry)
+    surface = surface_profile_binding("claude_saved_workflow_v1", registry)
+    original = new_execution_event_ledger(
+        root_execution_id="root-exec-frozen-genesis",
+        policy_digest=execution_policy_digest(policy),
+        surface_profile_digest=surface["digest"],
+        watcher_id="watcher-1",
+    )
+    alternate = new_execution_event_ledger(
+        root_execution_id="root-exec-alternating-genesis",
+        policy_digest=execution_policy_digest(policy),
+        surface_profile_digest=surface["digest"],
+        watcher_id="watcher-alternate",
+    )
+
+    controller = start_registry_execution_admission(
+        policy,
+        AlternatingLedger(original, alternate),
+        surface_profile=surface["profile"],
+    )
+    allowed, rooted = _admit_execution_event(
+        policy,
+        original,
+        _event("root:1", "root_turn", depth=0),
+        surface_profile=surface["profile"],
+        controller=controller,
+    )
+
+    assert allowed is True
+    assert rooted["root_execution_id"] == original["root_execution_id"]
+
+
+def test_controller_factory_uses_one_registry_generation_snapshot(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    first_registry = load_registry()
+    later_registry = deepcopy(first_registry)
+    later_surface = later_registry["execution_policy"]["surface_profiles"][
+        "claude_saved_workflow_v1"
+    ]
+    later_surface["usage_telemetry"] = (
+        "reported_only"
+        if later_surface["usage_telemetry"] != "reported_only"
+        else "unavailable"
+    )
+    policy = compile_execution_budget_policy("narrow", first_registry)
+    surface = surface_profile_binding(
+        "claude_saved_workflow_v1",
+        first_registry,
+    )
+    ledger = new_execution_event_ledger(
+        root_execution_id="root-exec-one-registry-snapshot",
+        policy_digest=execution_policy_digest(policy),
+        surface_profile_digest=surface["digest"],
+        watcher_id="watcher-1",
+    )
+    generations = iter((first_registry, later_registry))
+    load_count = 0
+
+    def alternating_registry():
+        nonlocal load_count
+        load_count += 1
+        return deepcopy(next(generations))
+
+    monkeypatch.setattr(
+        registry_module,
+        "load_registry",
+        alternating_registry,
+    )
+    controller = start_registry_execution_admission(
+        policy,
+        ledger,
+        surface_profile=surface["profile"],
+    )
+    allowed, rooted = _admit_execution_event(
+        policy,
+        ledger,
+        _event("root:1", "root_turn", depth=0),
+        surface_profile=surface["profile"],
+        controller=controller,
+    )
+
+    assert load_count == 1
+    assert allowed is True
+    assert len(rooted["events"]) == 1
+
+
+def test_pristine_genesis_can_issue_only_one_process_lifetime_controller() -> None:
+    registry = load_registry()
+    policy = compile_execution_budget_policy("narrow", registry)
+    surface = surface_profile_binding("claude_saved_workflow_v1", registry)
+    ledger = new_execution_event_ledger(
+        root_execution_id="root-exec-single-genesis",
+        policy_digest=execution_policy_digest(policy),
+        surface_profile_digest=surface["digest"],
+        watcher_id="watcher-single-genesis",
+    )
+    controller = start_registry_execution_admission(
+        policy,
+        ledger,
+        surface_profile=surface["profile"],
+    )
+    root_event = _event("root:1", "root_turn", depth=0)
+    root_event["watcher_id"] = ledger["watcher_id"]
+    _, _ = _admit_execution_event(
+        policy,
+        ledger,
+        root_event,
+        surface_profile=surface["profile"],
+        controller=controller,
+    )
+    del controller
+    gc.collect()
+
+    with pytest.raises(ValueError, match="already claimed"):
+        start_registry_execution_admission(
+            policy,
+            ledger,
+            surface_profile=surface["profile"],
+        )
+
+
+def test_concurrent_factory_race_issues_only_one_controller() -> None:
+    registry = load_registry()
+    policy = compile_execution_budget_policy("narrow", registry)
+    surface = surface_profile_binding("claude_saved_workflow_v1", registry)
+    ledger = new_execution_event_ledger(
+        root_execution_id="root-exec-factory-race",
+        policy_digest=execution_policy_digest(policy),
+        surface_profile_digest=surface["digest"],
+        watcher_id="watcher-factory-race",
+    )
+
+    def issue():
+        try:
+            return (
+                "issued",
+                start_registry_execution_admission(
+                    policy,
+                    ledger,
+                    surface_profile=surface["profile"],
+                ),
+            )
+        except ValueError as exc:
+            return ("rejected", str(exc))
+
+    with ThreadPoolExecutor(max_workers=2) as pool:
+        results = list(pool.map(lambda _: issue(), range(2)))
+
+    assert sum(status == "issued" for status, _ in results) == 1
+    rejected = [value for status, value in results if status == "rejected"]
+    assert rejected == [
+        "execution controller genesis is already claimed for this root execution"
+    ]
+
+
+def test_controller_uses_frozen_registry_caps_not_dict_subclass_lookups() -> None:
+    class MaxNodeSpoofPolicy(dict):
+        def __getitem__(self, key):
+            value = super().__getitem__(key)
+            if key == "max_unique_nodes":
+                return value + 1
+            return value
+
+    registry = load_registry()
+    registry_policy = compile_execution_budget_policy("narrow", registry)
+    spoofed_policy = MaxNodeSpoofPolicy(registry_policy)
+    assert spoofed_policy == registry_policy
+    assert execution_policy_digest(spoofed_policy) == execution_policy_digest(
+        registry_policy
+    )
+    assert spoofed_policy["max_unique_nodes"] == (
+        registry_policy["max_unique_nodes"] + 1
+    )
+    surface = surface_profile_binding("claude_saved_workflow_v1", registry)
+    ledger = new_execution_event_ledger(
+        root_execution_id="root-exec-policy-subclass-spoof",
+        policy_digest=execution_policy_digest(registry_policy),
+        surface_profile_digest=surface["digest"],
+        watcher_id="watcher-1",
+    )
+    controller = start_registry_execution_admission(
+        spoofed_policy,
+        ledger,
+        surface_profile=surface["profile"],
+    )
+    _, ledger = _admit_execution_event(
+        spoofed_policy,
+        ledger,
+        _event("root:1", "root_turn", depth=0),
+        surface_profile=surface["profile"],
+        controller=controller,
+    )
+    for index in range(registry_policy["max_unique_nodes"]):
+        call = _event(
+            f"call:{index}",
+            "model_call",
+            depth=1,
+            call_digest=DIGEST_A,
+        )
+        call["node_id"] = f"node-{index}"
+        allowed, ledger = _admit_execution_event(
+            spoofed_policy,
+            ledger,
+            call,
+            surface_profile=surface["profile"],
+            controller=controller,
+        )
+        assert allowed is True
+
+    overflow = _event(
+        "call:overflow",
+        "model_call",
+        depth=1,
+        call_digest=DIGEST_B,
+    )
+    overflow["node_id"] = "node-overflow"
+    allowed, ledger = _admit_execution_event(
+        spoofed_policy,
+        ledger,
+        overflow,
+        surface_profile=surface["profile"],
+        controller=controller,
+    )
+
+    assert allowed is False
+    assert ledger["terminal_reason"] == "BUDGET_EXHAUSTED"
+
+
+def test_controller_uses_frozen_registry_surface_not_subclass_coverage() -> None:
+    class CoverageSpoofSurface(dict):
+        def __getitem__(self, key):
+            value = super().__getitem__(key)
+            if key == "event_coverage":
+                return ["model_call"]
+            return value
+
+    registry = load_registry()
+    policy = compile_execution_budget_policy("narrow", registry)
+    generic = surface_profile_binding("generic_host_v1", registry)
+    spoofed_surface = CoverageSpoofSurface(generic["profile"])
+    assert spoofed_surface == generic["profile"]
+    assert _canonical_digest(spoofed_surface) == generic["digest"]
+    assert spoofed_surface["event_coverage"] == ["model_call"]
+    ledger = new_execution_event_ledger(
+        root_execution_id="root-exec-surface-subclass-spoof",
+        policy_digest=execution_policy_digest(policy),
+        surface_profile_digest=generic["digest"],
+        watcher_id="watcher-1",
+    )
+    controller = start_registry_execution_admission(
+        policy,
+        ledger,
+        surface_profile=spoofed_surface,
+    )
+    _, ledger = _admit_execution_event(
+        policy,
+        ledger,
+        _event("root:1", "root_turn", depth=0),
+        surface_profile=spoofed_surface,
+        controller=controller,
+    )
+
+    with pytest.raises(ValueError, match="does not attest model_call"):
+        _admit_execution_event(
+            policy,
+            ledger,
+            _event(
+                "call:1",
+                "model_call",
+                depth=1,
+                call_digest=DIGEST_A,
+            ),
+            surface_profile=spoofed_surface,
+            controller=controller,
+        )
+
+
+def test_controller_detaches_nested_event_list_before_validation_and_budget() -> None:
+    class SwitchingEvents(list):
+        def __init__(self, values: list[dict]) -> None:
+            super().__init__(values)
+            self._iteration = 0
+
+        def __deepcopy__(self, memo):
+            return self
+
+        def __iter__(self):
+            self._iteration += 1
+            if self._iteration in {10, 11}:
+                return iter(list.__getitem__(self, slice(0, 1)))
+            return super().__iter__()
+
+    registry = load_registry()
+    policy = compile_execution_budget_policy("narrow", registry)
+    surface = surface_profile_binding("claude_saved_workflow_v1", registry)
+    ledger = new_execution_event_ledger(
+        root_execution_id="root-exec-nested-list-switch",
+        policy_digest=execution_policy_digest(policy),
+        surface_profile_digest=surface["digest"],
+        watcher_id="watcher-1",
+    )
+    controller = start_registry_execution_admission(
+        policy,
+        ledger,
+        surface_profile=surface["profile"],
+    )
+    _, ledger = _admit_execution_event(
+        policy,
+        ledger,
+        _event("root:1", "root_turn", depth=0),
+        surface_profile=surface["profile"],
+        controller=controller,
+    )
+    for index in range(policy["max_unique_nodes"]):
+        call = _event(
+            f"call:{index}",
+            "model_call",
+            depth=1,
+            call_digest=DIGEST_A,
+        )
+        call["node_id"] = f"node-{index}"
+        allowed, ledger = _admit_execution_event(
+            policy,
+            ledger,
+            call,
+            surface_profile=surface["profile"],
+            controller=controller,
+        )
+        assert allowed is True
+
+    ledger["events"] = SwitchingEvents(ledger["events"])
+    overflow = _event(
+        "call:overflow",
+        "model_call",
+        depth=1,
+        call_digest=DIGEST_B,
+    )
+    overflow["node_id"] = "node-overflow"
+    allowed, terminal = _admit_execution_event(
+        policy,
+        ledger,
+        overflow,
+        surface_profile=surface["profile"],
+        controller=controller,
+    )
+
+    assert allowed is False
+    assert terminal["terminal_reason"] == "BUDGET_EXHAUSTED"
+
+
+def test_controller_detaches_event_mapping_before_budget_and_append() -> None:
+    class NodeLookupSpoof(dict):
+        def __getitem__(self, key):
+            if key == "node_id":
+                return "node-0"
+            return super().__getitem__(key)
+
+    registry = load_registry()
+    policy = compile_execution_budget_policy("narrow", registry)
+    surface = surface_profile_binding("claude_saved_workflow_v1", registry)
+    ledger = new_execution_event_ledger(
+        root_execution_id="root-exec-event-mapping-spoof",
+        policy_digest=execution_policy_digest(policy),
+        surface_profile_digest=surface["digest"],
+        watcher_id="watcher-1",
+    )
+    controller = start_registry_execution_admission(
+        policy,
+        ledger,
+        surface_profile=surface["profile"],
+    )
+    _, ledger = _admit_execution_event(
+        policy,
+        ledger,
+        _event("root:1", "root_turn", depth=0),
+        surface_profile=surface["profile"],
+        controller=controller,
+    )
+    for index in range(policy["max_unique_nodes"]):
+        call = _event(
+            f"call:{index}",
+            "model_call",
+            depth=1,
+            call_digest=DIGEST_A,
+        )
+        call["node_id"] = f"node-{index}"
+        allowed, ledger = _admit_execution_event(
+            policy,
+            ledger,
+            call,
+            surface_profile=surface["profile"],
+            controller=controller,
+        )
+        assert allowed is True
+
+    overflow = _event(
+        "call:overflow",
+        "model_call",
+        depth=1,
+        call_digest=DIGEST_B,
+    )
+    overflow["node_id"] = "node-overflow"
+    allowed, terminal = _admit_execution_event(
+        policy,
+        ledger,
+        NodeLookupSpoof(overflow),
+        surface_profile=surface["profile"],
+        controller=controller,
+    )
+
+    assert allowed is False
+    assert terminal["terminal_reason"] == "BUDGET_EXHAUSTED"
+    assert terminal["events"][-1]["node_id"] == "node-overflow"
+
+
+def test_controller_ledger_snapshot_is_stable_during_nested_list_mutation(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    class SharedEvents(list):
+        def __deepcopy__(self, memo):
+            return self
+
+    registry = load_registry()
+    policy = compile_execution_budget_policy("narrow", registry)
+    surface = surface_profile_binding("claude_saved_workflow_v1", registry)
+    ledger = new_execution_event_ledger(
+        root_execution_id="root-exec-ledger-nested-mutation",
+        policy_digest=execution_policy_digest(policy),
+        surface_profile_digest=surface["digest"],
+        watcher_id="watcher-1",
+    )
+    controller = start_registry_execution_admission(
+        policy,
+        ledger,
+        surface_profile=surface["profile"],
+    )
+    _, ledger = _admit_execution_event(
+        policy,
+        ledger,
+        _event("root:1", "root_turn", depth=0),
+        surface_profile=surface["profile"],
+        controller=controller,
+    )
+    for index in range(policy["max_unique_nodes"]):
+        call = _event(
+            f"call:{index}",
+            "model_call",
+            depth=1,
+            call_digest=DIGEST_A,
+        )
+        call["node_id"] = f"node-{index}"
+        _, ledger = _admit_execution_event(
+            policy,
+            ledger,
+            call,
+            surface_profile=surface["profile"],
+            controller=controller,
+        )
+
+    caller_events = SharedEvents(ledger["events"])
+    ledger["events"] = caller_events
+    validated = Event()
+    resume = Event()
+    real_validator = execution_policy.validate_execution_event_ledger
+
+    def pause_after_validation(*args, **kwargs):
+        result = real_validator(*args, **kwargs)
+        validated.set()
+        assert resume.wait(timeout=2)
+        return result
+
+    monkeypatch.setattr(
+        execution_policy,
+        "validate_execution_event_ledger",
+        pause_after_validation,
+    )
+    overflow = _event(
+        "call:overflow",
+        "model_call",
+        depth=1,
+        call_digest=DIGEST_B,
+    )
+    overflow["node_id"] = "node-overflow"
+    with ThreadPoolExecutor(max_workers=1) as pool:
+        future = pool.submit(
+            _admit_execution_event,
+            policy,
+            ledger,
+            overflow,
+            surface_profile=surface["profile"],
+            controller=controller,
+        )
+        assert validated.wait(timeout=2)
+        caller_events[:] = caller_events[:1]
+        resume.set()
+        allowed, terminal = future.result(timeout=2)
+
+    assert allowed is False
+    assert terminal["terminal_reason"] == "BUDGET_EXHAUSTED"
+    assert len(terminal["events"]) == policy["max_unique_nodes"] + 2
+
+
+def test_controller_event_snapshot_is_stable_during_caller_mutation(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    registry = load_registry()
+    policy = compile_execution_budget_policy("narrow", registry)
+    surface = surface_profile_binding("claude_saved_workflow_v1", registry)
+    ledger = new_execution_event_ledger(
+        root_execution_id="root-exec-event-mutation",
+        policy_digest=execution_policy_digest(policy),
+        surface_profile_digest=surface["digest"],
+        watcher_id="watcher-1",
+    )
+    controller = start_registry_execution_admission(
+        policy,
+        ledger,
+        surface_profile=surface["profile"],
+    )
+    _, ledger = _admit_execution_event(
+        policy,
+        ledger,
+        _event("root:1", "root_turn", depth=0),
+        surface_profile=surface["profile"],
+        controller=controller,
+    )
+    for index in range(policy["max_unique_nodes"]):
+        call = _event(
+            f"call:{index}",
+            "model_call",
+            depth=1,
+            call_digest=DIGEST_A,
+        )
+        call["node_id"] = f"node-{index}"
+        _, ledger = _admit_execution_event(
+            policy,
+            ledger,
+            call,
+            surface_profile=surface["profile"],
+            controller=controller,
+        )
+
+    entered_budget = Event()
+    budget_checked = Event()
+    run_budget = Event()
+    allow_append = Event()
+    seen_events: list[dict] = []
+    real_budget_check = execution_policy._budget_rejection_reason
+
+    def pause_around_budget(authority, admitted, event):
+        if event["event_id"] != "call:overflow":
+            return real_budget_check(authority, admitted, event)
+        seen_events.append(event)
+        entered_budget.set()
+        assert run_budget.wait(timeout=2)
+        result = real_budget_check(authority, admitted, event)
+        budget_checked.set()
+        assert allow_append.wait(timeout=2)
+        return result
+
+    monkeypatch.setattr(
+        execution_policy,
+        "_budget_rejection_reason",
+        pause_around_budget,
+    )
+    overflow = _event(
+        "call:overflow",
+        "model_call",
+        depth=1,
+        call_digest=DIGEST_B,
+    )
+    overflow["node_id"] = "node-overflow"
+    with ThreadPoolExecutor(max_workers=1) as pool:
+        future = pool.submit(
+            _admit_execution_event,
+            policy,
+            ledger,
+            overflow,
+            surface_profile=surface["profile"],
+            controller=controller,
+        )
+        assert entered_budget.wait(timeout=2)
+        overflow["node_id"] = "node-0"
+        run_budget.set()
+        assert budget_checked.wait(timeout=2)
+        overflow["node_id"] = "node-overflow"
+        allow_append.set()
+        allowed, terminal = future.result(timeout=2)
+
+    assert seen_events[0] is not overflow
+    assert seen_events[0]["node_id"] == "node-overflow"
+    assert allowed is False
+    assert terminal["terminal_reason"] == "BUDGET_EXHAUSTED"
+    expected_digest = _canonical_digest(
+        {key: value for key, value in terminal.items() if key != "ledger_digest"}
+    )
+    assert terminal["ledger_digest"] == expected_digest
+
+
+def test_controller_rejects_an_unstable_non_json_event_snapshot() -> None:
+    class UnstableEvent(dict):
+        def items(self):
+            raise RuntimeError("caller mutated mapping during canonical capture")
+
+    registry = load_registry()
+    policy = compile_execution_budget_policy("narrow", registry)
+    surface = surface_profile_binding("claude_saved_workflow_v1", registry)
+    ledger = new_execution_event_ledger(
+        root_execution_id="root-exec-unstable-event-json",
+        policy_digest=execution_policy_digest(policy),
+        surface_profile_digest=surface["digest"],
+        watcher_id="watcher-1",
+    )
+    controller = start_registry_execution_admission(
+        policy,
+        ledger,
+        surface_profile=surface["profile"],
+    )
+
+    with pytest.raises(ValueError, match="supplied event is not canonical JSON"):
+        _admit_execution_event(
+            policy,
+            ledger,
+            UnstableEvent(_event("root:unstable", "root_turn", depth=0)),
+            surface_profile=surface["profile"],
+            controller=controller,
+        )
+
+    allowed, rooted = _admit_execution_event(
+        policy,
+        ledger,
+        _event("root:1", "root_turn", depth=0),
+        surface_profile=surface["profile"],
+        controller=controller,
+    )
+    assert allowed is True
+    assert len(rooted["events"]) == 1
+
+
+def test_controller_policy_caps_are_stable_during_caller_mutation_race(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    registry = load_registry()
+    caller_policy = compile_execution_budget_policy("narrow", registry)
+    surface = surface_profile_binding("claude_saved_workflow_v1", registry)
+    ledger = new_execution_event_ledger(
+        root_execution_id="root-exec-policy-mutation-race",
+        policy_digest=execution_policy_digest(caller_policy),
+        surface_profile_digest=surface["digest"],
+        watcher_id="watcher-1",
+    )
+    controller = start_registry_execution_admission(
+        caller_policy,
+        ledger,
+        surface_profile=surface["profile"],
+    )
+    _, ledger = _admit_execution_event(
+        caller_policy,
+        ledger,
+        _event("root:1", "root_turn", depth=0),
+        surface_profile=surface["profile"],
+        controller=controller,
+    )
+    for index in range(caller_policy["max_unique_nodes"]):
+        call = _event(
+            f"call:{index}",
+            "model_call",
+            depth=1,
+            call_digest=DIGEST_A,
+        )
+        call["node_id"] = f"node-{index}"
+        allowed, ledger = _admit_execution_event(
+            caller_policy,
+            ledger,
+            call,
+            surface_profile=surface["profile"],
+            controller=controller,
+        )
+        assert allowed is True
+
+    entered_budget_check = Event()
+    permit_budget_check = Event()
+    seen_authorities: list[dict] = []
+    real_budget_check = execution_policy._budget_rejection_reason
+
+    def pause_before_budget_read(authority, admitted, event):
+        if event["event_id"] == "call:overflow":
+            seen_authorities.append(authority)
+            entered_budget_check.set()
+            assert permit_budget_check.wait(timeout=2)
+        return real_budget_check(authority, admitted, event)
+
+    monkeypatch.setattr(
+        execution_policy,
+        "_budget_rejection_reason",
+        pause_before_budget_read,
+    )
+    overflow = _event(
+        "call:overflow",
+        "model_call",
+        depth=1,
+        call_digest=DIGEST_B,
+    )
+    overflow["node_id"] = "node-overflow"
+
+    with ThreadPoolExecutor(max_workers=1) as pool:
+        future = pool.submit(
+            _admit_execution_event,
+            caller_policy,
+            ledger,
+            overflow,
+            surface_profile=surface["profile"],
+            controller=controller,
+        )
+        assert entered_budget_check.wait(timeout=2)
+        caller_policy["max_unique_nodes"] += 1
+        permit_budget_check.set()
+        allowed, terminal = future.result(timeout=2)
+
+    assert seen_authorities[0] is not caller_policy
+    assert seen_authorities[0]["max_unique_nodes"] == 4
+    assert allowed is False
+    assert terminal["terminal_reason"] == "BUDGET_EXHAUSTED"
+
+
+def test_controller_surface_is_stable_during_caller_mutation_race(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    registry = load_registry()
+    policy = compile_execution_budget_policy("narrow", registry)
+    generic = surface_profile_binding("generic_host_v1", registry)
+    caller_surface = deepcopy(generic["profile"])
+    ledger = new_execution_event_ledger(
+        root_execution_id="root-exec-surface-mutation-race",
+        policy_digest=execution_policy_digest(policy),
+        surface_profile_digest=generic["digest"],
+        watcher_id="watcher-1",
+    )
+    controller = start_registry_execution_admission(
+        policy,
+        ledger,
+        surface_profile=caller_surface,
+    )
+    _, ledger = _admit_execution_event(
+        policy,
+        ledger,
+        _event("root:1", "root_turn", depth=0),
+        surface_profile=caller_surface,
+        controller=controller,
+    )
+    entered_coverage_check = Event()
+    permit_coverage_check = Event()
+    seen_authorities: list[dict] = []
+    real_coverage_check = execution_policy._surface_event_coverage_error
+
+    def pause_before_coverage_read(bound_ledger, event, authority_surface):
+        if event["event_id"] == "call:1":
+            seen_authorities.append(authority_surface)
+            entered_coverage_check.set()
+            assert permit_coverage_check.wait(timeout=2)
+        return real_coverage_check(bound_ledger, event, authority_surface)
+
+    monkeypatch.setattr(
+        execution_policy,
+        "_surface_event_coverage_error",
+        pause_before_coverage_read,
+    )
+
+    with ThreadPoolExecutor(max_workers=1) as pool:
+        future = pool.submit(
+            _admit_execution_event,
+            policy,
+            ledger,
+            _event(
+                "call:1",
+                "model_call",
+                depth=1,
+                call_digest=DIGEST_A,
+            ),
+            surface_profile=caller_surface,
+            controller=controller,
+        )
+        assert entered_coverage_check.wait(timeout=2)
+        caller_surface["event_coverage"] = ["model_call"]
+        permit_coverage_check.set()
+        with pytest.raises(ValueError, match="does not attest model_call"):
+            future.result(timeout=2)
+
+    assert seen_authorities[0] is not caller_surface
+    assert seen_authorities[0]["event_coverage"] == []
+
+
+def test_controller_serializes_competing_admissions_from_the_same_head(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    registry = load_registry()
+    policy = compile_execution_budget_policy("narrow", registry)
+    surface = surface_profile_binding("claude_saved_workflow_v1", registry)
+    ledger = new_execution_event_ledger(
+        root_execution_id="root-exec-concurrent-head",
+        policy_digest=execution_policy_digest(policy),
+        surface_profile_digest=surface["digest"],
+        watcher_id="watcher-1",
+    )
+    controller = start_registry_execution_admission(
+        policy,
+        ledger,
+        surface_profile=surface["profile"],
+    )
+    _, rooted = _admit_execution_event(
+        policy,
+        ledger,
+        _event("root:1", "root_turn", depth=0),
+        surface_profile=surface["profile"],
+        controller=controller,
+    )
+    real_budget_check = execution_policy._budget_rejection_reason
+
+    def overlapping_budget_check(*args, **kwargs):
+        event = args[2]
+        if event["kind"] == "model_call":
+            time.sleep(0.05)
+        return real_budget_check(*args, **kwargs)
+
+    monkeypatch.setattr(
+        execution_policy,
+        "_budget_rejection_reason",
+        overlapping_budget_check,
+    )
+
+    def compete(event_id: str, call_digest: str):
+        try:
+            allowed, _ = _admit_execution_event(
+                policy,
+                rooted,
+                _event(
+                    event_id,
+                    "model_call",
+                    depth=1,
+                    call_digest=call_digest,
+                ),
+                surface_profile=surface["profile"],
+                controller=controller,
+            )
+            return ("allowed", allowed)
+        except ValueError as exc:
+            return ("rejected", str(exc))
+
+    with ThreadPoolExecutor(max_workers=2) as pool:
+        results = list(
+            pool.map(
+                lambda args: compete(*args),
+                [("call:a", DIGEST_A), ("call:b", DIGEST_B)],
+            )
+        )
+
+    assert sum(result == ("allowed", True) for result in results) == 1
+    rejected = [value for status, value in results if status == "rejected"]
+    assert len(rejected) == 1
+    assert "controller-owned monotonic anchor" in rejected[0]
+
+
+def test_event_admission_rejects_a_stale_ledger_digest() -> None:
+    registry = load_registry()
+    policy = compile_execution_budget_policy("narrow", registry)
+    surface = surface_profile_binding("claude_saved_workflow_v1", registry)
+    ledger = new_execution_event_ledger(
+        root_execution_id="root-exec-stale-digest",
+        policy_digest=execution_policy_digest(policy),
+        surface_profile_digest=surface["digest"],
+        watcher_id="watcher-1",
+    )
+    _, ledger = admit_execution_event(
+        policy, ledger, _event("root:1", "root_turn", depth=0)
+    )
+    ledger["ledger_digest"] = DIGEST_A
+
+    with pytest.raises(ValueError, match="execution ledger.*digest"):
+        admit_execution_event(
+            policy,
+            ledger,
+            _event("call:1", "model_call", depth=1, call_digest=DIGEST_B),
+        )
+
+
+def test_event_admission_rejects_resealed_extra_ledger_fields() -> None:
+    registry = load_registry()
+    policy = compile_execution_budget_policy("narrow", registry)
+    surface = surface_profile_binding("claude_saved_workflow_v1", registry)
+    ledger = new_execution_event_ledger(
+        root_execution_id="root-exec-extra-field",
+        policy_digest=execution_policy_digest(policy),
+        surface_profile_digest=surface["digest"],
+        watcher_id="watcher-1",
+    )
+    ledger["unreviewed_counter"] = 0
+    _reseal_ledger(ledger)
+
+    with pytest.raises(ValueError, match="execution ledger fields"):
+        admit_execution_event(
+            policy,
+            ledger,
+            _event("root:1", "root_turn", depth=0),
+        )
+
+
+def test_event_admission_rejects_a_ledger_bound_to_another_policy() -> None:
+    registry = load_registry()
+    original_policy = compile_execution_budget_policy("narrow", registry)
+    replacement_policy = deepcopy(original_policy)
+    replacement_policy["max_call_attempts"] += 1
+    replacement_policy["max_total_model_turns"] += 1
+    surface = surface_profile_binding("claude_saved_workflow_v1", registry)
+    ledger = new_execution_event_ledger(
+        root_execution_id="root-exec-wrong-policy",
+        policy_digest=execution_policy_digest(original_policy),
+        surface_profile_digest=surface["digest"],
+        watcher_id="watcher-1",
+    )
+    _, ledger = admit_execution_event(
+        original_policy, ledger, _event("root:1", "root_turn", depth=0)
+    )
+
+    with pytest.raises(ValueError, match="execution ledger.*policy"):
+        admit_execution_event(
+            replacement_policy,
+            ledger,
+            _event("call:1", "model_call", depth=1, call_digest=DIGEST_A),
+        )
+
+
+def test_event_admission_rejects_a_resealed_invalid_prior_workload() -> None:
+    registry = load_registry()
+    policy = compile_execution_budget_policy("narrow", registry)
+    surface = surface_profile_binding("claude_saved_workflow_v1", registry)
+    ledger = new_execution_event_ledger(
+        root_execution_id="root-exec-invalid-prior-workload",
+        policy_digest=execution_policy_digest(policy),
+        surface_profile_digest=surface["digest"],
+        watcher_id="watcher-1",
+    )
+    _, ledger = admit_execution_event(
+        policy, ledger, _event("root:1", "root_turn", depth=0)
+    )
+    _, ledger = admit_execution_event(
+        policy,
+        ledger,
+        _event("call:1", "model_call", depth=1, call_digest=DIGEST_A),
+    )
+    ledger["events"][1]["parent_event_id"] = "missing:parent"
+    _reseal_ledger(ledger)
+
+    assert any(
+        "parent" in error
+        for error in validate_execution_event_ledger(
+            policy,
+            ledger,
+            call_record_digests=[DIGEST_A],
+        )
+    )
+    with pytest.raises(ValueError, match="controller-owned monotonic anchor"):
+        admit_execution_event(
+            policy,
+            ledger,
+            _event("call:2", "model_call", depth=1, call_digest=DIGEST_B),
+        )
 
 
 def test_execution_event_ledger_rejects_a_call_with_a_missing_parent() -> None:
@@ -629,7 +1893,9 @@ def test_execution_event_ledger_retry_preserves_parent_node_and_depth() -> None:
 def test_execution_event_ledger_spawn_descends_exactly_one_level() -> None:
     registry = load_registry()
     policy = compile_execution_budget_policy("narrow", registry)
-    surface = surface_profile_binding("claude_saved_workflow_v1", registry)
+    surface = _structural_test_surface(
+        surface_profile_binding("claude_saved_workflow_v1", registry)
+    )
     ledger = new_execution_event_ledger(
         root_execution_id="root-exec-spawn-lineage",
         policy_digest=execution_policy_digest(policy),
@@ -659,7 +1925,9 @@ def test_execution_event_ledger_spawn_descends_exactly_one_level() -> None:
 def test_execution_event_ledger_spawned_call_uses_spawned_node_identity() -> None:
     registry = load_registry()
     policy = compile_execution_budget_policy("narrow", registry)
-    surface = surface_profile_binding("claude_saved_workflow_v1", registry)
+    surface = _structural_test_surface(
+        surface_profile_binding("claude_saved_workflow_v1", registry)
+    )
     ledger = new_execution_event_ledger(
         root_execution_id="root-exec-spawn-node",
         policy_digest=execution_policy_digest(policy),
@@ -685,7 +1953,9 @@ def test_execution_event_ledger_spawned_call_uses_spawned_node_identity() -> Non
 def test_execution_event_ledger_follow_up_stays_on_prior_call_lineage() -> None:
     registry = load_registry()
     policy = compile_execution_budget_policy("standard", registry)
-    surface = surface_profile_binding("claude_saved_workflow_v1", registry)
+    surface = _structural_test_surface(
+        surface_profile_binding("claude_saved_workflow_v1", registry)
+    )
     ledger = new_execution_event_ledger(
         root_execution_id="root-exec-follow-up",
         policy_digest=execution_policy_digest(policy),
@@ -723,7 +1993,9 @@ def test_execution_event_ledger_follow_up_does_not_consume_call_attempt_cap() ->
     policy["retry_budget"] = 1
     policy["max_followup_attempts"] = 1
     policy["max_total_model_turns"] = 4
-    surface = surface_profile_binding("claude_saved_workflow_v1", registry)
+    surface = _structural_test_surface(
+        surface_profile_binding("claude_saved_workflow_v1", registry)
+    )
     ledger = new_execution_event_ledger(
         root_execution_id="root-exec-independent-follow-up-cap",
         policy_digest=execution_policy_digest(policy),
@@ -832,7 +2104,9 @@ def test_execution_event_ledger_enforces_retry_budget_before_retry_call() -> Non
 
 def test_execution_event_ledger_validates_terminal_cap_rejections() -> None:
     registry = load_registry()
-    surface = surface_profile_binding("claude_saved_workflow_v1", registry)
+    surface = _structural_test_surface(
+        surface_profile_binding("claude_saved_workflow_v1", registry)
+    )
 
     follow_policy = deepcopy(
         compile_execution_budget_policy("standard", registry)
@@ -922,7 +2196,9 @@ def test_execution_event_ledger_validates_terminal_cap_rejections() -> None:
 def test_execution_event_ledger_enforces_wait_wakeup_terminate_lifecycle() -> None:
     registry = load_registry()
     policy = compile_execution_budget_policy("standard", registry)
-    surface = surface_profile_binding("claude_saved_workflow_v1", registry)
+    surface = _structural_test_surface(
+        surface_profile_binding("claude_saved_workflow_v1", registry)
+    )
     ledger = new_execution_event_ledger(
         root_execution_id="root-exec-lifecycle",
         policy_digest=execution_policy_digest(policy),
@@ -1105,13 +2381,155 @@ def test_execution_event_ledger_checks_only_surface_attested_event_coverage() ->
             surface_profile=surface["profile"],
         )
 
-    _, structural_only = admit_execution_event(
-        policy, ledger, unsupported_wait
+    with pytest.raises(ValueError, match="exact surface profile is required"):
+        _admit_execution_event(policy, ledger, unsupported_wait)
+
+
+def test_event_admission_validates_prior_surface_coverage_before_appending() -> None:
+    registry = load_registry()
+    policy = compile_execution_budget_policy("standard", registry)
+    surface = surface_profile_binding("claude_saved_workflow_v1", registry)
+    ledger = new_execution_event_ledger(
+        root_execution_id="root-exec-prior-surface-coverage",
+        policy_digest=execution_policy_digest(policy),
+        surface_profile_digest=surface["digest"],
+        watcher_id="watcher-1",
     )
-    errors = validate_execution_event_ledger(
+    _, ledger = admit_execution_event(
+        policy, ledger, _event("root:1", "root_turn", depth=0)
+    )
+    _, ledger = admit_execution_event(
         policy,
-        structural_only,
-        call_record_digests=[DIGEST_A],
+        ledger,
+        _event("call:1", "model_call", depth=1, call_digest=DIGEST_A),
+    )
+    unsupported_wait = _event("wait:unsupported", "wait", depth=1)
+    unsupported_wait["parent_event_id"] = "call:1"
+    ledger["events"].append(
+        {
+            **unsupported_wait,
+            "sequence": len(ledger["events"]),
+        }
+    )
+    _reseal_ledger(ledger)
+
+    assert any(
+        "surface profile does not attest wait" in error
+        for error in validate_execution_event_ledger(
+            policy,
+            ledger,
+            call_record_digests=[DIGEST_A],
+            surface_profile=surface["profile"],
+        )
+    )
+    with pytest.raises(ValueError, match="controller-owned monotonic anchor"):
+        admit_execution_event(
+            policy,
+            ledger,
+            _event("call:2", "model_call", depth=1, call_digest=DIGEST_B),
+            surface_profile=surface["profile"],
+        )
+
+
+def test_event_admission_rejects_a_ledger_bound_to_another_surface() -> None:
+    registry = load_registry()
+    policy = compile_execution_budget_policy("narrow", registry)
+    expected_surface = surface_profile_binding(
+        "claude_saved_workflow_v1", registry
+    )
+    other_surface = surface_profile_binding("generic_host_v1", registry)
+    ledger = new_execution_event_ledger(
+        root_execution_id="root-exec-wrong-surface",
+        policy_digest=execution_policy_digest(policy),
+        surface_profile_digest=other_surface["digest"],
+        watcher_id="watcher-1",
+    )
+    _, ledger = admit_execution_event(
+        policy, ledger, _event("root:1", "root_turn", depth=0)
+    )
+
+    with pytest.raises(
+        ValueError,
+        match="pre-admission.*surface profile digest differs",
+    ):
+        admit_execution_event(
+            policy,
+            ledger,
+            _event("call:1", "model_call", depth=1, call_digest=DIGEST_A),
+            surface_profile=expected_surface["profile"],
+        )
+
+
+def test_public_event_admission_requires_an_exact_surface_profile() -> None:
+    registry = load_registry()
+    policy = compile_execution_budget_policy("narrow", registry)
+    surface = surface_profile_binding("claude_saved_workflow_v1", registry)
+    ledger = new_execution_event_ledger(
+        root_execution_id="root-exec-missing-surface",
+        policy_digest=execution_policy_digest(policy),
+        surface_profile_digest=surface["digest"],
+        watcher_id="watcher-1",
+    )
+
+    with pytest.raises(ValueError, match="exact surface profile is required"):
+        _admit_execution_event(
+            policy,
+            ledger,
+            _event("root:1", "root_turn", depth=0),
+        )
+
+
+def test_standalone_ledger_validation_requires_an_exact_surface_profile() -> None:
+    registry = load_registry()
+    policy = compile_execution_budget_policy("narrow", registry)
+    surface = surface_profile_binding("claude_saved_workflow_v1", registry)
+    ledger = new_execution_event_ledger(
+        root_execution_id="root-exec-validator-missing-surface",
+        policy_digest=execution_policy_digest(policy),
+        surface_profile_digest=surface["digest"],
+        watcher_id="watcher-1",
+    )
+    _, ledger = admit_execution_event(
+        policy,
+        ledger,
+        _event("root:1", "root_turn", depth=0),
         surface_profile=surface["profile"],
     )
-    assert any("does not attest wait" in error for error in errors)
+
+    assert _validate_execution_event_ledger(
+        policy,
+        ledger,
+        call_record_digests=[],
+    ) == ["execution event ledger exact surface profile is required"]
+
+
+def test_generic_host_empty_coverage_rejects_model_call() -> None:
+    registry = load_registry()
+    policy = compile_execution_budget_policy("narrow", registry)
+    generic = surface_profile_binding("generic_host_v1", registry)
+    assert generic["profile"]["event_coverage"] == []
+    ledger = new_execution_event_ledger(
+        root_execution_id="root-exec-generic-no-model-call",
+        policy_digest=execution_policy_digest(policy),
+        surface_profile_digest=generic["digest"],
+        watcher_id="watcher-1",
+    )
+    _, ledger = admit_execution_event(
+        policy,
+        ledger,
+        _event("root:1", "root_turn", depth=0),
+        surface_profile=generic["profile"],
+    )
+
+    with pytest.raises(ValueError, match="does not attest model_call"):
+        admit_execution_event(
+            policy,
+            ledger,
+            _event(
+                "call:1",
+                "model_call",
+                depth=1,
+                call_digest=DIGEST_A,
+            ),
+            surface_profile=generic["profile"],
+        )

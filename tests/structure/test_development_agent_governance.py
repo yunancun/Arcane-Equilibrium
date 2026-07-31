@@ -1283,7 +1283,19 @@ def test_agent_wave_executes_only_verified_inline_context_and_reuses_exact_retry
         "previous_failure": "contextPath bytes were not verified",
         "task_prompt": "Review the bound context only.",
     }
-    context_plan = governance.compile_context("E2", facts)
+    execution_dag = [{
+        "node_id": "independent_review",
+        "role": "E2",
+        "native_agent": "E2",
+        "requires": [],
+        "node_class": "verification",
+        "permission": "read_only",
+    }]
+    context_plan = governance.compile_context(
+        "E2",
+        facts,
+        execution_dag=execution_dag,
+    )
     assert context_plan["budget"]["pass_allowed"] is True
     context_artifact = governance.materialize_context_artifact(context_plan)
     wave_args = {
@@ -1304,14 +1316,7 @@ def test_agent_wave_executes_only_verified_inline_context_and_reuses_exact_retry
         "dag_digest": _canonical_digest(
             {
                 "schema_version": "agent_wave_execution_dag_v1",
-                "nodes": [
-                    {
-                        "node_id": "independent_review", "role": "E2",
-                        "native_agent": "E2",
-                        "requires": [], "node_class": "verification",
-                        "permission": "read_only",
-                    }
-                ],
+                "nodes": execution_dag,
             }
         ),
         "budget": {
@@ -1782,9 +1787,113 @@ def test_closure_schema_binds_role_producers_and_typed_capture_refs() -> None:
     }
 
 
+_FIXTURE_EVENT_TIMESTAMP_FIELDS = {
+    "completed_at",
+    "created_at",
+    "ended_at",
+    "executed_at",
+    "issued_at",
+    "observed_at",
+    "reused_from",
+    "started_at",
+}
+
+
+def _fixture_timestamp(value: object) -> datetime:
+    parsed = datetime.fromisoformat(str(value).replace("Z", "+00:00"))
+    assert parsed.tzinfo is not None
+    return parsed.astimezone(timezone.utc)
+
+
+def _fixture_event_timestamps(value: object) -> list[datetime]:
+    timestamps: list[datetime] = []
+    if isinstance(value, dict):
+        for key, child in value.items():
+            if key in _FIXTURE_EVENT_TIMESTAMP_FIELDS and child is not None:
+                timestamps.append(_fixture_timestamp(child))
+            timestamps.extend(_fixture_event_timestamps(child))
+    elif isinstance(value, list):
+        for child in value:
+            timestamps.extend(_fixture_event_timestamps(child))
+    return timestamps
+
+
+def _bind_fixture_evaluation_clock(packet: dict, context_plan: dict) -> str:
+    """Place the fixture verifier clock after its generation, inside every Context TTL."""
+
+    source_observed = [
+        _fixture_timestamp(source["observed_at"])
+        for source in context_plan["sources"]
+        if source.get("observed_at")
+    ]
+    source_expiry = [
+        _fixture_timestamp(source["expires_at"])
+        for source in context_plan["sources"]
+        if source.get("expires_at")
+    ]
+    capture_evidence = [
+        evidence
+        for evidence in packet.get("evidence", [])
+        if evidence.get("kind") not in {
+            "workflow_call_manifest_v1", "workflow_wave_record_v1",
+        }
+    ]
+    event_timestamps = _fixture_event_timestamps({
+        "authority_refs": packet.get("authority_refs", []),
+        "evidence": capture_evidence,
+        "checks": packet.get("checks", []),
+    })
+    assert source_observed
+    assert source_expiry
+    evaluated_at = max([*source_observed, *event_timestamps]) + timedelta(
+        microseconds=1
+    )
+    assert evaluated_at < min(source_expiry)
+    timestamp = evaluated_at.isoformat().replace("+00:00", "Z")
+    packet["adjudicated_at"] = timestamp
+    return timestamp
+
+
 def _refresh_standard_workflow_lineage(governance, packet: dict) -> None:
-    artifact = packet["dispatch"]["context_artifact"]
-    plan = json.loads(artifact["canonical_plan"])
+    task_specs, projection_errors = governance.task_execution_projection(
+        packet["dispatch"]["required_role_nodes"],
+        packet["dispatch"]["admitted_role_nodes"],
+        task_facts=packet["dispatch"]["task_facts"],
+    )
+    assert projection_errors == [], projection_errors
+    plan = governance.compile_context(
+        "PM",
+        packet["dispatch"]["task_facts"],
+        execution_dag=task_specs,
+    )
+    artifact = governance.materialize_context_artifact(plan)
+    packet["dispatch"]["context_artifact"] = artifact
+    _bind_fixture_evaluation_clock(packet, plan)
+    source_by_name = {
+        source["source"]: source
+        for source in plan["sources"]
+    }
+    packet["authority_refs"] = [
+        governance.build_authority_claim(
+            authority_class=claim["class"],
+            subject=claim["subject"],
+            value=claim["value"],
+            source=claim["source"],
+            source_ref=claim["source_ref"],
+            source_digest=source_by_name[claim["source"]]["content_digest"],
+            observed_at=source_by_name[claim["source"]]["observed_at"],
+            scope=claim["scope"],
+            strength=claim["strength"],
+            expiry=claim["expiry"],
+        )
+        if (
+            isinstance(claim, dict)
+            and claim.get("source_ref") == f"context:{claim.get('source')}"
+            and claim.get("source") in source_by_name
+        )
+        else claim
+        for claim in packet["authority_refs"]
+    ]
     contract = plan["task_contract"]
     task_digest = plan["task_contract_digest"]
     context_digest = artifact["artifact_digest"]
@@ -1792,18 +1901,35 @@ def _refresh_standard_workflow_lineage(governance, packet: dict) -> None:
         {"schema_version": "test_standard_workflow_v1", "task": task_digest}
     )
     schema_digest = _canonical_digest({"schema": "standard_judgment_v1"})
-    task_specs, projection_errors = governance.delegated_execution_projection(
-        packet["dispatch"]["required_role_nodes"],
-        packet["dispatch"]["admitted_role_nodes"],
-        excluded_nodes=governance.non_call_controller_node_ids(
-            packet["dispatch"]["task_facts"]
-        ),
-    )
-    assert projection_errors == [], projection_errors
     execution_waves, topology_errors = governance.topological_waves(task_specs)
     assert topology_errors == [], topology_errors
     dag_digest = governance.execution_dag_digest(task_specs)
     packet["dispatch"]["dag_digest"] = dag_digest
+    for evidence in packet.get("evidence", []):
+        if evidence.get("kind") != "program_adoption_receipt_v1":
+            continue
+        bundle = evidence.get("artifact")
+        artifacts = bundle.get("artifacts") if isinstance(bundle, dict) else None
+        final_attempt = (
+            artifacts.get("finalization_attempt")
+            if isinstance(artifacts, dict)
+            else None
+        )
+        bootstrap = (
+            final_attempt.get("bootstrap_admission")
+            if isinstance(final_attempt, dict)
+            else None
+        )
+        if not isinstance(bootstrap, dict):
+            continue
+        bootstrap.update({
+            "task_id": packet["task_id"],
+            "task_contract_digest": task_digest,
+            "dag_digest": dag_digest,
+            "context_artifact_digest": context_digest,
+            "baseline_head": packet["baseline"]["source_head"],
+        })
+        evidence["digest"] = _canonical_digest(bundle)
     task_by_node = {task["node_id"]: task for task in task_specs}
     fragment_by_node = {
         fragment["node_id"]: fragment for fragment in packet["role_fragments"]
@@ -2994,26 +3120,23 @@ def test_saved_workflows_expose_closure_and_consumption_envelopes() -> None:
     assert "axis_fragment_digests: axisFragmentDigests" in audit
     assert "full_audit_debt:${canonicalJson" in audit
     assert "estimated_seam_tokens" in audit
-    assert "estimated_fix_tokens" in audit
-    assert "estimated_review_tokens" in audit
-    # claim-0011(2026-07-24 run0):in-run Regression 死碼已移除——釘「死碼不存在」
-    # 與新 reserve 不變量(E1 candidate + E2 review 兩節點;result 欄位形狀恆 null 保留)
+    assert "hostPhaseOnlyConfigFields" in audit
+    assert "requires a separately admitted MAE-005 host-capability phase" in audit
+    # GPT-5.6 remediation: the saved workflow binds only the fixed 13 axes plus
+    # seam. Data-dependent verify/fix work is debt for a separately admitted
+    # MAE-005 host-capability phase; no speculative post-call reserve remains.
     assert "estimated_regression_tokens" not in audit
     assert "retryBudget * auditCallTokens" in audit
-    assert "const fixReserveNodes = 2" in audit
-    assert "const fixReserveTokens = fixCallTokens + reviewCallTokens" in audit
+    assert "const admittedClaims = []" in audit
+    assert "dynamic claim verification requires a separately admitted host-capability verification phase" in audit
+    assert "const fixReserveTokens" not in audit
+    assert "const fixReserveNodes" not in audit
     assert "regressionReserved" not in audit
     assert "const regression = null" in audit
     assert "regression_reserved: false" in audit
-    # run0 follow-up(2026-07-24):確定性浮動第三票在 admission 期預派——釘住機制
-    # 防無聲退回 verify 期 FCFS 搶票(舊形狀=floatingThirdVoteSlots 可變計數器,
-    # 第三票落點隨 agent 完成順序漂移,破壞 resume 重放確定性)
-    assert "const floatingThirdVoteClaimIds = new Set()" in audit
-    assert "if (!reserveVerificationSlots(1)) break" in audit
-    assert (
-        "reservedThirdVoteClaimIds.has(claim.claim_id) || floatingThirdVoteClaimIds.has(claim.claim_id)"
-        in audit
-    )
+    assert "floatingThirdVoteClaimIds" not in audit
+    assert "reserveVerificationSlots" not in audit
+    assert "reservedThirdVoteClaimIds" not in audit
     assert "floatingThirdVoteSlots" not in audit
     # GPT-5.6 remediation: saved workflows cannot inherit or accept a caller
     # model/effort override; every call is pinned by the Registry role policy.

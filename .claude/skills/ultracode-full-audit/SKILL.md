@@ -17,6 +17,12 @@ than a narrow task when that avoids false closure or rework. Hard boundaries,
 independent discovery, negative space, dissent, and raw evidence are never
 compressed away to meet a budget.
 
+The saved workflow in this source generation has one exact pre-call DAG:
+13 discovery axes plus one seam critic. Data-dependent claim verification and
+fix/review are a separately admitted phase under the existing
+`MAE-005 / EXTERNAL_LIMIT_NATIVE_SELECTOR_ATTESTATION` host capability; the
+saved workflow emits typed coverage debt and makes zero such agent calls.
+
 ## Stage 0 — PM freeze
 
 Before the workflow, PM freezes the claims that need stable identity:
@@ -63,28 +69,20 @@ Tunable args inside that authority:
 
 | Arg | Default | Meaning |
 |---|---:|---|
-| `max_verification_calls` | Context `max_agents` | Independent claim-verification calls; cannot exceed agent authority |
 | `estimated_tokens_per_audit` | 4,500 | Admission lower-bound estimate, not a prompt cap |
-| `estimated_tokens_per_verification` | 2,000 | Admission lower-bound estimate |
 | `estimated_seam_tokens` | 4,000 | Cross-axis seam critic reserve |
-| `estimated_fix_tokens` | 8,000 | Optional E1 fix reserve per admitted finding |
-| `estimated_review_tokens` | 4,000 | Independent E2 fix-review reserve |
-| `max_fixes` | 5 | Optional fix-mode source patches |
 | `admission_now_ms` | wall clock | Dispatch-side epoch-ms admission clock; mandatory where the sandbox denies `Date.now()` |
 | `stop_when` | decision-value rule | Mandatory coverage closed and next novelty/verdict-reversal value below marginal cost |
 
 If the envelope cannot admit all 13 discovery axes, the workflow returns
-`EXTERNAL_LIMIT_RECALL_AUTHORITY` before its first model call. Later
-claim/fix-stage capacity shortfalls become explicit `coverage_debt`; deferred
-or unverified debt makes `pass_eligible=false` and never truncates into PASS.
-Increase the envelope or split scope when the debt is decision-critical.
+`EXTERNAL_LIMIT_RECALL_AUTHORITY` before its first model call. Every discovered
+decision claim becomes explicit `coverage_debt` for a fresh MAE-005
+host-attested verification Context; `fix=true` likewise emits host-phase debt
+and authorizes no writer/reviewer call. Deferred or unverified debt makes
+`pass_eligible=false` and never truncates into PASS.
 
-Call and token accounting reserves every phase: audit axes, one shared total
-retry budget across audit and verification, seam critic, verifier quorum with
-risk-conditioned third votes, and optional E1/E2 fix pairs. The Registry
-authority is a ceiling, not a target; unused reserves are not actual usage. If
-full backstop plus claims cannot fit, split scope and preserve coverage debt
-rather than lowering evidence.
+Call and token accounting covers the 13 audit axes, their bounded infrastructure
+retries, and one seam critic. Registry authority is a ceiling, not a target.
 
 ## Audit phase
 
@@ -99,35 +97,33 @@ Every axis discovers independently and returns `audit_fragment_v2` with:
 No axis writes a role report or memory. Findings are not shown to peers during
 discovery; this protects independence.
 
-## Verify phase
+## Claim staging and seam phase
 
 1. Deterministically validate required finding fields and normalize exact claim
    identity.
-2. Exact duplicate assertion+evidence can share verification; distinct
-   assertions at one symbol remain separate and all original members survive.
-3. Every admitted CRITICAL/HIGH/goal-bearing MEDIUM claim receives two
-   independent verifiers.
-4. High-risk/reachability or verifier disagreement receives a third independent
-   adjudicator within the risk-conditioned third-vote capacity (dedicated
-   reservation per admitted high-risk claim, then deterministic severity-order
-   floating entitlements); shortfall is explicit coverage debt.
-5. Missing quorum is disputed, never confirmed.
-6. A seam critic returns re-probes; these remain coverage debt until an assigned
+2. Exact duplicates remain grouped for presentation; distinct assertions at one
+   symbol remain separate and all original members survive.
+3. Every zero-outcome decision claim is staged as typed
+   `staged_claim_verification` debt with exact `MAE-005`,
+   `REQUIRES_HOST_CAPABILITY_PHASE`, and sorted unique `bound_axes`. It is
+   `UNVERIFIED`, not a verified dispute; exact duplicates across axes share one
+   claim/debt whose binding exact-covers every originating axis.
+4. The current saved workflow performs zero data-dependent verifier, third-vote,
+   fix, or fix-review calls. A host phase must recompile Context with its now
+   knowable exact call DAG before any such call.
+5. A seam critic returns re-probes; these remain coverage debt until an assigned
    role obtains evidence.
 
-The workflow preserves verifier dissent. Capability/over-gate findings are not
-downgraded merely because the capability is unreachable; unreachability may be
-the defect itself.
+No absent host phase is presented as verifier dissent or quorum.
 
 ## Cluster and fix
 
 Clustering is presentation-only by normalized file+symbol. Members, severity,
 evidence, and fix identity remain untouched.
 
-`fix=true` admits only bounded confirmed claims. E1 fixes in isolated scope; E2
-reviews without editing. Candidates are never integrated in-run
-(`integration_status` stays `NOT_INTEGRATED`); E4 regression evidence belongs to
-the post-integration pipeline after the candidate merges (claim-0011).
+`fix=true` does not authorize an in-run E1/E2 call. It records MAE-005
+host-capability debt. A later host-attested phase may compile a fixed candidate
+DAG; E4 regression remains post-integration.
 
 ## Closure
 
@@ -137,9 +133,12 @@ views, coverage holes/debt, assumptions, seam re-probes, fixes (in-run
 regression is retired; result fields stay null), and
 partial or measured consumption. PM must copy controller/admissions/fragments and
 the canonical unverified projection into one `closure_packet_v1`. Closure
-requires the full scheduler and exact 13-axis parity; validates canonical JSON
-debt projection, seam result digest, axis fragment digests and hash-pinned
-verification outcomes. Omitting an axis/debt or overwriting dissent fails.
+requires the full scheduler and exact ordered 14-node admission parity:
+13 `role_fragment` axis admissions followed by the `nested_payload`
+`seam:critic` admission. It validates canonical JSON debt projection, seam
+result digest, axis fragment digests, and exact workflow call coverage of the
+Context-bound axes+seam DAG. Omitting or substituting an axis, seam, or debt
+fails.
 
 ## Recall benchmark before adaptive default
 
@@ -165,32 +164,52 @@ Until then every run uses `full`.
 
 ## Standard invocation
 
-```text
-Workflow({
-  name: "openclaw-full-audit",
-  args: {
-    baseline: {
-      source_head: "<40-hex>",
-      dirty_diff_hash: "sha256:<64-hex>",
-      untracked_relevant_hash: "sha256:<64-hex>",
-      runtime_head: "<40-hex-or-null>",
-      runtime_observed_at: "<ISO-time-or-null>"
-    },
-    scope,
-    dirty_scope: ["<sorted-repo-path>"],
-    surfaces: ["full_audit", "agent_workflow", "authority", "runtime", "bybit", "ibkr", "ml", "gui", "docs"],
-    focus,
-    scheduler: "full",
-    task_contract_digest: "sha256:<64-hex>",
-    context_artifact_digest: "sha256:<64-hex>",
-    route_required_roles: ["CC", "AI-E", "QC", "MIT", "OPS", "BB", "IB"],
-    budget_authority_canonical: "<exact compiler-produced canonical JSON bytes>",
-    budget_authority_digest: "sha256:<64-hex>",
-    run_sequence: 0,
-    fix: false
+```javascript
+const dispatchFullAudit = ({
+  Workflow,
+  contextArtifact,
+  admissionNowMs,
+  baseline,
+  scope,
+  dirtyScope,
+  surfaces,
+  focus = "",
+  routeRequiredRoles,
+  runSequence = 0,
+}) => {
+  if (
+    !contextArtifact ||
+    contextArtifact.schema_version !== "context_artifact_v1"
+  ) {
+    throw new Error("exact materialized contextArtifact is required");
   }
-})
+  if (!Number.isInteger(admissionNowMs) || admissionNowMs <= 0) {
+    throw new Error("dispatch-side admissionNowMs must be positive epoch-ms");
+  }
+  return Workflow({
+    name: "openclaw-full-audit",
+    args: {
+      context_artifact: contextArtifact,
+      admission_now_ms: admissionNowMs,
+      baseline,
+      scope,
+      dirty_scope: dirtyScope,
+      surfaces,
+      focus,
+      scheduler: "full",
+      route_required_roles: routeRequiredRoles,
+      run_sequence: runSequence,
+      fix: false,
+    },
+  });
+};
 ```
+
+`admissionNowMs` is captured by the desktop dispatch side immediately before
+invocation; the saved-workflow sandbox never has to call `Date.now()`.
+`contextArtifact` is the exact object returned by Context materialization.
+Digest and budget fields are derived from those inline bytes rather than copied
+as a second caller-controlled authority.
 
 `openclaw-full-audit` finds defects. `profit-diagnosis` finds money. Profit
 diagnosis requires a fresh baseline and hash-pinned current priors, allows an

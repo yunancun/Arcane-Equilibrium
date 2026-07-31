@@ -15,6 +15,9 @@ DIGEST_RE = re.compile(r"^sha256:[0-9a-f]{64}$")
 EXECUTION_NODE_FIELDS = (
     "node_id", "role", "native_agent", "requires", "node_class", "permission",
 )
+CONTEXT_EXECUTION_DAG_BINDING_FIELDS = (
+    "schema_version", "dag_digest", "node_count", "edge_count", "nodes",
+)
 
 
 def _canonical(value: Any) -> bytes:
@@ -38,6 +41,168 @@ def execution_dag_digest(tasks: list[dict[str, Any]]) -> str:
     return "sha256:" + hashlib.sha256(_canonical(core)).hexdigest()
 
 
+def _compile_context_execution_dag_binding(
+    tasks: Any,
+    *,
+    registry: dict[str, Any] | None = None,
+    allow_empty: bool = False,
+) -> dict[str, Any]:
+    """Internal exact binding primitive with an explicit zero-call policy."""
+
+    if not isinstance(tasks, list):
+        raise ValueError("Context execution DAG must be an array")
+    if not tasks and not allow_empty:
+        raise ValueError("Context execution DAG must contain at least one node")
+    if any(not isinstance(task, dict) for task in tasks):
+        raise ValueError("Context execution DAG nodes must be objects")
+    expected_fields = set(EXECUTION_NODE_FIELDS)
+    for index, task in enumerate(tasks):
+        if set(task) != expected_fields:
+            raise ValueError(
+                f"Context execution DAG node[{index}] fields must be exact"
+            )
+    nodes = [execution_node_core(task) for task in tasks]
+    _, errors = topological_waves(nodes, registry=registry)
+    if errors:
+        raise ValueError("invalid Context execution DAG: " + "; ".join(errors))
+    return {
+        "schema_version": "context_execution_dag_binding_v1",
+        "dag_digest": execution_dag_digest(nodes),
+        "node_count": len(nodes),
+        "edge_count": sum(len(node["requires"]) for node in nodes),
+        "nodes": nodes,
+    }
+
+
+def compile_context_execution_dag_binding(
+    tasks: Any,
+    *,
+    registry: dict[str, Any] | None = None,
+) -> dict[str, Any]:
+    """Bind a caller-supplied, non-empty exact call-producing DAG."""
+
+    return _compile_context_execution_dag_binding(
+        tasks,
+        registry=registry,
+        allow_empty=False,
+    )
+
+
+def _compiler_derived_zero_call_context_execution_dag_binding(
+    *,
+    registry: dict[str, Any] | None = None,
+) -> dict[str, Any]:
+    """Materialize the compiler's zero-delegation binding.
+
+    This helper accepts no caller DAG and therefore cannot be used as a public
+    boolean override to erase routed work.
+    """
+
+    return _compile_context_execution_dag_binding(
+        [],
+        registry=registry,
+        allow_empty=True,
+    )
+
+
+def profit_diagnosis_execution_dag(
+    registry: dict[str, Any] | None = None,
+) -> list[dict[str, Any]]:
+    """Compile the complete pre-call Profit Diagnosis execution DAG."""
+
+    registry = registry or load_registry()
+    contract = registry["workflow_contracts"]["profit_diagnosis_v1"]
+    evidence_axes = contract["evidence_axes"]
+    probe_axes = contract["probe_axes"]
+    probe_requirements = {
+        "QC": ["MIT", "OPS"],
+        "BB": ["MIT", "OPS"],
+        "IB": ["MIT", "OPS"],
+        "MIT": ["MIT", "OPS"],
+        "AI-E": ["AI-E", "OPS"],
+        "EXT": list(evidence_axes),
+    }
+
+    def node(
+        node_id: str,
+        role: str,
+        requires: list[str],
+    ) -> dict[str, Any]:
+        binding = native_agent_binding(role, "verification", registry)
+        return {
+            "node_id": node_id,
+            "role": role,
+            "native_agent": binding["native_agent"],
+            "requires": sorted(requires),
+            "node_class": "verification",
+            "permission": binding["permission"],
+        }
+
+    evidence = [
+        node(f"evidence:{axis}", axis, [])
+        for axis in evidence_axes
+    ]
+    probes = [
+        node(
+            f"probe:{axis}",
+            "QC" if axis == "EXT" else axis,
+            [f"evidence:{item}" for item in probe_requirements[axis]],
+        )
+        for axis in probe_axes
+    ]
+    mapped = node(
+        "map:PA",
+        "PA",
+        [
+            *[f"evidence:{axis}" for axis in evidence_axes],
+            *[f"probe:{axis}" for axis in probe_axes],
+        ],
+    )
+    tasks = [*evidence, *probes, mapped]
+    _, errors = topological_waves(tasks, registry=registry)
+    if errors:
+        raise ValueError(
+            "invalid Profit Diagnosis execution DAG: " + "; ".join(errors)
+        )
+    return tasks
+
+
+def full_audit_execution_dag(
+    registry: dict[str, Any] | None = None,
+) -> list[dict[str, Any]]:
+    """Compile the fixed pre-call Full Audit axes plus seam DAG."""
+
+    registry = registry or load_registry()
+    axes = registry["workflow_contracts"]["full_audit_v3"]["axes"]
+
+    def node(
+        node_id: str,
+        role: str,
+        requires: list[str],
+    ) -> dict[str, Any]:
+        binding = native_agent_binding(role, "verification", registry)
+        return {
+            "node_id": node_id,
+            "role": role,
+            "native_agent": binding["native_agent"],
+            "requires": sorted(requires),
+            "node_class": "verification",
+            "permission": binding["permission"],
+        }
+
+    audit_nodes = [node(f"audit:{axis}", axis, []) for axis in axes]
+    seam = node(
+        "seam:critic",
+        "CC",
+        [item["node_id"] for item in audit_nodes],
+    )
+    tasks = [*audit_nodes, seam]
+    _, errors = topological_waves(tasks, registry=registry)
+    if errors:
+        raise ValueError("invalid Full Audit execution DAG: " + "; ".join(errors))
+    return tasks
+
+
 def non_call_controller_node_ids(task_facts: dict[str, Any] | None) -> set[str]:
     """Return routed role nodes whose result is the workflow-wave controller."""
 
@@ -48,6 +213,257 @@ def non_call_controller_node_ids(task_facts: dict[str, Any] | None) -> set[str]:
     if "profit_diagnosis" in surfaces:
         excluded.add("profit_control")
     return excluded
+
+
+def specialized_execution_surface(
+    task_facts: dict[str, Any] | None,
+) -> str | None:
+    """Return the one saved-workflow surface that owns the call DAG."""
+
+    surfaces = set((task_facts or {}).get("surfaces", []))
+    selected = [
+        surface
+        for surface in ("full_audit", "profit_diagnosis")
+        if surface in surfaces
+    ]
+    if len(selected) > 1:
+        raise ValueError(
+            "task facts cannot bind more than one specialized execution surface"
+        )
+    return selected[0] if selected else None
+
+
+def _specialized_route_result_node(
+    route_node: dict[str, Any],
+    surface: str,
+) -> str | None:
+    """Map one generic route requirement to its saved-workflow owner/result."""
+
+    node_id = route_node.get("node_id")
+    role = route_node.get("role")
+    if surface == "full_audit":
+        if node_id == "pa_design":
+            # The fixed DAG itself is the PM-owned plan; no PA model call is
+            # made merely to rediscover that already-bound plan.
+            return None
+        if node_id == "ai_economics_review":
+            # The post-wave AI-E control fragment owns the complete wave.
+            return "ai_economics_review"
+        if node_id == "constitutional_gate":
+            return "audit:CC"
+        if isinstance(role, str) and role in {
+            "CC", "FA", "E2", "E3", "BB", "IB", "OPS",
+            "QC", "MIT", "AI-E", "E5", "A3", "R4",
+        }:
+            return f"audit:{role}"
+    elif surface == "profit_diagnosis":
+        if node_id == "pa_design":
+            return "map:PA"
+        if node_id == "profit_control":
+            # The deterministic AI-E controller binds the fixed wave result.
+            return "profit_control"
+        if role == "QC":
+            # Quantitative route review is already the fixed QC probe; adding
+            # the generic quant_review id would double-call the same semantics.
+            return "probe:QC"
+    return str(node_id) if isinstance(node_id, str) else None
+
+
+def specialized_route_result_bindings(
+    required_nodes: Any,
+    task_facts: dict[str, Any] | None,
+) -> tuple[list[dict[str, Any]], list[str]]:
+    """Describe how routed semantics are satisfied by a specialized workflow.
+
+    `result_node_id=None` is reserved for a deterministic controller-owned
+    planning step.  Other result ids name either an actual fixed call or the
+    post-wave controller fragment.  This projection is also used by closure so
+    a generic route fragment is never demanded in addition to its fixed call.
+    """
+
+    try:
+        surface = specialized_execution_surface(task_facts)
+    except ValueError as error:
+        return [], [str(error)]
+    if surface is None:
+        return [], []
+    if not isinstance(required_nodes, list) or any(
+        not isinstance(node, dict) for node in required_nodes
+    ):
+        return [], ["routed execution nodes must be an array of objects"]
+    bindings: list[dict[str, Any]] = []
+    errors: list[str] = []
+    seen: set[str] = set()
+    for node in required_nodes:
+        node_id = node.get("node_id")
+        role = node.get("role")
+        if not isinstance(node_id, str) or not node_id or node_id in seen:
+            errors.append("routed execution node ids are invalid or duplicate")
+            continue
+        seen.add(node_id)
+        if not isinstance(role, str) or not role:
+            errors.append(f"routed execution node {node_id} role is invalid")
+            continue
+        result_node_id = _specialized_route_result_node(node, surface)
+        bindings.append({
+            "route_node_id": node_id,
+            "route_role": role,
+            "result_node_id": result_node_id,
+            "controller_owned": result_node_id is None
+            or result_node_id in {"ai_economics_review", "profit_control"},
+        })
+    return bindings, errors
+
+
+def task_execution_projection(
+    required_nodes: Any,
+    admitted_nodes: Any,
+    *,
+    task_facts: dict[str, Any] | None,
+    registry: dict[str, Any] | None = None,
+    require_fixed_admissions: bool = False,
+) -> tuple[list[dict[str, Any]], list[str]]:
+    """Compile the one canonical call DAG for generic and saved workflows.
+
+    Generic routes retain their delegated node ids.  Full Audit and Profit
+    Diagnosis instead begin with their fixed workflow DAG; routed semantic
+    roles are represented by fixed calls or explicit controller ownership.
+    Additional admitted calls remain permitted only as an exact superset.
+    """
+
+    try:
+        surface = specialized_execution_surface(task_facts)
+    except ValueError as error:
+        return [], [str(error)]
+    if surface is None:
+        return delegated_execution_projection(
+            required_nodes,
+            admitted_nodes,
+            excluded_nodes=non_call_controller_node_ids(task_facts),
+            registry=registry,
+        )
+    if not isinstance(required_nodes, list) or not isinstance(admitted_nodes, list):
+        return [], ["dispatch execution nodes must be arrays"]
+    combined = [*required_nodes, *admitted_nodes]
+    if any(not isinstance(node, dict) for node in combined):
+        return [], ["dispatch execution nodes must be objects"]
+    node_ids = [node.get("node_id") for node in combined]
+    if any(not isinstance(node_id, str) or not node_id for node_id in node_ids):
+        return [], ["dispatch execution node ids are invalid"]
+    if len(node_ids) != len(set(node_ids)):
+        return [], ["dispatch execution node ids are not unique"]
+
+    registry = registry or load_registry()
+    fixed = (
+        full_audit_execution_dag(registry)
+        if surface == "full_audit"
+        else profit_diagnosis_execution_dag(registry)
+    )
+    fixed_by_id = {node["node_id"]: node for node in fixed}
+    route_bindings, errors = specialized_route_result_bindings(
+        required_nodes, task_facts,
+    )
+    binding_by_route = {
+        binding["route_node_id"]: binding["result_node_id"]
+        for binding in route_bindings
+    }
+    controller_owned_route_ids = {
+        binding["route_node_id"]
+        for binding in route_bindings
+        if binding["controller_owned"]
+    }
+    represented_route_ids = set(binding_by_route)
+
+    admitted_by_id = {
+        str(node["node_id"]): node for node in admitted_nodes
+    }
+    for node_id, fixed_node in fixed_by_id.items():
+        admission = admitted_by_id.get(node_id)
+        if require_fixed_admissions and admission is None:
+            errors.append(
+                f"specialized {surface} dispatch omits fixed call admission {node_id}"
+            )
+            continue
+        if (
+            admission is not None
+            and execution_node_core(admission) != fixed_node
+        ):
+            errors.append(
+                f"specialized {surface} admission substitutes fixed call node {node_id}"
+            )
+
+    def project_requires(
+        node_id: str,
+        requires: Any,
+    ) -> list[str]:
+        if not isinstance(requires, list) or requires != sorted(set(requires)):
+            errors.append(
+                f"dispatch execution node {node_id} requires are not sorted unique"
+            )
+            return []
+        projected: set[str] = set()
+        for required in requires:
+            if not isinstance(required, str):
+                errors.append(
+                    f"dispatch execution node {node_id} requires are invalid"
+                )
+                continue
+            if required in binding_by_route:
+                representative = binding_by_route[required]
+                if representative is not None and representative not in {
+                    "ai_economics_review", "profit_control",
+                }:
+                    projected.add(representative)
+                continue
+            if required in fixed_by_id:
+                projected.add(required)
+                continue
+            if required in node_ids:
+                projected.add(required)
+                continue
+            errors.append(
+                f"dispatch execution node {node_id} requires unknown predecessor {required}"
+            )
+        projected.discard(node_id)
+        return sorted(projected)
+
+    route_extras: list[dict[str, Any]] = []
+    for node in required_nodes:
+        node_id = str(node["node_id"])
+        representative = binding_by_route.get(node_id)
+        if (
+            node_id not in represented_route_ids
+            or (
+                representative == node_id
+                and node_id not in controller_owned_route_ids
+            )
+        ):
+            route_extras.append({
+                **execution_node_core(node),
+                "requires": project_requires(node_id, node.get("requires")),
+            })
+
+    admitted_extras: list[dict[str, Any]] = []
+    for node in admitted_nodes:
+        node_id = str(node["node_id"])
+        if node_id in fixed_by_id:
+            continue
+        admitted_extras.append({
+            **execution_node_core(node),
+            "requires": project_requires(node_id, node.get("requires")),
+        })
+
+    projected = [*fixed, *route_extras, *admitted_extras]
+    projected_ids = {node["node_id"] for node in projected}
+    for node in projected:
+        missing = set(node["requires"]) - projected_ids
+        if missing:
+            errors.append(
+                f"specialized {surface} node {node['node_id']} requires absent calls {sorted(missing)}"
+            )
+    _, topology_errors = topological_waves(projected, registry=registry)
+    errors.extend(topology_errors)
+    return projected, errors
 
 
 def delegated_execution_projection(
@@ -132,6 +548,65 @@ def delegated_execution_projection(
     _, topology_errors = topological_waves(projected, registry=registry)
     errors.extend(topology_errors)
     return projected, errors
+
+
+def explicit_execution_dag_route_errors(
+    tasks: Any,
+    required_nodes: Any,
+    task_facts: dict[str, Any] | None,
+    *,
+    registry: dict[str, Any] | None = None,
+) -> list[str]:
+    """Require caller DAGs to retain every canonical routed call node.
+
+    Extra nodes are permitted, but a caller cannot omit a routed node or reuse
+    its node id with a different role/native/class/permission/predecessor core.
+    Saved-workflow controller nodes that do not themselves make a call are
+    projected out through the same canonical rule used by Context defaults.
+    """
+
+    canonical, errors = task_execution_projection(
+        required_nodes,
+        [],
+        task_facts=task_facts,
+        registry=registry,
+    )
+    if errors:
+        return [
+            "cannot derive routed call-producing DAG: " + "; ".join(errors)
+        ]
+    if not isinstance(tasks, list):
+        return ["explicit Context execution DAG must be an array"]
+    supplied_by_id = {
+        task.get("node_id"): task
+        for task in tasks
+        if isinstance(task, dict) and isinstance(task.get("node_id"), str)
+    }
+    route_errors: list[str] = []
+    for required in canonical:
+        node_id = str(required["node_id"])
+        supplied = supplied_by_id.get(node_id)
+        if supplied is None:
+            surface = specialized_execution_surface(task_facts)
+            if surface is None:
+                route_errors.append(
+                    f"explicit Context execution DAG omits routed call-producing node {node_id}"
+                )
+            else:
+                route_errors.append(
+                    f"explicit Context execution DAG does not authorize specialized {surface} workflow: omits fixed call node {node_id}"
+                )
+        elif execution_node_core(supplied) != required:
+            surface = specialized_execution_surface(task_facts)
+            if surface is None:
+                route_errors.append(
+                    f"explicit Context execution DAG substitutes routed call-producing node {node_id}"
+                )
+            else:
+                route_errors.append(
+                    f"explicit Context execution DAG does not authorize specialized {surface} workflow: substitutes fixed call node {node_id}"
+                )
+    return route_errors
 
 
 def topological_waves(

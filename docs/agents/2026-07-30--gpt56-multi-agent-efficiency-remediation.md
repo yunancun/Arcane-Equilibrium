@@ -1,6 +1,6 @@
 # GPT-5.6 Multi-Agent Efficiency Remediation TODO
 
-Status: `COMPLETE_WITH_EXTERNAL_LIMITS_UNCOMMITTED`
+Status: `SOURCE_REMEDIATION_COMPLETE_WITH_EXTERNAL_LIMITS`
 
 Task ID: `GPT56-MULTIAGENT-EFFICIENCY-REMEDIATION-20260730`
 
@@ -53,7 +53,7 @@ platform capability is machine-detectable. Completion additionally requires:
 | `MAE-002` | P0 | `EXTERNAL_LIMIT_CODEX_HISTORY_ATTESTATION` | History propagation is prose-only; `fork_turns=all` caused large context duplication. | Bind normalized history mode, source thread, boundary turn, and ephemeral state in requested-agent/call records. Default to `none`; full/partial history requires an explicit reviewed exception. | Saved workflows enforce exact history records; Codex-native history/fork remains advisory until a host receipt attests the selected boundary. |
 | `MAE-003` | P0 | `EXTERNAL_LIMIT_HOST_WAIT_CANCEL` | Repeated waits/follow-ups can create hundreds of new model turns. | Add aggregate `max_wait_cycles` and `max_no_delta_wakeups`; one watcher owns a wave. Represent call/wave deadline and cancellation capability truthfully. | Ledger events stop supported wait/no-delta admission at the cap; no supported host wait/deadline cancellation Adapter is available. |
 | `MAE-004` | P0 | `DONE` | All 22 custom agents are fixed to `high`, while direct spawns may inherit root `max`. | Add role-specific GPT-5.6 model/effort policy. Terra/medium serves read-heavy support; Sol/high is limited to hard reasoning/review; `max`/`xhigh` needs an explicit critical node. | Native and saved-workflow identities resolve an exact Registry tier and reject caller or session inheritance. |
-| `MAE-005` | P0 | `EXTERNAL_LIMIT_NATIVE_SELECTOR_ATTESTATION` | Native identity and budget enforcement vary by execution surface. | Add `execution_surface_profile_v1` with native-selector, telemetry, deadline, fork, and concurrency capabilities. Required-role closure fails closed on degraded identity. | Degraded surfaces cannot close mandatory roles; Codex-native selector/history enforcement remains reported-only pending a supported host receipt. |
+| `MAE-005` | P0 | `EXTERNAL_LIMIT_NATIVE_SELECTOR_ATTESTATION` | Native identity and budget enforcement vary by execution surface; a saved workflow cannot self-authorize data-dependent nodes discovered after its Context was compiled. | Add `execution_surface_profile_v1` with native-selector, telemetry, deadline, fork, and concurrency capabilities. Required-role closure fails closed on degraded identity. Full Audit stages discovered claim verification/fix/review as debt until a fresh host-attested exact DAG is compiled. | Degraded surfaces cannot close mandatory roles. The saved Full Audit exact-covers only 13 axes + seam and makes zero dynamic verifier/writer calls; the later host phase remains external pending a supported native-selector receipt. |
 | `MAE-006` | P0 | `DONE` | Project config relies on legacy `max_threads` and undocumented `max_depth`. | Use `max_concurrent_threads_per_session`; make recursion policy explicit and receipt-validated rather than config folklore. | Current config validates and execution-lineage admission enforces spawn depth independently of undocumented config. |
 | `MAE-007` | P1 | `DONE` | `active_state` can load the entire 44.8KB AI/ML board into many roles. | Select exact task ID/row plus direct dependency rows and digest those bytes. | Context compiles the exact active TODO projection; unrelated rows do not alter the admitted projection digest. |
 | `MAE-008` | P1 | `DONE` | `history_on_demand` is declared but unreachable in the Context compiler. | Add exact `history_refs` selection with safe path/section/digest validation. | At most four repository-local safe H2 sections are byte/digest-bound; whole-glob and unselected history fail closed. |
@@ -63,7 +63,7 @@ platform capability is machine-detectable. Completion additionally requires:
 | `MAE-012` | P1 | `DONE` | Read-only operations review schedules preflight and postcheck without an intervening effect. | Collapse to one `ops_observation` for read-only/source lanes; keep two nodes only around an admitted effect. | Read-only/service review uses one observation; admitted effects retain distinct preflight and postcheck nodes. |
 | `MAE-013` | P1 | `DONE` | Repeated universal contract prose inflates every custom-agent prompt. | Centralize common operating rules behind one generated compact contract; keep persona lens/Own/Refuse role-specific. | Generated common contract preserves required invariants and renderer drift checks pass with a smaller prompt corpus. |
 | `MAE-014` | P1 | `EXTERNAL_LIMIT_HOST_DEADLINE_CANCEL` | Full Audit/agent-wave launch whole runnable sets without a local concurrency guard; host deadline/cancel is unavailable. | Put one workflow-global bounded scheduler in front of every `agent()` call and expose deadline/cancel capability separately. | Workflow-global scheduling enforces actual in-flight capacity; no supported host deadline/cancel Adapter exists. |
-| `MAE-015` | P1 | `EXTERNAL_LIMIT_HOST_ACTIVITY_ADAPTER` | Liveness heuristics depend on private JSONL file layout. | Define supported collaboration/thread activity as the primary Interface and retain JSONL size only as diagnostic fallback; require a real host acquisition Adapter before integration claims. | Pure adjudication returns `UNKNOWN` without evidence; a supported host activity acquisition Adapter is not available. |
+| `MAE-015` | P1 | `EXTERNAL_LIMIT_HOST_ACTIVITY_ADAPTER` | Liveness heuristics depend on private JSONL file layout. | Keep caller collaboration/thread activity and JSONL size diagnostic-only; require managed host acquisition plus monotonic identity/sequence/head verification before any `RUNNING`/`TERMINAL` claim. | Pure adjudication treats every caller mapping, including fresh active/terminal values, as unverified and returns `UNKNOWN + EXTERNAL_LIMIT`; a supported host activity acquisition Adapter is not available. |
 | `MAE-016` | P1 | `DONE` | Interruption messages can alter model-visible context without call-record coverage. | Disable injected interruption messages for governed calls or bind them into the call record. | Governed project config disables interruption-message injection; replay records remain closed over model-visible inputs. |
 | `MAE-017` | P1 | `DONE` | No reproducible efficiency regression benchmark exists. | Add `multi_agent_efficiency_evaluation_v1` fixture/schema/runner for current, single-agent, and bounded-role profiles. | Runner and typed attestation index compare quality and cost classes; standalone/self-attested input cannot unlock a measured claim. |
 | `MAE-018` | P1 | `DONE` | Memories may be generated from external-context sessions and use an unreviewed model. | Document/project the supported memory-generation policy: external-context exclusion and lower-cost extract/consolidation model where the host supports it. | Local capability probe validates strict config keys, external-context exclusion, Codex version, and the Luna model without fallback. |
@@ -109,7 +109,7 @@ source; this section is an index, not a second report.
 | `MAE-012` | Read-only OPS calls collapsed without weakening effect gates. | OPS routing tests. |
 | `MAE-013` | Common contract centralized and generated. | Renderer drift and prompt-invariant tests. |
 | `MAE-014` | Workflow-global concurrency enforced; cancellation external. | Peak in-flight scheduler tests and surface capability record. |
-| `MAE-015` | Private-file liveness claim removed; host acquisition external. | Liveness schema/adjudicator tests. |
+| `MAE-015` | Private-file and caller-self-asserted liveness claims removed; managed host acquisition and monotonic replay resistance remain external. | Liveness schema/adjudicator plus fresh fabrication, replay/rollback, and caller identity/sequence/head rejection tests. |
 | `MAE-016` | Unrecorded interruption injection disabled. | Strict config validation and execution-policy replay contract. |
 | `MAE-017` | Quality-first A/B runner and typed trust seam complete. | Evaluation schemas, fixture, threshold and anti-self-attestation tests. |
 | `MAE-018` | Memory-generation policy supported locally. | Strict negative-control capability probe reports `SUPPORTED`. |
@@ -140,5 +140,134 @@ Both are closed: the skill now exposes only the executable full 13-axis
 invocation and exact Registry caps with no model override, while
 `verify_manifest()` compares the manifest roster to the discovered governed
 active memories in exact canonical order. Missing and duplicate role cases now
-fail after self-digest recomputation. The independent rerun reported no
-remaining P0/P1.
+fail after self-digest recomputation. At that point the independent rerun
+reported no remaining P0/P1; this was a point-in-time result later superseded
+by review rounds 3 through 5.
+
+### Independent review reopen round 3
+
+The third independent review found that Context capacity was bound to a
+route-derived projection while Profit Diagnosis and Full Audit could construct
+different call DAGs after admission. It also found that explicit empty DAGs,
+unknown node fields, and malformed CLI JSON were not all rejected through one
+typed fail-closed boundary.
+
+The round-3 source repair now binds the complete saved-workflow DAG before the
+first model call and exact-compares every node, predecessor edge, identity,
+class, permission, count, and digest. Profit Diagnosis binds its 3 evidence +
+6 probe + 1 map nodes. Full Audit binds only 13 discovery axes + 1 seam critic; all
+data-dependent claim verification and fix/review paths were removed from the
+saved workflow and emitted as coverage debt for a separately compiled,
+host-attested phase under existing `MAE-005`. This is not a ninth
+`EXTERNAL_LIMIT`. Public compilation rejects `[]` and unknown fields, while an
+internal no-argument constructor represents compiler-derived zero-delegation
+queries. CLI `null`, non-arrays, empty arrays, and malformed JSON return typed
+`FAIL` with a nonzero exit and no traceback.
+
+The round-3 cross-review, whose point-in-time completeness judgment was later
+superseded by rounds 4 and 5, reopened two P1 trust seams. First, a caller could
+provide an explicit DAG that omitted or substituted canonical routed
+call-producing nodes. Second, Closure validated a wave against its own
+recomputed DAG but did not exact-bind that wave back to the Context DAG, so a
+14-node Full Audit Context could accept an internally rehashed 16-node wave.
+Both are now closed: explicit DAGs must retain the exact routed-node core while
+permitting only legitimate supersets, and Closure exact-compares the ordered
+admitted-task core plus `dag_digest` with the verified Context binding. Any DAG
+expansion therefore requires a fresh Context before calls; packet-local
+rehashing cannot self-authorize it.
+
+### Independent review reopen round 4
+
+The 2026-07-31 P1/P2 cross-review reopened five source-bound trust gaps. A
+caller could truncate or reseal an execution ledger and race two admissions
+from the same head; a fresh caller timestamp could be promoted to
+`RUNNING`/`TERMINAL` without authenticated host acquisition; the generic
+Context materializer could accept a self-rehashed omission or substitution;
+the specialized Full Audit and Profit projections still disagreed with their
+actual fixed call sets; and duplicated Full Audit claims could produce
+ambiguous staged debt while an exhausted axis could continue to the seam.
+
+The ledger admission path now requires one opaque, non-serializable,
+Registry-minted controller capability. It freezes the exact Registry policy
+and surface generation, admits from one process-lifetime genesis, advances a
+monotonic ledger head under a per-controller lock, and rejects truncation,
+replay, copied authority, forged caps, mutable-mapping races, and competing
+same-head admissions. Receipt reconstruction remains structural and cannot
+mint admission authority. Liveness now treats caller collaboration/thread
+mappings only as freshness diagnostics: all such claims return
+`UNKNOWN + EXTERNAL_LIMIT` until a managed host Adapter supplies authenticated
+identity, sequence, and head continuity. The Registry owns the exact
+60-second/zero-future-skew policy, and the public interface exposes no caller
+clock override.
+
+Context materialization now re-routes every plan and exact-checks the
+task-aware execution projection before signing. Generic tasks preserve their
+complete routed core and allow only legitimate supersets. Full Audit binds
+exactly 14 call-producing nodes (13 axes plus seam), while Profit Diagnosis
+binds exactly 10 (3 evidence, 6 probes, and 1 map); PA/CC/QC route obligations
+reuse those fixed results instead of creating duplicate calls. Dispatch,
+capture, trust, and Closure consume the same projection. Structurally valid
+unauthorized waves remain visible to consumption exact-cover and also fail
+with an explicit unbound-node error, so early DAG rejection cannot hide a
+ghost wave.
+
+Full Audit staged debt is now one sorted, unique typed record per discovered
+claim, exact-bound to every source axis through `bound_axes`. Zero verification
+outcomes cannot be reported as disputed or verified, and missing, extra, or
+forged axis bindings fail closed. Persistent null after the one allowed retry
+aborts before seam execution. The canonical skill supplies the exact Context
+artifact and a positive dispatch-owned admission clock, and the AIML lineage
+refresh updates the nested program-adoption bootstrap when recompilation
+changes the Context generation.
+
+Final evidence for this review lane is `244 passed` across Context/DAG/wave,
+Full Audit, Profit, codegen, AIML-adoption, and development-governance tests,
+plus `89 passed` across execution policy, liveness, and trust bindings.
+Full-Audit and Profit files independently report `28 passed` and `29 passed`;
+workflow codegen reports `3 passed`. Python compilation, Registry governance
+validation (`PASS`, 20 roles), generated-workflow drift validation, and
+`git diff --check` all pass. Those listed round-4 gaps were closed, but the
+point-in-time completeness statement was superseded by round 5. The documented
+host-capability `EXTERNAL_LIMIT` rows remain fail-closed rather than being
+relabelled as source completion.
+
+### Independent review reopen round 5
+
+The post-fix contract review found one final P1 mismatch between the real Full
+Audit workflow result and Closure. Although the Context and wave exact-bound
+the fixed 14-node axes-plus-seam DAG, workflow `closure_admissions` returned
+only the 13 axes. It also omitted the required dispatch fields on those axis
+admissions. Tests had copied the fixture admissions into Closure instead of
+directly consuming the real workflow result, so the mismatch remained hidden.
+
+The workflow now returns ordered exact-cover admissions for the same Context
+core: 13 `role_fragment` axis admissions with explicit empty predecessors,
+followed by one `nested_payload` `seam:critic` admission whose CC native
+identity, verification/read-only class, sorted 13-axis predecessors, empty
+path scope, and canonical reason match the Full Audit contract. Controller
+`axis_bindings` remains the axis-only projection and cannot absorb the seam.
+
+The real saved-workflow integration test now copies these admissions directly
+into a closure packet, proves their ordered identity-bearing core equals the
+Context DAG binding, and obtains a valid Closure result. Removing the seam or
+changing its predecessor set is rejected as a missing or substituted fixed
+call admission. Earlier round-2 through round-4 completeness language is
+therefore historical and explicitly superseded by this round; publication
+must use the cumulative round-1-through-round-5 result.
+
+Round-5 evidence is `28 passed` for the complete Full Audit adversarial file
+and `107 passed` for the combined Closure quality, Context, dispatch-DAG, wave,
+trust-binding, and development-governance suite. Workflow codegen reports
+`3 passed`; Node syntax validation, Registry governance validation (`PASS`,
+20 roles), generated-workflow drift validation, and `git diff --check` pass.
+
+The final frozen worktree rerun supersedes those scoped counts as the release
+candidate evidence: the exact core/adjacent selection reports `507 passed`;
+the complete non-disposable structure suite reports
+`5131 passed / 16 skipped / 0 failed` in 1026.03 seconds. The 16 skips are
+pre-existing conditional tests, not failures or external-limit closures.
+Independent post-fix review reports `0 P0 / 0 P1 / 0 P2`. Registry size is
+106,151 bytes, leaving 24,921 bytes below the 128 KiB single-argument ceiling
+and satisfying the enforced greater-than-24-KiB headroom gate. These are
+source-worktree results only; hosted exact-head CI/review and publication
+remain separate gates.

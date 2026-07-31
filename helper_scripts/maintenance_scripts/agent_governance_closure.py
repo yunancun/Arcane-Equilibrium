@@ -52,6 +52,7 @@ from agent_governance_execution import (
     WORK_STATUSES,
     route_task,
 )
+from agent_governance_execution_dag import specialized_route_result_bindings
 from agent_governance_full_audit import validate_full_audit_binding
 from agent_governance_observations import validate_observation_evidence
 from agent_governance_profit import validate_profit_diagnosis_binding
@@ -301,6 +302,7 @@ def validate_closure(
     errors.extend(adoption_errors)
     captures = collect_closure_captures(
         packet, dispatch, task_contract, task_contract_digest, baseline,
+        context_plan=context_plan,
         external_evidence_verifier=external_evidence_verifier,
     )
     if not packet.get("acceptance"):
@@ -559,31 +561,54 @@ def validate_closure(
             "implementation", "implementation_backend", "implementation_frontend",
             "test_implementation", "docs_update", "docs_projection",
         }
+        specialized_bindings, specialized_binding_errors = (
+            specialized_route_result_bindings(
+                expected_required_nodes,
+                (expected_route or {}).get("task_facts", {}),
+            )
+        )
+        errors.extend(
+            f"closure specialized route binding: {error}"
+            for error in specialized_binding_errors
+        )
+        binding_by_route = {
+            binding["route_node_id"]: binding
+            for binding in specialized_bindings
+        }
         for requirement in expected_required_nodes:
-            fragment = fragments_by_node.get(requirement["node_id"])
+            route_binding = binding_by_route.get(requirement["node_id"])
+            if route_binding is not None and route_binding["result_node_id"] is None:
+                continue
+            result_node_id = (
+                route_binding["result_node_id"]
+                if route_binding is not None
+                else requirement["node_id"]
+            )
+            fragment = fragments_by_node.get(result_node_id)
             if fragment is None or fragment.get("role") != requirement["role"]:
                 errors.append(
-                    f"closure PASS missing mandatory node fragment {requirement['node_id']}:{requirement['role']}"
+                    f"closure PASS missing mandatory node result {requirement['node_id']}->{result_node_id}:{requirement['role']}"
                 )
                 continue
             if fragment.get("work_status") not in {"DONE", "DONE_WITH_CONCERNS"}:
                 errors.append(
-                    f"mandatory node {requirement['node_id']} cannot support closure PASS"
+                    f"mandatory node result {requirement['node_id']}->{result_node_id} cannot support closure PASS"
                 )
                 continue
             if requirement["node_id"] in work_only_nodes:
                 if fragment.get("gate_verdict") not in {"PASS", "NOT_APPLICABLE"}:
                     errors.append(
-                        f"mandatory work node {requirement['node_id']} cannot support closure PASS"
+                        f"mandatory work node result {requirement['node_id']}->{result_node_id} cannot support closure PASS"
                     )
             elif fragment.get("gate_verdict") != "PASS":
                 errors.append(
-                    f"mandatory verification node {requirement['node_id']} requires PASS"
+                    f"mandatory verification node result {requirement['node_id']}->{result_node_id} requires PASS"
                 )
             else:
                 errors.extend(
                     verification_fragment_truth_errors(
-                        fragment, f"mandatory verification node {requirement['node_id']}",
+                        fragment,
+                        f"mandatory verification node result {requirement['node_id']}->{result_node_id}",
                         dispatch.get("task_facts", {}),
                         expected_generation=trusted_review_generation,
                     )

@@ -10,6 +10,7 @@ from agent_governance_efficiency_evaluation import (
     registry_efficiency_evaluation_policy_errors,
 )
 from agent_governance_execution_policy import registry_execution_policy_errors
+from agent_governance_liveness import registry_liveness_policy_errors
 from agent_governance_registry_budget import registry_budget_errors
 from agent_governance_registry_capabilities import registry_capability_errors
 from agent_governance_task_control import validate_task_execution_control
@@ -128,6 +129,7 @@ def validate_registry(registry: dict[str, Any], root: Path = REPO_ROOT) -> list[
         "task_execution_control",
         "execution_policy",
         "efficiency_evaluation_policy",
+        "liveness_policy",
         "authority_classes",
         "external_access_classes",
         "permission_profiles",
@@ -199,6 +201,7 @@ def validate_registry(registry: dict[str, Any], root: Path = REPO_ROOT) -> list[
     errors.extend(validate_task_execution_control(registry.get("task_execution_control")))
     errors.extend(registry_execution_policy_errors(registry))
     errors.extend(registry_efficiency_evaluation_policy_errors(registry))
+    errors.extend(registry_liveness_policy_errors(registry))
     expected_external_access = {
         "public_web_read": {"class": "read_only_evidence_acquisition",
             "allowed_sources": "opened_public_urls_only", "requirements": ["opened_content", "citation", "capture_provenance"],

@@ -1,14 +1,22 @@
 {
   "$schema": "https://json-schema.org/draft/2020-12/schema",
   "$id": "agent_liveness_adjudication_v1.schema.json",
-  "title": "Development-agent liveness adjudication",
+  "title": "Unverified development-agent liveness adjudication",
   "type": "object",
   "additionalProperties": false,
   "required": [
     "schema_version",
     "liveness_state",
     "primary_evidence",
+    "activity_verification_status",
+    "activity_verification_reason",
     "activity_state",
+    "activity_observed_at",
+    "adjudicated_at",
+    "activity_freshness",
+    "liveness_policy_id",
+    "liveness_policy_digest",
+    "max_observation_age_seconds",
     "diagnostic_state",
     "transcript_diagnostic",
     "automatic_stop"
@@ -18,13 +26,16 @@
       "const": "agent_liveness_adjudication_v1"
     },
     "liveness_state": {
-      "enum": ["RUNNING", "TERMINAL", "UNKNOWN"]
+      "const": "UNKNOWN"
     },
     "primary_evidence": {
-      "enum": [
-        "SUPPORTED_COLLABORATION_ACTIVITY",
-        "SUPPORTED_THREAD_ACTIVITY"
-      ]
+      "const": "CALLER_ACTIVITY_UNVERIFIED"
+    },
+    "activity_verification_status": {
+      "const": "EXTERNAL_LIMIT"
+    },
+    "activity_verification_reason": {
+      "const": "MANAGED_HOST_ACTIVITY_ADAPTER_UNAVAILABLE"
     },
     "activity_state": {
       "enum": [
@@ -35,6 +46,28 @@
         "CANCELLED",
         "UNAVAILABLE"
       ]
+    },
+    "activity_observed_at": {
+      "type": "string",
+      "format": "date-time",
+      "pattern": "Z$"
+    },
+    "adjudicated_at": {
+      "type": ["string", "null"],
+      "format": "date-time",
+      "pattern": "Z$"
+    },
+    "activity_freshness": {
+      "enum": ["FRESH", "STALE", "FUTURE", "UNVERIFIABLE"]
+    },
+    "liveness_policy_id": {
+      "const": "supported_activity_freshness_v1"
+    },
+    "liveness_policy_digest": {
+      "const": "sha256:db265e286f3e4275e9f721759c6b70adb4c34375f5d21441484ee5aedd5687fb"
+    },
+    "max_observation_age_seconds": {
+      "const": 60
     },
     "diagnostic_state": {
       "enum": ["AVAILABLE", "UNAVAILABLE", "RUNAWAY_SUSPECT"]

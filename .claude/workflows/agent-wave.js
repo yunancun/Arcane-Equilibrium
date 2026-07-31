@@ -123,7 +123,9 @@ function resolveAdmissionNowMs(value) {
 // block verbatim after replacing the Registry-owned authority-profile token.
 const CONTEXT_ADMISSION_V1 = Object.freeze({
   artifactFields: Object.freeze(['schema_version', 'artifact_digest', 'task_contract_digest', 'budget_authority_digest', 'budget_authority_canonical', 'canonical_plan', 'shared_task_context_digest', 'shared_task_context_canonical', 'role_context_delta_digest', 'role_context_delta_canonical', 'semantic_input_tokens']),
-  planFields: Object.freeze(['schema_version', 'registry_schema_version', 'role', 'role_permission', 'task_contract', 'task_contract_digest', 'mandatory_content', 'omitted_mandatory', 'baseline_errors', 'selected_packs', 'shared_packs', 'role_packs', 'sources', 'unresolved_sources', 'blocking_sources', 'evidence_debt', 'required_for_verdict', 'acquisition_plan', 'budget']),
+  planFields: Object.freeze(['schema_version', 'registry_schema_version', 'role', 'role_permission', 'execution_dag_binding', 'task_contract', 'task_contract_digest', 'mandatory_content', 'omitted_mandatory', 'baseline_errors', 'selected_packs', 'shared_packs', 'role_packs', 'sources', 'unresolved_sources', 'blocking_sources', 'evidence_debt', 'required_for_verdict', 'acquisition_plan', 'budget']),
+  dagBindingFields: Object.freeze(['schema_version', 'dag_digest', 'node_count', 'edge_count', 'nodes']),
+  dagNodeFields: Object.freeze(['node_id', 'role', 'native_agent', 'requires', 'node_class', 'permission']),
   contractFields: Object.freeze(['task_shape', 'surfaces', 'risk', 'runtime_claim', 'end_to_end_claim', 'uncertainty', 'side_effect_class', 'objective', 'scope', 'acceptance_criteria', 'hard_stops', 'baseline', 'dirty_scope', 'verification_scope', 'direct_interfaces', 'previous_failure', 'focus', 'claim_inputs', 'task_prompt', 'task_prompt_digest', 'continuation_mode', 'operator_loop_request_digest', 'history_refs']),
   mandatoryFields: Object.freeze(['objective', 'scope', 'acceptance_criteria', 'hard_stops', 'baseline', 'direct_interfaces', 'previous_failure', 'task_prompt', 'task_prompt_digest']),
   budgetFields: Object.freeze(['envelope', 'target_context_tokens', 'quality_reserve_context_tokens', 'accounting_basis', 'max_context_tokens_per_call', 'max_prompt_utf8_bytes_per_call', 'estimated_tokens', 'compiler_estimated_input_tokens', 'action', 'review_required', 'review_rationale', 'mandatory_truncated', 'quality_reserve_reasons', 'authority', 'authority_canonical', 'authority_digest', 'call_allowed', 'claim_pass_eligible', 'pass_allowed']),
@@ -212,11 +214,29 @@ const boundedParallelV1 = async (factories, capacity) => {
   if (!Array.isArray(factories) || !Number.isInteger(capacity) || capacity <= 0) {
     throw new Error('bounded scheduler requires task factories and a positive capacity')
   }
-  const results = []
-  for (let index = 0; index < factories.length; index += capacity) {
-    const batch = await parallel(factories.slice(index, index + capacity))
-    results.push(...batch)
-  }
+  const results = Array(factories.length)
+  let nextIndex = 0
+  let stopped = false
+  let firstError
+  const workers = Array.from(
+    { length: Math.min(capacity, factories.length) },
+    () => async () => {
+      while (!stopped && nextIndex < factories.length) {
+        const index = nextIndex
+        nextIndex += 1
+        try {
+          results[index] = await factories[index]()
+        } catch (error) {
+          if (!stopped) {
+            stopped = true
+            firstError = error
+          }
+        }
+      }
+    },
+  )
+  await parallel(workers)
+  if (stopped) throw firstError
   return results
 }
 const contextUtf8LengthV1 = value => new TextEncoder().encode(value).length
@@ -252,36 +272,6 @@ const promotedEnvelopeV1 = (baseEnvelope, requiredNodes) => {
   return selected
 }
 // END GENERATED CONTEXT_ADMISSION_V1
-
-const rollingParallelV1 = async (factories, capacity) => {
-  if (!Array.isArray(factories) || !Number.isInteger(capacity) || capacity <= 0) {
-    throw new Error('rolling scheduler requires task factories and a positive capacity')
-  }
-  const results = Array(factories.length)
-  let nextIndex = 0
-  let stopped = false
-  let firstError
-  const workers = Array.from(
-    { length: Math.min(capacity, factories.length) },
-    () => async () => {
-      while (!stopped && nextIndex < factories.length) {
-        const index = nextIndex
-        nextIndex += 1
-        try {
-          results[index] = await factories[index]()
-        } catch (error) {
-          if (!stopped) {
-            stopped = true
-            firstError = error
-          }
-        }
-      }
-    },
-  )
-  await parallel(workers)
-  if (stopped) throw firstError
-  return results
-}
 
 const JUDGMENT_SCHEMA = {
   type: 'object',
@@ -468,6 +458,7 @@ const contextArtifacts = verifiedContextBytes.map((value, index) => {
 })
 const compilerEstimates = []
 const admittedAuthorityDigests = []
+const executionDagBindings = []
 for (let index = 0; index < tasks.length; index += 1) {
   const task = tasks[index]
   if (typeof task.node_id !== 'string' || !task.node_id.trim()) {
@@ -511,6 +502,21 @@ for (let index = 0; index < tasks.length; index += 1) {
   }
   if (!await validateSemanticContextV1(contextCapsules[index], contextArtifact)) {
     throw new Error(`tasks[${index}] semantic Context projection/digests are invalid`)
+  }
+  const executionDagBinding = contextArtifact.execution_dag_binding
+  if (
+    !exactKeys(executionDagBinding, CONTEXT_ADMISSION_V1.dagBindingFields) ||
+    executionDagBinding.schema_version !== 'context_execution_dag_binding_v1' ||
+    !/^sha256:[0-9a-f]{64}$/.test(executionDagBinding.dag_digest || '') ||
+    !Number.isInteger(executionDagBinding.node_count) ||
+    executionDagBinding.node_count <= 0 ||
+    !Number.isInteger(executionDagBinding.edge_count) ||
+    executionDagBinding.edge_count < 0 ||
+    !Array.isArray(executionDagBinding.nodes) ||
+    executionDagBinding.nodes.length !== executionDagBinding.node_count ||
+    executionDagBinding.nodes.some(node => !exactKeys(node, CONTEXT_ADMISSION_V1.dagNodeFields))
+  ) {
+    throw new Error(`tasks[${index}] execution DAG binding is invalid`)
   }
   if (contextArtifact.role !== task.agentType) {
     throw new Error(`tasks[${index}] context artifact role does not match the admitted node`)
@@ -664,7 +670,10 @@ for (let index = 0; index < tasks.length; index += 1) {
   if (!exactKeys(contextBudget, CONTEXT_ADMISSION_V1.budgetFields) || contextBudget.call_allowed !== true || contextBudget.pass_allowed !== true || contextBudget.mandatory_truncated !== false) {
     throw new Error(`tasks[${index}] context plan is not call_allowed; repair blocking context or split first`)
   }
-  const expectedEnvelope = promotedEnvelopeV1(envelopeFor(contract), tasks.length)
+  const expectedEnvelope = promotedEnvelopeV1(
+    envelopeFor(contract),
+    executionDagBinding.node_count,
+  )
   const profile = CONTEXT_ADMISSION_V1.authorityProfiles[expectedEnvelope]
   const expectedAuthority = profile
   let parsedAuthority
@@ -681,7 +690,9 @@ for (let index = 0; index < tasks.length; index += 1) {
     authorityDigest !== contextCapsules[index].budget_authority_digest ||
     contextBudget.authority_canonical !== contextCapsules[index].budget_authority_canonical
   ) {
-    throw new Error(`tasks[${index}] budget authority is forged or not compiler-bound`)
+    throw new Error(
+      `tasks[${index}] budget authority is forged or not compiler/DAG-bound`,
+    )
   }
   const computedEstimate = Math.max(1, Math.ceil(utf8Length(pythonJsonForEstimate(mandatory)) / 4)) + computedSourceTokens
   const reserveEnd = profile.target_context_tokens + profile.quality_reserve_context_tokens
@@ -711,6 +722,7 @@ for (let index = 0; index < tasks.length; index += 1) {
   }
   compilerEstimates.push(computedEstimate)
   admittedAuthorityDigests.push(authorityDigest)
+  executionDagBindings.push(executionDagBinding)
 }
 const nodeIds = tasks.map(task => task.node_id.trim())
 if (new Set(nodeIds).size !== nodeIds.length) {
@@ -752,9 +764,26 @@ const executionDag = {
     native_agent: task.native_agent, node_class: task.node_class, permission: task.permission,
   })),
 }
-if (await sha256Bytes(canonicalJson(executionDag)) !== dagDigest) {
+const computedExecutionDagDigest = await sha256Bytes(canonicalJson(executionDag))
+if (computedExecutionDagDigest !== dagDigest) {
   throw new Error('dag_digest differs from the canonical admitted execution DAG')
 }
+const executionDagEdgeCount = executionDag.nodes.reduce(
+  (total, node) => total + node.requires.length,
+  0,
+)
+executionDagBindings.forEach((binding, index) => {
+  if (
+    binding.dag_digest !== computedExecutionDagDigest ||
+    binding.node_count !== executionDag.nodes.length ||
+    binding.edge_count !== executionDagEdgeCount ||
+    !sameJson(binding.nodes, executionDag.nodes)
+  ) {
+    throw new Error(
+      `tasks[${index}] execution DAG binding differs from the admitted wave`,
+    )
+  }
+})
 const pendingNodes = new Set(nodeIds)
 const executionWaves = []
 while (pendingNodes.size) {
@@ -973,7 +1002,7 @@ for (let waveIndex = 0; waveIndex < executionWaves.length; waveIndex += 1) {
   if (!runnable.length) continue
   phase('Wave')
   const generations = runnable.map(index => Object.fromEntries(tasks[index].requires.map(node => [node, producerRecords[nodeIds.indexOf(node)].record_digest])))
-  const first = await rollingParallelV1(runnable.map((index, position) => () => invoke({
+  const first = await boundedParallelV1(runnable.map((index, position) => () => invoke({
     task: tasks[index], index, attempt: 1, retryParent: null, phaseName: 'Wave',
     prompt: basePrompts[index], topologicalWave: waveIndex, producerGeneration: generations[position],
   })), authority.max_concurrent_calls)
@@ -989,7 +1018,7 @@ for (let waveIndex = 0; waveIndex < executionWaves.length; waveIndex += 1) {
   retriesRemaining -= admittedRetries.length
   if (admittedRetries.length) {
     phase('Retry')
-    const retried = await rollingParallelV1(admittedRetries.map(index => () => invoke({
+    const retried = await boundedParallelV1(admittedRetries.map(index => () => invoke({
       task: tasks[index], index, attempt: 2,
       retryParent: producerRecords[index].logical_call_id, phaseName: 'Retry',
       prompt: basePrompts[index] + '\n\n' + relay, topologicalWave: waveIndex,

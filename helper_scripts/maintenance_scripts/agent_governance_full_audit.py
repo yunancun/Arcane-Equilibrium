@@ -47,6 +47,18 @@ GOAL_TYPES = {"over-gate", "evolution-blocker", "lineage-gap"}
 HIGH_RISK_TYPES = {"auth-bypass", "secret-leak", "missing-gate", "leakage", "replay-misuse"}
 CAPABILITY_TYPES = {"over-gate", "evolution-blocker"}
 STRUCTURAL_FINDING_FIELDS = ("title", "assertion", "evidence", "file", "symbol_anchor")
+STAGED_CLAIM_KIND = "staged_claim_verification"
+STAGED_CLAIM_REMEDIATION = "MAE-005"
+STAGED_CLAIM_STATE = "REQUIRES_HOST_CAPABILITY_PHASE"
+STAGED_CLAIM_REASON = (
+    "dynamic claim verification requires a separately admitted "
+    "host-capability verification phase"
+)
+STAGED_CLAIM_DEBT_FIELDS = {
+    "kind", "id", "owner", "claim_key", "remediation_id",
+    "verification_state", "bound_axes", "reason",
+}
+SEVERITY_RANK = {"CRITICAL": 0, "HIGH": 1, "MEDIUM": 2, "LOW": 3, "INFO": 4}
 
 def _debt_projection(item: dict[str, Any]) -> str:
     canonical = {
@@ -57,6 +69,9 @@ def _debt_projection(item: dict[str, Any]) -> str:
     }
     if item.get("claim_key") is not None:
         canonical["claim_key"] = item.get("claim_key")
+    for field in ("remediation_id", "verification_state", "bound_axes"):
+        if item.get(field) is not None:
+            canonical[field] = item.get(field)
     return "full_audit_debt:" + _canonical_json(canonical)
 
 
@@ -144,6 +159,69 @@ def _structural_finding_debt(axis: str, finding: dict[str, Any]) -> dict[str, st
         "owner": axis,
         "reason": "missing deterministic evidence fields: " + ",".join(missing),
     }
+
+
+def _expected_staged_claim_debt(
+    admitted_axes: list[str],
+    fragments_by_node: dict[str, dict[str, Any]],
+) -> list[dict[str, Any]]:
+    """Derive zero-outcome MAE-005 debt from immutable raw decision findings."""
+
+    groups: dict[str, list[tuple[str, dict[str, Any]]]] = {}
+    outcome_keys: set[str] = set()
+    for axis in admitted_axes:
+        fragment = fragments_by_node.get(f"audit:{axis}", {})
+        payload = fragment.get("payload", {})
+        audit = payload.get("audit", {}) if isinstance(payload, dict) else {}
+        findings = audit.get("findings", []) if isinstance(audit, dict) else []
+        if isinstance(findings, list):
+            for finding in findings:
+                if (
+                    isinstance(finding, dict)
+                    and _is_decision_outcome(finding)
+                    and not any(
+                        not str(finding.get(field) or "").strip()
+                        for field in STRUCTURAL_FINDING_FIELDS
+                    )
+                ):
+                    groups.setdefault(_claim_key(finding), []).append((axis, finding))
+        records = payload.get("verification_outcomes", []) if isinstance(payload, dict) else []
+        if isinstance(records, list):
+            for record in records:
+                outcome = record.get("outcome") if isinstance(record, dict) else None
+                claim_key = outcome.get("claim_key") if isinstance(outcome, dict) else None
+                if isinstance(claim_key, str) and claim_key:
+                    outcome_keys.add(claim_key)
+
+    claims = [
+        {
+            "claim_id": f"claim-{index:04d}",
+            "claim_key": claim_key,
+            "members": members,
+            "representative": members[0][1],
+        }
+        for index, (claim_key, members) in enumerate(groups.items(), start=1)
+    ]
+    claims.sort(
+        key=lambda claim: (
+            SEVERITY_RANK.get(claim["representative"].get("severity"), 9),
+            -1 if claim["representative"].get("confidence") == "low" else 0,
+        )
+    )
+    return [
+        {
+            "kind": STAGED_CLAIM_KIND,
+            "id": claim["claim_id"],
+            "owner": sorted({axis for axis, _finding in claim["members"]})[0],
+            "claim_key": claim["claim_key"],
+            "remediation_id": STAGED_CLAIM_REMEDIATION,
+            "verification_state": STAGED_CLAIM_STATE,
+            "bound_axes": sorted({axis for axis, _finding in claim["members"]}),
+            "reason": STAGED_CLAIM_REASON,
+        }
+        for claim in claims
+        if claim["claim_key"] not in outcome_keys
+    ]
 
 
 def _workflow_capture(
@@ -351,13 +429,78 @@ def validate_full_audit_binding(
         debt = []
     else:
         for item in debt:
-            if set(item) - {"kind", "id", "reason", "owner", "claim_key"}:
+            if item.get("kind") == STAGED_CLAIM_KIND:
+                if set(item) != STAGED_CLAIM_DEBT_FIELDS:
+                    errors.append(
+                        "full audit staged claim debt fields do not match the canonical contract"
+                    )
+                bound_axes = item.get("bound_axes")
+                if (
+                    not isinstance(bound_axes, list)
+                    or not bound_axes
+                    or any(axis not in allowed_axes for axis in bound_axes)
+                    or bound_axes != sorted(set(bound_axes))
+                ):
+                    errors.append(
+                        "full audit staged claim debt bound_axes must be sorted unique contract axes"
+                    )
+                if (
+                    item.get("remediation_id") != STAGED_CLAIM_REMEDIATION
+                    or item.get("verification_state") != STAGED_CLAIM_STATE
+                    or item.get("reason") != STAGED_CLAIM_REASON
+                ):
+                    errors.append(
+                        "full audit staged claim debt is not exact MAE-005 verification debt"
+                    )
+                if (
+                    not isinstance(item.get("owner"), str)
+                    or not isinstance(bound_axes, list)
+                    or not bound_axes
+                    or item.get("owner") != bound_axes[0]
+                    or not isinstance(item.get("claim_key"), str)
+                    or not item.get("claim_key")
+                ):
+                    errors.append(
+                        "full audit staged claim debt owner/claim identity is invalid"
+                    )
+            elif set(item) - {"kind", "id", "reason", "owner", "claim_key"}:
                 errors.append("full audit coverage_debt contains unknown fields")
             if not all(isinstance(item.get(field), str) and item.get(field) for field in ("kind", "id", "reason")):
                 errors.append("full audit coverage_debt item lacks kind/id/reason")
         identities = [(item.get("kind"), item.get("id"), item.get("owner")) for item in debt]
         if len(identities) != len(set(identities)):
             errors.append("full audit coverage_debt contains duplicate identities")
+    expected_staged_debt = _expected_staged_claim_debt(
+        admitted_axes, fragments_by_node
+    )
+    actual_staged_debt = [
+        item for item in debt if item.get("kind") == STAGED_CLAIM_KIND
+    ]
+    expected_axes_by_key = {
+        item["claim_key"]: item["bound_axes"] for item in expected_staged_debt
+    }
+    actual_axes_by_key = {
+        item.get("claim_key"): item.get("bound_axes")
+        for item in actual_staged_debt
+        if isinstance(item.get("claim_key"), str)
+        and isinstance(item.get("bound_axes"), list)
+    }
+    axis_cover_mismatch = False
+    for claim_key in sorted(set(expected_axes_by_key) | set(actual_axes_by_key)):
+        expected_bound_axes = set(expected_axes_by_key.get(claim_key, []))
+        actual_bound_axes = set(actual_axes_by_key.get(claim_key, []))
+        missing_axes = sorted(expected_bound_axes - actual_bound_axes)
+        extra_axes = sorted(actual_bound_axes - expected_bound_axes)
+        if missing_axes or extra_axes:
+            axis_cover_mismatch = True
+            errors.append(
+                "full audit staged claim bound_axes do not exact-cover raw findings "
+                f"for {claim_key}: missing={missing_axes}; extra={extra_axes}"
+            )
+    if actual_staged_debt != expected_staged_debt and not axis_cover_mismatch:
+        errors.append(
+            "full audit staged claim debt does not match exact MAE-005 typed projection"
+        )
     holes = control.get("coverage_holes")
     if not isinstance(holes, list) or any(axis not in allowed_axes for axis in holes):
         errors.append("full audit coverage_holes is invalid")
@@ -446,7 +589,15 @@ def validate_full_audit_binding(
             coverage_debt_count = 0
         axis_debt_count = sum(
             1 for item in debt
-            if item.get("owner") == axis or (item.get("kind") == "axis" and item.get("id") == axis)
+            if (
+                item.get("owner") == axis
+                or (
+                    item.get("kind") == STAGED_CLAIM_KIND
+                    and isinstance(item.get("bound_axes"), list)
+                    and axis in item.get("bound_axes", [])
+                )
+                or (item.get("kind") == "axis" and item.get("id") == axis)
+            )
         )
         if coverage_debt_count != axis_debt_count:
             errors.append(f"full audit axis {axis} coverage_debt_count is inconsistent")
@@ -660,8 +811,9 @@ def validate_full_audit_binding(
         missing_outcome_keys = set(raw_decision_by_claim_key) - outcome_claim_keys
         for claim_key in sorted(missing_outcome_keys):
             if not any(
-                item.get("kind") == "claim"
-                and item.get("owner") == axis
+                item.get("kind") == STAGED_CLAIM_KIND
+                and isinstance(item.get("bound_axes"), list)
+                and axis in item.get("bound_axes", [])
                 and item.get("claim_key") == claim_key
                 for item in debt
             ):

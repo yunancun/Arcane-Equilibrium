@@ -36,7 +36,8 @@
     "task_execution": "persist prompt-bound contract/control/preceding snapshot behind a task-admission fencing token + recapture task-owned source bytes + exclusive linked-worktree writer lease -> deterministic continuation or terminal no-delta closure",
     "external_evidence": "validate_external_evidence_capture(external_evidence_capture_v1, host verifier) -> typed public-policy/outcome capture; absent out-of-band verifier remains evidence debt",
     "closure": "validate_closure(packet with admitted_role_nodes, trusted-host verifier capability) + project_closure(packet) -> validated closure view; PASS delegated/runtime/outcome/effect/context evidence requires exact out-of-band host attestation",
-    "closure_quality_followup": "build_scheduled_closure_quality_followup() + validate_closure_quality_followup() + summarize_closure_quality_followups() -> closure-digest-bound durability ledger; measured values require caller-trusted PLATFORM_OR_EXTERNAL_ATTESTED evidence"
+    "closure_quality_followup": "build_scheduled_closure_quality_followup() + validate_closure_quality_followup() + summarize_closure_quality_followups() -> closure-digest-bound durability ledger; measured values require caller-trusted PLATFORM_OR_EXTERNAL_ATTESTED evidence",
+    "liveness": "adjudicate_agent_liveness(...) -> caller evidence remains UNKNOWN/EXTERNAL_LIMIT"
   },
   "context_evidence_schema_path": ".codex/schemas/context_evidence_artifact_v1.schema.json",
   "external_evidence_schema_path": ".codex/schemas/external_evidence_capture_v1.schema.json",
@@ -54,26 +55,10 @@
   "model_routing": {
     "schema_version": "model_routing_v1",
     "roles": {
-      "A3": {"model": "gpt-5.6-terra", "model_reasoning_effort": "medium"},
-      "AI-E": {"model": "gpt-5.6-terra", "model_reasoning_effort": "medium"},
-      "BB": {"model": "gpt-5.6-terra", "model_reasoning_effort": "medium"},
-      "CC": {"model": "gpt-5.6-sol", "model_reasoning_effort": "high"},
-      "E1": {"model": "gpt-5.6-terra", "model_reasoning_effort": "medium"},
-      "E1a": {"model": "gpt-5.6-terra", "model_reasoning_effort": "medium"},
-      "E2": {"model": "gpt-5.6-sol", "model_reasoning_effort": "high"},
-      "E3": {"model": "gpt-5.6-sol", "model_reasoning_effort": "high"},
-      "E4": {"model": "gpt-5.6-terra", "model_reasoning_effort": "medium"},
-      "E5": {"model": "gpt-5.6-terra", "model_reasoning_effort": "medium"},
-      "FA": {"model": "gpt-5.6-terra", "model_reasoning_effort": "medium"},
-      "IB": {"model": "gpt-5.6-terra", "model_reasoning_effort": "medium"},
-      "MIT": {"model": "gpt-5.6-sol", "model_reasoning_effort": "high"},
-      "OPS": {"model": "gpt-5.6-terra", "model_reasoning_effort": "medium"},
-      "PA": {"model": "gpt-5.6-sol", "model_reasoning_effort": "high"},
-      "PM": {"model": "gpt-5.6-sol", "model_reasoning_effort": "high"},
-      "QA": {"model": "gpt-5.6-terra", "model_reasoning_effort": "medium"},
-      "QC": {"model": "gpt-5.6-sol", "model_reasoning_effort": "high"},
-      "R4": {"model": "gpt-5.6-terra", "model_reasoning_effort": "medium"},
-      "TW": {"model": "gpt-5.6-terra", "model_reasoning_effort": "medium"}
+      "A3": {"model": "gpt-5.6-terra", "model_reasoning_effort": "medium"}, "AI-E": {"model": "gpt-5.6-terra", "model_reasoning_effort": "medium"}, "BB": {"model": "gpt-5.6-terra", "model_reasoning_effort": "medium"}, "CC": {"model": "gpt-5.6-sol", "model_reasoning_effort": "high"}, "E1": {"model": "gpt-5.6-terra", "model_reasoning_effort": "medium"},
+      "E1a": {"model": "gpt-5.6-terra", "model_reasoning_effort": "medium"}, "E2": {"model": "gpt-5.6-sol", "model_reasoning_effort": "high"}, "E3": {"model": "gpt-5.6-sol", "model_reasoning_effort": "high"}, "E4": {"model": "gpt-5.6-terra", "model_reasoning_effort": "medium"}, "E5": {"model": "gpt-5.6-terra", "model_reasoning_effort": "medium"},
+      "FA": {"model": "gpt-5.6-terra", "model_reasoning_effort": "medium"}, "IB": {"model": "gpt-5.6-terra", "model_reasoning_effort": "medium"}, "MIT": {"model": "gpt-5.6-sol", "model_reasoning_effort": "high"}, "OPS": {"model": "gpt-5.6-terra", "model_reasoning_effort": "medium"}, "PA": {"model": "gpt-5.6-sol", "model_reasoning_effort": "high"},
+      "PM": {"model": "gpt-5.6-sol", "model_reasoning_effort": "high"}, "QA": {"model": "gpt-5.6-terra", "model_reasoning_effort": "medium"}, "QC": {"model": "gpt-5.6-sol", "model_reasoning_effort": "high"}, "R4": {"model": "gpt-5.6-terra", "model_reasoning_effort": "medium"}, "TW": {"model": "gpt-5.6-terra", "model_reasoning_effort": "medium"}
     }
   },
   "saved_workflow_model_policy": {
@@ -82,26 +67,10 @@
     "model": "claude-sonnet-5",
     "allow_inheritance": false,
     "role_efforts": {
-      "A3": "medium",
-      "AI-E": "medium",
-      "BB": "medium",
-      "CC": "high",
-      "E1": "medium",
-      "E1a": "medium",
-      "E2": "high",
-      "E3": "high",
-      "E4": "medium",
-      "E5": "medium",
-      "FA": "medium",
-      "IB": "medium",
-      "MIT": "high",
-      "OPS": "medium",
-      "PA": "high",
-      "PM": "high",
-      "QA": "medium",
-      "QC": "high",
-      "R4": "medium",
-      "TW": "medium"
+      "A3": "medium", "AI-E": "medium", "BB": "medium", "CC": "high", "E1": "medium",
+      "E1a": "medium", "E2": "high", "E3": "high", "E4": "medium", "E5": "medium",
+      "FA": "medium", "IB": "medium", "MIT": "high", "OPS": "medium", "PA": "high",
+      "PM": "high", "QA": "medium", "QC": "high", "R4": "medium", "TW": "medium"
     }
   },
   "native_operating_contract": {
@@ -216,6 +185,14 @@
     },
     "synthetic_measured_claim_allowed": false,
     "policy_digest": "sha256:bec62dfd2f581a3bb22c79edc14ef48eab17b161d5a642d45f6160e5f59b6a6e"
+  },
+  "liveness_policy": {
+    "schema_version": "agent_liveness_policy_v1",
+    "policy_id": "supported_activity_freshness_v1",
+    "max_observation_age_seconds": 60,
+    "max_future_skew_seconds": 0,
+    "clock_source": "trusted_system_utc_no_caller_override_v1",
+    "policy_digest": "sha256:db265e286f3e4275e9f721759c6b70adb4c34375f5d21441484ee5aedd5687fb"
   },
   "native_agent_adapters": {
     "PA": [

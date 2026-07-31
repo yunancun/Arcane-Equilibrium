@@ -70,6 +70,7 @@ def collect_capture_evidence(
     expected_context_artifact_digest: str,
     expected_budget_authority_digest: str | None = None,
     expected_budget_authority_canonical: str | None = None,
+    expected_execution_dag_binding: dict[str, Any] | None = None,
     require_current_repository: bool,
     external_evidence_verifier: ExternalEvidenceVerifier | None = None,
     adjudicated_at: Any = None,
@@ -279,6 +280,27 @@ def collect_capture_evidence(
         if manifest is None:
             errors.append(f"{label}: workflow wave references a missing call manifest")
             continue
+        accounting_errors = validate_workflow_wave_record(
+            wave,
+            manifest,
+            expected_task_contract_digest=expected_task_contract_digest,
+            expected_context_artifact_digest=expected_context_artifact_digest,
+            expected_budget_authority_digest=expected_budget_authority_digest,
+            expected_budget_authority_canonical=expected_budget_authority_canonical,
+        )
+        if not accounting_errors:
+            # Accounting must see every structurally valid, Context-generation
+            # bound wave even when its call DAG is unauthorized.  The exact DAG
+            # validator below still rejects that ghost wave for execution.
+            result["waves_by_id"][evidence_id] = wave
+            if expected_execution_tasks is not None:
+                for admitted_task in wave.get("admitted_tasks", []):
+                    node_id = admitted_task.get("node_id")
+                    if node_id not in expected_execution_tasks:
+                        errors.append(
+                            f"{label}: workflow admitted node {node_id} "
+                            "is not closure/dispatch bound"
+                        )
         wave_errors = validate_workflow_wave_record(
             wave,
             manifest,
@@ -286,6 +308,7 @@ def collect_capture_evidence(
             expected_context_artifact_digest=expected_context_artifact_digest,
             expected_budget_authority_digest=expected_budget_authority_digest,
             expected_budget_authority_canonical=expected_budget_authority_canonical,
+            expected_execution_dag_binding=expected_execution_dag_binding,
         )
         errors.extend(f"{label}: {error}" for error in wave_errors)
         if not wave_errors:
@@ -296,7 +319,6 @@ def collect_capture_evidence(
                 label=label,
                 errors=errors,
             )
-            result["waves_by_id"][evidence_id] = wave
             used_manifest_digests.add(str(manifest_digest))
     orphan_manifests = set(result["manifests"]) - used_manifest_digests
     if orphan_manifests:

@@ -137,11 +137,27 @@ missing files, unknown keys, sensitive paths, symlinks, and path escape remain u
 
 `agent-wave` consumes one Python-produced `context_artifact_v1`. It hashes the
 exact `canonical_plan` bytes, recomputes the task-contract digest, source bytes/
-digests, capture TTLs, token estimate, and compiler budget authority, then embeds
+digests, capture TTLs, token estimate, compiler budget authority, and the exact
+call-producing DAG binding (canonical nodes/edges, digest, node count, edge count),
+then embeds
 the same verified plan bytes and reuses them on retry. Exact `task_prompt` and
 required uncertainty are part of the normalized task contract; prompt swap or
-omission fails before a call. Closure separately revalidates the PM admission
-artifact and binds every fragment to its digest. Every model call is then
+omission fails before a call. A wave that differs from the deterministic routed
+DAG must be supplied to `compile_context(..., execution_dag=...)` before
+materialization; the explicit DAG must retain the exact core of every canonical
+routed call-producing node. Legitimate extra nodes are allowed as a superset,
+but omission or substitution of a routed node fails closed; local JS cannot
+self-promote a narrow artifact. Profit
+Diagnosis binds 10 pre-call nodes; Full Audit binds 13 axes + seam and stages
+later claim verification/fix as MAE-005 host-phase debt. Explicit `[]`,
+non-arrays, malformed JSON, or unknown node fields are rejected. Only a
+compiler-derived zero-delegation query may carry an empty binding; there is no
+public empty override. Closure separately revalidates the PM admission
+artifact and binds every fragment to its digest. Its wave validator also
+exact-compares the ordered admitted-task core and `dag_digest` with the
+Context `execution_dag_binding`; adding a post-Context node requires a freshly
+compiled Context, even if every call/manifest/wave self-digest was recomputed.
+Every model call is then
 controller-recorded with exact task/context/role/node/native identity/class/
 permission, DAG predecessors/topological wave, producer generation, dirty-scope/
 focus/schema/result, and retry binding. The complete call
@@ -156,6 +172,9 @@ Diagnosis embed a generated `CONTEXT_ADMISSION_V1` block from
 Registry budget profiles, execution surfaces, default history, and exact
 saved-workflow model/role-effort policy; it rejects byte drift, shadow
 declarations, real import/require statements, or an unused common-prefix helper.
+The same generated block owns a rolling bounded worker pool: completion of one
+call immediately refills the slot while active calls remain within the Registry
+cap; first error stops new dequeue only after already-running calls settle.
 Every call begins with the exact `canonical_plan` bytes already recorded by `artifact_digest`,
 then adds only the node-specific suffix after one blank line. This preserves
 cache reuse without truncating Context.

@@ -81,14 +81,18 @@ from agent_governance_execution_dag import (  # noqa: E402
     delegated_execution_projection,
     execution_dag_digest,
     non_call_controller_node_ids,
+    specialized_route_result_bindings,
+    task_execution_projection,
     topological_waves,
 )
 from agent_governance_execution_policy import (  # noqa: E402
+    ExecutionAdmissionController,
     admit_execution_event,
     compile_execution_budget_policy,
     default_history_binding,
     execution_policy_digest,
     new_execution_event_ledger,
+    registry_execution_budget_policy_errors,
     requested_execution_binding,
     requested_history_errors,
     surface_profile_binding,
@@ -104,7 +108,11 @@ from agent_governance_efficiency_evaluation import (  # noqa: E402
     validate_efficiency_attestation_index,
     validate_multi_agent_efficiency_evaluation,
 )
-from agent_governance_liveness import adjudicate_agent_liveness  # noqa: E402
+from agent_governance_liveness import (  # noqa: E402
+    adjudicate_agent_liveness,
+    liveness_policy_digest,
+    registry_liveness_policy_errors,
+)
 from agent_governance_permissions import (  # noqa: E402
     authorize_command,
     authorize_native_command,
@@ -198,6 +206,7 @@ __all__ = [
     "execution_dag_digest",
     "execution_policy_digest",
     "execution_admitted_caps",
+    "ExecutionAdmissionController",
     "EfficiencyAttestationVerifier",
     "efficiency_attestation_index_digest",
     "efficiency_evaluation_policy_digest",
@@ -212,17 +221,22 @@ __all__ = [
     "new_execution_event_ledger",
     "next_action_may_be_null",
     "load_registry",
+    "liveness_policy_digest",
     "project_closure",
     "progress_snapshot",
     "queue_lane",
     "render_all",
     "render_views",
     "registry_efficiency_evaluation_policy_errors",
+    "registry_execution_budget_policy_errors",
+    "registry_liveness_policy_errors",
     "review_task_contract_digest",
     "requested_execution_binding",
     "requested_history_errors",
     "resolve_authority_claims",
     "non_call_controller_node_ids",
+    "specialized_route_result_bindings",
+    "task_execution_projection",
     "route_task",
     "summarize_closure_quality_followups",
     "surface_profile_binding",
@@ -317,6 +331,15 @@ def _build_parser() -> argparse.ArgumentParser:
     writer_lease.add_argument("--ttl-seconds", type=int, default=7200)
     context = subparsers.add_parser("context", help="compile a lossless adaptive context plan")
     context.add_argument("--role", required=True)
+    context.add_argument(
+        "--execution-dag",
+        help=(
+            "exact non-null, non-empty call-producing execution-DAG JSON array "
+            "or @path, with only canonical node fields; required "
+            "when compiling Context for an agent-wave that differs from the "
+            "deterministic routed DAG"
+        ),
+    )
     context.add_argument("task_facts", help="JSON object or @path-to-JSON")
     efficiency = subparsers.add_parser(
         "efficiency-evaluation",
@@ -513,7 +536,33 @@ def main(
         print(json.dumps(packet, ensure_ascii=False, indent=2, sort_keys=True))
         return 0 if packet["status"] == "PASS" else 3
     if args.action == "context":
-        print(json.dumps(compile_context(args.role, _json_arg(args.task_facts), registry), ensure_ascii=False, indent=2))
+        try:
+            execution_dag = (
+                _json_arg(args.execution_dag)
+                if args.execution_dag is not None
+                else None
+            )
+            if args.execution_dag is not None and execution_dag is None:
+                raise ValueError(
+                    "--execution-dag must be a non-null JSON array"
+                )
+            plan = compile_context(
+                args.role,
+                _json_arg(args.task_facts),
+                registry,
+                execution_dag=execution_dag,
+            )
+        except (KeyError, OSError, TypeError, ValueError) as error:
+            print(json.dumps(
+                {"status": "FAIL", "error": str(error)},
+                ensure_ascii=False,
+            ))
+            return 2
+        print(json.dumps(
+            plan,
+            ensure_ascii=False,
+            indent=2,
+        ))
         return 0
     if args.action == "efficiency-evaluation":
         try:

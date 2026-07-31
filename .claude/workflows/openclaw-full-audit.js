@@ -1,17 +1,18 @@
 // OpenClaw full audit — Development-Agent Governance scheduler Adapter.
 // Quality is protected by independent discovery, negative space, mandatory
-// verification quorum, and explicit coverage debt. Budgets admit work; they
-// never turn unverified residual scope into PASS.
+// seam review, and explicit coverage debt. Data-dependent claim verification
+// and fix/review require a fresh host-attested phase; this saved workflow never
+// turns unverified residual scope into PASS or invents post-call DAG nodes.
 export const meta = {
   name: 'openclaw-full-audit',
-  description: 'Full-system 13-axis adversarial audit with claim-centric verification, elastic quality reserve, immutable fragments, and explicit coverage debt',
-  whenToUse: 'Operator requests full audit/cold audit/multi-perspective optimization. The saved workflow executes the full 13-axis backstop; adaptive or reduced execution is EXTERNAL_LIMIT until a platform-attested recall/non-inferiority verifier exists.',
+  description: 'Full-system 13-axis adversarial discovery plus seam review, immutable claim staging, and explicit host-phase verification debt',
+  whenToUse: 'Operator requests full audit/cold audit/multi-perspective optimization. This saved workflow executes the exact pre-bound 13-axis plus seam DAG; data-dependent verification/fix requires a new MAE-005 host-attested Context phase.',
   phases: [
-    { title: 'Admit', detail: 'freeze scope, axes, scheduler mode, and elastic consumption envelope' },
+    { title: 'Admit', detail: 'freeze scope and exact 13-axis plus seam execution DAG' },
     { title: 'Audit', detail: 'independent read-only discovery with negative-space self-audit' },
-    { title: 'Verify', detail: 'deterministic claim normalization then independent two/three-view challenge' },
+    { title: 'Stage', detail: 'normalize immutable claims and emit MAE-005 host-phase verification debt' },
+    { title: 'Seam', detail: 'one pre-bound cross-axis seam critic call' },
     { title: 'Cluster', detail: 'lossless presentation clustering; original claims remain immutable' },
-    { title: 'Fix', detail: 'optional bounded E1 fix plus independent E2 review' },
   ],
 }
 
@@ -133,7 +134,9 @@ function resolveAdmissionNowMs(value) {
 // block verbatim after replacing the Registry-owned authority-profile token.
 const CONTEXT_ADMISSION_V1 = Object.freeze({
   artifactFields: Object.freeze(['schema_version', 'artifact_digest', 'task_contract_digest', 'budget_authority_digest', 'budget_authority_canonical', 'canonical_plan', 'shared_task_context_digest', 'shared_task_context_canonical', 'role_context_delta_digest', 'role_context_delta_canonical', 'semantic_input_tokens']),
-  planFields: Object.freeze(['schema_version', 'registry_schema_version', 'role', 'role_permission', 'task_contract', 'task_contract_digest', 'mandatory_content', 'omitted_mandatory', 'baseline_errors', 'selected_packs', 'shared_packs', 'role_packs', 'sources', 'unresolved_sources', 'blocking_sources', 'evidence_debt', 'required_for_verdict', 'acquisition_plan', 'budget']),
+  planFields: Object.freeze(['schema_version', 'registry_schema_version', 'role', 'role_permission', 'execution_dag_binding', 'task_contract', 'task_contract_digest', 'mandatory_content', 'omitted_mandatory', 'baseline_errors', 'selected_packs', 'shared_packs', 'role_packs', 'sources', 'unresolved_sources', 'blocking_sources', 'evidence_debt', 'required_for_verdict', 'acquisition_plan', 'budget']),
+  dagBindingFields: Object.freeze(['schema_version', 'dag_digest', 'node_count', 'edge_count', 'nodes']),
+  dagNodeFields: Object.freeze(['node_id', 'role', 'native_agent', 'requires', 'node_class', 'permission']),
   contractFields: Object.freeze(['task_shape', 'surfaces', 'risk', 'runtime_claim', 'end_to_end_claim', 'uncertainty', 'side_effect_class', 'objective', 'scope', 'acceptance_criteria', 'hard_stops', 'baseline', 'dirty_scope', 'verification_scope', 'direct_interfaces', 'previous_failure', 'focus', 'claim_inputs', 'task_prompt', 'task_prompt_digest', 'continuation_mode', 'operator_loop_request_digest', 'history_refs']),
   mandatoryFields: Object.freeze(['objective', 'scope', 'acceptance_criteria', 'hard_stops', 'baseline', 'direct_interfaces', 'previous_failure', 'task_prompt', 'task_prompt_digest']),
   budgetFields: Object.freeze(['envelope', 'target_context_tokens', 'quality_reserve_context_tokens', 'accounting_basis', 'max_context_tokens_per_call', 'max_prompt_utf8_bytes_per_call', 'estimated_tokens', 'compiler_estimated_input_tokens', 'action', 'review_required', 'review_rationale', 'mandatory_truncated', 'quality_reserve_reasons', 'authority', 'authority_canonical', 'authority_digest', 'call_allowed', 'claim_pass_eligible', 'pass_allowed']),
@@ -222,11 +225,29 @@ const boundedParallelV1 = async (factories, capacity) => {
   if (!Array.isArray(factories) || !Number.isInteger(capacity) || capacity <= 0) {
     throw new Error('bounded scheduler requires task factories and a positive capacity')
   }
-  const results = []
-  for (let index = 0; index < factories.length; index += capacity) {
-    const batch = await parallel(factories.slice(index, index + capacity))
-    results.push(...batch)
-  }
+  const results = Array(factories.length)
+  let nextIndex = 0
+  let stopped = false
+  let firstError
+  const workers = Array.from(
+    { length: Math.min(capacity, factories.length) },
+    () => async () => {
+      while (!stopped && nextIndex < factories.length) {
+        const index = nextIndex
+        nextIndex += 1
+        try {
+          results[index] = await factories[index]()
+        } catch (error) {
+          if (!stopped) {
+            stopped = true
+            firstError = error
+          }
+        }
+      }
+    },
+  )
+  await parallel(workers)
+  if (stopped) throw firstError
   return results
 }
 const contextUtf8LengthV1 = value => new TextEncoder().encode(value).length
@@ -272,11 +293,13 @@ const DEFECT_TYPES = [
   'schema-issue', 'secret-leak', 'readability-debt', 'over-gate',
   'evolution-blocker', 'other',
 ]
-const HIGH_RISK_TYPES = ['auth-bypass', 'secret-leak', 'missing-gate', 'leakage', 'replay-misuse']
 const GOAL_TYPES = ['over-gate', 'evolution-blocker', 'lineage-gap']
-const CAPABILITY_TYPES = ['over-gate', 'evolution-blocker']
 const SEVERITY_RANK = { CRITICAL: 0, HIGH: 1, MEDIUM: 2, LOW: 3, INFO: 4 }
 const STRUCTURAL_FINDING_FIELDS = ['title', 'assertion', 'evidence', 'file', 'symbol_anchor']
+const STAGED_CLAIM_KIND = 'staged_claim_verification'
+const STAGED_CLAIM_REMEDIATION = 'MAE-005'
+const STAGED_CLAIM_STATE = 'REQUIRES_HOST_CAPABILITY_PHASE'
+const STAGED_CLAIM_REASON = 'dynamic claim verification requires a separately admitted host-capability verification phase'
 const FINDINGS_SCHEMA = {
   type: 'object', additionalProperties: false,
   required: ['schema_version', 'verdict', 'confidence', 'findings', 'assumptions', 'consumption'],
@@ -320,24 +343,6 @@ const FINDINGS_SCHEMA = {
     },
   },
 }
-const VERDICT_SCHEMA = {
-  type: 'object', additionalProperties: false,
-  required: ['refuted', 'confidence', 'reason', 'evidence'],
-  properties: {
-    refuted: { type: 'boolean' }, confidence: { type: 'string', enum: ['high', 'med', 'low'] },
-    reason: { type: 'string', minLength: 1 }, evidence: { type: 'string', minLength: 1 },
-  },
-}
-const THIRD_SCHEMA = {
-  type: 'object', additionalProperties: false,
-  required: ['refuted', 'confidence', 'reachable', 'reason', 'evidence'],
-  properties: {
-    refuted: { type: 'boolean' },
-    confidence: { type: 'string', enum: ['high', 'med', 'low'] },
-    reachable: { type: 'string', enum: ['reachable', 'latent', 'unknown', 'not_applicable'] },
-    reason: { type: 'string', minLength: 1 }, evidence: { type: 'string', minLength: 1 },
-  },
-}
 const SEAM_SCHEMA = {
   type: 'object', additionalProperties: false, required: ['reprobes'],
   properties: { reprobes: { type: 'array', items: {
@@ -345,44 +350,6 @@ const SEAM_SCHEMA = {
     properties: { seam: { type: 'string' }, assign_axis: { type: 'string' }, why: { type: 'string' } },
   } } },
 }
-const FIX_CANDIDATE_SCHEMA = {
-  type: 'object', additionalProperties: false,
-  required: ['worktree_id', 'base_head', 'candidate_head', 'patch_digest', 'diff_digest', 'files'],
-  properties: {
-    worktree_id: { type: 'string', minLength: 1 },
-    base_head: { type: 'string', pattern: '^[0-9a-f]{40}$' },
-    candidate_head: { type: 'string', pattern: '^[0-9a-f]{40}$' },
-    patch_digest: { type: 'string', pattern: '^sha256:[0-9a-f]{64}$' },
-    diff_digest: { type: 'string', pattern: '^sha256:[0-9a-f]{64}$' },
-    files: { type: 'array', minItems: 1, items: { type: 'string', minLength: 1 } },
-  },
-}
-const FIX_SCHEMA = {
-  type: 'object', additionalProperties: false, required: ['status', 'summary', 'candidate'],
-  properties: {
-    status: { type: 'string', enum: ['CANDIDATE_READY', 'BLOCKED', 'NO_CHANGE_NEEDED'] },
-    summary: { type: 'string' },
-    candidate: { anyOf: [FIX_CANDIDATE_SCHEMA, { type: 'null' }] },
-  },
-}
-const REVIEW_SCHEMA = {
-  type: 'object', additionalProperties: false,
-  required: [
-    'verdict', 'issues', 'evidence', 'candidate_worktree_id', 'base_head',
-    'candidate_head', 'patch_digest', 'diff_digest', 'review_evidence_digest',
-  ],
-  properties: {
-    verdict: { type: 'string', enum: ['APPROVE', 'RETURN'] },
-    issues: { type: 'string' }, evidence: { type: 'string', minLength: 1 },
-    candidate_worktree_id: { type: 'string', minLength: 1 },
-    base_head: { type: 'string', pattern: '^[0-9a-f]{40}$' },
-    candidate_head: { type: 'string', pattern: '^[0-9a-f]{40}$' },
-    patch_digest: { type: 'string', pattern: '^sha256:[0-9a-f]{64}$' },
-    diff_digest: { type: 'string', pattern: '^sha256:[0-9a-f]{64}$' },
-    review_evidence_digest: { type: 'string', pattern: '^sha256:[0-9a-f]{64}$' },
-  },
-}
-
 function parseArgs(value) {
   if (typeof value !== 'string') return value || {}
   try { return JSON.parse(value) } catch (_error) { throw new Error('args JSON parse failed; refusing silent defaults') }
@@ -406,34 +373,6 @@ function canonicalDirtyScope(value) {
     throw new Error('dirty_scope must be unique and sorted')
   }
   return value
-}
-function validFixCandidate(candidate) {
-  return Boolean(
-    candidate && typeof candidate === 'object' &&
-    typeof candidate.worktree_id === 'string' && candidate.worktree_id.trim() &&
-    /^[0-9a-f]{40}$/.test(candidate.base_head || '') &&
-    /^[0-9a-f]{40}$/.test(candidate.candidate_head || '') &&
-    candidate.base_head !== candidate.candidate_head &&
-    /^sha256:[0-9a-f]{64}$/.test(candidate.patch_digest || '') &&
-    /^sha256:[0-9a-f]{64}$/.test(candidate.diff_digest || '') &&
-    Array.isArray(candidate.files) && candidate.files.length > 0 &&
-    new Set(candidate.files).size === candidate.files.length &&
-    candidate.files.every(file => typeof file === 'string' && file.trim())
-  )
-}
-async function reviewMatchesCandidate(review, candidate) {
-  if (!review || !validFixCandidate(candidate)) return false
-  const bindingMatches =
-    review.candidate_worktree_id === candidate.worktree_id &&
-    review.base_head === candidate.base_head &&
-    review.candidate_head === candidate.candidate_head &&
-    review.patch_digest === candidate.patch_digest &&
-    review.diff_digest === candidate.diff_digest
-  if (!bindingMatches || typeof review.evidence !== 'string' || !review.evidence.trim()) return false
-  const expectedDigest = await sha256Canonical({
-    candidate, verdict: review.verdict, issues: review.issues, evidence: review.evidence,
-  })
-  return review.review_evidence_digest === expectedDigest
 }
 function normalize(value) {
   return String(value || '').replace(/\\/g, '/').trim().toLowerCase().replace(/\s+/g, ' ')
@@ -534,6 +473,19 @@ async function structuralFindingDebt(finding) {
     reason: `missing deterministic evidence fields: ${missingStructuralFindingFields(finding).join(',')}`,
   }
 }
+function stagedClaimDebt(claim) {
+  const boundAxes = [...new Set(claim.duplicate_members.map(member => member.axis))].sort()
+  return {
+    kind: STAGED_CLAIM_KIND,
+    id: claim.claim_id,
+    owner: boundAxes[0],
+    claim_key: claim.claim_key,
+    remediation_id: STAGED_CLAIM_REMEDIATION,
+    verification_state: STAGED_CLAIM_STATE,
+    bound_axes: boundAxes,
+    reason: STAGED_CLAIM_REASON,
+  }
+}
 function clusterKey(finding) {
   const file = normalizeFile(finding.file)
   const anchor = normalize(finding.symbol_anchor)
@@ -542,9 +494,6 @@ function clusterKey(finding) {
 function isDecisionClaim(finding) {
   return finding.severity === 'CRITICAL' || finding.severity === 'HIGH' ||
     (finding.severity === 'MEDIUM' && (finding.defect_type || []).some(type => GOAL_TYPES.includes(type)))
-}
-function isHighRisk(finding) {
-  return finding.severity === 'CRITICAL' || (finding.defect_type || []).some(type => HIGH_RISK_TYPES.includes(type))
 }
 function normalizeBaseline(value, runtimeRequired) {
   if (!value || typeof value !== 'object' || Array.isArray(value)) {
@@ -850,24 +799,28 @@ for (const [name, value] of Object.entries({ max_unique_nodes: maxUniqueNodes, m
     throw new Error(`${name} cannot override the admitted Context budget authority`)
   }
 }
-const maxVerificationCalls = positiveInt(config.max_verification_calls, maxUniqueNodes, 'max_verification_calls')
-if (maxVerificationCalls > maxUniqueNodes) throw new Error('max_verification_calls cannot exceed Context max_unique_nodes')
+const hostPhaseOnlyConfigFields = [
+  'max_verification_calls',
+  'estimated_tokens_per_verification',
+  'estimated_fix_tokens',
+  'estimated_review_tokens',
+  'max_fixes',
+]
+for (const field of hostPhaseOnlyConfigFields) {
+  if (config[field] !== undefined) {
+    throw new Error(`${field} requires a separately admitted MAE-005 host-capability phase`)
+  }
+}
+const maxVerificationCalls = 0
 const estimatedAuditTokens = positiveInt(config.estimated_tokens_per_audit, 4500, 'estimated_tokens_per_audit')
-const estimatedVerificationTokens = positiveInt(config.estimated_tokens_per_verification, 2000, 'estimated_tokens_per_verification')
 const estimatedSeamTokens = positiveInt(config.estimated_seam_tokens, 4000, 'estimated_seam_tokens')
-const estimatedFixTokens = positiveInt(config.estimated_fix_tokens, 8000, 'estimated_fix_tokens')
-const estimatedReviewTokens = positiveInt(config.estimated_review_tokens, 4000, 'estimated_review_tokens')
 const contextCompilerFloor = Math.max(1, Math.ceil(utf8Length(contextPrefix) / 4))
 const auditCallTokens = Math.max(contextCompilerFloor, estimatedAuditTokens)
-const verificationCallTokens = Math.max(contextCompilerFloor, estimatedVerificationTokens)
 const seamCallTokens = Math.max(contextCompilerFloor, estimatedSeamTokens)
-const fixCallTokens = Math.max(contextCompilerFloor, estimatedFixTokens)
-const reviewCallTokens = Math.max(contextCompilerFloor, estimatedReviewTokens)
-if ([auditCallTokens, verificationCallTokens, seamCallTokens, fixCallTokens, reviewCallTokens].some(value => value >= maxContextTokensPerCall)) {
+if ([auditCallTokens, seamCallTokens].some(value => value >= maxContextTokensPerCall)) {
   throw new Error('configured or compiler input floor reaches max_context_tokens_per_call before admission')
 }
 const stopWhen = config.stop_when || 'mandatory coverage closed and next expected novelty or verdict-reversal value is below marginal token/time/opportunity cost'
-const maxFixes = positiveInt(config.max_fixes, 5, 'max_fixes')
 const doFix = config.fix === true
 // Model and effort are one Registry-owned, role-specific policy. Saved
 // workflows never inherit the host session tier and callers cannot override it.
@@ -877,8 +830,6 @@ for (const field of ['cheap_model', 'cheap_effort', 'judgment_model', 'judgment_
   }
 }
 const cheapTier = () => ({})
-const strongJudgmentTier = () => ({})
-const verificationTier = _finding => ({})
 const workflowContract = {
   schema_version: 'workflow_receipt_contract_v1', workflow: 'openclaw-full-audit',
   task_contract_digest: taskContractDigest, context_artifact_digest: contextArtifactDigest,
@@ -951,6 +902,17 @@ async function invoke({ prompt, options, nodeId, payloadKind, attempt = 1, retry
     !Array.isArray(requires) || requires.some(node => typeof node !== 'string' || !node) ||
     canonicalJson(requires) !== canonicalJson([...new Set(requires)].sort()) || requires.includes(nodeId)
   ) throw new Error(`call ${nodeId} requires must be sorted unique predecessor node ids`)
+  const preCallTask = preCallExecutionTaskByNode.get(nodeId)
+  if (
+    !preCallTask ||
+    preCallTask.role !== logicalRole ||
+    preCallTask.native_agent !== binding.native_agent ||
+    preCallTask.node_class !== (options.nodeClass || 'verification') ||
+    preCallTask.permission !== binding.permission ||
+    !sameJson(preCallTask.requires, requires)
+  ) {
+    throw new Error(`call ${nodeId} is absent from or differs from the pre-call execution DAG`)
+  }
   const boundPrompt = contextPrefix + '\n\n' + prompt
   const finalPromptBytes = utf8Length(boundPrompt)
   const compilerFloor = Math.max(1, Math.ceil(finalPromptBytes / 4))
@@ -1033,6 +995,39 @@ const coverageDebt = capacityDeferredAxes.map(axis => ({ kind: 'axis', id: axis,
 ALL_AXES.filter(axis => !requestedAxes.includes(axis)).forEach(axis => {
   coverageDebt.push({ kind: 'axis', id: axis, reason: 'configured subset omitted a full-audit backstop axis' })
 })
+const preCallExecutionTasks = [
+  ...axes.map(axis => ({
+    node_id: `audit:${axis}`, role: axis, ...nativeBinding(axis),
+    requires: [], node_class: 'verification',
+  })),
+  {
+    node_id: 'seam:critic', role: 'CC', ...nativeBinding('CC'),
+    requires: axes.map(axis => `audit:${axis}`).sort(),
+    node_class: 'verification',
+  },
+]
+const preCallExecutionDagDigest = await sha256Canonical({
+  schema_version: 'agent_wave_execution_dag_v1',
+  nodes: preCallExecutionTasks,
+})
+const preCallExecutionEdgeCount = preCallExecutionTasks.reduce(
+  (total, task) => total + task.requires.length,
+  0,
+)
+const boundExecutionDag = contextAdmission.plan.execution_dag_binding
+if (
+  !exactKeys(boundExecutionDag, CONTEXT_ADMISSION_V1.dagBindingFields) ||
+  boundExecutionDag.schema_version !== 'context_execution_dag_binding_v1' ||
+  boundExecutionDag.dag_digest !== preCallExecutionDagDigest ||
+  boundExecutionDag.node_count !== preCallExecutionTasks.length ||
+  boundExecutionDag.edge_count !== preCallExecutionEdgeCount ||
+  !sameJson(boundExecutionDag.nodes, preCallExecutionTasks)
+) {
+  throw new Error('Full Audit Context execution DAG binding differs from the complete pre-call workflow DAG')
+}
+const preCallExecutionTaskByNode = new Map(
+  preCallExecutionTasks.map(task => [task.node_id, task]),
+)
 
 const READONLY = 'Read-only audit: no source/report/memory write; no git mutation; no PG/service/runtime mutation; no private broker effect or unauthorized external contact. Linux evidence is allowlisted read-only only. Return an immutable audit_fragment_v2.'
 const ANNOTATE = `After forming each claim, add defect_type, symbol_anchor, and optional root_anchor. This is post-hoc indexing, not an investigation menu. Severity prices both avoided loss and suppressed valid edge/rework annuity; live hard boundaries never loosen.`
@@ -1077,6 +1072,15 @@ if (retryAxisIndexes.length) {
     producerByNode.set(`audit:${axes[originalIndex]}`, retried[retryIndex].record)
   })
 }
+const terminalNullAxes = axes.filter((_, index) => auditResults[index] === null)
+if (terminalNullAxes.length) {
+  throw new Error(`FULL_AUDIT_TERMINAL_NULL_V1:${canonicalJson({
+    schema_version: 'full_audit_terminal_null_v1',
+    node_ids: terminalNullAxes.map(axis => `audit:${axis}`),
+    disposition: 'ABORTED_BEFORE_SEAM',
+    reason: 'fixed pre-call DAG cannot emit a complete axes+seam wave after final null',
+  })}`)
+}
 retryDebtIndexes.forEach(index => coverageDebt.push({ kind: 'axis', id: axes[index], reason: 'infrastructure null exceeded retry_budget' }))
 const audits = auditResults.map((result, index) => result && ({ axis: axes[index], ...result })).filter(Boolean)
 const coverageHoles = axes.filter(axis => !audits.some(audit => audit.axis === axis) || audits.some(audit => audit.axis === axis && audit.verdict === 'BLOCKED'))
@@ -1115,221 +1119,41 @@ const distinctClaims = [...exactGroups.entries()].map(([key, members], index) =>
   (left.representative.confidence === 'low' ? -1 : 0) - (right.representative.confidence === 'low' ? -1 : 0)
 )
 
-let plannedInputTokens = (axes.length + retryAxisIndexes.length) * auditCallTokens + seamCallTokens
-let plannedUniqueNodes = axes.length + 1
-let plannedCallAttempts = axes.length + retryAxisIndexes.length + 1
-let reservedVerificationCalls = 0
-// B-1:為 verify 票的基礎設施 null 有界重試預留額度(全 Verify 段共用,上限=retry_budget),
-// 讓 admission 帳目涵蓋它,不會超支 attempt / workflow-input caps。
-const verifyRetryCap = Math.max(0, retryBudget - retryAxisIndexes.length)
-let verifyInfraRetries = 0
-plannedInputTokens += verifyRetryCap * verificationCallTokens
-plannedCallAttempts += verifyRetryCap
-// C-2(claim-0011):in-run Regression reserve 移除。本 workflow 的 fix 產物依設計
-// 永不在 run 內 integration(integration_status 恆 NOT_INTEGRATED、E1 prompt 明令
-// 「do not claim repository integration」),regression 段是不可達死碼,其 reserve
-// 在 fix-run 只會擠占一條可驗證 claim。regression 證據屬 candidate 併入 main 後的
-// post-integration 管線(E4 regression-testing-protocol),不在此 run 內佔容量。
-let fixWorkflowReserved = false
-let reservedFixPairs = 0
-const fixReserveNodes = 2 // E1 candidate + E2 exact review
-const fixReserveTokens = fixCallTokens + reviewCallTokens
-if (doFix && distinctClaims.length) {
-  if (
-    plannedUniqueNodes + fixReserveNodes <= maxUniqueNodes &&
-    plannedCallAttempts + fixReserveNodes <= maxCallAttempts &&
-    plannedInputTokens + fixReserveTokens <= maxWorkflowPlannedInputTokens
-  ) {
-    plannedUniqueNodes += fixReserveNodes
-    plannedCallAttempts += fixReserveNodes
-    plannedInputTokens += fixReserveTokens
-    fixWorkflowReserved = true
-  } else {
-    coverageDebt.push({ kind: 'fix', id: 'reserve', owner: 'E1', reason: 'atomic fix/review reserve unavailable before claim admission' })
-  }
-}
-// C-1(claim-0010):第三票不再是全局唯一 reserve(舊制每輪至多 1 條 high-risk claim
-// 拿得到第三裁決)。admission 依 severity 序先為每條 high-risk claim 條件化預留專屬
-// 第三票(容量不足時該 claim 仍以兩票入場,verify 段記 debt);claim 全數入場後,
-// 剩餘容量按同一 severity 序確定性預派為浮動第三票,供 verify 段兩票分歧時使用。
-// 全部配額於 admission 期決定(E2 複審:FCFS 池取決於 agent 完成順序,resume 重放
-// 時第三票會落到不同 claim → record 集合分歧);invoke() 的 runtime caps 仍是最終防線。
+const plannedInputTokens = (axes.length + retryAxisIndexes.length) * auditCallTokens + seamCallTokens
+const plannedUniqueNodes = axes.length + 1
+const plannedCallAttempts = axes.length + retryAxisIndexes.length + 1
+const reservedVerificationCalls = 0
+const reservedFixPairs = 0
 const admittedClaims = []
-const deferredClaims = []
-const reservedThirdVoteClaimIds = new Set()
-const reserveVerificationSlots = count => {
-  if (
-    reservedVerificationCalls + count <= maxVerificationCalls &&
-    plannedUniqueNodes + count <= maxUniqueNodes &&
-    plannedCallAttempts + count <= maxCallAttempts &&
-    plannedInputTokens + count * verificationCallTokens <= maxWorkflowPlannedInputTokens
-  ) {
-    reservedVerificationCalls += count
-    plannedUniqueNodes += count
-    plannedCallAttempts += count
-    plannedInputTokens += count * verificationCallTokens
-    return true
-  }
-  return false
+const deferredClaims = [...distinctClaims]
+deferredClaims.forEach(claim => coverageDebt.push(stagedClaimDebt(claim)))
+if (doFix && distinctClaims.length) {
+  coverageDebt.push({
+    kind: 'fix', id: 'host-capability-phase', owner: 'E1',
+    reason: 'dynamic fix/review requires a separately admitted host-capability phase',
+  })
 }
-for (const claim of distinctClaims) {
-  if (!reserveVerificationSlots(2)) { // two mandatory views
-    deferredClaims.push(claim)
-    coverageDebt.push({
-      kind: 'claim', id: claim.claim_id, owner: claim.representative.axis,
-      claim_key: claim.claim_key, reason: 'verification admission envelope exhausted',
-    })
-    continue
-  }
-  admittedClaims.push(claim)
-  if (isHighRisk(claim.representative) && reserveVerificationSlots(1)) {
-    reservedThirdVoteClaimIds.add(claim.claim_id)
-  }
-}
-const floatingThirdVoteClaimIds = new Set()
-for (const claim of admittedClaims) {
-  if (reservedThirdVoteClaimIds.has(claim.claim_id)) continue
-  if (!reserveVerificationSlots(1)) break // 單調耗盡:一次預留失敗後續必失敗
-  floatingThirdVoteClaimIds.add(claim.claim_id)
-}
-// 未用的浮動票保持 planning reserve,不回收再分配——換取重放確定性。
-const claimThirdVote = claim =>
-  reservedThirdVoteClaimIds.has(claim.claim_id) || floatingThirdVoteClaimIds.has(claim.claim_id)
 log(`findings=${allFindings.length}; decision_claims=${distinctClaims.length}; admitted=${admittedClaims.length}; deferred=${deferredClaims.length}; assumptions=${assumptions.length}`)
 
-phase('Verify')
-function verificationJob(claim) {
-  return async () => {
-    const finding = claim.representative
-    const prompts = [
-      `Try to refute claim ${claim.claim_id} without contrarian theater. Verify the cited source/output and whether FACT/INFERENCE/ASSUMPTION is honest.\nClaim: ${finding.assertion}\nEvidence: ${finding.evidence}\nFile: ${finding.file}\n${READONLY}`,
-      `Try to refute claim ${claim.claim_id} from outcome/impact and severity. Reproduce enough evidence to decide whether the problem and claimed consequence are real.\nClaim: ${finding.assertion}\nImpact: ${finding.impact}\nEvidence: ${finding.evidence}\n${READONLY}`,
-    ]
-    const firstInvocations = await boundedParallelV1(prompts.map((prompt, index) => () =>
-      invoke({
-        prompt, nodeId: `verify:${claim.claim_id}:${index === 0 ? 'source' : 'impact'}`,
-        payloadKind: ROLE_PAYLOAD_KIND[index === 0 ? 'E2' : 'PA'], admittedTokens: estimatedVerificationTokens,
-        requires: [`audit:${finding.axis}`],
-        options: {
-          agentType: index === 0 ? 'E2' : 'PA', label: `verify-${index + 1}:${claim.claim_id}`,
-          phase: 'Verify', schema: VERDICT_SCHEMA, ...verificationTier(finding),
-        },
-      })
-    ), budgetAuthority.max_concurrent_calls)
-    // B-1:verify 票的基礎設施 null 有界重試(audit 軸本有此保護,verify 票先前沒有→infra 抖動會把真 finding
-    // 靜默降級成 disputed)。共用 verifyInfraRetries 計數,單執行緒 JS 於 await 間無競態。
-    let voteRetries = 0
-    const settledInvocations = await Promise.all(firstInvocations.map((invocation, index) => {
-      if (invocation.result !== null || verifyInfraRetries >= verifyRetryCap) return Promise.resolve(invocation)
-      verifyInfraRetries += 1
-      voteRetries += 1
-      return invoke({
-        prompt: `Infrastructure null retry only; re-verify from read-only evidence and do not fabricate.\n\n${prompts[index]}`,
-        nodeId: `verify:${claim.claim_id}:${index === 0 ? 'source' : 'impact'}`,
-        payloadKind: ROLE_PAYLOAD_KIND[index === 0 ? 'E2' : 'PA'], attempt: 2,
-        retryParent: invocation.record.logical_call_id, admittedTokens: estimatedVerificationTokens,
-        requires: [`audit:${finding.axis}`],
-        options: {
-          agentType: index === 0 ? 'E2' : 'PA', label: `verify-relay-${index + 1}:${claim.claim_id}`,
-          phase: 'Verify', schema: VERDICT_SCHEMA, ...verificationTier(finding),
-        },
-      })
-    }))
-    const settled = settledInvocations.map(invocation => invocation.result)
-    const votes = settled.filter(Boolean)
-    const eligibleVotes = votes.filter(vote => vote.confidence !== 'low')
-    const firstVoteRecords = settled.flatMap((vote, index) => vote ? [{
-      view: index === 0 ? 'source' : 'impact',
-      refuted: vote.refuted,
-      confidence: vote.confidence,
-      reason: vote.reason,
-      evidence: vote.evidence,
-      reachable: null,
-      producer_record_kind: 'workflow_call_record_v1',
-      producer_call_ref: settledInvocations[index].record.logical_call_id,
-      producer_call_receipt_digest: settledInvocations[index].record.record_digest,
-    }] : [])
-    const firstRefuted = eligibleVotes.filter(vote => vote.refuted).length
-    const firstComplete = eligibleVotes.length === 2
-    const disagreement = firstComplete && firstRefuted === 1
-    const needsThird = isHighRisk(finding) || disagreement
-    const thirdAllowed = needsThird && claimThirdVote(claim)
-    if (needsThird && !thirdAllowed) coverageDebt.push({
-      kind: 'claim', id: claim.claim_id, owner: finding.axis,
-      claim_key: claim.claim_key, reason: 'risk-conditioned third-vote capacity exhausted; continue from immutable finding in a later verification wave',
-    })
-    const thirdInvocation = thirdAllowed
-      ? await invoke({
-          prompt: `Third independent adjudication for ${claim.claim_id}. Resolve any disagreement and check production reachability/gate path. Do not copy either prior conclusion.\nClaim: ${finding.assertion}\nEvidence: ${finding.evidence}\nImpact: ${finding.impact}\n${READONLY}`,
-          nodeId: `verify:${claim.claim_id}:third`, payloadKind: ROLE_PAYLOAD_KIND.E3,
-          admittedTokens: estimatedVerificationTokens,
-          requires: [...new Set([
-            `audit:${finding.axis}`,
-            ...settledInvocations.filter(item => item.result !== null).map(item => item.record.node_id),
-          ])].sort(),
-          options: { agentType: 'E3', label: `verify-3:${claim.claim_id}`, phase: 'Verify', schema: THIRD_SCHEMA, ...strongJudgmentTier() },
-        })
-      : null
-    const third = thirdInvocation && thirdInvocation.result
-    const eligibleThird = third && third.confidence !== 'low' ? third : null
-    const allVotes = eligibleThird ? [...eligibleVotes, eligibleThird] : eligibleVotes
-    const verifierVotes = third
-      ? [...firstVoteRecords, {
-          view: 'third', refuted: third.refuted, confidence: third.confidence,
-          reason: third.reason,
-          evidence: third.evidence, reachable: third.reachable,
-          producer_record_kind: 'workflow_call_record_v1',
-          producer_call_ref: thirdInvocation.record.logical_call_id,
-          producer_call_receipt_digest: thirdInvocation.record.record_digest,
-        }]
-      : firstVoteRecords
-    const refutedCount = allVotes.filter(vote => vote.refuted).length
-    const quorum = firstComplete && (!needsThird || Boolean(eligibleThird))
-    const majorityRefuted = refutedCount > allVotes.length / 2
-    const capability = (finding.defect_type || []).some(type => CAPABILITY_TYPES.includes(type))
-    const latent = third && third.reachable === 'latent' && !capability
-    if (!quorum && !coverageDebt.some(item => item.kind === 'claim' && item.id === claim.claim_id)) {
-      coverageDebt.push({ kind: 'claim', id: claim.claim_id, owner: finding.axis, claim_key: claim.claim_key, reason: 'verification quorum incomplete; continue from immutable predecessor votes' })
-    }
-    return {
-      ...finding,
-      claim_id: claim.claim_id,
-      duplicate_members: claim.duplicate_members,
-      confirmed: quorum && !majorityRefuted,
-      refuted: quorum && majorityRefuted,
-      // B-2:third 裁決存在即以 quorum 結論為準;不再因「初始分歧」永久掛 disputed(third 的職責就是破僵局)。
-      // 初始分歧仍由 verifier_dissent 保留供人檢視。null-quorum(含 third 死於 infra)才是真 disputed。
-      disputed: !quorum,
-      latent: Boolean(latent),
-      reachable: third ? third.reachable : 'not_applicable',
-      verifier_dissent: disagreement,
-      verifier_votes: verifierVotes,
-      verification_calls: 2 + voteRetries + (thirdAllowed ? 1 : 0),
-    }
-  }
-}
+phase('Stage')
 const seamPrompt = `Cross-axis seam critic. Review the independently discovered claim titles below and identify material ownerless seams without repeating claims. Return targeted re-probe instructions only; they are coverage debt until an assigned role brings evidence.\n${allFindings.map(finding => `- [${finding.axis}] ${finding.title}`).join('\n') || '(none)'}\n${READONLY}`
-const verifiedRawPromise = boundedParallelV1([
-  ...admittedClaims.map(verificationJob),
-], budgetAuthority.max_concurrent_calls)
-const seamInvocationPromise = invoke({
-    prompt: seamPrompt, nodeId: 'seam:critic', payloadKind: ROLE_PAYLOAD_KIND.CC,
-    admittedTokens: estimatedSeamTokens,
-    requires: audits.map(audit => `audit:${audit.axis}`).sort(),
-    options: { agentType: 'CC', label: 'seam-critic', phase: 'Verify', schema: SEAM_SCHEMA, ...cheapTier() },
-  })
-const [verifiedRaw, seamInvocation] = await Promise.all([verifiedRawPromise, seamInvocationPromise])
+phase('Seam')
+const seamInvocation = await invoke({
+  prompt: seamPrompt, nodeId: 'seam:critic', payloadKind: ROLE_PAYLOAD_KIND.CC,
+  admittedTokens: estimatedSeamTokens,
+  requires: audits.map(audit => `audit:${audit.axis}`).sort(),
+  options: { agentType: 'CC', label: 'seam-critic', phase: 'Seam', schema: SEAM_SCHEMA, ...cheapTier() },
+})
 const seam = seamInvocation && seamInvocation.result
 if (seamInvocation) producerByNode.set('seam:critic', seamInvocation.record)
-const verified = verifiedRaw.filter(Boolean)
-const verificationCallsUsed = verified.reduce((total, finding) => total + finding.verification_calls, 0)
-const confirmed = verified.filter(finding => finding.confirmed && !finding.latent)
-const latent = verified.filter(finding => finding.confirmed && finding.latent)
-const disputed = verified.filter(finding => finding.disputed)
-const refuted = verified.filter(finding => finding.refuted)
+const verificationCallsUsed = 0
+const confirmed = []
+const latent = []
+const disputed = []
+const refuted = []
 const seamReprobes = (seam && seam.reprobes) || []
 const seamResultDigest = seam ? await sha256Canonical(seam) : null
-if (!seam) coverageDebt.push({ kind: 'seam', id: 'seam-critic', reason: 'seam critic missing after verification phase' })
+if (!seam) coverageDebt.push({ kind: 'seam', id: 'seam-critic', reason: 'seam critic missing after pre-bound seam phase' })
 seamReprobes.forEach((item, index) => coverageDebt.push({ kind: 'seam_reprobe', id: `seam-${index + 1}`, reason: item.seam, owner: item.assign_axis }))
 
 phase('Cluster')
@@ -1350,70 +1174,7 @@ const clusters = [...buckets.entries()].map(([key, members]) => ({
   defect_types: [...new Set(members.flatMap(member => member.defect_type || []))],
 }))
 
-let fixes = []
-if (doFix && confirmed.length) {
-  phase('Fix')
-  const ranked = [...confirmed]
-    .sort((left, right) => (SEVERITY_RANK[left.severity] ?? 9) - (SEVERITY_RANK[right.severity] ?? 9))
-  const queue = fixWorkflowReserved ? ranked.slice(0, Math.min(maxFixes, 1)) : []
-  ranked.slice(queue.length).forEach(finding => coverageDebt.push({ kind: 'fix', id: finding.claim_id, reason: 'fix admission envelope or max_fixes exhausted' }))
-  reservedFixPairs = queue.length
-  fixes = (await pipeline(
-    queue,
-    finding => invoke({
-      prompt: `Prepare a candidate for confirmed claim ${finding.claim_id} in the isolated worktree; do not claim repository integration. Return CANDIDATE_READY only with exact worktree_id, base_head, candidate_head, patch_digest, diff_digest, and changed files. Preserve hard boundaries and do not expand scope.\nClaim: ${finding.assertion}\nEvidence: ${finding.evidence}\nFile: ${finding.file}\nHint: ${finding.fix_hint || 'none'}`,
-      nodeId: `fix:${finding.claim_id}`, payloadKind: ROLE_PAYLOAD_KIND.E1, admittedTokens: estimatedFixTokens,
-      requires: [...new Set([
-        `audit:${finding.axis}`,
-        ...finding.verifier_votes.map(vote => callRecords.find(record => record.logical_call_id === vote.producer_call_ref)?.node_id).filter(Boolean),
-      ])].sort(),
-      options: {
-        agentType: 'E1', label: `fix:${finding.claim_id}`, phase: 'Fix', isolation: 'worktree',
-        nodeClass: 'work', permission: 'source_writer', schema: FIX_SCHEMA,
-      },
-    }).then(invocation => ({ finding, fix: invocation.result, fix_producer: invocation.record })),
-    item => item && item.fix && item.fix.status === 'CANDIDATE_READY' && validFixCandidate(item.fix.candidate)
-      ? invoke({
-          prompt: `Independently review the exact candidate for ${item.finding.claim_id}; do not edit or substitute it. Inspect the bound worktree/head/patch/diff and return the same identifiers plus review_evidence_digest=SHA256(canonical JSON of {candidate,verdict,issues,evidence}).\nCandidate: ${canonicalJson(item.fix.candidate)}\nSummary: ${item.fix.summary}`,
-          nodeId: `review:${item.finding.claim_id}`, payloadKind: ROLE_PAYLOAD_KIND.E2, admittedTokens: estimatedReviewTokens,
-          requires: [`fix:${item.finding.claim_id}`],
-          options: { agentType: 'E2', label: `review:${item.finding.claim_id}`, phase: 'Fix', schema: REVIEW_SCHEMA, ...cheapTier() },
-        }).then(async invocation => ({
-          ...item, review: invocation.result, review_producer: invocation.record,
-          review_exact: await reviewMatchesCandidate(invocation.result, item.fix.candidate),
-        }))
-      : item,
-  )).filter(Boolean).map(item => {
-    const candidateReady = item.fix && item.fix.status === 'CANDIDATE_READY' && validFixCandidate(item.fix.candidate)
-    const reviewed = candidateReady && item.review_exact === true && item.review && item.review.verdict === 'APPROVE'
-    const status = reviewed
-      ? 'CANDIDATE_REVIEWED_NOT_INTEGRATED'
-      : candidateReady
-        ? 'CANDIDATE_REVIEW_UNVERIFIED'
-        : item.fix && item.fix.status === 'NO_CHANGE_NEEDED'
-          ? 'NO_CHANGE_NEEDED'
-          : 'CANDIDATE_BLOCKED'
-    const reason = reviewed
-      ? 'exact reviewed candidate is isolated and has no verified integration into the audit baseline'
-      : candidateReady
-        ? 'candidate lacks an exact approving E2 review'
-        : 'fix attempt did not produce a hash-bound candidate'
-    if (status !== 'NO_CHANGE_NEEDED') {
-      coverageDebt.push({
-        kind: reviewed ? 'fix_integration' : 'fix_candidate',
-        id: item.finding.claim_id, owner: 'E1', reason,
-      })
-    }
-    return {
-      finding: item.finding, fix: item.fix, review: item.review || null,
-      fix_producer_call_ref: item.fix_producer && item.fix_producer.logical_call_id,
-      fix_producer_call_receipt_digest: item.fix_producer && item.fix_producer.record_digest,
-      review_producer_call_ref: item.review_producer && item.review_producer.logical_call_id || null,
-      review_producer_call_receipt_digest: item.review_producer && item.review_producer.record_digest || null,
-      status, integration_status: 'NOT_INTEGRATED',
-    }
-  })
-}
+const fixes = []
 
 // C-2(claim-0011):Regression 執行段隨 reserve 一併移除;result 仍保留
 // regression 欄位形狀(恆 null)以維持 full_audit_result_v3 消費端相容。
@@ -1428,13 +1189,32 @@ const slim = finding => ({
   defect_type: finding.defect_type, reachable: finding.reachable,
 })
 const PAYLOAD_KIND = ROLE_PAYLOAD_KIND
-const closureAdmissions = axes.map(axis => ({
+const axisBindings = axes.map(axis => ({
   node_id: `audit:${axis}`, role: axis, ...nativeBinding(axis),
   node_class: 'verification', reason: 'full audit admitted axis',
 }))
+const closureAdmissions = [
+  ...axisBindings.map(binding => ({
+    ...binding,
+    requires: [],
+    path_scope: [],
+    result_binding: 'role_fragment',
+  })),
+  {
+    node_id: 'seam:critic', role: 'CC', ...nativeBinding('CC'),
+    node_class: 'verification',
+    requires: axes.map(axis => `audit:${axis}`).sort(),
+    path_scope: [],
+    reason: 'full audit cross-axis seam critic',
+    result_binding: 'nested_payload',
+  },
+]
 const debtProjection = item => `full_audit_debt:${canonicalJson({
   id: item.id, kind: item.kind, owner: item.owner === undefined ? null : item.owner,
   reason: item.reason, ...(item.claim_key === undefined ? {} : { claim_key: item.claim_key }),
+  ...(item.remediation_id === undefined ? {} : { remediation_id: item.remediation_id }),
+  ...(item.verification_state === undefined ? {} : { verification_state: item.verification_state }),
+  ...(item.bound_axes === undefined ? {} : { bound_axes: item.bound_axes }),
 })}`
 const unverifiedProjection = coverageDebt.map(debtProjection)
   .concat(coverageHoles.map(axis => `full_audit_hole:${canonicalJson({ axis })}`))
@@ -1442,18 +1222,25 @@ const unverifiedProjection = coverageDebt.map(debtProjection)
   .concat(decisionChangingFindings.length ? [`full_audit_decision_changing_findings:${canonicalJson({ count: decisionChangingFindings.length })}`] : [])
   .concat(seam ? [] : ['full_audit_seam_missing'])
 
-// Full Audit admits claim/review nodes dynamically.  Finalize their receipts
-// only after admission closes, then hash records in topological order so every
-// dependency carries the exact successful predecessor generation.
-const firstAttempts = callRecords
-  .filter(record => record.attempt === 1)
-  .sort((left, right) => left.node_id.localeCompare(right.node_id))
-const dagNodes = firstAttempts.map(record => ({
-  node_id: record.node_id, role: record.requested.logical_role, requires: record.requires,
-  native_agent: record.requested.platform_requested_agent,
-  node_class: record.requested.node_class, permission: record.requested.permission,
-}))
-const dagDigest = await sha256Canonical({ schema_version: 'agent_wave_execution_dag_v1', nodes: dagNodes })
+// The fixed axes+seam calls must exactly cover the Context-bound pre-call DAG.
+// Hash records in topological order so every dependency carries the exact
+// successful predecessor generation.
+const observedFirstAttempts = callRecords.filter(record => record.attempt === 1)
+const firstAttemptByNode = new Map(
+  observedFirstAttempts.map(record => [record.node_id, record]),
+)
+if (
+  firstAttemptByNode.size !== observedFirstAttempts.length ||
+  observedFirstAttempts.length !== preCallExecutionTasks.length ||
+  preCallExecutionTasks.some(task => !firstAttemptByNode.has(task.node_id))
+) {
+  throw new Error('Full Audit calls do not exactly cover the pre-call execution DAG')
+}
+const firstAttempts = preCallExecutionTasks.map(
+  task => firstAttemptByNode.get(task.node_id),
+)
+const dagNodes = preCallExecutionTasks.map(task => ({ ...task }))
+const dagDigest = preCallExecutionDagDigest
 const pendingDagNodes = new Set(dagNodes.map(node => node.node_id))
 const executionWaves = []
 while (pendingDagNodes.size) {
@@ -1489,46 +1276,18 @@ for (const record of orderedCallRecords) {
   record.record_digest = await sha256Canonical(unsigned)
   if (!record.returned_null) successfulProducerByNode.set(record.node_id, record)
 }
-const finalizedRecordById = new Map(orderedCallRecords.map(record => [record.logical_call_id, record]))
-verified.forEach(finding => finding.verifier_votes.forEach(vote => {
-  vote.producer_call_receipt_digest = finalizedRecordById.get(vote.producer_call_ref)?.record_digest || vote.producer_call_receipt_digest || null
-}))
-fixes.forEach(item => {
-  item.fix_producer_call_receipt_digest = finalizedRecordById.get(item.fix_producer_call_ref)?.record_digest || null
-  item.review_producer_call_receipt_digest = finalizedRecordById.get(item.review_producer_call_ref)?.record_digest || null
-})
-
 const roleFragments = (await Promise.all(axes.map(async axis => {
   const audit = audits.find(item => item.axis === axis)
   if (!audit) return null
   const axisDecisionClaims = decisionChangingFindings.filter(finding => finding.axis === audit.axis)
   const axisDisputed = disputed.filter(finding => finding.axis === audit.axis)
-  const axisDebt = coverageDebt.filter(item => item.owner === audit.axis || (item.kind === 'axis' && item.id === audit.axis))
-  const axisAssumptions = audit.assumptions || []
-  const verificationOutcomes = await Promise.all(
-    verified.filter(finding => finding.axis === audit.axis).map(async finding => {
-      const outcome = {
-        claim_id: finding.claim_id,
-        claim_key: claimKey(finding),
-        axis: finding.axis,
-        severity: finding.severity,
-        defect_type: finding.defect_type || [],
-        assertion: finding.assertion,
-        evidence: finding.evidence,
-        file: finding.file,
-        symbol_anchor: finding.symbol_anchor,
-        confirmed: finding.confirmed,
-        refuted: finding.refuted,
-        disputed: finding.disputed,
-        latent: finding.latent,
-        reachable: finding.reachable,
-        verifier_dissent: finding.verifier_dissent,
-        verifier_votes: finding.verifier_votes,
-        verification_calls: finding.verification_calls,
-      }
-      return { outcome, outcome_digest: await sha256Canonical(outcome) }
-    }),
+  const axisDebt = coverageDebt.filter(item =>
+    item.owner === audit.axis ||
+    (item.kind === STAGED_CLAIM_KIND && item.bound_axes.includes(audit.axis)) ||
+    (item.kind === 'axis' && item.id === audit.axis)
   )
+  const axisAssumptions = audit.assumptions || []
+  const verificationOutcomes = []
   const gateVerdict = axisDecisionClaims.length
     ? 'FAIL'
     : axisDisputed.length
@@ -1660,7 +1419,7 @@ const controllerPayload = {
   expected_axes: expectedAxes,
   admitted_axes: axes,
   deferred_axes: deferredAxes,
-  axis_bindings: closureAdmissions,
+  axis_bindings: axisBindings,
   axis_fragment_digests: axisFragmentDigests,
   workflow_contract_digest: workflowContractDigest,
   call_manifest_digest: callManifest.manifest_digest,
@@ -1702,8 +1461,7 @@ const controlFragment = {
 }
 
 const splitRequired = Boolean(
-  coverageDebt.length || deferredClaims.length || disputed.length ||
-  confirmed.some(finding => !fixes.some(item => item.finding.claim_id === finding.claim_id && ['NO_CHANGE_NEEDED', 'APPLIED_VERIFIED'].includes(item.status))),
+  coverageDebt.length || deferredClaims.length || disputed.length,
 )
 const splitRecommendation = splitRequired ? {
   schema_version: 'full_audit_split_recommendation_v1',

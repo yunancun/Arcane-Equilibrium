@@ -14,8 +14,14 @@ from typing import Any
 from agent_governance_registry import REPO_ROOT, load_registry
 from agent_governance_context_specs import trusted_derived_kinds
 from agent_governance_context_projection import materialize_semantic_context
-from agent_governance_execution_policy import compile_execution_budget_policy
-from agent_governance_routing import route_task
+from agent_governance_execution_dag import (
+    _compiler_derived_zero_call_context_execution_dag_binding,
+    compile_context_execution_dag_binding,
+)
+from agent_governance_execution_policy import (
+    compile_execution_budget_policy,
+    promote_execution_envelope,
+)
 from agent_governance_task_control import compile_task_execution_policy
 
 
@@ -39,6 +45,7 @@ PLAN_FIELDS = {
     "registry_schema_version",
     "role",
     "role_permission",
+    "execution_dag_binding",
     "task_contract",
     "task_contract_digest",
     "mandatory_content",
@@ -325,14 +332,33 @@ def _local_provenance_errors(
     }
     if evidence_state:
         contract["evidence_state"] = evidence_state
+    execution_dag_binding = plan.get("execution_dag_binding")
+    execution_dag = (
+        execution_dag_binding.get("nodes")
+        if isinstance(execution_dag_binding, dict)
+        else None
+    )
+    # The public Context compiler rejects caller-supplied ``[]``. Therefore an
+    # authenticated empty binding can only have come from the compiler's own
+    # zero-delegation route; recapture that route instead of replaying ``[]`` as
+    # if it were caller authority.
+    recapture_execution_dag = None if execution_dag == [] else execution_dag
     try:
         recaptured = compile_context(
             str(plan.get("role", "")), contract, registry=registry, root=root,
             external_evidence_verifier=external_evidence_verifier,
+            execution_dag=recapture_execution_dag,
         )
     except (KeyError, OSError, TypeError, ValueError) as error:
         return [f"local Context provenance recapture failed: {error}"]
     errors: list[str] = []
+    if (
+        execution_dag == []
+        and recaptured.get("execution_dag_binding") != execution_dag_binding
+    ):
+        errors.append(
+            "compiler-derived zero-call execution DAG differs from caller artifact"
+        )
     if recaptured.get("selected_packs") != plan.get("selected_packs"):
         errors.append("Registry-selected Context packs differ from caller artifact")
     actual_sources = recaptured.get("sources", [])
@@ -482,6 +508,31 @@ def validate_context_artifact(
     registry = registry or load_registry()
     if plan.get("role_permission") != registry.get("roles", {}).get(plan.get("role"), {}).get("permission"):
         errors.append("context role_permission differs from Registry")
+    execution_dag_binding = plan.get("execution_dag_binding")
+    if (
+        not isinstance(execution_dag_binding, dict)
+        or not isinstance(execution_dag_binding.get("nodes"), list)
+    ):
+        errors.append("context plan lacks an exact execution DAG binding")
+        execution_dag_binding = None
+    else:
+        try:
+            expected_dag_binding = (
+                _compiler_derived_zero_call_context_execution_dag_binding(
+                    registry=registry,
+                )
+                if not execution_dag_binding["nodes"]
+                else compile_context_execution_dag_binding(
+                    execution_dag_binding["nodes"],
+                    registry=registry,
+                )
+            )
+        except (KeyError, TypeError, ValueError) as error:
+            errors.append(f"context execution DAG binding is invalid: {error}")
+            execution_dag_binding = None
+        else:
+            if execution_dag_binding != expected_dag_binding:
+                errors.append("context execution DAG binding is not compiler-derived")
     try:
         expected_semantic = materialize_semantic_context(plan, registry)
     except (KeyError, TypeError, ValueError) as error:
@@ -653,7 +704,13 @@ def validate_context_artifact(
     if not isinstance(budget, dict) or set(budget) != BUDGET_FIELDS:
         errors.append("context budget fields are not exact")
         return result
-    envelope_name = route_task(contract, registry=registry)["budget_envelope"]
+    if execution_dag_binding is None:
+        return result
+    envelope_name = promote_execution_envelope(
+        _envelope(contract),
+        required_nodes=execution_dag_binding["node_count"],
+        registry=registry,
+    )
     try:
         envelope = registry["budget_envelopes"][envelope_name]
     except (KeyError, TypeError):

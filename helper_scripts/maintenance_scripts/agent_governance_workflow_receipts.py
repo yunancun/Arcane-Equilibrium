@@ -10,8 +10,9 @@ from typing import Any
 
 from agent_governance_registry import load_registry
 from agent_governance_execution_policy import (
-    admit_execution_event,
+    _assemble_structural_execution_event_ledger,
     new_execution_event_ledger,
+    registry_execution_budget_policy_errors,
     surface_profile_binding,
     validate_execution_event_ledger,
 )
@@ -23,6 +24,7 @@ from agent_governance_workflow_identity import (
 )
 from agent_governance_workflow_budget import workflow_budget_errors
 from agent_governance_execution_dag import (
+    execution_node_core,
     execution_dag_digest,
     topological_waves,
     validate_call_dag_fields,
@@ -341,6 +343,33 @@ def validate_workflow_call_manifest(
     return errors
 
 
+def _registry_surface_for_validated_records(
+    records: list[dict[str, Any]],
+) -> dict[str, Any]:
+    """Resolve one exact Registry surface shared by every validated call."""
+
+    profile_ids = {
+        record["requested"]["surface_profile_id"]
+        for record in records
+    }
+    profile_digests = {
+        record["requested"]["surface_profile_digest"]
+        for record in records
+    }
+    if len(profile_ids) != 1 or len(profile_digests) != 1:
+        raise ValueError(
+            "workflow call manifest must bind one execution surface profile"
+        )
+    profile_id = next(iter(profile_ids))
+    supplied_digest = next(iter(profile_digests))
+    binding = surface_profile_binding(profile_id, load_registry())
+    if supplied_digest != binding["digest"]:
+        raise ValueError(
+            "workflow call manifest execution surface digest differs from Registry"
+        )
+    return binding
+
+
 def _admitted_task_errors(task: Any, index: int) -> list[str]:
     label = f"workflow wave admitted_tasks[{index}]"
     if not isinstance(task, dict) or set(task) != ADMITTED_TASK_FIELDS:
@@ -399,6 +428,7 @@ def validate_workflow_wave_record(
     expected_context_artifact_digest: str | None = None,
     expected_budget_authority_digest: str | None = None,
     expected_budget_authority_canonical: str | None = None,
+    expected_execution_dag_binding: dict[str, Any] | None = None,
 ) -> list[str]:
     """Validate call accounting, retries, admitted nodes, and result coverage."""
 
@@ -435,6 +465,23 @@ def validate_workflow_wave_record(
         tasks = []
     for index, task in enumerate(tasks):
         errors.extend(_admitted_task_errors(task, index))
+    if expected_execution_dag_binding is not None:
+        expected_nodes = expected_execution_dag_binding.get("nodes")
+        admitted_core = [
+            execution_node_core(task)
+            for task in tasks
+            if isinstance(task, dict)
+        ]
+        if admitted_core != expected_nodes:
+            errors.append(
+                "workflow wave admitted task core differs from Context execution DAG binding"
+            )
+        if wave.get("dag_digest") != expected_execution_dag_binding.get(
+            "dag_digest"
+        ):
+            errors.append(
+                "workflow wave dag_digest differs from Context execution DAG binding"
+            )
     node_ids = [task.get("node_id") for task in tasks if isinstance(task, dict)]
     if len(node_ids) != len(set(node_ids)):
         errors.append("workflow wave admitted node ids must be unique")
@@ -579,6 +626,12 @@ def validate_workflow_wave_record(
         except (TypeError, ValueError, json.JSONDecodeError):
             execution_policy = None
         if isinstance(execution_policy, dict):
+            errors.extend(
+                f"workflow wave {error}"
+                for error in registry_execution_budget_policy_errors(
+                    execution_policy
+                )
+            )
             surface_profile_ids = [
                 record.get("requested", {}).get("surface_profile_id")
                 for record in records
@@ -724,7 +777,15 @@ def build_workflow_wave_record(
 ) -> dict[str, Any]:
     """Build a deterministic wave ledger from canonical call records."""
 
-    records = manifest.get("records", []) if isinstance(manifest, dict) else []
+    manifest_errors = validate_workflow_call_manifest(manifest)
+    if manifest_errors:
+        raise ValueError(
+            "invalid workflow call manifest: " + "; ".join(manifest_errors)
+        )
+    records = manifest["records"]
+    surface_binding = _registry_surface_for_validated_records(records)
+    surface_profile = surface_binding["profile"]
+    surface_digest = surface_binding["digest"]
     admitted_tasks = [
         {
             **task, "requires": task.get("requires", []),
@@ -745,13 +806,7 @@ def build_workflow_wave_record(
     try:
         execution_policy = json.loads(budget_authority["authority_canonical"])
         policy_digest = str(budget_authority["authority_digest"])
-        first_requested = next(
-            record["requested"]
-            for record in records
-            if isinstance(record, dict) and isinstance(record.get("requested"), dict)
-        )
-        surface_digest = first_requested["surface_profile_digest"]
-    except (KeyError, StopIteration, TypeError, ValueError, json.JSONDecodeError) as exc:
+    except (KeyError, TypeError, ValueError, json.JSONDecodeError) as exc:
         raise ValueError("cannot build execution ledger from wave authority/calls") from exc
     watcher_id = f"workflow-wave:{manifest.get('manifest_digest')}"
     execution_ledger = new_execution_event_ledger(
@@ -760,9 +815,7 @@ def build_workflow_wave_record(
         surface_profile_digest=surface_digest,
         watcher_id=watcher_id,
     )
-    _, execution_ledger = admit_execution_event(
-        execution_policy,
-        execution_ledger,
+    structural_events = [
         {
             "event_id": "workflow-root-turn",
             "kind": "root_turn",
@@ -772,14 +825,12 @@ def build_workflow_wave_record(
             "watcher_id": watcher_id,
             "outcome": "completed",
             "call_record_digest": None,
-        },
-    )
+        }
+    ]
     for record in records:
         if not isinstance(record, dict):
             continue
-        allowed, execution_ledger = admit_execution_event(
-            execution_policy,
-            execution_ledger,
+        structural_events.append(
             {
                 "event_id": str(record["logical_call_id"]),
                 "kind": "retry" if record.get("attempt", 1) > 1 else "model_call",
@@ -795,10 +846,23 @@ def build_workflow_wave_record(
                 "call_record_digest": str(record["record_digest"]),
             },
         )
-        if not allowed:
-            raise ValueError(
-                "execution policy denied a call already present in the manifest"
-            )
+    policy_errors = registry_execution_budget_policy_errors(execution_policy)
+    if policy_errors:
+        raise ValueError(
+            "cannot build execution receipt from non-Registry policy: "
+            + "; ".join(policy_errors)
+        )
+    try:
+        execution_ledger = _assemble_structural_execution_event_ledger(
+            execution_policy,
+            execution_ledger,
+            structural_events,
+            surface_profile=surface_profile,
+        )
+    except ValueError as exc:
+        raise ValueError(
+            "cannot build structural execution receipt from wave authority/calls"
+        ) from exc
     core: dict[str, Any] = {
         "schema_version": "workflow_wave_record_v1",
         "workflow_contract_digest": manifest.get("workflow_contract_digest"),

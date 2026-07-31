@@ -5,9 +5,8 @@ from __future__ import annotations
 from typing import Any
 
 from agent_governance_execution_dag import (
-    delegated_execution_projection,
     execution_dag_digest,
-    non_call_controller_node_ids,
+    task_execution_projection,
 )
 from agent_governance_repository_changes import writer_scope_contracts
 
@@ -82,12 +81,11 @@ def validate_dispatch_projection(
                 f"dispatch admitted_role_nodes[{index}] requires are not sorted unique dispatch predecessors"
             )
 
-    projection, projection_errors = delegated_execution_projection(
+    projection, projection_errors = task_execution_projection(
         expected_required_nodes,
         admitted_nodes,
-        excluded_nodes=non_call_controller_node_ids(
-            (expected_route or {}).get("task_facts", {})
-        ),
+        task_facts=(expected_route or {}).get("task_facts", {}),
+        require_fixed_admissions=True,
     )
     errors.extend(
         f"dispatch delegated execution projection invalid: {error}"

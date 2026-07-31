@@ -6,7 +6,9 @@ from copy import deepcopy
 import hashlib
 import json
 import re
+from threading import RLock
 from typing import Any
+from weakref import WeakKeyDictionary
 
 
 DIGEST_RE = re.compile(r"^sha256:[0-9a-f]{64}$")
@@ -90,6 +92,35 @@ TERMINAL_REASONS = {
     "DEADLINE_EXCEEDED",
 }
 ENVELOPE_ORDER = ("narrow", "standard", "complex", "full_audit")
+_CONTROLLER_SEAL = object()
+
+
+class ExecutionAdmissionController:
+    """Opaque, non-serializable authority for one in-process ledger lineage."""
+
+    __slots__ = ("__weakref__",)
+
+    def __init__(self, seal: object) -> None:
+        if seal is not _CONTROLLER_SEAL:
+            raise TypeError(
+                "ExecutionAdmissionController must be created by its Registry factory"
+            )
+
+    def __copy__(self) -> None:
+        raise TypeError("ExecutionAdmissionController cannot be copied")
+
+    def __deepcopy__(self, memo: dict[int, Any]) -> None:
+        raise TypeError("ExecutionAdmissionController cannot be copied")
+
+    def __reduce__(self) -> None:
+        raise TypeError("ExecutionAdmissionController cannot be serialized")
+
+
+_CONTROLLER_STATES: WeakKeyDictionary[
+    ExecutionAdmissionController, dict[str, Any]
+] = WeakKeyDictionary()
+_CONTROLLER_REGISTRY_LOCK = RLock()
+_ISSUED_CONTROLLER_ROOTS: set[str] = set()
 
 
 def _canonical_bytes(value: Any) -> bytes:
@@ -102,12 +133,60 @@ def _canonical_bytes(value: Any) -> bytes:
     ).encode("utf-8")
 
 
+def _plain_canonical_mapping(
+    value: Any,
+    *,
+    label: str,
+) -> tuple[bytes, dict[str, Any]]:
+    try:
+        canonical = _canonical_bytes(value)
+        plain = json.loads(canonical)
+    except (TypeError, ValueError, RuntimeError, json.JSONDecodeError) as exc:
+        raise ValueError(f"{label} is not canonical JSON") from exc
+    if type(plain) is not dict:
+        raise ValueError(f"{label} must be a JSON object")
+    return canonical, plain
+
+
 def _digest(value: Any) -> str:
     return "sha256:" + hashlib.sha256(_canonical_bytes(value)).hexdigest()
 
 
 def _ledger_digest(ledger: dict[str, Any]) -> str:
     return _digest({key: value for key, value in ledger.items() if key != "ledger_digest"})
+
+
+def _registry_execution_budget_policy_authority(
+    policy: Any,
+    registry: dict[str, Any],
+) -> tuple[dict[str, Any] | None, list[str]]:
+    if not isinstance(policy, dict):
+        return None, ["execution budget policy must be an object"]
+    envelope = policy.get("envelope")
+    if not isinstance(envelope, str):
+        return None, ["execution budget policy envelope is invalid"]
+    try:
+        expected = compile_execution_budget_policy(envelope, registry)
+    except ValueError as exc:
+        return None, [str(exc)]
+    if policy != expected:
+        return None, [
+            "execution budget policy differs from the live Registry authority"
+        ]
+    return expected, []
+
+
+def registry_execution_budget_policy_errors(policy: Any) -> list[str]:
+    """Bind one executable policy to the live Registry, not caller-signed bytes."""
+
+    # Lazy import avoids the Registry -> execution-policy validation import cycle.
+    from agent_governance_registry import load_registry
+
+    _, errors = _registry_execution_budget_policy_authority(
+        policy,
+        load_registry(),
+    )
+    return errors
 
 
 def compile_execution_budget_policy(
@@ -344,6 +423,174 @@ def new_execution_event_ledger(
     return ledger
 
 
+def _pristine_ledger_errors(
+    policy: dict[str, Any],
+    ledger: Any,
+    surface_profile: Any,
+) -> list[str]:
+    if (
+        not isinstance(ledger, dict)
+        or set(ledger) != LEDGER_FIELDS
+        or ledger.get("ledger_digest") != _ledger_digest(ledger)
+    ):
+        return ["execution ledger fields or digest are invalid"]
+    errors: list[str] = []
+    if ledger.get("schema_version") != "execution_event_ledger_v1":
+        errors.append("schema_version is invalid")
+    if ledger.get("policy_digest") != execution_policy_digest(policy):
+        errors.append("policy digest differs from authority")
+    if (
+        not isinstance(ledger.get("root_execution_id"), str)
+        or not ledger["root_execution_id"].strip()
+    ):
+        errors.append("root_execution_id is invalid")
+    if (
+        not isinstance(ledger.get("watcher_id"), str)
+        or not ledger["watcher_id"].strip()
+    ):
+        errors.append("watcher_id is invalid")
+    if ledger.get("events") != []:
+        errors.append(
+            "controller can start only from a pristine empty execution ledger"
+        )
+    if ledger.get("terminal_reason") is not None:
+        errors.append("terminal reason is invalid")
+    surface_error = _surface_profile_binding_error(ledger, surface_profile)
+    if surface_error is not None:
+        errors.append(surface_error)
+    return errors
+
+
+def _issue_execution_admission_controller(
+    policy: dict[str, Any],
+    ledger: dict[str, Any],
+    *,
+    surface_profile: dict[str, Any],
+) -> ExecutionAdmissionController:
+    """Trusted-controller seam; callers must establish policy authority first."""
+
+    policy_canonical, frozen_policy = _plain_canonical_mapping(
+        policy,
+        label="execution controller policy authority",
+    )
+    surface_canonical, frozen_surface = _plain_canonical_mapping(
+        surface_profile,
+        label="execution controller surface authority",
+    )
+    _, frozen_ledger = _plain_canonical_mapping(
+        ledger,
+        label="execution controller pristine ledger",
+    )
+    errors = _pristine_ledger_errors(
+        frozen_policy,
+        frozen_ledger,
+        frozen_surface,
+    )
+    if errors:
+        raise ValueError(
+            "execution controller initialization failed: " + "; ".join(errors)
+        )
+    with _CONTROLLER_REGISTRY_LOCK:
+        root_execution_id = frozen_ledger["root_execution_id"]
+        if root_execution_id in _ISSUED_CONTROLLER_ROOTS:
+            raise ValueError(
+                "execution controller genesis is already claimed for this root execution"
+            )
+        controller = ExecutionAdmissionController(_CONTROLLER_SEAL)
+        _ISSUED_CONTROLLER_ROOTS.add(root_execution_id)
+        _CONTROLLER_STATES[controller] = {
+            "root_execution_id": root_execution_id,
+            "watcher_id": frozen_ledger["watcher_id"],
+            "policy_digest": frozen_ledger["policy_digest"],
+            "surface_profile_digest": frozen_ledger["surface_profile_digest"],
+            "policy_authority_canonical": policy_canonical,
+            "surface_authority_canonical": surface_canonical,
+            "last_ledger_digest": frozen_ledger["ledger_digest"],
+            "lock": RLock(),
+        }
+    return controller
+
+
+def _start_registry_execution_admission(
+    policy: dict[str, Any],
+    ledger: dict[str, Any],
+    *,
+    surface_profile: dict[str, Any],
+) -> ExecutionAdmissionController:
+    """Internal mint for a canonical controller-derived execution root."""
+
+    _, supplied_policy = _plain_canonical_mapping(
+        policy,
+        label="execution controller supplied policy",
+    )
+    from agent_governance_registry import load_registry
+
+    registry = load_registry()
+    expected_policy, policy_errors = _registry_execution_budget_policy_authority(
+        supplied_policy,
+        registry,
+    )
+    if policy_errors:
+        raise ValueError(
+            "execution controller policy authority failed: "
+            + "; ".join(policy_errors)
+        )
+    if expected_policy is None:
+        raise ValueError("execution controller policy authority is unavailable")
+    _, supplied_surface = _plain_canonical_mapping(
+        surface_profile,
+        label="execution controller supplied surface",
+    )
+    _, supplied_ledger = _plain_canonical_mapping(
+        ledger,
+        label="execution controller supplied pristine ledger",
+    )
+    try:
+        binding = surface_profile_binding(
+            str(supplied_surface.get("profile_id")),
+            registry,
+        )
+    except (AttributeError, ValueError) as exc:
+        raise ValueError(
+            "execution controller surface differs from the live Registry authority"
+        ) from exc
+    if (
+        supplied_surface != binding["profile"]
+        or supplied_ledger.get("surface_profile_digest") != binding["digest"]
+    ):
+        raise ValueError(
+            "execution controller surface differs from the live Registry authority"
+        )
+    return _issue_execution_admission_controller(
+        expected_policy,
+        supplied_ledger,
+        surface_profile=binding["profile"],
+    )
+
+
+def _controller_state(
+    controller: ExecutionAdmissionController | None,
+) -> dict[str, Any]:
+    if not isinstance(controller, ExecutionAdmissionController):
+        raise ValueError(
+            "execution event admission requires an opaque controller capability"
+        )
+    with _CONTROLLER_REGISTRY_LOCK:
+        state = _CONTROLLER_STATES.get(controller)
+    if state is None:
+        raise ValueError(
+            "execution event controller capability is unknown or copied"
+        )
+    return state
+
+
+def _advance_ledger_head(
+    state: dict[str, Any],
+    ledger: dict[str, Any],
+) -> None:
+    state["last_ledger_digest"] = ledger["ledger_digest"]
+
+
 def _reject_event(
     ledger: dict[str, Any], event: dict[str, Any], reason: str,
 ) -> tuple[bool, dict[str, Any]]:
@@ -501,6 +748,20 @@ def _surface_event_coverage_error(
     event: dict[str, Any],
     surface_profile: Any,
 ) -> str | None:
+    binding_error = _surface_profile_binding_error(ledger, surface_profile)
+    if binding_error is not None:
+        return binding_error
+    coverage = surface_profile["event_coverage"]
+    # root_turn is controller-owned lineage, not a claim that the host surfaced it.
+    if event.get("kind") != "root_turn" and event.get("kind") not in coverage:
+        return f"surface profile does not attest {event.get('kind')}"
+    return None
+
+
+def _surface_profile_binding_error(
+    ledger: dict[str, Any],
+    surface_profile: Any,
+) -> str | None:
     if (
         not isinstance(surface_profile, dict)
         or set(surface_profile) != SURFACE_FIELDS
@@ -510,13 +771,13 @@ def _surface_event_coverage_error(
     if _digest(surface_profile) != ledger.get("surface_profile_digest"):
         return "surface profile digest differs from the execution ledger"
     coverage = surface_profile.get("event_coverage")
-    if not isinstance(coverage, list) or any(
-        kind not in EVENT_KINDS for kind in coverage
+    if (
+        not isinstance(coverage, list)
+        or any(not isinstance(kind, str) for kind in coverage)
+        or len(set(coverage)) != len(coverage)
+        or any(kind not in EVENT_KINDS for kind in coverage)
     ):
         return "surface profile event coverage is invalid"
-    # root_turn is controller-owned lineage, not a claim that the host surfaced it.
-    if event.get("kind") != "root_turn" and event.get("kind") not in coverage:
-        return f"surface profile does not attest {event.get('kind')}"
     return None
 
 
@@ -586,16 +847,103 @@ def _budget_rejection_reason(
     return None
 
 
-def admit_execution_event(
+def _transition_execution_event_ledger(
     policy: dict[str, Any],
     ledger: dict[str, Any],
     event: dict[str, Any],
     *,
-    surface_profile: dict[str, Any] | None = None,
+    surface_profile: dict[str, Any],
+    state: dict[str, Any],
 ) -> tuple[bool, dict[str, Any]]:
-    """Admit one controller event before any model/tool-side action occurs."""
-
-    ledger = deepcopy(ledger)
+    _, ledger = _plain_canonical_mapping(
+        ledger,
+        label="execution event supplied ledger",
+    )
+    _, event = _plain_canonical_mapping(
+        event,
+        label="execution event supplied event",
+    )
+    if (
+        not isinstance(ledger, dict)
+        or set(ledger) != LEDGER_FIELDS
+        or ledger.get("ledger_digest") != _ledger_digest(ledger)
+    ):
+        raise ValueError("execution ledger fields or digest are invalid")
+    expected_binding = {
+        "root_execution_id": ledger.get("root_execution_id"),
+        "watcher_id": ledger.get("watcher_id"),
+        "policy_digest": ledger.get("policy_digest"),
+        "surface_profile_digest": ledger.get("surface_profile_digest"),
+    }
+    if any(state.get(key) != value for key, value in expected_binding.items()):
+        raise ValueError(
+            "execution ledger differs from its controller-owned authority binding"
+        )
+    if ledger.get("ledger_digest") != state.get("last_ledger_digest"):
+        raise ValueError(
+            "execution ledger digest differs from the controller-owned monotonic anchor"
+        )
+    if ledger.get("policy_digest") != execution_policy_digest(policy):
+        raise ValueError("execution ledger policy digest differs from authority")
+    events = ledger.get("events")
+    if events == []:
+        pristine_errors: list[str] = []
+        if ledger.get("schema_version") != "execution_event_ledger_v1":
+            pristine_errors.append("schema_version is invalid")
+        if (
+            not isinstance(ledger.get("root_execution_id"), str)
+            or not ledger["root_execution_id"].strip()
+        ):
+            pristine_errors.append("root_execution_id is invalid")
+        if (
+            not isinstance(ledger.get("watcher_id"), str)
+            or not ledger["watcher_id"].strip()
+        ):
+            pristine_errors.append("watcher_id is invalid")
+        if not DIGEST_RE.fullmatch(
+            str(ledger.get("surface_profile_digest", ""))
+        ):
+            pristine_errors.append("surface profile digest is invalid")
+        if ledger.get("terminal_reason") is not None:
+            pristine_errors.append("terminal reason is invalid")
+        if surface_profile is not None:
+            surface_error = _surface_profile_binding_error(
+                ledger, surface_profile
+            )
+            if surface_error is not None:
+                pristine_errors.append(surface_error)
+        if pristine_errors:
+            raise ValueError(
+                "execution ledger pre-admission validation failed: "
+                + "; ".join(pristine_errors)
+            )
+    else:
+        if not isinstance(events, list):
+            raise ValueError(
+                "execution ledger pre-admission validation failed: "
+                "events must be a list"
+            )
+        call_record_digests = [
+            event.get("call_record_digest")
+            for event in events
+            if isinstance(event, dict)
+            and event.get("outcome") != "rejected"
+            and event.get("kind") in SAMPLING_KINDS
+        ]
+        try:
+            ledger_errors = validate_execution_event_ledger(
+                policy,
+                ledger,
+                call_record_digests=call_record_digests,
+                surface_profile=surface_profile,
+            )
+        except (KeyError, TypeError, ValueError):
+            ledger_errors = ["prior workload contract is invalid"]
+        if ledger_errors:
+            raise ValueError(
+                "execution ledger pre-admission validation failed: "
+                + "; ".join(ledger_errors)
+            )
     if ledger.get("terminal_reason") is not None:
         return False, ledger
     if not isinstance(event, dict) or set(event) != EVENT_INPUT_FIELDS:
@@ -656,18 +1004,110 @@ def admit_execution_event(
         raise ValueError(f"execution event {structural_lineage_error}")
     rejection_reason = _budget_rejection_reason(policy, completed, event)
     if rejection_reason == "SPAWN_DEPTH_EXCEEDED":
-        return _reject_event(ledger, event, rejection_reason)
+        allowed, ledger = _reject_event(ledger, event, rejection_reason)
+        _advance_ledger_head(state, ledger)
+        return allowed, ledger
     lineage_error = _event_lineage_error(
         event, prior_admitted
     )
     if lineage_error is not None:
         raise ValueError(f"execution event {lineage_error}")
     if rejection_reason is not None:
-        return _reject_event(ledger, event, rejection_reason)
+        allowed, ledger = _reject_event(ledger, event, rejection_reason)
+        _advance_ledger_head(state, ledger)
+        return allowed, ledger
     accepted = {**event, "sequence": len(events)}
     events.append(accepted)
     ledger["ledger_digest"] = _ledger_digest(ledger)
+    _advance_ledger_head(state, ledger)
     return True, ledger
+
+
+def _assemble_structural_execution_event_ledger(
+    policy: dict[str, Any],
+    ledger: dict[str, Any],
+    events: list[dict[str, Any]],
+    *,
+    surface_profile: dict[str, Any],
+) -> dict[str, Any]:
+    """Deterministically reconstruct a receipt; never mint admission authority."""
+
+    if not isinstance(events, list):
+        raise ValueError("structural execution events must be an array")
+    state = {
+        "root_execution_id": ledger.get("root_execution_id"),
+        "watcher_id": ledger.get("watcher_id"),
+        "policy_digest": ledger.get("policy_digest"),
+        "surface_profile_digest": ledger.get("surface_profile_digest"),
+        "last_ledger_digest": ledger.get("ledger_digest"),
+    }
+    assembled = ledger
+    for event in events:
+        allowed, assembled = _transition_execution_event_ledger(
+            policy,
+            assembled,
+            event,
+            surface_profile=surface_profile,
+            state=state,
+        )
+        if not allowed:
+            raise ValueError(
+                "structural execution receipt contains a policy-denied event"
+            )
+    return assembled
+
+
+def admit_execution_event(
+    policy: dict[str, Any],
+    ledger: dict[str, Any],
+    event: dict[str, Any],
+    *,
+    surface_profile: dict[str, Any] | None = None,
+    controller: ExecutionAdmissionController | None = None,
+) -> tuple[bool, dict[str, Any]]:
+    """Atomically admit one event through its controller-owned monotonic head."""
+
+    if surface_profile is None:
+        raise ValueError("execution event exact surface profile is required")
+    state = _controller_state(controller)
+    lock = state["lock"]
+    with lock:
+        supplied_policy_canonical, _ = _plain_canonical_mapping(
+            policy,
+            label="execution event supplied policy",
+        )
+        if (
+            supplied_policy_canonical
+            != state["policy_authority_canonical"]
+        ):
+            raise ValueError(
+                "execution ledger policy differs from controller-owned authority"
+            )
+        supplied_surface_canonical, _ = _plain_canonical_mapping(
+            surface_profile,
+            label="execution event supplied surface",
+        )
+        if (
+            supplied_surface_canonical
+            != state["surface_authority_canonical"]
+        ):
+            raise ValueError(
+                "execution ledger pre-admission surface profile digest differs "
+                "from controller-owned authority"
+            )
+        authority_policy = json.loads(
+            state["policy_authority_canonical"]
+        )
+        authority_surface = json.loads(
+            state["surface_authority_canonical"]
+        )
+        return _transition_execution_event_ledger(
+            authority_policy,
+            ledger,
+            event,
+            surface_profile=authority_surface,
+            state=state,
+        )
 
 
 def validate_execution_event_ledger(
@@ -677,6 +1117,8 @@ def validate_execution_event_ledger(
     call_record_digests: list[str],
     surface_profile: dict[str, Any] | None = None,
 ) -> list[str]:
+    if surface_profile is None:
+        return ["execution event ledger exact surface profile is required"]
     if not isinstance(ledger, dict) or set(ledger) != LEDGER_FIELDS:
         return ["execution event ledger fields do not match contract"]
     errors: list[str] = []

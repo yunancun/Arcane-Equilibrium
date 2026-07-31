@@ -114,13 +114,30 @@ cannot stand in for runtime, and repo writes require an exact before/after
 For desktop saved workflows, a pause may kill in-flight agents. Stay in-turn
 while a wave runs. Resume from journal/checkpoint; no unchanged blind retry.
 `agent_governance_liveness.adjudicate_agent_liveness` is currently a pure
-contract, not a connected controller. It specifies that supported
-collaboration/thread activity outranks transcript diagnostics; worktree silence
-and private transcript layout never override a supported `RUNNING` or terminal
-state. When supported activity is unavailable the result remains `UNKNOWN`;
-private JSONL existence, size, and mtime are diagnostic fallback only. The
-platform activity-acquisition plus wait/cancel/stop Adapter is still
-`EXTERNAL_LIMIT` and must not be inferred from this helper.
+caller-claim classifier, not a connected controller or host-evidence verifier.
+It reads the trusted system UTC clock internally; its exact public Interface
+accepts neither caller-supplied `now` nor a caller-provided verifier. The
+Registry-owned `agent_liveness_policy_v1` fixes the maximum claimed-observation
+age at 60 seconds and permits zero future skew. The 60-second boundary is
+inclusive; any positive excess is stale. The output canonicalizes the claim's
+`observed_at` to UTC `Z` and preserves trusted `adjudicated_at`, freshness,
+policy ID/digest, and maximum age.
+
+Freshness describes only the timestamp relationship. A caller mapping, even
+with a fresh `RUNNING`, `WAITING`, or terminal value, cannot authenticate host
+acquisition and therefore always emits `liveness_state=UNKNOWN`,
+`primary_evidence=CALLER_ACTIVITY_UNVERIFIED`, and
+`activity_verification_status=EXTERNAL_LIMIT`. Extra caller identity,
+sequence, or head fields are rejected rather than treated as proof. A future
+host-attested activity-acquisition contract, distinct from the current saved-
+workflow classifier, requires a managed out-of-band Adapter that binds activity
+to a stable identity plus monotonic sequence/head and rejects replay, rollback,
+and fabrication; it must use a new verified contract rather than relaxing this
+pure Interface. Platform activity acquisition plus wait/cancel/stop remains
+`EXTERNAL_LIMIT`.
+
+Private JSONL existence, size, and mtime remain diagnostic only. They never
+promote a caller claim to `RUNNING` or `TERMINAL`.
 
 When statting the session's `subagents/agent-*.jsonl` for liveness, also check
 byte size. A transcript growing past a threshold (suggested 10 MB) is a
