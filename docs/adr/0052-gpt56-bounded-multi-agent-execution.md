@@ -192,9 +192,14 @@ decision-changing findings, reopen/rework, and false-closure evidence are
 checked before elapsed time, calls, waits, retries, compactions, or token
 classes can count as improvement.
 
-The quality thresholds are an exact Registry policy: zero closure-quality drop,
-zero reopen increase, and full decision-changing-finding retention. Callers
-cannot relax them. Synthetic fixtures validate the schema and adjudicator only.
+The exact quality metrics include `required_coverage_ratio`,
+`closure_quality_score`, `decision_changing_findings`, `reopen_count`,
+`rework_count`, `false_closure_count`, and `p0_p1_recall_ratio`. The quality
+thresholds are an exact Registry policy: complete required coverage and P0/P1
+recall, zero closure-quality drop, zero reopen/rework/false-closure increase,
+and full decision-changing-finding retention. Missing or inferior quality
+evidence blocks an efficiency claim; callers cannot relax the gate. Synthetic
+fixtures validate the schema and adjudicator only.
 Actual savings require a typed attestation index that binds unique immutable
 run IDs, exact non-reused call-record inventories, metrics digests, and record
 digests; an out-of-band trusted-host verifier must authenticate the exact index.

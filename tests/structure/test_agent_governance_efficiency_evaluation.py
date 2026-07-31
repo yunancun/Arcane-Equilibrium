@@ -186,7 +186,11 @@ def test_registry_owns_and_validates_the_exact_quality_policy() -> None:
     policy = registry["efficiency_evaluation_policy"]
     assert policy["thresholds"] == {
         "max_closure_quality_score_drop": 0.0,
+        "minimum_required_coverage_ratio": 1.0,
         "max_reopen_count_increase": 0,
+        "max_rework_count_increase": 0,
+        "max_false_closure_count_increase": 0,
+        "minimum_p0_p1_recall_ratio": 1.0,
         "minimum_decision_changing_findings_retention_ratio": 1.0,
     }
     assert governance.registry_efficiency_evaluation_policy_errors(registry) == []
@@ -298,10 +302,134 @@ def test_quality_noninferiority_blocks_a_cheaper_but_degraded_profile() -> None:
         if check["status"] == "FAIL"
     } == {
         "closure_quality_score",
+        "required_coverage_ratio",
         "reopen_count",
+        "rework_count",
+        "false_closure_count",
+        "p0_p1_recall_ratio",
         "decision_changing_findings",
     }
     assert single["efficiency_claim_allowed"] is False
+
+
+def test_quality_noninferiority_requires_complete_required_coverage() -> None:
+    module = _load_module()
+    fixture = _fixture()
+    bounded = _profile(fixture, "bounded_role")
+    bounded["metrics"]["required_coverage_ratio"] = 0.99
+    _resign(module, fixture)
+
+    result = module.evaluate_multi_agent_efficiency(fixture)
+    comparison = result["comparisons"]["bounded_role"]
+
+    assert comparison["quality_noninferiority"]["status"] == "FAIL"
+    assert comparison["quality_noninferiority"]["checks"][
+        "required_coverage_ratio"
+    ] == {
+        "status": "FAIL",
+        "baseline": 1.0,
+        "candidate": 0.99,
+        "threshold": 1.0,
+    }
+    assert comparison["efficiency_claim_allowed"] is False
+
+
+def test_quality_noninferiority_rejects_additional_rework() -> None:
+    module = _load_module()
+    fixture = _fixture()
+    bounded = _profile(fixture, "bounded_role")
+    bounded["metrics"]["rework_count"] = 2
+    _resign(module, fixture)
+
+    result = module.evaluate_multi_agent_efficiency(fixture)
+    check = result["comparisons"]["bounded_role"]["quality_noninferiority"][
+        "checks"
+    ]["rework_count"]
+
+    assert check == {
+        "status": "FAIL",
+        "baseline": 1,
+        "candidate": 2,
+        "threshold": 1,
+    }
+    assert (
+        result["comparisons"]["bounded_role"]["quality_noninferiority"]["status"]
+        == "FAIL"
+    )
+
+
+def test_quality_noninferiority_rejects_additional_false_closures() -> None:
+    module = _load_module()
+    fixture = _fixture()
+    bounded = _profile(fixture, "bounded_role")
+    bounded["metrics"]["false_closure_count"] = 1
+    _resign(module, fixture)
+
+    result = module.evaluate_multi_agent_efficiency(fixture)
+    check = result["comparisons"]["bounded_role"]["quality_noninferiority"][
+        "checks"
+    ]["false_closure_count"]
+
+    assert check == {
+        "status": "FAIL",
+        "baseline": 0,
+        "candidate": 1,
+        "threshold": 0,
+    }
+    assert (
+        result["comparisons"]["bounded_role"]["quality_noninferiority"]["status"]
+        == "FAIL"
+    )
+
+
+def test_quality_noninferiority_requires_complete_p0_p1_recall() -> None:
+    module = _load_module()
+    fixture = _fixture()
+    bounded = _profile(fixture, "bounded_role")
+    bounded["metrics"]["p0_p1_recall_ratio"] = 0.99
+    _resign(module, fixture)
+
+    result = module.evaluate_multi_agent_efficiency(fixture)
+    check = result["comparisons"]["bounded_role"]["quality_noninferiority"][
+        "checks"
+    ]["p0_p1_recall_ratio"]
+
+    assert check == {
+        "status": "FAIL",
+        "baseline": 1.0,
+        "candidate": 0.99,
+        "threshold": 1.0,
+    }
+    assert (
+        result["comparisons"]["bounded_role"]["quality_noninferiority"]["status"]
+        == "FAIL"
+    )
+
+
+@pytest.mark.parametrize(
+    "metric",
+    [
+        "required_coverage_ratio",
+        "rework_count",
+        "false_closure_count",
+        "p0_p1_recall_ratio",
+    ],
+)
+def test_adr_quality_metrics_cannot_be_omitted(metric: str) -> None:
+    module = _load_module()
+    fixture = _fixture()
+    del _profile(fixture, "bounded_role")["metrics"][metric]
+    _resign(module, fixture)
+
+    errors = module.validate_multi_agent_efficiency_evaluation(fixture)
+
+    assert any(
+        f"missing required property {metric}" in error
+        or "metric fields differ from the contract" in error
+        for error in errors
+    )
+    with pytest.raises(ValueError):
+        module.evaluate_multi_agent_efficiency(fixture)
 
 
 def test_measured_record_cannot_relax_the_registry_quality_gate() -> None:

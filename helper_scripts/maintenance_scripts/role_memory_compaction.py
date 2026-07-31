@@ -978,11 +978,61 @@ def _host_verified_promotion_authority(
         return False
 
 
-def verify_manifest(
+def _expected_promotion_successor(
+    prior_manifest: dict[str, Any],
+    promotion: dict[str, Any],
+) -> dict[str, Any]:
+    """Derive the only successor state authorized by one promotion."""
+
+    successor = json.loads(json.dumps(prior_manifest, ensure_ascii=False))
+    role = promotion["role"]
+    matching_entries = [
+        entry
+        for entry in successor["roles"]
+        if isinstance(entry, dict) and entry.get("role") == role
+    ]
+    if len(matching_entries) != 1:
+        raise ValueError(f"{role}: prior manifest role entry is not unique")
+    entry = matching_entries[0]
+    prior_lessons = entry.get("durable_lessons")
+    if not isinstance(prior_lessons, list) or not all(
+        isinstance(lesson, str) for lesson in prior_lessons
+    ):
+        raise ValueError(f"{role}: prior durable lessons are invalid")
+    if promotion["durable_lesson"] in prior_lessons:
+        raise ValueError(f"{role}: durable lesson already exists")
+    entry["durable_lessons"] = [
+        *prior_lessons,
+        promotion["durable_lesson"],
+    ]
+    successor_active = _render_hot_memory(entry)
+    entry["active_bytes"] = len(successor_active)
+    entry["active_lines"] = len(
+        successor_active.decode("utf-8").splitlines()
+    )
+    entry["active_sha256"] = _sha256(successor_active)
+    successor["generation"] = prior_manifest["generation"] + 1
+    successor["supersedes_manifest_digest"] = prior_manifest[
+        "manifest_digest"
+    ]
+    successor["promotions"] = [
+        *prior_manifest["promotions"],
+        json.loads(json.dumps(promotion, ensure_ascii=False)),
+    ]
+    successor["manifest_digest"] = _digest_record(
+        successor,
+        "manifest_digest",
+    )
+    return successor
+
+
+def _verify_manifest_with_active_overrides(
     repo_root: Path,
     manifest: dict[str, Any],
+    *,
+    active_overrides: dict[str, bytes],
 ) -> list[str]:
-    """Verify archive prefix, payload, compact view, and manifest integrity."""
+    """Verify all manifest invariants against explicit virtual active bytes."""
 
     errors: list[str] = []
     if set(manifest) != MANIFEST_FIELDS:
@@ -1034,6 +1084,9 @@ def verify_manifest(
     promoted_lessons: dict[str, list[str]] = {
         role: [] for role in entries_by_role
     }
+    archived_prior_manifests: list[dict[str, Any] | None] = [
+        None for _ in promotions
+    ]
     request_digests: set[str] = set()
     for index, promotion in enumerate(promotions, start=1):
         if not isinstance(promotion, dict):
@@ -1102,6 +1155,7 @@ def verify_manifest(
             )
             if not isinstance(prior_manifest, dict):
                 raise ValueError("prior manifest must be an object")
+            archived_prior_manifests[index - 1] = prior_manifest
             if _manifest_bytes(prior_manifest) != prior_manifest_bytes:
                 errors.append(
                     f"{role}: prior manifest bytes are not canonical"
@@ -1177,6 +1231,30 @@ def verify_manifest(
             UnicodeDecodeError,
         ) as exc:
             errors.append(f"{role}: invalid promotion: {exc}")
+    for index, promotion in enumerate(promotions):
+        if not isinstance(promotion, dict):
+            continue
+        prior_manifest = archived_prior_manifests[index]
+        actual_successor = (
+            manifest
+            if index == len(promotions) - 1
+            else archived_prior_manifests[index + 1]
+        )
+        if prior_manifest is None or actual_successor is None:
+            continue
+        role = promotion.get("role", "<unknown>")
+        try:
+            expected_successor = _expected_promotion_successor(
+                prior_manifest,
+                promotion,
+            )
+            if actual_successor != expected_successor:
+                errors.append(
+                    f"{role}: successor transition differs from authorized "
+                    "promotion"
+                )
+        except (KeyError, TypeError, ValueError) as exc:
+            errors.append(f"{role}: invalid successor transition: {exc}")
     for entry in entries:
         if not isinstance(entry, dict):
             errors.append("manifest role entry must be an object")
@@ -1192,7 +1270,9 @@ def verify_manifest(
             if _sha256(archive[record_start:record_end]) != entry["record_sha256"]:
                 errors.append(f"{role}: archive record changed")
             recover_original_bytes(repo_root, entry)
-            active = (repo_root / entry["active_path"]).read_bytes()
+            active = active_overrides.get(entry["active_path"])
+            if active is None:
+                active = (repo_root / entry["active_path"]).read_bytes()
             if _sha256(active) != entry["active_sha256"]:
                 errors.append(f"{role}: active compact memory digest mismatch")
             expected_lessons = list(ROLE_LESSONS[role]) + promoted_lessons.get(
@@ -1222,6 +1302,19 @@ def verify_manifest(
         except (KeyError, OSError, TypeError, ValueError) as exc:
             errors.append(f"{role}: {exc}")
     return errors
+
+
+def verify_manifest(
+    repo_root: Path,
+    manifest: dict[str, Any],
+) -> list[str]:
+    """Verify archive prefix, payload, compact view, and manifest integrity."""
+
+    return _verify_manifest_with_active_overrides(
+        repo_root,
+        manifest,
+        active_overrides={},
+    )
 
 
 def _existing_manifest(repo_root: Path) -> dict[str, Any] | None:
@@ -1291,7 +1384,7 @@ def _latest_bound_prior_active(
     repo_root: Path,
     manifest: dict[str, Any],
     entry: dict[str, Any],
-) -> bytes | None:
+) -> tuple[bytes, dict[str, Any]] | None:
     """Recover the only predecessor view allowed for interrupted finalization."""
 
     promotion = next(
@@ -1313,13 +1406,63 @@ def _latest_bound_prior_active(
         entry=entry,
         promotion=promotion,
     )
-    return prior
+    return prior, promotion
+
+
+def _reauthenticate_recovery_promotions(
+    manifest: dict[str, Any],
+    authority_verifier: PromotionAuthorityVerifier | None,
+) -> None:
+    """Authenticate every serialized authority before successor recovery."""
+
+    if authority_verifier is None:
+        raise ValueError(
+            "promotion recovery requires an out-of-band host verifier"
+        )
+    for promotion in manifest["promotions"]:
+        role = promotion.get("role", "<unknown>")
+        authority = promotion.get("closure_authority")
+        authority_errors = _validate_promotion_authority(
+            role=role,
+            lesson=promotion.get("durable_lesson"),
+            authority=authority,
+        )
+        if (
+            isinstance(authority, dict)
+            and promotion.get("authority_attestation_digest")
+            != authority.get("record_digest")
+        ):
+            authority_errors.append(
+                "promotion authority attestation digest differs"
+            )
+        if (
+            isinstance(authority, dict)
+            and promotion.get("closure_digest")
+            != authority.get("closure_digest")
+        ):
+            authority_errors.append(
+                "promotion closure digest differs from authority"
+            )
+        if authority_errors:
+            raise ValueError(f"{role}: {'; '.join(authority_errors)}")
+        frozen_authority = json.loads(
+            json.dumps(authority, ensure_ascii=False)
+        )
+        if not _host_verified_promotion_authority(
+            authority_verifier,
+            frozen_authority,
+        ):
+            raise ValueError(
+                f"{role}: promotion recovery authority was not "
+                "authenticated by the host verifier"
+            )
 
 
 def _resume_or_return(
     repo_root: Path,
     manifest: dict[str, Any],
     roles: tuple[str, ...],
+    authority_verifier: PromotionAuthorityVerifier | None,
 ) -> dict[str, Any] | None:
     entries = manifest.get("roles")
     if not isinstance(entries, list):
@@ -1348,7 +1491,8 @@ def _resume_or_return(
     if archive_errors:
         return None
 
-    changed = False
+    planned_writes: list[tuple[Path, bytes]] = []
+    has_promotions = bool(manifest.get("promotions"))
     for entry in entries:
         active_path = repo_root / entry["active_path"]
         expected = _render_hot_memory(entry)
@@ -1356,21 +1500,43 @@ def _resume_or_return(
         if current == expected:
             continue
         original = recover_original_bytes(repo_root, entry)
-        prior_active = _latest_bound_prior_active(repo_root, manifest, entry)
-        if current != original and current != prior_active:
+        bound_prior = _latest_bound_prior_active(
+            repo_root,
+            manifest,
+            entry,
+        )
+        if has_promotions:
+            if bound_prior is None or current != bound_prior[0]:
+                raise ValueError(
+                    f"{entry['role']}: active memory drift after compaction"
+                )
+        elif current != original:
             raise ValueError(
                 f"{entry['role']}: active memory drift after compaction"
             )
+        planned_writes.append((active_path, expected))
+    if planned_writes:
+        active_overrides = {
+            _relative(active_path, repo_root): expected
+            for active_path, expected in planned_writes
+        }
+        errors = _verify_manifest_with_active_overrides(
+            repo_root,
+            manifest,
+            active_overrides=active_overrides,
+        )
+        if errors:
+            raise ValueError("; ".join(errors))
+    if planned_writes and has_promotions:
+        _reauthenticate_recovery_promotions(
+            manifest,
+            authority_verifier,
+        )
+    for active_path, expected in planned_writes:
         _atomic_write(active_path, expected)
-        changed = True
-    if changed:
-        errors = verify_manifest(repo_root, manifest)
-        if errors:
-            raise ValueError("; ".join(errors))
-    else:
-        errors = verify_manifest(repo_root, manifest)
-        if errors:
-            raise ValueError("; ".join(errors))
+    errors = verify_manifest(repo_root, manifest)
+    if errors:
+        raise ValueError("; ".join(errors))
     return manifest
 
 
@@ -1378,8 +1544,9 @@ def compact_repository(
     repo_root: Path,
     *,
     roles: Sequence[str] | None = None,
+    authority_verifier: PromotionAuthorityVerifier | None = None,
 ) -> dict[str, Any]:
-    """Archive exact active bytes and replace them with bounded hot views."""
+    """Compact memories; promoted recovery requires a trusted host verifier."""
 
     repo_root = repo_root.resolve()
     selected = tuple(roles) if roles is not None else ROLE_NAMES
@@ -1401,7 +1568,12 @@ def compact_repository(
             INTERMEDIATE_SCHEMA_VERSION,
         }:
             return _upgrade_legacy_manifest(repo_root, existing, selected)
-        resumed = _resume_or_return(repo_root, existing, selected)
+        resumed = _resume_or_return(
+            repo_root,
+            existing,
+            selected,
+            authority_verifier,
+        )
         if resumed is not None:
             return resumed
         raise ValueError("existing compaction manifest does not match requested roles")
@@ -1571,19 +1743,6 @@ def promote_durable_lesson(
         prior_generation=manifest["generation"],
     )
 
-    successor = json.loads(json.dumps(manifest, ensure_ascii=False))
-    successor_entry = next(
-        candidate
-        for candidate in successor["roles"]
-        if candidate["role"] == role
-    )
-    successor_entry["durable_lessons"].append(lesson)
-    successor_active = _render_hot_memory(successor_entry)
-    successor_entry["active_bytes"] = len(successor_active)
-    successor_entry["active_lines"] = len(
-        successor_active.decode("utf-8").splitlines()
-    )
-    successor_entry["active_sha256"] = _sha256(successor_active)
     promotion = {
         **request,
         "closure_authority": frozen_authority,
@@ -1595,12 +1754,16 @@ def promote_durable_lesson(
     promotion["promotion_digest"] = _digest_record(
         promotion, "promotion_digest"
     )
-    successor["generation"] = manifest["generation"] + 1
-    successor["supersedes_manifest_digest"] = manifest["manifest_digest"]
-    successor["promotions"].append(promotion)
-    successor["manifest_digest"] = _digest_record(
-        successor, "manifest_digest"
+    successor = _expected_promotion_successor(
+        manifest,
+        promotion,
     )
+    successor_entry = next(
+        candidate
+        for candidate in successor["roles"]
+        if candidate["role"] == role
+    )
+    successor_active = _render_hot_memory(successor_entry)
 
     # Preserve the current hot view first, then publish its successor manifest,
     # and finally switch the active view. Replaying the same request reuses the

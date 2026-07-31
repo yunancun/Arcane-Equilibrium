@@ -11,6 +11,7 @@ from typing import Any
 
 DIGEST_RE = re.compile(r"^sha256:[0-9a-f]{64}$")
 HEADING_RE = re.compile(r"^(#{1,6})\s+.+$")
+HISTORY_HEADING_RE = re.compile(r"^## [^\r\n]+$")
 HISTORY_PATH_RE = re.compile(
     r"^docs/CCAgentWorkSpace/[A-Za-z0-9_-]+/"
     r"(?:memory(?:-archive)?\.md|workspace/reports/(?:[^/]+/)*[^/]+\.md)$"
@@ -35,8 +36,8 @@ def _markdown_lines(data: bytes) -> list[str]:
 def exact_markdown_section(data: bytes, heading: str) -> bytes:
     """Return one exact Markdown heading section, including its heading line."""
 
-    if not isinstance(heading, str) or not HEADING_RE.fullmatch(heading):
-        raise ValueError("history_refs heading must be an exact Markdown heading")
+    if not isinstance(heading, str) or not HISTORY_HEADING_RE.fullmatch(heading):
+        raise ValueError("history_refs heading must be an exact Markdown H2")
     lines = _markdown_lines(data)
     matches = [
         index for index, line in enumerate(lines)
@@ -45,7 +46,7 @@ def exact_markdown_section(data: bytes, heading: str) -> bytes:
     if len(matches) != 1:
         raise ValueError("history_refs heading must match exactly one section")
     start = matches[0]
-    level = len(HEADING_RE.fullmatch(heading).group(1))
+    level = 2
     end = len(lines)
     for index in range(start + 1, len(lines)):
         candidate = HEADING_RE.match(lines[index].rstrip("\r\n"))
@@ -86,8 +87,8 @@ def normalize_history_refs(value: Any) -> list[dict[str, str]]:
         path = _safe_history_path(item.get("path"))
         heading = item.get("heading")
         digest = item.get("digest")
-        if not isinstance(heading, str) or not HEADING_RE.fullmatch(heading):
-            raise ValueError("history_refs heading must include its exact Markdown level")
+        if not isinstance(heading, str) or not HISTORY_HEADING_RE.fullmatch(heading):
+            raise ValueError("history_refs heading must be an exact Markdown H2")
         if not isinstance(digest, str) or not DIGEST_RE.fullmatch(digest):
             raise ValueError("history_refs digest must be exact sha256")
         identity = (path, heading)

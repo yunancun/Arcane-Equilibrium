@@ -194,11 +194,15 @@
     "policy_id": "gpt56_multi_agent_quality_noninferiority_v1",
     "thresholds": {
       "max_closure_quality_score_drop": 0.0,
+      "minimum_required_coverage_ratio": 1.0,
       "max_reopen_count_increase": 0,
+      "max_rework_count_increase": 0,
+      "max_false_closure_count_increase": 0,
+      "minimum_p0_p1_recall_ratio": 1.0,
       "minimum_decision_changing_findings_retention_ratio": 1.0
     },
     "synthetic_measured_claim_allowed": false,
-    "policy_digest": "sha256:eeb06619213f3b1eece0a897ef4e63f56e8173d5daa07483c397f6b3c855ee49"
+    "policy_digest": "sha256:6e7848b5f9826dbee965928955b7b21a14de0180be8e6ad34c8e545d3073bd47"
   },
   "native_agent_adapters": {
     "PA": [

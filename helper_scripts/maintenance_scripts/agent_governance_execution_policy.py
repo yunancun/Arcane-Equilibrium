@@ -75,6 +75,7 @@ EVENT_OUTCOMES = {
     "terminate": {"terminated"},
 }
 SAMPLING_KINDS = {"model_call", "retry", "follow_up"}
+CALL_ATTEMPT_KINDS = {"model_call", "retry"}
 MANDATORY_ROLE_CONTROL_FIELDS = {
     "native_selector_binding",
     "history_selection",
@@ -541,6 +542,9 @@ def _budget_rejection_reason(
         sampling_count = sum(
             item["kind"] in SAMPLING_KINDS for item in admitted_events
         )
+        call_attempt_count = sum(
+            item["kind"] in CALL_ATTEMPT_KINDS for item in admitted_events
+        )
         retry_count = sum(
             item["kind"] == "retry" for item in admitted_events
         )
@@ -551,7 +555,10 @@ def _budget_rejection_reason(
             item["kind"] == "root_turn" for item in admitted_events
         )
         if (
-            sampling_count + 1 > policy["max_call_attempts"]
+            (
+                event["kind"] in CALL_ATTEMPT_KINDS
+                and call_attempt_count + 1 > policy["max_call_attempts"]
+            )
             or (
                 event["kind"] == "retry"
                 and retry_count + 1 > policy["retry_budget"]
@@ -762,9 +769,14 @@ def validate_execution_event_ledger(
         for event in admitted_events
         if event.get("kind") in SAMPLING_KINDS
     ]
+    completed_call_attempts = [
+        event
+        for event in admitted_events
+        if event.get("kind") in CALL_ATTEMPT_KINDS
+    ]
     if completed_calls != call_record_digests:
         errors.append("execution event ledger does not exact-cover call records")
-    if len(completed_calls) > policy["max_call_attempts"]:
+    if len(completed_call_attempts) > policy["max_call_attempts"]:
         errors.append("execution event ledger exceeds the call-attempt cap")
     if len(completed_calls) + 1 > policy["max_total_model_turns"]:
         errors.append("execution event ledger exceeds the total model-turn cap")

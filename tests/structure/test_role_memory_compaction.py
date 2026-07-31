@@ -306,6 +306,272 @@ def test_standalone_promote_cli_returns_external_limit_without_mutation(
     ) == before
 
 
+def test_apply_rejects_interrupted_promotion_without_host_reauthentication(
+    tmp_path: Path,
+) -> None:
+    _seed_repository(tmp_path)
+    compact_repository(tmp_path, roles=("A3",))
+    promoted = _host_promotion(
+        tmp_path,
+        role="A3",
+        lesson="Reauthenticate every interrupted promotion before recovery.",
+        closure_digest="sha256:" + "c" * 64,
+    )
+    promotion = promoted["promotions"][-1]
+    active_path = tmp_path / "docs/CCAgentWorkSpace/A3/memory.md"
+    archive_path = tmp_path / "docs/CCAgentWorkSpace/A3/memory-archive.md"
+    manifest_path = tmp_path / "docs/agents/role-memory-compaction-v1.json"
+    archive = archive_path.read_bytes()
+    start = promotion["prior_active_offset"]
+    end = start + promotion["prior_active_bytes"]
+    active_path.write_bytes(archive[start:end])
+    before = (
+        active_path.read_bytes(),
+        archive_path.read_bytes(),
+        manifest_path.read_bytes(),
+    )
+
+    with pytest.raises(
+        ValueError,
+        match="promotion recovery requires an out-of-band host verifier",
+    ):
+        compact_repository(tmp_path, roles=("A3",))
+
+    assert (
+        active_path.read_bytes(),
+        archive_path.read_bytes(),
+        manifest_path.read_bytes(),
+    ) == before
+
+
+def test_apply_rejects_recovery_when_host_rejects_exact_promotion_authority(
+    tmp_path: Path,
+) -> None:
+    _seed_repository(tmp_path)
+    compact_repository(tmp_path, roles=("A3",))
+    promoted = _host_promotion(
+        tmp_path,
+        role="A3",
+        lesson="Reject a forged recovery authority even when a verifier exists.",
+        closure_digest="sha256:" + "d" * 64,
+    )
+    promotion = promoted["promotions"][-1]
+    active_path = tmp_path / "docs/CCAgentWorkSpace/A3/memory.md"
+    archive_path = tmp_path / "docs/CCAgentWorkSpace/A3/memory-archive.md"
+    manifest_path = tmp_path / "docs/agents/role-memory-compaction-v1.json"
+    archive = archive_path.read_bytes()
+    start = promotion["prior_active_offset"]
+    end = start + promotion["prior_active_bytes"]
+    active_path.write_bytes(archive[start:end])
+    before = (
+        active_path.read_bytes(),
+        archive_path.read_bytes(),
+        manifest_path.read_bytes(),
+    )
+    observed: dict[str, object] = {}
+
+    def reject_authority(
+        kind: str,
+        digest: str,
+        artifact: dict[str, object],
+    ) -> bool:
+        observed.update(
+            {
+                "kind": kind,
+                "digest": digest,
+                "artifact": artifact,
+            }
+        )
+        return False
+
+    with pytest.raises(
+        ValueError,
+        match="recovery authority was not authenticated",
+    ):
+        compact_repository(
+            tmp_path,
+            roles=("A3",),
+            authority_verifier=reject_authority,
+        )
+
+    assert observed == {
+        "kind": "role_memory_promotion_authority_v1",
+        "digest": promotion["closure_authority"]["record_digest"],
+        "artifact": promotion["closure_authority"],
+    }
+    assert (
+        active_path.read_bytes(),
+        archive_path.read_bytes(),
+        manifest_path.read_bytes(),
+    ) == before
+
+
+def test_apply_preflights_forged_successor_before_any_recovery_write(
+    tmp_path: Path,
+) -> None:
+    _seed_repository(tmp_path)
+    compact_repository(tmp_path, roles=("A3",))
+    promoted = _host_promotion(
+        tmp_path,
+        role="A3",
+        lesson="Authenticate the real promotion while rejecting forged lineage.",
+        closure_digest="sha256:" + "e" * 64,
+    )
+    promotion = promoted["promotions"][-1]
+    active_path = tmp_path / "docs/CCAgentWorkSpace/A3/memory.md"
+    archive_path = tmp_path / "docs/CCAgentWorkSpace/A3/memory-archive.md"
+    manifest_path = tmp_path / "docs/agents/role-memory-compaction-v1.json"
+    legitimate_active = active_path.read_text(encoding="utf-8")
+    rogue = "This forged successor has no promotion lineage."
+    forged_active = legitimate_active.replace(
+        "\n## Topical pointers",
+        f"\n- {rogue}\n\n## Topical pointers",
+    ).encode("utf-8")
+    forged = json.loads(json.dumps(promoted))
+    forged_entry = forged["roles"][0]
+    forged_entry["durable_lessons"].append(rogue)
+    forged_entry["active_bytes"] = len(forged_active)
+    forged_entry["active_lines"] = len(
+        forged_active.decode("utf-8").splitlines()
+    )
+    forged_entry["active_sha256"] = (
+        "sha256:" + hashlib.sha256(forged_active).hexdigest()
+    )
+    forged["manifest_digest"] = _record_digest(
+        forged,
+        "manifest_digest",
+    )
+    manifest_path.write_text(
+        json.dumps(forged, ensure_ascii=False, sort_keys=True, indent=2) + "\n",
+        encoding="utf-8",
+    )
+    archive = archive_path.read_bytes()
+    start = promotion["prior_active_offset"]
+    end = start + promotion["prior_active_bytes"]
+    active_path.write_bytes(archive[start:end])
+    before = (
+        active_path.read_bytes(),
+        archive_path.read_bytes(),
+        manifest_path.read_bytes(),
+    )
+
+    with pytest.raises(ValueError, match="durable lesson lineage mismatch"):
+        compact_repository(
+            tmp_path,
+            roles=("A3",),
+            authority_verifier=_accept_test_authority,
+        )
+
+    assert (
+        active_path.read_bytes(),
+        archive_path.read_bytes(),
+        manifest_path.read_bytes(),
+    ) == before
+
+
+def test_apply_rejects_forged_successor_pointer_transition_before_write(
+    tmp_path: Path,
+) -> None:
+    _seed_repository(tmp_path)
+    compact_repository(tmp_path, roles=("A3",))
+    promoted = _host_promotion(
+        tmp_path,
+        role="A3",
+        lesson="A promotion may change only its authorized durable lesson.",
+        closure_digest="sha256:" + "f" * 64,
+    )
+    promotion = promoted["promotions"][-1]
+    active_path = tmp_path / "docs/CCAgentWorkSpace/A3/memory.md"
+    archive_path = tmp_path / "docs/CCAgentWorkSpace/A3/memory-archive.md"
+    manifest_path = tmp_path / "docs/agents/role-memory-compaction-v1.json"
+    legitimate_active = active_path.read_text(encoding="utf-8")
+    archive = archive_path.read_bytes()
+    forged = json.loads(json.dumps(promoted))
+    forged_entry = forged["roles"][0]
+    prior_payload_sha256 = forged_entry["payload_sha256"]
+    prior_payload_offset = forged_entry["payload_offset"]
+    prior_payload_bytes = forged_entry["payload_bytes"]
+    prior_pointer_digest = forged_entry["archive_pointer_digest"]
+    forged_payload = archive[0:1]
+    forged_entry["payload_sha256"] = (
+        "sha256:" + hashlib.sha256(forged_payload).hexdigest()
+    )
+    forged_entry["payload_offset"] = 0
+    forged_entry["payload_bytes"] = 1
+    forged_pointer = {
+        "schema_version": "role_memory_archive_pointer_v1",
+        "role": forged_entry["role"],
+        "active_path": forged_entry["active_path"],
+        "archive_path": forged_entry["archive_path"],
+        "payload_sha256": forged_entry["payload_sha256"],
+        "payload_offset": forged_entry["payload_offset"],
+        "payload_bytes": forged_entry["payload_bytes"],
+    }
+    forged_entry["archive_pointer_digest"] = (
+        "sha256:"
+        + hashlib.sha256(
+            json.dumps(
+                forged_pointer,
+                ensure_ascii=False,
+                sort_keys=True,
+                separators=(",", ":"),
+            ).encode("utf-8")
+        ).hexdigest()
+    )
+    forged_active = (
+        legitimate_active.replace(
+            f"- Payload digest: `{prior_payload_sha256}`",
+            f"- Payload digest: `{forged_entry['payload_sha256']}`",
+        )
+        .replace(
+            f"- Payload slice: offset `{prior_payload_offset}`, "
+            f"bytes `{prior_payload_bytes}`",
+            "- Payload slice: offset `0`, bytes `1`",
+        )
+        .replace(
+            f"- Pointer digest: `{prior_pointer_digest}`",
+            f"- Pointer digest: `{forged_entry['archive_pointer_digest']}`",
+        )
+        .encode("utf-8")
+    )
+    forged_entry["active_bytes"] = len(forged_active)
+    forged_entry["active_lines"] = len(
+        forged_active.decode("utf-8").splitlines()
+    )
+    forged_entry["active_sha256"] = (
+        "sha256:" + hashlib.sha256(forged_active).hexdigest()
+    )
+    forged["manifest_digest"] = _record_digest(
+        forged,
+        "manifest_digest",
+    )
+    manifest_path.write_text(
+        json.dumps(forged, ensure_ascii=False, sort_keys=True, indent=2) + "\n",
+        encoding="utf-8",
+    )
+    start = promotion["prior_active_offset"]
+    end = start + promotion["prior_active_bytes"]
+    active_path.write_bytes(archive[start:end])
+    before = (
+        active_path.read_bytes(),
+        archive_path.read_bytes(),
+        manifest_path.read_bytes(),
+    )
+
+    with pytest.raises(ValueError, match="successor transition differs"):
+        compact_repository(
+            tmp_path,
+            roles=("A3",),
+            authority_verifier=_accept_test_authority,
+        )
+
+    assert (
+        active_path.read_bytes(),
+        archive_path.read_bytes(),
+        manifest_path.read_bytes(),
+    ) == before
+
+
 def test_apply_resumes_interrupted_promotion_from_bound_prior_active_slice(
     tmp_path: Path,
 ) -> None:
@@ -330,7 +596,11 @@ def test_apply_resumes_interrupted_promotion_from_bound_prior_active_slice(
         tmp_path / "docs/agents/role-memory-compaction-v1.json"
     ).read_bytes()
 
-    resumed = compact_repository(tmp_path, roles=("A3",))
+    resumed = compact_repository(
+        tmp_path,
+        roles=("A3",),
+        authority_verifier=_accept_test_authority,
+    )
 
     assert resumed == promoted
     assert active_path.read_bytes() == expected_active

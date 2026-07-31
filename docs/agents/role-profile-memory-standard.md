@@ -115,8 +115,19 @@ promotion prefix, and predecessor active binding. Changing a predecessor digest
 and recomputing current self-digests without changing the archive therefore
 fails closed. Replaying the same role/lesson/closure/attestation request is
 byte-idempotent. If publication stops between the manifest and hot-view writes,
-`--apply` resumes only when the current bytes equal the last promotion's
-digest-bound prior-active archive slice; arbitrary drift still fails closed.
+recovery resumes only when the current bytes equal the last promotion's
+digest-bound prior-active archive slice. A read-only preflight verifies the
+complete successor manifest, promotion, archive, role lineage, and rendered
+successor bytes before an embedding host re-authenticates every serialized
+promotion authority through the non-serialized verifier and before any write.
+Each archived generation reconstructs exactly one authorized transition: only
+the named durable lesson and its derived active byte/line/digest metadata may
+change. Policy, paths, archive/payload source fields, pointer binding, unrelated
+roles, and every other predecessor field remain byte-semantically identical.
+Standalone `--apply` has no verifier and therefore fails closed for an
+interrupted promoted successor; arbitrary drift also fails closed. Original
+archive slices remain independently recoverable without granting mutation
+authority.
 
 Standalone `--check` verifies structural integrity and recoverability only. It
 does not replay the out-of-band host authentication and must never be cited as

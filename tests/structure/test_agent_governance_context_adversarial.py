@@ -1133,6 +1133,17 @@ def test_history_refs_reject_whole_file_glob_traversal_and_digest_mismatch(
                 }],
             })
 
+    for heading in ("# Durable rule", "### Durable rule"):
+        with pytest.raises(ValueError, match="history_refs heading"):
+            route_task({
+                **base,
+                "history_refs": [{
+                    "path": "docs/CCAgentWorkSpace/E2/memory.md",
+                    "heading": heading,
+                    "digest": "sha256:" + "0" * 64,
+                }],
+            })
+
     mismatch = compile_context(
         "E2",
         {

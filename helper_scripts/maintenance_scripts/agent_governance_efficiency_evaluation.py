@@ -74,6 +74,7 @@ PROFILE_FIELDS = {
 PROFILE_NAMES = {"current", "single_agent", "bounded_role"}
 METRIC_FIELDS = {
     "closure_quality_score",
+    "required_coverage_ratio",
     "elapsed_time_ms",
     "input_tokens",
     "output_tokens",
@@ -83,6 +84,9 @@ METRIC_FIELDS = {
     "retries",
     "compactions",
     "reopen_count",
+    "rework_count",
+    "false_closure_count",
+    "p0_p1_recall_ratio",
     "decision_changing_findings",
 }
 EFFICIENCY_METRICS = (
@@ -97,12 +101,25 @@ EFFICIENCY_METRICS = (
 )
 QUALITY_METRICS = (
     "closure_quality_score",
+    "required_coverage_ratio",
     "reopen_count",
+    "rework_count",
+    "false_closure_count",
+    "p0_p1_recall_ratio",
     "decision_changing_findings",
 )
+SCORE_METRICS = {
+    "closure_quality_score",
+    "required_coverage_ratio",
+    "p0_p1_recall_ratio",
+}
 POLICY_THRESHOLD_FIELDS = {
     "max_closure_quality_score_drop",
+    "minimum_required_coverage_ratio",
     "max_reopen_count_increase",
+    "max_rework_count_increase",
+    "max_false_closure_count_increase",
+    "minimum_p0_p1_recall_ratio",
     "minimum_decision_changing_findings_retention_ratio",
 }
 POLICY_FIELDS = {
@@ -143,7 +160,11 @@ EXPECTED_POLICY_UNSIGNED = {
     "policy_id": "gpt56_multi_agent_quality_noninferiority_v1",
     "thresholds": {
         "max_closure_quality_score_drop": 0.0,
+        "minimum_required_coverage_ratio": 1.0,
         "max_reopen_count_increase": 0,
+        "max_rework_count_increase": 0,
+        "max_false_closure_count_increase": 0,
+        "minimum_p0_p1_recall_ratio": 1.0,
         "minimum_decision_changing_findings_retention_ratio": 1.0,
     },
     "synthetic_measured_claim_allowed": False,
@@ -255,8 +276,10 @@ def registry_efficiency_evaluation_policy_errors(
     if unsigned != EXPECTED_POLICY_UNSIGNED:
         errors.append(
             "efficiency_evaluation_policy must preserve zero quality-score "
-            "drop, zero reopen increase, full decision-changing finding "
-            "retention, and no synthetic measured claim"
+            "drop, complete required coverage and P0/P1 recall, zero reopen "
+            "increase, zero rework increase, zero false-closure increase, "
+            "full decision-changing finding retention, and no synthetic "
+            "measured claim"
         )
     try:
         expected_digest = efficiency_evaluation_policy_digest(policy)
@@ -291,7 +314,7 @@ def _complete_metrics(metrics: Any) -> bool:
     for field, value in metrics.items():
         if value is None or isinstance(value, bool):
             return False
-        if field == "closure_quality_score":
+        if field in SCORE_METRICS:
             if not isinstance(value, (int, float)) or not 0 <= value <= 1:
                 return False
         elif not isinstance(value, int) or value < 0:
@@ -737,9 +760,18 @@ def _quality_noninferiority(
         baseline_metrics["closure_quality_score"]
         - gate["max_closure_quality_score_drop"],
     )
+    minimum_required_coverage = gate["minimum_required_coverage_ratio"]
     maximum_reopens = (
         baseline_metrics["reopen_count"] + gate["max_reopen_count_increase"]
     )
+    maximum_rework = (
+        baseline_metrics["rework_count"] + gate["max_rework_count_increase"]
+    )
+    maximum_false_closures = (
+        baseline_metrics["false_closure_count"]
+        + gate["max_false_closure_count_increase"]
+    )
+    minimum_p0_p1_recall = gate["minimum_p0_p1_recall_ratio"]
     minimum_findings = math.ceil(
         baseline_metrics["decision_changing_findings"]
         * gate["minimum_decision_changing_findings_retention_ratio"]
@@ -755,6 +787,17 @@ def _quality_noninferiority(
             "candidate": candidate_metrics["closure_quality_score"],
             "threshold": round(minimum_quality, 6),
         },
+        "required_coverage_ratio": {
+            "status": (
+                "PASS"
+                if candidate_metrics["required_coverage_ratio"]
+                >= minimum_required_coverage
+                else "FAIL"
+            ),
+            "baseline": baseline_metrics["required_coverage_ratio"],
+            "candidate": candidate_metrics["required_coverage_ratio"],
+            "threshold": minimum_required_coverage,
+        },
         "reopen_count": {
             "status": (
                 "PASS"
@@ -764,6 +807,38 @@ def _quality_noninferiority(
             "baseline": baseline_metrics["reopen_count"],
             "candidate": candidate_metrics["reopen_count"],
             "threshold": maximum_reopens,
+        },
+        "rework_count": {
+            "status": (
+                "PASS"
+                if candidate_metrics["rework_count"] <= maximum_rework
+                else "FAIL"
+            ),
+            "baseline": baseline_metrics["rework_count"],
+            "candidate": candidate_metrics["rework_count"],
+            "threshold": maximum_rework,
+        },
+        "false_closure_count": {
+            "status": (
+                "PASS"
+                if candidate_metrics["false_closure_count"]
+                <= maximum_false_closures
+                else "FAIL"
+            ),
+            "baseline": baseline_metrics["false_closure_count"],
+            "candidate": candidate_metrics["false_closure_count"],
+            "threshold": maximum_false_closures,
+        },
+        "p0_p1_recall_ratio": {
+            "status": (
+                "PASS"
+                if candidate_metrics["p0_p1_recall_ratio"]
+                >= minimum_p0_p1_recall
+                else "FAIL"
+            ),
+            "baseline": baseline_metrics["p0_p1_recall_ratio"],
+            "candidate": candidate_metrics["p0_p1_recall_ratio"],
+            "threshold": minimum_p0_p1_recall,
         },
         "decision_changing_findings": {
             "status": (

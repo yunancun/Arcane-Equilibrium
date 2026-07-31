@@ -24,6 +24,7 @@
       "unavailable_reason": null,
       "metrics": {
         "closure_quality_score": 0.96,
+        "required_coverage_ratio": 1.0,
         "elapsed_time_ms": 7200000,
         "input_tokens": 2000000,
         "output_tokens": 200000,
@@ -33,6 +34,9 @@
         "retries": 3,
         "compactions": 2,
         "reopen_count": 1,
+        "rework_count": 1,
+        "false_closure_count": 0,
+        "p0_p1_recall_ratio": 1.0,
         "decision_changing_findings": 5
       }
     },
@@ -46,6 +50,7 @@
       "unavailable_reason": null,
       "metrics": {
         "closure_quality_score": 0.88,
+        "required_coverage_ratio": 0.75,
         "elapsed_time_ms": 1800000,
         "input_tokens": 450000,
         "output_tokens": 50000,
@@ -55,6 +60,9 @@
         "retries": 0,
         "compactions": 0,
         "reopen_count": 3,
+        "rework_count": 3,
+        "false_closure_count": 1,
+        "p0_p1_recall_ratio": 0.5,
         "decision_changing_findings": 2
       }
     },
@@ -68,6 +76,7 @@
       "unavailable_reason": null,
       "metrics": {
         "closure_quality_score": 0.96,
+        "required_coverage_ratio": 1.0,
         "elapsed_time_ms": 2700000,
         "input_tokens": 700000,
         "output_tokens": 80000,
@@ -77,17 +86,20 @@
         "retries": 1,
         "compactions": 0,
         "reopen_count": 1,
+        "rework_count": 1,
+        "false_closure_count": 0,
+        "p0_p1_recall_ratio": 1.0,
         "decision_changing_findings": 5
       }
     }
   ],
   "quality_noninferiority_policy": {
     "policy_id": "gpt56_multi_agent_quality_noninferiority_v1",
-    "policy_digest": "sha256:eeb06619213f3b1eece0a897ef4e63f56e8173d5daa07483c397f6b3c855ee49"
+    "policy_digest": "sha256:6e7848b5f9826dbee965928955b7b21a14de0180be8e6ad34c8e545d3073bd47"
   },
   "limitations": [
     "This synthetic fixture is not measured evidence and cannot support an adoption or savings claim.",
     "Populate the same contract with caller-attested telemetry before making a measured comparison."
   ],
-  "record_digest": "sha256:102a0f20f7916977a7bbf48331734365be3d07c86b2a2a9653989ef868f7f567"
+  "record_digest": "sha256:f2dc868f6a130c3d314f8cfddfd1986ddf6e63c5ad8deb9041e0258fe8877948"
 }

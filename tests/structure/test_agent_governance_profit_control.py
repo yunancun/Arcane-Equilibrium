@@ -1482,9 +1482,18 @@ const persistentNull = __PERSISTENT_NULL__;
 const persistentProbeNull = __PERSISTENT_PROBE_NULL__;
 const runtimeFact = __RUNTIME_FACT__;
 const oversizedProbe = __OVERSIZED_PROBE__;
+const reverseCompletion = __REVERSE_COMPLETION__;
 const consumption = { measurement_status: 'unavailable', unavailable_reason: 'harness' };
 const agent = async (prompt, options) => {
   prompts.push({ prompt, label: options.label });
+  if (reverseCompletion) {
+    const delay = {
+      'evidence:OPS': 60, 'evidence:MIT': 30, 'evidence:AI-E': 0,
+      'probe:QC': 60, 'probe:BB': 30, 'probe:IB': 0,
+      'probe:MIT': 60, 'probe:AI-E': 30, 'probe:EXT': 0,
+    }[options.label] || 0;
+    if (delay) await new Promise(resolve => setTimeout(resolve, delay));
+  }
   if (injectNull && options.label === 'evidence:OPS') return null;
   if (
     persistentNull &&
@@ -1519,6 +1528,7 @@ const parallel = async jobs => Promise.all(jobs.map(job => job()));
         run_args: dict, *, map_ready: bool, null_first: bool = False,
         persistent_null: bool = False, runtime_fact: bool = False,
         persistent_probe_null: bool = False, oversized_probe: bool = False,
+        reverse_completion: bool = False,
     ) -> dict:
         script = (
             script_template.replace(
@@ -1537,6 +1547,10 @@ const parallel = async jobs => Promise.all(jobs.map(job => job()));
             )
             .replace("__RUNTIME_FACT__", "true" if runtime_fact else "false")
             .replace("__OVERSIZED_PROBE__", "true" if oversized_probe else "false")
+            .replace(
+                "__REVERSE_COMPLETION__",
+                "true" if reverse_completion else "false",
+            )
         )
         completed = subprocess.run(
             ["node", "-e", script],
@@ -1587,6 +1601,87 @@ const parallel = async jobs => Promise.all(jobs.map(job => job()));
     assert retried["workflow_wave_record"]["null_call_count"] == 1
     assert retried["workflow_wave_record"]["retry_call_count"] == 1
     assert retried["workflow_wave_record"]["final_null_node_count"] == 0
+    # Each parallel batch completes in reverse admission order; the externally
+    # visible receipts must remain in canonical DAG order, including retries.
+    reverse_retried = run(
+        args, map_ready=True, null_first=True, reverse_completion=True
+    )["result"]
+    execution_waves = reverse_retried["workflow_wave_record"]["execution_waves"]
+    canonical_position = {
+        node_id: (wave_index, task_position)
+        for wave_index, wave in enumerate(execution_waves)
+        for task_position, node_id in enumerate(wave)
+    }
+    reverse_records = reverse_retried["call_manifest"]["records"]
+    assert [
+        (record["node_id"], record["attempt"]) for record in reverse_records
+    ] == [
+        (record["node_id"], record["attempt"])
+        for record in sorted(
+            reverse_records,
+            key=lambda record: (
+                *canonical_position[record["node_id"]],
+                record["attempt"],
+            ),
+        )
+    ]
+    assert [
+        task["node_id"]
+        for task in reverse_retried["workflow_wave_record"]["admitted_tasks"]
+    ] == [node_id for wave in execution_waves for node_id in wave]
+    assert all(
+        record["topological_wave"]
+        == canonical_position[record["node_id"]][0]
+        for record in reverse_records
+    )
+    def call_semantics(records: list[dict]) -> list[dict]:
+        return [
+            {
+                key: record[key]
+                for key in (
+                    "logical_call_id", "node_id", "payload_kind", "attempt",
+                    "retry_parent_call_id", "requested", "requires",
+                    "topological_wave", "prompt_digest",
+                    "compiler_input_tokens_lower_bound",
+                    "admitted_input_tokens_lower_bound", "returned_null",
+                    "parsed_result_digest",
+                )
+            } | {"producer_nodes": sorted(record["producer_generation"])}
+            for record in records
+        ]
+
+    assert call_semantics(reverse_records) == call_semantics(
+        retried["call_manifest"]["records"]
+    )
+    budget_fields = (
+        "compiler_planned_input_tokens_lower_bound",
+        "admitted_planned_input_tokens_lower_bound",
+        "scheduled_call_compiler_input_tokens_lower_bound",
+        "scheduled_call_admitted_input_tokens_lower_bound",
+        "first_attempt_call_count", "retry_call_count", "null_call_count",
+        "final_null_node_count", "budget_authority",
+    )
+    assert {
+        field: reverse_retried["workflow_wave_record"][field]
+        for field in budget_fields
+    } == {
+        field: retried["workflow_wave_record"][field]
+        for field in budget_fields
+    }
+    def result_projection(result: dict) -> list[dict]:
+        return [
+            {
+                key: fragment[key]
+                for key in (
+                    "node_id", "payload_kind", "work_status", "gate_verdict",
+                    "consumption", "payload",
+                )
+            }
+            for fragment in result["role_fragments"]
+            if fragment["node_id"] in canonical_position
+        ]
+
+    assert result_projection(reverse_retried) == result_projection(retried)
     persistent_null = run(args, map_ready=True, persistent_null=True)
     assert "result" not in persistent_null
     assert (

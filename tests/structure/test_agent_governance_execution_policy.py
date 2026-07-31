@@ -40,6 +40,7 @@ from agent_governance_workflow_identity import requested_identity_errors  # noqa
 
 DIGEST_A = "sha256:" + "a" * 64
 DIGEST_B = "sha256:" + "b" * 64
+DIGEST_C = "sha256:" + "c" * 64
 
 
 def _event(
@@ -712,6 +713,48 @@ def test_execution_event_ledger_follow_up_stays_on_prior_call_lineage() -> None:
     assert allowed
     assert validate_execution_event_ledger(
         policy, ledger, call_record_digests=[DIGEST_A, DIGEST_B]
+    ) == []
+
+
+def test_execution_event_ledger_follow_up_does_not_consume_call_attempt_cap() -> None:
+    registry = load_registry()
+    policy = deepcopy(compile_execution_budget_policy("standard", registry))
+    policy["max_call_attempts"] = 2
+    policy["retry_budget"] = 1
+    policy["max_followup_attempts"] = 1
+    policy["max_total_model_turns"] = 4
+    surface = surface_profile_binding("claude_saved_workflow_v1", registry)
+    ledger = new_execution_event_ledger(
+        root_execution_id="root-exec-independent-follow-up-cap",
+        policy_digest=execution_policy_digest(policy),
+        surface_profile_digest=surface["digest"],
+        watcher_id="watcher-1",
+    )
+    _, ledger = admit_execution_event(
+        policy, ledger, _event("root:1", "root_turn", depth=0)
+    )
+    _, ledger = admit_execution_event(
+        policy,
+        ledger,
+        _event("call:1", "model_call", depth=1, call_digest=DIGEST_A),
+    )
+    retry = _event("retry:1", "retry", depth=1, call_digest=DIGEST_B)
+    retry["parent_event_id"] = "call:1"
+    allowed, ledger = admit_execution_event(policy, ledger, retry)
+    assert allowed
+
+    follow_up = _event(
+        "follow-up:1", "follow_up", depth=1, call_digest=DIGEST_C
+    )
+    follow_up["parent_event_id"] = "retry:1"
+    allowed, ledger = admit_execution_event(policy, ledger, follow_up)
+
+    assert allowed
+    assert ledger["terminal_reason"] is None
+    assert validate_execution_event_ledger(
+        policy,
+        ledger,
+        call_record_digests=[DIGEST_A, DIGEST_B, DIGEST_C],
     ) == []
 
 

@@ -1045,7 +1045,20 @@ const fragmentBindings = roleFragments.map(fragment => ({
 const fragmentDigests = Object.fromEntries(await Promise.all(
   roleFragments.map(async fragment => [fragment.node_id, await sha256Canonical(fragment)]),
 ))
-const orderedCallRecords = [...callRecords]
+// invoke() appends on completion; receipts must follow the admitted DAG instead.
+const canonicalCallPosition = new Map(executionWaves.flatMap((waveNodes, wavePosition) =>
+  waveNodes.map((nodeId, taskPosition) => [nodeId, { wavePosition, taskPosition }])
+))
+if (callRecords.some(record => !canonicalCallPosition.has(record.node_id))) {
+  throw new Error('profit call record references a node outside the canonical execution waves')
+}
+const orderedCallRecords = [...callRecords].sort((left, right) => {
+  const leftPosition = canonicalCallPosition.get(left.node_id)
+  const rightPosition = canonicalCallPosition.get(right.node_id)
+  return leftPosition.wavePosition - rightPosition.wavePosition ||
+    leftPosition.taskPosition - rightPosition.taskPosition ||
+    left.attempt - right.attempt
+})
 const callManifestCore = {
   schema_version: 'workflow_call_manifest_v1', workflow_contract_digest: workflowContractDigest,
   records: orderedCallRecords,
