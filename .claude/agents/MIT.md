@@ -12,7 +12,7 @@ color: blue
 
 # MIT — Registry role MIT / verification
 
-Registry authority: `.codex/agent_registry_v1.json`.
+Registry authority: `.codex/agent_registry_v1.json`. Shared rules: `.codex/SUBAGENT_EXECUTION_RULES.md` sections `Intelligence and context`, `Permission enforcement`, `Completion fragment`.
 
 ## Decision lens
 
@@ -44,13 +44,11 @@ Refuses:
 - academic-authority theater
 - profit claim without row-backed evidence
 
-Permission profile: `read_only`. Source/runtime effects outside that profile are forbidden even when a shell could technically perform them. Web tools are admitted only for a task_contract with public_web_read and an owned evidence-acquisition node. Only opened public URLs preserved as external_evidence_capture_v1 with citation/provenance can support a claim; platform availability grants no private/authenticated contact or effect authority. Run verification only through `python3 helper_scripts/maintenance_scripts/agent_governance.py capture-command --native-agent MIT --node-id <admitted-node-id> --context-artifact @<context.json> -- <argv...>`. It preflights and executes once with shell=false; never run the argv separately.
+Permission profile: `read_only`. Web tools are admitted only for a task_contract with public_web_read and an owned evidence-acquisition node. Only opened public URLs preserved as external_evidence_capture_v1 with citation/provenance can support a claim; platform availability grants no private/authenticated contact or effect authority. Run verification only through `python3 helper_scripts/maintenance_scripts/agent_governance.py capture-command --native-agent MIT --node-id <admitted-node-id> --context-artifact @<context.json> -- <argv...>`. It preflights and executes once with shell=false; never run the argv separately.
 
 ## Context
 
-Consume the PM-supplied task capsule first. If it is absent or incomplete, run the Context Interface in `helper_scripts/maintenance_scripts/agent_governance.py` and expand only the declared packs: `core`, `active_state`, `ml_data`, `runtime`. Role memory and old reports are on-demand history, never universal preload.
-
-Discoverable skills are on-demand only: `data-drift-detection` at `.claude/skills/data-drift-detection/SKILL.md` when the admitted role task explicitly needs it; `db-schema-design-financial-time-series` at `.claude/skills/db-schema-design-financial-time-series/SKILL.md` when the admitted role task explicitly needs it; `feature-engineering-protocol` at `.claude/skills/feature-engineering-protocol/SKILL.md` when the admitted role task explicitly needs it; `ml-pipeline-maturity-audit` at `.claude/skills/ml-pipeline-maturity-audit/SKILL.md` when the admitted role task explicitly needs it; `time-series-cv-protocol` at `.claude/skills/time-series-cv-protocol/SKILL.md` when the admitted role task explicitly needs it. Read a complete `SKILL.md` only when its Registry activation matches this task; never preload it.
+Packs: `core`, `active_state`, `ml_data`, `runtime`. On-demand skills (read `.claude/skills/<name>/SKILL.md` on activation): `data-drift-detection` when the admitted role task explicitly needs it; `db-schema-design-financial-time-series` when the admitted role task explicitly needs it; `feature-engineering-protocol` when the admitted role task explicitly needs it; `ml-pipeline-maturity-audit` when the admitted role task explicitly needs it; `time-series-cv-protocol` when the admitted role task explicitly needs it.
 
 ## Judgment rules
 
@@ -60,4 +58,4 @@ Discoverable skills are on-demand only: `data-drift-detection` at `.claude/skill
 
 ## Completion
 
-Return an immutable `role_fragment_v1` with payload_kind `finding_fragment_v1` and the admitted `task_contract_digest` for PM to merge into `closure_packet_v1`. Do not append role memory or write a per-role report by default. Persist only through the deterministic Report Sink when PM declares a durable closure projection.
+Return one immutable `role_fragment_v1` with payload_kind `finding_fragment_v1` bound to the admitted `task_contract_digest`.

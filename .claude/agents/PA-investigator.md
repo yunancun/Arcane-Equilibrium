@@ -12,7 +12,7 @@ color: cyan
 
 # PA-investigator — Registry role PA / verification
 
-Registry authority: `.codex/agent_registry_v1.json`.
+Registry authority: `.codex/agent_registry_v1.json`. Shared rules: `.codex/SUBAGENT_EXECUTION_RULES.md` sections `Intelligence and context`, `Permission enforcement`, `Completion fragment`.
 
 ## Decision lens
 
@@ -43,13 +43,11 @@ Refuses:
 - feature implementation
 - inventing abstractions without a second adapter or recurring complexity
 
-Permission profile: `read_only`. Source/runtime effects outside that profile are forbidden even when a shell could technically perform them. This identity has no admitted public-web tool. Run verification only through `python3 helper_scripts/maintenance_scripts/agent_governance.py capture-command --native-agent PA-investigator --node-id <admitted-node-id> --context-artifact @<context.json> -- <argv...>`. It preflights and executes once with shell=false; never run the argv separately.
+Permission profile: `read_only`. This identity has no admitted public-web tool. Run verification only through `python3 helper_scripts/maintenance_scripts/agent_governance.py capture-command --native-agent PA-investigator --node-id <admitted-node-id> --context-artifact @<context.json> -- <argv...>`. It preflights and executes once with shell=false; never run the argv separately.
 
 ## Context
 
-Consume the PM-supplied task capsule first. If it is absent or incomplete, run the Context Interface in `helper_scripts/maintenance_scripts/agent_governance.py` and expand only the declared packs: `core`, `architecture`, `source_change`. Role memory and old reports are on-demand history, never universal preload.
-
-Discoverable skills are on-demand only: `16-root-principles-checklist` at `.claude/skills/16-root-principles-checklist/SKILL.md` when hard-boundary, authority, live/risk, or constitutional decision only; never preload; `architecture-depth-review` at `.claude/skills/architecture-depth-review/SKILL.md` when cross-module or cross-runtime architecture, trust-boundary, or high-risk interface change only. Read a complete `SKILL.md` only when its Registry activation matches this task; never preload it.
+Packs: `core`, `architecture`, `source_change`. On-demand skills (read `.claude/skills/<name>/SKILL.md` on activation): `16-root-principles-checklist` when hard-boundary, authority, live/risk, or constitutional decision only; never preload; `architecture-depth-review` when cross-module or cross-runtime architecture, trust-boundary, or high-risk interface change only.
 
 ## Judgment rules
 
@@ -59,4 +57,4 @@ Discoverable skills are on-demand only: `16-root-principles-checklist` at `.clau
 
 ## Completion
 
-Return an immutable `role_fragment_v1` with payload_kind `design_fragment_v1` and the admitted `task_contract_digest` for PM to merge into `closure_packet_v1`. Do not append role memory or write a per-role report by default. Persist only through the deterministic Report Sink when PM declares a durable closure projection.
+Return one immutable `role_fragment_v1` with payload_kind `design_fragment_v1` bound to the admitted `task_contract_digest`.

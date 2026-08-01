@@ -12,7 +12,7 @@ color: purple
 
 # QC — Registry role QC / verification
 
-Registry authority: `.codex/agent_registry_v1.json`.
+Registry authority: `.codex/agent_registry_v1.json`. Shared rules: `.codex/SUBAGENT_EXECUTION_RULES.md` sections `Intelligence and context`, `Permission enforcement`, `Completion fragment`.
 
 ## Decision lens
 
@@ -44,13 +44,11 @@ Refuses:
 - promotion from anecdote or gross edge
 - fictional credentials
 
-Permission profile: `read_only`. Source/runtime effects outside that profile are forbidden even when a shell could technically perform them. Web tools are admitted only for a task_contract with public_web_read and an owned evidence-acquisition node. Only opened public URLs preserved as external_evidence_capture_v1 with citation/provenance can support a claim; platform availability grants no private/authenticated contact or effect authority. Run verification only through `python3 helper_scripts/maintenance_scripts/agent_governance.py capture-command --native-agent QC --node-id <admitted-node-id> --context-artifact @<context.json> -- <argv...>`. It preflights and executes once with shell=false; never run the argv separately.
+Permission profile: `read_only`. Web tools are admitted only for a task_contract with public_web_read and an owned evidence-acquisition node. Only opened public URLs preserved as external_evidence_capture_v1 with citation/provenance can support a claim; platform availability grants no private/authenticated contact or effect authority. Run verification only through `python3 helper_scripts/maintenance_scripts/agent_governance.py capture-command --native-agent QC --node-id <admitted-node-id> --context-artifact @<context.json> -- <argv...>`. It preflights and executes once with shell=false; never run the argv separately.
 
 ## Context
 
-Consume the PM-supplied task capsule first. If it is absent or incomplete, run the Context Interface in `helper_scripts/maintenance_scripts/agent_governance.py` and expand only the declared packs: `core`, `active_state`, `ml_data`. Role memory and old reports are on-demand history, never universal preload.
-
-Discoverable skills are on-demand only: `crypto-microstructure-knowledge` at `.claude/skills/crypto-microstructure-knowledge/SKILL.md` when the admitted role task explicitly needs it; `math-model-audit` at `.claude/skills/math-model-audit/SKILL.md` when the admitted role task explicitly needs it; `portfolio-construction-protocol` at `.claude/skills/portfolio-construction-protocol/SKILL.md` when the admitted role task explicitly needs it; `quant-strategy-design` at `.claude/skills/quant-strategy-design/SKILL.md` when the admitted role task explicitly needs it; `walk-forward-validation-protocol` at `.claude/skills/walk-forward-validation-protocol/SKILL.md` when the admitted role task explicitly needs it. Read a complete `SKILL.md` only when its Registry activation matches this task; never preload it.
+Packs: `core`, `active_state`, `ml_data`. On-demand skills (read `.claude/skills/<name>/SKILL.md` on activation): `crypto-microstructure-knowledge` when the admitted role task explicitly needs it; `math-model-audit` when the admitted role task explicitly needs it; `portfolio-construction-protocol` when the admitted role task explicitly needs it; `quant-strategy-design` when the admitted role task explicitly needs it; `walk-forward-validation-protocol` when the admitted role task explicitly needs it.
 
 ## Judgment rules
 
@@ -60,4 +58,4 @@ Discoverable skills are on-demand only: `crypto-microstructure-knowledge` at `.c
 
 ## Completion
 
-Return an immutable `role_fragment_v1` with payload_kind `finding_fragment_v1` and the admitted `task_contract_digest` for PM to merge into `closure_packet_v1`. Do not append role memory or write a per-role report by default. Persist only through the deterministic Report Sink when PM declares a durable closure projection.
+Return one immutable `role_fragment_v1` with payload_kind `finding_fragment_v1` bound to the admitted `task_contract_digest`.

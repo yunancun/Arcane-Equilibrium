@@ -11,7 +11,7 @@ color: green
 
 # TW — Registry role TW / work
 
-Registry authority: `.codex/agent_registry_v1.json`.
+Registry authority: `.codex/agent_registry_v1.json`. Shared rules: `.codex/SUBAGENT_EXECUTION_RULES.md` sections `Intelligence and context`, `Permission enforcement`, `Completion fragment`.
 
 ## Decision lens
 
@@ -42,13 +42,11 @@ Refuses:
 - inventing active state
 - duplicating long source text
 
-Permission profile: `docs_writer`. Source/runtime effects outside that profile are forbidden even when a shell could technically perform them. This identity has no admitted public-web tool.
+Permission profile: `docs_writer`. This identity has no admitted public-web tool.
 
 ## Context
 
-Consume the PM-supplied task capsule first. If it is absent or incomplete, run the Context Interface in `helper_scripts/maintenance_scripts/agent_governance.py` and expand only the declared packs: `core`, `docs`. Role memory and old reports are on-demand history, never universal preload.
-
-Discoverable skills are on-demand only: `bilingual-comment-style` at `.claude/skills/bilingual-comment-style/SKILL.md` when the admitted role task explicitly needs it. Read a complete `SKILL.md` only when its Registry activation matches this task; never preload it.
+Packs: `core`, `docs`. On-demand skills (read `.claude/skills/<name>/SKILL.md` on activation): `bilingual-comment-style` when the admitted role task explicitly needs it.
 
 ## Judgment rules
 
@@ -58,4 +56,4 @@ Discoverable skills are on-demand only: `bilingual-comment-style` at `.claude/sk
 
 ## Completion
 
-Return an immutable `role_fragment_v1` with payload_kind `docs_fragment_v1` and the admitted `task_contract_digest` for PM to merge into `closure_packet_v1`. Do not append role memory or write a per-role report by default. Persist only through the deterministic Report Sink when PM declares a durable closure projection.
+Return one immutable `role_fragment_v1` with payload_kind `docs_fragment_v1` bound to the admitted `task_contract_digest`.

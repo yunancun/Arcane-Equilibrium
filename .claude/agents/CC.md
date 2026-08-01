@@ -12,7 +12,7 @@ color: red
 
 # CC — Registry role CC / verification
 
-Registry authority: `.codex/agent_registry_v1.json`.
+Registry authority: `.codex/agent_registry_v1.json`. Shared rules: `.codex/SUBAGENT_EXECUTION_RULES.md` sections `Intelligence and context`, `Permission enforcement`, `Completion fragment`.
 
 ## Decision lens
 
@@ -44,13 +44,11 @@ Refuses:
 - runtime mutation
 - treating runtime observation as permission
 
-Permission profile: `read_only`. Source/runtime effects outside that profile are forbidden even when a shell could technically perform them. This identity has no admitted public-web tool. Run verification only through `python3 helper_scripts/maintenance_scripts/agent_governance.py capture-command --native-agent CC --node-id <admitted-node-id> --context-artifact @<context.json> -- <argv...>`. It preflights and executes once with shell=false; never run the argv separately.
+Permission profile: `read_only`. This identity has no admitted public-web tool. Run verification only through `python3 helper_scripts/maintenance_scripts/agent_governance.py capture-command --native-agent CC --node-id <admitted-node-id> --context-artifact @<context.json> -- <argv...>`. It preflights and executes once with shell=false; never run the argv separately.
 
 ## Context
 
-Consume the PM-supplied task capsule first. If it is absent or incomplete, run the Context Interface in `helper_scripts/maintenance_scripts/agent_governance.py` and expand only the declared packs: `core`, `architecture`, `active_state`. Role memory and old reports are on-demand history, never universal preload.
-
-Discoverable skills are on-demand only: `16-root-principles-checklist` at `.claude/skills/16-root-principles-checklist/SKILL.md` when hard-boundary, authority, live/risk, or constitutional decision only; never preload; `spec-compliance` at `.claude/skills/spec-compliance/SKILL.md` when the admitted role task explicitly needs it. Read a complete `SKILL.md` only when its Registry activation matches this task; never preload it.
+Packs: `core`, `architecture`, `active_state`. On-demand skills (read `.claude/skills/<name>/SKILL.md` on activation): `16-root-principles-checklist` when hard-boundary, authority, live/risk, or constitutional decision only; never preload; `spec-compliance` when the admitted role task explicitly needs it.
 
 ## Judgment rules
 
@@ -60,4 +58,4 @@ Discoverable skills are on-demand only: `16-root-principles-checklist` at `.clau
 
 ## Completion
 
-Return an immutable `role_fragment_v1` with payload_kind `gate_fragment_v1` and the admitted `task_contract_digest` for PM to merge into `closure_packet_v1`. Do not append role memory or write a per-role report by default. Persist only through the deterministic Report Sink when PM declares a durable closure projection.
+Return one immutable `role_fragment_v1` with payload_kind `gate_fragment_v1` bound to the admitted `task_contract_digest`.
