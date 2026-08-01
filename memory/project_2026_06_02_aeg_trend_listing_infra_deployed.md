@@ -7,7 +7,7 @@ metadata:
   originSessionId: 07386332-55ba-43c0-a468-02f0f16dd863
 ---
 
-承 [[project_2026_05_31_v58_alpha_pivot]] 的 alpha-source 研究方向。2026-06-02 部署 AEG 研究基礎設施（三端同步，最終 SHA `c1c017b0`；V126 DB 清理見 [[project_2026_06_01_db_schema_hygiene_cleanup]]）。**本身不產 alpha＝研究資料/驗證層。**
+承 [[project_2026_05_31_v58_alpha_pivot]](已移 archive/) 的 alpha-source 研究方向。2026-06-02 部署 AEG 研究基礎設施（三端同步，最終 SHA `c1c017b0`；V126 DB 清理見 [[project_2026_06_01_db_schema_hygiene_cleanup]]）。**本身不產 alpha＝研究資料/驗證層。**
 
 ## 部署成果（耐久）
 - **V125 alpha-history 儲存**：6 張 `research.alpha_*` 表（3 hypertable，chunk 7d/compress 30d/retain 1095d）+ `market.klines` retention 365→1095d；funding/OI/buy/sell ratio 全 `DOUBLE PRECISION NOT NULL`（C-3 拒 fake-zero/NULL）。§E TSDB 2.26.1 reflection 修（無 `compression_settings.segmentby` 欄 → 改 `segmentby_column_index IS NOT NULL` EXISTS；原寫法 deploy crash-loop，MIT Linux dry-run 兩度把關）。
@@ -32,5 +32,5 @@ metadata:
 
 ## [index-archive 2026-06-10] 原 MEMORY.md 索引條目全文(壓縮索引前歸檔,內容為當時點狀態)
 
-- [AEG trend/listing infra 部署 (2026-06-02)](project_2026_06_02_aeg_trend_listing_infra_deployed.md) — alpha-source 研究基礎設施全鏈部署+驗證(commits 0f19c861/e3233647/eae0b890/c1c017b0,三端同步 c1c017b0)：**V125** alpha 儲存(6 表/3 hypertable,§E TSDB 2.26.1 reflection 修)+**daily-kline backfill**(Rust 獨立 bin,已 --apply **14505 日線** 20 perp/730d 作多日 trend PIT 資料源,C-3 strict-parse 拒 fake-zero,signed GET via demo slot)+**Gate-B 隔離 listing 探針**(R-0 零洩漏 E3 驗,verdict INCONCLUSIVE_NO_TRANSITION/TRANSITION_BUT_NO_CAPTURE,Linux duckdb 1.5.1 smoke 過 EXIT=0,**尚未跑 24h 真捕捉**=operator-timed ~Q4);**部署機制**:OPENCLAW_AUTO_MIGRATE 預設0(restart_all 只從 basic_system_services.env 讀,deploy 暫設1→restart→復原0),engine auto-migrate=sqlx fresh-register 無 drift,restart_all 需 cargo on PATH(ssh non-interactive);**教訓**:full E1→E2→E3→BB→MIT→E4 鏈抓多 bug(window UTC partial/probe 假 PASS/FIX-3 註解二次錯被 re-E2 抓/**post-deploy Linux real-smoke 抓 parquet COPY-TO-? 崩潰=unit test+dry-run 漏**=真連線 smoke>mock);V126 DB 清理見 [[project_2026_06_01_db_schema_hygiene_cleanup]](909MB 回收);本身不產 alpha=研究資料/驗證層,承 [[project_2026_05_31_v58_alpha_pivot]]
+- [AEG trend/listing infra 部署 (2026-06-02)](project_2026_06_02_aeg_trend_listing_infra_deployed.md) — alpha-source 研究基礎設施全鏈部署+驗證(commits 0f19c861/e3233647/eae0b890/c1c017b0,三端同步 c1c017b0)：**V125** alpha 儲存(6 表/3 hypertable,§E TSDB 2.26.1 reflection 修)+**daily-kline backfill**(Rust 獨立 bin,已 --apply **14505 日線** 20 perp/730d 作多日 trend PIT 資料源,C-3 strict-parse 拒 fake-zero,signed GET via demo slot)+**Gate-B 隔離 listing 探針**(R-0 零洩漏 E3 驗,verdict INCONCLUSIVE_NO_TRANSITION/TRANSITION_BUT_NO_CAPTURE,Linux duckdb 1.5.1 smoke 過 EXIT=0,**尚未跑 24h 真捕捉**=operator-timed ~Q4);**部署機制**:OPENCLAW_AUTO_MIGRATE 預設0(restart_all 只從 basic_system_services.env 讀,deploy 暫設1→restart→復原0),engine auto-migrate=sqlx fresh-register 無 drift,restart_all 需 cargo on PATH(ssh non-interactive);**教訓**:full E1→E2→E3→BB→MIT→E4 鏈抓多 bug(window UTC partial/probe 假 PASS/FIX-3 註解二次錯被 re-E2 抓/**post-deploy Linux real-smoke 抓 parquet COPY-TO-? 崩潰=unit test+dry-run 漏**=真連線 smoke>mock);V126 DB 清理見 [[project_2026_06_01_db_schema_hygiene_cleanup]](909MB 回收);本身不產 alpha=研究資料/驗證層,承 [[project_2026_05_31_v58_alpha_pivot]](已移 archive/)
 </content>

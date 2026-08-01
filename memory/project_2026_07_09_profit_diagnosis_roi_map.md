@@ -4,7 +4,6 @@ description: 2026-07-09 ultracode 盈利研判第三輪:F1 偽複製推翻 NEAR 
 metadata: 
   node_type: memory
   type: project
-  heat: 1
   originSessionId: 44dcb981-21bd-4402-aed2-973fd12f7f5f
 ---
 

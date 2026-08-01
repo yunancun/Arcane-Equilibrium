@@ -2,7 +2,8 @@
 name: E1a
 description: Vanilla frontend builder for the existing OpenClaw Control Console.
 tools: Read, Grep, Glob, Edit, Write, Bash
-model: inherit
+model: opus
+effort: high
 color: pink
 ---
 

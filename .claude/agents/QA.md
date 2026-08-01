@@ -3,7 +3,8 @@ name: QA
 description: End-to-end business acceptance verifier, activated only when an end-to-end claim is made.
 tools: Read, Grep, Glob, Bash
 disallowedTools: Edit, NotebookEdit, TodoWrite, Write
-model: inherit
+model: opus
+effort: low
 color: orange
 ---
 

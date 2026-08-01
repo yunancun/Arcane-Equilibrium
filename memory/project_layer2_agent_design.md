@@ -11,6 +11,10 @@ originSessionId: 189878ce-df95-4b97-a566-ea1b4e395fe9
 2. **「Layer 2 自主推理循環 待開發」框架已被超越**：L2 advisory mesh 已 shipped（P1–P4，見 memory `project_2026_06_08_l2_d3_phase1_green` + MEMORY.md 索引）。**active tail 僅剩 `P1-L2-ADVISORY-MESH-E2E-1`**（`TODO.md` WAITING_OPERATOR）= operator 批准一次 true `diagnose_leak` 真 Ollama model call、寫真 `agent.l2_calls` row、記錄證據後復原 capability disabled;既有 deploy/E2E-0 只證 `l2_gate_seam_log` rejection + `l2_calls=0`，不視為全閉。
 3. 下方 L0/L1/L2 三層概念描述 + 2026-04-23 更正保留為 history;唯 Gap B「Layer 2 核心待設計」措辭已被 P1–P4 shipped 取代，僅 E2E-1 一次性 operator-gated 窗口未閉。
 
+## ⚠️ 2026-08-01 演變更正(E2E-1 tail 已閉,上節第 2/3 點過期)
+
+上節(07-09)所稱「active tail 僅剩 `P1-L2-ADVISORY-MESH-E2E-1`(WAITING_OPERATOR)」已被 runtime 超越:該 TODO row 自 2026-07-10 起=**DONE_WITH_CONCERNS_FENCE_SINK_FOLLOWUP**(operator 批准 unlock path A 後真 model call 達成、restore 驗證後 **L2 維持 fully disabled**);殘缺口=executor fence-parsing sink follow-up,非該 row。任何未來 L2 enablement 前須走完整 PA→E1→E2→E4 鏈。證據與細節見 [[project_2026_06_08_l2_d3_phase1_green]] 演變軌跡 2026-08-01 條。上節保留為 history 不改寫。
+
 ## ⚠️ 2026-04-23 重大更正
 
 **先前敘述「H1-H5 全為 stub」與 CLAUDE.md §十 舊描述 均過期**。
