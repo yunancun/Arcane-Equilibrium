@@ -41,7 +41,8 @@ load_registry() + render_views(registry) -> generated platform/profile Adapters
 ```
 
 Registry 只持穩定結構：role ID、execution mode、activation/skip、能力 pack、
-permission、context pack、output schema、budget envelope、charter rules。專業深度留在
+permission、context pack、output schema、budget envelope、charter rules、
+model/effort tier（2026-08-01 起，必填）。專業深度留在
 role skills；Root Principles、ADR、broker 官方規則不複製進 Registry。
 
 四個 execution mode：
@@ -51,8 +52,14 @@ role skills；Root Principles、ADR、broker 官方規則不複製進 Registry�
 - `Builder`：在明確 scope 內產出 source/test/docs patch。
 - `Verifier`：獨立判定，不修被審的 Implementation。
 
-既有 PM/PA/E1/QC 等名稱是 capability preset。所有 preset 都使用可用的完整模型
-智能；`default/explorer/worker` 只是 runtime substrate，不是智能等級。
+既有 PM/PA/E1/QC 等名稱是 capability preset。preset 的模型智能由 Registry 的
+三級 model/effort tier 決定（operator 2026-08-01 裁決：T1 `opus`/`high`＝
+PM/E1/E1a/E2/E3/CC/QC/MIT/PA；T2 `opus`/`low`＝E4/FA/OPS/E5/QA/AI-E/BB/IB；
+T3 `sonnet`/`medium`＝TW/R4/A3）；`default/explorer/worker` 只是 runtime
+substrate，不是智能等級。tier 是下限契約：saved workflow 與任何 caller 不得把
+Registry-`opus` 角色向下覆蓋（現存 cheapTier 類覆蓋屬違規遺留，在可執行綁定
+落地前由 PM 於 admission 時人工把關；agent-wave 的 executable tier 綁定為已
+記錄 follow-up）。
 
 新增的兩個 preset：
 
@@ -563,6 +570,8 @@ single execution；未來只能由 host-attested verifier 取代，不能由 pac
   backstop 構成；監測用 transcript-size proxy（見 sub-agent-hygiene-sop 的
   Background-wave liveness 節，proxy 永不得充當 actual-usage accounting）；真 cap 延後至
   runner 提供 turn/token limit 選項或 platform-attested telemetry 可得時再議。
+  另有 per-session 工程停點軟上限（§11「Session 資源邊界」）：它是停點紀律
+  （到限落帳 checkpoint 換 session），不是 usage accounting，也不改本節的 accounting 真相。
 - Closure 後另以 immutable closure digest 綁 `closure_quality_followup_v1`，追蹤 reopen、
   rework、false closure、decision-changing findings 與 realized value；measured follow-up
   必須有 caller-trusted platform/external attestation，缺失保持 scheduled/unavailable，不補 0。
@@ -684,3 +693,89 @@ python3 helper_scripts/maintenance_scripts/agent_governance.py closure-quality @
 - Adaptive Full Audit 或 profit diagnosis 未完成 coverage/controller binding 時不能 PASS。
 - Full/Profit inline Context 或 compiler budget authority 不相符時在首次 model call 前拒絕。
 - 重複結論不增長 role memory/per-role reports。
+
+## 11. Session 資源邊界
+
+依 2026-08-01 框架健檢裁決（operator 批准全部優化建議）。本節是工程停點紀律，
+不是 usage accounting，也不放鬆任何 evidence/closure gate；接棒 session 仍從
+current generation 重驗。
+
+**Per-session 軟上限**：
+
+- 觸發條件（任一）：單 turn context（cache_read）> 300k tokens，或 active wall
+  time > 8 小時。
+- 觸發後動作：完成當前原子步驟 → 落帳 clean checkpoint（ledger/TODO 投影更新）
+  → handoff 新 session 接棒。斷點續作正本＝AIML delivery protocol §4 的
+  checkpoint 續作協議（terminated Session resumes from the last clean exact-head
+  checkpoint）。
+- 每個 Session closure 與落帳 checkpoint 都是合法停點；sprint 級命令（含
+  `開始並完成S<n>` 族）不得覆寫本邊界，「單一 wave/PR/review 完成不得停止」型
+  條款一律以本節為準廢止。
+
+**輪詢禁令（等待一律事件驅動）**：
+
+- 禁 `TaskOutput(block:true)` 長輪詢等 sub-agent；等 task-notification 事件。
+- CI/PR 等待（`gh pr checks`、`gh run watch` 等）改單次查詢＋事件或排程喚醒；
+  禁 while+sleep watch 迴圈。
+- 禁 tail/監看自身 session transcript 目錄；`subagents/` transcript mtime 只作
+  TaskStop 前的 liveness spot-check（見 sub-agent-hygiene-sop），不作常駐輪詢。
+- 具名例外（desktop BG wave idle-kill 對策）：desktop local-agent 背景 wave
+  派發後，session idle 900s 會不可復活地殺死全部 in-flight subagents
+  （CLAUDE.md §八與 sub-agent-hygiene-sop 記錄的根因）；此場景允許以 blocking
+  `TaskOutput` 或 foreground-parallel Agent call 維持 in-turn 駐留直到收齊。
+  本例外僅限該駐留等收場景，不得援引為 CI/PR watch 迴圈或 transcript 常駐輪詢
+  的豁免；非 desktop BG wave 的等待仍一律事件驅動。
+
+**Review 批次收口**：
+
+- reviewer findings 單輪彙總，builder 一次修畢，受影響 reviewer 只做一次針對
+  finding IDs 的 delta recheck；禁逐 finding 一刀一 re-review。
+- E2 hard edge 加上限：同一 scope 連續 2 輪 FAIL 後升 PM 裁決
+  （rescope/split/接受 typed debt），不進第三輪機械重審。hard edge 本身不變：
+  source implementation 仍必有獨立 E2 → E4。
+- per-commit re-review worktree 改 per-batch：一個 fix batch 一個 re-review
+  worktree，不逐 fix commit spawn。
+
+## 12. 終態凍結（BLOCKED_OPERATOR_ACTION_PACKET_READY）
+
+- 適用範圍（不追溯）：本節適用於 2026-08-01 之後新發出 packet 的弧。現行
+  S2E/LW 弧（TODO 派發看板所示、operator 既有批准）依原批准續行至 S2E.5
+  exit，不受本節追溯凍結；其後同弧任何新增 readiness 層即受本節約束。
+- packet 發出後，該弧進入 `WAITING(named operator action)`：唯一合法後續是
+  operator 執行 packet，或 operator 顯式 reopen。
+- 不得由 sprint 級命令對同一弧再開新的 readiness 層（S2 → S2E → LW 的三層先例
+  即本條所禁的形狀）；新增 hardening/readiness 工作需 operator 顯式 reopen 並
+  建立新 admission。
+- Enforcement class：本節為 `normative_policy`，由 PM 於 dispatch/admission 前
+  人工核對弧與 packet 終態執行；依 §13 凍結，刻意不新增 route/registry 可執行
+  seam（`TASK_FACT_FIELDS` 不擴）。此 enforcement gap 記為 accepted residual
+  risk；升級為可執行 admission 檢查需 operator 顯式批准（屬 meta-work）。
+- 自 IBKR loop v2 移植兩條硬停機規則到 AIML lane：①同一包連續兩輪被 REJECT →
+  停該包，PM 反省寫帳本，不硬闖；②findings 一次性定性入帳後不得作為新案二次
+  立案（防審過審）；但被修復項須由對口 reviewer 在新 generation 上做 delta
+  recheck 驗證修復有效（引用原編號），未驗不得 PASS——去重立案 ≠ 免驗修復。
+- operator gate 本身不因本節放鬆：fresh exact authority、九項 authority 恆
+  false、fail-closed 邊界逐字保留。
+
+## 13. Meta-work 邊界
+
+- 生效時點：本節自 2026-08-01 框架健檢 remediation 各 lane 整合（merge）完成後
+  生效；該次 operator 批准的 remediation 批次本身（含並行 lane 對治理測試檔的
+  改動）不追溯計入凍結與佔比。
+- 治理測試家族凍結：tests/structure 的 governance 測試家族
+  （`test_agent_governance*` 與 `test_development_agent_governance*`）淨行數
+  不得再增；新增 gate 需先刪等量舊 gate（同一 change 內淨行數 ≤ 0）。
+- 每週 meta-work（治理機/框架自身）佔比 ≤ 30%；超限即凍結 meta-work，只做
+  product-work（交易/引擎/研究）。計量以觸及
+  `helper_scripts/maintenance_scripts/agent_governance*` 或 governance 測試家族
+  （`tests/structure/test_agent_governance*`、
+  `test_development_agent_governance*`）的 commit 計；product 功能自帶的
+  `tests/structure` 測試（GUI/IBKR/策略/runtime 等）屬 product-work，不計入、
+  不受凍結影響。
+- Full-audit envelope 政策：ML/AI 日常任務使用 compiler
+  （`agent_governance_routing.py`）依 risk/uncertainty 所選的非 `full_audit`
+  envelope（narrow/standard/complex），不得為升 envelope 虛報 risk；
+  `full_audit` envelope 需 operator 當次明示，不得由 agent 自升。
+- 2026-08-01 裁決先例：`origin/agent/gpt56-multiagent-remediation-20260730`
+  （+27,988 行治理機測試）依本節裁 `SUPERSEDED-KILL` — 不 merge、分支保留存史、
+  禁 recovery 遞迴（不得再開 remediation-of-remediation/recovery 分支或工單）。

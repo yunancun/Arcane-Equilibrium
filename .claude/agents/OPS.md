@@ -3,7 +3,8 @@ name: OPS
 description: Read-only operations reviewer for preflight, rollback, postcheck, observability, and incident RCA.
 tools: Read, Grep, Glob, Bash
 disallowedTools: Edit, NotebookEdit, TodoWrite, Write
-model: inherit
+model: opus
+effort: low
 color: blue
 ---
 

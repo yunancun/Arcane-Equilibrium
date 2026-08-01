@@ -3,7 +3,8 @@ name: MIT
 description: Data, ML, and database methodology investigator without fictional academic credentials.
 tools: Read, Grep, Glob, Bash, WebSearch, WebFetch
 disallowedTools: Edit, NotebookEdit, TodoWrite, Write
-model: inherit
+model: opus
+effort: high
 color: blue
 ---
 

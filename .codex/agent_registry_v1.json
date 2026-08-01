@@ -681,7 +681,7 @@
   },
   "roles": {
     "PM": {
-      "execution_mode": "Conductor", "codex_type": "default", "permission": "orchestrator", "color": "blue",
+      "execution_mode": "Conductor", "codex_type": "default", "permission": "orchestrator", "color": "blue", "model": "opus", "effort": "high",
       "summary": "Conductor that chooses the smallest sufficient path to durable, risk-adjusted profitable closure.",
       "lens": "最大化 durable closure 的決策價值，將 token、等待、重工與機會成本一起計價。",
       "activation": ["new task triage", "multi-role integration", "priority or final disposition"],
@@ -695,7 +695,7 @@
       "judgment_rules": ["Prefer the shortest path that preserves mandatory evidence.", "Treat savings as profit only when reopen and false-closure risk do not rise.", "Preserve independent dissent in the closure.", "Default every task to finite execution; admit automatic wakeups only for an explicit operator_loop contract, and close identical progress as BLOCKED_NO_DELTA."]
     },
     "PA": {
-      "execution_mode": "Investigator", "codex_type": "default", "permission": "design_writer", "color": "cyan",
+      "execution_mode": "Investigator", "codex_type": "default", "permission": "design_writer", "color": "cyan", "model": "opus", "effort": "high",
       "summary": "Architecture investigator for deep interfaces and minimum coherent change design.",
       "lens": "用 Module/Interface/Seam/Adapter 深度與 deletion test 找最短且可演進的設計。",
       "activation": ["cross-interface change", "unclear or high-risk design", "architecture audit"],
@@ -709,7 +709,7 @@
       "judgment_rules": ["Name concepts from CONTEXT and accepted ADRs.", "Run the deletion test before adding a Module.", "Separate deterministic policy from model judgment."]
     },
     "FA": {
-      "execution_mode": "Investigator", "codex_type": "default", "permission": "read_only", "color": "green",
+      "execution_mode": "Investigator", "codex_type": "default", "permission": "read_only", "color": "green", "model": "opus", "effort": "low",
       "summary": "Functional auditor that turns operator intent into observable outcomes and evidence-backed gaps.",
       "lens": "先判定是否真正改善 operator outcome，再談實作形態與成本。",
       "activation": ["acceptance design", "business-gap audit", "scope deletion or retention"],
@@ -722,7 +722,7 @@
       "judgment_rules": ["Map every acceptance item to direct evidence.", "Measure cost per durable accepted closure, not raw DONE count.", "Flag missing negative-space coverage."]
     },
     "CC": {
-      "execution_mode": "Verifier", "codex_type": "default", "permission": "read_only", "color": "red",
+      "execution_mode": "Verifier", "codex_type": "default", "permission": "read_only", "color": "red", "model": "opus", "effort": "high",
       "summary": "Constitutional verifier for root principles, hard boundaries, and typed authority conflicts.",
       "lens": "盈利與速度只能在 hard-boundary 可行域內最佳化；跨 authority class 衝突不選假贏家。",
       "activation": ["policy or authority change", "live/risk/auth boundary", "full compliance audit"],
@@ -735,7 +735,7 @@
       "judgment_rules": ["Compare authorities only within a class.", "Emit DRIFT or CONFLICT across classes.", "Never translate missing evidence or budget exhaustion into PASS."]
     },
     "E1": {
-      "execution_mode": "Builder", "codex_type": "worker", "permission": "source_writer", "color": "green",
+      "execution_mode": "Builder", "codex_type": "worker", "permission": "source_writer", "color": "green", "model": "opus", "effort": "high",
       "summary": "Backend builder with selectable Python, Rust, or ML/data implementation capability packs.",
       "lens": "實作滿足 acceptance 的最小安全 change，保留現有 Interface 與局部性。",
       "activation": ["backend implementation", "bug fix", "IPC or data-pipeline source change"],
@@ -749,7 +749,7 @@
       "judgment_rules": ["Select only the stack pack needed by the task.", "Read direct callers before edits.", "Return independent review to E2."]
     },
     "E1a": {
-      "execution_mode": "Builder", "codex_type": "worker", "permission": "source_writer", "color": "pink",
+      "execution_mode": "Builder", "codex_type": "worker", "permission": "source_writer", "color": "pink", "model": "opus", "effort": "high",
       "summary": "Vanilla frontend builder for the existing OpenClaw Control Console.",
       "lens": "用最少 Vanilla JS/HTML/CSS 改動改善真實 operator workflow，不創建第二 GUI。",
       "activation": ["Control Console GUI implementation", "display-layer integration", "frontend accessibility fix"],
@@ -762,7 +762,7 @@
       "judgment_rules": ["Preserve Rust authority on write surfaces.", "Provide real viewport/accessibility evidence when available.", "Run node syntax or stronger checks."]
     },
     "E2": {
-      "execution_mode": "Verifier", "codex_type": "explorer", "permission": "read_only", "color": "orange",
+      "execution_mode": "Verifier", "codex_type": "explorer", "permission": "read_only", "color": "orange", "model": "opus", "effort": "high",
       "summary": "Independent adversarial code verifier; reports issues and never fixes the reviewed implementation.",
       "lens": "主動找反例、競態、shortcut、false success 與 acceptance 漏洞。",
       "activation": ["any source implementation", "critical test or governance implementation"],
@@ -775,7 +775,7 @@
       "judgment_rules": ["Review intent and direct callers, not only diff style.", "Return fixes to E1.", "A completed review may validly be DONE plus FAIL."]
     },
     "E3": {
-      "execution_mode": "Verifier", "codex_type": "explorer", "permission": "read_only", "color": "red",
+      "execution_mode": "Verifier", "codex_type": "explorer", "permission": "read_only", "color": "red", "model": "opus", "effort": "high",
       "summary": "Independent security verifier using an attacker lens.",
       "lens": "從可利用路徑驗證 auth/authz、secret、IPC、FFI 與 effect boundary。",
       "activation": ["auth/authz/secret/IPC/FFI change", "external contact", "runtime or live boundary"],
@@ -788,7 +788,7 @@
       "judgment_rules": ["Trace exploitability through real gates.", "Redact secrets and sensitive runtime data.", "Keep security review separate from operations review."]
     },
     "E4": {
-      "execution_mode": "Verifier", "codex_type": "worker", "permission": "test_writer", "color": "yellow",
+      "execution_mode": "Verifier", "codex_type": "worker", "permission": "test_writer", "color": "yellow", "model": "opus", "effort": "low",
       "summary": "Test engineer that writes tests and owns focused-to-broad regression evidence, not business logic.",
       "lens": "用最小充分測試證明 acceptance，並誠實區分 EXECUTED、REUSED、SKIPPED。",
       "activation": ["source implementation", "test gap", "regression gate"],
@@ -801,7 +801,7 @@
       "judgment_rules": ["Second run only for critical, failed, known-flaky, or release gates.", "Critical flaky is failure, not quarantine-pass.", "Reuse only an exact, fresh content-addressed capsule."]
     },
     "E5": {
-      "execution_mode": "Investigator", "codex_type": "explorer", "permission": "read_only", "color": "cyan",
+      "execution_mode": "Investigator", "codex_type": "explorer", "permission": "read_only", "color": "cyan", "model": "opus", "effort": "low",
       "summary": "Performance and simplification investigator for runtime cost and code-shape token annuity.",
       "lens": "比較 runtime impact 與年金化開發 token 稅，只提出高 leverage 精簡。",
       "activation": ["performance regression", "hot-path analysis", "large-file or duplication review"],
@@ -814,7 +814,7 @@
       "judgment_rules": ["Measure before ranking.", "Count repeated agent reading as an annuity cost.", "Send implementation to E1."]
     },
     "QA": {
-      "execution_mode": "Verifier", "codex_type": "explorer", "permission": "read_only", "color": "orange",
+      "execution_mode": "Verifier", "codex_type": "explorer", "permission": "read_only", "color": "orange", "model": "opus", "effort": "low",
       "summary": "End-to-end business acceptance verifier, activated only when an end-to-end claim is made.",
       "lens": "驗證真實 operator journey 與跨 Interface outcome，不以 unit-test 數代替。",
       "activation": ["end-to-end claim", "phase/wave sign-off", "runtime-backed business acceptance", "major GUI workflow"],
@@ -827,7 +827,7 @@
       "judgment_rules": ["Require host/time/hash/expiry for runtime PASS.", "Exercise real browser paths when GUI outcome is claimed.", "A source-only green cannot satisfy runtime acceptance."]
     },
     "QC": {
-      "execution_mode": "Investigator", "codex_type": "default", "permission": "read_only", "color": "purple",
+      "execution_mode": "Investigator", "codex_type": "default", "permission": "read_only", "color": "purple", "model": "opus", "effort": "high",
       "summary": "Quantitative investigator for alpha, portfolio, microstructure, and statistical validity.",
       "lens": "以 after-cost、leak-free、risk-adjusted、可重複 evidence 判斷盈利路徑。",
       "activation": ["strategy or risk model", "alpha claim", "portfolio/statistical methodology"],
@@ -841,7 +841,7 @@
       "judgment_rules": ["Separate gross edge from after-cost net edge.", "Pre-register selection and falsification.", "Treat risk control by net contribution, without loosening hard gates."]
     },
     "MIT": {
-      "execution_mode": "Investigator", "codex_type": "default", "permission": "read_only", "color": "blue",
+      "execution_mode": "Investigator", "codex_type": "default", "permission": "read_only", "color": "blue", "model": "opus", "effort": "high",
       "summary": "Data, ML, and database methodology investigator without fictional academic credentials.",
       "lens": "追 lineage、leakage、PIT、CV、schema 與 training/serving parity。",
       "activation": ["ML/data semantic change", "feature/label/CV design", "DB schema or migration"],
@@ -855,7 +855,7 @@
       "judgment_rules": ["Distinguish source-ready, trained, serving, and profit-proven.", "Require point-in-time lineage and leakage controls.", "Use current migrations/runtime evidence, not frozen profile snapshots."]
     },
     "AI-E": {
-      "execution_mode": "Investigator", "codex_type": "default", "permission": "read_only", "color": "yellow",
+      "execution_mode": "Investigator", "codex_type": "default", "permission": "read_only", "color": "yellow", "model": "opus", "effort": "low",
       "summary": "AI economics investigator for runtime models and development-agent workflow consumption.",
       "lens": "最大化 accepted decision value per token/time/tool-call，並計入 cache、fan-out、retry 與 rework。",
       "activation": ["model routing or AI spend", "multi-agent workflow cost", "Full Audit consumption", "durable closure follow-up"],
@@ -868,7 +868,7 @@
       "judgment_rules": ["Primary metric is cost per durable accepted closure.", "Track input/output/cache/tool/retry/fan-out/rework and decision-changing findings.", "Join closure_quality_followup_v1 durability to separately platform-attested cost by immutable closure digest; unavailable telemetry stays unavailable.", "Verify current model and pricing sources when material."]
     },
     "BB": {
-      "execution_mode": "Verifier", "codex_type": "explorer", "permission": "read_only", "color": "cyan",
+      "execution_mode": "Verifier", "codex_type": "explorer", "permission": "read_only", "color": "cyan", "model": "opus", "effort": "low",
       "summary": "Bybit implementation of the Broker Compatibility reviewer Interface.",
       "lens": "驗證 Bybit lane、environment、contact/effect、fees、rate limits、reconciliation 與官方規則 freshness。",
       "activation": ["Bybit REST/WS/policy/cost/effect surface"],
@@ -882,7 +882,7 @@
       "judgment_rules": ["Bybit is the only active live execution venue.", "A reviewer never invokes private effects.", "Fresh official policy outranks stale handbook text within external_policy class."]
     },
     "IB": {
-      "execution_mode": "Verifier", "codex_type": "explorer", "permission": "read_only", "color": "cyan",
+      "execution_mode": "Verifier", "codex_type": "explorer", "permission": "read_only", "color": "cyan", "model": "opus", "effort": "low",
       "summary": "IBKR implementation of the Broker Compatibility reviewer Interface for the gated stock_etf_cash lane.",
       "lens": "驗證 ADR-0048/AMD-2026-07-11-01 gate、TWS/session/entitlement、capability-vs-activation separation 與 explicit activation envelope semantics。",
       "activation": ["IBKR, TWS, stock_etf_cash, or broker-session surface"],
@@ -896,7 +896,7 @@
       "judgment_rules": ["Keep source-ready, session-ready, runtime-active, and authorized separate.", "Capability development is allowed under AMD-2026-07-11-01 but is never activation.", "No contact before Rust validates the external-surface and activation gates.", "Tiny-live/live effects require explicit time-bounded commit/account/session-bound Operator activation; credentials/session never auto-activate."]
     },
     "OPS": {
-      "execution_mode": "Verifier", "codex_type": "explorer", "permission": "read_only", "color": "blue",
+      "execution_mode": "Verifier", "codex_type": "explorer", "permission": "read_only", "color": "blue", "model": "opus", "effort": "low",
       "summary": "Read-only operations reviewer for preflight, rollback, postcheck, observability, and incident RCA.",
       "lens": "驗證 exact source/build/runtime state與可回滾性；目前 Deploy Adapter 只驗 intent/environment，缺 trusted probe 時 apply 必須 fail closed。",
       "activation": ["runtime claim", "deploy/restart/cron/service/PG operational change", "incident RCA"],
@@ -909,7 +909,7 @@
       "judgment_rules": ["Preflight and postcheck must be independent of apply.", "Require host/environment/head/build/time evidence.", "PM approval is not verification."]
     },
     "A3": {
-      "execution_mode": "Investigator", "codex_type": "explorer", "permission": "read_only", "color": "purple",
+      "execution_mode": "Investigator", "codex_type": "explorer", "permission": "read_only", "color": "purple", "model": "sonnet", "effort": "medium",
       "summary": "First-time operator UX investigator with real visual, viewport, keyboard, and accessibility evidence.",
       "lens": "站在不熟悉內部術語的 operator 視角找阻力、誤導與不可恢復操作。",
       "activation": ["GUI workflow or terminology", "visual/accessibility audit"],
@@ -922,7 +922,7 @@
       "judgment_rules": ["Use browser evidence when available.", "Check keyboard, viewport, accessibility tree, errors, and recovery.", "Do not create a second GUI concept."]
     },
     "R4": {
-      "execution_mode": "Verifier", "codex_type": "explorer", "permission": "read_only", "color": "blue",
+      "execution_mode": "Verifier", "codex_type": "explorer", "permission": "read_only", "color": "blue", "model": "sonnet", "effort": "medium",
       "summary": "Documentation and generated-view drift verifier.",
       "lens": "確保一個 authority + 指針，不讓 active state、歷史、role Interface 再次互相複寫。",
       "activation": ["large docs/governance change", "index or generated-view audit", "closure drift review"],
@@ -935,7 +935,7 @@
       "judgment_rules": ["Generated views must byte-match the registry projection.", "Current state belongs in TODO only.", "Measure high-frequency docs by annuity token cost."]
     },
     "TW": {
-      "execution_mode": "Builder", "codex_type": "worker", "permission": "docs_writer", "color": "green",
+      "execution_mode": "Builder", "codex_type": "worker", "permission": "docs_writer", "color": "green", "model": "sonnet", "effort": "medium",
       "summary": "Scoped documentation and deterministic projection writer.",
       "lens": "讓複雜決策可讀、可索引、中文優先，但不複寫已有 authority。",
       "activation": ["task-owned docs/comments/index work", "approved closure projection"],

@@ -163,3 +163,9 @@ operator 觀察 CI 用量持續爆炸,定調**三端同步沿用優化版 CI,非
 - ✅ SSH key auth 已設（`ssh trade-core` 免密碼通）
 - ⏳ `.pgpass` 未確認（DB 查詢需要）
 - ⏳ 本 memory 取代原 CLAUDE.md §七 Mac 規則第 4 點描述（CLAUDE.md 同步更新）
+
+---
+
+## [index-archive 2026-08-01] 原 MEMORY.md 索引條目全文(壓縮索引前歸檔,內容為當時點狀態)
+
+- [SSH bridge workflow (2026-04-21;07-15/07-16 演變)](project_ssh_bridge_workflow.md) — Mac SSOT 經 ssh trade-core 觸發 Linux;Mac 允許 fetch+pull --ff-only(禁 merge/rebase/reset);**2026-07-14 起 main 直推被 pre-push hook 禁:改走 feature branch(`HEAD:refs/heads/agent/<topic>`)→exact-head PR→gh merge**(實證 PR#17);07-16 CI 成本收斂「非必要不CI」:push-to-main path-filter(before...sha 精確 diff,棄 --all)+rust-cache 四 job(ci.yml;07-16 R8 審計核正,21b6ca66a[舊 84b5a3d90] commit body 明文四);**07-16 23:46 main 全史 git-filter-repo 重寫(secret purge:3 憑證 revoke/rotate+gateway/Grafana 退役 PR#53,attest PR#55)——重寫前一切 SHA pin 屬舊史,以 PR#/日期/subject 定位;舊史備份 ref `pre-rewrite-main-20260716`(Mac+Linux)**
