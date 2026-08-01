@@ -12,10 +12,27 @@ ADMITTED_CAP_FIELDS = {
     "max_context_tokens_per_call", "max_prompt_utf8_bytes_per_call",
     "max_workflow_planned_input_tokens",
     "max_unique_nodes", "max_call_attempts", "retry_budget",
+    "max_followup_attempts", "max_total_model_turns", "max_wait_cycles",
+    "max_no_delta_wakeups", "max_wall_clock_ms", "max_call_duration_ms",
+    "max_wave_duration_ms", "max_concurrent_calls",
+    "max_spawn_depth_from_root",
 }
 CONTEXT_AUTHORITY_FIELDS = {
-    "schema_version", "envelope", "accounting_basis", *ADMITTED_CAP_FIELDS,
+    "schema_version", "envelope", "target_context_tokens",
+    "quality_reserve_context_tokens", "accounting_basis",
+    "platform_token_cap", *ADMITTED_CAP_FIELDS,
 }
+
+
+def execution_admitted_caps(authority: dict[str, Any]) -> dict[str, int]:
+    """Project the one exact cap set shared by Context and wave receipts."""
+
+    if not isinstance(authority, dict) or not ADMITTED_CAP_FIELDS <= set(authority):
+        raise ValueError("execution authority cannot project admitted caps")
+    caps = {field: authority[field] for field in ADMITTED_CAP_FIELDS}
+    if any(not _nonnegative_int(value) for value in caps.values()):
+        raise ValueError("execution authority admitted caps must be non-negative integers")
+    return caps
 
 
 def _nonnegative_int(value: Any) -> bool:
@@ -55,12 +72,32 @@ def workflow_budget_errors(
     if not isinstance(authority, dict) or set(authority) != CONTEXT_AUTHORITY_FIELDS:
         errors.append("workflow wave Context authority fields do not match contract")
         return errors
+    if authority.get("schema_version") != "execution_budget_policy_v1":
+        errors.append("workflow wave Context execution policy version is invalid")
     if authority.get("accounting_basis") != "utf8_bytes_div4_planned_lower_bound_v1":
         errors.append("workflow wave Context accounting basis is invalid")
-    if caps != {field: authority[field] for field in ADMITTED_CAP_FIELDS}:
+    if authority.get("platform_token_cap") != {
+        "status": "EXTERNAL_LIMIT",
+        "max_total_tokens": None,
+        "required_metric": "platform_attested_total_tokens",
+    }:
+        errors.append("workflow wave platform-token cap boundary is invalid")
+    if caps != execution_admitted_caps(authority):
         errors.append("workflow wave admitted caps differ from Context authority")
     if caps["max_call_attempts"] != caps["max_unique_nodes"] + caps["retry_budget"]:
         errors.append("workflow wave attempt cap differs from unique nodes plus retry budget")
+    if caps["max_total_model_turns"] != (
+        1 + caps["max_call_attempts"] + caps["max_followup_attempts"]
+    ):
+        errors.append("workflow wave model-turn cap does not exact-cover root and calls")
+    if not (
+        caps["max_call_duration_ms"]
+        <= caps["max_wave_duration_ms"]
+        <= caps["max_wall_clock_ms"]
+    ):
+        errors.append("workflow wave call/wave/wall deadlines are not monotonic")
+    if caps["max_spawn_depth_from_root"] != 1:
+        errors.append("workflow wave recursive child spawning is not denied")
     if len(tasks) > caps["max_unique_nodes"] or len(first_records) > caps["max_unique_nodes"]:
         errors.append("workflow wave unique-node cap was exceeded")
     if len(retry_records) > caps["retry_budget"]:
@@ -81,7 +118,7 @@ def workflow_budget_matches_context(budget: Any, context_artifact: Any) -> bool:
         return False
     try:
         authority = json.loads(context_artifact["budget_authority_canonical"])
-        caps = {field: authority[field] for field in ADMITTED_CAP_FIELDS}
+        caps = execution_admitted_caps(authority)
     except (KeyError, TypeError, ValueError, json.JSONDecodeError):
         return False
     return (

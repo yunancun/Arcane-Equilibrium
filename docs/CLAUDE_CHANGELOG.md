@@ -1,9 +1,20 @@
 # CLAUDE_CHANGELOG.md — 開發歷史歸檔
 
 > 從 CLAUDE.md / TODO.md 遷出的 Wave/Sprint/Batch + TODO version-increment 歷史敘事。新 session 不需要讀此文件，僅供回顧歷史時查閱。
-> 最後更新：2026-08-01（TODO v864 框架健檢 protocol 瘦身；PROGRESS ledger v20 世代切檔）
+> 最後更新：2026-08-01（TODO v865 GPT-5.6 remediation publication authorization）
 
 ---
+
+## TODO v865 增量：GPT-5.6 remediation publication authorization（2026-08-01）
+
+Operator 後續明確授權 PR #164 exact-head publication、merge 與 Mac／GitHub／Linux
+source-only 同步，取代 v864 的 `SUPERSEDED-KILL / 不 merge` 裁決。治理 source
+remediation 維持 `SOURCE_COMPLETE_WITH_8_TYPED_EXTERNAL_LIMITS`：repo 內 execution
+budget、routing/model tier、saved-workflow DAG、Context/memory/Closure 與 loop stop
+規則已 fail closed；8 項真正依賴宿主 telemetry、cancellation、native selector、
+memory promotion、recall authority 或 managed activity identity 的能力仍保持 typed
+`EXTERNAL_LIMIT`，不得由 repo self-attestation 冒充完成。本增量不改 AI/ML 唯一
+派發，也不授予 runtime、deploy、PG、broker、Decision Lease 或交易效果。
 
 ## TODO v864 增量：框架健檢 protocol 瘦身（2026-08-01）
 

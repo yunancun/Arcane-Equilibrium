@@ -132,18 +132,22 @@ def test_each_s2_step_is_an_exact_independently_admitted_effect(step: str) -> No
 
 
 @pytest.mark.parametrize("step", sorted(S2_EFFECT_STEPS))
-def test_effect_lane_admission_keeps_the_delegated_dag_digest_stable(step: str) -> None:
-    # effect-lane facts 的 claim_inputs 不同=新 admission(task_contract_digest 變),
-    # 但 role 拓撲穩定:effect_adapter/PM 節點不進 required_role_nodes,delegated
-    # predecessors 穿透回 ops_preflight → dag_digest 與同 facts 的 source-lane route 相等。
+def test_effect_lane_adds_preflight_and_postcheck_to_source_observation(step: str) -> None:
+    # effect-lane facts 的 claim_inputs 不同=新 admission(task_contract_digest 變)。SOURCE lane
+    # 只有一個 OPS observation；selector admitted 後才升級為 preflight + postcheck 雙 gate。
     effect_route = route_task(_facts(step))
     source_route = route_task(_facts(step, claim_inputs={}))
-    assert effect_route["dag_digest"] == source_route["dag_digest"]
-    assert [
+    assert effect_route["dag_digest"] != source_route["dag_digest"]
+    effect_ops = [
         node["node_id"] for node in effect_route["required_role_nodes"]
-    ] == [
-        node["node_id"] for node in source_route["required_role_nodes"]
+        if node["role"] == "OPS"
     ]
+    source_ops = [
+        node["node_id"] for node in source_route["required_role_nodes"]
+        if node["role"] == "OPS"
+    ]
+    assert effect_ops == ["ops_preflight", "ops_postcheck"]
+    assert source_ops == ["ops_observation"]
 
 
 def test_s2_selection_and_claim_inventory_fail_closed() -> None:
@@ -280,7 +284,8 @@ def test_source_lane_stays_unreachable_without_selector(effect_class: str) -> No
     ] == []
     for adapter_id in ALL_S2_ADAPTER_IDS:
         assert adapter_id not in node_ids, adapter_id
-    assert "ops_preflight" in node_ids and "ops_postcheck" in node_ids
+    assert "ops_observation" in node_ids
+    assert "ops_preflight" not in node_ids and "ops_postcheck" not in node_ids
 
 
 def test_exact_set_rejection_names_the_missing_and_extra_claim_keys() -> None:

@@ -14,11 +14,13 @@ if str(HELPERS) not in sys.path:
     sys.path.insert(0, str(HELPERS))
 
 from agent_governance_execution_dag import topological_waves  # noqa: E402
+from agent_governance_execution_policy import requested_execution_binding  # noqa: E402
 from agent_governance_permissions import authorize_native_command  # noqa: E402
 from agent_governance_node_permissions import (  # noqa: E402
     validate_node_scoped_permissions,
 )
 from agent_governance_routing import route_task  # noqa: E402
+from agent_governance_registry import load_registry  # noqa: E402
 from agent_governance_repository_changes import writer_scope_contracts  # noqa: E402
 
 
@@ -43,7 +45,10 @@ def _requested(role: str, native_agent: str, node_class: str, permission: str) -
             "logical_role": role, "native_agent": native_agent,
             "node_class": node_class, "permission": permission,
         },
-        "model": None, "effort": None, "isolation": None,
+        **requested_execution_binding(load_registry()),
+        "model": load_registry()["saved_workflow_model_policy"]["role_models"][role],
+        "effort": load_registry()["saved_workflow_model_policy"]["role_efforts"][role],
+        "isolation": None,
         "node_class": node_class, "permission": permission,
     }
 

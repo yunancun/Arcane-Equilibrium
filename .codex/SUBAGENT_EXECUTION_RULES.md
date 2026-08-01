@@ -1,6 +1,6 @@
 # Codex Sub-Agent Execution Rules
 
-Last updated: 2026-07-20
+Last updated: 2026-08-01
 Registry: `.codex/agent_registry_v1.json`
 
 ## Dispatch record
@@ -29,21 +29,22 @@ Temporary runtime nicknames are implementation detail. User-facing updates use
 
 ## Intelligence and context
 
-Model and reasoning effort are tiered per role by the Registry
-(`.codex/agent_registry_v1.json` is the single authority; the renderer
-transmits both to Claude agent frontmatter, while the Codex toml currently
-carries `model_reasoning_effort` only — a Codex-side model pin is a recorded
-follow-up, so the `sonnet` cost tier is presently effective on Claude
-execution): T1 flagship roles run `opus`/`high`, T2 judgment-light roles
-run `opus`/`low`, T3 mechanical roles run `sonnet`/`medium` (operator decision
-2026-08-01). The tier is a floor contract: saved workflows and callers must
-derive per-role model/effort from the Registry tier and must not override a
-Registry-`opus` role downward (existing cheap-tier overrides are
-non-conforming legacy; PM guards this at admission until an executable
-binding lands in agent-wave). Beyond the tier, consumption is reduced
-by routing fewer agents, loading less irrelevant context, and stopping when
-evidence closes—not by lowering a role's reasoning ceiling below its tier. Do not use runtime
-type, prompt length, or budget target as a proxy for intelligence.
+The Registry owns separate, explicit model policies for each execution surface:
+
+- Direct Claude custom agents use the role `model` / `effort` tiers: T1
+  `opus`/`high`, T2 `opus`/`low`, and T3 `sonnet`/`medium` (operator decision
+  2026-08-01).
+- Native Codex agents derive an equivalent `model_routing` tier: T1 runs
+  `gpt-5.6-sol`/`high`, T2 runs `gpt-5.6-sol`/`low`, and T3 runs
+  `gpt-5.6-terra`/`medium`.
+- Saved workflows use digest-bound per-role `role_models` and `role_efforts`
+  that exact-match the direct Claude tier.
+
+Generated projections must match the policy for their surface exactly. Callers
+may not substitute or inherit a different tier. Consumption is reduced by routing fewer
+agents, loading less irrelevant context, using the Registry-selected tier, and
+stopping when evidence closes. Do not use runtime type, prompt length, or budget
+target as a proxy for intelligence.
 
 The PM-supplied capsule is the starting point, not a ceiling on autonomous source
 inspection. Mandatory objective/acceptance/hard-boundary/current-diff facts are

@@ -6,7 +6,15 @@
 > 它不是 active dispatch queue；當前 blocker、owner、gate、runtime evidence 一律讀根目錄 `TODO.md`。
 > 新增重要文檔時優先更新本索引或 `initiative_index.md`，不要把長表重新塞回 `docs/README.md`。
 >
-> **Freshness（2026-07-22 增量）**：本索引按主題分段增量維護，無單一 as-of；最新增量為 AI/ML S0 `PROGRAM_ADOPTED`。判斷時效以 `git log` + `TODO.md` 為準，勿以本索引缺席反推文檔不存在。
+> **Freshness（2026-07-30 增量）**：本索引按主題分段增量維護，無單一 as-of；最新增量為 GPT-5.6 bounded multi-agent execution。判斷時效以 `git log` + `TODO.md` 為準，勿以本索引缺席反推文檔不存在。
+
+### 2026-07-30 GPT-5.6 bounded multi-agent execution
+
+| 文件 | 内容 |
+|------|------|
+| `adr/0052-gpt56-bounded-multi-agent-execution.md` | Accepted ADR-0052：執行 event caps、exact history/surface/model identity、post-DAG envelope、bounded scheduler、adaptive Full Audit、read-only OPS 去重、hot-memory/host-memory policy 與 quality-first A/B evaluation；provider token cap 與 host cancellation 保持 explicit `EXTERNAL_LIMIT`。 |
+| `agents/2026-07-30--gpt56-multi-agent-efficiency-remediation.md` | 18 項 P0/P1 remediation ledger、基線 session amplification、逐項結果與驗證入口；不授 runtime/deploy/PG/broker/trading effect。 |
+| `agents/role-memory-compaction-v1.json` | 18 個 active role memories 的 append-only archive/recovery manifest，綁 payload offset/bytes/digest 與 manifest self-digest。 |
 
 ### 2026-07-22 AI/ML S0 Program Adoption
 
@@ -70,6 +78,7 @@
 |------|------|
 | `agents/development-agent-governance.md` | 開發 sub-agent Registry/Context/Dispatch/Closure 深 Module；hybrid DAG、elastic quality reserve、typed authority、OPS/IB、effect Adapter、closure_packet_v1、test evidence reuse、Full Audit consumption 正本。 |
 | `adr/0050-development-agent-governance.md` | Accepted ADR-0050：角色改為 generated capability presets，退役 universal preload/fixed-chain/per-role auto-report-memory；新增唯讀 OPS/IB、可用的 report seam，以及 fail-closed effect contracts（deploy 目前僅 intent validation、broker development contact unsupported）。 |
+| `adr/0052-gpt56-bounded-multi-agent-execution.md` | ADR-0050 的 GPT-5.6 execution/context/model/memory/measurement amendment；ordinary work bounded，unsupported token/deadline capability fail closed。 |
 
 ### 2026-07-10 反事實重跑預註冊（R3 修復包 WP-A.3）
 
@@ -1214,7 +1223,9 @@
 | 文件 | 内容 |
 |------|------|
 | `agents/context-loading.md` | Agent context source-of-truth map and loading route |
-| `agents/role-profile-memory-standard.md` | Agent role profile / memory split and hygiene standard |
+| `agents/development-agent-governance.md` | Development-agent Registry/Context/Dispatch/Closure、execution policy 與 consumption 正本 |
+| `agents/2026-07-30--gpt56-multi-agent-efficiency-remediation.md` | GPT-5.6 multi-agent efficiency remediation ledger |
+| `agents/role-profile-memory-standard.md` | Agent role profile / bounded hot memory / reversible archive / host-memory policy |
 | `agents/todo-maintenance.md` | TODO.md active-queue maintenance standard |
 | `agents/domain.md` | Agent domain ownership and routing rules for issue triage |
 | `agents/issue-tracker.md` | GitHub Issues operating model after the 2026-05-08 tracker decision |

@@ -40,6 +40,10 @@ from agent_governance_authority import build_authority_claim
 from agent_governance_context import capture_repository_baseline
 from agent_governance_execution import compile_context, materialize_context_artifact
 from agent_governance_execution_dag import topological_waves
+from agent_governance_execution_policy import (
+    default_history_binding,
+    surface_profile_binding,
+)
 from agent_governance_registry import load_registry, native_agent_binding
 from agent_governance_routing import route_task
 from agent_governance_workflow_receipts import (
@@ -49,6 +53,7 @@ from agent_governance_workflow_receipts import (
     canonical_bytes,
     canonical_digest,
 )
+from agent_governance_workflow_budget import execution_admitted_caps
 
 
 OUTPUTS = {
@@ -268,6 +273,9 @@ def _task_facts(
 
 def _requested(node: dict[str, Any]) -> dict[str, Any]:
     binding = native_agent_binding(node["role"], node["node_class"])
+    registry = load_registry()
+    surface = surface_profile_binding("claude_saved_workflow_v1", registry)
+    model_policy = registry["saved_workflow_model_policy"]
     return {
         "logical_role": node["role"],
         "platform": "claude_saved_workflow",
@@ -278,8 +286,11 @@ def _requested(node: dict[str, Any]) -> dict[str, Any]:
             "node_class": node["node_class"],
             "permission": binding["permission"],
         },
-        "model": None,
-        "effort": None,
+        "surface_profile_id": surface["profile"]["profile_id"],
+        "surface_profile_digest": surface["digest"],
+        "history": default_history_binding(registry),
+        "model": model_policy["role_models"][node["role"]],
+        "effort": model_policy["role_efforts"][node["role"]],
         "isolation": None,
         "node_class": node["node_class"],
         "permission": binding["permission"],
@@ -507,17 +518,7 @@ def _workflow(
         budget_authority={
             "authority_digest": context["budget_authority_digest"],
             "authority_canonical": context["budget_authority_canonical"],
-            "admitted_caps": {
-                field: budget[field]
-                for field in (
-                    "max_context_tokens_per_call",
-                    "max_prompt_utf8_bytes_per_call",
-                    "max_workflow_planned_input_tokens",
-                    "max_unique_nodes",
-                    "max_call_attempts",
-                    "retry_budget",
-                )
-            },
+            "admitted_caps": execution_admitted_caps(budget),
         },
         result_fragment_digests={
             fragment["node_id"]: canonical_digest(fragment)

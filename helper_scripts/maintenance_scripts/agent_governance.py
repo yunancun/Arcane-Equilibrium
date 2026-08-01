@@ -78,10 +78,41 @@ from agent_governance_execution import (  # noqa: E402
     validate_context_artifact,
 )
 from agent_governance_execution_dag import (  # noqa: E402
+    SpecializedWorkflowSplitRequired,
     delegated_execution_projection,
     execution_dag_digest,
     non_call_controller_node_ids,
+    specialized_route_result_bindings,
+    task_execution_projection,
     topological_waves,
+)
+from agent_governance_execution_policy import (  # noqa: E402
+    ExecutionAdmissionController,
+    admit_execution_event,
+    compile_execution_budget_policy,
+    default_history_binding,
+    execution_policy_digest,
+    new_execution_event_ledger,
+    registry_execution_budget_policy_errors,
+    requested_execution_binding,
+    requested_history_errors,
+    surface_profile_binding,
+    validate_execution_event_ledger,
+)
+from agent_governance_efficiency_evaluation import (  # noqa: E402
+    EfficiencyAttestationVerifier,
+    efficiency_attestation_index_digest,
+    efficiency_evaluation_policy_digest,
+    evaluate_multi_agent_efficiency,
+    multi_agent_efficiency_evaluation_digest,
+    registry_efficiency_evaluation_policy_errors,
+    validate_efficiency_attestation_index,
+    validate_multi_agent_efficiency_evaluation,
+)
+from agent_governance_liveness import (  # noqa: E402
+    adjudicate_agent_liveness,
+    liveness_policy_digest,
+    registry_liveness_policy_errors,
 )
 from agent_governance_permissions import (  # noqa: E402
     authorize_command,
@@ -98,6 +129,7 @@ from agent_governance_registry import (  # noqa: E402
     load_registry,
     native_agent_binding,
     native_agent_contract,
+    registry_digest,
     render_all,
     render_views,
     validate_registry,
@@ -116,6 +148,7 @@ from agent_governance_workflow_receipts import (  # noqa: E402
     validate_workflow_call_record,
     validate_workflow_wave_record,
 )
+from agent_governance_workflow_budget import execution_admitted_caps  # noqa: E402
 from agent_governance_task_control import (  # noqa: E402
     filesystem_writer_lease_action,
     is_dispatchable,
@@ -140,6 +173,8 @@ from agent_governance_review_control import (  # noqa: E402
 __all__ = [
     "assess_test_evidence_reuse",
     "adjudicate_review_control",
+    "adjudicate_agent_liveness",
+    "admit_execution_event",
     "authority_claim_digest",
     "authorize_command",
     "authorize_native_command",
@@ -165,28 +200,50 @@ __all__ = [
     "capture_review_generation",
     "checkpoint_chain_id",
     "compile_context",
+    "compile_execution_budget_policy",
     "closure_quality_followup_digest",
     "context_plan_digest",
     "delegated_execution_projection",
+    "default_history_binding",
     "execution_dag_digest",
+    "execution_policy_digest",
+    "execution_admitted_caps",
+    "ExecutionAdmissionController",
+    "EfficiencyAttestationVerifier",
+    "efficiency_attestation_index_digest",
+    "efficiency_evaluation_policy_digest",
+    "evaluate_multi_agent_efficiency",
     "filesystem_writer_lease_action",
     "finalize_from_host_inputs",
     "is_dispatchable",
     "materialize_context_artifact",
+    "multi_agent_efficiency_evaluation_digest",
     "native_agent_binding",
     "native_agent_contract",
+    "new_execution_event_ledger",
     "next_action_may_be_null",
     "load_registry",
+    "liveness_policy_digest",
     "project_closure",
     "progress_snapshot",
     "queue_lane",
     "render_all",
     "render_views",
+    "registry_efficiency_evaluation_policy_errors",
+    "registry_execution_budget_policy_errors",
+    "registry_liveness_policy_errors",
+    "registry_digest",
     "review_task_contract_digest",
+    "requested_execution_binding",
+    "requested_history_errors",
     "resolve_authority_claims",
     "non_call_controller_node_ids",
+    "specialized_route_result_bindings",
+    "SpecializedWorkflowSplitRequired",
+    "task_execution_projection",
     "route_task",
     "summarize_closure_quality_followups",
+    "surface_profile_binding",
     "test_evidence_signature",
     "task_contract_digest",
     "topological_waves",
@@ -211,6 +268,9 @@ __all__ = [
     "validate_workflow_call_manifest",
     "validate_workflow_call_record",
     "validate_workflow_wave_record",
+    "validate_execution_event_ledger",
+    "validate_efficiency_attestation_index",
+    "validate_multi_agent_efficiency_evaluation",
     "verification_fragment_truth_errors",
 ]
 
@@ -275,7 +335,28 @@ def _build_parser() -> argparse.ArgumentParser:
     writer_lease.add_argument("--ttl-seconds", type=int, default=7200)
     context = subparsers.add_parser("context", help="compile a lossless adaptive context plan")
     context.add_argument("--role", required=True)
+    context.add_argument(
+        "--execution-dag",
+        help=(
+            "exact non-null, non-empty call-producing execution-DAG JSON array "
+            "or @path, with only canonical node fields; required "
+            "when compiling Context for an agent-wave that differs from the "
+            "deterministic routed DAG"
+        ),
+    )
     context.add_argument("task_facts", help="JSON object or @path-to-JSON")
+    efficiency = subparsers.add_parser(
+        "efficiency-evaluation",
+        help="evaluate one truth-labelled multi-agent efficiency comparison",
+    )
+    efficiency.add_argument("evaluation", help="JSON object or @path-to-JSON")
+    efficiency.add_argument(
+        "--attestation-index",
+        help=(
+            "typed attestation-index JSON object or @path; this CLI has no "
+            "trusted-host verifier and remains EXTERNAL_LIMIT"
+        ),
+    )
     closure = subparsers.add_parser("closure", help="validate closure_packet_v1 JSON")
     closure.add_argument("packet", help="JSON object or @path-to-JSON")
     trusted_finalize = subparsers.add_parser(
@@ -459,7 +540,72 @@ def main(
         print(json.dumps(packet, ensure_ascii=False, indent=2, sort_keys=True))
         return 0 if packet["status"] == "PASS" else 3
     if args.action == "context":
-        print(json.dumps(compile_context(args.role, _json_arg(args.task_facts), registry), ensure_ascii=False, indent=2))
+        try:
+            execution_dag = (
+                _json_arg(args.execution_dag)
+                if args.execution_dag is not None
+                else None
+            )
+            if args.execution_dag is not None and execution_dag is None:
+                raise ValueError(
+                    "--execution-dag must be a non-null JSON array"
+                )
+            plan = compile_context(
+                args.role,
+                _json_arg(args.task_facts),
+                registry,
+                execution_dag=execution_dag,
+            )
+        except SpecializedWorkflowSplitRequired as error:
+            print(json.dumps(
+                {
+                    "status": "FAIL",
+                    "error": str(error),
+                    "error_code": error.error_code,
+                    "surface": error.surface,
+                    "extra_node_ids": list(error.extra_node_ids),
+                },
+                ensure_ascii=False,
+            ))
+            return 2
+        except (KeyError, OSError, TypeError, ValueError) as error:
+            print(json.dumps(
+                {"status": "FAIL", "error": str(error)},
+                ensure_ascii=False,
+            ))
+            return 2
+        print(json.dumps(
+            plan,
+            ensure_ascii=False,
+            indent=2,
+        ))
+        return 0
+    if args.action == "efficiency-evaluation":
+        try:
+            result = evaluate_multi_agent_efficiency(
+                _json_arg(args.evaluation),
+                attestation_index=(
+                    _json_arg(args.attestation_index)
+                    if args.attestation_index
+                    else None
+                ),
+            )
+        except (OSError, json.JSONDecodeError, TypeError, ValueError) as error:
+            print(
+                json.dumps(
+                    {
+                        "schema_version": (
+                            "multi_agent_efficiency_evaluation_result_v1"
+                        ),
+                        "measurement_status": "invalid",
+                        "errors": [str(error)],
+                    },
+                    ensure_ascii=False,
+                    sort_keys=True,
+                )
+            )
+            return 2
+        print(json.dumps(result, ensure_ascii=False, sort_keys=True))
         return 0
     if args.action == "closure":
         errors = validate_closure(_json_arg(args.packet))

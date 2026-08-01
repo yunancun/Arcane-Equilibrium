@@ -1,6 +1,6 @@
 # Codex Agent Dispatch Protocol
 
-Last updated: 2026-07-20
+Last updated: 2026-07-31
 Canonical role Interface: `.codex/agent_registry_v1.json`
 
 ## Purpose
@@ -223,7 +223,23 @@ pointers/digests.
 
 `agent-wave` admission requires one inline compiled `context_artifact_v1` containing
 Python-canonical plan bytes plus their SHA-256, task-contract digest, and compiler
-budget-authority binding. It hashes, parses, embeds, and retries the same captured
+budget-authority binding. The plan also binds the exact call-producing DAG nodes,
+predecessor edges, digest, node count, and edge count. If PM admits nodes beyond
+the deterministic route, it must pass that complete DAG to the Context compiler
+before materialization. The explicit DAG must be a faithful superset: every
+canonical routed call-producing node keeps its exact identity, role/native
+binding, predecessors, class, and permission; omission or substitution rejects.
+Saved-workflow JS cannot promote its own envelope.
+Profit Diagnosis exact-binds 10 nodes; Full Audit exact-binds 13 axes plus one
+seam critic. Findings discovered by Full Audit cannot create post-call nodes:
+verification/fix/review is MAE-005 host-phase debt until a fresh exact Context
+exists. Caller-supplied empty/malformed DAGs or unknown node fields reject;
+only compiler-derived zero-delegation queries have a zero-node binding.
+Closure exact-compares each captured wave's ordered admitted-task core and
+`dag_digest` to this Context binding. Rehashing an expanded call/manifest/wave
+chain cannot authorize a post-Context node; the expanded DAG needs a fresh
+compiled and materialized Context.
+It hashes, parses, embeds, and retries the same captured
 plan bytes without cross-language reserialization or path reopen; source bytes,
 producer, freshness, token estimate, role, baseline, and authority caps are
 recomputed. Verdict-relevant priors are bound under task-contract `claim_inputs`;
@@ -239,6 +255,26 @@ common-prefix digest, improving cache reuse without truncation.
 Every returned fragment carries the same `task_contract_digest`; closure revalidates
 the PM context artifact at adjudication and rejects objective/scope/criterion drift.
 
+Generic routing nodes and saved-workflow call nodes are not additive. The one
+task-aware projection owns compilation, materialization, dispatch, and closure:
+Full Audit represents `constitutional_gate` with `audit:CC`, quantitative review
+with `audit:QC`, the fixed PM plan without a duplicate `pa_design` call, and the
+AI-E route result with its post-wave controller fragment. Profit Diagnosis
+represents `pa_design` with `map:PA`, quantitative review with `probe:QC`, and
+`profit_control` with its post-wave controller fragment. Thus the fixed DAGs
+remain exactly 14 and 10 unique call nodes across supported route shapes.
+Specialized dispatch must admit every fixed call with its exact core; a missing
+role representative, substituted node, or second generic call fails closed.
+Full Audit and Profit Diagnosis do not accept separately admitted extra calls.
+A pure fixed-core-plus-extra graph returns typed
+`SPECIALIZED_WORKFLOW_SPLIT_REQUIRED`; PM uses its `error_code`, surface, and
+sorted extra ids to compile a fresh non-specialized host phase. “Pure” requires
+exact Registry/artifact metadata, complete route authorization, canonical
+ASCII node ids, Registry-native bindings, and acyclic topology. Mixed
+omission/substitution remains a generic DAG mismatch and must not enter an
+automatic split/retry loop. Generic executors may still admit a faithful,
+Context-bound superset.
+
 Every call attempt emits one canonical `workflow_call_record_v1` binding the
 workflow contract, node/role/payload, requested model/effort/isolation, prompt,
 task/context/dirty-scope/focus/schema, native identity/class/permission, DAG
@@ -251,6 +287,24 @@ overhead exclusion. A self-digest protects canonical integrity; it is not a
 provider signature or producer-authenticity proof. Any orchestrator structural
 ledger must reference exactly every wave in the closure capture index; omitted,
 extra, or duplicate wave identity fails closed.
+Serialized execution-event ledgers never authorize resume. Live admission
+requires one non-serializable controller capability minted only through an
+internal pre-action seam from a pristine ledger after exact live-Registry
+policy/surface verification; no facade/public mint accepts caller-named roots.
+Each root is process-lifetime single-issue under one locked tombstone that
+survives controller GC. That same instance owns a locked monotonic last-head for
+compare-through-advance plus frozen canonical Registry policy/surface authority.
+Every cap and coverage decision reconstructs ordinary mappings from those private
+bytes; one Registry-generation snapshot derives both authorities. Caller-owned
+mutable mappings are exact-precheck inputs only, while the whole ledger and event
+are each canonical-detached once under the controller lock before any validation
+or read. A caller-provided prior digest, resealed truncation, copied capability,
+second genesis mint, or fresh controller over existing events cannot reset a budget.
+The post-hoc canonical wave builder instead uses a structural-only assembler:
+rebuilding the same manifest is deterministic, does not consume or return a
+controller, and grants no admission authority. Offline validation remains
+structural diagnosis only. A general live mint Interface requires the later
+managed host's non-caller-reported root/task authority.
 
 Budget authority separates target/reserve, reviewed single-call band, exact prompt
 UTF-8 bytes, UTF8/4 planned lower bounds, workflow planned input, unique nodes,
@@ -258,6 +312,9 @@ attempts, and retry. Crossing target+reserve requires rationale; reaching a cap
 triggers split/escalation, never mandatory-content deletion. Planned lower bounds
 are not actual token/cache telemetry. The authenticated shared semantic capsule may
 improve prefix reuse, but only platform telemetry can quantify savings.
+All generated workflows use the shared rolling bounded worker pool: a completed
+call immediately refills its slot, the Registry concurrency cap remains global,
+and an error stops new dequeue while already-running calls settle.
 
 AI-E owns quality-adjusted workflow consumption: input/output/cache tokens,
 tool calls, retry, fan-out, wall time, accepted decision-changing findings,

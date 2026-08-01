@@ -53,16 +53,18 @@ def nested_admission_inventory(
         for record in outcomes if isinstance(outcomes, list) else []:
             outcome = record.get("outcome", {}) if isinstance(record, dict) else {}
             claim_id, votes = outcome.get("claim_id"), outcome.get("verifier_votes", [])
-            if not isinstance(claim_id, str) or not isinstance(votes, list):
+            if not isinstance(claim_id, str) or not claim_id or not isinstance(votes, list):
                 continue
             vote_nodes = {
-                vote.get("view"): f"verify:{claim_id}:{vote.get('view')}"
-                for vote in votes if isinstance(vote, dict)
-                and vote.get("view") in role_by_view
+                view: f"verify:{claim_id}:{view}"
+                for vote in votes
+                if isinstance(vote, dict)
+                and isinstance((view := vote.get("view")), str)
+                and view in role_by_view
             }
             for vote in votes:
                 view = vote.get("view") if isinstance(vote, dict) else None
-                if view not in role_by_view:
+                if not isinstance(view, str) or view not in role_by_view:
                     continue
                 role = role_by_view[view]
                 requires = [parent]

@@ -84,8 +84,8 @@ EXACT_STDLIB_IMPORTS_BY_FILE = {
         "__future__", "functools", "json", "pathlib", "sys", "typing",
     }),
     "agent_governance_s2_5_recovery_state.py": frozenset({
-        "__future__", "copy", "dataclasses", "json", "pathlib", "sys",
-        "typing", "weakref",
+        "__future__", "copy", "dataclasses", "json", "os", "pathlib",
+        "stat", "sys", "typing",
     }),
     "agent_governance_s2_5_recovery_store.py": frozenset({
         "__future__", "datetime", "fcntl", "functools", "hashlib", "json",
@@ -126,6 +126,7 @@ GOVERNANCE_IMPORTS_BY_FILE: dict[str, frozenset[str]] = {
     }),
     "agent_governance_s2_5_recovery_state.py": frozenset({
         "agent_governance_s2_5_recovery",
+        "agent_governance_s2_5_wal",
         "aiml_gate_receipt_s2_5_host_capture",
         "aiml_gate_receipt_validator",
     }),
@@ -245,7 +246,9 @@ RECOVERY_SENSITIVE_CALLS_BY_FILE: dict[
     "agent_governance_s2_5_recovery_readback.py": {
         "socket": frozenset({"socket"}),
     },
-    "agent_governance_s2_5_recovery_state.py": {},
+    "agent_governance_s2_5_recovery_state.py": {
+        "os": frozenset({"close", "fstat", "geteuid", "open", "read"}),
+    },
     "agent_governance_s2_5_recovery_store.py": {
         "fcntl": frozenset({"flock"}),
         "os": frozenset({
@@ -960,6 +963,32 @@ def test_no_raw_command_outside_the_kernel():
     for path in present:
         findings = _raw_command_findings(path)
         assert findings == [], f"{path.name} carries a raw-command surface: {findings}"
+
+
+def test_recovery_import_capability_declarations_are_exact():
+    """Recovery leaves may neither hide imports nor retain unused grants."""
+
+    for filename, stdlib_modules in EXACT_STDLIB_IMPORTS_BY_FILE.items():
+        tree = ast.parse(
+            (HELPERS / filename).read_text(encoding="utf-8"),
+            filename=filename,
+        )
+        imported_modules: set[str] = set()
+        for node in ast.walk(tree):
+            if isinstance(node, ast.Import):
+                imported_modules.update(
+                    alias.name.split(".", 1)[0] for alias in node.names
+                )
+            elif isinstance(node, ast.ImportFrom):
+                imported_modules.add((node.module or "").split(".", 1)[0])
+        declared_modules = set(stdlib_modules) | set(
+            GOVERNANCE_IMPORTS_BY_FILE.get(filename, frozenset())
+        )
+        assert imported_modules == declared_modules, (
+            f"{filename} import capability declaration drift: "
+            f"undeclared={sorted(imported_modules - declared_modules)}, "
+            f"unused_grants={sorted(declared_modules - imported_modules)}"
+        )
 
 
 def _unscanned_runner_candidates(helpers_dir: Path, family_names: set[str]) -> list[str]:

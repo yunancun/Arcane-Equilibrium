@@ -12,10 +12,9 @@ from datetime import datetime
 from typing import Any
 
 from agent_governance_execution_dag import (
-    delegated_execution_projection,
     execution_dag_digest,
     execution_node_core,
-    non_call_controller_node_ids,
+    task_execution_projection,
     topological_waves,
 )
 from agent_governance_workflow_receipts import (
@@ -370,12 +369,11 @@ def _wave_errors(
     dispatch = packet.get("dispatch", {})
     required_nodes = dispatch.get("required_role_nodes", [])
     admitted_nodes = dispatch.get("admitted_role_nodes", [])
-    projection, projection_errors = delegated_execution_projection(
+    projection, projection_errors = task_execution_projection(
         required_nodes,
         admitted_nodes,
-        excluded_nodes=non_call_controller_node_ids(
-            (expected_route or {}).get("task_facts", {})
-        ),
+        task_facts=(expected_route or {}).get("task_facts", {}),
+        require_fixed_admissions=True,
     )
     errors.extend(
         f"closure dispatch execution projection: {error}"

@@ -1,7 +1,7 @@
 """Routing behavior for the S2.1 quiesce-fence effect class (SOURCE lane).
 
 Mirrors the sibling ``pg_observer_bootstrap`` / ``target_host_probe`` routing tests: it pins the WP3
-registry invariant that a ``quiesce_fence`` task routes ``... -> ops_preflight -> ops_postcheck`` with the
+registry invariant that a ``quiesce_fence`` source-lane task routes one ``ops_observation`` with the
 effect-adapter node DELIBERATELY NOT injected (the real route_task effect node is deferred to the S2.1
 EFFECT session), and the FORWARD-only surface-consistency rule (runtime_effect/service surface +
 runtime_claim=true + high/critical risk).  This is the routing-side guarantee behind the "no effect node
@@ -44,17 +44,17 @@ def _facts(**overrides):
     return facts
 
 
-def test_route_quiesce_fence_has_no_effect_adapter_and_ops_preflight_then_postcheck():
+def test_route_quiesce_fence_has_no_effect_adapter_and_one_ops_observation():
     route = routing.route_task(_facts())
     node_ids = [node["id"] for node in route["nodes"]]
     effect_nodes = [node for node in route["nodes"] if node["kind"] == "effect_adapter"]
     assert effect_nodes == []
     assert routing.QUIESCE_FENCE_ADAPTER_ID == q.ADAPTER_ID
     assert routing.QUIESCE_FENCE_ADAPTER_ID not in node_ids
-    assert "ops_preflight" in node_ids and "ops_postcheck" in node_ids
+    assert "ops_observation" in node_ids
+    assert "ops_preflight" not in node_ids and "ops_postcheck" not in node_ids
     by_id = {node["id"]: node for node in route["nodes"]}
-    assert by_id["ops_postcheck"]["requires"] == ["ops_preflight"]
-    assert by_id["ops_preflight"]["role"] == "OPS" and by_id["ops_postcheck"]["role"] == "OPS"
+    assert by_id["ops_observation"]["role"] == "OPS"
     # 亦不得意外選中鄰接的 pg-observer / target-host / 通用 deploy / P0-B effect adapter。
     assert routing.PG_OBSERVER_BOOTSTRAP_ADAPTER_ID not in node_ids
     assert routing.TARGET_HOST_PROBE_ADAPTER_ID not in node_ids

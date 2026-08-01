@@ -1,0 +1,148 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://arcane-equilibrium.local/schemas/multi_agent_efficiency_attestation_index_v1.schema.json",
+  "title": "multi_agent_efficiency_attestation_index_v1",
+  "description": "Structurally binds platform/external efficiency telemetry to immutable run IDs, per-profile call-record inventories whose length exactly equals every reported metrics.calls (including an empty inventory for zero calls); an unavailable call count requires an empty inventory. It also binds profile metrics digests. A valid self-digest does not confer platform trust; the embedding host must independently verify the exact index digest.",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "schema_version",
+    "trust_tier",
+    "index_id",
+    "evaluation_id",
+    "producer",
+    "records",
+    "record_digest"
+  ],
+  "properties": {
+    "schema_version": {
+      "const": "multi_agent_efficiency_attestation_index_v1"
+    },
+    "trust_tier": {
+      "const": "PLATFORM_OR_EXTERNAL_ATTESTED"
+    },
+    "index_id": {
+      "type": "string",
+      "minLength": 1
+    },
+    "evaluation_id": {
+      "type": "string",
+      "minLength": 1
+    },
+    "producer": {
+      "$ref": "#/$defs/producer"
+    },
+    "records": {
+      "type": "object",
+      "minProperties": 1,
+      "additionalProperties": {
+        "$ref": "#/$defs/attestation"
+      }
+    },
+    "record_digest": {
+      "$ref": "#/$defs/digest"
+    }
+  },
+  "$defs": {
+    "digest": {
+      "type": "string",
+      "pattern": "^sha256:[0-9a-f]{64}$"
+    },
+    "timestamp": {
+      "type": "string",
+      "format": "date-time"
+    },
+    "producer": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "id",
+        "kind"
+      ],
+      "properties": {
+        "id": {
+          "type": "string",
+          "minLength": 1
+        },
+        "kind": {
+          "enum": [
+            "platform",
+            "external"
+          ]
+        }
+      }
+    },
+    "attestation": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "schema_version",
+        "trust_tier",
+        "attestation_id",
+        "evaluation_id",
+        "profile",
+        "run_id",
+        "workload_digest",
+        "baseline_digest",
+        "observed_at",
+        "call_record_digests",
+        "metrics_payload_digest",
+        "producer",
+        "record_digest"
+      ],
+      "properties": {
+        "schema_version": {
+          "const": "multi_agent_efficiency_attestation_v1"
+        },
+        "trust_tier": {
+          "const": "PLATFORM_OR_EXTERNAL_ATTESTED"
+        },
+        "attestation_id": {
+          "type": "string",
+          "minLength": 1
+        },
+        "evaluation_id": {
+          "type": "string",
+          "minLength": 1
+        },
+        "profile": {
+          "enum": [
+            "current",
+            "single_agent",
+            "bounded_role"
+          ]
+        },
+        "run_id": {
+          "type": "string",
+          "minLength": 1
+        },
+        "workload_digest": {
+          "$ref": "#/$defs/digest"
+        },
+        "baseline_digest": {
+          "$ref": "#/$defs/digest"
+        },
+        "observed_at": {
+          "$ref": "#/$defs/timestamp"
+        },
+        "call_record_digests": {
+          "type": "array",
+          "minItems": 0,
+          "uniqueItems": true,
+          "items": {
+            "$ref": "#/$defs/digest"
+          }
+        },
+        "metrics_payload_digest": {
+          "$ref": "#/$defs/digest"
+        },
+        "producer": {
+          "$ref": "#/$defs/producer"
+        },
+        "record_digest": {
+          "$ref": "#/$defs/digest"
+        }
+      }
+    }
+  }
+}

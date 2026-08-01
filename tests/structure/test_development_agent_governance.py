@@ -35,6 +35,11 @@ CONTEXT_ARTIFACT_FIXTURES = {
         "tests/fixtures/agent_governance/context/focused-acceptance-tests.json"
     ),
 }
+CODEX_MODEL_BY_ROLE_MODEL = {
+    "opus": "gpt-5.6-sol",
+    "sonnet": "gpt-5.6-terra",
+    "haiku": "gpt-5.6-terra",
+}
 
 
 def _load_module():
@@ -170,20 +175,21 @@ def test_registry_is_single_valid_interface_and_views_are_current(tmp_path: Path
         if path.parent == ROOT / ".claude/agents" and path.suffix == ".md"
     }
     assert {path.stem for path in claude_paths} == expected_native_names
-    # PA/E4 的 writer/verifier adapter 繼承其 role 的 model/effort 分級
+    # Split PA/E4 adapters inherit the exact route for their logical role.
     native_role_by_stem = {
         "PA-design-writer": "PA", "PA-investigator": "PA",
         "E4-writer": "E4", "E4-verifier": "E4",
     }
     for path in native_paths:
         native = tomllib.loads(rendered[path])
-        role_id = native_role_by_stem.get(path.stem, path.stem)
+        contract = governance.native_agent_contract(path.stem, registry)
+        model_route = registry["model_routing"]["roles"][contract["role_id"]]
         assert native["name"] == path.stem
         assert native["description"]
         assert native["developer_instructions"]
-        assert native["model_reasoning_effort"] == registry["roles"][role_id]["effort"]
+        assert native["model"] == model_route["model"]
+        assert native["model_reasoning_effort"] == model_route["model_reasoning_effort"]
         assert native["sandbox_mode"] in {"read-only", "workspace-write"}
-        assert "model" not in native
         assert "`$" not in native["developer_instructions"]
         if native["sandbox_mode"] == "read-only":
             assert not re.search(
@@ -307,6 +313,230 @@ def test_registry_is_single_valid_interface_and_views_are_current(tmp_path: Path
     assert workflow_axes == full_audit_contract["axes"]
 
 
+def test_subagent_model_routing_and_project_concurrency_are_explicit() -> None:
+    governance = _load_module()
+    registry = governance.load_registry()
+    policy = registry["model_routing"]
+    saved_policy = registry["saved_workflow_model_policy"]
+
+    assert policy["schema_version"] == "model_routing_v1"
+    assert set(policy["roles"]) == set(registry["roles"])
+    for role_id, route in policy["roles"].items():
+        role = registry["roles"][role_id]
+        expected = {
+            "model": CODEX_MODEL_BY_ROLE_MODEL[role["model"]],
+            "model_reasoning_effort": role["effort"],
+        }
+        assert route == expected
+    assert saved_policy["schema_version"] == "saved_workflow_model_policy_v1"
+    assert "model" not in saved_policy
+    assert set(saved_policy["role_models"]) == set(registry["roles"])
+    assert set(saved_policy["role_efforts"]) == set(registry["roles"])
+    for role_id, role in registry["roles"].items():
+        assert saved_policy["role_models"][role_id] == role["model"]
+        assert saved_policy["role_efforts"][role_id] == role["effort"]
+
+    rendered = governance.render_views(registry, ROOT)
+    for path, content in rendered.items():
+        if path.parent != ROOT / ".codex/agents" or path.suffix != ".toml":
+            continue
+        native = tomllib.loads(content)
+        contract = governance.native_agent_contract(path.stem, registry)
+        assert {
+            "model": native["model"],
+            "model_reasoning_effort": native["model_reasoning_effort"],
+        } == policy["roles"][contract["role_id"]]
+
+    agents = tomllib.loads((ROOT / ".codex/config.toml").read_text(encoding="utf-8"))[
+        "agents"
+    ]
+    assert agents == {
+        "enabled": True,
+        "max_concurrent_threads_per_session": 3,
+        "default_subagent_model": "gpt-5.6-terra",
+        "default_subagent_reasoning_effort": "medium",
+        "interrupt_message": False,
+    }
+    execution_rules = (
+        ROOT / ".codex/SUBAGENT_EXECUTION_RULES.md"
+    ).read_text(encoding="utf-8")
+    assert 'All native presets set `model_reasoning_effort = "high"`' not in (
+        execution_rules
+    )
+    assert "`gpt-5.6-sol`/`high`" in execution_rules
+    assert "`gpt-5.6-sol`/`low`" in execution_rules
+    assert "`gpt-5.6-terra`/`medium`" in execution_rules
+    workspace_readme = (ROOT / ".codex/README.md").read_text(encoding="utf-8")
+    assert "max_threads=4" not in workspace_readme
+    assert "max_depth=1" not in workspace_readme
+    assert "max_concurrent_threads_per_session=3" in workspace_readme
+
+
+def test_registry_owns_one_exact_native_operating_contract() -> None:
+    governance = _load_module()
+    registry = governance.load_registry()
+    contract = registry["native_operating_contract"]
+
+    assert set(contract) == {
+        "schema_version",
+        "registry_authority",
+        "context_rule",
+        "economy_rule",
+        "permission_rules",
+        "external_effect_rule",
+        "web_rules",
+        "capture_rule",
+        "skill_rule",
+        "completion_rules",
+    }
+    assert contract["schema_version"] == "native_operating_contract_v1"
+    assert set(contract["permission_rules"]) == {"read_only", "writer"}
+    assert set(contract["web_rules"]) == {
+        "public",
+        "unavailable",
+        "broker_freshness",
+    }
+    assert set(contract["completion_rules"]) == {"pm", "delegated"}
+    assert governance.validate_registry(registry, ROOT) == []
+
+
+def test_native_prompts_keep_each_invariant_once_with_lower_annuity_bytes() -> None:
+    governance = _load_module()
+    registry = governance.load_registry()
+    contract = registry["native_operating_contract"]
+    rendered = governance.render_views(registry, ROOT)
+    native_paths = sorted(
+        path
+        for path in rendered
+        if path.parent == ROOT / ".codex/agents" and path.suffix == ".toml"
+    )
+
+    assert len(native_paths) == 22
+    total_bytes = 0
+    for path in native_paths:
+        native_name = path.stem
+        native_contract = governance.native_agent_contract(native_name, registry)
+        role_id = native_contract["role_id"]
+        spec = registry["roles"][role_id]
+        instructions = tomllib.loads(rendered[path])["developer_instructions"]
+        total_bytes += len(instructions.encode("utf-8"))
+
+        expected_role_sections = [
+            f"Registry role `{role_id}`; native identity `{native_name}`.",
+            f"Decision lens:\n{spec['lens']}",
+            "Activate for:\n" + "\n".join(
+                f"- {item}" for item in spec["activation"]
+            ),
+            "Judgment:\n" + "\n".join(
+                f"- {item}" for item in spec["judgment_rules"]
+            ),
+        ]
+        owns = spec["owns"]
+        refuses = spec["refuses"]
+        if role_id == "E4" and native_contract["node_class"] == "verification":
+            owns = [
+                "test-gap analysis",
+                "regression selection",
+                "independent verification of test evidence",
+            ]
+            refuses = [*refuses, "test or source implementation"]
+        expected_role_sections.extend([
+            "Own:\n" + "\n".join(f"- {item}" for item in owns),
+            "Refuse:\n" + "\n".join(f"- {item}" for item in refuses),
+        ])
+        for section in expected_role_sections:
+            assert instructions.count(section) == 1, (native_name, section)
+
+        clauses = [
+            contract["registry_authority"],
+            contract["context_rule"],
+            contract["economy_rule"],
+            contract["external_effect_rule"],
+        ]
+        permission_key = (
+            "read_only"
+            if native_contract["node_class"] == "verification"
+            else "writer"
+        )
+        clauses.append(
+            contract["permission_rules"][permission_key].format(
+                permission=native_contract["permission"]
+            )
+        )
+        web_capable = bool(
+            {"WebSearch", "WebFetch"}.intersection(spec["tools"])
+        )
+        clauses.append(
+            contract["web_rules"]["public" if web_capable else "unavailable"]
+        )
+        if web_capable and role_id in {"BB", "IB"}:
+            clauses.append(contract["web_rules"]["broker_freshness"])
+        if native_contract["node_class"] == "verification":
+            clauses.append(
+                contract["capture_rule"].format(native_agent=native_name)
+            )
+
+        skill_names = sorted(set(spec["skills"]) | {
+            skill
+            for skill, binding in registry["on_demand_skills"].items()
+            if role_id in binding["owners"]
+        })
+        skill_bindings = ", ".join(
+            f"`{skill}` at `.agents/skills/{skill}/SKILL.md` when "
+            f"{registry['on_demand_skills'].get(skill, {}).get('activation', 'the admitted role task explicitly needs it')}"
+            for skill in skill_names
+        ) or "registry charter only"
+        clauses.append(
+            contract["skill_rule"].format(skill_bindings=skill_bindings)
+        )
+        completion_template = contract["completion_rules"][
+            "pm" if role_id == "PM" else "delegated"
+        ]
+        clauses.append(
+            completion_template.format(
+                output=spec["output"],
+                payload_kind=spec.get("payload_kind", ""),
+            )
+        )
+        for clause in clauses:
+            assert instructions.count(clause) == 1, (native_name, clause)
+        invariant_markers = [
+            "Authority: `.codex/agent_registry_v1.json`.",
+            "Context first; load only task-needed evidence/packs.",
+            "Shortest durable risk-adjusted closure;",
+            "save tokens only without more false closure/rework.",
+            "No service mutation, private/authenticated contact/effect, or broker effect.",
+            "Activated skill: read full `SKILL.md`.",
+        ]
+        invariant_markers.append(
+            "Read-only: no edits, report/memory writes, or git mutation;"
+            if native_contract["node_class"] == "verification"
+            else f"Write only task-owned `{native_contract['permission']}` files;"
+        )
+        invariant_markers.append(
+            "Web tools require public_web_read in the task_contract"
+            if web_capable
+            else "This identity has no admitted public-web tool."
+        )
+        if native_contract["node_class"] == "verification":
+            invariant_markers.extend([
+                f"capture-command --native-agent {native_name}",
+                "never run the argv separately",
+                "effect boundary is repository_policy_only",
+            ])
+        invariant_markers.append(
+            "preserve independent dissent."
+            if role_id == "PM"
+            else "bind admitted task-contract digest."
+        )
+        for marker in invariant_markers:
+            assert instructions.count(marker) == 1, (native_name, marker)
+
+    baseline_bytes = 47_047
+    assert total_bytes <= 40_000
+    assert total_bytes <= int(baseline_bytes * 0.85)
+
+
 def test_registry_roles_pin_operator_model_tiering() -> None:
     """三級模型分級是 operator 裁決(2026-08-01 框架健檢),漂移必須顯式重裁。"""
 
@@ -325,6 +555,42 @@ def test_registry_roles_pin_operator_model_tiering() -> None:
     assert {tiers[role] for role in t3} == {("sonnet", "medium")}
     # model 必須是明確 pin 的別名,不允許 inherit 回主 session 旗艦單價
     assert "inherit" not in {model for model, _ in tiers.values()}
+
+
+def test_registry_rejects_codex_route_below_operator_role_tier() -> None:
+    governance = _load_module()
+    registry = deepcopy(governance.load_registry())
+    registry["model_routing"]["roles"]["E1"] = {
+        "model": "gpt-5.6-terra",
+        "model_reasoning_effort": "medium",
+    }
+
+    assert (
+        "E1: Codex model route differs from operator role tier"
+        in governance.validate_registry(registry, ROOT)
+    )
+
+
+def test_registry_rejects_saved_workflow_role_tier_drift() -> None:
+    governance = _load_module()
+    registry = deepcopy(governance.load_registry())
+    registry["saved_workflow_model_policy"]["role_models"]["E1"] = "sonnet"
+
+    assert (
+        "E1: saved workflow model differs from operator role tier"
+        in governance.validate_registry(registry, ROOT)
+    )
+
+
+def test_registry_rejects_saved_workflow_effort_drift() -> None:
+    governance = _load_module()
+    registry = deepcopy(governance.load_registry())
+    registry["saved_workflow_model_policy"]["role_efforts"]["E4"] = "medium"
+
+    assert (
+        "E4: saved workflow effort differs from operator role tier"
+        in governance.validate_registry(registry, ROOT)
+    )
 
 
 def test_native_agents_bind_one_call_capture_and_effect_boundaries() -> None:
@@ -730,7 +996,10 @@ def test_hybrid_dag_keeps_hard_edges_but_skips_unneeded_ceremony() -> None:
         }
     )
     assert {"E3", "OPS"}.issubset(operations["roles"])
-    assert operations["roles"].count("OPS") == 2
+    assert operations["roles"].count("OPS") == 1
+    assert [
+        node["id"] for node in operations["nodes"] if node.get("role") == "OPS"
+    ] == ["ops_observation"]
 
     source_only_runtime = route(
         {
@@ -1095,7 +1364,19 @@ def test_agent_wave_executes_only_verified_inline_context_and_reuses_exact_retry
         "previous_failure": "contextPath bytes were not verified",
         "task_prompt": "Review the bound context only.",
     }
-    context_plan = governance.compile_context("E2", facts)
+    execution_dag = [{
+        "node_id": "independent_review",
+        "role": "E2",
+        "native_agent": "E2",
+        "requires": [],
+        "node_class": "verification",
+        "permission": "read_only",
+    }]
+    context_plan = governance.compile_context(
+        "E2",
+        facts,
+        execution_dag=execution_dag,
+    )
     assert context_plan["budget"]["pass_allowed"] is True
     context_artifact = governance.materialize_context_artifact(context_plan)
     wave_args = {
@@ -1116,14 +1397,7 @@ def test_agent_wave_executes_only_verified_inline_context_and_reuses_exact_retry
         "dag_digest": _canonical_digest(
             {
                 "schema_version": "agent_wave_execution_dag_v1",
-                "nodes": [
-                    {
-                        "node_id": "independent_review", "role": "E2",
-                        "native_agent": "E2",
-                        "requires": [], "node_class": "verification",
-                        "permission": "read_only",
-                    }
-                ],
+                "nodes": execution_dag,
             }
         ),
         "budget": {
@@ -1524,10 +1798,11 @@ def test_closure_schema_binds_role_producers_and_typed_capture_refs() -> None:
         "label": "independent_review",
         "requested": {
             "logical_role": "E2", "platform": "claude_saved_workflow",
-            "platform_requested_agent": "E2",
-            "native_binding": {"logical_role": "E2", "native_agent": "E2", "node_class": "verification", "permission": "read_only"},
-            "model": None,
-            "effort": None,
+                "platform_requested_agent": "E2",
+                "native_binding": {"logical_role": "E2", "native_agent": "E2", "node_class": "verification", "permission": "read_only"},
+                **governance.requested_execution_binding(governance.load_registry()),
+                "model": governance.load_registry()["saved_workflow_model_policy"]["role_models"]["E2"],
+            "effort": governance.load_registry()["saved_workflow_model_policy"]["role_efforts"]["E2"],
             "isolation": None,
             "node_class": "verification",
             "permission": "read_only",
@@ -1593,9 +1868,113 @@ def test_closure_schema_binds_role_producers_and_typed_capture_refs() -> None:
     }
 
 
+_FIXTURE_EVENT_TIMESTAMP_FIELDS = {
+    "completed_at",
+    "created_at",
+    "ended_at",
+    "executed_at",
+    "issued_at",
+    "observed_at",
+    "reused_from",
+    "started_at",
+}
+
+
+def _fixture_timestamp(value: object) -> datetime:
+    parsed = datetime.fromisoformat(str(value).replace("Z", "+00:00"))
+    assert parsed.tzinfo is not None
+    return parsed.astimezone(timezone.utc)
+
+
+def _fixture_event_timestamps(value: object) -> list[datetime]:
+    timestamps: list[datetime] = []
+    if isinstance(value, dict):
+        for key, child in value.items():
+            if key in _FIXTURE_EVENT_TIMESTAMP_FIELDS and child is not None:
+                timestamps.append(_fixture_timestamp(child))
+            timestamps.extend(_fixture_event_timestamps(child))
+    elif isinstance(value, list):
+        for child in value:
+            timestamps.extend(_fixture_event_timestamps(child))
+    return timestamps
+
+
+def _bind_fixture_evaluation_clock(packet: dict, context_plan: dict) -> str:
+    """Place the fixture verifier clock after its generation, inside every Context TTL."""
+
+    source_observed = [
+        _fixture_timestamp(source["observed_at"])
+        for source in context_plan["sources"]
+        if source.get("observed_at")
+    ]
+    source_expiry = [
+        _fixture_timestamp(source["expires_at"])
+        for source in context_plan["sources"]
+        if source.get("expires_at")
+    ]
+    capture_evidence = [
+        evidence
+        for evidence in packet.get("evidence", [])
+        if evidence.get("kind") not in {
+            "workflow_call_manifest_v1", "workflow_wave_record_v1",
+        }
+    ]
+    event_timestamps = _fixture_event_timestamps({
+        "authority_refs": packet.get("authority_refs", []),
+        "evidence": capture_evidence,
+        "checks": packet.get("checks", []),
+    })
+    assert source_observed
+    assert source_expiry
+    evaluated_at = max([*source_observed, *event_timestamps]) + timedelta(
+        microseconds=1
+    )
+    assert evaluated_at < min(source_expiry)
+    timestamp = evaluated_at.isoformat().replace("+00:00", "Z")
+    packet["adjudicated_at"] = timestamp
+    return timestamp
+
+
 def _refresh_standard_workflow_lineage(governance, packet: dict) -> None:
-    artifact = packet["dispatch"]["context_artifact"]
-    plan = json.loads(artifact["canonical_plan"])
+    task_specs, projection_errors = governance.task_execution_projection(
+        packet["dispatch"]["required_role_nodes"],
+        packet["dispatch"]["admitted_role_nodes"],
+        task_facts=packet["dispatch"]["task_facts"],
+    )
+    assert projection_errors == [], projection_errors
+    plan = governance.compile_context(
+        "PM",
+        packet["dispatch"]["task_facts"],
+        execution_dag=task_specs,
+    )
+    artifact = governance.materialize_context_artifact(plan)
+    packet["dispatch"]["context_artifact"] = artifact
+    _bind_fixture_evaluation_clock(packet, plan)
+    source_by_name = {
+        source["source"]: source
+        for source in plan["sources"]
+    }
+    packet["authority_refs"] = [
+        governance.build_authority_claim(
+            authority_class=claim["class"],
+            subject=claim["subject"],
+            value=claim["value"],
+            source=claim["source"],
+            source_ref=claim["source_ref"],
+            source_digest=source_by_name[claim["source"]]["content_digest"],
+            observed_at=source_by_name[claim["source"]]["observed_at"],
+            scope=claim["scope"],
+            strength=claim["strength"],
+            expiry=claim["expiry"],
+        )
+        if (
+            isinstance(claim, dict)
+            and claim.get("source_ref") == f"context:{claim.get('source')}"
+            and claim.get("source") in source_by_name
+        )
+        else claim
+        for claim in packet["authority_refs"]
+    ]
     contract = plan["task_contract"]
     task_digest = plan["task_contract_digest"]
     context_digest = artifact["artifact_digest"]
@@ -1603,18 +1982,35 @@ def _refresh_standard_workflow_lineage(governance, packet: dict) -> None:
         {"schema_version": "test_standard_workflow_v1", "task": task_digest}
     )
     schema_digest = _canonical_digest({"schema": "standard_judgment_v1"})
-    task_specs, projection_errors = governance.delegated_execution_projection(
-        packet["dispatch"]["required_role_nodes"],
-        packet["dispatch"]["admitted_role_nodes"],
-        excluded_nodes=governance.non_call_controller_node_ids(
-            packet["dispatch"]["task_facts"]
-        ),
-    )
-    assert projection_errors == [], projection_errors
     execution_waves, topology_errors = governance.topological_waves(task_specs)
     assert topology_errors == [], topology_errors
     dag_digest = governance.execution_dag_digest(task_specs)
     packet["dispatch"]["dag_digest"] = dag_digest
+    for evidence in packet.get("evidence", []):
+        if evidence.get("kind") != "program_adoption_receipt_v1":
+            continue
+        bundle = evidence.get("artifact")
+        artifacts = bundle.get("artifacts") if isinstance(bundle, dict) else None
+        final_attempt = (
+            artifacts.get("finalization_attempt")
+            if isinstance(artifacts, dict)
+            else None
+        )
+        bootstrap = (
+            final_attempt.get("bootstrap_admission")
+            if isinstance(final_attempt, dict)
+            else None
+        )
+        if not isinstance(bootstrap, dict):
+            continue
+        bootstrap.update({
+            "task_id": packet["task_id"],
+            "task_contract_digest": task_digest,
+            "dag_digest": dag_digest,
+            "context_artifact_digest": context_digest,
+            "baseline_head": packet["baseline"]["source_head"],
+        })
+        evidence["digest"] = _canonical_digest(bundle)
     task_by_node = {task["node_id"]: task for task in task_specs}
     fragment_by_node = {
         fragment["node_id"]: fragment for fragment in packet["role_fragments"]
@@ -1652,8 +2048,9 @@ def _refresh_standard_workflow_lineage(governance, packet: dict) -> None:
                     "node_class": task_spec["node_class"],
                     "permission": task_spec["permission"],
                 },
-                "model": None,
-                "effort": None, "isolation": None,
+                **governance.requested_execution_binding(governance.load_registry()),
+                "model": governance.load_registry()["saved_workflow_model_policy"]["role_models"][fragment["role"]],
+                "effort": governance.load_registry()["saved_workflow_model_policy"]["role_efforts"][fragment["role"]], "isolation": None,
                 "node_class": task_spec["node_class"],
                 "permission": task_spec["permission"],
             },
@@ -1720,14 +2117,9 @@ def _refresh_standard_workflow_lineage(governance, packet: dict) -> None:
         budget_authority={
             "authority_digest": artifact["budget_authority_digest"],
             "authority_canonical": artifact["budget_authority_canonical"],
-            "admitted_caps": {
-                field: budget_authority_value[field]
-                for field in (
-                    "max_context_tokens_per_call", "max_prompt_utf8_bytes_per_call",
-                    "max_workflow_planned_input_tokens",
-                    "max_unique_nodes", "max_call_attempts", "retry_budget",
-                )
-            },
+            "admitted_caps": governance.execution_admitted_caps(
+                budget_authority_value
+            ),
         },
         result_fragment_digests={
             fragment["node_id"]: _canonical_digest(fragment)
@@ -2809,37 +3201,29 @@ def test_saved_workflows_expose_closure_and_consumption_envelopes() -> None:
     assert "axis_fragment_digests: axisFragmentDigests" in audit
     assert "full_audit_debt:${canonicalJson" in audit
     assert "estimated_seam_tokens" in audit
-    assert "estimated_fix_tokens" in audit
-    assert "estimated_review_tokens" in audit
-    # claim-0011(2026-07-24 run0):in-run Regression 死碼已移除——釘「死碼不存在」
-    # 與新 reserve 不變量(E1 candidate + E2 review 兩節點;result 欄位形狀恆 null 保留)
+    assert "hostPhaseOnlyConfigFields" in audit
+    assert "requires a separately admitted MAE-005 host-capability phase" in audit
+    # GPT-5.6 remediation: the saved workflow binds only the fixed 13 axes plus
+    # seam. Data-dependent verify/fix work is debt for a separately admitted
+    # MAE-005 host-capability phase; no speculative post-call reserve remains.
     assert "estimated_regression_tokens" not in audit
     assert "retryBudget * auditCallTokens" in audit
-    assert "const fixReserveNodes = 2" in audit
-    assert "const fixReserveTokens = fixCallTokens + reviewCallTokens" in audit
+    assert "const admittedClaims = []" in audit
+    assert "dynamic claim verification requires a separately admitted host-capability verification phase" in audit
+    assert "const fixReserveTokens" not in audit
+    assert "const fixReserveNodes" not in audit
     assert "regressionReserved" not in audit
     assert "const regression = null" in audit
     assert "regression_reserved: false" in audit
-    # run0 follow-up(2026-07-24):確定性浮動第三票在 admission 期預派——釘住機制
-    # 防無聲退回 verify 期 FCFS 搶票(舊形狀=floatingThirdVoteSlots 可變計數器,
-    # 第三票落點隨 agent 完成順序漂移,破壞 resume 重放確定性)
-    assert "const floatingThirdVoteClaimIds = new Set()" in audit
-    assert "if (!reserveVerificationSlots(1)) break" in audit
-    assert (
-        "reservedThirdVoteClaimIds.has(claim.claim_id) || floatingThirdVoteClaimIds.has(claim.claim_id)"
-        in audit
-    )
+    assert "floatingThirdVoteClaimIds" not in audit
+    assert "reserveVerificationSlots" not in audit
+    assert "reservedThirdVoteClaimIds" not in audit
     assert "floatingThirdVoteSlots" not in audit
-    # run0 follow-up:cheap tier 顯式覆蓋 fail-closed(claim-0009 家族)——空字串
-    # 靜默回落與非字串直通 runner 均已封;null=繼承 escape 保留;默認 pin 的
-    # 派生權威=settings/ai_pricing.yaml active 條目
-    assert (
-        "cheap_model must be null (inherit session model) or a non-empty model id"
-        " derived from settings/ai_pricing.yaml active entries"
-    ) in audit
-    assert "cheap_effort must be null (inherit session effort) or a non-empty effort tier string" in audit
-    assert "config.cheap_model || 'claude-sonnet-5'" not in audit
-    assert "config.cheap_effort || 'medium'" not in audit
+    # GPT-5.6 remediation: saved workflows cannot inherit or accept a caller
+    # model/effort override; every call is pinned by the Registry role policy.
+    assert "savedWorkflowModelPolicy" in audit
+    assert "admittedSavedWorkflowTierV1(logicalRole, options)" in audit
+    assert "cannot override Registry saved-workflow model policy" in audit
 
     profit = (ROOT / ".claude/workflows/profit-diagnosis.js").read_text(encoding="utf-8")
     assert "report_path" not in profit
@@ -2860,15 +3244,11 @@ def test_saved_workflows_expose_closure_and_consumption_envelopes() -> None:
     assert "wave_record_refs: [waveRecord.record_digest]" in profit
     assert "role_fragment_v1" in profit
     assert "role_fragments: [controlFragment, ...roleFragments]" in profit
-    # run0 follow-up(2026-07-24):profit-diagnosis 與 audit 同病灶比照——cheap tier
-    # fail-closed、SANDBOX_DETERMINISM_SHIM_V1 上游化、admission 時鐘取代沙箱禁用牆鐘
-    assert (
-        "cheap_model must be null (inherit session model) or a non-empty model id"
-        " derived from settings/ai_pricing.yaml active entries"
-    ) in profit
-    assert "cheap_effort must be null (inherit session effort) or a non-empty effort tier string" in profit
-    assert "config.cheap_model || 'claude-sonnet-5'" not in profit
-    assert "config.cheap_effort || 'medium'" not in profit
+    # Profit workflow uses the same Registry-owned exact tier with no
+    # inheritance or caller override.
+    assert "savedWorkflowModelPolicy" in profit
+    assert "admittedSavedWorkflowTierV1(logicalRole, options)" in profit
+    assert "cannot override Registry saved-workflow model policy" in profit
     assert "resolveAdmissionNowMs(config.admission_now_ms)" in profit
     assert "observed <= admissionNowMs && admissionNowMs < expires" in profit
     assert "observed <= Date.now()" not in profit

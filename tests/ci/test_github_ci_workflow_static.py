@@ -111,6 +111,8 @@ def test_ci_workflow_classifies_paths_before_expensive_jobs() -> None:
 def test_development_agent_governance_budget_covers_the_current_suite() -> None:
     governance = _job("development-agent-governance")
     assert "timeout-minutes: 30" in governance
+    assert "tests/structure/test_codex_memory_policy.py" in governance
+    assert "tests/structure/test_role_memory_compaction.py" in governance
 
 
 def test_ci_workflow_keeps_cheap_guards_unconditional() -> None:

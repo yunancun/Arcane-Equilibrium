@@ -3,6 +3,9 @@
 Status: Accepted
 Date: 2026-07-10
 
+2026-07-30 execution/context/model/memory amendment:
+`docs/adr/0052-gpt56-bounded-multi-agent-execution.md`.
+
 ## Context
 
 開發 sub-agent 已形成 18 個名稱、Claude/Codex/profile 三層定義、固定 chain、每角色
@@ -351,9 +354,9 @@ Costs/risks:
 
 框架健檢(2026-08-01)後 operator 裁決:role schema 新增必填 `model`/`effort`
 欄位,renderer 透傳至生成視圖(`.claude/agents/*.md` frontmatter 兩欄;
-`.codex/agents/*.toml` 現階段僅透傳 `model_reasoning_effort`,Codex 側 model
-pin 為已記錄 follow-up)。三級:T1 `opus`/`high`(PM,E1,E1a,E2,E3,CC,QC,MIT,PA)、
+`.codex/agents/*.toml` 透過 provider-equivalent `model_routing_v1` 同時釘住
+model 與 effort)。三級:T1 `opus`/`high`(PM,E1,E1a,E2,E3,CC,QC,MIT,PA)、
 T2 `opus`/`low`(E4,FA,OPS,E5,QA,AI-E,BB,IB)、T3 `sonnet`/`medium`(TW,R4,A3)。
-tier 為下限契約:任何 caller/saved workflow 不得向下覆蓋 Registry-`opus` 角色
-(agent-wave executable 綁定為 follow-up,落地前 PM 於 admission 把關)。本修正案
+tier 為下限契約:任何 caller/saved workflow 不得向下覆蓋 Registry-`opus` 角色；
+Codex 與 saved workflow executable binding 均已逐角色落地並由 validator 強制。本修正案
 取代原文「所有 preset 都使用可用的完整模型智能」表述。

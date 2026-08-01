@@ -2,9 +2,21 @@
 
 from __future__ import annotations
 
+import json
 from typing import Any
 
 from agent_governance_capture_binding import collect_capture_evidence
+
+
+def _context_execution_dag_binding(context: Any) -> dict[str, Any] | None:
+    if not isinstance(context, dict):
+        return None
+    try:
+        plan = json.loads(context.get("canonical_plan", ""))
+    except (TypeError, ValueError, json.JSONDecodeError):
+        return None
+    binding = plan.get("execution_dag_binding") if isinstance(plan, dict) else None
+    return binding if isinstance(binding, dict) else None
 
 
 def collect_bound_workflow_capture(
@@ -32,6 +44,7 @@ def collect_bound_workflow_capture(
         expected_context_artifact_digest=context.get("artifact_digest", ""),
         expected_budget_authority_digest=context.get("budget_authority_digest"),
         expected_budget_authority_canonical=context.get("budget_authority_canonical"),
+        expected_execution_dag_binding=_context_execution_dag_binding(context),
         require_current_repository=False,
         external_evidence_verifier=external_evidence_verifier,
         adjudicated_at=packet.get("adjudicated_at"),
@@ -52,6 +65,7 @@ def collect_bound_workflow_capture(
 def collect_closure_captures(
     packet: dict[str, Any], dispatch: dict[str, Any], task_contract: dict[str, Any],
     task_contract_digest: str | None, baseline: dict[str, Any], *,
+    context_plan: dict[str, Any] | None = None,
     external_evidence_verifier=None,
 ) -> dict[str, Any]:
     context = dispatch.get("context_artifact", {})
@@ -72,6 +86,12 @@ def collect_closure_captures(
         expected_context_artifact_digest=str(context.get("artifact_digest", "")),
         expected_budget_authority_digest=context.get("budget_authority_digest"),
         expected_budget_authority_canonical=context.get("budget_authority_canonical"),
+        expected_execution_dag_binding=(
+            context_plan.get("execution_dag_binding")
+            if isinstance(context_plan, dict)
+            and isinstance(context_plan.get("execution_dag_binding"), dict)
+            else _context_execution_dag_binding(context)
+        ),
         require_current_repository=True,
         external_evidence_verifier=external_evidence_verifier,
         adjudicated_at=packet.get("adjudicated_at"),

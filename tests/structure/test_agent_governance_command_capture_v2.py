@@ -198,12 +198,12 @@ def test_verification_scope_binds_read_only_capture_and_closure_replay() -> None
     artifact, routed = _operations_verification_context()
     task = next(
         item for item in routed["required_role_nodes"]
-        if item["node_id"] == "ops_preflight"
+        if item["node_id"] == "ops_observation"
     )
     assert task["path_scope"] == []
     record = capture_v2.capture_governed_command(
         native_agent="OPS",
-        node_id="ops_preflight",
+        node_id="ops_observation",
         context_artifact=artifact,
         argv=["git", "rev-parse", "--is-inside-work-tree"],
         root=ROOT,
@@ -232,7 +232,7 @@ def test_verification_scope_binds_read_only_capture_and_closure_replay() -> None
         expected_task_contract_digest=artifact["task_contract_digest"],
         expected_context_artifact_digest=artifact["artifact_digest"],
         require_current_repository=False,
-        expected_execution_tasks={"ops_preflight": task},
+        expected_execution_tasks={"ops_observation": task},
     )
     assert captured["errors"] == []
 
@@ -247,7 +247,7 @@ def test_verification_scope_binds_read_only_capture_and_closure_replay() -> None
         expected_task_contract_digest=artifact["task_contract_digest"],
         expected_context_artifact_digest=artifact["artifact_digest"],
         require_current_repository=False,
-        expected_execution_tasks={"ops_preflight": task},
+        expected_execution_tasks={"ops_observation": task},
     )
     assert any("path_scope differs" in error for error in forged["errors"])
 
@@ -293,7 +293,7 @@ def test_verification_scope_cannot_enable_writer_or_empty_capture_scope() -> Non
     )
     with pytest.raises(ValueError, match="no non-empty derived path_scope"):
         capture_v2._bound_execution_task(
-            scope_less_artifact, "OPS", "ops_preflight", ROOT
+            scope_less_artifact, "OPS", "ops_observation", ROOT
         )
 
 

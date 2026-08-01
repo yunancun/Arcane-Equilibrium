@@ -19,6 +19,12 @@ than a narrow task when that avoids false closure or rework. Hard boundaries,
 independent discovery, negative space, dissent, and raw evidence are never
 compressed away to meet a budget.
 
+The saved workflow in this source generation has one exact pre-call DAG:
+13 discovery axes plus one seam critic. Data-dependent claim verification and
+fix/review are a separately admitted phase under the existing
+`MAE-005 / EXTERNAL_LIMIT_NATIVE_SELECTOR_ATTESTATION` host capability; the
+saved workflow emits typed coverage debt and makes zero such agent calls.
+
 ## Stage 0 — PM freeze
 
 Before the workflow, PM freezes the claims that need stable identity:
@@ -34,19 +40,16 @@ runtime/live claim without fresh runtime identity cannot PASS.
 
 ## Scheduler modes
 
-- `adaptive_shadow` (default): execute the full requested backstop while also
-  calculating the scope-selected adaptive subset. This measures recall without
-  paying a second discovery wave.
-- `full`: execute every requested axis.
-- `adaptive`: execute the selected subset + rotating negative-space axis; allowed
-  only with `adaptive_recall_approved=true` plus a hash-pinned
-  `adaptive_recall_authority_digest` after the benchmark below. Mandatory axes
-  come from the canonical Dispatch role projection, then add CC/FA and one
-  rotating negative-space axis. Full Audit does not maintain a second
-  surface-to-role table. Selection surfaces and run sequence are closure-bound
-  and recomputed; CC/FA-only cannot PASS.
+- `full` is the only currently executable scheduler. It executes all 13
+  canonical discovery axes.
+- `adaptive_shadow`, `adaptive`, and any `full` axes subset are unavailable
+  until a separate `PLATFORM_OR_EXTERNAL_ATTESTED` recall/non-inferiority
+  Adapter and out-of-band host verifier exist. A task claim, boolean,
+  self-digest, `claim_evidence`, or ordinary execution attestation cannot grant
+  this authority. The workflow returns `EXTERNAL_LIMIT_RECALL_AUTHORITY` before
+  its first model call.
 
-Default full axes include CC/FA/E2/E3/BB/IB/OPS/QC/MIT/AI-E/E5/A3/R4. E4
+The full axes are CC/FA/E2/E3/BB/IB/OPS/QC/MIT/AI-E/E5/A3/R4. E4
 regression evidence belongs to the post-integration pipeline outside this
 workflow (claim-0011) and TW is a writer, so neither is a discovery axis.
 IBKR never routes to BB; runtime/deploy evidence gets OPS.
@@ -54,50 +57,47 @@ IBKR never routes to BB; runtime/deploy evidence gets OPS.
 ## Elastic admission envelope
 
 The compiler-produced `context_budget_authority_v1` is required. Its canonical
-bytes and digest supply the exact `max_agents`, `retry_budget`, and
-`max_input_tokens`; caller-local values cannot override them. The current
-Registry `full_audit` envelope is 44 unique nodes, 46 call attempts, 2 total
-retries, 96,000 max context tokens **per call**, and 4,416,000 max workflow
-planned input tokens.
+bytes and digest supply every execution cap; caller-local values cannot
+override them. The current Registry `full_audit` authority is:
+
+- `max_unique_nodes` = `44`
+- `max_call_attempts` = `46`
+- `max_context_tokens_per_call` = `96000`
+- `max_workflow_planned_input_tokens` = `4416000`
+- `retry_budget` = `2`
+- `max_concurrent_calls` = `3`
 
 > 數字 SSOT = `.codex/agent_registry_v1.json` `budget_envelopes.full_audit`；
-> 同一組數字另硬編碼於 `.claude/workflows/agent-wave.js`（authorityProfiles）與
-> `.claude/workflows/openclaw-full-audit.js`（authorityProfiles）兩處——三處必
-> 同步更新，registry 為唯一正本。96,000 是 per-call cap，不是 workflow 總量；
-> 以 per-call cap 做整 run sizing 會把成本低估一個量級以上。
+> workflow 內的 `authorityProfiles` 由 codegen 從 Registry 投影，Registry 是唯一
+> 正本。`96000` 是 per-call cap，`4416000` 才是 workflow planned-input cap；
+> 不得以前者估算整輪成本。
 
 > **Envelope 使用限制**：ML/AI 日常任務（含常規 quant/ML 改動的審查鏈）禁用
-> `full_audit` envelope，一律使用 compiler（`agent_governance_routing.py`）依
-> risk/uncertainty 所選的非 `full_audit` envelope（narrow/standard/complex；
-> complex cap=588,000 planned input，約 full_audit 的 1/7.5），不得為升 envelope
-> 而虛報 risk；`full_audit` envelope 只在 operator 當次明示要求 full/cold audit
-> 時使用，不得由 PM 或 workflow 自行升級。
+> `full_audit` envelope，一律使用 compiler 依 risk/uncertainty 選出的
+> `narrow`／`standard`／`complex`；不得為升 envelope 虛報 risk。
+> `full_audit` 只在 operator 當次明示要求 full/cold audit 時使用，PM 或 workflow
+> 不得自行升級。
 
 Tunable args inside that authority:
 
 | Arg | Default | Meaning |
 |---|---:|---|
-| `max_verification_calls` | Context `max_agents` | Independent claim-verification calls; cannot exceed agent authority |
 | `estimated_tokens_per_audit` | 4,500 | Admission lower-bound estimate, not a prompt cap |
-| `estimated_tokens_per_verification` | 2,000 | Admission lower-bound estimate |
 | `estimated_seam_tokens` | 4,000 | Cross-axis seam critic reserve |
-| `estimated_fix_tokens` | 8,000 | Optional E1 fix reserve per admitted finding |
-| `estimated_review_tokens` | 4,000 | Independent E2 fix-review reserve |
-| `max_fixes` | 5 | Optional fix-mode source patches |
 | `admission_now_ms` | wall clock | Dispatch-side epoch-ms admission clock; mandatory where the sandbox denies `Date.now()` |
-| `judgment_model` | inherit session model | Explicit strong-judgment override; derive from `settings/ai_pricing.yaml` active entries, `null` = inherit |
 | `stop_when` | decision-value rule | Mandatory coverage closed and next novelty/verdict-reversal value below marginal cost |
 
-If the envelope cannot admit an axis/claim/fix, it becomes explicit
-`coverage_debt`. Deferred or unverified debt makes `pass_eligible=false`; the
-scheduler never truncates it into PASS. Increase the envelope or split scope when
-the debt is decision-critical.
+If the envelope cannot admit all 13 discovery axes, the workflow returns
+`EXTERNAL_LIMIT_RECALL_AUTHORITY` before its first model call. Every discovered
+decision claim becomes explicit `coverage_debt` for a fresh MAE-005
+host-attested verification Context; `fix=true` likewise emits host-phase debt
+and authorizes no writer/reviewer call. Deferred or unverified debt makes
+`pass_eligible=false` and never truncates into PASS.
 
-Call and token accounting reserves every phase: audit axes, one shared total
-retry budget across audit and verification, seam critic, verifier quorum with
-risk-conditioned third votes, and optional E1/E2 fix pairs. The 44-node/4.416M
-authority is a ceiling, not a target; unused reserves are not actual usage. If full backstop plus claims
-cannot fit, split scope and preserve coverage debt rather than lowering evidence.
+Call and token accounting covers the 13 audit axes, their bounded infrastructure
+retries, and one seam critic. Registry authority is a ceiling, not a target;
+unused reserves are not actual usage. If mandatory coverage cannot fit, split
+scope and preserve coverage debt rather than lowering evidence.
 
 ## Audit phase
 
@@ -112,35 +112,33 @@ Every axis discovers independently and returns `audit_fragment_v2` with:
 No axis writes a role report or memory. Findings are not shown to peers during
 discovery; this protects independence.
 
-## Verify phase
+## Claim staging and seam phase
 
 1. Deterministically validate required finding fields and normalize exact claim
    identity.
-2. Exact duplicate assertion+evidence can share verification; distinct
-   assertions at one symbol remain separate and all original members survive.
-3. Every admitted CRITICAL/HIGH/goal-bearing MEDIUM claim receives two
-   independent verifiers.
-4. High-risk/reachability or verifier disagreement receives a third independent
-   adjudicator within the risk-conditioned third-vote capacity (dedicated
-   reservation per admitted high-risk claim, then deterministic severity-order
-   floating entitlements); shortfall is explicit coverage debt.
-5. Missing quorum is disputed, never confirmed.
-6. A seam critic returns re-probes; these remain coverage debt until an assigned
+2. Exact duplicates remain grouped for presentation; distinct assertions at one
+   symbol remain separate and all original members survive.
+3. Every zero-outcome decision claim is staged as typed
+   `staged_claim_verification` debt with exact `MAE-005`,
+   `REQUIRES_HOST_CAPABILITY_PHASE`, and sorted unique `bound_axes`. It is
+   `UNVERIFIED`, not a verified dispute; exact duplicates across axes share one
+   claim/debt whose binding exact-covers every originating axis.
+4. The current saved workflow performs zero data-dependent verifier, third-vote,
+   fix, or fix-review calls. A host phase must recompile Context with its now
+   knowable exact call DAG before any such call.
+5. A seam critic returns re-probes; these remain coverage debt until an assigned
    role obtains evidence.
 
-The workflow preserves verifier dissent. Capability/over-gate findings are not
-downgraded merely because the capability is unreachable; unreachability may be
-the defect itself.
+No absent host phase is presented as verifier dissent or quorum.
 
 ## Cluster and fix
 
 Clustering is presentation-only by normalized file+symbol. Members, severity,
 evidence, and fix identity remain untouched.
 
-`fix=true` admits only bounded confirmed claims. E1 fixes in isolated scope; E2
-reviews without editing. Candidates are never integrated in-run
-(`integration_status` stays `NOT_INTEGRATED`); E4 regression evidence belongs to
-the post-integration pipeline after the candidate merges (claim-0011).
+`fix=true` does not authorize an in-run E1/E2 call. It records MAE-005
+host-capability debt. A later host-attested phase may compile a fixed candidate
+DAG; E4 regression remains post-integration.
 
 ## Closure
 
@@ -150,9 +148,12 @@ views, coverage holes/debt, assumptions, seam re-probes, fixes (in-run
 regression is retired; result fields stay null), and
 partial or measured consumption. PM must copy controller/admissions/fragments and
 the canonical unverified projection into one `closure_packet_v1`. Closure
-recomputes adaptive selection, eligibility and axis parity; validates canonical
-JSON debt projection, seam result digest, axis fragment digests and hash-pinned
-verification outcomes. Omitting an axis/debt or overwriting dissent fails.
+requires the full scheduler and exact ordered 14-node admission parity:
+13 `role_fragment` axis admissions followed by the `nested_payload`
+`seam:critic` admission. It validates canonical JSON debt projection, seam
+result digest, axis fragment digests, and exact workflow call coverage of the
+Context-bound axes+seam DAG. Omitting or substituting an axis, seam, or debt
+fails.
 
 ## Recall benchmark before adaptive default
 
@@ -171,50 +172,74 @@ Required before `adaptive_recall_approved=true`:
 - median token per durable closure and p75 closure lead time improve without
   quality regression
 
-Until proven, `adaptive_shadow` remains the default. After approval, run a full
-backstop at least every 10 adaptive runs or 30 days and rotate the negative-space
-axis.
+This benchmark is a future design input, not current execution authority. Even
+after it is satisfied, reduced scheduling remains disabled until an independent
+platform/external Adapter and out-of-band verifier are implemented and admitted.
+Until then every run uses `full`.
 
 ## Standard invocation
 
-```text
-Workflow({
-  name: "openclaw-full-audit",
-  args: {
-    context_artifact: <compiler 產物 context_artifact_v1 exact object，必須 inline，缺即 throw>,
-    admission_now_ms: <派發側 epoch-ms admission 時鐘；沙箱無牆鐘，缺即 throw>,
-    baseline: {
-      source_head: "<40-hex>",
-      dirty_diff_hash: "sha256:<64-hex>",
-      untracked_relevant_hash: "sha256:<64-hex>",
-      runtime_head: "<40-hex-or-null>",
-      runtime_observed_at: "<ISO-time-or-null>"
-    },
-    scope,
-    dirty_scope: ["<sorted-repo-path>"],
-    surfaces: ["full_audit", "agent_workflow", "authority", "ml", "gui", "docs"],
-    focus,
-    scheduler: "adaptive_shadow",
-    task_contract_digest: "sha256:<64-hex>",
-    context_artifact_digest: "sha256:<64-hex>",
-    route_required_roles: ["CC", "AI-E", "QC", "MIT"],
-    budget_authority_canonical: "<exact compiler-produced canonical JSON bytes>",
-    budget_authority_digest: "sha256:<64-hex>",
-    run_sequence: 0,
-    fix: false
+```javascript
+const dispatchFullAudit = ({
+  Workflow,
+  contextArtifact,
+  admissionNowMs,
+  baseline,
+  scope,
+  dirtyScope,
+  surfaces,
+  focus = "",
+  routeRequiredRoles,
+  runSequence = 0,
+}) => {
+  if (
+    !contextArtifact ||
+    contextArtifact.schema_version !== "context_artifact_v1"
+  ) {
+    throw new Error("exact materialized contextArtifact is required");
   }
-})
+  if (!Number.isInteger(admissionNowMs) || admissionNowMs <= 0) {
+    throw new Error("dispatch-side admissionNowMs must be positive epoch-ms");
+  }
+  return Workflow({
+    name: "openclaw-full-audit",
+    args: {
+      context_artifact: contextArtifact,
+      admission_now_ms: admissionNowMs,
+      baseline,
+      scope,
+      dirty_scope: dirtyScope,
+      surfaces,
+      focus,
+      scheduler: "full",
+      route_required_roles: routeRequiredRoles,
+      run_sequence: runSequence,
+      fix: false,
+    },
+  });
+};
 ```
 
-注意（07-24 治理版配方）：surfaces **勿含 runtime/pg/service/cron/deploy 家族與
-bybit/ibkr**（runtime-claim surface 定義見 openclaw-full-audit.js:694）——admission
-要求 `evidence_debt` 全空，含之必炸；runtime 身份改走 `baseline.runtime_head` +
-`runtime_observed_at`。route_required_roles 一律以 compiler route 產出的
-required_role_nodes 為準，勿手寫（上例 surfaces 無 bybit/ibkr 故無 BB/IB；無
-runtime 家族則 operations_needed=false 故亦無 OPS；加回對應 surfaces 時由 route
-產出帶回）。caller 端
-scope/focus/surfaces 必須與 inline contract 逐字一致。完整配方 = compile_context → materialize_context_artifact → scriptPath 嵌入
-（見 workflow 檔頭 parseArgs 與 memory `reference_ultracode_full_audit.md`）。
+`admissionNowMs` is captured by the desktop dispatch side immediately before
+invocation; the saved-workflow sandbox never has to call `Date.now()`.
+`contextArtifact` is the exact object returned by Context materialization.
+Digest and budget fields are derived from those inline bytes rather than copied
+as a second caller-controlled authority.
+
+For the source-only saved-workflow phase shown here, compile the task contract
+without `runtime`, `pg`, `service`, `cron`, `deploy`, `bybit`, or `ibkr` effect
+surfaces. Those surfaces require a separate, fresh host-attested Context phase;
+adding them to an unattested source-only packet creates typed evidence debt and
+admission must fail closed. This does not remove BB, IB, or OPS from the fixed
+Full Audit discovery axes. Runtime identity is carried only by
+`baseline.runtime_head` plus `baseline.runtime_observed_at`.
+
+`routeRequiredRoles` must be the compiler route's exact, order-preserving
+deduplicated projection of `required_role_nodes`, never a handwritten list.
+Caller `scope`, `focus`, and `surfaces` must exactly match the inline
+`contextArtifact.canonical_plan.task_contract`. The complete dispatch recipe is
+`compile_context` → `materialize_context_artifact` → invoke the helper above
+with the exact object.
 
 `openclaw-full-audit` finds defects. `profit-diagnosis` finds money. Profit
 diagnosis requires a fresh baseline and hash-pinned current priors, allows an

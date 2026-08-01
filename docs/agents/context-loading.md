@@ -31,6 +31,12 @@ These facts are normalized into one exact `task_contract`: task shape, sorted
 surfaces, risk, runtime/end-to-end claims, `side_effect_class`, objective, scope,
 acceptance, hard stops, source baseline, `dirty_scope`, optional
 `verification_scope`, direct interfaces, and previous failure.
+`dirty_scope` is normalized to unique, safe repository-relative paths sorted by
+Unicode scalar value; unpaired surrogates and Git/pathspec-like spellings fail
+closed. `verification_scope` uses the same portable path ordering and safety.
+Reserved documentation/frontend path tokens use ASCII-only case folding in both
+Python and saved-workflow JS; Unicode confusables never acquire those ownership
+classes.
 Any prior/evidence digest that may determine a verdict is also admitted under
 `claim_inputs`; the free-form prompt is not an authority channel for replacing
 it. The canonical task-contract digest follows the Context artifact into every
@@ -43,6 +49,15 @@ and trusted replay. It is selected only when routed verifier `path_scope` is
 empty, and before the `dirty_scope` fallback. This field is not writer ownership,
 mutation authority, or an ACL, and it never replaces writer `dirty_scope` or
 whole-repository generation checks.
+
+`history_refs` is an optional list of at most four exact historical sections.
+Each ref binds one allowlisted repository-relative Markdown path, one exact H2
+heading, and the current section digest. The compiler rejects globs, directory
+selection, path traversal, symlinks, whole-file fallbacks, duplicate refs,
+sections above 16 KiB, and an aggregate above 32 KiB. Omission normalizes to an
+empty list. History can inform judgment only through these pinned bytes; it
+cannot silently inherit the parent task, an entire conversation, or every role
+memory.
 
 ## Source-of-truth routing
 
@@ -85,7 +100,10 @@ external/actual-usage claims require the third tier.
 The Registry defines packs; the compiler selects and deduplicates pointers:
 
 - `core`: relevant product/root/hard-boundary sections
-- `active_state`: TODO only when current state can change the answer
+- `active_state`: exact rows from the `S2E 當前 ACTIVE 派發` table only when
+  current state can change the answer; the compiler selects the unique ACTIVE
+  task row plus direct dependency rows, caps the projection at 8 KiB, and hashes
+  the projected bytes rather than all of `TODO.md`
 - `architecture`: CONTEXT + relevant ADR
 - `source_change`: diff, direct interfaces/callers, focused acceptance tests
 - `runtime`: active evidence + sub-agent hygiene
@@ -93,9 +111,12 @@ The Registry defines packs; the compiler selects and deduplicates pointers:
 - `ml_data`: lineage, feature/label/CV, training/serving evidence
 - `gui_visual`: browser/viewport/keyboard/accessibility/screenshot evidence
 - `docs`: placement and relevant indexes
-- `history_on_demand`: only the directly relevant memory/report shard
+- `history_on_demand`: only exact sections named by validated `history_refs`;
+  empty refs mean the pack is inactive
 
 Role memory is historical judgment support, not an automatic startup dependency.
+Unrelated TODO rows and unselected history must not change Context bytes, digest,
+or planned tokens.
 
 ## Elastic budget
 
@@ -122,11 +143,42 @@ missing files, unknown keys, sensitive paths, symlinks, and path escape remain u
 
 `agent-wave` consumes one Python-produced `context_artifact_v1`. It hashes the
 exact `canonical_plan` bytes, recomputes the task-contract digest, source bytes/
-digests, capture TTLs, token estimate, and compiler budget authority, then embeds
+digests, capture TTLs, token estimate, compiler budget authority, and the exact
+call-producing DAG binding (canonical nodes/edges, digest, node count, edge count),
+then embeds
 the same verified plan bytes and reuses them on retry. Exact `task_prompt` and
 required uncertainty are part of the normalized task contract; prompt swap or
-omission fails before a call. Closure separately revalidates the PM admission
-artifact and binds every fragment to its digest. Every model call is then
+omission fails before a call. A generic host-executor wave that differs from
+the deterministic routed DAG must be supplied to
+`compile_context(..., execution_dag=...)` before materialization; the explicit
+DAG must retain the exact core of every canonical routed call-producing node.
+Full Audit and Profit Diagnosis accept only their fixed graphs: neither a
+compiler-derived nor caller-supplied superset may extend or select a saved
+workflow executor. When a specialized route has unmatched calls, compilation
+returns typed `SPECIALIZED_WORKFLOW_SPLIT_REQUIRED` with the surface and sorted
+node ids. It may do so only after exact Registry/artifact metadata, complete
+routed obligations, canonical ASCII node ids, native bindings, and acyclic
+topology pass. PM branches on `error_code` and compiles the fixed saved-workflow
+phase plus a fresh non-specialized generic/host phase; it never slices,
+re-signs, or retries the rejected artifact. A generic mismatch or mixed
+omission/substitution is not a split signal. Omission or substitution of a
+routed node still fails closed; local JS cannot self-promote a narrow artifact. Profit
+Diagnosis binds 10 pre-call nodes; Full Audit binds 13 axes + seam and stages
+later claim verification/fix as MAE-005 host-phase debt. Explicit `[]`,
+non-arrays, malformed JSON, or unknown node fields are rejected. Only a
+compiler-derived zero-delegation query may carry an empty binding; there is no
+public empty override. Closure separately revalidates the PM admission
+artifact and binds every fragment to its digest. Its wave validator also
+exact-compares the ordered admitted-task core and `dag_digest` with the
+Context `execution_dag_binding`; adding a post-Context node requires a freshly
+compiled Context, even if every call/manifest/wave self-digest was recomputed.
+Both saved workflows repeat the exact split discriminator before call 1, so
+passing a host-phase superset or mixed tamper to the wrong executor cannot
+start a partial wave. The plan also binds the canonical digest of the validated
+Registry generation. Compile, materialize, independent validation, and saved
+JS admission all require the same bytes; Registry injection cannot redefine a
+fixed graph or reuse an artifact across generations.
+Every model call is then
 controller-recorded with exact task/context/role/node/native identity/class/
 permission, DAG predecessors/topological wave, producer generation, dirty-scope/
 focus/schema/result, and retry binding. The complete call
@@ -138,9 +190,13 @@ The loader evaluates one standalone `AsyncFunction` and has no stable
 module-relative import contract. Therefore `agent-wave`, Full Audit, and Profit
 Diagnosis embed a generated `CONTEXT_ADMISSION_V1` block from
 `.claude/workflows/context-admission-v1.fragment.js`. Its checker projects
-Registry budget profiles and rejects byte drift, shadow declarations, real
-import/require statements, or an unused common-prefix helper. Every call begins
-with the exact `canonical_plan` bytes already recorded by `artifact_digest`,
+Registry budget profiles, execution surfaces, default history, and exact
+saved-workflow model/role-effort policy; it rejects byte drift, shadow
+declarations, real import/require statements, or an unused common-prefix helper.
+The same generated block owns a rolling bounded worker pool: completion of one
+call immediately refills the slot while active calls remain within the Registry
+cap; first error stops new dequeue only after already-running calls settle.
+Every call begins with the exact `canonical_plan` bytes already recorded by `artifact_digest`,
 then adds only the node-specific suffix after one blank line. This preserves
 cache reuse without truncating Context.
 Inline context can still be ingested per agent; actual token/cache/tool/time
@@ -187,6 +243,7 @@ Cargo, Linux, PG, deploy, cron, service, or broker work:
 - Stable architecture -> README/CONTEXT/ADR.
 - Agent Interface -> Registry, renderer, this router when pack routing changes.
 - Evidence -> closure/report/archive, linked rather than pasted.
-- Durable new lesson -> memory promotion at PM closure only.
+- Durable new lesson -> candidate at PM closure; mutate memory only with the
+  typed trusted-host promotion attestation.
 - Generated `.claude/agents/*.md`, `.codex/agents/*.md`, and
   `docs/CCAgentWorkSpace/*/profile.md` views are never hand-edited.

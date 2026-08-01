@@ -1,7 +1,7 @@
 """Routing behavior for the S2.5 start-intent effect class (SOURCE lane).
 
 Mirrors the sibling ``quiesce_fence`` / ``s2_4`` routing tests: it pins the WP5 registry
-invariant that an ``s2_5_start_intent`` task routes ``... -> ops_preflight -> ops_postcheck``
+invariant that an ``s2_5_start_intent`` source-lane task routes one ``ops_observation``
 with the effect-adapter nodes DELIBERATELY NOT injected (the real route_task effect nodes are
 deferred to the S2.5 EFFECT session), the FORWARD-only surface-consistency rule
 (runtime_effect/service surface + runtime_claim=true + high/critical risk), and the design §6
@@ -43,16 +43,17 @@ def _facts(**overrides):
     return facts
 
 
-def test_route_s2_5_start_has_no_effect_adapter_and_ops_preflight_then_postcheck():
+def test_route_s2_5_start_has_no_effect_adapter_and_one_ops_observation():
     route = routing.route_task(_facts())
     node_ids = [node["id"] for node in route["nodes"]]
     assert [node for node in route["nodes"] if node["kind"] == "effect_adapter"] == []
     # 兩個 s2_5 adapter id 都不得出現在 node_ids(EFFECT session 前不注入)。
     assert routing.S2_5_RUNTIME_START_ADAPTER_ID not in node_ids
     assert routing.S2_5_FINAL_ATTESTATION_ADAPTER_ID not in node_ids
-    assert "ops_preflight" in node_ids and "ops_postcheck" in node_ids
+    assert "ops_observation" in node_ids
+    assert "ops_preflight" not in node_ids and "ops_postcheck" not in node_ids
     by_id = {node["id"]: node for node in route["nodes"]}
-    assert by_id["ops_postcheck"]["requires"] == ["ops_preflight"]
+    assert by_id["ops_observation"]["role"] == "OPS"
     # 亦不得意外選中鄰接 adapter。
     assert routing.S2_4_INSTALL_ADAPTER_ID not in node_ids
     assert routing.QUIESCE_FENCE_ADAPTER_ID not in node_ids

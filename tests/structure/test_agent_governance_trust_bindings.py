@@ -3,7 +3,9 @@
 from __future__ import annotations
 
 from copy import deepcopy
+from datetime import datetime, timedelta, timezone
 import importlib.util
+import json
 from pathlib import Path
 import sys
 
@@ -40,6 +42,74 @@ def _passing_packet():
         ),
     ) == []
     return support, governance, packet
+
+
+def test_refresh_rebinds_delayed_packet_to_new_context_generation_clock() -> None:
+    support, governance, packet = _passing_packet()
+    packet["adjudicated_at"] = "2000-01-01T00:00:00Z"
+
+    support._refresh_standard_workflow_lineage(governance, packet)
+
+    plan = json.loads(packet["dispatch"]["context_artifact"]["canonical_plan"])
+    source_observed = [
+        datetime.fromisoformat(source["observed_at"].replace("Z", "+00:00"))
+        for source in plan["sources"]
+        if source.get("observed_at")
+    ]
+    source_expiry = [
+        datetime.fromisoformat(source["expires_at"].replace("Z", "+00:00"))
+        for source in plan["sources"]
+        if source.get("expires_at")
+    ]
+    adjudicated = datetime.fromisoformat(
+        packet["adjudicated_at"].replace("Z", "+00:00")
+    )
+    call_manifest = next(
+        evidence["artifact"]
+        for evidence in packet["evidence"]
+        if evidence["kind"] == "workflow_call_manifest_v1"
+    )
+
+    assert max(source_observed) < adjudicated < min(source_expiry)
+    assert all(
+        call["started_at"] == packet["adjudicated_at"]
+        and call["ended_at"] == packet["adjudicated_at"]
+        for call in call_manifest["records"]
+    )
+    assert governance.validate_closure(
+        packet,
+        execution_attestation_verifier=support._test_execution_attestation_verifier(
+            packet
+        ),
+        trusted_evaluated_at=adjudicated.astimezone(timezone.utc),
+    ) == []
+
+
+def test_trusted_clock_before_refreshed_context_generation_still_fails_closed() -> None:
+    support, governance, packet = _passing_packet()
+    plan = json.loads(packet["dispatch"]["context_artifact"]["canonical_plan"])
+    rolled_back = min(
+        datetime.fromisoformat(source["observed_at"].replace("Z", "+00:00"))
+        for source in plan["sources"]
+        if source.get("observed_at")
+    ) - timedelta(microseconds=1)
+    stale = deepcopy(packet)
+    stale["adjudicated_at"] = rolled_back.isoformat().replace("+00:00", "Z")
+
+    errors = governance.validate_closure(
+        stale,
+        execution_attestation_verifier=support._test_execution_attestation_verifier(
+            stale
+        ),
+        trusted_evaluated_at=rolled_back.astimezone(timezone.utc),
+    )
+
+    assert any(
+        "dispatch context artifact invalid" in error
+        and "expired or not yet valid" in error
+        for error in errors
+    )
+    assert any("authority claim is observed after adjudication" in error for error in errors)
 
 
 def test_self_rehashed_authority_cannot_replace_pinned_source() -> None:
@@ -155,8 +225,9 @@ def test_ghost_wave_cannot_be_omitted_from_accounting_or_dispatch() -> None:
                 "logical_role": "E2", "native_agent": "E2",
                 "node_class": "verification", "permission": "read_only",
             },
-            "model": None,
-            "effort": None, "isolation": None,
+            **governance.requested_execution_binding(governance.load_registry()),
+            "model": governance.load_registry()["saved_workflow_model_policy"]["role_models"]["E2"],
+            "effort": governance.load_registry()["saved_workflow_model_policy"]["role_efforts"]["E2"], "isolation": None,
             "node_class": "verification", "permission": "read_only",
         },
         prompt_digest=support._canonical_digest("ghost"),
@@ -198,14 +269,7 @@ def test_ghost_wave_cannot_be_omitted_from_accounting_or_dispatch() -> None:
         budget_authority={
             "authority_digest": artifact["budget_authority_digest"],
             "authority_canonical": artifact["budget_authority_canonical"],
-            "admitted_caps": {
-                field: budget_value[field] for field in (
-                    "max_context_tokens_per_call",
-                    "max_prompt_utf8_bytes_per_call",
-                    "max_workflow_planned_input_tokens",
-                    "max_unique_nodes", "max_call_attempts", "retry_budget",
-                )
-            },
+            "admitted_caps": governance.execution_admitted_caps(budget_value),
         },
         result_fragment_digests={"ghost-review": support._canonical_digest(judgment)},
     )
@@ -253,8 +317,9 @@ def test_high_cost_standalone_call_cannot_bypass_manifest_wave_accounting() -> N
                 "logical_role": "E2", "native_agent": "E2",
                 "node_class": "verification", "permission": "read_only",
             },
-            "model": None,
-            "effort": None, "isolation": None,
+            **governance.requested_execution_binding(governance.load_registry()),
+            "model": governance.load_registry()["saved_workflow_model_policy"]["role_models"]["E2"],
+            "effort": governance.load_registry()["saved_workflow_model_policy"]["role_efforts"]["E2"], "isolation": None,
             "node_class": "verification", "permission": "read_only",
         },
         prompt_digest=support._canonical_digest("orphan review"),

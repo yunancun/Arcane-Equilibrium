@@ -86,7 +86,7 @@ srv/
 ├── memory/                        ← ★ Claude 跨-session 記憶（MEMORY.md 索引 + topic 檔；Mac ~/.claude 經 symlink 指向此處）
 ├── CONTEXT.md                     ← ★ 领域词汇表（domain glossary，2026-05-06 引入）
 ├── docs/
-│   ├── adr/                       ← ★ 架构决策记录系列（目前至 ADR 0050；精确清单见 docs/_indexes）
+│   ├── adr/                       ← ★ 架构决策记录系列（目前至 ADR 0052；精确清单见 docs/_indexes）
 │   └── ...                        ← 工程文档（20+ 份日志/审核/设计）
 ├── program_code/
 │   ├── exchange_connectors/

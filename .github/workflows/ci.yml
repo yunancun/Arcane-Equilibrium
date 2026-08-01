@@ -162,6 +162,8 @@ jobs:
           python3 -m pytest -q \
             tests/structure/test_development_agent_governance.py \
             tests/structure/test_agent_governance_*.py \
+            tests/structure/test_codex_memory_policy.py \
+            tests/structure/test_role_memory_compaction.py \
             tests/structure/test_s2_4_w0_admission.py \
             tests/structure/test_aiml_s1_closure_target_host_run.py \
             tests/structure/test_target_host_effect_adapter.py \

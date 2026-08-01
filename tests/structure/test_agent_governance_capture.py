@@ -34,6 +34,8 @@ from agent_governance_capture import (  # noqa: E402
     validate_workflow_call_record,
 )
 from agent_governance_workflow_receipts import canonical_digest  # noqa: E402
+from agent_governance_execution_policy import requested_execution_binding  # noqa: E402
+from agent_governance_registry import load_registry  # noqa: E402
 from agent_governance_permissions import authorize_command  # noqa: E402
 from agent_governance_capture_binding import collect_capture_evidence  # noqa: E402
 from agent_governance_external_evidence import (  # noqa: E402
@@ -366,8 +368,9 @@ def test_workflow_call_record_is_canonical_and_strictly_bound() -> None:
                 "logical_role": "E2", "native_agent": "E2",
                 "node_class": "verification", "permission": "read_only",
             },
-            "model": None,
-            "effort": "high", "isolation": None,
+            **requested_execution_binding(load_registry()),
+            "model": load_registry()["saved_workflow_model_policy"]["role_models"]["E2"],
+            "effort": load_registry()["saved_workflow_model_policy"]["role_efforts"]["E2"], "isolation": None,
             "node_class": "verification", "permission": "read_only",
         },
         prompt_digest="sha256:" + "e" * 64,

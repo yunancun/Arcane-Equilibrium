@@ -12,6 +12,18 @@ The prompt declares role/type, owned scope, task shape, expected fragment/patch,
 context digest, acceptance, hard stops, and verification surface. Unknown or
 colliding ownership stops before edits.
 
+Every governed spawn also binds exact native agent, model/effort, execution
+surface, ephemeral history mode, policy digest, parent/root execution IDs, and
+spawn depth. Default history is `none`; do not use full-parent history as a
+convenience. A Codex native receipt is currently caller-reported and cannot
+satisfy mandatory-role closure until a host adapter attests the exact tool-call
+and fork boundary. Saved workflows derive exact per-role model and effort from
+`saved_workflow_model_policy_v1.role_models/role_efforts`; session inheritance and caller overrides are
+forbidden. `narrow` waves admit at most two in-flight model calls, other
+current envelopes at most three, and child agents may not spawn grandchildren.
+One watcher owns waits/follow-ups for the wave; a no-delta or budget terminal
+state is not a reason to respawn.
+
 ## Mac source vs Linux runtime
 
 - E1/E2/E4 source and cargo verification runs on Mac.
@@ -101,16 +113,41 @@ cannot stand in for runtime, and repo writes require an exact before/after
 
 For desktop saved workflows, a pause may kill in-flight agents. Stay in-turn
 while a wave runs. Resume from journal/checkpoint; no unchanged blind retry.
-Platform transcript activity is preferred over worktree silence as liveness
-evidence. Exact platform-specific handling belongs in `agent-wave`, not every
-role prompt.
+`agent_governance_liveness.adjudicate_agent_liveness` is currently a pure
+caller-claim classifier, not a connected controller or host-evidence verifier.
+It reads the trusted system UTC clock internally; its exact public Interface
+accepts neither caller-supplied `now` nor a caller-provided verifier. The
+Registry-owned `agent_liveness_policy_v1` fixes the maximum claimed-observation
+age at 60 seconds and permits zero future skew. The 60-second boundary is
+inclusive; any positive excess is stale. The output canonicalizes the claim's
+`observed_at` to UTC `Z` and preserves trusted `adjudicated_at`, freshness,
+policy ID/digest, and maximum age.
+
+Freshness describes only the timestamp relationship. A caller mapping, even
+with a fresh `RUNNING`, `WAITING`, or terminal value, cannot authenticate host
+acquisition and therefore always emits `liveness_state=UNKNOWN`,
+`primary_evidence=CALLER_ACTIVITY_UNVERIFIED`, and
+`activity_verification_status=EXTERNAL_LIMIT`. Extra caller identity,
+sequence, or head fields are rejected rather than treated as proof. A future
+host-attested activity-acquisition contract, distinct from the current saved-
+workflow classifier, requires a managed out-of-band Adapter that binds activity
+to a stable identity plus monotonic sequence/head and rejects replay, rollback,
+and fabrication; it must use a new verified contract rather than relaxing this
+pure Interface. Platform activity acquisition plus wait/cancel/stop remains
+`EXTERNAL_LIMIT`.
+
+Private JSONL existence, size, and mtime remain diagnostic only. They never
+promote a caller claim to `RUNNING` or `TERMINAL`.
 
 When statting the session's `subagents/agent-*.jsonl` for liveness, also check
 byte size. A transcript growing past a threshold (suggested 10 MB) is a
 `RUNAWAY_SUSPECT`: apply the existing TaskStop preconditions and let PM
-adjudicate the stop. Transcript bytes are a proxy monitoring signal only; they
-must never stand in for actual-usage accounting (see the development-agent
-governance consumption truth contract).
+adjudicate the stop. It never requests or performs an automatic stop. A missing
+private JSONL is `UNAVAILABLE` diagnostic evidence, not a liveness failure.
+Transcript bytes are a proxy monitoring signal only; they must never stand in
+for actual-usage accounting (see the development-agent governance consumption
+truth contract). The exact output contract is
+`.codex/schemas/agent_liveness_adjudication_v1.schema.json`.
 
 Every workflow retains one canonical call record per attempt and a complete
 wave ledger for admitted nodes, retries, nulls, planned input lower bounds,

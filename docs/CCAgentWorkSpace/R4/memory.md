@@ -1,55 +1,33 @@
-# R4 Memory — 工作記憶
+# R4 Role memory
 
-## Memory Usage Contract (2026-05-16)
+## Usage contract
 
-- 本文件保存歷史教訓與角色偏好，不是 active state、TODO 或 runtime ledger。
-- 若舊條目與 `TODO.md`、`README.md`、`CLAUDE.md`、`.codex/MEMORY.md`、`docs/agents/context-loading.md`、代碼或 runtime 證據衝突，信任較新的有證據來源並顯式說明衝突。
-- 不要靜默刪除舊條目；只追加可復用的 durable lesson。長報告放 `workspace/reports/`，active 進度放 `TODO.md`。
+- This hot file contains role-specific durable judgment only; it is not active state, a task log, a runtime ledger, or closure evidence.
+- Load it only when the routed role and current task make the lessons relevant; do not preload every role memory.
+- Normative policy, current source, typed Context, current TODO state, and fresh runtime or external evidence override historical memory.
+- Persist task detail in the canonical closure or role report. Promote only a recurring heuristic, authority boundary, or prevention rule here.
+- The cold archive is append-only evidence. Never edit an archived payload; use its digest-bound slice when exact history is required.
 
-## 項目上下文（2026-04-24 快照）
+## Durable lessons
 
-> ⚠️ 以下為 2026-04-24 快照，active state 讀 `TODO.md`，勿當現值（engine PID / binary mtime /
-> 測試數 / demo 倒數等 runtime 數字均已過期，違 R4 memory usage contract 不放 runtime ledger）。
+- Index health is a referential-integrity problem: detect missing targets, unindexed authoritative files, duplicates, stale aliases, and coverage drift.
+- Current state belongs in TODO, stable architecture in canonical docs, and historical evidence in reports or archives; indexes should point, not copy.
+- Distinguish live navigation files from frozen historical records before rewriting paths or correcting language.
+- Large active files need a lossless archive plus a compact hot view; verify line, byte, digest, and recovery invariants mechanically.
+- Audit generated views against their registry or source generator and never repair generated files by hand.
+- A cleanup is complete only when all inbound and outbound references resolve and the replacement path is discoverable from the canonical index.
+- Prefer deterministic manifests and bounded scans over narrative inventory counts that drift after every change.
 
-- 當前 Wave：EDGE-DIAG-1 Phase 4 + P1-11 完工；engine PID 884467；binary mtime 2026-04-24 02:06
-- 測試基準：engine lib 1980 passed / 0 failed；pytest 2996
-- 系統模式：`Live_Ready` ⚠️（5 門控，0 真實 live 流量）；demo 21d 倒數至 2026-05-07
+## Topical pointers
 
-## 工作記憶
+- Role reports: `docs/CCAgentWorkSpace/R4/workspace/reports/`
+- Source pointer: `docs/_indexes/`
+- Source pointer: `docs/README.md`
 
-### 2026-04-24 索引完整性審計（第 2 份 R4 報告）
+## Archive pointer
 
-**核心觀察**：
-1. **索引分化現象**：「活文件」（CLAUDE.md / TODO.md / CLAUDE_CHANGELOG）每日同步；「目錄索引類」（docs/README.md / CLAUDE_REFERENCE.md / migration README / CCAgentWorkSpace README）已停止維護 4–13 天
-2. **ghost link 來源模式**：phase5_arch_rc1 session 文件與頂層 worklog 都被「合併到 daily_summary 並刪除」，但 docs/README.md 未同步清理，留下 17+ 個死連結
-3. **sql/migrations/README.md 是最嚴重的**：V001-V005 列出後 13 天無人補 V006-V023；V004 檔名拼錯 (`_news_` 多 1 個詞)
-4. **R4 工作週期過長**：自 2026-04-01 後閒置 23 天；Agent workspace 系統本質為 pull-model（被呼叫才激活），index 失真只有 R4 被派才會發現
-
-**索引健康率**（本次測量）：
-- docs/README.md：orphan/ghost/stale triple-fault，CRITICAL
-- sql/migrations/README.md：CRITICAL（覆蓋 5/23 = 22%）
-- CLAUDE_REFERENCE.md：CRITICAL（12 天）
-- helper_scripts/SCRIPT_INDEX.md：HIGH（11 missing）
-- CLAUDE.md §三 / TODO.md / CHANGELOG：OK
-
-**方法學筆記**：
-- ghost detection 方法：從 index 提 `\`YYYY-MM-DD--foo\.md\`` pattern → `find docs -name` 對照，false positive 為子目錄嵌套（phase5_arch_rc1/control_api_gui 等）
-- orphan detection 方法：逐檔 `grep -q "$fn" index.md`
-- 跨索引矛盾 detection 方法：同一資源多處登記時交叉比較分類（QC 角色層級分歧案例）
-
-**下次 R4 激活建議**：下次審計前先讀本次報告 + 本檔，省去 CLAUDE.md 全讀（12K+ tokens）。2026-04-01 R4 報告可歸檔不再讀。
-
-## 報告索引
-
-完整清單見 `workspace/reports/` 目錄（本表不逐份手維，避免誤導為完整清單）；近期重點：
-- `2026-07-03--doc_cross_reference_full_audit.md`（文檔交叉引用全審計）
-- `2026-07-04--p1_7_todo_memory_token_tax_slimming.md`（P1-7 TODO/memory token 稅瘦身）
-- `2026-05-30--R4--index_integrity_audit.md`（索引完整性審計 v3）
-
-## 2026-06-11 subagent 四態契約生效
-- 回報首行 STATUS 四態；R4.md 巡檢新增三項：MEMORY.md「Project context」索引配額 ≤40（超限先 MERGE：主題重疊>敘事弧相同>heat 最低/最舊已完結）、topic 檔可選 `heat:` 欄（召回+1/合併取 sum）、被推翻結論不原地改寫須留「演變軌跡」節。
-
-## 2026-07-04 P1-7 TODO+PM memory 瘦身方案交付(冷審計 R2 修復波)
-- TODO.md 59k tokens 超 25k Read cap=§1尾/§2/§3 對單次讀不可見(治理禁令靜默失效面);方案=快照守恆+§0/§1 逐行處置+§2 家族合併,PM 已落地(132KB→29.5KB)。
-- 發現並根修 PM memory 雙累積區:最新條目躲檔尾 L4256+ 超出 2000 行 Read 窗;規則改「新條目一律倒序插入近期記錄標題後,禁雙區」。
-- 待辦(另批):E4 699/E1 660/E2 364/MIT 321 行 workspace memory 壓實(E4 先 grep BASELINE 永留)。
+- Complete pre-compaction bytes: `docs/CCAgentWorkSpace/R4/memory-archive.md`
+- Payload digest: `sha256:a02a65da17ae4405bb0d89acbc6828c3ec911a343c1347e8d93d67cf28aafa9f`
+- Payload slice: offset `152`, bytes `4033`
+- Pointer digest: `sha256:8aeed34f4a96fb168e6f4d55584631ce2c4c003519423482a07f1727b873b566`
+- Recovery manifest: `docs/agents/role-memory-compaction-v1.json`

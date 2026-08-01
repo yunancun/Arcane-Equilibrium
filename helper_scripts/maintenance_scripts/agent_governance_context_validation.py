@@ -11,10 +11,27 @@ from datetime import datetime, timedelta, timezone
 from pathlib import Path, PurePosixPath
 from typing import Any
 
-from agent_governance_registry import REPO_ROOT, load_registry
+from agent_governance_registry import (
+    REPO_ROOT,
+    load_registry,
+    registry_digest,
+    validate_registry,
+)
 from agent_governance_context_specs import trusted_derived_kinds
 from agent_governance_context_projection import materialize_semantic_context
+from agent_governance_execution_dag import (
+    SpecializedWorkflowSplitRequired,
+    _compiler_derived_zero_call_context_execution_dag_binding,
+    compile_context_execution_dag_binding,
+    explicit_execution_dag_route_errors,
+    specialized_workflow_split_exception,
+)
+from agent_governance_execution_policy import (
+    compile_execution_budget_policy,
+    promote_execution_envelope,
+)
 from agent_governance_task_control import compile_task_execution_policy
+from agent_governance_routing import route_task
 
 
 DIGEST_RE = re.compile(r"^sha256:[0-9a-f]{64}$")
@@ -35,8 +52,10 @@ ARTIFACT_FIELDS = {
 PLAN_FIELDS = {
     "schema_version",
     "registry_schema_version",
+    "registry_digest",
     "role",
     "role_permission",
+    "execution_dag_binding",
     "task_contract",
     "task_contract_digest",
     "mandatory_content",
@@ -76,6 +95,7 @@ CONTRACT_FIELDS = {
     "task_prompt_digest",
     "continuation_mode",
     "operator_loop_request_digest",
+    "history_refs",
 }
 MANDATORY_FIELDS = {
     "objective",
@@ -213,7 +233,7 @@ def _expected_facts_errors(
     optional_projection = {
         "direct_interfaces", "dirty_scope", "verification_scope", "previous_failure", "focus",
         "claim_inputs", "runtime_claim", "end_to_end_claim", "continuation_mode",
-        "operator_loop_request_digest",
+        "operator_loop_request_digest", "history_refs",
     }
     for field in optional_projection & set(expected):
         if contract.get(field) != expected.get(field):
@@ -294,6 +314,7 @@ def _recaptured_source_projection(source: dict[str, Any]) -> dict[str, Any]:
 def _local_provenance_errors(
     plan: dict[str, Any], *, registry: dict[str, Any], root: Path,
     external_evidence_verifier=None,
+    execution_dag_authoritative: bool = True,
 ) -> list[str]:
     """Re-run the local compiler so caller-rehashed source bytes cannot self-attest."""
 
@@ -322,14 +343,41 @@ def _local_provenance_errors(
     }
     if evidence_state:
         contract["evidence_state"] = evidence_state
+    execution_dag_binding = plan.get("execution_dag_binding")
+    execution_dag = (
+        execution_dag_binding.get("nodes")
+        if isinstance(execution_dag_binding, dict)
+        else None
+    )
+    # The public Context compiler rejects caller-supplied ``[]``. Therefore an
+    # authenticated empty binding can only have come from the compiler's own
+    # zero-delegation route; recapture that route instead of replaying ``[]`` as
+    # if it were caller authority.
+    recapture_execution_dag = (
+        execution_dag
+        if execution_dag_authoritative and execution_dag != []
+        else None
+    )
     try:
         recaptured = compile_context(
             str(plan.get("role", "")), contract, registry=registry, root=root,
             external_evidence_verifier=external_evidence_verifier,
+            execution_dag=recapture_execution_dag,
         )
+    except SpecializedWorkflowSplitRequired:
+        return [
+            "local Context provenance recapture rejected task/DAG authority"
+        ]
     except (KeyError, OSError, TypeError, ValueError) as error:
         return [f"local Context provenance recapture failed: {error}"]
     errors: list[str] = []
+    if (
+        execution_dag == []
+        and recaptured.get("execution_dag_binding") != execution_dag_binding
+    ):
+        errors.append(
+            "compiler-derived zero-call execution DAG differs from caller artifact"
+        )
     if recaptured.get("selected_packs") != plan.get("selected_packs"):
         errors.append("Registry-selected Context packs differ from caller artifact")
     actual_sources = recaptured.get("sources", [])
@@ -405,6 +453,10 @@ def validate_context_artifact(
         errors.append("canonical plan schema_version is invalid")
     if plan.get("registry_schema_version") != "agent_registry_v1":
         errors.append("canonical plan Registry generation is invalid")
+    if not isinstance(plan.get("registry_digest"), str) or not DIGEST_RE.fullmatch(
+        plan["registry_digest"]
+    ):
+        errors.append("canonical plan Registry digest is invalid")
 
     contract = plan.get("task_contract")
     if not isinstance(contract, dict) or set(contract) != CONTRACT_FIELDS:
@@ -476,9 +528,93 @@ def validate_context_artifact(
     if observed_now is None:
         errors.append("context validation now must be timezone-aware")
         observed_now = datetime.now(timezone.utc)
-    registry = registry or load_registry()
+    registry = load_registry() if registry is None else registry
+    try:
+        registry_errors = validate_registry(registry, REPO_ROOT)
+        admitted_registry_digest = registry_digest(registry)
+    except (
+        AttributeError,
+        KeyError,
+        OverflowError,
+        RecursionError,
+        TypeError,
+        ValueError,
+    ) as error:
+        errors.append(f"Registry validation failed: {error}")
+        return result
+    if registry_errors:
+        errors.extend(
+            f"Registry validation failed: {error}" for error in registry_errors
+        )
+        return result
+    if plan.get("registry_digest") != admitted_registry_digest:
+        errors.append("canonical plan Registry digest differs from validated Registry")
     if plan.get("role_permission") != registry.get("roles", {}).get(plan.get("role"), {}).get("permission"):
         errors.append("context role_permission differs from Registry")
+    split_preconditions_clean = not errors
+    execution_dag_binding = plan.get("execution_dag_binding")
+    execution_dag_authoritative = False
+    specialized_split_candidate: SpecializedWorkflowSplitRequired | None = None
+    if (
+        not isinstance(execution_dag_binding, dict)
+        or not isinstance(execution_dag_binding.get("nodes"), list)
+    ):
+        errors.append("context plan lacks an exact execution DAG binding")
+        execution_dag_binding = None
+    else:
+        try:
+            expected_dag_binding = (
+                _compiler_derived_zero_call_context_execution_dag_binding(
+                    registry=registry,
+                )
+                if not execution_dag_binding["nodes"]
+                else compile_context_execution_dag_binding(
+                    execution_dag_binding["nodes"],
+                    registry=registry,
+                )
+            )
+        except (KeyError, TypeError, ValueError) as error:
+            errors.append(f"context execution DAG binding is invalid: {error}")
+            execution_dag_binding = None
+        else:
+            if execution_dag_binding != expected_dag_binding:
+                errors.append("context execution DAG binding is not compiler-derived")
+            else:
+                execution_dag_authoritative = True
+            try:
+                routed = route_task(contract, registry=registry)
+                route_errors = explicit_execution_dag_route_errors(
+                    execution_dag_binding["nodes"],
+                    routed["required_role_nodes"],
+                    contract,
+                    registry=registry,
+                )
+                split_error = (
+                    specialized_workflow_split_exception(
+                        execution_dag_binding["nodes"],
+                        contract,
+                        registry=registry,
+                    )
+                    if (
+                        execution_dag_authoritative
+                        and split_preconditions_clean
+                        and not route_errors
+                    )
+                    else None
+                )
+            except (KeyError, TypeError, ValueError) as error:
+                errors.append(
+                    "context execution DAG route validation failed: "
+                    + str(error)
+                )
+            else:
+                errors.extend(
+                    "context execution DAG binding does not authorize the task contract: "
+                    + error
+                    for error in route_errors
+                )
+                if split_error is not None:
+                    specialized_split_candidate = split_error
     try:
         expected_semantic = materialize_semantic_context(plan, registry)
     except (KeyError, TypeError, ValueError) as error:
@@ -621,14 +757,18 @@ def validate_context_artifact(
         if acquisition_plan != expected_acquisition:
             errors.append("context acquisition_plan is not evidence-debt-derived")
 
-    if require_local_provenance:
+    if require_local_provenance and specialized_split_candidate is None:
         errors.extend(
             _local_provenance_errors(
                 plan, registry=registry, root=root.resolve(),
                 external_evidence_verifier=external_evidence_verifier,
+                execution_dag_authoritative=(
+                    execution_dag_authoritative
+                    and specialized_split_candidate is None
+                ),
             )
         )
-    else:
+    elif not require_local_provenance:
         try:
             provenance_verified = (
                 provenance_verifier is not None
@@ -650,23 +790,19 @@ def validate_context_artifact(
     if not isinstance(budget, dict) or set(budget) != BUDGET_FIELDS:
         errors.append("context budget fields are not exact")
         return result
-    envelope_name = _envelope(contract)
+    if execution_dag_binding is None:
+        return result
+    envelope_name = promote_execution_envelope(
+        _envelope(contract),
+        required_nodes=execution_dag_binding["node_count"],
+        registry=registry,
+    )
     try:
         envelope = registry["budget_envelopes"][envelope_name]
     except (KeyError, TypeError):
         errors.append(f"Registry budget authority is missing envelope {envelope_name}")
         return result
-    authority = {
-        "schema_version": "context_budget_authority_v1",
-        "envelope": envelope_name,
-        "accounting_basis": envelope["accounting_basis"],
-        "max_context_tokens_per_call": envelope["max_context_tokens_per_call"],
-        "max_prompt_utf8_bytes_per_call": envelope["max_prompt_utf8_bytes_per_call"],
-        "max_workflow_planned_input_tokens": envelope["max_workflow_planned_input_tokens"],
-        "max_unique_nodes": envelope["max_unique_nodes"],
-        "max_call_attempts": envelope["max_call_attempts"],
-        "retry_budget": envelope["retry_budget"],
-    }
+    authority = compile_execution_budget_policy(envelope_name, registry)
     authority_canonical = _canonical(authority)
     authority_digest = _digest(authority_canonical.encode("utf-8"))
     if budget.get("authority") != authority:
@@ -730,4 +866,6 @@ def validate_context_artifact(
         errors.append("context budget is not independently call_allowed")
     if not isinstance(budget.get("quality_reserve_reasons"), list):
         errors.append("context budget quality_reserve_reasons must be a list")
+    if not errors and specialized_split_candidate is not None:
+        errors.append(str(specialized_split_candidate))
     return result

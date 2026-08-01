@@ -1,7 +1,8 @@
 # Development-Agent Governance Module
 
-Status: active Interface, 2026-07-20
-ADR: `docs/adr/0050-development-agent-governance.md`
+Status: active Interface, 2026-07-30
+ADR: `docs/adr/0050-development-agent-governance.md`,
+`docs/adr/0052-gpt56-bounded-multi-agent-execution.md`
 
 本文件是開發 sub-agent 工作流的人類入口。機器正本是
 `.codex/agent_registry_v1.json`，可執行 Implementation 是
@@ -57,9 +58,23 @@ role skills；Root Principles、ADR、broker 官方規則不複製進 Registry�
 PM/E1/E1a/E2/E3/CC/QC/MIT/PA；T2 `opus`/`low`＝E4/FA/OPS/E5/QA/AI-E/BB/IB；
 T3 `sonnet`/`medium`＝TW/R4/A3）；`default/explorer/worker` 只是 runtime
 substrate，不是智能等級。tier 是下限契約：saved workflow 與任何 caller 不得把
-Registry-`opus` 角色向下覆蓋（現存 cheapTier 類覆蓋屬違規遺留，在可執行綁定
-落地前由 PM 於 admission 時人工把關；agent-wave 的 executable tier 綁定為已
-記錄 follow-up）。
+Registry-`opus` 角色向下覆蓋；各 execution surface 的 executable binding 已由
+Registry validator、generated view 及 call identity 共同 fail-closed。
+
+Registry 同時持有 exact `model_routing_v1`，renderer 把 model 與 reasoning effort
+明寫進每個 native TOML，controller 再把 requested identity 綁入 call receipt。
+Codex provider 等價映射為 T1 `gpt-5.6-sol/high`、T2
+`gpt-5.6-sol/low`、T3 `gpt-5.6-terra/medium`；config 的
+`gpt-5.6-terra/medium` 只是不具 governed role 的 fallback。`max`/`xhigh` 不可由
+parent 繼承，也沒有隱式 critical 例外；若未來需要，必須先成為 Registry 中具名、
+測試覆蓋的 node policy。Claude saved workflow 由
+`saved_workflow_model_policy_v1.role_models/role_efforts` 逐角色 exact-match 同一
+operator tier；controller config、task 欄位與 session inheritance 都不能覆蓋它。
+
+跨角色共通的 authority/context/economy/permission/effect/web/capture/output 規則只存在於
+`native_operating_contract_v1`，由單一 renderer helper 投影；role lens、activation、
+Own、Refuse、judgment 與 E4 verifier/writer identity 仍逐角色保留。Exact-once renderer
+tests 防止「為了縮 prompt 刪掉 invariant」或重新複製共通 prose。
 
 新增的兩個 preset：
 
@@ -72,7 +87,11 @@ Registry-`opus` 角色向下覆蓋（現存 cheapTier 類覆蓋屬違規遺留�
 ### Context Interface
 
 ```text
-compile_context(role, task_facts_with_optional_evidence_state) -> context_plan_v1
+compile_context(
+  role,
+  task_facts_with_optional_evidence_state,
+  execution_dag=exact_call_producing_nodes,
+) -> context_plan_v1
 ```
 
 Context capsule 分三層：
@@ -80,7 +99,8 @@ Context capsule 分三層：
 1. immutable exact core：user objective/scope、acceptance、hard stops、baseline、
    direct Interface、上一輪 failure/concern。
 2. task evidence：由 role/surface 選 context pack，附 path、selector、digest。
-3. expandable history：role memory、舊 report、archive 僅在直接相關時讀。
+3. expandable history：role memory、舊 report、archive 只由 exact `history_refs`
+   點名直接相關的 Markdown H2 section，最多四段。
 
 Concrete repo source 永遠先安全 resolve、拒絕 symlink escape、讀 bytes 並重算 digest/
 token estimate；`evidence_state` 對它只能是 expected-digest assertion，不能覆寫內容或把
@@ -94,8 +114,8 @@ bytes/tokens。Digest-only、missing concrete source、未知 evidence key 或 m
 Context 不是一段可任意重寫的 prompt。Compiler 先把 exact `task_prompt`、task
 shape/surfaces/risk、必填 `low|medium|high|unknown` uncertainty、runtime/E2E claim、
 `side_effect_class`、objective/scope/acceptance/hard stops、三欄 source baseline、
-`dirty_scope`、可選 `verification_scope`、direct interfaces、previous failure 與
-verdict-relevant `claim_inputs` 正規化成
+`dirty_scope`、可選 `verification_scope`、direct interfaces、previous failure、
+可選 `history_refs` 與 verdict-relevant `claim_inputs` 正規化成
 `task_contract`。`claim_inputs` 是 name→canonical digest map；任何會影響結論的 prior/
 evidence 都必須在 admission 時綁定，不能藏在 free-form prompt 內替換。其 canonical
 SHA-256 以 `task_contract_digest` 同時綁在 plan、artifact、每個 `role_fragment_v1` 與最終
@@ -109,6 +129,12 @@ verifier `path_scope` 為空時採用，並先於 `dirty_scope` fallback。它�
 writer ownership、mutation authority 或 ACL，也不能取代 writer `dirty_scope` 或 whole-repo
 generation checks。
 
+`active_state` 不再投影整個 `TODO.md`：compiler 只讀 exact
+`S2E 當前 ACTIVE 派發` 表，選唯一 ACTIVE row 與 direct dependency rows，最多
+8 KiB，並對投影 bytes 計 digest。`history_refs` 每項綁 allowlisted safe path、exact H2
+heading 與 digest，單段 16 KiB、總量 32 KiB；glob、whole-file、symlink、traversal、
+未選 section 均拒絕。因而無關 TODO/history 變更不再破壞 shared Context/cache key。
+
 Budget 分開管理 single-call planned lower bound、exact prompt bytes、workflow planned
 lower bound、unique nodes、call attempts 與 retry：
 
@@ -120,6 +146,31 @@ lower bound、unique nodes、call attempts 與 retry：
 - Full Audit 有更大的 envelope。
 - budget 用完但 evidence 未閉合，只能 `NEEDS_CONTEXT/UNVERIFIED/BLOCKED`。
 
+Context plan 另綁 `context_execution_dag_binding_v1`：exact canonical nodes、
+predecessor edges、DAG digest、node count 與 edge count。省略 `execution_dag` 時 compiler
+綁 deterministic routed call-producing DAG；generic `agent-wave` 若加入 adaptive nodes，
+PM 必須在 materialize 前把完整 wave DAG 傳入 compiler。Generic caller DAG 可以是合法
+superset，但必須逐欄保留每個 canonical routed call-producing node 的 identity、
+role/native、predecessors、class 與 permission；省略或用同 node id 替換其 core 都拒絕。
+Full Audit 與 Profit Diagnosis 無論 implicit 或 explicit 都只接受 fixed graph。若
+specialized route 另含 `business_acceptance`、`security_gate`、`ops_observation` 或其他
+固定圖外 call，compiler 在 materialize 前回傳 typed
+`SPECIALIZED_WORKFLOW_SPLIT_REQUIRED`、surface 與排序後的 extra node ids；PM 只依
+`error_code` 分流。Typed split 只在 Registry/artifact metadata、完整 routed
+obligations、canonical ASCII node ids、native bindings、acyclic topology 全部 exact
+時成立；mixed metadata、omission/substitution 或 malformed `requires` 一律是普通 DAG
+failure。PM 重新 compile 固定 saved-workflow 及 non-specialized generic/host
+兩份 fresh Context，不得切割、重簽或重試被拒 artifact。普通 DAG mismatch 或混合
+omission/substitution 不是 split signal。兩個 saved workflow 亦在 call 1 前做同一精確
+判別，不能以 superset 或 mixed tamper 啟動 partial wave。Compiler 先依
+task risk/surface 取 base
+envelope，再按 exact node count 選最小可容納 envelope；四節點仍是 narrow，五節點會合法
+提升為 standard。Materializer 與獨立 validator 都重算 binding 和最小 envelope；只改
+authority/self-digest、縮 node/edge count 或換 DAG bytes 都不能自鑄升級。使用 injected
+Registry 時 compile、materialize、validate 必須傳同一份已通過治理驗證的 Registry；
+Context plan 額外綁 canonical Registry content digest，generated saved-workflow 亦只接受
+checked-in generation，禁止中途 ambient reload、刪除 axes 或跨 generation 重用 artifact。
+
 `agent-wave` 不接受裸 legacy task array 或 raw `contextPath`。每個 admitted node 只帶一份
 `context_artifact_v1`：Python compiler 保留完整 canonical envelope 供 closure 重驗，另產
 authenticated shared semantic capsule + role delta 作為 prompt/cache prefix；receipt/ambient
@@ -130,11 +181,18 @@ Workflow 在 JS 端獨立重算 semantic digests。Wave 與 infrastructure retry
 digest、`budget.pass_allowed=true` 才執行。Inline artifact 仍可能被每個 agent ingest；cache
 收益只按平台實測記錄，不能宣稱「只付一次」。
 
+Closure capture 會把 `workflow_wave_record_v1.admitted_tasks` 的 ordered execution-node
+core 與 `dag_digest` exact-compare 到已驗證 Context 的
+`context_execution_dag_binding_v1`。因此在 Context 之後追加節點，即使同步重算
+call records、manifest、wave 與所有 packet-local digest，也不能被舊 Context 接受；
+合法擴 DAG 必須先重新 compile/materialize Context。
+
 每一次 model call（含 infrastructure retry）都由 controller 產
 `workflow_call_record_v1`，綁 workflow contract、logical call/node/role/payload、requested
 model/effort/isolation、prompt、context/task/dirty-scope/focus/response-schema digest、exact
 native agent/node class/permission、DAG predecessors/topological wave、producer generation、
-attempt/retry parent、timestamps、null state 與 exact parsed-result digest。Dependencies 只有在
+execution surface、history mode/boundary/exception、attempt/retry parent、timestamps、
+null state 與 exact parsed-result digest。Dependencies 只有在
 所有 predecessor 完成後才可呼叫。Role fragment 的身份/
 task fields 由 controller 注入，model 只返回 judgment payload；fragment 必須指回產生它的
 call record。所有 call 依序進唯一 `workflow_call_manifest_v1`，再由
@@ -157,7 +215,7 @@ Task-facts seam 是 typed、fail-closed：exact `task_prompt`、`task_shape`、`
 必填 `uncertainty`、`surfaces`，以及
 `runtime_claim` / `end_to_end_claim` boolean 使用 Registry compiler 已知字彙；objective、
 scope、acceptance、hard stops、baseline、`dirty_scope`、可選 `verification_scope`、
-direct interfaces、previous failure 與可選
+direct interfaces、previous failure、可選 `history_refs` 與可選
 `evidence_state` 供 Context Interface 使用；verdict-relevant prior/evidence 另由
 `claim_inputs` 以 canonical digest 固定。`continuation_mode` 缺省只正規化為
 `finite`；只有 exact Operator request 第一控制行精確等於 `/loop` 才可用
@@ -170,7 +228,9 @@ surface、effect 類別或互相矛盾的組合通常代表 typo 或
 未建模風險，必須先修正／擴充 compiler，不能靜默跳過角色。`runtime` surface 只表示
 需要 runtime context；只有 `runtime_claim=true`、deploy，或 service/cron/PG/
 runtime-effect/incident-RCA 等 operational surface 才觸發 OPS，避免 source-only
-runtime code change 機械式增加兩次 runtime review。
+runtime code change 機械式增加 review。沒有 intervening effect 的 read-only/source lane
+只產一個 `ops_observation`；只有 admitted effect 才保留 separated preflight →
+effect Adapter → postcheck。
 
 `public_web_read` 僅是 read-only evidence acquisition：必須實際開啟 public URL，保留
 citation/capture provenance；平台是否提供 WebSearch/WebFetch 是另一個 availability fact，
@@ -185,8 +245,9 @@ Hard edges：
 
 - source Implementation → independent `E2` → relevant `E4` tests。
 - authority/live/risk/auth → `CC` + `E3`；Implementation 仍需 E2/E4。
-- runtime claim 或 operational change/deploy → `OPS preflight`；deploy 再經
-  PM/operator exact intent → Deploy Adapter contract → `OPS postcheck`；trusted local probe
+- read-only runtime claim 或 operational observation → 一個 `OPS ops_observation`。
+- operational effect/deploy → `OPS preflight`；deploy 再經 PM/operator exact intent →
+  Deploy Adapter contract → `OPS postcheck`；trusted local probe
   source 已存在，但 apply 仍因 rollback binding 與 stable observation-window controls 未綁定，
   在 component invocation 前 fail closed。
 - Bybit surface → `BB`；IBKR/TWS/stock_etf_cash → `IB`；不可互代。
@@ -202,6 +263,13 @@ decision gain 觸發。PM 可增加 node，但必須在 closure dispatch 的
 digest。它隨即是 mandatory coverage，不能只在成功時留下 fragment。跳過時記
 reason、residual risk、owner。未知
 risk 進 full-audit envelope，不可自動當 low-risk。
+
+Envelope 在完整 required-node DAG 建成後才選擇／提升，不能用 pre-route 猜測後再產出
+不可執行的 node set。`narrow` 同時最多 2 個 model calls，其餘目前最多 3 個；每個
+generated workflow 透過同一 rolling bounded worker pool 執行 first attempts、retries
+與其他 runnable calls。任一 call 完成即補下一個 factory，不等待同一固定 slice 的最慢
+call；active calls 仍永不超過 Registry `max_concurrent_calls`，首錯後停止 dequeue 並先
+settle 已在途 calls。
 
 再加入一個 node 的條件：在保留 quality reserve 後，預期 decision gain（降低風險、
 解鎖盈利或避免重工）大於 token/time/opportunity cost。停止條件是 mandatory coverage
@@ -253,6 +321,77 @@ Task Execution Control 是 Dispatch 與 Closure 共用的內部 Implementation�
 public controller/daemon。它有 Git common-dir 原子 task-admission store、filesystem
 writer-lease store，以及 writer lease 的測試用 in-memory store；`git_loop_guard.py` 是唯讀
 consumer，只驗證既有 writer lease。
+
+同一 Implementation 現另投影 `execution_budget_policy_v1` 與
+`execution_surface_profile_v1`。Route、Context、requested agent、call manifest 和 wave
+receipt 必須綁同一 policy/surface digest。唯一 watcher 的 event ledger 只接受 surface
+明示 attested 的 event kinds，並驗 exactly-one root、parent/depth/node lineage、unique
+event ID、call-record exact coverage、terminated lineage 與 distinct delegated-node cap。
+Event admission 與 standalone ledger validation 都必須收到 ledger digest 所綁的
+exact surface profile；缺失或不匹配一律 fail closed。Canonical wave builder 會在首次
+admission 前驗完整 call manifest，並從所有 validated records 導出唯一、Registry-canonical
+的 uniform surface profile。這條 post-hoc receipt path 使用明確的 structural-only
+assembler；不 mint／消耗 controller capability，而且同一 manifest 可重建相同 bytes。
+
+Live pre-action admission 是另一條 internal seam，必須持有從 pristine empty ledger 建立的
+non-serializable controller capability；mint 不在 facade/public Interface，且 policy 與
+surface 會精確比對 live Registry。同一 `root_execution_id` 必須在 process-lifetime lock
+內原子 single-claim；tombstone 不隨 controller GC 釋放。Controller 私有保存唯一
+last-head 與 Registry policy/surface 的 frozen canonical authority；每次 cap／coverage
+decision 都只從該私有 bytes 重建 ordinary mapping，caller-owned mutable mapping 只可做
+exact precheck，不能成為 transition authority。Factory 只讀一次 Registry generation
+來同時導出 policy/surface authority；每次 admission 亦在同一 per-instance lock 內、任何
+validation/read 前把完整 caller ledger 與 event 各自 canonical-detach 成唯一 plain-JSON
+snapshot，再原子執行 compare、validate、append/reject、advance。同一 head 的競爭 caller
+只容許一方前進。目前沒有 managed host 把這個 mint seam 接成 general-purpose runtime
+authority。
+
+Ledger self-digest 與 standalone validator 只證明離線結構／診斷，沒有 resume
+authority。Caller 不能傳入 expected previous digest 或自行重封截斷 ledger 來重置
+budget；controller 不能從 non-pristine ledger 重建，persisted ledger 在沒有原
+in-process capability 時一律不得繼續 admission。這個 process-local monotonic guard
+不是 host/provider attestation，也不把 workflow receipt 升級為
+`PLATFORM_OR_EXTERNAL_ATTESTED`。Caller 也不能只改 root/watcher 經 public facade
+取得新 budget；general-purpose live mint 要等 future managed-host-attested
+capability 提供不可自報的 task/root authority。Structural receipt rebuild 不持有
+capability，不能拿來繼續 live ledger。
+Saved workflow 目前 exact-cover root/model call/retry；call/model-turn/follow-up/wait/
+no-delta/concurrency/unique-node/spawn-depth 的 count/state cap 在下一 admitted action 前
+拒絕並留下 terminal reason。預設 history 是 ephemeral `none`；bounded history 需要
+source thread、boundary turn 與 admitted exception digest，`all` 或欄位缺失皆拒絕。
+
+Surface capability 必須誠實投影。Saved workflow 可 enforce selector/history/
+ephemeral fork/concurrency；Codex native collaboration 目前只有 concurrency 與 disabled
+interruption message 可由 project config enforce，native selector/history/fork 仍是
+`reported_only`，且 repo 沒有 host adapter 可把 collaboration tool call attested 到 closure。
+因此 Codex native 與 generic host 都是 mandatory-role `EXTERNAL_LIMIT`／advisory-only，
+不能冒充 PA/E4 native execution。`max_wall_clock_ms`、`max_call_duration_ms` 與
+`max_wave_duration_ms` 只是 Registry-declared ceilings；目前沒有 monotonic clock、
+in-flight timeout/cancel Adapter，故 per-call/wave deadline/cancellation 與 platform token
+telemetry 都固定 `unavailable`／`EXTERNAL_LIMIT`。Model-visible interruption message 在
+governed Codex calls 中關閉，避免未進 receipt 的 context mutation。
+
+Liveness 的 pure adjudicator 是 caller-claim classifier，不是 host-evidence verifier。
+它不接受 caller 自報 `now` 或 caller 注入 verifier，而是內部讀可信 system UTC。
+Registry 的 `agent_liveness_policy_v1` 以 digest 綁定 60 秒
+`max_observation_age_seconds` 與零 future skew；age 恰好 60 秒仍 fresh，任何正 excess
+即 stale。結果把 claim 的 `observed_at` canonicalize 成 UTC `Z`，並保留 trusted
+`adjudicated_at`、freshness、policy ID/digest 與 max age。
+
+Freshness 只描述 caller timestamp 與可信 clock 的距離，不能證明 host acquisition。
+因此 caller mapping 即使聲稱 fresh `RUNNING`、`WAITING` 或 terminal，結果也固定為
+`UNKNOWN + CALLER_ACTIVITY_UNVERIFIED + EXTERNAL_LIMIT`；caller 額外塞入 identity、
+sequence 或 head 會因 exact contract 被拒絕，不能充當 monotonic proof。Future
+host-attested activity acquisition 必須由 managed out-of-band host Adapter 取得
+activity，綁定 stable identity 與 monotonic sequence/head，並拒絕 replay、rollback、
+fabrication；屆時使用新的 verified contract，不能放寬此 current saved-workflow pure
+Interface。
+
+Missing private JSONL 保持 diagnostic `UNAVAILABLE`，size/mtime 也只作 diagnostic；
+repo 尚無 host activity-acquisition/controller Adapter，故實際 wait/no-delta/stop
+integration 是 `EXTERNAL_LIMIT`，不可因 helper 存在就宣稱已接入。Transcript 超過
+10 MiB 只可形成 `RUNAWAY_SUSPECT` 供 PM adjudicate，永不自動 stop，也永不冒充
+actual token usage。
 
 普通 task 的唯一預設是 `finite`，不具排下一 turn 或 `ScheduleWakeup` 的 authority。
 明示 `operator_loop` 先取得 persisted task admission；其 private fencing token 綁原始
@@ -565,11 +704,14 @@ single execution；未來只能由 host-attested verifier 取代，不能由 pac
   重算。
 - 目前 saved-workflow runtime 沒有完整可信 actual token/cache/tool telemetry，因此這些欄位
   必須 honest partial/unavailable；compiler estimate、budget cap 或模型 self-report 不是實測。
-- actual session spend 目前設計上**無 repo 端 cap**：邊界由 admission caps（fan-out /
-  retry / per-call planned prompt fail-closed）+ operator platform usage limit 聚合
-  backstop 構成；監測用 transcript-size proxy（見 sub-agent-hygiene-sop 的
+- actual session spend 目前只有 repo 端可驗的 structural count/state caps（calls/model
+  turns/follow-ups/waits/no-delta/concurrency/unique nodes/spawn depth）與 planned prompt
+  caps；wall/call/wave duration、in-flight cancellation 與 provider total-token cap 都是
+  machine-detectable `EXTERNAL_LIMIT`，不能被 repo 自報值取代。
+  operator platform usage limit 仍是聚合 backstop；監測用 transcript-size proxy（見
+  sub-agent-hygiene-sop 的
   Background-wave liveness 節，proxy 永不得充當 actual-usage accounting）；真 cap 延後至
-  runner 提供 turn/token limit 選項或 platform-attested telemetry 可得時再議。
+  runner 提供 turn/token/cancellation capability 或 platform-attested telemetry 可得時再議。
   另有 per-session 工程停點軟上限（§11「Session 資源邊界」）：它是停點紀律
   （到限落帳 checkpoint 換 session），不是 usage accounting，也不改本節的 accounting 真相。
 - Closure 後另以 immutable closure digest 綁 `closure_quality_followup_v1`，追蹤 reopen、
@@ -579,55 +721,105 @@ single execution；未來只能由 host-attested verifier 取代，不能由 pac
 節約判斷以 durable accepted closure 為分母，同時看 reopen/rework、false closure、P0/P1
 recall 與 lead time；不得用低報 usage 或少開 verifier 製造虛假效率。
 
+`multi_agent_efficiency_evaluation_v1` 對同一 case 比較 current、single-agent 與
+bounded-role 三個 profile。先判 closure quality/required coverage/decision-changing
+finding 的 non-inferiority，再比較 elapsed、input/output/cached tokens、calls、waits、
+retries、compactions、reopen/rework。Non-inferiority threshold 由 Registry exact policy
+固定為：
+
+- `max_closure_quality_score_drop=0.0`
+- `minimum_required_coverage_ratio=1.0`
+- `max_reopen_count_increase=0`
+- `max_rework_count_increase=0`
+- `max_false_closure_count_increase=0`
+- `minimum_p0_p1_recall_ratio=1.0`
+- `minimum_decision_changing_findings_retention_ratio=1.0`
+
+Registry authority 以 `allow_nan=false` canonical JSON bytes 做 type-sensitive 比對；
+重簽 digest 不能把 `0.0` 換成 integer `0`，也不能把 boolean `false` 換成 integer
+`0`。evaluation payload 不可自訂。Quality PASS 仍不等於 efficiency：Registry 的
+`all_axes_non_worse_and_one_strictly_better_v1` 要求 `elapsed_time_ms`、
+`input_tokens`、`output_tokens`、`cache_read_tokens`、`calls`、`waits`、`retries`
+與 `compactions` 八個 raw-value 軸全部小於或等於 current baseline，且至少一軸嚴格
+較小；任一軸缺值、全部相等或任一軸變差都不產生 efficiency candidate。這個 Pareto
+門同時約束 synthetic `benchmark_only_candidates` 與 measured claim；synthetic fixture
+仍只驗 schema 與 adjudicator，永遠不能成為 measured savings。
+
+實際節省另需 typed attestation index 綁唯一 run IDs、不可跨 run 重用且逐 profile
+長度 exact 等於已報告 `metrics.calls` 的 call-record inventory、metrics/attestation/index
+digests，再由帶外 trusted-host verifier 認證 exact index。`metrics.calls=0` 唯一匹配
+空 inventory；partial profile 的 `metrics.calls=null` 也只能綁空 inventory，不能一面
+聲稱 call count 不可得、一面列出未能 exact-cover 的 calls。每個已報告 call count 的
+profile 另須滿足 `retries <= calls`。Free-form ref 或 packet self-digest 永不解鎖
+measured；standalone CLI 固定 `EXTERNAL_LIMIT`。
+
 ## 7. Full Audit controller and consumption policy
 
-Full Audit 保留獨立 discovery、negative space、seam critic、原始 finding、雙質疑者與
-coverage holes。改進的是 scheduler，不是砍深度：
+Full Audit 保留獨立 discovery、negative space、seam critic、原始 finding 與
+coverage holes。saved workflow 的執行面固定為 13 axes + seam；data-dependent
+verification/fix 另屬 fresh host-attested phase：
 
 - 任何 model call 前先重驗 inline compiler-produced Context、exact task prompt/hard stops、
-  source freshness 與 Registry full-audit budget authority；caller 自簽 cap 或平行欄位 mismatch
-  以 0 calls fail closed，不能先花資源再等 Closure 拒絕。
+  source freshness、Registry full-audit budget authority，以及完整 14-node execution DAG
+  的 node identity／native role／predecessors／class／permission／count／digest；caller
+  自簽 cap、平行欄位或 DAG mismatch 以 0 calls fail closed。
 - baseline 必須是 structured object，包含 exact 40-hex source HEAD、dirty/untracked
   sha256；runtime-claim surfaces 再要求 runtime HEAD + observed_at。Truthy label 不算
   frozen generation。
-- discovery axes 包含獨立 source-review `E2`，且只接受 read-only audit presets；E4 是 fix
-  後 regression phase，TW 是 writer，兩者不能冒充 discovery axis。
-- scope/risk 觸發 mandatory axes，保留 rotating negative-space axis。
-- exact duplicate claim 可共用 deterministic evidence；同 symbol 的不同 assertion 不合併。
-- deterministic check 先於 LLM verification。
-- HIGH/CRITICAL outcome 至少有 source/impact 兩份 typed verifier vote；兩票分歧、CRITICAL
-  或高風險 defect 才要求第三份 reachability vote。Confirmed/refuted/disputed、dissent、
-  reachability 與 latent 狀態全部由 Closure validator 從 `verifier_votes` 重算，不能由
-  workflow boolean 自報。
+- discovery axes 包含獨立 source-review `E2`，且只接受 read-only audit presets；E4 與
+  TW 不在此 saved-workflow DAG，不能冒充 discovery axis 或由 post-call finding 動態加入。
+- `scheduler=full` 跑完整 13 discovery axes，這也是目前唯一可執行／closure 的模式。
+  Reduced `scheduler=adaptive`、`adaptive_shadow` 或 `full` 下的 axes subset 在首次
+  model call 前一律以 `EXTERNAL_LIMIT_RECALL_AUTHORITY` 拒絕。Task-contract
+  `claim_inputs`、boolean、self-digest、`claim_evidence` 或一般 execution attestation
+  都不是 recall/non-inferiority authority。只有未來獨立的
+  `PLATFORM_OR_EXTERNAL_ATTESTED` recall Adapter 加上帶外 host verifier 才可重新開啟；
+  standalone workflow／Closure 不能自行解鎖。Focused/no-finding 的 14→6 目前只是假設
+  candidate，不是可執行或已實現的節省。
+- exact duplicate claim 只作 presentation grouping；同 symbol 的不同 assertion 不合併。
+  deterministic structural check 後，每個 zero-outcome decision claim 均保存為 typed
+  `staged_claim_verification` debt，exact 綁定 `MAE-005`、
+  `REQUIRES_HOST_CAPABILITY_PHASE` 與 sorted unique `bound_axes`。它是
+  `UNVERIFIED`，不是已驗證的 dispute；跨 axis exact duplicate 共用一個 claim/debt，
+  其 binding 必須 exact-cover 全部原始 axis。
+- current saved workflow 不執行 verifier、third vote、E1 fix 或 E2 fix-review。任何此類
+  call 都必須建立新 task、由 host 取得 `MAE-005 /
+  EXTERNAL_LIMIT_NATIVE_SELECTOR_ATTESTATION` authority、先 compile 當輪 exact DAG；
+  否則呼叫數固定為 0，不能把缺席的 host phase 宣稱成 verification outcome。
+- Closure validator 仍可重算由「另行 admission、且 receipts exact-cover 新 DAG」產生的
+  typed verifier votes；這不授權 current saved workflow 自行生成那些節點。
 - `max_unique_nodes`、`max_call_attempts`、`retry_budget`、per-call exact UTF-8 byte cap 與
   UTF8-bytes/4 planned lower-bound caps 是不同 authority；後者不是 provider actual token
   telemetry，更不能把 residual claim 變 PASS。
-- admission accounting 必須涵蓋 audit、worst-case infrastructure relay、seam critic、
-  verifier reserve、optional E1/E2 fix pair 與 E4 regression；任何 phase 不得游離在
-  max calls/tokens 之外。Planned reserve 與 actual telemetry 分開。
+- current admission accounting 只涵蓋 13 audit first attempts、全局有界 audit
+  infrastructure retries 與 seam critic；不存在 verifier/fix speculative reserve。
+  Planned authority ceiling 與 actual telemetry 分開。
 - budget/agent cap 到達時留下 explicit coverage debt；結果至多 CONDITIONAL/UNVERIFIED。
-- Full Audit ceiling 使用 44 unique / 46 attempts（13 discovery + seam + 13 claims 的 two-view
-  challenge + 1 global risk-conditioned third vote + 3-node atomic fix chain，另含 2 retry attempts）；
-  這是 worst-case ceiling，不是每輪 target。`fix=true` 在 claim admission 前原子預留
-  E1 fix + E2 exact review + E4 regression。超出的 verification/fix work 只輸出
-  `full_audit_split_recommendation_v1` 與 exact coverage-debt digest；它不是 verdict authority。
+- Registry Full Audit policy 的 44 unique / 46 attempts 是未來 separately admitted
+  host phase 可用的 authority ceiling，不是 current 14-node workflow 的 reservation 或
+  actual usage。`fix=true` 只新增 MAE-005 host-phase debt，不產生 writer/reviewer call。
+  current 結果輸出 `full_audit_split_recommendation_v1` 與 exact coverage-debt digest；
+  它不是 verdict authority。
   下一輪必須建立新 task、重新 compile Context 並重建 evidence，不接受 caller checkpoint、
   inherited vote/fix 或 saved-workflow resume。這個 cold restart 刻意縮小未使用的 trust surface。
-- Workflow 另產唯一 `full_audit_control_v1` controller fragment 與 exact
-  `closure_admissions`，並附全 call manifest/wave record。Controller baseline、expected/admitted/deferred axes、debt/holes、
-  assumptions/disputes、seam 與 eligibility 由 Closure validator 重算；adaptive selection
-  由 routed surfaces + run sequence 重算，並需 hash-pinned recall authority。任一 admitted
-  axis 都需 controller-bound fragment digest，seam 與 verification outcome 也有內容 digest；
-  debt 用 canonical JSON lossless 投影。Low/refuted finding 可保留為
-  `PASS + DONE_WITH_CONCERNS`，但任何 debt、缺軸、dissent 或 decision-changing finding 都
+- Workflow 另產唯一 `full_audit_control_v1` controller fragment 與 ordered exact
+  14-node `closure_admissions`：13 個 `role_fragment` axis admissions 加最後一個
+  `nested_payload` `seam:critic` admission，且其 DAG core 與 Context binding 完全一致；
+  並附全 call manifest/wave record。Controller baseline、expected/admitted/deferred axes、debt/holes、
+  assumptions/disputes、seam 與 eligibility 由 Closure validator 重算；任何 reduced
+  selection 在缺少帶外 platform recall verifier 時直接保持 `EXTERNAL_LIMIT`。任一 admitted
+  axis 都需 controller-bound fragment digest，seam 有內容 digest，current
+  `verification_outcomes` 固定為空；debt 用 canonical JSON lossless 投影。Low/INFO
+  finding 可保留，但任何 debt、缺軸或 decision-changing finding 都
   不能被 PM 省略成 global PASS。
 - Raw finding 缺 title/assertion/evidence/file/symbol anchor 時不會消失；validator 由內容產生
-  stable claim debt，要求一對一投影。Optional E1 fix 只產 isolated、base/candidate head +
-  patch/diff digest 綁定的 candidate；E2 必須 review 同一 candidate。沒有外部
-  `APPLIED_VERIFIED` integration 就保持 `NOT_INTEGRATED` debt，E4 不得替未整合 candidate
-  製造 regression PASS。
-- adaptive 模式先 shadow benchmark；每 10 次或 30 日跑一次固定 backstop，直到 recall
-  non-inferiority 已證明。
+  stable claim debt，要求一對一投影。current workflow 的 `fixes=[]`、`regression=null`；
+  E4 不得替不存在或未整合的 host-phase candidate 製造 regression PASS。
+- `scheduler=full` backstop 與 candidate adaptive run 進相同
+  `multi_agent_efficiency_evaluation_v1`；必須先證 closure quality/recall
+  non-inferiority，並由帶外 host verifier 驗證 exact typed attestation，才可在未來啟用
+  adaptive 或把較少 calls/tokens/elapsed 視為收益。Caller-provided policy ref、
+  self-digest 或 synthetic evaluation 永遠不足。
 
 追蹤：accepted decision-changing findings/token、P0/P1 recall、false positive、verdict
 reversal、reopen rate、time-to-evidence、cache validity、retry/rework；不以 raw finding
@@ -669,6 +861,9 @@ python3 helper_scripts/maintenance_scripts/agent_governance.py authority @claims
 python3 helper_scripts/maintenance_scripts/agent_governance.py evidence-key @test_facts.json
 python3 helper_scripts/maintenance_scripts/agent_governance.py capture-command --native-agent E2 --node-id independent_review --context-artifact @context.json -- rg --version
 python3 helper_scripts/maintenance_scripts/agent_governance.py closure-quality @followup.json
+python3 helper_scripts/maintenance_scripts/agent_governance.py efficiency-evaluation @evaluation.json
+python3 helper_scripts/maintenance_scripts/codex_memory_policy_probe.py
+python3 helper_scripts/maintenance_scripts/role_memory_compaction.py --check
 ```
 
 ## 10. Acceptance
@@ -680,6 +875,7 @@ python3 helper_scripts/maintenance_scripts/agent_governance.py closure-quality @
 - Context/task contract、side-effect class、fragment 與 closure digest 全鏈一致。
 - Uncertainty 缺失、native identity/class/permission mismatch、DAG dependency 未完成時 0 calls fail closed。
 - Verdict-relevant `claim_inputs`、call manifest/wave、producer task/context/role/result 全鏈一致。
+- Requested model/effort/surface/history 與 execution-policy digest 全鏈一致，cap 後無下一 call。
 - Orchestrator structural ledger exact-cover 所有 captured waves；ghost/duplicate/omitted wave 不可 PASS。
 - `DONE+FAIL` valid；hard-gate FAIL 不可被 closure PASS 覆蓋。
 - Self-digest 只證 integrity；evidence-class substitution、stale authority 與假 consumption 不可支撐 PASS。
@@ -691,6 +887,8 @@ python3 helper_scripts/maintenance_scripts/agent_governance.py closure-quality @
   observation-window controls 未綁定時於 component invocation 前 fail closed；broker/external
   effect route 不可 PASS。
 - Adaptive Full Audit 或 profit diagnosis 未完成 coverage/controller binding 時不能 PASS。
+- Adaptive/full/single-agent efficiency 比較先過 quality non-inferiority；synthetic fixture
+  不可冒充平台實測節省。
 - Full/Profit inline Context 或 compiler budget authority 不相符時在首次 model call 前拒絕。
 - 重複結論不增長 role memory/per-role reports。
 

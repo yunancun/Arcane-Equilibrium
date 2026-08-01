@@ -1,0 +1,599 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://arcane-equilibrium.local/schemas/multi_agent_efficiency_evaluation_v1.schema.json",
+  "title": "multi_agent_efficiency_evaluation_v1",
+  "description": "One workload- and baseline-bound comparison of current, single-agent, and bounded-role execution profiles, bound to the exact Registry-owned quality and Pareto-improvement policy by ID and digest. Synthetic fixtures are benchmark inputs, never measured telemetry.",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "schema_version",
+    "evaluation_id",
+    "created_at",
+    "evidence_kind",
+    "workload",
+    "baseline",
+    "profiles",
+    "quality_noninferiority_policy",
+    "limitations",
+    "record_digest"
+  ],
+  "properties": {
+    "schema_version": {
+      "const": "multi_agent_efficiency_evaluation_v1"
+    },
+    "evaluation_id": {
+      "type": "string",
+      "minLength": 1
+    },
+    "created_at": {
+      "$ref": "#/$defs/timestamp"
+    },
+    "evidence_kind": {
+      "enum": [
+        "synthetic_fixture",
+        "platform_or_external_attested",
+        "mixed"
+      ]
+    },
+    "workload": {
+      "$ref": "#/$defs/workload"
+    },
+    "baseline": {
+      "$ref": "#/$defs/baseline"
+    },
+    "profiles": {
+      "type": "array",
+      "minItems": 3,
+      "maxItems": 3,
+      "items": {
+        "$ref": "#/$defs/profile"
+      }
+    },
+    "quality_noninferiority_policy": {
+      "$ref": "#/$defs/quality_policy_binding"
+    },
+    "limitations": {
+      "type": "array",
+      "minItems": 1,
+      "uniqueItems": true,
+      "items": {
+        "type": "string",
+        "minLength": 1
+      }
+    },
+    "record_digest": {
+      "$ref": "#/$defs/digest"
+    }
+  },
+  "allOf": [
+    {
+      "if": {
+        "properties": {
+          "evidence_kind": {
+            "const": "synthetic_fixture"
+          }
+        }
+      },
+      "then": {
+        "properties": {
+          "profiles": {
+            "items": {
+              "properties": {
+                "measurement_status": {
+                  "const": "synthetic"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    {
+      "if": {
+        "properties": {
+          "evidence_kind": {
+            "const": "platform_or_external_attested"
+          }
+        }
+      },
+      "then": {
+        "properties": {
+          "profiles": {
+            "items": {
+              "properties": {
+                "measurement_status": {
+                  "enum": [
+                    "measured",
+                    "partial",
+                    "unavailable"
+                  ]
+                }
+              }
+            }
+          }
+        }
+      }
+    }
+  ],
+  "$defs": {
+    "digest": {
+      "type": "string",
+      "pattern": "^sha256:[0-9a-f]{64}$"
+    },
+    "timestamp": {
+      "type": "string",
+      "format": "date-time"
+    },
+    "workload": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "workload_id",
+        "workload_digest",
+        "description"
+      ],
+      "properties": {
+        "workload_id": {
+          "type": "string",
+          "minLength": 1
+        },
+        "workload_digest": {
+          "$ref": "#/$defs/digest"
+        },
+        "description": {
+          "type": "string",
+          "minLength": 1
+        }
+      }
+    },
+    "baseline": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "baseline_id",
+        "baseline_digest",
+        "profile"
+      ],
+      "properties": {
+        "baseline_id": {
+          "type": "string",
+          "minLength": 1
+        },
+        "baseline_digest": {
+          "$ref": "#/$defs/digest"
+        },
+        "profile": {
+          "const": "current"
+        }
+      }
+    },
+    "profile": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "profile",
+        "workload_digest",
+        "baseline_digest",
+        "measurement_status",
+        "evidence_ref",
+        "evidence_digest",
+        "unavailable_reason",
+        "metrics"
+      ],
+      "properties": {
+        "profile": {
+          "enum": [
+            "current",
+            "single_agent",
+            "bounded_role"
+          ]
+        },
+        "workload_digest": {
+          "$ref": "#/$defs/digest"
+        },
+        "baseline_digest": {
+          "$ref": "#/$defs/digest"
+        },
+        "measurement_status": {
+          "enum": [
+            "synthetic",
+            "measured",
+            "partial",
+            "unavailable"
+          ]
+        },
+        "evidence_ref": {
+          "type": [
+            "string",
+            "null"
+          ],
+          "minLength": 1
+        },
+        "evidence_digest": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/digest"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "unavailable_reason": {
+          "type": [
+            "string",
+            "null"
+          ],
+          "minLength": 1
+        },
+        "metrics": {
+          "$ref": "#/$defs/nullable_metrics"
+        }
+      },
+      "allOf": [
+        {
+          "if": {
+            "properties": {
+              "measurement_status": {
+                "const": "synthetic"
+              }
+            }
+          },
+          "then": {
+            "properties": {
+              "evidence_ref": {
+                "type": "null"
+              },
+              "evidence_digest": {
+                "type": "null"
+              },
+              "unavailable_reason": {
+                "type": "null"
+              },
+              "metrics": {
+                "$ref": "#/$defs/complete_metrics"
+              }
+            }
+          }
+        },
+        {
+          "if": {
+            "properties": {
+              "measurement_status": {
+                "const": "measured"
+              }
+            }
+          },
+          "then": {
+            "properties": {
+              "evidence_ref": {
+                "type": "string",
+                "minLength": 1
+              },
+              "evidence_digest": {
+                "$ref": "#/$defs/digest"
+              },
+              "unavailable_reason": {
+                "type": "null"
+              },
+              "metrics": {
+                "$ref": "#/$defs/complete_metrics"
+              }
+            }
+          }
+        },
+        {
+          "if": {
+            "properties": {
+              "measurement_status": {
+                "const": "partial"
+              }
+            }
+          },
+          "then": {
+            "properties": {
+              "evidence_ref": {
+                "type": "string",
+                "minLength": 1
+              },
+              "evidence_digest": {
+                "$ref": "#/$defs/digest"
+              },
+              "unavailable_reason": {
+                "type": "string",
+                "minLength": 1
+              }
+            }
+          }
+        },
+        {
+          "if": {
+            "properties": {
+              "measurement_status": {
+                "const": "unavailable"
+              }
+            }
+          },
+          "then": {
+            "properties": {
+              "evidence_ref": {
+                "type": "null"
+              },
+              "evidence_digest": {
+                "type": "null"
+              },
+              "unavailable_reason": {
+                "type": "string",
+                "minLength": 1
+              },
+              "metrics": {
+                "$ref": "#/$defs/unavailable_metrics"
+              }
+            }
+          }
+        }
+      ]
+    },
+    "nullable_non_negative_integer": {
+      "anyOf": [
+        {
+          "type": "integer",
+          "minimum": 0
+        },
+        {
+          "type": "null"
+        }
+      ]
+    },
+    "nullable_score": {
+      "anyOf": [
+        {
+          "type": "number",
+          "minimum": 0,
+          "maximum": 1
+        },
+        {
+          "type": "null"
+        }
+      ]
+    },
+    "nullable_metrics": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "closure_quality_score",
+        "required_coverage_ratio",
+        "elapsed_time_ms",
+        "input_tokens",
+        "output_tokens",
+        "cache_read_tokens",
+        "calls",
+        "waits",
+        "retries",
+        "compactions",
+        "reopen_count",
+        "rework_count",
+        "false_closure_count",
+        "p0_p1_recall_ratio",
+        "decision_changing_findings"
+      ],
+      "properties": {
+        "closure_quality_score": {
+          "$ref": "#/$defs/nullable_score"
+        },
+        "required_coverage_ratio": {
+          "$ref": "#/$defs/nullable_score"
+        },
+        "elapsed_time_ms": {
+          "$ref": "#/$defs/nullable_non_negative_integer"
+        },
+        "input_tokens": {
+          "$ref": "#/$defs/nullable_non_negative_integer"
+        },
+        "output_tokens": {
+          "$ref": "#/$defs/nullable_non_negative_integer"
+        },
+        "cache_read_tokens": {
+          "$ref": "#/$defs/nullable_non_negative_integer"
+        },
+        "calls": {
+          "$ref": "#/$defs/nullable_non_negative_integer"
+        },
+        "waits": {
+          "$ref": "#/$defs/nullable_non_negative_integer"
+        },
+        "retries": {
+          "$ref": "#/$defs/nullable_non_negative_integer"
+        },
+        "compactions": {
+          "$ref": "#/$defs/nullable_non_negative_integer"
+        },
+        "reopen_count": {
+          "$ref": "#/$defs/nullable_non_negative_integer"
+        },
+        "rework_count": {
+          "$ref": "#/$defs/nullable_non_negative_integer"
+        },
+        "false_closure_count": {
+          "$ref": "#/$defs/nullable_non_negative_integer"
+        },
+        "p0_p1_recall_ratio": {
+          "$ref": "#/$defs/nullable_score"
+        },
+        "decision_changing_findings": {
+          "$ref": "#/$defs/nullable_non_negative_integer"
+        }
+      }
+    },
+    "complete_metrics": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "closure_quality_score",
+        "required_coverage_ratio",
+        "elapsed_time_ms",
+        "input_tokens",
+        "output_tokens",
+        "cache_read_tokens",
+        "calls",
+        "waits",
+        "retries",
+        "compactions",
+        "reopen_count",
+        "rework_count",
+        "false_closure_count",
+        "p0_p1_recall_ratio",
+        "decision_changing_findings"
+      ],
+      "properties": {
+        "closure_quality_score": {
+          "type": "number",
+          "minimum": 0,
+          "maximum": 1
+        },
+        "required_coverage_ratio": {
+          "type": "number",
+          "minimum": 0,
+          "maximum": 1
+        },
+        "elapsed_time_ms": {
+          "type": "integer",
+          "minimum": 0
+        },
+        "input_tokens": {
+          "type": "integer",
+          "minimum": 0
+        },
+        "output_tokens": {
+          "type": "integer",
+          "minimum": 0
+        },
+        "cache_read_tokens": {
+          "type": "integer",
+          "minimum": 0
+        },
+        "calls": {
+          "type": "integer",
+          "minimum": 0
+        },
+        "waits": {
+          "type": "integer",
+          "minimum": 0
+        },
+        "retries": {
+          "type": "integer",
+          "minimum": 0
+        },
+        "compactions": {
+          "type": "integer",
+          "minimum": 0
+        },
+        "reopen_count": {
+          "type": "integer",
+          "minimum": 0
+        },
+        "rework_count": {
+          "type": "integer",
+          "minimum": 0
+        },
+        "false_closure_count": {
+          "type": "integer",
+          "minimum": 0
+        },
+        "p0_p1_recall_ratio": {
+          "type": "number",
+          "minimum": 0,
+          "maximum": 1
+        },
+        "decision_changing_findings": {
+          "type": "integer",
+          "minimum": 0
+        }
+      }
+    },
+    "unavailable_metrics": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "closure_quality_score",
+        "required_coverage_ratio",
+        "elapsed_time_ms",
+        "input_tokens",
+        "output_tokens",
+        "cache_read_tokens",
+        "calls",
+        "waits",
+        "retries",
+        "compactions",
+        "reopen_count",
+        "rework_count",
+        "false_closure_count",
+        "p0_p1_recall_ratio",
+        "decision_changing_findings"
+      ],
+      "properties": {
+        "closure_quality_score": {
+          "type": "null"
+        },
+        "required_coverage_ratio": {
+          "type": "null"
+        },
+        "elapsed_time_ms": {
+          "type": "null"
+        },
+        "input_tokens": {
+          "type": "null"
+        },
+        "output_tokens": {
+          "type": "null"
+        },
+        "cache_read_tokens": {
+          "type": "null"
+        },
+        "calls": {
+          "type": "null"
+        },
+        "waits": {
+          "type": "null"
+        },
+        "retries": {
+          "type": "null"
+        },
+        "compactions": {
+          "type": "null"
+        },
+        "reopen_count": {
+          "type": "null"
+        },
+        "rework_count": {
+          "type": "null"
+        },
+        "false_closure_count": {
+          "type": "null"
+        },
+        "p0_p1_recall_ratio": {
+          "type": "null"
+        },
+        "decision_changing_findings": {
+          "type": "null"
+        }
+      }
+    },
+    "quality_policy_binding": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "policy_id",
+        "policy_digest"
+      ],
+      "properties": {
+        "policy_id": {
+          "const": "gpt56_multi_agent_quality_noninferiority_v1"
+        },
+        "policy_digest": {
+          "const": "sha256:bec62dfd2f581a3bb22c79edc14ef48eab17b161d5a642d45f6160e5f59b6a6e"
+        }
+      }
+    }
+  }
+}

@@ -3,6 +3,7 @@ from __future__ import annotations
 import hashlib
 import importlib.util
 import json
+import re
 import subprocess
 import sys
 from copy import deepcopy
@@ -28,6 +29,10 @@ ADMITTED_CAP_FIELDS = (
     "max_context_tokens_per_call", "max_prompt_utf8_bytes_per_call",
     "max_workflow_planned_input_tokens", "max_unique_nodes",
     "max_call_attempts", "retry_budget",
+    "max_followup_attempts", "max_total_model_turns", "max_wait_cycles",
+    "max_no_delta_wakeups", "max_wall_clock_ms", "max_call_duration_ms",
+    "max_wave_duration_ms", "max_concurrent_calls",
+    "max_spawn_depth_from_root",
 )
 NODE_STDIN_ARGS = "JSON.parse(fs.readFileSync(0, 'utf8'))"
 
@@ -254,13 +259,9 @@ def _fragment(
 
 
 def _refresh_profit_lineage(governance: object, packet: dict) -> None:
-    context = packet["dispatch"]["context_artifact"]
     task = packet["dispatch"]["task_facts"]
-    task_digest = context["task_contract_digest"]
-    context_digest = context["artifact_digest"]
     dirty_scope = task["dirty_scope"]
     focus = task.get("focus", "")
-    workflow_digest = _digest({"workflow": "profit-fixture", "context": context_digest})
     observed = packet["adjudicated_at"]
     controller = _controller_fragment(packet)
     fragment_by_node = {
@@ -268,12 +269,56 @@ def _refresh_profit_lineage(governance: object, packet: dict) -> None:
         for fragment in packet["role_fragments"]
         if fragment is not controller
     }
-    dag_nodes, projection_errors = governance.delegated_execution_projection(
+    dag_nodes, projection_errors = governance.task_execution_projection(
         packet["dispatch"]["required_role_nodes"],
         packet["dispatch"]["admitted_role_nodes"],
-        excluded_nodes=governance.non_call_controller_node_ids(task),
+        task_facts=task,
     )
     assert projection_errors == [], projection_errors
+    context_plan = governance.compile_context(
+        "PM",
+        task,
+        execution_dag=dag_nodes,
+    )
+    context = governance.materialize_context_artifact(context_plan)
+    packet["dispatch"]["context_artifact"] = context
+    source_by_name = {
+        source["source"]: source
+        for source in context_plan["sources"]
+    }
+    packet["authority_refs"] = [
+        governance.build_authority_claim(
+            authority_class=claim["class"],
+            subject=claim["subject"],
+            value=claim["value"],
+            source=claim["source"],
+            source_ref=claim["source_ref"],
+            source_digest=source_by_name[claim["source"]]["content_digest"],
+            observed_at=source_by_name[claim["source"]]["observed_at"],
+            scope=claim["scope"],
+            strength=claim["strength"],
+            expiry=claim["expiry"],
+        )
+        if (
+            isinstance(claim, dict)
+            and claim.get("source_ref") == f"context:{claim.get('source')}"
+            and claim.get("source") in source_by_name
+        )
+        else claim
+        for claim in packet["authority_refs"]
+    ]
+    task_digest = context["task_contract_digest"]
+    context_digest = context["artifact_digest"]
+    workflow_digest = _digest(
+        {"workflow": "profit-fixture", "context": context_digest}
+    )
+    for fragment in packet["role_fragments"]:
+        fragment["task_contract_digest"] = task_digest
+    controller["payload"].update({
+        "task_contract_digest": task_digest,
+        "context_artifact_digest": context_digest,
+        "budget_authority_digest": context["budget_authority_digest"],
+    })
     execution_waves, topology_errors = governance.topological_waves(dag_nodes)
     assert topology_errors == [], topology_errors
     dag_digest = governance.execution_dag_digest(dag_nodes)
@@ -307,9 +352,12 @@ def _refresh_profit_lineage(governance: object, packet: dict) -> None:
                     "node_class": task_spec["node_class"],
                     "permission": task_spec["permission"],
                 },
+                **governance.requested_execution_binding(governance.load_registry()),
                 "node_class": task_spec["node_class"],
                 "permission": task_spec["permission"],
-                "model": None, "effort": None, "isolation": None,
+                "model": governance.load_registry()["saved_workflow_model_policy"]["role_models"][fragment["role"]],
+                "effort": governance.load_registry()["saved_workflow_model_policy"]["role_efforts"][fragment["role"]],
+                "isolation": None,
             },
             prompt_digest=_digest({"prompt": node}), context_artifact_digest=context_digest,
             task_contract_digest=task_digest, dirty_scope_digest=_digest(dirty_scope),
@@ -352,34 +400,20 @@ def _refresh_profit_lineage(governance: object, packet: dict) -> None:
         "compiler_estimated_input_tokens": 0, "admitted_input_tokens_lower_bound": 0,
     } for task_spec in dag_nodes]
     authority = __import__("json").loads(context["budget_authority_canonical"])
-    wave_core = {
-        "schema_version": "workflow_wave_record_v1", "workflow_contract_digest": workflow_digest,
-        "dag_digest": dag_digest,
-        "execution_waves": execution_waves,
-        "context_artifact_digests": {item["node_id"]: context_digest for item in admitted_tasks},
-        "compiler_planned_input_tokens_lower_bound": 0,
-        "admitted_planned_input_tokens_lower_bound": 0,
-        "scheduled_call_compiler_input_tokens_lower_bound": 0,
-        "scheduled_call_admitted_input_tokens_lower_bound": 0,
-        "admitted_tasks": admitted_tasks, "call_manifest_digest": manifest["manifest_digest"],
-        "call_record_digests": [call["record_digest"] for call in calls],
-        "first_attempt_call_count": len(calls), "retry_call_count": 0,
-        "null_call_count": 0, "final_null_node_count": 0,
-        "coverage_debt": [],
-        "budget_authority": {
+    wave = governance.build_workflow_wave_record(
+        manifest=manifest,
+        admitted_tasks=admitted_tasks,
+        budget_authority={
             "authority_digest": context["budget_authority_digest"],
             "authority_canonical": context["budget_authority_canonical"],
-            "admitted_caps": {
-                field: authority[field] for field in ADMITTED_CAP_FIELDS
-            },
+            "admitted_caps": governance.execution_admitted_caps(authority),
         },
-        "result_fragment_digests": result_fragments,
-        "accounting_boundary": {
+        result_fragment_digests=result_fragments,
+        accounting_boundary={
             "usage_measurement_status": "unavailable", "controller_overhead_status": "unavailable",
             "excluded_from_token_lower_bounds": ["semantic fixture has no platform telemetry or compiler estimate"],
         },
-    }
-    wave = {**wave_core, "record_digest": _digest(wave_core)}
+    )
     control = controller["payload"]
     control.update({
         "workflow_contract_digest": workflow_digest,
@@ -508,15 +542,7 @@ def _clean_packet() -> tuple[object, dict, dict]:
     evidence_axes = contract["evidence_axes"]
     probe_axes = contract["probe_axes"]
     role_by_probe = {axis: ("QC" if axis == "EXT" else axis) for axis in probe_axes}
-    role_fragments = [
-        _fragment(
-            registry,
-            node_id="pa_design",
-            role="PA",
-            task_contract_digest=task_contract_digest,
-            payload={"node": "pa_design"},
-        )
-    ]
+    role_fragments = []
     diagnosis_fragments = []
     for axis in evidence_axes:
         diagnosis_fragments.append(
@@ -627,15 +653,17 @@ def _clean_packet() -> tuple[object, dict, dict]:
         }
         for fragment in diagnosis_fragments
     ]
-    diagnosis_node_ids = [binding["node_id"] for binding in bindings]
+    fixed_dag, fixed_dag_errors = governance.task_execution_projection(
+        route["required_role_nodes"],
+        [],
+        task_facts=route["task_facts"],
+    )
+    assert fixed_dag_errors == [], fixed_dag_errors
+    fixed_by_node = {node["node_id"]: node for node in fixed_dag}
     admissions = [
         {
             **binding,
-            "requires": (
-                sorted(node for node in diagnosis_node_ids if node != "map:PA")
-                if binding["node_id"] == "map:PA"
-                else ["pa_design"]
-            ),
+            "requires": fixed_by_node[binding["node_id"]]["requires"],
             "path_scope": [], "result_binding": "role_fragment",
         }
         for binding in bindings
@@ -862,7 +890,6 @@ def _defer_probe(packet: dict, axis: str) -> None:
             "unverified": [projection],
         }
     )
-    _refresh_profit_lineage(_load_governance(), packet)
 
 
 def test_profit_control_clean_packet_passes_public_closure_validation() -> None:
@@ -1195,7 +1222,11 @@ def test_profit_control_rejects_rehashed_non_contract_fragment_payloads() -> Non
 def test_profit_control_cannot_cherry_pick_a_deferred_probe_or_omit_its_debt() -> None:
     governance, _contract, packet = _clean_packet()
     _defer_probe(packet, "EXT")
-    assert governance.validate_closure(packet) == []
+    assert any(
+        "specialized profit_diagnosis dispatch omits fixed call admission probe:EXT"
+        in error
+        for error in governance.validate_closure(packet)
+    )
 
     control = _control(packet)
     control["coverage_debt"] = []
@@ -1484,12 +1515,27 @@ const source = fs.readFileSync(__WORKFLOW__, 'utf8').replace('export const meta 
 const runner = new AsyncFunction('args', 'phase', 'log', 'parallel', 'agent', source);
 const prompts = [];
 const injectNull = __INJECT_NULL__;
+const persistentNull = __PERSISTENT_NULL__;
+const persistentProbeNull = __PERSISTENT_PROBE_NULL__;
 const runtimeFact = __RUNTIME_FACT__;
 const oversizedProbe = __OVERSIZED_PROBE__;
+const reverseCompletion = __REVERSE_COMPLETION__;
 const consumption = { measurement_status: 'unavailable', unavailable_reason: 'harness' };
 const agent = async (prompt, options) => {
   prompts.push({ prompt, label: options.label });
+  if (reverseCompletion) {
+    const delay = {
+      'evidence:OPS': 60, 'evidence:MIT': 30, 'evidence:AI-E': 0,
+      'probe:QC': 60, 'probe:BB': 30, 'probe:IB': 0,
+      'probe:MIT': 60, 'probe:AI-E': 30, 'probe:EXT': 0,
+    }[options.label] || 0;
+    if (delay) await new Promise(resolve => setTimeout(resolve, delay));
+  }
   if (injectNull && options.label === 'evidence:OPS') return null;
+  if (
+    persistentNull &&
+    ['evidence:OPS', 'evidence-relay:OPS'].includes(options.label)
+  ) return null;
   if (options.label.startsWith('evidence:') || options.label.startsWith('evidence-relay:')) {
     const axis = options.label.split(':').at(-1);
     const unattested = runtimeFact && axis === 'OPS';
@@ -1497,6 +1543,7 @@ const agent = async (prompt, options) => {
   }
   if (options.label.startsWith('probe:') || options.label.startsWith('probe-relay:')) {
     const axis = options.label.split(':').at(-1);
+    if (persistentProbeNull && axis === 'QC') return null;
     const negative = oversizedProbe && axis === 'QC' ? 'Z'.repeat(2000000) : `${axis} searched with no supported move`;
     return { schema_version: 'profit_probe_fragment_v2', axis, work_status: 'DONE', verdict: 'NO_EVIDENCE', diagnoses: [], opportunities: [], evidence_refs: ['ev-repo-authority'], negative_search_summary: negative, next_experiments: [`repeat ${axis} after fresh evidence`], consumption };
   }
@@ -1505,14 +1552,25 @@ const agent = async (prompt, options) => {
 };
 const parallel = async jobs => Promise.all(jobs.map(job => job()));
 (async () => {
-  const result = await runner(__ARGS__, () => {}, () => {}, parallel, agent);
-  console.log(JSON.stringify({ result, prompts }));
-})().catch(error => { console.error(error); process.exit(1); });
+  try {
+    const result = await runner(__ARGS__, () => {}, () => {}, parallel, agent);
+    console.log(JSON.stringify({ result, prompts }));
+  } catch (error) {
+    console.log(JSON.stringify({
+      _error: String(error.message || error), prompts,
+      _error_code: error.error_code || null,
+      _surface: error.surface || null,
+      _extra_node_ids: error.extra_node_ids || null,
+    }));
+  }
+})();
 """
 
     def run(
         run_args: dict, *, map_ready: bool, null_first: bool = False,
-        runtime_fact: bool = False, oversized_probe: bool = False,
+        persistent_null: bool = False, runtime_fact: bool = False,
+        persistent_probe_null: bool = False, oversized_probe: bool = False,
+        reverse_completion: bool = False,
     ) -> dict:
         script = (
             script_template.replace(
@@ -1522,8 +1580,19 @@ const parallel = async jobs => Promise.all(jobs.map(job => job()));
             .replace("__ARGS__", NODE_STDIN_ARGS)
             .replace("__MAP_READY__", "true" if map_ready else "false")
             .replace("__INJECT_NULL__", "true" if null_first else "false")
+            .replace(
+                "__PERSISTENT_NULL__", "true" if persistent_null else "false"
+            )
+            .replace(
+                "__PERSISTENT_PROBE_NULL__",
+                "true" if persistent_probe_null else "false",
+            )
             .replace("__RUNTIME_FACT__", "true" if runtime_fact else "false")
             .replace("__OVERSIZED_PROBE__", "true" if oversized_probe else "false")
+            .replace(
+                "__REVERSE_COMPLETION__",
+                "true" if reverse_completion else "false",
+            )
         )
         completed = subprocess.run(
             ["node", "-e", script],
@@ -1538,6 +1607,254 @@ const parallel = async jobs => Promise.all(jobs.map(job => job()));
         return json.loads(completed.stdout)
 
     output = run(args, map_ready=True)
+    divergent_artifact = deepcopy(context_artifact)
+    divergent_plan = json.loads(divergent_artifact["canonical_plan"])
+    bound_nodes = divergent_plan["execution_dag_binding"]["nodes"]
+    divergent_plan["execution_dag_binding"] = __import__(
+        "agent_governance_execution_dag"
+    ).compile_context_execution_dag_binding(bound_nodes[:1])
+    divergent_artifact["canonical_plan"] = _canonical(divergent_plan)
+    divergent_artifact["artifact_digest"] = governance.context_plan_digest(
+        divergent_plan
+    )
+    divergent = run(
+        {**args, "context_artifact": divergent_artifact},
+        map_ready=True,
+    )
+    assert divergent["prompts"] == []
+    assert "execution DAG binding differs" in divergent["_error"]
+    assert divergent["_error_code"] is None
+
+    def extra(node_id: str) -> dict:
+        return {
+            "node_id": node_id,
+            "role": "E2",
+            "native_agent": "E2",
+            "requires": ["map:PA"],
+            "node_class": "verification",
+            "permission": "read_only",
+        }
+
+    def artifact_with_nodes(nodes: list[dict]) -> dict:
+        candidate = deepcopy(context_artifact)
+        candidate_plan = json.loads(candidate["canonical_plan"])
+        candidate_plan["execution_dag_binding"] = __import__(
+            "agent_governance_execution_dag"
+        ).compile_context_execution_dag_binding(nodes)
+        candidate["canonical_plan"] = _canonical(candidate_plan)
+        candidate["artifact_digest"] = governance.context_plan_digest(
+            candidate_plan
+        )
+        return candidate
+
+    def artifact_with_routed_nodes(
+        nodes: list[dict],
+        contract_updates: dict | None = None,
+    ) -> dict:
+        candidate = deepcopy(context_artifact)
+        candidate_plan = json.loads(candidate["canonical_plan"])
+        candidate_plan["task_contract"].update(
+            contract_updates or {"end_to_end_claim": True}
+        )
+        candidate_plan["task_contract_digest"] = governance.task_contract_digest(
+            candidate_plan["task_contract"]
+        )
+        candidate_plan["execution_dag_binding"] = __import__(
+            "agent_governance_execution_dag"
+        ).compile_context_execution_dag_binding(nodes)
+        candidate.update(
+            __import__(
+                "agent_governance_context_projection"
+            ).materialize_semantic_context(
+                candidate_plan,
+                governance.load_registry(),
+            )
+        )
+        candidate["task_contract_digest"] = candidate_plan[
+            "task_contract_digest"
+        ]
+        candidate["canonical_plan"] = _canonical(candidate_plan)
+        candidate["artifact_digest"] = governance.context_plan_digest(
+            candidate_plan
+        )
+        return candidate
+
+    business_acceptance = {
+        "node_id": "business_acceptance",
+        "role": "QA",
+        "native_agent": "QA",
+        "requires": [],
+        "node_class": "verification",
+        "permission": "read_only",
+    }
+
+    unrelated_superset = run(
+        {
+            **args,
+            "context_artifact": artifact_with_nodes([
+                *bound_nodes, extra("extra:unrouted"),
+            ]),
+        },
+        map_ready=True,
+    )
+    assert unrelated_superset["prompts"] == []
+    assert "does not authorize the exact task route" in unrelated_superset["_error"]
+    assert unrelated_superset["_error_code"] is None
+
+    superset = run(
+        {
+            **args,
+            "context_artifact": artifact_with_routed_nodes([
+                *bound_nodes, business_acceptance,
+            ]),
+        },
+        map_ready=True,
+    )
+    assert superset["prompts"] == []
+    assert superset["_error_code"] == "SPECIALIZED_WORKFLOW_SPLIT_REQUIRED"
+    assert superset["_surface"] == "profit_diagnosis"
+    assert superset["_extra_node_ids"] == ["business_acceptance"]
+
+    for forged_route in (
+        artifact_with_routed_nodes(bound_nodes),
+        artifact_with_routed_nodes(
+            [*bound_nodes, business_acceptance],
+            {
+                "end_to_end_claim": False,
+                "surfaces": ["full_audit", "profit_diagnosis"],
+            },
+        ),
+    ):
+        rejected = run(
+            {**args, "context_artifact": forged_route},
+            map_ready=True,
+        )
+        assert rejected["prompts"] == []
+        assert "does not authorize the exact task route" in rejected["_error"]
+        assert rejected["_error_code"] is None
+
+    effectful_specialized = run(
+        {
+            **args,
+            "context_artifact": artifact_with_routed_nodes(
+                bound_nodes,
+                {
+                    "runtime_claim": True,
+                    "side_effect_class": "target_host_probe",
+                    "surfaces": ["profit_diagnosis", "runtime_effect"],
+                },
+            ),
+        },
+        map_ready=True,
+    )
+    assert effectful_specialized["prompts"] == []
+    assert (
+        "does not authorize the exact task route"
+        in effectful_specialized["_error"]
+    )
+    assert effectful_specialized["_error_code"] is None
+
+    fixed_ids = {node["node_id"] for node in bound_nodes}
+    for source_write_updates in (
+        {
+            "task_shape": "implementation",
+            "side_effect_class": "repo_write",
+            "surfaces": ["profit_diagnosis", "python"],
+        },
+        {
+            "task_shape": "docs",
+            "side_effect_class": "docs_write",
+            "surfaces": ["docs", "profit_diagnosis"],
+        },
+        {
+            "task_shape": "test",
+            "side_effect_class": "local_test",
+            "surfaces": ["profit_diagnosis", "python"],
+        },
+    ):
+        source_write_contract = deepcopy(
+            json.loads(context_artifact["canonical_plan"])["task_contract"]
+        )
+        source_write_contract.update(source_write_updates)
+        source_write_route = governance.route_task(source_write_contract)
+        source_write_projection, source_write_errors = __import__(
+            "agent_governance_execution_dag"
+        ).task_execution_projection(
+            source_write_route["required_role_nodes"],
+            [],
+            task_facts=source_write_route["task_facts"],
+            registry=governance.load_registry(),
+        )
+        assert source_write_errors == []
+        source_write_extra_ids = sorted(
+            node["node_id"]
+            for node in source_write_projection
+            if node["node_id"] not in fixed_ids
+        )
+        assert source_write_extra_ids
+        source_write_split = run(
+            {
+                **args,
+                "context_artifact": artifact_with_routed_nodes(
+                    source_write_projection,
+                    source_write_updates,
+                ),
+            },
+            map_ready=True,
+        )
+        assert source_write_split["prompts"] == []
+        assert source_write_split["_error_code"] == (
+            "SPECIALIZED_WORKFLOW_SPLIT_REQUIRED"
+        )
+        assert source_write_split["_surface"] == "profit_diagnosis"
+        assert source_write_split["_extra_node_ids"] == source_write_extra_ids
+
+    omitted_nodes = [
+        deepcopy(node)
+        for node in bound_nodes
+        if node["node_id"] != "probe:EXT"
+    ]
+    next(
+        node for node in omitted_nodes if node["node_id"] == "map:PA"
+    )["requires"].remove("probe:EXT")
+    mixed_omission = run(
+        {
+            **args,
+            "context_artifact": artifact_with_routed_nodes([
+                *omitted_nodes, business_acceptance,
+            ]),
+        },
+        map_ready=True,
+    )
+    assert mixed_omission["prompts"] == []
+    assert "execution DAG binding differs" in mixed_omission["_error"]
+    assert mixed_omission["_error_code"] is None
+
+    substituted_nodes = deepcopy(bound_nodes)
+    next(
+        node for node in substituted_nodes
+        if node["node_id"] == "evidence:AI-E"
+    ).update({"role": "E2", "native_agent": "E2"})
+    mixed_substitution = run(
+        {
+            **args,
+            "context_artifact": artifact_with_routed_nodes([
+                *substituted_nodes, business_acceptance,
+            ]),
+        },
+        map_ready=True,
+    )
+    assert mixed_substitution["prompts"] == []
+    assert "execution DAG binding differs" in mixed_substitution["_error"]
+    assert mixed_substitution["_error_code"] is None
+
+    tier_override = run(
+        {**args, "cheap_model": "claude-sonnet-5"}, map_ready=True
+    )
+    assert (
+        "cannot override Registry saved-workflow model policy"
+        in tier_override["_error"]
+    )
     oversized = run(args, map_ready=False, oversized_probe=True)
     assert "call map:PA final bound prompt exceeds" in oversized["_error"]
     assert governance.validate_workflow_call_manifest(
@@ -1567,6 +1884,123 @@ const parallel = async jobs => Promise.all(jobs.map(job => job()));
     assert retried["workflow_wave_record"]["null_call_count"] == 1
     assert retried["workflow_wave_record"]["retry_call_count"] == 1
     assert retried["workflow_wave_record"]["final_null_node_count"] == 0
+    # Each parallel batch completes in reverse admission order; the externally
+    # visible receipts must remain in canonical DAG order, including retries.
+    reverse_retried = run(
+        args, map_ready=True, null_first=True, reverse_completion=True
+    )["result"]
+    execution_waves = reverse_retried["workflow_wave_record"]["execution_waves"]
+    canonical_position = {
+        node_id: (wave_index, task_position)
+        for wave_index, wave in enumerate(execution_waves)
+        for task_position, node_id in enumerate(wave)
+    }
+    reverse_records = reverse_retried["call_manifest"]["records"]
+    assert [
+        (record["node_id"], record["attempt"]) for record in reverse_records
+    ] == [
+        (record["node_id"], record["attempt"])
+        for record in sorted(
+            reverse_records,
+            key=lambda record: (
+                *canonical_position[record["node_id"]],
+                record["attempt"],
+            ),
+        )
+    ]
+    assert [
+        task["node_id"]
+        for task in reverse_retried["workflow_wave_record"]["admitted_tasks"]
+    ] == [node_id for wave in execution_waves for node_id in wave]
+    assert all(
+        record["topological_wave"]
+        == canonical_position[record["node_id"]][0]
+        for record in reverse_records
+    )
+    def call_semantics(records: list[dict]) -> list[dict]:
+        return [
+            {
+                key: record[key]
+                for key in (
+                    "logical_call_id", "node_id", "payload_kind", "attempt",
+                    "retry_parent_call_id", "requested", "requires",
+                    "topological_wave", "prompt_digest",
+                    "compiler_input_tokens_lower_bound",
+                    "admitted_input_tokens_lower_bound", "returned_null",
+                    "parsed_result_digest",
+                )
+            } | {"producer_nodes": sorted(record["producer_generation"])}
+            for record in records
+        ]
+
+    assert call_semantics(reverse_records) == call_semantics(
+        retried["call_manifest"]["records"]
+    )
+    budget_fields = (
+        "compiler_planned_input_tokens_lower_bound",
+        "admitted_planned_input_tokens_lower_bound",
+        "scheduled_call_compiler_input_tokens_lower_bound",
+        "scheduled_call_admitted_input_tokens_lower_bound",
+        "first_attempt_call_count", "retry_call_count", "null_call_count",
+        "final_null_node_count", "budget_authority",
+    )
+    assert {
+        field: reverse_retried["workflow_wave_record"][field]
+        for field in budget_fields
+    } == {
+        field: retried["workflow_wave_record"][field]
+        for field in budget_fields
+    }
+    def result_projection(result: dict) -> list[dict]:
+        return [
+            {
+                key: fragment[key]
+                for key in (
+                    "node_id", "payload_kind", "work_status", "gate_verdict",
+                    "consumption", "payload",
+                )
+            }
+            for fragment in result["role_fragments"]
+            if fragment["node_id"] in canonical_position
+        ]
+
+    assert result_projection(reverse_retried) == result_projection(retried)
+    persistent_null = run(args, map_ready=True, persistent_null=True)
+    assert "result" not in persistent_null
+    assert (
+        "mandatory profit evidence did not complete; refusing to emit "
+        "workflow_wave_record_v1"
+    ) in persistent_null["_error"]
+    assert "evidence:OPS" in persistent_null["_error"]
+    persistent_labels = [item["label"] for item in persistent_null["prompts"]]
+    assert persistent_labels == [
+        "evidence:OPS",
+        "evidence:MIT",
+        "evidence:AI-E",
+        "evidence-relay:OPS",
+    ]
+    assert not any(
+        label.startswith(("probe:", "probe-relay:"))
+        or label.startswith("profit-map")
+        for label in persistent_labels
+    )
+    persistent_probe = run(
+        args, map_ready=True, persistent_probe_null=True
+    )
+    assert "result" not in persistent_probe
+    assert (
+        "mandatory profit probe did not complete; refusing to call dependent "
+        "map or emit workflow_wave_record_v1"
+    ) in persistent_probe["_error"]
+    assert "probe:QC" in persistent_probe["_error"]
+    persistent_probe_labels = [
+        item["label"] for item in persistent_probe["prompts"]
+    ]
+    assert "probe:QC" in persistent_probe_labels
+    assert "probe-relay:QC" in persistent_probe_labels
+    assert not any(
+        label.startswith("profit-map") for label in persistent_probe_labels
+    )
     unattested = run(args, map_ready=False, runtime_fact=True)["result"]
     assert {
         "kind": "evidence_fact", "id": "OPS:OPS-fact-1",
@@ -1642,7 +2076,7 @@ const parallel = async jobs => Promise.all(jobs.map(job => job()));
     assert any(_canonical(priors) in prompt for prompt in rendered_prompts)
     workflow_source = (ROOT / ".claude/workflows/profit-diagnosis.js").read_text()
     assert all(token in workflow_source for token in ("measurement_source", "telemetry_digest", "missing_metrics", "retry_count", "wall_time_ms", "rework_count"))
-    assert "720000" not in workflow_source
+    assert re.search(r"(?<!\d)720000(?!\d)", workflow_source) is None
     assert "maxAgents > 24" not in workflow_source
     assert "retryBudget > 4" not in workflow_source
     assert all(
