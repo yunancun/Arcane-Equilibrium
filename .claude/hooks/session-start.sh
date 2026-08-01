@@ -14,12 +14,13 @@ fi
 
 out=$(printf '%s\n' \
   '<workflow-hot-rules>' \
-  '1. 路由:先依 .codex/agent_registry_v1.json 綁 task facts/role/context;skill 只按對口 surface 載入,禁 universal preload。' \
-  '2. hybrid DAG:source implementation 必有獨立 E2→E4;authority/runtime/venue/quant-ML/E2E 依 facts 加 owner,其餘按 decision value;skip 留 residual risk。' \
-  '3. closure_packet_v1 分 work_status/gate_verdict/disposition;DONE+FAIL 合法;缺 evidence/budget/coverage 不得 PASS;禁無變更同模型裸重試。' \
-  '4. rtk:Bash 輸出已被 hook 自動壓縮;exit≠0 而摘要看似全綠→必讀輸出尾 [full output:] tee log 或 rtk proxy 重跑;測試基準線記 passed/failed/skipped/error 四元組。' \
-  '5. persistence:reviewer 不寫 per-role report/memory;PM closure 後只 promote 新 durable lesson;active state 只進 TODO。' \
-  '6. effect:OPS/IB/BB reviewer 唯讀;deploy/contact 走 approved deterministic Adapter;BG wave 用 journal/checkpoint,禁盲重跑。' \
+  '1. 路由:跑 agent_governance.py route/context 綁 task facts/role/context,勿直讀 registry JSON;skill 按對口 surface 載入,禁 universal preload。' \
+  '2. hybrid DAG:source implementation 必有獨立 E2→E4;authority/runtime/venue/quant-ML/E2E 依 facts 加 owner;skip 留 residual risk。' \
+  '3. closure_packet_v1 分 work_status/gate_verdict/disposition;DONE+FAIL 合法;缺 evidence/coverage 不得 PASS;禁無變更裸重試。' \
+  '4. rtk:Bash 輸出已被 hook 壓縮;exit≠0 而摘要似綠→讀 [full output:] tee log 或 rtk proxy 重跑;測試記 passed/failed/skipped/error 四元組。' \
+  '5. persistence:reviewer 不寫 per-role report/memory;closure 後只 promote 新 durable lesson;effect 走 approved deterministic Adapter,OPS/IB/BB 唯讀。' \
+  '6. 等待一律事件驅動:禁 blocking TaskOutput 長輪詢/watch 迴圈/tail 自身 transcript;改單次查詢+task-notification/排程喚醒;BG wave 用 journal/checkpoint,禁盲重跑。' \
+  '7. context 軟上限:cache_read/turn>300k 或 wall>8h→落帳 checkpoint 換 session;Session closure=合法停點(governance §11)。' \
   '</workflow-hot-rules>' \
   | jq -Rs '{hookSpecificOutput: {hookEventName: "SessionStart", additionalContext: (. | rtrimstr("\n"))}}' 2>/dev/null) || exit 0
 

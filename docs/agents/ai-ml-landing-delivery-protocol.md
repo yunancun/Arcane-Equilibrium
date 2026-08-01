@@ -27,9 +27,15 @@ template and cannot receive runtime completion.
 
 ## 2. Session Intake Contract
 
-Every Session starts by reading `AGENTS.md`, the generated PM Adapter and
-`docs/agents/context-loading.md`, then the current `TODO.md`, this protocol, the
-formal plan and `PROGRESS.md`. PM must:
+Session intake is need-to-know, not universal preload (2026-08-01
+framework-health remediation). Every Session starts from the repository entry
+rule (`AGENTS.md`, the generated PM Adapter, `docs/agents/context-loading.md`),
+then reads only: the `TODO.md` dispatch board plus the exact row(s) of the
+Session being dispatched, and the `PROGRESS.md` active tail (current-generation
+rows/events; archived generations live in `PROGRESS-archive-1.md`). This
+protocol's relevant sections, the formal plan's exact Session spec and linked
+design docs are followed on demand — do not re-read the full seven-document set
+per Session. PM must:
 
 1. fetch read-only source truth and run the branch/head/dirty guard;
 2. stop on `main`, detached HEAD, wrong checkpoint, collision or unowned dirty
@@ -74,7 +80,7 @@ never keeps `DONE` by copying an invalid verdict.
 | W6 Publication | PM alone stages exact paths, commits subject+body, runs publish guard, pushes once, requests one current-head review/CI set and exact-head merge. | Remote branch and merged head match reviewed head. |
 | W7 Effect classification/gate | Closure derives the effect class from work-package/path/interface facts. `NONE` is typed and justified; otherwise OPS preflight -> exact approved intent -> admitted Adapter -> distinct OPS postcheck. Bybit Demo also requires E3/BB and current authority. | Platform/external-attested receipt or honest blocker; no self-classification bypass. |
 | W8 Closure | QA verifies acceptance; PM emits immutable `closure_packet_v1`/Report Sink record and updates the ledger projection without erasing dissent. | Authoritative closure plus bounded metadata delta. |
-| W9 Closure publication | Publish the post-effect metadata delta through the same exact-head PM lane, or reference an immutable authoritative Report Sink when the final no-write rule applies. | Durable cross-Session resume point; remote head/projection reconciled. |
+| W9 Closure publication | Publish the post-effect metadata delta through the same exact-head PM lane (ledger-only deltas may batch per Sprint under §5 projection batching), or reference an immutable authoritative Report Sink when the final no-write rule applies. | Durable cross-Session resume point; remote head/projection reconciled (or batch-pending under §5 with the closure packet already immutable). |
 
 No fixed-agent theater is allowed. Optional roles are admitted only when a fact
 can change the decision. A builder cannot be its only verifier; an effect actor
@@ -124,6 +130,14 @@ never use CI as the edit-debug loop. Current-head review/CI becomes stale after
 any head change. The attempt record stores classifier digest, selected workflows,
 head, invocation count, failure fingerprint and disposition. A second identical
 fingerprint cannot be hidden by a new Session or empty rerun.
+
+Projection batching (2026-08-01 framework-health remediation): docs/ledger-only
+projection deltas — a metadata-only W6 and the W9 closure publication — from
+multiple Sessions in the same Sprint may be batched into one periodic
+projection PR instead of one PR per Session, provided each Session's closure
+packet/receipt chain stays individually intact and the batch commit lists the
+covered Sessions. Implementation (source-touching) PRs are never batched by
+this clause, and batching never reorders or weakens per-Session evidence.
 
 ## 6. Sprint And Session Map
 
