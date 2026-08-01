@@ -252,6 +252,19 @@ run as standalone `AsyncFunction` bodies without a stable import seam, all three
 use the generated `CONTEXT_ADMISSION_V1` block and begin every model prompt with
 the exact `canonical_plan` bytes. Its existing artifact digest is therefore the
 common-prefix digest, improving cache reuse without truncation.
+
+At-rest role context files may be stored dehydrated as
+`context_artifact_store_v1` (tool:
+`agent_governance_context_store.py dehydrate/resolve/verify`): shared source
+content is content-addressed into single `context-shared-<digest>.json` blobs
+across roles and delta rounds, and small fields stay verbatim. The store is a
+storage representation only, never an admission format. Every consumption
+surface — admission, `capture-command --context-artifact`, closure, saved
+workflows — still accepts only the fully materialized `context_artifact_v1`;
+a stored form must be resolved back first, and resolve verifies byte-exact
+identity against the artifact's own digest anchors. Fully inlined legacy files
+remain valid input everywhere.
+
 Every returned fragment carries the same `task_contract_digest`; closure revalidates
 the PM context artifact at adjudication and rejects objective/scope/criterion drift.
 
