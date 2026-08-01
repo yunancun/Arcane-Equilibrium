@@ -7,6 +7,7 @@ allowed-tools: Read, Grep, Glob, Edit, Write
 # Chinese-First Comment Style
 
 > **本檔為注釋規範唯一正本，E1 / E1a / E2 正文不重述，僅指針至此。**
+> 以內建知識為底：通識不在本檔重述；本檔只列本專案的偏離、教訓與 SSOT 指針。
 
 > **Compatibility note**: the skill directory keeps the historical
 > `bilingual-comment-style` name so existing agent settings do not break.
@@ -67,7 +68,7 @@ pub fn compute_atr_stop(kline: &[Ohlcv]) -> Option<f64> { ... }
 MODULE_NOTE
 模塊用途：定時刷新每個 strategy::symbol 的 edge estimate。
 主要類/函數：EdgeEstimatorScheduler、refresh_edge_estimates。
-依賴：trading.fills、learning.exit_features、settings/edge_estimates.json。
+依賴：trading.fills、learning.exit_features、settings/edge_clusters.json。
 硬邊界：leader election 必須防止多 worker 重複寫入。
 """
 ```
