@@ -90,17 +90,25 @@ attempt expands them into distinct node IDs/classes/permissions/predecessors.
 ML semantic reviewers inspect the post-E2/E4 current generation; `OPS preflight`
 and `OPS postcheck` are distinct nodes and actors.
 
-Full-suite rerun reform (2026-08-01 framework-health adjudication): gate/exit
-full-suite evidence is executed once by one role under a governed, binding
-`command_capture_v2`; every additional required verifier (for example the other
-two of PM/E2/E4) independently re-derives the capture digest from the capture
-bytes and cross-checks its evidence-signature binding (HEAD/diff/command/
-toolchain/env/config) instead of re-executing the suite. Capture-digest
-equivalence supersedes the historical verbatim-identical-tail-line standard.
-A second real execution stays reserved for critical, previously-failed,
-known-flaky and release-gate checks by a distinct role, and the closure-side
-trusted re-execution of captures (governance §5) is unchanged until a
-host-attested CommandCaptureVerifier exists.
+Full-suite rerun reform (2026-08-01 framework-health adjudication): this
+paragraph covers test-suite evidence only; the effect Adapter's independent
+`ops_postcheck` verifier must still produce its own governed
+`command_capture_v2` and cannot cite this paragraph to verify a digest only.
+Gate/exit full-suite evidence is executed once by one role under a governed,
+binding `command_capture_v2`; every additional required verifier (for example
+the other two of PM/E2/E4) independently re-derives the capture digest from
+the capture bytes and cross-checks every evidence-signature field listed in
+governance §5 (source HEAD through authorization hash) instead of re-executing
+the suite, and marks its check fact `REUSED` (never `EXECUTED`) under the §5
+`REUSED` lineage and assessor-receipt requirements. Capture-digest equivalence
+supersedes the historical verbatim-identical-tail-line standard; it proves the
+verifiers read the same capture bytes, not that the suite actually ran — that
+assurance stays with the closure-side trusted re-execution of captures
+(governance §5), unchanged until a host-attested CommandCaptureVerifier
+exists. A second real execution stays reserved for critical, previously-failed,
+known-flaky and release-gate checks by a distinct role; release gate means a
+production release/deploy-level gate, and a source gate/exit (such as S2.4
+`SOURCE_READY`) is not one.
 
 ## 4. Retry, Stop And Resume
 
