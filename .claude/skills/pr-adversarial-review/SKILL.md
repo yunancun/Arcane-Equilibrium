@@ -84,7 +84,7 @@ P0/P1 級別的 leak / look-ahead bias / selection bias / stale finding **必須
 
 ### 3.11 ML training pipeline 非輸入不變量（MIT-MF-1）
 - `trading.fills.details->>'close_maker_*'` audit 欄位僅供 execution-quality observability + post-mortem，禁入任何 ML training pipeline（LinUCB / Scorer / Quantile / MLDE / DL3）— target leakage + policy-degradation feedback 風險。
-- MIT-MF-1 / close_maker gate grep 配方正本：normative 配方見 `docs/governance_dev/amendments/2026-05-15--AMD-2026-05-15-02-edge-p2-3-phase-1b-close-maker-first.md` §7 原則 #7（逐欄位 grep regex，命中即 reject）；可執行 guard = `helper_scripts/healthchecks/e3_grep_non_training_surface.sh`。E2 review 遇相關改動時引用該配方執行，非白名單命中 = BLOCKER（finding 格式沿用 §3.10）。
+- MIT-MF-1 / close_maker gate grep 配方正本：normative 配方見 `docs/governance_dev/amendments/2026-05-15--AMD-2026-05-15-02-edge-p2-3-phase-1b-close-maker-first.md` §7 原則 #7（逐欄位 grep regex，命中即 reject）；可執行 guard = `helper_scripts/healthchecks/e3_grep_non_training_surface.sh`（Rule 4 = close_maker 專項）。E2 review 遇相關改動時引用該配方執行，非白名單命中 = BLOCKER（finding 格式沿用 §3.10）。
 
 ## 4. 對抗自證要求
 

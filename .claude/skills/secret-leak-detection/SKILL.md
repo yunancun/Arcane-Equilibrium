@@ -29,6 +29,7 @@ allowed-tools: Read, Grep, Glob, Bash
 | `authorization.json` | `$OPENCLAW_SECRETS_DIR/<env>/authorization.json` | CRITICAL（HMAC + actor + env_allowed） |
 | HMAC signing secret | `$OPENCLAW_SECRETS_DIR/<env>/auth_signing_key` | CRITICAL |
 | Control API token | env `OPENCLAW_API_TOKEN` → `OPENCLAW_API_TOKEN_FILE` → `../.secrets/api_token`（解析鏈見 `app/auth.py:_resolve_api_token`） | CRITICAL |
+| GUI 登入憑證 | env `GUI_USERNAME`/`GUI_PASSWORD` → `$OPENCLAW_SECRETS_ROOT/environment_files/gui_auth.env` → legacy `~/BybitOpenClaw/secrets/gui_auth.env`（解析鏈見 `app/auth.py` L68-71） | CRITICAL |
 | Layer 2 Claude API key | env `ANTHROPIC_API_KEY` | HIGH |
 | LM Studio / Ollama base URL | env `LM_STUDIO_BASE_URL` / `OLLAMA_BASE_URL` | LOW（localhost） |
 

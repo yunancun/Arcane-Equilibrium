@@ -197,7 +197,7 @@ Workflow({
     scheduler: "adaptive_shadow",
     task_contract_digest: "sha256:<64-hex>",
     context_artifact_digest: "sha256:<64-hex>",
-    route_required_roles: ["CC", "AI-E", "QC", "MIT", "OPS"],
+    route_required_roles: ["CC", "AI-E", "QC", "MIT"],
     budget_authority_canonical: "<exact compiler-produced canonical JSON bytes>",
     budget_authority_digest: "sha256:<64-hex>",
     run_sequence: 0,
@@ -209,8 +209,10 @@ Workflow({
 注意（07-24 治理版配方）：surfaces **勿含 runtime/pg/service/cron/deploy 家族與
 bybit/ibkr**（runtime-claim surface 定義見 openclaw-full-audit.js:694）——admission
 要求 `evidence_debt` 全空，含之必炸；runtime 身份改走 `baseline.runtime_head` +
-`runtime_observed_at`。route_required_roles 須與 surfaces 對映（上例已去
-bybit/ibkr 故不含 BB/IB；若加回該 surfaces 則同步加 BB/IB）。caller 端
+`runtime_observed_at`。route_required_roles 一律以 compiler route 產出的
+required_role_nodes 為準，勿手寫（上例 surfaces 無 bybit/ibkr 故無 BB/IB；無
+runtime 家族則 operations_needed=false 故亦無 OPS；加回對應 surfaces 時由 route
+產出帶回）。caller 端
 scope/focus/surfaces 必須與 inline contract 逐字一致。完整配方 = compile_context → materialize_context_artifact → scriptPath 嵌入
 （見 workflow 檔頭 parseArgs 與 memory `reference_ultracode_full_audit.md`）。
 

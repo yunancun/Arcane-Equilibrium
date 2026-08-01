@@ -32,7 +32,7 @@ allowed-tools: Read, Grep, Glob, Bash
 
 - 本地（Ollama / LM Studio）：無賬單但監 latency + 失敗率（journalctl / 應用內 log）
 - Claude API：Anthropic console usage 頁 + per-request `usage.*` log 入 DB
-- 內部記錄：`agent.l2_calls`（V134，append-only，寫入唯一入口 = `L2CallLedgerWriter`；含 tokens / cost / latency 欄位）+ `learning.l2_gate_seam_log`（V135），按 provider / model / request_type 分組取 7d/30d
+- 內部記錄：`agent.l2_calls`（V134，append-only，寫入唯一入口 = `L2CallLedgerWriter`；含 tokens / cost / latency 欄位）+ `learning.l2_gate_seam_log`（V135），按 model / capability_id / trigger 分組取 7d/30d（V134 實際欄位；provider 由 model 值推導）
 
 ## 核心分析
 

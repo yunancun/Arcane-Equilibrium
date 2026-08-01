@@ -49,6 +49,7 @@ operator 批准全部優化建議(P0 機制級:禁 blocking 輪詢/session 分�
 - agent-wave saved-workflow tier 綁定(workflow 派發側尚未讀 registry model/effort 欄)
 - Codex toml model pin(codex 側 config 未跟進三級分級)
 - `memory/README.md` 拓撲描述更正:「Linux live 為權威」已與現實相反——現實=Mac 經 symlink 直寫 repo,Linux 是 rsync 收端
+- （以上 wave2 項已登記 `TODO.md` §1 `P2-FW-WAVE2-FRAMEWORK-OPT-BACKLOG` row——current-state 派發以 TODO 為準,本檔留背景與證據）
 
 ## 教訓
 - 條數 cap 不擋增長,只改變增長形狀(擠成行內膨脹)——cap 類治理必須配機械檢查(≤250 一行 python 可驗)。
