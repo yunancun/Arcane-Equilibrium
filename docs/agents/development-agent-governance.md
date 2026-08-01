@@ -765,8 +765,10 @@ current generation 重驗。
   `test_development_agent_governance*`）的 commit 計；product 功能自帶的
   `tests/structure` 測試（GUI/IBKR/策略/runtime 等）屬 product-work，不計入、
   不受凍結影響。
-- Full-audit envelope 政策：ML/AI 日常任務一律 complex envelope；`full_audit`
-  envelope 需 operator 當次明示，不得由 agent 自升。
+- Full-audit envelope 政策：ML/AI 日常任務使用 compiler
+  （`agent_governance_routing.py`）依 risk/uncertainty 所選的非 `full_audit`
+  envelope（narrow/standard/complex），不得為升 envelope 虛報 risk；
+  `full_audit` envelope 需 operator 當次明示，不得由 agent 自升。
 - 2026-08-01 裁決先例：`origin/agent/gpt56-multiagent-remediation-20260730`
   （+27,988 行治理機測試）依本節裁 `SUPERSEDED-KILL` — 不 merge、分支保留存史、
   禁 recovery 遞迴（不得再開 remediation-of-remediation/recovery 分支或工單）。
