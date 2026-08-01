@@ -22,7 +22,7 @@ metadata:
 
 **交叉印證**:MIT+QC 各自獨立都指出 `data_loader.py:300` Phase-1 `compute_rule_based_regime` 的 full-sample vol-tercile cross-section leak(minor,productionized `aeg_regime_v0.1.0` runner 不可繼承)。
 
-承 [[project_2026_06_02_aeg_trend_listing_infra_deployed]]（infra 部署）+ [[project_2026_05_31_v58_alpha_pivot]]（成本牆 2 逃逸路）+ [[project_2026_06_01_rust_python_boundary_simplification_audit]]（P5-SM Option2）；funding-tilt 紅線見 [[project_2026_05_31_funding_short_structural_doa]]（cap SSOT + regime-dormant）；soak 發現呼應 [[feedback_evidence_discipline_under_degraded_tools]]（silent no-op 偽 pass）。
+承 [[project_2026_06_02_aeg_trend_listing_infra_deployed]]（infra 部署）+ [[project_2026_05_31_v58_alpha_pivot]](已移 archive/)（成本牆 2 逃逸路）+ [[project_2026_06_01_rust_python_boundary_simplification_audit]]（P5-SM Option2）；funding-tilt 紅線見 [[project_2026_05_31_funding_short_structural_doa]]（cap SSOT + regime-dormant）；soak 發現呼應 [[feedback_evidence_discipline_under_degraded_tools]]（silent no-op 偽 pass）。
 
 
 ---

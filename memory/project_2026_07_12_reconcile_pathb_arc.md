@@ -4,7 +4,6 @@ description: 玄衡 治理 reconcile (demo 引擎↔api-demo) Path B advisory-fi
 metadata:
   node_type: memory
   type: project
-  heat: 0
   originSessionId: e68bbc7b-975e-4ab2-8841-819d97ee4669
 ---
 
@@ -68,3 +67,9 @@ control-api **無 systemd unit**(只 engine/watchdog/collector 有)→`restart_a
 - 承上節 OOM row「MemoryMax 不可安全定值→真解=P2 streaming 代碼修」:p0 系列連發併入(新史)main——**p0b candidate board 有界投影**(PR#43/#50)、**p0d sealed horizon 有界 streaming**(PR#52,commit body 明文「Replace full retained-ledger materialization with candidate-scoped disk projections + streaming JSONL I/O」=正面拆 79-85GB 全量物化路徑)、p0a outcome_refresh 記帳誠實(PR#44 batch mature backlog+fallback event time/PR#46 durable backlog 終端化計數)、p0c pre-capability 評估源終端化+runtime wiring(PR#54/#56,附 `pg_connect` 每連線 statement_timeout 持久化修)。
 - 尚未收口:`agent/p0-oom-*` 4 支線(ledger streaming/polymarket streaming 投影/data-plane stability/systemd scope repair)仍 in-flight 未併;OOM row 的 root 降引擎 adj+跨週期驗 python 實例≤1 仍待 operator。
 - 部署面:07-17 三端同步(見 [[project_ssh_bridge_workflow]] 全史重寫節)後 Linux checkout 已含上述已併修,cron 下輪 fire 即用新碼;OOM row 狀態重評歸下輪 loop。
+
+---
+
+## [index-archive 2026-08-01] 原 MEMORY.md 索引條目全文(壓縮索引前歸檔,內容為當時點狀態)
+
+- [reconcile Path B advisory-first 弧 (2026-07-12)](project_2026_07_12_reconcile_pathb_arc.md) — 手動對賬鈕三層壞+escalation 三重死→Path B 建真兩側 demo↔api-demo:v1`c2cb45fc5`+v2`497ebb4b2`(引擎 dust-freeze+orders/fills scope)source-landed,advisory cap 永不 freeze(runtime 實證阻過早 auth-freeze),arming 待 Phase 2(engine rebuild+operator 清 dust+shadow MATCH+CC audited diff);**unit-env 漂移家族:07-12 API 已修(PID3536174;07-14 23:55 起 durable user unit openclaw-trading-api.service 接管=enabled+linger+var env+journald,api.log 停更,topic 檔 07-15 節);07-15 watchdog unit 零 PG env→audit 直寫 chronic skip(帳由 bridge 兜住未丟),修上 main PR#22(unit 模板+resolve_dsn 第4步推導備援),runtime 一行 apply 待 operator;同日揭 trade-core OOM 風暴 P0(cron python 全量物化 79-85GB 單進程/kernel 16 kills/引擎被殺;**疊加機 flock PR#27+OOM-victim 自標 PR#31 both source-landed 且 Linux 已 pull 部署,flock 反疊加 runtime 鐵證=SKIP log**;引擎 adj=200 降負需 operator root=user manager DefaultOOMScoreAdjust,MemoryMax 不可安全定值→真解 P2 streaming 代碼修;家族 12+20 檔遷移+跨週期驗實例≤1 待 follow-up/operator)**;UNKNOWN-1 定案 engine=demo 對 pair;reconcile 抓到真引擎 intraday dust-evict bug;logrotate drift 哨兵 [95] 上線 PR#24+manifest 治理入口 PR#30 收口刷新窗漏洞(installer 兩段式 receipt,[95] 只認 applied:true;trade-core 已 apply,PASS)(07-15);**07-16 深夜~07-17 P2 streaming 修復波上 main(p0a-p0d:PR#43/44/46/50/52/54/56——sealed-horizon 全量物化→candidate-scoped 投影+streaming JSONL 已拆;p0-oom-* 4 支線 in-flight)**;topic 檔

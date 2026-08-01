@@ -17,7 +17,7 @@ OpenClaw 從「concept-only 16-agent 體系」升級到「真實接線 18 agent�
 - **專項審查層**：A3 / R4 / TW
 - **分析顧問層**：AI-E / QA / QC / BB / MIT
 
-每個 agent 含 Anthropic 官方 frontmatter（name / description / tools / disallowedTools / model: inherit / color / skills 預載）+ 啟動序列（讀 docs/CCAgentWorkSpace/<NAME>/{profile,memory}.md + 最新 report）+ 完成序列（追加 memory + 存 workspace/reports/）。
+每個 agent 含 Anthropic 官方 frontmatter（name / description / tools / disallowedTools / model+effort〔2026-08-01 起由 registry 三級分級透傳；曾為 model: inherit〕 / color / skills 預載）+ 啟動序列（讀 docs/CCAgentWorkSpace/<NAME>/{profile,memory}.md + 最新 report）+ 完成序列（追加 memory + 存 workspace/reports/）。
 
 ### OpenClaw custom skills（25 個）— `srv/.claude/skills/<name>/SKILL.md`，git tracked
 - 11 既有：math-model-audit / spec-compliance / 16-root-principles-checklist / owasp-checklist / secret-leak-detection / performance-profiling / ux-checklist / gui-style-guide / token-cost-analysis / doc-cross-reference / bilingual-comment-style
@@ -79,3 +79,7 @@ CCAgentWorkSpace/ 仍是各 agent profile.md / memory.md / workspace/reports/ �
 
 - `4af73bb`：24 custom skills + .gitignore exception + symlink
 - `677ac67`：18 agent definitions
+
+## 演變軌跡(append-only;被推翻結論留原文)
+
+- **2026-08-01(框架健檢更正)**:本檔「18 subagent+25 skill」與「根目錄 .claude=symlink→srv/.claude(單副本,無雙端)」被實測推翻——現況=`srv/.claude/agents/` **22** 個 subagent(04-25 後新增 E4-writer/E4-verifier、PA-design-writer/PA-investigator 等 permission 拆分)、`srv/.claude/skills/` **28** 個;根 .claude 是**真目錄**(file 命令實證,非 symlink),內含 agents/skills/workflows 三個 symlink 子項→srv/.claude 對應目錄+本地 settings.local.json+worktrees/——根端存在本地 settings,「無雙端」不再成立(單副本原則僅在三個 symlink 子項上成立)。原因:04-25 之後的角色拆分與 skill 增補未回寫本檔。
