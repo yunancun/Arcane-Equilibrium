@@ -1,9 +1,52 @@
 # CLAUDE_CHANGELOG.md — 開發歷史歸檔
 
 > 從 CLAUDE.md / TODO.md 遷出的 Wave/Sprint/Batch + TODO version-increment 歷史敘事。新 session 不需要讀此文件，僅供回顧歷史時查閱。
-> 最後更新：2026-07-30（AIML S2E launch-gate calibration；PROGRESS ledger v19）
+> 最後更新：2026-08-01（TODO v865 GPT-5.6 remediation publication authorization）
 
 ---
+
+## TODO v865 增量：GPT-5.6 remediation publication authorization（2026-08-01）
+
+Operator 後續明確授權 PR #164 exact-head publication、merge 與 Mac／GitHub／Linux
+source-only 同步，取代 v864 的 `SUPERSEDED-KILL / 不 merge` 裁決。治理 source
+remediation 維持 `SOURCE_COMPLETE_WITH_8_TYPED_EXTERNAL_LIMITS`：repo 內 execution
+budget、routing/model tier、saved-workflow DAG、Context/memory/Closure 與 loop stop
+規則已 fail closed；8 項真正依賴宿主 telemetry、cancellation、native selector、
+memory promotion、recall authority 或 managed activity identity 的能力仍保持 typed
+`EXTERNAL_LIMIT`，不得由 repo self-attestation 冒充完成。本增量不改 AI/ML 唯一
+派發，也不授予 runtime、deploy、PG、broker、Decision Lease 或交易效果。
+
+## TODO v864 增量：框架健檢 protocol 瘦身（2026-08-01）
+
+2026-08-01 框架健檢（23/23 findings CONFIRMED）後 operator 批准的 protocol lane
+落地：docs + 一支 SessionStart hook（`.claude/hooks/session-start.sh`，屬
+executable source——驗證證據：`bash -n`、實跑產出合法 hook JSON、獨立審查員
+複跑覆核），零 runtime/effect/status 變更：
+
+- 命令文法改停點語義：刪「單一 commit/checkpoint/PR/CI/wave/review 完成不得
+  停止」「W9 立即補位」「不能因本輪有產出提前結束」等禁停條款；改為每個
+  Session/wave closure 落帳即合法停點，斷點正本＝delivery protocol §4
+  checkpoint 續作協議。terminal 條件與 receipt 鏈完全不變。
+- TODO 瘦身（資訊守恆搬家）：S2.4 gate row 6,121 字全文遷
+  `docs/execution_plan/ai_ml_landing/design/S2.4-W5-source-ready-gate-record.md`；
+  S2E-LW1~LW5 五個巨型 row 全文遷同目錄 `S2E-launch-wave-specs.md`；row 只留
+  狀態+關鍵指標+exit token+連結。`W5-PM-ADJ-IDS`/`W5-RECEIPT-BINDING` 機器
+  marker 原地保留。
+- PROGRESS ledger v19→v20 世代切檔：masthead 敘事、Amendment A2 全文、S0/S1
+  session rows、07-20→07-29 ledger events、S0.3 finalization、coverage debt 全文
+  遷 `PROGRESS-archive-1.md`（active tail 165KB→34KB）；機器鎖定節不遷移。
+- governance 新增 §11 Session 資源邊界（cache_read/turn>300k 或 wall>8h 落帳
+  checkpoint 換 session；輪詢禁令；review 批次收口+E2 同 scope 2 輪 FAIL 升 PM）、
+  §12 終態凍結（BLOCKED_OPERATOR_ACTION_PACKET_READY 後同弧 WAITING，禁 sprint
+  級再開 readiness 層；移植 IBKR loop 兩條硬停機規則）、§13 Meta-work 邊界
+  （治理測試家族淨行數凍結；週 meta-work commit ≤30%；full_audit 需 operator
+  當次明示）。
+- delivery protocol §2 intake 改 need-to-know（TODO row+PROGRESS active tail+
+  按需連結）；§5 加 W6/W9 docs/ledger-only 投影同 Sprint 合批條款。
+- session-start hot-rules 改寫：路由改跑 `agent_governance.py route/context`；
+  新增事件驅動等待與 context 軟上限兩條。
+- 裁決記錄：`origin/agent/gpt56-multiagent-remediation-20260730` 依 meta-work
+  凍結政策裁 SUPERSEDED-KILL（不 merge、留分支存史、禁 recovery 遞迴）。
 
 ## AIML S2E launch-gate calibration checkpoint（2026-07-30）
 

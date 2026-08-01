@@ -6,8 +6,8 @@ allowed-tools: Read, Grep, Glob, WebSearch
 
 # Math Model Audit（量化數學審計）
 
-> Authority 使用 `.codex/agent_registry_v1.json` typed matrix：normative policy、implementation contract、active work state、runtime observation、external policy、claim evidence 只在同類內比較。跨類不一致標 DRIFT/CONFLICT；runtime 不得合法化 policy denial。
-> 即時內容依相應 authority class 與 fresh evidence 取得，本 skill 不寫死也不建立全局總排序。
+> Authority typed matrix 正本見 `16-root-principles-checklist` 頭部（`.codex/agent_registry_v1.json` 定義）：只在同類內比較，跨類標 DRIFT/CONFLICT，runtime 不得合法化 policy denial；即時內容依 authority class 與 fresh evidence 取得，本 skill 不寫死。
+> 以內建知識為底：Kelly / VaR / CVaR 公式、t-test / 多重比較 / cluster-SE 統計通識不在本檔重述；本檔只列本專案的偏離（黑名單、SSOT 衝突規則、×365 等）、教訓與 SSOT 指針。
 
 > **S1 風控數字 SSOT**：position size / VaR / drawdown threshold 等所有風控數字以 `settings/risk_control_rules/risk_config_<env>.toml` 為 SSOT；config 不合理 → push back operator，**不信 memory 或 skill 內寫死值**。
 
@@ -35,44 +35,32 @@ allowed-tools: Read, Grep, Glob, WebSearch
 
 任何方法觸碰本黑名單 = 報告開頭明寫「拒絕，因為 ...」+ 給替代。
 
-## 標準審計維度（5 大）
+## 標準審計維度（5 大；統計通識靠內建知識，下列為專案判準）
 
 ### 1. 樣本與基準
-- [ ] 樣本量 N 充分（單策略 ≥ 200 trades 或 ≥ 30d，依較嚴）
-- [ ] 樣本選擇無倖存者偏差（不剔除已下市 symbol）
-- [ ] In-sample / Out-of-sample 切分明確（70/30 或 walk-forward）
-- [ ] 基準（baseline）合理（buy-hold / random / 簡單 MA cross），不只比 0
-- [ ] **Engine_mode 隔離**：edge 估計用 demo 不混 paper（CLAUDE.md memory `feedback_demo_over_paper_for_edge.md`）
+- [ ] 樣本量 N 充分（單策略 ≥ 200 trades 或 ≥ 30d，依較嚴）；無倖存者偏差（不剔除已下市 symbol）
+- [ ] IS/OOS 切分明確；baseline 合理（buy-hold / random / 簡單 MA cross），不只比 0
+- [ ] **Engine_mode 隔離**：edge 估計用 demo 不混 paper（memory `feedback_demo_over_paper_for_edge.md`）
 
 ### 2. 統計顯著性
-- [ ] t-stat / p-value 計算（含正確 ddof + df-aware t_crit）
-- [ ] 多重比較校正（Bonferroni / FDR）若 sweep ≥ 3 參數
-- [ ] cluster-SE（按 symbol 或 day cluster）若觀察非獨立
-- [ ] effect size 與 p-value 並列（不要只看顯著性）
-- [ ] 信賴區間（不只 point estimate）
+- [ ] t-stat（正確 ddof + df-aware t_crit）；sweep ≥ 3 參數必多重比較校正
+- [ ] 觀察非獨立必 cluster-SE（按 symbol 或 day）；effect size 與信賴區間並列，不只看 p
 
 ### 3. Look-ahead bias 偵測
-
-逐項檢查：
-- [ ] `rolling(N).max()` / `rolling(N).min()` **含 current bar** → bias 必 RETRACT；補 `shift(1)` leak-free 版對比
-- [ ] z-score / normalization 用 全期 mean+std（用了未來資訊）→ 改 expanding window
-- [ ] target label 計算用了 entry tick 後 X 分鐘但 feature 在 entry tick 已知（OK，是 horizon）vs feature 計算用了 target window 內資料（BUG）
-- [ ] cross-validation 切分尊重時序（TimeSeriesSplit，不是 KFold）
+- [ ] `rolling(N).max()` / `.min()` **含 current bar** → bias 必 RETRACT；補 `shift(1)` leak-free 版對比
+- [ ] z-score / normalization 用全期 mean+std（用了未來資訊）→ 改 expanding window
+- [ ] feature 計算用了 target window 內資料 = BUG（entry 後 horizon label 本身 OK）
+- [ ] CV 切分尊重時序（TimeSeriesSplit，不是 KFold）
 
 ### 4. Sizing 與風控數學
-
-- [ ] **Kelly fraction**：full Kelly 過激，用 fractional Kelly（0.25–0.5）；公式 `f* = (bp - q) / b` 正確使用 + 估 b（odds）+ p（win rate）
-- [ ] **VaR**：parametric vs historical 標明；crypto 用 historical（fat tail）；信心度 95% / 99% 雙列
-- [ ] **CVaR / ES**：tail loss expectation；新策略上 live 前必算
+- [ ] Kelly 必 fractional（full Kelly = Reject）；公式與估參靠內建知識
+- [ ] VaR：crypto 用 historical（fat tail），95% / 99% 雙列；CVaR / ES 新策略上 live 前必算
 - [ ] **Position sizing**：以 RiskConfig `[limits].per_trade_risk_pct`（base 0.1%）為 SSOT；memory `feedback_position_sizing.md` 寫的「3% risk / trade · 25 symbols」是 operator 設計意圖**但 config 為唯一 runtime 真值**，衝突信 config + push back operator（per S1 systemic）
-- [ ] **Drawdown bound**：max DD vs DD-tolerance 對齊
-- [ ] **Correlation / portfolio risk**：原則 16 監控關聯曝險，新 symbol 加入時計 ρ
+- [ ] Drawdown bound vs DD-tolerance 對齊；新 symbol 加入時計 ρ（原則 16 組合曝險）
 
 ### 5. Live 適用性
-- [ ] Demo / Paper 結果不等同 Live（slippage / fee / queue position 真實後降級多少）
-- [ ] cost_edge_ratio < 0.5（`CLAUDE.md` Root Principles）
-- [ ] PostOnly / TWAP / VWAP 等執行細節 與 sizing 對齊
-- [ ] fee model 真實（maker rebate vs taker；funding rate；borrow cost）
+- [ ] Demo / Paper 結果不等同 Live（slippage / fee / queue position 降級評估）
+- [ ] cost_edge_ratio < 0.5（`CLAUDE.md` Root Principles）；fee model 真實（maker rebate vs taker；funding；borrow cost）
 
 ## 工作流（6 步）
 
@@ -89,15 +77,14 @@ edge_estimator shrinkage prior 必合理（James-Stein 或 Bayesian shrinkage �
 
 ## Cross-Skill 互引（避免重述）
 
-- **C1.j 設計 vs 審計視角**：本 skill = **審計**（黑名單 / 對抗反問 / 數字復算 / 樣本診斷）；**設計**（如何提出 alpha hypothesis、Kelly fractional 配置、portfolio risk budget 分配）走 `quant-strategy-design` + `portfolio-construction-protocol`
-- **C1.b 統計顯著性 PSR / DSR / multiple testing**：本 skill 列為 audit 維度 #2 但細節不重述；走 `walk-forward-validation-protocol`
-- **觸發順序提示**：`quant-strategy-design`（提案）→ `math-model-audit`（本 skill；數學審計）→ `walk-forward-validation-protocol`（驗證）三步走，遞進不可顛倒
+- **C1.j 設計 vs 審計視角**：本 skill = **審計**（黑名單 / 對抗反問 / 數字復算 / 樣本診斷）；**設計**走 `quant-strategy-design` + `portfolio-construction-protocol`
+- **C1.b PSR / DSR / multiple testing 細節**：走 `walk-forward-validation-protocol`
+- **觸發順序**：`quant-strategy-design`（提案）→ 本 skill（數學審計）→ `walk-forward-validation-protocol`（驗證），遞進不可顛倒
 
 ## 反模式（見即 Reject）
 
 - 黑名單方法（HMM / GARCH / VPIN / ...）
-- p < 0.05 但 N < 30
-- look-ahead bias 未排查（特別是 rolling max/min）
+- p < 0.05 但 N < 30；look-ahead bias 未排查（特別是 rolling max/min）
 - Kelly full（不 fractional）
 - Sharpe 算 daily 但年化用 ×252（crypto 是 24/7 應 ×365；**本條為 ×365 年化規則唯一正本**，`walk-forward-validation-protocol` 指向此處）
 - correlation matrix 未列就推薦多策略並行

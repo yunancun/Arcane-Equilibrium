@@ -5,6 +5,8 @@ description: Conductor 專用；operator 要求全盤審查、全面優化、mul
 
 # Full Audit Orchestration
 
+> 以內建知識為底：通識不在本檔重述；本檔只列本專案的偏離、教訓與 SSOT 指針。
+
 Canonical workflow: `.claude/workflows/openclaw-full-audit.js`
 Governance: `.codex/agent_registry_v1.json` and
 `docs/agents/development-agent-governance.md`
@@ -65,6 +67,17 @@ override them. The current Registry `full_audit` authority is:
 - `retry_budget` = `2`
 - `max_concurrent_calls` = `3`
 
+> 數字 SSOT = `.codex/agent_registry_v1.json` `budget_envelopes.full_audit`；
+> workflow 內的 `authorityProfiles` 由 codegen 從 Registry 投影，Registry 是唯一
+> 正本。`96000` 是 per-call cap，`4416000` 才是 workflow planned-input cap；
+> 不得以前者估算整輪成本。
+
+> **Envelope 使用限制**：ML/AI 日常任務（含常規 quant/ML 改動的審查鏈）禁用
+> `full_audit` envelope，一律使用 compiler 依 risk/uncertainty 選出的
+> `narrow`／`standard`／`complex`；不得為升 envelope 虛報 risk。
+> `full_audit` 只在 operator 當次明示要求 full/cold audit 時使用，PM 或 workflow
+> 不得自行升級。
+
 Tunable args inside that authority:
 
 | Arg | Default | Meaning |
@@ -82,7 +95,9 @@ and authorizes no writer/reviewer call. Deferred or unverified debt makes
 `pass_eligible=false` and never truncates into PASS.
 
 Call and token accounting covers the 13 audit axes, their bounded infrastructure
-retries, and one seam critic. Registry authority is a ceiling, not a target.
+retries, and one seam critic. Registry authority is a ceiling, not a target;
+unused reserves are not actual usage. If mandatory coverage cannot fit, split
+scope and preserve coverage debt rather than lowering evidence.
 
 ## Audit phase
 

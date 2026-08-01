@@ -6,8 +6,8 @@ allowed-tools: Read, Grep, Glob, WebSearch
 
 # Walk-Forward Validation Protocol（驗證 / 回測手冊）
 
-> Authority 使用 `.codex/agent_registry_v1.json` typed matrix：normative policy、implementation contract、active work state、runtime observation、external policy、claim evidence 只在同類內比較。跨類不一致標 DRIFT/CONFLICT；runtime 不得合法化 policy denial。
-> 即時內容依相應 authority class 與 fresh evidence 取得，本 skill 不寫死也不建立全局總排序。
+> Authority typed matrix 正本見 `16-root-principles-checklist` 頭部（`.codex/agent_registry_v1.json` 定義）：只在同類內比較，跨類標 DRIFT/CONFLICT，runtime 不得合法化 policy denial；即時內容依 authority class 與 fresh evidence 取得，本 skill 不寫死。
+> 以內建知識為底：rolling vs anchored 概念、PSR/DSR/Sortino/Calmar/Omega 公式、multiple testing 方法（Bonferroni/Holm/BH/White/Romano-Wolf）、平穩性/自相關/正態性統計檢定、bootstrap、plateau vs cliff 等通識不在本檔重述；本檔只列本專案的判準、教訓與 SSOT 指針。
 > 主用者 QC 無 Bash：runtime 取數（psql / trade count / sweep log 等）標註需 MIT/E4 協查，報告列出所需查詢。
 
 > **S1 風控數字 SSOT**：策略 sizing / drawdown / position cap 等所有風控數字以 `settings/risk_control_rules/risk_config_<env>.toml` 為 SSOT；config 不合理 → push back operator，**不信 memory 或 skill 內寫死值**。
@@ -18,145 +18,46 @@ allowed-tools: Read, Grep, Glob, WebSearch
 
 - QC 收到「策略上線前驗證」「Sharpe 顯著嗎」「參數 sweep 結果評審」「OOS 效能判斷」
 - 任何引用 in-sample 表現的策略提案（要立即要求 OOS 驗證）
-- 對 P0-3 / Phase 5 重評等需要 demo 21d gross > 0 判斷的場景
+- 需要 demo 21d gross > 0 判斷的場景
 
 ## ★ 黃金法則
 
-**In-sample 表現是故事，OOS 表現才是證據**。
-**單一 Sharpe 是空話**：必須 deflate / probabilistic 化才有資訊量。
+**In-sample 表現是故事，OOS 表現才是證據**。**單一 Sharpe 是空話**：必須 deflate / probabilistic 化才有資訊量。
 
-## 1. Walk-Forward 設計
+## 1. Walk-Forward 專案判準
 
-### 1.1 Rolling vs Anchored
-- **Rolling window**：固定訓練窗（如 90d），滑動。適合 regime 切換頻繁、半衰期短
-- **Anchored expanding**：訓練窗從 t0 累積。適合長期穩定 alpha
-- **OpenClaw 建議起點（非治理硬規範）**：Rolling 90d train + 30d test，crypto regime 切換快通常不適合 anchored；具體 window 依策略半衰期 + 樣本量動態調整，新策略提案可由 QC 提替代並說明理由
+- **OpenClaw 建議起點（非治理硬規範）**：Rolling 90d train + 30d test；crypto regime 切換快通常不適合 anchored。具體 window 依策略半衰期 + 樣本量動態調整，新策略提案可由 QC 提替代並說明理由。
+- ML 訓練 + 信號預測場景未加 purge + embargo = leakage → Reject（機制正本見 `time-series-cv-protocol`）；rolling-max 含 current bar 屬同類問題（`feedback_indicator_lookahead_bias`）。
+- 樣本量下限（OpenClaw 場景對照）：1m timeframe ≥ 200 trades（demo ~21d 累積）；5m ≥ 100（~14d）；1h ≥ 50（~30d）。樣本不足 → t-test power < 0.5，結論無意義。
 
-### 1.2 Purged + Embargo（Lopez de Prado）
-Purge / Embargo 定義與實作細節**唯一正本見 `time-series-cv-protocol`**（MIT 視角），本檔不重述。QC 審查判準：
-- ML 訓練 + 信號預測場景未加 purge + embargo = leakage → Reject
-- OpenClaw `feedback_indicator_lookahead_bias`：rolling-max 含 current bar 屬同類問題
+## 2. Sharpe 顯著性判準（QC 硬判準）
 
-### 1.3 樣本量
-| Test 期 | 最少 trade 數 | 對應 OpenClaw 場景 |
-|---|---|---|
-| 1m timeframe / 5 strat | ≥ 200 trades | demo ~21d 累積 |
-| 5m timeframe | ≥ 100 trades | demo ~14d |
-| 1h timeframe | ≥ 50 trades | demo ~30d |
-
-樣本不足 → t-test power < 0.5，結論無意義。
-
-## 2. Sharpe 系列進階指標（單 Sharpe 不夠）
-
-### 2.1 Probabilistic Sharpe Ratio (PSR) — Bailey & Lopez de Prado (2012)
-給定樣本 Sharpe `SR_obs` 跟期望 benchmark `SR*`（通常 = 0），計算「真 Sharpe > SR* 的機率」：
-```
-PSR(SR*) = Φ( (SR_obs - SR*) · sqrt(N-1) / sqrt(1 - γ3·SR_obs + (γ4-1)/4·SR_obs²) )
-```
-- γ3 = skew，γ4 = kurtosis
-- crypto returns 高峰厚尾 → kurt 高 → PSR 比 normal 假設低
-- **判讀**：PSR(0) > 0.95 才算「Sharpe 顯著大於 0」
-
-### 2.2 Deflated Sharpe Ratio (DSR) — Multiple Testing 修正
-若 sweep 過 K 個參數組合，「最高 Sharpe」要 deflate：
-```
-SR_max_expected = sqrt(Var(SR)) · ( (1-γ)·Φ⁻¹(1-1/K) + γ·Φ⁻¹(1-1/(K·e)) )
-γ = Euler-Mascheroni ≈ 0.5772
-DSR = PSR(SR_max_expected)
-```
-- K=100 sweep + naive Sharpe 1.5 可能 deflate 後 < 0
-- **OpenClaw P1-11 BB sweep 必跑 DSR**
-
-### 2.3 進階績效指標
-| 指標 | 公式 | 何時用 |
-|---|---|---|
-| **Sortino** | `mean / std_downside` | 上行波動不算風險（asymmetric） |
-| **Calmar** | `annual_return / max_drawdown` | 對 drawdown 敏感的場景 |
-| **Omega(τ)** | `E[max(R-τ, 0)] / E[max(τ-R, 0)]` | 全分布資訊（非僅二階） |
-| **MAR ratio** | `CAGR / max_DD` | 跟 Calmar 同類 |
-| **Drawdown duration** | 從峰到復元天數 | 心理 / 資金成本評估 |
+- **PSR(0) > 0.95** 才算「Sharpe 顯著大於 0」；crypto returns 高峰厚尾 → PSR 比 normal 假設低，必用含 skew/kurt 修正版
+- **Sweep 過 K 個參數組合必跑 DSR**（deflate 後再判：`SR_max_expected = sqrt(Var(SR))·[(1−γ)·Φ⁻¹(1−1/K) + γ·Φ⁻¹(1−1/(K·e))]`，γ≈0.5772，`DSR = PSR(SR_max_expected)`）；K=100 sweep + naive Sharpe 1.5 可能 deflate 後 < 0。**√Var(SR) 縮放不可省**：實作省略此縮放會使 K≥2 時 deflation 門檻遠高於任何合理 per-trade Sharpe → DSR≈0 恆 block（07-24 run0 QC finding，正本 `docs/CCAgentWorkSpace/PM/workspace/reports/2026-07-24--full_system_ultracode_audit_run0.decision_view.json`）
+- 進階指標（Sortino / Calmar / Omega / MAR / DD duration）按場景選用，公式靠內建知識
 
 ## 3. Multiple Testing 修正（必做）
 
-任何 sweep ≥ 3 參數 = 多重假設檢驗。**不修正 = false positive 必爆**。
+任何 sweep ≥ 3 參數 = 多重假設檢驗，不修正 = false positive 必爆。OpenClaw 建議起點（**非治理硬規範**）：sweep ≥ 5 用 Bonferroni；sweep ≥ 20 用 BH（FDR=0.10）；具體 K 閾值與方法可由 QC 提替代並說明 Type-I/II trade-off。White's Reality Check / Romano-Wolf 需 Python bootstrap——QC 無 Bash → 報告列需求，協調 E1/MIT/E4 跑。
 
-| 方法 | 適用 | 嚴格度 |
-|---|---|---|
-| **Bonferroni** | 獨立或弱相關 hypothesis | 最嚴 — α / K |
-| **Holm-Bonferroni** | 同上但 step-down | 比 Bonferroni 弱一點 |
-| **Benjamini-Hochberg (FDR)** | 大規模 testing 容忍 false discovery | 寬鬆 |
-| **White's Reality Check** | 策略選擇場景，含 bootstrap | 量化 best-of-K bias（執行需 Python `arch` 套件或自寫 bootstrap；QC 無 Bash → 報告列需求，協調 E1/MIT/E4 跑）|
-| **Romano-Wolf** | step-down + bootstrap | 較精緻（同上：Python 套件 + 大量 bootstrap iteration，協調 E1 / Linux runtime 跑）|
+## 4. PBO / CSCV 判準
 
-OpenClaw 建議起點（**非治理硬規範**）：sweep ≥ 5 用 Bonferroni；sweep ≥ 20 用 BH（FDR=0.10）；具體 K 閾值與方法可由 QC 對特定情境提替代並說明 Type-I/II error trade-off。
+CSCV 機制細節唯一正本見 `time-series-cv-protocol` §4「CSCV（唯一正本）」。QC 判準：PBO < 0.5 = 過擬合不嚴重；PBO > 0.5 = 過擬合主導，棄。執行需 Python；協調 MIT/E4 跑。
 
-## 4. PBO / CSCV — Probability of Backtest Overfitting
+## 5. 資料品質前置（OpenClaw crypto 已知）
 
-Lopez de Prado et al. (2014, 2017)。CSCV 機制細節（切分組合 / 計算步驟）**唯一正本見 `time-series-cv-protocol`** §5，本檔只留 QC 判準：
-- PBO < 0.5 = 過擬合不嚴重
-- PBO > 0.5 = 過擬合主導，棄
-- 執行需 Python（`pbo` 套件或自寫）；QC 無 Bash → 報告列所需計算，協調 MIT/E4 跑
+回測前跑 5 test（ADF + KPSS + Ljung-Box + JB + ARCH effect；檢定原理靠內建知識）。crypto 已知結論：ADF 通常拒 unit root（returns 平穩）；JB 必拒 normality（fat tail）→ **任何 normal 假設模型作廢**；ARCH effect（vol clustering）顯著 → naive variance 估計低估。
 
-## 5. 資料品質統計診斷（時序分析前置）
+## 6. 參數穩健性判準
 
-任何時序回測前必跑：
+- Plateau vs Cliff：heat map 相鄰參數組表現相似才穩健。OpenClaw 反例：BB squeeze_bw=0.03 100% 觸發、expansion_bw=0.04 永不達 → 不是 plateau 是 binary（歷史 P1-11 F1；當前狀態查 `TODO.md` / reports）
+- Bootstrap CI：crypto returns 有 autocorrelation → **必用 block bootstrap**（IID bootstrap = 反模式）；給 Sharpe / max_DD 95% CI 不只 point estimate
+- IS vs OOS 退化：健康 OOS ≈ 0.5–0.8 × IS；OOS < 0.3 × IS = 過擬合警報；OOS ≈ 0.95 × IS 數字太巧 = 可能 leakage
 
-| Test | 對象 | 閾值 |
-|---|---|---|
-| **ADF**（Augmented Dickey-Fuller） | stationarity | p < 0.05 = stationary |
-| **KPSS** | stationarity（反向 null） | p > 0.05 = stationary |
-| **Phillips-Perron** | stationarity（HAC robust） | 同 ADF |
-| **Engle-Granger** | cointegration（pairs trading）| p < 0.05 = cointegrated |
-| **Johansen** | multi-asset cointegration | trace stat |
-| **Ljung-Box** | autocorrelation | p < 0.05 = autocorr 存在 |
-| **Durbin-Watson** | residual autocorrelation | DW ≈ 2 = 無 |
-| **Breusch-Pagan** / **White** | heteroscedasticity | p < 0.05 = 異質變異數 |
-| **Jarque-Bera** | normality | p < 0.05 = 非正態（crypto 必非）|
-| **Anderson-Darling** | distribution fit | 比 KS 對 tail 敏感 |
+## 7. 工作流（11 步含 step 0 樣本量檢查）
 
-**OpenClaw crypto 已知**：
-- ADF 通常拒 unit root（returns 平穩）
-- JB 必拒 normality（kurt > 3 fat tail）→ 任何 normal 假設模型作廢
-- ARCH effect（vol clustering）顯著 → naive variance 估計低估
-
-## 6. 參數穩健性
-
-### 6.1 Plateau vs Cliff
-策略 P&L 對參數作 heat map：
-- **Plateau**：相鄰參數組表現相似 → 穩健
-- **Cliff**：小擾動 collapse → 過擬合
-
-OpenClaw 反例：BB squeeze_bw=0.03 100% 觸發、expansion_bw=0.04 永不達 → 不是 plateau 是 binary（歷史 P1-11 F1；當前狀態查 `TODO.md` / reports）
-
-### 6.2 Bootstrap 置信區間
-重抽樣 1000 次計算指標分布：
-- IID bootstrap：returns 獨立場景（crypto 多半不對）
-- **Block bootstrap**（Politis-Romano）：保留 autocorrelation 結構，crypto 必用
-- 給 Sharpe / max_DD 95% CI，不只 point estimate
-
-### 6.3 In-sample vs OOS Sharpe 退化曲線
-畫 IS Sharpe vs OOS Sharpe 散點圖。
-- 健康策略：OOS ≈ 0.5–0.8 × IS
-- 退化嚴重：OOS < 0.3 × IS = 過擬合警報
-
-## 7. 工作流（驗證 SOP，11 步含 step 0 樣本量檢查）
-
-0. **樣本量 N_min 預先檢查**（強制前置，2026-04-25 加）：
-   - **t-test power 公式**：`N_min ≈ ((z_{α/2} + z_β) · σ / Δ)²`，α=0.05、β=0.20、Δ = 期望 effect size、σ = sample std
-   - **rule-of-thumb**：detect Sharpe > 0 顯著 → ≥ 30 trades；detect Sharpe Δ=0.5 → ≥ 60 trades；detect Sharpe Δ=0.2 → ≥ 200 trades
-   - **OpenClaw 1m timeframe 對照**：5 strat × 25 symbols 1m → 21d demo 通常 ≥ 300 trades 可達 §1.3 表閾值；< 200 trades 需先延長累積期，不直接跑 sweep
-   - 樣本量取數（trade count）QC 無 Bash → 報告列所需查詢，協調 MIT/E4 跑
-   - 樣本不足 → 報告標 BLOCKED + 樣本量證據後結束（power < 0.5 結論無意義），不暫停等待
-1. **資料品質 5 test**（ADF + KPSS + Ljung-Box + JB + ARCH effect）→ 看是否有 unit root / autocorr / heteroscedasticity
-2. **In-sample backtest**（leak-free，shift(1) 強制）
-3. **Walk-forward 設計**（Rolling 90/30 建議起點，含 purge + embargo）
-4. **參數 sweep**（如有）+ 記錄 K
-5. **Multiple testing 修正**（Bonferroni 若 K ≥ 5）
-6. **DSR 計算**（給 deflate 後 Sharpe）
-7. **PSR(0)** ≥ 0.95 確認
-8. **PBO / CSCV**（K ≥ 10 時）
-9. **Bootstrap CI**（block bootstrap 1000 次，給 Sharpe / max_DD CI）
-10. **Plateau analysis**（heat map，確認非 cliff）
+0. **樣本量 N_min 預先檢查**（強制前置，2026-04-25 加）：rule-of-thumb — detect Sharpe > 0 顯著 ≥ 30 trades；Δ=0.5 ≥ 60；Δ=0.2 ≥ 200（power 公式靠內建知識）。OpenClaw 1m 對照：21d demo 通常 ≥ 300 trades 可達 §1 閾值；< 200 trades 先延長累積期，不直接跑 sweep。取數 QC 無 Bash → 協調 MIT/E4。樣本不足 → 報告標 BLOCKED + 樣本量證據後結束，不暫停等待。
+1. 資料品質 5 test → 2. In-sample backtest（leak-free，shift(1) 強制）→ 3. Walk-forward 設計（Rolling 90/30 起點，含 purge + embargo）→ 4. 參數 sweep + 記錄 K → 5. Multiple testing 修正 → 6. DSR → 7. PSR(0) ≥ 0.95 → 8. PBO / CSCV（K ≥ 10 時）→ 9. Block bootstrap CI → 10. Plateau analysis。
 
 任一步 fail → 報告標 BLOCKED + 該步證據 + 所需修正後結束，不暫停等待。
 
@@ -166,13 +67,10 @@ edge 計算只用 demo + live_demo（不混 paper）；`engine_mode IN ('live','
 
 ## 反模式（見即 Reject）
 
-- 只給 Sharpe 不給 PSR / DSR
-- Sweep K=100 但無 multiple testing 修正
-- 用 KFold 而非 TimeSeriesSplit
-- IID bootstrap 而非 block bootstrap
-- 「OOS Sharpe = 0.95 × IS Sharpe」(數字太巧 = 可能 leakage)
-- ADF / JB 都沒跑就上模型
-- 樣本 N < 30 但稱 p < 0.05 顯著
+- 只給 Sharpe 不給 PSR / DSR；Sweep K=100 但無 multiple testing 修正
+- 用 KFold 而非 TimeSeriesSplit；IID bootstrap 而非 block bootstrap
+- 「OOS Sharpe = 0.95 × IS Sharpe」（數字太巧 = 可能 leakage）
+- ADF / JB 都沒跑就上模型；樣本 N < 30 但稱 p < 0.05 顯著
 - Sharpe 算 daily 但年化 ×252（×365 規則正本見 `math-model-audit` 反模式）
 - in-sample 報 max_DD = -5%（多半是 selection bias）
 
@@ -185,18 +83,9 @@ edge 計算只用 demo + live_demo（不混 paper）；`engine_mode IN ('live','
 
 ## 資料品質 5 test
 | Test | p | 結論 |
-| ADF | | |
-| KPSS | | |
-| Ljung-Box | | |
-| JB | | |
-| ARCH | | |
 
 ## Sharpe 系列
-- Naive SR: X
-- PSR(0): Y (target ≥ 0.95)
-- DSR: Z (含 K=N deflate)
-- Sortino / Calmar: ...
-- Drawdown depth × duration: ...
+- Naive SR / PSR(0)（target ≥ 0.95）/ DSR（含 K=N deflate）/ Sortino / Calmar / DD depth × duration
 
 ## Walk-forward 設計
 Rolling W_train / W_test，Purge=N，Embargo=M
@@ -207,16 +96,14 @@ Rolling W_train / W_test，Purge=N，Embargo=M
 ## PBO（如 K ≥ 10）
 PBO = X
 
-## Bootstrap CI（block, 1000）
-Sharpe 95% CI: [a, b]
-max_DD 95% CI: [c, d]
+## Bootstrap CI（block）
+Sharpe 95% CI: [a, b]；max_DD 95% CI: [c, d]
 
 ## Plateau 分析
-（描述 heat map / cliff 與否）
+（heat map / cliff 與否）
 
 ## OpenClaw 適配
-- engine_mode 隔離 ...
-- demo 21d gross 達標 ...
+- engine_mode 隔離 / demo 21d gross 達標
 
 ## 條件 / 拒絕理由
 1. <具體 + 修正路徑>

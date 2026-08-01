@@ -9,6 +9,7 @@ allowed-tools: Read, Grep, Glob, Bash
 > Authority 使用 `.codex/agent_registry_v1.json` typed matrix。Normative
 > permission、source contract、active TODO、runtime observation、external policy、
 > claim evidence 分類保留；runtime 綠不能合法化 policy denial。
+> 以內建知識為底：通識不在本檔重述；本檔只列本專案的偏離、教訓與 SSOT 指針。
 
 ## Activation
 
