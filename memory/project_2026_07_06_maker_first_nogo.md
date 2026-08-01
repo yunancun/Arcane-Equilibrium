@@ -3,7 +3,6 @@ name: project_2026_07_06_maker_first_nogo
 description: "maker-first/做市執行軸經 fill_sim 雙窗實測判 NO-GO;不賺錢=無方向alpha+執行edge被費用階梯鎖住,非「缺AI/太機械」"
 metadata: 
   node_type: memory
-  heat: 0
   type: project
   originSessionId: e4edc993-6380-45df-9d97-f38b704f30ed
 ---

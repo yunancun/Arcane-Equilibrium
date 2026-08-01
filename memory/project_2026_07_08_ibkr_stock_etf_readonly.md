@@ -3,7 +3,6 @@ name: project_2026_07_08_ibkr_stock_etf_readonly
 description: "首個非-Bybit 資產類:美股/ETF via IBKR,stock_etf_cash lane(ADR-0048);AMD-2026-07-11-01 Accepted=full live-capability development 授權(活化分離:envelope+Operator 紀錄);工程總綱 IBKR_TODO.md 上 main;runtime dormant,Bybit path 不變"
 metadata:
   node_type: memory
-  heat: 0
   type: project
   originSessionId: b8f94432-3891-440a-ba13-f17896dd26d5
 ---
@@ -36,3 +35,17 @@ TradeBot 的**首個非-Bybit 資產類**——美股/ETF via Interactive Broker
 - **2026-07-16(R8 追記)**:Operator 裁 **D2=採用**(W5+W8a+W9a 齊備即開 EA1-EA4 唯讀跑道,每步仍逐一活化)+ **AMD-07-08-01 澄清 #3 acknowledged**(EA3 前置清項)。
 - **2026-07-16(R9∥R10)**:W5-S0∥S1 收口落 main——PR#48(CI 守衛鏈三洞閉:classifier 補 ibkr 審計腳本/`rust-ibkr-tests` job 釘鎖/W4 lockstep pytest 入 hosted CI+fake crate 入 CI+macOS draft 閘)+PR#49(四 typed row contracts:account-summary/positions/executions/commissions;E3-F1/F2 CLOSED),各經一輪 E2 REJECT→修復;IB 現勘全 CONFIRMED。下一=R11 W5-S2(消化;S3 前置=IB 哨兵/exec_time 兩 blocking)。
 - **2026-07-17(SHA 紀元註記)**:2026-07-16 23:46 main 全史經 git-filter-repo 重寫(secret purge,詳 [[project_ssh_bridge_workflow]]);本檔此前記錄的 commit/merge SHA 全屬舊史。新史定位用 PR 編號,例:PR#45 merge=`e67e5ac2c`、PR#47=`70e802ead`、PR#48=`c48689acb`、PR#49=`dbc234bbd`、PR#42=`39c0d5f3d`(其餘以 `git log --grep` 按 PR#/subject 查);舊史備份 ref `pre-rewrite-main-20260716`(Mac+Linux)。
+- **2026-08-01(索引對時,框架健檢)**:MEMORY.md 索引行原停在 07-16「下一=R11 W5-S2」,落後帳本 ~18 輪——實況(IBKR_TODO.md/PROGRESS.md):W5(R9-R13)/W6(R17-R22)全 DONE_SOURCE_SECURED、W8a∥W9a carve(R14/R15)、EA3 mini-wiring(R16)、W7 設計+S0-S3 收口(R23-R27,IN_PROGRESS 4/5)、R28 W7-S4a option B HMAC in-flight、R29 校準輪;工期估計=工程側 live-ready ≈2-5 有效工程日,EA paper/shadow evidence clock(6-8 週)仍是最大 wall-clock 項。索引行改為現況一行,工程細節一律以 repo 根 `IBKR_TODO.md`+`docs/execution_plan/ibkr_live_capability/PROGRESS.md` 為正本,本檔僅史料+教訓。
+
+## [index-archive 2026-08-01] 原 MEMORY.md 索引條目全文(對時壓縮前歸檔,內容為當時點狀態;其中 SHA 屬新史但已不入索引)
+
+- [IBKR stock/ETF full live-capability 軸 (2026-06-29~07-16)](project_2026_07_08_ibkr_stock_etf_readonly.md) — AMD-2026-07-11-01 Accepted=development 全授權+活化分離(margin/short/options/cfd/transfer 永久 denied;真實接觸需 envelope+Operator 活化紀錄);**W0-W4+W-CI 全 DONE 且 R8(07-16)8 鏡頭對抗審計 CONFIRMED**(INV-1 HOLDS=production 零 permit 放行路徑;測試鏈 211/74+287/34/2/9/201 本地複現全綠);**工程正本=repo 根 `IBKR_TODO.md` v2(§5.5 日誌 R9-R30,工期 2.5-4 週)+ loop 協議 v2(並行 manifest/記帳 checklist/反空轉/死亡三分類)+ 帳本 PROGRESS.md R0-R8,校準 PR#45(新史 merge `e67e5ac2c`)**;**W5-S0∥S1 已收口(07-16 R9/R10,PR#48 `c48689acb`/PR#49 `dbc234bbd`(新史):CI 三洞閉+E3-F1/F2 CLOSED+四 row contracts,IB 現勘全 CONFIRMED)**,下一=R11 W5-S2(消化;S3 前置=IB 哨兵/exec_time 兩 blocking)→W8a/W9a carve(EA1-EA3 前置=W3-W5+W8a+W9a);**D2 已裁採用+澄清 #3 acknowledged(07-16,PR#47 新史 `70e802ead`)**=W5+W8a+W9a 齊即開 EA1-EA4(每步仍逐一活化);runtime 教科書式 dormant(07-16 復核);教訓:Actions spending 耗盡=全分支 runner='' 假死非代碼問題;topic 檔含演變軌跡
+
+## P1/P2/B1 濃縮要點(2026-08-01 併自 project_2026_07_09_ibkr_p1_secret_slot_loader.md;原檔全文移 archive/)
+
+- **落地鏈(2026-07-09,SHA 屬舊史)**:P1 SecretSlotLoader+P2 external-surface gate producer+B1 只讀 TWS 連接器(connect+reqCurrentTime)全 landed,皆 fail-closed dormant scaffold;引擎 rebuild+restart 部署完成(07-09 23:59);QA post-restart 16 端點 honest fail-closed。教訓:**部署 dormant scaffold ≠ GUI-wired**(P1→W5-S4 attestation/B1→P4 IPC 才 wire)。
+- **base-path 陷阱**:`OPENCLAW_SECRETS_DIR` 語義已被 bybit 既有碼定為 bybit 根,IBKR 絕不 overload→獨立 `OPENCLAW_SECRETS_ROOT`→`secrets/external/ibkr/{readonly,paper}/`;`live/` 永不創建。
+- **stat-only 指紋裁決**(E3+CC 推翻 content-digest 提議):fingerprint=sha256(檔描述符,不讀憑證內容);account_id 是唯一被讀內容檔;paper 槽=身份;單一 pub(crate) 純函數防算法漂移。
+- **P2 approval-model**:owner-only 批准檔+6 綁定(option A)非 HMAC(同-uid 威脅模型下密碼學增益≈0);**升級 trigger:延用到 order-write/tiny-live/任何 capital exposure→必升簽名路徑**(W7-S4a option B HMAC 即此軌)。`validate()` 只驗 hash shape→producer 必自帶 verify 重算。
+- **B1 wire 硬化**:唯一 TcpStream::connect 鎖 feature flag,default build 0 socket 符號(nm 審計須 unstripped debug+fail-closed on inconclusive);managedAccounts(15)握手必推→drop;ERR_MSG info≥2100 容忍 drain;系統「只讀」load-bearing 控制在 Gateway Read-Only API checkbox 非 B1 碼。
+- **流程教訓**:cargo check 不編 `#[cfg(test)]`→Rust 驗證必 Linux cargo test;多 session 髒樹驗證走隔離 worktree+`git commit --only`。

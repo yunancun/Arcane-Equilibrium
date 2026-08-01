@@ -3,7 +3,6 @@ name: feedback_active_profit_unconventional_mandate
 description: "operator 鐵則——市場必然可主動盈利,禁範式陷阱,須用各 lens 原生數學探結構性/機械性 edge,discover AND implement"
 metadata: 
   node_type: memory
-  heat: 0
   type: feedback
   originSessionId: e4edc993-6380-45df-9d97-f38b704f30ed
 ---

@@ -3,7 +3,6 @@ name: project_2026_07_08_profit_first_autonomy_loop
 description: "承 maker-nogo 但拒『窮盡剩 operator-hand』;standing profit-first 自主 loop——TradeBot 自跑 discover→admit→execute→review→learn,現 READY_FOR_PM_E3_DISPATCH 卡 stale BBO manifest,零 order/fill proof"
 metadata:
   node_type: memory
-  heat: 0
   type: project
   originSessionId: b8f94432-3891-440a-ba13-f17896dd26d5
 ---
@@ -25,3 +24,9 @@ maker-first NO-GO(2026-07-06)後,operator **拒**「不賺錢=無可工程化方
 ## 演變軌跡
 
 - **2026-07-09(盈利研判第三輪 F1,CRITICAL)**:「avg net 64.98bps / 5058 outcomes / bh_fdr_pass」被推翻——MIT 實證 + conductor 親自重跑復驗:5058 行只含 **2 個 distinct entry_ts**(2026-07-07 16:19Z ×2614 份 +70.28bps、16:20Z ×2444 份 +59.32bps),ma_crossover 秒級重發信號×被擋即生成 outcome、`outcome_review.py` 無 per-(cell,entry_ts) 去重 → 偽複製 ×2529,n_eff≈1-2,兩窗 60min markout 重疊 59/60。全部來自 NEAR 單日 +1.6%/1h pop=單 episode regime-bet,**非 edge 證據**。同輪發現 standing 授權已過期 ~20.7h(loop 正確 fail-closed defer)。含義:READY_FOR_PM_E3_DISPATCH 鏈在 outcome_review dedup+effective-n 修復前**凍結**,不得消耗 order-capable E3/BB 窗口。修復 owner=E1(dedup)+QC(預註冊判準)。證據:probe_ledger.20260707T163027Z/213755Z.jsonl uniq -c 兩行;凍結 SHA `a71b5ed93`;見 [[project_2026_07_09_profit_diagnosis_roi_map]]。
+
+---
+
+## [index-archive 2026-08-01] 原 MEMORY.md 索引條目全文(壓縮索引前歸檔,內容為當時點狀態)
+
+- [profit-first 自主 loop(承 maker-nogo 拒「剩 operator-hand」)(2026-07-08)](project_2026_07_08_profit_first_autonomy_loop.md) — TradeBot 自跑 discover→admit→execute→review→learn(spec `docs/agents/profit-first-autonomy-loop.md`);**07-09 R3 推翻候選統計**(NEAR 5058=2 distinct entry 偽複製)→ **07-10 dedup+n_eff 管線上線 `1a3ecdd57`,重跑裁決候選榜=零合格**(7/7 VETO,gate=淨止損)——loop 回 discover 段等真候選;零 order/fill proof;無 live/無降 Cost Gate;演變軌跡在 topic 檔

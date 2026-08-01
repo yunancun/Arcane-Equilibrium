@@ -3,7 +3,6 @@ name: project_2026_06_13_profit_diagnosis_searchspace_reconfirm
 description: "不賺錢根因=搜索空間問題非執行;OHLCV/funding/liq-cascade/Polymarket 四軸全驗證窮盡,現無廉價近期 lever"
 metadata: 
   node_type: memory
-  heat: 0
   type: project
   originSessionId: e4edc993-6380-45df-9d97-f38b704f30ed
 ---
