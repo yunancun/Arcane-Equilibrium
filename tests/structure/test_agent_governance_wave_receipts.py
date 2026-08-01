@@ -56,6 +56,19 @@ def _wave_args(
     _git(repo, "init")
     _git(repo, "config", "user.email", "wave-test@example.invalid")
     _git(repo, "config", "user.name", "Wave Test")
+    (repo / "AGENTS.md").write_text(
+        "Wave fixture entry rules.\n",
+        encoding="utf-8",
+    )
+    (repo / "CLAUDE.md").write_text(
+        "# Product Boundary\n"
+        "Wave fixture product boundary.\n\n"
+        "# Root Principles\n"
+        "Wave fixture root principles.\n\n"
+        "# Hard Boundaries\n"
+        "Wave fixture hard boundaries.\n",
+        encoding="utf-8",
+    )
     (repo / "local.md").write_text("controller-owned wave input\n", encoding="utf-8")
     (repo / "docs" / "_indexes").mkdir(parents=True)
     (repo / "docs" / "README.md").write_text(
@@ -69,10 +82,10 @@ def _wave_args(
     _git(repo, "add", ".")
     _git(repo, "commit", "-m", "baseline")
 
-    registry = deepcopy(load_registry())
-    registry["context_packs"]["wave_test"] = ["local.md"]
-    registry["roles"]["E2"]["context_packs"] = ["wave_test"]
-    registry["roles"]["R4"]["context_packs"] = ["wave_test"]
+    # Saved workflows admit only the repository-canonical Registry generation.
+    # The fixture therefore provides the canonical pack sources instead of
+    # self-signing a test-only Registry variant.
+    registry = load_registry()
     facts = {
         "task_shape": "query" if risk == "low" else "review",
         "surfaces": ["governance"],
@@ -900,7 +913,8 @@ def test_wave_rejects_unbound_or_cyclic_dag_and_never_runs_blocked_dependents(
         artifact["artifact_digest"] = canonical_digest(plan)
     rejected = _run_harness(cyclic)["retry"]
     assert rejected["ok"] is False
-    assert "contains a cycle" in rejected["error"]
+    assert rejected["seenCalls"] == []
+    assert "execution DAG binding is invalid" in rejected["error"]
 
     substituted = deepcopy(wave_args)
     substituted["tasks"][0]["native_agent"] = "E4-verifier"

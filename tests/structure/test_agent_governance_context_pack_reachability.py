@@ -287,7 +287,7 @@ def test_unrelated_todo_row_does_not_change_model_visible_context(
         )
 
     first = compile_context("PM", facts(), registry, repo)
-    first_artifact = materialize_context_artifact(first)
+    first_artifact = materialize_context_artifact(first, registry)
     first_source = first["sources"][0]
     todo.write_text(
         prefix
@@ -295,7 +295,7 @@ def test_unrelated_todo_row_does_not_change_model_visible_context(
         encoding="utf-8",
     )
     second = compile_context("PM", facts(), registry, repo)
-    second_artifact = materialize_context_artifact(second)
+    second_artifact = materialize_context_artifact(second, registry)
     second_source = second["sources"][0]
     assert second_source["content_digest"] == first_source["content_digest"]
     assert second_source["planned_tokens"] == first_source["planned_tokens"]

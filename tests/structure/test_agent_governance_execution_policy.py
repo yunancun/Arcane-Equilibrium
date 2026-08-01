@@ -276,11 +276,14 @@ def test_route_and_context_share_exact_execution_budget_policy() -> None:
 def test_injected_registry_is_one_route_context_and_validation_authority() -> None:
     registry = deepcopy(load_registry())
     registry["budget_envelopes"]["narrow"]["max_unique_nodes"] = 2
-    registry["native_agent_adapters"]["E1"] = [{
-        "name": "E1-test-injected",
-        "node_class": "work",
-        "permission": registry["roles"]["E1"]["permission"],
-    }]
+    registry["budget_envelopes"]["narrow"]["max_call_attempts"] = (
+        2 + registry["budget_envelopes"]["narrow"]["retry_budget"]
+    )
+    registry["budget_envelopes"]["narrow"]["max_total_model_turns"] = (
+        1
+        + registry["budget_envelopes"]["narrow"]["max_call_attempts"]
+        + registry["budget_envelopes"]["narrow"]["max_followup_attempts"]
+    )
     scope = ["helper_scripts/maintenance_scripts/agent_governance_execution.py"]
     facts = {
         "task_shape": "implementation",
@@ -316,7 +319,7 @@ def test_injected_registry_is_one_route_context_and_validation_authority() -> No
     assert next(
         node for node in route["required_role_nodes"]
         if node["node_id"] == "implementation"
-    )["native_agent"] == "E1-test-injected"
+    )["native_agent"] == "E1"
     assert plan["budget"]["authority"] == route["execution_budget_policy"]
     assert validated["errors"] == []
 

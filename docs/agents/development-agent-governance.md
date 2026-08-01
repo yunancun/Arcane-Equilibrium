@@ -141,15 +141,28 @@ lower bound、unique nodes、call attempts 與 retry：
 
 Context plan 另綁 `context_execution_dag_binding_v1`：exact canonical nodes、
 predecessor edges、DAG digest、node count 與 edge count。省略 `execution_dag` 時 compiler
-綁 deterministic routed call-producing DAG；`agent-wave` 若加入 adaptive nodes，PM 必須在
-materialize 前把完整 wave DAG 傳入 compiler。Caller 提供的 DAG 可以是合法 superset，
-但必須逐欄保留每個 canonical routed call-producing node 的 identity、role/native、
-predecessors、class 與 permission；省略或用同 node id 替換其 core 都拒絕。Compiler 先依
+綁 deterministic routed call-producing DAG；generic `agent-wave` 若加入 adaptive nodes，
+PM 必須在 materialize 前把完整 wave DAG 傳入 compiler。Generic caller DAG 可以是合法
+superset，但必須逐欄保留每個 canonical routed call-producing node 的 identity、
+role/native、predecessors、class 與 permission；省略或用同 node id 替換其 core 都拒絕。
+Full Audit 與 Profit Diagnosis 無論 implicit 或 explicit 都只接受 fixed graph。若
+specialized route 另含 `business_acceptance`、`security_gate`、`ops_observation` 或其他
+固定圖外 call，compiler 在 materialize 前回傳 typed
+`SPECIALIZED_WORKFLOW_SPLIT_REQUIRED`、surface 與排序後的 extra node ids；PM 只依
+`error_code` 分流。Typed split 只在 Registry/artifact metadata、完整 routed
+obligations、canonical ASCII node ids、native bindings、acyclic topology 全部 exact
+時成立；mixed metadata、omission/substitution 或 malformed `requires` 一律是普通 DAG
+failure。PM 重新 compile 固定 saved-workflow 及 non-specialized generic/host
+兩份 fresh Context，不得切割、重簽或重試被拒 artifact。普通 DAG mismatch 或混合
+omission/substitution 不是 split signal。兩個 saved workflow 亦在 call 1 前做同一精確
+判別，不能以 superset 或 mixed tamper 啟動 partial wave。Compiler 先依
 task risk/surface 取 base
 envelope，再按 exact node count 選最小可容納 envelope；四節點仍是 narrow，五節點會合法
 提升為 standard。Materializer 與獨立 validator 都重算 binding 和最小 envelope；只改
 authority/self-digest、縮 node/edge count 或換 DAG bytes 都不能自鑄升級。使用 injected
-Registry 時 compile、materialize、validate 必須傳同一 Registry，禁止中途 ambient reload。
+Registry 時 compile、materialize、validate 必須傳同一份已通過治理驗證的 Registry；
+Context plan 額外綁 canonical Registry content digest，generated saved-workflow 亦只接受
+checked-in generation，禁止中途 ambient reload、刪除 axes 或跨 generation 重用 artifact。
 
 `agent-wave` 不接受裸 legacy task array 或 raw `contextPath`。每個 admitted node 只帶一份
 `context_artifact_v1`：Python compiler 保留完整 canonical envelope 供 closure 重驗，另產

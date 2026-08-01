@@ -414,13 +414,22 @@ def _s2_effect_step(claim_inputs: dict[str, str]) -> str | None:
     return step
 
 
+def _portable_ascii_lower(value: str) -> str:
+    """Fold only ASCII letters so Python and saved-workflow JS classify paths alike."""
+
+    return "".join(
+        chr(ord(character) + 32) if "A" <= character <= "Z" else character
+        for character in value
+    )
+
+
 def _documentation_path(path: str) -> bool:
     pure = PurePosixPath(path)
-    lowered = path.casefold()
+    lowered = _portable_ascii_lower(path)
     return (
-        pure.suffix.casefold() in {".md", ".mdx", ".rst", ".adoc"}
+        _portable_ascii_lower(pure.suffix) in {".md", ".mdx", ".rst", ".adoc"}
         or lowered.startswith(("docs/", "doc/", ".codex/docs/", ".claude/docs/"))
-        or pure.name.casefold() in {
+        or _portable_ascii_lower(pure.name) in {
             "agents.md", "claude.md", "readme", "readme.md", "todo.md",
         }
     )
@@ -428,8 +437,8 @@ def _documentation_path(path: str) -> bool:
 
 def _frontend_path(path: str) -> bool:
     pure = PurePosixPath(path)
-    parts = tuple(part.casefold() for part in pure.parts)
-    suffix = pure.suffix.casefold()
+    parts = tuple(_portable_ascii_lower(part) for part in pure.parts)
+    suffix = _portable_ascii_lower(pure.suffix)
     frontend_parts = {"frontend", "gui", "ui", "components", "pages", "views"}
     if suffix in {
         ".css", ".scss", ".sass", ".less", ".html", ".jsx", ".tsx",
@@ -453,6 +462,7 @@ def _safe_verification_path(value: str) -> str | None:
         or relative in {"."}
         or relative.startswith(("/", "~", "-", "!", ":"))
         or ".." in path.parts
+        or any(0xD800 <= ord(character) <= 0xDFFF for character in relative)
         or any(character in relative for character in ("\0", "\n", "\r", "\\", "*", "?", "["))
     ):
         return None
@@ -835,13 +845,12 @@ def _normalize_task_facts(task_facts: dict[str, Any]) -> dict[str, Any]:
         raise ValueError("task facts dirty_scope must be a list of non-empty strings")
     safe_dirty_scope: list[str] = []
     for item in supplied_dirty_scope:
-        relative = item.strip()
-        path = PurePosixPath(relative)
-        if relative.startswith(("/", "~")) or ".." in path.parts:
+        relative = _safe_verification_path(item)
+        if relative is None:
             raise ValueError("task facts dirty_scope must contain safe repo-relative paths")
         if relative not in safe_dirty_scope:
             safe_dirty_scope.append(relative)
-    normalized["dirty_scope"] = safe_dirty_scope
+    normalized["dirty_scope"] = sorted(safe_dirty_scope)
     if effect in {"repo_write", "docs_write", "local_test"} and not safe_dirty_scope:
         raise ValueError(
             f"side_effect_class={effect} requires a non-empty dirty_scope"
@@ -895,7 +904,7 @@ def route_task(
 ) -> dict[str, Any]:
     """Compile task facts into the mandatory hybrid DAG."""
 
-    registry = registry or load_registry()
+    registry = load_registry() if registry is None else registry
     facts = _normalize_task_facts(task_facts)
     surfaces, shape, risk = set(facts["surfaces"]), facts["task_shape"], facts["risk"]
     uncertainty = facts["uncertainty"]

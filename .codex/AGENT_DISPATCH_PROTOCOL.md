@@ -265,8 +265,15 @@ represents `pa_design` with `map:PA`, quantitative review with `probe:QC`, and
 remain exactly 14 and 10 unique call nodes across supported route shapes.
 Specialized dispatch must admit every fixed call with its exact core; a missing
 role representative, substituted node, or second generic call fails closed.
-Separately admitted extra calls are allowed only as an exact Context-bound
-superset.
+Full Audit and Profit Diagnosis do not accept separately admitted extra calls.
+A pure fixed-core-plus-extra graph returns typed
+`SPECIALIZED_WORKFLOW_SPLIT_REQUIRED`; PM uses its `error_code`, surface, and
+sorted extra ids to compile a fresh non-specialized host phase. “Pure” requires
+exact Registry/artifact metadata, complete route authorization, canonical
+ASCII node ids, Registry-native bindings, and acyclic topology. Mixed
+omission/substitution remains a generic DAG mismatch and must not enter an
+automatic split/retry loop. Generic executors may still admit a faithful,
+Context-bound superset.
 
 Every call attempt emits one canonical `workflow_call_record_v1` binding the
 workflow contract, node/role/payload, requested model/effort/isolation, prompt,

@@ -22,13 +22,19 @@ from agent_governance_execution_dag import (
     _compiler_derived_zero_call_context_execution_dag_binding,
     compile_context_execution_dag_binding,
     explicit_execution_dag_route_errors,
+    specialized_workflow_split_exception,
     task_execution_projection,
 )
 from agent_governance_execution_policy import (
     compile_execution_budget_policy,
     promote_execution_envelope,
 )
-from agent_governance_registry import REPO_ROOT, load_registry
+from agent_governance_registry import (
+    REPO_ROOT,
+    load_registry,
+    registry_digest,
+    validate_registry,
+)
 from agent_governance_external_evidence import ExternalEvidenceVerifier
 from agent_governance_routing import (
     TASK_CONTRACT_FIELDS,
@@ -119,7 +125,11 @@ def compile_context(
 ) -> dict[str, Any]:
     """Compile a lossless content-addressed context plan."""
 
-    registry = registry or load_registry()
+    registry = load_registry() if registry is None else registry
+    registry_errors = validate_registry(registry, REPO_ROOT)
+    if registry_errors:
+        raise ValueError("invalid Registry: " + "; ".join(registry_errors))
+    admitted_registry_digest = registry_digest(registry)
     facts = _normalize_task_facts(task_facts)
     if role_id not in registry["roles"]:
         raise ValueError(f"unknown role: {role_id}")
@@ -268,6 +278,13 @@ def compile_context(
         )
         if route_binding_errors:
             raise ValueError("; ".join(route_binding_errors))
+    split_error = specialized_workflow_split_exception(
+        execution_dag,
+        facts,
+        registry=registry,
+    )
+    if split_error is not None:
+        raise split_error
     execution_dag_binding = (
         _compiler_derived_zero_call_context_execution_dag_binding(
             registry=registry,
@@ -344,6 +361,7 @@ def compile_context(
     plan = {
         "schema_version": "context_plan_v1",
         "registry_schema_version": registry["schema_version"],
+        "registry_digest": admitted_registry_digest,
         "role": role_id,
         "role_permission": role["permission"],
         "execution_dag_binding": execution_dag_binding,
@@ -436,6 +454,13 @@ def _validate_plan_execution_dag_authority(
             "context plan execution DAG binding does not authorize the task contract: "
             + "; ".join(route_errors)
         )
+    split_error = specialized_workflow_split_exception(
+        binding["nodes"],
+        task_contract,
+        registry=registry,
+    )
+    if split_error is not None:
+        raise split_error
     expected_envelope = promote_execution_envelope(
         _select_envelope(plan.get("task_contract", {})),
         required_nodes=expected_binding["node_count"],
@@ -471,7 +496,12 @@ def materialize_context_artifact(
 ) -> dict[str, Any]:
     """Freeze Python-canonical plan bytes for cross-runtime admission/retry."""
 
-    registry = registry or load_registry()
+    registry = load_registry() if registry is None else registry
+    registry_errors = validate_registry(registry, REPO_ROOT)
+    if registry_errors:
+        raise ValueError("invalid Registry: " + "; ".join(registry_errors))
+    if plan.get("registry_digest") != registry_digest(registry):
+        raise ValueError("context plan Registry digest differs from validated Registry")
     expected_digest = context_plan_digest(plan)
     if plan.get("context_digest") != expected_digest:
         raise ValueError("context plan self-digest is stale or forged")

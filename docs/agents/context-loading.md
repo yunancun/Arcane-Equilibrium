@@ -31,6 +31,12 @@ These facts are normalized into one exact `task_contract`: task shape, sorted
 surfaces, risk, runtime/end-to-end claims, `side_effect_class`, objective, scope,
 acceptance, hard stops, source baseline, `dirty_scope`, optional
 `verification_scope`, direct interfaces, and previous failure.
+`dirty_scope` is normalized to unique, safe repository-relative paths sorted by
+Unicode scalar value; unpaired surrogates and Git/pathspec-like spellings fail
+closed. `verification_scope` uses the same portable path ordering and safety.
+Reserved documentation/frontend path tokens use ASCII-only case folding in both
+Python and saved-workflow JS; Unicode confusables never acquire those ownership
+classes.
 Any prior/evidence digest that may determine a verdict is also admitted under
 `claim_inputs`; the free-form prompt is not an authority channel for replacing
 it. The canonical task-contract digest follows the Context artifact into every
@@ -142,12 +148,21 @@ call-producing DAG binding (canonical nodes/edges, digest, node count, edge coun
 then embeds
 the same verified plan bytes and reuses them on retry. Exact `task_prompt` and
 required uncertainty are part of the normalized task contract; prompt swap or
-omission fails before a call. A wave that differs from the deterministic routed
-DAG must be supplied to `compile_context(..., execution_dag=...)` before
-materialization; the explicit DAG must retain the exact core of every canonical
-routed call-producing node. Legitimate extra nodes are allowed as a superset,
-but omission or substitution of a routed node fails closed; local JS cannot
-self-promote a narrow artifact. Profit
+omission fails before a call. A generic host-executor wave that differs from
+the deterministic routed DAG must be supplied to
+`compile_context(..., execution_dag=...)` before materialization; the explicit
+DAG must retain the exact core of every canonical routed call-producing node.
+Full Audit and Profit Diagnosis accept only their fixed graphs: neither a
+compiler-derived nor caller-supplied superset may extend or select a saved
+workflow executor. When a specialized route has unmatched calls, compilation
+returns typed `SPECIALIZED_WORKFLOW_SPLIT_REQUIRED` with the surface and sorted
+node ids. It may do so only after exact Registry/artifact metadata, complete
+routed obligations, canonical ASCII node ids, native bindings, and acyclic
+topology pass. PM branches on `error_code` and compiles the fixed saved-workflow
+phase plus a fresh non-specialized generic/host phase; it never slices,
+re-signs, or retries the rejected artifact. A generic mismatch or mixed
+omission/substitution is not a split signal. Omission or substitution of a
+routed node still fails closed; local JS cannot self-promote a narrow artifact. Profit
 Diagnosis binds 10 pre-call nodes; Full Audit binds 13 axes + seam and stages
 later claim verification/fix as MAE-005 host-phase debt. Explicit `[]`,
 non-arrays, malformed JSON, or unknown node fields are rejected. Only a
@@ -157,6 +172,12 @@ artifact and binds every fragment to its digest. Its wave validator also
 exact-compares the ordered admitted-task core and `dag_digest` with the
 Context `execution_dag_binding`; adding a post-Context node requires a freshly
 compiled Context, even if every call/manifest/wave self-digest was recomputed.
+Both saved workflows repeat the exact split discriminator before call 1, so
+passing a host-phase superset or mixed tamper to the wrong executor cannot
+start a partial wave. The plan also binds the canonical digest of the validated
+Registry generation. Compile, materialize, independent validation, and saved
+JS admission all require the same bytes; Registry injection cannot redefine a
+fixed graph or reuse an artifact across generations.
 Every model call is then
 controller-recorded with exact task/context/role/node/native identity/class/
 permission, DAG predecessors/topological wave, producer generation, dirty-scope/

@@ -1556,7 +1556,12 @@ const parallel = async jobs => Promise.all(jobs.map(job => job()));
     const result = await runner(__ARGS__, () => {}, () => {}, parallel, agent);
     console.log(JSON.stringify({ result, prompts }));
   } catch (error) {
-    console.log(JSON.stringify({ _error: String(error.message || error), prompts }));
+    console.log(JSON.stringify({
+      _error: String(error.message || error), prompts,
+      _error_code: error.error_code || null,
+      _surface: error.surface || null,
+      _extra_node_ids: error.extra_node_ids || null,
+    }));
   }
 })();
 """
@@ -1618,6 +1623,230 @@ const parallel = async jobs => Promise.all(jobs.map(job => job()));
     )
     assert divergent["prompts"] == []
     assert "execution DAG binding differs" in divergent["_error"]
+    assert divergent["_error_code"] is None
+
+    def extra(node_id: str) -> dict:
+        return {
+            "node_id": node_id,
+            "role": "E2",
+            "native_agent": "E2",
+            "requires": ["map:PA"],
+            "node_class": "verification",
+            "permission": "read_only",
+        }
+
+    def artifact_with_nodes(nodes: list[dict]) -> dict:
+        candidate = deepcopy(context_artifact)
+        candidate_plan = json.loads(candidate["canonical_plan"])
+        candidate_plan["execution_dag_binding"] = __import__(
+            "agent_governance_execution_dag"
+        ).compile_context_execution_dag_binding(nodes)
+        candidate["canonical_plan"] = _canonical(candidate_plan)
+        candidate["artifact_digest"] = governance.context_plan_digest(
+            candidate_plan
+        )
+        return candidate
+
+    def artifact_with_routed_nodes(
+        nodes: list[dict],
+        contract_updates: dict | None = None,
+    ) -> dict:
+        candidate = deepcopy(context_artifact)
+        candidate_plan = json.loads(candidate["canonical_plan"])
+        candidate_plan["task_contract"].update(
+            contract_updates or {"end_to_end_claim": True}
+        )
+        candidate_plan["task_contract_digest"] = governance.task_contract_digest(
+            candidate_plan["task_contract"]
+        )
+        candidate_plan["execution_dag_binding"] = __import__(
+            "agent_governance_execution_dag"
+        ).compile_context_execution_dag_binding(nodes)
+        candidate.update(
+            __import__(
+                "agent_governance_context_projection"
+            ).materialize_semantic_context(
+                candidate_plan,
+                governance.load_registry(),
+            )
+        )
+        candidate["task_contract_digest"] = candidate_plan[
+            "task_contract_digest"
+        ]
+        candidate["canonical_plan"] = _canonical(candidate_plan)
+        candidate["artifact_digest"] = governance.context_plan_digest(
+            candidate_plan
+        )
+        return candidate
+
+    business_acceptance = {
+        "node_id": "business_acceptance",
+        "role": "QA",
+        "native_agent": "QA",
+        "requires": [],
+        "node_class": "verification",
+        "permission": "read_only",
+    }
+
+    unrelated_superset = run(
+        {
+            **args,
+            "context_artifact": artifact_with_nodes([
+                *bound_nodes, extra("extra:unrouted"),
+            ]),
+        },
+        map_ready=True,
+    )
+    assert unrelated_superset["prompts"] == []
+    assert "does not authorize the exact task route" in unrelated_superset["_error"]
+    assert unrelated_superset["_error_code"] is None
+
+    superset = run(
+        {
+            **args,
+            "context_artifact": artifact_with_routed_nodes([
+                *bound_nodes, business_acceptance,
+            ]),
+        },
+        map_ready=True,
+    )
+    assert superset["prompts"] == []
+    assert superset["_error_code"] == "SPECIALIZED_WORKFLOW_SPLIT_REQUIRED"
+    assert superset["_surface"] == "profit_diagnosis"
+    assert superset["_extra_node_ids"] == ["business_acceptance"]
+
+    for forged_route in (
+        artifact_with_routed_nodes(bound_nodes),
+        artifact_with_routed_nodes(
+            [*bound_nodes, business_acceptance],
+            {
+                "end_to_end_claim": False,
+                "surfaces": ["full_audit", "profit_diagnosis"],
+            },
+        ),
+    ):
+        rejected = run(
+            {**args, "context_artifact": forged_route},
+            map_ready=True,
+        )
+        assert rejected["prompts"] == []
+        assert "does not authorize the exact task route" in rejected["_error"]
+        assert rejected["_error_code"] is None
+
+    effectful_specialized = run(
+        {
+            **args,
+            "context_artifact": artifact_with_routed_nodes(
+                bound_nodes,
+                {
+                    "runtime_claim": True,
+                    "side_effect_class": "target_host_probe",
+                    "surfaces": ["profit_diagnosis", "runtime_effect"],
+                },
+            ),
+        },
+        map_ready=True,
+    )
+    assert effectful_specialized["prompts"] == []
+    assert (
+        "does not authorize the exact task route"
+        in effectful_specialized["_error"]
+    )
+    assert effectful_specialized["_error_code"] is None
+
+    fixed_ids = {node["node_id"] for node in bound_nodes}
+    for source_write_updates in (
+        {
+            "task_shape": "implementation",
+            "side_effect_class": "repo_write",
+            "surfaces": ["profit_diagnosis", "python"],
+        },
+        {
+            "task_shape": "docs",
+            "side_effect_class": "docs_write",
+            "surfaces": ["docs", "profit_diagnosis"],
+        },
+        {
+            "task_shape": "test",
+            "side_effect_class": "local_test",
+            "surfaces": ["profit_diagnosis", "python"],
+        },
+    ):
+        source_write_contract = deepcopy(
+            json.loads(context_artifact["canonical_plan"])["task_contract"]
+        )
+        source_write_contract.update(source_write_updates)
+        source_write_route = governance.route_task(source_write_contract)
+        source_write_projection, source_write_errors = __import__(
+            "agent_governance_execution_dag"
+        ).task_execution_projection(
+            source_write_route["required_role_nodes"],
+            [],
+            task_facts=source_write_route["task_facts"],
+            registry=governance.load_registry(),
+        )
+        assert source_write_errors == []
+        source_write_extra_ids = sorted(
+            node["node_id"]
+            for node in source_write_projection
+            if node["node_id"] not in fixed_ids
+        )
+        assert source_write_extra_ids
+        source_write_split = run(
+            {
+                **args,
+                "context_artifact": artifact_with_routed_nodes(
+                    source_write_projection,
+                    source_write_updates,
+                ),
+            },
+            map_ready=True,
+        )
+        assert source_write_split["prompts"] == []
+        assert source_write_split["_error_code"] == (
+            "SPECIALIZED_WORKFLOW_SPLIT_REQUIRED"
+        )
+        assert source_write_split["_surface"] == "profit_diagnosis"
+        assert source_write_split["_extra_node_ids"] == source_write_extra_ids
+
+    omitted_nodes = [
+        deepcopy(node)
+        for node in bound_nodes
+        if node["node_id"] != "probe:EXT"
+    ]
+    next(
+        node for node in omitted_nodes if node["node_id"] == "map:PA"
+    )["requires"].remove("probe:EXT")
+    mixed_omission = run(
+        {
+            **args,
+            "context_artifact": artifact_with_routed_nodes([
+                *omitted_nodes, business_acceptance,
+            ]),
+        },
+        map_ready=True,
+    )
+    assert mixed_omission["prompts"] == []
+    assert "execution DAG binding differs" in mixed_omission["_error"]
+    assert mixed_omission["_error_code"] is None
+
+    substituted_nodes = deepcopy(bound_nodes)
+    next(
+        node for node in substituted_nodes
+        if node["node_id"] == "evidence:AI-E"
+    ).update({"role": "E2", "native_agent": "E2"})
+    mixed_substitution = run(
+        {
+            **args,
+            "context_artifact": artifact_with_routed_nodes([
+                *substituted_nodes, business_acceptance,
+            ]),
+        },
+        map_ready=True,
+    )
+    assert mixed_substitution["prompts"] == []
+    assert "execution DAG binding differs" in mixed_substitution["_error"]
+    assert mixed_substitution["_error_code"] is None
 
     tier_override = run(
         {**args, "cheap_model": "claude-sonnet-5"}, map_ready=True

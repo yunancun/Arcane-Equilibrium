@@ -1,5 +1,6 @@
 """Registry and generated-view Implementation for Development-Agent Governance."""
 from __future__ import annotations
+import hashlib
 import json
 import re
 from pathlib import Path
@@ -51,6 +52,19 @@ def load_registry(path: Path | None = None) -> dict[str, Any]:
 
     registry_path = path or (REPO_ROOT / REGISTRY_REL)
     return json.loads(registry_path.read_text(encoding="utf-8"))
+
+
+def registry_digest(registry: dict[str, Any]) -> str:
+    """Bind the exact validated Registry bytes used for compilation."""
+
+    canonical = json.dumps(
+        registry,
+        ensure_ascii=False,
+        sort_keys=True,
+        separators=(",", ":"),
+        allow_nan=False,
+    ).encode("utf-8")
+    return "sha256:" + hashlib.sha256(canonical).hexdigest()
 
 
 def _iter_text(value: Any) -> Iterable[str]:
@@ -608,7 +622,7 @@ def native_agent_binding(
 ) -> dict[str, str]:
     """Resolve one Registry-authoritative pre-spawn native identity."""
 
-    registry = registry or load_registry()
+    registry = load_registry() if registry is None else registry
     spec = registry.get("roles", {}).get(role_id)
     if not isinstance(spec, dict) or role_id == "PM":
         raise ValueError(f"role {role_id!r} is not a delegated native role")
@@ -635,7 +649,7 @@ def native_agent_contract(
 ) -> dict[str, str]:
     """Resolve an exact native identity without trusting caller-supplied role facts."""
 
-    registry = registry or load_registry()
+    registry = load_registry() if registry is None else registry
     matches: list[dict[str, str]] = []
     for role_id, spec in registry.get("roles", {}).items():
         for adapter in _native_adapters(registry, role_id, spec):

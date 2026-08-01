@@ -69,6 +69,7 @@ def context_semantic_projections(
     shared = {
         "schema_version": "shared_task_context_v1",
         "registry_schema_version": plan["registry_schema_version"],
+        "registry_digest": plan["registry_digest"],
         "task_contract": _semantic_contract(plan["task_contract"]),
         "task_semantic_generation": {
             "source_head": source_head,

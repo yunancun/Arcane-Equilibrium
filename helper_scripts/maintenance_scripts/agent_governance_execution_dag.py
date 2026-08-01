@@ -12,12 +12,29 @@ from agent_governance_registry import load_registry, native_agent_binding
 
 
 DIGEST_RE = re.compile(r"^sha256:[0-9a-f]{64}$")
+EXECUTION_NODE_ID_RE = re.compile(r"^[A-Za-z0-9][A-Za-z0-9._:/-]*$")
 EXECUTION_NODE_FIELDS = (
     "node_id", "role", "native_agent", "requires", "node_class", "permission",
 )
 CONTEXT_EXECUTION_DAG_BINDING_FIELDS = (
     "schema_version", "dag_digest", "node_count", "edge_count", "nodes",
 )
+
+
+class SpecializedWorkflowSplitRequired(ValueError):
+    """Stable machine-readable boundary between a saved workflow and next phase."""
+
+    error_code = "SPECIALIZED_WORKFLOW_SPLIT_REQUIRED"
+
+    def __init__(self, surface: str, extra_node_ids: list[str]) -> None:
+        self.surface = surface
+        self.extra_node_ids = tuple(sorted(set(extra_node_ids)))
+        super().__init__(
+            f"{self.error_code}: specialized {surface} Context contains calls "
+            f"outside its fixed saved-workflow DAG: {list(self.extra_node_ids)}; "
+            "compile those calls into a fresh non-specialized Context bound to "
+            "its selected executor"
+        )
 
 
 def _canonical(value: Any) -> bytes:
@@ -110,7 +127,7 @@ def profit_diagnosis_execution_dag(
 ) -> list[dict[str, Any]]:
     """Compile the complete pre-call Profit Diagnosis execution DAG."""
 
-    registry = registry or load_registry()
+    registry = load_registry() if registry is None else registry
     contract = registry["workflow_contracts"]["profit_diagnosis_v1"]
     evidence_axes = contract["evidence_axes"]
     probe_axes = contract["probe_axes"]
@@ -172,7 +189,7 @@ def full_audit_execution_dag(
 ) -> list[dict[str, Any]]:
     """Compile the fixed pre-call Full Audit axes plus seam DAG."""
 
-    registry = registry or load_registry()
+    registry = load_registry() if registry is None else registry
     axes = registry["workflow_contracts"]["full_audit_v3"]["axes"]
 
     def node(
@@ -312,6 +329,40 @@ def specialized_route_result_bindings(
             "controller_owned": result_node_id is None
             or result_node_id in {"ai_economics_review", "profit_control"},
         })
+
+    # A fixed saved-workflow result cannot consume a predecessor that only a
+    # fresh generic phase can execute. Preserve that predecessor's complete
+    # downstream verification chain as explicit extras; otherwise a writer can
+    # be stranded while its E2/E4 reviewers are incorrectly absorbed by fixed
+    # audit nodes, turning a valid typed split into a topology error.
+    binding_by_id = {
+        binding["route_node_id"]: binding for binding in bindings
+    }
+    unmatched = {
+        binding["route_node_id"]
+        for binding in bindings
+        if binding["result_node_id"] == binding["route_node_id"]
+        and not binding["controller_owned"]
+    }
+    changed = True
+    while changed:
+        changed = False
+        for node in required_nodes:
+            node_id = node.get("node_id")
+            requires = node.get("requires")
+            if (
+                not isinstance(node_id, str)
+                or node_id in unmatched
+                or not isinstance(requires, list)
+            ):
+                continue
+            if any(required in unmatched for required in requires):
+                binding = binding_by_id.get(node_id)
+                if binding is not None:
+                    binding["result_node_id"] = node_id
+                    binding["controller_owned"] = False
+                    unmatched.add(node_id)
+                    changed = True
     return bindings, errors
 
 
@@ -328,7 +379,11 @@ def task_execution_projection(
     Generic routes retain their delegated node ids.  Full Audit and Profit
     Diagnosis instead begin with their fixed workflow DAG; routed semantic
     roles are represented by fixed calls or explicit controller ownership.
-    Additional admitted calls remain permitted only as an exact superset.
+    Generic routes may admit an exact superset for a separately selected host
+    executor.  A specialized Context may only identify unmatched route calls
+    so the caller can split them into a freshly compiled non-specialized phase;
+    neither implicit nor explicit admissions may extend the fixed saved
+    workflow graph.
     """
 
     try:
@@ -353,7 +408,7 @@ def task_execution_projection(
     if len(node_ids) != len(set(node_ids)):
         return [], ["dispatch execution node ids are not unique"]
 
-    registry = registry or load_registry()
+    registry = load_registry() if registry is None else registry
     fixed = (
         full_audit_execution_dag(registry)
         if surface == "full_audit"
@@ -466,6 +521,98 @@ def task_execution_projection(
     return projected, errors
 
 
+def specialized_workflow_split_exception(
+    execution_dag: Any,
+    task_facts: dict[str, Any] | None,
+    *,
+    registry: dict[str, Any] | None = None,
+) -> SpecializedWorkflowSplitRequired | None:
+    """Classify only an exact fixed core plus well-formed additional calls."""
+
+    try:
+        surface = specialized_execution_surface(task_facts)
+    except ValueError:
+        return None
+    if surface is None:
+        return None
+    if not isinstance(execution_dag, list) or any(
+        not isinstance(node, dict) for node in execution_dag
+    ):
+        return None
+    registry = load_registry() if registry is None else registry
+    fixed = (
+        full_audit_execution_dag(registry)
+        if surface == "full_audit"
+        else profit_diagnosis_execution_dag(registry)
+    )
+    fixed_ids = {node["node_id"] for node in fixed}
+    if (
+        len(fixed_ids) != len(fixed)
+        or any(set(node) != set(EXECUTION_NODE_FIELDS) for node in execution_dag)
+    ):
+        return None
+    node_ids = [node.get("node_id") for node in execution_dag]
+    if (
+        any(not isinstance(node_id, str) or not node_id for node_id in node_ids)
+        or len(node_ids) != len(set(node_ids))
+    ):
+        return None
+    fixed_projection = [
+        execution_node_core(node)
+        for node in execution_dag
+        if node["node_id"] in fixed_ids
+    ]
+    if fixed_projection != fixed:
+        return None
+    try:
+        compile_context_execution_dag_binding(execution_dag, registry=registry)
+        # Import locally because routing owns the public task normalizer and
+        # itself imports this module's projection primitives.
+        from agent_governance_routing import route_task
+
+        routed = route_task(task_facts or {}, registry=registry)
+        expected, projection_errors = task_execution_projection(
+            routed["required_role_nodes"],
+            [],
+            task_facts=routed["task_facts"],
+            registry=registry,
+        )
+    except (KeyError, TypeError, ValueError):
+        return None
+    if projection_errors:
+        return None
+    expected_extras = {
+        node["node_id"]: execution_node_core(node)
+        for node in expected
+        if node["node_id"] not in fixed_ids
+    }
+    supplied_extras = {
+        node["node_id"]: execution_node_core(node)
+        for node in execution_dag
+        if node["node_id"] not in fixed_ids
+    }
+    if not expected_extras or supplied_extras != expected_extras:
+        return None
+    extra_ids = sorted(expected_extras)
+    return SpecializedWorkflowSplitRequired(surface, extra_ids)
+
+
+def compiler_derived_specialized_split_errors(
+    execution_dag: Any,
+    task_facts: dict[str, Any] | None,
+    *,
+    registry: dict[str, Any] | None = None,
+) -> list[str]:
+    """Compatibility wrapper for callers that still consume string errors."""
+
+    error = specialized_workflow_split_exception(
+        execution_dag,
+        task_facts,
+        registry=registry,
+    )
+    return [str(error)] if error is not None else []
+
+
 def delegated_execution_projection(
     required_nodes: Any,
     admitted_nodes: Any,
@@ -559,10 +706,12 @@ def explicit_execution_dag_route_errors(
 ) -> list[str]:
     """Require caller DAGs to retain every canonical routed call node.
 
-    Extra nodes are permitted, but a caller cannot omit a routed node or reuse
-    its node id with a different role/native/class/permission/predecessor core.
-    Saved-workflow controller nodes that do not themselves make a call are
+    Generic routes may admit extra nodes, but a caller cannot omit a routed node
+    or reuse its node id with a different role/native/class/permission/predecessor
+    core. Saved-workflow controller nodes that do not themselves make a call are
     projected out through the same canonical rule used by Context defaults.
+    Specialized exact supersets are rejected separately because their saved
+    executors cannot run the additional calls.
     """
 
     canonical, errors = task_execution_projection(
@@ -606,6 +755,20 @@ def explicit_execution_dag_route_errors(
                 route_errors.append(
                     f"explicit Context execution DAG does not authorize specialized {surface} workflow: substitutes fixed call node {node_id}"
                 )
+    surface = specialized_execution_surface(task_facts)
+    if surface is not None:
+        canonical_ids = {str(node["node_id"]) for node in canonical}
+        unexpected_ids = sorted(
+            str(task["node_id"])
+            for task in tasks
+            if isinstance(task, dict)
+            and isinstance(task.get("node_id"), str)
+            and task["node_id"] not in canonical_ids
+        )
+        if unexpected_ids:
+            route_errors.append(
+                f"explicit Context execution DAG does not authorize specialized {surface} workflow: adds unrouted call nodes {unexpected_ids}"
+            )
     return route_errors
 
 
@@ -616,12 +779,16 @@ def topological_waves(
 ) -> tuple[list[list[str]], list[str]]:
     node_ids = [task.get("node_id") for task in tasks]
     errors: list[str] = []
-    if any(not isinstance(node, str) or not node for node in node_ids):
+    if any(
+        not isinstance(node, str)
+        or not EXECUTION_NODE_ID_RE.fullmatch(node)
+        for node in node_ids
+    ):
         return [], ["execution DAG node ids are invalid"]
     if len(node_ids) != len(set(node_ids)):
         return [], ["execution DAG node ids are not unique"]
     node_set = set(node_ids)
-    registry = registry or load_registry()
+    registry = load_registry() if registry is None else registry
     roles = registry["roles"]
     for index, task in enumerate(tasks):
         requires = task.get("requires")

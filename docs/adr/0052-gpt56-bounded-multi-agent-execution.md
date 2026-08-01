@@ -185,12 +185,32 @@ seam critic). Either workflow exact-compares that binding before its first
 model call; it cannot append a post-call node or promote its own envelope.
 Explicit caller `execution_dag=[]`, non-array/malformed values, and unknown
 node fields fail closed. A zero-node binding exists only for a
-compiler-derived zero-delegation query, not through a caller switch. A
-non-empty explicit DAG may add nodes only as a faithful superset of the
+compiler-derived zero-delegation query, not through a caller switch. Generic
+host-executor routes may add nodes only as a faithful explicit superset of the
 canonical route: omission or substitution of any routed call-producing node
 core fails. Closure then exact-binds the ordered wave admitted-task core and
 wave `dag_digest` to the Context binding; an internally consistent rehash of a
 larger post-Context wave remains invalid until Context is freshly compiled.
+Full Audit and Profit Diagnosis never accept a DAG superset, whether supplied
+implicitly or explicitly. If valid route facts require another call (for
+example end-to-end `business_acceptance`, or runtime `security_gate` /
+`ops_observation`), compilation fails before materialization with the typed
+`SPECIALIZED_WORKFLOW_SPLIT_REQUIRED`, its specialized surface, and sorted
+unmatched node ids. The discriminator runs only after Registry generation,
+artifact metadata, routed obligations, native bindings, canonical ASCII node
+ids, and acyclic topology all match; mixed metadata, omission, substitution,
+or malformed `requires` remains an ordinary DAG failure. PM branches on
+`error_code`, never on the human error string, and compiles both the fixed saved workflow and the additional
+non-specialized host executor as fresh Context phases. A generic DAG mismatch
+is not a split signal and must not trigger automatic retry. Both saved
+workflows repeat the exact discriminator before call 1, preventing mixed
+tampering or a host-phase superset from becoming a partial saved wave.
+
+Every Context plan also binds the validated Registry generation by canonical
+content digest. Compile, materialize, independent validation, and the generated
+saved-workflow admission block all require that exact generation; an injected
+Registry cannot erase axes, redefine the fixed graph, or authorize an artifact
+created under different Registry bytes.
 
 Full Audit defaults to the complete 13-axis backstop. Reduced adaptive selection
 uses `CC`, `FA`, route-required axes, and one deterministic rotating

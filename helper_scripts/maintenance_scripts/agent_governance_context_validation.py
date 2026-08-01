@@ -11,18 +11,27 @@ from datetime import datetime, timedelta, timezone
 from pathlib import Path, PurePosixPath
 from typing import Any
 
-from agent_governance_registry import REPO_ROOT, load_registry
+from agent_governance_registry import (
+    REPO_ROOT,
+    load_registry,
+    registry_digest,
+    validate_registry,
+)
 from agent_governance_context_specs import trusted_derived_kinds
 from agent_governance_context_projection import materialize_semantic_context
 from agent_governance_execution_dag import (
+    SpecializedWorkflowSplitRequired,
     _compiler_derived_zero_call_context_execution_dag_binding,
     compile_context_execution_dag_binding,
+    explicit_execution_dag_route_errors,
+    specialized_workflow_split_exception,
 )
 from agent_governance_execution_policy import (
     compile_execution_budget_policy,
     promote_execution_envelope,
 )
 from agent_governance_task_control import compile_task_execution_policy
+from agent_governance_routing import route_task
 
 
 DIGEST_RE = re.compile(r"^sha256:[0-9a-f]{64}$")
@@ -43,6 +52,7 @@ ARTIFACT_FIELDS = {
 PLAN_FIELDS = {
     "schema_version",
     "registry_schema_version",
+    "registry_digest",
     "role",
     "role_permission",
     "execution_dag_binding",
@@ -304,6 +314,7 @@ def _recaptured_source_projection(source: dict[str, Any]) -> dict[str, Any]:
 def _local_provenance_errors(
     plan: dict[str, Any], *, registry: dict[str, Any], root: Path,
     external_evidence_verifier=None,
+    execution_dag_authoritative: bool = True,
 ) -> list[str]:
     """Re-run the local compiler so caller-rehashed source bytes cannot self-attest."""
 
@@ -342,13 +353,21 @@ def _local_provenance_errors(
     # authenticated empty binding can only have come from the compiler's own
     # zero-delegation route; recapture that route instead of replaying ``[]`` as
     # if it were caller authority.
-    recapture_execution_dag = None if execution_dag == [] else execution_dag
+    recapture_execution_dag = (
+        execution_dag
+        if execution_dag_authoritative and execution_dag != []
+        else None
+    )
     try:
         recaptured = compile_context(
             str(plan.get("role", "")), contract, registry=registry, root=root,
             external_evidence_verifier=external_evidence_verifier,
             execution_dag=recapture_execution_dag,
         )
+    except SpecializedWorkflowSplitRequired:
+        return [
+            "local Context provenance recapture rejected task/DAG authority"
+        ]
     except (KeyError, OSError, TypeError, ValueError) as error:
         return [f"local Context provenance recapture failed: {error}"]
     errors: list[str] = []
@@ -434,6 +453,10 @@ def validate_context_artifact(
         errors.append("canonical plan schema_version is invalid")
     if plan.get("registry_schema_version") != "agent_registry_v1":
         errors.append("canonical plan Registry generation is invalid")
+    if not isinstance(plan.get("registry_digest"), str) or not DIGEST_RE.fullmatch(
+        plan["registry_digest"]
+    ):
+        errors.append("canonical plan Registry digest is invalid")
 
     contract = plan.get("task_contract")
     if not isinstance(contract, dict) or set(contract) != CONTRACT_FIELDS:
@@ -505,10 +528,33 @@ def validate_context_artifact(
     if observed_now is None:
         errors.append("context validation now must be timezone-aware")
         observed_now = datetime.now(timezone.utc)
-    registry = registry or load_registry()
+    registry = load_registry() if registry is None else registry
+    try:
+        registry_errors = validate_registry(registry, REPO_ROOT)
+        admitted_registry_digest = registry_digest(registry)
+    except (
+        AttributeError,
+        KeyError,
+        OverflowError,
+        RecursionError,
+        TypeError,
+        ValueError,
+    ) as error:
+        errors.append(f"Registry validation failed: {error}")
+        return result
+    if registry_errors:
+        errors.extend(
+            f"Registry validation failed: {error}" for error in registry_errors
+        )
+        return result
+    if plan.get("registry_digest") != admitted_registry_digest:
+        errors.append("canonical plan Registry digest differs from validated Registry")
     if plan.get("role_permission") != registry.get("roles", {}).get(plan.get("role"), {}).get("permission"):
         errors.append("context role_permission differs from Registry")
+    split_preconditions_clean = not errors
     execution_dag_binding = plan.get("execution_dag_binding")
+    execution_dag_authoritative = False
+    specialized_split_candidate: SpecializedWorkflowSplitRequired | None = None
     if (
         not isinstance(execution_dag_binding, dict)
         or not isinstance(execution_dag_binding.get("nodes"), list)
@@ -533,6 +579,42 @@ def validate_context_artifact(
         else:
             if execution_dag_binding != expected_dag_binding:
                 errors.append("context execution DAG binding is not compiler-derived")
+            else:
+                execution_dag_authoritative = True
+            try:
+                routed = route_task(contract, registry=registry)
+                route_errors = explicit_execution_dag_route_errors(
+                    execution_dag_binding["nodes"],
+                    routed["required_role_nodes"],
+                    contract,
+                    registry=registry,
+                )
+                split_error = (
+                    specialized_workflow_split_exception(
+                        execution_dag_binding["nodes"],
+                        contract,
+                        registry=registry,
+                    )
+                    if (
+                        execution_dag_authoritative
+                        and split_preconditions_clean
+                        and not route_errors
+                    )
+                    else None
+                )
+            except (KeyError, TypeError, ValueError) as error:
+                errors.append(
+                    "context execution DAG route validation failed: "
+                    + str(error)
+                )
+            else:
+                errors.extend(
+                    "context execution DAG binding does not authorize the task contract: "
+                    + error
+                    for error in route_errors
+                )
+                if split_error is not None:
+                    specialized_split_candidate = split_error
     try:
         expected_semantic = materialize_semantic_context(plan, registry)
     except (KeyError, TypeError, ValueError) as error:
@@ -675,14 +757,18 @@ def validate_context_artifact(
         if acquisition_plan != expected_acquisition:
             errors.append("context acquisition_plan is not evidence-debt-derived")
 
-    if require_local_provenance:
+    if require_local_provenance and specialized_split_candidate is None:
         errors.extend(
             _local_provenance_errors(
                 plan, registry=registry, root=root.resolve(),
                 external_evidence_verifier=external_evidence_verifier,
+                execution_dag_authoritative=(
+                    execution_dag_authoritative
+                    and specialized_split_candidate is None
+                ),
             )
         )
-    else:
+    elif not require_local_provenance:
         try:
             provenance_verified = (
                 provenance_verifier is not None
@@ -780,4 +866,6 @@ def validate_context_artifact(
         errors.append("context budget is not independently call_allowed")
     if not isinstance(budget.get("quality_reserve_reasons"), list):
         errors.append("context budget quality_reserve_reasons must be a list")
+    if not errors and specialized_split_candidate is not None:
+        errors.append(str(specialized_split_candidate))
     return result

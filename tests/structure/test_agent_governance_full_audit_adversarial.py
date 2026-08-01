@@ -1007,7 +1007,7 @@ def test_full_audit_closure_rejects_missing_fixed_route_representative() -> None
     )
 
 
-def test_full_audit_recomputes_aggregate_outcome_from_typed_votes() -> None:
+def test_full_audit_rejects_inline_typed_votes_without_host_executor_phase() -> None:
     governance, contract, packet = _clean_packet()
     fragment = _axis(packet, "FA")
     raw = _raw_high_finding()
@@ -1052,62 +1052,19 @@ def test_full_audit_recomputes_aggregate_outcome_from_typed_votes() -> None:
     fragment["payload"]["verification_outcomes"] = [
         {"outcome": outcome, "outcome_digest": _digest(outcome)}
     ]
-    _rehash_axis(packet, contract, "FA")
-    assert governance.validate_closure(
-        packet, execution_attestation_verifier=_host_execution_verifier(packet)
-    ) == []
-
-    missing_vote = deepcopy(packet)
-    missing_fragment = _axis(missing_vote, "FA")
-    missing_record = missing_fragment["payload"]["verification_outcomes"][0]
-    missing_record["outcome"]["verifier_votes"][0]["producer_call_ref"] = "missing:vote"
-    missing_record["outcome_digest"] = _digest(missing_record["outcome"])
-    _controller(missing_vote, contract)["payload"]["axis_fragment_digests"]["audit:FA"] = _digest(missing_fragment)
-    assert any(
-        "verify:claim-high-1:source producer call is missing" in error
-        for error in governance.validate_closure(missing_vote)
-    )
-
-    substituted_vote = deepcopy(packet)
-    substituted_fragment = _axis(substituted_vote, "FA")
-    substituted_record = substituted_fragment["payload"]["verification_outcomes"][0]
-    substituted_record["outcome"]["verifier_votes"][1]["reason"] = "substituted after producer call"
-    substituted_record["outcome_digest"] = _digest(substituted_record["outcome"])
-    _controller(substituted_vote, contract)["payload"]["axis_fragment_digests"]["audit:FA"] = _digest(substituted_fragment)
-    assert any(
-        "verify:claim-high-1:impact producer call/result binding is invalid" in error
-        for error in governance.validate_closure(substituted_vote)
-    )
-
-    forged = deepcopy(packet)
-    forged_fragment = _axis(forged, "FA")
-    forged_outcome = forged_fragment["payload"]["verification_outcomes"][0]["outcome"]
-    forged_outcome.update({"confirmed": True, "refuted": False})
-    forged_fragment["payload"]["verification_outcomes"][0]["outcome_digest"] = _digest(
-        forged_outcome
-    )
-    _rehash_axis(forged, contract, "FA")
-    assert any(
-        "aggregate state disagrees with typed verifier votes" in error
-        for error in governance.validate_closure(forged)
-    )
-
-    low_confidence = deepcopy(packet)
-    low_fragment = _axis(low_confidence, "FA")
-    low_outcome = low_fragment["payload"]["verification_outcomes"][0]["outcome"]
-    for vote in low_outcome["verifier_votes"]:
-        vote["confidence"] = "low"
-    low_fragment["payload"]["verification_outcomes"][0]["outcome_digest"] = _digest(
-        low_outcome
-    )
-    _rehash_axis(low_confidence, contract, "FA")
-    assert any(
-        "aggregate state disagrees with typed verifier votes" in error
-        for error in governance.validate_closure(low_confidence)
-    )
+    try:
+        _rehash_axis(packet, contract, "FA")
+    except ValueError as error:
+        assert not isinstance(error, governance.SpecializedWorkflowSplitRequired)
+        message = str(error)
+        assert "adds unrouted call nodes" in message
+        assert "verify:claim-high-1:impact" in message
+        assert "verify:claim-high-1:source" in message
+    else:
+        raise AssertionError("inline verifier calls bypassed route authorization")
 
 
-def test_full_audit_typed_dissent_requires_and_uses_third_vote() -> None:
+def test_full_audit_rejects_inline_third_vote_without_host_executor_phase() -> None:
     governance, contract, packet = _clean_packet()
     fragment = _axis(packet, "FA")
     raw = _raw_high_finding()
@@ -1160,29 +1117,122 @@ def test_full_audit_typed_dissent_requires_and_uses_third_vote() -> None:
     fragment["payload"]["verification_outcomes"] = [
         {"outcome": outcome, "outcome_digest": _digest(outcome)}
     ]
-    _rehash_axis(packet, contract, "FA")
-    assert governance.validate_closure(
-        packet, execution_attestation_verifier=_host_execution_verifier(packet)
-    ) == []
+    try:
+        _rehash_axis(packet, contract, "FA")
+    except ValueError as error:
+        assert not isinstance(error, governance.SpecializedWorkflowSplitRequired)
+        message = str(error)
+        assert "adds unrouted call nodes" in message
+        assert "verify:claim-high-dissent:impact" in message
+        assert "verify:claim-high-dissent:source" in message
+        assert "verify:claim-high-dissent:third" in message
+    else:
+        raise AssertionError("inline third verifier bypassed route authorization")
 
-    hidden_dissent = deepcopy(packet)
-    hidden_fragment = _axis(hidden_dissent, "FA")
-    hidden_outcome = hidden_fragment["payload"]["verification_outcomes"][0]["outcome"]
-    hidden_outcome["verifier_votes"] = hidden_outcome["verifier_votes"][:2]
-    hidden_outcome.update(
-        {
-            "verifier_dissent": False,
+
+def test_full_audit_quarantines_malformed_inline_outcomes_and_votes() -> None:
+    governance, _contract, base_packet = _clean_packet()
+    raw = {
+        **_raw_high_finding(),
+        "severity": "MEDIUM",
+        "defect_type": ["over-gate"],
+    }
+
+    def valid_outcome() -> dict:
+        return {
+            "claim_id": "claim-malformed-inline",
+            "claim_key": _finding_claim_key(raw),
+            "axis": "FA",
+            "severity": raw["severity"],
+            "defect_type": list(raw["defect_type"]),
+            "assertion": raw["assertion"],
+            "evidence": raw["evidence"],
+            "file": raw["file"],
+            "symbol_anchor": raw["symbol_anchor"],
+            "confirmed": True,
+            "refuted": False,
+            "disputed": False,
+            "latent": False,
             "reachable": "not_applicable",
+            "verifier_dissent": False,
+            "verifier_votes": [
+                {
+                    "view": view,
+                    "refuted": False,
+                    "confidence": "high",
+                    "reason": f"{view} confirms",
+                    "evidence": f"{view}:evidence",
+                    "reachable": None,
+                    "producer_record_kind": "workflow_call_record_v1",
+                    "producer_call_ref": f"call:{view}",
+                    "producer_call_receipt_digest": "sha256:" + "a" * 64,
+                }
+                for view in ("source", "impact")
+            ],
             "verification_calls": 2,
         }
-    )
-    hidden_fragment["payload"]["verification_outcomes"][0]["outcome_digest"] = _digest(
-        hidden_outcome
-    )
-    _rehash_axis(hidden_dissent, contract, "FA")
-    errors = governance.validate_closure(hidden_dissent)
-    assert any("dissent disagrees with typed verifier votes" in error for error in errors)
-    assert any("aggregate state disagrees with typed verifier votes" in error for error in errors)
+
+    cases = [
+        (
+            "verification outcome types are invalid",
+            lambda outcome: outcome.update({"defect_type": [{}]}),
+        ),
+        (
+            "verification outcome types are invalid",
+            lambda outcome: outcome.update({"claim_key": []}),
+        ),
+        (
+            "verification outcome types are invalid",
+            lambda outcome: outcome.update({"severity": []}),
+        ),
+        (
+            "verification outcome types are invalid",
+            lambda outcome: outcome.update({"reachable": {}}),
+        ),
+        (
+            "verifier vote view is invalid",
+            lambda outcome: outcome["verifier_votes"][0].update({"view": []}),
+        ),
+        (
+            "verifier vote evidence is invalid",
+            lambda outcome: outcome["verifier_votes"][0].update(
+                {"confidence": []}
+            ),
+        ),
+        (
+            "third verifier reachability is invalid",
+            lambda outcome: outcome["verifier_votes"][0].update(
+                {"view": "third", "reachable": {}}
+            ),
+        ),
+        (
+            "verifier vote evidence is invalid",
+            lambda outcome: outcome["verifier_votes"][0].update(
+                {"producer_call_receipt_digest": []}
+            ),
+        ),
+    ]
+    for expected_error, mutate in cases:
+        packet = deepcopy(base_packet)
+        fragment = _axis(packet, "FA")
+        fragment["payload"]["audit"].update(
+            {"verdict": "FINDINGS", "findings": [deepcopy(raw)]}
+        )
+        outcome = valid_outcome()
+        mutate(outcome)
+        fragment["payload"]["verification_outcomes"] = [
+            {"outcome": outcome, "outcome_digest": _digest(outcome)}
+        ]
+
+        errors = governance.validate_closure(
+            packet,
+            execution_attestation_verifier=_host_execution_verifier(packet),
+        )
+
+        assert any(expected_error in error for error in errors), (
+            expected_error,
+            errors,
+        )
 
 
 def _structural_debt(axis: str, finding: dict) -> dict:
@@ -1270,6 +1320,288 @@ def test_full_audit_structural_debt_is_stable_and_losslessly_bound() -> None:
     )
     _rehash_axis(acknowledged, contract, "FA")
     assert governance.validate_closure(acknowledged) == []
+
+    missing_field = deepcopy(acknowledged)
+    missing_finding = _axis(missing_field, "FA")["payload"]["audit"]["findings"][0]
+    missing_finding.pop("evidence")
+    forged_debt = _structural_debt("FA", missing_finding)
+    forged_projection = _debt_projection(forged_debt)
+    missing_axis = _axis(missing_field, "FA")
+    missing_axis["concerns"] = [forged_projection]
+    missing_controller = _controller(missing_field, contract)
+    missing_controller["payload"]["coverage_debt"] = [forged_debt]
+    missing_controller["payload"]["unverified_projection"] = [forged_projection]
+    missing_controller["concerns"] = [forged_projection]
+    missing_field["unverified"] = [forged_projection]
+    _rehash_axis(missing_field, contract, "FA")
+    missing_errors = governance.validate_closure(missing_field)
+    assert any(
+        "raw audit violates FINDINGS_SCHEMA" in error
+        and "missing required property evidence" in error
+        for error in missing_errors
+    )
+    assert any(
+        "structural finding debt is not one-to-one" in error
+        for error in missing_errors
+    )
+
+
+def test_full_audit_python_schema_mirror_covers_the_complete_model_result() -> None:
+    full_audit = __import__("agent_governance_full_audit")
+    valid_finding = {
+        **_raw_high_finding(),
+        "severity": "LOW",
+        "root_anchor": "root",
+        "fix_hint": "fix",
+    }
+    valid = {
+        "schema_version": "audit_fragment_v2",
+        "verdict": "FINDINGS",
+        "confidence": "high",
+        "findings": [valid_finding],
+        "assumptions": [{"note": "bounded", "why_unproven": "no runtime"}],
+        "consumption": {
+            "measurement_status": "measured",
+            "input_tokens": 0,
+            "output_tokens": 0,
+            "cache_read_tokens": 0,
+            "tool_calls": 0,
+            "wall_time_ms": 0,
+        },
+    }
+    assert full_audit._raw_audit_schema_violations(valid) == []
+
+    invalid: list[tuple[str, dict]] = []
+    for field in (
+        "schema_version", "verdict", "confidence", "findings", "assumptions",
+        "consumption",
+    ):
+        invalid.append((
+            f"missing top-level {field}",
+            {key: value for key, value in valid.items() if key != field},
+        ))
+    invalid.extend([
+        ("top-level extra", {**valid, "undeclared": True}),
+        ("bad schema", {**valid, "schema_version": "audit_fragment_v3"}),
+        ("bad verdict", {**valid, "verdict": "PWN"}),
+        ("bad confidence type", {**valid, "confidence": 7}),
+        ("findings type", {**valid, "findings": {}}),
+        ("assumptions type", {**valid, "assumptions": 7}),
+        (
+            "assumption missing",
+            {**valid, "assumptions": [{"note": "bounded"}]},
+        ),
+        (
+            "assumption type",
+            {
+                **valid,
+                "assumptions": [{"note": 7, "why_unproven": "no runtime"}],
+            },
+        ),
+        ("assumption item type", {**valid, "assumptions": [7]}),
+        (
+            "assumption extra",
+            {
+                **valid,
+                "assumptions": [{
+                    "note": "bounded", "why_unproven": "no runtime", "extra": 1,
+                }],
+            },
+        ),
+        ("consumption type", {**valid, "consumption": []}),
+        ("consumption missing status", {**valid, "consumption": {}}),
+        (
+            "consumption status",
+            {**valid, "consumption": {"measurement_status": "bogus"}},
+        ),
+        (
+            "consumption negative",
+            {
+                **valid,
+                "consumption": {
+                    "measurement_status": "measured", "input_tokens": -1,
+                },
+            },
+        ),
+        (
+            "consumption non-integer",
+            {
+                **valid,
+                "consumption": {
+                    "measurement_status": "measured", "tool_calls": 1.5,
+                },
+            },
+        ),
+        (
+            "consumption extra",
+            {
+                **valid,
+                "consumption": {
+                    "measurement_status": "unavailable", "extra": 1,
+                },
+            },
+        ),
+    ])
+    for field in (
+        "title", "assertion", "severity", "classification", "confidence",
+        "evidence", "impact", "file", "defect_type", "symbol_anchor",
+    ):
+        missing = deepcopy(valid)
+        missing["findings"][0].pop(field)
+        invalid.append((f"finding missing {field}", missing))
+    for field in (
+        "title", "assertion", "severity", "classification", "confidence",
+        "evidence", "impact", "file", "symbol_anchor", "root_anchor", "fix_hint",
+    ):
+        wrong_type = deepcopy(valid)
+        wrong_type["findings"][0][field] = 7
+        invalid.append((f"finding {field} type", wrong_type))
+    for field, value in (
+        ("severity", "HIGHER"),
+        ("classification", "CERTAIN"),
+        ("confidence", "very-high"),
+    ):
+        wrong_enum = deepcopy(valid)
+        wrong_enum["findings"][0][field] = value
+        invalid.append((f"finding {field} enum", wrong_enum))
+    for label, value in (
+        ("scalar string", "other"),
+        ("scalar integer", 7),
+        ("object", {"type": "other"}),
+        ("non-string item", [7]),
+        ("object item", [{"type": "other"}]),
+        ("unknown enum", ["not-a-defect-type"]),
+    ):
+        wrong_defect = deepcopy(valid)
+        wrong_defect["findings"][0].update(
+            {"severity": "MEDIUM", "defect_type": value}
+        )
+        invalid.append((f"finding defect_type {label}", wrong_defect))
+    high_scalar_defect = deepcopy(valid)
+    high_scalar_defect["findings"][0].update(
+        {"severity": "HIGH", "defect_type": "other"}
+    )
+    invalid.append(("HIGH finding scalar defect_type", high_scalar_defect))
+    for metric in (
+        "input_tokens", "output_tokens", "cache_read_tokens", "tool_calls",
+        "wall_time_ms",
+    ):
+        for label, value in (("negative", -1), ("float", 1.5), ("boolean", True)):
+            wrong_metric = deepcopy(valid)
+            wrong_metric["consumption"][metric] = value
+            invalid.append((f"consumption {metric} {label}", wrong_metric))
+    wrong_unavailable_reason = deepcopy(valid)
+    wrong_unavailable_reason["consumption"]["unavailable_reason"] = 7
+    invalid.append(("consumption unavailable_reason type", wrong_unavailable_reason))
+    finding_extra = deepcopy(valid)
+    finding_extra["findings"][0]["undeclared"] = True
+    invalid.append(("finding extra", finding_extra))
+
+    for label, malformed in invalid:
+        assert full_audit._raw_audit_schema_violations(malformed), label
+
+
+def test_full_audit_python_schema_mirror_matches_saved_workflow_source() -> None:
+    import subprocess
+
+    workflow = ROOT / ".claude/workflows/openclaw-full-audit.js"
+    extractor = r"""
+const fs = require('fs')
+const vm = require('vm')
+const source = fs.readFileSync(process.argv[1], 'utf8')
+const defectStart = source.indexOf('const DEFECT_TYPES =')
+const defectEnd = source.indexOf('const GOAL_TYPES =', defectStart)
+const schemaStart = source.indexOf('const FINDINGS_SCHEMA =', defectEnd)
+const schemaEnd = source.indexOf('const SEAM_SCHEMA =', schemaStart)
+if ([defectStart, defectEnd, schemaStart, schemaEnd].some(value => value < 0)) {
+  throw new Error('saved workflow FINDINGS_SCHEMA markers are missing')
+}
+const program = [
+  source.slice(defectStart, defectEnd),
+  source.slice(schemaStart, schemaEnd),
+  'JSON.stringify(FINDINGS_SCHEMA)',
+].join('\n')
+process.stdout.write(vm.runInNewContext(program, Object.create(null)))
+"""
+    completed = subprocess.run(
+        ["node", "-e", extractor, str(workflow)],
+        cwd=ROOT,
+        text=True,
+        capture_output=True,
+        check=False,
+    )
+    assert completed.returncode == 0, completed.stderr
+    saved_schema = json.loads(completed.stdout)
+    python_schema = deepcopy(
+        __import__("agent_governance_full_audit").RAW_AUDIT_FINDINGS_SCHEMA
+    )
+
+    def normalize_schema(value):
+        if isinstance(value, dict):
+            return {
+                key: (
+                    sorted(normalize_schema(item) for item in item_value)
+                    if key in {"enum", "required"}
+                    and isinstance(item_value, list)
+                    else normalize_schema(item_value)
+                )
+                for key, item_value in value.items()
+            }
+        if isinstance(value, list):
+            return [normalize_schema(item) for item in value]
+        return value
+
+    assert normalize_schema(python_schema) == normalize_schema(saved_schema)
+
+
+def test_full_audit_raw_findings_fail_closed_against_declared_schema() -> None:
+    valid = {**_raw_high_finding(), "severity": "LOW"}
+    governance, contract, packet = _clean_packet()
+    fragment = _axis(packet, "FA")
+    fragment["payload"]["audit"].update(
+        {"verdict": "FINDINGS", "findings": [deepcopy(valid)]}
+    )
+    _refresh_full_lineage(governance, packet, contract)
+    assert governance.validate_closure(
+        packet, execution_attestation_verifier=_host_execution_verifier(packet)
+    ) == []
+
+    valid_audit = deepcopy(fragment["payload"]["audit"])
+    invalid_cases = {
+        "unknown severity": {
+            **valid_audit,
+            "findings": [{**valid, "severity": "HIGHER"}],
+        },
+        "medium scalar defect type": {
+            **valid_audit,
+            "findings": [{
+                **valid, "severity": "MEDIUM", "defect_type": 7,
+            }],
+        },
+        "top-level extra": {**valid_audit, "undeclared": "hidden"},
+        "invalid verdict": {**valid_audit, "verdict": "PWN"},
+        "assumptions scalar": {**valid_audit, "assumptions": 7},
+        "invalid consumption": {
+            **valid_audit,
+            "consumption": {"measurement_status": "bogus", "extra": 1},
+        },
+    }
+    for label, malformed_audit in invalid_cases.items():
+        governance, contract, packet = _clean_packet()
+        fragment = _axis(packet, "FA")
+        fragment["payload"]["audit"] = {
+            "axis": "FA",
+            **deepcopy(malformed_audit),
+        }
+        _refresh_full_lineage(governance, packet, contract)
+        errors = governance.validate_closure(
+            packet, execution_attestation_verifier=_host_execution_verifier(packet)
+        )
+
+        assert any(
+            "raw audit violates FINDINGS_SCHEMA" in error
+            for error in errors
+        ), (label, errors)
 
 
 def test_unrelated_debt_cannot_hide_an_unverified_decision_finding() -> None:
@@ -1649,10 +1981,261 @@ def test_full_audit_rejects_malformed_or_self_signed_context_before_agent_calls(
     divergent["canonical_plan"] = _canonical(divergent_plan)
     divergent["artifact_digest"] = _digest(divergent_plan)
 
+    def extra(node_id: str) -> dict:
+        return {
+            "node_id": node_id,
+            "role": "E2",
+            **_governance.native_agent_binding("E2", "verification"),
+            "requires": ["seam:critic"],
+            "node_class": "verification",
+        }
+
+    def artifact_with_nodes(nodes: list[dict]) -> dict:
+        candidate = deepcopy(artifact)
+        candidate_plan = json.loads(candidate["canonical_plan"])
+        candidate_plan["execution_dag_binding"] = __import__(
+            "agent_governance_execution_dag"
+        ).compile_context_execution_dag_binding(nodes)
+        candidate["canonical_plan"] = _canonical(candidate_plan)
+        candidate["artifact_digest"] = _digest(candidate_plan)
+        return candidate
+
+    def artifact_with_routed_nodes(
+        nodes: list[dict],
+        contract_updates: dict | None = None,
+    ) -> dict:
+        candidate = deepcopy(artifact)
+        candidate_plan = json.loads(candidate["canonical_plan"])
+        candidate_plan["task_contract"].update(
+            contract_updates or {"end_to_end_claim": True}
+        )
+        candidate_plan["task_contract_digest"] = _digest(
+            candidate_plan["task_contract"]
+        )
+        candidate_plan["execution_dag_binding"] = __import__(
+            "agent_governance_execution_dag"
+        ).compile_context_execution_dag_binding(nodes)
+        candidate.update(
+            __import__(
+                "agent_governance_context_projection"
+            ).materialize_semantic_context(
+                candidate_plan,
+                _governance.load_registry(),
+            )
+        )
+        candidate["task_contract_digest"] = candidate_plan[
+            "task_contract_digest"
+        ]
+        candidate["canonical_plan"] = _canonical(candidate_plan)
+        candidate["artifact_digest"] = _digest(candidate_plan)
+        return candidate
+
+    def artifact_with_raw_nodes(nodes: list[dict]) -> dict:
+        candidate = deepcopy(artifact)
+        candidate_plan = json.loads(candidate["canonical_plan"])
+        candidate_plan["execution_dag_binding"] = {
+            "schema_version": "context_execution_dag_binding_v1",
+            "dag_digest": _governance.execution_dag_digest(nodes),
+            "node_count": len(nodes),
+            "edge_count": sum(len(node["requires"]) for node in nodes),
+            "nodes": nodes,
+        }
+        candidate["canonical_plan"] = _canonical(candidate_plan)
+        candidate["artifact_digest"] = _digest(candidate_plan)
+        return candidate
+
+    business_acceptance = {
+        "node_id": "business_acceptance",
+        "role": "QA",
+        "native_agent": "QA",
+        "requires": ["audit:CC", "audit:QC"],
+        "node_class": "verification",
+        "permission": "read_only",
+    }
+    superset = artifact_with_routed_nodes([
+        *bound_nodes, business_acceptance,
+    ])
+    unrelated_superset = artifact_with_nodes([
+        *bound_nodes, extra("extra:unrouted"),
+    ])
+    forged_fixed_only = artifact_with_routed_nodes(bound_nodes)
+    dual_specialized = artifact_with_routed_nodes(
+        [*bound_nodes, business_acceptance],
+        {
+            "end_to_end_claim": False,
+            "surfaces": ["full_audit", "profit_diagnosis"],
+        },
+    )
+    effectful_specialized = artifact_with_routed_nodes(
+        bound_nodes,
+        {
+            "runtime_claim": True,
+            "side_effect_class": "target_host_probe",
+            "surfaces": [
+                "agent_workflow", "full_audit", "profitability",
+                "runtime_effect",
+            ],
+        },
+    )
+    fixed_ids = {node["node_id"] for node in bound_nodes}
+    source_split_cases = []
+    for source_write_updates in (
+        {
+            "task_shape": "implementation",
+            "side_effect_class": "repo_write",
+            "surfaces": ["full_audit", "python"],
+        },
+        {
+            "task_shape": "docs",
+            "side_effect_class": "docs_write",
+            "surfaces": ["docs", "full_audit"],
+        },
+        {
+            "task_shape": "test",
+            "side_effect_class": "local_test",
+            "surfaces": ["full_audit", "python"],
+        },
+    ):
+        source_write_contract = deepcopy(
+            json.loads(artifact["canonical_plan"])["task_contract"]
+        )
+        source_write_contract.update(source_write_updates)
+        source_write_route = _governance.route_task(source_write_contract)
+        source_write_projection, source_write_errors = __import__(
+            "agent_governance_execution_dag"
+        ).task_execution_projection(
+            source_write_route["required_role_nodes"],
+            [],
+            task_facts=source_write_route["task_facts"],
+            registry=_governance.load_registry(),
+        )
+        assert source_write_errors == []
+        source_write_extra_ids = sorted(
+            node["node_id"]
+            for node in source_write_projection
+            if node["node_id"] not in fixed_ids
+        )
+        assert source_write_extra_ids
+        source_split_cases.append((
+            artifact_with_routed_nodes(
+                source_write_projection,
+                source_write_updates,
+            ),
+            json.loads(artifact["budget_authority_canonical"]),
+            "SPECIALIZED_WORKFLOW_SPLIT_REQUIRED",
+            source_write_extra_ids,
+        ))
+    omitted_nodes = [
+        deepcopy(node)
+        for node in bound_nodes
+        if node["node_id"] != "audit:A3"
+    ]
+    next(
+        node for node in omitted_nodes if node["node_id"] == "seam:critic"
+    )["requires"].remove("audit:A3")
+    mixed_omission = artifact_with_routed_nodes(
+        [*omitted_nodes, business_acceptance]
+    )
+    substituted_nodes = deepcopy(bound_nodes)
+    next(
+        node for node in substituted_nodes if node["node_id"] == "audit:A3"
+    ).update({"role": "E2", "native_agent": "E2"})
+    mixed_substitution = artifact_with_routed_nodes(
+        [*substituted_nodes, business_acceptance]
+    )
+    cyclic_extra_a = extra("extra:a")
+    cyclic_extra_b = extra("extra:b")
+    cyclic_extra_a["requires"] = ["extra:b"]
+    cyclic_extra_b["requires"] = ["extra:a"]
+    cyclic_superset = artifact_with_raw_nodes(
+        [*bound_nodes, cyclic_extra_a, cyclic_extra_b]
+    )
+    unicode_superset = artifact_with_raw_nodes([
+        *bound_nodes,
+        extra("\U0001f600"),
+        extra("\ue000"),
+    ])
+    non_string_requires = extra("extra:non-string-requires")
+    non_string_requires["requires"] = [1, 2]
+    malformed_requires_superset = artifact_with_raw_nodes(
+        [*bound_nodes, non_string_requires]
+    )
+
     cases = [
-        ({"schema_version": "context_artifact_v1"}, json.loads(artifact["budget_authority_canonical"])),
-        (forged, forged_authority),
-        (divergent, json.loads(artifact["budget_authority_canonical"])),
+        (
+            {"schema_version": "context_artifact_v1"},
+            json.loads(artifact["budget_authority_canonical"]),
+            None,
+            None,
+        ),
+        (forged, forged_authority, None, None),
+        (
+            divergent,
+            json.loads(artifact["budget_authority_canonical"]),
+            None,
+            None,
+        ),
+        (
+            superset,
+            json.loads(artifact["budget_authority_canonical"]),
+            "SPECIALIZED_WORKFLOW_SPLIT_REQUIRED",
+            ["business_acceptance"],
+        ),
+        (
+            forged_fixed_only,
+            json.loads(artifact["budget_authority_canonical"]),
+            "does not authorize the exact task route",
+            None,
+        ),
+        (
+            dual_specialized,
+            json.loads(artifact["budget_authority_canonical"]),
+            "does not authorize the exact task route",
+            None,
+        ),
+        (
+            effectful_specialized,
+            json.loads(artifact["budget_authority_canonical"]),
+            "does not authorize the exact task route",
+            None,
+        ),
+        *source_split_cases,
+        (
+            unrelated_superset,
+            json.loads(artifact["budget_authority_canonical"]),
+            "does not authorize the exact task route",
+            None,
+        ),
+        (
+            mixed_omission,
+            json.loads(artifact["budget_authority_canonical"]),
+            "Full Audit Context execution DAG binding",
+            None,
+        ),
+        (
+            mixed_substitution,
+            json.loads(artifact["budget_authority_canonical"]),
+            "Full Audit Context execution DAG binding",
+            None,
+        ),
+        (
+            cyclic_superset,
+            json.loads(artifact["budget_authority_canonical"]),
+            "Full Audit Context execution DAG binding",
+            None,
+        ),
+        (
+            unicode_superset,
+            json.loads(artifact["budget_authority_canonical"]),
+            "Full Audit Context execution DAG binding",
+            None,
+        ),
+        (
+            malformed_requires_superset,
+            json.loads(artifact["budget_authority_canonical"]),
+            "Full Audit Context execution DAG binding",
+            None,
+        ),
     ]
     script = r"""
 const fs = require('node:fs');
@@ -1677,24 +2260,43 @@ const pipeline = async () => [];
     await runner(__ARGS__, () => {}, () => {}, parallel, pipeline, agent);
     console.log(JSON.stringify({ ok: true, calls }));
   } catch (error) {
-    console.log(JSON.stringify({ ok: false, calls, error: String(error.message || error) }));
+    console.log(JSON.stringify({
+      ok: false, calls, error: String(error.message || error),
+      error_code: error.error_code || null,
+      surface: error.surface || null,
+      extra_node_ids: error.extra_node_ids || null,
+    }));
   }
 })().catch(error => { console.error(error); process.exit(1); });
 """.replace(
         "__WORKFLOW__",
         json.dumps(str(ROOT / ".claude/workflows/openclaw-full-audit.js")),
     )
-    for context_artifact, authority in cases:
+    for context_artifact, authority, expected_error, expected_extra_ids in cases:
+        case_plan = json.loads(context_artifact.get(
+            "canonical_plan", artifact["canonical_plan"]
+        ))
+        case_baseline = baseline
+        if case_plan["task_contract"].get("runtime_claim"):
+            case_baseline = {
+                **baseline,
+                "runtime_head": baseline["source_head"],
+                "runtime_observed_at": _z(datetime.now(timezone.utc)),
+            }
         run_args = {
             "context_artifact": context_artifact,
-            "task_contract_digest": artifact["task_contract_digest"],
+            "task_contract_digest": context_artifact.get(
+                "task_contract_digest", artifact["task_contract_digest"]
+            ),
             "context_artifact_digest": context_artifact.get(
                 "artifact_digest", artifact["artifact_digest"]
             ),
-            "dirty_scope": json.loads(artifact["canonical_plan"])["task_contract"][
+            "dirty_scope": json.loads(context_artifact.get(
+                "canonical_plan", artifact["canonical_plan"]
+            ))["task_contract"][
                 "dirty_scope"
             ],
-            "baseline": baseline,
+            "baseline": case_baseline,
             "route_required_roles": route_roles,
             "budget_authority_canonical": _canonical(authority),
             "budget_authority_digest": _digest(authority),
@@ -1711,6 +2313,17 @@ const pipeline = async () => [];
         outcome = json.loads(completed.stdout)
         assert outcome["ok"] is False, outcome
         assert outcome["calls"] == 0, outcome
+        if expected_error is not None:
+            assert expected_error in outcome["error"]
+        if expected_extra_ids is None:
+            assert outcome["error_code"] is None
+            assert outcome["surface"] is None
+            assert outcome["extra_node_ids"] is None
+        else:
+            assert outcome["error_code"] == "SPECIALIZED_WORKFLOW_SPLIT_REQUIRED"
+            assert outcome["surface"] == "full_audit"
+            assert outcome["extra_node_ids"] == expected_extra_ids
+            assert all(node_id in outcome["error"] for node_id in expected_extra_ids)
 
 
 def test_full_audit_workflow_preserves_null_retry_and_valid_call_lineage() -> None:

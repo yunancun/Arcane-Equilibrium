@@ -78,6 +78,7 @@ from agent_governance_execution import (  # noqa: E402
     validate_context_artifact,
 )
 from agent_governance_execution_dag import (  # noqa: E402
+    SpecializedWorkflowSplitRequired,
     delegated_execution_projection,
     execution_dag_digest,
     non_call_controller_node_ids,
@@ -128,6 +129,7 @@ from agent_governance_registry import (  # noqa: E402
     load_registry,
     native_agent_binding,
     native_agent_contract,
+    registry_digest,
     render_all,
     render_views,
     validate_registry,
@@ -230,12 +232,14 @@ __all__ = [
     "registry_efficiency_evaluation_policy_errors",
     "registry_execution_budget_policy_errors",
     "registry_liveness_policy_errors",
+    "registry_digest",
     "review_task_contract_digest",
     "requested_execution_binding",
     "requested_history_errors",
     "resolve_authority_claims",
     "non_call_controller_node_ids",
     "specialized_route_result_bindings",
+    "SpecializedWorkflowSplitRequired",
     "task_execution_projection",
     "route_task",
     "summarize_closure_quality_followups",
@@ -552,6 +556,18 @@ def main(
                 registry,
                 execution_dag=execution_dag,
             )
+        except SpecializedWorkflowSplitRequired as error:
+            print(json.dumps(
+                {
+                    "status": "FAIL",
+                    "error": str(error),
+                    "error_code": error.error_code,
+                    "surface": error.surface,
+                    "extra_node_ids": list(error.extra_node_ids),
+                },
+                ensure_ascii=False,
+            ))
+            return 2
         except (KeyError, OSError, TypeError, ValueError) as error:
             print(json.dumps(
                 {"status": "FAIL", "error": str(error)},

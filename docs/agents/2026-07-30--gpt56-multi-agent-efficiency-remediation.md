@@ -142,7 +142,7 @@ invocation and exact Registry caps with no model override, while
 active memories in exact canonical order. Missing and duplicate role cases now
 fail after self-digest recomputation. At that point the independent rerun
 reported no remaining P0/P1; this was a point-in-time result later superseded
-by review rounds 3 through 5.
+by review rounds 3 through 6.
 
 ### Independent review reopen round 3
 
@@ -227,7 +227,7 @@ Full-Audit and Profit files independently report `28 passed` and `29 passed`;
 workflow codegen reports `3 passed`. Python compilation, Registry governance
 validation (`PASS`, 20 roles), generated-workflow drift validation, and
 `git diff --check` all pass. Those listed round-4 gaps were closed, but the
-point-in-time completeness statement was superseded by round 5. The documented
+point-in-time completeness statement was superseded by round 6. The documented
 host-capability `EXTERNAL_LIMIT` rows remain fail-closed rather than being
 relabelled as source completion.
 
@@ -251,9 +251,9 @@ The real saved-workflow integration test now copies these admissions directly
 into a closure packet, proves their ordered identity-bearing core equals the
 Context DAG binding, and obtains a valid Closure result. Removing the seam or
 changing its predecessor set is rejected as a missing or substituted fixed
-call admission. Earlier round-2 through round-4 completeness language is
-therefore historical and explicitly superseded by this round; publication
-must use the cumulative round-1-through-round-5 result.
+call admission. Earlier round-2 through round-4 completeness language became
+historical at this round and was later superseded again by round 6; publication
+must use the cumulative round-1-through-round-6 result.
 
 Round-5 evidence is `28 passed` for the complete Full Audit adversarial file
 and `107 passed` for the combined Closure quality, Context, dispatch-DAG, wave,
@@ -261,13 +261,124 @@ trust-binding, and development-governance suite. Workflow codegen reports
 `3 passed`; Node syntax validation, Registry governance validation (`PASS`,
 20 roles), generated-workflow drift validation, and `git diff --check` pass.
 
-The final frozen worktree rerun supersedes those scoped counts as the release
-candidate evidence: the exact core/adjacent selection reports `507 passed`;
-the complete non-disposable structure suite reports
-`5131 passed / 16 skipped / 0 failed` in 1026.03 seconds. The 16 skips are
-pre-existing conditional tests, not failures or external-limit closures.
-Independent post-fix review reports `0 P0 / 0 P1 / 0 P2`. Registry size is
-106,151 bytes, leaving 24,921 bytes below the 128 KiB single-argument ceiling
-and satisfying the enforced greater-than-24-KiB headroom gate. These are
-source-worktree results only; hosted exact-head CI/review and publication
-remain separate gates.
+### Independent review reopen round 6
+
+The pre-merge review found one call-zero availability seam. Valid end-to-end or
+runtime facts could produce a 15-node Full Audit or 11/12-node Profit Context
+even though the corresponding saved workflow can execute only its fixed
+14/10-node graph. The compiler admitted and materialized the Context, while the
+executor rejected it before call 1. No authority or model call escaped, but the
+contradictory admission could waste sessions and provoke retry loops.
+
+The first repair made compiler-derived specialized plans reject unmatched calls
+with `SPECIALIZED_WORKFLOW_SPLIT_REQUIRED`, while retaining explicit supersets
+for a presumed separately selected executor. That distinction was an
+intermediate state only and was superseded by round 7 after independent review
+proved a caller argument is not executor authority.
+
+### Independent review reopen round 7
+
+Exact-head adversarial review found four related remaining seams:
+
+- a caller-supplied specialized superset could impersonate host-executor
+  authority and reach the fixed saved workflow;
+- an injected Registry could redefine fixed axes or graph identity between
+  compile, materialize, validation, and saved-JS admission;
+- mixed omission/substitution plus an extra node could be misclassified as a
+  safe split and feed a retry loop; and
+- Closure validated only a partial mirror of the model-facing Full Audit
+  schema, then continued deriving decisions from malformed raw audits or
+  malformed inline verifier outcomes.
+
+The final contract permits explicit DAG supersets only on non-specialized
+generic/host routes. Full Audit and Profit Diagnosis always require their exact
+fixed graph. A pure fixed-core-plus-extra graph raises the typed
+`SPECIALIZED_WORKFLOW_SPLIT_REQUIRED` with `surface` and sorted
+`extra_node_ids`. This signal exists only after exact Registry/artifact
+metadata, complete route authorization, canonical ASCII node ids,
+Registry-native role/class/permission bindings, and acyclic topology pass;
+mixed or malformed artifacts receive only a generic DAG error. PM branches on
+`error_code` and freshly compiles the fixed
+saved-workflow phase plus a non-specialized host phase. It never slices,
+re-signs, or retries the rejected artifact. Mixed tampering remains a generic
+DAG mismatch and cannot auto-split. Python materialization, the public
+validator, Full Audit JS, and Profit JS all enforce the same call-zero rule.
+
+Context now binds the canonical digest of a governance-validated Registry.
+Compile, materialize, independent validation, generated `agent-wave`, and both
+saved workflows reject invalid or different Registry generations. This
+prevents axis deletion, fixed-graph redefinition, and cross-generation artifact
+reuse.
+
+Closure mirrors the complete model-facing `FINDINGS_SCHEMA` and quarantines an
+invalid raw audit before finding counts, staged-debt derivation, decision
+classification, or set operations. A checked-in cross-language parity test
+extracts the live JS schema and exact-compares its JSON-Schema semantics with
+the Python mirror. Inline verifier outcomes and votes are likewise type-checked
+and quarantined before identity lookup, nested-admission projection,
+aggregation, or hash-set use, so malformed JSON returns deterministic errors
+instead of crashing the session. Until a real host executor exists, those
+typed verifier calls remain explicit MAE-005 host-phase debt rather than
+inline saved-workflow authority.
+
+The earlier `507 passed` and `5131 passed / 16 skipped` figures belong to the
+superseded round-6 head and are not release evidence for round 7. Final frozen
+worktree counts, independent post-fix review, hosted exact-head CI/review, and
+publication are recorded only after the cumulative rerun completes.
+
+### Independent review reopen round 8 and final local evidence
+
+The cumulative exact-bytes review found additional cross-language admission
+and availability gaps before publication. Python-valid Unicode object keys
+could be rejected because JavaScript canonical JSON used UTF-16 key order;
+generic saved-workflow admission checked contract shape without proving that
+the bound DAG contained every canonical routed call; operator-loop, hidden
+suffix, focus, and repository-scope normalization had narrower parity gaps;
+and fixed Full Audit reviewers could absorb the downstream reviewers of an
+unmatched writer, producing a generic topology error instead of the promised
+typed fresh-phase split. Host-effect contracts also needed an explicit
+call-zero boundary on both specialized saved workflows.
+
+Canonical JSON and every repository-path ordering boundary now use Unicode
+code-point order, reject lone surrogates and unsafe/pathspec spellings, and
+preserve Python `PurePosixPath` hidden-file suffix semantics. The generic
+workflow recomputes the exact canonical routed call core before call 1,
+including every source, review, gate, broker, P0-B, S2, AIML, and operator-loop
+selector. Full Audit and Profit Diagnosis allow source/docs/test calls only as
+typed `SPECIALIZED_WORKFLOW_SPLIT_REQUIRED` extras; any unmatched call now
+pulls its complete downstream reviewer/gate dependency chain into the fresh
+phase. Effects requiring a host Adapter reject before calls, while `none`,
+`public_web_read`, and source/docs/test classes retain their documented split
+semantics. Malformed or self-rehashed contracts, routes, Registries, schemas,
+paths, and digests remain ordinary zero-call failures rather than retry
+signals.
+
+The first complete structure rerun exposed one stale test fixture, not a
+production fallback: it self-signed a test-only Registry generation that the
+saved workflow correctly rejected before any call. The fixture now supplies
+the canonical core/docs pack sources and uses the repository Registry; cyclic
+DAGs are asserted at the earlier zero-call binding gate. Its complete file is
+`15 passed`.
+
+Final local release evidence on the cumulative worktree is:
+
+- scoped Context/DAG/Full-Audit/Profit/codegen suite: `218 passed`;
+- non-disposable structure suite: `5150 passed, 16 skipped, 0 failed` in
+  `1130.30s`;
+- Python-to-generated-JavaScript route parity: generic `129/129` and
+  specialized `46/46` exact;
+- directed/fuzz route corpus: 2,707 cases and zero full-entry mismatches (the
+  two synchronous-helper differences are cryptographic digest checks that the
+  full async entry rejects with zero calls);
+- valid finite, operator-loop, and Unicode-bound requests each call exactly
+  once; invalid prompt/loop digests, focus, path order/safety, omitted route,
+  host effects, and forged Registries call zero times;
+- Registry validation, workflow codegen drift, all three Node syntax checks,
+  and `git diff --check`: PASS;
+- two independent exact-byte release/parity reviews: `0 P0 / 0 P1 / 0 P2`.
+
+These results establish source-level release readiness only. They do not close
+the eight typed host/platform `EXTERNAL_LIMIT` rows, attest provider billing or
+duration telemetry, authorize deployment/runtime mutation, or prove any
+broker/trading effect. Hosted exact-head CI/review and publication remain Git
+release steps, not substitutes for those external capabilities.

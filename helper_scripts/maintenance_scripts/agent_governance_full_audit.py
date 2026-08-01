@@ -16,6 +16,7 @@ from agent_governance_full_audit_dag import (
     nonnegative_integer as _integer,
 )
 from agent_governance_registry import load_registry, native_agent_binding
+from agent_governance_schema import schema_subset_errors
 
 DIGEST_RE = re.compile(r"^sha256:[0-9a-f]{64}$")
 HEAD_RE = re.compile(r"^[0-9a-f]{40}$")
@@ -47,6 +48,94 @@ GOAL_TYPES = {"over-gate", "evolution-blocker", "lineage-gap"}
 HIGH_RISK_TYPES = {"auth-bypass", "secret-leak", "missing-gate", "leakage", "replay-misuse"}
 CAPABILITY_TYPES = {"over-gate", "evolution-blocker"}
 STRUCTURAL_FINDING_FIELDS = ("title", "assertion", "evidence", "file", "symbol_anchor")
+RAW_FINDING_DEFECT_TYPES = {
+    "hardcoded-config", "missing-gate", "auth-bypass", "fake-success", "dead-code",
+    "duplicate-logic", "leakage", "drift-source-runtime", "lineage-gap",
+    "untruthful-ai", "replay-misuse", "perf-hotpath", "index-broken", "doc-stale",
+    "test-blindspot", "bybit-incompat", "ibkr-incompat", "ops-drift", "math-error",
+    "schema-issue", "secret-leak", "readability-debt", "over-gate",
+    "evolution-blocker", "other",
+}
+RAW_FINDING_SCHEMA = {
+    "type": "object",
+    "additionalProperties": False,
+    "required": [
+        "title", "assertion", "severity", "classification", "confidence",
+        "evidence", "impact", "file", "defect_type", "symbol_anchor",
+    ],
+    "properties": {
+        "title": {"type": "string"},
+        "assertion": {"type": "string"},
+        "severity": {
+            "type": "string",
+            "enum": ["CRITICAL", "HIGH", "MEDIUM", "LOW", "INFO"],
+        },
+        "classification": {
+            "type": "string",
+            "enum": ["FACT", "INFERENCE", "ASSUMPTION"],
+        },
+        "confidence": {"type": "string", "enum": ["high", "med", "low"]},
+        "evidence": {"type": "string"},
+        "impact": {"type": "string"},
+        "file": {"type": "string"},
+        "defect_type": {
+            "type": "array",
+            "items": {
+                "type": "string",
+                "enum": sorted(RAW_FINDING_DEFECT_TYPES),
+            },
+        },
+        "symbol_anchor": {"type": "string"},
+        "root_anchor": {"type": "string"},
+        "fix_hint": {"type": "string"},
+    },
+}
+RAW_AUDIT_FINDINGS_SCHEMA = {
+    "type": "object",
+    "additionalProperties": False,
+    "required": [
+        "schema_version", "verdict", "confidence", "findings", "assumptions",
+        "consumption",
+    ],
+    "properties": {
+        "schema_version": {"type": "string", "enum": ["audit_fragment_v2"]},
+        "verdict": {
+            "type": "string",
+            "enum": ["PASS", "FINDINGS", "BLOCKED", "NO_CHANGE_NEEDED"],
+        },
+        "confidence": {"type": "string", "enum": ["high", "med", "low"]},
+        "findings": {"type": "array", "items": RAW_FINDING_SCHEMA},
+        "assumptions": {
+            "type": "array",
+            "items": {
+                "type": "object",
+                "additionalProperties": False,
+                "required": ["note", "why_unproven"],
+                "properties": {
+                    "note": {"type": "string"},
+                    "why_unproven": {"type": "string"},
+                },
+            },
+        },
+        "consumption": {
+            "type": "object",
+            "additionalProperties": False,
+            "required": ["measurement_status"],
+            "properties": {
+                "measurement_status": {
+                    "type": "string",
+                    "enum": ["measured", "partial", "unavailable"],
+                },
+                "unavailable_reason": {"type": "string"},
+                "input_tokens": {"type": "integer", "minimum": 0},
+                "output_tokens": {"type": "integer", "minimum": 0},
+                "cache_read_tokens": {"type": "integer", "minimum": 0},
+                "tool_calls": {"type": "integer", "minimum": 0},
+                "wall_time_ms": {"type": "integer", "minimum": 0},
+            },
+        },
+    },
+}
 STAGED_CLAIM_KIND = "staged_claim_verification"
 STAGED_CLAIM_REMEDIATION = "MAE-005"
 STAGED_CLAIM_STATE = "REQUIRES_HOST_CAPABILITY_PHASE"
@@ -117,10 +206,36 @@ def _unique_axis_list(value: Any, allowed: set[str], field: str, errors: list[st
     return value
 
 
+def _raw_audit_schema_violations(audit: Any) -> list[str]:
+    """Mirror the complete saved-workflow FINDINGS_SCHEMA without coercion."""
+
+    if not isinstance(audit, dict):
+        return schema_subset_errors(
+            audit,
+            RAW_AUDIT_FINDINGS_SCHEMA,
+            RAW_AUDIT_FINDINGS_SCHEMA,
+            "$",
+        )
+    raw_audit = {key: value for key, value in audit.items() if key != "axis"}
+    return schema_subset_errors(
+        raw_audit,
+        RAW_AUDIT_FINDINGS_SCHEMA,
+        RAW_AUDIT_FINDINGS_SCHEMA,
+        "$",
+    )
+
+
 def _is_decision_outcome(outcome: dict[str, Any]) -> bool:
-    return outcome.get("severity") in {"CRITICAL", "HIGH"} or (
-        outcome.get("severity") == "MEDIUM"
-        and bool(set(outcome.get("defect_type", [])) & GOAL_TYPES)
+    severity = outcome.get("severity")
+    defect_types = outcome.get("defect_type")
+    if not isinstance(defect_types, list):
+        defect_types = []
+    return severity in ("CRITICAL", "HIGH") or (
+        severity == "MEDIUM"
+        and any(
+            isinstance(defect_type, str) and defect_type in GOAL_TYPES
+            for defect_type in defect_types
+        )
     )
 
 
@@ -173,6 +288,12 @@ def _expected_staged_claim_debt(
         fragment = fragments_by_node.get(f"audit:{axis}", {})
         payload = fragment.get("payload", {})
         audit = payload.get("audit", {}) if isinstance(payload, dict) else {}
+        if (
+            not isinstance(audit, dict)
+            or audit.get("axis") != axis
+            or _raw_audit_schema_violations(audit)
+        ):
+            continue
         findings = audit.get("findings", []) if isinstance(audit, dict) else []
         if isinstance(findings, list):
             for finding in findings:
@@ -470,6 +591,18 @@ def validate_full_audit_binding(
         identities = [(item.get("kind"), item.get("id"), item.get("owner")) for item in debt]
         if len(identities) != len(set(identities)):
             errors.append("full audit coverage_debt contains duplicate identities")
+    raw_audit_schema_errors_by_axis: dict[str, list[str]] = {}
+    for axis in admitted_axes:
+        fragment = fragments_by_node.get(f"audit:{axis}", {})
+        payload = fragment.get("payload", {}) if isinstance(fragment, dict) else {}
+        audit = payload.get("audit", {}) if isinstance(payload, dict) else {}
+        schema_errors = _raw_audit_schema_violations(audit)
+        raw_audit_schema_errors_by_axis[axis] = schema_errors
+        errors.extend(
+            f"full audit axis {axis} raw audit violates FINDINGS_SCHEMA: {violation}"
+            for violation in schema_errors
+        )
+
     expected_staged_debt = _expected_staged_claim_debt(
         admitted_axes, fragments_by_node
     )
@@ -544,15 +677,15 @@ def validate_full_audit_binding(
         ))
         if wave and wave.get("result_fragment_digests", {}).get(f"audit:{axis}") != _digest(fragment):
             errors.append(f"full audit axis {axis} differs from workflow wave result map")
-        raw_findings = audit.get("findings", [])
-        if not isinstance(raw_findings, list):
-            errors.append(f"full audit axis {axis} raw findings must be a list")
-            raw_findings = []
+        audit_semantically_valid = (
+            not raw_audit_schema_errors_by_axis.get(axis)
+            and audit.get("axis") == axis
+        )
+        raw_findings = audit["findings"] if audit_semantically_valid else []
+        raw_assumptions = audit["assumptions"] if audit_semantically_valid else []
+        raw_verdict = audit["verdict"] if audit_semantically_valid else None
         expected_structural_debt: list[dict[str, str]] = []
         for finding in raw_findings:
-            if not isinstance(finding, dict):
-                errors.append(f"full audit axis {axis} raw finding must be an object")
-                continue
             if any(
                 not str(finding.get(field) or "").strip()
                 for field in STRUCTURAL_FINDING_FIELDS
@@ -581,7 +714,7 @@ def validate_full_audit_binding(
         declared_confirmed_ids = payload.get("confirmed_decision_claim_ids")
         declared_disputed_ids = payload.get("disputed_claim_ids")
         outcome_records = payload.get("verification_outcomes")
-        if not _integer(assumptions_count) or assumptions_count != len(audit.get("assumptions", [])):
+        if not _integer(assumptions_count) or assumptions_count != len(raw_assumptions):
             errors.append(f"full audit axis {axis} assumptions_count is inconsistent")
             assumptions_count = 0
         if not _integer(coverage_debt_count):
@@ -605,7 +738,7 @@ def validate_full_audit_binding(
         disputed_ids: list[str] = []
         outcome_claim_keys: set[str] = set()
         raw_decision_by_claim_key: dict[str, dict[str, Any]] = {}
-        for finding in audit.get("findings", []):
+        for finding in raw_findings:
             if isinstance(finding, dict) and _is_decision_outcome(finding):
                 raw_decision_by_claim_key.setdefault(_claim_key(finding), finding)
         if not isinstance(outcome_records, list):
@@ -625,6 +758,41 @@ def validate_full_audit_binding(
                 errors.append(f"full audit axis {axis} verification outcome claim_id is invalid")
                 continue
             seen_claim_ids.add(claim_id)
+            if (
+                not isinstance(outcome.get("claim_key"), str)
+                or not outcome.get("claim_key", "").strip()
+                or not isinstance(outcome.get("axis"), str)
+                or not isinstance(outcome.get("severity"), str)
+                or outcome.get("severity") not in (
+                    "CRITICAL", "HIGH", "MEDIUM", "LOW", "INFO",
+                )
+                or not isinstance(outcome.get("defect_type"), list)
+                or any(
+                    not isinstance(item, str)
+                    for item in outcome.get("defect_type", [])
+                )
+                or any(
+                    not isinstance(outcome.get(field), str)
+                    for field in (
+                        "assertion", "evidence", "file", "symbol_anchor",
+                    )
+                )
+                or not isinstance(outcome.get("reachable"), str)
+                or outcome.get("reachable") not in (
+                    "reachable", "latent", "unknown", "not_applicable",
+                )
+                or not isinstance(outcome.get("verifier_votes"), list)
+                or not _integer(outcome.get("verification_calls"))
+                or any(
+                    not isinstance(outcome.get(field), bool)
+                    for field in (
+                        "confirmed", "refuted", "disputed", "latent",
+                        "verifier_dissent",
+                    )
+                )
+            ):
+                errors.append(f"full audit axis {axis} verification outcome types are invalid")
+                continue
             if outcome.get("axis") != axis:
                 errors.append(f"full audit axis {axis} verification outcome identity is invalid")
             if outcome.get("claim_key") != _claim_key(outcome):
@@ -645,21 +813,6 @@ def validate_full_audit_binding(
                 )
             if record.get("outcome_digest") != _digest(outcome):
                 errors.append(f"full audit axis {axis} verification outcome digest is invalid")
-            if (
-                outcome.get("severity") not in {"CRITICAL", "HIGH", "MEDIUM", "LOW", "INFO"}
-                or not isinstance(outcome.get("defect_type"), list)
-                or any(not isinstance(item, str) for item in outcome.get("defect_type", []))
-                or outcome.get("reachable") not in {"reachable", "latent", "unknown", "not_applicable"}
-                or not isinstance(outcome.get("verifier_votes"), list)
-                or not _integer(outcome.get("verification_calls"))
-                or any(
-                    not isinstance(outcome.get(field), bool)
-                    for field in (
-                        "confirmed", "refuted", "disputed", "latent", "verifier_dissent"
-                    )
-                )
-            ):
-                errors.append(f"full audit axis {axis} verification outcome types are invalid")
             state_count = sum(
                 outcome.get(field) is True for field in ("confirmed", "refuted", "disputed")
             )
@@ -676,29 +829,50 @@ def validate_full_audit_binding(
                     errors.append(f"full audit axis {axis} verifier vote shape is invalid")
                     continue
                 view = vote.get("view")
-                if view not in {"source", "impact", "third"} or view in votes_by_view:
+                if (
+                    not isinstance(view, str)
+                    or view not in {"source", "impact", "third"}
+                    or view in votes_by_view
+                ):
                     errors.append(f"full audit axis {axis} verifier vote view is invalid")
                     continue
                 if (
                     not isinstance(vote.get("refuted"), bool)
-                    or vote.get("confidence") not in {"high", "med", "low"}
+                    or not isinstance(vote.get("confidence"), str)
+                    or vote.get("confidence") not in ("high", "med", "low")
                     or not isinstance(vote.get("reason"), str)
                     or not vote.get("reason", "").strip()
                     or not isinstance(vote.get("evidence"), str)
                     or not vote.get("evidence", "").strip()
+                    or vote.get("producer_record_kind")
+                    != "workflow_call_record_v1"
+                    or not isinstance(vote.get("producer_call_ref"), str)
+                    or not vote.get("producer_call_ref", "").strip()
+                    or not isinstance(
+                        vote.get("producer_call_receipt_digest"), str,
+                    )
+                    or not DIGEST_RE.fullmatch(
+                        vote.get("producer_call_receipt_digest", ""),
+                    )
                 ):
                     errors.append(f"full audit axis {axis} verifier vote evidence is invalid")
+                    continue
                 if view == "third":
-                    if vote.get("reachable") not in {
-                        "reachable", "latent", "unknown", "not_applicable"
-                    }:
+                    if (
+                        not isinstance(vote.get("reachable"), str)
+                        or vote.get("reachable") not in (
+                            "reachable", "latent", "unknown", "not_applicable",
+                        )
+                    ):
                         errors.append(
                             f"full audit axis {axis} third verifier reachability is invalid"
                         )
+                        continue
                 elif vote.get("reachable") is not None:
                     errors.append(
                         f"full audit axis {axis} first-view verifier cannot claim reachability"
                     )
+                    continue
                 projection = {
                     key: vote[key] for key in ("refuted", "confidence", "reason", "evidence")
                     if key in vote
@@ -823,7 +997,7 @@ def validate_full_audit_binding(
         expected_gate = (
             "FAIL" if confirmed_ids
             else "CONDITIONAL" if disputed_ids
-            else "UNVERIFIED" if audit.get("verdict") == "BLOCKED" or assumptions_count or coverage_debt_count
+            else "UNVERIFIED" if raw_verdict == "BLOCKED" or assumptions_count or coverage_debt_count
             else "PASS"
         )
         if fragment.get("gate_verdict") != expected_gate:
