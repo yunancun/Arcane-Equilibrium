@@ -17,7 +17,7 @@ OpenClaw 從「concept-only 16-agent 體系」升級到「真實接線 18 agent�
 - **專項審查層**：A3 / R4 / TW
 - **分析顧問層**：AI-E / QA / QC / BB / MIT
 
-每個 agent 含 Anthropic 官方 frontmatter（name / description / tools / disallowedTools / model: inherit / color / skills 預載）+ 啟動序列（讀 docs/CCAgentWorkSpace/<NAME>/{profile,memory}.md + 最新 report）+ 完成序列（追加 memory + 存 workspace/reports/）。
+每個 agent 含 Anthropic 官方 frontmatter（name / description / tools / disallowedTools / model+effort〔2026-08-01 起由 registry 三級分級透傳；曾為 model: inherit〕 / color / skills 預載）+ 啟動序列（讀 docs/CCAgentWorkSpace/<NAME>/{profile,memory}.md + 最新 report）+ 完成序列（追加 memory + 存 workspace/reports/）。
 
 ### OpenClaw custom skills（25 個）— `srv/.claude/skills/<name>/SKILL.md`，git tracked
 - 11 既有：math-model-audit / spec-compliance / 16-root-principles-checklist / owasp-checklist / secret-leak-detection / performance-profiling / ux-checklist / gui-style-guide / token-cost-analysis / doc-cross-reference / bilingual-comment-style
