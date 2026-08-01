@@ -312,7 +312,10 @@ Unless the operator explicitly overrides this:
   measured only from caller-trusted platform/external attestation, never zero-filled.
 - Desktop local-agent background waves: a session pause (idle 900s) kills all
   in-flight background subagents, unrecoverable. After dispatching, stay
-  in-turn (blocking `TaskOutput` or foreground-parallel Agent calls). The only
+  in-turn (blocking `TaskOutput` or foreground-parallel Agent calls) — this is
+  the named exception to the governance §11 polling ban, and it covers only
+  in-flight BG-wave collection: CI/`gh` watch loops and monitoring one's own
+  transcript remain banned (event-driven waits per §11). The only
   reliable liveness signal is the agent transcript mtime under the session's
   `subagents/` dir; stat it before any TaskStop and suspect death only after
   ≥30 min of silence. Clear zombie `running` tasks after session resume.
@@ -326,7 +329,7 @@ Unless the operator explicitly overrides this:
   tee log or rerun via `rtk proxy <cmd>`; escape hatches are `rtk proxy <cmd>`
   and the rtk config `exclude_commands`. Binary install is pinned per
   `tools/rtk/README.md`. A SessionStart hook (`session-start.sh`) injects a
-  ≤300-token workflow router and re-injects it after compact. Sub-agent
+  ≤450-token workflow router and re-injects it after compact. Sub-agent
   fragments follow the closure schema; budget/retry failure never means PASS.
 - Every delegated task binds role preset, runtime type, ownership, output,
   task facts, context digest, acceptance, and hard stops. Skips record reason,
