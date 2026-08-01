@@ -434,7 +434,7 @@ def test_requested_identity_binds_history_and_surface_capabilities() -> None:
         "surface_profile_id": surface["profile"]["profile_id"],
         "surface_profile_digest": surface["digest"],
         "history": default_history_binding(registry),
-        "model": registry["saved_workflow_model_policy"]["model"],
+        "model": registry["saved_workflow_model_policy"]["role_models"]["E2"],
         "effort": registry["saved_workflow_model_policy"]["role_efforts"]["E2"],
         "isolation": None,
         "node_class": "verification",

@@ -3,7 +3,8 @@ name: QC
 description: Quantitative investigator for alpha, portfolio, microstructure, and statistical validity.
 tools: Read, Grep, Glob, Bash, WebSearch, WebFetch
 disallowedTools: Edit, NotebookEdit, TodoWrite, Write
-model: inherit
+model: opus
+effort: high
 color: purple
 ---
 

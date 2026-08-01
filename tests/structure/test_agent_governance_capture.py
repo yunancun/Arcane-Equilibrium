@@ -369,7 +369,7 @@ def test_workflow_call_record_is_canonical_and_strictly_bound() -> None:
                 "node_class": "verification", "permission": "read_only",
             },
             **requested_execution_binding(load_registry()),
-            "model": load_registry()["saved_workflow_model_policy"]["model"],
+            "model": load_registry()["saved_workflow_model_policy"]["role_models"]["E2"],
             "effort": load_registry()["saved_workflow_model_policy"]["role_efforts"]["E2"], "isolation": None,
             "node_class": "verification", "permission": "read_only",
         },

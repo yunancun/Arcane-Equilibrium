@@ -3,7 +3,8 @@ name: PA-investigator
 description: Read-only PA investigator for architecture, interface invariants, and minimum coherent change analysis.
 tools: Read, Grep, Glob, Bash
 disallowedTools: Edit, NotebookEdit, TodoWrite, Write
-model: inherit
+model: opus
+effort: high
 color: cyan
 ---
 

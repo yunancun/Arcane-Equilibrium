@@ -42,7 +42,8 @@ load_registry() + render_views(registry) -> generated platform/profile Adapters
 ```
 
 Registry 只持穩定結構：role ID、execution mode、activation/skip、能力 pack、
-permission、context pack、output schema、budget envelope、charter rules。專業深度留在
+permission、context pack、output schema、budget envelope、charter rules、
+model/effort tier（2026-08-01 起，必填）。專業深度留在
 role skills；Root Principles、ADR、broker 官方規則不複製進 Registry。
 
 四個 execution mode：
@@ -52,17 +53,23 @@ role skills；Root Principles、ADR、broker 官方規則不複製進 Registry�
 - `Builder`：在明確 scope 內產出 source/test/docs patch。
 - `Verifier`：獨立判定，不修被審的 Implementation。
 
-既有 PM/PA/E1/QC 等名稱是 capability preset。所有 preset 都使用可用的完整模型
-智能；`default/explorer/worker` 只是 runtime substrate，不是智能等級。
+既有 PM/PA/E1/QC 等名稱是 capability preset。preset 的模型智能由 Registry 的
+三級 model/effort tier 決定（operator 2026-08-01 裁決：T1 `opus`/`high`＝
+PM/E1/E1a/E2/E3/CC/QC/MIT/PA；T2 `opus`/`low`＝E4/FA/OPS/E5/QA/AI-E/BB/IB；
+T3 `sonnet`/`medium`＝TW/R4/A3）；`default/explorer/worker` 只是 runtime
+substrate，不是智能等級。tier 是下限契約：saved workflow 與任何 caller 不得把
+Registry-`opus` 角色向下覆蓋；各 execution surface 的 executable binding 已由
+Registry validator、generated view 及 call identity 共同 fail-closed。
 
 Registry 同時持有 exact `model_routing_v1`，renderer 把 model 與 reasoning effort
-明寫進每個 native TOML，controller 再把 requested identity 綁入 call receipt。預設
-subagent 是 `gpt-5.6-terra/medium`；`CC/E2/E3/MIT/PA/PM/QC` 的高歧義、對抗或
-關鍵判斷使用 `gpt-5.6-sol/high`。`max`/`xhigh` 不可由 parent 繼承，也沒有隱式
-critical 例外；若未來需要，必須先成為 Registry 中具名、測試覆蓋的 node policy。
-Claude saved workflow 另由 `saved_workflow_model_policy_v1` 精確釘住
-`claude-sonnet-5` 與逐角色 effort；controller config、task 欄位與 session inheritance
-都不能覆蓋它。
+明寫進每個 native TOML，controller 再把 requested identity 綁入 call receipt。
+Codex provider 等價映射為 T1 `gpt-5.6-sol/high`、T2
+`gpt-5.6-sol/low`、T3 `gpt-5.6-terra/medium`；config 的
+`gpt-5.6-terra/medium` 只是不具 governed role 的 fallback。`max`/`xhigh` 不可由
+parent 繼承，也沒有隱式 critical 例外；若未來需要，必須先成為 Registry 中具名、
+測試覆蓋的 node policy。Claude saved workflow 由
+`saved_workflow_model_policy_v1.role_models/role_efforts` 逐角色 exact-match 同一
+operator tier；controller config、task 欄位與 session inheritance 都不能覆蓋它。
 
 跨角色共通的 authority/context/economy/permission/effect/web/capture/output 規則只存在於
 `native_operating_contract_v1`，由單一 renderer helper 投影；role lens、activation、

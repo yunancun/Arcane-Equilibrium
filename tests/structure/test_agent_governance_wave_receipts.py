@@ -174,7 +174,7 @@ def _wave_args(
     model_policy = load_registry()["saved_workflow_model_policy"]
     if len(tasks) > 1:
         tasks[1].update({
-            "model": model_policy["model"],
+            "model": model_policy["role_models"][tasks[1]["agentType"]],
             "effort": model_policy["role_efforts"][tasks[1]["agentType"]],
             "isolation": "worktree",
         })
@@ -508,7 +508,7 @@ def test_wave_controller_owns_identity_and_records_every_retry(tmp_path: Path) -
             "platform_requested_agent": "E2",
             "native_binding": {"logical_role": "E2", "native_agent": "E2", "node_class": "verification", "permission": "read_only"},
             **requested_execution_binding(load_registry()),
-            "model": load_registry()["saved_workflow_model_policy"]["model"],
+            "model": load_registry()["saved_workflow_model_policy"]["role_models"]["E2"],
             "effort": load_registry()["saved_workflow_model_policy"]["role_efforts"]["E2"],
             "isolation": None,
             "node_class": "verification", "permission": "read_only",
@@ -521,7 +521,7 @@ def test_wave_controller_owns_identity_and_records_every_retry(tmp_path: Path) -
         "platform_requested_agent": "E2",
         "native_binding": {"logical_role": "E2", "native_agent": "E2", "node_class": "verification", "permission": "read_only"},
         **requested_execution_binding(load_registry()),
-        "model": load_registry()["saved_workflow_model_policy"]["model"],
+        "model": load_registry()["saved_workflow_model_policy"]["role_models"]["E2"],
         "effort": load_registry()["saved_workflow_model_policy"]["role_efforts"]["E2"],
         "isolation": "worktree",
         "node_class": "verification",

@@ -3,7 +3,8 @@ name: IB
 description: IBKR implementation of the Broker Compatibility reviewer Interface for the gated stock_etf_cash lane.
 tools: Read, Grep, Glob, Bash, WebSearch, WebFetch
 disallowedTools: Edit, NotebookEdit, TodoWrite, Write
-model: inherit
+model: opus
+effort: low
 color: cyan
 ---
 

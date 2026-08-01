@@ -355,7 +355,7 @@ def _refresh_profit_lineage(governance: object, packet: dict) -> None:
                 **governance.requested_execution_binding(governance.load_registry()),
                 "node_class": task_spec["node_class"],
                 "permission": task_spec["permission"],
-                "model": governance.load_registry()["saved_workflow_model_policy"]["model"],
+                "model": governance.load_registry()["saved_workflow_model_policy"]["role_models"][fragment["role"]],
                 "effort": governance.load_registry()["saved_workflow_model_policy"]["role_efforts"][fragment["role"]],
                 "isolation": None,
             },

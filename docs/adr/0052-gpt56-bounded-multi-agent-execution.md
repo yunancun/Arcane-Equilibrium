@@ -35,8 +35,8 @@ Current OpenAI documentation makes three relevant capabilities explicit:
 
 - subagents increase token use; read-heavy parallelism should be bounded and
   model/effort may be pinned per role;
-- `gpt-5.6-terra` is appropriate for faster, lower-cost exploration and
-  supporting-document work, while demanding roles can use GPT-5.6 Sol;
+- GPT-5.6 Sol supports T1/high and T2/low role tiers, while Terra/medium is
+  reserved for the T3 mechanical tier;
 - GPT-5.6 `ultra` already coordinates subagents, so stacking an unbounded
   project fan-out underneath it compounds rather than controls orchestration;
 - GPT-5.6 prompt caching is more predictable, but cache reads are discounted
@@ -124,16 +124,17 @@ tokens.
 
 ### 3. Model choice is role-specific and never inherited accidentally
 
-Codex spawn defaults are `gpt-5.6-terra/medium`. Read-heavy/support roles use
-that pair. The critical reasoning/review allowlist
-`CC/E2/E3/MIT/PA/PM/QC` uses `gpt-5.6-sol/high`.
+Codex config defaults are the unguided fallback `gpt-5.6-terra/medium`.
+Governed roles derive their provider-equivalent tier from the operator role
+policy: T1 uses `gpt-5.6-sol/high`, T2 uses `gpt-5.6-sol/low`, and T3 uses
+`gpt-5.6-terra/medium`.
 
 Every generated native TOML and call receipt names model and effort explicitly.
 Claude saved workflows use the separate Registry-owned
-`saved_workflow_model_policy_v1`: the current saved-workflow model is
-`claude-sonnet-5`, while effort remains role-specific. Neither surface may
-inherit a parent/session tier or accept caller `max`/`xhigh`. A future exception
-requires a new named Registry policy and tests.
+`saved_workflow_model_policy_v1`: `role_models` and `role_efforts` exact-match
+the same operator role tier. Neither surface may inherit a parent/session tier
+or accept a caller substitution. A future exception requires a new named
+Registry policy and tests.
 
 Common authority/context/economy/permission/effect/web/capture/output prose is
 rendered once from `native_operating_contract_v1`. Persona lens, activation,

@@ -17,8 +17,8 @@ surface, ephemeral history mode, policy digest, parent/root execution IDs, and
 spawn depth. Default history is `none`; do not use full-parent history as a
 convenience. A Codex native receipt is currently caller-reported and cannot
 satisfy mandatory-role closure until a host adapter attests the exact tool-call
-and fork boundary. Saved workflows derive exact model and role effort from
-`saved_workflow_model_policy_v1`; session inheritance and caller overrides are
+and fork boundary. Saved workflows derive exact per-role model and effort from
+`saved_workflow_model_policy_v1.role_models/role_efforts`; session inheritance and caller overrides are
 forbidden. `narrow` waves admit at most two in-flight model calls, other
 current envelopes at most three, and child agents may not spawn grandchildren.
 One watcher owns waits/follow-ups for the wave; a no-delta or budget terminal

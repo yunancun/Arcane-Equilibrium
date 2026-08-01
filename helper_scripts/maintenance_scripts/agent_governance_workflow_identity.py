@@ -88,9 +88,9 @@ def requested_identity_errors(
         and role in registry["roles"]
     ):
         model_policy = registry["saved_workflow_model_policy"]
-        if value.get("model") != model_policy["model"]:
+        if value.get("model") != model_policy["role_models"][role]:
             errors.append(
-                "saved workflow model differs from Registry model policy"
+                "saved workflow model differs from Registry role policy"
             )
         if value.get("effort") != model_policy["role_efforts"][role]:
             errors.append(

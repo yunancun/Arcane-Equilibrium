@@ -289,7 +289,7 @@ def _requested(node: dict[str, Any]) -> dict[str, Any]:
         "surface_profile_id": surface["profile"]["profile_id"],
         "surface_profile_digest": surface["digest"],
         "history": default_history_binding(registry),
-        "model": model_policy["model"],
+        "model": model_policy["role_models"][node["role"]],
         "effort": model_policy["role_efforts"][node["role"]],
         "isolation": None,
         "node_class": node["node_class"],

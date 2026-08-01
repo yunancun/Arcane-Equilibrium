@@ -1,6 +1,6 @@
 # Codex Sub-Agent Execution Rules
 
-Last updated: 2026-07-31
+Last updated: 2026-08-01
 Registry: `.codex/agent_registry_v1.json`
 
 ## Dispatch record
@@ -29,14 +29,22 @@ Temporary runtime nicknames are implementation detail. User-facing updates use
 
 ## Intelligence and context
 
-The Registry owns the per-role model route. Judgment-critical roles `CC`, `E2`,
-`E3`, `MIT`, `PA`, `PM`, and `QC` use `gpt-5.6-sol` / `high`; all other
-delegated roles use `gpt-5.6-terra` / `medium`. Generated native TOML must match
-that mapping exactly, and callers may not upgrade or downgrade it ad hoc.
-Consumption is reduced by routing fewer agents, loading less irrelevant
-context, using the Registry-selected model, and stopping when evidence closes.
-Do not use runtime type, prompt length, or budget target as a proxy for
-intelligence.
+The Registry owns separate, explicit model policies for each execution surface:
+
+- Direct Claude custom agents use the role `model` / `effort` tiers: T1
+  `opus`/`high`, T2 `opus`/`low`, and T3 `sonnet`/`medium` (operator decision
+  2026-08-01).
+- Native Codex agents derive an equivalent `model_routing` tier: T1 runs
+  `gpt-5.6-sol`/`high`, T2 runs `gpt-5.6-sol`/`low`, and T3 runs
+  `gpt-5.6-terra`/`medium`.
+- Saved workflows use digest-bound per-role `role_models` and `role_efforts`
+  that exact-match the direct Claude tier.
+
+Generated projections must match the policy for their surface exactly. Callers
+may not substitute or inherit a different tier. Consumption is reduced by routing fewer
+agents, loading less irrelevant context, using the Registry-selected tier, and
+stopping when evidence closes. Do not use runtime type, prompt length, or budget
+target as a proxy for intelligence.
 
 The PM-supplied capsule is the starting point, not a ceiling on autonomous source
 inspection. Mandatory objective/acceptance/hard-boundary/current-diff facts are

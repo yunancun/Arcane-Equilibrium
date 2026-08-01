@@ -46,7 +46,7 @@ def _requested(role: str, native_agent: str, node_class: str, permission: str) -
             "node_class": node_class, "permission": permission,
         },
         **requested_execution_binding(load_registry()),
-        "model": load_registry()["saved_workflow_model_policy"]["model"],
+        "model": load_registry()["saved_workflow_model_policy"]["role_models"][role],
         "effort": load_registry()["saved_workflow_model_policy"]["role_efforts"][role],
         "isolation": None,
         "node_class": node_class, "permission": permission,

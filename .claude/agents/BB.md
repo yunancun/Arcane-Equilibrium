@@ -3,7 +3,8 @@ name: BB
 description: Bybit implementation of the Broker Compatibility reviewer Interface.
 tools: Read, Grep, Glob, Bash, WebSearch, WebFetch
 disallowedTools: Edit, NotebookEdit, TodoWrite, Write
-model: inherit
+model: opus
+effort: low
 color: cyan
 ---
 

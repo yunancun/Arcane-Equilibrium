@@ -35,7 +35,11 @@ CONTEXT_ARTIFACT_FIXTURES = {
         "tests/fixtures/agent_governance/context/focused-acceptance-tests.json"
     ),
 }
-DEMANDING_GPT56_ROLES = {"CC", "E2", "E3", "MIT", "PA", "PM", "QC"}
+CODEX_MODEL_BY_ROLE_MODEL = {
+    "opus": "gpt-5.6-sol",
+    "sonnet": "gpt-5.6-terra",
+    "haiku": "gpt-5.6-terra",
+}
 
 
 def _load_module():
@@ -171,6 +175,11 @@ def test_registry_is_single_valid_interface_and_views_are_current(tmp_path: Path
         if path.parent == ROOT / ".claude/agents" and path.suffix == ".md"
     }
     assert {path.stem for path in claude_paths} == expected_native_names
+    # Split PA/E4 adapters inherit the exact route for their logical role.
+    native_role_by_stem = {
+        "PA-design-writer": "PA", "PA-investigator": "PA",
+        "E4-writer": "E4", "E4-verifier": "E4",
+    }
     for path in native_paths:
         native = tomllib.loads(rendered[path])
         contract = governance.native_agent_contract(path.stem, registry)
@@ -181,6 +190,7 @@ def test_registry_is_single_valid_interface_and_views_are_current(tmp_path: Path
         assert native["model"] == model_route["model"]
         assert native["model_reasoning_effort"] == model_route["model_reasoning_effort"]
         assert native["sandbox_mode"] in {"read-only", "workspace-write"}
+        assert "`$" not in native["developer_instructions"]
         if native["sandbox_mode"] == "read-only":
             assert not re.search(
                 r"\b(writes?|writer|implementation owner)\b",
@@ -193,6 +203,12 @@ def test_registry_is_single_valid_interface_and_views_are_current(tmp_path: Path
             assert not re.search(
                 r"\b(writes?|writer|implementation)\b", owns, re.IGNORECASE
             )
+    for path in claude_paths:
+        role_id = native_role_by_stem.get(path.stem, path.stem)
+        frontmatter = rendered[path].split("---", 2)[1]
+        assert f"\nmodel: {registry['roles'][role_id]['model']}\n" in frontmatter
+        assert f"\neffort: {registry['roles'][role_id]['effort']}\n" in frontmatter
+        assert "model: inherit" not in frontmatter
     assert tomllib.loads(rendered[ROOT / ".codex/agents/E4-writer.toml"])[
         "sandbox_mode"
     ] == "workspace-write"
@@ -301,16 +317,24 @@ def test_subagent_model_routing_and_project_concurrency_are_explicit() -> None:
     governance = _load_module()
     registry = governance.load_registry()
     policy = registry["model_routing"]
+    saved_policy = registry["saved_workflow_model_policy"]
 
     assert policy["schema_version"] == "model_routing_v1"
     assert set(policy["roles"]) == set(registry["roles"])
     for role_id, route in policy["roles"].items():
-        expected = (
-            {"model": "gpt-5.6-sol", "model_reasoning_effort": "high"}
-            if role_id in DEMANDING_GPT56_ROLES
-            else {"model": "gpt-5.6-terra", "model_reasoning_effort": "medium"}
-        )
+        role = registry["roles"][role_id]
+        expected = {
+            "model": CODEX_MODEL_BY_ROLE_MODEL[role["model"]],
+            "model_reasoning_effort": role["effort"],
+        }
         assert route == expected
+    assert saved_policy["schema_version"] == "saved_workflow_model_policy_v1"
+    assert "model" not in saved_policy
+    assert set(saved_policy["role_models"]) == set(registry["roles"])
+    assert set(saved_policy["role_efforts"]) == set(registry["roles"])
+    for role_id, role in registry["roles"].items():
+        assert saved_policy["role_models"][role_id] == role["model"]
+        assert saved_policy["role_efforts"][role_id] == role["effort"]
 
     rendered = governance.render_views(registry, ROOT)
     for path, content in rendered.items():
@@ -339,8 +363,9 @@ def test_subagent_model_routing_and_project_concurrency_are_explicit() -> None:
     assert 'All native presets set `model_reasoning_effort = "high"`' not in (
         execution_rules
     )
-    assert "`gpt-5.6-sol` / `high`" in execution_rules
-    assert "`gpt-5.6-terra` / `medium`" in execution_rules
+    assert "`gpt-5.6-sol`/`high`" in execution_rules
+    assert "`gpt-5.6-sol`/`low`" in execution_rules
+    assert "`gpt-5.6-terra`/`medium`" in execution_rules
     workspace_readme = (ROOT / ".codex/README.md").read_text(encoding="utf-8")
     assert "max_threads=4" not in workspace_readme
     assert "max_depth=1" not in workspace_readme
@@ -457,7 +482,7 @@ def test_native_prompts_keep_each_invariant_once_with_lower_annuity_bytes() -> N
             if role_id in binding["owners"]
         })
         skill_bindings = ", ".join(
-            f"`${skill}` at `.agents/skills/{skill}/SKILL.md` when "
+            f"`{skill}` at `.agents/skills/{skill}/SKILL.md` when "
             f"{registry['on_demand_skills'].get(skill, {}).get('activation', 'the admitted role task explicitly needs it')}"
             for skill in skill_names
         ) or "registry charter only"
@@ -510,6 +535,62 @@ def test_native_prompts_keep_each_invariant_once_with_lower_annuity_bytes() -> N
     baseline_bytes = 47_047
     assert total_bytes <= 40_000
     assert total_bytes <= int(baseline_bytes * 0.85)
+
+
+def test_registry_roles_pin_operator_model_tiering() -> None:
+    """三級模型分級是 operator 裁決(2026-08-01 框架健檢),漂移必須顯式重裁。"""
+
+    governance = _load_module()
+    registry = governance.load_registry()
+    tiers = {
+        role_id: (spec["model"], spec["effort"])
+        for role_id, spec in registry["roles"].items()
+    }
+    t1 = {"PM", "E1", "E1a", "E2", "E3", "CC", "QC", "MIT", "PA"}
+    t2 = {"E4", "FA", "OPS", "E5", "QA", "AI-E", "BB", "IB"}
+    t3 = {"TW", "R4", "A3"}
+    assert t1 | t2 | t3 == set(tiers)
+    assert {tiers[role] for role in t1} == {("opus", "high")}
+    assert {tiers[role] for role in t2} == {("opus", "low")}
+    assert {tiers[role] for role in t3} == {("sonnet", "medium")}
+    # model 必須是明確 pin 的別名,不允許 inherit 回主 session 旗艦單價
+    assert "inherit" not in {model for model, _ in tiers.values()}
+
+
+def test_registry_rejects_codex_route_below_operator_role_tier() -> None:
+    governance = _load_module()
+    registry = deepcopy(governance.load_registry())
+    registry["model_routing"]["roles"]["E1"] = {
+        "model": "gpt-5.6-terra",
+        "model_reasoning_effort": "medium",
+    }
+
+    assert (
+        "E1: Codex model route differs from operator role tier"
+        in governance.validate_registry(registry, ROOT)
+    )
+
+
+def test_registry_rejects_saved_workflow_role_tier_drift() -> None:
+    governance = _load_module()
+    registry = deepcopy(governance.load_registry())
+    registry["saved_workflow_model_policy"]["role_models"]["E1"] = "sonnet"
+
+    assert (
+        "E1: saved workflow model differs from operator role tier"
+        in governance.validate_registry(registry, ROOT)
+    )
+
+
+def test_registry_rejects_saved_workflow_effort_drift() -> None:
+    governance = _load_module()
+    registry = deepcopy(governance.load_registry())
+    registry["saved_workflow_model_policy"]["role_efforts"]["E4"] = "medium"
+
+    assert (
+        "E4: saved workflow effort differs from operator role tier"
+        in governance.validate_registry(registry, ROOT)
+    )
 
 
 def test_native_agents_bind_one_call_capture_and_effect_boundaries() -> None:
@@ -1720,7 +1801,7 @@ def test_closure_schema_binds_role_producers_and_typed_capture_refs() -> None:
                 "platform_requested_agent": "E2",
                 "native_binding": {"logical_role": "E2", "native_agent": "E2", "node_class": "verification", "permission": "read_only"},
                 **governance.requested_execution_binding(governance.load_registry()),
-                "model": governance.load_registry()["saved_workflow_model_policy"]["model"],
+                "model": governance.load_registry()["saved_workflow_model_policy"]["role_models"]["E2"],
             "effort": governance.load_registry()["saved_workflow_model_policy"]["role_efforts"]["E2"],
             "isolation": None,
             "node_class": "verification",
@@ -1968,7 +2049,7 @@ def _refresh_standard_workflow_lineage(governance, packet: dict) -> None:
                     "permission": task_spec["permission"],
                 },
                 **governance.requested_execution_binding(governance.load_registry()),
-                "model": governance.load_registry()["saved_workflow_model_policy"]["model"],
+                "model": governance.load_registry()["saved_workflow_model_policy"]["role_models"][fragment["role"]],
                 "effort": governance.load_registry()["saved_workflow_model_policy"]["role_efforts"][fragment["role"]], "isolation": None,
                 "node_class": task_spec["node_class"],
                 "permission": task_spec["permission"],

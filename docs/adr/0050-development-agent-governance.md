@@ -349,3 +349,14 @@ Costs/risks:
 - `agent_governance.py render --check`
 - Node syntax checks for saved workflows
 - R4 generated-view/index audit
+
+## Amendment 2026-08-01: Registry model/effort tier
+
+框架健檢(2026-08-01)後 operator 裁決:role schema 新增必填 `model`/`effort`
+欄位,renderer 透傳至生成視圖(`.claude/agents/*.md` frontmatter 兩欄;
+`.codex/agents/*.toml` 透過 provider-equivalent `model_routing_v1` 同時釘住
+model 與 effort)。三級:T1 `opus`/`high`(PM,E1,E1a,E2,E3,CC,QC,MIT,PA)、
+T2 `opus`/`low`(E4,FA,OPS,E5,QA,AI-E,BB,IB)、T3 `sonnet`/`medium`(TW,R4,A3)。
+tier 為下限契約:任何 caller/saved workflow 不得向下覆蓋 Registry-`opus` 角色；
+Codex 與 saved workflow executable binding 均已逐角色落地並由 validator 強制。本修正案
+取代原文「所有 preset 都使用可用的完整模型智能」表述。

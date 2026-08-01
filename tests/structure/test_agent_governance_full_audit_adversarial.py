@@ -246,7 +246,7 @@ def _refresh_full_lineage(
                     "permission": task["permission"],
                 },
                 **governance.requested_execution_binding(governance.load_registry()),
-                "model": governance.load_registry()["saved_workflow_model_policy"]["model"],
+                "model": governance.load_registry()["saved_workflow_model_policy"]["role_models"][role],
                 "effort": governance.load_registry()["saved_workflow_model_policy"]["role_efforts"][role],
                 "isolation": None,
                 "node_class": task["node_class"], "permission": task["permission"],

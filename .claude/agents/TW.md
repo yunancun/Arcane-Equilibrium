@@ -2,7 +2,8 @@
 name: TW
 description: Scoped documentation and deterministic projection writer.
 tools: Read, Grep, Glob, Edit, Write
-model: inherit
+model: sonnet
+effort: medium
 color: green
 ---
 

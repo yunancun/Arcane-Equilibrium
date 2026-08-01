@@ -62,17 +62,18 @@ const requestedExecutionBindingV1 = () => {
 }
 const savedWorkflowTierV1 = logicalRole => {
   const policy = CONTEXT_ADMISSION_V1.savedWorkflowModelPolicy
+  const model = policy.role_models && policy.role_models[logicalRole]
   const effort = policy.role_efforts && policy.role_efforts[logicalRole]
   if (
     policy.schema_version !== 'saved_workflow_model_policy_v1' ||
     policy.surface_profile_id !== 'claude_saved_workflow_v1' ||
     policy.allow_inheritance !== false ||
-    typeof policy.model !== 'string' || !policy.model ||
+    typeof model !== 'string' || !model ||
     typeof effort !== 'string' || !effort
   ) {
     throw new Error(`logical role ${logicalRole} lacks an exact saved-workflow model tier`)
   }
-  return { model: policy.model, effort }
+  return { model, effort }
 }
 const admittedSavedWorkflowTierV1 = (logicalRole, requested = {}) => {
   const tier = savedWorkflowTierV1(logicalRole)
