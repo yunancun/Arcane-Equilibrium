@@ -54,7 +54,7 @@
 - [四條核心工作原則](feedback_working_principles.md) — 誠實報告測試/簡潔輸出/對抗性驗證/多角色工作流不可跳過
 - [Evidence discipline under degraded tools (2026-05-31)](feedback_evidence_discipline_under_degraded_tools.md) — 寫 verdict 前讀 source 全文/ssh 暫存檔分次讀/build-SHA≠git-commit/sub-agent 比即時 ssh 解讀可靠
 - [風險參數修改必須限定範圍](feedback_risk_changes_scoped.md) — 只改被要求的參數,不連帶重設
-- [關閉 Adaptive Thinking](feedback_disable_adaptive_thinking.md) — 不使用延伸思考,直接輸出(operator 明確要求)
+- [模型/effort 三級分級 (2026-08-01)](feedback_model_effort_tiering.md) — operator 裁決:T1 opus/high=PM,E1,E1a,E2,E3,CC,QC,MIT,PA;T2 opus/low=E4,FA,OPS,E5,QA,AI-E,BB,IB;T3 sonnet/medium=TW,R4,A3;thinking 治理改 per-lane effort;subagent 委派需上限非鼓勵;取代兩條已退役鐵則
 - [Edge 分析用 demo 不用 paper](feedback_demo_over_paper_for_edge.md) — edge 估計取 demo fills;paper 失真
 - [Demo 放寬/Live 收緊 (2026-04-28)](feedback_demo_loose_live_strict_policy.md) — Demo=學習源可放寬;Live 永遠 fail-closed;核心是平衡虧損與盈利
 - [MICRO-PROFIT-FIX-1 意圖](feedback_micro_profit_fix_intent.md) — 「有微利就套(net>0)」非 cost_edge_ratio gate
@@ -72,7 +72,6 @@
 ## Workflow & roles
 - [強制工作鏈與審計模板](feedback_workflow_audit_chain.md) — E1→E2→E4→PM 不可跳過;策略改動加 QA Audit
 - [主會話角色:PM+Conductor](feedback_role_definition.md) — 主會話=PM+Conductor;sub-agent 只執行/審查/研究
-- [強制先評估 sub-agent 拆分](feedback_subagent_first.md) — 收任務先想能否拆後台並行
 - [Sub-agent silent-failure 5步審計](feedback_subagent_code_writing_refusal.md) — sub-agent 自報成功可能實際沒做/被 idle-kill;5步查驗(2026-04-07 refuse-pattern 已於 04-18 解除,留史)
 - [governance continuation 的 delta 協議 (2026-07-26)](feedback_governance_continuation_delta_protocol.md) — continuation 一輪一次且必須在做完工作後呼叫;空呼叫或 scope 漂移即判 BLOCKED_NO_DELTA 且該 admission 終結,需 release→重建 contract→acquire
 - [Meta-doc 用 git commit --only](feedback_git_commit_only_for_metadoc.md) — CLAUDE/TODO/docs/memory 必用 --only;multi-session 下 add+commit 不安全
