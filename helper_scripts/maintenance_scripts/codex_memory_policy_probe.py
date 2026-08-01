@@ -9,12 +9,15 @@ import re
 import shutil
 import subprocess
 from collections.abc import Callable
+from pathlib import Path
 from typing import Any
 
 
 SCHEMA_VERSION = "codex_memory_policy_capability_v1"
 SELECTED_MODEL = "gpt-5.6-luna"
+PROJECT_ROOT = Path(__file__).resolve().parents[2]
 CONFIG_VALUES = {
+    "features.memories": "true",
     "memories.consolidation_model": f'"{SELECTED_MODEL}"',
     "memories.disable_on_external_context": "true",
     "memories.extract_model": f'"{SELECTED_MODEL}"',
@@ -51,6 +54,7 @@ def _invoke(
         capture_output=True,
         text=True,
         timeout=15,
+        cwd=PROJECT_ROOT,
     )
 
 

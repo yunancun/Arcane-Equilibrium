@@ -70,6 +70,7 @@ def test_memory_policy_probe_reports_supported_keys_and_model() -> None:
         "status": "SUPPORTED",
         "codex_version": "0.146.0-alpha.3.1",
         "supported_keys": [
+            "features.memories",
             "memories.consolidation_model",
             "memories.disable_on_external_context",
             "memories.extract_model",
@@ -79,6 +80,27 @@ def test_memory_policy_probe_reports_supported_keys_and_model() -> None:
         "selected_models_available": ["gpt-5.6-luna"],
         "reasons": [],
     }
+
+
+def test_memory_policy_probe_binds_project_root_and_feature_gate() -> None:
+    invocations: list[tuple[list[str], object]] = []
+
+    def recording_runner(args, **kwargs):
+        invocations.append((list(args), kwargs.get("cwd")))
+        return _supported_runner(args, **kwargs)
+
+    result = probe_codex_memory_policy(
+        "/opt/codex",
+        runner=recording_runner,
+    )
+
+    assert result["status"] == "SUPPORTED"
+    assert invocations
+    assert all(cwd == ROOT for _, cwd in invocations)
+    strict_config_call = next(
+        argv for argv, _ in invocations if "--strict-config" in argv
+    )
+    assert "features.memories=true" in strict_config_call
 
 
 def test_missing_or_older_host_returns_explicit_external_limit() -> None:

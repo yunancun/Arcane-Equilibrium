@@ -326,7 +326,7 @@ superseded round-6 head and are not release evidence for round 7. Final frozen
 worktree counts, independent post-fix review, hosted exact-head CI/review, and
 publication are recorded only after the cumulative rerun completes.
 
-### Independent review reopen round 8 and final local evidence
+### Independent review reopen round 8 and cumulative local evidence
 
 The cumulative exact-bytes review found additional cross-language admission
 and availability gaps before publication. Python-valid Unicode object keys
@@ -360,7 +360,7 @@ the canonical core/docs pack sources and uses the repository Registry; cyclic
 DAGs are asserted at the earlier zero-call binding gate. Its complete file is
 `15 passed`.
 
-Final local release evidence on the cumulative worktree is:
+Round-8 cumulative local evidence on the worktree is:
 
 - scoped Context/DAG/Full-Audit/Profit/codegen suite: `218 passed`;
 - non-disposable structure suite: `5150 passed, 16 skipped, 0 failed` in
@@ -376,6 +376,28 @@ Final local release evidence on the cumulative worktree is:
 - Registry validation, workflow codegen drift, all three Node syntax checks,
   and `git diff --check`: PASS;
 - two independent exact-byte release/parity reviews: `0 P0 / 0 P1 / 0 P2`.
+
+### PR current-head review closure round 9
+
+The hosted current-head review found two remaining source gaps after the
+round-8 evidence freeze. First, the implementation module still exposed a raw
+controller issuer that accepted a caller-recomputed policy and surface, even
+though the Registry-checked factory was safe. Second, the Codex memory
+capability probe validated the five `[memories]` keys without submitting the
+required `features.memories=true` gate and without binding the subprocess to
+the repository root.
+
+The raw issuer is removed. Controller creation now occurs only inside the
+Registry-checking factory after exact live-policy, live-surface, and pristine
+ledger validation; reduced-cap structural state-machine tests use the pure
+transition seam and cannot mint a production controller. The memory probe now
+submits the feature gate with the five memory settings under strict config and
+runs every capability check from the exact project root. TDD evidence is the
+expected three-test RED followed by `4 passed`; the complete two affected test
+files pass `65 passed`, with Python compilation and `git diff --check` also
+green. The hosted exact-head suite must rerun on the new commit before merge;
+the earlier `5150 passed / 16 skipped` count remains cumulative evidence, not a
+claim about the still-unpublished round-9 head.
 
 These results establish source-level release readiness only. They do not close
 the eight typed host/platform `EXTERNAL_LIMIT` rows, attest provider billing or

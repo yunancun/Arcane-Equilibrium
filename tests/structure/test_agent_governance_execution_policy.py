@@ -9,7 +9,7 @@ import hashlib
 import json
 from pathlib import Path
 import sys
-from threading import Event
+from threading import Event, RLock
 import time
 
 import pytest
@@ -20,7 +20,6 @@ HELPERS = ROOT / "helper_scripts" / "maintenance_scripts"
 sys.path.insert(0, str(HELPERS))
 
 from agent_governance_execution_policy import (  # noqa: E402
-    _issue_execution_admission_controller,
     admit_execution_event as _admit_execution_event,
     compile_execution_budget_policy,
     default_history_binding,
@@ -53,7 +52,7 @@ DIGEST_A = "sha256:" + "a" * 64
 DIGEST_B = "sha256:" + "b" * 64
 DIGEST_C = "sha256:" + "c" * 64
 _TEST_SURFACE_PROFILES: dict[str, dict] = {}
-_TEST_EXECUTION_CONTROLLERS: dict[tuple[object, ...], object] = {}
+_TEST_EXECUTION_STATES: dict[tuple[object, ...], dict] = {}
 
 
 def _event(
@@ -154,25 +153,24 @@ def admit_execution_event(
         ledger.get("policy_digest"),
         ledger.get("surface_profile_digest"),
     )
-    if (
-        ledger.get("events") == []
-        and controller_key not in _TEST_EXECUTION_CONTROLLERS
-    ):
-        _TEST_EXECUTION_CONTROLLERS[controller_key] = (
-            _issue_execution_admission_controller(
-                policy,
-                ledger,
-                surface_profile=resolved_surface,
-            )
+    if ledger.get("events") == [] and controller_key not in _TEST_EXECUTION_STATES:
+        _TEST_EXECUTION_STATES[controller_key] = {
+            "root_execution_id": ledger.get("root_execution_id"),
+            "watcher_id": ledger.get("watcher_id"),
+            "policy_digest": ledger.get("policy_digest"),
+            "surface_profile_digest": ledger.get("surface_profile_digest"),
+            "last_ledger_digest": ledger.get("ledger_digest"),
+            "lock": RLock(),
+        }
+    state = _TEST_EXECUTION_STATES[controller_key]
+    with state["lock"]:
+        return execution_policy._transition_execution_event_ledger(
+            policy,
+            ledger,
+            event,
+            surface_profile=resolved_surface,
+            state=state,
         )
-    controller = _TEST_EXECUTION_CONTROLLERS.get(controller_key)
-    return _admit_execution_event(
-        policy,
-        ledger,
-        event,
-        surface_profile=resolved_surface,
-        controller=controller,
-    )
 
 
 def validate_execution_event_ledger(
@@ -663,6 +661,13 @@ def test_controller_rejects_a_self_signed_policy_outside_registry_authority() ->
             ledger,
             surface_profile=surface["profile"],
         )
+
+
+def test_raw_policy_controller_issuer_is_not_importable() -> None:
+    assert not hasattr(
+        execution_policy,
+        "_issue_execution_admission_controller",
+    )
 
 
 def test_public_facade_cannot_mint_a_caller_named_execution_root() -> None:

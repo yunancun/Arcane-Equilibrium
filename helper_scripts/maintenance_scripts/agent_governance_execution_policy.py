@@ -461,56 +461,6 @@ def _pristine_ledger_errors(
     return errors
 
 
-def _issue_execution_admission_controller(
-    policy: dict[str, Any],
-    ledger: dict[str, Any],
-    *,
-    surface_profile: dict[str, Any],
-) -> ExecutionAdmissionController:
-    """Trusted-controller seam; callers must establish policy authority first."""
-
-    policy_canonical, frozen_policy = _plain_canonical_mapping(
-        policy,
-        label="execution controller policy authority",
-    )
-    surface_canonical, frozen_surface = _plain_canonical_mapping(
-        surface_profile,
-        label="execution controller surface authority",
-    )
-    _, frozen_ledger = _plain_canonical_mapping(
-        ledger,
-        label="execution controller pristine ledger",
-    )
-    errors = _pristine_ledger_errors(
-        frozen_policy,
-        frozen_ledger,
-        frozen_surface,
-    )
-    if errors:
-        raise ValueError(
-            "execution controller initialization failed: " + "; ".join(errors)
-        )
-    with _CONTROLLER_REGISTRY_LOCK:
-        root_execution_id = frozen_ledger["root_execution_id"]
-        if root_execution_id in _ISSUED_CONTROLLER_ROOTS:
-            raise ValueError(
-                "execution controller genesis is already claimed for this root execution"
-            )
-        controller = ExecutionAdmissionController(_CONTROLLER_SEAL)
-        _ISSUED_CONTROLLER_ROOTS.add(root_execution_id)
-        _CONTROLLER_STATES[controller] = {
-            "root_execution_id": root_execution_id,
-            "watcher_id": frozen_ledger["watcher_id"],
-            "policy_digest": frozen_ledger["policy_digest"],
-            "surface_profile_digest": frozen_ledger["surface_profile_digest"],
-            "policy_authority_canonical": policy_canonical,
-            "surface_authority_canonical": surface_canonical,
-            "last_ledger_digest": frozen_ledger["ledger_digest"],
-            "lock": RLock(),
-        }
-    return controller
-
-
 def _start_registry_execution_admission(
     policy: dict[str, Any],
     ledger: dict[str, Any],
@@ -561,11 +511,42 @@ def _start_registry_execution_admission(
         raise ValueError(
             "execution controller surface differs from the live Registry authority"
         )
-    return _issue_execution_admission_controller(
+    policy_canonical, frozen_policy = _plain_canonical_mapping(
         expected_policy,
-        supplied_ledger,
-        surface_profile=binding["profile"],
+        label="execution controller Registry policy authority",
     )
+    surface_canonical, frozen_surface = _plain_canonical_mapping(
+        binding["profile"],
+        label="execution controller Registry surface authority",
+    )
+    errors = _pristine_ledger_errors(
+        frozen_policy,
+        supplied_ledger,
+        frozen_surface,
+    )
+    if errors:
+        raise ValueError(
+            "execution controller initialization failed: " + "; ".join(errors)
+        )
+    with _CONTROLLER_REGISTRY_LOCK:
+        root_execution_id = supplied_ledger["root_execution_id"]
+        if root_execution_id in _ISSUED_CONTROLLER_ROOTS:
+            raise ValueError(
+                "execution controller genesis is already claimed for this root execution"
+            )
+        controller = ExecutionAdmissionController(_CONTROLLER_SEAL)
+        _ISSUED_CONTROLLER_ROOTS.add(root_execution_id)
+        _CONTROLLER_STATES[controller] = {
+            "root_execution_id": root_execution_id,
+            "watcher_id": supplied_ledger["watcher_id"],
+            "policy_digest": supplied_ledger["policy_digest"],
+            "surface_profile_digest": supplied_ledger["surface_profile_digest"],
+            "policy_authority_canonical": policy_canonical,
+            "surface_authority_canonical": surface_canonical,
+            "last_ledger_digest": supplied_ledger["ledger_digest"],
+            "lock": RLock(),
+        }
+    return controller
 
 
 def _controller_state(
