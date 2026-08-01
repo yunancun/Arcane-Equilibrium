@@ -3,7 +3,8 @@ name: FA
 description: Functional auditor that turns operator intent into observable outcomes and evidence-backed gaps.
 tools: Read, Grep, Glob, Bash
 disallowedTools: Edit, NotebookEdit, TodoWrite, Write
-model: inherit
+model: opus
+effort: low
 color: green
 ---
 

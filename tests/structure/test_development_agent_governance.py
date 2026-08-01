@@ -170,14 +170,27 @@ def test_registry_is_single_valid_interface_and_views_are_current(tmp_path: Path
         if path.parent == ROOT / ".claude/agents" and path.suffix == ".md"
     }
     assert {path.stem for path in claude_paths} == expected_native_names
+    # PA/E4 的 writer/verifier adapter 繼承其 role 的 model/effort 分級
+    native_role_by_stem = {
+        "PA-design-writer": "PA", "PA-investigator": "PA",
+        "E4-writer": "E4", "E4-verifier": "E4",
+    }
     for path in native_paths:
         native = tomllib.loads(rendered[path])
+        role_id = native_role_by_stem.get(path.stem, path.stem)
         assert native["name"] == path.stem
         assert native["description"]
         assert native["developer_instructions"]
-        assert native["model_reasoning_effort"] == "high"
+        assert native["model_reasoning_effort"] == registry["roles"][role_id]["effort"]
         assert native["sandbox_mode"] in {"read-only", "workspace-write"}
         assert "model" not in native
+        assert "`$" not in native["developer_instructions"]
+    for path in claude_paths:
+        role_id = native_role_by_stem.get(path.stem, path.stem)
+        frontmatter = rendered[path].split("---", 2)[1]
+        assert f"\nmodel: {registry['roles'][role_id]['model']}\n" in frontmatter
+        assert f"\neffort: {registry['roles'][role_id]['effort']}\n" in frontmatter
+        assert "model: inherit" not in frontmatter
         if native["sandbox_mode"] == "read-only":
             assert not re.search(
                 r"\b(writes?|writer|implementation owner)\b",
@@ -292,6 +305,26 @@ def test_registry_is_single_valid_interface_and_views_are_current(tmp_path: Path
     assert axis_literal
     workflow_axes = re.findall(r"'([^']+)'", axis_literal.group(1))
     assert workflow_axes == full_audit_contract["axes"]
+
+
+def test_registry_roles_pin_operator_model_tiering() -> None:
+    """三級模型分級是 operator 裁決(2026-08-01 框架健檢),漂移必須顯式重裁。"""
+
+    governance = _load_module()
+    registry = governance.load_registry()
+    tiers = {
+        role_id: (spec["model"], spec["effort"])
+        for role_id, spec in registry["roles"].items()
+    }
+    t1 = {"PM", "E1", "E1a", "E2", "E3", "CC", "QC", "MIT", "PA"}
+    t2 = {"E4", "FA", "OPS", "E5", "QA", "AI-E", "BB", "IB"}
+    t3 = {"TW", "R4", "A3"}
+    assert t1 | t2 | t3 == set(tiers)
+    assert {tiers[role] for role in t1} == {("opus", "high")}
+    assert {tiers[role] for role in t2} == {("opus", "low")}
+    assert {tiers[role] for role in t3} == {("sonnet", "medium")}
+    # model 必須是明確 pin 的別名,不允許 inherit 回主 session 旗艦單價
+    assert "inherit" not in {model for model, _ in tiers.values()}
 
 
 def test_native_agents_bind_one_call_capture_and_effect_boundaries() -> None:

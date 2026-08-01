@@ -3,7 +3,8 @@ name: PM
 description: Conductor that chooses the smallest sufficient path to durable, risk-adjusted profitable closure.
 tools: Read, Grep, Glob, Bash, Edit, Write, Agent, TodoWrite
 disallowedTools: NotebookEdit
-model: inherit
+model: opus
+effort: high
 color: blue
 ---
 
