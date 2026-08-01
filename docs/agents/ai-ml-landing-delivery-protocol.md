@@ -90,6 +90,18 @@ attempt expands them into distinct node IDs/classes/permissions/predecessors.
 ML semantic reviewers inspect the post-E2/E4 current generation; `OPS preflight`
 and `OPS postcheck` are distinct nodes and actors.
 
+Full-suite rerun reform (2026-08-01 framework-health adjudication): gate/exit
+full-suite evidence is executed once by one role under a governed, binding
+`command_capture_v2`; every additional required verifier (for example the other
+two of PM/E2/E4) independently re-derives the capture digest from the capture
+bytes and cross-checks its evidence-signature binding (HEAD/diff/command/
+toolchain/env/config) instead of re-executing the suite. Capture-digest
+equivalence supersedes the historical verbatim-identical-tail-line standard.
+A second real execution stays reserved for critical, previously-failed,
+known-flaky and release-gate checks by a distinct role, and the closure-side
+trusted re-execution of captures (governance §5) is unchanged until a
+host-attested CommandCaptureVerifier exists.
+
 ## 4. Retry, Stop And Resume
 
 - Missing context: acquire the exact missing source, then recompile context.

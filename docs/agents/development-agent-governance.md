@@ -683,6 +683,16 @@ signature、referenced execution evidence digest、assessment/adjudication/expir
 packet 形狀本身不是 cache proof。第二遍測試只在 critical、已失敗、已知 flaky、
 release gate；critical flaky 是 FAIL。
 
+重跑政策（2026-08-01 框架健檢裁決）：gate/exit 級「全 suite 通過」證據由**一方執行**
+——執行方產出 task/node/role/command-bound `command_capture_v2`——其餘 required 覆核方
+（例如 PM/E2/E4 三方場景中的另外兩方）不再各自重跑整個 suite，改為各自獨立讀取
+capture bytes、重算 capture digest、核對其 evidence signature 綁定（HEAD/diff/command/
+toolchain/env/config）與宣稱一致；舊「逐字相同的尾行」標準由 capture digest 等價取代
+（尾行屬 capture bytes 的一部分，digest 等價即涵蓋逐字比對）。第二遍真執行仍只保留給
+上段列出的 critical、已失敗、已知 flaky 與 release gate，且執行方必須是不同 role；
+歷史 gate record 中的三方各自重跑（如 S2.4 `SOURCE_READY` 退出條件①）自此為先例存史，
+不再是未來 gate 的模板。
+
 這個 E4 scheduling 規則與 Closure assurance replay 分開計價：目前缺 host
 CommandCaptureVerifier，Closure 對 capture 做 trusted re-execution，故非 critical 也會有
 一次驗證 replay。這是刻意的高保證 constraint，不得在 consumption accounting 中稱為
