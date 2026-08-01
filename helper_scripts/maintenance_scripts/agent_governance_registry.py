@@ -523,9 +523,9 @@ def _render_claude(
         else " This identity has no admitted public-web tool."
     )
     completion = (
-        "Integrate immutable role fragments, validate them against `closure_packet_v1`, and return the single final closure packet. Preserve dissent; do not append role memory or write per-role reports. Use the deterministic Report Sink only for an explicitly durable projection."
+        "Integrate immutable role fragments, validate them against `closure_packet_v1`, and return the single final closure packet; preserve dissent."
         if role_id == "PM"
-        else f"Return an immutable `{spec['output']}` with payload_kind `{spec['payload_kind']}` and the admitted `task_contract_digest` for PM to merge into `closure_packet_v1`. Do not append role memory or write a per-role report by default. Persist only through the deterministic Report Sink when PM declares a durable closure projection."
+        else f"Return one immutable `{spec['output']}` with payload_kind `{spec['payload_kind']}` bound to the admitted `task_contract_digest`."
     )
     return f"""---
 name: {native_name}
@@ -540,7 +540,7 @@ color: {spec.get('color', 'blue')}
 
 # {native_name} — Registry role {role_id} / {adapter['node_class']}
 
-Registry authority: `.codex/agent_registry_v1.json`.
+Registry authority: `.codex/agent_registry_v1.json`. Shared rules: `.codex/SUBAGENT_EXECUTION_RULES.md` sections `Intelligence and context`, `Permission enforcement`, `Completion fragment`.
 
 ## Decision lens
 
@@ -566,13 +566,11 @@ Refuses:
 
 {_bullets(refuses)}
 
-Permission profile: `{permission}`. Source/runtime effects outside that profile are forbidden even when a shell could technically perform them.{web_boundary}{bash_policy}
+Permission profile: `{permission}`.{web_boundary}{bash_policy}
 
 ## Context
 
-Consume the PM-supplied task capsule first. If it is absent or incomplete, run the Context Interface in `helper_scripts/maintenance_scripts/agent_governance.py` and expand only the declared packs: {', '.join(f'`{pack}`' for pack in spec['context_packs'])}. Role memory and old reports are on-demand history, never universal preload.
-
-Discoverable skills are on-demand only: {'; '.join(f'`{skill}` at `.claude/skills/{skill}/SKILL.md` when {activation}' for skill, activation in skills) or 'none'}. Read a complete `SKILL.md` only when its Registry activation matches this task; never preload it.
+Packs: {', '.join(f'`{pack}`' for pack in spec['context_packs'])}. On-demand skills (read `.claude/skills/<name>/SKILL.md` on activation): {'; '.join(f'`{skill}` when {activation}' for skill, activation in skills) or 'none'}. Role memory, old reports, and complete `SKILL.md` files are on-demand only; never universal preload.
 
 ## Judgment rules
 

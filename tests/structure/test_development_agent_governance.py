@@ -160,7 +160,6 @@ def test_registry_is_single_valid_interface_and_views_are_current(tmp_path: Path
         for content in rendered.values()
     )
     assert "`agent_governance.py render --check`" not in rendered[ROOT / ".codex/agents/INDEX.md"]
-    assert "fragment for PM to merge" not in rendered[ROOT / ".claude/agents/PM.md"]
     assert "single final closure packet" in rendered[ROOT / ".claude/agents/PM.md"]
     native_paths = {
         path for path in rendered
@@ -175,6 +174,7 @@ def test_registry_is_single_valid_interface_and_views_are_current(tmp_path: Path
         if path.parent == ROOT / ".claude/agents" and path.suffix == ".md"
     }
     assert {path.stem for path in claude_paths} == expected_native_names
+    assert all("`.codex/SUBAGENT_EXECUTION_RULES.md`" in rendered[path] for path in claude_paths)
     # Split PA/E4 adapters inherit the exact route for their logical role.
     native_role_by_stem = {
         "PA-design-writer": "PA", "PA-investigator": "PA",
