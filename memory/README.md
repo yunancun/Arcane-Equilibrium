@@ -55,15 +55,18 @@ ls "$HOME/.claude/projects/-Users-ncyu-Projects-TradeBot/memory/MEMORY.md"
 
 ## How to update the Linux live dir (repo → live)
 
-repo 為正本；Linux 端更新一律 `git pull` 後 rsync repo→live。`--delete` 會刪掉
-live 端獨有檔案，故**先 dry-run diff 確認 live 無獨有新檔**（有則先把它們吸收回
-repo commit——rsync live→repo **不帶 `--delete`**——再同步）：
+repo 為正本；Linux 端更新一律 `git pull` 後 rsync repo→live。真跑的 `--delete`
+會刪掉 live 端獨有檔案，且**對兩邊都存在的檔會直接以 repo 版覆蓋 live 端的修改**
+——後者在 rsync dry-run 輸出裡只是一行普通傳輸檔名、不會出現 `deleting`，故 gate
+不能只看 deleting 行，必須用 `diff -ru` 檢視**全部**差異：
 
 ```bash
 cd "$OPENCLAW_BASE_DIR" && git pull --ff-only
-# 先 dry-run：輸出裡的 deleting 行＝live 端獨有檔案，出現即停手先吸收
-rsync -avn --delete "$OPENCLAW_BASE_DIR/memory/" "$HOME/.claude/projects/-home-ncyu-BybitOpenClaw-srv/memory/"
-# 確認無 deleting（或已吸收完）後真跑
+# gate：逐項檢視差異。「repo 有而 live 沒有／repo 內容較新」＝正常待同步；
+# 發現 live 端獨有內容（live 側新檔**或 live 側對既有檔的新增段落**）即停手，
+# 先反向吸收（rsync live→repo **不帶 --delete**）、git diff 檢視後 commit，再回本節重跑
+diff -ru "$HOME/.claude/projects/-home-ncyu-BybitOpenClaw-srv/memory/" "$OPENCLAW_BASE_DIR/memory/"
+# gate 通過（全部差異均為 repo 較新、live 無獨有內容）後真跑
 rsync -av --delete "$OPENCLAW_BASE_DIR/memory/" "$HOME/.claude/projects/-home-ncyu-BybitOpenClaw-srv/memory/"
 ```
 
