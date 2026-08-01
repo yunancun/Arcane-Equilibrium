@@ -93,11 +93,8 @@
 - [ultracode 全盤審計編排設置 (2026-06-10;07-24 治理版配方)](reference_ultracode_full_audit.md) — openclaw-full-audit.js+conductor skill;默認 report-only;07-24 起=context_artifact 嵌入 runner+沙箱 shim+admission_now_ms;surfaces 勿含 runtime/bybit/ibkr(debt 必炸);配方 topic 檔
 - [Remote Access 配置](reference_remote_access.md) — Tailscale: Trading GUI / OpenClaw URLs
 - [重啟腳本](reference_restart_script.md) — bash helper_scripts/restart_all.sh
-- [外部整合工具入口 (2026-04-29)](reference_external_tools.md) — **superseded posture**; current authority=GitHub Issues active, Linear historical/passive unless explicitly reopened;Notion frozen;其餘 declined
+- [外部工具權威邊界+整合入口 (2026-04-29)](feedback_external_tool_authority.md) — current authority=GitHub Issues active,Linear historical/passive unless explicitly reopened;Notion frozen,其餘 declined;看到 declined MCP 不重新評估啟用;入口清單 reference_external_tools.md
 - ARCH-RC1 統一 Config 契約 → `docs/references/2026-04-15--arch_rc1_unified_config_contract.md`
 - [GUI 大修基線備份+設計正本 (2026-07-09/10)](reference_gui_redesign_baseline_2026_07_09.md) — git tag gui-baseline-2026-07-09=回滾錨點;07-10 裁決:玄衡儀認可+雙主題真目標+Phase 0 放行;正本入 docs/execution_plan/gui_redesign/(四規格+tokens.css 雙主題);next=Phase 0 §9 chain;topic 檔
-
-## External tool authority
-- [外部工具權威邊界 (2026-04-29)](feedback_external_tool_authority.md) — **superseded posture**; current authority=GitHub Issues active, Linear historical/passive unless explicitly reopened;看到 declined MCP 不重新評估啟用
 
 > Archived stale memories: topic 檔全留原地、可按名 recall(archive 守恆)。**2026-07-06 R4**:Project context 63→40,移出 23 條已完結/被取代/低召回 index 行(topic 檔未刪)。早期 Phase 1-era/completed migrations/superseded plans 原已移 `archive/`。**2026-07-09 R4(subagent 逐行核實)**:+3 新軸(profit-first loop/AI-ML 路線圖/IBKR)−3 merge-out(sprint_n0/v58_alpha_pivot/fincept,topic 檔留原地)=Project context 維持 40;修 profit_diagnosis「operator-hand」終態已超越、PyO3 索引(--rebuild/rust-first,PyO3 2026-04-20 移除)、owed V138+V139=已 apply·cron=已復原;索引 2 孤兒(fastapi_depends/pnl_priority);topic 側:paper=archived 非 disabled/gui TradingMode→PipelineKind/layer2 路徑+L2-mesh shipped/README symlink 拓撲/trim 三胖檔(fail_closed_gate 60→33·residual_producer 127→37·aeg 45→36)。**2026-08-01 框架健檢 R4**:heat 條款廢除(MERGE 代理=git log 日期);冷審 06-14 行併入 ultracode 全審弧行(+框架健檢新行=維持 40);24 超限行壓回 ≤250+16 死 SHA pin 清除(filter-repo 遺留);退役 subagent_first/disable_adaptive_thinking 兩鐵則→archive/(model_effort_tiering 取代);ibkr_p1_secret_slot_loader 併入 ibkr 主檔;fincept/ref20/a_group_triage/sprint_n0/v58 五孤兒檔移 archive/;External tool authority section 併入 References。
