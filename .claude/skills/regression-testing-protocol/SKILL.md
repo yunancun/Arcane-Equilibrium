@@ -56,6 +56,13 @@ allowed-tools: Read, Grep, Glob, Bash
 7. 產 content-addressed evidence capsule，標 EXECUTED/REUSED/SKIPPED/FAILED。
 8. 回 immutable `role_fragment_v1` with `payload_kind=test_fragment_v1`；不寫 E4 memory/report。
 
+## 3. 測試覆蓋 checklist（專案 delta，壓縮版）
+
+- **Unit**：每個新 E1 改動有對應 unit test；邊界值 + 正常路徑至少各 1；修復安全問題需有「修復後攻擊路徑測試通過」
+- **Integration**：跨模塊調用鏈（Strategist → IPC → Rust engine）；連 PG 測試（含 hypertable / migration）；Bybit demo / paper API 整合（Mac 端 dev_disabled 跳過，見 §1）
+- **Property-based（proptest）**：Rust 狀態機轉換窮舉；serde round-trip；IPC schema 隨機 fuzzing
+- **Concurrency**：asyncio 多 task 併發呼同 path；兩 worker 同跑 reconciler；shared singleton 並發訪問；threading + asyncio 邊界
+
 ## OpenClaw 特定核心
 
 - Mac dev_disabled secret slots：見 §1（fail-closed by design）
