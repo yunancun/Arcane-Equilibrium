@@ -185,12 +185,6 @@ def test_registry_is_single_valid_interface_and_views_are_current(tmp_path: Path
         assert native["sandbox_mode"] in {"read-only", "workspace-write"}
         assert "model" not in native
         assert "`$" not in native["developer_instructions"]
-    for path in claude_paths:
-        role_id = native_role_by_stem.get(path.stem, path.stem)
-        frontmatter = rendered[path].split("---", 2)[1]
-        assert f"\nmodel: {registry['roles'][role_id]['model']}\n" in frontmatter
-        assert f"\neffort: {registry['roles'][role_id]['effort']}\n" in frontmatter
-        assert "model: inherit" not in frontmatter
         if native["sandbox_mode"] == "read-only":
             assert not re.search(
                 r"\b(writes?|writer|implementation owner)\b",
@@ -203,6 +197,12 @@ def test_registry_is_single_valid_interface_and_views_are_current(tmp_path: Path
             assert not re.search(
                 r"\b(writes?|writer|implementation)\b", owns, re.IGNORECASE
             )
+    for path in claude_paths:
+        role_id = native_role_by_stem.get(path.stem, path.stem)
+        frontmatter = rendered[path].split("---", 2)[1]
+        assert f"\nmodel: {registry['roles'][role_id]['model']}\n" in frontmatter
+        assert f"\neffort: {registry['roles'][role_id]['effort']}\n" in frontmatter
+        assert "model: inherit" not in frontmatter
     assert tomllib.loads(rendered[ROOT / ".codex/agents/E4-writer.toml"])[
         "sandbox_mode"
     ] == "workspace-write"
