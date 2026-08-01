@@ -45,7 +45,7 @@ allowed-tools: Read, Grep, Glob
 | SM-XX | State Machine | DOC-XX 內部 |
 | EX-XX | Exchange-side | DOC-XX 內部 |
 | AMD-YYYY-MM-DD-NN | 治理 / 架構決策修訂（amendment） | SPECIFICATION_REGISTER.md Amendments 節 + `docs/governance_dev/amendments/` |
-| ADR-XXXX | 架構決策記錄（4 位數字） | `docs/adr/`（ADR-0001~0033 檔名即 ID）+ SPECIFICATION_REGISTER.md（ADR-0034+ 登錄） |
+| ADR-XXXX | 架構決策記錄（4 位數字） | `docs/adr/` 檔名即 ID + SPECIFICATION_REGISTER.md 同步登錄 |
 | P0/P1/P2/P3/P4-XX | 風控層 / 任務優先 | TODO.md + `CLAUDE.md` Hard Boundaries |
 | LG-X | Live Guard | TODO.md + hard-boundary docs |
 | W-XX / Wave-X | Sprint / Wave | TODO.md + PM reports |
@@ -62,9 +62,9 @@ allowed-tools: Read, Grep, Glob
    - **C. 狀態不一致**：TODO.md active state 與 runtime / reports / README source map 不一致
 5. **產出 fragment** — 回 immutable `role_fragment_v1` with `payload_kind=review_fragment_v1`；不直接修文檔、不自動寫 role report/memory
 
-## 已知漂移模式（G6-04 TODO drift 規則唯一正本：CC / R4 / QA / e2e 指向此處）
+## 已知漂移模式
 
-- **TODO runtime drift**：TODO 含「runtime 數值」（cell count / row count / fill rate / binary mtime）必註採集時間 + healthcheck id 或採集命令；滿 7 日未重驗即必更新、降級待驗，或移入 archive/report
+- **TODO runtime drift**：細則正本見 `docs/agents/todo-maintenance.md` Runtime evidence 節（歷史編號 G6-04）
 - **memory 越界**：CLAUDE / Codex memory 出現 active queue、工作進度、runtime 數字，應搬到 TODO 或 README
 - **README 越界**：README 鏡像動態狀態，應改為指向 TODO
 - **DEPRECATED.md 漏更**：撤回 DOC-XX 時忘了加進 DEPRECATED.md → 後續引用視為 SSOT 嚴重誤導
@@ -100,7 +100,7 @@ allowed-tools: Read, Grep, Glob
 
 ## OpenClaw 特定核心檔對齊
 
-每次 R4 審必驗 6 對：
+每次 R4 審必驗以下各對：
 - `README.md` context map ⇄ `docs/agents/context-loading.md`
 - `TODO.md` active blockers ⇄ latest PM/role reports
 - `CLAUDE.md` hard boundaries ⇄ Rust / Python hard-boundary constants where applicable

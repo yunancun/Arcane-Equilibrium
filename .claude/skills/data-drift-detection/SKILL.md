@@ -75,7 +75,7 @@ Concept drift：live prediction error 比 OOS error 高 > 50% → 警報；用 `
 
 ## 穩定 drift rule（不會 drift）
 
-reference + current 兩個 window 都必 `engine_mode IN ('live','live_demo')` filter；drift check 必加 `helper_scripts/db/passive_wait_healthcheck.py:check_data_drift_X()`（cron 6h）；CognitiveModulator confidence_floor 是動態降倉機制（架構級不變）。
+reference + current 兩個 window 都必 `engine_mode IN ('live','live_demo')` filter；drift check 必加 healthcheck：新 check 寫在 `helper_scripts/db/passive_wait_healthcheck/` package 的 `checks_*.py` 加 `check_NN_*`（cron 6h；既有 `[67] feature_baseline_readiness` 與 Rust `drift_detector.rs` 先查重，勿往薄殼 shim 塞函數）；CognitiveModulator confidence_floor 是動態降倉機制（架構級不變）。
 
 ## 反模式（見即 Reject）
 

@@ -181,6 +181,8 @@ axis.
 Workflow({
   name: "openclaw-full-audit",
   args: {
+    context_artifact: <compiler 產物 context_artifact_v1 exact object，必須 inline，缺即 throw>,
+    admission_now_ms: <派發側 epoch-ms admission 時鐘；沙箱無牆鐘，缺即 throw>,
     baseline: {
       source_head: "<40-hex>",
       dirty_diff_hash: "sha256:<64-hex>",
@@ -190,7 +192,7 @@ Workflow({
     },
     scope,
     dirty_scope: ["<sorted-repo-path>"],
-    surfaces: ["full_audit", "agent_workflow", "authority", "runtime", "bybit", "ibkr", "ml", "gui", "docs"],
+    surfaces: ["full_audit", "agent_workflow", "authority", "ml", "gui", "docs"],
     focus,
     scheduler: "adaptive_shadow",
     task_contract_digest: "sha256:<64-hex>",
@@ -203,6 +205,12 @@ Workflow({
   }
 })
 ```
+
+注意（07-24 治理版配方）：surfaces **勿含 runtime/bybit/ibkr 家族**——admission 要求
+`evidence_debt` 全空，含之必炸；runtime 身份改走 `baseline.runtime_head` +
+`runtime_observed_at`。caller 端 scope/focus/surfaces 必須與 inline contract 逐字
+一致。完整配方 = compile_context → materialize_context_artifact → scriptPath 嵌入
+（見 workflow 檔頭 parseArgs 與 memory `reference_ultracode_full_audit.md`）。
 
 `openclaw-full-audit` finds defects. `profit-diagnosis` finds money. Profit
 diagnosis requires a fresh baseline and hash-pinned current priors, allows an

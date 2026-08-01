@@ -60,7 +60,7 @@ allowed-tools: Read, Grep, Glob, Bash
 
 - **Unit**：每個新 E1 改動有對應 unit test；邊界值 + 正常路徑至少各 1；修復安全問題需有「修復後攻擊路徑測試通過」
 - **Integration**：跨模塊調用鏈（Strategist → IPC → Rust engine）；連 PG 測試（含 hypertable / migration）；Bybit demo / paper API 整合（Mac 端 dev_disabled 跳過，見 §1）
-- **Property-based（proptest）**：Rust 狀態機轉換窮舉；serde round-trip；IPC schema 隨機 fuzzing
+- **Property-based（引入 proptest 時適用；workspace 現無此依賴）**：Rust 狀態機轉換窮舉；serde round-trip；IPC schema 隨機 fuzzing
 - **Concurrency**：asyncio 多 task 併發呼同 path；兩 worker 同跑 reconciler；shared singleton 並發訪問；threading + asyncio 邊界
 
 ## OpenClaw 特定核心

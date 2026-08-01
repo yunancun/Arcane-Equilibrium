@@ -26,60 +26,13 @@ allowed-tools: Read, Grep, Glob, Bash
 - Compression 必開（PG 4-8GB 下 30d+ 老資料可省 80-90%）：`compress_segmentby = 'symbol, strategy_name'`、`compress_orderby = 'ts DESC'`、`add_compression_policy(…, INTERVAL '30 days')`
 - 高量資料（>100M rows / yr）必加 `add_retention_policy(…, INTERVAL '90 days')` 起跳
 
-## 2. Migration Guard 規範（唯一正本）
+## 2. Migration Guard 規範（語義正本在此；SQL 範本正本 = `sql/migrations/templates/schema_guard_template.sql`）
 
-### Guard A — 表已存在但 schema 不符
-```sql
-DO $$
-BEGIN
-    IF EXISTS (SELECT 1 FROM information_schema.tables
-               WHERE table_schema='learning' AND table_name='X') THEN
-        IF NOT EXISTS (SELECT 1 FROM information_schema.columns
-                       WHERE table_schema='learning' AND table_name='X'
-                         AND column_name='required_col') THEN
-            RAISE EXCEPTION 'V023 silent-noop: learning.X exists but missing column required_col';
-        END IF;
-    END IF;
-END $$;
+- **Guard A — 表已存在但 schema 不符**：`CREATE TABLE IF NOT EXISTS` 前用 DO block 驗必要欄位齊全，缺欄即 RAISE（V023 silent-noop 教訓：表已存在時 CREATE 靜默跳過，欄位永不 land）。
+- **Guard B — column 型別不符**：type-sensitive `ADD COLUMN IF NOT EXISTS` 前驗既有 column 的 `data_type`，型別不符即 RAISE（V021 教訓）。
+- **Guard C — 索引選用**：hot-path `CREATE INDEX IF NOT EXISTS` 前驗同名索引定義，column 順序漂移即 RAISE。
 
-CREATE TABLE IF NOT EXISTS learning.X (...);
-```
-
-### Guard B — column 型別不符
-```sql
-DO $$
-DECLARE
-    col_type text;
-BEGIN
-    SELECT data_type INTO col_type
-    FROM information_schema.columns
-    WHERE table_schema='trading' AND table_name='Y' AND column_name='exit_source';
-
-    IF col_type IS NOT NULL AND col_type != 'character varying' THEN
-        RAISE EXCEPTION 'V021 type mismatch: trading.Y.exit_source is % (expected varchar)', col_type;
-    END IF;
-END $$;
-
-ALTER TABLE trading.Y ADD COLUMN IF NOT EXISTS exit_source VARCHAR(64);
-```
-
-### Guard C — 索引選用
-```sql
-DO $$
-DECLARE
-    idx_def text;
-BEGIN
-    SELECT pg_get_indexdef(c.oid) INTO idx_def
-    FROM pg_class c JOIN pg_namespace n ON n.oid=c.relnamespace
-    WHERE n.nspname='learning' AND c.relname='X_hot_idx';
-
-    IF idx_def IS NOT NULL AND idx_def NOT LIKE '%(symbol, strategy_name, ts DESC)%' THEN
-        RAISE EXCEPTION 'V### index drift: X_hot_idx exists with wrong column order';
-    END IF;
-END $$;
-
-CREATE INDEX IF NOT EXISTS X_hot_idx ON learning.X (symbol, strategy_name, ts DESC);
-```
+三段 SQL 全文照抄 template（canonical copy-paste source；其版本比舊簡化版更嚴——Guard A 全欄位 array_agg、Guard B 附 canonical type 對照、Guard C 解碼 pg_index）。
 
 ### Idempotency
 每個 migration 必須能 run 兩次不出錯（第二次 no-op，Guard 不 RAISE）；第二次 RAISE → migration 寫錯，回 E2 改。
@@ -99,14 +52,11 @@ CREATE INDEX IF NOT EXISTS X_hot_idx ON learning.X (symbol, strategy_name, ts DE
 
 - 4 值語義：`paper`（純 simulation，PnL 失真，不能進 edge / training）/ `demo`（Bybit demo endpoint，價格真實）/ `live_demo`（Live 管線走 demo endpoint，Live 嚴格標準）/ `live`（真實 Mainnet）
 - column 必加：`engine_mode VARCHAR(20) NOT NULL CHECK (engine_mode IN ('paper','demo','live_demo','live'))`
-- **OpenClaw 教訓**：歷史 43k 條 `engine_mode='live'` 實為 LiveDemo（memory `project_engine_mode_tag_live_demo`）；ML training filter 必用 `engine_mode IN ('live','live_demo')`，不能 `='live'`；outcome_backfiller fix（commit `5e2981d`）INSERT 時補 engine_mode
+- **OpenClaw 教訓**：歷史 43k 條 `engine_mode='live'` 實為 LiveDemo（memory `project_engine_mode_tag_live_demo`）；ML training filter 必用 `engine_mode IN ('live','live_demo')`，不能 `='live'`；outcome_backfiller fix（2026-04；舊史 SHA 已因 07-16 main 全史重寫失效）INSERT 時補 engine_mode
 
 ## 5. PG 資源 — 必 verify 不信 baseline
 
-> ⚠️ OpenClaw 真實 `postgresql.conf` 未 verified（postgres 跑在 container）。**verify 命令**：
-> ```bash
-> psql "$DATABASE_URL" -c "SHOW work_mem; SHOW shared_buffers; SHOW max_connections; SHOW effective_cache_size;"
-> ```
+> ⚠️ OpenClaw 真實 `postgresql.conf` 未 verified（postgres 跑在 container）。**verify 參數**：`SHOW work_mem; SHOW shared_buffers; SHOW max_connections; SHOW effective_cache_size;` —— 取值須經 read-only-identity Adapter / operator artifact（direct `psql` 被 governance preflight 拒，delegated role 不可直連；見 CLAUDE.md「Data, Migrations, And Validation」）。
 > 對應不上時以 `postgresql.conf` 為準。tuning 通識（work_mem/shared_buffers 比例、pgbouncer）靠內建知識；4-8GB 約束下大 query 必分批、防多並行 OOM。
 
 ## 6. Row 量規劃 — 不在本 skill 寫死
