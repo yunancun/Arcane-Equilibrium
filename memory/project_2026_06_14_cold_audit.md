@@ -20,3 +20,7 @@ metadata:
 **seam:** 7→2 refuted + 1 降 LOW;dirty 8 檔讀模型 CLEAN 但 fix-before-commit。
 
 **教訓:** Workflow args 必傳真 JSON 物件非字串(首輪退默認 10 軸)。TODO §5 登 6 條 AUDIT-2026-06-14-*。
+
+---
+
+- **2026-08-01(索引 MERGE 註記)**:本檔獨立索引行已併入「ultracode 全審弧」行(MEMORY.md Project context);本檔留原地,archive 守恆。

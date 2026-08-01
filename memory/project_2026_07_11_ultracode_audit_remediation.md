@@ -44,3 +44,5 @@ run `wf_749b4f8c-2ea`,baseline main=runtime=`7d78765a2`(PR#114 merge),`adaptive_
 - **claim-0002/0005 已閉**:fix branch `agent/aiml-s1-closure-p1p2-fixes` 經多輪 exact-head 對抗收口(五額外 P1+Linux ARG_MAX gate P1 全修)後以 PR#115 精確合併(reviewed head `da8e54148`→merge `22876b16d`,07-24 03:02);closure SSHSIG 簽在含修復的 exact head 上(簽發時態 `S1_CLOSURE_AUTHENTICATED_PENDING_MERGE`),未違「併入前禁簽」禁令。PR#117(`2a471f374`)隨後投影 terminal **`S1_CLOSED`**(非 run0 報告預期的 S1_ENGINEERING_CLOSED_EXTERNAL_WORM_BINDING_PENDING——merge+CI 證據使 ledger 直接組合出 S1_CLOSED)。
 - **claim-0015 已閉**:TODO.md 經 PR#115/#117 連續投影至 v851(header/看板/P0-AIML row 全 S1_CLOSED),殘留的 §4 自檢行(仍稱 PENDING exact-head merge)由 PR#118(`34a568139`,TODO v852,07-24 06:5x)手術式收口。派發該 writer task 時指令基於 v844 快照,fetch 後證實已被超越——再證 memory 鐵則「派工前 fetch」。
 - 仍活:adaptive_shadow 默認不可退、QC PROFIT-1/DSR √Var、BB 110003/110049、AI-E workflow 缺陷、5 seam。當前 Sprint=S2(READY pool S2.0∥S2.2A∥S2.3)。
+
+- **2026-08-01(索引 MERGE)**:MEMORY.md「全盤冷酷審計 ultracode 12軸+seam (2026-06-14)」行併入本弧索引行(主題重疊;Project context cap=40 讓位框架健檢新行);[[project_2026_06_14_cold_audit]] topic 檔留原地可按名 recall。
