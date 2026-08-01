@@ -1423,7 +1423,6 @@ for (const field of ['cheap_model', 'cheap_effort', 'judgment_model', 'judgment_
     throw new Error(`${field} cannot override Registry saved-workflow model policy`)
   }
 }
-const cheapTier = () => ({})
 const workflowContract = {
   schema_version: 'workflow_receipt_contract_v1', workflow: 'openclaw-full-audit',
   task_contract_digest: taskContractDigest, context_artifact_digest: contextArtifactDigest,
@@ -1749,7 +1748,7 @@ const seamInvocation = await invoke({
   prompt: seamPrompt, nodeId: 'seam:critic', payloadKind: ROLE_PAYLOAD_KIND.CC,
   admittedTokens: estimatedSeamTokens,
   requires: audits.map(audit => `audit:${audit.axis}`).sort(),
-  options: { agentType: 'CC', label: 'seam-critic', phase: 'Seam', schema: SEAM_SCHEMA, ...cheapTier() },
+  options: { agentType: 'CC', label: 'seam-critic', phase: 'Seam', schema: SEAM_SCHEMA },
 })
 const seam = seamInvocation && seamInvocation.result
 if (seamInvocation) producerByNode.set('seam:critic', seamInvocation.record)
