@@ -41,7 +41,8 @@ load_registry() + render_views(registry) -> generated platform/profile Adapters
 ```
 
 Registry 只持穩定結構：role ID、execution mode、activation/skip、能力 pack、
-permission、context pack、output schema、budget envelope、charter rules。專業深度留在
+permission、context pack、output schema、budget envelope、charter rules、
+model/effort tier（2026-08-01 起，必填）。專業深度留在
 role skills；Root Principles、ADR、broker 官方規則不複製進 Registry。
 
 四個 execution mode：
@@ -51,8 +52,14 @@ role skills；Root Principles、ADR、broker 官方規則不複製進 Registry�
 - `Builder`：在明確 scope 內產出 source/test/docs patch。
 - `Verifier`：獨立判定，不修被審的 Implementation。
 
-既有 PM/PA/E1/QC 等名稱是 capability preset。所有 preset 都使用可用的完整模型
-智能；`default/explorer/worker` 只是 runtime substrate，不是智能等級。
+既有 PM/PA/E1/QC 等名稱是 capability preset。preset 的模型智能由 Registry 的
+三級 model/effort tier 決定（operator 2026-08-01 裁決：T1 `opus`/`high`＝
+PM/E1/E1a/E2/E3/CC/QC/MIT/PA；T2 `opus`/`low`＝E4/FA/OPS/E5/QA/AI-E/BB/IB；
+T3 `sonnet`/`medium`＝TW/R4/A3）；`default/explorer/worker` 只是 runtime
+substrate，不是智能等級。tier 是下限契約：saved workflow 與任何 caller 不得把
+Registry-`opus` 角色向下覆蓋（現存 cheapTier 類覆蓋屬違規遺留，在可執行綁定
+落地前由 PM 於 admission 時人工把關；agent-wave 的 executable tier 綁定為已
+記錄 follow-up）。
 
 新增的兩個 preset：
 

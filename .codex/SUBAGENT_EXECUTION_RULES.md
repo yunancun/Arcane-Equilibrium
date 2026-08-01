@@ -31,9 +31,16 @@ Temporary runtime nicknames are implementation detail. User-facing updates use
 
 Model and reasoning effort are tiered per role by the Registry
 (`.codex/agent_registry_v1.json` is the single authority; the renderer
-transmits both): T1 flagship roles run `opus`/`high`, T2 judgment-light roles
+transmits both to Claude agent frontmatter, while the Codex toml currently
+carries `model_reasoning_effort` only — a Codex-side model pin is a recorded
+follow-up, so the `sonnet` cost tier is presently effective on Claude
+execution): T1 flagship roles run `opus`/`high`, T2 judgment-light roles
 run `opus`/`low`, T3 mechanical roles run `sonnet`/`medium` (operator decision
-2026-08-01). Beyond the tier, consumption is reduced
+2026-08-01). The tier is a floor contract: saved workflows and callers must
+derive per-role model/effort from the Registry tier and must not override a
+Registry-`opus` role downward (existing cheap-tier overrides are
+non-conforming legacy; PM guards this at admission until an executable
+binding lands in agent-wave). Beyond the tier, consumption is reduced
 by routing fewer agents, loading less irrelevant context, and stopping when
 evidence closes—not by lowering a role's reasoning ceiling below its tier. Do not use runtime
 type, prompt length, or budget target as a proxy for intelligence.
