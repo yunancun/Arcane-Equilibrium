@@ -79,3 +79,7 @@ CCAgentWorkSpace/ 仍是各 agent profile.md / memory.md / workspace/reports/ �
 
 - `4af73bb`：24 custom skills + .gitignore exception + symlink
 - `677ac67`：18 agent definitions
+
+## 演變軌跡(append-only;被推翻結論留原文)
+
+- **2026-08-01(框架健檢更正)**:本檔「18 subagent+25 skill」與「根目錄 .claude=symlink→srv/.claude(單副本,無雙端)」被實測推翻——現況=`srv/.claude/agents/` **22** 個 subagent(04-25 後新增 E4-writer/E4-verifier、PA-design-writer/PA-investigator 等 permission 拆分)、`srv/.claude/skills/` **28** 個;根 .claude 是**真目錄**(file 命令實證,非 symlink),內含 agents/skills/workflows 三個 symlink 子項→srv/.claude 對應目錄+本地 settings.local.json+worktrees/——根端存在本地 settings,「無雙端」不再成立(單副本原則僅在三個 symlink 子項上成立)。原因:04-25 之後的角色拆分與 skill 增補未回寫本檔。

@@ -97,3 +97,7 @@ P3b hypothesize alpha-gate 已 green+commit **`24d049fc`**（18 檔/3989+）。*
 **P2p 設計**（`e5a39342` feat/l2-p2p-design，E1-READY）：6 軸 cron */5 哨兵（engine 心跳/watchdog 活性/canary 4 事件消費=MEDIUM-2 收口/healthz/seam reject/migrations drift+A5 污染偵測 rate 主力雙層）；**watchdog alert wiring 已落地直接 sibling-import 零改動**；never-remediate 結構性；單 E1 ~900 行零 migration；OQ-1=告警通道 creds 先確認。
 
 **三端同步**：origin=Linux；Mac=他 session rescue-branch 架構（髒樹快照保 WIP）。**next session**：P2p E1 實作（1 session）∥ P4 MIT ratify→三線 E1（2-3 session）；hypothesize 真用前置=cloud key+M4 flag 評估（operator）。
+
+## 演變軌跡(append-only)
+
+- **2026-08-01(索引權威撤銷)**:MEMORY.md 索引行原宣告「current authority 2026-07-05:active L2 tail 在 TODO.md P1-L2-ADVISORY-MESH-E2E-1;E2E-1 需 operator 批准一次 true model call 後復原 disabled,不得視為全閉」——已被 runtime 超越且與同索引盈利研判行自相矛盾:TODO row `P1-L2-ADVISORY-MESH-E2E-1` 自 2026-07-10 起=**DONE_WITH_CONCERNS_FENCE_SINK_FOLLOWUP**(operator 批准的 unlock path A 後真 model call 達成:`agent.l2_calls` row `l2r:724ac38bc4fc`、cost $0.0149、restore 驗證後 **L2 維持 fully disabled**)。殘缺口=executor fence-parsing sink fix(有效 fenced-JSON 回覆被 parse 成 None,`agent.lessons` sink 未寫入),屬 follow-up 新 ticket 非該 row;任何未來 L2 enablement 前須走完整 PA→E1→E2→E4 鏈。
