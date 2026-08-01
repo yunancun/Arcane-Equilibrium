@@ -68,7 +68,7 @@ pub fn compute_atr_stop(kline: &[Ohlcv]) -> Option<f64> { ... }
 MODULE_NOTE
 模塊用途：定時刷新每個 strategy::symbol 的 edge estimate。
 主要類/函數：EdgeEstimatorScheduler、refresh_edge_estimates。
-依賴：trading.fills、learning.exit_features、settings/edge_clusters.json。
+依賴：trading.fills、learning.exit_features、settings/edge_estimates.json（runtime 生成檔，Mac 開發機上不存在屬正常）。
 硬邊界：leader election 必須防止多 worker 重複寫入。
 """
 ```

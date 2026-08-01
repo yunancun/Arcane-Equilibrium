@@ -50,7 +50,7 @@ allowed-tools: Read, Grep, Glob, WebSearch
 - **PostOnly 部署評估**：Demo / paper / live 三環境 PostOnly 配置以 RiskConfig TOML `[execution]` 段為 SSOT；當前部署狀態查 git log + TOML 實值，**本 skill 不寫死部署狀態**
 - **Maker fill rate 建議起點 ≥ 60%（非治理硬規範）**：低於此值 PostOnly 反而吃 missed-trade opportunity cost；具體閾值依 strategy 進場頻率 + edge size 動態調整，由 QC 提替代
 - OpenClaw 當前單筆 size 小，MARKET 一拳搞定，TWAP/VWAP 暫不必要。**警告**：未來 portfolio scale 上 → 必須切片，否則 market impact 吃掉 edge（crypto 流動性差於 equity，同 size impact 大 5-10x）
-- Bybit 各 symbol tick size 不同，影響 maker rebate 策略；spoofing / iceberg 在 crypto 無 reg 限制 → 常見
+- Bybit 各 symbol tick size 不同，影響 maker rebate 策略；iceberg 在 crypto 無 reg 限制 → 常見。**spoofing 屬市場操縱，本專案禁止且 BB 合規審查必拒**（分類正本 `bybit-policy-compliance`）；本 skill 只涉 spoofing **偵測**（他人操縱行為的防禦性識別），不得作為執行手法
 
 ## 5. Bybit Specific 機制（與 `bybit-policy-compliance` 互補）
 

@@ -42,7 +42,7 @@ allowed-tools: Read, Grep, Glob, WebSearch
 
 ## 4. PBO / CSCV 判準
 
-CSCV 機制細節唯一正本見 `time-series-cv-protocol` §5。QC 判準：PBO < 0.5 = 過擬合不嚴重；PBO > 0.5 = 過擬合主導，棄。執行需 Python；協調 MIT/E4 跑。
+CSCV 機制細節唯一正本見 `time-series-cv-protocol` §4「CSCV（唯一正本）」。QC 判準：PBO < 0.5 = 過擬合不嚴重；PBO > 0.5 = 過擬合主導，棄。執行需 Python；協調 MIT/E4 跑。
 
 ## 5. 資料品質前置（OpenClaw crypto 已知）
 

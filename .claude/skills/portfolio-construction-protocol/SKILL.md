@@ -26,7 +26,7 @@ allowed-tools: Read, Grep, Glob, WebSearch
 
 - Full Kelly = Reject（estimation error + crypto fat tail 下 wipe-out 風險）；必 fractional，**crypto-specific 推薦 k = 0.10–0.25**
 - 更嚴版：用 bootstrap 估 p 的不確定性縮倉（越不確定倉位越小）
-- OpenClaw 應用：operator 偏好 3% risk / trade · 25 symbols（memory `feedback_position_sizing`）≈ quarter Kelly + portfolio-level cap；動態 qty 從 ATR 推（歷史 P0-13 ATR scale；當前狀態查 `TODO.md` / reports）；**runtime 真值以 RiskConfig 為 SSOT**（衝突信 config，見 `math-model-audit` §4）
+- OpenClaw 應用：operator 偏好 3% risk / trade · 25 symbols（memory `feedback_position_sizing`）≈ quarter Kelly + portfolio-level cap；動態 qty 從 ATR 推（歷史 P0-13 ATR scale；當前狀態查 `TODO.md` / reports）；**runtime 真值以 RiskConfig 為 SSOT**（衝突信 config，見 `math-model-audit` §4「Sizing 與風控數學」）
 
 ## 2. Risk Budget 分配 — 不在本 skill 寫死
 

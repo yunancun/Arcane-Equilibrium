@@ -67,9 +67,11 @@ planned input tokens.
 > 以 per-call cap 做整 run sizing 會把成本低估一個量級以上。
 
 > **Envelope 使用限制**：ML/AI 日常任務（含常規 quant/ML 改動的審查鏈）禁用
-> `full_audit` envelope，一律走 `complex`（588,000 planned input cap，約 1/7.5）；
-> `full_audit` envelope 只在 operator 當次明示要求 full/cold audit 時使用，
-> 不得由 PM 或 workflow 自行升級。
+> `full_audit` envelope，一律使用 compiler（`agent_governance_routing.py`）依
+> risk/uncertainty 所選的非 `full_audit` envelope（narrow/standard/complex；
+> complex cap=588,000 planned input，約 full_audit 的 1/7.5），不得為升 envelope
+> 而虛報 risk；`full_audit` envelope 只在 operator 當次明示要求 full/cold audit
+> 時使用，不得由 PM 或 workflow 自行升級。
 
 Tunable args inside that authority:
 
