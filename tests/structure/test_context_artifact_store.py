@@ -42,11 +42,16 @@ def _digest(raw: bytes) -> str:
     return "sha256:" + hashlib.sha256(raw).hexdigest()
 
 
-def _make_artifact(*, large_shared: str = "S" * (MIN_EXTRACT_BYTES * 2)) -> dict:
+def _make_artifact(
+    *, large_shared: str = "S" * (MIN_EXTRACT_BYTES * 2), wide_shared: int = 0,
+) -> dict:
     """構造最小合成 artifact:plan 與 shared 投影共享同一大 content。
 
     為什麼合成:真實 artifact 需 Registry+git 世代,結構測試必須離線可跑;
     儲存層只依賴 canonical 位元組與 sources/content 槽位,合成件即可覆蓋。
+    wide_shared>0 時追加 N 個小 content 的 shared source:單個 content 低於
+    抽取閾值維持內嵌,但 dehydrated 後的 shared 投影文本仍夠大,
+    用來覆蓋 payload 級去重(真實 artifact 的 shared 投影即此形態)。
     """
 
     shared_source = {
@@ -56,6 +61,16 @@ def _make_artifact(*, large_shared: str = "S" * (MIN_EXTRACT_BYTES * 2)) -> dict
         "content_digest": _digest(large_shared.encode("utf-8")),
         "context_scope": "shared",
     }
+    wide_sources = [
+        {
+            "source": f"docs/wide-{index:03d}.md",
+            "content_encoding": "utf-8",
+            "content": f"wide-{index:03d} " * 8,
+            "content_digest": _digest((f"wide-{index:03d} " * 8).encode("utf-8")),
+            "context_scope": "shared",
+        }
+        for index in range(wide_shared)
+    ]
     role_source = {
         "source": "docs/small.md",
         "content_encoding": "utf-8",
@@ -66,7 +81,7 @@ def _make_artifact(*, large_shared: str = "S" * (MIN_EXTRACT_BYTES * 2)) -> dict
     plan = {
         "schema_version": "context_plan_v1",
         "role": "E1",
-        "sources": [shared_source, role_source],
+        "sources": [shared_source, *wide_sources, role_source],
         "task_contract": {"objective": "synthetic"},
         "task_contract_digest": _digest(b"contract"),
         "budget": {
@@ -76,7 +91,7 @@ def _make_artifact(*, large_shared: str = "S" * (MIN_EXTRACT_BYTES * 2)) -> dict
     }
     shared_projection = {
         "schema_version": "shared_task_context_v1",
-        "sources": [dict(shared_source)],
+        "sources": [dict(shared_source), *[dict(s) for s in wide_sources]],
     }
     delta_projection = {
         "schema_version": "role_context_delta_v1",
@@ -184,6 +199,44 @@ def test_digest_mismatch_on_input_is_rejected(tmp_path):
     artifact["artifact_digest"] = "sha256:" + "0" * 64
     with pytest.raises(ValueError, match="does not match artifact_digest"):
         dehydrate_context_artifact(artifact, tmp_path)
+
+
+def test_shared_payload_text_is_deduped_across_roles(tmp_path):
+    # 同輪同 shared 投影:整份 dehydrated 文本落 payload 級 blob,N 個 role 共用;
+    # plan 逐 role 唯一,payload 級引用零收益,維持內嵌字串。
+    first = dehydrate_context_artifact(_make_artifact(wide_shared=30), tmp_path)
+    assert isinstance(first["shared_dehydrated"], dict)
+    assert REF_KEY in first["shared_dehydrated"]
+    assert isinstance(first["plan_dehydrated"], str)
+    blobs_after_first = sorted(p.name for p in tmp_path.glob("context-shared-*.json"))
+    second = dehydrate_context_artifact(_make_artifact(wide_shared=30), tmp_path)
+    blobs_after_second = sorted(p.name for p in tmp_path.glob("context-shared-*.json"))
+    assert blobs_after_second == blobs_after_first
+    assert second["shared_dehydrated"] == first["shared_dehydrated"]
+    verify_round_trip(_make_artifact(wide_shared=30), second, tmp_path)
+
+
+def test_inline_shared_payload_form_still_resolves(tmp_path):
+    # 向前相容:payload 級去重前的儲存體形態(shared_dehydrated=內嵌字串)仍可還原。
+    artifact = _make_artifact(wide_shared=30)
+    stored = dehydrate_context_artifact(artifact, tmp_path)
+    ref = stored["shared_dehydrated"][REF_KEY]
+    inline_text = (tmp_path / ref["path"]).read_text(encoding="utf-8")
+    legacy = dict(stored)
+    legacy["shared_dehydrated"] = inline_text
+    legacy["shared_refs"] = [
+        item for item in stored["shared_refs"] if item["path"] != ref["path"]
+    ]
+    assert resolve_context_artifact(legacy, tmp_path) == artifact
+
+
+def test_tampered_payload_blob_fails_closed(tmp_path):
+    artifact = _make_artifact(wide_shared=30)
+    stored = dehydrate_context_artifact(artifact, tmp_path)
+    blob = tmp_path / stored["shared_dehydrated"][REF_KEY]["path"]
+    blob.write_bytes(blob.read_bytes().replace(b"wide", b"Wide", 1))
+    with pytest.raises(ValueError, match="do not match sha256"):
+        resolve_context_artifact(stored, tmp_path)
 
 
 def test_rehydrated_payload_digest_anchor_fails_closed(tmp_path):
