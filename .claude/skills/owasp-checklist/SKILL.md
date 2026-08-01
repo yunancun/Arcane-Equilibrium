@@ -40,7 +40,7 @@ allowed-tools: Read, Grep, Glob, Bash
 - [ ] 不自寫 crypto；用 `hmac` / `cryptography` / Rust `ring`；對外 HTTPS-only
 
 ### A03 Injection
-- [ ] SQL 100% 參數化（`asyncpg.execute(query, *args)` / sqlx `query!()`）；禁 f-string 拼 SQL
+- [ ] SQL 100% 參數化（`asyncpg.execute(query, *args)` / sqlx `query!()`）；禁 f-string 拼 SQL；NoSQL/Redis N/A（不用）
 - [ ] `subprocess.run(args=[...])` list form，禁 `shell=True` 拼 user input
 - [ ] bybit symbol 等用戶可控字串入 path 前，正則白名單 `^[A-Z0-9_-]+$`
 - [ ] structured log 欄位化，不直接內嵌 raw user input
@@ -56,7 +56,7 @@ allowed-tools: Read, Grep, Glob, Bash
 - [ ] env var 不寫進 code / log / commit message
 
 ### A06 Vulnerable Components
-- [ ] `pip-audit` / `cargo audit` + `cargo deny` 無 high/critical；requirements.txt + Cargo.lock 鎖版本
+- [ ] `pip-audit` / `safety check` / `cargo audit` + `cargo deny` 無 high/critical；requirements.txt + Cargo.lock 鎖版本；棄用 unmaintained 依賴（最後 commit > 2y 紅旗）
 
 ### A07 Authentication Failures
 - [ ] Operator role auth 不存 client-side 純文字
@@ -64,6 +64,7 @@ allowed-tools: Read, Grep, Glob, Bash
 - [ ] Login 失敗 N 次短期鎖；session token 短 TTL + refresh
 
 ### A08 Software/Data Integrity
+- [ ] CI/CD pipeline 不允 unsigned tag deploy
 - [ ] `helper_scripts/` 內不從 untrusted source `curl | bash`
 - [ ] DB migration（V### sql）必 review + 套用 Guard A/B/C；Rust release build 才上 prod
 

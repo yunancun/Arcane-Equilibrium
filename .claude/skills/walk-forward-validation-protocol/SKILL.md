@@ -33,7 +33,7 @@ allowed-tools: Read, Grep, Glob, WebSearch
 ## 2. Sharpe 顯著性判準（QC 硬判準）
 
 - **PSR(0) > 0.95** 才算「Sharpe 顯著大於 0」；crypto returns 高峰厚尾 → PSR 比 normal 假設低，必用含 skew/kurt 修正版
-- **Sweep 過 K 個參數組合必跑 DSR**（deflate 後再判）；K=100 sweep + naive Sharpe 1.5 可能 deflate 後 < 0。**注意 DSR 公式中 sqrt(Var(SR)) 的 √Var 縮放不可省**——K≥2 的 sweep 未做 DSR = block（07-24 run0 QC finding）
+- **Sweep 過 K 個參數組合必跑 DSR**（deflate 後再判：`SR_max_expected = sqrt(Var(SR))·[(1−γ)·Φ⁻¹(1−1/K) + γ·Φ⁻¹(1−1/(K·e))]`，γ≈0.5772，`DSR = PSR(SR_max_expected)`）；K=100 sweep + naive Sharpe 1.5 可能 deflate 後 < 0。**√Var(SR) 縮放不可省**：實作省略此縮放會使 K≥2 時 deflation 門檻遠高於任何合理 per-trade Sharpe → DSR≈0 恆 block（07-24 run0 QC finding，正本 `docs/CCAgentWorkSpace/PM/workspace/reports/2026-07-24--full_system_ultracode_audit_run0.decision_view.json`）
 - 進階指標（Sortino / Calmar / Omega / MAR / DD duration）按場景選用，公式靠內建知識
 
 ## 3. Multiple Testing 修正（必做）

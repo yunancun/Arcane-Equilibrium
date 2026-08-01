@@ -91,12 +91,15 @@ Cache hit、tokens/call、findings count、roles skipped、DONE 數都只是診�
 ## cost_edge_ratio 分布
 （數值必從本次拉數計算，勿照抄示例）
 | 策略 | ratio | 結論 |
+|---|---|---|
 
 ## Token 浪費熱點
 | 模式 | 範圍 | 估計浪費 | 建議 |
+|---|---|---|---|
 
 ## 模型路由
 | request_type | 主用 model | 月成本 | 建議 |
+|---|---|---|---|
 
 ## 預算 Gate 健康
 daily cap / 本期超限次數

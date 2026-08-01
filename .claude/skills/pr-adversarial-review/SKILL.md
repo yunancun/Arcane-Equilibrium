@@ -19,7 +19,7 @@ E2 收到任何 E1 / E1a 改動（E4 回歸前跑）；PR diff、commit hash、s
 
 六視角（通識，細節靠內建知識）：Root cause vs symptom / Edge case / Race / Leakage 安全 / Shortcut bypass / 副作用 spec drift。本專案錨點：
 
-- **Leakage**：log 含 secret / authorization HMAC（走 `secret-leak-detection`）；`detail=str(e)` 洩堆棧；XSS 需 `ocEsc` / `ocSanitizeClass`；跨進程 IPC payload validation。
+- **Leakage / 安全**：SQL injection（f-string 拼 SQL vs 參數化）；log 含 secret / authorization HMAC（走 `secret-leak-detection`）；`detail=str(e)` 洩堆棧；XSS 需 `ocEsc` / `ocSanitizeClass`；跨進程 IPC payload validation。
 - **Shortcut**：風控 gate 被跳過（`live_execution_allowed` / `execution_authority` / `system_mode`）；`max_retries=0` 被改；`decision_lease_emitted=False` 被覆蓋；E1 為過測試改 assertion 而非修 bug。
 - **副作用**：改動範圍 vs PA 方案一致（沒多改 / 沒少改）；API response schema 變動前端會掛；被 import / 被 mock 的位置。
 
@@ -106,7 +106,7 @@ P0/P1 級別的 leak / look-ahead bias / selection bias / stale finding **必須
 ## OpenClaw 特定核心
 
 - **Implementation hard edge**：E2 FAIL → E1 修 → 新 signature 重 E2；E2 PASS 後 E4 取得 relevant test evidence。例外只能由 operator 在 policy 允許範圍明示承擔風險
-- **批次收口（迭代上限）**：E2 findings 在單輪內彙總為一份清單，一次退回 E1 批修；**禁止逐 finding 一刀一 re-review**。同 scope 連續 2 輪 FAIL 後不再進入第 3 輪重審，升 PM 裁決（scope 拆分 / 重派 / operator 風險承擔），防止 FAIL→修→重審無限循環
+- **批次收口（迭代上限）**：E2 findings 在單輪內彙總為一份清單，一次退回 E1 批修；**禁止逐 finding 一刀一 re-review**。同 scope 連續 2 輪 FAIL 後不再進入第 3 輪重審，升 PM 裁決（scope 拆分 / 重派 / operator 風險承擔），防止 FAIL→修→重審無限循環；**升 PM 不等於 PASS**：未解 finding 的 gate_verdict 維持 FAIL（hard-gate FAIL 不可被 closure PASS 覆蓋）
 - **E2 嚴格唯讀**：發現任何 issue 都退回 E1，不接受 typo/lint write 例外
 - **engine_mode IN ('live', 'live_demo')**：filter 需含兩者
 - 跨平台 grep：見 §3.1（正本）；Migration Guard A/B/C：V023 silent-noop 教訓（§3.5）；healthcheck 配對（§3.6）
@@ -127,6 +127,7 @@ P0/P1 級別的 leak / look-ahead bias / selection bias / stale finding **必須
 - 沒跑跨平台 grep；Bybit API 改動沒查字典手冊；Migration 沒 Guard A
 - 逐 finding 單刀退回觸發整輪 re-review（違反批次收口）
 - 文件 > 2000 行 still merge
+- 「下次再修」延誤
 - E1 答 "should work" 沒驗證就放行
 
 ## 輸出格式

@@ -38,27 +38,29 @@ allowed-tools: Read, Grep, Glob, WebSearch
 ## 標準審計維度（5 大；統計通識靠內建知識，下列為專案判準）
 
 ### 1. 樣本與基準
-- 樣本量 N 充分（單策略 ≥ 200 trades 或 ≥ 30d，依較嚴）；無倖存者偏差（不剔除已下市 symbol）；IS/OOS 切分明確；baseline 合理（buy-hold / random / 簡單 MA cross），不只比 0
-- **Engine_mode 隔離**：edge 估計用 demo 不混 paper（memory `feedback_demo_over_paper_for_edge.md`）
+- [ ] 樣本量 N 充分（單策略 ≥ 200 trades 或 ≥ 30d，依較嚴）；無倖存者偏差（不剔除已下市 symbol）
+- [ ] IS/OOS 切分明確；baseline 合理（buy-hold / random / 簡單 MA cross），不只比 0
+- [ ] **Engine_mode 隔離**：edge 估計用 demo 不混 paper（memory `feedback_demo_over_paper_for_edge.md`）
 
 ### 2. 統計顯著性
-- t-stat（正確 ddof + df-aware t_crit）；sweep ≥ 3 參數必多重比較校正；觀察非獨立必 cluster-SE（按 symbol 或 day）；effect size 與信賴區間並列，不只看 p
+- [ ] t-stat（正確 ddof + df-aware t_crit）；sweep ≥ 3 參數必多重比較校正
+- [ ] 觀察非獨立必 cluster-SE（按 symbol 或 day）；effect size 與信賴區間並列，不只看 p
 
 ### 3. Look-ahead bias 偵測
-- `rolling(N).max()` / `.min()` **含 current bar** → bias 必 RETRACT；補 `shift(1)` leak-free 版對比
-- z-score / normalization 用全期 mean+std（用了未來資訊）→ 改 expanding window
-- feature 計算用了 target window 內資料 = BUG（entry 後 horizon label 本身 OK）
-- CV 切分尊重時序（TimeSeriesSplit，不是 KFold）
+- [ ] `rolling(N).max()` / `.min()` **含 current bar** → bias 必 RETRACT；補 `shift(1)` leak-free 版對比
+- [ ] z-score / normalization 用全期 mean+std（用了未來資訊）→ 改 expanding window
+- [ ] feature 計算用了 target window 內資料 = BUG（entry 後 horizon label 本身 OK）
+- [ ] CV 切分尊重時序（TimeSeriesSplit，不是 KFold）
 
 ### 4. Sizing 與風控數學
-- Kelly 必 fractional（full Kelly = Reject）；公式與估參靠內建知識
-- VaR：crypto 用 historical（fat tail），95% / 99% 雙列；CVaR / ES 新策略上 live 前必算
-- **Position sizing**：以 RiskConfig `[limits].per_trade_risk_pct`（base 0.1%）為 SSOT；memory `feedback_position_sizing.md` 寫的「3% risk / trade · 25 symbols」是 operator 設計意圖**但 config 為唯一 runtime 真值**，衝突信 config + push back operator（per S1 systemic）
-- Drawdown bound vs DD-tolerance 對齊；新 symbol 加入時計 ρ（原則 16 組合曝險）
+- [ ] Kelly 必 fractional（full Kelly = Reject）；公式與估參靠內建知識
+- [ ] VaR：crypto 用 historical（fat tail），95% / 99% 雙列；CVaR / ES 新策略上 live 前必算
+- [ ] **Position sizing**：以 RiskConfig `[limits].per_trade_risk_pct`（base 0.1%）為 SSOT；memory `feedback_position_sizing.md` 寫的「3% risk / trade · 25 symbols」是 operator 設計意圖**但 config 為唯一 runtime 真值**，衝突信 config + push back operator（per S1 systemic）
+- [ ] Drawdown bound vs DD-tolerance 對齊；新 symbol 加入時計 ρ（原則 16 組合曝險）
 
 ### 5. Live 適用性
-- Demo / Paper 結果不等同 Live（slippage / fee / queue position 降級評估）
-- cost_edge_ratio < 0.5（`CLAUDE.md` Root Principles）；fee model 真實（maker rebate vs taker；funding；borrow cost）
+- [ ] Demo / Paper 結果不等同 Live（slippage / fee / queue position 降級評估）
+- [ ] cost_edge_ratio < 0.5（`CLAUDE.md` Root Principles）；fee model 真實（maker rebate vs taker；funding；borrow cost）
 
 ## 工作流（6 步）
 
