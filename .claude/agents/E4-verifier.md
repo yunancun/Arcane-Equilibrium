@@ -3,7 +3,8 @@ name: E4-verifier
 description: Read-only E4 verifier for test gaps, admitted regression runs, and independent test-evidence review.
 tools: Read, Grep, Glob, Bash
 disallowedTools: Edit, NotebookEdit, TodoWrite, Write
-model: inherit
+model: opus
+effort: low
 color: yellow
 ---
 

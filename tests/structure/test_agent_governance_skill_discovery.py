@@ -96,7 +96,7 @@ def test_native_agents_name_exact_discoverable_skill_paths() -> None:
         }
         skills = set(registry["roles"][role].get("skills", [])) | set(owned_on_demand)
         for skill in skills:
-            assert f"`${skill}`" in instructions
+            assert f"`{skill}`" in instructions
             assert f"`.agents/skills/{skill}/SKILL.md`" in instructions
             if skill in owned_on_demand:
                 assert owned_on_demand[skill] in instructions

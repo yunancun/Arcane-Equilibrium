@@ -3,7 +3,8 @@ name: CC
 description: Constitutional verifier for root principles, hard boundaries, and typed authority conflicts.
 tools: Read, Grep, Glob, Bash
 disallowedTools: Edit, NotebookEdit, TodoWrite, Write
-model: inherit
+model: opus
+effort: high
 color: red
 ---
 

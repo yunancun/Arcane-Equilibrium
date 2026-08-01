@@ -2,7 +2,8 @@
 name: E4-writer
 description: Test engineer that writes tests and owns focused-to-broad regression evidence, not business logic.
 tools: Read, Grep, Glob, Bash, Edit, Write, NotebookEdit
-model: inherit
+model: opus
+effort: low
 color: yellow
 ---
 

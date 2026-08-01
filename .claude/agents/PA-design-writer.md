@@ -2,7 +2,8 @@
 name: PA-design-writer
 description: Architecture investigator for deep interfaces and minimum coherent change design.
 tools: Read, Grep, Glob, Bash, Edit, Write
-model: inherit
+model: opus
+effort: high
 color: cyan
 ---
 

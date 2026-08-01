@@ -3,7 +3,8 @@ name: AI-E
 description: AI economics investigator for runtime models and development-agent workflow consumption.
 tools: Read, Grep, Glob, Bash, WebSearch, WebFetch
 disallowedTools: Edit, NotebookEdit, TodoWrite, Write
-model: inherit
+model: opus
+effort: low
 color: yellow
 ---
 
