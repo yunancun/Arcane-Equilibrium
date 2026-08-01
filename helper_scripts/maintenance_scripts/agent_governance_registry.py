@@ -562,7 +562,7 @@ def _render_native_agent(
         f"`{spec['payload_kind']}` and the admitted task-contract digest."
     )
     skill_route = ", ".join(
-        f"`${skill}` at `.agents/skills/{skill}/SKILL.md` when {activation}"
+        f"`{skill}` at `.agents/skills/{skill}/SKILL.md` when {activation}"
         for skill, activation in skills
     ) or "registry charter only"
     instructions = f"""Registry role `{role_id}`; native identity `{adapter['name']}`.
