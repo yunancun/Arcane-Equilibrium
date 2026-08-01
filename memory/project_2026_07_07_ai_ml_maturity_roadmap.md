@@ -3,7 +3,6 @@ name: project_2026_07_07_ai_ml_maturity_roadmap
 description: "maker-nogo 後 PM SIGNED-WITH-GATES 的 AI/ML 交易成熟度路線圖 WP1-WP7;證據閉環先行,全 flag-OFF/runtime-gated Python source contracts,tests PASS,WP1/WP4 P1 待修;TODO 故意不鏡像→memory 為唯一索引"
 metadata:
   node_type: memory
-  heat: 0
   type: project
   originSessionId: b8f94432-3891-440a-ba13-f17896dd26d5
 ---

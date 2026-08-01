@@ -32,7 +32,7 @@ metadata:
 - Bybit linear perp **正側 funding 硬上限 +0.01%/8h = +10.9% APR**，負側自由（不對稱）。自抓 Bybit funding/history API 200 結算/symbol（含 probe 窗）：BTC/SOL/DOGE/**1000PEPE/WIF** 全部 max ≤ +0.0001，1000 筆 **0 筆破 30% gate**；WIF 負側到 -0.00776（-85% APR）。MIT 同步驗 25-symbol universe 517k row 0 跨 gate。
 - ∴ funding_short_v2 的 30% 入場 / 160% break-even 門檻**設在交易所結構上限之上 → 結構性 DOA，永遠不 fire**。非市場（不是「目前低」）非 pipeline，是 **QC 設計時一眼可查的可行性錯誤**（建策略前先查交易所 funding cap）。
 
-**行動**：A1 funding_short NO-GO 是結構性永久；等 basis_panel 累積（≥14天 ~2026-06-13）或擴 universe **都無效**，停止打磨。BTC/ETH fence **不是**主因（我先前 push back 錯，已收回）。A2 (liquidation_cascade_fade) 同 probe avg_net -4.11bps 負、n_eff=9 也 non-viable。延續 [[project_2026_05_31_v58_alpha_pivot]] 的「A1 NO-GO」結論並給出結構性 why。
+**行動**：A1 funding_short NO-GO 是結構性永久；等 basis_panel 累積（≥14天 ~2026-06-13）或擴 universe **都無效**，停止打磨。BTC/ETH fence **不是**主因（我先前 push back 錯，已收回）。A2 (liquidation_cascade_fade) 同 probe avg_net -4.11bps 負、n_eff=9 也 non-viable。延續 [[project_2026_05_31_v58_alpha_pivot]](已移 archive/) 的「A1 NO-GO」結論並給出結構性 why。
 
 
 ---

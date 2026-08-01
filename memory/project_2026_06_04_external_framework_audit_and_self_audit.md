@@ -9,7 +9,7 @@ metadata:
 
 # 外部框架借鑒 + 代碼級自審 (2026-06-04) — 暫停於 usage limit,待重置接續
 
-承 [[project_2026_06_03_v58_archive_audit_s2_design]] / [[project_2026_05_31_v58_alpha_pivot]]。operator 給兩篇知乎(Claude Code 挖 alpha 軟文 + FinceptTerminal 產品 pin),要求判斷對我們的幫助,進而**用查驗論文同等強度對抗自審我們自己的程序**(明令:勿盲信自研完整度、勿膜拜對方;對方=many-eyes open project,我們=solo)。並行評 RevolutX API/下單邏輯作基建借鑒。
+承 [[project_2026_06_03_v58_archive_audit_s2_design]] / [[project_2026_05_31_v58_alpha_pivot]](已移 archive/)。operator 給兩篇知乎(Claude Code 挖 alpha 軟文 + FinceptTerminal 產品 pin),要求判斷對我們的幫助,進而**用查驗論文同等強度對抗自審我們自己的程序**(明令:勿盲信自研完整度、勿膜拜對方;對方=many-eyes open project,我們=solo)。並行評 RevolutX API/下單邏輯作基建借鑒。
 
 ## 暫停點 / RESUME ENTRY
 乾淨停止:4 個自審 agent 全回、結論已綜合、**無 agent 在途**。**待 operator 拍 A/B**:

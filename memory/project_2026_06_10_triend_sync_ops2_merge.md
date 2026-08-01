@@ -22,4 +22,4 @@ metadata:
 3. 三端同步期間 main 高頻移動(2h 內 02c80f3b→35d923aa→97a5c310 l2-owed 落地),每步 push 前 re-fetch,merge 用 worktree 不碰主 checkout。
 4. Mac 主 checkout 三個 stash 未動(stash@{0} 他人 recovered WIP)。
 
-關聯:[[project_2026_06_10_a_group_triage]](ops2 鏈出處)、[[project_2026_06_10_half_life_scipy_lane_fix]](同日 scipy 實裝)、[[feedback_fetch_before_dispatch]]
+關聯:[[project_2026_06_10_a_group_triage]](已移 archive/)(ops2 鏈出處)、[[project_2026_06_10_half_life_scipy_lane_fix]](同日 scipy 實裝)、[[feedback_fetch_before_dispatch]]
