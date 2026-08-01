@@ -26,6 +26,7 @@ from agent_governance_context_store import (  # noqa: E402
     MIN_EXTRACT_BYTES,
     REF_KEY,
     dehydrate_context_artifact,
+    main,
     resolve_context_artifact,
     verify_round_trip,
 )
@@ -250,3 +251,29 @@ def test_rehydrated_payload_digest_anchor_fails_closed(tmp_path):
     swapped["shared_refs"] = stored_other["shared_refs"]
     with pytest.raises(ValueError, match="canonical_plan does not match"):
         resolve_context_artifact(swapped, tmp_path)
+
+
+def test_dehydrate_cli_rejects_basename_collision(tmp_path, capsys):
+    # 不同目錄同 basename 必須 fail-loud,不得靜默覆蓋先前輸入的儲存體。
+    store = tmp_path / "store"
+    store.mkdir()
+    for sub in ("a", "b"):
+        d = tmp_path / sub
+        d.mkdir()
+        (d / "context.json").write_text(
+            _canonical(_make_artifact()) + "\n", encoding="utf-8"
+        )
+    rc = main([
+        "dehydrate", "--store-dir", str(store),
+        str(tmp_path / "a" / "context.json"), str(tmp_path / "b" / "context.json"),
+    ])
+    out = capsys.readouterr().out
+    assert rc != 0
+    assert "stored name collision" in out
+
+
+def test_write_blob_installs_atomically_no_tmp_residue(tmp_path):
+    # blob 落盤走同目錄暫存檔+os.replace;完成後不得殘留 .tmp 檔。
+    dehydrate_context_artifact(_make_artifact(wide_shared=30), tmp_path)
+    residues = [p.name for p in tmp_path.iterdir() if ".tmp." in p.name]
+    assert residues == []

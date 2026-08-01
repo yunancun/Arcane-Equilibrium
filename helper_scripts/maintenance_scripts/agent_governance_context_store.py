@@ -26,6 +26,7 @@ from __future__ import annotations
 import argparse
 import hashlib
 import json
+import os
 import re
 import sys
 from pathlib import Path
@@ -152,7 +153,15 @@ def _write_blob(
         if blob_path.read_bytes() != raw:
             raise ValueError(f"existing blob {blob_name} bytes differ from content")
     else:
-        blob_path.write_bytes(raw)
+        # 為什麼原子安裝:並行 dehydrate 或中斷/ENOSPC 不得留下半截 blob 汙染
+        # content-addressed 池——先寫同目錄暫存檔再 os.replace 原子換入;
+        # 同名即同內容,競態下後到者換入的位元組必然相同。
+        tmp_path = store_dir / f".{blob_name}.tmp.{os.getpid()}"
+        try:
+            tmp_path.write_bytes(raw)
+            os.replace(tmp_path, blob_path)
+        finally:
+            tmp_path.unlink(missing_ok=True)
     refs[blob_name] = {"path": blob_name, "sha256": digest, "bytes": len(raw)}
     return {REF_KEY: {"path": blob_name, "sha256": digest}}
 
@@ -365,6 +374,7 @@ def main(argv: list[str] | None = None) -> int:
         if args.command == "dehydrate":
             store_dir = Path(args.store_dir)
             written: list[dict[str, Any]] = []
+            seen_outputs: dict[Path, str] = {}
             for raw_path in args.artifacts:
                 input_path = Path(raw_path)
                 artifact = _read_json(raw_path)
@@ -373,6 +383,14 @@ def main(argv: list[str] | None = None) -> int:
                 # 不可逆輸入在產生儲存體的當下就暴露,而非消費時才發現。
                 verify_round_trip(artifact, stored, store_dir)
                 output_path = store_dir / _stored_name(input_path)
+                # 為什麼拒絕撞名:不同目錄同 basename 會映射同一儲存檔,
+                # 後者靜默覆蓋令前者失去可解析儲存體——同批次內 fail-loud。
+                if output_path in seen_outputs:
+                    raise ValueError(
+                        f"stored name collision: {output_path.name} from "
+                        f"{seen_outputs[output_path]} and {raw_path}"
+                    )
+                seen_outputs[output_path] = raw_path
                 output_path.write_text(_canonical(stored) + "\n", encoding="utf-8")
                 written.append({
                     "input": str(input_path),
