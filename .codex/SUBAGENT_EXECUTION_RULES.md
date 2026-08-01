@@ -29,9 +29,13 @@ Temporary runtime nicknames are implementation detail. User-facing updates use
 
 ## Intelligence and context
 
-All native presets set `model_reasoning_effort = "high"`. Consumption is reduced
+Model and reasoning effort are tiered per role by the Registry
+(`.codex/agent_registry_v1.json` is the single authority; the renderer
+transmits both): T1 flagship roles run `opus`/`high`, T2 judgment-light roles
+run `opus`/`low`, T3 mechanical roles run `sonnet`/`medium` (operator decision
+2026-08-01). Beyond the tier, consumption is reduced
 by routing fewer agents, loading less irrelevant context, and stopping when
-evidence closes—not by lowering a role's reasoning ceiling. Do not use runtime
+evidence closes—not by lowering a role's reasoning ceiling below its tier. Do not use runtime
 type, prompt length, or budget target as a proxy for intelligence.
 
 The PM-supplied capsule is the starting point, not a ceiling on autonomous source
