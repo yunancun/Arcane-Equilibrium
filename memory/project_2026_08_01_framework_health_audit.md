@@ -44,4 +44,4 @@ operator 批准全部優化建議(P0 機制級:禁 blocking 輪詢/session 分�
 ## 教訓
 - 條數 cap 不擋增長,只改變增長形狀(擠成行內膨脹)——cap 類治理必須配機械檢查(≤250 一行 python 可驗)。
 - 治理規則不得引用死數據(heat 欄位從未回填卻是 MERGE 優先級依據)。
-- 為舊世代模型可靠性補償而生的強制鏈/多重 adversarial 輪/超長 prescriptive skill,在新世代要重新计價:official migration 指引「separate verification steps…are likely redundant…this is a delete, not a rewrite」。
+- 為舊世代模型可靠性補償而生的強制鏈/多重 adversarial 輪/超長 prescriptive skill,在新世代要重新計價:official migration 指引「separate verification steps…are likely redundant…this is a delete, not a rewrite」。

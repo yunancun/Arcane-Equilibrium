@@ -93,7 +93,7 @@
 - [ultracode 全盤審計編排設置 (2026-06-10;07-24 治理版配方)](reference_ultracode_full_audit.md) — openclaw-full-audit.js+conductor skill;默認 report-only;07-24 起=context_artifact 嵌入 runner+沙箱 shim+admission_now_ms;surfaces 勿含 runtime/bybit/ibkr(debt 必炸);配方 topic 檔
 - [Remote Access 配置](reference_remote_access.md) — Tailscale: Trading GUI / OpenClaw URLs
 - [重啟腳本](reference_restart_script.md) — bash helper_scripts/restart_all.sh
-- [外部工具權威邊界+整合入口 (2026-04-29)](feedback_external_tool_authority.md) — current authority=GitHub Issues active,Linear historical/passive unless explicitly reopened;Notion frozen,其餘 declined;看到 declined MCP 不重新評估啟用;入口清單 reference_external_tools.md
+- [外部工具權威邊界+整合入口 (2026-04-29)](feedback_external_tool_authority.md) — current authority=GitHub Issues active,Linear historical/passive unless explicitly reopened;Notion frozen,其餘 declined;看到 declined MCP 不重新評估啟用;[入口清單](reference_external_tools.md)
 - ARCH-RC1 統一 Config 契約 → `docs/references/2026-04-15--arch_rc1_unified_config_contract.md`
 - [GUI 大修基線備份+設計正本 (2026-07-09/10)](reference_gui_redesign_baseline_2026_07_09.md) — git tag gui-baseline-2026-07-09=回滾錨點;07-10 裁決:玄衡儀認可+雙主題真目標+Phase 0 放行;正本入 docs/execution_plan/gui_redesign/(四規格+tokens.css 雙主題);next=Phase 0 §9 chain;topic 檔
 

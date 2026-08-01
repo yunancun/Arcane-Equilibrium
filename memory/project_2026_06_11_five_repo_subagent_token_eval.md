@@ -40,4 +40,4 @@ metadata:
 - **owed(operator-gated,代碼已三端同步 dormant 就緒)**:① rtk#2399 簽 CLA;② V138+V139 prod apply(prod sqlx head=137;連帶順序 V138→V139+checksum 預檢,MIT C-2);③ 三 cron 一鍵激活(installer APPLY-gated,未自行繞過——BB 哨兵會真告警/polymarket 真打外部 API/L2 依賴 V139,皆 outward-facing);④ bge-m3 pull(缺則 FTS-only 自動降級)。
 - 教訓:① 月度限額殺 agent 與 desktop idle-kill 同類,續作棒「源碼盤點先於重做」省一輪;② installer APPLY-gate=runtime 行為改變的 operator 閘,PM 代按=繞過設計意圖,outward-facing 一律留 operator;③ engine_watchdog 2100 行 pre-existing 超頂,本批已盡量抽出。
 
-關聯:[[project_2026_06_04_fincept_terminal_eval]]、[[project_2026_06_11_bg_subagent_idle_kill_rootcause]]、[[project_2026_06_05_engine_selfheal_bindhost_incident]]
+關聯:[[project_2026_06_04_fincept_terminal_eval]](已移 archive/)、[[project_2026_06_11_bg_subagent_idle_kill_rootcause]]、[[project_2026_06_05_engine_selfheal_bindhost_incident]]
