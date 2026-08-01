@@ -93,7 +93,7 @@ fee + slippage + impact + funding = Y bps
 
 ## cost_edge_ratio
 edge: P bps，cost: Q bps，ratio: Q/P
-（risk_config TOML `[cost_edge]` 段：≥ 0.8 建議關倉）
+（≥ 0.8 建議關倉——正本 CONTEXT.md「Cost Gate」條；TOML 落點為 risk_config `[cost_edge]` 段抬頭註解）
 
 ## 結論
 Approve / Conditional（修 X）/ Reject
