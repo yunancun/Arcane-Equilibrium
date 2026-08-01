@@ -8,7 +8,9 @@
 ## TODO v864 增量：框架健檢 protocol 瘦身（2026-08-01）
 
 2026-08-01 框架健檢（23/23 findings CONFIRMED）後 operator 批准的 protocol lane
-落地，全部 docs-only、零 runtime/effect/status 變更：
+落地：docs + 一支 SessionStart hook（`.claude/hooks/session-start.sh`，屬
+executable source——驗證證據：`bash -n`、實跑產出合法 hook JSON、獨立審查員
+複跑覆核），零 runtime/effect/status 變更：
 
 - 命令文法改停點語義：刪「單一 commit/checkpoint/PR/CI/wave/review 完成不得
   停止」「W9 立即補位」「不能因本輪有產出提前結束」等禁停條款；改為每個

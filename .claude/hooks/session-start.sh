@@ -20,7 +20,7 @@ out=$(printf '%s\n' \
   '3. closure_packet_v1 分 work_status/gate_verdict/disposition;DONE+FAIL 合法;缺 evidence/budget/coverage 不得 PASS;禁無變更同模型裸重試。' \
   '4. rtk:Bash 輸出已被 hook 壓縮;exit≠0 而摘要似綠→讀 [full output:] tee log 或 rtk proxy 重跑;測試記 passed/failed/skipped/error 四元組。' \
   '5. persistence:reviewer 不寫 per-role report/memory;active state 只進 TODO;closure 後只 promote 新 durable lesson;effect 走 approved deterministic Adapter,OPS/IB/BB 唯讀。' \
-  '6. 等待事件驅動:禁 blocking TaskOutput 長輪詢/watch 迴圈/tail 自身 transcript;改單次查詢+task-notification/排程喚醒;唯一例外=desktop BG wave in-turn 駐留等收(governance §11);BG wave 禁盲重跑。' \
+  '6. 等待事件驅動:禁 blocking TaskOutput 長輪詢/watch 迴圈/tail 自身 transcript;改單次查詢+task-notification 事件;排程喚醒僅限已 admission 的 operator loop,finite task 單查後即收尾;唯一例外=desktop BG wave in-turn 駐留等收(governance §11);BG wave 禁盲重跑。' \
   '7. context 軟上限:cache_read/turn>300k 或 wall>8h→落帳 checkpoint 換 session;Session closure=合法停點(governance §11)。' \
   '</workflow-hot-rules>' \
   | jq -Rs '{hookSpecificOutput: {hookEventName: "SessionStart", additionalContext: (. | rtrimstr("\n"))}}' 2>/dev/null) || exit 0

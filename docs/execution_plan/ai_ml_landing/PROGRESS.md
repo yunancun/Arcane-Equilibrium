@@ -129,7 +129,7 @@ closed S0.x/S1.x rows(全部 DONE)已遷 `PROGRESS-archive-1.md`(資訊守恆);�
 | 3 | S3.3 | LR5 physical retention/backpressure/deleter/restore | PROGRAM | S2.5, S3.1B | PM -> PA -> E1 -> E2 -> E4 -> CC/E3/OPS -> QA -> PM | PLANNED | retention apply/per-object receipts | `RETENTION_APPLY_RESTORE` | Destructive fixtures before apply |
 | 3 | S3.4 | LR6 faults, independent observer and 72h/two-cycle soak | landing_scope_id instance | S3.1B, S3.2, S3.2A, S3.3 | PM -> distinct OPS observer -> E4 -> QA -> PM | PLANNED | `foundation_ready_receipt_v1` | `FAULT_INJECTION_OBSERVE` | Platform-attested; no CI without change |
 
-尚未開始的 S4-S8 template rows(全部 PLANNED,零 receipt/狀態;normative session map=protocol §6)已遷 `PROGRESS-archive-1.md`;PM 開 S4 前先遷回或就地實例化。
+尚未開始的 S4-S8 template rows(全部 PLANNED,零 receipt/狀態;normative session map=protocol §6)已遷 `PROGRESS-archive-1.md`;PM 開 S4 前**必先遷回本 active ledger 再實例化**——archive 檔凍結,不得就地實例化或承載任何 live 狀態。
 
 ## Ledger Events
 

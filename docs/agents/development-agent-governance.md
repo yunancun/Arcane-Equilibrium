@@ -739,9 +739,14 @@ current generation 重驗。
 - 不得由 sprint 級命令對同一弧再開新的 readiness 層（S2 → S2E → LW 的三層先例
   即本條所禁的形狀）；新增 hardening/readiness 工作需 operator 顯式 reopen 並
   建立新 admission。
+- Enforcement class：本節為 `normative_policy`，由 PM 於 dispatch/admission 前
+  人工核對弧與 packet 終態執行；依 §13 凍結，刻意不新增 route/registry 可執行
+  seam（`TASK_FACT_FIELDS` 不擴）。此 enforcement gap 記為 accepted residual
+  risk；升級為可執行 admission 檢查需 operator 顯式批准（屬 meta-work）。
 - 自 IBKR loop v2 移植兩條硬停機規則到 AIML lane：①同一包連續兩輪被 REJECT →
-  停該包，PM 反省寫帳本，不硬闖；②findings 一次性定性入帳後不得二次立案，
-  下輪 reviewer 引用編號不重審（防審過審）。
+  停該包，PM 反省寫帳本，不硬闖；②findings 一次性定性入帳後不得作為新案二次
+  立案（防審過審）；但被修復項須由對口 reviewer 在新 generation 上做 delta
+  recheck 驗證修復有效（引用原編號），未驗不得 PASS——去重立案 ≠ 免驗修復。
 - operator gate 本身不因本節放鬆：fresh exact authority、九項 authority 恆
   false、fail-closed 邊界逐字保留。
 
@@ -753,9 +758,13 @@ current generation 重驗。
 - 治理測試家族凍結：tests/structure 的 governance 測試家族
   （`test_agent_governance*` 與 `test_development_agent_governance*`）淨行數
   不得再增；新增 gate 需先刪等量舊 gate（同一 change 內淨行數 ≤ 0）。
-- 每週 meta-work（治理機/框架自身，以觸及 `helper_scripts/maintenance_scripts/`
-  或 `tests/structure/` 的 commit 計）佔比 ≤ 30%；超限即凍結 meta-work，只做
-  product-work（交易/引擎/研究）。
+- 每週 meta-work（治理機/框架自身）佔比 ≤ 30%；超限即凍結 meta-work，只做
+  product-work（交易/引擎/研究）。計量以觸及
+  `helper_scripts/maintenance_scripts/agent_governance*` 或 governance 測試家族
+  （`tests/structure/test_agent_governance*`、
+  `test_development_agent_governance*`）的 commit 計；product 功能自帶的
+  `tests/structure` 測試（GUI/IBKR/策略/runtime 等）屬 product-work，不計入、
+  不受凍結影響。
 - Full-audit envelope 政策：ML/AI 日常任務一律 complex envelope；`full_audit`
   envelope 需 operator 當次明示，不得由 agent 自升。
 - 2026-08-01 裁決先例：`origin/agent/gpt56-multiagent-remediation-20260730`

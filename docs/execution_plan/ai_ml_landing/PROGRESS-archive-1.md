@@ -170,7 +170,7 @@ unchanged and stays operator-gated.
 
 ## Current Sessions — future sprint template rows(S4-S8,全部 PLANNED)
 
-> 非「已關閉世代」而是尚未開始的 template rows;normative session map=protocol §6。PM 開 S4 前遷回 `PROGRESS.md` 或就地實例化。
+> 非「已關閉世代」而是尚未開始的 template rows;normative session map=protocol §6。PM 開 S4 前必先遷回 `PROGRESS.md` 再實例化——本 archive 檔凍結,不得就地實例化或承載任何 live 狀態。
 
 | Sprint | Session | Work package | Scope template | Dependencies | Required role route template | Status | Completion receipt | Required effect | Sync / CI policy |
 |---:|---|---|---|---|---|---|---|---|---|

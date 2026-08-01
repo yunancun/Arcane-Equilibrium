@@ -136,7 +136,11 @@ projection deltas — a metadata-only W6 and the W9 closure publication — from
 multiple Sessions in the same Sprint may be batched into one periodic
 projection PR instead of one PR per Session, provided each Session's closure
 packet/receipt chain stays individually intact and the batch commit lists the
-covered Sessions. Implementation (source-touching) PRs are never batched by
+covered Sessions. The batch runs as its own separately admitted
+projection-batch task — a single writer consuming the immutable per-Session
+closures — and never reuses or overlaps the original Sessions' writer scopes,
+so the batch commit carries its own task/role/node-bound mutation record.
+Implementation (source-touching) PRs are never batched by
 this clause, and batching never reorders or weakens per-Session evidence.
 
 ## 6. Sprint And Session Map
