@@ -47,7 +47,7 @@ allowed-tools: Read, Grep, Glob, WebSearch
 ## 4. Execution — 專案判準
 
 - Fee 真值：API `/v5/account/fee-rate` 或字典手冊 `docs/references/2026-04-04--bybit_api_reference.md`；官方 fee schedule 動態變動（BB 可 WebFetch），本檔不寫死數字
-- **PostOnly 部署評估**：Demo / paper / live 三環境 PostOnly 配置以 RiskConfig TOML `[execution]` 段為 SSOT；當前部署狀態查 git log + TOML 實值，**本 skill 不寫死部署狀態**
+- **PostOnly 部署評估**：Demo / paper / live 三環境 PostOnly 配置以 RiskConfig TOML `[agent].post_only_limit` 為 SSOT（收盤 maker 路徑另見 `[close_maker_backoff]`）；當前部署狀態查 git log + TOML 實值，**本 skill 不寫死部署狀態**
 - **Maker fill rate 建議起點 ≥ 60%（非治理硬規範）**：低於此值 PostOnly 反而吃 missed-trade opportunity cost；具體閾值依 strategy 進場頻率 + edge size 動態調整，由 QC 提替代
 - OpenClaw 當前單筆 size 小，MARKET 一拳搞定，TWAP/VWAP 暫不必要。**警告**：未來 portfolio scale 上 → 必須切片，否則 market impact 吃掉 edge（crypto 流動性差於 equity，同 size impact 大 5-10x）
 - Bybit 各 symbol tick size 不同，影響 maker rebate 策略；iceberg 在 crypto 無 reg 限制 → 常見。**spoofing 屬市場操縱，本專案禁止且 BB 合規審查必拒**（分類正本 `bybit-policy-compliance`）；本 skill 只涉 spoofing **偵測**（他人操縱行為的防禦性識別），不得作為執行手法
@@ -93,7 +93,7 @@ fee + slippage + impact + funding = Y bps
 
 ## cost_edge_ratio
 edge: P bps，cost: Q bps，ratio: Q/P
-（`CLAUDE.md` Root Principles：≥ 0.8 建議關倉）
+（≥ 0.8 建議關倉——正本 CONTEXT.md「Cost Gate」條；TOML 落點為 risk_config `[cost_edge]` 段抬頭註解）
 
 ## 結論
 Approve / Conditional（修 X）/ Reject

@@ -12,7 +12,7 @@ allowed-tools: Read, Grep, Glob, Bash
 ## 何時觸發
 
 - MIT 收到「feature pipeline 設計」「ML 訓練 dataset 準備」「P1-7 C label 準備」「特徵不對勁、模型過擬合 RCA」
-- 任何 `learning.exit_features` / `learning.bb_features` / 新 feature table 上線前
+- 任何 `learning.exit_features` / `learning.decision_features` / 新 feature table 上線前
 - ML training 後 IS Sharpe vs OOS Sharpe 差距 > 50% 的 RCA
 
 ## ★ 黃金法則

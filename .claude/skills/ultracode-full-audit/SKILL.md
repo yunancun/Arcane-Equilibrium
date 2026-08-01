@@ -226,6 +226,21 @@ invocation; the saved-workflow sandbox never has to call `Date.now()`.
 Digest and budget fields are derived from those inline bytes rather than copied
 as a second caller-controlled authority.
 
+For the source-only saved-workflow phase shown here, compile the task contract
+without `runtime`, `pg`, `service`, `cron`, `deploy`, `bybit`, or `ibkr` effect
+surfaces. Those surfaces require a separate, fresh host-attested Context phase;
+adding them to an unattested source-only packet creates typed evidence debt and
+admission must fail closed. This does not remove BB, IB, or OPS from the fixed
+Full Audit discovery axes. Runtime identity is carried only by
+`baseline.runtime_head` plus `baseline.runtime_observed_at`.
+
+`routeRequiredRoles` must be the compiler route's exact, order-preserving
+deduplicated projection of `required_role_nodes`, never a handwritten list.
+Caller `scope`, `focus`, and `surfaces` must exactly match the inline
+`contextArtifact.canonical_plan.task_contract`. The complete dispatch recipe is
+`compile_context` → `materialize_context_artifact` → invoke the helper above
+with the exact object.
+
 `openclaw-full-audit` finds defects. `profit-diagnosis` finds money. Profit
 diagnosis requires a fresh baseline and hash-pinned current priors, allows an
 honest well-covered `NO_EVIDENCE`, and returns one structured result rather than

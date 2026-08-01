@@ -38,6 +38,8 @@ allowed-tools: Read, Grep, Glob
 未做 step 1 = sub-agent 讀的 `.md` 與 operator 真實意圖漂移。未來可考慮 git pre-commit hook（commit `.docx` 時自動 re-render `.md`）。
 
 DOC-XX 速查（以 SPECIFICATION_REGISTER.md 為準，本表僅快速方向）：
+
+> ⚠️ 本表用的是 register **落地映射**命名空間，與 `docs/decisions/` 治理正典題名**不同**（僅 DOC-05 對齊；如正典 DOC-08=Implementation Bridge 非 Incident Response——§12 安全不變量屬正典檔）。詳見 SPECIFICATION_REGISTER.md「命名空間注意」警語；引用 DOC-0x 須註明是正典還是落地表。
 - DOC-01 Core Risk Doctrine（硬止損 §5.9 / position sizing / risk limits）
 - DOC-02 Scanning & Monitoring（5-min interval / rate limiting）
 - DOC-03 Market Regime Detection

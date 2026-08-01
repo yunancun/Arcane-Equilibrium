@@ -55,12 +55,12 @@ allowed-tools: Read, Grep, Glob, WebSearch
 ### 4. Sizing 與風控數學
 - [ ] Kelly 必 fractional（full Kelly = Reject）；公式與估參靠內建知識
 - [ ] VaR：crypto 用 historical（fat tail），95% / 99% 雙列；CVaR / ES 新策略上 live 前必算
-- [ ] **Position sizing**：以 RiskConfig `[limits].per_trade_risk_pct`（base 0.1%）為 SSOT；memory `feedback_position_sizing.md` 寫的「3% risk / trade · 25 symbols」是 operator 設計意圖**但 config 為唯一 runtime 真值**，衝突信 config + push back operator（per S1 systemic）
+- [ ] **Position sizing**：以 RiskConfig `[limits].per_trade_risk_pct`（fraction-domain，實值必讀 TOML）為 SSOT；memory `feedback_position_sizing.md` 寫的「3% risk / trade · 25 symbols」是 operator 設計意圖**但 config 為唯一 runtime 真值**，衝突信 config + push back operator（per S1 systemic）
 - [ ] Drawdown bound vs DD-tolerance 對齊；新 symbol 加入時計 ρ（原則 16 組合曝險）
 
 ### 5. Live 適用性
 - [ ] Demo / Paper 結果不等同 Live（slippage / fee / queue position 降級評估）
-- [ ] cost_edge_ratio < 0.5（`CLAUDE.md` Root Principles）；fee model 真實（maker rebate vs taker；funding；borrow cost）
+- [ ] cost_edge_ratio < 0.5（指針：CONTEXT.md「Cost Gate」條，該處寫 `< 0.8` 與本判準不一致，待 operator 裁；勿與 TOML `[cost_edge]` `trigger_threshold=-0.5` 混淆，語義不同）；fee model 真實（maker rebate vs taker；funding；borrow cost）
 
 ## 工作流（6 步）
 

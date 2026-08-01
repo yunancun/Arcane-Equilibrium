@@ -26,7 +26,7 @@ OpenClaw Control Console：
 - Canonical GUI: `http://trade-core:8000/console`（README 為入口）
 - Tab 清單以 `README.md` tab 表為準，不硬編碼歷史 N-Tab 數字
 - Learning / Paper / Demo / Live 相關視圖需跟 README + 實際 static files 對齊
-- 新元件加入前先 grep `static/index.html`、`static/js/`、`static/tabs/`
+- 新元件加入前先 grep `static/index.html`、`static/js/`、`static/tab-*.html`、`static/cards/`
 
 技術棧：FastAPI 後端 + 既有 HTML / Vanilla JS / CSS。**不引入新框架**，
 不投奔 Next.js / Vite / React / Vue，除非 PM+PA 另開架構決策。

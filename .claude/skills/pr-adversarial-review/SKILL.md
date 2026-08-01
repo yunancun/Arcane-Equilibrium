@@ -65,7 +65,7 @@ IPC JSON-RPC 消息 schema 一致性；serde 型別安全；Python ↔ Rust 浮�
 新 singleton 在 PA/E2 report + TODO follow-up 或穩定登記表明確落地；子模塊用 `base.xxx()` 經 main_legacy 命名空間，不可直接 import 原始版本。
 
 ### 3.8 文件大小
-檔案大小治理（警告線=軟性 review attention / 硬限=不許 merge）唯一正本見 E5.md，本節不重述、不寫死數字。
+檔案大小治理（警告線=軟性 review attention / 硬限=不許 merge）正本見 CLAUDE.md §九 + `docs/references/2000_line_exception_registry.md`，本節不重述、不寫死數字。
 
 ### 3.9 Bybit API
 改動觸 `/v5/*` REST / WS 先查 `srv/docs/references/2026-04-04--bybit_api_reference.md`；新增 endpoint 同步更新手冊。政策/平台面疑慮 → PM 派 BB 跨 agent review（見 bybit-policy-compliance）。
@@ -84,7 +84,7 @@ P0/P1 級別的 leak / look-ahead bias / selection bias / stale finding **必須
 
 ### 3.11 ML training pipeline 非輸入不變量（MIT-MF-1）
 - `trading.fills.details->>'close_maker_*'` audit 欄位僅供 execution-quality observability + post-mortem，禁入任何 ML training pipeline（LinUCB / Scorer / Quantile / MLDE / DL3）— target leakage + policy-degradation feedback 風險。
-- MIT-MF-1 / close_maker gate grep 配方唯一正本見 E3.md；E2 review 遇相關改動時引用該配方執行，非白名單命中 = BLOCKER（finding 格式沿用 §3.10）。
+- MIT-MF-1 / close_maker gate grep 配方正本：normative 配方見 `docs/governance_dev/amendments/2026-05-15--AMD-2026-05-15-02-edge-p2-3-phase-1b-close-maker-first.md` §7 原則 #7（逐欄位 grep regex，命中即 reject）；可執行 guard = `helper_scripts/healthchecks/e3_grep_non_training_surface.sh`（Rule 4 = close_maker 專項）。E2 review 遇相關改動時引用該配方執行，非白名單命中 = BLOCKER（finding 格式沿用 §3.10）。
 
 ## 4. 對抗自證要求
 
@@ -96,7 +96,7 @@ P0/P1 級別的 leak / look-ahead bias / selection bias / stale finding **必須
 |---|---|---|
 | **CRITICAL** | 硬邊界繞過（live_execution_allowed） / SQL injection / panic 在交易路徑 | 立即 BLOCKER，回 E1 |
 | **HIGH** | 副作用未識別 / race / 跨平台路徑硬編碼 | 退回 E1 修，不過 E2 |
-| **MEDIUM** | except:pass / log f-string / 檔案達 E5 硬限需拆分（警告線僅標記，閾值正本見 E5.md 不寫死）/ 臃腫合入（超出方案必要面積的投機實作、一次性抽象、重複邏輯；熱檔升 HIGH，計價依 E5 token 稅軸） | 退回 E1 改 |
+| **MEDIUM** | except:pass / log f-string / 檔案達治理硬限需拆分（警告線僅標記，閾值正本見 CLAUDE.md §九 + exception registry，不寫死）/ 臃腫合入（超出方案必要面積的投機實作、一次性抽象、重複邏輯；熱檔升 HIGH，計價依 E5 token 稅軸） | 退回 E1 改 |
 | **LOW** | typo / lint / dead import | 退回 E1；E2 不直接修 |
 
 ## 6. 工作流（10 步）

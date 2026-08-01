@@ -15,7 +15,7 @@ allowed-tools: Read, Grep, Glob, Bash, WebSearch
 - MIT 收到「ML training pipeline CV 設計」「為何 OOS 退化」
 - 任何 ML model（LightGBM / Transformer / TCN / 線性）訓練前
 - ONNX export 前的 final validation
-- P1-7 C labels 累積到 200+ 啟動 training pipeline 之前
+- exit-label 累積到 200+ 啟動 training pipeline 之前
 
 ## ★ 黃金法則
 
@@ -44,7 +44,7 @@ allowed-tools: Read, Grep, Glob, Bash, WebSearch
 | 模型類別 | 最少 train sample | 對應 OpenClaw 場景 |
 |---|---|---|
 | **Linear regression** | ≥ 10 × n_features | 25 features → ≥ 250 |
-| **LightGBM (small)** | ≥ 1000 | P1-7 C 早期不夠 |
+| **LightGBM (small)** | ≥ 1000 | exit-label 早期不夠 |
 | **LightGBM (typical)** | ≥ 10000 | 5 strat × 25 symbol × 1m × 30d 過 |
 | **Transformer** | ≥ 100k | 1m 級 ~半年才夠 |
 | **TCN / N-BEATS** | ≥ 50k | 1m ~3 個月 |

@@ -28,7 +28,8 @@ allowed-tools: Read, Grep, Glob, Bash
 | Bybit API key/secret | `$OPENCLAW_SECRETS_DIR/secret_files/bybit/<slot>/api_key` + `api_secret` | CRITICAL |
 | `authorization.json` | `$OPENCLAW_SECRETS_DIR/<env>/authorization.json` | CRITICAL（HMAC + actor + env_allowed） |
 | HMAC signing secret | `$OPENCLAW_SECRETS_DIR/<env>/auth_signing_key` | CRITICAL |
-| Operator password hash | DB `auth.operators` table | HIGH |
+| Control API token | env `OPENCLAW_API_TOKEN` → `OPENCLAW_API_TOKEN_FILE` → `../.secrets/api_token`（解析鏈見 `app/auth.py:_resolve_api_token`） | CRITICAL |
+| GUI 登入憑證 | env `GUI_USERNAME`/`GUI_PASSWORD` → `$OPENCLAW_SECRETS_ROOT/environment_files/gui_auth.env` → legacy `~/BybitOpenClaw/secrets/gui_auth.env`（解析鏈見 `app/auth.py` L68-71） | CRITICAL |
 | Layer 2 Claude API key | env `ANTHROPIC_API_KEY` | HIGH |
 | LM Studio / Ollama base URL | env `LM_STUDIO_BASE_URL` / `OLLAMA_BASE_URL` | LOW（localhost） |
 
@@ -94,11 +95,10 @@ grep -nrE '(/home/ncyu|/Users/[^/]+)/.*(secret|auth|key)' <path>
 ❌ 禁：commit message / PR description 含真實 key 片段
 ```
 
-## CI/Pre-commit 整合建議
+## CI/Pre-commit 現況與缺口
 
-- `gitleaks` + `truffleHog` + `detect-secrets` 三選一裝 pre-commit
-- pre-merge：`pip-audit` + `cargo audit` 同跑
-- daily：`git log --all -p | gitleaks detect --pipe`
+- 已機械化：pre-commit hook 在位（canonical=`helper_scripts/git_hooks/pre-commit`，經 `install_git_hooks.sh` 安裝；repo-native gate fail-closed + gitleaks 補掃）+ CI `public-repository-hygiene.yml`（PR/push + 每週一 cron）。E3 職責=**驗 hook 在位**（fresh clone 需跑 install 腳本），非重複提案安裝。
+- 未落地缺口：pre-merge `pip-audit` + `cargo audit`；daily `git log --all -p | gitleaks detect --pipe` history-scan（hygiene workflow 現為週跑非日跑）。
 
 ## 緊急應對（confirmed leak）
 
