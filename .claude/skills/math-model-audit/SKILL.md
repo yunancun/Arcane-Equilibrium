@@ -60,7 +60,7 @@ allowed-tools: Read, Grep, Glob, WebSearch
 
 ### 5. Live 適用性
 - [ ] Demo / Paper 結果不等同 Live（slippage / fee / queue position 降級評估）
-- [ ] cost_edge_ratio < 0.5（risk_config TOML `[cost_edge]`/`[cost_gate]` 段）；fee model 真實（maker rebate vs taker；funding；borrow cost）
+- [ ] cost_edge_ratio < 0.5（指針：CONTEXT.md「Cost Gate」條，該處寫 `< 0.8` 與本判準不一致，待 operator 裁；勿與 TOML `[cost_edge]` `trigger_threshold=-0.5` 混淆，語義不同）；fee model 真實（maker rebate vs taker；funding；borrow cost）
 
 ## 工作流（6 步）
 

@@ -45,7 +45,7 @@ allowed-tools: Read, Grep, Glob
 | SM-XX | State Machine | DOC-XX 內部 |
 | EX-XX | Exchange-side | DOC-XX 內部 |
 | AMD-YYYY-MM-DD-NN | 治理 / 架構決策修訂（amendment） | SPECIFICATION_REGISTER.md Amendments 節 + `docs/governance_dev/amendments/` |
-| ADR-XXXX | 架構決策記錄（4 位數字） | `docs/adr/` 檔名即 ID + SPECIFICATION_REGISTER.md 同步登錄 |
+| ADR-XXXX | 架構決策記錄（4 位數字） | `docs/adr/` 檔名即 ID（0001+，完整清單見目錄）；SPECIFICATION_REGISTER.md ADR 表僅追蹤 0034+ |
 | P0/P1/P2/P3/P4-XX | 風控層 / 任務優先 | TODO.md + `CLAUDE.md` Hard Boundaries |
 | LG-X | Live Guard | TODO.md + hard-boundary docs |
 | W-XX / Wave-X | Sprint / Wave | TODO.md + PM reports |
