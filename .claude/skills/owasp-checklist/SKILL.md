@@ -6,8 +6,8 @@ allowed-tools: Read, Grep, Glob, Bash
 
 # OWASP Top 10 Checklist（OpenClaw 專用）
 
-> Authority 使用 `.codex/agent_registry_v1.json` typed matrix：normative policy、implementation contract、active work state、runtime observation、external policy、claim evidence 只在同類內比較。跨類不一致標 DRIFT/CONFLICT；runtime 不得合法化 policy denial。
-> 即時內容依相應 authority class 與 fresh evidence 取得，本 skill 不寫死也不建立全局總排序。
+> Authority typed matrix 正本見 `16-root-principles-checklist` 頭部（`.codex/agent_registry_v1.json` 定義）：只在同類內比較，跨類標 DRIFT/CONFLICT，runtime 不得合法化 policy denial；即時內容依 authority class 與 fresh evidence 取得，本 skill 不寫死。
+> 以內建知識為底：OWASP Top 10 各類別定義與通用防護不在本檔重述；本檔只列本專案的攻擊面映射、專案 gate 與 SSOT 指針。逐條審計時用內建 OWASP 知識展開，以下每類只列 OpenClaw delta。
 
 ## 何時觸發
 
@@ -26,11 +26,10 @@ allowed-tools: Read, Grep, Glob, Bash
 | External | Bybit REST + WS | api.bybit.com / api-demo.bybit.com |
 | Local LLM | Ollama / LM Studio | localhost only |
 
-## OWASP Top 10 (2021) 逐條
+## OWASP 逐條 — OpenClaw delta
 
 ### A01 Broken Access Control
-- [ ] `/operator/*` 路由 100% 走 Operator 角色守衛（`current_actor()` + role check）
-- [ ] 寫操作（POST/PUT/DELETE）不可被 viewer/researcher 角色觸達
+- [ ] `/operator/*` 路由 100% 走 Operator 角色守衛（`current_actor()` + role check）；寫操作不可被 viewer/researcher 觸達
 - [ ] `live_reserved` global mode 由 Operator 開關，**不可** env var override
 - [ ] Decision Lease 寫入需有效 lease + 未過期 + lease.actor == request.actor
 - [ ] grep：`@require_role`, `current_actor`, `is_operator`
@@ -38,64 +37,50 @@ allowed-tools: Read, Grep, Glob, Bash
 ### A02 Cryptographic Failures
 - [ ] `authorization.json` HMAC-SHA256 簽名驗證在 Rust 側強制（`build_exchange_pipeline`）
 - [ ] Bybit API key/secret **不入** git；存 `$OPENCLAW_SECRETS_DIR/secret_files/bybit/<slot>/`
-- [ ] HTTPS-only 對外（`api.bybit.com`），禁 plain HTTP
-- [ ] 不自寫 crypto；用 `hmac` / `cryptography` / Rust `ring`
+- [ ] 不自寫 crypto；用 `hmac` / `cryptography` / Rust `ring`；對外 HTTPS-only
 
 ### A03 Injection
-- [ ] **SQL**：100% 用參數化查詢（Python `asyncpg.execute(query, *args)` / Rust sqlx `query!()`）；禁 f-string 拼 SQL
-- [ ] **Shell**：`subprocess.run(args=[...])` list form，禁 `shell=True` 拼 user input
-- [ ] **Command injection**：bybit symbol 等用戶可控字串入 path 前，正則白名單 `^[A-Z0-9_-]+$`
-- [ ] **NoSQL/Redis**：N/A（不用）
-- [ ] **Log injection**：log message 不直接內嵌 raw user input；structured log 欄位化
+- [ ] SQL 100% 參數化（`asyncpg.execute(query, *args)` / sqlx `query!()`）；禁 f-string 拼 SQL；NoSQL/Redis N/A（不用）
+- [ ] `subprocess.run(args=[...])` list form，禁 `shell=True` 拼 user input
+- [ ] bybit symbol 等用戶可控字串入 path 前，正則白名單 `^[A-Z0-9_-]+$`
+- [ ] structured log 欄位化，不直接內嵌 raw user input
 
 ### A04 Insecure Design
 - [ ] 寫操作預設 fail-closed（錯誤 → 拒絕 而非通過）
 - [ ] `OPENCLAW_ALLOW_MAINNET=1` 必須有 + 憑證雙驗才允 Mainnet
-- [ ] Rate limit 在 `slowapi.Limiter` 上對外路由全覆蓋
-- [ ] 重要操作 idempotency key（防重放 / 重試）
+- [ ] Rate limit 在 `slowapi.Limiter` 上對外路由全覆蓋；重要操作 idempotency key
 
 ### A05 Security Misconfiguration
-- [ ] FastAPI `debug=False` in prod
-- [ ] CORS 不開 `*`；白名單 GUI origin
-- [ ] DB user 最小權限（read-only 給 GUI；DDL 給 migration only）
-- [ ] systemd unit 不 root 跑（檢 `User=` 行）
-- [ ] env var **不寫進** code / log / commit message
+- [ ] FastAPI `debug=False` in prod；CORS 白名單 GUI origin 不開 `*`
+- [ ] DB user 最小權限（read-only 給 GUI；DDL 給 migration only）；systemd unit 不 root 跑
+- [ ] env var 不寫進 code / log / commit message
 
 ### A06 Vulnerable Components
-- [ ] Python：`pip-audit` / `safety check` 無 high/critical
-- [ ] Rust：`cargo audit` + `cargo deny` 無 RUSTSEC critical
-- [ ] requirements.txt + Cargo.lock 鎖版本（重現性）
-- [ ] 棄用 unmaintained 依賴（最後 commit > 2y 紅旗）
+- [ ] `pip-audit` / `safety check` / `cargo audit` + `cargo deny` 無 high/critical；requirements.txt + Cargo.lock 鎖版本；棄用 unmaintained 依賴（最後 commit > 2y 紅旗）
 
 ### A07 Authentication Failures
-- [ ] Operator role auth 不存 client-side cookie / localStorage 純文字
+- [ ] Operator role auth 不存 client-side 純文字
 - [ ] Live session 5 門控**全綠**才允（`CLAUDE.md` Hard Boundaries）
-- [ ] Login attempt 失敗 N 次 → 短期鎖（防爆破）
-- [ ] Session token TTL 合理（短，5-15min）+ refresh 流程
+- [ ] Login 失敗 N 次短期鎖；session token 短 TTL + refresh
 
 ### A08 Software/Data Integrity
 - [ ] CI/CD pipeline 不允 unsigned tag deploy
 - [ ] `helper_scripts/` 內不從 untrusted source `curl | bash`
-- [ ] DB migration（V### sql）必 review + 套用 Guard A/B/C
-- [ ] Rust binary release build 才上 prod；debug build 留 dev only
+- [ ] DB migration（V### sql）必 review + 套用 Guard A/B/C；Rust release build 才上 prod
 
 ### A09 Logging Failures
 - [ ] `change_audit_log.py`（DOC-06）append-only JSONL 完整覆蓋寫操作
-- [ ] 失敗的 auth attempt 必 log（不只成功）
-- [ ] 關鍵風控動作（lease acquire/release、order submit/cancel、risk degrade）落 `audit_persistence`
+- [ ] 失敗的 auth attempt 必 log；關鍵風控動作（lease acquire/release、order submit/cancel、risk degrade）落 `audit_persistence`
 - [ ] log 不寫敏感（API key / authorization HMAC / Operator password 全脫敏）
 
 ### A10 SSRF
-- [ ] 任何「外部 URL」可控的路由白名單域名（Bybit-only）
-- [ ] Local LLM 路由僅 `127.0.0.1` / `localhost`
-- [ ] webhook（如有）拒 `169.254.*` / `127.*` / `10.*` private IP
+- [ ] 「外部 URL」可控路由白名單域名（Bybit-only）；Local LLM 路由僅 loopback；webhook 拒 private IP
 
-### A11 — LLM/Prompt-Injection（本系統 L2 推理鏈）
+### A11 LLM/Prompt-Injection（本系統 L2 推理鏈）
 - [ ] 外部數據經 tool 結果回流注入 L2 prompt（news / web / UGC）有隔離與標記，不當指令執行
 - [ ] L2 輸出未驗證不得直接驅動決策鏈（schema 驗證 + 數值範圍檢查後才入 gate）
-- [ ] 本地模型 endpoint 鑑權：Ollama / LM Studio 綁定 loopback，非 loopback 綁定 = finding
-- [ ] prompt / 推理日誌不嵌入 secret（API key / HMAC / credential）
-- [ ] 模型輸出寫 DB 前消毒（長度 / 型別 / 注入字元）
+- [ ] Ollama / LM Studio 綁定 loopback，非 loopback 綁定 = finding
+- [ ] prompt / 推理日誌不嵌入 secret；模型輸出寫 DB 前消毒（長度 / 型別 / 注入字元）
 - [ ] L2 推理鏈信任邊界詳見 E3.md scope 條目
 
 ## OpenClaw 補充項

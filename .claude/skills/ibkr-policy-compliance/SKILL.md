@@ -6,6 +6,8 @@ allowed-tools: Read, Grep, Glob, Bash, WebSearch, WebFetch
 
 # IBKR Policy And Compatibility Review
 
+> 以內建知識為底：通識不在本檔重述；本檔只列本專案的偏離、教訓與 SSOT 指針。
+
 ## Boundary first
 
 - Reviewer role is `IB(explorer)` and read-only.

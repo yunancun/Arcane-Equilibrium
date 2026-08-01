@@ -6,13 +6,13 @@ allowed-tools: Read, Grep, Glob, Bash, WebSearch
 
 # Time Series CV Protocol（時序 CV 設計手冊）
 
-> Authority 使用 `.codex/agent_registry_v1.json` typed matrix：normative policy、implementation contract、active work state、runtime observation、external policy、claim evidence 只在同類內比較。跨類不一致標 DRIFT/CONFLICT；runtime 不得合法化 policy denial。
-> 即時內容依相應 authority class 與 fresh evidence 取得，本 skill 不寫死也不建立全局總排序。
+> Authority typed matrix 正本見 `16-root-principles-checklist` 頭部（`.codex/agent_registry_v1.json` 定義）：只在同類內比較，跨類標 DRIFT/CONFLICT，runtime 不得合法化 policy denial；即時內容依 authority class 與 fresh evidence 取得，本 skill 不寫死。
+> 以內建知識為底：KFold/TimeSeriesSplit 通識、walk-forward 概念、sklearn API 不在本檔重述；本檔只列本專案的判準、教訓與 SSOT 指針。
 > **本檔為 Purged k-fold / Embargo / CSCV 機制細節唯一正本**（`walk-forward-validation-protocol` 指向此處）。
 
 ## 何時觸發
 
-- MIT 收到「ML training pipeline CV 設計」「sklearn TimeSeriesSplit 用法」「為何 OOS 退化」
+- MIT 收到「ML training pipeline CV 設計」「為何 OOS 退化」
 - 任何 ML model（LightGBM / Transformer / TCN / 線性）訓練前
 - ONNX export 前的 final validation
 - P1-7 C labels 累積到 200+ 啟動 training pipeline 之前
@@ -22,128 +22,44 @@ allowed-tools: Read, Grep, Glob, Bash, WebSearch
 **時序資料禁用 KFold**（會 shuffle）：必用 TimeSeriesSplit 或 walk-forward。
 **Purge + Embargo 是必要不是 optional**：未加就是 leakage。
 
-> **C1.b cross-skill 邊界**：本 skill（MIT）跟 `walk-forward-validation-protocol`（QC）在 walk-forward / Purge / Embargo / CSCV 等技術細節有 ~50% 內容重疊。**同時觸發時職責分**：
-> - **MIT 主負**：ML 模型訓練 CV 設計（sklearn TimeSeriesSplit / PurgedKFold / sample size for ML model 類別）
-> - **QC 主負**：策略 alpha 顯著性（PSR / DSR / 統計檢定 / 多重比較修正）
-> - 同時引用兩者的 audit task 應由 PM 明確指派 owner，避免雙頭判斷。
+> **C1.b cross-skill 邊界**：本 skill（MIT）跟 `walk-forward-validation-protocol`（QC）職責分：**MIT 主負** ML 模型訓練 CV 設計（TimeSeriesSplit / PurgedKFold / ML sample size）；**QC 主負**策略 alpha 顯著性（PSR / DSR / 統計檢定 / 多重比較修正）。同時引用兩者的 audit task 應由 PM 明確指派 owner，避免雙頭判斷。
 
-## 1. CV 方法對照表
+## 1. Purge + Embargo（唯一正本；Lopez de Prado, AFML Ch.7）
 
-| 方法 | 適用 | 缺點 | sklearn API |
-|---|---|---|---|
-| **KFold** | 時序資料 ❌ 禁用 | shuffle 後 future leak past | `sklearn.model_selection.KFold` |
-| **TimeSeriesSplit** | 時序基本 baseline | 默認無 purge / embargo | `sklearn.model_selection.TimeSeriesSplit` |
-| **Walk-Forward Anchored** | 累積學習 | 後期 train fold 巨大 | 自寫 |
-| **Walk-Forward Rolling** | 固定 lookback | regime 切換場景 | 自寫 |
-| **Purged k-fold (Lopez de Prado)** | 含 label window 重疊 | 計算複雜 | 自寫或套件（見 §7 套件選型注意）|
-| **CSCV (Combinatorially Symmetric CV)** | PBO 計算 | 樣本要求大 | 自寫 |
+### 1.1 Purge（淨化）
+**問題**：label `y_t` 由 `[t, t+H]` 區間決定，train fold 中接近 test fold start 的 sample，其 label 已含 test 區間資訊 → leak。
+**動作**：train fold 中刪除「label window 與 test fold 任何重疊」的 sample：`train_keep = label_end_ts < test_start − H` 之前的 sample。
 
-## 2. Purge + Embargo（Lopez de Prado, AFML Ch.7）
+### 1.2 Embargo（禁忌期）
+**問題**：feature 含 autocorrelation，test fold 結束後立刻接 train 仍含 nearby contamination。
+**動作**：test fold 結束後跳 N 期再開 train；embargo_pct 建議 0.5–1% of total samples。
 
-### 2.1 Purge（淨化）
-**問題**：label `y_t` 由 `[t, t+H]` 區間決定（如 H 期未來 return 方向），train fold 中接近 test fold start 的 sample，其 label 已含 test 區間資訊 → leak。
-
-**Purge 動作**：train fold 中刪除「label window 與 test fold 任何重疊」的 sample。
-
-```
-test_start = T
-purge_range = [T - H, T]   # label horizon
-train_keep = train_set 中 label_end_ts < T - H 的 sample
-```
-
-### 2.2 Embargo（禁忌期）
-**問題**：feature 含 autocorrelation，test fold 開始後立刻 train 下一個 fold 仍含 nearby contamination。
-
-**Embargo 動作**：test fold 結束後，跳 N 期再開 train。
-
-```
-test_end = T'
-embargo_pct = 0.01   # 1% of total samples
-train_resume = T' + embargo_periods
-```
-
-### 2.3 OpenClaw 適用
-- `exit_features` 中 H = exit horizon (如持倉期 60s-3600s)
-- Embargo % = 0.5-1% of total samples（Lopez de Prado 推薦）
+### 1.3 OpenClaw 適用
+- `exit_features` 中 H = exit horizon（如持倉期 60s-3600s）
 - 1m timeframe + 5 strat × 25 symbol → embargo ≈ 1d 期
+- 實作要點：`TimeSeriesSplit(gap=embargo_periods)` + 手動 purge（train 中刪 `label_end_ts >= test_start` 的 sample）；sklearn 默認 `gap=0` 無 embargo，label 含 H 期 horizon 場景必手動傳
 
-## 3. 樣本量規劃
+## 2. 樣本量規劃
 
 | 模型類別 | 最少 train sample | 對應 OpenClaw 場景 |
 |---|---|---|
 | **Linear regression** | ≥ 10 × n_features | 25 features → ≥ 250 |
-| **LightGBM (small)** | ≥ 1000 | P1-7 C 47/200 不夠 |
+| **LightGBM (small)** | ≥ 1000 | P1-7 C 早期不夠 |
 | **LightGBM (typical)** | ≥ 10000 | 5 strat × 25 symbol × 1m × 30d 過 |
 | **Transformer** | ≥ 100k | 1m 級 ~半年才夠 |
 | **TCN / N-BEATS** | ≥ 50k | 1m ~3 個月 |
 
-當 P1-7 C labels 不足 §3 表閾值（具體進度動態查 `psql -c "SELECT count(*) FROM learning.exit_features WHERE engine_mode IN ('live','live_demo')"`）→ **不訓練，只準備 pipeline**。**禁寫死「47/200」等 snapshot 數字當決策依據** — 隨時間累積會失真。
+labels 不足閾值（進度動態查 `psql -c "SELECT count(*) FROM learning.exit_features WHERE engine_mode IN ('live','live_demo')"`）→ **不訓練，只準備 pipeline**。**禁寫死「47/200」等 snapshot 數字當決策依據**。
 
-## 4. CV split 設計實例
+## 3. CV 方法選型（OpenClaw 判準）
 
-### 4.1 OpenClaw 1m exit-features 模型 baseline
-```python
-from sklearn.model_selection import TimeSeriesSplit
+- **OpenClaw 推薦：Walk-Forward Rolling**（crypto regime 快；anchored expanding 不適合）
+- 建議起點：train 90d / test 30d / stride 30d / embargo 1d + purge train tail（`train['label_end_ts'] < test['ts'].min()`）
+- Purged k-fold / 自寫 walk-forward 的通用寫法靠內建知識；mlfinlab 開源版已停滯，套件選型以當前維護狀態為準，建議自寫或審查後選用
 
-# 取 90d demo + live_demo data
-df = load_features(engine_mode__in=['demo', 'live_demo'], days=90)
-df = df.sort_values('ts').reset_index(drop=True)
+## 4. CSCV（唯一正本）
 
-# 5 fold time series split with embargo + purge
-tscv = TimeSeriesSplit(n_splits=5, gap=embargo_periods)
-
-for train_idx, test_idx in tscv.split(df):
-    # purge: 刪 train 中 label_end_ts >= test_start 的 sample
-    train_idx_purged = [i for i in train_idx 
-                         if df.iloc[i]['label_end_ts'] < df.iloc[test_idx[0]]['ts']]
-    
-    X_train = df.iloc[train_idx_purged][features]
-    y_train = df.iloc[train_idx_purged]['target']
-    X_test = df.iloc[test_idx][features]
-    y_test = df.iloc[test_idx]['target']
-    
-    # train + eval
-    ...
-```
-
-### 4.2 Walk-Forward Rolling（regime 切換場景）
-```python
-window_train = 90_days
-window_test = 30_days
-stride = 30_days
-
-t = data.start
-while t + window_train + window_test < data.end:
-    train = data[t : t+window_train]
-    test = data[t+window_train+embargo : t+window_train+window_test]
-    # purge train tail
-    train = train[train['label_end_ts'] < test['ts'].min()]
-    yield train, test
-    t += stride
-```
-
-### 4.3 Anchored Expanding（長期穩定 alpha）
-```python
-window_train_min = 90_days
-window_test = 30_days
-stride = 30_days
-
-t = data.start + window_train_min
-while t + window_test < data.end:
-    train = data[: t]   # 累積
-    test = data[t+embargo : t+window_test]
-    train = train[train['label_end_ts'] < test['ts'].min()]
-    yield train, test
-    t += stride
-```
-
-OpenClaw 推薦：**Walk-Forward Rolling**（crypto regime 快）。
-
-## 5. CSCV（Combinatorially Symmetric Cross-Validation）
-
-Lopez de Prado et al. (2014, 2017)。用於 PBO 計算（Probability of Backtest Overfitting）。
-
-**步驟**：
+Lopez de Prado et al. (2014, 2017)，用於 PBO 計算：
 1. 把 sample 切 N 份（建議 N=16）
 2. 從 N 中選 N/2 為 train（C(N, N/2) 個組合）
 3. 每個組合：train 上找最佳策略，test 上看排名
@@ -151,69 +67,34 @@ Lopez de Prado et al. (2014, 2017)。用於 PBO 計算（Probability of Backtest
 
 PBO < 0.5 = 模型未過擬合主導。
 
-## 6. CV 結果評估
+## 5. CV 結果評估判準
 
-### 6.1 Per-fold metrics
-- AUC / accuracy / log-loss / R²
-- 對 trading：Sharpe / hit rate / drawdown
-- **Per-fold variance** 比 mean 重要（穩定性）
+- **Per-fold variance 比 mean 重要**：5 fold metric std / mean > 0.5 → 不穩定，不上線
+- IS vs OOS gap：< 30% 健康；30-50% warning；> 50% = 過擬合或 leakage（用 `feature-engineering-protocol` RCA）
 
-### 6.2 IS vs OOS gap
-- gap < 30% = 健康
-- gap 30-50% = warning
-- gap > 50% = 過擬合或 leakage（用 `feature-engineering-protocol` skill RCA）
+## 6. 工作流（10 步）
 
-### 6.3 Cross-fold consistency
-- 對 5 fold 的 metric 算 std
-- std / mean > 0.5 → 不穩定，不上線
-
-## 7. 套件對照與選型注意
-
-```python
-# sklearn 內建
-from sklearn.model_selection import TimeSeriesSplit
-# 默認 gap=0（無 embargo），需手動傳 gap
-
-# PurgedKFold：概念參考 López de Prado《Advances in Financial ML》Ch.7
-# 套件選型以當前維護狀態為準（mlfinlab 開源版已停滯）；建議自寫或審查後選用替代套件
-
-# 自寫 walk-forward（複雜時用）
-```
-
-## 8. 工作流（10 步）
-
-1. **資料 sort by ts** — 必要前置
-2. **Label end_ts 列** — 每 sample 的 label window 結束時間
-3. **CV 方法選擇**（依 §4 場景選型；OpenClaw 推薦見 §4 末）
-4. **N folds 設計**（5-10）
-5. **Window 設計**（train 90d / test 30d / embargo 1d）
-6. **Purge 邏輯**（train_label_end < test_start）
-7. **Per-fold metrics 計算**
-8. **Cross-fold consistency**（mean ± std）
-9. **IS vs OOS gap**（用同期 train sample 算 IS）
-10. **CSCV / PBO**（K ≥ 10 model variants 時做）
+1. 資料 sort by ts → 2. 每 sample 補 label end_ts 列 → 3. CV 方法選擇（§3）→ 4. N folds 設計（5-10）→ 5. Window 設計（train 90d / test 30d / embargo 1d）→ 6. Purge 邏輯（train_label_end < test_start）→ 7. Per-fold metrics → 8. Cross-fold consistency（mean ± std）→ 9. IS vs OOS gap → 10. CSCV / PBO（K ≥ 10 model variants 時做）。
 
 ## 穩定 CV rule（不會 drift）
 
-時序資料禁用 `KFold`（會 shuffle）；training filter 必含 'live' + 'live_demo'（不混 paper）；TimescaleDB hypertable 支援快速 time-range query for split；embargo size 由 label horizon + autocorrelation 動態決定（不寫死數字）。Label count / row 量必跑 SQL 取真值（`SELECT count(*) FROM learning.exit_features WHERE engine_mode IN ('live','live_demo')`）。
+時序資料禁用 `KFold`（會 shuffle）；training filter 必含 'live' + 'live_demo'（不混 paper）；TimescaleDB hypertable 支援快速 time-range query for split；embargo size 由 label horizon + autocorrelation 動態決定（不寫死數字）。Label count / row 量必跑 SQL 取真值。
 
 ## Cross-Skill 互引（避免重述）
 
-- **C1.b QC 視角 = 策略 alpha 顯著性**（PSR / DSR / Bonferroni / PBO）走 `walk-forward-validation-protocol`；本 skill = MIT 視角，**ML 模型訓練 CV 設計**（sklearn / 自寫 PurgedKFold）
-- **C1.c feature 設計 + leakage**：feature-side 6 leakage 類型（look-ahead / target / survivorship 等）走 `feature-engineering-protocol`，本 skill 補 split-side leakage（purge / embargo）
-- **pipeline 成熟度評級**：本 skill CV 設計通過 ≠ pipeline live；走 `ml-pipeline-maturity-audit` 看 4 維度 + 5 階段
+- **C1.b QC 視角**（PSR / DSR / Bonferroni / PBO 判準）走 `walk-forward-validation-protocol`；本 skill = MIT 視角 ML 訓練 CV 設計
+- **C1.c feature 設計 + leakage**：feature-side 6 leakage 類型走 `feature-engineering-protocol`，本 skill 補 split-side leakage（purge / embargo）
+- **pipeline 成熟度評級**：CV 設計通過 ≠ pipeline live；走 `ml-pipeline-maturity-audit`
 
 ## 反模式（見即 Reject）
 
-- `KFold`（time series 禁用）
+- `KFold`（time series 禁用）；訓練前 shuffle 時序資料
 - `TimeSeriesSplit(gap=0)` 用在 label 含 H 期 horizon 場景
-- 沒 purge train 中 label window 重疊
-- 訓練前 shuffle 時序資料
-- IS sample 跟 OOS sample 重疊（無 embargo）
+- 沒 purge train 中 label window 重疊；IS 與 OOS sample 重疊（無 embargo）
 - 5 fold metric 全用 mean 不看 std
 - IS 80% / OOS 60% 不查 leakage
 - N=2 fold 還宣稱「驗證過」
-- Anchored expanding 用於 regime 快速切換的 crypto（見 §4 末推薦）
+- Anchored expanding 用於 regime 快速切換的 crypto（見 §3 推薦）
 
 ## 輸出格式
 
@@ -221,12 +102,7 @@ from sklearn.model_selection import TimeSeriesSplit
 # MIT Time Series CV Audit — <model_name> · <date>
 
 ## CV 設計
-- 方法：Walk-Forward Rolling / Anchored / Purged k-fold
-- N folds: X
-- train_window: Y_days
-- test_window: Z_days
-- embargo: W periods
-- purge logic: <describe>
+- 方法 / N folds / train_window / test_window / embargo / purge logic
 
 ## 樣本量
 | Fold | train_n | test_n | features_n |

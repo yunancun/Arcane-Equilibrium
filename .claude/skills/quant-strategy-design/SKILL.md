@@ -6,130 +6,66 @@ allowed-tools: Read, Grep, Glob, WebSearch
 
 # Quant Strategy Design（量化策略設計手冊）
 
-> Authority 使用 `.codex/agent_registry_v1.json` typed matrix：normative policy、implementation contract、active work state、runtime observation、external policy、claim evidence 只在同類內比較。跨類不一致標 DRIFT/CONFLICT；runtime 不得合法化 policy denial。
-> 即時內容依相應 authority class 與 fresh evidence 取得，本 skill 不寫死也不建立全局總排序。
+> Authority typed matrix 正本見 `16-root-principles-checklist` 頭部（`.codex/agent_registry_v1.json` 定義）：只在同類內比較，跨類標 DRIFT/CONFLICT，runtime 不得合法化 policy denial；即時內容依 authority class 與 fresh evidence 取得，本 skill 不寫死。
+> 以內建知識為底：alpha 來源分類學、IC/IR 定義、信號融合方法、多 TF 融合、半衰期公式、replication crisis 文獻等通識不在本檔重述；本檔只列本專案的偏離、教訓與 SSOT 指針。
 
 > **S1 風控數字 SSOT**：position size / Kelly / risk_per_trade 等所有 sizing 數字以 `settings/risk_control_rules/risk_config_<env>.toml` 為 SSOT；config 不合理 → push back operator，**不信 memory 或 skill 內寫死值**。
 
 > **S6 P0/P1/P2 cross-ref**：三層風控定義見 `srv/docs/decisions/EX-01_..._V2.md` §2.1-§2.3；本 skill 引用屬語意重述。
 
-> **C1.a 觸發順序提示**：「Alpha 研究 / 新策略提案」可能與 `math-model-audit`（audit 視角）/ `walk-forward-validation-protocol`（validation 視角）同時 fire；建議順序 = **本 skill 設計階段 → math-model-audit 數學審計 → walk-forward 驗證**。三者並用而非取代。
+> **C1.a 觸發順序**：設計（本 skill）→ `math-model-audit`（數學審計）→ `walk-forward-validation-protocol`（驗證），三者並用而非取代。
 
 ## 何時觸發
 
 - QC 收到「新策略提案」「alpha hypothesis」「信號設計」「多源訊號融合」「策略升級規劃」
-- Operator 提出「我看到某 paper / 某 KOL 推薦 X 異常」要評估
+- Operator 提出「某 paper / 某 KOL 推薦 X 異常」要評估
 - 既有策略 edge 衰減後的接班候選評估（策略名單與激活/dormant 狀態以 `srv/TODO.md` 與 runtime 配置為準，本檔不寫死）
 
-## ★ Alpha 8 來源 framework
+## ★ Alpha 來源歸類（第一關）
 
-任何策略提案必須先指出 alpha 來源屬於哪一類。**無法歸類 = 高度疑似沒 edge，建議 Reject**（**8 來源 framework 為本 skill 整理，非治理硬規範；極端原創策略可由 QC 提議擴充分類，operator 批准後新增**）：
+任何策略提案必須先歸類 alpha 來源（行為偏差 / 結構性低效 / 流動性提供 / 資訊不對稱 / 波動率錯定價 / 時間框架套利 / 跨資產溢出 / 微結構——分類學本身靠內建知識）。**無法歸類 = 高度疑似沒 edge，建議 Reject**（8 來源 framework 為本 skill 整理，非治理硬規範；極端原創策略可由 QC 提議擴充分類，operator 批准後新增）。
 
-| # | 來源類別 | crypto 例子 | 風險 |
-|---|---|---|---|
-| 1 | **行為偏差**（herd / FOMO / panic）| momentum、breakout 後追單 | regime 切換時反向 |
-| 2 | **結構性低效**（市場分割、監管套利）| CEX↔DEX basis、funding rate spike | 隨資金流入消失 |
-| 3 | **流動性提供**（spread + rebate）| market making、PostOnly 主動報單 | inventory risk |
-| 4 | **資訊不對稱**（鏈上、新聞、訂單流）| whale tracking、large order 領先 | 資訊源消失即 dead |
-| 5 | **波動率錯定價**（implied vs realized）| variance risk premium、gamma scalping | crypto IV 市場淺 |
-| 6 | **時間框架套利**（短期均回 / 長期動量）| pairs trading、co-integration | 半衰期短 |
-| 7 | **跨資產溢出**（BTC↔altcoin 動量）| BTC dominance regime → alt rotation | 相關性結構性轉變 |
-| 8 | **微結構 / queue position**（HFT 邊緣）| order book imbalance、queue jumping | latency war，個人玩家難 |
+OpenClaw 歸類示例（僅示範歸類法；現役名單與狀態以 `srv/TODO.md` / runtime 配置為準）：`grid_trading`=短期均回、`ma_crossover`/`bb_breakout`=行為偏差（趨勢/突破）、`bb_reversion`=短期均回、`funding_arb`=結構性 funding 不平衡。
 
-OpenClaw 策略歸類示例（僅示範歸類法；現役名單與狀態以 `srv/TODO.md` / runtime 配置為準）：
-- `grid_trading`：類別 6（短期均回，需區間 regime）
-- `ma_crossover`：類別 1（趨勢追隨）
-- `bb_breakout`：類別 1（突破延續）
-- `bb_reversion`：類別 6（短期均回，需 squeeze 後 mean revert 假設）
-- `funding_arb`：類別 2（結構性 funding 不平衡）
+## 半衰期判準（OpenClaw 適用範圍）
 
-## 信號衰減 / 半衰期分析
+上線前必估 edge half-life（fit 法靠內建知識）。**OpenClaw 適用範圍 = 1-30 day**：
+- `< 1 day` → 拒。訊號生命週期跟 1m kline + IPC ms 延遲 sampling rate 不匹配，抓不到衰減前 reaction window（**不是 latency 問題**）
+- `> 30 day` → 配置層不給策略層
 
-每個策略上線前必算「edge half-life」— alpha 隨時間衰減速度：
+## 信號融合判準
 
-```
-half_life = ln(2) / λ   ， λ 從 PnL_t = PnL_0 · e^(-λt) 擬合
-```
+- 單信號 IC > 0.05 可用、> 0.10 強；IC < 0.02 但堅稱有用 = Reject
+- 信號間 ρ > 0.7 → 退化為單信號，融合無價值；5 個高相關信號（ρ > 0.8）平均當「集成」= 反模式
+- 1m 的 noise floor 是 OpenClaw 主要敵人（見 P1-11 BB-BREAKOUT）；TF 越短 SNR 越低
 
-**判讀**：
-- `< 1 day` → 訊號要求 sub-second reaction window，OpenClaw 1m kline + IPC ms 延遲抓不到衰減前的 entry/exit timing（**不是 latency 問題；是訊號生命週期跟我們 sampling rate 不匹配**）
-- `1-7 day` → 短期 alpha，需動態 regime gate
-- `7-30 day` → 中期 alpha，主流量化棧
-- `> 30 day` → 長期 factor，配置型而非交易型
+## Crypto 異常評估邊界
 
-**OpenClaw 適用範圍**：1-30 day。短於 1d → 訊號 lifecycle vs 我們 1m sampling rate 不匹配，抓不到 reaction window；長於 30d 給配置層不給策略層。
+值得納入設計的結構性事件（機制細節靠內建知識）：funding 結算 instant（per-symbol `fundingInterval`，非普適 8h）、weekend effect、CME gap、halving regime、Bybit 新 listing 24h pump-dump。
 
-## 信號融合與 IC/IR
-
-多源信號融合時必算：
-
-- **Information Coefficient (IC)**：信號 vs 未來 N 期收益的 Spearman 相關
-  - 單信號 IC > 0.05 算可用，> 0.10 算強
-- **Information Ratio (IR)**：`mean(IC) / std(IC)` — IC 穩定性
-- **Cross-signal correlation**：信號間 ρ > 0.7 → 退化為單信號，融合無價值
-
-**融合方法**（按複雜度排）：
-1. Equal weight average — baseline
-2. IR-weighted（按各信號歷史 IR 加權）
-3. Mean-variance optimal blend（min variance subject to expected IC）
-4. Bayesian model averaging（含先驗信心）
-
-**反模式**：把 5 個高度相關信號 (ρ > 0.8) 平均當「集成」— 等同單信號，但複雜度翻倍。
-
-## 多時間框架融合
-
-OpenClaw 已用 1m kline，補方法：
-- **Higher TF gate**：1h trend filter + 1m entry
-- **Multi-TF confirmation**：1m signal + 5m confirmation + 1h regime
-- **Adaptive TF**：低波動用長 TF（穩定），高波動用短 TF（捕捉）
-
-警告：TF 越短 SNR 越低，1m 的 noise floor 是 OpenClaw 主要敵人（見 P1-11 BB-BREAKOUT）。
-
-## 行為金融 / 市場異常（crypto specific）
-
-值得納入策略設計：
-- **Funding payment cycle**：結算 instant（per-symbol `fundingInterval`，非普適 8h）前 / 後價格動態（mean-revert 偏向）
-- **Weekend effect**：週五 → 週日交易量低 + 波動 + 少量 mean-revert
-- **CME futures gap**：週末 BTC 現貨 vs CME 期貨 gap，週一回補
-- **Halving effect**：BTC halving 前 6m / 後 12m 不同 regime
-- **Listing pump**：Bybit 新 listing 後 24h pump-dump 已知 pattern
-
-不值得納入（噪音 > 訊號）：
-- 月份 / 季節 effect（樣本太小）
-- Twitter / sentiment、鏈上 metric 等外部數據軸：數據源範圍以 runtime 數據盤點為準，不在本檔寫死；OpenClaw 無對應數據源的異常 = 不可回測 → Reject
+不值得納入：月份 / 季節 effect（樣本太小）；Twitter / sentiment、鏈上 metric 等外部數據軸——數據源範圍以 runtime 數據盤點為準，OpenClaw 無對應數據源的異常 = 不可回測 → Reject。
 
 ## Regime 標註最低標準
 
-- Regime 標註用可解釋指標：ATR 分位、realized vol 分位、趨勢斜率符號、成交量分位。
-- 禁用黑名單模型做 regime 偵測（HMM / GARCH 等，見 `math-model-audit` 黑名單正本）。
-- Regime 結論必附指標值 + 計算窗口（如「ATR 30d 分位 = 0.82，窗口 2026-05-01~05-30」），不接受裸標籤。
+- 用可解釋指標：ATR 分位、realized vol 分位、趨勢斜率符號、成交量分位
+- 禁用黑名單模型做 regime 偵測（HMM / GARCH 等，黑名單正本見 `math-model-audit`）
+- Regime 結論必附指標值 + 計算窗口，不接受裸標籤
 
-## ★ Replication Crisis & Public Anomaly Graveyard
+## ★ Replication Crisis 查證義務
 
-**任何策略提案如引用學術論文 / KOL 異常 → 必先查 graveyard**。50% 已發表 anomaly 不能 replicate。
+**任何策略提案如引用學術論文 / KOL 異常 → 必先查 replication 狀態**（~50% 已發表 anomaly 不能 replicate；文獻細節靠內建知識，Harvey-Liu-Zhu / Hou-Xue-Zhang / McLean-Pontiff 一線即可引）。
 
-### 已知 dead anomalies（不要重新發明）
-| 來源 | 異常 | 為何 dead |
-|---|---|---|
-| Harvey, Liu, Zhu (2016) JFE | 296 個 cross-sectional factor，~50% 不能 replicate | publication bias + multiple testing |
-| Hou, Xue, Zhang (2020) RFS | 全 anomaly replication study，>50% t < 1.96 | 同上 |
-| McLean, Pontiff (2016) JF | post-publication decay 研究：published 後 50%+ alpha 消失 | 學術 paper 一發 → 大家做 → arbitrage 掉 |
-
-### 紅旗（看到立即懷疑）
-- 「我用 ML 找到了 X feature 預測未來收益」→ 通常是 leakage
-- 「Sharpe 3.0+ 的 backtest」→ 通常是過擬合 / look-ahead bias
+紅旗（看到立即懷疑）：
+- 「ML 找到 X feature 預測未來收益」→ 通常是 leakage
+- 「Sharpe 3.0+ backtest」→ 過擬合 / look-ahead bias
 - 「沒有交易成本的回測 PnL 圖」→ 真實 fee 後可能 -50%
-- 「rolling window N 內最大值突破」→ rolling-max 含 current bar 必 mean-revert（你 memory `feedback_indicator_lookahead_bias.md`）
+- 「rolling window N 內最大值突破」→ rolling-max 含 current bar 必 mean-revert（memory `feedback_indicator_lookahead_bias.md`）
 
-### 評估流程（看到 claim 必跑）
-1. ArXiv / SSRN search 看是否已 published + 多少引用
-2. Google「<anomaly> replication」/「<anomaly> dead」
-3. 對照本檔 graveyard
-4. 實證檢測：在 OpenClaw 的 demo 數據跑 OOS 能不能 replicate
+評估流程：查 published + replication 狀態 → 對照內建 graveyard 知識 → 在 OpenClaw demo 數據跑 OOS 實證。
 
 ## ★ Funding-harvest / funding-門檻策略：cap 必查 `upperFundingRate`（SSOT），禁從 history max 推
 
-任何「收 funding 做空 / 做多 funding-harvest」或「以 funding 數值設入場/break-even 門檻」的策略，在第 1 步歸類後、第 3 步數學模型化前，必先核對 **目標交易所對該 symbol 的 funding 硬上下限 vs 策略門檻**：
+任何「收 funding」或「以 funding 數值設入場/break-even 門檻」的策略，在歸類後、數學模型化前，必先核對 **目標交易所對該 symbol 的 funding 硬上下限 vs 策略門檻**：
 
 - **cap 的 SSOT = 交易所 `instruments-info` 的 `upperFundingRate` / `lowerFundingRate`（+ `fundingInterval` 算 APR）**，不是 funding/history 樣本窗的 max。
 - **禁從 funding/history 樣本窗 max 反推 cap**：history 樣本必落在某個 regime 內（低-premium 窗 funding 貼近 IR baseline），用樣本 max 當 cap 必誤判。
@@ -138,15 +74,15 @@ OpenClaw 已用 1m kline，補方法：
 
 ## 設計 → 驗證 → 部署 SOP（10 步）
 
-1. **Alpha 來源歸類**（8 來源 framework）— 答不出 = Reject
-2. **學術文獻 check**（已 published? graveyard 內?）
+1. **Alpha 來源歸類** — 答不出 = Reject
+2. **學術文獻 check**（published? replication?）
 3. **數學模型化**（公式 + 假設）
 4. **資料準備**（demo 數據，engine_mode 隔離；feedback `demo_over_paper_for_edge`）
 5. **In-sample backtest**（leak-free shift(1)，注意 P1-11 F3 RETRACT 教訓）
-6. **半衰期估算**（從 in-sample backtest PnL fit λ；< 1d → 拒，OpenClaw 1m sampling 抓不到）
-7. **Walk-forward OOS**（用 `walk-forward-validation-protocol` skill）
-8. **成本驗證**（cost_edge_ratio < 0.5 → 過；用 `crypto-microstructure-knowledge` skill）
-9. **組合相容**（與現有 active 策略 ρ < 0.7；用 `portfolio-construction-protocol` skill）
+6. **半衰期估算**（< 1d → 拒）
+7. **Walk-forward OOS**（用 `walk-forward-validation-protocol`）
+8. **成本驗證**（cost_edge_ratio < 0.5 → 過；用 `crypto-microstructure-knowledge`）
+9. **組合相容**（與現有 active 策略 ρ < 0.7；用 `portfolio-construction-protocol`）
 10. **Demo 21d gross > 0**（當前標準以 `TODO.md` / PM reports 為準）
 
 任一步 fail → 報告標 BLOCKED + 該步證據 + 所需修正後結束，不暫停等待。
@@ -160,10 +96,8 @@ OpenClaw 已用 1m kline，補方法：
 - Alpha 來源「答不出 / 多種混合 / 跟感覺有關」
 - 半衰期 < 1 day（OpenClaw 打不到）
 - 引用 anomaly 但沒查 replication crisis
-- 「ML 找到 feature」沒驗 leakage
-- IC < 0.02 但堅稱有用
-- 5 個高相關信號（ρ > 0.8）平均當集成
-- 1m timeframe 設計但沒驗 SNR
+- 「ML 找到 feature」沒驗 leakage；IC < 0.02 但堅稱有用
+- 5 個高相關信號（ρ > 0.8）平均當集成；1m timeframe 設計但沒驗 SNR
 - 未對照 operator 已拒絕方法黑名單（唯一正本見 `math-model-audit`）
 - **funding-harvest / funding-門檻策略用 funding/history 樣本 max 當 cap**（必落在 regime 內 → 必誤判；cap 的 SSOT 是 `upperFundingRate`，見上方 funding 專段 + 2026-05-31 教訓）
 
@@ -175,10 +109,10 @@ OpenClaw 已用 1m kline，補方法：
 判定：Approve / Conditional（待 N 條件）/ Reject
 
 ## Alpha 來源
-類別 #X（行為偏差 / 結構性低效 / ...）— 一句話為何屬此類
+類別 X — 一句話為何屬此類
 
 ## 學術 / Anomaly check
-（是否 published、graveyard 命中、replication 狀態）
+（是否 published、replication 狀態）
 
 ## 半衰期估計
 λ ≈ X，half_life ≈ Y day
@@ -190,9 +124,7 @@ OpenClaw 已用 1m kline，補方法：
 | 步 | 狀態 | 證據 |
 
 ## OpenClaw 適配
-- engine_mode 隔離 ...
-- 與現有 5 策略 ρ ...
-- fee model ...
+- engine_mode 隔離 / 與現有策略 ρ / fee model
 
 ## 條件 / 拒絕理由
 1. <具體 + 修正路徑>

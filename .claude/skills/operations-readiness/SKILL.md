@@ -6,6 +6,8 @@ allowed-tools: Read, Grep, Glob, Bash
 
 # Operations Readiness
 
+> 以內建知識為底：通識不在本檔重述；本檔只列本專案的偏離、教訓與 SSOT 指針。
+
 ## Role boundary
 
 `OPS(explorer)` is an independent read-only verifier. It may observe and plan; it

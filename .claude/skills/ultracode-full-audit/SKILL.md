@@ -5,6 +5,8 @@ description: Conductor 專用；operator 要求全盤審查、全面優化、mul
 
 # Full Audit Orchestration
 
+> 以內建知識為底：通識不在本檔重述；本檔只列本專案的偏離、教訓與 SSOT 指針。
+
 Canonical workflow: `.claude/workflows/openclaw-full-audit.js`
 Governance: `.codex/agent_registry_v1.json` and
 `docs/agents/development-agent-governance.md`
@@ -54,8 +56,22 @@ IBKR never routes to BB; runtime/deploy evidence gets OPS.
 The compiler-produced `context_budget_authority_v1` is required. Its canonical
 bytes and digest supply the exact `max_agents`, `retry_budget`, and
 `max_input_tokens`; caller-local values cannot override them. The current
-Registry `full_audit` authority is 20 agents, 2 total retries, and 96,000 planned
-input tokens.
+Registry `full_audit` envelope is 44 unique nodes, 46 call attempts, 2 total
+retries, 96,000 max context tokens **per call**, and 4,416,000 max workflow
+planned input tokens.
+
+> 數字 SSOT = `.codex/agent_registry_v1.json` `budget_envelopes.full_audit`；
+> 同一組數字另硬編碼於 `.claude/workflows/agent-wave.js`（authorityProfiles）與
+> `.claude/workflows/openclaw-full-audit.js`（authorityProfiles）兩處——三處必
+> 同步更新，registry 為唯一正本。96,000 是 per-call cap，不是 workflow 總量；
+> 以 per-call cap 做整 run sizing 會把成本低估一個量級以上。
+
+> **Envelope 使用限制**：ML/AI 日常任務（含常規 quant/ML 改動的審查鏈）禁用
+> `full_audit` envelope，一律使用 compiler（`agent_governance_routing.py`）依
+> risk/uncertainty 所選的非 `full_audit` envelope（narrow/standard/complex；
+> complex cap=588,000 planned input，約 full_audit 的 1/7.5），不得為升 envelope
+> 而虛報 risk；`full_audit` envelope 只在 operator 當次明示要求 full/cold audit
+> 時使用，不得由 PM 或 workflow 自行升級。
 
 Tunable args inside that authority:
 
@@ -79,8 +95,8 @@ the debt is decision-critical.
 
 Call and token accounting reserves every phase: audit axes, one shared total
 retry budget across audit and verification, seam critic, verifier quorum with
-risk-conditioned third votes, and optional E1/E2 fix pairs. The 20/96k authority is a ceiling,
-not a target; unused reserves are not actual usage. If full backstop plus claims
+risk-conditioned third votes, and optional E1/E2 fix pairs. The 44-node/4.416M
+authority is a ceiling, not a target; unused reserves are not actual usage. If full backstop plus claims
 cannot fit, split scope and preserve coverage debt rather than lowering evidence.
 
 ## Audit phase
