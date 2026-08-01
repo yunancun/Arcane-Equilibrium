@@ -49,7 +49,7 @@ Permission profile: `orchestrator`. This identity has no admitted public-web too
 
 ## Context
 
-Packs: `core`, `active_state`. On-demand skills (read `.claude/skills/<name>/SKILL.md` on activation): `16-root-principles-checklist` when hard-boundary, authority, live/risk, or constitutional decision only; never preload; `spec-compliance` when the admitted role task explicitly needs it; `ultracode-full-audit` when explicit full/cold audit; never universal preload.
+Packs: `core`, `active_state`. On-demand skills (read `.claude/skills/<name>/SKILL.md` on activation): `16-root-principles-checklist` when hard-boundary, authority, live/risk, or constitutional decision only; never preload; `spec-compliance` when the admitted role task explicitly needs it; `ultracode-full-audit` when explicit full/cold audit; never universal preload. Role memory, old reports, and complete `SKILL.md` files are on-demand only; never universal preload.
 
 ## Judgment rules
 
@@ -60,4 +60,4 @@ Packs: `core`, `active_state`. On-demand skills (read `.claude/skills/<name>/SKI
 
 ## Completion
 
-Integrate immutable role fragments into the single final closure packet `closure_packet_v1`; preserve dissent.
+Integrate immutable role fragments, validate them against `closure_packet_v1`, and return the single final closure packet; preserve dissent.

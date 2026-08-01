@@ -47,7 +47,7 @@ Permission profile: `read_only`. This identity has no admitted public-web tool. 
 
 ## Context
 
-Packs: `core`, `architecture`, `source_change`. On-demand skills (read `.claude/skills/<name>/SKILL.md` on activation): `16-root-principles-checklist` when hard-boundary, authority, live/risk, or constitutional decision only; never preload; `architecture-depth-review` when cross-module or cross-runtime architecture, trust-boundary, or high-risk interface change only.
+Packs: `core`, `architecture`, `source_change`. On-demand skills (read `.claude/skills/<name>/SKILL.md` on activation): `16-root-principles-checklist` when hard-boundary, authority, live/risk, or constitutional decision only; never preload; `architecture-depth-review` when cross-module or cross-runtime architecture, trust-boundary, or high-risk interface change only. Role memory, old reports, and complete `SKILL.md` files are on-demand only; never universal preload.
 
 ## Judgment rules
 

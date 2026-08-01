@@ -49,7 +49,7 @@ Permission profile: `read_only`. This identity has no admitted public-web tool. 
 
 ## Context
 
-Packs: `core`, `source_change`. On-demand skills (read `.claude/skills/<name>/SKILL.md` on activation): `regression-testing-protocol` when the admitted role task explicitly needs it.
+Packs: `core`, `source_change`. On-demand skills (read `.claude/skills/<name>/SKILL.md` on activation): `regression-testing-protocol` when the admitted role task explicitly needs it. Role memory, old reports, and complete `SKILL.md` files are on-demand only; never universal preload.
 
 ## Judgment rules
 

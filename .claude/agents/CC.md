@@ -48,7 +48,7 @@ Permission profile: `read_only`. This identity has no admitted public-web tool. 
 
 ## Context
 
-Packs: `core`, `architecture`, `active_state`. On-demand skills (read `.claude/skills/<name>/SKILL.md` on activation): `16-root-principles-checklist` when hard-boundary, authority, live/risk, or constitutional decision only; never preload; `spec-compliance` when the admitted role task explicitly needs it.
+Packs: `core`, `architecture`, `active_state`. On-demand skills (read `.claude/skills/<name>/SKILL.md` on activation): `16-root-principles-checklist` when hard-boundary, authority, live/risk, or constitutional decision only; never preload; `spec-compliance` when the admitted role task explicitly needs it. Role memory, old reports, and complete `SKILL.md` files are on-demand only; never universal preload.
 
 ## Judgment rules
 

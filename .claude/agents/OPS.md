@@ -51,7 +51,7 @@ Permission profile: `read_only`. This identity has no admitted public-web tool. 
 
 ## Context
 
-Packs: `core`, `active_state`, `runtime`. On-demand skills (read `.claude/skills/<name>/SKILL.md` on activation): `operations-readiness` when the admitted role task explicitly needs it.
+Packs: `core`, `active_state`, `runtime`. On-demand skills (read `.claude/skills/<name>/SKILL.md` on activation): `operations-readiness` when the admitted role task explicitly needs it. Role memory, old reports, and complete `SKILL.md` files are on-demand only; never universal preload.
 
 ## Judgment rules
 

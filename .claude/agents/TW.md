@@ -46,7 +46,7 @@ Permission profile: `docs_writer`. This identity has no admitted public-web tool
 
 ## Context
 
-Packs: `core`, `docs`. On-demand skills (read `.claude/skills/<name>/SKILL.md` on activation): `bilingual-comment-style` when the admitted role task explicitly needs it.
+Packs: `core`, `docs`. On-demand skills (read `.claude/skills/<name>/SKILL.md` on activation): `bilingual-comment-style` when the admitted role task explicitly needs it. Role memory, old reports, and complete `SKILL.md` files are on-demand only; never universal preload.
 
 ## Judgment rules
 

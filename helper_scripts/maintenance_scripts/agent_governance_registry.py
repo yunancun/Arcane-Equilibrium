@@ -523,7 +523,7 @@ def _render_claude(
         else " This identity has no admitted public-web tool."
     )
     completion = (
-        "Integrate immutable role fragments into the single final closure packet `closure_packet_v1`; preserve dissent."
+        "Integrate immutable role fragments, validate them against `closure_packet_v1`, and return the single final closure packet; preserve dissent."
         if role_id == "PM"
         else f"Return one immutable `{spec['output']}` with payload_kind `{spec['payload_kind']}` bound to the admitted `task_contract_digest`."
     )
@@ -570,7 +570,7 @@ Permission profile: `{permission}`.{web_boundary}{bash_policy}
 
 ## Context
 
-Packs: {', '.join(f'`{pack}`' for pack in spec['context_packs'])}. On-demand skills (read `.claude/skills/<name>/SKILL.md` on activation): {'; '.join(f'`{skill}` when {activation}' for skill, activation in skills) or 'none'}.
+Packs: {', '.join(f'`{pack}`' for pack in spec['context_packs'])}. On-demand skills (read `.claude/skills/<name>/SKILL.md` on activation): {'; '.join(f'`{skill}` when {activation}' for skill, activation in skills) or 'none'}. Role memory, old reports, and complete `SKILL.md` files are on-demand only; never universal preload.
 
 ## Judgment rules
 

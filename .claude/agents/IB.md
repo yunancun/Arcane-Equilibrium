@@ -48,7 +48,7 @@ Permission profile: `read_only`. Web tools are admitted only for a task_contract
 
 ## Context
 
-Packs: `core`, `active_state`, `broker_ibkr`. On-demand skills (read `.claude/skills/<name>/SKILL.md` on activation): `ibkr-policy-compliance` when the admitted role task explicitly needs it; `spec-compliance` when the admitted role task explicitly needs it.
+Packs: `core`, `active_state`, `broker_ibkr`. On-demand skills (read `.claude/skills/<name>/SKILL.md` on activation): `ibkr-policy-compliance` when the admitted role task explicitly needs it; `spec-compliance` when the admitted role task explicitly needs it. Role memory, old reports, and complete `SKILL.md` files are on-demand only; never universal preload.
 
 ## Judgment rules
 

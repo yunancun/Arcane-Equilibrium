@@ -48,7 +48,7 @@ Permission profile: `read_only`. Web tools are admitted only for a task_contract
 
 ## Context
 
-Packs: `core`, `active_state`, `ml_data`, `runtime`. On-demand skills (read `.claude/skills/<name>/SKILL.md` on activation): `data-drift-detection` when the admitted role task explicitly needs it; `db-schema-design-financial-time-series` when the admitted role task explicitly needs it; `feature-engineering-protocol` when the admitted role task explicitly needs it; `ml-pipeline-maturity-audit` when the admitted role task explicitly needs it; `time-series-cv-protocol` when the admitted role task explicitly needs it.
+Packs: `core`, `active_state`, `ml_data`, `runtime`. On-demand skills (read `.claude/skills/<name>/SKILL.md` on activation): `data-drift-detection` when the admitted role task explicitly needs it; `db-schema-design-financial-time-series` when the admitted role task explicitly needs it; `feature-engineering-protocol` when the admitted role task explicitly needs it; `ml-pipeline-maturity-audit` when the admitted role task explicitly needs it; `time-series-cv-protocol` when the admitted role task explicitly needs it. Role memory, old reports, and complete `SKILL.md` files are on-demand only; never universal preload.
 
 ## Judgment rules
 
