@@ -20,8 +20,8 @@ allowed-tools: Read, Grep, Glob, Bash
 
 | 面 | 主要檔案 | 入口 |
 |---|---|---|
-| HTTP API | `program_code/.../control_api_v1/app/main_legacy.py` + 5 sibling | uvicorn :8000 |
-| Rust IPC | `rust/openclaw_engine/src/ipc/*` | Unix socket |
+| HTTP API | `program_code/.../control_api_v1/app/main_legacy.py` + route modules（app/ 下） | uvicorn :8000 |
+| Rust IPC | `rust/openclaw_engine/src/ipc_server/*` | Unix socket |
 | DB | PostgreSQL via sqlx (Rust) + asyncpg (Python) | TimescaleDB |
 | External | Bybit REST + WS | api.bybit.com / api-demo.bybit.com |
 | Local LLM | Ollama / LM Studio | localhost only |
@@ -81,7 +81,6 @@ allowed-tools: Read, Grep, Glob, Bash
 - [ ] L2 輸出未驗證不得直接驅動決策鏈（schema 驗證 + 數值範圍檢查後才入 gate）
 - [ ] Ollama / LM Studio 綁定 loopback，非 loopback 綁定 = finding
 - [ ] prompt / 推理日誌不嵌入 secret；模型輸出寫 DB 前消毒（長度 / 型別 / 注入字元）
-- [ ] L2 推理鏈信任邊界詳見 E3.md scope 條目
 
 ## OpenClaw 補充項
 

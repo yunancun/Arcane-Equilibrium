@@ -33,11 +33,11 @@ allowed-tools: Read, Grep, Glob
 | # | 原則 | 關鍵檢查點 | grep 指紋 |
 |---|------|-----------|----------|
 | 1 | 單一寫入口 | 所有訂單通過唯一執行入口 | `IntentProcessor`, `submit_intent` |
-| 2 | 讀寫分離 | GUI/研究只讀；寫入受限可審計可鎖定 | `READ_ONLY_*`, `_authorize_write` |
+| 2 | 讀寫分離 | GUI/研究只讀；寫入受限可審計可鎖定 | `READ_ONLY_*`, `_require_operator_role` |
 | 3 | AI 輸出 ≠ 命令 | AI → Decision Lease → 本地復核 → 執行 | `decision_lease`, `acquire_lease`, `_shadow_mode` |
 | 4 | 策略不繞風控 | 所有意圖經 Guardian 審批 | `Guardian`, `risk_envelope`, `RiskConfig` |
 | 5 | 生存 > 利潤 | 止損優先於盈利 | `hard_stop`, `liquidation_buffer` |
-| 6 | 失敗默認收縮 | 不確定時保守 | `fail_closed`, `degrade_to_paper` |
+| 6 | 失敗默認收縮 | 不確定時保守 | `fail_closed`, `degraded` |
 | 7 | 學習 ≠ 改寫 Live | 學習平面與 Live 平面隔離 | `learning.*`, `paper_state` |
 | 8 | 交易可解釋 | 每筆交易可重建 | `audit_log`, `trace_id` |
 | 9 | 災難保護 | 本地 + 交易所雙重防線 | `local_stop` + `conditional_order` |
@@ -57,7 +57,7 @@ allowed-tools: Read, Grep, Glob
 
 任一新增 / 修改 / 拿掉 fail-closed → 升 BLOCKER；要 Operator 顯式 sign-off。
 
-## DOC-08 §12 安全不變量（9 條）
+## 工程安全不變量（9 條；非 docs/decisions DOC-08 §12 原文——該節另為一組 9 條，審計時另對照該節 + CLAUDE.md Hard Boundaries）
 
 逐條核對：
 1. Pre-trade audit/replay 必開

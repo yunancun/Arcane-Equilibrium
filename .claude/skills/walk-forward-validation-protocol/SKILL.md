@@ -63,7 +63,7 @@ CSCV 機制細節唯一正本見 `time-series-cv-protocol` §4「CSCV（唯一�
 
 ## 穩定驗證 rule（不會 drift）
 
-edge 計算只用 demo + live_demo（不混 paper）；`engine_mode IN ('live','live_demo')` filter 必含兩者；rolling stat 必加 `.shift(1)` leak-free；crypto annualization ×365 非 ×252（正本見 `math-model-audit` 反模式）。
+edge 計算只用 demo + live_demo（不混 paper）；`engine_mode IN ('live','live_demo')` filter 必含兩者；rolling stat 必加 `.shift(1)` leak-free；crypto annualization ×365 非 ×252。
 
 ## 反模式（見即 Reject）
 

@@ -40,7 +40,7 @@ allowed-tools: Read, Grep, Glob, Bash, WebSearch, WebFetch
 
 > ⚠️ 門檻 / rebate 數字動態變動；申請評估 / eligibility 結論前必先 WebFetch 官方 Broker / Institutional 頁核對，本 skill 不取代官方條款。
 
-OpenClaw 適用：當前不夠資格（單帳戶 size 太小）；未來 scale 後可申。MM 計劃有 quote spread / uptime SLA 義務。
+MM 計劃有 quote spread / uptime SLA 義務。
 
 ## 4. API Key Management（專案 gate）
 
@@ -76,7 +76,7 @@ OpenClaw 當前 policy compliance 狀態隨 operator 配置 + Bybit 公告變動
 
 ## 穩定平台 + governance rule（不會 drift）
 
-Bybit 為唯一交易所（`CLAUDE.md` Product Boundary；跨所策略 out of scope）；demo/paper/live_demo/live 4 環境合規規則微異（demo no-KYC、live KYC required）；authorization.json HMAC 是 Live gate 5（`CLAUDE.md` Hard Boundaries）；`OPENCLAW_ALLOW_MAINNET=1` 是內部 gate 不替代 KYC；withdraw permission 永遠 false（架構級）；PostOnly 是合規行為（不違 ToS）。
+Bybit = 唯一 active live execution 交易所（`CLAUDE.md` Product Boundary）；Binance data-only（ADR-0033/0040）；IBKR 另軌歸 IB / ADR-0048，BB 不代審；demo/paper/live_demo/live 4 環境合規規則微異（demo no-KYC、live KYC required）；authorization.json HMAC 是 Live gate 5（`CLAUDE.md` Hard Boundaries）；`OPENCLAW_ALLOW_MAINNET=1` 是內部 gate 不替代 KYC；withdraw permission 永遠 false（架構級）；PostOnly 是合規行為（不違 ToS）。
 
 ## 反模式（見即升級）
 

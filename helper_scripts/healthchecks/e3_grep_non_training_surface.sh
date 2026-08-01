@@ -3,7 +3,8 @@
 # 模塊用途：P0-LG-3 non-training surface invariant 的 CI/pre-deploy grep guard（spec §6.1）。
 #           learning.supervised_live_audit（V104）是合規 audit 表，不是 ML feature store /
 #           label 表。本 guard 防 ML/training pipeline 誤讀此表，並防 append-only 被破壞
-#           （writer 之外不得 UPDATE/DELETE 此表）。
+#           （writer 之外不得 UPDATE/DELETE 此表）。Rule 4 另涵蓋 MIT-MF-1：
+#           close_maker_* audit 欄位禁入 ML/training pipeline（AMD-2026-05-15-02 §7）。
 # 依賴：ripgrep（rg）優先，fallback grep。
 # 硬邊界：
 #   1) 偵測到違規 exit 1（fail-loud），CI 必須紅燈（spec §6.1 Expected 0 hit）。
@@ -80,6 +81,25 @@ if [[ -n "${R3_HITS}" ]]; then
     if [[ -n "${R3_VIOL}" ]]; then
         echo "[e3-grep] Rule 3 違規：supervised_live_audit DDL 含 forbidden ML column。" >&2
         echo "${R3_VIOL}" >&2
+        EXIT_CODE=1
+    fi
+fi
+
+# ============================================================
+# Rule 4：MIT-MF-1 — close_maker_* audit 欄位禁入 ML/training pipeline
+# 為什麼：trading.fills.details->>'close_maker_*' 僅供 execution-quality
+#   observability + post-mortem;入 training = target leakage +
+#   policy-degradation feedback（AMD-2026-05-15-02 §7 原則 #7 的可執行化）。
+# allowlist：沿用 Rule 1（healthcheck / reconciler / tests / writer / migration）。
+# ============================================================
+CM_PATTERN='close_maker_'
+R4_HITS="$(_search "${CM_PATTERN}")"
+if [[ -n "${R4_HITS}" ]]; then
+    # 只對檔案路徑段(冒號前)匹配 ML surface,避免行內 'toml_' 之類子串誤中 'ml_'。
+    R4_VIOL="$(echo "${R4_HITS}" | grep -vE "${ALLOWLIST_RE}" | awk -F: '$1 ~ /(\/ml\/|\/training\/|\/learning\/|ml_training|train_|feature_store)/' || true)"
+    if [[ -n "${R4_VIOL}" ]]; then
+        echo "[e3-grep] Rule 4 違規：ML/training surface 引用 close_maker_* audit 欄位（MIT-MF-1 target-leakage 防線）。" >&2
+        echo "${R4_VIOL}" >&2
         EXIT_CODE=1
     fi
 fi

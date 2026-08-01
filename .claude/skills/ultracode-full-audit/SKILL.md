@@ -181,6 +181,8 @@ axis.
 Workflow({
   name: "openclaw-full-audit",
   args: {
+    context_artifact: <compiler 產物 context_artifact_v1 exact object，必須 inline，缺即 throw>,
+    admission_now_ms: <派發側 epoch-ms admission 時鐘；沙箱無牆鐘，缺即 throw>,
     baseline: {
       source_head: "<40-hex>",
       dirty_diff_hash: "sha256:<64-hex>",
@@ -190,12 +192,12 @@ Workflow({
     },
     scope,
     dirty_scope: ["<sorted-repo-path>"],
-    surfaces: ["full_audit", "agent_workflow", "authority", "runtime", "bybit", "ibkr", "ml", "gui", "docs"],
+    surfaces: ["full_audit", "agent_workflow", "authority", "ml", "gui", "docs"],
     focus,
     scheduler: "adaptive_shadow",
     task_contract_digest: "sha256:<64-hex>",
     context_artifact_digest: "sha256:<64-hex>",
-    route_required_roles: ["CC", "AI-E", "QC", "MIT", "OPS", "BB", "IB"],
+    route_required_roles: ["CC", "AI-E", "QC", "MIT"],
     budget_authority_canonical: "<exact compiler-produced canonical JSON bytes>",
     budget_authority_digest: "sha256:<64-hex>",
     run_sequence: 0,
@@ -203,6 +205,16 @@ Workflow({
   }
 })
 ```
+
+注意（07-24 治理版配方）：surfaces **勿含 runtime/pg/service/cron/deploy 家族與
+bybit/ibkr**（runtime-claim surface 定義見 openclaw-full-audit.js:694）——admission
+要求 `evidence_debt` 全空，含之必炸；runtime 身份改走 `baseline.runtime_head` +
+`runtime_observed_at`。route_required_roles 一律以 compiler route 產出的
+required_role_nodes 為準，勿手寫（上例 surfaces 無 bybit/ibkr 故無 BB/IB；無
+runtime 家族則 operations_needed=false 故亦無 OPS；加回對應 surfaces 時由 route
+產出帶回）。caller 端
+scope/focus/surfaces 必須與 inline contract 逐字一致。完整配方 = compile_context → materialize_context_artifact → scriptPath 嵌入
+（見 workflow 檔頭 parseArgs 與 memory `reference_ultracode_full_audit.md`）。
 
 `openclaw-full-audit` finds defects. `profit-diagnosis` finds money. Profit
 diagnosis requires a fresh baseline and hash-pinned current priors, allows an
