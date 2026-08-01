@@ -44,14 +44,14 @@ from agent_governance_aiml_adoption import (  # noqa: E402
 
 def _async_function_syntax(source: str) -> subprocess.CompletedProcess[str]:
     wrapper = (
+        "const fs=require('fs');"
+        "const source=fs.readFileSync(0,'utf8');"
         "const AsyncFunction=Object.getPrototypeOf(async function(){}).constructor;"
-        "new AsyncFunction('args','phase','log','parallel','pipeline','agent',"
-        + json.dumps(source.replace("export const meta =", "const meta ="))
-        + ");"
+        "new AsyncFunction('args','phase','log','parallel','pipeline','agent',source);"
     )
     return subprocess.run(
         ["node", "-e", wrapper], cwd=ROOT, text=True, capture_output=True,
-        check=False,
+        input=source.replace("export const meta =", "const meta ="), check=False,
     )
 
 
