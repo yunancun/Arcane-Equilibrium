@@ -712,6 +712,12 @@ current generation 重驗。
   禁 while+sleep watch 迴圈。
 - 禁 tail/監看自身 session transcript 目錄；`subagents/` transcript mtime 只作
   TaskStop 前的 liveness spot-check（見 sub-agent-hygiene-sop），不作常駐輪詢。
+- 具名例外（desktop BG wave idle-kill 對策）：desktop local-agent 背景 wave
+  派發後，session idle 900s 會不可復活地殺死全部 in-flight subagents
+  （CLAUDE.md §八與 sub-agent-hygiene-sop 記錄的根因）；此場景允許以 blocking
+  `TaskOutput` 或 foreground-parallel Agent call 維持 in-turn 駐留直到收齊。
+  本例外僅限該駐留等收場景，不得援引為 CI/PR watch 迴圈或 transcript 常駐輪詢
+  的豁免；非 desktop BG wave 的等待仍一律事件驅動。
 
 **Review 批次收口**：
 
@@ -725,6 +731,9 @@ current generation 重驗。
 
 ## 12. 終態凍結（BLOCKED_OPERATOR_ACTION_PACKET_READY）
 
+- 適用範圍（不追溯）：本節適用於 2026-08-01 之後新發出 packet 的弧。現行
+  S2E/LW 弧（TODO 派發看板所示、operator 既有批准）依原批准續行至 S2E.5
+  exit，不受本節追溯凍結；其後同弧任何新增 readiness 層即受本節約束。
 - packet 發出後，該弧進入 `WAITING(named operator action)`：唯一合法後續是
   operator 執行 packet，或 operator 顯式 reopen。
 - 不得由 sprint 級命令對同一弧再開新的 readiness 層（S2 → S2E → LW 的三層先例
@@ -738,6 +747,9 @@ current generation 重驗。
 
 ## 13. Meta-work 邊界
 
+- 生效時點：本節自 2026-08-01 框架健檢 remediation 各 lane 整合（merge）完成後
+  生效；該次 operator 批准的 remediation 批次本身（含並行 lane 對治理測試檔的
+  改動）不追溯計入凍結與佔比。
 - 治理測試家族凍結：tests/structure 的 governance 測試家族
   （`test_agent_governance*` 與 `test_development_agent_governance*`）淨行數
   不得再增；新增 gate 需先刪等量舊 gate（同一 change 內淨行數 ≤ 0）。

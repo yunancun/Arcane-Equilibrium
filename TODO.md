@@ -16,7 +16,7 @@
 
 ## AI/ML 一分鐘派發看板
 
-本節只負責回答四件事：**現在做哪個 Sprint、包含哪些 Session、哪些可並行、何時停止**。S0 已關閉，S1=`S1_CLOSED`；S2 七個窄義 source seams 均 landed，但 effect-execution readiness 尚未完成。九個拆分包已完成 **5/9**：`S2E.0`、`S2E.1`、`S2E.2a`、`S2E.2b-1`、`S2E.3`；**現在唯一派發 `S2E.2b-2`**，其後 `S2E.2b-3 → S2E.4 → S2E.5`。不得重開 WP1-WP5 或五個已完成包，不得執行 `DRAFT_NOT_EXECUTABLE` packet，不得把 source/CI 當 runtime。28 條 obligations 必須從 live ABI 枚舉並逐條關閉或裁決。詳細 scope 以本 TODO 的 S2E 表與 `PROGRESS.md` ledger v19 為準；兩者衝突時停止，由 PM 綁定 current generation。
+本節只負責回答四件事：**現在做哪個 Sprint、包含哪些 Session、哪些可並行、何時停止**。S0 已關閉，S1=`S1_CLOSED`；S2 七個窄義 source seams 均 landed，但 effect-execution readiness 尚未完成。九個拆分包已完成 **5/9**：`S2E.0`、`S2E.1`、`S2E.2a`、`S2E.2b-1`、`S2E.3`；**現在唯一派發 `S2E.2b-2`**，其後 `S2E.2b-3 → S2E.4 → S2E.5`。不得重開 WP1-WP5 或五個已完成包，不得執行 `DRAFT_NOT_EXECUTABLE` packet，不得把 source/CI 當 runtime。28 條 obligations 必須從 live ABI 枚舉並逐條關閉或裁決。詳細 scope 以本 TODO 的 S2E 表與 `PROGRESS.md` ledger v20 為準；兩者衝突時停止，由 PM 綁定 current generation。
 
 ### 命令解析
 
