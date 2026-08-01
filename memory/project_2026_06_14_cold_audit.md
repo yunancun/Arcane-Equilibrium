@@ -3,7 +3,6 @@ name: project_2026_06_14_cold_audit
 description: "全盤冷酷審計 ultracode 12軸+seam;凍結 976d420e,無 P0/CRITICAL,confirmed P1 三項"
 metadata: 
   node_type: memory
-  heat: 0
   type: project
   originSessionId: e4edc993-6380-45df-9d97-f38b704f30ed
 ---

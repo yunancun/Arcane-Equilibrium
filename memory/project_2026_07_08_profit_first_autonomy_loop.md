@@ -3,7 +3,6 @@ name: project_2026_07_08_profit_first_autonomy_loop
 description: "承 maker-nogo 但拒『窮盡剩 operator-hand』;standing profit-first 自主 loop——TradeBot 自跑 discover→admit→execute→review→learn,現 READY_FOR_PM_E3_DISPATCH 卡 stale BBO manifest,零 order/fill proof"
 metadata:
   node_type: memory
-  heat: 0
   type: project
   originSessionId: b8f94432-3891-440a-ba13-f17896dd26d5
 ---

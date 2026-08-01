@@ -1,7 +1,6 @@
 ---
 name: five-repo-subagent-token-eval
 description: 2026-06-11 五 repo 評估+P0/P1 落地(rtk hook 全鏈/四態契約/25 descriptions/SessionStart 路由)— 裁決、落地紀錄、教訓;rtk PR#2399 待 CLA;P2 待拍
-heat: 2
 metadata: 
   node_type: memory
   type: project

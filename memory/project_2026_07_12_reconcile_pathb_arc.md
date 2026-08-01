@@ -4,7 +4,6 @@ description: 玄衡 治理 reconcile (demo 引擎↔api-demo) Path B advisory-fi
 metadata:
   node_type: memory
   type: project
-  heat: 0
   originSessionId: e68bbc7b-975e-4ab2-8841-819d97ee4669
 ---
 

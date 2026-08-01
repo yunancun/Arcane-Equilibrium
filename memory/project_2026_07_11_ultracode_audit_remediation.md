@@ -3,7 +3,6 @@ name: project_2026_07_11_ultracode_audit_remediation
 description: "ultracode 全盤審計弧:07-11 審計→修復→部署 + 07-24 run0 治理版全審(9C/1L/3D/1R,S1 P1 fix branch 未併=首要,adaptive 會漏 44%)"
 metadata: 
   node_type: memory
-  heat: 0
   type: project
   originSessionId: 76772c74-e189-4bd6-afb6-fa63d693bdfe
   modified: 2026-07-24T01:16:28.667Z

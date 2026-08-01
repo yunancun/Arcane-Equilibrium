@@ -3,7 +3,6 @@ name: project_2026_07_08_ibkr_stock_etf_readonly
 description: "首個非-Bybit 資產類:美股/ETF via IBKR,stock_etf_cash lane(ADR-0048);AMD-2026-07-11-01 Accepted=full live-capability development 授權(活化分離:envelope+Operator 紀錄);工程總綱 IBKR_TODO.md 上 main;runtime dormant,Bybit path 不變"
 metadata:
   node_type: memory
-  heat: 0
   type: project
   originSessionId: b8f94432-3891-440a-ba13-f17896dd26d5
 ---
