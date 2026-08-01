@@ -34,12 +34,21 @@ operator 批准全部優化建議(P0 機制級:禁 blocking 輪詢/session 分�
 - `agent/fw-skills-trim-20260801`(skill 教科書段壓縮/agent 檔整併/full-audit 數字修正)
 - `agent/fw-memory-hygiene-20260801`(本檔所在 lane:P2-12 memory 衛生全項——治理頭廢 heat/三權威條更正/24 超限行壓縮/16 死 SHA 清除/鐵則退役+分級正本/topic 檔整併)
 
+## 落地紀錄(2026-08-01)
+- **四 PR 全 merge**:#165 protocol/#166 tiering/#167 memory/#168 skills,main head `a1efe2bfb`。
+- 三級分級 Linux 驗證:19 opus + 3 sonnet。
+- Linux memory rsync 完成(live=repo 135 檔)。
+- **第二刀=本 PR**(skills 正確性修正):6 agents 分析+對抗覆核→30 條 CONFIRMED 落地(死指針改活/幻影表名·段名·路徑校正/雙正本收斂/寫死狀態句移除);1 REFUTED(gui-style-guide Chart.js 條——trading.html 實載 lightweight-charts,不動)+1 DOWNGRADE_TO_KEEP(pr-adversarial-review「何時觸發」段含 unstaged scope 增量,不動)。淨體積變化≈0 屬預期:本輪產出是正確性非省量。
+
 ## wave2 待辦(裁決在案,未入本輪四 lane)
 - WP-D context artifact delta 化(共享段 content-addressed 單發+引用;delta 輪只發真 delta;final 輪觀察型 role 改摘要)
 - P1-7 W5-owned path 縮面(中央 schema 註冊移出或 receipt 綁 schema digest;全 suite 三方重跑改一方執行+兩方驗 capture digest)
 - agent 檔 ceremony trim(共用 boilerplate 可省 ~40%/檔;**交易安全 gate 條款(CC/BB/IB/OPS/E3 refuses)逐字保留不可動**)
 - 殭屍 session 清理+44 codex worktree(9.8GB)/58 本地 branch GC
 - 附帶安全發現(另行處理軌,非本弧範疇):本地 settings allowlist 內嵌 PAT,已列撤銷/輪換待辦
+- agent-wave saved-workflow tier 綁定(workflow 派發側尚未讀 registry model/effort 欄)
+- Codex toml model pin(codex 側 config 未跟進三級分級)
+- `memory/README.md` 拓撲描述更正:「Linux live 為權威」已與現實相反——現實=Mac 經 symlink 直寫 repo,Linux 是 rsync 收端
 
 ## 教訓
 - 條數 cap 不擋增長,只改變增長形狀(擠成行內膨脹)——cap 類治理必須配機械檢查(≤250 一行 python 可驗)。
