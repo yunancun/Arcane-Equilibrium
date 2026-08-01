@@ -6,8 +6,8 @@ allowed-tools: Read, Grep, Glob, Bash
 
 # Performance Profiling（效能分析）
 
-> Authority 使用 `.codex/agent_registry_v1.json` typed matrix：normative policy、implementation contract、active work state、runtime observation、external policy、claim evidence 只在同類內比較。跨類不一致標 DRIFT/CONFLICT；runtime 不得合法化 policy denial。
-> 即時內容依相應 authority class 與 fresh evidence 取得，本 skill 不寫死也不建立全局總排序。
+> Authority typed matrix 正本見 `16-root-principles-checklist` 頭部（`.codex/agent_registry_v1.json` 定義）：只在同類內比較，跨類標 DRIFT/CONFLICT，runtime 不得合法化 policy denial；即時內容依 authority class 與 fresh evidence 取得，本 skill 不寫死。
+> 以內建知識為底：flamegraph / cargo-bloat / py-spy / memray / cProfile / pg_stat_statements 等工具用法通識不在本檔重述；本檔只列本專案的 SLA 正本、硬體預算與判準。
 
 **本檔為 SLA 閾值唯一正本（H0 Gate <1ms / Tick path <0.3ms / IPC round-trip <5ms），他檔引用不重述。**
 SLA 來源：CLAUDE.md 硬件 memory + 工程實測 baseline；與真實 runtime 衝突以實測為準。
@@ -28,93 +28,23 @@ SLA 來源：CLAUDE.md 硬件 memory + 工程實測 baseline；與真實 runtime
 | NAS via 10GbE | 40TB | 歷史 kline / log archive | I/O 走網路非本地 |
 | CPU | M-series | Rust + Python tokio runtime | 不能 over-thread |
 
-## 三層工具鏈
+## 工具鏈選型（用法靠內建知識）
 
-### Rust（hot path）
-```bash
-# Flamegraph（CPU sample）
-cargo install flamegraph
-RUSTFLAGS='-C debuginfo=2' cargo build --release -p openclaw_engine
-sudo flamegraph -o engine.svg -- target/release/openclaw_engine
-
-# Binary size
-cargo install cargo-bloat
-cargo bloat --release -p openclaw_engine --crates -n 30
-
-# Compile-time bloat
-cargo bloat --release --time -j 1
-
-# Macro expansion（找 PyO3/sqlx 過度展開）
-cargo install cargo-expand
-cargo expand -p openclaw_engine <module>
-
-# Audit
-cargo audit && cargo deny check
-
-# Bench
-cargo bench -p openclaw_engine -- --save-baseline before
-# ... change ...
-cargo bench -p openclaw_engine -- --baseline before
-```
-
-### Python
-```bash
-# Sampling profiler（不阻塞 prod）
-pip install py-spy
-sudo py-spy record -o flame.svg --pid <uvicorn-pid> --duration 60
-
-# Top 即時
-sudo py-spy top --pid <uvicorn-pid>
-
-# cProfile（測試/離線）
-python -m cProfile -o out.prof script.py
-python -m pstats out.prof  # interactive
-
-# Memory
-pip install memray
-memray run -o trace.bin script.py
-memray flamegraph trace.bin
-
-# Async-specific
-pip install aiomonitor       # live tasks list
-```
-
-### PostgreSQL
-```sql
--- 啟用 pg_stat_statements 後
-SELECT query, calls, mean_exec_time, total_exec_time
-FROM pg_stat_statements
-ORDER BY mean_exec_time DESC LIMIT 20;
-
--- 慢 query
-ALTER SYSTEM SET log_min_duration_statement = 100;  -- ms
-SELECT pg_reload_conf();
-
--- 鎖等
-SELECT * FROM pg_stat_activity WHERE wait_event_type IS NOT NULL;
-
--- Index 使用率
-SELECT schemaname, relname, idx_scan, seq_scan
-FROM pg_stat_user_tables ORDER BY seq_scan DESC LIMIT 20;
-
--- TimescaleDB hypertable chunks
-SELECT * FROM timescaledb_information.chunks
-WHERE hypertable_name = 'fills' ORDER BY range_end DESC LIMIT 10;
-```
+- **Rust hot path**：flamegraph（`RUSTFLAGS='-C debuginfo=2'` release build）、cargo-bloat（crates + compile-time）、cargo-expand（找 sqlx 過度展開）、cargo audit / deny、criterion bench（`--save-baseline before` / `--baseline before` 對比）
+- **Python**：py-spy（sampling，不阻塞 prod uvicorn）、cProfile（離線）、memray（memory）、aiomonitor（live async tasks）
+- **PostgreSQL**：pg_stat_statements（mean_exec_time top）、`log_min_duration_statement=100`、pg_stat_activity 鎖等、pg_stat_user_tables seq_scan、`timescaledb_information.chunks`
 
 ## 工作流（5 步）
 
 1. **建 baseline** — 改前 `cargo bench --save-baseline before` + py-spy 60s + pg_stat_reset()
 2. **改動** — 套用優化
-3. **驗證** — `cargo bench --baseline before`（比對）+ 同 workload 再 60s py-spy + pg_stat_statements diff
+3. **驗證** — `cargo bench --baseline before` + 同 workload 再 60s py-spy + pg_stat_statements diff
 4. **回歸測試** — cargo test + pytest 全綠
 5. **報告** — 改前/改後 P50 / P95 / P99 + RAM peak + binary size + 結論 PASS/FAIL
 
 ## OpenClaw context — 不在本 skill 列具體熱點路徑
 
-具體熱點檔案 / 行數 / 模組分布隨 commit 演進變動（refactor / split / rename 都會讓 cite 過期）。**本 skill 不寫死**避免 sub-agent 引過期路徑。
-
-實際熱點必跑 profiler 取真值：Rust `flamegraph` + `cargo bloat`；Python `py-spy top` + `memray`；PostgreSQL `pg_stat_statements` + `pg_stat_user_tables`（見 §三層工具鏈段）。從 profile 結果再決定優化目標 — **不從本 skill 預設熱點清單**。
+具體熱點檔案 / 行數 / 模組分布隨 commit 演進變動。**本 skill 不寫死**避免 sub-agent 引過期路徑。實際熱點必跑 profiler 取真值，從 profile 結果再決定優化目標 — **不從預設熱點清單**。
 
 ## 紅旗（直接標 FAIL）
 
@@ -149,7 +79,6 @@ after：commit `<sha-after>`
 
 ## 改動清單
 | 檔 | 動作 | 預期效益 | 實測 |
-|---|---|---|---|
 
 ## 紅旗發現
 （list）

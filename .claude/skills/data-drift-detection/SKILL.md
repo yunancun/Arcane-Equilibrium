@@ -6,78 +6,34 @@ allowed-tools: Read, Grep, Glob, Bash
 
 # Data Drift Detection（資料漂移偵測手冊）
 
-> Authority 使用 `.codex/agent_registry_v1.json` typed matrix：normative policy、implementation contract、active work state、runtime observation、external policy、claim evidence 只在同類內比較。跨類不一致標 DRIFT/CONFLICT；runtime 不得合法化 policy denial。
-> 即時內容依相應 authority class 與 fresh evidence 取得，本 skill 不寫死也不建立全局總排序。
+> Authority typed matrix 正本見 `16-root-principles-checklist` 頭部（`.codex/agent_registry_v1.json` 定義）：只在同類內比較，跨類標 DRIFT/CONFLICT，runtime 不得合法化 policy denial；即時內容依 authority class 與 fresh evidence 取得，本 skill 不寫死。
+> 以內建知識為底：covariate/concept/label drift 分類、PSI/KL/KS/Wasserstein/JS/Chi² 公式、DDM/Page-Hinkley 不在本檔重述；本檔只列本專案的閾值判準、監控接線與 SSOT 指針。
 
 ## 何時觸發
 
-- MIT 收到「Live 階段 ML 模型表現衰減」「為何 model accuracy 從 80% 掉到 60%」「regime 切換偵測」
-- ML 模型上線後每週例行 drift check
-- regime change 顯著事件（如 Fed 大幅升降息、crypto crash、大 listing）後重新 audit
-- model_registry V023 的 production model 持續監控
+- MIT 收到「Live 階段 ML 模型表現衰減」「accuracy 掉」「regime 切換偵測」
+- ML 模型上線後每週例行 drift check；顯著 regime 事件後重新 audit
+- model_registry 的 production model 持續監控
 
 ## ★ 黃金法則
 
-**ML 模型 live 表現衰減 = drift / regime 切換 / leakage / 資料管線壞**。前三者要 drift detection 工具區分。
+**ML live 表現衰減 = drift / regime 切換 / leakage / 資料管線壞**，用 drift detection 工具區分前三者。
 **Drift 不必然 = 重訓**：先判斷 drift 性質，再決定動作（重訓 / 換特徵 / 暫停 model）。
+OpenClaw 經驗：crypto 主要面對 covariate + concept drift；label drift 較罕見（除非 regime 從 trending → ranging）。
 
-## 1. Drift 三種類型
+> ⚠️ **執行需求**：PSI / KS / Wasserstein 計算需 Python 套件（scipy / sklearn / numpy）；無 venv → 協調 E1 跑或在 Linux runtime 跑。
 
-### 1.1 Covariate Drift（X 分布變了）
-- `P(X)` 變動但 `P(y|X)` 不變
-- 例：BTC 價從 30k 漲到 60k，volatility regime 變但 「strategy logic on X」 仍對
-- 偵測：feature 分布監控
+## 1. 專案閾值判準
 
-### 1.2 Concept Drift（X→y 關係變了）
-- `P(y|X)` 變動
-- 例：QE 期間「funding > 0.1% → 後續 mean revert」現在不成立
-- 偵測：模型 prediction error rate 上升 + feature 分布未變
+- PSI：業界 default < 0.1 穩定 / 0.1-0.25 警告 / > 0.25 漂移（**建議起點，非治理硬規範**；依 model + symbol 動態調整）
+- KS test p < 0.05 = drift；KL / Wasserstein 看趨勢無絕對閾值
+- 警報門檻：single feature PSI > 0.25 → warning；**≥ 3 features PSI > 0.25 同時 → critical**；KS p < 0.01 持續 1 hour → critical
+- crypto fat tail：不可用 normal 假設算檢定
 
-### 1.3 Label Drift（y 分布變了）
-- `P(y)` 變動
-- 例：原本 50/50 long/short label 變 30/70
-- 偵測：label histogram 對比
+## 2. 監控架構
 
-OpenClaw 經驗：crypto 主要面對 covariate + concept drift，label drift 較罕見（除非 regime 從 trending → ranging）。
+三組對照：**Reference**（training set 分布，fixed）/ **Production**（live 最新 N hour）/ **Last week**（上週同期 trend）。
 
-## 2. 偵測指標對照表
-
-| 指標 | 適用 | 公式 / 概念 | 閾值 |
-|---|---|---|---|
-| **PSI** (Population Stability Index) | 連續 / 分組 feature 分布 | Σ (P_curr − P_ref) × ln(P_curr / P_ref) | 業界 default：< 0.1 穩定 / 0.1-0.25 警告 / > 0.25 漂移（**建議起點，非治理硬規範**；具體閾值依 model + symbol 動態調整）|
-| **KL Divergence** | 連續分布相對熵 | Σ P_curr × ln(P_curr / P_ref) | 沒有絕對閾值，看趨勢 |
-| **KS Test** (Kolmogorov-Smirnov) | 連續分布 hypothesis test | sup\|F_curr(x) − F_ref(x)\| | p < 0.05 = drift |
-| **Wasserstein Distance** | Earth-Mover's distance | min cost transport between distributions | 數值依 feature scale |
-| **Chi-squared** | 類別 feature | Σ (O−E)²/E | p < 0.05 = drift |
-| **JS Divergence** | KL 對稱版 | (KL(P\|M) + KL(Q\|M))/2 with M=(P+Q)/2 | 範圍 [0, ln 2] |
-
-### PSI 詳細
-
-> ⚠️ **執行需求**：PSI / KS / Wasserstein 計算需要 Python 套件（scipy / scikit-learn / numpy）。MIT agent tools (Read, Grep, Glob, Bash) 可跑 Python 但需 venv 預備好；無 venv → 協調 E1 跑或在 Linux runtime 跑。
-
-```python
-import numpy as np
-
-def psi(reference, current, bins=10):
-    bin_edges = np.percentile(reference, np.linspace(0, 100, bins+1))
-    ref_dist, _ = np.histogram(reference, bins=bin_edges)
-    cur_dist, _ = np.histogram(current, bins=bin_edges)
-    
-    # avoid zero division
-    ref_pct = (ref_dist + 1e-9) / sum(ref_dist + 1e-9)
-    cur_pct = (cur_dist + 1e-9) / sum(cur_dist + 1e-9)
-    
-    return np.sum((cur_pct - ref_pct) * np.log(cur_pct / ref_pct))
-```
-
-## 3. 監控架構
-
-### 3.1 三組對照
-- **Reference**：training set 分布（fixed）
-- **Production**：live 最新 N hour 資料
-- **Last week**：上週同期（trend）
-
-### 3.2 監控頻率
 | 用途 | 頻率 |
 |---|---|
 | Per-feature distribution | 每 hour |
@@ -85,42 +41,23 @@ def psi(reference, current, bins=10):
 | Per-segment（per symbol / strategy）| 每 day |
 | Regime indicator（vol / funding / spread）| 每 5 min |
 
-### 3.3 警報門檻
-- Single feature PSI > 0.25 → warning
-- ≥ 3 features PSI > 0.25 同時 → critical
-- KS test p < 0.01 持續 1 hour → critical
+Concept drift：live prediction error 比 OOS error 高 > 50% → 警報；用 `helper_scripts/db/passive_wait_healthcheck.py` cron 每 6h 跑；DDM / Page-Hinkley 靠內建知識。
 
-## 4. Concept Drift 偵測
-
-### 4.1 直接法：error rate monitoring
-- live prediction error 比 OOS error 高 > 50% → concept drift 警報
-- 用 `helper_scripts/db/passive_wait_healthcheck.py` cron 每 6h 跑
-
-### 4.2 間接法：DDM (Drift Detection Method)
-- 偵測 error rate 的 mean + std 變化
-- 觸發後 alert + 進入 retraining queue
-
-### 4.3 間接法：Page-Hinkley test
-- 累計偏差超門檻觸發
-
-## 5. Drift 後的動作決策樹
+## 3. Drift 後的動作決策樹
 
 ```
 1. Drift 偵測 → severity 分級
-2. severity 低（PSI 0.1-0.25 single feature）：
-   → 繼續觀察，每天重 check
-3. severity 中（PSI > 0.25 single 或多 feature warning）：
-   → 暫停 model 寫倉位（shadow mode）
-   → 7d 內重訓計劃
-4. severity 高（多 feature critical 或 prediction error rate 飆）：
+2. 低（PSI 0.1-0.25 single feature）：繼續觀察，每天重 check
+3. 中（PSI > 0.25 single 或多 feature warning）：暫停 model 寫倉位（shadow mode）+ 7d 內重訓計劃
+4. 高（多 feature critical 或 prediction error rate 飆）：
    → 立即下線 model（fallback 到 baseline strategy）
    → 24h 內 RCA：drift type / regime change / data pipeline?
    → 修復後重訓 + canary 重新部署
 ```
 
-## 6. OpenClaw 特定 drift signals
+## 4. OpenClaw 特定 drift signals
 
-### 6.1 Crypto regime indicators
+### 4.1 Crypto regime indicators
 | Indicator | 監控 | drift 信號 |
 |---|---|---|
 | BTC realized vol (24h) | 每 5 min | > 90 percentile → vol regime shift |
@@ -129,24 +66,12 @@ def psi(reference, current, bins=10):
 | Open Interest change | 每 5 min | > 20% in 1h → cascade event |
 | Cross-symbol correlation | 每 hour | > 0.9 spike → risk-off sync |
 
-### 6.2 Model-specific drift（不在本 skill 列具體 OpenClaw feature）
+### 4.2 Model-specific drift（不在本 skill 列具體 feature）
+各 model / strategy 特定 drift signal 隨策略增刪 + feature 演進變動，**本 skill 不寫死**。通用模式（不會 drift）：對每個 production model 列 top-3 high-importance features → 逐個算 PSI + KS p-value → 異常即 alert。具體 feature 列表由 audit 開始時 grep `learning.X_features` schema + `feature_importance` query 取真值。
 
-各 model / strategy 特定的 drift signal（feature 名稱 / 閾值 / regime shift trigger）會隨策略增刪 + feature engineering 演進變動。**本 skill 不寫死**避免 sub-agent 引過期 feature 名。
+## 5. 工作流（10 步）
 
-**通用模式**（不會 drift）：對每個 production model 列出 top-3 high-importance features → 逐個算 PSI + KS p-value → 異常即 alert。具體 feature 列表必由 audit 開始時 grep `learning.X_features` schema + `feature_importance` query 取真值。
-
-## 7. 工作流（10 步）
-
-1. **設定 reference window**（training set period）
-2. **設定 current window**（last 24h / 7d）
-3. **逐 feature 算 PSI / KS / Wasserstein**
-4. **逐 segment 算同樣指標**（per symbol / per strategy）
-5. **prediction distribution drift**（KS test on score）
-6. **Error rate drift**（DDM / Page-Hinkley）
-7. **Regime indicator 監控**
-8. **Aggregate severity**（low / medium / high）
-9. **Decision tree 觸發動作**
-10. **報告 + memory update**
+1. 設定 reference window（training set period）→ 2. 設定 current window（last 24h / 7d）→ 3. 逐 feature 算 PSI / KS / Wasserstein → 4. 逐 segment 同指標（per symbol / strategy）→ 5. prediction distribution drift（KS on score）→ 6. Error rate drift（DDM / Page-Hinkley）→ 7. Regime indicator 監控 → 8. Aggregate severity → 9. Decision tree 觸發動作 → 10. 報告。
 
 ## 穩定 drift rule（不會 drift）
 
@@ -156,7 +81,7 @@ reference + current 兩個 window 都必 `engine_mode IN ('live','live_demo')` f
 
 - 沒 reference window → 沒比對基準
 - 只看 single PSI 閾值 0.25 → 忽略多 feature 累積警報
-- 沒 per-segment 監控 → 整體看穩但 ETHUSDT drift
+- 沒 per-segment 監控 → 整體看穩但單 symbol drift
 - error rate 上升不查 drift（只看絕對值）
 - drift 警報後立即 retrain（不先判斷 type）
 - 沒 fallback baseline strategy → 下線 model 後系統 idle
@@ -168,8 +93,7 @@ reference + current 兩個 window 都必 `engine_mode IN ('live','live_demo')` f
 # MIT Data Drift Audit — <model> · <date>
 
 ## Reference / Current windows
-- ref: [t0, t1] (training set)
-- curr: [now-24h, now]
+- ref: [t0, t1] (training set)；curr: [now-24h, now]
 
 ## Per-feature drift
 | Feature | PSI | KS p | Wasserstein | severity |
@@ -190,7 +114,7 @@ KS p: X / drift: Y/N
 low / medium / high
 
 ## 建議動作
-（依 §5 decision tree）
+（依 §3 decision tree）
 
 MIT returns an immutable `role_fragment_v1` with `payload_kind=finding_fragment_v1` for the task closure; no automatic report or memory append.
 ```

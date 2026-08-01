@@ -6,8 +6,8 @@ allowed-tools: Read, Grep, Glob, Bash
 
 # Feature Engineering Protocol（特徵工程嚴謹性手冊）
 
-> Authority 使用 `.codex/agent_registry_v1.json` typed matrix：normative policy、implementation contract、active work state、runtime observation、external policy、claim evidence 只在同類內比較。跨類不一致標 DRIFT/CONFLICT；runtime 不得合法化 policy denial。
-> 即時內容依相應 authority class 與 fresh evidence 取得，本 skill 不寫死也不建立全局總排序。
+> Authority typed matrix 正本見 `16-root-principles-checklist` 頭部（`.codex/agent_registry_v1.json` 定義）：只在同類內比較，跨類標 DRIFT/CONFLICT，runtime 不得合法化 policy denial；即時內容依 authority class 與 fresh evidence 取得，本 skill 不寫死。
+> 以內建知識為底：leakage 類型學的通用定義與偵測法不在本檔重述；本檔只列本專案的已驗實例、判準與 SSOT 指針。
 
 ## 何時觸發
 
@@ -17,137 +17,38 @@ allowed-tools: Read, Grep, Glob, Bash
 
 ## ★ 黃金法則
 
-**特徵 leakage = 隱形殺手**：模型 IS 80% 準、OOS 50% 準（隨機）= leakage。
-**回測 IS 看著漂亮 + Live 部署崩 = 80% 機率是 feature leakage**。
+**特徵 leakage = 隱形殺手**：IS 80% 準、OOS 50% 準（隨機）= leakage。**回測 IS 漂亮 + Live 崩 = 80% 機率是 feature leakage**。
 
-## 6 大 Leakage 類型
+## 6 大 Leakage 類型 — OpenClaw 判準與已驗實例
+
+（各類型通用定義與偵測法靠內建知識；逐 feature × target 檢查時全 6 類都要過。）
 
 ### 1. Look-ahead Bias（時序穿越）
-
-**定義**：feature_t 用了 t 之後才能知道的資訊。
-
-**OpenClaw 已驗實例**：
-- `bb_breakout` F3 RETRACT：Donchian breach 用 rolling(N).max() **含 current bar**，breach 變成「current 是 N-bar max」必 mean revert（memory `feedback_indicator_lookahead_bias`）
-- 修法：所有 rolling stat 必加 `.shift(1)` 或用 `.iloc[:-1]` 截 current bar
-
-**偵測**：
-```python
-# 反例（leak）
-df['bb_upper'] = df['close'].rolling(20).mean() + 2 * df['close'].rolling(20).std()
-df['breach'] = df['close'] > df['bb_upper']  # current bar 在 rolling 內
-
-# 正解（leak-free）
-df['bb_upper'] = df['close'].shift(1).rolling(20).mean() + 2 * df['close'].shift(1).rolling(20).std()
-df['breach'] = df['close'] > df['bb_upper']
-```
+- **OpenClaw 已驗實例**：`bb_breakout` F3 RETRACT — Donchian breach 用 rolling(N).max() **含 current bar**，breach 變成「current 是 N-bar max」必 mean revert（memory `feedback_indicator_lookahead_bias`）
+- 修法：所有 rolling stat 必加 `.shift(1)` 或 `.iloc[:-1]` 截 current bar；審計時要求並列 leak-free 版對比
 
 ### 2. Target Leakage（標籤穿越）
-
-**定義**：feature 計算用了 target window 內的資訊。
-
-**例**：預測「下一根 K 線方向」，feature 用 0:00-0:30 OHLC 平均，但 target window 是 0:00-1:00 → feature 已知 target window 一半。
-
-**OpenClaw 警覺**：`exit_features` table 計算 `giveback_atr_norm` 必須用 entry tick 之前的 ATR（不能含 entry 後的 price action）。
-
-**偵測**：
-- 對每個 feature 列出「需要哪些 timestamp」
-- 對每個 target 列出「target window 範圍」
-- feature ts 重疊 target window → leak
+- **OpenClaw 警覺**：`exit_features` 的 `giveback_atr_norm` 必須用 entry tick 之前的 ATR（不能含 entry 後 price action）
+- 偵測：對每 feature 列「依賴的 timestamp」、對每 target 列「window 範圍」；feature ts 重疊 target window → leak
 
 ### 3. Survivorship Bias（倖存偏差）
-
-**定義**：訓練集只含「至今仍 live」的 symbol，已下市的不在內 → 模型過樂觀。
-
-**OpenClaw 例**：Bybit delist 過的 symbol（如某些低交易量 perp）若不在 training set，模型沒學到 delisting risk。
-
-**偵測**：
-```sql
--- Symbol 完整性審計
-SELECT symbol, min(ts), max(ts), 
-       (max(ts) - min(ts)) / interval '1d' as tenure_days
-FROM trading.fills 
-WHERE engine_mode IN ('live', 'live_demo', 'demo')
-GROUP BY symbol
-ORDER BY tenure_days DESC;
--- 比對 Bybit 當前 active perp 列表，找出已 delist 的
-```
+- **OpenClaw 例**：Bybit delist 過的 symbol 若不在 training set，模型沒學到 delisting risk
+- 偵測 SQL：`SELECT symbol, min(ts), max(ts) FROM trading.fills WHERE engine_mode IN ('live','live_demo','demo') GROUP BY symbol` 後比對 Bybit 當前 active perp 列表；訓練集全是 survivor = 壞
 
 ### 4. Cross-Section Leakage（橫截面穿越）
-
-**定義**：normalize / rank / standardize 用了**全 universe** 同期 cross-section 資訊（OK，當天可知），但若 standardize parameter（如 mean / std）用了**全期**資訊（含未來）→ leak。
-
-**正解**：
-```python
-# 反例（用全期 mean / std）
-df['z_score'] = (df['return'] - df['return'].mean()) / df['return'].std()
-
-# 正解（expanding window）
-df['z_score'] = (df['return'] - df['return'].expanding().mean()) / df['return'].expanding().std()
-```
+- 同期 cross-section normalize OK；standardize parameter（mean / std）用**全期**資訊 = leak → 改 expanding window
 
 ### 5. Time-Zone / Boundary Leakage
-
-**定義**：跨 timezone 或跨 day boundary 時用了「未來」timezone 資料。
-
-**OpenClaw 警覺**：funding settlement 整點 UTC 是固定的，但若 feature 計算用「local time of fill」可能跨 settlement 邊界拿後續 funding 資訊。
-
-**檢查**：所有 timestamp 必統一 UTC。Bybit API 都是 ms-unix-UTC。
+- **OpenClaw 警覺**：funding settlement 整點 UTC 固定，feature 用「local time of fill」可能跨 settlement 邊界拿後續 funding 資訊
+- 檢查：所有 timestamp 統一 UTC；Bybit API 都是 ms-unix-UTC
 
 ### 6. Re-sample Boundary Leakage
+- 從 1m resample 到 5m / 1h 時，未 close 的 partial bar 被當完整 bar 用 = leak
+- 正解：resample 後**只用已 closed bar**（`isClosed=true` 或 `now() > bar_end_time`）
 
-**定義**：從 1m k-line resample 到 5m / 1h，未 close 的 bar 被當完整 bar 用。
+## 偵測 SQL 注意
 
-**例**：當前時間 12:03，5m bar 12:00-12:05 still building。若 model 用此 partial bar 的 OHLC → feature 含「未來 12:03-12:05」（其實是還沒到的）資訊。
-
-**正解**：resample 後**只用已 closed bar**（`isClosed=true` 或 `now() > bar_end_time`）。
-
-## 偵測 SQL 範本
-
-> 範本中表名（`learning.feature_metadata` / `learning.feature_target_pairs` / `learning.training_set` 等）為**示意 schema**；執行前先以 `information_schema.tables` 驗證存在，不存在則在報告標註並改用實際表名。
-
-### A. Look-ahead 偵測（per feature × per timestamp）
-```sql
--- 對每個 feature 找出實際依賴的最後 timestamp
-WITH feature_lookback AS (
-  SELECT feature_name, 
-         max(input_ts) as last_input_ts,
-         feature_computed_at
-  FROM learning.feature_metadata
-  GROUP BY feature_name, feature_computed_at
-)
-SELECT feature_name, 
-       count(*) FILTER (WHERE last_input_ts > feature_computed_at) as leakage_rows
-FROM feature_lookback
-GROUP BY feature_name;
--- leakage_rows > 0 = leak
-```
-
-### B. Target window 重疊偵測
-```sql
--- feature_window_end 必須 < target_window_start
-SELECT feature_name, target_name,
-       count(*) FILTER (WHERE feature_window_end >= target_window_start) as overlap_count
-FROM learning.feature_target_pairs
-GROUP BY feature_name, target_name;
-```
-
-### C. Survivorship 偵測
-```sql
--- 比對 training period 期間 active vs current active
-WITH training_symbols AS (
-  SELECT DISTINCT symbol FROM learning.training_set 
-  WHERE date_range = 'last_90d'
-),
-current_active AS (
-  SELECT DISTINCT symbol FROM trading.fills WHERE ts > now() - interval '7d'
-)
-SELECT 'in_training_not_current' as type, count(*)
-FROM training_symbols t
-LEFT JOIN current_active c USING (symbol)
-WHERE c.symbol IS NULL;
--- > 0 個 → 至少 training 含 delisted symbol（好）
--- = 0 → 訓練集全是 survivor（壞，survivorship bias）
-```
+偵測 SQL 範本中的表名（`learning.feature_metadata` / `learning.feature_target_pairs` / `learning.training_set` 等）為**示意 schema**；執行前先以 `information_schema.tables` 驗證存在，不存在則在報告標註並改用實際表名。核心查法：feature 依賴的最後 input_ts 不得晚於 feature_computed_at；feature_window_end 必須 < target_window_start；training set 與 current active symbol 差集檢驗 survivorship。
 
 ## 7 步審計工作流
 
@@ -156,18 +57,18 @@ WHERE c.symbol IS NULL;
 3. **Leakage type 6 維度逐查** — 對每 feature × target 跑 6 維檢查
 4. **shift(1) 強制** — 任何 rolling stat 必加（OpenClaw 教訓）
 5. **Resample 邊界** — 確認非 partial bar
-6. **Cross-validation 驗 leakage 影響** — TimeSeriesSplit + purge + embargo（用 `time-series-cv-protocol` skill）
+6. **CV 驗 leakage 影響** — TimeSeriesSplit + purge + embargo（用 `time-series-cv-protocol`）
 7. **IS vs OOS Sharpe 差距** — > 50% 必 RCA leak
 
 ## 穩定 ML feature rule（不會 drift）
 
-training filter 必含 'live' + 'live_demo'（不混 paper）；任何 rolling stat 必加 `.shift(1)` leak-free（rolling.max() 含 current bar 是已知 measurement bias）；resample 後只用 closed bar（`isClosed=true`）；feature ts 必早於 target window start（不重疊）。table 名 / column / row 量必跑 SQL 取真值。
+training filter 必含 'live' + 'live_demo'（不混 paper）；任何 rolling stat 必加 `.shift(1)` leak-free；resample 後只用 closed bar（`isClosed=true`）；feature ts 必早於 target window start（不重疊）。table 名 / column / row 量必跑 SQL 取真值。
 
 ## Cross-Skill 互引（避免重述）
 
-- **C1.c pipeline 成熟度評級**：本 skill 看單表 leakage（feature 設計層面）；**writer/consumer/row/decision-impact 4 維度評級 + Foundation/Skeleton/Shadow/Canary/Production 5 階段**走 `ml-pipeline-maturity-audit`
-- **C1.h schema 設計 + Guard A/B/C migration**：feature 對應 column 設計（hypertable / chunk / partial index）走 `db-schema-design-financial-time-series`
-- **CV 設計 / Purge / Embargo**：feature 訓練時的 train/test split 走 `time-series-cv-protocol`（MIT），與本 skill 的 leakage 偵測互為前後 — 本 skill 解 feature-side leakage，time-series-cv 解 split-side leakage
+- **C1.c pipeline 成熟度評級**：本 skill 看單表 leakage（feature 設計層面）；4 維度評級 + 5 階段走 `ml-pipeline-maturity-audit`
+- **C1.h schema 設計 + Guard A/B/C migration**：走 `db-schema-design-financial-time-series`
+- **CV 設計 / Purge / Embargo**：走 `time-series-cv-protocol`（MIT）— 本 skill 解 feature-side leakage，time-series-cv 解 split-side leakage
 
 ## 反模式（見即 Reject）
 
@@ -193,12 +94,6 @@ training filter 必含 'live' + 'live_demo'（不混 paper）；任何 rolling s
 
 ## 6 Leakage 類型逐項
 | 類型 | 命中 features | 證據 |
-| Look-ahead | | |
-| Target leak | | |
-| Survivorship | | |
-| Cross-section | | |
-| Time-zone | | |
-| Resample boundary | | |
 
 ## shift(1) compliance
 | feature | shift(1)? | 備註 |

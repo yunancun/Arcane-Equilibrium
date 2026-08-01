@@ -17,6 +17,8 @@ allowed-tools: Read, Grep, Glob
 > 即時策略/閾值/端點/baseline 來自相應 implementation/runtime/active-state
 > class，不能反向改寫 normative permission。
 
+> 以內建知識為底：通識不在本檔重述；本檔只列本專案的偏離、教訓與 SSOT 指針。本頭部 typed matrix 段為全 skill 家族唯一正本，他檔以一行指針引用。
+
 > **S6 P0/P1/P2 cross-ref**：三層風控定義見 `srv/docs/decisions/EX-01_..._V2.md` §2.1-§2.3；本 skill 引用屬語意重述。
 
 ## 何時觸發

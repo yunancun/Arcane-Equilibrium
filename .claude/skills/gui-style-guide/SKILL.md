@@ -6,8 +6,8 @@ allowed-tools: Read, Grep, Glob, Edit, Write, Bash
 
 # GUI Style Guide（OpenClaw Control Console）
 
-> Authority 使用 `.codex/agent_registry_v1.json` typed matrix：normative policy、implementation contract、active work state、runtime observation、external policy、claim evidence 只在同類內比較。跨類不一致標 DRIFT/CONFLICT；runtime 不得合法化 policy denial。
-> 即時內容依相應 authority class 與 fresh evidence 取得，本 skill 不寫死也不建立全局總排序。
+> Authority typed matrix 正本見 `16-root-principles-checklist` 頭部（`.codex/agent_registry_v1.json` 定義）：只在同類內比較，跨類標 DRIFT/CONFLICT，runtime 不得合法化 policy denial；即時內容依 authority class 與 fresh evidence 取得，本 skill 不寫死。
+> 以內建知識為底：通識不在本檔重述；本檔只列本專案的偏離、教訓與 SSOT 指針。
 
 > ⚠️ **GUI 結構**：Control Console tab 清單以 `README.md`
 > 「OpenClaw Control Console 核心 Tab」表為準（不寫死數量）。`ocEsc` /

@@ -5,6 +5,8 @@ description: PA architecture investigator; use for cross-module, cross-runtime, 
 
 # Architecture Depth Review
 
+> 以內建知識為底：通識不在本檔重述；本檔只列本專案的偏離、教訓與 SSOT 指針。
+
 Find the shortest durable design that preserves authority, evidence, and
 operability. Savings count as profit only when they do not increase false
 closure, rework, or irreversible-risk exposure.
