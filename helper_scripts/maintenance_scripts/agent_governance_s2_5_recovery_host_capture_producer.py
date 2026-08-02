@@ -13,13 +13,13 @@ import json
 import os
 import platform
 import stat
-import subprocess
 import sys
 from datetime import datetime, timedelta, timezone
 from pathlib import Path
 from typing import Any
 
 import agent_governance_s2_5_disposable_profile as profile
+import agent_governance_s2_host_kernel as host_kernel
 from aiml_gate_receipt_s2_5_host_capture import (
     HOST_CAPTURE_ADMISSION_CLASS,
     HOST_CAPTURE_ADMISSION_SCHEMA_VERSION,
@@ -38,14 +38,12 @@ from aiml_gate_receipt_s2_5_host_capture import (
 from aiml_gate_receipt_schema_core import artifact_self_digest
 
 
-REPO_ROOT = Path(__file__).resolve().parents[2]
 MACHINE_ID_PATH = Path("/etc/machine-id")
 OS_RELEASE_PATH = Path("/etc/os-release")
 BOOT_ID_PATH = Path("/proc/sys/kernel/random/boot_id")
 SELF_CGROUP_PATH = Path("/proc/self/cgroup")
 CAPTURE_TTL = timedelta(minutes=5)
 MAX_FACT_BYTES = 64 * 1024
-MAX_SIGNATURE_BYTES = 16 * 1024
 
 
 def _sha256(raw: bytes) -> str:
@@ -80,21 +78,17 @@ def _read_fixed_fact(path: Path, *, label: str) -> bytes:
 
 
 def _git_source_head() -> str:
-    for argv in (
-        ["git", "diff", "--quiet"],
-        ["git", "diff", "--cached", "--quiet"],
-    ):
-        completed = subprocess.run(argv, cwd=REPO_ROOT, check=False)
-        if completed.returncode != 0:
-            raise ValueError("host capture source checkout has tracked changes")
-    completed = subprocess.run(
-        ["git", "rev-parse", "--verify", "HEAD^{commit}"],
-        cwd=REPO_ROOT,
-        check=True,
-        capture_output=True,
-        text=True,
+    kernel = host_kernel.HostExecutionKernel(
+        session=host_kernel.SESSION_S2_5_RECOVERY_HOST_CAPTURE
     )
-    head = completed.stdout.strip()
+    try:
+        for argv in host_kernel.RECOVERY_HOST_CAPTURE_CLEAN_ARGV:
+            kernel.run(argv)
+        head = kernel.run(host_kernel.RECOVERY_HOST_CAPTURE_HEAD_ARGV).strip()
+    except host_kernel.S2HostKernelError as error:
+        raise ValueError(
+            "host capture source checkout is unavailable or has tracked changes"
+        ) from error
     if len(head) != 40 or any(character not in "0123456789abcdef" for character in head):
         raise ValueError("host capture source head is invalid")
     return head
@@ -152,23 +146,12 @@ def _invoke_fixed_signer_capability(payload: bytes) -> str:
         or not stat.S_IMODE(metadata.st_mode) & 0o111
     ):
         raise ValueError("fixed host-capture signer capability is not trusted")
-    completed = subprocess.run(
-        [str(path), "--protocol", HOST_CAPTURE_SIGNER_CAPABILITY_PROTOCOL],
-        input=payload,
-        capture_output=True,
-        check=False,
-    )
-    if completed.returncode != 0:
-        raise ValueError("fixed host-capture signer capability denied the request")
-    if completed.stderr or not (1 <= len(completed.stdout) <= MAX_SIGNATURE_BYTES):
-        raise ValueError("fixed host-capture signer capability response is invalid")
     try:
-        signature = completed.stdout.decode("ascii").strip()
-    except UnicodeDecodeError as error:
-        raise ValueError("host-capture signature is not ASCII") from error
-    if not signature:
-        raise ValueError("host-capture signature is empty")
-    return signature
+        return host_kernel.HostExecutionKernel(
+            session=host_kernel.SESSION_S2_5_RECOVERY_HOST_CAPTURE
+        ).sign_recovery_host_capture(payload)
+    except host_kernel.S2HostKernelError as error:
+        raise ValueError("fixed host-capture signer capability denied the request") from error
 
 
 def capture_s2_5_recovery_host() -> dict[str, Any]:

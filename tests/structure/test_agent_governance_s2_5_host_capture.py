@@ -26,6 +26,7 @@ import aiml_gate_receipt_validator as validator  # noqa: E402
 import agent_governance_s2_5_disposable_profile as disposable_profile  # noqa: E402
 import agent_governance_s2_5_lifecycle as lifecycle  # noqa: E402
 import agent_governance_s2_5_recovery_host_capture_producer as producer  # noqa: E402
+import agent_governance_s2_host_kernel as host_kernel  # noqa: E402
 
 
 HOST_CAPTURE_SCHEMA = "s2_5_recovery_host_capture_v1"
@@ -249,6 +250,35 @@ def test_fixed_signer_capability_rejects_symlink_and_untrusted_mode(
     with pytest.raises(ValueError, match="not trusted"):
         producer._invoke_fixed_signer_capability(b"payload")
 
+
+def test_fixed_producer_delegates_source_head_to_exact_kernel_argv(monkeypatch):
+    calls: list[tuple[str, ...]] = []
+
+    class _Kernel:
+        def __init__(self, *, session):
+            assert session == host_kernel.SESSION_S2_5_RECOVERY_HOST_CAPTURE
+
+        def run(self, argv):
+            candidate = tuple(argv)
+            calls.append(candidate)
+            if candidate == host_kernel.RECOVERY_HOST_CAPTURE_HEAD_ARGV:
+                return HEAD + "\n"
+            return ""
+
+    monkeypatch.setattr(producer.host_kernel, "HostExecutionKernel", _Kernel)
+    assert producer._git_source_head() == HEAD
+    assert calls == [
+        *host_kernel.RECOVERY_HOST_CAPTURE_CLEAN_ARGV,
+        host_kernel.RECOVERY_HOST_CAPTURE_HEAD_ARGV,
+    ]
+
+
+def test_kernel_signer_binding_equals_receipt_owner_constants():
+    assert host_kernel.RECOVERY_HOST_CAPTURE_SIGNER_ARGV == (
+        host_capture.HOST_CAPTURE_SIGNER_CAPABILITY_PATH,
+        "--protocol",
+        host_capture.HOST_CAPTURE_SIGNER_CAPABILITY_PROTOCOL,
+    )
 
 def test_producer_public_surface_has_no_caller_selected_identity_or_clock():
     assert list(inspect.signature(producer.capture_s2_5_recovery_host).parameters) == []
