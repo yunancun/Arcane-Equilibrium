@@ -132,7 +132,6 @@ jobs:
   # consuming a Rust build or macOS 10x minute.
   development-agent-governance:
     name: development-agent governance (cheap static gate)
-    timeout-minutes: 45
     needs: changes
     if: needs.changes.outputs.governance == 'true'
     runs-on: ubuntu-latest

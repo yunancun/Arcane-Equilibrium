@@ -14,7 +14,7 @@
   （追認審計 wf_b7aae581 五維度事後補審＝實質過關）
 - 新 row ×3：`P1-ROLE-MEMORY-PROMOTION-VERIFIER`、
   `P2-AGENT-WAVE-BLOCKED-PREDECESSOR`、`P2-W5-PROJECTION-MEMOIZATION`
-- ci.yml governance job 補 timeout-minutes: 45；SCRIPT_INDEX 補登 #164 五腳本
+- ci.yml governance job 既有 timeout-minutes: 30(#164 已設);SCRIPT_INDEX 補登 #164 五腳本
 - Codex platform memories 通道保留（operator 2026-08-02 裁決）＋權威邊界註記
   （hint 級、repo 恆勝；luna=extraction lane 專屬指派，tier 治理範圍外）
 
