@@ -576,7 +576,7 @@ def _predecessor_registry_attestation(
         "purpose": "ATTEST_S2E_PREDECESSOR_SINGLE_USE_GRANT",
         "evidence_class": "PLATFORM_OR_EXTERNAL_ATTESTED",
         "registry_class": "HOST_APPEND_ONLY_PREDECESSOR_REGISTRY_V1",
-        "registry_locator": "registry:external-append-only:s2e",
+        "registry_locator": "registry:host-append-only:s2e",
         **{
             field: request[field]
             for field in (

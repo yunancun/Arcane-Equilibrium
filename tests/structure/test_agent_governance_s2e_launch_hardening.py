@@ -189,7 +189,7 @@ def _review_for_wave(
             "anchor": "fixed_off_repo_public_trust_root_v1",
             "key_fingerprint": case["fingerprint"],
         },
-        "external_worm_binding": None,
+        "durability_anchor_binding": None,
     }
     signed = validator.s2e_acceptance_review_signed_bytes(bundle)
     bundle["signed_core_digest"] = "sha256:" + hashlib.sha256(signed).hexdigest()
@@ -203,32 +203,15 @@ def _review_for_wave(
             directory=tmp_path,
         ),
     }
-    intent, result, readback = support._external_worm_triplet(
+    anchor_attestation = support._durability_anchor_attestation(
         validator.s2e_acceptance_review_worm_payload(bundle),
-        source_head=candidate["source_head"],
-        landing_scope_id=candidate["payload_digest"],
-        learning_runtime_digest=candidate["launch_contract_digest"],
-        issued_at=issued_at,
-        intent_id=f"s2e-wave-review-{intent_suffix}",
-    )
-    provider_attestation = support._external_worm_provider_attestation(
-        intent,
-        result,
-        readback,
         trust=case["external_trust"],
         issued_at=issued_at,
         directory=tmp_path,
     )
-    bundle["external_worm_binding"] = {
-        "result_digest": result["result_digest"],
-        "readback_ack_digest": readback["ack_digest"],
-        "record_locator": result["record_locator"],
-        "object_version_id": result["object_version_id"],
-        "checksum_sha256": result["checksum_sha256"],
-        "provider_attestation_digest": provider_attestation[
-            "attestation_digest"
-        ],
-    }
+    bundle["durability_anchor_binding"] = support._anchor_binding(
+        anchor_attestation
+    )
     bundle["bundle_digest"] = validator.s2e_acceptance_review_bundle_digest(
         bundle
     )
@@ -291,16 +274,7 @@ def _review_for_wave(
         "_trusted_issuance_now",
         lambda: case["now"] + timedelta(minutes=1),
     )
-    return (
-        bundle,
-        capture,
-        chain,
-        intent,
-        result,
-        readback,
-        provider_attestation,
-        bootstrap,
-    )
+    return (bundle, capture, chain, anchor_attestation, bootstrap)
 
 
 def _issue_wave(
@@ -310,7 +284,7 @@ def _issue_wave(
     *,
     bootstrap_authority: object = _DEFAULT_BOOTSTRAP,
 ) -> dict:
-    bundle, capture, chain, intent, result, readback, provider, bootstrap = review
+    bundle, capture, chain, anchor, bootstrap = review
     selected_bootstrap = (
         bootstrap
         if bootstrap_authority is _DEFAULT_BOOTSTRAP
@@ -322,10 +296,7 @@ def _issue_wave(
         repo_root=case["repo"],
         governed_capture_record=capture,
         disposable_test_effect_chains=[chain],
-        external_append_intent=intent,
-        external_append_result=result,
-        external_readback_ack=readback,
-        external_worm_provider_attestation=provider,
+        durability_anchor_attestation=anchor,
         predecessor_receipt=case["issued"],
         predecessor_authority=case["authority"],
         predecessor_consumption_bootstrap_authority=selected_bootstrap,
@@ -399,11 +370,8 @@ def test_historical_review_cannot_be_reissued_after_head_advances(
         disposable_test_effect_chains=authority[
             "review_disposable_test_effect_chains"
         ],
-        external_append_intent=authority["review_external_append_intent"],
-        external_append_result=authority["review_external_append_result"],
-        external_readback_ack=authority["review_external_readback_ack"],
-        external_worm_provider_attestation=authority[
-            "review_external_worm_provider_attestation"
+        durability_anchor_attestation=authority[
+            "review_durability_anchor_attestation"
         ],
     )
     assert result["status"] == "EXTERNAL_VERIFICATION_PENDING"
@@ -640,7 +608,7 @@ def test_wave_issuance_binds_effects_and_consumes_predecessor_once(
         case,
         sibling_review,
         sibling,
-        bootstrap_authority=review[7],
+        bootstrap_authority=review[4],
     )
     assert cross_candidate_authority["status"] == (
         "EXTERNAL_VERIFICATION_PENDING"
