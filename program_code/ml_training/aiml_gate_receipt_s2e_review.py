@@ -80,7 +80,6 @@ S2E_REVIEW_BASE_PATHS = (
         "typing_extensions-4.15.0-py3-none-any.whl"
     ),
     ".codex/schemas/closure_packet_v1.schema.json",
-    ".codex/schemas/s2e_lw1_operator_action_packet_v1.schema.json",
     "helper_scripts/maintenance_scripts/agent_governance_capture.py",
     "helper_scripts/maintenance_scripts/agent_governance_command_capture_v2.py",
     "helper_scripts/maintenance_scripts/agent_governance_command_replay.py",
@@ -97,10 +96,6 @@ S2E_REVIEW_BASE_PATHS = (
     "helper_scripts/maintenance_scripts/agent_governance_registry.py",
     "helper_scripts/maintenance_scripts/agent_governance_routing.py",
     "helper_scripts/maintenance_scripts/agent_governance_schema.py",
-    (
-        "helper_scripts/maintenance_scripts/"
-        "agent_governance_s2e_lw1_action_packet.py"
-    ),
     "helper_scripts/maintenance_scripts/agent_governance_s2e_launch_receipts.py",
     (
         "helper_scripts/maintenance_scripts/"
@@ -158,7 +153,6 @@ S2E_REVIEW_BASE_PATHS = (
     "tests/structure/test_agent_governance_s2e_launch_hardening.py",
     "tests/structure/test_agent_governance_s2e_launch_receipts.py",
     "tests/structure/test_agent_governance_s2e_external_evidence.py",
-    "tests/structure/test_agent_governance_s2e_lw1_action_packet.py",
 )
 S2E_LW1_REVIEW_PREFIXES = (
     ".codex/schemas/s2_5_recovery_",
