@@ -19,5 +19,6 @@ metadata:
 1. **thinking 治理改 per-lane effort**:舊鐵則「關閉 Adaptive Thinking」已退役——Fable 5 thinking 不可關(API 回 400),Opus 5 僅 effort≤high 可關,且 thinking 只佔總成本 ~1%,不是槓桿。控制成本的正確旋鈕是 per-lane effort 分級,不是關 thinking。
 2. **subagent 委派需上限而非鼓勵**:舊鐵則「強制先評估 sub-agent 拆分」已退役——Opus 5 官方 migration 指引明言新世代模型已過度委派,舊的「多委派」引導應刪除並加上限。委派決策以「一個 subagent 是否帶來淨決策增益」為準,不是默認拆分;月 output 65% 在 subagent 是本裁決的量化背景。
 3. 落地面:registry schema 加 model/effort 欄+renderer 透傳,見 `agent/fw-model-tiering-20260801` lane;本檔為政策正本,分級調整需 operator 裁決。
+4. memory extraction lane:Codex 平台 memories 抽取/整併模型 `gpt-5.6-luna` 屬該通道專屬指派,在 role 三級 tier 治理範圍外(operator 2026-08-02 裁決保留該通道;權威邊界=hint 級、repo 恆勝,見 `.codex/SUBAGENT_EXECUTION_RULES.md`)。
 
 兩條被退役鐵則原檔(含 superseded 註記)在 `archive/feedback_subagent_first.md` 與 `archive/feedback_disable_adaptive_thinking.md`;健檢弧見 [[project_2026_08_01_framework_health_audit]]。

@@ -44,6 +44,7 @@
 | `execution_plan/ai_ml_landing/PROGRESS-archive-1.md` | PROGRESS ledger v19 及更早世代歸檔；另暫存 S4-S8 未實例化 template rows（全 PLANNED 零 receipt），PM 開 S4 前必先遷回 active ledger 再實例化（archive 凍結）。 |
 | `execution_plan/ai_ml_landing/design/S2.4-W5-source-ready-gate-record.md` | 自 TODO.md S2.4 gate row 遷出的 W5 source-ready gate 全文記錄（TODO row 只留狀態+指標+連結）。 |
 | `execution_plan/ai_ml_landing/design/S2E-launch-wave-specs.md` | 自 TODO.md 五個 S2E LW row 遷出的 LW1-LW5 launch wave 完整規格（TODO rows 只留狀態+exit token+連結）。 |
+| `execution_plan/ai_ml_landing/design/W5-history-record.md` | 自 TODO.md L10 遷出的 W5 receipt 世代鏈歷史敘事（machine marker 與狀態仍在 TODO 原行）。 |
 | `execution_plan/2026-07-19--ai_ml_long_lived_repair_and_landing_plan.md` | 修訂為 `AIML-LONG-LIVED-LANDING-V2`：兩 root umbrella 下新增 LR-1/LR0A-C 與 ML0-ML10，終態按 platform scope + covered decision cells + environment promotion edge 分離；ML9 只產 candidate，S8.6 才可 trading landing，profit/live 另證。 |
 
 ### 2026-07-19 AI/ML 真實狀態、長效修復與落地方案

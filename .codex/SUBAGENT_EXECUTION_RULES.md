@@ -46,6 +46,13 @@ agents, loading less irrelevant context, using the Registry-selected tier, and
 stopping when evidence closes. Do not use runtime type, prompt length, or budget
 target as a proxy for intelligence.
 
+Codex platform memories (`[memories]` in `.codex/config.toml`) are hint-grade
+context only — not an authority class in the Typed Authority Matrix. On any
+conflict with repo-resident sources (docs/TODO/Registry/code), the repo wins;
+platform memories never justify skipping repo reads or overriding policy.
+Operator decision 2026-08-02: the channel stays enabled; its extraction lane
+model (`gpt-5.6-luna`) is outside role-tier governance.
+
 The PM-supplied capsule is the starting point, not a ceiling on autonomous source
 inspection. Mandatory objective/acceptance/hard-boundary/current-diff facts are
 lossless. If the capsule is incomplete, return `NEEDS_CONTEXT` with the exact
