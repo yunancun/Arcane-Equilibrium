@@ -139,6 +139,14 @@ RECOVERY_HOST_CAPTURE_CLEAN_ARGV = (
         "--quiet",
     ),
 )
+RECOVERY_HOST_CAPTURE_STATUS_ARGV = (
+    RECOVERY_HOST_CAPTURE_GIT,
+    "-C",
+    str(REPO_ROOT),
+    "status",
+    "--porcelain=v1",
+    "--untracked-files=all",
+)
 RECOVERY_HOST_CAPTURE_HEAD_ARGV = (
     RECOVERY_HOST_CAPTURE_GIT,
     "-C",
@@ -214,6 +222,7 @@ SESSION_ARGV_ALLOWLISTS: dict[str, frozenset[tuple[str, ...]]] = {
     SESSION_S2_1_QUIESCE_FENCE: frozenset(_derive_quiesce_fence_argv()),
     SESSION_S2_5_RECOVERY_HOST_CAPTURE: frozenset({
         *RECOVERY_HOST_CAPTURE_CLEAN_ARGV,
+        RECOVERY_HOST_CAPTURE_STATUS_ARGV,
         RECOVERY_HOST_CAPTURE_HEAD_ARGV,
         RECOVERY_HOST_CAPTURE_SIGNER_ARGV,
     }),

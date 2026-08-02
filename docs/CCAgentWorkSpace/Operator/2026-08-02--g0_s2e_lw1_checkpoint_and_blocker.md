@@ -20,4 +20,3 @@ provision；只提供 credential channel 名稱，禁止把 private key/token/se
 驗證：launch 相鄰 `180 passed, 3 skipped`；對抗回歸先抓到 9 個 raw-command/scanner failure，
 修復後 recovery/kernel `773 passed, 9 skipped`。authority 0/9、production effect 0/6；本輪沒有
 deploy/restart/PG/broker/order/runtime mutation。
-

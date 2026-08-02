@@ -84,10 +84,14 @@ def _git_source_head() -> str:
     try:
         for argv in host_kernel.RECOVERY_HOST_CAPTURE_CLEAN_ARGV:
             kernel.run(argv)
+        if kernel.run(host_kernel.RECOVERY_HOST_CAPTURE_STATUS_ARGV).strip():
+            raise ValueError(
+                "host capture source checkout contains untracked or modified files"
+            )
         head = kernel.run(host_kernel.RECOVERY_HOST_CAPTURE_HEAD_ARGV).strip()
-    except host_kernel.S2HostKernelError as error:
+    except (host_kernel.S2HostKernelError, ValueError) as error:
         raise ValueError(
-            "host capture source checkout is unavailable or has tracked changes"
+            "host capture source checkout is unavailable or not fully clean"
         ) from error
     if len(head) != 40 or any(character not in "0123456789abcdef" for character in head):
         raise ValueError("host capture source head is invalid")

@@ -1620,6 +1620,7 @@ def test_recovery_host_capture_allowlist_is_fixed_and_owner_bound():
         kernel.SESSION_S2_5_RECOVERY_HOST_CAPTURE
     ] == frozenset({
         *kernel.RECOVERY_HOST_CAPTURE_CLEAN_ARGV,
+        kernel.RECOVERY_HOST_CAPTURE_STATUS_ARGV,
         kernel.RECOVERY_HOST_CAPTURE_HEAD_ARGV,
         kernel.RECOVERY_HOST_CAPTURE_SIGNER_ARGV,
     })

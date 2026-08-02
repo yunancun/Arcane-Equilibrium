@@ -1,7 +1,7 @@
 # G0 / S2E-LW1 工程 checkpoint 與外部前置阻塞報告
 
-日期：2026-08-02  
-任務：`AIML-S2E-LW1-20260802`  
+日期：2026-08-02
+任務：`AIML-S2E-LW1-20260802`
 終態：`BLOCKED_EXTERNAL_PREREQUISITES_ACTION_PACKET_READY`
 
 ## PM 結論
@@ -39,8 +39,11 @@ loop 都不會產生合法 W0/LW1 receipt。
 5. `488077156` / `cbaacecc3`：新增 closed action-packet schema、builder/validator 與 13 個
    focused tests；blocker helper 刻意不擴張 256-item launch acceptance manifest。
 6. `1716307d8`：對抗回歸發現 producer 直接持有 `subprocess` 後，改由唯一
-   `HostExecutionKernel` 固定三條 Git argv 與 signer path/protocol；generic `run()` 不能呼叫
+   `HostExecutionKernel` 固定 Git argv 與 signer path/protocol；generic `run()` 不能呼叫
    signer，只有 bounded stdin 專用方法可進入。
+7. current-head 對抗複核補上 `git status --porcelain=v1 --untracked-files=all` 固定檢查；
+   host capture 現在會拒絕 tracked、staged 或 untracked 任一污染，避免未追蹤 Python 模組繞過
+   source-head binding。
 
 ## Current machine observation
 
@@ -91,4 +94,3 @@ GitHub Codex review 及 classifier-required checks。
 
 只有第 6 步的 current-head receipts 與 transition gate 真正 `ADVANCE`，才可投影
 `S2E_2B_2A_SECURITY_RECOVERY_READY` 並解鎖 LW2。
-

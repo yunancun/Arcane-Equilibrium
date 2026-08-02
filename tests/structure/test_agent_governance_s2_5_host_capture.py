@@ -269,8 +269,24 @@ def test_fixed_producer_delegates_source_head_to_exact_kernel_argv(monkeypatch):
     assert producer._git_source_head() == HEAD
     assert calls == [
         *host_kernel.RECOVERY_HOST_CAPTURE_CLEAN_ARGV,
+        host_kernel.RECOVERY_HOST_CAPTURE_STATUS_ARGV,
         host_kernel.RECOVERY_HOST_CAPTURE_HEAD_ARGV,
     ]
+
+
+def test_fixed_producer_rejects_untracked_source_files(monkeypatch):
+    class _Kernel:
+        def __init__(self, *, session):
+            assert session == host_kernel.SESSION_S2_5_RECOVERY_HOST_CAPTURE
+
+        def run(self, argv):
+            if tuple(argv) == host_kernel.RECOVERY_HOST_CAPTURE_STATUS_ARGV:
+                return "?? helper_scripts/maintenance_scripts/hashlib.py\n"
+            return ""
+
+    monkeypatch.setattr(producer.host_kernel, "HostExecutionKernel", _Kernel)
+    with pytest.raises(ValueError, match="not fully clean"):
+        producer._git_source_head()
 
 
 def test_kernel_signer_binding_equals_receipt_owner_constants():
