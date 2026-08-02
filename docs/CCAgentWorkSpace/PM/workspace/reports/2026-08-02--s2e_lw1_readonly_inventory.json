@@ -1,7 +1,7 @@
 {
   "schema_version": "s2e_lw1_readonly_inventory_v1",
   "host": "trade-core",
-  "observed_at": "2026-08-02T04:06:52Z",
+  "observed_at": "2026-08-02T14:51:53Z",
   "evidence_class": "UNAUTHENTICATED_READ_ONLY_OBSERVATION",
   "linux_source_head": "8656dd80df3c332ecb84ac57d8bf09aca9f72e37",
   "linux_worktree_clean": true,

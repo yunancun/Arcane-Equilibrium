@@ -1,9 +1,23 @@
 # CLAUDE_CHANGELOG.md — 開發歷史歸檔
 
 > 從 CLAUDE.md / TODO.md 遷出的 Wave/Sprint/Batch + TODO version-increment 歷史敘事。新 session 不需要讀此文件，僅供回顧歷史時查閱。
-> 最後更新：2026-08-02（TODO v870 LW1 provider-class final delta closure）
+> 最後更新：2026-08-02（TODO v871 LW1 attestor-owned host capture hardening）
 
 ---
+
+## TODO v871 增量：LW1 attestor-owned host capture hardening（2026-08-02）
+
+- current-head Codex review 在 `06efe0b89` 新增 1 個 safety P1：producer 與依賴先從
+  mutable checkout import，之後才驗 Git clean/HEAD；同 UID 程序可在 import 後還原 bytes，令
+  不同程式碼產出的 capture 被簽成乾淨 `HEAD`。
+- `e68966670` 移除 caller-authored signing path：unprivileged producer 不再採集 source/host/
+  process/clock facts，也不能向 signer 提交 payload；唯一 kernel exec point 以零輸入呼叫
+  root-owned `attest-v2` capability，由後者從 immutable source view 自主生成完整 SSHSIG artifact。
+  producer 只做 bounded duplicate-safe JSON parse、verifier-side clock freshness 與中央驗簽。
+- host-capture/action-packet focused `48 passed`，host-kernel `211 passed, 9 skipped`；S2E/
+  recovery adjacent set `416 passed, 9 skipped`。action packet 重綁 `e68966670`／tree
+  `6c0e49c9d`，digest `sha256:c13142b4…d5809`。終態不變：14/14 external prerequisites
+  blocking，W0/LW1 receipts absent、LW2 locked、authority 0/9、production effect 0/6。
 
 ## TODO v870 增量：LW1 provider-class final delta closure（2026-08-02）
 
