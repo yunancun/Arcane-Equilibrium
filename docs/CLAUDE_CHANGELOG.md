@@ -9,8 +9,8 @@
 
 - wave2 backlog 全項收口（PR#170-174；tier 綁定/Codex model pin 由 PR#164 提前
   交付判 NO-OP；WP-D store 實測 39 份 artifact 21.4MB→3.0MB）
-- PR#164 追認落帳：§13 演變注記＋凍結/計量 glob 修正＋基線重置（in-glob
-  86,203 行@245869d25）；TODO #164 row 的 exact-head review 宣稱如實更正
+- PR#164 追認落帳：§13 演變注記＋凍結/計量 glob 修正＋基線重置（原兩 glob
+  subtotal=86,203；擴展後四 glob 合計=87,967 行@245869d25）；TODO #164 row 的 exact-head review 宣稱如實更正
   （追認審計 wf_b7aae581 五維度事後補審＝實質過關）
 - 新 row ×3：`P1-ROLE-MEMORY-PROMOTION-VERIFIER`、
   `P2-AGENT-WAVE-BLOCKED-PREDECESSOR`、`P2-W5-PROJECTION-MEMOIZATION`
