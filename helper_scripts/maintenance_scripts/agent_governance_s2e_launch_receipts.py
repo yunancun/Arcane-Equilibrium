@@ -4,6 +4,7 @@
 from __future__ import annotations
 
 import argparse
+from datetime import datetime, timezone
 import json
 from pathlib import Path
 import sys
@@ -27,6 +28,19 @@ from aiml_gate_receipt_s2e_launch import (  # noqa: E402,F401
     validate_s2e_launch_wave_receipt,
     verify_receipt_carrier_attestation,
 )
+
+
+_HOST_CLOCK_ACTIONS = frozenset({
+    "generate-wave",
+    "validate",
+    "verify-carrier",
+    "build-predecessor-authority",
+    "transition-gate",
+})
+
+
+def _sample_utc_host_clock() -> str:
+    return datetime.now(timezone.utc).isoformat().replace("+00:00", "Z")
 
 
 def _read(path: Path) -> Any:
@@ -56,6 +70,12 @@ def _add_external_triplet(
         type=Path,
         required=True,
     )
+    parser.add_argument(
+        f"--{option_prefix}external-worm-provider-attestation",
+        dest=f"{destination_prefix}external_worm_provider_attestation",
+        type=Path,
+        required=True,
+    )
 
 
 def _parser() -> argparse.ArgumentParser:
@@ -74,7 +94,6 @@ def _parser() -> argparse.ArgumentParser:
     wave.add_argument("--schema-carrier-head", required=True)
     wave.add_argument("--predecessor-receipt", type=Path, required=True)
     wave.add_argument("--predecessor-authority", type=Path, required=True)
-    wave.add_argument("--now", required=True)
     wave.add_argument("--launch-contract-digest", required=True)
     wave.add_argument("--generation-task-contract-digest", required=True)
     validate = subparsers.add_parser("validate")
@@ -83,7 +102,6 @@ def _parser() -> argparse.ArgumentParser:
     validate.add_argument("--predecessor-receipt", type=Path)
     validate.add_argument("--predecessor-authority", type=Path)
     validate.add_argument("--payload-receipt", type=Path)
-    validate.add_argument("--now")
     issue = subparsers.add_parser("issue")
     issue.add_argument("--repo-root", type=Path, default=REPO_ROOT)
     issue.add_argument("--candidate", type=Path, required=True)
@@ -103,7 +121,6 @@ def _parser() -> argparse.ArgumentParser:
     carrier.add_argument("--attestation", type=Path, required=True)
     carrier.add_argument("--payload-receipt", type=Path, required=True)
     carrier.add_argument("--governed-capture-record", type=Path, required=True)
-    carrier.add_argument("--now", required=True)
     _add_external_triplet(carrier)
     authority = subparsers.add_parser("build-predecessor-authority")
     authority.add_argument("--repo-root", type=Path, default=REPO_ROOT)
@@ -124,7 +141,6 @@ def _parser() -> argparse.ArgumentParser:
     authority.add_argument(
         "--carrier-governed-capture-record", type=Path, required=True
     )
-    authority.add_argument("--now", required=True)
     _add_external_triplet(authority, prefix="review")
     _add_external_triplet(authority, prefix="carrier")
     transition = subparsers.add_parser("transition-gate")
@@ -136,12 +152,14 @@ def _parser() -> argparse.ArgumentParser:
     transition.add_argument(
         "--predecessor-authority", type=Path, required=True
     )
-    transition.add_argument("--now", required=True)
     return parser
 
 
 def main(argv: list[str] | None = None) -> int:
     args = _parser().parse_args(argv)
+    authority_now = (
+        _sample_utc_host_clock() if args.action in _HOST_CLOCK_ACTIONS else None
+    )
     if args.action == "generate-genesis":
         artifact = build_genesis_candidate(
             repo_root=args.repo_root,
@@ -162,7 +180,7 @@ def main(argv: list[str] | None = None) -> int:
             predecessor_authority=_read(args.predecessor_authority),
             launch_contract_digest=args.launch_contract_digest,
             generation_task_contract_digest=args.generation_task_contract_digest,
-            now=args.now,
+            now=authority_now,
         )
         print(json.dumps(artifact, ensure_ascii=False, sort_keys=True))
         return 0
@@ -178,6 +196,9 @@ def main(argv: list[str] | None = None) -> int:
             external_append_intent=_read(args.external_append_intent),
             external_append_result=_read(args.external_append_result),
             external_readback_ack=_read(args.external_readback_ack),
+            external_worm_provider_attestation=_read(
+                args.external_worm_provider_attestation
+            ),
             predecessor_receipt=(
                 _read(args.predecessor_receipt)
                 if args.predecessor_receipt is not None
@@ -202,11 +223,14 @@ def main(argv: list[str] | None = None) -> int:
             _read(args.attestation),
             payload_receipt=_read(args.payload_receipt),
             repo_root=args.repo_root,
-            now=args.now,
+            now=authority_now,
             governed_capture_record=_read(args.governed_capture_record),
             external_append_intent=_read(args.external_append_intent),
             external_append_result=_read(args.external_append_result),
             external_readback_ack=_read(args.external_readback_ack),
+            external_worm_provider_attestation=_read(
+                args.external_worm_provider_attestation
+            ),
         )
         print(json.dumps(result, ensure_ascii=False, sort_keys=True))
         return 0 if result.get("status") == "VERIFIED" else 2
@@ -232,6 +256,9 @@ def main(argv: list[str] | None = None) -> int:
             review_external_readback_ack=_read(
                 args.review_external_readback_ack
             ),
+            review_external_worm_provider_attestation=_read(
+                args.review_external_worm_provider_attestation
+            ),
             carrier_attestation=_read(args.carrier_attestation),
             carrier_governed_capture_record=_read(
                 args.carrier_governed_capture_record
@@ -245,8 +272,11 @@ def main(argv: list[str] | None = None) -> int:
             carrier_external_readback_ack=_read(
                 args.carrier_external_readback_ack
             ),
+            carrier_external_worm_provider_attestation=_read(
+                args.carrier_external_worm_provider_attestation
+            ),
             repo_root=args.repo_root,
-            now=args.now,
+            now=authority_now,
         )
         print(json.dumps(artifact, ensure_ascii=False, sort_keys=True))
         return 0
@@ -265,7 +295,7 @@ def main(argv: list[str] | None = None) -> int:
             predecessor_receipt=predecessor,
             predecessor_authority=authority,
             repo_root=args.repo_root,
-            now=args.now,
+            now=authority_now,
             consumed_predecessor_digests=frozenset(consumed),
         )
         status = "ADVANCE" if not errors else "FAIL"
@@ -285,14 +315,14 @@ def main(argv: list[str] | None = None) -> int:
                 artifact,
                 payload_receipt=_read(args.payload_receipt),
                 repo_root=args.repo_root,
-                now=args.now,
+                now=authority_now,
             )
     elif args.predecessor_receipt is None:
         errors = validate_s2e_launch_wave_receipt(artifact, repo_root=args.repo_root)
         status = "STRUCTURAL_PASS_NOT_ADVANCE" if not errors else "FAIL"
     else:
         predecessor = _read(args.predecessor_receipt)
-        if args.predecessor_authority is None or args.now is None:
+        if args.predecessor_authority is None:
             errors = validate_s2e_launch_transition_payload(
                 artifact,
                 predecessor_receipt=predecessor,
@@ -313,7 +343,7 @@ def main(argv: list[str] | None = None) -> int:
                 predecessor_receipt=predecessor,
                 predecessor_authority=authority,
                 repo_root=args.repo_root,
-                now=args.now,
+                now=authority_now,
                 consumed_predecessor_digests=frozenset(consumed),
             )
             status = "ADVANCE" if not errors else "FAIL"

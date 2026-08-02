@@ -214,7 +214,8 @@
         "readback_ack_digest",
         "record_locator",
         "object_version_id",
-        "checksum_sha256"
+        "checksum_sha256",
+        "provider_attestation_digest"
       ],
       "properties": {
         "result_digest": {"$ref": "#/$defs/digest"},
@@ -224,7 +225,8 @@
           "pattern": "^records/[0-9a-f]{64}\\.record$"
         },
         "object_version_id": {"type": "string", "minLength": 1, "maxLength": 256},
-        "checksum_sha256": {"$ref": "#/$defs/digest"}
+        "checksum_sha256": {"$ref": "#/$defs/digest"},
+        "provider_attestation_digest": {"$ref": "#/$defs/digest"}
       }
     }
   }

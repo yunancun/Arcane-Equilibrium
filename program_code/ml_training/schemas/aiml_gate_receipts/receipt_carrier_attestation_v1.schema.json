@@ -111,14 +111,18 @@
     "immutable_readback": {
       "type": "object",
       "additionalProperties": false,
-      "required": ["adapter", "object_id", "version_id", "readback_digest"],
+      "required": [
+        "adapter", "object_id", "version_id", "readback_digest",
+        "provider_attestation_digest"
+      ],
       "properties": {
         "adapter": {
           "enum": ["EXTERNAL_WORM_V1", "TRUSTED_HOST_SSHSIG_APPEND_ONLY_V1"]
         },
         "object_id": {"type": "string", "minLength": 1, "maxLength": 256},
         "version_id": {"type": "string", "minLength": 1, "maxLength": 128},
-        "readback_digest": {"$ref": "#/$defs/digest"}
+        "readback_digest": {"$ref": "#/$defs/digest"},
+        "provider_attestation_digest": {"$ref": "#/$defs/digest"}
       }
     },
     "signature": {

@@ -22,6 +22,11 @@
 5. :func:`assert_read_only_surface` —— 鏡 ``agent_governance_s2_4_install_driver
    .assert_no_aggregate_forbidden_surface``:物件上出現任一寫能力方法即 typed 拒,且**絕不呼叫**。
 
+S2E-LW1 的 recovery host-capture 另共用同一 exec point：root-owned attestor 的固定
+path/protocol 由本 kernel 封閉；attestor 只能走零輸入、bounded output 的專用方法，不能經
+generic :meth:`HostExecutionKernel.run` 呼叫。source head、host facts、process identity、clock
+與 SSHSIG 全由該 capability 自主採集，producer 不再把 mutable-checkout claims 送去代簽。
+
 外加兩件與 exec / 出境不可分割的執法:
 
 * :func:`enforce_process_hardening` 在**每一次**主機指令執行之前真的跑 ``prctl(PR_SET_DUMPABLE, 0)``
@@ -78,6 +83,10 @@ for _candidate in (HELPER_DIR, ML_TRAINING_DIR):
 # 進入點模組(pg_observer_bootstrap / alr_quiesce_fence / s2_4_* / s2_5_*),故 observer 的
 # import-closure ∩ applier == ∅ 可以成立。
 import agent_governance_alr_quiesce_inventory as quiesce_inventory  # noqa: E402
+from aiml_gate_receipt_s2_5_host_capture import (  # noqa: E402
+    HOST_CAPTURE_ATTESTOR_CAPABILITY_PATH,
+    HOST_CAPTURE_ATTESTOR_CAPABILITY_PROTOCOL,
+)
 
 
 class S2HostKernelError(RuntimeError):
@@ -107,10 +116,18 @@ class S2HostCommandFailed(S2HostKernelError):
 SESSION_S2_0_OBSERVER_BOOTSTRAP = "s2_0_pg_observer_bootstrap"
 SESSION_S2_1_QUIESCE_READ = "s2_1_quiesce_read"
 SESSION_S2_1_QUIESCE_FENCE = "s2_1_quiesce_fence"
+SESSION_S2_5_RECOVERY_HOST_CAPTURE = "s2_5_recovery_host_capture"
 # 唯讀 observer 的**進程分離**子行程(§B.2 L2)。它沒有字面 allowlist:argv 由
 # :meth:`HostExecutionKernel.run_observer_child` 於 kernel 內部**構造**(解譯器 + ``-E`` + 絕對
 # 腳本路徑 + 一段經 charset/大小驗證的 base64 request),caller 永遠遞不進 argv。
 SESSION_S2_HOST_OBSERVER_CHILD = "s2_host_observer_child"
+
+RECOVERY_HOST_CAPTURE_ATTESTOR_ARGV = (
+    HOST_CAPTURE_ATTESTOR_CAPABILITY_PATH,
+    "--protocol",
+    HOST_CAPTURE_ATTESTOR_CAPABILITY_PROTOCOL,
+)
+MAX_RECOVERY_HOST_CAPTURE_ARTIFACT_BYTES = 64 * 1024
 
 # 只有 fence session 允許變更主機狀態,且必須由 caller 顯式 ``allow_mutation=True`` 承認。
 MUTATING_SESSIONS = frozenset({SESSION_S2_1_QUIESCE_FENCE})
@@ -169,6 +186,9 @@ SESSION_ARGV_ALLOWLISTS: dict[str, frozenset[tuple[str, ...]]] = {
     SESSION_S2_0_OBSERVER_BOOTSTRAP: frozenset(),
     SESSION_S2_1_QUIESCE_READ: frozenset(_derive_quiesce_read_argv()),
     SESSION_S2_1_QUIESCE_FENCE: frozenset(_derive_quiesce_fence_argv()),
+    SESSION_S2_5_RECOVERY_HOST_CAPTURE: frozenset({
+        RECOVERY_HOST_CAPTURE_ATTESTOR_ARGV,
+    }),
     # observer child 的 argv 由 kernel 構造,故字面 allowlist 為空 ⇒ ``run()`` 對此 session 恆拒。
     SESSION_S2_HOST_OBSERVER_CHILD: frozenset(),
 }
@@ -178,6 +198,7 @@ SESSION_TIMEOUT_SECONDS: dict[str, int] = {
     SESSION_S2_0_OBSERVER_BOOTSTRAP: 30,
     SESSION_S2_1_QUIESCE_READ: 30,
     SESSION_S2_1_QUIESCE_FENCE: 120,
+    SESSION_S2_5_RECOVERY_HOST_CAPTURE: 30,
     SESSION_S2_HOST_OBSERVER_CHILD: 120,
 }
 
@@ -888,22 +909,52 @@ class HostExecutionKernel:
         argv = observer_child_argv(base64.b64encode(payload).decode("ascii"))
         enforce_process_hardening(force=True)
         self.calls.append(tuple(argv))
-        return self._execute(argv)
+        return _redact(self._execute(argv).stdout or b"")
 
     def run(self, argv: Iterable[str]) -> str:
         """Execute exactly one allowlisted argv and return its redacted stdout."""
 
         candidate = assert_session_argv(self.session, argv)
+        if candidate == RECOVERY_HOST_CAPTURE_ATTESTOR_ARGV:
+            raise S2HostSessionError(
+                "the recovery attestor requires the zero-input dedicated method"
+            )
         enforce_process_hardening(force=True)
         self.calls.append(candidate)
-        return self._execute(list(candidate))
+        return _redact(self._execute(list(candidate)).stdout or b"")
 
-    def _execute(self, candidate: list[str]) -> str:
+    def capture_recovery_host(self) -> bytes:
+        """Invoke the fixed attestor with no caller payload and return bounded JSON bytes."""
+
+        if self.session != SESSION_S2_5_RECOVERY_HOST_CAPTURE:
+            raise S2HostSessionError(
+                f"session {self.session!r} may not invoke the recovery attestor"
+            )
+        candidate = assert_session_argv(
+            self.session, RECOVERY_HOST_CAPTURE_ATTESTOR_ARGV
+        )
+        enforce_process_hardening(force=True)
+        self.calls.append(candidate)
+        completed = self._execute(list(candidate))
+        if completed.stderr or not (
+            1 <= len(completed.stdout) <= MAX_RECOVERY_HOST_CAPTURE_ARTIFACT_BYTES
+        ):
+            raise S2HostCommandFailed(
+                "fixed recovery host-capture attestor response is invalid"
+            )
+        return bytes(completed.stdout)
+
+    def _execute(
+        self,
+        candidate: list[str],
+        *,
+        stdin_bytes: bytes = b"",
+    ) -> Any:
         try:
             completed = subprocess.run(  # noqa: S603 - fixed absolute argv, shell=False, no caller string
                 list(candidate),
                 shell=False,
-                stdin=subprocess.DEVNULL,
+                input=stdin_bytes,
                 stdout=subprocess.PIPE,
                 stderr=subprocess.PIPE,
                 env=_safe_environment(),
@@ -923,7 +974,7 @@ class HostExecutionKernel:
                 f"S2 host command exited {completed.returncode} in session {self.session}: "
                 + _redact(completed.stderr or b"")[:400]
             )
-        return _redact(completed.stdout or b"")
+        return completed
 
 
 def kernel_abi_projection() -> dict[str, Any]:

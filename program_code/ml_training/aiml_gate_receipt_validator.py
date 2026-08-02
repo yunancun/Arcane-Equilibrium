@@ -183,7 +183,7 @@ from aiml_gate_receipt_adoption import (  # noqa: E402,F401
     validate_program_adoption_receipt,
 )
 from aiml_gate_receipt_s2e_launch import (  # noqa: E402,F401
-    build_s2e_launch_consumption_bootstrap_authority_core,
+    build_s2e_launch_consumption_bootstrap_authority_core, build_s2e_predecessor_registry_request,
     build_s2e_launch_predecessor_authority,
     build_s2e_disposable_test_effect_chain,
     canonical_launch_payload_bytes,
@@ -213,6 +213,9 @@ from aiml_gate_receipt_s2e_launch import (  # noqa: E402,F401
     validate_s2e_launch_transition,
     validate_s2e_launch_transition_payload,
     validate_s2e_launch_wave_receipt,
+)
+from aiml_gate_receipt_s2e_dispatch import (  # noqa: E402
+    s2e_launch_artifact_errors as _s2e_launch_artifact_errors,
 )
 from aiml_gate_receipt_source_compatibility import (  # noqa: E402,F401
     source_compatibility_receipt_errors as _source_compatibility_receipt_errors,
@@ -1763,34 +1766,12 @@ def validate_aiml_artifact(
         errors.extend(_program_adoption_receipt_errors(artifact))
     if schema_version == "source_compatibility_receipt_v1":
         errors.extend(_source_compatibility_receipt_errors(artifact))
-    if schema_version == "s2e_launch_genesis_receipt_v1":
-        errors.extend(validate_s2e_launch_genesis_receipt(artifact, repo_root=REPO_ROOT))
-    if schema_version == "s2e_launch_wave_receipt_v1":
-        errors.extend(validate_s2e_launch_wave_receipt(artifact, repo_root=REPO_ROOT))
-    if schema_version == "receipt_carrier_attestation_v1":
-        errors.extend(validate_receipt_carrier_attestation(
-            artifact, payload_receipt=None, repo_root=REPO_ROOT, now=now
-        ))
-    if schema_version == "s2e_launch_acceptance_review_bundle_v1":
-        # The generic API has no paired candidate, governed capture record,
-        # fixed-root SSHSIG profile, or external WORM result/readback inputs.
-        # Closed-schema validity therefore cannot authenticate acceptance.
-        errors.append(
-            "s2e acceptance review bundle EXTERNAL_VERIFICATION_PENDING: exact "
-            "candidate, governed capture, fixed-root SSHSIG, and external WORM "
-            "evidence are required"
-        )
-    if schema_version == "s2e_launch_consumption_bootstrap_authority_v1":
-        # The generic API has no exact candidate/predecessor chain, current
-        # acceptance-review digest, trusted-root SSHSIG evaluation time, or
-        # external single-use registry context.  Structural validity alone
-        # must never be presented as authenticated bootstrap authority.
-        errors.append(
-            "s2e consumption bootstrap authority "
-            "EXTERNAL_VERIFICATION_PENDING: exact candidate, predecessor "
-            "chain, acceptance review, fixed-root SSHSIG, and trusted "
-            "single-use registry evidence are required"
-        )
+    errors.extend(_s2e_launch_artifact_errors(
+        artifact,
+        schema_version=schema_version,
+        repo_root=REPO_ROOT,
+        now=now,
+    ))
     if schema_version in {"sealed_build_receipt_v1", "expected_identity_receipt_v1"}:
         # S2.3(LR2)sealed-build / expected-identity 是 BUILD-IDENTITY / source 產物
         # (content-addressed、可重算、production_running_attested=false、observation_owner=

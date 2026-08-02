@@ -1,9 +1,69 @@
 # CLAUDE_CHANGELOG.md — 開發歷史歸檔
 
 > 從 CLAUDE.md / TODO.md 遷出的 Wave/Sprint/Batch + TODO version-increment 歷史敘事。新 session 不需要讀此文件，僅供回顧歷史時查閱。
-> 最後更新：2026-08-02（TODO v866 wave2 收口＋PR#164 追認）
+> 最後更新：2026-08-02（TODO v871 LW1 attestor-owned host capture hardening）
 
 ---
+
+## TODO v871 增量：LW1 attestor-owned host capture hardening（2026-08-02）
+
+- current-head Codex review 在 `06efe0b89` 新增 1 個 safety P1：producer 與依賴先從
+  mutable checkout import，之後才驗 Git clean/HEAD；同 UID 程序可在 import 後還原 bytes，令
+  不同程式碼產出的 capture 被簽成乾淨 `HEAD`。
+- `e68966670` 移除 caller-authored signing path：unprivileged producer 不再採集 source/host/
+  process/clock facts，也不能向 signer 提交 payload；唯一 kernel exec point 以零輸入呼叫
+  root-owned `attest-v2` capability，由後者從 immutable source view 自主生成完整 SSHSIG artifact。
+  producer 只做 bounded duplicate-safe JSON parse、verifier-side clock freshness 與中央驗簽。
+- host-capture/action-packet focused `48 passed`，host-kernel `211 passed, 9 skipped`；S2E/
+  recovery adjacent set `416 passed, 9 skipped`。action packet 重綁 `e68966670`／tree
+  `6c0e49c9d`，digest `sha256:c13142b4…d5809`。終態不變：14/14 external prerequisites
+  blocking，W0/LW1 receipts absent、LW2 locked、authority 0/9、production effect 0/6。
+
+## TODO v870 增量：LW1 provider-class final delta closure（2026-08-02）
+
+- final Codex delta review 新增 1 個 safety P2：generic provider locator 仍容許 `file:`／`unix:`
+  等本地 backend 冒充 external provider evidence。
+- `d3a21f4e4` 以 schema exact pattern 與 validator semantic allowlist 雙層限定
+  `aws:s3-object-lock-attestor:<external-id>`；`file:`、`unix:`、`https:` 與 local fixture
+  全部 fail closed，S2E 關聯回歸 `90 passed`。
+- action packet 重綁 `d3a21f4e4`／tree `4905cd18f`，digest
+  `sha256:453733c8…524ee`。終態不變：14/14 external prerequisites blocking，W0/LW1
+  receipts absent、LW2 locked、authority 0/9、production effect 0/6。
+
+## TODO v869 增量：LW1 current-head review closure（2026-08-02）
+
+- GitHub Codex review 在 `d3bc5c011` 提出 2 P1＋2 P2：ignored bytecode 可能污染
+  source lineage、Ubuntu os-release symlink 會令 capture 永久失敗、provider locator 未 canonicalize、
+  predecessor registry locator 可接受 local/resettable backend。
+- `13c813968` 封閉全部四項：porcelain status 納入 ignored artifacts，os-release 固定讀取實機
+  確認的 `/usr/lib/os-release`，provider locator 拒 whitespace/local schemes，registry schema/validator
+  只接納 `registry:external-append-only:*`。
+- launch/receipt `200 passed, 3 skipped`，recovery/kernel `904 passed, 9 skipped`；action packet 重綁
+  `sha256:aa589fc0…a2ca5`。LW1 exit 仍因 14/14 external prerequisites 阻塞。
+
+## TODO v868 增量：LW1 full-worktree source binding（2026-08-02）
+
+- current-head 對抗複核發現 host-capture 只拒絕 tracked/staged delta，未拒絕 untracked
+  Python import 污染；fixed host kernel allowlist 新增 porcelain status，任一工作樹污染均 fail closed。
+- focused host-capture/kernel regression `350 passed, 9 skipped`，recovery/kernel adjacent set
+  `902 passed, 9 skipped`；implementation checkpoint 更新為 `cb787a80a`，action packet 重綁為
+  `sha256:bfeb0070…0f164`。
+- 終態不變：`BLOCKED_EXTERNAL_PREREQUISITES_ACTION_PACKET_READY`；W0/LW1 receipts absent、
+  LW2 locked、authority 0/9、production effect 0/6。
+
+## TODO v867 增量：G0 / S2E-LW1 checkpoint 與 external blocker（2026-08-02）
+
+- G0 校準為 `SOURCE_COMPLETE_RUNTIME_INDETERMINATE`：governance source landed，沒有
+  current runtime/process/build attestation，不以 source sync 冒充 runtime PASS。
+- LW1 source 補齊 dispatch/host-clock、fixed host-capture producer、independent external
+  WORM provider attestation、append-only predecessor registry 與 closed action packet。
+- fail-first recovery/kernel regression 抓到 9 個 producer raw-`subprocess`/scanner failure；
+  所有 Git/signer invocation 改由 sole host kernel 固定 argv 與 bounded stdin 後，同集合
+  `773 passed, 9 skipped`。
+- Linux 唯讀 inventory 顯示 11 個 fixed trust/signer paths absent、三個 external services
+  `NOT_OBSERVED`。終態為 `BLOCKED_EXTERNAL_PREREQUISITES_ACTION_PACKET_READY`；W0/LW1
+  receipts absent、LW2 locked、authority 0/9、production effect 0/6，S2 仍 open。
+
 
 ## TODO v866 增量：wave2 收口＋PR#164 追認（2026-08-02）
 

@@ -147,23 +147,40 @@ def _capture(
         },
         "host_identity": "",
         "node_identity": {
-            "node_id": "s2-5-host-attestor",
+            "node_id": host_capture.HOST_CAPTURE_NODE_ID,
             "role": "HOST_ATTESTOR",
             "permission": "read_only",
-            "key_identity": "key:s2-5-host-attestor",
+            "key_identity": host_capture.RECOVERY_HOST_CAPTURE_SIGNER_IDENTITY,
         },
         "process_identity": {
-            "uid": 4300,
-            "cgroup": "/system.slice/s2-5-host-capture.service",
+            "uid": profile.PROFILE_UID,
+            "cgroup": profile.RECOVERY_RUNNER_CGROUP,
         },
         "boot_manager_facts": {
             "boot_id": boot_id,
             "manager": "systemd",
-            "manager_root": "/run/systemd/system",
-            "unit_name": (
-                "arcane-equilibrium-aiml-engine-scanner.service"
-            ),
+            "manager_root": profile.USER_MANAGER_ROOT,
+            "unit_name": profile.RECOVERY_RUNNER_UNIT,
             "canonical_state_root": profile.DISPOSABLE_STATE_ROOT,
+        },
+        "admission_provenance": {
+            "schema_version": host_capture.HOST_CAPTURE_ADMISSION_SCHEMA_VERSION,
+            "admission_class": host_capture.HOST_CAPTURE_ADMISSION_CLASS,
+            "capability_protocol": (
+                host_capture.HOST_CAPTURE_ATTESTOR_CAPABILITY_PROTOCOL
+            ),
+            "capability_path": host_capture.HOST_CAPTURE_ATTESTOR_CAPABILITY_PATH,
+            "node_id": host_capture.HOST_CAPTURE_NODE_ID,
+            "role": "HOST_ATTESTOR",
+            "permission": "read_only",
+            "uid": profile.PROFILE_UID,
+            "cgroup": profile.RECOVERY_RUNNER_CGROUP,
+            "unit_name": profile.RECOVERY_RUNNER_UNIT,
+            "canonical_state_root": profile.DISPOSABLE_STATE_ROOT,
+            "signer_identity": (
+                host_capture.RECOVERY_HOST_CAPTURE_SIGNER_IDENTITY
+            ),
+            "signer_fingerprint": fingerprint,
         },
         "observed_at": observed_at,
         "expires_at": expires_at,

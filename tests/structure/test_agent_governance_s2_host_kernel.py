@@ -22,6 +22,7 @@ for candidate in (HELPERS, ML_ROOT):
         sys.path.insert(0, str(candidate))
 import agent_governance_alr_quiesce_inventory as qi  # noqa: E402
 import agent_governance_s2_host_kernel as kernel  # noqa: E402
+import aiml_gate_receipt_s2_5_host_capture as host_capture  # noqa: E402
 KERNEL_PATH = HELPERS / "agent_governance_s2_host_kernel.py"
 RUNNER_FAMILY_GLOBS = ("agent_governance_s2_*host_*.py", "aiml_s2_*host_run*.py")
 # Explicit exclusions still pass every raw-command rule and the import denylist.
@@ -83,6 +84,9 @@ EXACT_STDLIB_IMPORTS_BY_FILE = {
     "agent_governance_s2_5_recovery_lock.py": frozenset({
         "__future__", "functools", "json", "pathlib", "sys", "typing",
     }),
+    "agent_governance_s2_5_recovery_host_capture_producer.py": frozenset({
+        "__future__", "datetime", "json", "pathlib", "stat", "sys", "typing",
+    }),
     "agent_governance_s2_5_recovery_state.py": frozenset({
         "__future__", "copy", "dataclasses", "json", "os", "pathlib",
         "stat", "sys", "typing",
@@ -109,6 +113,10 @@ GOVERNANCE_IMPORTS_BY_FILE: dict[str, frozenset[str]] = {
         "aiml_gate_receipt_schema_core",
     }),
     "agent_governance_s2_5_recovery_lock.py": frozenset({"agent_governance_s2_5_disposable_profile", "agent_governance_schema", "aiml_gate_receipt_validator"}),
+    "agent_governance_s2_5_recovery_host_capture_producer.py": frozenset({
+        "agent_governance_s2_host_kernel",
+        "aiml_gate_receipt_s2_5_host_capture",
+    }),
     "agent_governance_s2_5_recovery_anchor.py": frozenset({"agent_governance_s2_5_disposable_profile", "agent_governance_s2_5_recovery_store", "agent_governance_schema", "aiml_gate_receipt_validator"}),
     "agent_governance_s2_5_recovery_anchor_v2.py": frozenset({
         "agent_governance_s2_5_disposable_profile",
@@ -145,6 +153,7 @@ GOVERNANCE_IMPORTS_BY_FILE: dict[str, frozenset[str]] = {
     }),
     "agent_governance_s2_host_kernel.py": frozenset({
         "agent_governance_alr_quiesce_inventory",
+        "aiml_gate_receipt_s2_5_host_capture",
     }),
     "agent_governance_s2_host_observer.py": frozenset({
         "agent_governance_alr_quiesce_inventory",
@@ -222,17 +231,78 @@ SUBPROCESS_EXEC_CAPABILITY_NAMES = frozenset({
     "run", "Popen", "call", "check_call", "check_output", "getoutput",
     "getstatusoutput",
 })
-RECOVERY_GOVERNED_FILES = frozenset({
-    "agent_governance_s2_5_recovery.py",
-    "agent_governance_s2_5_recovery_anchor.py",
-    "agent_governance_s2_5_recovery_anchor_v2.py",
-    "agent_governance_s2_5_recovery_controller.py",
-    "agent_governance_s2_5_recovery_lock.py",
-    "agent_governance_s2_5_recovery_readback.py",
-    "agent_governance_s2_5_recovery_state.py",
-    "agent_governance_s2_5_recovery_store.py",
-    "agent_governance_s2_5_recovery_store_v2.py",
+RECOVERY_HELPER_PREFIX = (
+    "helper_scripts/maintenance_scripts/agent_governance_s2_5_recovery"
+)
+RECOVERY_TEST_SUPPORT_PREFIXES = (
+    "tests/structure/s2_5_recovery",
+    "tests/structure/test_agent_governance_s2_5_recovery",
+)
+CLASSIFIED_RECOVERY_TEST_SUPPORT_FILES = frozenset({
+    "tests/structure/s2_5_recovery_anchor_test_support.py",
+    "tests/structure/s2_5_recovery_anchor_testkit.py",
+    "tests/structure/s2_5_recovery_readback_socket_scan.py",
+    "tests/structure/test_agent_governance_s2_5_recovery.py",
+    "tests/structure/test_agent_governance_s2_5_recovery_anchor_append.py",
+    "tests/structure/test_agent_governance_s2_5_recovery_anchor_mutations.py",
+    "tests/structure/test_agent_governance_s2_5_recovery_anchor_pagination.py",
+    "tests/structure/test_agent_governance_s2_5_recovery_anchor_private_guard.py",
+    "tests/structure/test_agent_governance_s2_5_recovery_anchor_schemas.py",
+    "tests/structure/test_agent_governance_s2_5_recovery_anchor_v2.py",
+    "tests/structure/test_agent_governance_s2_5_recovery_controller.py",
+    "tests/structure/test_agent_governance_s2_5_recovery_lock.py",
+    "tests/structure/test_agent_governance_s2_5_recovery_lock_posix.py",
+    "tests/structure/test_agent_governance_s2_5_recovery_lock_private_guard.py",
+    "tests/structure/test_agent_governance_s2_5_recovery_lock_schemas.py",
+    "tests/structure/test_agent_governance_s2_5_recovery_readback.py",
+    "tests/structure/test_agent_governance_s2_5_recovery_readback_socket_scan.py",
+    "tests/structure/test_agent_governance_s2_5_recovery_store.py",
+    "tests/structure/test_agent_governance_s2_5_recovery_store_faults.py",
+    "tests/structure/test_agent_governance_s2_5_recovery_store_schemas.py",
+    "tests/structure/test_agent_governance_s2_5_recovery_store_v2.py",
 })
+
+
+def _discover_recovery_family(
+    tracked_paths: set[str] | frozenset[str],
+) -> tuple[frozenset[str], frozenset[str]]:
+    normalized = {path.replace("\\", "/") for path in tracked_paths}
+    helpers = frozenset(
+        Path(path).name
+        for path in normalized
+        if path.startswith(RECOVERY_HELPER_PREFIX) and path.endswith(".py")
+    )
+    tests = frozenset(
+        path
+        for path in normalized
+        if path.endswith(".py")
+        and any(
+            path.startswith(prefix)
+            for prefix in RECOVERY_TEST_SUPPORT_PREFIXES
+        )
+    )
+    return helpers, tests
+
+
+def _tracked_recovery_paths(repo_root: Path = ROOT) -> frozenset[str]:
+    completed = subprocess.run(
+        [
+            "git", "ls-files", "--",
+            f"{RECOVERY_HELPER_PREFIX}*.py",
+            "tests/structure/s2_5_recovery*.py",
+            "tests/structure/test_agent_governance_s2_5_recovery*.py",
+        ],
+        cwd=repo_root,
+        check=True,
+        capture_output=True,
+        text=True,
+    )
+    return frozenset(completed.stdout.splitlines())
+
+
+RECOVERY_GOVERNED_FILES, RECOVERY_TEST_SUPPORT_FILES = (
+    _discover_recovery_family(_tracked_recovery_paths())
+)
 RECOVERY_SENSITIVE_CALLS_BY_FILE: dict[
     str, dict[str, frozenset[str]]
 ] = {
@@ -242,6 +312,7 @@ RECOVERY_SENSITIVE_CALLS_BY_FILE: dict[
     "agent_governance_s2_5_recovery_anchor.py": {},
     "agent_governance_s2_5_recovery_anchor_v2.py": {},
     "agent_governance_s2_5_recovery_controller.py": {},
+    "agent_governance_s2_5_recovery_host_capture_producer.py": {},
     "agent_governance_s2_5_recovery_lock.py": {},
     "agent_governance_s2_5_recovery_readback.py": {
         "socket": frozenset({"socket"}),
@@ -259,6 +330,31 @@ RECOVERY_SENSITIVE_CALLS_BY_FILE: dict[
     "agent_governance_s2_5_recovery_store_v2.py": {},
 }
 RECOVERY_SENSITIVE_MODULES = frozenset({"fcntl", "os", "socket"})
+
+
+def _recovery_family_classification_findings(
+    tracked_paths: set[str] | frozenset[str],
+) -> list[str]:
+    helpers, tests = _discover_recovery_family(tracked_paths)
+    policies = {
+        "stdlib import": frozenset(EXACT_STDLIB_IMPORTS_BY_FILE),
+        "governance import": frozenset(
+            name for name in GOVERNANCE_IMPORTS_BY_FILE
+            if name.startswith("agent_governance_s2_5_recovery")
+        ),
+        "sensitive callable": frozenset(RECOVERY_SENSITIVE_CALLS_BY_FILE),
+    }
+    findings: list[str] = []
+    for label, classified in policies.items():
+        for name in sorted(helpers - classified):
+            findings.append(f"unclassified {label} recovery helper: {name}")
+        for name in sorted(classified - helpers):
+            findings.append(f"missing tracked {label} recovery helper: {name}")
+    for path in sorted(tests - CLASSIFIED_RECOVERY_TEST_SUPPORT_FILES):
+        findings.append(f"unclassified recovery test/support: {path}")
+    for path in sorted(CLASSIFIED_RECOVERY_TEST_SUPPORT_FILES - tests):
+        findings.append(f"missing tracked recovery test/support: {path}")
+    return findings
 
 
 def _present_family() -> list[Path]:
@@ -889,7 +985,7 @@ def _raw_command_findings(path: Path, *, exec_family: bool = True) -> list[str]:
                     and {
                         keyword.arg for keyword in node.keywords
                     } == {
-                        "shell", "stdin", "stdout", "stderr", "env", "timeout", "check",
+                        "shell", "input", "stdout", "stderr", "env", "timeout", "check",
                     }
                     and all(
                         not (
@@ -899,6 +995,12 @@ def _raw_command_findings(path: Path, *, exec_family: bool = True) -> list[str]:
                                 and keyword.value.value is False
                             )
                         )
+                        for keyword in node.keywords
+                    )
+                    and any(
+                        keyword.arg == "input"
+                        and isinstance(keyword.value, ast.Name)
+                        and keyword.value.id == "stdin_bytes"
                         for keyword in node.keywords
                     )
                 )
@@ -968,6 +1070,9 @@ def test_no_raw_command_outside_the_kernel():
 def test_recovery_import_capability_declarations_are_exact():
     """Recovery leaves may neither hide imports nor retain unused grants."""
 
+    assert _recovery_family_classification_findings(
+        _tracked_recovery_paths()
+    ) == []
     for filename, stdlib_modules in EXACT_STDLIB_IMPORTS_BY_FILE.items():
         tree = ast.parse(
             (HELPERS / filename).read_text(encoding="utf-8"),
@@ -1498,6 +1603,62 @@ def test_s2_0_session_has_no_argv_surface_at_all():
     assert kernel.SESSION_ARGV_ALLOWLISTS[kernel.SESSION_S2_0_OBSERVER_BOOTSTRAP] == frozenset()
     with pytest.raises(kernel.S2HostArgvNotAllowlisted):
         kernel.assert_session_argv(kernel.SESSION_S2_0_OBSERVER_BOOTSTRAP, ["/usr/bin/psql", "-c", "select 1"])
+
+
+def test_recovery_host_capture_allowlist_is_fixed_and_owner_bound():
+    assert kernel.RECOVERY_HOST_CAPTURE_ATTESTOR_ARGV == (
+        host_capture.HOST_CAPTURE_ATTESTOR_CAPABILITY_PATH,
+        "--protocol",
+        host_capture.HOST_CAPTURE_ATTESTOR_CAPABILITY_PROTOCOL,
+    )
+    assert kernel.SESSION_ARGV_ALLOWLISTS[
+        kernel.SESSION_S2_5_RECOVERY_HOST_CAPTURE
+    ] == frozenset({
+        kernel.RECOVERY_HOST_CAPTURE_ATTESTOR_ARGV,
+    })
+
+
+def test_recovery_host_capture_attestor_uses_zero_input_and_bounded_output(monkeypatch):
+    captured: dict = {}
+
+    class _Completed:
+        returncode = 0
+        stdout = b'{"schema_version":"capture"}\n'
+        stderr = b""
+
+    def _fake_run(argv, **kwargs):
+        captured["argv"] = argv
+        captured["kwargs"] = kwargs
+        return _Completed()
+
+    monkeypatch.setattr(subprocess, "run", _fake_run)
+    monkeypatch.setattr(kernel, "enforce_process_hardening", lambda **_kw: {})
+    host = kernel.HostExecutionKernel(
+        session=kernel.SESSION_S2_5_RECOVERY_HOST_CAPTURE
+    )
+    assert host.capture_recovery_host() == b'{"schema_version":"capture"}\n'
+    assert captured["argv"] == list(kernel.RECOVERY_HOST_CAPTURE_ATTESTOR_ARGV)
+    assert captured["kwargs"]["input"] == b""
+    assert "stdin" not in captured["kwargs"]
+    assert captured["kwargs"]["shell"] is False
+    assert captured["kwargs"]["timeout"] == 30
+    assert host.calls == [kernel.RECOVERY_HOST_CAPTURE_ATTESTOR_ARGV]
+
+
+def test_recovery_attestor_cannot_use_generic_run_or_wrong_session(monkeypatch):
+    monkeypatch.setattr(
+        subprocess,
+        "run",
+        lambda *_args, **_kwargs: pytest.fail("attestor must not execute"),
+    )
+    host = kernel.HostExecutionKernel(
+        session=kernel.SESSION_S2_5_RECOVERY_HOST_CAPTURE
+    )
+    with pytest.raises(kernel.S2HostSessionError, match="zero-input"):
+        host.run(kernel.RECOVERY_HOST_CAPTURE_ATTESTOR_ARGV)
+    wrong = kernel.HostExecutionKernel(session=kernel.SESSION_S2_1_QUIESCE_READ)
+    with pytest.raises(kernel.S2HostSessionError, match="may not invoke"):
+        wrong.capture_recovery_host()
 
 
 @pytest.mark.parametrize("argv", [

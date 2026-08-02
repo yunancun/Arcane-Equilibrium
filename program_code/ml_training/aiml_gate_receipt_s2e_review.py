@@ -103,6 +103,8 @@ S2E_REVIEW_BASE_PATHS = (
     ),
     "program_code/ml_training/application_bundle_runtime_closure_v1.json",
     "program_code/ml_training/aiml_gate_receipt_s2e_consumption.py",
+    "program_code/ml_training/aiml_gate_receipt_s2e_dispatch.py",
+    "program_code/ml_training/aiml_gate_receipt_s2e_external_evidence.py",
     "program_code/ml_training/aiml_gate_receipt_s2e_launch.py",
     "program_code/ml_training/aiml_gate_receipt_s2e_review.py",
     "program_code/ml_training/aiml_gate_receipt_schema_core.py",
@@ -114,6 +116,10 @@ S2E_REVIEW_BASE_PATHS = (
     (
         "program_code/ml_training/schemas/aiml_gate_receipts/"
         "s2e_disposable_test_effect_chain_v1.schema.json"
+    ),
+    (
+        "program_code/ml_training/schemas/aiml_gate_receipts/"
+        "s2e_external_worm_provider_attestation_v1.schema.json"
     ),
     (
         "program_code/ml_training/schemas/aiml_gate_receipts/"
@@ -135,6 +141,10 @@ S2E_REVIEW_BASE_PATHS = (
         "program_code/ml_training/schemas/aiml_gate_receipts/"
         "s2e_launch_wave_receipt_v1.schema.json"
     ),
+    (
+        "program_code/ml_training/schemas/aiml_gate_receipts/"
+        "s2e_predecessor_registry_attestation_v1.schema.json"
+    ),
     "program_code/ml_training/tests/test_aiml_gate_receipt_validator_s2_4.py",
     "tests/structure/test_agent_governance_s2_2b.py",
     "tests/structure/test_agent_governance_command_capture_v2.py",
@@ -142,6 +152,7 @@ S2E_REVIEW_BASE_PATHS = (
     "tests/structure/test_agent_governance_s2e_launch_chain.py",
     "tests/structure/test_agent_governance_s2e_launch_hardening.py",
     "tests/structure/test_agent_governance_s2e_launch_receipts.py",
+    "tests/structure/test_agent_governance_s2e_external_evidence.py",
 )
 S2E_LW1_REVIEW_PREFIXES = (
     ".codex/schemas/s2_5_recovery_",
@@ -493,6 +504,7 @@ def s2e_review_test_argv(
             "tests/structure/test_agent_governance_s2_2b.py",
             "tests/structure/test_agent_governance_command_capture_v2.py",
             "tests/structure/test_agent_governance_node_permissions.py",
+            "tests/structure/test_agent_governance_s2e_external_evidence.py",
             "tests/structure/test_agent_governance_s2e_launch_chain.py",
             "tests/structure/test_agent_governance_s2e_launch_hardening.py",
             "tests/structure/test_agent_governance_s2e_launch_receipts.py",

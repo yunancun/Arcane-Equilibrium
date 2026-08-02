@@ -20,6 +20,7 @@ for candidate in (HELPERS, ML_ROOT):
         sys.path.insert(0, str(candidate))
 
 import agent_governance_s2_5_lifecycle as lifecycle  # noqa: E402
+import agent_governance_s2_5_disposable_profile as disposable_profile  # noqa: E402
 import agent_governance_s2_5_recovery as recovery  # noqa: E402
 import agent_governance_s2_5_recovery_readback as readback_adapter  # noqa: E402
 import aiml_gate_receipt_s2_5_host_capture as host_capture_leaf  # noqa: E402
@@ -242,21 +243,46 @@ def _host_capture(state_root: Path, *, source_head: str = HEAD) -> dict:
         },
         "host_identity": "",
         "node_identity": {
-            "node_id": "s2-5-host-attestor",
+            "node_id": host_capture_leaf.HOST_CAPTURE_NODE_ID,
             "role": "HOST_ATTESTOR",
             "permission": "read_only",
-            "key_identity": "key:s2-5-host-attestor",
+            "key_identity": (
+                host_capture_leaf.RECOVERY_HOST_CAPTURE_SIGNER_IDENTITY
+            ),
         },
         "process_identity": {
-            "uid": 4300,
-            "cgroup": "/system.slice/s2-5-host-capture.service",
+            "uid": disposable_profile.PROFILE_UID,
+            "cgroup": disposable_profile.RECOVERY_RUNNER_CGROUP,
         },
         "boot_manager_facts": {
             "boot_id": "boot-disposable-1",
             "manager": "systemd",
-            "manager_root": "/run/systemd/system",
-            "unit_name": lifecycle.S2_5_UNIT_NAME,
+            "manager_root": disposable_profile.USER_MANAGER_ROOT,
+            "unit_name": disposable_profile.RECOVERY_RUNNER_UNIT,
             "canonical_state_root": str(state_root.resolve(strict=False)),
+        },
+        "admission_provenance": {
+            "schema_version": (
+                host_capture_leaf.HOST_CAPTURE_ADMISSION_SCHEMA_VERSION
+            ),
+            "admission_class": host_capture_leaf.HOST_CAPTURE_ADMISSION_CLASS,
+            "capability_protocol": (
+                host_capture_leaf.HOST_CAPTURE_ATTESTOR_CAPABILITY_PROTOCOL
+            ),
+            "capability_path": (
+                host_capture_leaf.HOST_CAPTURE_ATTESTOR_CAPABILITY_PATH
+            ),
+            "node_id": host_capture_leaf.HOST_CAPTURE_NODE_ID,
+            "role": "HOST_ATTESTOR",
+            "permission": "read_only",
+            "uid": disposable_profile.PROFILE_UID,
+            "cgroup": disposable_profile.RECOVERY_RUNNER_CGROUP,
+            "unit_name": disposable_profile.RECOVERY_RUNNER_UNIT,
+            "canonical_state_root": str(state_root.resolve(strict=False)),
+            "signer_identity": (
+                host_capture_leaf.RECOVERY_HOST_CAPTURE_SIGNER_IDENTITY
+            ),
+            "signer_fingerprint": _RECOVERY_FINGERPRINTS["host_capture"],
         },
         "observed_at": NOW,
         "expires_at": LATER,
@@ -1915,8 +1941,8 @@ def test_host_capture_leaf_and_schema_extend_closure_without_lifecycle_roots():
     assert expected_resources <= set(closure["schema_resources"])
     # The launch review oracle and its centrally registered disposable-test
     # chain are application-reachable; lifecycle roots remain excluded.
-    assert len(closure["python_modules"]) == 56
-    assert len(closure["schema_resources"]) == 91
+    assert len(closure["python_modules"]) == 59
+    assert len(closure["schema_resources"]) == 93
     assert closure["runtime_lazy_helper_roots"] == [{
         "module": "agent_governance_sealed_build",
         "reason": (
