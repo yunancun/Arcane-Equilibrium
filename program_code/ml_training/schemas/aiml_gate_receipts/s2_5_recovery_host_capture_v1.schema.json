@@ -7,6 +7,7 @@
   "required": [
     "schema_version", "capture_profile", "source_head", "stable_host_facts",
     "host_identity", "node_identity", "process_identity", "boot_manager_facts",
+    "admission_provenance",
     "observed_at", "expires_at", "side_effect_class", "production_effect",
     "production_authority", "target_class", "signer_identity",
     "signer_fingerprint", "signature_namespace", "signed_binding",
@@ -21,6 +22,7 @@
     "node_identity": {"$ref": "#/$defs/node_identity"},
     "process_identity": {"$ref": "#/$defs/process_identity"},
     "boot_manager_facts": {"$ref": "#/$defs/boot_manager_facts"},
+    "admission_provenance": {"$ref": "#/$defs/admission_provenance"},
     "observed_at": {"$ref": "#/$defs/timestamp"},
     "expires_at": {"$ref": "#/$defs/timestamp"},
     "side_effect_class": {"const": "DISPOSABLE_TEST"},
@@ -56,18 +58,22 @@
       "type": "object", "additionalProperties": false,
       "required": ["node_id", "role", "permission", "key_identity"],
       "properties": {
-        "node_id": {"type": "string", "minLength": 1},
+        "node_id": {"const": "s2_5_recovery_host_capture_attestor"},
         "role": {"const": "HOST_ATTESTOR"},
         "permission": {"const": "read_only"},
-        "key_identity": {"type": "string", "minLength": 1}
+        "key_identity": {
+          "const": "aiml-s2-5-recovery-host-capture-attestor-v1"
+        }
       }
     },
     "process_identity": {
       "type": "object", "additionalProperties": false,
       "required": ["uid", "cgroup"],
       "properties": {
-        "uid": {"type": "integer", "minimum": 0},
-        "cgroup": {"type": "string", "minLength": 1}
+        "uid": {"const": 1000},
+        "cgroup": {
+          "const": "/user.slice/user-1000.slice/user@1000.service/app.slice/arcane-equilibrium-aiml-s2-5-recovery.service"
+        }
       }
     },
     "boot_manager_facts": {
@@ -78,9 +84,45 @@
       "properties": {
         "boot_id": {"type": "string", "minLength": 1},
         "manager": {"const": "systemd"},
-        "manager_root": {"const": "/run/systemd/system"},
-        "unit_name": {"const": "arcane-equilibrium-aiml-engine-scanner.service"},
+        "manager_root": {"const": "/run/user/1000/systemd"},
+        "unit_name": {"const": "arcane-equilibrium-aiml-s2-5-recovery.service"},
         "canonical_state_root": {"type": "string", "pattern": "^/"}
+      }
+    },
+    "admission_provenance": {
+      "type": "object", "additionalProperties": false,
+      "required": [
+        "schema_version", "admission_class", "capability_protocol",
+        "capability_path", "node_id", "role", "permission", "uid", "cgroup",
+        "unit_name", "canonical_state_root", "signer_identity",
+        "signer_fingerprint"
+      ],
+      "properties": {
+        "schema_version": {
+          "const": "s2_5_recovery_host_capture_admission_v1"
+        },
+        "admission_class": {"const": "FIXED_SYSTEMD_SIGNER_CAPABILITY_V1"},
+        "capability_protocol": {
+          "const": "arcane-equilibrium-aiml-s2-5-recovery-host-capture-sign-v1"
+        },
+        "capability_path": {
+          "const": "/usr/local/libexec/arcane-equilibrium/s2-5-recovery-host-capture-sign-v1"
+        },
+        "node_id": {"const": "s2_5_recovery_host_capture_attestor"},
+        "role": {"const": "HOST_ATTESTOR"},
+        "permission": {"const": "read_only"},
+        "uid": {"const": 1000},
+        "cgroup": {
+          "const": "/user.slice/user-1000.slice/user@1000.service/app.slice/arcane-equilibrium-aiml-s2-5-recovery.service"
+        },
+        "unit_name": {"const": "arcane-equilibrium-aiml-s2-5-recovery.service"},
+        "canonical_state_root": {"type": "string", "pattern": "^/"},
+        "signer_identity": {
+          "const": "aiml-s2-5-recovery-host-capture-attestor-v1"
+        },
+        "signer_fingerprint": {
+          "type": "string", "pattern": "^SHA256:[A-Za-z0-9+/]{43}$"
+        }
       }
     },
     "signed_binding": {
@@ -89,6 +131,7 @@
       "required": [
         "schema_version", "capture_profile", "source_head", "stable_host_facts",
         "host_identity", "node_identity", "process_identity", "boot_manager_facts",
+        "admission_provenance",
         "observed_at", "expires_at", "side_effect_class", "production_effect",
         "production_authority", "target_class"
       ],
@@ -101,6 +144,7 @@
         "node_identity": {"$ref": "#/$defs/node_identity"},
         "process_identity": {"$ref": "#/$defs/process_identity"},
         "boot_manager_facts": {"$ref": "#/$defs/boot_manager_facts"},
+        "admission_provenance": {"$ref": "#/$defs/admission_provenance"},
         "observed_at": {"$ref": "#/$defs/timestamp"},
         "expires_at": {"$ref": "#/$defs/timestamp"},
         "side_effect_class": {"const": "DISPOSABLE_TEST"},

@@ -23,7 +23,9 @@ for candidate in (HELPERS, ML_ROOT):
 import aiml_gate_receipt_schema_core as schema_core  # noqa: E402
 import aiml_gate_receipt_s2_5_host_capture as host_capture  # noqa: E402
 import aiml_gate_receipt_validator as validator  # noqa: E402
+import agent_governance_s2_5_disposable_profile as disposable_profile  # noqa: E402
 import agent_governance_s2_5_lifecycle as lifecycle  # noqa: E402
+import agent_governance_s2_5_recovery_host_capture_producer as producer  # noqa: E402
 
 
 HOST_CAPTURE_SCHEMA = "s2_5_recovery_host_capture_v1"
@@ -78,21 +80,40 @@ def _signed_capture(
         },
         "host_identity": "",
         "node_identity": {
-            "node_id": "s2-5-host-attestor",
+            "node_id": host_capture.HOST_CAPTURE_NODE_ID,
             "role": "HOST_ATTESTOR",
             "permission": "read_only",
-            "key_identity": "key:s2-5-host-attestor",
+            "key_identity": host_capture.RECOVERY_HOST_CAPTURE_SIGNER_IDENTITY,
         },
         "process_identity": {
-            "uid": 4300,
-            "cgroup": "/system.slice/s2-5-host-capture.service",
+            "uid": disposable_profile.PROFILE_UID,
+            "cgroup": disposable_profile.RECOVERY_RUNNER_CGROUP,
         },
         "boot_manager_facts": {
             "boot_id": "boot-disposable-1",
             "manager": "systemd",
-            "manager_root": "/run/systemd/system",
-            "unit_name": "arcane-equilibrium-aiml-engine-scanner.service",
+            "manager_root": disposable_profile.USER_MANAGER_ROOT,
+            "unit_name": disposable_profile.RECOVERY_RUNNER_UNIT,
             "canonical_state_root": str(state_root.resolve(strict=False)),
+        },
+        "admission_provenance": {
+            "schema_version": host_capture.HOST_CAPTURE_ADMISSION_SCHEMA_VERSION,
+            "admission_class": host_capture.HOST_CAPTURE_ADMISSION_CLASS,
+            "capability_protocol": (
+                host_capture.HOST_CAPTURE_SIGNER_CAPABILITY_PROTOCOL
+            ),
+            "capability_path": host_capture.HOST_CAPTURE_SIGNER_CAPABILITY_PATH,
+            "node_id": host_capture.HOST_CAPTURE_NODE_ID,
+            "role": "HOST_ATTESTOR",
+            "permission": "read_only",
+            "uid": disposable_profile.PROFILE_UID,
+            "cgroup": disposable_profile.RECOVERY_RUNNER_CGROUP,
+            "unit_name": disposable_profile.RECOVERY_RUNNER_UNIT,
+            "canonical_state_root": str(state_root.resolve(strict=False)),
+            "signer_identity": (
+                host_capture.RECOVERY_HOST_CAPTURE_SIGNER_IDENTITY
+            ),
+            "signer_fingerprint": fingerprint,
         },
         "observed_at": observed_at,
         "expires_at": expires_at,
@@ -137,6 +158,102 @@ def test_host_capture_schema_is_registered_before_recovery_artifact_validation()
     assert HOST_CAPTURE_SCHEMA in schema_core.SCHEMA_FILES
     leaf = importlib.import_module("aiml_gate_receipt_s2_5_host_capture")
     assert callable(leaf.validate_s2_5_recovery_host_capture)
+
+
+def test_fixed_producer_captures_kernel_facts_and_uses_only_capability_signer(
+    tmp_path, signing_profile, monkeypatch
+):
+    private_key, _public_key, fingerprint = signing_profile
+    monkeypatch.setattr(producer.os, "geteuid", lambda: disposable_profile.PROFILE_UID)
+    monkeypatch.setattr(
+        producer,
+        "_unified_cgroup",
+        lambda: disposable_profile.RECOVERY_RUNNER_CGROUP,
+    )
+    monkeypatch.setattr(producer, "_git_source_head", lambda: HEAD)
+    monkeypatch.setattr(producer, "_os_id", lambda: "linux")
+    monkeypatch.setattr(producer.platform, "machine", lambda: "x86_64")
+    monkeypatch.setattr(
+        producer.os,
+        "uname",
+        lambda: type("Uname", (), {"nodename": "trade-core-disposable"})(),
+    )
+
+    def fixed_fact(path, *, label):
+        del label
+        if path == producer.MACHINE_ID_PATH:
+            return b"machine-id-test\n"
+        if path == producer.BOOT_ID_PATH:
+            return b"boot-disposable-1\n"
+        raise AssertionError(path)
+
+    monkeypatch.setattr(producer, "_read_fixed_fact", fixed_fact)
+    monkeypatch.setattr(
+        producer,
+        "_invoke_fixed_signer_capability",
+        lambda payload: __import__("s2_5_testkit")._sign_bytes(
+            private_key,
+            payload,
+            namespace=host_capture.RECOVERY_HOST_CAPTURE_SIGNATURE_NAMESPACE,
+        ),
+    )
+    monkeypatch.setattr(
+        producer,
+        "RECOVERY_HOST_CAPTURE_TRUST_ROOT_FINGERPRINT",
+        fingerprint,
+    )
+    artifact = producer.capture_s2_5_recovery_host()
+
+    assert artifact["source_head"] == HEAD
+    assert artifact["process_identity"] == {
+        "uid": disposable_profile.PROFILE_UID,
+        "cgroup": disposable_profile.RECOVERY_RUNNER_CGROUP,
+    }
+    assert artifact["admission_provenance"]["capability_path"] == (
+        host_capture.HOST_CAPTURE_SIGNER_CAPABILITY_PATH
+    )
+    assert host_capture.validate_s2_5_recovery_host_capture(
+        artifact, now=artifact["observed_at"]
+    ) == []
+
+
+@pytest.mark.parametrize(
+    ("uid", "cgroup"),
+    [
+        (9999, disposable_profile.RECOVERY_RUNNER_CGROUP),
+        (disposable_profile.PROFILE_UID, "/foreign.scope"),
+    ],
+)
+def test_fixed_producer_rejects_uid_or_cgroup_drift(
+    monkeypatch, uid, cgroup
+):
+    monkeypatch.setattr(producer.os, "geteuid", lambda: uid)
+    monkeypatch.setattr(producer, "_unified_cgroup", lambda: cgroup)
+    with pytest.raises(ValueError, match="fixed recovery-runner admission"):
+        producer.capture_s2_5_recovery_host()
+
+
+def test_fixed_signer_capability_rejects_symlink_and_untrusted_mode(
+    tmp_path, monkeypatch
+):
+    target = tmp_path / "signer"
+    target.write_text("#!/bin/sh\nexit 1\n", encoding="ascii")
+    target.chmod(0o777)
+    monkeypatch.setattr(producer, "HOST_CAPTURE_SIGNER_CAPABILITY_PATH", str(target))
+    with pytest.raises(ValueError, match="not trusted"):
+        producer._invoke_fixed_signer_capability(b"payload")
+
+    link = tmp_path / "signer-link"
+    link.symlink_to(target)
+    monkeypatch.setattr(producer, "HOST_CAPTURE_SIGNER_CAPABILITY_PATH", str(link))
+    with pytest.raises(ValueError, match="not trusted"):
+        producer._invoke_fixed_signer_capability(b"payload")
+
+
+def test_producer_public_surface_has_no_caller_selected_identity_or_clock():
+    assert list(inspect.signature(producer.capture_s2_5_recovery_host).parameters) == []
+    with pytest.raises(SystemExit, match="accepts no arguments"):
+        producer.main(["--now", NOW])
 
 
 def test_valid_signed_host_capture_is_dispatched_by_the_central_validator(
@@ -316,7 +433,11 @@ def test_source_node_process_and_root_rewrite_cannot_survive_digest_reseal(
     mutate(artifact["signed_binding"])
     _reseal(artifact)
     errors = validator.validate_aiml_artifact(artifact, now=NOW)
-    assert any("SSHSIG is invalid" in error for error in errors), errors
+    assert errors
+    assert any(
+        "SSHSIG is invalid" in error or "expected const" in error
+        for error in errors
+    ), errors
 
 
 def test_full_capture_omission_and_digest_only_substitute_fail_closed(

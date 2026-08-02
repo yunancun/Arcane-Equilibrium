@@ -16,6 +16,7 @@ from pathlib import Path
 from typing import Any
 
 import agent_governance_aiml_trusted_host as _trusted_host
+import agent_governance_s2_5_disposable_profile as _disposable_profile
 from agent_governance_schema import schema_subset_errors
 from aiml_gate_receipt_schema_core import (
     SCHEMA_DIR,
@@ -29,6 +30,18 @@ from aiml_gate_receipt_schema_core import (
 
 HOST_CAPTURE_SCHEMA_VERSION = "s2_5_recovery_host_capture_v1"
 HOST_CAPTURE_PROFILE = "DISPOSABLE_SYSTEMD_RECOVERY_HOST"
+HOST_CAPTURE_NODE_ID = "s2_5_recovery_host_capture_attestor"
+HOST_CAPTURE_ADMISSION_SCHEMA_VERSION = (
+    "s2_5_recovery_host_capture_admission_v1"
+)
+HOST_CAPTURE_ADMISSION_CLASS = "FIXED_SYSTEMD_SIGNER_CAPABILITY_V1"
+HOST_CAPTURE_SIGNER_CAPABILITY_PROTOCOL = (
+    "arcane-equilibrium-aiml-s2-5-recovery-host-capture-sign-v1"
+)
+HOST_CAPTURE_SIGNER_CAPABILITY_PATH = (
+    "/usr/local/libexec/arcane-equilibrium/"
+    "s2-5-recovery-host-capture-sign-v1"
+)
 RECOVERY_HOST_CAPTURE_SIGNER_IDENTITY = (
     "aiml-s2-5-recovery-host-capture-attestor-v1"
 )
@@ -45,6 +58,7 @@ MAX_HOST_CAPTURE_TTL = timedelta(minutes=15)
 _SIGNED_BINDING_KEYS = frozenset({
     "schema_version", "capture_profile", "source_head", "stable_host_facts",
     "host_identity", "node_identity", "process_identity", "boot_manager_facts",
+    "admission_provenance",
     "observed_at", "expires_at", "side_effect_class", "production_effect",
     "production_authority", "target_class",
 })
@@ -59,6 +73,12 @@ _NODE_KEYS = frozenset({"node_id", "role", "permission", "key_identity"})
 _PROCESS_KEYS = frozenset({"uid", "cgroup"})
 _BOOT_MANAGER_KEYS = frozenset({
     "boot_id", "manager", "manager_root", "unit_name", "canonical_state_root",
+})
+_ADMISSION_KEYS = frozenset({
+    "schema_version", "admission_class", "capability_protocol",
+    "capability_path", "node_id", "role", "permission", "uid", "cgroup",
+    "unit_name", "canonical_state_root", "signer_identity",
+    "signer_fingerprint",
 })
 _HOST_CAPTURE_SCHEMA_PATH = (
     SCHEMA_DIR / SCHEMA_FILES[HOST_CAPTURE_SCHEMA_VERSION]
@@ -195,6 +215,10 @@ def validate_s2_5_recovery_host_capture_integrity(
         capture.get("boot_manager_facts"), _BOOT_MANAGER_KEYS,
         "host capture boot_manager_facts",
     ))
+    errors.extend(_exact(
+        capture.get("admission_provenance"), _ADMISSION_KEYS,
+        "host capture admission_provenance",
+    ))
     signed = capture.get("signed_binding")
     if isinstance(signed, dict) and signed != {
         key: capture.get(key) for key in _SIGNED_BINDING_KEYS
@@ -204,18 +228,54 @@ def validate_s2_5_recovery_host_capture_integrity(
         errors.append("host capture host_identity does not derive from stable host facts")
     node = capture.get("node_identity")
     if isinstance(node, dict) and (
-        node.get("role") != "HOST_ATTESTOR"
+        node.get("node_id") != HOST_CAPTURE_NODE_ID
+        or node.get("role") != "HOST_ATTESTOR"
         or node.get("permission") != "read_only"
+        or node.get("key_identity")
+        != RECOVERY_HOST_CAPTURE_SIGNER_IDENTITY
     ):
-        errors.append("host capture node must be the read-only HOST_ATTESTOR")
+        errors.append(
+            "host capture node must be the fixed read-only HOST_ATTESTOR"
+        )
+    process = capture.get("process_identity")
+    if isinstance(process, dict) and (
+        process.get("uid") != _disposable_profile.PROFILE_UID
+        or process.get("cgroup") != _disposable_profile.RECOVERY_RUNNER_CGROUP
+    ):
+        errors.append("host capture process is not the fixed recovery runner")
     manager = capture.get("boot_manager_facts")
     if isinstance(manager, dict) and (
         manager.get("manager") != "systemd"
-        or manager.get("manager_root") != "/run/systemd/system"
-        or manager.get("unit_name")
-        != "arcane-equilibrium-aiml-engine-scanner.service"
+        or manager.get("manager_root")
+        != _disposable_profile.USER_MANAGER_ROOT
+        or manager.get("unit_name") != _disposable_profile.RECOVERY_RUNNER_UNIT
     ):
         errors.append("host capture manager facts are not the fixed systemd target")
+    admission = capture.get("admission_provenance")
+    if isinstance(admission, dict):
+        expected_admission = {
+            "schema_version": HOST_CAPTURE_ADMISSION_SCHEMA_VERSION,
+            "admission_class": HOST_CAPTURE_ADMISSION_CLASS,
+            "capability_protocol": HOST_CAPTURE_SIGNER_CAPABILITY_PROTOCOL,
+            "capability_path": HOST_CAPTURE_SIGNER_CAPABILITY_PATH,
+            "node_id": HOST_CAPTURE_NODE_ID,
+            "role": "HOST_ATTESTOR",
+            "permission": "read_only",
+            "uid": _disposable_profile.PROFILE_UID,
+            "cgroup": _disposable_profile.RECOVERY_RUNNER_CGROUP,
+            "unit_name": _disposable_profile.RECOVERY_RUNNER_UNIT,
+            "canonical_state_root": (
+                manager.get("canonical_state_root")
+                if isinstance(manager, dict)
+                else None
+            ),
+            "signer_identity": RECOVERY_HOST_CAPTURE_SIGNER_IDENTITY,
+            "signer_fingerprint": RECOVERY_HOST_CAPTURE_TRUST_ROOT_FINGERPRINT,
+        }
+        if admission != expected_admission:
+            errors.append(
+                "host capture admission provenance is not the fixed signer capability"
+            )
     if capture.get("capture_profile") != HOST_CAPTURE_PROFILE:
         errors.append("host capture profile is invalid")
     if capture.get("signer_identity") != RECOVERY_HOST_CAPTURE_SIGNER_IDENTITY:

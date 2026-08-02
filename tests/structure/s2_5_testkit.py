@@ -29,6 +29,7 @@ from agent_governance_s2_4_install_evidence import (  # noqa: E402
 )
 import agent_governance_s2_4_install_plan as s2_4_install_plan  # noqa: E402
 import agent_governance_s2_5_attestation as attestation  # noqa: E402
+import agent_governance_s2_5_disposable_profile as disposable_profile  # noqa: E402
 import agent_governance_s2_5_lifecycle as lifecycle  # noqa: E402
 import aiml_gate_receipt_s2_5_host_capture as host_capture_leaf  # noqa: E402
 import aiml_gate_receipt_validator as validator  # noqa: E402
@@ -125,21 +126,46 @@ def signed_recovery_host_capture(
         },
         "host_identity": "",
         "node_identity": {
-            "node_id": "s2-5-host-attestor",
+            "node_id": host_capture_leaf.HOST_CAPTURE_NODE_ID,
             "role": "HOST_ATTESTOR",
             "permission": "read_only",
-            "key_identity": "key:s2-5-host-attestor",
+            "key_identity": (
+                host_capture_leaf.RECOVERY_HOST_CAPTURE_SIGNER_IDENTITY
+            ),
         },
         "process_identity": {
-            "uid": 4300,
-            "cgroup": "/system.slice/s2-5-host-capture.service",
+            "uid": disposable_profile.PROFILE_UID,
+            "cgroup": disposable_profile.RECOVERY_RUNNER_CGROUP,
         },
         "boot_manager_facts": {
             "boot_id": "boot-disposable-test",
             "manager": "systemd",
-            "manager_root": "/run/systemd/system",
-            "unit_name": lifecycle.S2_5_UNIT_NAME,
+            "manager_root": disposable_profile.USER_MANAGER_ROOT,
+            "unit_name": disposable_profile.RECOVERY_RUNNER_UNIT,
             "canonical_state_root": str(canonical_root),
+        },
+        "admission_provenance": {
+            "schema_version": (
+                host_capture_leaf.HOST_CAPTURE_ADMISSION_SCHEMA_VERSION
+            ),
+            "admission_class": host_capture_leaf.HOST_CAPTURE_ADMISSION_CLASS,
+            "capability_protocol": (
+                host_capture_leaf.HOST_CAPTURE_SIGNER_CAPABILITY_PROTOCOL
+            ),
+            "capability_path": (
+                host_capture_leaf.HOST_CAPTURE_SIGNER_CAPABILITY_PATH
+            ),
+            "node_id": host_capture_leaf.HOST_CAPTURE_NODE_ID,
+            "role": "HOST_ATTESTOR",
+            "permission": "read_only",
+            "uid": disposable_profile.PROFILE_UID,
+            "cgroup": disposable_profile.RECOVERY_RUNNER_CGROUP,
+            "unit_name": disposable_profile.RECOVERY_RUNNER_UNIT,
+            "canonical_state_root": str(canonical_root),
+            "signer_identity": (
+                host_capture_leaf.RECOVERY_HOST_CAPTURE_SIGNER_IDENTITY
+            ),
+            "signer_fingerprint": profile["fingerprint"],
         },
         "observed_at": observed_at,
         "expires_at": expires_at,
