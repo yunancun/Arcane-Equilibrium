@@ -978,13 +978,18 @@ current generation 重驗。
   生效；該次 operator 批准的 remediation 批次本身（含並行 lane 對治理測試檔的
   改動）不追溯計入凍結與佔比。
 - 治理測試家族凍結：tests/structure 的 governance 測試家族
-  （`test_agent_governance*` 與 `test_development_agent_governance*`）淨行數
+  （`test_agent_governance*`、`test_development_agent_governance*`、
+  `test_codex_memory_policy*`、`test_role_memory_compaction*`）淨行數
   不得再增；新增 gate 需先刪等量舊 gate（同一 change 內淨行數 ≤ 0）。
+  基線：2026-08-02 追認 PR#164 後重置——in-glob 86,203 行（@245869d25），
+  淨行數自此起算。
 - 每週 meta-work（治理機/框架自身）佔比 ≤ 30%；超限即凍結 meta-work，只做
   product-work（交易/引擎/研究）。計量以觸及
-  `helper_scripts/maintenance_scripts/agent_governance*` 或 governance 測試家族
-  （`tests/structure/test_agent_governance*`、
-  `test_development_agent_governance*`）的 commit 計；product 功能自帶的
+  `helper_scripts/maintenance_scripts/agent_governance*`、
+  `role_memory_compaction.py`、`codex_memory_policy_probe.py` 或 governance
+  測試家族（`tests/structure/test_agent_governance*`、
+  `test_development_agent_governance*`、`test_codex_memory_policy*`、
+  `test_role_memory_compaction*`）的 commit 計；product 功能自帶的
   `tests/structure` 測試（GUI/IBKR/策略/runtime 等）屬 product-work，不計入、
   不受凍結影響。
 - Full-audit envelope 政策：ML/AI 日常任務使用 compiler
@@ -994,3 +999,8 @@ current generation 重驗。
 - 2026-08-01 裁決先例：`origin/agent/gpt56-multiagent-remediation-20260730`
   （+27,988 行治理機測試）依本節裁 `SUPERSEDED-KILL` — 不 merge、分支保留存史、
   禁 recovery 遞迴（不得再開 remediation-of-remediation/recovery 分支或工單）。
+- 演變（2026-08-01 22:51）：operator 改判並親自 merge PR#164（245869d25）；
+  2026-08-02 補做 5 維度追認審計（wf_b7aae581：safety 零削弱／workflows 有界性
+  存活且強化／機件 782 tests 綠／tier 綁定與三級裁決一致）。上一條原裁決文字
+  保留存史；凍結基線依上方重置。改判僅覆蓋已 merge 的本弧；新 meta-work 仍受
+  本節全部條款約束。

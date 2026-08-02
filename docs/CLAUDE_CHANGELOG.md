@@ -1,9 +1,23 @@
 # CLAUDE_CHANGELOG.md — 開發歷史歸檔
 
 > 從 CLAUDE.md / TODO.md 遷出的 Wave/Sprint/Batch + TODO version-increment 歷史敘事。新 session 不需要讀此文件，僅供回顧歷史時查閱。
-> 最後更新：2026-08-01（TODO v865 GPT-5.6 remediation publication authorization）
+> 最後更新：2026-08-02（TODO v866 wave2 收口＋PR#164 追認）
 
 ---
+
+## TODO v866 增量：wave2 收口＋PR#164 追認（2026-08-02）
+
+- wave2 backlog 全項收口（PR#170-174；tier 綁定/Codex model pin 由 PR#164 提前
+  交付判 NO-OP；WP-D store 實測 39 份 artifact 21.4MB→3.0MB）
+- PR#164 追認落帳：§13 演變注記＋凍結/計量 glob 修正＋基線重置（in-glob
+  86,203 行@245869d25）；TODO #164 row 的 exact-head review 宣稱如實更正
+  （追認審計 wf_b7aae581 五維度事後補審＝實質過關）
+- 新 row ×3：`P1-ROLE-MEMORY-PROMOTION-VERIFIER`、
+  `P2-AGENT-WAVE-BLOCKED-PREDECESSOR`、`P2-W5-PROJECTION-MEMOIZATION`
+- ci.yml governance job 補 timeout-minutes: 45；SCRIPT_INDEX 補登 #164 五腳本
+- Codex platform memories 通道保留（operator 2026-08-02 裁決）＋權威邊界註記
+  （hint 級、repo 恆勝；luna=extraction lane 專屬指派，tier 治理範圍外）
+
 
 ## TODO v865 增量：GPT-5.6 remediation publication authorization（2026-08-01）
 

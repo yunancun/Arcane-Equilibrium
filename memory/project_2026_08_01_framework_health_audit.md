@@ -55,3 +55,8 @@ operator 批准全部優化建議(P0 機制級:禁 blocking 輪詢/session 分�
 - 條數 cap 不擋增長,只改變增長形狀(擠成行內膨脹)——cap 類治理必須配機械檢查(≤250 一行 python 可驗)。
 - 治理規則不得引用死數據(heat 欄位從未回填卻是 MERGE 優先級依據)。
 - 為舊世代模型可靠性補償而生的強制鏈/多重 adversarial 輪/超長 prescriptive skill,在新世代要重新計價:official migration 指引「separate verification steps…are likely redundant…this is a delete, not a rewrite」。
+
+## 演變軌跡
+- 2026-08-01 22:51:gpt56 remediation 線的 SUPERSEDED-KILL 裁決被 operator 改判——親自 merge PR#164(245869d25,+33,414/−8,064,143 檔)。mergedBy=yunancun;TODO v865 row 同步改 EXACT_HEAD_MERGE_AUTHORIZED。
+- 2026-08-02:追認審計 wf_b7aae581(5 維度+對抗覆核)=實質過關——safety 零削弱/workflows 有界性存活且強化/機件 782 tests 綠/role memory compaction 無損(−97.3%)/tier 綁定與三級裁決一致且更嚴(exact-match)。四條 CONFIRMED high(帳面矛盾/glob 缺口/promotion 死鎖/exact-head 宣稱不實)隨追認整合 commit 收口;#164 提前交付 wave2 兩項(tier 綁定/Codex model pin)。
+- 同日:wave2 五 lane 全落地(PR#170-174);Codex platform memories 通道經比較判定保留(與 per-role 檔案增長退役政策互補:不燒 repo context/不 churn git;殘餘風險以權威邊界註記圈住,promotion 死鎖另立 P1 修復 row)。
