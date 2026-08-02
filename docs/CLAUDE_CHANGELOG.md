@@ -1,9 +1,19 @@
 # CLAUDE_CHANGELOG.md — 開發歷史歸檔
 
 > 從 CLAUDE.md / TODO.md 遷出的 Wave/Sprint/Batch + TODO version-increment 歷史敘事。新 session 不需要讀此文件，僅供回顧歷史時查閱。
-> 最後更新：2026-08-02（TODO v867 G0/LW1 checkpoint＋external blocker）
+> 最後更新：2026-08-02（TODO v868 G0/LW1 full-worktree binding）
 
 ---
+
+## TODO v868 增量：LW1 full-worktree source binding（2026-08-02）
+
+- current-head 對抗複核發現 host-capture 只拒絕 tracked/staged delta，未拒絕 untracked
+  Python import 污染；fixed host kernel allowlist 新增 porcelain status，任一工作樹污染均 fail closed。
+- focused host-capture/kernel regression `350 passed, 9 skipped`，recovery/kernel adjacent set
+  `902 passed, 9 skipped`；implementation checkpoint 更新為 `cb787a80a`，action packet 重綁為
+  `sha256:bfeb0070…0f164`。
+- 終態不變：`BLOCKED_EXTERNAL_PREREQUISITES_ACTION_PACKET_READY`；W0/LW1 receipts absent、
+  LW2 locked、authority 0/9、production effect 0/6。
 
 ## TODO v867 增量：G0 / S2E-LW1 checkpoint 與 external blocker（2026-08-02）
 

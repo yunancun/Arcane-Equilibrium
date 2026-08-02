@@ -37,7 +37,7 @@
   },
   "launch_id": "S2E-LW1-LW5",
   "next_action": "OPERATOR_PROVISION_EXTERNAL_PREREQUISITES_THEN_RESUME_S2E_LW1",
-  "packet_digest": "sha256:3c6ce22809faf90b1c207c6d70f40d14d461a31096d41d46f8ad5948cbae5991",
+  "packet_digest": "sha256:bfeb007089031fbaa6ccca3d677166ae634cab9f6abe08378e03f2ffbce0f164",
   "prerequisites": [
     {
       "blocking": true,
@@ -214,8 +214,8 @@
     "private_key_material_permitted": false
   },
   "source_binding": {
-    "implementation_checkpoint_head": "1716307d82cfc815b71175905ac91685c619041a",
-    "implementation_checkpoint_tree": "9d40613caa41439a2212320659a29e626a6afe76",
+    "implementation_checkpoint_head": "cb787a80a452e33f76140d36bb29e6e25a2f0dca",
+    "implementation_checkpoint_tree": "e2beb3ba153194cb0d6feb8b7b20c45518997a3a",
     "worktree_clean_at_build": true
   },
   "state": "BLOCKED_EXTERNAL_PREREQUISITES_ACTION_PACKET_READY",

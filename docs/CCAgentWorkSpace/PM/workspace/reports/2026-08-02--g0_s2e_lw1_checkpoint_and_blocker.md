@@ -64,9 +64,9 @@ Machine action packet：
 `docs/CCAgentWorkSpace/PM/workspace/reports/2026-08-02--s2e_lw1_external_prerequisite_action_packet.json`
 
 - schema：`s2e_lw1_operator_action_packet_v1`
-- source checkpoint：`1716307d82cfc815b71175905ac91685c619041a`
+- source checkpoint：`cb787a80a452e33f76140d36bb29e6e25a2f0dca`
 - blocked prerequisites：14/14
-- packet digest：`sha256:3c6ce22809faf90b1c207c6d70f40d14d461a31096d41d46f8ad5948cbae5991`
+- packet digest：`sha256:bfeb007089031fbaa6ccca3d677166ae634cab9f6abe08378e03f2ffbce0f164`
 - packet 只排序下一步，不帶 secret、不執行 action、不授權 production effect。
 
 ## 驗證與對抗複驗
@@ -77,6 +77,8 @@ Machine action packet：
   9 個 failure 全部指向 host-capture producer 的 raw `subprocess` 與缺失 scanner policy。
 - 修復後同一 recovery/kernel 全集合：`773 passed, 9 skipped`。
 - 修復 focused set：`144 passed`。
+- current-head full-worktree clean binding focused set：`350 passed, 9 skipped`。
+- current-head recovery/kernel adjacent set：`902 passed, 9 skipped`。
 - action packet CLI validation：PASS；JSON parse、`py_compile`、`git diff --check`：PASS。
 
 本 session 沒有可用的獨立 subagent execution tool，故未虛構 E2/E4 身分；PM 直接執行
