@@ -16,24 +16,46 @@ if str(STRUCTURE) not in sys.path:
 import test_agent_governance_s2_host_kernel as scanner  # noqa: E402
 
 
-EXPECTED_RECOVERY_LEAVES = frozenset({
-    "agent_governance_s2_5_recovery.py",
-    "agent_governance_s2_5_recovery_anchor.py",
-    "agent_governance_s2_5_recovery_anchor_v2.py",
-    "agent_governance_s2_5_recovery_controller.py",
-    "agent_governance_s2_5_recovery_lock.py",
-    "agent_governance_s2_5_recovery_readback.py",
-    "agent_governance_s2_5_recovery_state.py",
-    "agent_governance_s2_5_recovery_store.py",
-    "agent_governance_s2_5_recovery_store_v2.py",
-})
+EXPECTED_RECOVERY_LEAVES = scanner.RECOVERY_GOVERNED_FILES
 
 
 def test_every_recovery_leaf_has_exact_import_and_callable_policy():
-    assert scanner.RECOVERY_GOVERNED_FILES == EXPECTED_RECOVERY_LEAVES
+    assert scanner._recovery_family_classification_findings(
+        scanner._tracked_recovery_paths()
+    ) == []
     assert set(scanner.EXACT_STDLIB_IMPORTS_BY_FILE) >= EXPECTED_RECOVERY_LEAVES
     assert set(scanner.GOVERNANCE_IMPORTS_BY_FILE) >= EXPECTED_RECOVERY_LEAVES
     assert set(scanner.RECOVERY_SENSITIVE_CALLS_BY_FILE) == EXPECTED_RECOVERY_LEAVES
+
+
+def test_tracked_recovery_discovery_rejects_new_renamed_and_deleted_members():
+    tracked = set(scanner._tracked_recovery_paths())
+    helper = (
+        "helper_scripts/maintenance_scripts/"
+        "agent_governance_s2_5_recovery_anchor.py"
+    )
+    test = "tests/structure/test_agent_governance_s2_5_recovery_anchor_v2.py"
+    mutations = {
+        "new": tracked | {
+            "helper_scripts/maintenance_scripts/"
+            "agent_governance_s2_5_recovery_new_leaf.py",
+            "tests/structure/test_agent_governance_s2_5_recovery_new_leaf.py",
+        },
+        "renamed": (tracked - {helper, test}) | {
+            helper.replace("_anchor.py", "_anchor_v3.py"),
+            test.replace("_anchor_v2.py", "_anchor_v3.py"),
+        },
+        "deleted": tracked - {helper, test},
+    }
+    for mutation, paths in mutations.items():
+        findings = scanner._recovery_family_classification_findings(paths)
+        assert findings, mutation
+        if mutation == "new":
+            assert any("unclassified stdlib import" in item for item in findings)
+            assert any("unclassified recovery test/support" in item for item in findings)
+        else:
+            assert any("missing tracked stdlib import" in item for item in findings)
+            assert any("missing tracked recovery test/support" in item for item in findings)
 
 
 @pytest.mark.parametrize("name", sorted(EXPECTED_RECOVERY_LEAVES))

@@ -21,6 +21,7 @@ for candidate in (HELPERS, ML_ROOT):
         sys.path.insert(0, str(candidate))
 
 import agent_governance_s2e_launch_receipts as launch  # noqa: E402
+import aiml_gate_receipt_s2e_dispatch as s2e_dispatch  # noqa: E402
 import aiml_gate_receipt_s2e_launch as s2e  # noqa: E402
 import aiml_gate_receipt_s2e_review as s2e_review  # noqa: E402
 import aiml_gate_receipt_validator as validator  # noqa: E402
@@ -127,6 +128,140 @@ def test_receipt_issuance_has_no_caller_controlled_time() -> None:
     )
     issue_parser = action.choices["issue"]
     assert all(item.dest != "now" for item in issue_parser._actions)
+
+
+def test_authority_cli_parsers_reject_caller_controlled_time(
+    capsys: pytest.CaptureFixture[str],
+) -> None:
+    parser = launch._parser()
+    action = next(item for item in parser._actions if item.dest == "action")
+    for action_name in sorted(launch._HOST_CLOCK_ACTIONS):
+        subparser = action.choices[action_name]
+        argv = [action_name]
+        for item in subparser._actions:
+            if item.required:
+                argv.extend([item.option_strings[0], "S2E-LW1"])
+        argv.extend(["--now", "2026-08-02T12:00:00Z"])
+        with pytest.raises(SystemExit):
+            parser.parse_args(argv)
+        assert "unrecognized arguments: --now" in capsys.readouterr().err
+
+
+def test_s2e_dispatch_split_preserves_facade_abi_and_line_policy() -> None:
+    exported = (
+        "build_s2e_launch_consumption_bootstrap_authority_core",
+        "build_s2e_launch_predecessor_authority",
+        "build_s2e_disposable_test_effect_chain",
+        "canonical_launch_payload_bytes",
+        "issue_s2e_launch_receipt",
+        "launch_payload_digest",
+        "load_s2e_receipt_signer_trust_root",
+        "s2e_acceptance_review_bundle_digest",
+        "s2e_acceptance_review_signed_bytes",
+        "s2e_acceptance_review_worm_payload",
+        "s2e_carrier_attestation_digest",
+        "s2e_carrier_attested_core_digest",
+        "s2e_carrier_signed_bytes",
+        "s2e_carrier_verification_argv",
+        "s2e_carrier_worm_payload",
+        "s2e_launch_consumption_bootstrap_authority_digest",
+        "s2e_launch_consumption_bootstrap_signed_bytes",
+        "s2e_review_predicate_results",
+        "s2e_review_source_blob_manifest",
+        "s2e_review_test_argv",
+        "validate_receipt_carrier_attestation",
+        "validate_s2e_disposable_test_effect_chain",
+        "validate_s2e_launch_acceptance_review_bundle",
+        "validate_s2e_launch_consumption_bootstrap_authority",
+        "validate_s2e_launch_genesis_receipt",
+        "validate_s2e_launch_predecessor_authority",
+        "validate_s2e_launch_transition",
+        "validate_s2e_launch_transition_payload",
+        "validate_s2e_launch_wave_receipt",
+        "verify_receipt_carrier_attestation",
+    )
+    for name in exported:
+        assert getattr(validator, name) is getattr(s2e, name)
+    repository_policy_threshold = 2_000
+    facade = ML_ROOT / "aiml_gate_receipt_validator.py"
+    launch_leaf = ML_ROOT / "aiml_gate_receipt_s2e_launch.py"
+    assert len(facade.read_text(encoding="utf-8").splitlines()) <= (
+        repository_policy_threshold
+    )
+    assert len(launch_leaf.read_text(encoding="utf-8").splitlines()) <= (
+        repository_policy_threshold
+    )
+    assert "def s2e_launch_artifact_errors(" not in launch_leaf.read_text(
+        encoding="utf-8"
+    )
+    assert validator._s2e_launch_artifact_errors is (
+        s2e_dispatch.s2e_launch_artifact_errors
+    )
+    assert "program_code/ml_training/aiml_gate_receipt_s2e_dispatch.py" in (
+        s2e_review.S2E_REVIEW_BASE_PATHS
+    )
+
+
+def test_central_validator_delegates_s2e_branch_unchanged(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    artifact = {"schema_version": "s2e_launch_genesis_receipt_v1"}
+    captured: dict[str, object] = {}
+
+    def dispatch(
+        value: object,
+        *,
+        schema_version: str,
+        repo_root: Path,
+        now: object,
+    ) -> list[str]:
+        captured.update({
+            "artifact": value,
+            "schema_version": schema_version,
+            "repo_root": repo_root,
+            "now": now,
+        })
+        return ["S2E dispatch sentinel"]
+
+    monkeypatch.setattr(validator, "_s2e_launch_artifact_errors", dispatch)
+    monkeypatch.setattr(validator, "schema_subset_errors", lambda *args: [])
+    errors = validator.validate_aiml_artifact(
+        artifact, now="2026-08-02T12:00:00Z"
+    )
+    assert "S2E dispatch sentinel" in errors
+    assert captured == {
+        "artifact": artifact,
+        "schema_version": artifact["schema_version"],
+        "repo_root": validator.REPO_ROOT,
+        "now": "2026-08-02T12:00:00Z",
+    }
+
+
+@pytest.mark.parametrize(
+    ("schema_version", "expected"),
+    (
+        (
+            "s2e_launch_acceptance_review_bundle_v1",
+            "s2e acceptance review bundle EXTERNAL_VERIFICATION_PENDING",
+        ),
+        (
+            "s2e_launch_consumption_bootstrap_authority_v1",
+            "s2e consumption bootstrap authority EXTERNAL_VERIFICATION_PENDING",
+        ),
+    ),
+)
+def test_dispatch_preserves_fail_closed_context_boundaries(
+    schema_version: str,
+    expected: str,
+) -> None:
+    errors = s2e_dispatch.s2e_launch_artifact_errors(
+        {},
+        schema_version=schema_version,
+        repo_root=ROOT,
+        now="2026-08-02T12:00:00Z",
+    )
+    assert len(errors) == 1
+    assert expected in errors[0]
 
 
 class _NotFound(Exception):
@@ -781,13 +916,20 @@ def test_carrier_rejects_duplicate_key_secret_hidden_by_json_parsing(
 
 
 def test_cli_recognizes_carrier_but_cannot_self_authenticate_it(
-    tmp_path: Path, capsys: pytest.CaptureFixture[str]
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+    capsys: pytest.CaptureFixture[str],
 ) -> None:
     repo, genesis, attestation, _, issued_at = _carrier_case(tmp_path)
     receipt_path = tmp_path / "carrier-attestation.json"
     payload_path = tmp_path / "genesis-payload.json"
     receipt_path.write_text(json.dumps(attestation), encoding="utf-8")
     payload_path.write_text(json.dumps(genesis), encoding="utf-8")
+    monkeypatch.setattr(
+        launch,
+        "_sample_utc_host_clock",
+        lambda: (issued_at + timedelta(minutes=1)).isoformat(),
+    )
 
     exit_code = launch.main([
         "validate",
@@ -797,8 +939,6 @@ def test_cli_recognizes_carrier_but_cannot_self_authenticate_it(
         str(receipt_path),
         "--payload-receipt",
         str(payload_path),
-        "--now",
-        (issued_at + timedelta(minutes=1)).isoformat().replace("+00:00", "Z"),
     ])
 
     assert exit_code == 2
@@ -1397,6 +1537,26 @@ def test_wave_generation_requires_ready_reviewed_attested_predecessor(
             now=case["now"] + timedelta(minutes=5),
         )
     )
+    late_now = case["now"] + timedelta(minutes=5)
+    late_errors = validator.validate_s2e_launch_predecessor_authority(
+        case["authority"],
+        predecessor_receipt=case["issued"],
+        repo_root=repo,
+        now=late_now,
+    )
+    assert late_errors == validator.validate_s2e_launch_predecessor_authority(
+        case["authority"],
+        predecessor_receipt=case["issued"],
+        repo_root=repo,
+        now=late_now,
+    )
+    early_errors = validator.validate_s2e_launch_predecessor_authority(
+        case["authority"],
+        predecessor_receipt=case["issued"],
+        repo_root=repo,
+        now=case["now"] - timedelta(minutes=10),
+    )
+    assert any("stale or not yet valid" in error for error in early_errors)
 
     disposable_label_only = dict(wave)
     disposable_label_only["side_effect_class"] = "DISPOSABLE_TEST"
@@ -1469,6 +1629,15 @@ def test_lw1_predicate_oracle_replays_evidence_and_preserves_active_package(
     )
     manifest = validator.s2e_review_source_blob_manifest(
         candidate, repo_root=repo
+    )
+    dispatch_path = (
+        "program_code/ml_training/aiml_gate_receipt_s2e_dispatch.py"
+    )
+    dispatch_entry = next(
+        entry for entry in manifest if entry["path"] == dispatch_path
+    )
+    assert dispatch_entry["git_blob"] == _git(
+        repo, "rev-parse", f"{source_head}:{dispatch_path}"
     )
     results = validator.s2e_review_predicate_results(
         candidate,
@@ -1545,6 +1714,13 @@ def test_launch_cli_exposes_full_issue_carrier_authority_and_transition_gates(
     issued = case["issued"]
     authority = case["authority"]
     now = case["now"].isoformat()
+    clock_samples: list[str] = []
+
+    def sample_clock() -> str:
+        clock_samples.append(now)
+        return now
+
+    monkeypatch.setattr(launch, "_sample_utc_host_clock", sample_clock)
     pending = s2e._pending_candidate_from_issued(issued)
     files = {
         "candidate": _json_file(tmp_path, "candidate.json", pending),
@@ -1623,6 +1799,7 @@ def test_launch_cli_exposes_full_issue_carrier_authority_and_transition_gates(
         "not the clean current HEAD" in error
         for error in stale_issue["errors"]
     )
+    assert clock_samples == []
 
     assert launch.main([
         "verify-carrier",
@@ -1633,9 +1810,9 @@ def test_launch_cli_exposes_full_issue_carrier_authority_and_transition_gates(
         "--external-append-intent", str(files["carrier_intent"]),
         "--external-append-result", str(files["carrier_result"]),
         "--external-readback-ack", str(files["carrier_readback"]),
-        "--now", now,
     ]) == 0
     assert json.loads(capsys.readouterr().out)["status"] == "VERIFIED"
+    assert clock_samples == [now]
 
     assert launch.main([
         "build-predecessor-authority",
@@ -1653,37 +1830,52 @@ def test_launch_cli_exposes_full_issue_carrier_authority_and_transition_gates(
         "--carrier-external-append-intent", str(files["carrier_intent"]),
         "--carrier-external-append-result", str(files["carrier_result"]),
         "--carrier-external-readback-ack", str(files["carrier_readback"]),
-        "--now", now,
     ]) == 0
     rebuilt_authority = json.loads(capsys.readouterr().out)
     assert rebuilt_authority["authority_digest"] == authority["authority_digest"]
+    assert clock_samples == [now, now]
 
     source_head = _commit(repo, "lw1-cli.txt", "LW1\n", "LW1 CLI source")
-    wave = launch.build_wave_candidate(
-        repo_root=repo,
-        wave="S2E-LW1",
-        source_head=source_head,
-        schema_carrier_head=case["schema_carrier"],
-        predecessor_receipt=issued,
-        predecessor_authority=authority,
-        launch_contract_digest=LAUNCH_CONTRACT_DIGEST,
-        generation_task_contract_digest=NEXT_GENERATION_TASK_CONTRACT_DIGEST,
-        now=case["now"],
-    )
-    wave_path = _json_file(tmp_path, "wave.json", wave)
     authority_path = _json_file(tmp_path, "authority.json", authority)
+    assert launch.main([
+        "generate-wave",
+        "--repo-root", str(repo),
+        "--wave", "S2E-LW1",
+        "--source-head", source_head,
+        "--schema-carrier-head", case["schema_carrier"],
+        "--predecessor-receipt", str(files["issued"]),
+        "--predecessor-authority", str(authority_path),
+        "--launch-contract-digest", LAUNCH_CONTRACT_DIGEST,
+        "--generation-task-contract-digest",
+        NEXT_GENERATION_TASK_CONTRACT_DIGEST,
+    ]) == 0
+    wave = json.loads(capsys.readouterr().out)
+    assert clock_samples == [now, now, now]
+    wave_path = _json_file(tmp_path, "wave.json", wave)
+    assert launch.main([
+        "validate",
+        "--repo-root", str(repo),
+        "--receipt", str(wave_path),
+        "--predecessor-receipt", str(files["issued"]),
+        "--predecessor-authority", str(authority_path),
+    ]) == 0
+    assert json.loads(capsys.readouterr().out) == {
+        "status": "ADVANCE",
+        "errors": [],
+    }
+    assert clock_samples == [now, now, now, now]
     assert launch.main([
         "transition-gate",
         "--repo-root", str(repo),
         "--receipt", str(wave_path),
         "--predecessor-receipt", str(files["issued"]),
         "--predecessor-authority", str(authority_path),
-        "--now", now,
     ]) == 0
     assert json.loads(capsys.readouterr().out) == {
         "status": "ADVANCE",
         "errors": [],
     }
+    assert clock_samples == [now, now, now, now, now]
 
 
 def test_verified_review_bundle_issues_ready_genesis_receipt(

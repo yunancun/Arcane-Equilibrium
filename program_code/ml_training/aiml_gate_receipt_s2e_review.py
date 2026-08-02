@@ -103,6 +103,7 @@ S2E_REVIEW_BASE_PATHS = (
     ),
     "program_code/ml_training/application_bundle_runtime_closure_v1.json",
     "program_code/ml_training/aiml_gate_receipt_s2e_consumption.py",
+    "program_code/ml_training/aiml_gate_receipt_s2e_dispatch.py",
     "program_code/ml_training/aiml_gate_receipt_s2e_launch.py",
     "program_code/ml_training/aiml_gate_receipt_s2e_review.py",
     "program_code/ml_training/aiml_gate_receipt_schema_core.py",
