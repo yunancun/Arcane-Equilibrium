@@ -303,10 +303,24 @@ def test_independent_provider_and_registry_attestations_validate(trust_profiles)
     ) == []
 
 
-def test_provider_rejects_fixture_locator_and_cross_bound_result(trust_profiles):
+def test_provider_rejects_non_s3_class_locator_and_cross_bound_result(
+    trust_profiles,
+):
     artifact, triplet = _provider_attestation(trust_profiles)
     for mutate, expected in (
         (lambda value: value.update(provider_locator="memory:fake-s3"), "fixture or local"),
+        (
+            lambda value: value.update(provider_locator="file:///tmp/fake-s3"),
+            "outside the admitted external S3 Object Lock provider class",
+        ),
+        (
+            lambda value: value.update(provider_locator="unix:/run/fake-s3.sock"),
+            "outside the admitted external S3 Object Lock provider class",
+        ),
+        (
+            lambda value: value.update(provider_locator="https://s3.example.test"),
+            "outside the admitted external S3 Object Lock provider class",
+        ),
         (
             lambda value: value.update(provider_locator=" memory:fake-s3"),
             "does not match pattern",

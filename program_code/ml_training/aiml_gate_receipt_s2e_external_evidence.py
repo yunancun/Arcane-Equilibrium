@@ -37,6 +37,7 @@ PREDECESSOR_REGISTRY_NAMESPACE = (
 LOCAL_EVIDENCE_LOCATOR_SCHEMES = frozenset({
     "fixture", "memory", "local", "test",
 })
+EXTERNAL_WORM_PROVIDER_LOCATOR_PREFIX = "aws:s3-object-lock-attestor:"
 PREDECESSOR_REGISTRY_LOCATOR_PREFIX = "registry:external-append-only:"
 EXTERNAL_WORM_PROVIDER_TRUST_ROOT_PATH = Path(
     "/etc/arcane-equilibrium/aiml/"
@@ -384,6 +385,7 @@ def _external_locator_errors(
     *,
     label: str,
     required_prefix: str | None = None,
+    admitted_class: str = "external registry class",
 ) -> list[str]:
     if not isinstance(value, str):
         return [f"{label} locator is not a string"]
@@ -394,7 +396,7 @@ def _external_locator_errors(
     if not separator or scheme.lower() in LOCAL_EVIDENCE_LOCATOR_SCHEMES:
         return [f"{label} locator is fixture or local evidence"]
     if required_prefix is not None and not canonical.startswith(required_prefix):
-        return [f"{label} locator is outside the admitted external registry class"]
+        return [f"{label} locator is outside the admitted {admitted_class}"]
     return []
 
 
@@ -410,8 +412,16 @@ def validate_s2e_external_worm_provider_attestation(
 
     schema = _load_schema(EXTERNAL_WORM_SCHEMA)
     errors = schema_subset_errors(attestation, schema, root_schema=schema)
-    if errors or not isinstance(attestation, dict):
+    if not isinstance(attestation, dict):
         return errors
+    errors.extend(_external_locator_errors(
+        attestation.get("provider_locator"),
+        label="external WORM provider",
+        required_prefix=EXTERNAL_WORM_PROVIDER_LOCATOR_PREFIX,
+        admitted_class="external S3 Object Lock provider class",
+    ))
+    if errors:
+        return sorted(set(errors))
     import agent_governance_terminal_receipt_external_sink as external_sink
 
     now_text = _timestamp(now).isoformat()
@@ -486,10 +496,6 @@ def validate_s2e_external_worm_provider_attestation(
         and readback.get("object_lock_enabled") is True
     ):
         errors.append("external WORM provider immutable readback is not proven")
-    errors.extend(_external_locator_errors(
-        attestation.get("provider_locator"),
-        label="external WORM provider",
-    ))
     errors.extend(_freshness_errors(attestation, now=now, label="external WORM provider"))
     try:
         if _timestamp(attestation["observed_at"]) < _timestamp(readback["observed_at"]):

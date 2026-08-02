@@ -18,9 +18,9 @@
     "provider_class": {"const": "S3_OBJECT_LOCK_EXTERNAL_ATTESTOR_V1"},
     "provider_locator": {
       "type": "string",
-      "minLength": 8,
-      "maxLength": 512,
-      "pattern": "^[A-Za-z][A-Za-z0-9+.-]*:[^\\s]+$"
+      "minLength": 29,
+      "maxLength": 156,
+      "pattern": "^aws:s3-object-lock-attestor:[A-Za-z0-9][A-Za-z0-9._-]{0,127}$"
     },
     "external_intent_digest": {"$ref": "#/$defs/digest"},
     "external_result_digest": {"$ref": "#/$defs/digest"},
