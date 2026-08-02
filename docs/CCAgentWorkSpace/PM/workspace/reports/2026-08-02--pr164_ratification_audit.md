@@ -1,9 +1,9 @@
-# PR#164 追認審計正本（2026-08-02）
+# PR#164 追認審計紀錄（2026-08-02；後補可復算，非 ORCHESTRATOR_BOUND）
 
 - **對象**:PR #164 `governance: bound GPT-5.6 multi-agent execution`,merge commit `245869d25`(2026-08-01T20:51:23Z,mergedBy=yunancun),range `f115a40e6..245869d25`,143 檔 +33,414/−8,064。
 - **背景**:該分支原經 operator 批准裁 `SUPERSEDED-KILL`(governance doc §13 先例);2026-08-01 22:51 operator 改判並親自 merge;改判條件=「仔細審核」,即本審計。
-- **編排**:workflow run `wf_b7aae581-484`(本 repo 開發用 Claude 主會話派發;transcript 於開發機 session 目錄),5 個 read-only 審計 lane(policy/safety/workflows/machine/claims)+每 lane critical/high findings 對抗覆核。
-- **總裁決**:實質面過關,支持追認;4 條 CONFIRMED high 帳面問題由追認整合 PR(#175)收口。
+- **編排來源聲稱（非持久化 authority）**:開發主會話曾以 `wf_b7aae581-484` 派發 5 個 read-only 審計 lane(policy/safety/workflows/machine/claims)並對 critical/high findings 覆核；其 transcript／call manifest／governed command capture 未進 repository durable evidence，故本檔不得宣稱該 workflow 已達 `ORCHESTRATOR_BOUND`，workflow ID 只作來源線索。
+- **總裁決**:本檔作為後補且可由下列命令／Git bytes 本地復算的審計紀錄，實質面支持追認；不以未持久化的 workflow provenance 作權威。4 條 CONFIRMED high 帳面問題由追認整合 PR(#175)收口。
 - **可復現錨**:本檔所有量化主張標明復算方式;關鍵數字=治理測試 in-glob 76,939→86,203(+9,264)、glob 外 +1,764(四 glob 合計 87,967 @245869d25)、本地 782 tests passed/0 failed/9 skipped、role memory 熱記憶 1,547,913→41,904B(−97.3%,18 archive digest 逐一對上原 bytes)。
 
 
