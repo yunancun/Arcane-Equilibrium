@@ -683,6 +683,23 @@ signature、referenced execution evidence digest、assessment/adjudication/expir
 packet 形狀本身不是 cache proof。第二遍測試只在 critical、已失敗、已知 flaky、
 release gate；critical flaky 是 FAIL。
 
+重跑政策（2026-08-01 框架健檢裁決）：本段只涵蓋 test-suite 證據；effect Adapter 的
+`ops_postcheck` 獨立驗證者仍須產出自己的 governed `command_capture_v2`（§4），不得援引
+本段改為只驗 digest。gate/exit 級「全 suite 通過」證據由**一方執行**——執行方產出
+task/node/role/command-bound `command_capture_v2`——其餘 required 覆核方
+（例如 PM/E2/E4 三方場景中的另外兩方）不再各自重跑整個 suite，改為各自獨立讀取
+capture bytes、重算 capture digest、核對本節首段所列 evidence signature **全欄位**
+（source HEAD 至 authorization hash）與宣稱一致；覆核產物一律標 `REUSED`（覆核方未
+執行，不得標 `EXECUTED`），並沿用上文 `REUSED` 的原 execution evidence、assessment、
+created/expiry lineage 與 closure 消費時的 assessor hash-pinned receipt 要求。舊「逐字
+相同的尾行」標準由 capture digest 等價取代（尾行屬 capture bytes 的一部分，digest 等價
+即涵蓋逐字比對）；誠實邊界：digest 等價只證明各覆核方讀到同一批 capture bytes，不證明
+suite 真被執行——該保證仍只由下段 Closure trusted re-execution（或未來 host-attested
+verifier）提供。第二遍真執行仍只保留給上段列出的 critical、已失敗、已知 flaky 與
+release gate，且執行方必須是不同 role；release gate 專指 production release/deploy 級
+gate，source gate/exit（如 S2.4 `SOURCE_READY`）不屬之。歷史 gate record 中的三方各自
+重跑（如 S2.4 `SOURCE_READY` 退出條件①）自此為先例存史，不再是未來 gate 的模板。
+
 這個 E4 scheduling 規則與 Closure assurance replay 分開計價：目前缺 host
 CommandCaptureVerifier，Closure 對 capture 做 trusted re-execution，故非 critical 也會有
 一次驗證 replay。這是刻意的高保證 constraint，不得在 consumption accounting 中稱為
