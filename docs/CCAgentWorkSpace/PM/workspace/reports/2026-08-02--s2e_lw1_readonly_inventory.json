@@ -1,0 +1,50 @@
+{
+  "schema_version": "s2e_lw1_readonly_inventory_v1",
+  "host": "trade-core",
+  "observed_at": "2026-08-02T04:06:52Z",
+  "evidence_class": "UNAUTHENTICATED_READ_ONLY_OBSERVATION",
+  "linux_source_head": "8656dd80df3c332ecb84ac57d8bf09aca9f72e37",
+  "linux_worktree_clean": true,
+  "fixed_path_statuses": {
+    "/etc/arcane-equilibrium/aiml/s2e-external-worm-provider-trust-root-v1.json": "ABSENT",
+    "/etc/arcane-equilibrium/aiml/s2e-predecessor-registry-trust-root-v1.json": "ABSENT",
+    "/etc/arcane-equilibrium/aiml/s2e-receipt-trust-root-v1.json": "ABSENT",
+    "/etc/arcane-equilibrium/trust/s2-5-recovery-actor-capture.pub": "ABSENT",
+    "/etc/arcane-equilibrium/trust/s2-5-recovery-anchor-readback.pub": "ABSENT",
+    "/etc/arcane-equilibrium/trust/s2-5-recovery-anchor.pub": "ABSENT",
+    "/etc/arcane-equilibrium/trust/s2-5-recovery-authorization.pub": "ABSENT",
+    "/etc/arcane-equilibrium/trust/s2-5-recovery-consumption.pub": "ABSENT",
+    "/etc/arcane-equilibrium/trust/s2-5-recovery-host-capture.pub": "ABSENT",
+    "/etc/arcane-equilibrium/trust/s2-5-recovery-verifier-capture.pub": "ABSENT",
+    "/usr/local/libexec/arcane-equilibrium/s2-5-recovery-host-capture-sign-v1": "ABSENT"
+  },
+  "service_statuses": {
+    "EXTERNAL_APPEND_ONLY_PREDECESSOR_REGISTRY": "NOT_OBSERVED",
+    "EXTERNAL_WORM_COMPLIANCE_DESTINATION": "NOT_OBSERVED",
+    "EXTERNAL_WORM_PROVIDER_ATTESTOR": "NOT_OBSERVED"
+  },
+  "runtime_units": [
+    {
+      "unit": "arcane-equilibrium-aiml-engine-scanner.service",
+      "load_state": "not-found",
+      "active_state": "inactive",
+      "sub_state": "dead"
+    },
+    {
+      "unit": "openclaw-learning.service",
+      "load_state": "not-found",
+      "active_state": "inactive",
+      "sub_state": "dead"
+    }
+  ],
+  "canonical_roots": [
+    {
+      "path": "/opt/arcane-equilibrium/aiml",
+      "status": "ABSENT"
+    },
+    {
+      "path": "/var/lib/arcane-equilibrium/aiml",
+      "status": "ABSENT"
+    }
+  ]
+}

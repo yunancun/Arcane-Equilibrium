@@ -6,7 +6,16 @@
 > 它不是 active dispatch queue；當前 blocker、owner、gate、runtime evidence 一律讀根目錄 `TODO.md`。
 > 新增重要文檔時優先更新本索引或 `initiative_index.md`，不要把長表重新塞回 `docs/README.md`。
 >
-> **Freshness（2026-07-30 增量）**：本索引按主題分段增量維護，無單一 as-of；最新增量為 GPT-5.6 bounded multi-agent execution。判斷時效以 `git log` + `TODO.md` 為準，勿以本索引缺席反推文檔不存在。
+> **Freshness（2026-08-02 增量）**：本索引按主題分段增量維護，無單一 as-of；最新增量為 G0 / S2E-LW1 checkpoint。判斷時效以 `git log` + `TODO.md` 為準，勿以本索引缺席反推文檔不存在。
+
+### 2026-08-02 G0 / S2E-LW1 checkpoint
+
+| 文件 | 内容 |
+|------|------|
+| `CCAgentWorkSpace/PM/workspace/reports/2026-08-02--g0_s2e_lw1_checkpoint_and_blocker.md` | PM 工程收口與對抗複驗：G0=`SOURCE_COMPLETE_RUNTIME_INDETERMINATE`；LW1 source implementation checkpoint 完成，但 14/14 external prerequisites blocking，W0/LW1 receipts absent、LW2 locked、authority 0/9、effect 0/6。 |
+| `CCAgentWorkSpace/Operator/2026-08-02--g0_s2e_lw1_checkpoint_and_blocker.md` | Operator 交接：只執行 machine packet 的 fixed roots/signer/WORM/provider/registry provisioning 與 fresh evidence sequence；禁止 secret 入 repo/prompt/packet，禁止先跑 LW2。 |
+| `CCAgentWorkSpace/PM/workspace/reports/2026-08-02--s2e_lw1_readonly_inventory.json` | trade-core 唯讀 inventory；固定低信任 `UNAUTHENTICATED_READ_ONLY_OBSERVATION`，記錄 source head/clean、兩 units、兩 canonical roots、11 fixed paths 與三個 external service 狀態。 |
+| `CCAgentWorkSpace/PM/workspace/reports/2026-08-02--s2e_lw1_external_prerequisite_action_packet.json` | Closed `s2e_lw1_operator_action_packet_v1`；綁 implementation checkpoint `1716307d8`，列出 14 blockers、6-step action sequence 與不可升格的 closure/authority/runtime 邊界。 |
 
 ### 2026-07-30 GPT-5.6 bounded multi-agent execution
 

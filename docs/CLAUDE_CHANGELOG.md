@@ -1,9 +1,23 @@
 # CLAUDE_CHANGELOG.md — 開發歷史歸檔
 
 > 從 CLAUDE.md / TODO.md 遷出的 Wave/Sprint/Batch + TODO version-increment 歷史敘事。新 session 不需要讀此文件，僅供回顧歷史時查閱。
-> 最後更新：2026-08-02（TODO v866 wave2 收口＋PR#164 追認）
+> 最後更新：2026-08-02（TODO v867 G0/LW1 checkpoint＋external blocker）
 
 ---
+
+## TODO v867 增量：G0 / S2E-LW1 checkpoint 與 external blocker（2026-08-02）
+
+- G0 校準為 `SOURCE_COMPLETE_RUNTIME_INDETERMINATE`：governance source landed，沒有
+  current runtime/process/build attestation，不以 source sync 冒充 runtime PASS。
+- LW1 source 補齊 dispatch/host-clock、fixed host-capture producer、independent external
+  WORM provider attestation、append-only predecessor registry 與 closed action packet。
+- fail-first recovery/kernel regression 抓到 9 個 producer raw-`subprocess`/scanner failure；
+  所有 Git/signer invocation 改由 sole host kernel 固定 argv 與 bounded stdin 後，同集合
+  `773 passed, 9 skipped`。
+- Linux 唯讀 inventory 顯示 11 個 fixed trust/signer paths absent、三個 external services
+  `NOT_OBSERVED`。終態為 `BLOCKED_EXTERNAL_PREREQUISITES_ACTION_PACKET_READY`；W0/LW1
+  receipts absent、LW2 locked、authority 0/9、production effect 0/6，S2 仍 open。
+
 
 ## TODO v866 增量：wave2 收口＋PR#164 追認（2026-08-02）
 

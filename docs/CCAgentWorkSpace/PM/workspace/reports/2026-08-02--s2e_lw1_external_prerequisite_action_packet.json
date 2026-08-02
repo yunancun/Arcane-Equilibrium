@@ -1,0 +1,223 @@
+{
+  "authority_boundaries": {
+    "admitted_production_effect_receipt_count": 0,
+    "packet_execution_receipt_absent_within_task_scope": true,
+    "production_deploy_restart_pg_broker_order_authorized": false,
+    "production_runtime_effect_performed_by_task": false,
+    "task_issued_authority_count": 0,
+    "total_authority_count": 9,
+    "total_production_effect_receipt_count": 6
+  },
+  "blocked_prerequisite_ids": [
+    "EXTERNAL_APPEND_ONLY_PREDECESSOR_REGISTRY",
+    "EXTERNAL_WORM_COMPLIANCE_DESTINATION",
+    "EXTERNAL_WORM_PROVIDER_ATTESTOR",
+    "EXTERNAL_WORM_PROVIDER_TRUST_ROOT",
+    "PREDECESSOR_REGISTRY_TRUST_ROOT",
+    "RECOVERY_ACTOR_CAPTURE_TRUST_ROOT",
+    "RECOVERY_ANCHOR_READBACK_TRUST_ROOT",
+    "RECOVERY_ANCHOR_TRUST_ROOT",
+    "RECOVERY_AUTHORIZATION_TRUST_ROOT",
+    "RECOVERY_CONSUMPTION_TRUST_ROOT",
+    "RECOVERY_HOST_CAPTURE_SIGNER_CAPABILITY",
+    "RECOVERY_HOST_CAPTURE_TRUST_ROOT",
+    "RECOVERY_VERIFIER_CAPTURE_TRUST_ROOT",
+    "S2E_RECEIPT_TRUST_ROOT"
+  ],
+  "closure_projection": {
+    "g0_state": "SOURCE_COMPLETE_RUNTIME_INDETERMINATE",
+    "lw1_state": "BLOCKED_EXTERNAL_PREREQUISITES",
+    "lw1_transition_gate_advance": false,
+    "lw1_wave_receipt_issued": false,
+    "lw2_unlocked": false,
+    "runtime_state": "UNVERIFIED_NOT_OBSERVED",
+    "s2_closed": false,
+    "s2e_2b_2_closed": false,
+    "w0_genesis_receipt_issued": false
+  },
+  "launch_id": "S2E-LW1-LW5",
+  "next_action": "OPERATOR_PROVISION_EXTERNAL_PREREQUISITES_THEN_RESUME_S2E_LW1",
+  "packet_digest": "sha256:3c6ce22809faf90b1c207c6d70f40d14d461a31096d41d46f8ad5948cbae5991",
+  "prerequisites": [
+    {
+      "blocking": true,
+      "category": "EXTERNAL_SERVICE",
+      "locator": "operator-config:external-predecessor-registry",
+      "prerequisite_id": "EXTERNAL_APPEND_ONLY_PREDECESSOR_REGISTRY",
+      "required_property": "DISTINCT_FIXED_ROOT_APPEND_ONLY_SINGLE_USE_REGISTRY",
+      "secret_material_allowed": false,
+      "status": "NOT_OBSERVED"
+    },
+    {
+      "blocking": true,
+      "category": "EXTERNAL_SERVICE",
+      "locator": "operator-config:external-worm-compliance-destination",
+      "prerequisite_id": "EXTERNAL_WORM_COMPLIANCE_DESTINATION",
+      "required_property": "S3_OBJECT_LOCK_COMPLIANCE_WITH_NAMED_CREDENTIAL_CHANNEL",
+      "secret_material_allowed": false,
+      "status": "NOT_OBSERVED"
+    },
+    {
+      "blocking": true,
+      "category": "EXTERNAL_SERVICE",
+      "locator": "operator-config:external-worm-provider-attestor",
+      "prerequisite_id": "EXTERNAL_WORM_PROVIDER_ATTESTOR",
+      "required_property": "DISTINCT_FIXED_ROOT_PLATFORM_OR_EXTERNAL_ATTESTOR",
+      "secret_material_allowed": false,
+      "status": "NOT_OBSERVED"
+    },
+    {
+      "blocking": true,
+      "category": "FIXED_HOST_PATH",
+      "locator": "/etc/arcane-equilibrium/aiml/s2e-external-worm-provider-trust-root-v1.json",
+      "prerequisite_id": "EXTERNAL_WORM_PROVIDER_TRUST_ROOT",
+      "required_property": "ROOT_OWNED_EXACT_0644_JSON_TRUST_PROFILE",
+      "secret_material_allowed": false,
+      "status": "ABSENT"
+    },
+    {
+      "blocking": true,
+      "category": "FIXED_HOST_PATH",
+      "locator": "/etc/arcane-equilibrium/aiml/s2e-predecessor-registry-trust-root-v1.json",
+      "prerequisite_id": "PREDECESSOR_REGISTRY_TRUST_ROOT",
+      "required_property": "ROOT_OWNED_EXACT_0644_JSON_TRUST_PROFILE",
+      "secret_material_allowed": false,
+      "status": "ABSENT"
+    },
+    {
+      "blocking": true,
+      "category": "FIXED_HOST_PATH",
+      "locator": "/etc/arcane-equilibrium/trust/s2-5-recovery-actor-capture.pub",
+      "prerequisite_id": "RECOVERY_ACTOR_CAPTURE_TRUST_ROOT",
+      "required_property": "FIXED_PUBLIC_KEY_NOT_GROUP_OR_OTHER_WRITABLE",
+      "secret_material_allowed": false,
+      "status": "ABSENT"
+    },
+    {
+      "blocking": true,
+      "category": "FIXED_HOST_PATH",
+      "locator": "/etc/arcane-equilibrium/trust/s2-5-recovery-anchor-readback.pub",
+      "prerequisite_id": "RECOVERY_ANCHOR_READBACK_TRUST_ROOT",
+      "required_property": "FIXED_PUBLIC_KEY_NOT_GROUP_OR_OTHER_WRITABLE",
+      "secret_material_allowed": false,
+      "status": "ABSENT"
+    },
+    {
+      "blocking": true,
+      "category": "FIXED_HOST_PATH",
+      "locator": "/etc/arcane-equilibrium/trust/s2-5-recovery-anchor.pub",
+      "prerequisite_id": "RECOVERY_ANCHOR_TRUST_ROOT",
+      "required_property": "FIXED_PUBLIC_KEY_NOT_GROUP_OR_OTHER_WRITABLE",
+      "secret_material_allowed": false,
+      "status": "ABSENT"
+    },
+    {
+      "blocking": true,
+      "category": "FIXED_HOST_PATH",
+      "locator": "/etc/arcane-equilibrium/trust/s2-5-recovery-authorization.pub",
+      "prerequisite_id": "RECOVERY_AUTHORIZATION_TRUST_ROOT",
+      "required_property": "FIXED_PUBLIC_KEY_NOT_GROUP_OR_OTHER_WRITABLE",
+      "secret_material_allowed": false,
+      "status": "ABSENT"
+    },
+    {
+      "blocking": true,
+      "category": "FIXED_HOST_PATH",
+      "locator": "/etc/arcane-equilibrium/trust/s2-5-recovery-consumption.pub",
+      "prerequisite_id": "RECOVERY_CONSUMPTION_TRUST_ROOT",
+      "required_property": "FIXED_PUBLIC_KEY_NOT_GROUP_OR_OTHER_WRITABLE",
+      "secret_material_allowed": false,
+      "status": "ABSENT"
+    },
+    {
+      "blocking": true,
+      "category": "FIXED_HOST_PATH",
+      "locator": "/usr/local/libexec/arcane-equilibrium/s2-5-recovery-host-capture-sign-v1",
+      "prerequisite_id": "RECOVERY_HOST_CAPTURE_SIGNER_CAPABILITY",
+      "required_property": "ROOT_OWNED_FIXED_EXECUTABLE_CAPABILITY",
+      "secret_material_allowed": false,
+      "status": "ABSENT"
+    },
+    {
+      "blocking": true,
+      "category": "FIXED_HOST_PATH",
+      "locator": "/etc/arcane-equilibrium/trust/s2-5-recovery-host-capture.pub",
+      "prerequisite_id": "RECOVERY_HOST_CAPTURE_TRUST_ROOT",
+      "required_property": "FIXED_PUBLIC_KEY_NOT_GROUP_OR_OTHER_WRITABLE",
+      "secret_material_allowed": false,
+      "status": "ABSENT"
+    },
+    {
+      "blocking": true,
+      "category": "FIXED_HOST_PATH",
+      "locator": "/etc/arcane-equilibrium/trust/s2-5-recovery-verifier-capture.pub",
+      "prerequisite_id": "RECOVERY_VERIFIER_CAPTURE_TRUST_ROOT",
+      "required_property": "FIXED_PUBLIC_KEY_NOT_GROUP_OR_OTHER_WRITABLE",
+      "secret_material_allowed": false,
+      "status": "ABSENT"
+    },
+    {
+      "blocking": true,
+      "category": "FIXED_HOST_PATH",
+      "locator": "/etc/arcane-equilibrium/aiml/s2e-receipt-trust-root-v1.json",
+      "prerequisite_id": "S2E_RECEIPT_TRUST_ROOT",
+      "required_property": "ROOT_OWNED_EXACT_0644_JSON_TRUST_PROFILE",
+      "secret_material_allowed": false,
+      "status": "ABSENT"
+    }
+  ],
+  "purpose": "UNBLOCK_S2E_LW1_EXTERNAL_EVIDENCE_AND_RECEIPT_CHAIN",
+  "readonly_observation": {
+    "canonical_roots": [
+      {
+        "path": "/opt/arcane-equilibrium/aiml",
+        "status": "ABSENT"
+      },
+      {
+        "path": "/var/lib/arcane-equilibrium/aiml",
+        "status": "ABSENT"
+      }
+    ],
+    "evidence_class": "UNAUTHENTICATED_READ_ONLY_OBSERVATION",
+    "host": "trade-core",
+    "inventory_digest": "sha256:eafe1d62ec599e5310dda4cd6d60f86de0f99bd120a1bd8517fe65e6b1ba5de5",
+    "linux_source_head": "8656dd80df3c332ecb84ac57d8bf09aca9f72e37",
+    "linux_worktree_clean": true,
+    "observed_at": "2026-08-02T04:06:52Z",
+    "runtime_units": [
+      {
+        "active_state": "inactive",
+        "load_state": "not-found",
+        "sub_state": "dead",
+        "unit": "arcane-equilibrium-aiml-engine-scanner.service"
+      },
+      {
+        "active_state": "inactive",
+        "load_state": "not-found",
+        "sub_state": "dead",
+        "unit": "openclaw-learning.service"
+      }
+    ]
+  },
+  "required_action_ids": [
+    "PROVISION_FIXED_TRUST_ROOTS",
+    "PROVISION_HOST_CAPTURE_SIGNER_CAPABILITY",
+    "CONFIGURE_EXTERNAL_WORM_COMPLIANCE_DESTINATION",
+    "CONFIGURE_DISTINCT_EXTERNAL_WORM_PROVIDER_ATTESTOR",
+    "CONFIGURE_DISTINCT_APPEND_ONLY_PREDECESSOR_REGISTRY",
+    "RESUME_W0_AND_LW1_RECEIPT_CHAIN_WITH_FRESH_EVIDENCE"
+  ],
+  "schema_version": "s2e_lw1_operator_action_packet_v1",
+  "sensitive_material_policy": {
+    "credential_channel_name_only": true,
+    "policy": "NO_SECRET_MATERIAL_IN_PACKET",
+    "private_key_material_permitted": false
+  },
+  "source_binding": {
+    "implementation_checkpoint_head": "1716307d82cfc815b71175905ac91685c619041a",
+    "implementation_checkpoint_tree": "9d40613caa41439a2212320659a29e626a6afe76",
+    "worktree_clean_at_build": true
+  },
+  "state": "BLOCKED_EXTERNAL_PREREQUISITES_ACTION_PACKET_READY",
+  "wave": "S2E-LW1"
+}
