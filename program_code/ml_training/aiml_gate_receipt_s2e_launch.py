@@ -20,12 +20,16 @@ from aiml_gate_receipt_schema_core import (
 )
 from aiml_gate_receipt_s2e_consumption import (
     build_s2e_launch_consumption_bootstrap_authority_core,
+    build_s2e_predecessor_registry_request,
     consume_s2e_launch_predecessor,
     s2e_launch_consumption_bootstrap_authority_digest,
     s2e_launch_consumption_bootstrap_signed_bytes,
     validate_s2e_launch_consumption_entry,
     validate_s2e_launch_consumption_entry_structure,
     validate_s2e_launch_consumption_bootstrap_authority,
+)
+from aiml_gate_receipt_s2e_external_evidence import (
+    external_worm_provider_digest_or_none, validate_s2e_external_worm_provider_attestation,
 )
 from aiml_gate_receipt_s2e_review import (
     build_s2e_disposable_test_effect_chain,
@@ -629,11 +633,13 @@ _S2E_PREDECESSOR_AUTHORITY_FIELDS = {
     "review_external_append_intent",
     "review_external_append_result",
     "review_external_readback_ack",
+    "review_external_worm_provider_attestation",
     "carrier_attestation",
     "carrier_governed_capture_record",
     "carrier_external_append_intent",
     "carrier_external_append_result",
     "carrier_external_readback_ack",
+    "carrier_external_worm_provider_attestation",
     "authority_digest",
 }
 
@@ -800,6 +806,7 @@ def validate_s2e_launch_predecessor_authority(
             external_readback_ack=authority.get(
                 "review_external_readback_ack"
             ),
+            external_worm_provider_attestation=authority.get("review_external_worm_provider_attestation"),
             repo_root=repo_root,
             now=now,
             require_current_generation=False,
@@ -822,6 +829,7 @@ def validate_s2e_launch_predecessor_authority(
         external_readback_ack=authority.get(
             "carrier_external_readback_ack"
         ),
+        external_worm_provider_attestation=authority.get("carrier_external_worm_provider_attestation"),
     )
     if carrier_result.get("status") != "VERIFIED":
         errors.extend(
@@ -843,11 +851,13 @@ def build_s2e_launch_predecessor_authority(
     review_external_append_intent: dict[str, Any],
     review_external_append_result: dict[str, Any],
     review_external_readback_ack: dict[str, Any],
+    review_external_worm_provider_attestation: dict[str, Any],
     carrier_attestation: dict[str, Any],
     carrier_governed_capture_record: dict[str, Any],
     carrier_external_append_intent: dict[str, Any],
     carrier_external_append_result: dict[str, Any],
     carrier_external_readback_ack: dict[str, Any],
+    carrier_external_worm_provider_attestation: dict[str, Any],
     repo_root: Path,
     now: str | datetime,
 ) -> dict[str, Any]:
@@ -863,11 +873,13 @@ def build_s2e_launch_predecessor_authority(
         "review_external_append_intent": review_external_append_intent,
         "review_external_append_result": review_external_append_result,
         "review_external_readback_ack": review_external_readback_ack,
+        "review_external_worm_provider_attestation": review_external_worm_provider_attestation,
         "carrier_attestation": carrier_attestation,
         "carrier_governed_capture_record": carrier_governed_capture_record,
         "carrier_external_append_intent": carrier_external_append_intent,
         "carrier_external_append_result": carrier_external_append_result,
         "carrier_external_readback_ack": carrier_external_readback_ack,
+        "carrier_external_worm_provider_attestation": carrier_external_worm_provider_attestation,
     }
     authority["authority_digest"] = s2e_predecessor_authority_digest(authority)
     errors = validate_s2e_launch_predecessor_authority(
@@ -1072,6 +1084,7 @@ def verify_receipt_carrier_attestation(
     external_append_intent: Any,
     external_append_result: Any,
     external_readback_ack: Any,
+    external_worm_provider_attestation: Any,
 ) -> dict[str, Any]:
     """Verify a carrier through fixed-root SSHSIG, capture, and external WORM."""
 
@@ -1172,6 +1185,17 @@ def verify_receipt_carrier_attestation(
             now=now_text,
         )
     )
+    errors.extend(
+        f"external worm provider: {error}"
+        for error in validate_s2e_external_worm_provider_attestation(
+            external_worm_provider_attestation,
+            external_append_intent=external_append_intent,
+            external_append_result=external_append_result,
+            external_readback_ack=external_readback_ack,
+            now=now,
+        )
+    )
+    provider_digest = external_worm_provider_digest_or_none(external_worm_provider_attestation)
     if isinstance(external_append_result, dict) and external_append_result.get(
         "append_status"
     ) not in external_sink.EXTERNAL_COMMITTED_STATUSES:
@@ -1212,6 +1236,7 @@ def verify_receipt_carrier_attestation(
             ("object_id", append_result.get("record_locator")),
             ("version_id", append_result.get("object_version_id")),
             ("readback_digest", readback_ack.get("ack_digest")),
+            ("provider_attestation_digest", provider_digest),
         ):
             if immutable.get(field) != actual:
                 errors.append(
@@ -1266,6 +1291,7 @@ def verify_receipt_carrier_attestation(
             if isinstance(external_readback_ack, dict)
             else None
         ),
+        "external_worm_provider_attestation_digest": provider_digest,
         "independent_signing_key_available": profile is not None,
         "errors": sorted(set(errors)),
     }
@@ -1283,6 +1309,7 @@ def validate_s2e_launch_acceptance_review_bundle(
     external_append_intent: Any,
     external_append_result: Any,
     external_readback_ack: Any,
+    external_worm_provider_attestation: Any,
     repo_root: Path,
     now: str | datetime,
     require_current_generation: bool = True,
@@ -1537,6 +1564,17 @@ def validate_s2e_launch_acceptance_review_bundle(
             now=now_text,
         )
     )
+    errors.extend(
+        f"acceptance review external worm provider: {error}"
+        for error in validate_s2e_external_worm_provider_attestation(
+            external_worm_provider_attestation,
+            external_append_intent=external_append_intent,
+            external_append_result=external_append_result,
+            external_readback_ack=external_readback_ack,
+            now=now,
+        )
+    )
+    provider_digest = external_worm_provider_digest_or_none(external_worm_provider_attestation)
     if not (
         isinstance(external_append_result, dict)
         and external_append_result.get("append_status")
@@ -1593,6 +1631,7 @@ def validate_s2e_launch_acceptance_review_bundle(
             if isinstance(external_append_result, dict)
             else None,
         ),
+        ("provider_attestation_digest", provider_digest),
     ):
         if worm_binding.get(field) != actual:
             errors.append(f"acceptance review external WORM {field} binding differs")
@@ -1658,6 +1697,7 @@ def issue_s2e_launch_receipt(
     external_append_intent: Any = None,
     external_append_result: Any = None,
     external_readback_ack: Any = None,
+    external_worm_provider_attestation: Any = None,
     predecessor_receipt: Any = None,
     predecessor_authority: Any = None,
     predecessor_consumption_bootstrap_authority: Any = None,
@@ -1718,6 +1758,7 @@ def issue_s2e_launch_receipt(
             external_append_intent=external_append_intent,
             external_append_result=external_append_result,
             external_readback_ack=external_readback_ack,
+            external_worm_provider_attestation=external_worm_provider_attestation,
             repo_root=repo_root,
             now=trusted_now,
         )

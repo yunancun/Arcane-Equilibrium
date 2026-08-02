@@ -63,6 +63,12 @@ SCHEMA_FILES = {
     "s2e_launch_consumption_bootstrap_authority_v1": (
         "s2e_launch_consumption_bootstrap_authority_v1.schema.json"
     ),
+    "s2e_external_worm_provider_attestation_v1": (
+        "s2e_external_worm_provider_attestation_v1.schema.json"
+    ),
+    "s2e_predecessor_registry_attestation_v1": (
+        "s2e_predecessor_registry_attestation_v1.schema.json"
+    ),
     "aiml_required_effect_classification_v1": "aiml_required_effect_classification_v1.schema.json",
     "github_repository_policy_attestation_v1": "github_repository_policy_attestation_v1.schema.json",
     "aiml_receipt_dependency_graph_v1": "aiml_receipt_dependency_graph_v1.schema.json",

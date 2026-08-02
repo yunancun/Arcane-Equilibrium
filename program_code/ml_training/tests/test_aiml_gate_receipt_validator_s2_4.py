@@ -1024,8 +1024,9 @@ def test_cp2b_schema_files_resolve_to_real_files() -> None:
     # CP2a/CP2b + W2/W5 + S2.5 + S2.2B + launch registration reached 83.
     # S2E.LW1 adds four recovery-chain schemas, signed host-capture ABI, the
     # closed disposable-test chain and predecessor-consumption ABI, and the
-    # purpose-specific consumption bootstrap authority:91.
-    assert len(SCHEMA_FILES) == 91
+    # purpose-specific consumption bootstrap authority:91; independent WORM
+    # provider and predecessor-registry attestations bring the closed set to 93.
+    assert len(SCHEMA_FILES) == 93
     for s2e_key in (
         "s2e_launch_genesis_receipt_v1",
         "s2e_launch_predecessor_consumption_ledger_v1",

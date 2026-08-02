@@ -1941,8 +1941,8 @@ def test_host_capture_leaf_and_schema_extend_closure_without_lifecycle_roots():
     assert expected_resources <= set(closure["schema_resources"])
     # The launch review oracle and its centrally registered disposable-test
     # chain are application-reachable; lifecycle roots remain excluded.
-    assert len(closure["python_modules"]) == 58
-    assert len(closure["schema_resources"]) == 91
+    assert len(closure["python_modules"]) == 59
+    assert len(closure["schema_resources"]) == 93
     assert closure["runtime_lazy_helper_roots"] == [{
         "module": "agent_governance_sealed_build",
         "reason": (

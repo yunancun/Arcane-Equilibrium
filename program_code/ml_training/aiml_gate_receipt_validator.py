@@ -183,7 +183,7 @@ from aiml_gate_receipt_adoption import (  # noqa: E402,F401
     validate_program_adoption_receipt,
 )
 from aiml_gate_receipt_s2e_launch import (  # noqa: E402,F401
-    build_s2e_launch_consumption_bootstrap_authority_core,
+    build_s2e_launch_consumption_bootstrap_authority_core, build_s2e_predecessor_registry_request,
     build_s2e_launch_predecessor_authority,
     build_s2e_disposable_test_effect_chain,
     canonical_launch_payload_bytes,

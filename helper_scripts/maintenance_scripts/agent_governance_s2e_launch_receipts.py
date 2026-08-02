@@ -70,6 +70,12 @@ def _add_external_triplet(
         type=Path,
         required=True,
     )
+    parser.add_argument(
+        f"--{option_prefix}external-worm-provider-attestation",
+        dest=f"{destination_prefix}external_worm_provider_attestation",
+        type=Path,
+        required=True,
+    )
 
 
 def _parser() -> argparse.ArgumentParser:
@@ -190,6 +196,9 @@ def main(argv: list[str] | None = None) -> int:
             external_append_intent=_read(args.external_append_intent),
             external_append_result=_read(args.external_append_result),
             external_readback_ack=_read(args.external_readback_ack),
+            external_worm_provider_attestation=_read(
+                args.external_worm_provider_attestation
+            ),
             predecessor_receipt=(
                 _read(args.predecessor_receipt)
                 if args.predecessor_receipt is not None
@@ -219,6 +228,9 @@ def main(argv: list[str] | None = None) -> int:
             external_append_intent=_read(args.external_append_intent),
             external_append_result=_read(args.external_append_result),
             external_readback_ack=_read(args.external_readback_ack),
+            external_worm_provider_attestation=_read(
+                args.external_worm_provider_attestation
+            ),
         )
         print(json.dumps(result, ensure_ascii=False, sort_keys=True))
         return 0 if result.get("status") == "VERIFIED" else 2
@@ -244,6 +256,9 @@ def main(argv: list[str] | None = None) -> int:
             review_external_readback_ack=_read(
                 args.review_external_readback_ack
             ),
+            review_external_worm_provider_attestation=_read(
+                args.review_external_worm_provider_attestation
+            ),
             carrier_attestation=_read(args.carrier_attestation),
             carrier_governed_capture_record=_read(
                 args.carrier_governed_capture_record
@@ -256,6 +271,9 @@ def main(argv: list[str] | None = None) -> int:
             ),
             carrier_external_readback_ack=_read(
                 args.carrier_external_readback_ack
+            ),
+            carrier_external_worm_provider_attestation=_read(
+                args.carrier_external_worm_provider_attestation
             ),
             repo_root=args.repo_root,
             now=authority_now,

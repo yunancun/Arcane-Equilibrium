@@ -282,9 +282,9 @@ def test_local_recovery_store_schemas_reject_effect_or_authority_relabel(
 
 
 def test_local_store_schemas_do_not_expand_central_runtime_closure():
-    # The S2E disposable-test chain and consumption-bootstrap authority are
-    # the unrelated central increments.
-    assert len(validator.SCHEMA_FILES) == 91
+    # S2E launch and independent external-evidence contracts are unrelated
+    # central increments; these local schemas remain outside that registry.
+    assert len(validator.SCHEMA_FILES) == 93
     assert set(SAMPLES).isdisjoint(validator.SCHEMA_FILES)
 
 

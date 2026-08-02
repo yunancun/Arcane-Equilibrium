@@ -17,7 +17,7 @@
     "prior_consumption_ledger_digest",
     "expected_consumption_entry",
     "expected_result_ledger_digest",
-    "registry_receipt",
+    "registry_attestation",
     "issued_at",
     "expires_at",
     "side_effect_class",
@@ -44,7 +44,10 @@
     "prior_consumption_ledger_digest": {"$ref": "#/$defs/digest"},
     "expected_consumption_entry": {"$ref": "#/$defs/entry"},
     "expected_result_ledger_digest": {"$ref": "#/$defs/digest"},
-    "registry_receipt": {"$ref": "#/$defs/registry_receipt"},
+    "registry_attestation": {
+      "type": "object",
+      "description": "Delegated closed s2e_predecessor_registry_attestation_v1; the Python validator applies that separately registered schema and its fixed-root SSHSIG semantics."
+    },
     "issued_at": {"type": "string", "format": "date-time"},
     "expires_at": {"type": "string", "format": "date-time"},
     "side_effect_class": {"const": "LOCAL_SOURCE_CONTROL_STATE"},
@@ -106,30 +109,6 @@
         "side_effect_class": {"const": "LOCAL_SOURCE_CONTROL_STATE"},
         "production_effect": {"const": false},
         "entry_digest": {"$ref": "#/$defs/digest"}
-      }
-    },
-    "registry_receipt": {
-      "type": "object",
-      "additionalProperties": false,
-      "required": [
-        "schema_version",
-        "registry_class",
-        "slot_id",
-        "decision",
-        "conflicting_grant_absent",
-        "observed_at"
-      ],
-      "properties": {
-        "schema_version": {
-          "const": "s2e_launch_predecessor_single_use_registry_receipt_v1"
-        },
-        "registry_class": {
-          "const": "TRUSTED_SIGNER_PREDECESSOR_SINGLE_USE_REGISTRY_V1"
-        },
-        "slot_id": {"$ref": "#/$defs/digest"},
-        "decision": {"const": "GRANTED_ONCE"},
-        "conflicting_grant_absent": {"const": true},
-        "observed_at": {"type": "string", "format": "date-time"}
       }
     },
     "signer": {

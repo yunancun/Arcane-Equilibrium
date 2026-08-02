@@ -22,6 +22,7 @@ for candidate in (HELPERS, ML_ROOT):
 
 import agent_governance_s2e_launch_receipts as launch  # noqa: E402
 import aiml_gate_receipt_s2e_dispatch as s2e_dispatch  # noqa: E402
+import aiml_gate_receipt_s2e_external_evidence as s2e_external  # noqa: E402
 import aiml_gate_receipt_s2e_launch as s2e  # noqa: E402
 import aiml_gate_receipt_s2e_review as s2e_review  # noqa: E402
 import aiml_gate_receipt_validator as validator  # noqa: E402
@@ -92,6 +93,76 @@ def _install_disposable_s2e_trust_root(
     return private_key, public_key, fingerprint
 
 
+def _install_disposable_external_evidence_roots(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> dict[str, object]:
+    receipt_profile, receipt_errors = s2e.load_s2e_receipt_signer_trust_root()
+    assert receipt_errors == []
+    assert receipt_profile is not None
+
+    def profile(
+        name: str,
+        identity: str,
+        namespace: str,
+        attestor_class: str,
+    ) -> tuple[Path, dict[str, str]]:
+        private, public, fingerprint = __import__("s2_5_testkit").mint_key(
+            tmp_path, name
+        )
+        return private, {
+            "schema_version": name + "_trust_root_v1",
+            "signer_identity": identity,
+            "signature_namespace": namespace,
+            "algorithm": "SSH-ED25519",
+            "key_generation": "independent_off_repo_ed25519_v1",
+            "anchor": "fixed_off_repo_public_trust_root_v1",
+            "public_key": public,
+            "key_fingerprint": fingerprint,
+            "attestor_class": attestor_class,
+        }
+
+    provider_private, provider_profile = profile(
+        "s2e_external_worm_provider",
+        s2e_external.EXTERNAL_WORM_PROVIDER_IDENTITY,
+        s2e_external.EXTERNAL_WORM_PROVIDER_NAMESPACE,
+        "S3_OBJECT_LOCK_EXTERNAL_ATTESTOR_V1",
+    )
+    registry_private, registry_profile = profile(
+        "s2e_predecessor_registry",
+        s2e_external.PREDECESSOR_REGISTRY_IDENTITY,
+        s2e_external.PREDECESSOR_REGISTRY_NAMESPACE,
+        "EXTERNAL_APPEND_ONLY_PREDECESSOR_REGISTRY_V1",
+    )
+    fingerprints = {
+        receipt_profile["key_fingerprint"],
+        provider_profile["key_fingerprint"],
+        registry_profile["key_fingerprint"],
+    }
+    assert len(fingerprints) == 3
+    monkeypatch.setattr(
+        s2e_external,
+        "_load_external_worm_provider_trust_root",
+        lambda: (provider_profile, []),
+    )
+    monkeypatch.setattr(
+        s2e_external,
+        "_load_predecessor_registry_trust_root",
+        lambda: (registry_profile, []),
+    )
+    monkeypatch.setattr(
+        s2e_external,
+        "_load_s2e_receipt_signer_profile",
+        lambda: (receipt_profile, []),
+    )
+    return {
+        "provider_private": provider_private,
+        "provider_profile": provider_profile,
+        "registry_private": registry_private,
+        "registry_profile": registry_profile,
+    }
+
+
 def test_code_owned_s2e_trust_root_loads_independent_disposable_key(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
@@ -151,6 +222,7 @@ def test_s2e_dispatch_split_preserves_facade_abi_and_line_policy() -> None:
     exported = (
         "build_s2e_launch_consumption_bootstrap_authority_core",
         "build_s2e_launch_predecessor_authority",
+        "build_s2e_predecessor_registry_request",
         "build_s2e_disposable_test_effect_chain",
         "canonical_launch_payload_bytes",
         "issue_s2e_launch_receipt",
@@ -419,10 +491,10 @@ def _external_worm_triplet(
         endpoint="https://s3.us-east-1.amazonaws.com",
         region="us-east-1",
         bucket="s2e-disposable-object-lock",
-        object_lock_mode="GOVERNANCE",
+        object_lock_mode="COMPLIANCE",
         retain_until=(issued_at + timedelta(days=30)).isoformat(),
         credential_channel_id="aws-profile:s2e-disposable",
-        compliance_operator_approved=False,
+        compliance_operator_approved=True,
         now=(issued_at + timedelta(minutes=1)).isoformat(),
     )
     client = _DisposableObjectLockS3()
@@ -442,6 +514,146 @@ def _external_worm_triplet(
         observed_at=(issued_at + timedelta(seconds=5)).isoformat(),
     )
     return intent, result, readback
+
+
+def _external_worm_provider_attestation(
+    intent: dict,
+    result: dict,
+    readback: dict,
+    *,
+    trust: dict[str, object],
+    issued_at: datetime,
+    directory: Path,
+) -> dict:
+    destination = intent["destination_contract"]
+    artifact = {
+        "schema_version": s2e_external.EXTERNAL_WORM_SCHEMA,
+        "purpose": "ATTEST_S2E_EXTERNAL_WORM_IMMUTABLE_READBACK",
+        "evidence_class": "PLATFORM_OR_EXTERNAL_ATTESTED",
+        "provider_class": "S3_OBJECT_LOCK_EXTERNAL_ATTESTOR_V1",
+        "provider_locator": "aws:s3-object-lock-attestor:external-account",
+        "external_intent_digest": intent["external_intent_digest"],
+        "external_result_digest": result["result_digest"],
+        "external_readback_ack_digest": readback["ack_digest"],
+        "terminal_payload_digest": intent["append_intent"]["payload_binding"][
+            "terminal_payload_digest"
+        ],
+        "destination": {
+            field: destination[field]
+            for field in (
+                "endpoint",
+                "region",
+                "bucket",
+                "credential_channel_id",
+                "object_lock_mode",
+                "retain_until",
+            )
+        },
+        "immutable_object": {
+            "record_locator": result["record_locator"],
+            "object_version_id": result["object_version_id"],
+            "checksum_sha256": result["checksum_sha256"],
+            "append_status": result["append_status"],
+            "readback_ack": readback["ack"],
+            "immutability_proven": readback["immutability_proven"],
+            "object_lock_enabled": readback["object_lock_enabled"],
+        },
+        "observed_at": (issued_at + timedelta(seconds=10)).isoformat(),
+        "expires_at": (issued_at + timedelta(minutes=5)).isoformat(),
+        "signer": {
+            "role": "EXTERNAL_WORM_PROVIDER_ATTESTOR",
+            "identity": s2e_external.EXTERNAL_WORM_PROVIDER_IDENTITY,
+            "namespace": s2e_external.EXTERNAL_WORM_PROVIDER_NAMESPACE,
+            "key_generation": "independent_off_repo_ed25519_v1",
+            "anchor": "fixed_off_repo_public_trust_root_v1",
+            "key_fingerprint": trust["provider_profile"]["key_fingerprint"],
+        },
+    }
+    signed = s2e_external.external_worm_provider_signed_bytes(artifact)
+    artifact["signed_core_digest"] = "sha256:" + hashlib.sha256(signed).hexdigest()
+    artifact["signature"] = {
+        "algorithm": "SSHSIG",
+        "signed_digest": artifact["signed_core_digest"],
+        "signature": _sign_sshsig(
+            trust["provider_private"],
+            signed,
+            namespace=s2e_external.EXTERNAL_WORM_PROVIDER_NAMESPACE,
+            directory=directory,
+        ),
+    }
+    artifact["attestation_digest"] = (
+        s2e_external.external_worm_provider_attestation_digest(artifact)
+    )
+    return artifact
+
+
+def _predecessor_registry_attestation(
+    request: dict,
+    *,
+    trust: dict[str, object],
+    issued_at: datetime,
+    directory: Path,
+) -> dict:
+    artifact = {
+        "schema_version": s2e_external.PREDECESSOR_REGISTRY_SCHEMA,
+        "purpose": "ATTEST_S2E_PREDECESSOR_SINGLE_USE_GRANT",
+        "evidence_class": "PLATFORM_OR_EXTERNAL_ATTESTED",
+        "registry_class": "EXTERNAL_APPEND_ONLY_PREDECESSOR_REGISTRY_V1",
+        "registry_locator": "registry:external-append-only:s2e",
+        **{
+            field: request[field]
+            for field in (
+                "launch_id",
+                "slot_id",
+                "predecessor_payload_digest",
+                "successor_candidate_payload_digest",
+                "successor_wave",
+                "successor_source_head",
+                "acceptance_review_bundle_digest",
+                "prior_consumption_ledger_digest",
+                "expected_consumption_entry_digest",
+                "expected_result_ledger_digest",
+            )
+        },
+        "decision": "GRANTED_ONCE",
+        "conflicting_grant_absent": True,
+        "registry_generation": 1,
+        "previous_registry_head_digest": None,
+        "registry_entry_digest": "",
+        "registry_head_digest": "",
+        "observed_at": issued_at.isoformat(),
+        "expires_at": (issued_at + timedelta(minutes=5)).isoformat(),
+        "signer": {
+            "role": "PREDECESSOR_REGISTRY_ATTESTOR",
+            "identity": s2e_external.PREDECESSOR_REGISTRY_IDENTITY,
+            "namespace": s2e_external.PREDECESSOR_REGISTRY_NAMESPACE,
+            "key_generation": "independent_off_repo_ed25519_v1",
+            "anchor": "fixed_off_repo_public_trust_root_v1",
+            "key_fingerprint": trust["registry_profile"]["key_fingerprint"],
+        },
+    }
+    artifact["registry_entry_digest"] = (
+        s2e_external.predecessor_registry_entry_digest(artifact)
+    )
+    artifact["registry_head_digest"] = (
+        s2e_external.predecessor_registry_head_digest(artifact)
+    )
+    signed = s2e_external.predecessor_registry_signed_bytes(artifact)
+    artifact["signed_core_digest"] = "sha256:" + hashlib.sha256(signed).hexdigest()
+    artifact["signature"] = {
+        "algorithm": "SSHSIG",
+        "signed_digest": artifact["signed_core_digest"],
+        "signature": _sign_sshsig(
+            trust["registry_private"],
+            signed,
+            namespace=s2e_external.PREDECESSOR_REGISTRY_NAMESPACE,
+            directory=directory,
+        ),
+    }
+    artifact["attestation_digest"] = (
+        s2e_external.predecessor_registry_attestation_digest(artifact)
+    )
+    return artifact
 
 
 def _git(repo: Path, *args: str) -> str:
@@ -668,6 +880,7 @@ def _carrier_case(tmp_path: Path) -> tuple[Path, dict, dict, dict, datetime]:
             "object_id": "s2e/w0/genesis",
             "version_id": "v1",
             "readback_digest": "sha256:" + "3" * 64,
+            "provider_attestation_digest": "sha256:" + "4" * 64,
         },
     }
     attestation["attested_core_digest"] = (
@@ -984,6 +1197,7 @@ def test_fake_trusted_host_objects_return_typed_pending_not_pass(
         external_append_intent={"schema_version": "caller-shaped"},
         external_append_result={"schema_version": "caller-shaped"},
         external_readback_ack={"schema_version": "caller-shaped"},
+        external_worm_provider_attestation={"schema_version": "caller-shaped"},
     )
 
     assert result["schema_version"] == "receipt_carrier_verification_result_v1"
@@ -1012,6 +1226,7 @@ def test_missing_trusted_host_objects_return_typed_pending_not_exception(
         external_append_intent=None,
         external_append_result=None,
         external_readback_ack=None,
+        external_worm_provider_attestation=None,
     )
 
     assert result["status"] == "EXTERNAL_VERIFICATION_PENDING"
@@ -1024,6 +1239,9 @@ def test_independent_key_capture_and_worm_produce_verified_carrier(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
     private_key, _, fingerprint = _install_disposable_s2e_trust_root(
+        tmp_path, monkeypatch
+    )
+    external_trust = _install_disposable_external_evidence_roots(
         tmp_path, monkeypatch
     )
     repo, genesis, attestation, _, issued_at = _carrier_case(tmp_path)
@@ -1067,11 +1285,22 @@ def test_independent_key_capture_and_worm_produce_verified_carrier(
         issued_at=issued_at,
         intent_id="s2e-carrier-intent-0001",
     )
+    provider_attestation = _external_worm_provider_attestation(
+        intent,
+        result,
+        readback,
+        trust=external_trust,
+        issued_at=issued_at,
+        directory=tmp_path,
+    )
     attestation["immutable_readback"] = {
         "adapter": "EXTERNAL_WORM_V1",
         "object_id": result["record_locator"],
         "version_id": result["object_version_id"],
         "readback_digest": readback["ack_digest"],
+        "provider_attestation_digest": provider_attestation[
+            "attestation_digest"
+        ],
     }
     _reseal_carrier(attestation)
     attestation["signature"]["signature"] = _sign_sshsig(
@@ -1093,6 +1322,7 @@ def test_independent_key_capture_and_worm_produce_verified_carrier(
         external_append_intent=intent,
         external_append_result=result,
         external_readback_ack=readback,
+        external_worm_provider_attestation=provider_attestation,
     )
 
     assert fingerprint != trusted_host.EXPECTED_EXECUTION_SIGNER_FINGERPRINT
@@ -1182,6 +1412,9 @@ def _issued_genesis_authority_case(
     monkeypatch: pytest.MonkeyPatch,
 ) -> dict:
     private_key, _, fingerprint = _install_disposable_s2e_trust_root(
+        tmp_path, monkeypatch
+    )
+    external_trust = _install_disposable_external_evidence_roots(
         tmp_path, monkeypatch
     )
     repo, baseline, schema_carrier, _ = _repo(tmp_path)
@@ -1288,12 +1521,23 @@ def _issued_genesis_authority_case(
         issued_at=issued_at,
         intent_id="s2e-authority-review-0001",
     )
+    review_provider_attestation = _external_worm_provider_attestation(
+        review_intent,
+        review_result,
+        review_readback,
+        trust=external_trust,
+        issued_at=issued_at,
+        directory=tmp_path,
+    )
     review_bundle["external_worm_binding"] = {
         "result_digest": review_result["result_digest"],
         "readback_ack_digest": review_readback["ack_digest"],
         "record_locator": review_result["record_locator"],
         "object_version_id": review_result["object_version_id"],
         "checksum_sha256": review_result["checksum_sha256"],
+        "provider_attestation_digest": review_provider_attestation[
+            "attestation_digest"
+        ],
     }
     review_bundle["bundle_digest"] = (
         validator.s2e_acceptance_review_bundle_digest(review_bundle)
@@ -1312,6 +1556,7 @@ def _issued_genesis_authority_case(
         external_append_intent=review_intent,
         external_append_result=review_result,
         external_readback_ack=review_readback,
+        external_worm_provider_attestation=review_provider_attestation,
     )
     assert issuance["status"] == "ISSUED"
     issued = issuance["issued_receipt"]
@@ -1371,6 +1616,7 @@ def _issued_genesis_authority_case(
             "object_id": "records/" + "0" * 64 + ".record",
             "version_id": "pending",
             "readback_digest": "sha256:" + "0" * 64,
+            "provider_attestation_digest": "sha256:" + "0" * 64,
         },
     }
     carrier_attestation["attested_core_digest"] = (
@@ -1416,11 +1662,22 @@ def _issued_genesis_authority_case(
         issued_at=issued_at + timedelta(minutes=2),
         intent_id="s2e-authority-carrier-0001",
     )
+    carrier_provider_attestation = _external_worm_provider_attestation(
+        carrier_intent,
+        carrier_result,
+        carrier_readback,
+        trust=external_trust,
+        issued_at=issued_at + timedelta(minutes=2),
+        directory=tmp_path,
+    )
     carrier_attestation["immutable_readback"] = {
         "adapter": "EXTERNAL_WORM_V1",
         "object_id": carrier_result["record_locator"],
         "version_id": carrier_result["object_version_id"],
         "readback_digest": carrier_readback["ack_digest"],
+        "provider_attestation_digest": carrier_provider_attestation[
+            "attestation_digest"
+        ],
     }
     _reseal_carrier(carrier_attestation)
     carrier_attestation["signature"]["signature"] = _sign_sshsig(
@@ -1441,11 +1698,17 @@ def _issued_genesis_authority_case(
         review_external_append_intent=review_intent,
         review_external_append_result=review_result,
         review_external_readback_ack=review_readback,
+        review_external_worm_provider_attestation=(
+            review_provider_attestation
+        ),
         carrier_attestation=carrier_attestation,
         carrier_governed_capture_record=carrier_capture,
         carrier_external_append_intent=carrier_intent,
         carrier_external_append_result=carrier_result,
         carrier_external_readback_ack=carrier_readback,
+        carrier_external_worm_provider_attestation=(
+            carrier_provider_attestation
+        ),
         repo_root=repo,
         now=issued_at + timedelta(minutes=3),
     )
@@ -1457,6 +1720,7 @@ def _issued_genesis_authority_case(
         "now": issued_at + timedelta(minutes=3),
         "private_key": private_key,
         "fingerprint": fingerprint,
+        "external_trust": external_trust,
     }
 
 
@@ -1755,6 +2019,11 @@ def test_launch_cli_exposes_full_issue_carrier_authority_and_transition_gates(
             "review-readback.json",
             authority["review_external_readback_ack"],
         ),
+        "review_provider": _json_file(
+            tmp_path,
+            "review-provider.json",
+            authority["review_external_worm_provider_attestation"],
+        ),
         "carrier_attestation": _json_file(
             tmp_path,
             "carrier-attestation.json",
@@ -1780,6 +2049,11 @@ def test_launch_cli_exposes_full_issue_carrier_authority_and_transition_gates(
             "carrier-readback.json",
             authority["carrier_external_readback_ack"],
         ),
+        "carrier_provider": _json_file(
+            tmp_path,
+            "carrier-provider.json",
+            authority["carrier_external_worm_provider_attestation"],
+        ),
         "empty_chain": _json_file(tmp_path, "empty-chain.json", []),
     }
     assert launch.main([
@@ -1792,6 +2066,7 @@ def test_launch_cli_exposes_full_issue_carrier_authority_and_transition_gates(
         "--external-append-intent", str(files["review_intent"]),
         "--external-append-result", str(files["review_result"]),
         "--external-readback-ack", str(files["review_readback"]),
+        "--external-worm-provider-attestation", str(files["review_provider"]),
     ]) == 2
     stale_issue = json.loads(capsys.readouterr().out)
     assert stale_issue["status"] == "EXTERNAL_VERIFICATION_PENDING"
@@ -1810,6 +2085,7 @@ def test_launch_cli_exposes_full_issue_carrier_authority_and_transition_gates(
         "--external-append-intent", str(files["carrier_intent"]),
         "--external-append-result", str(files["carrier_result"]),
         "--external-readback-ack", str(files["carrier_readback"]),
+        "--external-worm-provider-attestation", str(files["carrier_provider"]),
     ]) == 0
     assert json.loads(capsys.readouterr().out)["status"] == "VERIFIED"
     assert clock_samples == [now]
@@ -1825,11 +2101,15 @@ def test_launch_cli_exposes_full_issue_carrier_authority_and_transition_gates(
         "--review-external-append-intent", str(files["review_intent"]),
         "--review-external-append-result", str(files["review_result"]),
         "--review-external-readback-ack", str(files["review_readback"]),
+        "--review-external-worm-provider-attestation",
+        str(files["review_provider"]),
         "--carrier-attestation", str(files["carrier_attestation"]),
         "--carrier-governed-capture-record", str(files["carrier_capture"]),
         "--carrier-external-append-intent", str(files["carrier_intent"]),
         "--carrier-external-append-result", str(files["carrier_result"]),
         "--carrier-external-readback-ack", str(files["carrier_readback"]),
+        "--carrier-external-worm-provider-attestation",
+        str(files["carrier_provider"]),
     ]) == 0
     rebuilt_authority = json.loads(capsys.readouterr().out)
     assert rebuilt_authority["authority_digest"] == authority["authority_digest"]
@@ -1882,6 +2162,9 @@ def test_verified_review_bundle_issues_ready_genesis_receipt(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
     private_key, _, fingerprint = _install_disposable_s2e_trust_root(
+        tmp_path, monkeypatch
+    )
+    external_trust = _install_disposable_external_evidence_roots(
         tmp_path, monkeypatch
     )
     repo, baseline, carrier, _ = _repo(tmp_path)
@@ -1999,12 +2282,23 @@ def test_verified_review_bundle_issues_ready_genesis_receipt(
         issued_at=issued_at,
         intent_id="s2e-review-intent-0001",
     )
+    provider_attestation = _external_worm_provider_attestation(
+        intent,
+        append_result,
+        readback,
+        trust=external_trust,
+        issued_at=issued_at,
+        directory=tmp_path,
+    )
     bundle["external_worm_binding"] = {
         "result_digest": append_result["result_digest"],
         "readback_ack_digest": readback["ack_digest"],
         "record_locator": append_result["record_locator"],
         "object_version_id": append_result["object_version_id"],
         "checksum_sha256": append_result["checksum_sha256"],
+        "provider_attestation_digest": provider_attestation[
+            "attestation_digest"
+        ],
     }
     bundle["bundle_digest"] = validator.s2e_acceptance_review_bundle_digest(
         bundle
@@ -2026,6 +2320,7 @@ def test_verified_review_bundle_issues_ready_genesis_receipt(
         external_append_intent=intent,
         external_append_result=append_result,
         external_readback_ack=readback,
+        external_worm_provider_attestation=provider_attestation,
         repo_root=repo,
         now=issued_at + timedelta(minutes=1),
     )
@@ -2047,6 +2342,7 @@ def test_verified_review_bundle_issues_ready_genesis_receipt(
         external_append_intent=intent,
         external_append_result=append_result,
         external_readback_ack=readback,
+        external_worm_provider_attestation=provider_attestation,
         repo_root=repo,
         now=issued_at + timedelta(minutes=1),
     )
@@ -2086,6 +2382,7 @@ def test_verified_review_bundle_issues_ready_genesis_receipt(
         external_append_intent=intent,
         external_append_result=append_result,
         external_readback_ack=readback,
+        external_worm_provider_attestation=provider_attestation,
         disposable_test_effect_chains=[disposable_chain],
     )
     assert rejected["status"] == "EXTERNAL_VERIFICATION_PENDING"
@@ -2114,6 +2411,7 @@ def test_verified_review_bundle_issues_ready_genesis_receipt(
         external_append_intent=intent,
         external_append_result=append_result,
         external_readback_ack=readback,
+        external_worm_provider_attestation=provider_attestation,
         disposable_test_effect_chains=[disposable_chain],
     )
 
@@ -2207,9 +2505,10 @@ def test_generic_validator_never_schema_only_accepts_review_bundle() -> None:
             "result_digest": digest,
             "readback_ack_digest": digest,
             "record_locator": "records/" + "a" * 64 + ".record",
-            "object_version_id": "version-1",
-            "checksum_sha256": digest,
-        },
+                "object_version_id": "version-1",
+                "checksum_sha256": digest,
+                "provider_attestation_digest": digest,
+            },
         "bundle_digest": digest,
     }
 

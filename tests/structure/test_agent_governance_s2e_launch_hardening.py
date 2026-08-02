@@ -110,8 +110,8 @@ def test_review_manifest_closes_oracle_and_offline_provider_dependencies() -> No
         lw1_candidate,
         repo_root=ROOT,
     )
-    assert len(genesis_argv[genesis_argv.index("-q") + 1:]) == 7
-    assert len(lw1_argv[lw1_argv.index("-q") + 1:]) == 36
+    assert len(genesis_argv[genesis_argv.index("-q") + 1:]) == 8
+    assert len(lw1_argv[lw1_argv.index("-q") + 1:]) == 37
 
 
 def _review_for_wave(
@@ -122,7 +122,7 @@ def _review_for_wave(
     monkeypatch: pytest.MonkeyPatch,
     intent_suffix: str,
     grant_bootstrap: bool = True,
-) -> tuple[dict, dict, dict, dict, dict, dict, dict | None]:
+) -> tuple[dict, dict, dict, dict, dict, dict, dict, dict | None]:
     repo = case["repo"]
     capture = support._actual_capture(
         repo,
@@ -211,26 +211,52 @@ def _review_for_wave(
         issued_at=issued_at,
         intent_id=f"s2e-wave-review-{intent_suffix}",
     )
+    provider_attestation = support._external_worm_provider_attestation(
+        intent,
+        result,
+        readback,
+        trust=case["external_trust"],
+        issued_at=issued_at,
+        directory=tmp_path,
+    )
     bundle["external_worm_binding"] = {
         "result_digest": result["result_digest"],
         "readback_ack_digest": readback["ack_digest"],
         "record_locator": result["record_locator"],
         "object_version_id": result["object_version_id"],
         "checksum_sha256": result["checksum_sha256"],
+        "provider_attestation_digest": provider_attestation[
+            "attestation_digest"
+        ],
     }
     bundle["bundle_digest"] = validator.s2e_acceptance_review_bundle_digest(
         bundle
     )
     bootstrap = None
     if grant_bootstrap:
+        bootstrap_issued_at = case["now"] + timedelta(minutes=1)
+        registry_request = validator.build_s2e_predecessor_registry_request(
+            candidate=candidate,
+            predecessor_receipt=case["issued"],
+            predecessor_chain=[case["issued"]],
+            acceptance_review_bundle_digest=bundle["bundle_digest"],
+            consumed_at=bootstrap_issued_at,
+        )
+        registry_attestation = support._predecessor_registry_attestation(
+            registry_request,
+            trust=case["external_trust"],
+            issued_at=bootstrap_issued_at,
+            directory=tmp_path,
+        )
         bootstrap_core = (
             validator.build_s2e_launch_consumption_bootstrap_authority_core(
                 candidate=candidate,
                 predecessor_receipt=case["issued"],
                 predecessor_chain=[case["issued"]],
                 acceptance_review_bundle_digest=bundle["bundle_digest"],
+                registry_attestation=registry_attestation,
                 signer=bundle["signer"],
-                issued_at=case["now"] + timedelta(minutes=1),
+                issued_at=bootstrap_issued_at,
                 expires_at=case["now"] + timedelta(minutes=5),
             )
         )
@@ -265,7 +291,16 @@ def _review_for_wave(
         "_trusted_issuance_now",
         lambda: case["now"] + timedelta(minutes=1),
     )
-    return bundle, capture, chain, intent, result, readback, bootstrap
+    return (
+        bundle,
+        capture,
+        chain,
+        intent,
+        result,
+        readback,
+        provider_attestation,
+        bootstrap,
+    )
 
 
 def _issue_wave(
@@ -275,7 +310,7 @@ def _issue_wave(
     *,
     bootstrap_authority: object = _DEFAULT_BOOTSTRAP,
 ) -> dict:
-    bundle, capture, chain, intent, result, readback, bootstrap = review
+    bundle, capture, chain, intent, result, readback, provider, bootstrap = review
     selected_bootstrap = (
         bootstrap
         if bootstrap_authority is _DEFAULT_BOOTSTRAP
@@ -290,6 +325,7 @@ def _issue_wave(
         external_append_intent=intent,
         external_append_result=result,
         external_readback_ack=readback,
+        external_worm_provider_attestation=provider,
         predecessor_receipt=case["issued"],
         predecessor_authority=case["authority"],
         predecessor_consumption_bootstrap_authority=selected_bootstrap,
@@ -366,6 +402,9 @@ def test_historical_review_cannot_be_reissued_after_head_advances(
         external_append_intent=authority["review_external_append_intent"],
         external_append_result=authority["review_external_append_result"],
         external_readback_ack=authority["review_external_readback_ack"],
+        external_worm_provider_attestation=authority[
+            "review_external_worm_provider_attestation"
+        ],
     )
     assert result["status"] == "EXTERNAL_VERIFICATION_PENDING"
     assert any("not the clean current HEAD" in error for error in result["errors"])
@@ -601,7 +640,7 @@ def test_wave_issuance_binds_effects_and_consumes_predecessor_once(
         case,
         sibling_review,
         sibling,
-        bootstrap_authority=review[6],
+        bootstrap_authority=review[7],
     )
     assert cross_candidate_authority["status"] == (
         "EXTERNAL_VERIFICATION_PENDING"

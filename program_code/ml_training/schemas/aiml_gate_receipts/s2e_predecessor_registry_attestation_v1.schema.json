@@ -1,0 +1,81 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://arcane-equilibrium.local/schemas/s2e_predecessor_registry_attestation_v1.schema.json",
+  "title": "s2e_predecessor_registry_attestation_v1",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "schema_version", "purpose", "evidence_class", "registry_class",
+    "registry_locator", "launch_id", "slot_id", "predecessor_payload_digest",
+    "successor_candidate_payload_digest", "successor_wave",
+    "successor_source_head", "acceptance_review_bundle_digest",
+    "prior_consumption_ledger_digest", "expected_consumption_entry_digest",
+    "expected_result_ledger_digest", "decision", "conflicting_grant_absent",
+    "registry_generation", "previous_registry_head_digest",
+    "registry_entry_digest", "registry_head_digest", "observed_at", "expires_at",
+    "signer", "signed_core_digest", "signature", "attestation_digest"
+  ],
+  "properties": {
+    "schema_version": {"const": "s2e_predecessor_registry_attestation_v1"},
+    "purpose": {"const": "ATTEST_S2E_PREDECESSOR_SINGLE_USE_GRANT"},
+    "evidence_class": {"const": "PLATFORM_OR_EXTERNAL_ATTESTED"},
+    "registry_class": {"const": "EXTERNAL_APPEND_ONLY_PREDECESSOR_REGISTRY_V1"},
+    "registry_locator": {"type": "string", "minLength": 8, "maxLength": 512},
+    "launch_id": {"const": "S2E-LW1-LW5"},
+    "slot_id": {"$ref": "#/$defs/digest"},
+    "predecessor_payload_digest": {"$ref": "#/$defs/digest"},
+    "successor_candidate_payload_digest": {"$ref": "#/$defs/digest"},
+    "successor_wave": {"$ref": "#/$defs/wave"},
+    "successor_source_head": {"$ref": "#/$defs/git_sha"},
+    "acceptance_review_bundle_digest": {"$ref": "#/$defs/digest"},
+    "prior_consumption_ledger_digest": {"$ref": "#/$defs/digest"},
+    "expected_consumption_entry_digest": {"$ref": "#/$defs/digest"},
+    "expected_result_ledger_digest": {"$ref": "#/$defs/digest"},
+    "decision": {"const": "GRANTED_ONCE"},
+    "conflicting_grant_absent": {"const": true},
+    "registry_generation": {"type": "integer", "minimum": 1},
+    "previous_registry_head_digest": {
+      "anyOf": [{"$ref": "#/$defs/digest"}, {"type": "null"}]
+    },
+    "registry_entry_digest": {"$ref": "#/$defs/digest"},
+    "registry_head_digest": {"$ref": "#/$defs/digest"},
+    "observed_at": {"$ref": "#/$defs/timestamp"},
+    "expires_at": {"$ref": "#/$defs/timestamp"},
+    "signer": {"$ref": "#/$defs/signer"},
+    "signed_core_digest": {"$ref": "#/$defs/digest"},
+    "signature": {"$ref": "#/$defs/signature"},
+    "attestation_digest": {"$ref": "#/$defs/digest"}
+  },
+  "$defs": {
+    "digest": {"type": "string", "pattern": "^sha256:[0-9a-f]{64}$"},
+    "git_sha": {"type": "string", "pattern": "^[0-9a-f]{40}$"},
+    "timestamp": {"type": "string", "format": "date-time"},
+    "wave": {"enum": ["S2E-LW1", "S2E-LW2", "S2E-LW3", "S2E-LW4", "S2E-LW5"]},
+    "signer": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "role", "identity", "namespace", "key_generation", "anchor",
+        "key_fingerprint"
+      ],
+      "properties": {
+        "role": {"const": "PREDECESSOR_REGISTRY_ATTESTOR"},
+        "identity": {"const": "aiml-s2e-predecessor-registry-attestor-v1"},
+        "namespace": {"const": "arcane-equilibrium-aiml-s2e-predecessor-registry"},
+        "key_generation": {"const": "independent_off_repo_ed25519_v1"},
+        "anchor": {"const": "fixed_off_repo_public_trust_root_v1"},
+        "key_fingerprint": {"type": "string", "pattern": "^SHA256:[A-Za-z0-9+/]{43}$"}
+      }
+    },
+    "signature": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["algorithm", "signed_digest", "signature"],
+      "properties": {
+        "algorithm": {"const": "SSHSIG"},
+        "signed_digest": {"$ref": "#/$defs/digest"},
+        "signature": {"type": "string", "minLength": 32, "maxLength": 16384}
+      }
+    }
+  }
+}

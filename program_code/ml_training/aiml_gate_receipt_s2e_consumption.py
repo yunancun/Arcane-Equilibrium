@@ -8,12 +8,17 @@ import os
 import stat
 import subprocess
 import tempfile
+from copy import deepcopy
 from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any, Callable
 
 from agent_governance_schema import schema_subset_errors
 from aiml_gate_receipt_schema_core import _load_schema, canonical_digest
+from aiml_gate_receipt_s2e_external_evidence import (
+    s2e_predecessor_registry_slot_id,
+    validate_s2e_predecessor_registry_attestation,
+)
 
 
 LAUNCH_ID = "S2E-LW1-LW5"
@@ -22,9 +27,6 @@ LEDGER_SCHEMA = "s2e_launch_predecessor_consumption_ledger_v1"
 ENTRY_SCHEMA = "s2e_launch_predecessor_consumption_entry_v1"
 BOOTSTRAP_SCHEMA = "s2e_launch_consumption_bootstrap_authority_v1"
 BOOTSTRAP_PURPOSE = "AUTHORIZE_PREDECESSOR_SINGLE_USE_CONSUMPTION"
-BOOTSTRAP_REGISTRY_CLASS = (
-    "TRUSTED_SIGNER_PREDECESSOR_SINGLE_USE_REGISTRY_V1"
-)
 S2E_RECEIPT_SIGNER_IDENTITY = "aiml-s2e-receipt-signer-v1"
 S2E_RECEIPT_SIGNATURE_NAMESPACE = "arcane-equilibrium-aiml-s2e-receipts"
 STATE_BASENAME = "codex-s2e-launch-consumption-v1.json"
@@ -156,11 +158,7 @@ def _empty_ledger() -> dict[str, Any]:
 def s2e_launch_consumption_bootstrap_slot_id(
     predecessor_payload_digest: str,
 ) -> str:
-    return canonical_digest({
-        "schema_version": "s2e_launch_predecessor_single_use_slot_v1",
-        "launch_id": LAUNCH_ID,
-        "predecessor_payload_digest": predecessor_payload_digest,
-    })
+    return s2e_predecessor_registry_slot_id(predecessor_payload_digest)
 
 
 def s2e_launch_consumption_bootstrap_signed_bytes(
@@ -219,20 +217,16 @@ def _ledger_from_predecessor_chain(
     return ledger
 
 
-def build_s2e_launch_consumption_bootstrap_authority_core(
+def _s2e_launch_consumption_bootstrap_material(
     *,
     candidate: dict[str, Any],
     predecessor_receipt: dict[str, Any],
     predecessor_chain: list[dict[str, Any]],
     acceptance_review_bundle_digest: str,
-    signer: dict[str, Any],
-    issued_at: str | datetime,
-    expires_at: str | datetime,
-) -> dict[str, Any]:
-    """Build the exact unsigned core an external trusted signer may authorize."""
-
+    consumed_at: str | datetime,
+) -> tuple[dict[str, Any], dict[str, Any], dict[str, Any]]:
     prior = _ledger_from_predecessor_chain(predecessor_chain)
-    issued = _timestamp(issued_at)
+    consumed = _timestamp(consumed_at)
     sequence = len(prior["entries"]) + 1
     entry = {
         "schema_version": ENTRY_SCHEMA,
@@ -250,7 +244,7 @@ def build_s2e_launch_consumption_bootstrap_authority_core(
         "successor_wave": candidate.get("wave"),
         "successor_source_head": candidate.get("source_head"),
         "acceptance_review_bundle_digest": acceptance_review_bundle_digest,
-        "consumed_at": issued,
+        "consumed_at": consumed,
         "side_effect_class": "LOCAL_SOURCE_CONTROL_STATE",
         "production_effect": False,
     }
@@ -263,6 +257,85 @@ def build_s2e_launch_consumption_bootstrap_authority_core(
     result_ledger["ledger_digest"] = s2e_launch_consumption_ledger_digest(
         result_ledger
     )
+    return prior, entry, result_ledger
+
+
+def build_s2e_predecessor_registry_request(
+    *,
+    candidate: dict[str, Any],
+    predecessor_receipt: dict[str, Any],
+    predecessor_chain: list[dict[str, Any]],
+    acceptance_review_bundle_digest: str,
+    consumed_at: str | datetime,
+) -> dict[str, Any]:
+    """Build the exact non-authoritative subject an external registry consumes."""
+
+    prior, entry, result_ledger = _s2e_launch_consumption_bootstrap_material(
+        candidate=candidate,
+        predecessor_receipt=predecessor_receipt,
+        predecessor_chain=predecessor_chain,
+        acceptance_review_bundle_digest=acceptance_review_bundle_digest,
+        consumed_at=consumed_at,
+    )
+    predecessor_digest = str(predecessor_receipt.get("payload_digest", ""))
+    request = {
+        "schema_version": "s2e_predecessor_registry_request_v1",
+        "launch_id": LAUNCH_ID,
+        "slot_id": s2e_launch_consumption_bootstrap_slot_id(predecessor_digest),
+        "predecessor_payload_digest": predecessor_digest,
+        "successor_candidate_payload_digest": candidate.get("payload_digest"),
+        "successor_wave": candidate.get("wave"),
+        "successor_source_head": candidate.get("source_head"),
+        "acceptance_review_bundle_digest": acceptance_review_bundle_digest,
+        "prior_consumption_ledger_digest": prior["ledger_digest"],
+        "expected_consumption_entry_digest": entry["entry_digest"],
+        "expected_result_ledger_digest": result_ledger["ledger_digest"],
+        "consumed_at": entry["consumed_at"],
+        "requested_decision": "GRANTED_ONCE",
+        "conflicting_grant_required_absent": True,
+        "production_authority": False,
+        "production_effect": False,
+    }
+    request["request_digest"] = canonical_digest(request)
+    return request
+
+
+def build_s2e_launch_consumption_bootstrap_authority_core(
+    *,
+    candidate: dict[str, Any],
+    predecessor_receipt: dict[str, Any],
+    predecessor_chain: list[dict[str, Any]],
+    acceptance_review_bundle_digest: str,
+    registry_attestation: dict[str, Any],
+    signer: dict[str, Any],
+    issued_at: str | datetime,
+    expires_at: str | datetime,
+) -> dict[str, Any]:
+    """Build a receipt-signer core only after independent registry proof."""
+
+    issued = _timestamp(issued_at)
+    prior, entry, result_ledger = _s2e_launch_consumption_bootstrap_material(
+        candidate=candidate,
+        predecessor_receipt=predecessor_receipt,
+        predecessor_chain=predecessor_chain,
+        acceptance_review_bundle_digest=acceptance_review_bundle_digest,
+        consumed_at=issued,
+    )
+    registry_errors = validate_s2e_predecessor_registry_attestation(
+        registry_attestation,
+        candidate=candidate,
+        predecessor_receipt=predecessor_receipt,
+        acceptance_review_bundle_digest=acceptance_review_bundle_digest,
+        prior_consumption_ledger_digest=prior["ledger_digest"],
+        expected_consumption_entry=entry,
+        expected_result_ledger_digest=result_ledger["ledger_digest"],
+        now=issued,
+    )
+    if registry_errors:
+        raise ValueError(
+            "independent predecessor registry attestation is invalid: "
+            + "; ".join(registry_errors)
+        )
     predecessor_digest = str(predecessor_receipt.get("payload_digest", ""))
     return {
         "schema_version": BOOTSTRAP_SCHEMA,
@@ -276,18 +349,7 @@ def build_s2e_launch_consumption_bootstrap_authority_core(
         "prior_consumption_ledger_digest": prior["ledger_digest"],
         "expected_consumption_entry": entry,
         "expected_result_ledger_digest": result_ledger["ledger_digest"],
-        "registry_receipt": {
-            "schema_version": (
-                "s2e_launch_predecessor_single_use_registry_receipt_v1"
-            ),
-            "registry_class": BOOTSTRAP_REGISTRY_CLASS,
-            "slot_id": s2e_launch_consumption_bootstrap_slot_id(
-                predecessor_digest
-            ),
-            "decision": "GRANTED_ONCE",
-            "conflicting_grant_absent": True,
-            "observed_at": issued,
-        },
+        "registry_attestation": deepcopy(registry_attestation),
         "issued_at": issued,
         "expires_at": _timestamp(expires_at),
         "side_effect_class": "LOCAL_SOURCE_CONTROL_STATE",
@@ -372,20 +434,24 @@ def validate_s2e_launch_consumption_bootstrap_authority(
             errors.append(
                 "S2E consumption bootstrap result ledger digest differs"
             )
-    registry = authority.get("registry_receipt", {})
-    expected_slot = s2e_launch_consumption_bootstrap_slot_id(
-        str(predecessor_receipt.get("payload_digest", ""))
+    registry = authority.get("registry_attestation", {})
+    errors.extend(
+        "S2E consumption bootstrap registry: " + error
+        for error in validate_s2e_predecessor_registry_attestation(
+            registry,
+            candidate=candidate,
+            predecessor_receipt=predecessor_receipt,
+            acceptance_review_bundle_digest=acceptance_review_bundle_digest,
+            prior_consumption_ledger_digest=prior["ledger_digest"],
+            expected_consumption_entry=(
+                expected_entry if isinstance(expected_entry, dict) else {}
+            ),
+            expected_result_ledger_digest=str(
+                authority.get("expected_result_ledger_digest", "")
+            ),
+            now=now,
+        )
     )
-    for field, expected in (
-        ("registry_class", BOOTSTRAP_REGISTRY_CLASS),
-        ("slot_id", expected_slot),
-        ("decision", "GRANTED_ONCE"),
-        ("conflicting_grant_absent", True),
-    ):
-        if registry.get(field) != expected:
-            errors.append(
-                f"S2E consumption bootstrap registry {field} differs"
-            )
     signed_bytes = s2e_launch_consumption_bootstrap_signed_bytes(authority)
     signed_digest = _raw_digest(signed_bytes)
     if authority.get("signed_core_digest") != signed_digest:

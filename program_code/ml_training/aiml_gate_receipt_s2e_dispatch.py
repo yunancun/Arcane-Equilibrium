@@ -45,4 +45,16 @@ def s2e_launch_artifact_errors(
             "chain, acceptance review, fixed-root SSHSIG, and trusted "
             "single-use registry evidence are required"
         ]
+    if schema_version == "s2e_external_worm_provider_attestation_v1":
+        return [
+            "s2e external WORM provider attestation "
+            "EXTERNAL_VERIFICATION_PENDING: exact append intent/result/readback "
+            "and fixed-root provider SSHSIG are required"
+        ]
+    if schema_version == "s2e_predecessor_registry_attestation_v1":
+        return [
+            "s2e predecessor registry attestation "
+            "EXTERNAL_VERIFICATION_PENDING: exact candidate/predecessor/ledger "
+            "context and fixed-root registry SSHSIG are required"
+        ]
     return []
