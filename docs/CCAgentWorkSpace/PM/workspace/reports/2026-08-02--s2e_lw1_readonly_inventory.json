@@ -1,12 +1,12 @@
 {
   "schema_version": "s2e_lw1_readonly_inventory_v1",
   "host": "trade-core",
-  "observed_at": "2026-08-02T14:51:53Z",
+  "observed_at": "2026-08-02T22:13:32Z",
   "evidence_class": "UNAUTHENTICATED_READ_ONLY_OBSERVATION",
-  "linux_source_head": "8656dd80df3c332ecb84ac57d8bf09aca9f72e37",
+  "linux_source_head": "097c879b92994fe4aa4e264d3d6a4db65de7f710",
   "linux_worktree_clean": true,
   "fixed_path_statuses": {
-    "/etc/arcane-equilibrium/aiml/s2e-external-worm-provider-trust-root-v1.json": "ABSENT",
+    "/etc/arcane-equilibrium/aiml/s2e-durability-anchor-trust-root-v1.json": "ABSENT",
     "/etc/arcane-equilibrium/aiml/s2e-predecessor-registry-trust-root-v1.json": "ABSENT",
     "/etc/arcane-equilibrium/aiml/s2e-receipt-trust-root-v1.json": "ABSENT",
     "/etc/arcane-equilibrium/trust/s2-5-recovery-actor-capture.pub": "ABSENT",
@@ -19,9 +19,9 @@
     "/usr/local/libexec/arcane-equilibrium/s2-5-recovery-host-capture-attest-v2": "ABSENT"
   },
   "service_statuses": {
-    "EXTERNAL_APPEND_ONLY_PREDECESSOR_REGISTRY": "NOT_OBSERVED",
-    "EXTERNAL_WORM_COMPLIANCE_DESTINATION": "NOT_OBSERVED",
-    "EXTERNAL_WORM_PROVIDER_ATTESTOR": "NOT_OBSERVED"
+    "HOST_APPEND_ONLY_DURABILITY_ANCHOR": "NOT_OBSERVED",
+    "HOST_APPEND_ONLY_PREDECESSOR_REGISTRY": "NOT_OBSERVED",
+    "OFFHOST_APPEND_ONLY_REPLICA": "NOT_OBSERVED"
   },
   "runtime_units": [
     {
