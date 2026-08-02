@@ -39,7 +39,9 @@ from aiml_gate_receipt_schema_core import artifact_self_digest
 
 
 MACHINE_ID_PATH = Path("/etc/machine-id")
-OS_RELEASE_PATH = Path("/etc/os-release")
+# Ubuntu exposes /etc/os-release as a symlink. Read the canonical fixed target so
+# O_NOFOLLOW remains load-bearing instead of rejecting every valid host.
+OS_RELEASE_PATH = Path("/usr/lib/os-release")
 BOOT_ID_PATH = Path("/proc/sys/kernel/random/boot_id")
 SELF_CGROUP_PATH = Path("/proc/self/cgroup")
 CAPTURE_TTL = timedelta(minutes=5)
@@ -86,7 +88,8 @@ def _git_source_head() -> str:
             kernel.run(argv)
         if kernel.run(host_kernel.RECOVERY_HOST_CAPTURE_STATUS_ARGV).strip():
             raise ValueError(
-                "host capture source checkout contains untracked or modified files"
+                "host capture source checkout contains modified, untracked, or "
+                "ignored files"
             )
         head = kernel.run(host_kernel.RECOVERY_HOST_CAPTURE_HEAD_ARGV).strip()
     except (host_kernel.S2HostKernelError, ValueError) as error:

@@ -16,7 +16,12 @@
     "purpose": {"const": "ATTEST_S2E_EXTERNAL_WORM_IMMUTABLE_READBACK"},
     "evidence_class": {"const": "PLATFORM_OR_EXTERNAL_ATTESTED"},
     "provider_class": {"const": "S3_OBJECT_LOCK_EXTERNAL_ATTESTOR_V1"},
-    "provider_locator": {"type": "string", "minLength": 8, "maxLength": 512},
+    "provider_locator": {
+      "type": "string",
+      "minLength": 8,
+      "maxLength": 512,
+      "pattern": "^[A-Za-z][A-Za-z0-9+.-]*:[^\\s]+$"
+    },
     "external_intent_digest": {"$ref": "#/$defs/digest"},
     "external_result_digest": {"$ref": "#/$defs/digest"},
     "external_readback_ack_digest": {"$ref": "#/$defs/digest"},

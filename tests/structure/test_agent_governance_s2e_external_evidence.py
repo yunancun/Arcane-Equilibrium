@@ -308,6 +308,10 @@ def test_provider_rejects_fixture_locator_and_cross_bound_result(trust_profiles)
     for mutate, expected in (
         (lambda value: value.update(provider_locator="memory:fake-s3"), "fixture or local"),
         (
+            lambda value: value.update(provider_locator=" memory:fake-s3"),
+            "does not match pattern",
+        ),
+        (
             lambda value: value.update(external_result_digest="sha256:" + "f" * 64),
             "binding differs",
         ),
@@ -325,6 +329,42 @@ def test_provider_rejects_fixture_locator_and_cross_bound_result(trust_profiles)
             now=ANCHOR + timedelta(minutes=1),
         )
         assert any(expected in error for error in errors), errors
+
+
+@pytest.mark.parametrize(
+    "locator",
+    (
+        "memory:s2e-registry",
+        " local:s2e-registry",
+        "registry:test:s2e",
+    ),
+)
+def test_registry_rejects_local_or_noncanonical_locator(
+    trust_profiles, locator
+):
+    artifact, candidate, predecessor, entry = _registry_case(trust_profiles)
+    for field in ("signed_core_digest", "signature", "attestation_digest"):
+        artifact.pop(field)
+    artifact["registry_locator"] = locator
+    artifact["registry_entry_digest"] = evidence.predecessor_registry_entry_digest(
+        artifact
+    )
+    artifact["registry_head_digest"] = evidence.predecessor_registry_head_digest(
+        artifact
+    )
+    artifact = _sign_registry(artifact, trust_profiles)
+    errors = evidence.validate_s2e_predecessor_registry_attestation(
+        artifact,
+        candidate=candidate,
+        predecessor_receipt=predecessor,
+        acceptance_review_bundle_digest="sha256:" + "4" * 64,
+        prior_consumption_ledger_digest="sha256:" + "5" * 64,
+        expected_consumption_entry=entry,
+        expected_result_ledger_digest="sha256:" + "6" * 64,
+        now=ANCHOR + timedelta(minutes=1),
+    )
+    assert errors
+    assert all("registry_locator" in error for error in errors), errors
 
 
 def test_provider_rejects_governance_mode_even_with_valid_signature(trust_profiles):

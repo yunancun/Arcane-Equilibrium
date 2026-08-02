@@ -146,6 +146,7 @@ RECOVERY_HOST_CAPTURE_STATUS_ARGV = (
     "status",
     "--porcelain=v1",
     "--untracked-files=all",
+    "--ignored=matching",
 )
 RECOVERY_HOST_CAPTURE_HEAD_ARGV = (
     RECOVERY_HOST_CAPTURE_GIT,

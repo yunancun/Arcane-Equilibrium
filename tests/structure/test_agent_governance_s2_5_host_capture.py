@@ -272,21 +272,46 @@ def test_fixed_producer_delegates_source_head_to_exact_kernel_argv(monkeypatch):
         host_kernel.RECOVERY_HOST_CAPTURE_STATUS_ARGV,
         host_kernel.RECOVERY_HOST_CAPTURE_HEAD_ARGV,
     ]
+    assert host_kernel.RECOVERY_HOST_CAPTURE_STATUS_ARGV[-1] == (
+        "--ignored=matching"
+    )
 
 
-def test_fixed_producer_rejects_untracked_source_files(monkeypatch):
+@pytest.mark.parametrize(
+    "status_line",
+    (
+        "?? helper_scripts/maintenance_scripts/hashlib.py\n",
+        "!! helper_scripts/maintenance_scripts/__pycache__/hashlib.pyc\n",
+    ),
+)
+def test_fixed_producer_rejects_untracked_or_ignored_source_files(
+    monkeypatch, status_line
+):
     class _Kernel:
         def __init__(self, *, session):
             assert session == host_kernel.SESSION_S2_5_RECOVERY_HOST_CAPTURE
 
         def run(self, argv):
             if tuple(argv) == host_kernel.RECOVERY_HOST_CAPTURE_STATUS_ARGV:
-                return "?? helper_scripts/maintenance_scripts/hashlib.py\n"
+                return status_line
             return ""
 
     monkeypatch.setattr(producer.host_kernel, "HostExecutionKernel", _Kernel)
     with pytest.raises(ValueError, match="not fully clean"):
         producer._git_source_head()
+
+
+def test_os_release_uses_canonical_non_symlink_target(monkeypatch):
+    observed: list[Path] = []
+
+    def fixed_fact(path, *, label):
+        observed.append(path)
+        assert label == "os-release"
+        return b'ID="ubuntu"\n'
+
+    monkeypatch.setattr(producer, "_read_fixed_fact", fixed_fact)
+    assert producer._os_id() == "ubuntu"
+    assert observed == [Path("/usr/lib/os-release")]
 
 
 def test_kernel_signer_binding_equals_receipt_owner_constants():

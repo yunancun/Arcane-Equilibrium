@@ -20,7 +20,12 @@
     "purpose": {"const": "ATTEST_S2E_PREDECESSOR_SINGLE_USE_GRANT"},
     "evidence_class": {"const": "PLATFORM_OR_EXTERNAL_ATTESTED"},
     "registry_class": {"const": "EXTERNAL_APPEND_ONLY_PREDECESSOR_REGISTRY_V1"},
-    "registry_locator": {"type": "string", "minLength": 8, "maxLength": 512},
+    "registry_locator": {
+      "type": "string",
+      "minLength": 31,
+      "maxLength": 512,
+      "pattern": "^registry:external-append-only:[a-z0-9][a-z0-9._:/-]*$"
+    },
     "launch_id": {"const": "S2E-LW1-LW5"},
     "slot_id": {"$ref": "#/$defs/digest"},
     "predecessor_payload_digest": {"$ref": "#/$defs/digest"},

@@ -34,6 +34,10 @@ PREDECESSOR_REGISTRY_IDENTITY = (
 PREDECESSOR_REGISTRY_NAMESPACE = (
     "arcane-equilibrium-aiml-s2e-predecessor-registry"
 )
+LOCAL_EVIDENCE_LOCATOR_SCHEMES = frozenset({
+    "fixture", "memory", "local", "test",
+})
+PREDECESSOR_REGISTRY_LOCATOR_PREFIX = "registry:external-append-only:"
 EXTERNAL_WORM_PROVIDER_TRUST_ROOT_PATH = Path(
     "/etc/arcane-equilibrium/aiml/"
     "s2e-external-worm-provider-trust-root-v1.json"
@@ -375,6 +379,25 @@ def _distinct_fingerprint_errors(
     return errors
 
 
+def _external_locator_errors(
+    value: Any,
+    *,
+    label: str,
+    required_prefix: str | None = None,
+) -> list[str]:
+    if not isinstance(value, str):
+        return [f"{label} locator is not a string"]
+    canonical = value.strip()
+    if canonical != value:
+        return [f"{label} locator is not canonical"]
+    scheme, separator, _remainder = canonical.partition(":")
+    if not separator or scheme.lower() in LOCAL_EVIDENCE_LOCATOR_SCHEMES:
+        return [f"{label} locator is fixture or local evidence"]
+    if required_prefix is not None and not canonical.startswith(required_prefix):
+        return [f"{label} locator is outside the admitted external registry class"]
+    return []
+
+
 def validate_s2e_external_worm_provider_attestation(
     attestation: Any,
     *,
@@ -463,9 +486,10 @@ def validate_s2e_external_worm_provider_attestation(
         and readback.get("object_lock_enabled") is True
     ):
         errors.append("external WORM provider immutable readback is not proven")
-    provider_locator = str(attestation.get("provider_locator", "")).lower()
-    if provider_locator.startswith(("fixture:", "memory:", "local:", "test:")):
-        errors.append("external WORM provider locator is fixture or local evidence")
+    errors.extend(_external_locator_errors(
+        attestation.get("provider_locator"),
+        label="external WORM provider",
+    ))
     errors.extend(_freshness_errors(attestation, now=now, label="external WORM provider"))
     try:
         if _timestamp(attestation["observed_at"]) < _timestamp(readback["observed_at"]):
@@ -535,6 +559,11 @@ def validate_s2e_predecessor_registry_attestation(
     for field, value in expected.items():
         if attestation.get(field) != value:
             errors.append(f"predecessor registry {field} binding differs")
+    errors.extend(_external_locator_errors(
+        attestation.get("registry_locator"),
+        label="predecessor registry",
+        required_prefix=PREDECESSOR_REGISTRY_LOCATOR_PREFIX,
+    ))
     generation = attestation.get("registry_generation")
     previous = attestation.get("previous_registry_head_digest")
     if (generation == 1 and previous is not None) or (
