@@ -504,6 +504,7 @@ def s2e_review_test_argv(
             "tests/structure/test_agent_governance_s2_2b.py",
             "tests/structure/test_agent_governance_command_capture_v2.py",
             "tests/structure/test_agent_governance_node_permissions.py",
+            "tests/structure/test_agent_governance_s2e_external_evidence.py",
             "tests/structure/test_agent_governance_s2e_launch_chain.py",
             "tests/structure/test_agent_governance_s2e_launch_hardening.py",
             "tests/structure/test_agent_governance_s2e_launch_receipts.py",
