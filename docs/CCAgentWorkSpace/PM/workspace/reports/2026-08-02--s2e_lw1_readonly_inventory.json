@@ -16,7 +16,7 @@
     "/etc/arcane-equilibrium/trust/s2-5-recovery-consumption.pub": "ABSENT",
     "/etc/arcane-equilibrium/trust/s2-5-recovery-host-capture.pub": "ABSENT",
     "/etc/arcane-equilibrium/trust/s2-5-recovery-verifier-capture.pub": "ABSENT",
-    "/usr/local/libexec/arcane-equilibrium/s2-5-recovery-host-capture-sign-v1": "ABSENT"
+    "/usr/local/libexec/arcane-equilibrium/s2-5-recovery-host-capture-attest-v2": "ABSENT"
   },
   "service_statuses": {
     "EXTERNAL_APPEND_ONLY_PREDECESSOR_REGISTRY": "NOT_OBSERVED",

@@ -85,8 +85,7 @@ EXACT_STDLIB_IMPORTS_BY_FILE = {
         "__future__", "functools", "json", "pathlib", "sys", "typing",
     }),
     "agent_governance_s2_5_recovery_host_capture_producer.py": frozenset({
-        "__future__", "datetime", "hashlib", "json", "os", "pathlib",
-        "platform", "stat", "sys", "typing",
+        "__future__", "datetime", "json", "pathlib", "stat", "sys", "typing",
     }),
     "agent_governance_s2_5_recovery_state.py": frozenset({
         "__future__", "copy", "dataclasses", "json", "os", "pathlib",
@@ -115,10 +114,8 @@ GOVERNANCE_IMPORTS_BY_FILE: dict[str, frozenset[str]] = {
     }),
     "agent_governance_s2_5_recovery_lock.py": frozenset({"agent_governance_s2_5_disposable_profile", "agent_governance_schema", "aiml_gate_receipt_validator"}),
     "agent_governance_s2_5_recovery_host_capture_producer.py": frozenset({
-        "agent_governance_s2_5_disposable_profile",
         "agent_governance_s2_host_kernel",
         "aiml_gate_receipt_s2_5_host_capture",
-        "aiml_gate_receipt_schema_core",
     }),
     "agent_governance_s2_5_recovery_anchor.py": frozenset({"agent_governance_s2_5_disposable_profile", "agent_governance_s2_5_recovery_store", "agent_governance_schema", "aiml_gate_receipt_validator"}),
     "agent_governance_s2_5_recovery_anchor_v2.py": frozenset({
@@ -315,9 +312,7 @@ RECOVERY_SENSITIVE_CALLS_BY_FILE: dict[
     "agent_governance_s2_5_recovery_anchor.py": {},
     "agent_governance_s2_5_recovery_anchor_v2.py": {},
     "agent_governance_s2_5_recovery_controller.py": {},
-    "agent_governance_s2_5_recovery_host_capture_producer.py": {
-        "os": frozenset({"close", "fstat", "geteuid", "open", "read", "uname"}),
-    },
+    "agent_governance_s2_5_recovery_host_capture_producer.py": {},
     "agent_governance_s2_5_recovery_lock.py": {},
     "agent_governance_s2_5_recovery_readback.py": {
         "socket": frozenset({"socket"}),
@@ -1611,27 +1606,24 @@ def test_s2_0_session_has_no_argv_surface_at_all():
 
 
 def test_recovery_host_capture_allowlist_is_fixed_and_owner_bound():
-    assert kernel.RECOVERY_HOST_CAPTURE_SIGNER_ARGV == (
-        host_capture.HOST_CAPTURE_SIGNER_CAPABILITY_PATH,
+    assert kernel.RECOVERY_HOST_CAPTURE_ATTESTOR_ARGV == (
+        host_capture.HOST_CAPTURE_ATTESTOR_CAPABILITY_PATH,
         "--protocol",
-        host_capture.HOST_CAPTURE_SIGNER_CAPABILITY_PROTOCOL,
+        host_capture.HOST_CAPTURE_ATTESTOR_CAPABILITY_PROTOCOL,
     )
     assert kernel.SESSION_ARGV_ALLOWLISTS[
         kernel.SESSION_S2_5_RECOVERY_HOST_CAPTURE
     ] == frozenset({
-        *kernel.RECOVERY_HOST_CAPTURE_CLEAN_ARGV,
-        kernel.RECOVERY_HOST_CAPTURE_STATUS_ARGV,
-        kernel.RECOVERY_HOST_CAPTURE_HEAD_ARGV,
-        kernel.RECOVERY_HOST_CAPTURE_SIGNER_ARGV,
+        kernel.RECOVERY_HOST_CAPTURE_ATTESTOR_ARGV,
     })
 
 
-def test_recovery_host_capture_signer_uses_only_bounded_kernel_stdin(monkeypatch):
+def test_recovery_host_capture_attestor_uses_zero_input_and_bounded_output(monkeypatch):
     captured: dict = {}
 
     class _Completed:
         returncode = 0
-        stdout = b"armored-signature\n"
+        stdout = b'{"schema_version":"capture"}\n'
         stderr = b""
 
     def _fake_run(argv, **kwargs):
@@ -1644,32 +1636,29 @@ def test_recovery_host_capture_signer_uses_only_bounded_kernel_stdin(monkeypatch
     host = kernel.HostExecutionKernel(
         session=kernel.SESSION_S2_5_RECOVERY_HOST_CAPTURE
     )
-    payload = b"closed-host-capture-binding"
-    assert host.sign_recovery_host_capture(payload) == "armored-signature"
-    assert captured["argv"] == list(kernel.RECOVERY_HOST_CAPTURE_SIGNER_ARGV)
-    assert captured["kwargs"]["input"] == payload
+    assert host.capture_recovery_host() == b'{"schema_version":"capture"}\n'
+    assert captured["argv"] == list(kernel.RECOVERY_HOST_CAPTURE_ATTESTOR_ARGV)
+    assert captured["kwargs"]["input"] == b""
     assert "stdin" not in captured["kwargs"]
     assert captured["kwargs"]["shell"] is False
     assert captured["kwargs"]["timeout"] == 30
-    assert host.calls == [kernel.RECOVERY_HOST_CAPTURE_SIGNER_ARGV]
+    assert host.calls == [kernel.RECOVERY_HOST_CAPTURE_ATTESTOR_ARGV]
 
 
-def test_recovery_signer_cannot_use_generic_run_or_wrong_session(monkeypatch):
+def test_recovery_attestor_cannot_use_generic_run_or_wrong_session(monkeypatch):
     monkeypatch.setattr(
         subprocess,
         "run",
-        lambda *_args, **_kwargs: pytest.fail("signer must not execute"),
+        lambda *_args, **_kwargs: pytest.fail("attestor must not execute"),
     )
     host = kernel.HostExecutionKernel(
         session=kernel.SESSION_S2_5_RECOVERY_HOST_CAPTURE
     )
-    with pytest.raises(kernel.S2HostSessionError, match="dedicated stdin"):
-        host.run(kernel.RECOVERY_HOST_CAPTURE_SIGNER_ARGV)
-    with pytest.raises(kernel.S2HostArgvNotAllowlisted, match="fixed limit"):
-        host.sign_recovery_host_capture(b"")
+    with pytest.raises(kernel.S2HostSessionError, match="zero-input"):
+        host.run(kernel.RECOVERY_HOST_CAPTURE_ATTESTOR_ARGV)
     wrong = kernel.HostExecutionKernel(session=kernel.SESSION_S2_1_QUIESCE_READ)
     with pytest.raises(kernel.S2HostSessionError, match="may not invoke"):
-        wrong.sign_recovery_host_capture(b"payload")
+        wrong.capture_recovery_host()
 
 
 @pytest.mark.parametrize("argv", [

@@ -6,6 +6,7 @@ import copy
 import ast
 import importlib
 import inspect
+import json
 import sys
 import weakref
 from pathlib import Path
@@ -101,9 +102,9 @@ def _signed_capture(
             "schema_version": host_capture.HOST_CAPTURE_ADMISSION_SCHEMA_VERSION,
             "admission_class": host_capture.HOST_CAPTURE_ADMISSION_CLASS,
             "capability_protocol": (
-                host_capture.HOST_CAPTURE_SIGNER_CAPABILITY_PROTOCOL
+                host_capture.HOST_CAPTURE_ATTESTOR_CAPABILITY_PROTOCOL
             ),
-            "capability_path": host_capture.HOST_CAPTURE_SIGNER_CAPABILITY_PATH,
+            "capability_path": host_capture.HOST_CAPTURE_ATTESTOR_CAPABILITY_PATH,
             "node_id": host_capture.HOST_CAPTURE_NODE_ID,
             "role": "HOST_ATTESTOR",
             "permission": "read_only",
@@ -161,164 +162,104 @@ def test_host_capture_schema_is_registered_before_recovery_artifact_validation()
     assert callable(leaf.validate_s2_5_recovery_host_capture)
 
 
-def test_fixed_producer_captures_kernel_facts_and_uses_only_capability_signer(
+def test_fixed_producer_only_retrieves_complete_capability_attestation(
     tmp_path, signing_profile, monkeypatch
 ):
-    private_key, _public_key, fingerprint = signing_profile
-    monkeypatch.setattr(producer.os, "geteuid", lambda: disposable_profile.PROFILE_UID)
+    artifact = _signed_capture(tmp_path / "state", signing_profile)
     monkeypatch.setattr(
         producer,
-        "_unified_cgroup",
-        lambda: disposable_profile.RECOVERY_RUNNER_CGROUP,
+        "_invoke_fixed_attestor_capability",
+        lambda: json.dumps(artifact, sort_keys=True).encode("utf-8"),
     )
-    monkeypatch.setattr(producer, "_git_source_head", lambda: HEAD)
-    monkeypatch.setattr(producer, "_os_id", lambda: "linux")
-    monkeypatch.setattr(producer.platform, "machine", lambda: "x86_64")
-    monkeypatch.setattr(
-        producer.os,
-        "uname",
-        lambda: type("Uname", (), {"nodename": "trade-core-disposable"})(),
-    )
+    monkeypatch.setattr(producer, "_trusted_current_time", lambda: NOW)
+    observed = producer.capture_s2_5_recovery_host()
 
-    def fixed_fact(path, *, label):
-        del label
-        if path == producer.MACHINE_ID_PATH:
-            return b"machine-id-test\n"
-        if path == producer.BOOT_ID_PATH:
-            return b"boot-disposable-1\n"
-        raise AssertionError(path)
-
-    monkeypatch.setattr(producer, "_read_fixed_fact", fixed_fact)
-    monkeypatch.setattr(
-        producer,
-        "_invoke_fixed_signer_capability",
-        lambda payload: __import__("s2_5_testkit")._sign_bytes(
-            private_key,
-            payload,
-            namespace=host_capture.RECOVERY_HOST_CAPTURE_SIGNATURE_NAMESPACE,
-        ),
-    )
-    monkeypatch.setattr(
-        producer,
-        "RECOVERY_HOST_CAPTURE_TRUST_ROOT_FINGERPRINT",
-        fingerprint,
-    )
-    artifact = producer.capture_s2_5_recovery_host()
-
-    assert artifact["source_head"] == HEAD
-    assert artifact["process_identity"] == {
+    assert observed == artifact
+    assert observed["source_head"] == HEAD
+    assert observed["process_identity"] == {
         "uid": disposable_profile.PROFILE_UID,
         "cgroup": disposable_profile.RECOVERY_RUNNER_CGROUP,
     }
-    assert artifact["admission_provenance"]["capability_path"] == (
-        host_capture.HOST_CAPTURE_SIGNER_CAPABILITY_PATH
+    assert observed["admission_provenance"]["capability_path"] == (
+        host_capture.HOST_CAPTURE_ATTESTOR_CAPABILITY_PATH
     )
     assert host_capture.validate_s2_5_recovery_host_capture(
-        artifact, now=artifact["observed_at"]
+        observed, now=NOW
     ) == []
 
 
 @pytest.mark.parametrize(
-    ("uid", "cgroup"),
+    ("field", "value"),
     [
-        (9999, disposable_profile.RECOVERY_RUNNER_CGROUP),
-        (disposable_profile.PROFILE_UID, "/foreign.scope"),
+        ("uid", 9999),
+        ("cgroup", "/foreign.scope"),
     ],
 )
-def test_fixed_producer_rejects_uid_or_cgroup_drift(
-    monkeypatch, uid, cgroup
+def test_fixed_producer_rejects_even_signed_attestor_identity_drift(
+    tmp_path, signing_profile, monkeypatch, field, value
 ):
-    monkeypatch.setattr(producer.os, "geteuid", lambda: uid)
-    monkeypatch.setattr(producer, "_unified_cgroup", lambda: cgroup)
-    with pytest.raises(ValueError, match="fixed recovery-runner admission"):
+    artifact = _signed_capture(tmp_path / "state", signing_profile)
+    artifact["process_identity"][field] = value
+    artifact["signed_binding"]["process_identity"][field] = value
+    _resign(artifact, signing_profile[0])
+    monkeypatch.setattr(
+        producer,
+        "_invoke_fixed_attestor_capability",
+        lambda: json.dumps(artifact, sort_keys=True).encode("utf-8"),
+    )
+    monkeypatch.setattr(producer, "_trusted_current_time", lambda: NOW)
+    with pytest.raises(ValueError, match="attested host capture is invalid"):
         producer.capture_s2_5_recovery_host()
 
 
-def test_fixed_signer_capability_rejects_symlink_and_untrusted_mode(
+def test_fixed_attestor_capability_rejects_symlink_and_untrusted_mode(
     tmp_path, monkeypatch
 ):
-    target = tmp_path / "signer"
+    target = tmp_path / "attestor"
     target.write_text("#!/bin/sh\nexit 1\n", encoding="ascii")
     target.chmod(0o777)
-    monkeypatch.setattr(producer, "HOST_CAPTURE_SIGNER_CAPABILITY_PATH", str(target))
+    monkeypatch.setattr(producer, "HOST_CAPTURE_ATTESTOR_CAPABILITY_PATH", str(target))
     with pytest.raises(ValueError, match="not trusted"):
-        producer._invoke_fixed_signer_capability(b"payload")
+        producer._invoke_fixed_attestor_capability()
 
-    link = tmp_path / "signer-link"
+    link = tmp_path / "attestor-link"
     link.symlink_to(target)
-    monkeypatch.setattr(producer, "HOST_CAPTURE_SIGNER_CAPABILITY_PATH", str(link))
+    monkeypatch.setattr(producer, "HOST_CAPTURE_ATTESTOR_CAPABILITY_PATH", str(link))
     with pytest.raises(ValueError, match="not trusted"):
-        producer._invoke_fixed_signer_capability(b"payload")
+        producer._invoke_fixed_attestor_capability()
 
 
-def test_fixed_producer_delegates_source_head_to_exact_kernel_argv(monkeypatch):
-    calls: list[tuple[str, ...]] = []
-
-    class _Kernel:
-        def __init__(self, *, session):
-            assert session == host_kernel.SESSION_S2_5_RECOVERY_HOST_CAPTURE
-
-        def run(self, argv):
-            candidate = tuple(argv)
-            calls.append(candidate)
-            if candidate == host_kernel.RECOVERY_HOST_CAPTURE_HEAD_ARGV:
-                return HEAD + "\n"
-            return ""
-
-    monkeypatch.setattr(producer.host_kernel, "HostExecutionKernel", _Kernel)
-    assert producer._git_source_head() == HEAD
-    assert calls == [
-        *host_kernel.RECOVERY_HOST_CAPTURE_CLEAN_ARGV,
-        host_kernel.RECOVERY_HOST_CAPTURE_STATUS_ARGV,
-        host_kernel.RECOVERY_HOST_CAPTURE_HEAD_ARGV,
-    ]
-    assert host_kernel.RECOVERY_HOST_CAPTURE_STATUS_ARGV[-1] == (
-        "--ignored=matching"
-    )
+def test_producer_has_no_source_fact_or_signing_payload_surface():
+    source = Path(producer.__file__).read_text(encoding="utf-8")
+    tree = ast.parse(source)
+    function_names = {
+        node.name for node in ast.walk(tree) if isinstance(node, ast.FunctionDef)
+    }
+    assert "_git_source_head" not in function_names
+    assert "_read_fixed_fact" not in function_names
+    assert "_admission_provenance" not in function_names
+    assert "_invoke_fixed_signer_capability" not in function_names
+    assert list(inspect.signature(producer._invoke_fixed_attestor_capability).parameters) == []
+    assert not hasattr(host_kernel.HostExecutionKernel, "sign_recovery_host_capture")
 
 
-@pytest.mark.parametrize(
-    "status_line",
-    (
-        "?? helper_scripts/maintenance_scripts/hashlib.py\n",
-        "!! helper_scripts/maintenance_scripts/__pycache__/hashlib.pyc\n",
-    ),
-)
-def test_fixed_producer_rejects_untracked_or_ignored_source_files(
-    monkeypatch, status_line
-):
-    class _Kernel:
-        def __init__(self, *, session):
-            assert session == host_kernel.SESSION_S2_5_RECOVERY_HOST_CAPTURE
-
-        def run(self, argv):
-            if tuple(argv) == host_kernel.RECOVERY_HOST_CAPTURE_STATUS_ARGV:
-                return status_line
-            return ""
-
-    monkeypatch.setattr(producer.host_kernel, "HostExecutionKernel", _Kernel)
-    with pytest.raises(ValueError, match="not fully clean"):
-        producer._git_source_head()
+def test_duplicate_or_non_object_attestor_json_fails_closed(monkeypatch):
+    for payload in (
+        b'{"schema_version":"first","schema_version":"second"}',
+        b"[]",
+    ):
+        monkeypatch.setattr(
+            producer, "_invoke_fixed_attestor_capability", lambda value=payload: value
+        )
+        with pytest.raises(ValueError, match="attestor"):
+            producer.capture_s2_5_recovery_host()
 
 
-def test_os_release_uses_canonical_non_symlink_target(monkeypatch):
-    observed: list[Path] = []
-
-    def fixed_fact(path, *, label):
-        observed.append(path)
-        assert label == "os-release"
-        return b'ID="ubuntu"\n'
-
-    monkeypatch.setattr(producer, "_read_fixed_fact", fixed_fact)
-    assert producer._os_id() == "ubuntu"
-    assert observed == [Path("/usr/lib/os-release")]
-
-
-def test_kernel_signer_binding_equals_receipt_owner_constants():
-    assert host_kernel.RECOVERY_HOST_CAPTURE_SIGNER_ARGV == (
-        host_capture.HOST_CAPTURE_SIGNER_CAPABILITY_PATH,
+def test_kernel_attestor_binding_equals_receipt_owner_constants():
+    assert host_kernel.RECOVERY_HOST_CAPTURE_ATTESTOR_ARGV == (
+        host_capture.HOST_CAPTURE_ATTESTOR_CAPABILITY_PATH,
         "--protocol",
-        host_capture.HOST_CAPTURE_SIGNER_CAPABILITY_PROTOCOL,
+        host_capture.HOST_CAPTURE_ATTESTOR_CAPABILITY_PROTOCOL,
     )
 
 def test_producer_public_surface_has_no_caller_selected_identity_or_clock():

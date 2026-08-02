@@ -267,10 +267,10 @@ def _host_capture(state_root: Path, *, source_head: str = HEAD) -> dict:
             ),
             "admission_class": host_capture_leaf.HOST_CAPTURE_ADMISSION_CLASS,
             "capability_protocol": (
-                host_capture_leaf.HOST_CAPTURE_SIGNER_CAPABILITY_PROTOCOL
+                host_capture_leaf.HOST_CAPTURE_ATTESTOR_CAPABILITY_PROTOCOL
             ),
             "capability_path": (
-                host_capture_leaf.HOST_CAPTURE_SIGNER_CAPABILITY_PATH
+                host_capture_leaf.HOST_CAPTURE_ATTESTOR_CAPABILITY_PATH
             ),
             "node_id": host_capture_leaf.HOST_CAPTURE_NODE_ID,
             "role": "HOST_ATTESTOR",

@@ -34,13 +34,13 @@ HOST_CAPTURE_NODE_ID = "s2_5_recovery_host_capture_attestor"
 HOST_CAPTURE_ADMISSION_SCHEMA_VERSION = (
     "s2_5_recovery_host_capture_admission_v1"
 )
-HOST_CAPTURE_ADMISSION_CLASS = "FIXED_SYSTEMD_SIGNER_CAPABILITY_V1"
-HOST_CAPTURE_SIGNER_CAPABILITY_PROTOCOL = (
-    "arcane-equilibrium-aiml-s2-5-recovery-host-capture-sign-v1"
+HOST_CAPTURE_ADMISSION_CLASS = "FIXED_SYSTEMD_ATTESTOR_CAPABILITY_V2"
+HOST_CAPTURE_ATTESTOR_CAPABILITY_PROTOCOL = (
+    "arcane-equilibrium-aiml-s2-5-recovery-host-capture-attest-v2"
 )
-HOST_CAPTURE_SIGNER_CAPABILITY_PATH = (
+HOST_CAPTURE_ATTESTOR_CAPABILITY_PATH = (
     "/usr/local/libexec/arcane-equilibrium/"
-    "s2-5-recovery-host-capture-sign-v1"
+    "s2-5-recovery-host-capture-attest-v2"
 )
 RECOVERY_HOST_CAPTURE_SIGNER_IDENTITY = (
     "aiml-s2-5-recovery-host-capture-attestor-v1"
@@ -256,8 +256,8 @@ def validate_s2_5_recovery_host_capture_integrity(
         expected_admission = {
             "schema_version": HOST_CAPTURE_ADMISSION_SCHEMA_VERSION,
             "admission_class": HOST_CAPTURE_ADMISSION_CLASS,
-            "capability_protocol": HOST_CAPTURE_SIGNER_CAPABILITY_PROTOCOL,
-            "capability_path": HOST_CAPTURE_SIGNER_CAPABILITY_PATH,
+            "capability_protocol": HOST_CAPTURE_ATTESTOR_CAPABILITY_PROTOCOL,
+            "capability_path": HOST_CAPTURE_ATTESTOR_CAPABILITY_PATH,
             "node_id": HOST_CAPTURE_NODE_ID,
             "role": "HOST_ATTESTOR",
             "permission": "read_only",
@@ -274,7 +274,7 @@ def validate_s2_5_recovery_host_capture_integrity(
         }
         if admission != expected_admission:
             errors.append(
-                "host capture admission provenance is not the fixed signer capability"
+                "host capture admission provenance is not the fixed attestor capability"
             )
     if capture.get("capture_profile") != HOST_CAPTURE_PROFILE:
         errors.append("host capture profile is invalid")

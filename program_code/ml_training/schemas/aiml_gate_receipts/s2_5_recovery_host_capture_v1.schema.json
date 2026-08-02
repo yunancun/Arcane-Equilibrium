@@ -101,12 +101,12 @@
         "schema_version": {
           "const": "s2_5_recovery_host_capture_admission_v1"
         },
-        "admission_class": {"const": "FIXED_SYSTEMD_SIGNER_CAPABILITY_V1"},
+        "admission_class": {"const": "FIXED_SYSTEMD_ATTESTOR_CAPABILITY_V2"},
         "capability_protocol": {
-          "const": "arcane-equilibrium-aiml-s2-5-recovery-host-capture-sign-v1"
+          "const": "arcane-equilibrium-aiml-s2-5-recovery-host-capture-attest-v2"
         },
         "capability_path": {
-          "const": "/usr/local/libexec/arcane-equilibrium/s2-5-recovery-host-capture-sign-v1"
+          "const": "/usr/local/libexec/arcane-equilibrium/s2-5-recovery-host-capture-attest-v2"
         },
         "node_id": {"const": "s2_5_recovery_host_capture_attestor"},
         "role": {"const": "HOST_ATTESTOR"},

@@ -167,9 +167,9 @@ def _capture(
             "schema_version": host_capture.HOST_CAPTURE_ADMISSION_SCHEMA_VERSION,
             "admission_class": host_capture.HOST_CAPTURE_ADMISSION_CLASS,
             "capability_protocol": (
-                host_capture.HOST_CAPTURE_SIGNER_CAPABILITY_PROTOCOL
+                host_capture.HOST_CAPTURE_ATTESTOR_CAPABILITY_PROTOCOL
             ),
-            "capability_path": host_capture.HOST_CAPTURE_SIGNER_CAPABILITY_PATH,
+            "capability_path": host_capture.HOST_CAPTURE_ATTESTOR_CAPABILITY_PATH,
             "node_id": host_capture.HOST_CAPTURE_NODE_ID,
             "role": "HOST_ATTESTOR",
             "permission": "read_only",
