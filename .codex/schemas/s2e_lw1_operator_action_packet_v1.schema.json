@@ -1,0 +1,202 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://arcane-equilibrium.local/schemas/s2e_lw1_operator_action_packet_v1.schema.json",
+  "title": "s2e_lw1_operator_action_packet_v1",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "schema_version", "purpose", "launch_id", "wave", "state",
+    "source_binding", "readonly_observation", "prerequisites",
+    "blocked_prerequisite_ids", "required_action_ids", "closure_projection",
+    "authority_boundaries", "sensitive_material_policy", "next_action",
+    "packet_digest"
+  ],
+  "properties": {
+    "schema_version": {"const": "s2e_lw1_operator_action_packet_v1"},
+    "purpose": {"const": "UNBLOCK_S2E_LW1_EXTERNAL_EVIDENCE_AND_RECEIPT_CHAIN"},
+    "launch_id": {"const": "S2E-LW1-LW5"},
+    "wave": {"const": "S2E-LW1"},
+    "state": {"const": "BLOCKED_EXTERNAL_PREREQUISITES_ACTION_PACKET_READY"},
+    "source_binding": {"$ref": "#/$defs/source_binding"},
+    "readonly_observation": {"$ref": "#/$defs/readonly_observation"},
+    "prerequisites": {
+      "type": "array",
+      "minItems": 14,
+      "maxItems": 14,
+      "items": {"$ref": "#/$defs/prerequisite"}
+    },
+    "blocked_prerequisite_ids": {
+      "type": "array",
+      "minItems": 1,
+      "maxItems": 14,
+      "uniqueItems": true,
+      "items": {"type": "string", "minLength": 3, "maxLength": 128}
+    },
+    "required_action_ids": {
+      "const": [
+        "PROVISION_FIXED_TRUST_ROOTS",
+        "PROVISION_HOST_CAPTURE_SIGNER_CAPABILITY",
+        "CONFIGURE_EXTERNAL_WORM_COMPLIANCE_DESTINATION",
+        "CONFIGURE_DISTINCT_EXTERNAL_WORM_PROVIDER_ATTESTOR",
+        "CONFIGURE_DISTINCT_APPEND_ONLY_PREDECESSOR_REGISTRY",
+        "RESUME_W0_AND_LW1_RECEIPT_CHAIN_WITH_FRESH_EVIDENCE"
+      ]
+    },
+    "closure_projection": {"$ref": "#/$defs/closure_projection"},
+    "authority_boundaries": {"$ref": "#/$defs/authority_boundaries"},
+    "sensitive_material_policy": {"$ref": "#/$defs/sensitive_material_policy"},
+    "next_action": {"const": "OPERATOR_PROVISION_EXTERNAL_PREREQUISITES_THEN_RESUME_S2E_LW1"},
+    "packet_digest": {"$ref": "#/$defs/digest"}
+  },
+  "$defs": {
+    "digest": {"type": "string", "pattern": "^sha256:[0-9a-f]{64}$"},
+    "git_sha": {"type": "string", "pattern": "^[0-9a-f]{40}$"},
+    "timestamp": {"type": "string", "format": "date-time"},
+    "source_binding": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "implementation_checkpoint_head", "implementation_checkpoint_tree",
+        "worktree_clean_at_build"
+      ],
+      "properties": {
+        "implementation_checkpoint_head": {"$ref": "#/$defs/git_sha"},
+        "implementation_checkpoint_tree": {"$ref": "#/$defs/git_sha"},
+        "worktree_clean_at_build": {"const": true}
+      }
+    },
+    "runtime_unit": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["unit", "load_state", "active_state", "sub_state"],
+      "properties": {
+        "unit": {"type": "string", "minLength": 3, "maxLength": 256},
+        "load_state": {"enum": ["loaded", "masked", "not-found", "unknown"]},
+        "active_state": {"enum": ["active", "inactive", "failed", "unknown"]},
+        "sub_state": {"type": "string", "minLength": 1, "maxLength": 128}
+      }
+    },
+    "canonical_root": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["path", "status"],
+      "properties": {
+        "path": {"type": "string", "pattern": "^/"},
+        "status": {"enum": ["ABSENT", "NOT_OBSERVED", "PRESENT_UNVERIFIED"]}
+      }
+    },
+    "readonly_observation": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "host", "observed_at", "evidence_class", "inventory_digest",
+        "linux_source_head", "linux_worktree_clean", "runtime_units",
+        "canonical_roots"
+      ],
+      "properties": {
+        "host": {"type": "string", "minLength": 1, "maxLength": 255},
+        "observed_at": {"$ref": "#/$defs/timestamp"},
+        "evidence_class": {"const": "UNAUTHENTICATED_READ_ONLY_OBSERVATION"},
+        "inventory_digest": {"$ref": "#/$defs/digest"},
+        "linux_source_head": {"$ref": "#/$defs/git_sha"},
+        "linux_worktree_clean": {"type": "boolean"},
+        "runtime_units": {
+          "type": "array",
+          "minItems": 2,
+          "maxItems": 2,
+          "items": {"$ref": "#/$defs/runtime_unit"}
+        },
+        "canonical_roots": {
+          "type": "array",
+          "minItems": 2,
+          "maxItems": 2,
+          "items": {"$ref": "#/$defs/canonical_root"}
+        }
+      }
+    },
+    "prerequisite": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "prerequisite_id", "category", "locator", "required_property",
+        "status", "blocking", "secret_material_allowed"
+      ],
+      "properties": {
+        "prerequisite_id": {"type": "string", "minLength": 3, "maxLength": 128},
+        "category": {"enum": ["FIXED_HOST_PATH", "EXTERNAL_SERVICE"]},
+        "locator": {"type": "string", "minLength": 8, "maxLength": 1024},
+        "required_property": {
+          "enum": [
+            "ROOT_OWNED_EXACT_0644_JSON_TRUST_PROFILE",
+            "FIXED_PUBLIC_KEY_NOT_GROUP_OR_OTHER_WRITABLE",
+            "ROOT_OWNED_FIXED_EXECUTABLE_CAPABILITY",
+            "S3_OBJECT_LOCK_COMPLIANCE_WITH_NAMED_CREDENTIAL_CHANNEL",
+            "DISTINCT_FIXED_ROOT_PLATFORM_OR_EXTERNAL_ATTESTOR",
+            "DISTINCT_FIXED_ROOT_APPEND_ONLY_SINGLE_USE_REGISTRY"
+          ]
+        },
+        "status": {
+          "enum": [
+            "ABSENT", "NOT_CONFIGURED", "NOT_OBSERVED",
+            "PRESENT_UNVERIFIED", "READY"
+          ]
+        },
+        "blocking": {"type": "boolean"},
+        "secret_material_allowed": {"const": false}
+      }
+    },
+    "closure_projection": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "g0_state", "lw1_state", "w0_genesis_receipt_issued",
+        "lw1_wave_receipt_issued", "lw1_transition_gate_advance",
+        "lw2_unlocked", "s2e_2b_2_closed", "s2_closed", "runtime_state"
+      ],
+      "properties": {
+        "g0_state": {"const": "SOURCE_COMPLETE_RUNTIME_INDETERMINATE"},
+        "lw1_state": {"const": "BLOCKED_EXTERNAL_PREREQUISITES"},
+        "w0_genesis_receipt_issued": {"const": false},
+        "lw1_wave_receipt_issued": {"const": false},
+        "lw1_transition_gate_advance": {"const": false},
+        "lw2_unlocked": {"const": false},
+        "s2e_2b_2_closed": {"const": false},
+        "s2_closed": {"const": false},
+        "runtime_state": {"const": "UNVERIFIED_NOT_OBSERVED"}
+      }
+    },
+    "authority_boundaries": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "task_issued_authority_count", "total_authority_count",
+        "admitted_production_effect_receipt_count",
+        "total_production_effect_receipt_count",
+        "production_runtime_effect_performed_by_task",
+        "packet_execution_receipt_absent_within_task_scope",
+        "production_deploy_restart_pg_broker_order_authorized"
+      ],
+      "properties": {
+        "task_issued_authority_count": {"const": 0},
+        "total_authority_count": {"const": 9},
+        "admitted_production_effect_receipt_count": {"const": 0},
+        "total_production_effect_receipt_count": {"const": 6},
+        "production_runtime_effect_performed_by_task": {"const": false},
+        "packet_execution_receipt_absent_within_task_scope": {"const": true},
+        "production_deploy_restart_pg_broker_order_authorized": {"const": false}
+      }
+    },
+    "sensitive_material_policy": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "policy", "credential_channel_name_only", "private_key_material_permitted"
+      ],
+      "properties": {
+        "policy": {"const": "NO_SECRET_MATERIAL_IN_PACKET"},
+        "credential_channel_name_only": {"const": true},
+        "private_key_material_permitted": {"const": false}
+      }
+    }
+  }
+}
