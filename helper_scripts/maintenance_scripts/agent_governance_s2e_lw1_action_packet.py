@@ -25,7 +25,7 @@ from aiml_gate_receipt_s2_5_host_capture import (  # noqa: E402
     RECOVERY_HOST_CAPTURE_TRUST_ROOT_PUBLIC_KEY_PATH,
 )
 from aiml_gate_receipt_s2e_external_evidence import (  # noqa: E402
-    EXTERNAL_WORM_PROVIDER_TRUST_ROOT_PATH,
+    DURABILITY_ANCHOR_TRUST_ROOT_PATH,
     PREDECESSOR_REGISTRY_TRUST_ROOT_PATH,
 )
 from aiml_gate_receipt_s2e_launch import (  # noqa: E402
@@ -62,8 +62,8 @@ _PATH_PREREQUISITES = (
         "ROOT_OWNED_EXACT_0644_JSON_TRUST_PROFILE",
     ),
     (
-        "EXTERNAL_WORM_PROVIDER_TRUST_ROOT",
-        str(EXTERNAL_WORM_PROVIDER_TRUST_ROOT_PATH),
+        "DURABILITY_ANCHOR_TRUST_ROOT",
+        str(DURABILITY_ANCHOR_TRUST_ROOT_PATH),
         "ROOT_OWNED_EXACT_0644_JSON_TRUST_PROFILE",
     ),
     (
@@ -112,20 +112,23 @@ _PATH_PREREQUISITES = (
         "ROOT_OWNED_FIXED_ATTESTOR_DERIVES_COMPLETE_SIGNED_CAPTURE_FROM_IMMUTABLE_SOURCE",
     ),
 )
+# Tier 1(operator 2026-08-02 裁決):durability 走 carrier schema 早已宣告的
+# TRUSTED_HOST_SSHSIG_APPEND_ONLY_V1 adapter。三項改為 host 側 root-owned 能力與
+# off-host 副本,不再需要任何付費外部 custody 服務,也不做不可逆的 COMPLIANCE 保留。
 _SERVICE_PREREQUISITES = (
     (
-        "EXTERNAL_WORM_COMPLIANCE_DESTINATION",
-        "operator-config:external-worm-compliance-destination",
-        "S3_OBJECT_LOCK_COMPLIANCE_WITH_NAMED_CREDENTIAL_CHANNEL",
+        "HOST_APPEND_ONLY_DURABILITY_ANCHOR",
+        "operator-config:host-append-only-durability-anchor",
+        "ROOT_OWNED_FIXED_APPEND_ONLY_ANCHOR_WITH_MONOTONIC_HEAD",
     ),
     (
-        "EXTERNAL_WORM_PROVIDER_ATTESTOR",
-        "operator-config:external-worm-provider-attestor",
-        "DISTINCT_FIXED_ROOT_PLATFORM_OR_EXTERNAL_ATTESTOR",
+        "OFFHOST_APPEND_ONLY_REPLICA",
+        "operator-config:offhost-append-only-replica",
+        "OFFHOST_APPEND_ONLY_REPLICA_WITH_LATEST_GENERATION_READBACK",
     ),
     (
-        "EXTERNAL_APPEND_ONLY_PREDECESSOR_REGISTRY",
-        "operator-config:external-predecessor-registry",
+        "HOST_APPEND_ONLY_PREDECESSOR_REGISTRY",
+        "operator-config:host-predecessor-registry",
         "DISTINCT_FIXED_ROOT_APPEND_ONLY_SINGLE_USE_REGISTRY",
     ),
 )
@@ -134,9 +137,9 @@ EXPECTED_SERVICE_IDS = tuple(item[0] for item in _SERVICE_PREREQUISITES)
 EXPECTED_ACTION_IDS = (
     "PROVISION_FIXED_TRUST_ROOTS",
     "PROVISION_HOST_CAPTURE_ATTESTOR_CAPABILITY",
-    "CONFIGURE_EXTERNAL_WORM_COMPLIANCE_DESTINATION",
-    "CONFIGURE_DISTINCT_EXTERNAL_WORM_PROVIDER_ATTESTOR",
-    "CONFIGURE_DISTINCT_APPEND_ONLY_PREDECESSOR_REGISTRY",
+    "PROVISION_HOST_APPEND_ONLY_DURABILITY_ANCHOR",
+    "CONFIGURE_OFFHOST_APPEND_ONLY_REPLICA",
+    "PROVISION_DISTINCT_HOST_APPEND_ONLY_PREDECESSOR_REGISTRY",
     "RESUME_W0_AND_LW1_RECEIPT_CHAIN_WITH_FRESH_EVIDENCE",
 )
 

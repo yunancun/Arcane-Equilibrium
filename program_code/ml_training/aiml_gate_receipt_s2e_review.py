@@ -119,7 +119,7 @@ S2E_REVIEW_BASE_PATHS = (
     ),
     (
         "program_code/ml_training/schemas/aiml_gate_receipts/"
-        "s2e_external_worm_provider_attestation_v1.schema.json"
+        "s2e_durability_anchor_attestation_v1.schema.json"
     ),
     (
         "program_code/ml_training/schemas/aiml_gate_receipts/"

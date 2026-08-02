@@ -29,7 +29,7 @@ from aiml_gate_receipt_s2e_consumption import (
     validate_s2e_launch_consumption_bootstrap_authority,
 )
 from aiml_gate_receipt_s2e_external_evidence import (
-    external_worm_provider_digest_or_none, validate_s2e_external_worm_provider_attestation,
+    durability_anchor_digest_or_none, validate_s2e_durability_anchor_attestation,
 )
 from aiml_gate_receipt_s2e_review import (
     build_s2e_disposable_test_effect_chain,
@@ -198,7 +198,7 @@ def s2e_acceptance_review_signed_bytes(bundle: dict[str, Any]) -> bytes:
             if key not in {
                 "signed_core_digest",
                 "signature",
-                "external_worm_binding",
+                "durability_anchor_binding",
                 "bundle_digest",
             }
         },
@@ -630,16 +630,10 @@ _S2E_PREDECESSOR_AUTHORITY_FIELDS = {
     "acceptance_review_bundle",
     "review_governed_capture_record",
     "review_disposable_test_effect_chains",
-    "review_external_append_intent",
-    "review_external_append_result",
-    "review_external_readback_ack",
-    "review_external_worm_provider_attestation",
+    "review_durability_anchor_attestation",
     "carrier_attestation",
     "carrier_governed_capture_record",
-    "carrier_external_append_intent",
-    "carrier_external_append_result",
-    "carrier_external_readback_ack",
-    "carrier_external_worm_provider_attestation",
+    "carrier_durability_anchor_attestation",
     "authority_digest",
 }
 
@@ -797,16 +791,9 @@ def validate_s2e_launch_predecessor_authority(
                 "review_disposable_test_effect_chains"
             ),
             predecessor_chain=chain,
-            external_append_intent=authority.get(
-                "review_external_append_intent"
+            durability_anchor_attestation=authority.get(
+                "review_durability_anchor_attestation"
             ),
-            external_append_result=authority.get(
-                "review_external_append_result"
-            ),
-            external_readback_ack=authority.get(
-                "review_external_readback_ack"
-            ),
-            external_worm_provider_attestation=authority.get("review_external_worm_provider_attestation"),
             repo_root=repo_root,
             now=now,
             require_current_generation=False,
@@ -820,16 +807,9 @@ def validate_s2e_launch_predecessor_authority(
         governed_capture_record=authority.get(
             "carrier_governed_capture_record"
         ),
-        external_append_intent=authority.get(
-            "carrier_external_append_intent"
+        durability_anchor_attestation=authority.get(
+            "carrier_durability_anchor_attestation"
         ),
-        external_append_result=authority.get(
-            "carrier_external_append_result"
-        ),
-        external_readback_ack=authority.get(
-            "carrier_external_readback_ack"
-        ),
-        external_worm_provider_attestation=authority.get("carrier_external_worm_provider_attestation"),
     )
     if carrier_result.get("status") != "VERIFIED":
         errors.extend(
@@ -848,16 +828,10 @@ def build_s2e_launch_predecessor_authority(
     acceptance_review_bundle: dict[str, Any],
     review_governed_capture_record: dict[str, Any],
     review_disposable_test_effect_chains: list[dict[str, Any]],
-    review_external_append_intent: dict[str, Any],
-    review_external_append_result: dict[str, Any],
-    review_external_readback_ack: dict[str, Any],
-    review_external_worm_provider_attestation: dict[str, Any],
+    review_durability_anchor_attestation: dict[str, Any],
     carrier_attestation: dict[str, Any],
     carrier_governed_capture_record: dict[str, Any],
-    carrier_external_append_intent: dict[str, Any],
-    carrier_external_append_result: dict[str, Any],
-    carrier_external_readback_ack: dict[str, Any],
-    carrier_external_worm_provider_attestation: dict[str, Any],
+    carrier_durability_anchor_attestation: dict[str, Any],
     repo_root: Path,
     now: str | datetime,
 ) -> dict[str, Any]:
@@ -870,16 +844,14 @@ def build_s2e_launch_predecessor_authority(
         "review_disposable_test_effect_chains": (
             review_disposable_test_effect_chains
         ),
-        "review_external_append_intent": review_external_append_intent,
-        "review_external_append_result": review_external_append_result,
-        "review_external_readback_ack": review_external_readback_ack,
-        "review_external_worm_provider_attestation": review_external_worm_provider_attestation,
+        "review_durability_anchor_attestation": (
+            review_durability_anchor_attestation
+        ),
         "carrier_attestation": carrier_attestation,
         "carrier_governed_capture_record": carrier_governed_capture_record,
-        "carrier_external_append_intent": carrier_external_append_intent,
-        "carrier_external_append_result": carrier_external_append_result,
-        "carrier_external_readback_ack": carrier_external_readback_ack,
-        "carrier_external_worm_provider_attestation": carrier_external_worm_provider_attestation,
+        "carrier_durability_anchor_attestation": (
+            carrier_durability_anchor_attestation
+        ),
     }
     authority["authority_digest"] = s2e_predecessor_authority_digest(authority)
     errors = validate_s2e_launch_predecessor_authority(
@@ -1081,17 +1053,18 @@ def verify_receipt_carrier_attestation(
     repo_root: Path,
     now: str | datetime,
     governed_capture_record: Any,
-    external_append_intent: Any,
-    external_append_result: Any,
-    external_readback_ack: Any,
-    external_worm_provider_attestation: Any,
+    durability_anchor_attestation: Any,
 ) -> dict[str, Any]:
-    """Verify a carrier through fixed-root SSHSIG, capture, and external WORM."""
+    """Verify a carrier through fixed-root SSHSIG, capture, and durability anchor.
+
+    durability 側走 carrier schema 早已宣告的 `TRUSTED_HOST_SSHSIG_APPEND_ONLY_V1`
+    adapter:單一 trusted-host 簽章綁 append-only head 與 off-host latest-generation
+    回讀,不依賴任何外部付費 WORM 服務。
+    """
 
     from agent_governance_command_capture_v2 import (
         validate_governed_command_capture,
     )
-    import agent_governance_terminal_receipt_external_sink as external_sink
     import agent_governance_terminal_receipt_sink as terminal_sink
 
     errors = validate_receipt_carrier_attestation(
@@ -1162,85 +1135,42 @@ def verify_receipt_carrier_attestation(
             errors.append("carrier signer role must differ from capture role")
         if governed_capture_record.get("result") != "PASS":
             errors.append("governed command capture did not PASS")
-    now_text = _time(now).isoformat()
-    errors.extend(
-        f"external worm intent: {error}"
-        for error in external_sink.validate_external_worm_append_intent(
-            external_append_intent, now=now_text
+    if isinstance(attestation, dict) and isinstance(payload_receipt, dict):
+        expected_worm_digest = terminal_sink.terminal_payload_digest(
+            s2e_carrier_worm_payload(attestation, payload_receipt=payload_receipt)
         )
-    )
+    else:
+        expected_worm_digest = None
     errors.extend(
-        f"external worm result: {error}"
-        for error in external_sink.validate_external_worm_append_result(
-            external_append_result,
-            intent=external_append_intent,
-            now=now_text,
-        )
-    )
-    errors.extend(
-        f"external worm readback: {error}"
-        for error in external_sink.validate_external_worm_readback_ack(
-            external_readback_ack,
-            result=external_append_result,
-            now=now_text,
-        )
-    )
-    errors.extend(
-        f"external worm provider: {error}"
-        for error in validate_s2e_external_worm_provider_attestation(
-            external_worm_provider_attestation,
-            external_append_intent=external_append_intent,
-            external_append_result=external_append_result,
-            external_readback_ack=external_readback_ack,
+        f"durability anchor: {error}"
+        for error in validate_s2e_durability_anchor_attestation(
+            durability_anchor_attestation,
+            terminal_payload_digest=expected_worm_digest,
             now=now,
         )
     )
-    provider_digest = external_worm_provider_digest_or_none(external_worm_provider_attestation)
-    if isinstance(external_append_result, dict) and external_append_result.get(
-        "append_status"
-    ) not in external_sink.EXTERNAL_COMMITTED_STATUSES:
-        errors.append("external worm carrier append is not committed")
-    if isinstance(external_readback_ack, dict) and not (
-        external_readback_ack.get("ack") is True
-        and external_readback_ack.get("immutability_proven") is True
-    ):
-        errors.append("external worm carrier readback is not independently immutable")
+    anchor_digest = durability_anchor_digest_or_none(durability_anchor_attestation)
+    anchor = (
+        durability_anchor_attestation
+        if isinstance(durability_anchor_attestation, dict)
+        else {}
+    )
     if isinstance(attestation, dict) and isinstance(payload_receipt, dict):
-        append_result = (
-            external_append_result
-            if isinstance(external_append_result, dict)
-            else {}
-        )
-        readback_ack = (
-            external_readback_ack
-            if isinstance(external_readback_ack, dict)
-            else {}
-        )
-        worm_payload = s2e_carrier_worm_payload(
-            attestation, payload_receipt=payload_receipt
-        )
-        expected_worm_digest = terminal_sink.terminal_payload_digest(worm_payload)
-        intent_digest = (
-            (external_append_intent.get("append_intent") or {})
-            .get("payload_binding", {})
-            .get("terminal_payload_digest")
-            if isinstance(external_append_intent, dict)
-            else None
-        )
-        if intent_digest != expected_worm_digest:
-            errors.append(
-                "external worm intent does not bind exact canonical carrier bytes"
-            )
         immutable = attestation.get("immutable_readback", {})
+        if immutable.get("adapter") != "TRUSTED_HOST_SSHSIG_APPEND_ONLY_V1":
+            errors.append(
+                "carrier immutable readback adapter is not trusted-host append-only"
+            )
+        generation = anchor.get("anchor_generation")
         for field, actual in (
-            ("object_id", append_result.get("record_locator")),
-            ("version_id", append_result.get("object_version_id")),
-            ("readback_digest", readback_ack.get("ack_digest")),
-            ("provider_attestation_digest", provider_digest),
+            ("object_id", anchor.get("anchor_locator")),
+            ("version_id", str(generation) if generation is not None else None),
+            ("readback_digest", anchor.get("anchor_head_digest")),
+            ("provider_attestation_digest", anchor_digest),
         ):
             if immutable.get(field) != actual:
                 errors.append(
-                    f"carrier immutable readback {field} is not bound to external WORM"
+                    f"carrier immutable readback {field} is not bound to durability anchor"
                 )
     profile, trust_errors = load_s2e_receipt_signer_trust_root()
     errors.extend(trust_errors)
@@ -1281,17 +1211,9 @@ def verify_receipt_carrier_attestation(
             if isinstance(governed_capture_record, dict)
             else None
         ),
-        "external_result_digest": (
-            external_append_result.get("result_digest")
-            if isinstance(external_append_result, dict)
-            else None
-        ),
-        "external_readback_ack_digest": (
-            external_readback_ack.get("ack_digest")
-            if isinstance(external_readback_ack, dict)
-            else None
-        ),
-        "external_worm_provider_attestation_digest": provider_digest,
+        "durability_anchor_head_digest": anchor.get("anchor_head_digest"),
+        "durability_anchor_generation": anchor.get("anchor_generation"),
+        "durability_anchor_attestation_digest": anchor_digest,
         "independent_signing_key_available": profile is not None,
         "errors": sorted(set(errors)),
     }
@@ -1306,21 +1228,17 @@ def validate_s2e_launch_acceptance_review_bundle(
     governed_capture_record: Any,
     disposable_test_effect_chains: Any,
     predecessor_chain: Any,
-    external_append_intent: Any,
-    external_append_result: Any,
-    external_readback_ack: Any,
-    external_worm_provider_attestation: Any,
+    durability_anchor_attestation: Any,
     repo_root: Path,
     now: str | datetime,
     require_current_generation: bool = True,
 ) -> list[str]:
-    """Validate one signed, capture-bound, externally immutable review bundle."""
+    """Validate one signed, capture-bound, durably anchored review bundle."""
 
     from agent_governance_command_capture_v2 import (
         validate_governed_command_capture,
     )
     import agent_governance_aiml_trusted_host as trusted_host
-    import agent_governance_terminal_receipt_external_sink as external_sink
     import agent_governance_terminal_receipt_sink as terminal_sink
 
     schema_errors = _schema_errors(bundle, "s2e_launch_acceptance_review_bundle_v1")
@@ -1541,100 +1459,37 @@ def validate_s2e_launch_acceptance_review_bundle(
                 repo_root=repo_root,
             )
         )
-    now_text = _time(now).isoformat()
-    errors.extend(
-        f"acceptance review external worm intent: {error}"
-        for error in external_sink.validate_external_worm_append_intent(
-            external_append_intent, now=now_text
-        )
-    )
-    errors.extend(
-        f"acceptance review external worm result: {error}"
-        for error in external_sink.validate_external_worm_append_result(
-            external_append_result,
-            intent=external_append_intent,
-            now=now_text,
-        )
-    )
-    errors.extend(
-        f"acceptance review external worm readback: {error}"
-        for error in external_sink.validate_external_worm_readback_ack(
-            external_readback_ack,
-            result=external_append_result,
-            now=now_text,
-        )
-    )
-    errors.extend(
-        f"acceptance review external worm provider: {error}"
-        for error in validate_s2e_external_worm_provider_attestation(
-            external_worm_provider_attestation,
-            external_append_intent=external_append_intent,
-            external_append_result=external_append_result,
-            external_readback_ack=external_readback_ack,
-            now=now,
-        )
-    )
-    provider_digest = external_worm_provider_digest_or_none(external_worm_provider_attestation)
-    if not (
-        isinstance(external_append_result, dict)
-        and external_append_result.get("append_status")
-        in external_sink.EXTERNAL_COMMITTED_STATUSES
-    ):
-        errors.append("acceptance review external WORM append is not committed")
-    if not (
-        isinstance(external_readback_ack, dict)
-        and external_readback_ack.get("ack") is True
-        and external_readback_ack.get("immutability_proven") is True
-    ):
-        errors.append("acceptance review external WORM readback is not immutable")
     expected_worm_digest = terminal_sink.terminal_payload_digest(
         s2e_acceptance_review_worm_payload(bundle)
     )
-    intent_digest = (
-        (external_append_intent.get("append_intent") or {})
-        .get("payload_binding", {})
-        .get("terminal_payload_digest")
-        if isinstance(external_append_intent, dict)
-        else None
+    errors.extend(
+        f"acceptance review durability anchor: {error}"
+        for error in validate_s2e_durability_anchor_attestation(
+            durability_anchor_attestation,
+            terminal_payload_digest=expected_worm_digest,
+            now=now,
+        )
     )
-    if intent_digest != expected_worm_digest:
-        errors.append("acceptance review external WORM bytes binding differs")
-    worm_binding = bundle.get("external_worm_binding", {})
+    anchor_digest = durability_anchor_digest_or_none(durability_anchor_attestation)
+    anchor = (
+        durability_anchor_attestation
+        if isinstance(durability_anchor_attestation, dict)
+        else {}
+    )
+    replica_readback = anchor.get("offhost_replica_readback")
+    replica_readback = replica_readback if isinstance(replica_readback, dict) else {}
+    anchor_binding = bundle.get("durability_anchor_binding", {})
     for field, actual in (
-        (
-            "result_digest",
-            external_append_result.get("result_digest")
-            if isinstance(external_append_result, dict)
-            else None,
-        ),
-        (
-            "readback_ack_digest",
-            external_readback_ack.get("ack_digest")
-            if isinstance(external_readback_ack, dict)
-            else None,
-        ),
-        (
-            "record_locator",
-            external_append_result.get("record_locator")
-            if isinstance(external_append_result, dict)
-            else None,
-        ),
-        (
-            "object_version_id",
-            external_append_result.get("object_version_id")
-            if isinstance(external_append_result, dict)
-            else None,
-        ),
-        (
-            "checksum_sha256",
-            external_append_result.get("checksum_sha256")
-            if isinstance(external_append_result, dict)
-            else None,
-        ),
-        ("provider_attestation_digest", provider_digest),
+        ("anchor_locator", anchor.get("anchor_locator")),
+        ("anchor_generation", anchor.get("anchor_generation")),
+        ("anchor_head_digest", anchor.get("anchor_head_digest")),
+        ("replica_head_digest", replica_readback.get("replica_head_digest")),
+        ("anchor_attestation_digest", anchor_digest),
     ):
-        if worm_binding.get(field) != actual:
-            errors.append(f"acceptance review external WORM {field} binding differs")
+        if anchor_binding.get(field) != actual:
+            errors.append(
+                f"acceptance review durability anchor {field} binding differs"
+            )
     profile, trust_errors = load_s2e_receipt_signer_trust_root()
     errors.extend(trust_errors)
     if profile is not None:
@@ -1694,10 +1549,7 @@ def issue_s2e_launch_receipt(
     repo_root: Path,
     governed_capture_record: Any = None,
     disposable_test_effect_chains: Any = None,
-    external_append_intent: Any = None,
-    external_append_result: Any = None,
-    external_readback_ack: Any = None,
-    external_worm_provider_attestation: Any = None,
+    durability_anchor_attestation: Any = None,
     predecessor_receipt: Any = None,
     predecessor_authority: Any = None,
     predecessor_consumption_bootstrap_authority: Any = None,
@@ -1755,10 +1607,7 @@ def issue_s2e_launch_receipt(
             governed_capture_record=governed_capture_record,
             disposable_test_effect_chains=disposable_test_effect_chains,
             predecessor_chain=review_predecessor_chain,
-            external_append_intent=external_append_intent,
-            external_append_result=external_append_result,
-            external_readback_ack=external_readback_ack,
-            external_worm_provider_attestation=external_worm_provider_attestation,
+            durability_anchor_attestation=durability_anchor_attestation,
             repo_root=repo_root,
             now=trusted_now,
         )

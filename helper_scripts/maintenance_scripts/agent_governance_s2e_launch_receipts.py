@@ -47,32 +47,14 @@ def _read(path: Path) -> Any:
     return json.loads(path.read_text(encoding="utf-8"))
 
 
-def _add_external_triplet(
+def _add_durability_anchor(
     parser: argparse.ArgumentParser, *, prefix: str = ""
 ) -> None:
     option_prefix = f"{prefix}-" if prefix else ""
     destination_prefix = f"{prefix}_" if prefix else ""
     parser.add_argument(
-        f"--{option_prefix}external-append-intent",
-        dest=f"{destination_prefix}external_append_intent",
-        type=Path,
-        required=True,
-    )
-    parser.add_argument(
-        f"--{option_prefix}external-append-result",
-        dest=f"{destination_prefix}external_append_result",
-        type=Path,
-        required=True,
-    )
-    parser.add_argument(
-        f"--{option_prefix}external-readback-ack",
-        dest=f"{destination_prefix}external_readback_ack",
-        type=Path,
-        required=True,
-    )
-    parser.add_argument(
-        f"--{option_prefix}external-worm-provider-attestation",
-        dest=f"{destination_prefix}external_worm_provider_attestation",
+        f"--{option_prefix}durability-anchor-attestation",
+        dest=f"{destination_prefix}durability_anchor_attestation",
         type=Path,
         required=True,
     )
@@ -115,13 +97,13 @@ def _parser() -> argparse.ArgumentParser:
     issue.add_argument(
         "--predecessor-consumption-bootstrap-authority", type=Path
     )
-    _add_external_triplet(issue)
+    _add_durability_anchor(issue)
     carrier = subparsers.add_parser("verify-carrier")
     carrier.add_argument("--repo-root", type=Path, default=REPO_ROOT)
     carrier.add_argument("--attestation", type=Path, required=True)
     carrier.add_argument("--payload-receipt", type=Path, required=True)
     carrier.add_argument("--governed-capture-record", type=Path, required=True)
-    _add_external_triplet(carrier)
+    _add_durability_anchor(carrier)
     authority = subparsers.add_parser("build-predecessor-authority")
     authority.add_argument("--repo-root", type=Path, default=REPO_ROOT)
     authority.add_argument("--predecessor-receipt", type=Path, required=True)
@@ -141,8 +123,8 @@ def _parser() -> argparse.ArgumentParser:
     authority.add_argument(
         "--carrier-governed-capture-record", type=Path, required=True
     )
-    _add_external_triplet(authority, prefix="review")
-    _add_external_triplet(authority, prefix="carrier")
+    _add_durability_anchor(authority, prefix="review")
+    _add_durability_anchor(authority, prefix="carrier")
     transition = subparsers.add_parser("transition-gate")
     transition.add_argument("--repo-root", type=Path, default=REPO_ROOT)
     transition.add_argument("--receipt", type=Path, required=True)
@@ -193,11 +175,8 @@ def main(argv: list[str] | None = None) -> int:
             disposable_test_effect_chains=_read(
                 args.disposable_test_effect_chains
             ),
-            external_append_intent=_read(args.external_append_intent),
-            external_append_result=_read(args.external_append_result),
-            external_readback_ack=_read(args.external_readback_ack),
-            external_worm_provider_attestation=_read(
-                args.external_worm_provider_attestation
+            durability_anchor_attestation=_read(
+                args.durability_anchor_attestation
             ),
             predecessor_receipt=(
                 _read(args.predecessor_receipt)
@@ -225,11 +204,8 @@ def main(argv: list[str] | None = None) -> int:
             repo_root=args.repo_root,
             now=authority_now,
             governed_capture_record=_read(args.governed_capture_record),
-            external_append_intent=_read(args.external_append_intent),
-            external_append_result=_read(args.external_append_result),
-            external_readback_ack=_read(args.external_readback_ack),
-            external_worm_provider_attestation=_read(
-                args.external_worm_provider_attestation
+            durability_anchor_attestation=_read(
+                args.durability_anchor_attestation
             ),
         )
         print(json.dumps(result, ensure_ascii=False, sort_keys=True))
@@ -247,33 +223,15 @@ def main(argv: list[str] | None = None) -> int:
             review_disposable_test_effect_chains=_read(
                 args.review_disposable_test_effect_chains
             ),
-            review_external_append_intent=_read(
-                args.review_external_append_intent
-            ),
-            review_external_append_result=_read(
-                args.review_external_append_result
-            ),
-            review_external_readback_ack=_read(
-                args.review_external_readback_ack
-            ),
-            review_external_worm_provider_attestation=_read(
-                args.review_external_worm_provider_attestation
+            review_durability_anchor_attestation=_read(
+                args.review_durability_anchor_attestation
             ),
             carrier_attestation=_read(args.carrier_attestation),
             carrier_governed_capture_record=_read(
                 args.carrier_governed_capture_record
             ),
-            carrier_external_append_intent=_read(
-                args.carrier_external_append_intent
-            ),
-            carrier_external_append_result=_read(
-                args.carrier_external_append_result
-            ),
-            carrier_external_readback_ack=_read(
-                args.carrier_external_readback_ack
-            ),
-            carrier_external_worm_provider_attestation=_read(
-                args.carrier_external_worm_provider_attestation
+            carrier_durability_anchor_attestation=_read(
+                args.carrier_durability_anchor_attestation
             ),
             repo_root=args.repo_root,
             now=authority_now,

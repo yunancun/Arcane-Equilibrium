@@ -20,13 +20,13 @@ from aiml_gate_receipt_schema_core import (
 
 
 LAUNCH_ID = "S2E-LW1-LW5"
-EXTERNAL_WORM_SCHEMA = "s2e_external_worm_provider_attestation_v1"
+DURABILITY_ANCHOR_SCHEMA = "s2e_durability_anchor_attestation_v1"
 PREDECESSOR_REGISTRY_SCHEMA = "s2e_predecessor_registry_attestation_v1"
-EXTERNAL_WORM_PROVIDER_IDENTITY = (
-    "aiml-s2e-external-worm-provider-attestor-v1"
+DURABILITY_ANCHOR_IDENTITY = (
+    "aiml-s2e-durability-anchor-attestor-v1"
 )
-EXTERNAL_WORM_PROVIDER_NAMESPACE = (
-    "arcane-equilibrium-aiml-s2e-external-worm-provider"
+DURABILITY_ANCHOR_NAMESPACE = (
+    "arcane-equilibrium-aiml-s2e-durability-anchor"
 )
 PREDECESSOR_REGISTRY_IDENTITY = (
     "aiml-s2e-predecessor-registry-attestor-v1"
@@ -34,14 +34,17 @@ PREDECESSOR_REGISTRY_IDENTITY = (
 PREDECESSOR_REGISTRY_NAMESPACE = (
     "arcane-equilibrium-aiml-s2e-predecessor-registry"
 )
+# 這組 scheme 擋的是 fixture／stub 證據冒充真實 attestation,與「證據在不在本機」
+# 無關;Tier 1 的 anchor 本來就是 host-local capability,仍必須擋掉測試替身。
 LOCAL_EVIDENCE_LOCATOR_SCHEMES = frozenset({
     "fixture", "memory", "local", "test",
 })
-EXTERNAL_WORM_PROVIDER_LOCATOR_PREFIX = "aws:s3-object-lock-attestor:"
-PREDECESSOR_REGISTRY_LOCATOR_PREFIX = "registry:external-append-only:"
-EXTERNAL_WORM_PROVIDER_TRUST_ROOT_PATH = Path(
+DURABILITY_ANCHOR_LOCATOR_PREFIX = "host:append-only-durability-anchor:"
+OFFHOST_REPLICA_LOCATOR_PREFIX = "replica:offhost-append-only:"
+PREDECESSOR_REGISTRY_LOCATOR_PREFIX = "registry:host-append-only:"
+DURABILITY_ANCHOR_TRUST_ROOT_PATH = Path(
     "/etc/arcane-equilibrium/aiml/"
-    "s2e-external-worm-provider-trust-root-v1.json"
+    "s2e-durability-anchor-trust-root-v1.json"
 )
 PREDECESSOR_REGISTRY_TRUST_ROOT_PATH = Path(
     "/etc/arcane-equilibrium/aiml/"
@@ -183,15 +186,15 @@ def _read_trust_root(
     return (profile if not errors else None), errors
 
 
-def _load_external_worm_provider_trust_root(
+def _load_durability_anchor_trust_root(
 ) -> tuple[dict[str, Any] | None, list[str]]:
     return _read_trust_root(
-        EXTERNAL_WORM_PROVIDER_TRUST_ROOT_PATH,
-        schema_version="s2e_external_worm_provider_trust_root_v1",
-        signer_identity=EXTERNAL_WORM_PROVIDER_IDENTITY,
-        signature_namespace=EXTERNAL_WORM_PROVIDER_NAMESPACE,
-        attestor_class="S3_OBJECT_LOCK_EXTERNAL_ATTESTOR_V1",
-        label="S2E external WORM provider",
+        DURABILITY_ANCHOR_TRUST_ROOT_PATH,
+        schema_version="s2e_durability_anchor_trust_root_v1",
+        signer_identity=DURABILITY_ANCHOR_IDENTITY,
+        signature_namespace=DURABILITY_ANCHOR_NAMESPACE,
+        attestor_class="HOST_APPEND_ONLY_DURABILITY_ANCHOR_V1",
+        label="S2E durability anchor",
     )
 
 
@@ -202,7 +205,7 @@ def _load_predecessor_registry_trust_root(
         schema_version="s2e_predecessor_registry_trust_root_v1",
         signer_identity=PREDECESSOR_REGISTRY_IDENTITY,
         signature_namespace=PREDECESSOR_REGISTRY_NAMESPACE,
-        attestor_class="EXTERNAL_APPEND_ONLY_PREDECESSOR_REGISTRY_V1",
+        attestor_class="HOST_APPEND_ONLY_PREDECESSOR_REGISTRY_V1",
         label="S2E predecessor registry",
     )
 
@@ -228,7 +231,7 @@ def _signed_bytes(attestation: dict[str, Any]) -> bytes:
     ).encode("utf-8")
 
 
-def external_worm_provider_signed_bytes(attestation: dict[str, Any]) -> bytes:
+def durability_anchor_signed_bytes(attestation: dict[str, Any]) -> bytes:
     return _signed_bytes(attestation)
 
 
@@ -236,7 +239,7 @@ def predecessor_registry_signed_bytes(attestation: dict[str, Any]) -> bytes:
     return _signed_bytes(attestation)
 
 
-def external_worm_provider_attestation_digest(
+def durability_anchor_attestation_digest(
     attestation: dict[str, Any],
 ) -> str:
     return canonical_digest({
@@ -245,8 +248,40 @@ def external_worm_provider_attestation_digest(
     })
 
 
-def external_worm_provider_digest_or_none(value: Any) -> str | None:
+def durability_anchor_digest_or_none(value: Any) -> str | None:
     return value.get("attestation_digest") if isinstance(value, dict) else None
+
+
+def durability_anchor_entry_digest(attestation: dict[str, Any]) -> str:
+    """單筆 append-only 條目的規範摘要,與 registry 條目採同一形制。"""
+
+    fields = (
+        "anchor_class",
+        "anchor_locator",
+        "launch_id",
+        "terminal_payload_digest",
+        "anchor_generation",
+        "previous_anchor_head_digest",
+    )
+    return canonical_digest({
+        "schema_version": "s2e_durability_anchor_entry_v1",
+        **{field: attestation.get(field) for field in fields},
+    })
+
+
+def durability_anchor_head_digest(attestation: dict[str, Any]) -> str:
+    """append-only head 的規範摘要;off-host 副本必須回讀到同一個值。"""
+
+    return canonical_digest({
+        "schema_version": "s2e_durability_anchor_head_v1",
+        "anchor_class": attestation.get("anchor_class"),
+        "anchor_locator": attestation.get("anchor_locator"),
+        "anchor_generation": attestation.get("anchor_generation"),
+        "previous_anchor_head_digest": attestation.get(
+            "previous_anchor_head_digest"
+        ),
+        "anchor_entry_digest": attestation.get("anchor_entry_digest"),
+    })
 
 
 def predecessor_registry_attestation_digest(
@@ -400,131 +435,96 @@ def _external_locator_errors(
     return []
 
 
-def validate_s2e_external_worm_provider_attestation(
+def validate_s2e_durability_anchor_attestation(
     attestation: Any,
     *,
-    external_append_intent: Any,
-    external_append_result: Any,
-    external_readback_ack: Any,
+    terminal_payload_digest: str,
     now: str | datetime,
 ) -> list[str]:
-    """Require authenticated provider proof above caller-injected S3 results."""
+    """Require one trusted-host SSHSIG binding append-only head and off-host readback.
 
-    schema = _load_schema(EXTERNAL_WORM_SCHEMA)
+    這是 §LW1 spec anchor 選言的第二支:單一 trusted-host 簽章同時綁獨立 key
+    identity、append-only monotonic head、trusted freshness window 與
+    latest-generation immutable readback。caller 不能自選 anchor 或 replica 後端。
+    """
+
+    schema = _load_schema(DURABILITY_ANCHOR_SCHEMA)
     errors = schema_subset_errors(attestation, schema, root_schema=schema)
     if not isinstance(attestation, dict):
         return errors
     errors.extend(_external_locator_errors(
-        attestation.get("provider_locator"),
-        label="external WORM provider",
-        required_prefix=EXTERNAL_WORM_PROVIDER_LOCATOR_PREFIX,
-        admitted_class="external S3 Object Lock provider class",
+        attestation.get("anchor_locator"),
+        label="durability anchor",
+        required_prefix=DURABILITY_ANCHOR_LOCATOR_PREFIX,
+        admitted_class="host append-only durability anchor class",
+    ))
+    errors.extend(_external_locator_errors(
+        attestation.get("offhost_replica_locator"),
+        label="durability anchor replica",
+        required_prefix=OFFHOST_REPLICA_LOCATOR_PREFIX,
+        admitted_class="off-host append-only replica class",
     ))
     if errors:
         return sorted(set(errors))
-    import agent_governance_terminal_receipt_external_sink as external_sink
-
-    now_text = _timestamp(now).isoformat()
-    errors.extend(
-        "external WORM provider intent: " + error
-        for error in external_sink.validate_external_worm_append_intent(
-            external_append_intent, now=now_text
-        )
-    )
-    errors.extend(
-        "external WORM provider result: " + error
-        for error in external_sink.validate_external_worm_append_result(
-            external_append_result,
-            intent=external_append_intent,
-            now=now_text,
-        )
-    )
-    errors.extend(
-        "external WORM provider readback: " + error
-        for error in external_sink.validate_external_worm_readback_ack(
-            external_readback_ack,
-            result=external_append_result,
-            now=now_text,
-        )
-    )
-    intent = external_append_intent if isinstance(external_append_intent, dict) else {}
-    result = external_append_result if isinstance(external_append_result, dict) else {}
-    readback = external_readback_ack if isinstance(external_readback_ack, dict) else {}
-    destination = intent.get("destination_contract") or {}
-    payload_binding = (intent.get("append_intent") or {}).get("payload_binding") or {}
-    expected_destination = {
-        field: destination.get(field)
-        for field in (
-            "endpoint",
-            "region",
-            "bucket",
-            "credential_channel_id",
-            "object_lock_mode",
-            "retain_until",
-        )
-    }
-    expected_object = {
-        "record_locator": result.get("record_locator"),
-        "object_version_id": result.get("object_version_id"),
-        "checksum_sha256": result.get("checksum_sha256"),
-        "append_status": result.get("append_status"),
-        "readback_ack": readback.get("ack"),
-        "immutability_proven": readback.get("immutability_proven"),
-        "object_lock_enabled": readback.get("object_lock_enabled"),
-    }
-    for field, expected in (
-        ("external_intent_digest", intent.get("external_intent_digest")),
-        ("external_result_digest", result.get("result_digest")),
-        ("external_readback_ack_digest", readback.get("ack_digest")),
-        ("terminal_payload_digest", payload_binding.get("terminal_payload_digest")),
-        ("destination", expected_destination),
-        ("immutable_object", expected_object),
+    if attestation.get("launch_id") != LAUNCH_ID:
+        errors.append("durability anchor launch_id binding differs")
+    if attestation.get("terminal_payload_digest") != terminal_payload_digest:
+        errors.append("durability anchor terminal_payload_digest binding differs")
+    # generation 與 previous head 必須連續:第一代不得帶前手,後續代不得缺前手。
+    generation = attestation.get("anchor_generation")
+    previous = attestation.get("previous_anchor_head_digest")
+    if (generation == 1 and previous is not None) or (
+        isinstance(generation, int) and generation > 1 and previous is None
     ):
-        if attestation.get(field) != expected:
-            errors.append(f"external WORM provider {field} binding differs")
-    if destination.get("object_lock_mode") != "COMPLIANCE":
-        errors.append("external WORM provider requires COMPLIANCE Object Lock")
-    if intent.get("compliance_operator_approved") is not True:
-        errors.append("external WORM COMPLIANCE intent lacks operator approval")
-    if result.get("append_status") not in external_sink.EXTERNAL_COMMITTED_STATUSES:
-        errors.append("external WORM provider append is not committed")
-    if result.get("external_verification_pending") is not False:
-        errors.append("external WORM provider result remains verification-pending")
+        errors.append("durability anchor generation/head continuity is invalid")
+    if attestation.get("anchor_entry_digest") != (
+        durability_anchor_entry_digest(attestation)
+    ):
+        errors.append("durability anchor entry digest is invalid")
+    if attestation.get("anchor_head_digest") != (
+        durability_anchor_head_digest(attestation)
+    ):
+        errors.append("durability anchor head digest is invalid")
+    readback = attestation.get("offhost_replica_readback")
+    readback = readback if isinstance(readback, dict) else {}
     if not (
         readback.get("ack") is True
-        and readback.get("immutability_proven") is True
-        and readback.get("object_lock_enabled") is True
+        and readback.get("entry_present") is True
+        and readback.get("latest_generation_matches") is True
     ):
-        errors.append("external WORM provider immutable readback is not proven")
-    errors.extend(_freshness_errors(attestation, now=now, label="external WORM provider"))
+        errors.append("durability anchor off-host readback is not proven")
+    # 副本必須回讀到與本機 anchor 完全相同的 head,否則不成立 latest-generation。
+    if readback.get("replica_head_digest") != attestation.get("anchor_head_digest"):
+        errors.append("durability anchor replica head does not match anchor head")
+    errors.extend(_freshness_errors(attestation, now=now, label="durability anchor"))
     try:
-        if _timestamp(attestation["observed_at"]) < _timestamp(readback["observed_at"]):
-            errors.append("external WORM provider predates immutable readback")
-        if _timestamp(destination["retain_until"]) <= _timestamp(attestation["expires_at"]):
-            errors.append("external WORM retention does not outlive attestation")
+        if _timestamp(attestation["observed_at"]) < _timestamp(
+            readback["observed_at"]
+        ):
+            errors.append("durability anchor predates off-host readback")
     except (KeyError, TypeError, ValueError) as error:
-        errors.append(f"external WORM provider binding timestamp is invalid: {error}")
-    signature_errors, provider_profile = _signature_errors(
+        errors.append(f"durability anchor binding timestamp is invalid: {error}")
+    signature_errors, anchor_profile = _signature_errors(
         attestation,
-        profile_loader=_load_external_worm_provider_trust_root,
-        identity=EXTERNAL_WORM_PROVIDER_IDENTITY,
-        namespace=EXTERNAL_WORM_PROVIDER_NAMESPACE,
-        label="external WORM provider",
+        profile_loader=_load_durability_anchor_trust_root,
+        identity=DURABILITY_ANCHOR_IDENTITY,
+        namespace=DURABILITY_ANCHOR_NAMESPACE,
+        label="durability anchor",
     )
     errors.extend(signature_errors)
     receipt_profile, receipt_errors = _load_s2e_receipt_signer_profile()
     errors.extend(receipt_errors)
     errors.extend(_distinct_fingerprint_errors(
-        subject=provider_profile,
+        subject=anchor_profile,
         peers=[("S2E receipt signer", receipt_profile)],
-        label="external WORM provider",
+        label="durability anchor",
     ))
     if attestation.get("attestation_digest") != (
-        external_worm_provider_attestation_digest(attestation)
+        durability_anchor_attestation_digest(attestation)
     ):
-        errors.append("external WORM provider attestation digest is invalid")
+        errors.append("durability anchor attestation digest is invalid")
     if _contains_github_secret_like_content(attestation):
-        errors.append("external WORM provider attestation contains secret-like content")
+        errors.append("durability anchor attestation contains secret-like content")
     return sorted(set(errors))
 
 
@@ -594,14 +594,14 @@ def validate_s2e_predecessor_registry_attestation(
     )
     errors.extend(signature_errors)
     receipt_profile, receipt_errors = _load_s2e_receipt_signer_profile()
-    provider_profile, provider_errors = _load_external_worm_provider_trust_root()
+    anchor_profile, anchor_errors = _load_durability_anchor_trust_root()
     errors.extend(receipt_errors)
-    errors.extend(provider_errors)
+    errors.extend(anchor_errors)
     errors.extend(_distinct_fingerprint_errors(
         subject=registry_profile,
         peers=[
             ("S2E receipt signer", receipt_profile),
-            ("external WORM provider", provider_profile),
+            ("durability anchor", anchor_profile),
         ],
         label="predecessor registry",
     ))

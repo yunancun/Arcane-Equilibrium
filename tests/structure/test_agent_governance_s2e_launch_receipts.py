@@ -122,28 +122,28 @@ def _install_disposable_external_evidence_roots(
             "attestor_class": attestor_class,
         }
 
-    provider_private, provider_profile = profile(
-        "s2e_external_worm_provider",
-        s2e_external.EXTERNAL_WORM_PROVIDER_IDENTITY,
-        s2e_external.EXTERNAL_WORM_PROVIDER_NAMESPACE,
-        "S3_OBJECT_LOCK_EXTERNAL_ATTESTOR_V1",
+    anchor_private, anchor_profile = profile(
+        "s2e_durability_anchor",
+        s2e_external.DURABILITY_ANCHOR_IDENTITY,
+        s2e_external.DURABILITY_ANCHOR_NAMESPACE,
+        "HOST_APPEND_ONLY_DURABILITY_ANCHOR_V1",
     )
     registry_private, registry_profile = profile(
         "s2e_predecessor_registry",
         s2e_external.PREDECESSOR_REGISTRY_IDENTITY,
         s2e_external.PREDECESSOR_REGISTRY_NAMESPACE,
-        "EXTERNAL_APPEND_ONLY_PREDECESSOR_REGISTRY_V1",
+        "HOST_APPEND_ONLY_PREDECESSOR_REGISTRY_V1",
     )
     fingerprints = {
         receipt_profile["key_fingerprint"],
-        provider_profile["key_fingerprint"],
+        anchor_profile["key_fingerprint"],
         registry_profile["key_fingerprint"],
     }
     assert len(fingerprints) == 3
     monkeypatch.setattr(
         s2e_external,
-        "_load_external_worm_provider_trust_root",
-        lambda: (provider_profile, []),
+        "_load_durability_anchor_trust_root",
+        lambda: (anchor_profile, []),
     )
     monkeypatch.setattr(
         s2e_external,
@@ -156,8 +156,8 @@ def _install_disposable_external_evidence_roots(
         lambda: (receipt_profile, []),
     )
     return {
-        "provider_private": provider_private,
-        "provider_profile": provider_profile,
+        "anchor_private": anchor_private,
+        "anchor_profile": anchor_profile,
         "registry_private": registry_private,
         "registry_profile": registry_profile,
     }
@@ -467,124 +467,101 @@ def _actual_capture(
     return record
 
 
-def _external_worm_triplet(
+ANCHOR_LOCATOR = "host:append-only-durability-anchor:s2e-aiml"
+REPLICA_LOCATOR = "replica:offhost-append-only:nas-s2e-aiml"
+
+
+def _durability_anchor_attestation(
     payload: dict,
-    *,
-    source_head: str,
-    landing_scope_id: str,
-    learning_runtime_digest: str,
-    issued_at: datetime,
-    intent_id: str,
-) -> tuple[dict, dict, dict]:
-    append_actor = f"{intent_id}-writer"
-    intent = external_sink.build_external_worm_append_intent(
-        intent_id=intent_id,
-        terminal_receipt_type="disposable_proof_payload_v1",
-        final_source_head=source_head,
-        landing_scope_id=landing_scope_id,
-        learning_runtime_digest=learning_runtime_digest,
-        terminal_payload_digest=terminal_sink.terminal_payload_digest(payload),
-        append_actor_id=append_actor,
-        approved_by="PM",
-        approved_at=issued_at.isoformat(),
-        expires_at=(issued_at + timedelta(hours=2)).isoformat(),
-        endpoint="https://s3.us-east-1.amazonaws.com",
-        region="us-east-1",
-        bucket="s2e-disposable-object-lock",
-        object_lock_mode="COMPLIANCE",
-        retain_until=(issued_at + timedelta(days=30)).isoformat(),
-        credential_channel_id="aws-profile:s2e-disposable",
-        compliance_operator_approved=True,
-        now=(issued_at + timedelta(minutes=1)).isoformat(),
-    )
-    client = _DisposableObjectLockS3()
-    result = external_sink.apply_external_worm_append(
-        intent,
-        s3_client=client,
-        append_actor_id=append_actor,
-        terminal_payload=payload,
-        started_at=issued_at.isoformat(),
-        completed_at=(issued_at + timedelta(seconds=1)).isoformat(),
-    )
-    readback = external_sink.independent_readback_ack(
-        result,
-        intent,
-        s3_client=client,
-        verifier_actor_id=f"{intent_id}-independent-readback",
-        observed_at=(issued_at + timedelta(seconds=5)).isoformat(),
-    )
-    return intent, result, readback
-
-
-def _external_worm_provider_attestation(
-    intent: dict,
-    result: dict,
-    readback: dict,
     *,
     trust: dict[str, object],
     issued_at: datetime,
     directory: Path,
+    generation: int = 1,
+    previous_head: str | None = None,
 ) -> dict:
-    destination = intent["destination_contract"]
+    """建一份 Tier 1 trusted-host durability anchor attestation(無外部服務)。"""
+
     artifact = {
-        "schema_version": s2e_external.EXTERNAL_WORM_SCHEMA,
-        "purpose": "ATTEST_S2E_EXTERNAL_WORM_IMMUTABLE_READBACK",
+        "schema_version": s2e_external.DURABILITY_ANCHOR_SCHEMA,
+        "purpose": "ATTEST_S2E_APPEND_ONLY_DURABILITY_AND_OFFHOST_READBACK",
         "evidence_class": "PLATFORM_OR_EXTERNAL_ATTESTED",
-        "provider_class": "S3_OBJECT_LOCK_EXTERNAL_ATTESTOR_V1",
-        "provider_locator": "aws:s3-object-lock-attestor:external-account",
-        "external_intent_digest": intent["external_intent_digest"],
-        "external_result_digest": result["result_digest"],
-        "external_readback_ack_digest": readback["ack_digest"],
-        "terminal_payload_digest": intent["append_intent"]["payload_binding"][
-            "terminal_payload_digest"
-        ],
-        "destination": {
-            field: destination[field]
-            for field in (
-                "endpoint",
-                "region",
-                "bucket",
-                "credential_channel_id",
-                "object_lock_mode",
-                "retain_until",
-            )
-        },
-        "immutable_object": {
-            "record_locator": result["record_locator"],
-            "object_version_id": result["object_version_id"],
-            "checksum_sha256": result["checksum_sha256"],
-            "append_status": result["append_status"],
-            "readback_ack": readback["ack"],
-            "immutability_proven": readback["immutability_proven"],
-            "object_lock_enabled": readback["object_lock_enabled"],
+        "anchor_class": "HOST_APPEND_ONLY_DURABILITY_ANCHOR_V1",
+        "anchor_locator": ANCHOR_LOCATOR,
+        "launch_id": s2e_external.LAUNCH_ID,
+        "terminal_payload_digest": terminal_sink.terminal_payload_digest(payload),
+        "anchor_generation": generation,
+        "previous_anchor_head_digest": previous_head,
+        "anchor_entry_digest": "",
+        "anchor_head_digest": "",
+        "offhost_replica_locator": REPLICA_LOCATOR,
+        "offhost_replica_readback": {
+            "ack": True,
+            "entry_present": True,
+            "latest_generation_matches": True,
+            "replica_head_digest": "",
+            "observed_at": (issued_at + timedelta(seconds=5)).isoformat(),
         },
         "observed_at": (issued_at + timedelta(seconds=10)).isoformat(),
         "expires_at": (issued_at + timedelta(minutes=5)).isoformat(),
         "signer": {
-            "role": "EXTERNAL_WORM_PROVIDER_ATTESTOR",
-            "identity": s2e_external.EXTERNAL_WORM_PROVIDER_IDENTITY,
-            "namespace": s2e_external.EXTERNAL_WORM_PROVIDER_NAMESPACE,
+            "role": "DURABILITY_ANCHOR_ATTESTOR",
+            "identity": s2e_external.DURABILITY_ANCHOR_IDENTITY,
+            "namespace": s2e_external.DURABILITY_ANCHOR_NAMESPACE,
             "key_generation": "independent_off_repo_ed25519_v1",
             "anchor": "fixed_off_repo_public_trust_root_v1",
-            "key_fingerprint": trust["provider_profile"]["key_fingerprint"],
+            "key_fingerprint": trust["anchor_profile"]["key_fingerprint"],
         },
     }
-    signed = s2e_external.external_worm_provider_signed_bytes(artifact)
+    artifact["anchor_entry_digest"] = s2e_external.durability_anchor_entry_digest(
+        artifact
+    )
+    artifact["anchor_head_digest"] = s2e_external.durability_anchor_head_digest(
+        artifact
+    )
+    artifact["offhost_replica_readback"]["replica_head_digest"] = artifact[
+        "anchor_head_digest"
+    ]
+    signed = s2e_external.durability_anchor_signed_bytes(artifact)
     artifact["signed_core_digest"] = "sha256:" + hashlib.sha256(signed).hexdigest()
     artifact["signature"] = {
         "algorithm": "SSHSIG",
         "signed_digest": artifact["signed_core_digest"],
         "signature": _sign_sshsig(
-            trust["provider_private"],
+            trust["anchor_private"],
             signed,
-            namespace=s2e_external.EXTERNAL_WORM_PROVIDER_NAMESPACE,
+            namespace=s2e_external.DURABILITY_ANCHOR_NAMESPACE,
             directory=directory,
         ),
     }
     artifact["attestation_digest"] = (
-        s2e_external.external_worm_provider_attestation_digest(artifact)
+        s2e_external.durability_anchor_attestation_digest(artifact)
     )
     return artifact
+
+
+def _anchor_immutable_readback(anchor: dict) -> dict:
+    """carrier schema 早已宣告的 trusted-host adapter 投影。"""
+
+    return {
+        "adapter": "TRUSTED_HOST_SSHSIG_APPEND_ONLY_V1",
+        "object_id": anchor["anchor_locator"],
+        "version_id": str(anchor["anchor_generation"]),
+        "readback_digest": anchor["anchor_head_digest"],
+        "provider_attestation_digest": anchor["attestation_digest"],
+    }
+
+
+def _anchor_binding(anchor: dict) -> dict:
+    return {
+        "anchor_locator": anchor["anchor_locator"],
+        "anchor_generation": anchor["anchor_generation"],
+        "anchor_head_digest": anchor["anchor_head_digest"],
+        "replica_head_digest": anchor["offhost_replica_readback"][
+            "replica_head_digest"
+        ],
+        "anchor_attestation_digest": anchor["attestation_digest"],
+    }
 
 
 def _predecessor_registry_attestation(
@@ -598,7 +575,7 @@ def _predecessor_registry_attestation(
         "schema_version": s2e_external.PREDECESSOR_REGISTRY_SCHEMA,
         "purpose": "ATTEST_S2E_PREDECESSOR_SINGLE_USE_GRANT",
         "evidence_class": "PLATFORM_OR_EXTERNAL_ATTESTED",
-        "registry_class": "EXTERNAL_APPEND_ONLY_PREDECESSOR_REGISTRY_V1",
+        "registry_class": "HOST_APPEND_ONLY_PREDECESSOR_REGISTRY_V1",
         "registry_locator": "registry:external-append-only:s2e",
         **{
             field: request[field]
@@ -1194,10 +1171,7 @@ def test_fake_trusted_host_objects_return_typed_pending_not_pass(
         repo_root=repo,
         now=issued_at + timedelta(minutes=1),
         governed_capture_record={"schema_version": "command_capture_v2"},
-        external_append_intent={"schema_version": "caller-shaped"},
-        external_append_result={"schema_version": "caller-shaped"},
-        external_readback_ack={"schema_version": "caller-shaped"},
-        external_worm_provider_attestation={"schema_version": "caller-shaped"},
+        durability_anchor_attestation={"schema_version": "caller-shaped"},
     )
 
     assert result["schema_version"] == "receipt_carrier_verification_result_v1"
@@ -1209,7 +1183,7 @@ def test_fake_trusted_host_objects_return_typed_pending_not_pass(
         if key != "verification_result_digest"
     })
     assert any("governed command capture" in error for error in result["errors"])
-    assert any("external worm" in error for error in result["errors"])
+    assert any("durability anchor" in error for error in result["errors"])
 
 
 def test_missing_trusted_host_objects_return_typed_pending_not_exception(
@@ -1223,15 +1197,12 @@ def test_missing_trusted_host_objects_return_typed_pending_not_exception(
         repo_root=repo,
         now=issued_at + timedelta(minutes=1),
         governed_capture_record=None,
-        external_append_intent=None,
-        external_append_result=None,
-        external_readback_ack=None,
-        external_worm_provider_attestation=None,
+        durability_anchor_attestation=None,
     )
 
     assert result["status"] == "EXTERNAL_VERIFICATION_PENDING"
-    assert result["external_result_digest"] is None
-    assert result["external_readback_ack_digest"] is None
+    assert result["durability_anchor_head_digest"] is None
+    assert result["durability_anchor_attestation_digest"] is None
     assert result["errors"]
 
 
@@ -1277,31 +1248,15 @@ def test_independent_key_capture_and_worm_produce_verified_carrier(
     worm_payload = validator.s2e_carrier_worm_payload(
         attestation, payload_receipt=genesis
     )
-    intent, result, readback = _external_worm_triplet(
+    anchor_attestation = _durability_anchor_attestation(
         worm_payload,
-        source_head=attestation["carrier_head"],
-        landing_scope_id=attestation["payload_digest"],
-        learning_runtime_digest=attestation["launch_contract_digest"],
-        issued_at=issued_at,
-        intent_id="s2e-carrier-intent-0001",
-    )
-    provider_attestation = _external_worm_provider_attestation(
-        intent,
-        result,
-        readback,
         trust=external_trust,
         issued_at=issued_at,
         directory=tmp_path,
     )
-    attestation["immutable_readback"] = {
-        "adapter": "EXTERNAL_WORM_V1",
-        "object_id": result["record_locator"],
-        "version_id": result["object_version_id"],
-        "readback_digest": readback["ack_digest"],
-        "provider_attestation_digest": provider_attestation[
-            "attestation_digest"
-        ],
-    }
+    attestation["immutable_readback"] = _anchor_immutable_readback(
+        anchor_attestation
+    )
     _reseal_carrier(attestation)
     attestation["signature"]["signature"] = _sign_sshsig(
         private_key,
@@ -1319,10 +1274,7 @@ def test_independent_key_capture_and_worm_produce_verified_carrier(
         repo_root=repo,
         now=issued_at + timedelta(minutes=1),
         governed_capture_record=capture,
-        external_append_intent=intent,
-        external_append_result=result,
-        external_readback_ack=readback,
-        external_worm_provider_attestation=provider_attestation,
+        durability_anchor_attestation=anchor_attestation,
     )
 
     assert fingerprint != trusted_host.EXPECTED_EXECUTION_SIGNER_FINGERPRINT
@@ -1497,7 +1449,7 @@ def _issued_genesis_authority_case(
             "anchor": "fixed_off_repo_public_trust_root_v1",
             "key_fingerprint": fingerprint,
         },
-        "external_worm_binding": None,
+        "durability_anchor_binding": None,
     }
     signed_bytes = validator.s2e_acceptance_review_signed_bytes(review_bundle)
     review_bundle["signed_core_digest"] = "sha256:" + hashlib.sha256(
@@ -1513,32 +1465,15 @@ def _issued_genesis_authority_case(
             directory=tmp_path,
         ),
     }
-    review_intent, review_result, review_readback = _external_worm_triplet(
+    review_anchor_attestation = _durability_anchor_attestation(
         validator.s2e_acceptance_review_worm_payload(review_bundle),
-        source_head=schema_carrier,
-        landing_scope_id=candidate["payload_digest"],
-        learning_runtime_digest=candidate["launch_contract_digest"],
-        issued_at=issued_at,
-        intent_id="s2e-authority-review-0001",
-    )
-    review_provider_attestation = _external_worm_provider_attestation(
-        review_intent,
-        review_result,
-        review_readback,
         trust=external_trust,
         issued_at=issued_at,
         directory=tmp_path,
     )
-    review_bundle["external_worm_binding"] = {
-        "result_digest": review_result["result_digest"],
-        "readback_ack_digest": review_readback["ack_digest"],
-        "record_locator": review_result["record_locator"],
-        "object_version_id": review_result["object_version_id"],
-        "checksum_sha256": review_result["checksum_sha256"],
-        "provider_attestation_digest": review_provider_attestation[
-            "attestation_digest"
-        ],
-    }
+    review_bundle["durability_anchor_binding"] = _anchor_binding(
+        review_anchor_attestation
+    )
     review_bundle["bundle_digest"] = (
         validator.s2e_acceptance_review_bundle_digest(review_bundle)
     )
@@ -1553,10 +1488,7 @@ def _issued_genesis_authority_case(
         repo_root=repo,
         governed_capture_record=review_capture,
         disposable_test_effect_chains=[disposable_chain],
-        external_append_intent=review_intent,
-        external_append_result=review_result,
-        external_readback_ack=review_readback,
-        external_worm_provider_attestation=review_provider_attestation,
+        durability_anchor_attestation=review_anchor_attestation,
     )
     assert issuance["status"] == "ISSUED"
     issued = issuance["issued_receipt"]
@@ -1652,33 +1584,19 @@ def _issued_genesis_authority_case(
         "native_agent": carrier_capture["native_agent"],
         "permission": carrier_capture["permission"],
     }
-    carrier_intent, carrier_result, carrier_readback = _external_worm_triplet(
+    carrier_anchor_attestation = _durability_anchor_attestation(
         validator.s2e_carrier_worm_payload(
             carrier_attestation, payload_receipt=issued
         ),
-        source_head=carrier_head,
-        landing_scope_id=issued["payload_digest"],
-        learning_runtime_digest=issued["launch_contract_digest"],
-        issued_at=issued_at + timedelta(minutes=2),
-        intent_id="s2e-authority-carrier-0001",
-    )
-    carrier_provider_attestation = _external_worm_provider_attestation(
-        carrier_intent,
-        carrier_result,
-        carrier_readback,
         trust=external_trust,
         issued_at=issued_at + timedelta(minutes=2),
         directory=tmp_path,
+        generation=2,
+        previous_head=review_anchor_attestation["anchor_head_digest"],
     )
-    carrier_attestation["immutable_readback"] = {
-        "adapter": "EXTERNAL_WORM_V1",
-        "object_id": carrier_result["record_locator"],
-        "version_id": carrier_result["object_version_id"],
-        "readback_digest": carrier_readback["ack_digest"],
-        "provider_attestation_digest": carrier_provider_attestation[
-            "attestation_digest"
-        ],
-    }
+    carrier_attestation["immutable_readback"] = _anchor_immutable_readback(
+        carrier_anchor_attestation
+    )
     _reseal_carrier(carrier_attestation)
     carrier_attestation["signature"]["signature"] = _sign_sshsig(
         private_key,
@@ -1695,20 +1613,10 @@ def _issued_genesis_authority_case(
         acceptance_review_bundle=review_bundle,
         review_governed_capture_record=review_capture,
         review_disposable_test_effect_chains=[disposable_chain],
-        review_external_append_intent=review_intent,
-        review_external_append_result=review_result,
-        review_external_readback_ack=review_readback,
-        review_external_worm_provider_attestation=(
-            review_provider_attestation
-        ),
+        review_durability_anchor_attestation=review_anchor_attestation,
         carrier_attestation=carrier_attestation,
         carrier_governed_capture_record=carrier_capture,
-        carrier_external_append_intent=carrier_intent,
-        carrier_external_append_result=carrier_result,
-        carrier_external_readback_ack=carrier_readback,
-        carrier_external_worm_provider_attestation=(
-            carrier_provider_attestation
-        ),
+        carrier_durability_anchor_attestation=carrier_anchor_attestation,
         repo_root=repo,
         now=issued_at + timedelta(minutes=3),
     )
@@ -2004,25 +1912,10 @@ def test_launch_cli_exposes_full_issue_carrier_authority_and_transition_gates(
             "review-chains.json",
             authority["review_disposable_test_effect_chains"],
         ),
-        "review_intent": _json_file(
+        "review_anchor": _json_file(
             tmp_path,
-            "review-intent.json",
-            authority["review_external_append_intent"],
-        ),
-        "review_result": _json_file(
-            tmp_path,
-            "review-result.json",
-            authority["review_external_append_result"],
-        ),
-        "review_readback": _json_file(
-            tmp_path,
-            "review-readback.json",
-            authority["review_external_readback_ack"],
-        ),
-        "review_provider": _json_file(
-            tmp_path,
-            "review-provider.json",
-            authority["review_external_worm_provider_attestation"],
+            "review-anchor.json",
+            authority["review_durability_anchor_attestation"],
         ),
         "carrier_attestation": _json_file(
             tmp_path,
@@ -2034,25 +1927,10 @@ def test_launch_cli_exposes_full_issue_carrier_authority_and_transition_gates(
             "carrier-capture.json",
             authority["carrier_governed_capture_record"],
         ),
-        "carrier_intent": _json_file(
+        "carrier_anchor": _json_file(
             tmp_path,
-            "carrier-intent.json",
-            authority["carrier_external_append_intent"],
-        ),
-        "carrier_result": _json_file(
-            tmp_path,
-            "carrier-result.json",
-            authority["carrier_external_append_result"],
-        ),
-        "carrier_readback": _json_file(
-            tmp_path,
-            "carrier-readback.json",
-            authority["carrier_external_readback_ack"],
-        ),
-        "carrier_provider": _json_file(
-            tmp_path,
-            "carrier-provider.json",
-            authority["carrier_external_worm_provider_attestation"],
+            "carrier-anchor.json",
+            authority["carrier_durability_anchor_attestation"],
         ),
         "empty_chain": _json_file(tmp_path, "empty-chain.json", []),
     }
@@ -2063,10 +1941,7 @@ def test_launch_cli_exposes_full_issue_carrier_authority_and_transition_gates(
         "--acceptance-review-bundle", str(files["review_bundle"]),
         "--governed-capture-record", str(files["review_capture"]),
         "--disposable-test-effect-chains", str(files["review_chains"]),
-        "--external-append-intent", str(files["review_intent"]),
-        "--external-append-result", str(files["review_result"]),
-        "--external-readback-ack", str(files["review_readback"]),
-        "--external-worm-provider-attestation", str(files["review_provider"]),
+        "--durability-anchor-attestation", str(files["review_anchor"]),
     ]) == 2
     stale_issue = json.loads(capsys.readouterr().out)
     assert stale_issue["status"] == "EXTERNAL_VERIFICATION_PENDING"
@@ -2082,10 +1957,7 @@ def test_launch_cli_exposes_full_issue_carrier_authority_and_transition_gates(
         "--attestation", str(files["carrier_attestation"]),
         "--payload-receipt", str(files["issued"]),
         "--governed-capture-record", str(files["carrier_capture"]),
-        "--external-append-intent", str(files["carrier_intent"]),
-        "--external-append-result", str(files["carrier_result"]),
-        "--external-readback-ack", str(files["carrier_readback"]),
-        "--external-worm-provider-attestation", str(files["carrier_provider"]),
+        "--durability-anchor-attestation", str(files["carrier_anchor"]),
     ]) == 0
     assert json.loads(capsys.readouterr().out)["status"] == "VERIFIED"
     assert clock_samples == [now]
@@ -2098,18 +1970,10 @@ def test_launch_cli_exposes_full_issue_carrier_authority_and_transition_gates(
         "--acceptance-review-bundle", str(files["review_bundle"]),
         "--review-governed-capture-record", str(files["review_capture"]),
         "--review-disposable-test-effect-chains", str(files["review_chains"]),
-        "--review-external-append-intent", str(files["review_intent"]),
-        "--review-external-append-result", str(files["review_result"]),
-        "--review-external-readback-ack", str(files["review_readback"]),
-        "--review-external-worm-provider-attestation",
-        str(files["review_provider"]),
+        "--review-durability-anchor-attestation", str(files["review_anchor"]),
         "--carrier-attestation", str(files["carrier_attestation"]),
         "--carrier-governed-capture-record", str(files["carrier_capture"]),
-        "--carrier-external-append-intent", str(files["carrier_intent"]),
-        "--carrier-external-append-result", str(files["carrier_result"]),
-        "--carrier-external-readback-ack", str(files["carrier_readback"]),
-        "--carrier-external-worm-provider-attestation",
-        str(files["carrier_provider"]),
+        "--carrier-durability-anchor-attestation", str(files["carrier_anchor"]),
     ]) == 0
     rebuilt_authority = json.loads(capsys.readouterr().out)
     assert rebuilt_authority["authority_digest"] == authority["authority_digest"]
@@ -2257,7 +2121,7 @@ def test_verified_review_bundle_issues_ready_genesis_receipt(
             "anchor": "fixed_off_repo_public_trust_root_v1",
             "key_fingerprint": fingerprint,
         },
-        "external_worm_binding": None,
+        "durability_anchor_binding": None,
     }
     signed_bytes = validator.s2e_acceptance_review_signed_bytes(bundle)
     bundle["signed_core_digest"] = "sha256:" + hashlib.sha256(
@@ -2274,32 +2138,13 @@ def test_verified_review_bundle_issues_ready_genesis_receipt(
         ),
     }
     worm_payload = validator.s2e_acceptance_review_worm_payload(bundle)
-    intent, append_result, readback = _external_worm_triplet(
+    anchor_attestation = _durability_anchor_attestation(
         worm_payload,
-        source_head=carrier,
-        landing_scope_id=candidate["payload_digest"],
-        learning_runtime_digest=candidate["launch_contract_digest"],
-        issued_at=issued_at,
-        intent_id="s2e-review-intent-0001",
-    )
-    provider_attestation = _external_worm_provider_attestation(
-        intent,
-        append_result,
-        readback,
         trust=external_trust,
         issued_at=issued_at,
         directory=tmp_path,
     )
-    bundle["external_worm_binding"] = {
-        "result_digest": append_result["result_digest"],
-        "readback_ack_digest": readback["ack_digest"],
-        "record_locator": append_result["record_locator"],
-        "object_version_id": append_result["object_version_id"],
-        "checksum_sha256": append_result["checksum_sha256"],
-        "provider_attestation_digest": provider_attestation[
-            "attestation_digest"
-        ],
-    }
+    bundle["durability_anchor_binding"] = _anchor_binding(anchor_attestation)
     bundle["bundle_digest"] = validator.s2e_acceptance_review_bundle_digest(
         bundle
     )
@@ -2317,10 +2162,7 @@ def test_verified_review_bundle_issues_ready_genesis_receipt(
         governed_capture_record=capture,
         disposable_test_effect_chains=[disposable_chain],
         predecessor_chain=[],
-        external_append_intent=intent,
-        external_append_result=append_result,
-        external_readback_ack=readback,
-        external_worm_provider_attestation=provider_attestation,
+        durability_anchor_attestation=anchor_attestation,
         repo_root=repo,
         now=issued_at + timedelta(minutes=1),
     )
@@ -2339,10 +2181,7 @@ def test_verified_review_bundle_issues_ready_genesis_receipt(
         governed_capture_record=capture,
         disposable_test_effect_chains=[disposable_chain],
         predecessor_chain=[],
-        external_append_intent=intent,
-        external_append_result=append_result,
-        external_readback_ack=readback,
-        external_worm_provider_attestation=provider_attestation,
+        durability_anchor_attestation=anchor_attestation,
         repo_root=repo,
         now=issued_at + timedelta(minutes=1),
     )
@@ -2379,10 +2218,7 @@ def test_verified_review_bundle_issues_ready_genesis_receipt(
         acceptance_review_bundle=bundle,
         repo_root=repo,
         governed_capture_record=capture,
-        external_append_intent=intent,
-        external_append_result=append_result,
-        external_readback_ack=readback,
-        external_worm_provider_attestation=provider_attestation,
+        durability_anchor_attestation=anchor_attestation,
         disposable_test_effect_chains=[disposable_chain],
     )
     assert rejected["status"] == "EXTERNAL_VERIFICATION_PENDING"
@@ -2408,10 +2244,7 @@ def test_verified_review_bundle_issues_ready_genesis_receipt(
         acceptance_review_bundle=bundle,
         repo_root=repo,
         governed_capture_record=capture,
-        external_append_intent=intent,
-        external_append_result=append_result,
-        external_readback_ack=readback,
-        external_worm_provider_attestation=provider_attestation,
+        durability_anchor_attestation=anchor_attestation,
         disposable_test_effect_chains=[disposable_chain],
     )
 
@@ -2501,14 +2334,13 @@ def test_generic_validator_never_schema_only_accepts_review_bundle() -> None:
             "signed_digest": digest,
             "signature": "x" * 32,
         },
-        "external_worm_binding": {
-            "result_digest": digest,
-            "readback_ack_digest": digest,
-            "record_locator": "records/" + "a" * 64 + ".record",
-                "object_version_id": "version-1",
-                "checksum_sha256": digest,
-                "provider_attestation_digest": digest,
-            },
+        "durability_anchor_binding": {
+            "anchor_locator": ANCHOR_LOCATOR,
+            "anchor_generation": 1,
+            "anchor_head_digest": digest,
+            "replica_head_digest": digest,
+            "anchor_attestation_digest": digest,
+        },
         "bundle_digest": digest,
     }
 

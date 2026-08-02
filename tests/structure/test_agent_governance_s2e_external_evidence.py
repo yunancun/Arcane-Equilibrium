@@ -1,4 +1,4 @@
-"""Adversarial tests for independent S2E external-evidence trust roots."""
+"""Adversarial tests for independent S2E durability/registry trust roots."""
 
 from __future__ import annotations
 
@@ -19,8 +19,6 @@ for candidate in (HELPERS, ML_ROOT, STRUCTURE):
     if str(candidate) not in sys.path:
         sys.path.insert(0, str(candidate))
 
-import agent_governance_terminal_receipt_external_sink as external_sink  # noqa: E402
-import agent_governance_terminal_receipt_sink as terminal_sink  # noqa: E402
 import aiml_gate_receipt_s2e_external_evidence as evidence  # noqa: E402
 import test_agent_governance_s2e_launch_receipts as support  # noqa: E402
 
@@ -30,6 +28,8 @@ D1 = "sha256:" + "1" * 64
 D2 = "sha256:" + "2" * 64
 D3 = "sha256:" + "3" * 64
 ANCHOR = datetime(2030, 1, 1, tzinfo=timezone.utc)
+ANCHOR_LOCATOR = "host:append-only-durability-anchor:s2e-aiml"
+REPLICA_LOCATOR = "replica:offhost-append-only:nas-s2e-aiml"
 
 
 def _key_profile(tmp_path: Path, name: str, identity: str, namespace: str, klass: str):
@@ -51,19 +51,19 @@ def _key_profile(tmp_path: Path, name: str, identity: str, namespace: str, klass
 
 @pytest.fixture
 def trust_profiles(tmp_path, monkeypatch):
-    worm_private, worm_profile = _key_profile(
+    anchor_private, anchor_profile = _key_profile(
         tmp_path,
-        "s2e_external_worm_provider",
-        evidence.EXTERNAL_WORM_PROVIDER_IDENTITY,
-        evidence.EXTERNAL_WORM_PROVIDER_NAMESPACE,
-        "S3_OBJECT_LOCK_EXTERNAL_ATTESTOR_V1",
+        "s2e_durability_anchor",
+        evidence.DURABILITY_ANCHOR_IDENTITY,
+        evidence.DURABILITY_ANCHOR_NAMESPACE,
+        "HOST_APPEND_ONLY_DURABILITY_ANCHOR_V1",
     )
     registry_private, registry_profile = _key_profile(
         tmp_path,
         "s2e_predecessor_registry",
         evidence.PREDECESSOR_REGISTRY_IDENTITY,
         evidence.PREDECESSOR_REGISTRY_NAMESPACE,
-        "EXTERNAL_APPEND_ONLY_PREDECESSOR_REGISTRY_V1",
+        "HOST_APPEND_ONLY_PREDECESSOR_REGISTRY_V1",
     )
     receipt_private, receipt_profile = _key_profile(
         tmp_path,
@@ -75,8 +75,8 @@ def trust_profiles(tmp_path, monkeypatch):
     del receipt_private
     monkeypatch.setattr(
         evidence,
-        "_load_external_worm_provider_trust_root",
-        lambda: (worm_profile, []),
+        "_load_durability_anchor_trust_root",
+        lambda: (anchor_profile, []),
     )
     monkeypatch.setattr(
         evidence,
@@ -89,8 +89,8 @@ def trust_profiles(tmp_path, monkeypatch):
         lambda: (receipt_profile, []),
     )
     return {
-        "worm_private": worm_private,
-        "worm_profile": worm_profile,
+        "anchor_private": anchor_private,
+        "anchor_profile": anchor_profile,
         "registry_private": registry_private,
         "registry_profile": registry_profile,
         "receipt_profile": receipt_profile,
@@ -98,52 +98,8 @@ def trust_profiles(tmp_path, monkeypatch):
     }
 
 
-def _worm_triplet(*, compliance: bool = True):
-    payload = {
-        "schema_version": "s2e-external-evidence-test-payload-v1",
-        "payload_digest": D1,
-    }
-    intent = external_sink.build_external_worm_append_intent(
-        intent_id="s2e-external-provider-test",
-        terminal_receipt_type="disposable_proof_payload_v1",
-        final_source_head=HEAD,
-        landing_scope_id=D2,
-        learning_runtime_digest=D3,
-        terminal_payload_digest=terminal_sink.terminal_payload_digest(payload),
-        append_actor_id="s2e-provider-writer",
-        approved_by="PM",
-        approved_at=ANCHOR.isoformat(),
-        expires_at=(ANCHOR + timedelta(hours=2)).isoformat(),
-        endpoint="https://s3.us-east-1.amazonaws.com",
-        region="us-east-1",
-        bucket="s2e-object-lock-evidence",
-        object_lock_mode="COMPLIANCE" if compliance else "GOVERNANCE",
-        retain_until=(ANCHOR + timedelta(days=30)).isoformat(),
-        credential_channel_id="iam-role:s2e-evidence",
-        compliance_operator_approved=compliance,
-        now=(ANCHOR + timedelta(seconds=1)).isoformat(),
-    )
-    client = support._DisposableObjectLockS3()
-    result = external_sink.apply_external_worm_append(
-        intent,
-        s3_client=client,
-        append_actor_id="s2e-provider-writer",
-        terminal_payload=payload,
-        started_at=(ANCHOR + timedelta(seconds=2)).isoformat(),
-        completed_at=(ANCHOR + timedelta(seconds=3)).isoformat(),
-    )
-    readback = external_sink.independent_readback_ack(
-        result,
-        intent,
-        s3_client=client,
-        verifier_actor_id="s2e-provider-independent-reader",
-        observed_at=(ANCHOR + timedelta(seconds=4)).isoformat(),
-    )
-    return intent, result, readback
-
-
-def _sign_provider(core: dict, trust_profiles: dict) -> dict:
-    signed = evidence.external_worm_provider_signed_bytes(core)
+def _sign_anchor(core: dict, trust_profiles: dict) -> dict:
+    signed = evidence.durability_anchor_signed_bytes(core)
     artifact = {
         **core,
         "signed_core_digest": "sha256:" + hashlib.sha256(signed).hexdigest(),
@@ -152,65 +108,70 @@ def _sign_provider(core: dict, trust_profiles: dict) -> dict:
         "algorithm": "SSHSIG",
         "signed_digest": artifact["signed_core_digest"],
         "signature": support._sign_sshsig(
-            trust_profiles["worm_private"],
+            trust_profiles["anchor_private"],
             signed,
-            namespace=evidence.EXTERNAL_WORM_PROVIDER_NAMESPACE,
+            namespace=evidence.DURABILITY_ANCHOR_NAMESPACE,
             directory=trust_profiles["tmp_path"],
         ),
     }
     artifact["attestation_digest"] = (
-        evidence.external_worm_provider_attestation_digest(artifact)
+        evidence.durability_anchor_attestation_digest(artifact)
     )
     return artifact
 
 
-def _provider_attestation(trust_profiles: dict, triplet=None) -> tuple[dict, tuple]:
-    intent, result, readback = triplet or _worm_triplet()
-    destination = intent["destination_contract"]
+def _reseal_anchor(core: dict, trust_profiles: dict) -> dict:
+    """重算 entry/head 與 replica head 後重簽,確保只有被測欄位是變因。"""
+
+    core["anchor_entry_digest"] = evidence.durability_anchor_entry_digest(core)
+    core["anchor_head_digest"] = evidence.durability_anchor_head_digest(core)
+    core["offhost_replica_readback"]["replica_head_digest"] = core[
+        "anchor_head_digest"
+    ]
+    return _sign_anchor(core, trust_profiles)
+
+
+def _anchor_case(trust_profiles: dict) -> dict:
     core = {
-        "schema_version": evidence.EXTERNAL_WORM_SCHEMA,
-        "purpose": "ATTEST_S2E_EXTERNAL_WORM_IMMUTABLE_READBACK",
+        "schema_version": evidence.DURABILITY_ANCHOR_SCHEMA,
+        "purpose": "ATTEST_S2E_APPEND_ONLY_DURABILITY_AND_OFFHOST_READBACK",
         "evidence_class": "PLATFORM_OR_EXTERNAL_ATTESTED",
-        "provider_class": "S3_OBJECT_LOCK_EXTERNAL_ATTESTOR_V1",
-        "provider_locator": "aws:s3-object-lock-attestor:external-account",
-        "external_intent_digest": intent["external_intent_digest"],
-        "external_result_digest": result["result_digest"],
-        "external_readback_ack_digest": readback["ack_digest"],
-        "terminal_payload_digest": intent["append_intent"]["payload_binding"][
-            "terminal_payload_digest"
-        ],
-        "destination": {
-            field: destination[field]
-            for field in (
-                "endpoint",
-                "region",
-                "bucket",
-                "credential_channel_id",
-                "object_lock_mode",
-                "retain_until",
-            )
-        },
-        "immutable_object": {
-            "record_locator": result["record_locator"],
-            "object_version_id": result["object_version_id"],
-            "checksum_sha256": result["checksum_sha256"],
-            "append_status": result["append_status"],
-            "readback_ack": readback["ack"],
-            "immutability_proven": readback["immutability_proven"],
-            "object_lock_enabled": readback["object_lock_enabled"],
+        "anchor_class": "HOST_APPEND_ONLY_DURABILITY_ANCHOR_V1",
+        "anchor_locator": ANCHOR_LOCATOR,
+        "launch_id": evidence.LAUNCH_ID,
+        "terminal_payload_digest": D1,
+        "anchor_generation": 1,
+        "previous_anchor_head_digest": None,
+        "anchor_entry_digest": "",
+        "anchor_head_digest": "",
+        "offhost_replica_locator": REPLICA_LOCATOR,
+        "offhost_replica_readback": {
+            "ack": True,
+            "entry_present": True,
+            "latest_generation_matches": True,
+            "replica_head_digest": "",
+            "observed_at": (ANCHOR + timedelta(seconds=4)).isoformat(),
         },
         "observed_at": (ANCHOR + timedelta(seconds=5)).isoformat(),
         "expires_at": (ANCHOR + timedelta(minutes=5)).isoformat(),
         "signer": {
-            "role": "EXTERNAL_WORM_PROVIDER_ATTESTOR",
-            "identity": evidence.EXTERNAL_WORM_PROVIDER_IDENTITY,
-            "namespace": evidence.EXTERNAL_WORM_PROVIDER_NAMESPACE,
+            "role": "DURABILITY_ANCHOR_ATTESTOR",
+            "identity": evidence.DURABILITY_ANCHOR_IDENTITY,
+            "namespace": evidence.DURABILITY_ANCHOR_NAMESPACE,
             "key_generation": "independent_off_repo_ed25519_v1",
             "anchor": "fixed_off_repo_public_trust_root_v1",
-            "key_fingerprint": trust_profiles["worm_profile"]["key_fingerprint"],
+            "key_fingerprint": trust_profiles["anchor_profile"]["key_fingerprint"],
         },
     }
-    return _sign_provider(core, trust_profiles), (intent, result, readback)
+    return _reseal_anchor(core, trust_profiles)
+
+
+def _forge_anchor(artifact: dict, trust_profiles: dict, mutate) -> dict:
+    forged = deepcopy(artifact)
+    for field in ("signed_core_digest", "signature", "attestation_digest"):
+        forged.pop(field)
+    mutate(forged)
+    return _reseal_anchor(forged, trust_profiles)
 
 
 def _sign_registry(core: dict, trust_profiles: dict) -> dict:
@@ -247,8 +208,8 @@ def _registry_case(trust_profiles: dict):
         "schema_version": evidence.PREDECESSOR_REGISTRY_SCHEMA,
         "purpose": "ATTEST_S2E_PREDECESSOR_SINGLE_USE_GRANT",
         "evidence_class": "PLATFORM_OR_EXTERNAL_ATTESTED",
-        "registry_class": "EXTERNAL_APPEND_ONLY_PREDECESSOR_REGISTRY_V1",
-        "registry_locator": "registry:external-append-only:s2e",
+        "registry_class": "HOST_APPEND_ONLY_PREDECESSOR_REGISTRY_V1",
+        "registry_locator": "registry:host-append-only:s2e",
         "launch_id": evidence.LAUNCH_ID,
         "slot_id": evidence.s2e_predecessor_registry_slot_id(D2),
         "predecessor_payload_digest": D2,
@@ -281,18 +242,9 @@ def _registry_case(trust_profiles: dict):
     return _sign_registry(core, trust_profiles), candidate, predecessor, expected_entry
 
 
-def test_independent_provider_and_registry_attestations_validate(trust_profiles):
-    provider, triplet = _provider_attestation(trust_profiles)
-    assert evidence.validate_s2e_external_worm_provider_attestation(
-        provider,
-        external_append_intent=triplet[0],
-        external_append_result=triplet[1],
-        external_readback_ack=triplet[2],
-        now=ANCHOR + timedelta(minutes=1),
-    ) == []
-    registry, candidate, predecessor, entry = _registry_case(trust_profiles)
-    assert evidence.validate_s2e_predecessor_registry_attestation(
-        registry,
+def _validate_registry(artifact, candidate, predecessor, entry):
+    return evidence.validate_s2e_predecessor_registry_attestation(
+        artifact,
         candidate=candidate,
         predecessor_receipt=predecessor,
         acceptance_review_bundle_digest="sha256:" + "4" * 64,
@@ -300,49 +252,182 @@ def test_independent_provider_and_registry_attestations_validate(trust_profiles)
         expected_consumption_entry=entry,
         expected_result_ledger_digest="sha256:" + "6" * 64,
         now=ANCHOR + timedelta(minutes=1),
+    )
+
+
+def test_independent_anchor_and_registry_attestations_validate(trust_profiles):
+    anchor = _anchor_case(trust_profiles)
+    assert evidence.validate_s2e_durability_anchor_attestation(
+        anchor,
+        terminal_payload_digest=D1,
+        now=ANCHOR + timedelta(minutes=1),
     ) == []
+    registry, candidate, predecessor, entry = _registry_case(trust_profiles)
+    assert _validate_registry(registry, candidate, predecessor, entry) == []
 
 
-def test_provider_rejects_non_s3_class_locator_and_cross_bound_result(
-    trust_profiles,
+@pytest.mark.parametrize(
+    ("locator", "expected"),
+    (
+        ("memory:fake-anchor", "fixture or local"),
+        ("file:///tmp/fake-anchor", "outside the admitted host append-only"),
+        ("unix:/run/fake-anchor.sock", "outside the admitted host append-only"),
+        ("https://anchor.example.test", "outside the admitted host append-only"),
+        ("aws:s3-object-lock-attestor:x", "outside the admitted host append-only"),
+        (" memory:fake-anchor", "does not match pattern"),
+    ),
+)
+def test_anchor_rejects_non_host_class_or_noncanonical_locator(
+    trust_profiles, locator, expected
 ):
-    artifact, triplet = _provider_attestation(trust_profiles)
-    for mutate, expected in (
-        (lambda value: value.update(provider_locator="memory:fake-s3"), "fixture or local"),
-        (
-            lambda value: value.update(provider_locator="file:///tmp/fake-s3"),
-            "outside the admitted external S3 Object Lock provider class",
-        ),
-        (
-            lambda value: value.update(provider_locator="unix:/run/fake-s3.sock"),
-            "outside the admitted external S3 Object Lock provider class",
-        ),
-        (
-            lambda value: value.update(provider_locator="https://s3.example.test"),
-            "outside the admitted external S3 Object Lock provider class",
-        ),
-        (
-            lambda value: value.update(provider_locator=" memory:fake-s3"),
-            "does not match pattern",
-        ),
-        (
-            lambda value: value.update(external_result_digest="sha256:" + "f" * 64),
-            "binding differs",
-        ),
-    ):
-        forged = deepcopy(artifact)
-        for field in ("signed_core_digest", "signature", "attestation_digest"):
-            forged.pop(field)
-        mutate(forged)
-        forged = _sign_provider(forged, trust_profiles)
-        errors = evidence.validate_s2e_external_worm_provider_attestation(
+    forged = _forge_anchor(
+        _anchor_case(trust_profiles),
+        trust_profiles,
+        lambda value: value.update(anchor_locator=locator),
+    )
+    errors = evidence.validate_s2e_durability_anchor_attestation(
+        forged,
+        terminal_payload_digest=D1,
+        now=ANCHOR + timedelta(minutes=1),
+    )
+    assert any(expected in error for error in errors), errors
+
+
+@pytest.mark.parametrize(
+    ("locator", "expected"),
+    (
+        ("memory:fake-replica", "fixture or local"),
+        ("file:///tmp/fake-replica", "outside the admitted off-host"),
+        ("host:append-only-durability-anchor:s2e-aiml", "outside the admitted off-host"),
+        (" replica:offhost-append-only:x", "does not match pattern"),
+    ),
+)
+def test_anchor_rejects_non_offhost_replica_locator(
+    trust_profiles, locator, expected
+):
+    forged = _forge_anchor(
+        _anchor_case(trust_profiles),
+        trust_profiles,
+        lambda value: value.update(offhost_replica_locator=locator),
+    )
+    errors = evidence.validate_s2e_durability_anchor_attestation(
+        forged,
+        terminal_payload_digest=D1,
+        now=ANCHOR + timedelta(minutes=1),
+    )
+    assert any(expected in error for error in errors), errors
+
+
+def test_anchor_rejects_replica_behind_local_head(trust_profiles):
+    """副本落後於本機 head = rollback 未被偵測,必須 fail closed。"""
+
+    artifact = _anchor_case(trust_profiles)
+    forged = deepcopy(artifact)
+    for field in ("signed_core_digest", "signature", "attestation_digest"):
+        forged.pop(field)
+    forged["offhost_replica_readback"]["replica_head_digest"] = "sha256:" + "e" * 64
+    forged = _sign_anchor(forged, trust_profiles)
+    errors = evidence.validate_s2e_durability_anchor_attestation(
+        forged,
+        terminal_payload_digest=D1,
+        now=ANCHOR + timedelta(minutes=1),
+    )
+    assert any(
+        "replica head does not match anchor head" in error for error in errors
+    ), errors
+
+
+@pytest.mark.parametrize(
+    "flag",
+    ("ack", "entry_present", "latest_generation_matches"),
+)
+def test_anchor_rejects_unproven_offhost_readback(trust_profiles, flag):
+    def mutate(value):
+        value["offhost_replica_readback"][flag] = False
+
+    forged = _forge_anchor(_anchor_case(trust_profiles), trust_profiles, mutate)
+    errors = evidence.validate_s2e_durability_anchor_attestation(
+        forged,
+        terminal_payload_digest=D1,
+        now=ANCHOR + timedelta(minutes=1),
+    )
+    assert errors
+
+
+def test_anchor_rejects_generation_head_discontinuity(trust_profiles):
+    cases = (
+        {"previous_anchor_head_digest": "sha256:" + "e" * 64},
+        {"anchor_generation": 2, "previous_anchor_head_digest": None},
+    )
+    for updates in cases:
+        forged = _forge_anchor(
+            _anchor_case(trust_profiles),
+            trust_profiles,
+            lambda value, updates=updates: value.update(updates),
+        )
+        errors = evidence.validate_s2e_durability_anchor_attestation(
             forged,
-            external_append_intent=triplet[0],
-            external_append_result=triplet[1],
-            external_readback_ack=triplet[2],
+            terminal_payload_digest=D1,
             now=ANCHOR + timedelta(minutes=1),
         )
-        assert any(expected in error for error in errors), errors
+        assert any("continuity" in error for error in errors), errors
+
+
+def test_anchor_rejects_payload_binding_and_stale_window(trust_profiles):
+    artifact = _anchor_case(trust_profiles)
+    errors = evidence.validate_s2e_durability_anchor_attestation(
+        artifact,
+        terminal_payload_digest="sha256:" + "f" * 64,
+        now=ANCHOR + timedelta(minutes=1),
+    )
+    assert any(
+        "terminal_payload_digest binding differs" in error for error in errors
+    ), errors
+
+    stale = _forge_anchor(
+        artifact,
+        trust_profiles,
+        lambda value: value.update(
+            observed_at=(ANCHOR - timedelta(hours=1)).isoformat(),
+            expires_at=(ANCHOR - timedelta(minutes=55)).isoformat(),
+        ),
+    )
+    errors = evidence.validate_s2e_durability_anchor_attestation(
+        stale,
+        terminal_payload_digest=D1,
+        now=ANCHOR + timedelta(minutes=1),
+    )
+    assert any("stale" in error for error in errors), errors
+
+    over_ttl = _forge_anchor(
+        artifact,
+        trust_profiles,
+        lambda value: value.update(
+            expires_at=(ANCHOR + timedelta(minutes=30)).isoformat()
+        ),
+    )
+    errors = evidence.validate_s2e_durability_anchor_attestation(
+        over_ttl,
+        terminal_payload_digest=D1,
+        now=ANCHOR + timedelta(minutes=1),
+    )
+    assert any("ten minutes" in error for error in errors), errors
+
+
+def test_anchor_rejects_attestation_predating_readback(trust_profiles):
+    forged = _forge_anchor(
+        _anchor_case(trust_profiles),
+        trust_profiles,
+        lambda value: value.update(
+            observed_at=(ANCHOR + timedelta(seconds=1)).isoformat()
+        ),
+    )
+    errors = evidence.validate_s2e_durability_anchor_attestation(
+        forged,
+        terminal_payload_digest=D1,
+        now=ANCHOR + timedelta(minutes=1),
+    )
+    assert any("predates off-host readback" in error for error in errors), errors
 
 
 @pytest.mark.parametrize(
@@ -351,6 +436,7 @@ def test_provider_rejects_non_s3_class_locator_and_cross_bound_result(
         "memory:s2e-registry",
         " local:s2e-registry",
         "registry:test:s2e",
+        "registry:external-append-only:s2e",
     ),
 )
 def test_registry_rejects_local_or_noncanonical_locator(
@@ -367,45 +453,21 @@ def test_registry_rejects_local_or_noncanonical_locator(
         artifact
     )
     artifact = _sign_registry(artifact, trust_profiles)
-    errors = evidence.validate_s2e_predecessor_registry_attestation(
-        artifact,
-        candidate=candidate,
-        predecessor_receipt=predecessor,
-        acceptance_review_bundle_digest="sha256:" + "4" * 64,
-        prior_consumption_ledger_digest="sha256:" + "5" * 64,
-        expected_consumption_entry=entry,
-        expected_result_ledger_digest="sha256:" + "6" * 64,
-        now=ANCHOR + timedelta(minutes=1),
-    )
+    errors = _validate_registry(artifact, candidate, predecessor, entry)
     assert errors
     assert all("registry_locator" in error for error in errors), errors
 
 
-def test_provider_rejects_governance_mode_even_with_valid_signature(trust_profiles):
-    triplet = _worm_triplet(compliance=False)
-    artifact, _ = _provider_attestation(trust_profiles, triplet)
-    errors = evidence.validate_s2e_external_worm_provider_attestation(
-        artifact,
-        external_append_intent=triplet[0],
-        external_append_result=triplet[1],
-        external_readback_ack=triplet[2],
-        now=ANCHOR + timedelta(minutes=1),
-    )
-    assert any("COMPLIANCE" in error for error in errors), errors
-
-
-def test_provider_and_registry_reject_same_key_custody(trust_profiles, monkeypatch):
-    provider, triplet = _provider_attestation(trust_profiles)
+def test_anchor_and_registry_reject_same_key_custody(trust_profiles, monkeypatch):
+    anchor = _anchor_case(trust_profiles)
     monkeypatch.setattr(
         evidence,
         "_load_s2e_receipt_signer_profile",
-        lambda: (trust_profiles["worm_profile"], []),
+        lambda: (trust_profiles["anchor_profile"], []),
     )
-    errors = evidence.validate_s2e_external_worm_provider_attestation(
-        provider,
-        external_append_intent=triplet[0],
-        external_append_result=triplet[1],
-        external_readback_ack=triplet[2],
+    errors = evidence.validate_s2e_durability_anchor_attestation(
+        anchor,
+        terminal_payload_digest=D1,
         now=ANCHOR + timedelta(minutes=1),
     )
     assert any("not independent" in error for error in errors), errors
@@ -416,16 +478,20 @@ def test_provider_and_registry_reject_same_key_custody(trust_profiles, monkeypat
         "_load_s2e_receipt_signer_profile",
         lambda: (trust_profiles["registry_profile"], []),
     )
-    errors = evidence.validate_s2e_predecessor_registry_attestation(
-        registry,
-        candidate=candidate,
-        predecessor_receipt=predecessor,
-        acceptance_review_bundle_digest="sha256:" + "4" * 64,
-        prior_consumption_ledger_digest="sha256:" + "5" * 64,
-        expected_consumption_entry=entry,
-        expected_result_ledger_digest="sha256:" + "6" * 64,
-        now=ANCHOR + timedelta(minutes=1),
+    errors = _validate_registry(registry, candidate, predecessor, entry)
+    assert any("not independent" in error for error in errors), errors
+
+
+def test_registry_rejects_anchor_shared_key_custody(trust_profiles, monkeypatch):
+    """registry 與 durability anchor 必須是兩份 custody,共用即 fail closed。"""
+
+    registry, candidate, predecessor, entry = _registry_case(trust_profiles)
+    monkeypatch.setattr(
+        evidence,
+        "_load_durability_anchor_trust_root",
+        lambda: (trust_profiles["registry_profile"], []),
     )
+    errors = _validate_registry(registry, candidate, predecessor, entry)
     assert any("not independent" in error for error in errors), errors
 
 
@@ -454,25 +520,14 @@ def test_registry_rejects_cross_candidate_head_fork_and_stale(trust_profiles):
             forged
         )
         forged = _sign_registry(forged, trust_profiles)
-        errors = evidence.validate_s2e_predecessor_registry_attestation(
-            forged,
-            candidate=candidate,
-            predecessor_receipt=predecessor,
-            acceptance_review_bundle_digest="sha256:" + "4" * 64,
-            prior_consumption_ledger_digest="sha256:" + "5" * 64,
-            expected_consumption_entry=entry,
-            expected_result_ledger_digest="sha256:" + "6" * 64,
-            now=ANCHOR + timedelta(minutes=1),
-        )
+        errors = _validate_registry(forged, candidate, predecessor, entry)
         assert any(expected in error for error in errors), errors
 
 
 def test_absent_attestations_never_validate():
-    assert evidence.validate_s2e_external_worm_provider_attestation(
+    assert evidence.validate_s2e_durability_anchor_attestation(
         None,
-        external_append_intent=None,
-        external_append_result=None,
-        external_readback_ack=None,
+        terminal_payload_digest=D1,
         now=ANCHOR,
     )
     assert evidence.validate_s2e_predecessor_registry_attestation(

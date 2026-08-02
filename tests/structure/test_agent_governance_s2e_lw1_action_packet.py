@@ -85,7 +85,7 @@ def _inventory(*, ready: bool = False) -> dict:
 def test_code_owned_prerequisite_paths_equal_live_fixed_root_constants() -> None:
     expected = {
         str(launch.S2E_RECEIPT_TRUST_ROOT_PATH),
-        str(external.EXTERNAL_WORM_PROVIDER_TRUST_ROOT_PATH),
+        str(external.DURABILITY_ANCHOR_TRUST_ROOT_PATH),
         str(external.PREDECESSOR_REGISTRY_TRUST_ROOT_PATH),
         str(host_capture.RECOVERY_HOST_CAPTURE_TRUST_ROOT_PUBLIC_KEY_PATH),
         host_capture.HOST_CAPTURE_ATTESTOR_CAPABILITY_PATH,

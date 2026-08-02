@@ -45,11 +45,12 @@ def s2e_launch_artifact_errors(
             "chain, acceptance review, fixed-root SSHSIG, and trusted "
             "single-use registry evidence are required"
         ]
-    if schema_version == "s2e_external_worm_provider_attestation_v1":
+    if schema_version == "s2e_durability_anchor_attestation_v1":
         return [
-            "s2e external WORM provider attestation "
-            "EXTERNAL_VERIFICATION_PENDING: exact append intent/result/readback "
-            "and fixed-root provider SSHSIG are required"
+            "s2e durability anchor attestation "
+            "EXTERNAL_VERIFICATION_PENDING: exact append-only head/generation, "
+            "off-host latest-generation readback and fixed-root anchor SSHSIG "
+            "are required"
         ]
     if schema_version == "s2e_predecessor_registry_attestation_v1":
         return [

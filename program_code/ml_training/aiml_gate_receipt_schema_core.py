@@ -63,8 +63,8 @@ SCHEMA_FILES = {
     "s2e_launch_consumption_bootstrap_authority_v1": (
         "s2e_launch_consumption_bootstrap_authority_v1.schema.json"
     ),
-    "s2e_external_worm_provider_attestation_v1": (
-        "s2e_external_worm_provider_attestation_v1.schema.json"
+    "s2e_durability_anchor_attestation_v1": (
+        "s2e_durability_anchor_attestation_v1.schema.json"
     ),
     "s2e_predecessor_registry_attestation_v1": (
         "s2e_predecessor_registry_attestation_v1.schema.json"

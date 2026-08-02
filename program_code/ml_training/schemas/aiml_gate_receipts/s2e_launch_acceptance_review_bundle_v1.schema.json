@@ -26,7 +26,7 @@
     "signer",
     "signed_core_digest",
     "signature",
-    "external_worm_binding",
+    "durability_anchor_binding",
     "bundle_digest"
   ],
   "properties": {
@@ -106,7 +106,7 @@
     "signer": {"$ref": "#/$defs/signer"},
     "signed_core_digest": {"$ref": "#/$defs/digest"},
     "signature": {"$ref": "#/$defs/signature"},
-    "external_worm_binding": {"$ref": "#/$defs/external_worm_binding"},
+    "durability_anchor_binding": {"$ref": "#/$defs/durability_anchor_binding"},
     "bundle_digest": {"$ref": "#/$defs/digest"}
   },
   "$defs": {
@@ -206,27 +206,27 @@
         "signature": {"type": "string", "minLength": 32, "maxLength": 16384}
       }
     },
-    "external_worm_binding": {
+    "durability_anchor_binding": {
       "type": "object",
       "additionalProperties": false,
       "required": [
-        "result_digest",
-        "readback_ack_digest",
-        "record_locator",
-        "object_version_id",
-        "checksum_sha256",
-        "provider_attestation_digest"
+        "anchor_locator",
+        "anchor_generation",
+        "anchor_head_digest",
+        "replica_head_digest",
+        "anchor_attestation_digest"
       ],
       "properties": {
-        "result_digest": {"$ref": "#/$defs/digest"},
-        "readback_ack_digest": {"$ref": "#/$defs/digest"},
-        "record_locator": {
+        "anchor_locator": {
           "type": "string",
-          "pattern": "^records/[0-9a-f]{64}\\.record$"
+          "minLength": 36,
+          "maxLength": 512,
+          "pattern": "^host:append-only-durability-anchor:[a-z0-9][a-z0-9._:/-]*$"
         },
-        "object_version_id": {"type": "string", "minLength": 1, "maxLength": 256},
-        "checksum_sha256": {"$ref": "#/$defs/digest"},
-        "provider_attestation_digest": {"$ref": "#/$defs/digest"}
+        "anchor_generation": {"type": "integer", "minimum": 1},
+        "anchor_head_digest": {"$ref": "#/$defs/digest"},
+        "replica_head_digest": {"$ref": "#/$defs/digest"},
+        "anchor_attestation_digest": {"$ref": "#/$defs/digest"}
       }
     }
   }
