@@ -41,9 +41,11 @@ loop 都不會產生合法 W0/LW1 receipt。
 6. `1716307d8`：對抗回歸發現 producer 直接持有 `subprocess` 後，改由唯一
    `HostExecutionKernel` 固定 Git argv 與 signer path/protocol；generic `run()` 不能呼叫
    signer，只有 bounded stdin 專用方法可進入。
-7. current-head 對抗複核補上 `git status --porcelain=v1 --untracked-files=all` 固定檢查；
-   host capture 現在會拒絕 tracked、staged 或 untracked 任一污染，避免未追蹤 Python 模組繞過
-   source-head binding。
+7. current-head 對抗複核補上固定 porcelain status；host capture 現在會拒絕 tracked、staged、
+   untracked 或 ignored 任一污染，包含 `__pycache__`／`*.pyc`。
+8. `13c813968`：GitHub Codex review 的 2 P1＋2 P2 全部修復：ignored executable artifacts、
+   Ubuntu canonical `/usr/lib/os-release`、provider locator canonicalization，以及只允許
+   `registry:external-append-only:*` predecessor registry locator。
 
 ## Current machine observation
 
@@ -59,14 +61,16 @@ loop 都不會產生合法 W0/LW1 receipt。
 - 10 個固定 public trust roots 加一個 fixed signer capability：全部 absent。
 - external WORM destination、distinct provider attestor、append-only predecessor registry：
   沒有可驗證配置證據，記 `NOT_OBSERVED`，不自稱 `READY`。
+- 追加唯讀 host check 確認 `/etc/os-release → /usr/lib/os-release`；canonical target 為
+  root-owned `0644` regular file，`ID=ubuntu`。
 
 Machine action packet：
 `docs/CCAgentWorkSpace/PM/workspace/reports/2026-08-02--s2e_lw1_external_prerequisite_action_packet.json`
 
 - schema：`s2e_lw1_operator_action_packet_v1`
-- source checkpoint：`cb787a80a452e33f76140d36bb29e6e25a2f0dca`
+- source checkpoint：`13c813968ce2276fa226c40040e3611c5f1578f7`
 - blocked prerequisites：14/14
-- packet digest：`sha256:bfeb007089031fbaa6ccca3d677166ae634cab9f6abe08378e03f2ffbce0f164`
+- packet digest：`sha256:aa589fc048135b9f3e28fb430da145e61d93883c53175fa54679acfd976a2ca5`
 - packet 只排序下一步，不帶 secret、不執行 action、不授權 production effect。
 
 ## 驗證與對抗複驗
@@ -77,13 +81,14 @@ Machine action packet：
   9 個 failure 全部指向 host-capture producer 的 raw `subprocess` 與缺失 scanner policy。
 - 修復後同一 recovery/kernel 全集合：`773 passed, 9 skipped`。
 - 修復 focused set：`144 passed`。
-- current-head full-worktree clean binding focused set：`350 passed, 9 skipped`。
-- current-head recovery/kernel adjacent set：`902 passed, 9 skipped`。
+- reviewed-head launch/receipt set：`200 passed, 3 skipped`。
+- reviewed-head recovery/kernel adjacent set：`904 passed, 9 skipped`。
 - action packet CLI validation：PASS；JSON parse、`py_compile`、`git diff --check`：PASS。
 
 本 session 沒有可用的獨立 subagent execution tool，故未虛構 E2/E4 身分；PM 直接執行
-fail-first 回歸、負向 mutation 與 source/runtime boundary review。publication 前仍須 current-head
-GitHub Codex review 及 classifier-required checks。
+fail-first 回歸、負向 mutation 與 source/runtime boundary review。GitHub Codex 已在 `d3bc5c011`
+提出四項 finding，均於 source checkpoint `13c813968` 修復；publication 仍要求 final current-head
+delta review 與 classifier-required checks。
 
 ## 唯一後續序列
 

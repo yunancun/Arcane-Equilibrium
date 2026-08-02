@@ -1,9 +1,20 @@
 # CLAUDE_CHANGELOG.md — 開發歷史歸檔
 
 > 從 CLAUDE.md / TODO.md 遷出的 Wave/Sprint/Batch + TODO version-increment 歷史敘事。新 session 不需要讀此文件，僅供回顧歷史時查閱。
-> 最後更新：2026-08-02（TODO v868 G0/LW1 full-worktree binding）
+> 最後更新：2026-08-02（TODO v869 LW1 current-head review closure）
 
 ---
+
+## TODO v869 增量：LW1 current-head review closure（2026-08-02）
+
+- GitHub Codex review 在 `d3bc5c011` 提出 2 P1＋2 P2：ignored bytecode 可能污染
+  source lineage、Ubuntu os-release symlink 會令 capture 永久失敗、provider locator 未 canonicalize、
+  predecessor registry locator 可接受 local/resettable backend。
+- `13c813968` 封閉全部四項：porcelain status 納入 ignored artifacts，os-release 固定讀取實機
+  確認的 `/usr/lib/os-release`，provider locator 拒 whitespace/local schemes，registry schema/validator
+  只接納 `registry:external-append-only:*`。
+- launch/receipt `200 passed, 3 skipped`，recovery/kernel `904 passed, 9 skipped`；action packet 重綁
+  `sha256:aa589fc0…a2ca5`。LW1 exit 仍因 14/14 external prerequisites 阻塞。
 
 ## TODO v868 增量：LW1 full-worktree source binding（2026-08-02）
 
