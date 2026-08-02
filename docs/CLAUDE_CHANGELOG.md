@@ -1,9 +1,20 @@
 # CLAUDE_CHANGELOG.md — 開發歷史歸檔
 
 > 從 CLAUDE.md / TODO.md 遷出的 Wave/Sprint/Batch + TODO version-increment 歷史敘事。新 session 不需要讀此文件，僅供回顧歷史時查閱。
-> 最後更新：2026-08-02（TODO v869 LW1 current-head review closure）
+> 最後更新：2026-08-02（TODO v870 LW1 provider-class final delta closure）
 
 ---
+
+## TODO v870 增量：LW1 provider-class final delta closure（2026-08-02）
+
+- final Codex delta review 新增 1 個 safety P2：generic provider locator 仍容許 `file:`／`unix:`
+  等本地 backend 冒充 external provider evidence。
+- `d3a21f4e4` 以 schema exact pattern 與 validator semantic allowlist 雙層限定
+  `aws:s3-object-lock-attestor:<external-id>`；`file:`、`unix:`、`https:` 與 local fixture
+  全部 fail closed，S2E 關聯回歸 `90 passed`。
+- action packet 重綁 `d3a21f4e4`／tree `4905cd18f`，digest
+  `sha256:453733c8…524ee`。終態不變：14/14 external prerequisites blocking，W0/LW1
+  receipts absent、LW2 locked、authority 0/9、production effect 0/6。
 
 ## TODO v869 增量：LW1 current-head review closure（2026-08-02）
 

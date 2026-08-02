@@ -17,6 +17,7 @@ WORM/provider/registry services `NOT_OBSERVED`。先依 packet 的 6-step action
 provision；只提供 credential channel 名稱，禁止把 private key/token/secret 寫入 repo、prompt
 或 packet。fresh evidence 到齊後才恢復 W0 -> LW1 receipt chain；不得先跑 LW2。
 
-reviewed checkpoint=`13c813968`，packet=`sha256:aa589fc0…a2ca5`。GitHub Codex 的 2 P1＋2 P2
-已修，launch/receipt `200 passed, 3 skipped`，recovery/kernel `904 passed, 9 skipped`。
+reviewed checkpoint=`d3a21f4e4`，packet=`sha256:453733c8…524ee`。GitHub Codex 的 2 P1＋3 P2
+已修；前一 checkpoint 的 launch/receipt `200 passed, 3 skipped`、recovery/kernel
+`904 passed, 9 skipped`，final provider-class delta 的 S2E 關聯集合 `90 passed`。
 authority 0/9、production effect 0/6；本輪沒有 deploy/restart/PG/broker/order/runtime mutation。

@@ -1,8 +1,8 @@
 # AI/ML Landing Progress Ledger
 
 **Program**: `AIML-LONG-LIVED-LANDING-V2`
-**Ledger version**: 23
-**Updated**: 2026-08-02（G0/LW1 current-head review closure 與 external blocker 校準）
+**Ledger version**: 24
+**Updated**: 2026-08-02（G0/LW1 final provider-class delta closure 與 external blocker 校準）
 **Overall state**: `PROGRAM_ADOPTED` · **`S1_CLOSED`** · every S2 effect-session
 source-seam predicate is narrowly `SOURCE_READY` (S2.0 + S2.1 + S2.2A + S2.3 +
 S2.4 + S2.5 + S2.2B), while Sprint 2 remains
@@ -11,7 +11,7 @@ packages are **5/9 source-landed**: `S2E.0`, `S2E.1`, `S2E.2a`,
 `S2E.2b-1`, and `S2E.3`. The only unclosed package entry is `S2E.2b-2`;
 its LW1 subwave is external-blocked, and the dependency order remains
 `LW1 → LW2 → S2E.2b-3 → S2E.4 → S2E.5`.
-`S2E-LW1` has a clean source implementation checkpoint at `13c813968`, but is
+`S2E-LW1` has a clean source implementation checkpoint at `d3a21f4e4`, but is
 `BLOCKED_EXTERNAL_PREREQUISITES`: W0 genesis and LW1 receipts are absent, the
 transition did not `ADVANCE`, and LW2 remains locked. The closed machine packet
 at `docs/CCAgentWorkSpace/PM/workspace/reports/2026-08-02--s2e_lw1_external_prerequisite_action_packet.json`
@@ -145,7 +145,7 @@ closed S0.x/S1.x rows(全部 DONE)已遷 `PROGRESS-archive-1.md`(資訊守恆);�
 
 | Time | Session | Event | Evidence |
 |---|---|---|---|
-| 2026-08-02 | G0 / S2E-LW1 | **Source checkpoint complete; true LW1 exit external-blocked.** G0 is `SOURCE_COMPLETE_RUNTIME_INDETERMINATE`. LW1 source closes dispatch/clock, fixed host capture, full-worktree clean binding, independent WORM/provider/registry evidence, consume-once registry and action-packet contracts. Fail-first recovery found raw-command gaps; current-head Codex review then found 2 P1＋2 P2 in ignored executable artifacts, Ubuntu os-release handling, provider locator normalization and predecessor-registry locator admission. All four are closed at `13c813968`; launch/receipt passed `200 passed, 3 skipped`, recovery/kernel passed `904 passed, 9 skipped`, and trade-core confirmed `/etc/os-release → /usr/lib/os-release` with root-owned `0644` target. Linux read-only evidence still shows 11 fixed paths absent and three external services `NOT_OBSERVED`; W0/LW1 receipts remain absent, LW2 locked, authority 0/9, production effect 0/6. | implementation checkpoint `13c813968`; packet `sha256:aa589fc0…a2ca5`; PM report `2026-08-02--g0_s2e_lw1_checkpoint_and_blocker.md` |
+| 2026-08-02 | G0 / S2E-LW1 | **Source checkpoint complete; true LW1 exit external-blocked.** G0 is `SOURCE_COMPLETE_RUNTIME_INDETERMINATE`. LW1 source closes dispatch/clock, fixed host capture, full-worktree clean binding, independent WORM/provider/registry evidence, consume-once registry and action-packet contracts. Fail-first recovery found raw-command gaps; Codex review then found 2 P1＋3 P2 across ignored executable artifacts, Ubuntu os-release handling, provider locator normalization, predecessor-registry locator admission, and a final `file:`／`unix:` provider-class bypass. The first four closed at `13c813968` with launch/receipt `200 passed, 3 skipped` and recovery/kernel `904 passed, 9 skipped`; the final S3-class allowlist closed at `d3a21f4e4` with `90 passed` in the S2E delta set. trade-core confirmed `/etc/os-release → /usr/lib/os-release` with root-owned `0644` target. Linux read-only evidence still shows 11 fixed paths absent and three external services `NOT_OBSERVED`; W0/LW1 receipts remain absent, LW2 locked, authority 0/9, production effect 0/6. | implementation checkpoint `d3a21f4e4`; packet `sha256:453733c8…524ee`; PM report `2026-08-02--g0_s2e_lw1_checkpoint_and_blocker.md` |
 | 2026-08-01 | LEDGER | **Ledger generation split (framework-health P1-6; docs-only, zero status change)** — closed-generation sections (masthead narrative, Amendment A2 full text, S0/S1 session rows, ledger events 2026-07-20→2026-07-29, S0.3 finalization, S0.3 accepted coverage debt) moved verbatim to `PROGRESS-archive-1.md`. The machine-pinned sections (`W5-RECEIPT-BINDING` marker, S2.4 unclosed owned obligations, W5 PM-owned adjudication) stay in this file. Information-conserving move; no row status, receipt, digest or authority changed. | this commit + `PROGRESS-archive-1.md` |
 | 2026-07-29 | S2E W0 handoff | **Current projection frozen before W1:** nine readiness packages are 5/9 source-landed (`S2E.0`, `S2E.1`, `S2E.2a`, `S2E.2b-1`, `S2E.3`); the only ACTIVE entry is `S2E.2b-2`, followed strictly by `S2E.2b-3 → S2E.4 → S2E.5`. Production effect stays 0/6; S2 remains open and the packet remains `DRAFT_NOT_EXECUTABLE`. `S2E.2b-2` now owns the full S2.5 runner/recovery/anchor/penetration/nonce/2004-line exit; `S2E.4` owns runtime capture, closure schema, actor/verifier identity and trusted-attestor source repair plus explicit adjudication of the 2231-line effect-binding test; `S2E.5` owns the forgery-negative full-DAG proof, 28-obligation closure, and CodeQL #95 fix/evidence adjudication before any terminal packet. S2.0 EFFECT operator prerequisites are pinned in the packet: lazy GRANT strictly between adapter steps 7/8, dedicated login `NOSUPERUSER`, post-window REVOKE, and out-of-band `credential_escalation_connect`. This event changes governance projection only: no source contract/schema/test/runtime/receipt, no W5 re-emission, no deploy/restart/PG/broker/order mutation. | W0 intake baseline `83dc0ec3017e541e156e557c2e2d16f1704682a3`; TODO v861 / ledger v16 / packet handoff calibration |
 

@@ -46,6 +46,9 @@ loop 都不會產生合法 W0/LW1 receipt。
 8. `13c813968`：GitHub Codex review 的 2 P1＋2 P2 全部修復：ignored executable artifacts、
    Ubuntu canonical `/usr/lib/os-release`、provider locator canonicalization，以及只允許
    `registry:external-append-only:*` predecessor registry locator。
+9. `d3a21f4e4`：final Codex delta review 發現 generic provider locator 仍容許 `file:`／
+   `unix:` 本地 backend；schema exact pattern 與 validator semantic allowlist 現只接納
+   `aws:s3-object-lock-attestor:<external-id>`，本地／任意 URI 均 fail closed。
 
 ## Current machine observation
 
@@ -68,9 +71,9 @@ Machine action packet：
 `docs/CCAgentWorkSpace/PM/workspace/reports/2026-08-02--s2e_lw1_external_prerequisite_action_packet.json`
 
 - schema：`s2e_lw1_operator_action_packet_v1`
-- source checkpoint：`13c813968ce2276fa226c40040e3611c5f1578f7`
+- source checkpoint：`d3a21f4e4be4206c34254967459406c558581ca8`
 - blocked prerequisites：14/14
-- packet digest：`sha256:aa589fc048135b9f3e28fb430da145e61d93883c53175fa54679acfd976a2ca5`
+- packet digest：`sha256:453733c8b4d9e05713553f416abffe4fed9cd564a3f0bcd6b75b86bab65524ee`
 - packet 只排序下一步，不帶 secret、不執行 action、不授權 production effect。
 
 ## 驗證與對抗複驗
@@ -81,14 +84,16 @@ Machine action packet：
   9 個 failure 全部指向 host-capture producer 的 raw `subprocess` 與缺失 scanner policy。
 - 修復後同一 recovery/kernel 全集合：`773 passed, 9 skipped`。
 - 修復 focused set：`144 passed`。
-- reviewed-head launch/receipt set：`200 passed, 3 skipped`。
-- reviewed-head recovery/kernel adjacent set：`904 passed, 9 skipped`。
+- `13c813968` reviewed-head launch/receipt set：`200 passed, 3 skipped`。
+- `13c813968` recovery/kernel adjacent set：`904 passed, 9 skipped`。
+- `d3a21f4e4` final provider-class delta 的 S2E 關聯集合：`90 passed`；另有
+  `file:`／`unix:`／`https:` 負向 mutation 覆蓋。
 - action packet CLI validation：PASS；JSON parse、`py_compile`、`git diff --check`：PASS。
 
 本 session 沒有可用的獨立 subagent execution tool，故未虛構 E2/E4 身分；PM 直接執行
-fail-first 回歸、負向 mutation 與 source/runtime boundary review。GitHub Codex 已在 `d3bc5c011`
-提出四項 finding，均於 source checkpoint `13c813968` 修復；publication 仍要求 final current-head
-delta review 與 classifier-required checks。
+fail-first 回歸、負向 mutation 與 source/runtime boundary review。GitHub Codex 在 `d3bc5c011`
+提出四項 finding，並於 final delta review 再提出一項 provider-class P2；五項均已於
+source checkpoint `d3a21f4e4` 閉合。publication 仍要求 current-head classified checks。
 
 ## 唯一後續序列
 
