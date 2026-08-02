@@ -981,7 +981,9 @@ current generation 重驗。
   （`test_agent_governance*`、`test_development_agent_governance*`、
   `test_codex_memory_policy*`、`test_role_memory_compaction*`）淨行數
   不得再增；新增 gate 需先刪等量舊 gate（同一 change 內淨行數 ≤ 0）。
-  基線：2026-08-02 追認 PR#164 後重置——in-glob 86,203 行（@245869d25），
+  基線：2026-08-02 追認 PR#164 後重置——上列四 glob 合計 87,967 行
+  （@245869d25：test_agent_governance* 82,899＋test_development_agent_governance*
+  3,304＋test_codex_memory_policy* 138＋test_role_memory_compaction* 1,626），
   淨行數自此起算。
 - 每週 meta-work（治理機/框架自身）佔比 ≤ 30%；超限即凍結 meta-work，只做
   product-work（交易/引擎/研究）。計量以觸及
@@ -1003,4 +1005,6 @@ current generation 重驗。
   2026-08-02 補做 5 維度追認審計（wf_b7aae581：safety 零削弱／workflows 有界性
   存活且強化／機件 782 tests 綠／tier 綁定與三級裁決一致）。上一條原裁決文字
   保留存史；凍結基線依上方重置。改判僅覆蓋已 merge 的本弧；新 meta-work 仍受
-  本節全部條款約束。
+  本節全部條款約束。審計證據正本：
+  `docs/CCAgentWorkSpace/PM/workspace/reports/2026-08-02--pr164_ratification_audit.md`
+  （5 lane summary/findings/覆核 verdict/復算錨全文）。

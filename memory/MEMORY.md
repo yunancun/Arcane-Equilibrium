@@ -4,7 +4,7 @@
 > 治理(2026-06-11 起,R4 巡檢;2026-08-01 修訂):Project context 索引 ≤40 條,超限新增前必先 MERGE(優先級:主題重疊>敘事弧相同>最舊已完結,以 git log 對 topic 檔的最後實質更新日期為代理;archive 守恆);heat 機制已廢(2026-08-01:欄位從未被回填,治理不得引用死數據);被推翻的結論不原地改寫 → topic 檔「演變軌跡」節(日期+轉變+原因+證據 PR#/日期)。
 
 ## Project context
-- [框架健檢 23/23 CONFIRMED+全項優化裁決 (2026-08-01)](project_2026_08_01_framework_health_audit.md) — 主訴 session 久+用量飛耗→8 線 23/23 CONFIRMED;operator 裁全項+三級分級;PR#165-174 全落地;#164 KILL→operator 改判 merge+追認審計過關;wave2 收口,殘 followups=TODO 三 row;演變軌跡在 topic 檔
+- [框架健檢 23/23 CONFIRMED+全項優化裁決 (2026-08-01)](project_2026_08_01_framework_health_audit.md) — 主訴 session 久+用量飛耗→8 線 23/23 CONFIRMED;operator 裁全項+三級分級;PR#165-174 全落地;#164 KILL→operator 改判 merge+追認審計過關;wave2 收口(followups 以 TODO 為準);演變軌跡在 topic 檔
 - [reconcile Path B advisory-first 弧 (2026-07-12~17)](project_2026_07_12_reconcile_pathb_arc.md) — 對賬鈕三層壞→Path B 真對賬 source-landed(cap 永不 freeze;arming 待 P2);unit-env 漂移修 PR#22;OOM P0(PR#27/#31 部署,streaming PR#43-56);哨兵[95]+manifest PR#24/#30;topic 檔
 - [ultracode 全審弧 (06-14 冷審→07-11 修復→07-24 run0)](project_2026_07_11_ultracode_audit_remediation.md) — 06-14 冷審無 P0,P1=AUTH-1(已修)/PROFIT-1/SCHEMA-1(見 cold_audit topic 檔);07-11 九項修復上 main;07-24 run0:9C+92 債,首二項收口(PR#115/117),adaptive_shadow 不可退;topic 檔
 - [profit-first 自主 loop(承 maker-nogo)(2026-07-08~10)](project_2026_07_08_profit_first_autonomy_loop.md) — 自跑 discover→admit→execute→review→learn;07-09 R3 推翻候選統計(偽複製)→07-10 dedup+n_eff 重跑=零合格(7/7 VETO),loop 回 discover 段;零 order/fill proof;topic 檔
