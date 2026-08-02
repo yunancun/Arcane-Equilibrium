@@ -9,10 +9,10 @@
     "total_production_effect_receipt_count": 6
   },
   "blocked_prerequisite_ids": [
-    "EXTERNAL_APPEND_ONLY_PREDECESSOR_REGISTRY",
-    "EXTERNAL_WORM_COMPLIANCE_DESTINATION",
-    "EXTERNAL_WORM_PROVIDER_ATTESTOR",
-    "EXTERNAL_WORM_PROVIDER_TRUST_ROOT",
+    "DURABILITY_ANCHOR_TRUST_ROOT",
+    "HOST_APPEND_ONLY_DURABILITY_ANCHOR",
+    "HOST_APPEND_ONLY_PREDECESSOR_REGISTRY",
+    "OFFHOST_APPEND_ONLY_REPLICA",
     "PREDECESSOR_REGISTRY_TRUST_ROOT",
     "RECOVERY_ACTOR_CAPTURE_TRUST_ROOT",
     "RECOVERY_ANCHOR_READBACK_TRUST_ROOT",
@@ -37,13 +37,31 @@
   },
   "launch_id": "S2E-LW1-LW5",
   "next_action": "OPERATOR_PROVISION_EXTERNAL_PREREQUISITES_THEN_RESUME_S2E_LW1",
-  "packet_digest": "sha256:c13142b4be6b607176ea464e3c7780a8a6db74ae12d524496d0ed35e174d5809",
+  "packet_digest": "sha256:d4ad8edeccb97bd3376e7d66b4afee4267a935cae4637a094903b41eb7ade367",
   "prerequisites": [
     {
       "blocking": true,
+      "category": "FIXED_HOST_PATH",
+      "locator": "/etc/arcane-equilibrium/aiml/s2e-durability-anchor-trust-root-v1.json",
+      "prerequisite_id": "DURABILITY_ANCHOR_TRUST_ROOT",
+      "required_property": "ROOT_OWNED_EXACT_0644_JSON_TRUST_PROFILE",
+      "secret_material_allowed": false,
+      "status": "ABSENT"
+    },
+    {
+      "blocking": true,
       "category": "EXTERNAL_SERVICE",
-      "locator": "operator-config:external-predecessor-registry",
-      "prerequisite_id": "EXTERNAL_APPEND_ONLY_PREDECESSOR_REGISTRY",
+      "locator": "operator-config:host-append-only-durability-anchor",
+      "prerequisite_id": "HOST_APPEND_ONLY_DURABILITY_ANCHOR",
+      "required_property": "ROOT_OWNED_FIXED_APPEND_ONLY_ANCHOR_WITH_MONOTONIC_HEAD",
+      "secret_material_allowed": false,
+      "status": "NOT_OBSERVED"
+    },
+    {
+      "blocking": true,
+      "category": "EXTERNAL_SERVICE",
+      "locator": "operator-config:host-predecessor-registry",
+      "prerequisite_id": "HOST_APPEND_ONLY_PREDECESSOR_REGISTRY",
       "required_property": "DISTINCT_FIXED_ROOT_APPEND_ONLY_SINGLE_USE_REGISTRY",
       "secret_material_allowed": false,
       "status": "NOT_OBSERVED"
@@ -51,29 +69,11 @@
     {
       "blocking": true,
       "category": "EXTERNAL_SERVICE",
-      "locator": "operator-config:external-worm-compliance-destination",
-      "prerequisite_id": "EXTERNAL_WORM_COMPLIANCE_DESTINATION",
-      "required_property": "S3_OBJECT_LOCK_COMPLIANCE_WITH_NAMED_CREDENTIAL_CHANNEL",
+      "locator": "operator-config:offhost-append-only-replica",
+      "prerequisite_id": "OFFHOST_APPEND_ONLY_REPLICA",
+      "required_property": "OFFHOST_APPEND_ONLY_REPLICA_WITH_LATEST_GENERATION_READBACK",
       "secret_material_allowed": false,
       "status": "NOT_OBSERVED"
-    },
-    {
-      "blocking": true,
-      "category": "EXTERNAL_SERVICE",
-      "locator": "operator-config:external-worm-provider-attestor",
-      "prerequisite_id": "EXTERNAL_WORM_PROVIDER_ATTESTOR",
-      "required_property": "DISTINCT_FIXED_ROOT_PLATFORM_OR_EXTERNAL_ATTESTOR",
-      "secret_material_allowed": false,
-      "status": "NOT_OBSERVED"
-    },
-    {
-      "blocking": true,
-      "category": "FIXED_HOST_PATH",
-      "locator": "/etc/arcane-equilibrium/aiml/s2e-external-worm-provider-trust-root-v1.json",
-      "prerequisite_id": "EXTERNAL_WORM_PROVIDER_TRUST_ROOT",
-      "required_property": "ROOT_OWNED_EXACT_0644_JSON_TRUST_PROFILE",
-      "secret_material_allowed": false,
-      "status": "ABSENT"
     },
     {
       "blocking": true,
@@ -180,10 +180,10 @@
     ],
     "evidence_class": "UNAUTHENTICATED_READ_ONLY_OBSERVATION",
     "host": "trade-core",
-    "inventory_digest": "sha256:0b9e2df308a9fbeba35d5b851e2daebb5662f0a65dff04f0b0c177a428b20455",
-    "linux_source_head": "8656dd80df3c332ecb84ac57d8bf09aca9f72e37",
+    "inventory_digest": "sha256:a0fe3b9d21b98d36bef82bd4ca893106bec394a2999d8ff4a44a69e55e13fb13",
+    "linux_source_head": "097c879b92994fe4aa4e264d3d6a4db65de7f710",
     "linux_worktree_clean": true,
-    "observed_at": "2026-08-02T14:51:53Z",
+    "observed_at": "2026-08-02T22:13:32Z",
     "runtime_units": [
       {
         "active_state": "inactive",
@@ -202,9 +202,9 @@
   "required_action_ids": [
     "PROVISION_FIXED_TRUST_ROOTS",
     "PROVISION_HOST_CAPTURE_ATTESTOR_CAPABILITY",
-    "CONFIGURE_EXTERNAL_WORM_COMPLIANCE_DESTINATION",
-    "CONFIGURE_DISTINCT_EXTERNAL_WORM_PROVIDER_ATTESTOR",
-    "CONFIGURE_DISTINCT_APPEND_ONLY_PREDECESSOR_REGISTRY",
+    "PROVISION_HOST_APPEND_ONLY_DURABILITY_ANCHOR",
+    "CONFIGURE_OFFHOST_APPEND_ONLY_REPLICA",
+    "PROVISION_DISTINCT_HOST_APPEND_ONLY_PREDECESSOR_REGISTRY",
     "RESUME_W0_AND_LW1_RECEIPT_CHAIN_WITH_FRESH_EVIDENCE"
   ],
   "schema_version": "s2e_lw1_operator_action_packet_v1",
@@ -214,8 +214,8 @@
     "private_key_material_permitted": false
   },
   "source_binding": {
-    "implementation_checkpoint_head": "e689666707be5fabb3434ca77ba11a9958449941",
-    "implementation_checkpoint_tree": "6c0e49c9dc9e06ac8b9d4ea0c3a86f4dab4cd938",
+    "implementation_checkpoint_head": "0253814b0e1fff7b25ba4a504da3cf88295aa95f",
+    "implementation_checkpoint_tree": "7cc6e20d4d983b5e5eea88744852ef88f35bd345",
     "worktree_clean_at_build": true
   },
   "state": "BLOCKED_EXTERNAL_PREREQUISITES_ACTION_PACKET_READY",
