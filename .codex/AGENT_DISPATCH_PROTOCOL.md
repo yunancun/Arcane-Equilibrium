@@ -252,6 +252,33 @@ run as standalone `AsyncFunction` bodies without a stable import seam, all three
 use the generated `CONTEXT_ADMISSION_V1` block and begin every model prompt with
 the exact `canonical_plan` bytes. Its existing artifact digest is therefore the
 common-prefix digest, improving cache reuse without truncation.
+
+At-rest role context files may be stored dehydrated as
+`context_artifact_store_v1` (tool:
+`agent_governance_context_store.py dehydrate/resolve/verify`): shared source
+content is content-addressed into single `context-shared-<digest>.json` blobs
+across roles and delta rounds, the shared projection's dehydrated text is
+itself content-addressed when large enough (one payload blob serves every role
+file of a round), and small fields stay verbatim. The store is a storage
+representation only, never an admission format. Every consumption surface —
+admission, `capture-command --context-artifact`, closure, saved workflows —
+still accepts only the fully materialized `context_artifact_v1`; a stored form
+must be resolved back first, and resolve verifies byte-exact identity against
+the artifact's own digest anchors. Fully inlined legacy files remain valid
+input everywhere.
+
+Adoption boundary: `dehydrate` is additive — it writes `<name>.store.json`
+plus blobs next to the original and never deletes or replaces the fully
+inlined file, and no in-repo producer or dispatch path emits or reads the
+stored form yet. On-disk savings therefore materialize only when an operator
+retires the originals after a green `verify`; anyone doing so must run
+`resolve` before handing the file to any consumer. Garbage collection of
+blobs orphaned by deleted store files is intentionally out of scope here and
+belongs to the wave2 residual-GC backlog item. Wiring the stored form into
+materialization output and delta-round dispatch stays deferred to the
+`context_artifact` v2 window (post-S2E, after the fw2-wave workflow lane
+merges), together with schema-level shared refs and delta-only dispatch.
+
 Every returned fragment carries the same `task_contract_digest`; closure revalidates
 the PM context artifact at adjudication and rejects objective/scope/criterion drift.
 

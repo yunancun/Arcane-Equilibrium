@@ -1209,7 +1209,6 @@ for (const field of ['cheap_model', 'cheap_effort', 'judgment_model', 'judgment_
     throw new Error(`${field} cannot override Registry saved-workflow model policy`)
   }
 }
-const cheapTier = () => ({})
 const nativeAgent = role => role === 'PA' ? 'PA-investigator' : role === 'E4' ? 'E4-verifier' : role
 const workflowContract = {
   schema_version: 'workflow_receipt_contract_v1',
@@ -1406,7 +1405,7 @@ const evidenceFirst = await boundedParallelV1(evidenceSpecs.map(spec => () =>
     prompt: spec.prompt, nodeId: `evidence:${spec.axis}`,
     payloadKind: spec.axis === 'OPS' ? 'operation_review_fragment_v1' : 'finding_fragment_v1',
     admittedTokens: evidenceEstimate,
-    options: { agentType: spec.agentType, label: `evidence:${spec.axis}`, phase: 'Evidence', schema: EVIDENCE_SCHEMA, ...cheapTier() },
+    options: { agentType: spec.agentType, label: `evidence:${spec.axis}`, phase: 'Evidence', schema: EVIDENCE_SCHEMA },
   })
 ), contextAuthority.max_concurrent_calls)
 const evidenceResults = evidenceSpecs.map((spec, index) => {
@@ -1425,7 +1424,7 @@ if (evidenceRetries.length) {
       retryParent: evidenceFirst[index].record.logical_call_id, admittedTokens: evidenceEstimate,
       options: {
         agentType: evidenceSpecs[index].agentType, label: `evidence-relay:${evidenceSpecs[index].axis}`,
-        phase: 'Evidence', schema: EVIDENCE_SCHEMA, ...cheapTier(),
+        phase: 'Evidence', schema: EVIDENCE_SCHEMA,
       },
     })
   ), contextAuthority.max_concurrent_calls)
