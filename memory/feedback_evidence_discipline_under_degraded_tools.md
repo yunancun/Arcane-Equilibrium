@@ -28,6 +28,22 @@
 
 ref：`project_multi_session_memory_race.md`（commit-first / 不認識的改動禁 revert）+ `feedback_v_migration_pg_dry_run.md`（idempotency double-apply 是 load-bearing gate）+ CLAUDE.md §四（不可 fake evidence）。
 
+## 2026-08-03 追加：引用 spec 授權自己時，必讀正本全文而非 TODO 摘要投影
+
+- S2E Tier 1 durability anchor 整個實作建立在「這是 §LW1 spec anchor 選言的第二支」之上。
+  `TODO.md` 的摘要投影寫「具獨立 signer、monotonic anchor 與 immutable readback 的
+  `TRUSTED_HOST_SSHSIG_APPEND_ONLY_V1`」——**漏抄了「外部」二字**，也漏了同句後半的
+  「單一簽章不能防 rollback；同一 writer 可 coherent rewrite 時只能得 `UNVERIFIED`」。
+  設計/實作/交付報告全程只引摘要，三路對抗複核才抓到 spec 全文逐字否定該實作。
+- **鐵則**：任何「這符合 spec 第 N 支/某條授權」的主張，必須引**設計正本全文**
+  （此處 `docs/execution_plan/ai_ml_landing/design/S2E-launch-wave-specs.md` §LW1），
+  不可引 TODO/PROGRESS 的壓縮投影。摘要投影是導航用的，不是授權來源。
+  這是 §15「寫 verdict 前必讀 source 全文」在**規範面**的同構延伸。
+- 相關反模式：schema 的 `"const": true` 欄位在語義上等於**零資訊**（producer 只能寫
+  true），卻很容易被當成「已驗證」的旗標；且它會讓其後的程式碼檢查變成不可達死碼，
+  對應的 negative test 只證明 schema、不證明 validator 行為（`assert errors` 這種
+  不釘錯誤訊息的弱斷言會讓它看起來有覆蓋）。
+
 ## 2026-07-28 追加：mutation harness 必帶 pristine 對照組
 
 - W5 round-6 E2 複驗第一輪 mutation harness 產出 20 個「RED」全是假紅——受限 env（HOME 隔離）下 `/usr/local/bin/python3` 找不到 user-site pytest，pytest 根本沒跑就非零退出。

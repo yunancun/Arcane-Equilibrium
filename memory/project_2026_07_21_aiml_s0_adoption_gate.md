@@ -80,3 +80,36 @@ Codex-reviewer merge-gate. Boundary held throughout: authority_limits all-const-
 - **W5 receipt 世代鏈**（每次觸 W5-owned path 即須 re-emit＋三腿投影同 commit 更新）：`fcc44eca7`→`c2a7263ce`→`aaee7f1a2`→`0faa6499d`（round6）→**`5be472193`（round7，carrier `0eb90e40c`）**；ledger digest 現值 `sha256:57696d69…`。中央註冊（SCHEMA_FILES／facade dispatch／closure allowlist／count pin）全在 W5-owned path 內＝任何新 schema 必觸發 re-emission，此為結構性而非疏失。
 - **反覆抓到的同一家族缺陷（教訓）**：①「digest 綁定」若不重算 `artifact_self_digest` 就只是名字（stub 自報即通過）；②effect 之後的例外裸逸＝unit 留在 active 而無 rollback；③hash-chain ledger 不持久化/無 head anchor ⇒ 尾截斷不可測；④probe-only 鎖 ≠ 交易互斥（需 hold 到 persist 完成）；⑤lane 混用（simulated 錨解鎖 production attested）。⑥文檔「現行/in this tree」現在式殘留會逃過只認 `source_head=` 格式的 discriminator。
 - runtime 未變：Linux `openclaw-learning.service` = inactive／not-found，`/var/lib/arcane-equilibrium/aiml` 不存在（2026-07-28 唯讀複核）。九項 authority 全 false。
+
+## 2026-08-03：S2E-LW1 Tier 1 durability anchor 三路複核 FAIL
+
+- 承 2026-08-02 operator 裁 Tier 1（S2E-LW1 receipt chain 去掉三個付費 distinct-custody
+  外部服務，改 host 側 `TRUSTED_HOST_SSHSIG_APPEND_ONLY_V1`）。分支
+  `agent/aiml-s2e-tier1-durability-anchor-20260802`，未 push、無 PR。
+- **PM 進場先驗真實情況，抓到一個 CI 抓不到的真缺陷**：committed 的 operator action
+  packet 還是 Tier 0 舊件，用本分支自己的 validator 跑就 FAIL（3 errors）——**沒有任何
+  測試把 artifact 綁到 generator**。放著不管，operator 會照 packet 去買 S3 Object Lock。
+  已用 fresh 唯讀 Linux 觀測重建（`c13142b4…`→`d4ad8ede…`），TODO/PROGRESS 過期 pin 一併校正。
+- **E2/E3/E4 三路獨立派工全 FAIL，收斂到同一組缺陷，PM 逐條複驗成立**。決定性一條：
+  實作**違反它引用來授權自己的那句 spec**——§LW1 全文要求 monotonic counter/head 必須
+  **外部**、明寫**單一簽章不能防 rollback**、**同一 writer 可 coherent rewrite 時只能得
+  `UNVERIFIED`**，實作是 host-local + 單簽 + 同 writer，三條逐字違反（誤讀源=TODO 摘要
+  投影漏抄「外部」，見 [[feedback_evidence_discipline_under_degraded_tools]]）。
+- 四條 P1：①連續性只檢查 null/non-null 形狀、零持久化 head ⇒ 可無限重放創世／掛空前手
+  （慣犯缺陷③原封重現）②readback 三旗標 schema `const:true` 由 anchor key 自簽自證，
+  Tier 0 與 `.codex/agent_registry_v1.json` 明文的 distinct-actor 要求**無替代物**
+  ③「off-host」零強制純命名，`replica:offhost-append-only:localhost` 通過
+  ④新寫的 carrier/review anchor 綁定執法可整段刪除而 72 測試全綠（E2/E4 各自獨立抓到）。
+- **不可被 FAIL 抹掉的 PASS**：trust-root TOCTOU 防護（品質很高）、SSHSIG domain
+  separation 真隔離、digest 逐項真重算（本次「digest 綁定只是名字」不適用）、零注入面、
+  三件套移除無覆蓋淨損失、交付報告**所有可驗證數字皆誠實**（含 headroom 紅燈 baseline
+  位元組中性，E4 以 detached worktree 獨立復現）。工藝紮實，錯在信任模型。
+- 放行條件（三路收斂）：跨 receipt 單調性 gate（**git 本身就是 spec 要的那個外部持久層**
+  ——receipt 已把 anchor_generation/head 釘進 git，只差 transition gate 沒比對）／replica
+  必須有自己的 key identity+trust root+簽章（同時解掉單簽違規與 TTL 回歸）／locator 排除
+  loopback／補 P1-4 regression（禁 `assert errors` 弱斷言）。全文＝
+  `docs/CCAgentWorkSpace/PM/workspace/reports/2026-08-03--s2e_tier1_adversarial_review_fail.md`。
+- 真瓶頸未變：`attest-v2`／durability anchor／predecessor registry 三支 root-owned
+  producer 能力**都還沒寫**，repo 內只有驗證端契約，故 W0/LW1 receipt 發不出、LW2 永遠
+  locked。runtime 仍 dormant（2026-08-02T22:13:32Z 唯讀複查：11 fixed path 全 ABSENT、
+  兩 unit not-found/inactive、兩 canonical root 全 ABSENT），authority 0/9、effect 0/6。
