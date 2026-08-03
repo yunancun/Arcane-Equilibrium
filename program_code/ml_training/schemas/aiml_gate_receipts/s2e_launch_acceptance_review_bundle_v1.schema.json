@@ -59,7 +59,7 @@
             "enum": [
               "CANDIDATE_SCHEMA_VALID",
               "EXACT_SOURCE_HEAD_TREE_VALID",
-              "EXTERNAL_WORM_IMMUTABLE_READBACK_VALID",
+              "DURABILITY_ANCHOR_IMMUTABLE_READBACK_VALID",
               "INDEPENDENT_GOVERNED_REVIEW_VALID",
               "INDEPENDENT_SSHSIG_VALID",
               "PREDECESSOR_CHAIN_VALID",
@@ -211,6 +211,7 @@
       "additionalProperties": false,
       "required": [
         "anchor_locator",
+        "offhost_replica_locator",
         "anchor_generation",
         "anchor_head_digest",
         "replica_head_digest",
@@ -222,6 +223,12 @@
           "minLength": 36,
           "maxLength": 512,
           "pattern": "^host:append-only-durability-anchor:[a-z0-9][a-z0-9._:/-]*$"
+        },
+        "offhost_replica_locator": {
+          "type": "string",
+          "minLength": 29,
+          "maxLength": 512,
+          "pattern": "^replica:offhost-append-only:[a-z0-9][a-z0-9._:/-]*$"
         },
         "anchor_generation": {"type": "integer", "minimum": 1},
         "anchor_head_digest": {"$ref": "#/$defs/digest"},

@@ -21,14 +21,14 @@
     "readonly_observation": {"$ref": "#/$defs/readonly_observation"},
     "prerequisites": {
       "type": "array",
-      "minItems": 14,
-      "maxItems": 14,
+      "minItems": 16,
+      "maxItems": 16,
       "items": {"$ref": "#/$defs/prerequisite"}
     },
     "blocked_prerequisite_ids": {
       "type": "array",
       "minItems": 1,
-      "maxItems": 14,
+      "maxItems": 16,
       "uniqueItems": true,
       "items": {"type": "string", "minLength": 3, "maxLength": 128}
     },
@@ -38,7 +38,9 @@
         "PROVISION_HOST_CAPTURE_ATTESTOR_CAPABILITY",
         "PROVISION_HOST_APPEND_ONLY_DURABILITY_ANCHOR",
         "CONFIGURE_OFFHOST_APPEND_ONLY_REPLICA",
+        "PROVISION_OFFHOST_REPLICA_READBACK_SIGNER",
         "PROVISION_DISTINCT_HOST_APPEND_ONLY_PREDECESSOR_REGISTRY",
+        "COMMIT_GENESIS_ARMED_DURABILITY_ANCHOR_FLOOR",
         "RESUME_W0_AND_LW1_RECEIPT_CHAIN_WITH_FRESH_EVIDENCE"
       ]
     },
@@ -132,7 +134,8 @@
             "ROOT_OWNED_FIXED_ATTESTOR_DERIVES_COMPLETE_SIGNED_CAPTURE_FROM_IMMUTABLE_SOURCE",
             "ROOT_OWNED_FIXED_APPEND_ONLY_ANCHOR_WITH_MONOTONIC_HEAD",
             "OFFHOST_APPEND_ONLY_REPLICA_WITH_LATEST_GENERATION_READBACK",
-            "DISTINCT_FIXED_ROOT_APPEND_ONLY_SINGLE_USE_REGISTRY"
+            "DISTINCT_FIXED_ROOT_APPEND_ONLY_SINGLE_USE_REGISTRY",
+            "OFFHOST_ROOT_OWNED_SIGNER_ON_SEPARATE_HOST_REACHABLE_FROM_TRADE_CORE_PRIVATE_KEY_NEVER_ON_ANCHOR_HOST"
           ]
         },
         "status": {

@@ -1,0 +1,44 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://arcane-equilibrium.local/schemas/s2e_durability_anchor_floor_v1.schema.json",
+  "title": "s2e_durability_anchor_floor_v1",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "schema_version", "launch_id", "state", "anchor_locator",
+    "offhost_replica_locator", "floor_generation", "floor_head_digest",
+    "bound_receipt_payload_digest", "bound_acceptance_review_bundle_digest",
+    "floor_digest"
+  ],
+  "properties": {
+    "schema_version": {"const": "s2e_durability_anchor_floor_v1"},
+    "launch_id": {"const": "S2E-LW1-LW5"},
+    "state": {"enum": ["GENESIS_ARMED", "ADVANCED"]},
+    "anchor_locator": {
+      "type": "string",
+      "minLength": 36,
+      "maxLength": 512,
+      "pattern": "^host:append-only-durability-anchor:[a-z0-9][a-z0-9._:/-]*$"
+    },
+    "offhost_replica_locator": {
+      "type": "string",
+      "minLength": 29,
+      "maxLength": 512,
+      "pattern": "^replica:offhost-append-only:[a-z0-9][a-z0-9._:/-]*$"
+    },
+    "floor_generation": {"type": "integer", "minimum": 0},
+    "floor_head_digest": {
+      "oneOf": [{"$ref": "#/$defs/digest"}, {"type": "null"}]
+    },
+    "bound_receipt_payload_digest": {
+      "oneOf": [{"$ref": "#/$defs/digest"}, {"type": "null"}]
+    },
+    "bound_acceptance_review_bundle_digest": {
+      "oneOf": [{"$ref": "#/$defs/digest"}, {"type": "null"}]
+    },
+    "floor_digest": {"$ref": "#/$defs/digest"}
+  },
+  "$defs": {
+    "digest": {"type": "string", "pattern": "^sha256:[0-9a-f]{64}$"}
+  }
+}

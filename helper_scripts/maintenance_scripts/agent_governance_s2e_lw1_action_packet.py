@@ -26,6 +26,7 @@ from aiml_gate_receipt_s2_5_host_capture import (  # noqa: E402
 )
 from aiml_gate_receipt_s2e_external_evidence import (  # noqa: E402
     DURABILITY_ANCHOR_TRUST_ROOT_PATH,
+    OFFHOST_REPLICA_TRUST_ROOT_PATH,
     PREDECESSOR_REGISTRY_TRUST_ROOT_PATH,
 )
 from aiml_gate_receipt_s2e_launch import (  # noqa: E402
@@ -111,6 +112,11 @@ _PATH_PREREQUISITES = (
         HOST_CAPTURE_ATTESTOR_CAPABILITY_PATH,
         "ROOT_OWNED_FIXED_ATTESTOR_DERIVES_COMPLETE_SIGNED_CAPTURE_FROM_IMMUTABLE_SOURCE",
     ),
+    (
+        "OFFHOST_REPLICA_TRUST_ROOT",
+        str(OFFHOST_REPLICA_TRUST_ROOT_PATH),
+        "ROOT_OWNED_EXACT_0644_JSON_TRUST_PROFILE",
+    ),
 )
 # Tier 1(operator 2026-08-02 裁決):durability 走 carrier schema 早已宣告的
 # TRUSTED_HOST_SSHSIG_APPEND_ONLY_V1 adapter。三項改為 host 側 root-owned 能力與
@@ -131,6 +137,15 @@ _SERVICE_PREREQUISITES = (
         "operator-config:host-predecessor-registry",
         "DISTINCT_FIXED_ROOT_APPEND_ONLY_SINGLE_USE_REGISTRY",
     ),
+    # 與 OFFHOST_APPEND_ONLY_REPLICA 是兩件事:後者是副本儲存與複寫路徑,前者是
+    # 「誰在第二台機器上用第二把 key 簽回讀證言」。合併會讓 packet 無法表達
+    # 「副本有了但沒人能簽」這個真實中間態。
+    (
+        "OFFHOST_REPLICA_READBACK_SIGNER_CAPABILITY",
+        "operator-config:offhost-replica-readback-signer",
+        "OFFHOST_ROOT_OWNED_SIGNER_ON_SEPARATE_HOST_REACHABLE_FROM_TRADE_CORE_"
+        "PRIVATE_KEY_NEVER_ON_ANCHOR_HOST",
+    ),
 )
 EXPECTED_PATHS = tuple(item[1] for item in _PATH_PREREQUISITES)
 EXPECTED_SERVICE_IDS = tuple(item[0] for item in _SERVICE_PREREQUISITES)
@@ -139,7 +154,9 @@ EXPECTED_ACTION_IDS = (
     "PROVISION_HOST_CAPTURE_ATTESTOR_CAPABILITY",
     "PROVISION_HOST_APPEND_ONLY_DURABILITY_ANCHOR",
     "CONFIGURE_OFFHOST_APPEND_ONLY_REPLICA",
+    "PROVISION_OFFHOST_REPLICA_READBACK_SIGNER",
     "PROVISION_DISTINCT_HOST_APPEND_ONLY_PREDECESSOR_REGISTRY",
+    "COMMIT_GENESIS_ARMED_DURABILITY_ANCHOR_FLOOR",
     "RESUME_W0_AND_LW1_RECEIPT_CHAIN_WITH_FRESH_EVIDENCE",
 )
 

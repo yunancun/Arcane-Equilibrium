@@ -84,6 +84,9 @@ def _parser() -> argparse.ArgumentParser:
     validate.add_argument("--predecessor-receipt", type=Path)
     validate.add_argument("--predecessor-authority", type=Path)
     validate.add_argument("--payload-receipt", type=Path)
+    # optional:缺省時本分支只做 payload topology,維持現行
+    # STRUCTURAL_PASS_NOT_ADVANCE 語義,不會靜默取得 Advance。
+    validate.add_argument("--durability-anchor-attestation", type=Path)
     issue = subparsers.add_parser("issue")
     issue.add_argument("--repo-root", type=Path, default=REPO_ROOT)
     issue.add_argument("--candidate", type=Path, required=True)
@@ -134,6 +137,7 @@ def _parser() -> argparse.ArgumentParser:
     transition.add_argument(
         "--predecessor-authority", type=Path, required=True
     )
+    _add_durability_anchor(transition)
     return parser
 
 
@@ -255,6 +259,9 @@ def main(argv: list[str] | None = None) -> int:
             repo_root=args.repo_root,
             now=authority_now,
             consumed_predecessor_digests=frozenset(consumed),
+            durability_anchor_attestation=_read(
+                args.durability_anchor_attestation
+            ),
         )
         status = "ADVANCE" if not errors else "FAIL"
         print(json.dumps({"status": status, "errors": errors}))
@@ -288,6 +295,15 @@ def main(argv: list[str] | None = None) -> int:
                 consumed_predecessor_digests=frozenset(),
             )
             status = "STRUCTURAL_PASS_NOT_ADVANCE" if not errors else "FAIL"
+        elif args.durability_anchor_attestation is None:
+            # authority 有、candidate anchor 沒有 ⇒ 不足以 Advance,只回 payload 語義。
+            errors = validate_s2e_launch_transition_payload(
+                artifact,
+                predecessor_receipt=predecessor,
+                repo_root=args.repo_root,
+                consumed_predecessor_digests=frozenset(),
+            )
+            status = "STRUCTURAL_PASS_NOT_ADVANCE" if not errors else "FAIL"
         else:
             authority = _read(args.predecessor_authority)
             chain = authority.get("launch_chain_before_predecessor", [])
@@ -303,6 +319,9 @@ def main(argv: list[str] | None = None) -> int:
                 repo_root=args.repo_root,
                 now=authority_now,
                 consumed_predecessor_digests=frozenset(consumed),
+                durability_anchor_attestation=_read(
+                    args.durability_anchor_attestation
+                ),
             )
             status = "ADVANCE" if not errors else "FAIL"
     if artifact.get("schema_version") != "s2e_launch_wave_receipt_v1":

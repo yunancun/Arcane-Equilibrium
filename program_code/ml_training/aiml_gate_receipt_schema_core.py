@@ -66,6 +66,9 @@ SCHEMA_FILES = {
     "s2e_durability_anchor_attestation_v1": (
         "s2e_durability_anchor_attestation_v1.schema.json"
     ),
+    "s2e_durability_anchor_floor_v1": (
+        "s2e_durability_anchor_floor_v1.schema.json"
+    ),
     "s2e_predecessor_registry_attestation_v1": (
         "s2e_predecessor_registry_attestation_v1.schema.json"
     ),

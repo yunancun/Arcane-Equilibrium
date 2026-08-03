@@ -52,6 +52,14 @@ def s2e_launch_artifact_errors(
             "off-host latest-generation readback and fixed-root anchor SSHSIG "
             "are required"
         ]
+    if schema_version == "s2e_durability_anchor_floor_v1":
+        # floor 只有從 git commit 位元組讀出、且通過整條檔案歷史檢查時才有意義;
+        # 對 caller 遞來的單份 floor 物件,中央驗證器恆回 typed pending。
+        return [
+            "s2e durability anchor floor EXTERNAL_VERIFICATION_PENDING: the "
+            "committed floor must be read from its own Git history with an "
+            "ancestor chain and a strictly increasing generation"
+        ]
     if schema_version == "s2e_predecessor_registry_attestation_v1":
         return [
             "s2e predecessor registry attestation "

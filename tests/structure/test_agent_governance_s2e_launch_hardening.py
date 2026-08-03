@@ -203,11 +203,15 @@ def _review_for_wave(
             directory=tmp_path,
         ),
     }
+    # candidate 自己的 review anchor 必須嚴格晚於前一份的 carrier anchor(gen 2),
+    # 且帶前手 head:committed floor 的跨 receipt 單調性在 transition 上執法。
     anchor_attestation = support._durability_anchor_attestation(
         validator.s2e_acceptance_review_worm_payload(bundle),
         trust=case["external_trust"],
         issued_at=issued_at,
         directory=tmp_path,
+        generation=3,
+        previous_head=case["carrier_anchor"]["anchor_head_digest"],
     )
     bundle["durability_anchor_binding"] = support._anchor_binding(
         anchor_attestation

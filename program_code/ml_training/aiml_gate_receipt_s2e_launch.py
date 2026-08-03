@@ -28,6 +28,11 @@ from aiml_gate_receipt_s2e_consumption import (
     validate_s2e_launch_consumption_entry_structure,
     validate_s2e_launch_consumption_bootstrap_authority,
 )
+from aiml_gate_receipt_s2e_anchor_floor import (
+    durability_anchor_floor_binding_errors, durability_anchor_floor_errors,
+    durability_anchor_transition_order_errors, next_durability_anchor_floor,
+    read_committed_durability_anchor_floor,
+)
 from aiml_gate_receipt_s2e_external_evidence import (
     durability_anchor_digest_or_none, validate_s2e_durability_anchor_attestation,
 )
@@ -797,8 +802,35 @@ def validate_s2e_launch_predecessor_authority(
             repo_root=repo_root,
             now=now,
             require_current_generation=False,
+            # 歷史件:bundle digest 已被 predecessor receipt 釘死,重鑄即改變該
+            # receipt 的 payload digest,物理上不可重鑄。對它做 wall-clock 檢查
+            # 必然在時間推移後變成死鎖;窗長上界仍恆檢查。
+            require_current_freshness=False,
         )
     )
+    # §3.3(c):前一份的 carrier anchor 必須嚴格晚於它自己的 review anchor。這條在
+    # transition 內另判一次,此處刻意重複,使「只跑 authority 複驗」的路徑也擋得住。
+    review_anchor = authority.get("review_durability_anchor_attestation")
+    carrier_anchor = authority.get("carrier_durability_anchor_attestation")
+    review_generation = (
+        review_anchor.get("anchor_generation")
+        if isinstance(review_anchor, dict)
+        else None
+    )
+    carrier_generation = (
+        carrier_anchor.get("anchor_generation")
+        if isinstance(carrier_anchor, dict)
+        else None
+    )
+    if not (
+        isinstance(review_generation, int)
+        and isinstance(carrier_generation, int)
+        and carrier_generation > review_generation
+    ):
+        errors.append(
+            "S2E predecessor carrier durability anchor generation does not "
+            "strictly exceed its review durability anchor"
+        )
     carrier_result = verify_receipt_carrier_attestation(
         authority.get("carrier_attestation"),
         payload_receipt=predecessor_receipt,
@@ -865,7 +897,7 @@ def build_s2e_launch_predecessor_authority(
     return authority
 
 
-def validate_s2e_launch_transition(
+def _transition_common_errors(
     receipt: Any,
     *,
     predecessor_receipt: Any,
@@ -873,8 +905,14 @@ def validate_s2e_launch_transition(
     repo_root: Path,
     now: str | datetime,
     consumed_predecessor_digests: set[str] | frozenset[str],
-) -> list[str]:
-    """Authority-bearing Advance gate; structural validation alone never enters."""
+) -> tuple[list[str], dict[str, Any] | None]:
+    """Everything a transition checks that does not need the candidate's own anchor.
+
+    候選自己的 review anchor 在 `build_wave_candidate` 當下**尚不存在**(它簽的是
+    還沒產生的 review bundle),因此 candidate 生成路徑只能取用本函式。
+    Advance 授權恆走 `validate_s2e_launch_transition`,那條路徑上該 anchor 為
+    required 參數,沒有「不傳就不檢查」的縫。
+    """
 
     errors = validate_s2e_launch_transition_payload(
         receipt,
@@ -901,6 +939,55 @@ def validate_s2e_launch_transition(
             errors.append(
                 "transition consumed-predecessor set differs from authenticated chain"
             )
+    floor, floor_errors = read_committed_durability_anchor_floor(
+        repo_root,
+        at_commit=(
+            receipt.get("source_head") if isinstance(receipt, dict) else None
+        ),
+    )
+    errors.extend(
+        f"transition durability anchor floor: {error}" for error in floor_errors
+    )
+    if floor is not None:
+        errors.extend(durability_anchor_floor_binding_errors(
+            floor=floor,
+            predecessor_receipt=predecessor_receipt,
+            predecessor_authority=predecessor_authority,
+        ))
+    return errors, floor
+
+
+def validate_s2e_launch_transition(
+    receipt: Any,
+    *,
+    predecessor_receipt: Any,
+    predecessor_authority: Any,
+    repo_root: Path,
+    now: str | datetime,
+    consumed_predecessor_digests: set[str] | frozenset[str],
+    durability_anchor_attestation: Any,
+) -> list[str]:
+    """Authority-bearing Advance gate; structural validation alone never enters.
+
+    `durability_anchor_attestation` 是**候選自己的 review anchor**,必須由呼叫端
+    傳入:wave receipt 只帶 `acceptance_review_bundle_digest`,不帶 binding 實值,
+    而 `predecessor_authority` 只帶前一份的兩份 anchor。本參數刻意無 default。
+    """
+
+    errors, floor = _transition_common_errors(
+        receipt,
+        predecessor_receipt=predecessor_receipt,
+        predecessor_authority=predecessor_authority,
+        repo_root=repo_root,
+        now=now,
+        consumed_predecessor_digests=consumed_predecessor_digests,
+    )
+    if floor is not None:
+        errors.extend(durability_anchor_transition_order_errors(
+            floor=floor,
+            predecessor_authority=predecessor_authority,
+            candidate_anchor=durability_anchor_attestation,
+        ))
     return sorted(set(errors))
 
 
@@ -1157,7 +1244,15 @@ def verify_receipt_carrier_attestation(
     )
     if isinstance(attestation, dict) and isinstance(payload_receipt, dict):
         immutable = attestation.get("immutable_readback", {})
-        if immutable.get("adapter") != "TRUSTED_HOST_SSHSIG_APPEND_ONLY_V1":
+        if immutable.get("adapter") == "EXTERNAL_WORM_V1":
+            # schema 層維持 §LW1 的選言(WORM 或 trusted-host SSHSIG),但這一代沒有
+            # 任何 WORM evidence validator;放行等於宣告一個不參與驗證的 adapter。
+            # 日後真的採購 S3 Object Lock 時,拿到的是精確指路而非靜默拒絕。
+            errors.append(
+                "carrier immutable readback adapter EXTERNAL_WORM_V1 has no "
+                "admitted evidence validator in this generation"
+            )
+        elif immutable.get("adapter") != "TRUSTED_HOST_SSHSIG_APPEND_ONLY_V1":
             errors.append(
                 "carrier immutable readback adapter is not trusted-host append-only"
             )
@@ -1232,8 +1327,14 @@ def validate_s2e_launch_acceptance_review_bundle(
     repo_root: Path,
     now: str | datetime,
     require_current_generation: bool = True,
+    require_current_freshness: bool = True,
 ) -> list[str]:
-    """Validate one signed, capture-bound, durably anchored review bundle."""
+    """Validate one signed, capture-bound, durably anchored review bundle.
+
+    `require_current_freshness` 與 `require_current_generation` 刻意分開:兩者鬆綁
+    的是兩個不同的不變量(時鐘謂詞 vs. HEAD/clean 現時性),合併成一個 flag 會讓
+    reviewer 無法分辨哪一個被關掉了。
+    """
 
     from agent_governance_command_capture_v2 import (
         validate_governed_command_capture,
@@ -1361,12 +1462,14 @@ def validate_s2e_launch_acceptance_review_bundle(
     try:
         issued_at = _time(bundle["issued_at"])
         expires_at = _time(bundle["expires_at"])
-        evaluated_at = _time(now)
+        # 恆檢查:時間無關的結構性上界。一份宣稱十年有效窗的 bundle 任何情況下都被拒。
         if not issued_at < expires_at:
             errors.append("acceptance review freshness window is invalid")
         if (expires_at - issued_at).total_seconds() > 600:
             errors.append("acceptance review freshness window exceeds 600 seconds")
-        if not issued_at <= evaluated_at < expires_at:
+        # 只有「now 落在窗內」這個謂詞受參數控制,且只對被 receipt digest 釘死、
+        # 物理上不可重鑄的歷史 bundle 關閉;窗長上界從不放寬。
+        if require_current_freshness and not issued_at <= _time(now) < expires_at:
             errors.append("acceptance review bundle is stale or not yet valid")
     except (TypeError, ValueError) as error:
         errors.append(f"acceptance review bundle timestamp is invalid: {error}")
@@ -1468,6 +1571,7 @@ def validate_s2e_launch_acceptance_review_bundle(
             durability_anchor_attestation,
             terminal_payload_digest=expected_worm_digest,
             now=now,
+            require_current_freshness=require_current_freshness,
         )
     )
     anchor_digest = durability_anchor_digest_or_none(durability_anchor_attestation)
@@ -1481,6 +1585,7 @@ def validate_s2e_launch_acceptance_review_bundle(
     anchor_binding = bundle.get("durability_anchor_binding", {})
     for field, actual in (
         ("anchor_locator", anchor.get("anchor_locator")),
+        ("offhost_replica_locator", anchor.get("offhost_replica_locator")),
         ("anchor_generation", anchor.get("anchor_generation")),
         ("anchor_head_digest", anchor.get("anchor_head_digest")),
         ("replica_head_digest", replica_readback.get("replica_head_digest")),
@@ -1490,6 +1595,22 @@ def validate_s2e_launch_acceptance_review_bundle(
             errors.append(
                 f"acceptance review durability anchor {field} binding differs"
             )
+    # §3.3(a):單份 anchor 對 committed floor 的規則。floor 由驗證器自己從 git
+    # commit 位元組讀,讀不到／歷史檢查有錯一律 fail-closed,不得 fallback。
+    floor, floor_errors = read_committed_durability_anchor_floor(
+        repo_root, at_commit=reviewed_head
+    )
+    errors.extend(
+        f"acceptance review durability anchor floor: {error}"
+        for error in floor_errors
+    )
+    if floor is not None:
+        errors.extend(durability_anchor_floor_errors(
+            durability_anchor_attestation,
+            floor=floor,
+            label="acceptance review durability anchor",
+            candidate_wave=candidate.get("wave"),
+        ))
     profile, trust_errors = load_s2e_receipt_signer_trust_root()
     errors.extend(trust_errors)
     if profile is not None:
@@ -1594,6 +1715,7 @@ def issue_s2e_launch_receipt(
                 repo_root=repo_root,
                 now=trusted_now,
                 consumed_predecessor_digests=frozenset(consumed),
+                durability_anchor_attestation=durability_anchor_attestation,
             )
         ready_status = "TASK_BRANCH_CHECKPOINT_READY"
     else:
@@ -1671,6 +1793,7 @@ def issue_s2e_launch_receipt(
                     repo_root=repo_root,
                     now=trusted_now,
                     consumed_predecessor_digests=frozenset(consumed),
+                    durability_anchor_attestation=durability_anchor_attestation,
                 )
             )
         if errors:
@@ -1690,6 +1813,14 @@ def issue_s2e_launch_receipt(
         ),
         "predecessor_consumption_result": predecessor_consumption_result,
         "issued_receipt": issued_receipt,
+        # §3.3(d):純投影,供 operator/E1 在同一個 PR 內 commit 下一份 floor。
+        # 驗證器永遠不寫檔;沒有 issued receipt 就沒有可推進的 floor。
+        "next_durability_anchor_floor": (
+            next_durability_anchor_floor(issued_receipt, acceptance_review_bundle)
+            if issued_receipt is not None
+            and isinstance(acceptance_review_bundle, dict)
+            else None
+        ),
         "errors": sorted(set(errors)),
     }
     result["issuance_result_digest"] = canonical_digest(result)
@@ -1836,7 +1967,10 @@ def build_wave_candidate(
         for item in chain
         if isinstance(item, dict)
     } if isinstance(chain, list) else set()
-    errors = validate_s2e_launch_transition(
+    # 候選自己的 review anchor 此刻尚不存在(它要簽的 review bundle 還沒產生),
+    # 故此處只能取用 candidate-anchor-free 的那一半。這裡產出的是 PENDING 候選,
+    # 不是 Advance 授權;Advance 恆走 validate_s2e_launch_transition。
+    errors, _floor = _transition_common_errors(
         receipt,
         predecessor_receipt=predecessor_receipt,
         predecessor_authority=predecessor_authority,
@@ -1845,5 +1979,5 @@ def build_wave_candidate(
         consumed_predecessor_digests=frozenset(consumed),
     )
     if errors:
-        raise ValueError("; ".join(errors))
+        raise ValueError("; ".join(sorted(set(errors))))
     return receipt

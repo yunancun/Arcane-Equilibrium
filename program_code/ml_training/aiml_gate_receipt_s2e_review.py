@@ -28,7 +28,7 @@ S2E_RECEIPT_SIGNATURE_NAMESPACE = "arcane-equilibrium-aiml-s2e-receipts"
 _S2E_REVIEW_COMMON_PREDICATES = (
     "CANDIDATE_SCHEMA_VALID",
     "EXACT_SOURCE_HEAD_TREE_VALID",
-    "EXTERNAL_WORM_IMMUTABLE_READBACK_VALID",
+    "DURABILITY_ANCHOR_IMMUTABLE_READBACK_VALID",
     "INDEPENDENT_GOVERNED_REVIEW_VALID",
     "INDEPENDENT_SSHSIG_VALID",
 )
@@ -101,7 +101,14 @@ S2E_REVIEW_BASE_PATHS = (
         "helper_scripts/maintenance_scripts/"
         "agent_governance_workflow_receipts.py"
     ),
+    # committed floor 與其讀取模組:reviewer 簽名的 source_blob_manifest 逐位元組
+    # 釘住 floor,關掉「review 與 transition 之間 floor 被換掉」這條縫。
+    (
+        "docs/execution_plan/ai_ml_landing/receipts/S2E-LW1-LW5/"
+        "durability-anchor-floor-v1.json"
+    ),
     "program_code/ml_training/application_bundle_runtime_closure_v1.json",
+    "program_code/ml_training/aiml_gate_receipt_s2e_anchor_floor.py",
     "program_code/ml_training/aiml_gate_receipt_s2e_consumption.py",
     "program_code/ml_training/aiml_gate_receipt_s2e_dispatch.py",
     "program_code/ml_training/aiml_gate_receipt_s2e_external_evidence.py",
@@ -120,6 +127,10 @@ S2E_REVIEW_BASE_PATHS = (
     (
         "program_code/ml_training/schemas/aiml_gate_receipts/"
         "s2e_durability_anchor_attestation_v1.schema.json"
+    ),
+    (
+        "program_code/ml_training/schemas/aiml_gate_receipts/"
+        "s2e_durability_anchor_floor_v1.schema.json"
     ),
     (
         "program_code/ml_training/schemas/aiml_gate_receipts/"
@@ -762,11 +773,11 @@ def s2e_review_predicate_results(
                 "manifest_digest": manifest_digest,
             })
         ],
-        "EXTERNAL_WORM_IMMUTABLE_READBACK_VALID": [
+        "DURABILITY_ANCHOR_IMMUTABLE_READBACK_VALID": [
             canonical_digest({
-                "schema_version": "s2e_review_external_worm_requirement_v1",
+                "schema_version": "s2e_review_durability_anchor_requirement_v1",
                 "candidate_payload_digest": candidate.get("payload_digest"),
-                "required_adapter": "EXTERNAL_WORM_V1",
+                "required_adapter": "TRUSTED_HOST_SSHSIG_APPEND_ONLY_V1",
                 "immutable_readback_required": True,
             })
         ],

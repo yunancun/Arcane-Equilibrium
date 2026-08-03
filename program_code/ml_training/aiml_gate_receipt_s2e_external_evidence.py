@@ -5,6 +5,7 @@ from __future__ import annotations
 import hashlib
 import json
 import os
+import re
 import stat
 from datetime import datetime, timedelta, timezone
 from pathlib import Path
@@ -39,12 +40,21 @@ PREDECESSOR_REGISTRY_NAMESPACE = (
 LOCAL_EVIDENCE_LOCATOR_SCHEMES = frozenset({
     "fixture", "memory", "local", "test",
 })
+OFFHOST_REPLICA_READBACK_SCHEMA = "s2e_offhost_replica_readback_v1"
+OFFHOST_REPLICA_IDENTITY = "aiml-s2e-offhost-replica-attestor-v1"
+OFFHOST_REPLICA_NAMESPACE = "arcane-equilibrium-aiml-s2e-offhost-replica"
 DURABILITY_ANCHOR_LOCATOR_PREFIX = "host:append-only-durability-anchor:"
 OFFHOST_REPLICA_LOCATOR_PREFIX = "replica:offhost-append-only:"
 PREDECESSOR_REGISTRY_LOCATOR_PREFIX = "registry:host-append-only:"
 DURABILITY_ANCHOR_TRUST_ROOT_PATH = Path(
     "/etc/arcane-equilibrium/aiml/"
     "s2e-durability-anchor-trust-root-v1.json"
+)
+# 第二把 key 的公開信任根。私鑰與簽章動作歸屬第二台實體機器(operator 2026-08-03
+# 裁決),trade-core 只讀公鑰形式;`host_fingerprint` 是那台機器的 SSH host key 指紋。
+OFFHOST_REPLICA_TRUST_ROOT_PATH = Path(
+    "/etc/arcane-equilibrium/aiml/"
+    "s2e-offhost-replica-trust-root-v1.json"
 )
 PREDECESSOR_REGISTRY_TRUST_ROOT_PATH = Path(
     "/etc/arcane-equilibrium/aiml/"
@@ -65,6 +75,14 @@ _TRUST_ROOT_FIELDS = {
     "key_fingerprint",
     "attestor_class",
 }
+_HOST_FINGERPRINT_FIELDS = frozenset({"host_fingerprint"})
+_SSH_FINGERPRINT_PATTERN = re.compile(r"^SHA256:[A-Za-z0-9+/]{43}$")
+# anchor 側簽章覆蓋除三個自指欄位外的全部欄位(含整份 replica readback);
+# replica 側只排除自己的兩個自指欄位,因此兩把簽章對同一個 head 各自負責。
+_ANCHOR_SIGNED_EXCLUSIONS = frozenset({
+    "signed_core_digest", "signature", "attestation_digest",
+})
+_REPLICA_SIGNED_EXCLUSIONS = frozenset({"signed_core_digest", "signature"})
 
 
 def _raw_digest(value: bytes) -> str:
@@ -102,6 +120,7 @@ def _read_trust_root(
     signature_namespace: str,
     attestor_class: str,
     label: str,
+    extra_fields: frozenset[str] = frozenset(),
 ) -> tuple[dict[str, Any] | None, list[str]]:
     errors: list[str] = []
     repo_root = Path(__file__).resolve().parents[2]
@@ -158,7 +177,9 @@ def _read_trust_root(
         profile = _strict_json_object(bytes(raw))
     except (UnicodeDecodeError, json.JSONDecodeError, ValueError) as error:
         return None, errors + [f"{label} trust root JSON is invalid: {error}"]
-    if not isinstance(profile, dict) or set(profile) != _TRUST_ROOT_FIELDS:
+    if not isinstance(profile, dict) or set(profile) != (
+        _TRUST_ROOT_FIELDS | set(extra_fields)
+    ):
         return None, errors + [f"{label} trust root fields are not exact"]
     expected = {
         "schema_version": schema_version,
@@ -172,6 +193,11 @@ def _read_trust_root(
     for field, value in expected.items():
         if profile.get(field) != value:
             errors.append(f"{label} trust root {field} is invalid")
+    # extra field 目前只有 host_fingerprint;它是公開值,必須是逐字可外部核對的
+    # SSH host key 指紋形制,不得是佔位字串。
+    for field in sorted(extra_fields):
+        if not _SSH_FINGERPRINT_PATTERN.match(str(profile.get(field, ""))):
+            errors.append(f"{label} trust root {field} is not an SSH fingerprint")
     try:
         fingerprint = trusted_host.ssh_public_key_fingerprint(
             str(profile.get("public_key"))
@@ -195,6 +221,20 @@ def _load_durability_anchor_trust_root(
         signature_namespace=DURABILITY_ANCHOR_NAMESPACE,
         attestor_class="HOST_APPEND_ONLY_DURABILITY_ANCHOR_V1",
         label="S2E durability anchor",
+        extra_fields=_HOST_FINGERPRINT_FIELDS,
+    )
+
+
+def _load_offhost_replica_trust_root(
+) -> tuple[dict[str, Any] | None, list[str]]:
+    return _read_trust_root(
+        OFFHOST_REPLICA_TRUST_ROOT_PATH,
+        schema_version="s2e_offhost_replica_trust_root_v1",
+        signer_identity=OFFHOST_REPLICA_IDENTITY,
+        signature_namespace=OFFHOST_REPLICA_NAMESPACE,
+        attestor_class="OFFHOST_APPEND_ONLY_REPLICA_READBACK_V1",
+        label="S2E off-host replica readback",
+        extra_fields=_HOST_FINGERPRINT_FIELDS,
     )
 
 
@@ -217,12 +257,16 @@ def _load_s2e_receipt_signer_profile(
     return load_s2e_receipt_signer_trust_root()
 
 
-def _signed_bytes(attestation: dict[str, Any]) -> bytes:
+def _signed_bytes(
+    attestation: dict[str, Any],
+    *,
+    excluded: frozenset[str] = _ANCHOR_SIGNED_EXCLUSIONS,
+) -> bytes:
     return json.dumps(
         {
             key: value
             for key, value in attestation.items()
-            if key not in {"signed_core_digest", "signature", "attestation_digest"}
+            if key not in excluded
         },
         ensure_ascii=False,
         sort_keys=True,
@@ -233,6 +277,16 @@ def _signed_bytes(attestation: dict[str, Any]) -> bytes:
 
 def durability_anchor_signed_bytes(attestation: dict[str, Any]) -> bytes:
     return _signed_bytes(attestation)
+
+
+def offhost_replica_readback_signed_bytes(readback: dict[str, Any]) -> bytes:
+    """replica 先簽自己的 readback core,anchor 再把整份 readback 納入自己的簽章。
+
+    因此 anchor 簽章證明「我引用的就是這份 replica 證言」,replica 簽章證明
+    「我在我自己的時間窗看到這個 head」:兩把簽章對同一個 head 各自負責。
+    """
+
+    return _signed_bytes(readback, excluded=_REPLICA_SIGNED_EXCLUSIONS)
 
 
 def predecessor_registry_signed_bytes(attestation: dict[str, Any]) -> bytes:
@@ -340,18 +394,28 @@ def predecessor_registry_head_digest(attestation: dict[str, Any]) -> str:
 
 
 def _freshness_errors(
-    attestation: dict[str, Any], *, now: str | datetime, label: str
+    attestation: dict[str, Any],
+    *,
+    now: str | datetime,
+    label: str,
+    require_current_freshness: bool = True,
 ) -> list[str]:
+    """時間無關的窗長上界恆檢查;只有「now 落在窗內」這個謂詞受參數控制。
+
+    被某份已發行 receipt 的 digest 釘死的歷史件物理上不可重鑄,對它做 wall-clock
+    檢查必然在時間推移後變成死鎖。窗長上界(≤10 分鐘)**不因此放寬**——本參數
+    不加長任何窗,也絕不得與 `require_current_generation` 合併成一個 flag。
+    """
+
     errors: list[str] = []
     try:
         observed = _timestamp(attestation.get("observed_at"))
         expires = _timestamp(attestation.get("expires_at"))
-        evaluated = _timestamp(now)
         if not observed < expires:
             errors.append(f"{label} freshness window is invalid")
         if expires - observed > MAX_ATTESTATION_TTL:
             errors.append(f"{label} freshness window exceeds ten minutes")
-        if not observed <= evaluated < expires:
+        if require_current_freshness and not observed <= _timestamp(now) < expires:
             errors.append(f"{label} is stale or not yet valid")
     except (TypeError, ValueError) as error:
         errors.append(f"{label} timestamp is invalid: {error}")
@@ -365,6 +429,7 @@ def _signature_errors(
     identity: str,
     namespace: str,
     label: str,
+    excluded: frozenset[str] = _ANCHOR_SIGNED_EXCLUSIONS,
 ) -> tuple[list[str], dict[str, Any] | None]:
     profile, errors = profile_loader()
     if profile is None:
@@ -379,7 +444,7 @@ def _signature_errors(
     ):
         if signer.get(field) != profile.get(profile_field):
             errors.append(f"{label} signer {field} differs from fixed trust root")
-    signed = _signed_bytes(attestation)
+    signed = _signed_bytes(attestation, excluded=excluded)
     signed_digest = _raw_digest(signed)
     if attestation.get("signed_core_digest") != signed_digest:
         errors.append(f"{label} signed core digest is invalid")
@@ -435,17 +500,82 @@ def _external_locator_errors(
     return []
 
 
+def _replica_readback_errors(
+    attestation: dict[str, Any],
+    *,
+    now: str | datetime,
+    require_current_freshness: bool,
+) -> tuple[list[str], dict[str, Any] | None]:
+    """第二把 key 在第二個 host identity 上對同一個 head 的獨立回讀證言。
+
+    副本是同一條 ledger 的忠實鏡像,不是獨立計數器:獨立性來自「第二把 key +
+    第二個 host」,不是來自第二個計數器。
+    """
+
+    readback = attestation.get("offhost_replica_readback")
+    if not isinstance(readback, dict):
+        return ["durability anchor off-host replica readback is absent"], None
+    errors: list[str] = []
+    if readback.get("replica_locator") != attestation.get("offhost_replica_locator"):
+        errors.append("durability anchor replica locator differs from the attestation")
+    if readback.get("observed_anchor_locator") != attestation.get("anchor_locator"):
+        errors.append("durability anchor replica observed a different anchor locator")
+    for replica_field, anchor_field in (
+        ("replica_generation", "anchor_generation"),
+        ("replica_previous_head_digest", "previous_anchor_head_digest"),
+        ("replica_entry_digest", "anchor_entry_digest"),
+        ("replica_head_digest", "anchor_head_digest"),
+    ):
+        if readback.get(replica_field) != attestation.get(anchor_field):
+            errors.append(
+                f"durability anchor replica {replica_field} does not mirror the anchor"
+            )
+    errors.extend(_freshness_errors(
+        readback,
+        now=now,
+        label="durability anchor replica readback",
+        require_current_freshness=require_current_freshness,
+    ))
+    signature_errors, replica_profile = _signature_errors(
+        readback,
+        profile_loader=_load_offhost_replica_trust_root,
+        identity=OFFHOST_REPLICA_IDENTITY,
+        namespace=OFFHOST_REPLICA_NAMESPACE,
+        label="durability anchor replica readback",
+        excluded=_REPLICA_SIGNED_EXCLUSIONS,
+    )
+    errors.extend(signature_errors)
+    # §5.1:副本身分的獨立性綁 host fingerprint,不用 loopback 黑名單——對自由文字
+    # 做否定列舉無法判定 host identity,而指紋是可由第三方視角 keyscan 逐字核對的公開值。
+    if replica_profile is not None and readback.get("replica_host_fingerprint") != (
+        replica_profile.get("host_fingerprint")
+    ):
+        errors.append(
+            "durability anchor replica host fingerprint differs from its fixed "
+            "trust root"
+        )
+    return errors, replica_profile
+
+
 def validate_s2e_durability_anchor_attestation(
     attestation: Any,
     *,
     terminal_payload_digest: str,
     now: str | datetime,
+    require_current_freshness: bool = True,
 ) -> list[str]:
-    """Require one trusted-host SSHSIG binding append-only head and off-host readback.
+    """Require two independent SSHSIG keys on two host identities over one head.
 
-    這是 §LW1 spec anchor 選言的第二支:單一 trusted-host 簽章同時綁獨立 key
-    identity、append-only monotonic head、trusted freshness window 與
-    latest-generation immutable readback。caller 不能自選 anchor 或 replica 後端。
+    這是 §LW1 spec anchor 選言的第二支。anchor 側簽章綁 append-only monotonic
+    head 與 trusted freshness window;replica 側由**第二把 key、第二個 host
+    fingerprint**對同一個 head 再簽一次,並帶自己的時間窗。因此 spec 的兩條否定
+    條款(單一簽章不能防 rollback、同一 writer coherent rewrite 只能得
+    `UNVERIFIED`)在結構上成立:只取得 anchor host 的 root 拿不到第二台機器對改寫
+    後 head 的簽章。caller 不能自選 anchor 或 replica 後端。
+
+    **代碼不宣稱、也不可能宣稱**:replica 私鑰實際存放在哪台機器。驗證端跑在受檢
+    主機上,這是任何在受檢主機執行的驗證器的資訊論上界;該邊界由 provisioning 的
+    三個可核對物承擔(keypair 產生地、第三方視角 keyscan、blocking 前置)。
     """
 
     schema = _load_schema(DURABILITY_ANCHOR_SCHEMA)
@@ -487,16 +617,18 @@ def validate_s2e_durability_anchor_attestation(
         errors.append("durability anchor head digest is invalid")
     readback = attestation.get("offhost_replica_readback")
     readback = readback if isinstance(readback, dict) else {}
-    if not (
-        readback.get("ack") is True
-        and readback.get("entry_present") is True
-        and readback.get("latest_generation_matches") is True
-    ):
-        errors.append("durability anchor off-host readback is not proven")
-    # 副本必須回讀到與本機 anchor 完全相同的 head,否則不成立 latest-generation。
-    if readback.get("replica_head_digest") != attestation.get("anchor_head_digest"):
-        errors.append("durability anchor replica head does not match anchor head")
-    errors.extend(_freshness_errors(attestation, now=now, label="durability anchor"))
+    replica_errors, replica_profile = _replica_readback_errors(
+        attestation,
+        now=now,
+        require_current_freshness=require_current_freshness,
+    )
+    errors.extend(replica_errors)
+    errors.extend(_freshness_errors(
+        attestation,
+        now=now,
+        label="durability anchor",
+        require_current_freshness=require_current_freshness,
+    ))
     try:
         if _timestamp(attestation["observed_at"]) < _timestamp(
             readback["observed_at"]
@@ -512,12 +644,36 @@ def validate_s2e_durability_anchor_attestation(
         label="durability anchor",
     )
     errors.extend(signature_errors)
+    if anchor_profile is not None and attestation.get("anchor_host_fingerprint") != (
+        anchor_profile.get("host_fingerprint")
+    ):
+        errors.append(
+            "durability anchor host fingerprint differs from its fixed trust root"
+        )
+    if attestation.get("anchor_host_fingerprint") == readback.get(
+        "replica_host_fingerprint"
+    ):
+        errors.append(
+            "durability anchor replica host identity is not independent from the "
+            "anchor host"
+        )
     receipt_profile, receipt_errors = _load_s2e_receipt_signer_profile()
     errors.extend(receipt_errors)
     errors.extend(_distinct_fingerprint_errors(
         subject=anchor_profile,
-        peers=[("S2E receipt signer", receipt_profile)],
+        peers=[
+            ("S2E receipt signer", receipt_profile),
+            ("off-host replica readback attestor", replica_profile),
+        ],
         label="durability anchor",
+    ))
+    errors.extend(_distinct_fingerprint_errors(
+        subject=replica_profile,
+        peers=[
+            ("S2E receipt signer", receipt_profile),
+            ("durability anchor", anchor_profile),
+        ],
+        label="durability anchor replica readback",
     ))
     if attestation.get("attestation_digest") != (
         durability_anchor_attestation_digest(attestation)
