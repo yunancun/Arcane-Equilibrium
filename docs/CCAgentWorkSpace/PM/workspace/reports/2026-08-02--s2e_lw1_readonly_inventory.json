@@ -1,12 +1,13 @@
 {
   "schema_version": "s2e_lw1_readonly_inventory_v1",
   "host": "trade-core",
-  "observed_at": "2026-08-02T22:13:32Z",
+  "observed_at": "2026-08-03T02:33:29Z",
   "evidence_class": "UNAUTHENTICATED_READ_ONLY_OBSERVATION",
   "linux_source_head": "097c879b92994fe4aa4e264d3d6a4db65de7f710",
   "linux_worktree_clean": true,
   "fixed_path_statuses": {
     "/etc/arcane-equilibrium/aiml/s2e-durability-anchor-trust-root-v1.json": "ABSENT",
+    "/etc/arcane-equilibrium/aiml/s2e-offhost-replica-trust-root-v1.json": "ABSENT",
     "/etc/arcane-equilibrium/aiml/s2e-predecessor-registry-trust-root-v1.json": "ABSENT",
     "/etc/arcane-equilibrium/aiml/s2e-receipt-trust-root-v1.json": "ABSENT",
     "/etc/arcane-equilibrium/trust/s2-5-recovery-actor-capture.pub": "ABSENT",
@@ -21,7 +22,8 @@
   "service_statuses": {
     "HOST_APPEND_ONLY_DURABILITY_ANCHOR": "NOT_OBSERVED",
     "HOST_APPEND_ONLY_PREDECESSOR_REGISTRY": "NOT_OBSERVED",
-    "OFFHOST_APPEND_ONLY_REPLICA": "NOT_OBSERVED"
+    "OFFHOST_APPEND_ONLY_REPLICA": "NOT_OBSERVED",
+    "OFFHOST_REPLICA_READBACK_SIGNER_CAPABILITY": "NOT_OBSERVED"
   },
   "runtime_units": [
     {
