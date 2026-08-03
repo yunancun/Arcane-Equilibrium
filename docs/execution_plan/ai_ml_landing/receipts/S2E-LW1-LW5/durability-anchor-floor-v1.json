@@ -1,0 +1,12 @@
+{
+  "schema_version": "s2e_durability_anchor_floor_v1",
+  "launch_id": "S2E-LW1-LW5",
+  "state": "GENESIS_ARMED",
+  "anchor_locator": "host:append-only-durability-anchor:var/lib/arcane-equilibrium/aiml/s2e-durability-anchor",
+  "offhost_replica_locator": "replica:offhost-append-only:ncyu-nas/arcane-equilibrium/aiml/s2e-durability-anchor-replica",
+  "floor_generation": 0,
+  "floor_head_digest": null,
+  "bound_receipt_payload_digest": null,
+  "bound_acceptance_review_bundle_digest": null,
+  "floor_digest": "sha256:61a99ac55b6048e4cb435caf1e33a1fd92e933411cf3fac6b153423eaca19642"
+}
