@@ -100,12 +100,14 @@ def test_review_manifest_closes_oracle_and_offline_provider_dependencies() -> No
     assert "program_code/ml_training/tests/__init__.py" in {
         entry["path"] for entry in lw1_manifest
     }
-    # 這兩條是 review 成本護欄,不是治理不變式——source 端沒有任何地方強制 256。
-    # 2026-08-03:加入 durability anchor floor 後 LW1 manifest 由 256 → 257,亦即
-    # 舊界線在當時已正好卡滿,任何新增受治理檔案都會踩到。改為 288(+32 headroom)
-    # 並保留上界,目的是擋住 manifest 無界成長,不是擋住單一檔案的合法新增。
-    assert len(manifest) <= 288
-    assert len(lw1_manifest) <= 288
+    # 這兩條是 review 成本護欄,不是治理不變式——source 端沒有任何地方強制上界。
+    # 2026-08-03 更正:先前註解寫「由 256 → 257、舊界線已正好卡滿」是錯的。
+    # E2 與 E4 各自獨立實測:baseline `097c879b9` 的 LW1 manifest 是 **254**(尚有
+    # 2 格),本分支新增 anchor_floor 模組、其 schema 與 floor 檔共 +3(並移除舊
+    # WORM provider schema),故 254 → 257,是本次改動吃掉 slack 並超出 1。
+    # 上界收在 264(257 + 7 格,約當一次 remediation 的量),不採先前無依據的 288。
+    assert len(manifest) <= 264
+    assert len(lw1_manifest) <= 264
     genesis_argv = validator.s2e_review_test_argv(
         genesis_candidate,
         repo_root=ROOT,
