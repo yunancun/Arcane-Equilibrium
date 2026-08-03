@@ -113,3 +113,22 @@ Codex-reviewer merge-gate. Boundary held throughout: authority_limits all-const-
   producer 能力**都還沒寫**，repo 內只有驗證端契約，故 W0/LW1 receipt 發不出、LW2 永遠
   locked。runtime 仍 dormant（2026-08-02T22:13:32Z 唯讀複查：11 fixed path 全 ABSENT、
   兩 unit not-found/inactive、兩 canonical root 全 ABSENT），authority 0/9、effect 0/6。
+
+### 2026-08-03 續：remediation source landed（branch-local，18 commits，未 push）
+
+- operator 裁：修成真的合 spec（非退回 Tier 0）＋replica 私鑰真的放 `ncyu-nas`＋600s 本輪一併修。
+  已落地：committed anchor floor（`GENESIS_ARMED` gen=0；驗證器以 `git show <commit>:<path>`
+  讀 **commit 位元組**——關鍵論證是「資料在 git ≠ 驗證器讀得到」，transition gate 三個輸入
+  原本全是 caller 給的檔案路徑，必須有 code-owned pin 才算 gate）、replica 2-of-2 第二簽章、
+  三個 `const:true` 刪除、host fingerprint 綁定、`require_current_freshness`。
+  前置 14→16；五個 S2E 檔 **100 passed**。
+- **可省未來 session 大量時間的順序事實**：`w5-emit` 需 `--test-evidence` 與
+  `--review-provenance`，所以 **W5 發射必然在對抗複核之後**，不可能先發。任何「先把 W5 債
+  清掉再審」的計畫都是錯的。
+- **反模式（新）**：只存在於測試、source 無強制、且**正好卡滿**的數值上界（此處 LW1 review
+  manifest `<= 256`）＝latent trap，任何人新增一個受治理檔案都會踩到並被迫「為了讓自己的改動
+  過而放寬測試」。遇到時要查它是否有 source 端推導，沒有就是成本護欄而非不變式，調整要具名
+  留給下一輪 reviewer 複核。
+- 仍未做：remediation 的 E2/E3/E4 複核、W5 re-emission（須併還 `209793b70` 漏發射）、
+  provisioning prompt（仍寫 10 把應為 11）。真瓶頸未變：三支 root-owned producer 未實作，
+  且 `ncyu-nas` 無 SSH listener ⇒ receipt 仍發不出。
