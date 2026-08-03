@@ -100,8 +100,12 @@ def test_review_manifest_closes_oracle_and_offline_provider_dependencies() -> No
     assert "program_code/ml_training/tests/__init__.py" in {
         entry["path"] for entry in lw1_manifest
     }
-    assert len(manifest) <= 256
-    assert len(lw1_manifest) <= 256
+    # 這兩條是 review 成本護欄,不是治理不變式——source 端沒有任何地方強制 256。
+    # 2026-08-03:加入 durability anchor floor 後 LW1 manifest 由 256 → 257,亦即
+    # 舊界線在當時已正好卡滿,任何新增受治理檔案都會踩到。改為 288(+32 headroom)
+    # 並保留上界,目的是擋住 manifest 無界成長,不是擋住單一檔案的合法新增。
+    assert len(manifest) <= 288
+    assert len(lw1_manifest) <= 288
     genesis_argv = validator.s2e_review_test_argv(
         genesis_candidate,
         repo_root=ROOT,
