@@ -1,7 +1,24 @@
 # S2E external-evidence 契約降級提案（待 operator 裁決）
 
+> **SUPERSEDED（2026-08-03）——本檔保留為決策史，不得當作現行事實引用。**
+> 三處已被後續證據推翻或取代：
+> 1. **§五的「blocker 14 → 11」是錯的。** 總數維持 **14**，改變的是組成（付費外部
+>    custody 3→0、待實作 root-owned 能力 1→3）。原估漏算「取代外部服務的 host 側能力
+>    本身也要寫」。更正正本＝`2026-08-02--s2e_tier1_durability_anchor_implementation.md` §三。
+> 2. **本提案的核心論證「實作比它自己的 spec 更嚴」不成立。** 2026-08-03 三路獨立對抗
+>    複核（E2/E3/E4）全 FAIL：據以降級的 §LW1 選言第二支，全文要求 monotonic
+>    counter/head 必須**外部**、明寫**單一簽章不能防 rollback**、且**同一 writer 可
+>    coherent rewrite 時只能得 `UNVERIFIED`**——落地的 Tier 1 實作三條逐字違反。
+>    誤讀源＝`TODO.md` 的摘要投影漏抄「外部」二字。全文＝
+>    `2026-08-03--s2e_tier1_adversarial_review_fail.md`。
+> 3. **後續路徑已由 operator 於 2026-08-03 裁定**：不退回 Tier 0，改為修成真的合 spec；
+>    replica 第二把簽章真的放第二台機器 `ncyu-nas`。設計正本＝
+>    `docs/execution_plan/ai_ml_landing/design/S2E-LW1-tier1-remediation.md`。
+
 日期：2026-08-02
-狀態：`PROPOSAL_AWAITING_OPERATOR_RATIFICATION` — 本文不是已採納設計，未改任何 source。
+狀態：`SUPERSEDED_BY_2026_08_03_REMEDIATION`（原狀態 `PROPOSAL_AWAITING_OPERATOR_RATIFICATION`
+於 2026-08-02 獲 operator 採納為 Tier 1，其實作隨後於 2026-08-03 複核 FAIL）— 本文不是
+已採納設計，未改任何 source。
 來源：operator 於 LW1 blocker 判斷中選定路徑 B。
 基準 head：`097c879b9`（worktree clean）；LW1 implementation checkpoint=`e68966670`；
 blocker packet=`sha256:c13142b4…d5809`（14/14 blocking）。
@@ -85,6 +102,10 @@ credentials 與 Rust 執行授權 —— **他已經拿到錢了，audit trail �
 效果：**blocker 14 → 11，且 11 項全部變成免費、host 側、可逆、operator 一次 root session
 可完成**（9 項是 `ssh-keygen` + `install -m 0644 -o root`；1 項是 host-local registry
 capability；1 項是 `attest-v2`，見下方「誠實邊界」）。
+
+> **更正（2026-08-03）：上段的 14 → 11 是錯的。** 總數維持 14，改變的只有組成；
+> 且 Tier 1 的**開發量比 Tier 0 大**（待實作 root-owned 能力 1→3）。詳見本檔開頭
+> SUPERSEDED 標註第 1 點。
 
 ### Tier 2（最小，不建議）
 只留固定 trust roots + `attest-v2`，拿掉 registry。**會失去 wave transition 的 double-spend／
