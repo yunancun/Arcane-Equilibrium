@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import base64
 import hashlib
 import json
 import os
@@ -83,6 +84,44 @@ _ANCHOR_SIGNED_EXCLUSIONS = frozenset({
     "signed_core_digest", "signature", "attestation_digest",
 })
 _REPLICA_SIGNED_EXCLUSIONS = frozenset({"signed_core_digest", "signature"})
+# 驗證器自己跑在 anchor host 上,因此它可以直接讀本機的 SSH host key 並算指紋。
+LOCAL_SSH_HOST_KEY_DIR = Path("/etc/ssh")
+LOCAL_SSH_HOST_KEY_GLOB = "ssh_host_*.pub"
+LOCAL_HOST_KEYS_OBSERVED = "LOCAL_HOST_KEYS_OBSERVED"
+LOCAL_HOST_KEYS_UNREADABLE = "LOCAL_HOST_KEYS_UNREADABLE"
+
+
+def local_ssh_host_key_fingerprints() -> tuple[frozenset[str], str]:
+    """本機 SSH host key 指紋集合 + typed 觀察狀態。
+
+    E3(2026-08-03 複核 §六「應該」第 9 項)指出:副本是否在**別台機器**這件事,有一段
+    是代碼本來就能執法卻被推給 provisioning 的——驗證器跑在 trade-core 上,讀
+    `/etc/ssh/ssh_host_*.pub` 就能算出本機指紋,要求 `replica_host_fingerprint`
+    不等於其中任何一個。這**不是**設計 §5.2 拒絕過的 loopback 自由文字黑名單
+    (對自由文字做否定列舉無法判定 host identity),而是與**真實本機 key** 的逐字
+    比對:同一台機器就是同一把 host key,改不掉也繞不開。
+
+    讀不到時(例如 Mac 開發機沒有 sshd host key)**不得 fail-open**:回空集合 +
+    `LOCAL_HOST_KEYS_UNREADABLE`,由驗證器把該 typed skip 顯式帶到 errors 之外的
+    observation 通道,而不是在驗證器裡靜默當成「已檢查且通過」。
+    """
+
+    fingerprints: set[str] = set()
+    try:
+        candidates = sorted(LOCAL_SSH_HOST_KEY_DIR.glob(LOCAL_SSH_HOST_KEY_GLOB))
+    except OSError:
+        candidates = []
+    for candidate in candidates:
+        try:
+            parts = candidate.read_text(encoding="ascii").split()
+            wire = base64.b64decode(parts[1], validate=True)
+        except (OSError, UnicodeDecodeError, IndexError, ValueError, TypeError):
+            continue
+        digest = base64.b64encode(hashlib.sha256(wire).digest()).decode("ascii")
+        fingerprints.add("SHA256:" + digest.rstrip("="))
+    if not fingerprints:
+        return frozenset(), LOCAL_HOST_KEYS_UNREADABLE
+    return frozenset(fingerprints), LOCAL_HOST_KEYS_OBSERVED
 
 
 def _raw_digest(value: bytes) -> str:
@@ -505,7 +544,7 @@ def _replica_readback_errors(
     *,
     now: str | datetime,
     require_current_freshness: bool,
-) -> tuple[list[str], dict[str, Any] | None]:
+) -> tuple[list[str], dict[str, Any] | None, str]:
     """第二把 key 在第二個 host identity 上對同一個 head 的獨立回讀證言。
 
     副本是同一條 ledger 的忠實鏡像,不是獨立計數器:獨立性來自「第二把 key +
@@ -514,7 +553,11 @@ def _replica_readback_errors(
 
     readback = attestation.get("offhost_replica_readback")
     if not isinstance(readback, dict):
-        return ["durability anchor off-host replica readback is absent"], None
+        return (
+            ["durability anchor off-host replica readback is absent"],
+            None,
+            local_ssh_host_key_fingerprints()[1],
+        )
     errors: list[str] = []
     if readback.get("replica_locator") != attestation.get("offhost_replica_locator"):
         errors.append("durability anchor replica locator differs from the attestation")
@@ -554,7 +597,15 @@ def _replica_readback_errors(
             "durability anchor replica host fingerprint differs from its fixed "
             "trust root"
         )
-    return errors, replica_profile
+    # 與**本機真實 host key** 的逐字比對(見 `local_ssh_host_key_fingerprints`)。
+    # 讀不到時集合為空 ⇒ 這裡不產生錯誤,狀態改由 observation 通道帶出。
+    local_fingerprints, local_status = local_ssh_host_key_fingerprints()
+    if readback.get("replica_host_fingerprint") in local_fingerprints:
+        errors.append(
+            "durability anchor replica host fingerprint is this verifying host's "
+            "own SSH host key"
+        )
+    return errors, replica_profile, local_status
 
 
 def validate_s2e_durability_anchor_attestation(
@@ -563,6 +614,7 @@ def validate_s2e_durability_anchor_attestation(
     terminal_payload_digest: str,
     now: str | datetime,
     require_current_freshness: bool = True,
+    observations: list[str] | None = None,
 ) -> list[str]:
     """Require two independent SSHSIG keys on two host identities over one head.
 
@@ -576,6 +628,9 @@ def validate_s2e_durability_anchor_attestation(
     **代碼不宣稱、也不可能宣稱**:replica 私鑰實際存放在哪台機器。驗證端跑在受檢
     主機上,這是任何在受檢主機執行的驗證器的資訊論上界;該邊界由 provisioning 的
     三個可核對物承擔(keypair 產生地、第三方視角 keyscan、blocking 前置)。
+
+    `observations` 是**errors 以外**的 typed 通道:本機 host key 讀不到時,
+    「這一條沒被執法」必須顯式出現在這裡,不能靜默當成已檢查(複核 §六-9)。
     """
 
     schema = _load_schema(DURABILITY_ANCHOR_SCHEMA)
@@ -617,12 +672,14 @@ def validate_s2e_durability_anchor_attestation(
         errors.append("durability anchor head digest is invalid")
     readback = attestation.get("offhost_replica_readback")
     readback = readback if isinstance(readback, dict) else {}
-    replica_errors, replica_profile = _replica_readback_errors(
+    replica_errors, replica_profile, local_status = _replica_readback_errors(
         attestation,
         now=now,
         require_current_freshness=require_current_freshness,
     )
     errors.extend(replica_errors)
+    if observations is not None:
+        observations.append(f"durability anchor replica host identity: {local_status}")
     errors.extend(_freshness_errors(
         attestation,
         now=now,

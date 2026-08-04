@@ -35,6 +35,7 @@ from aiml_gate_receipt_s2e_launch import (  # noqa: E402
 from aiml_gate_receipt_schema_core import (  # noqa: E402
     _contains_github_secret_like_content,
     canonical_digest,
+    git_subprocess_env,
 )
 
 
@@ -167,6 +168,7 @@ def _git(repo_root: Path, *args: str) -> str:
         cwd=repo_root,
         check=True,
         capture_output=True,
+        env=git_subprocess_env(),
         text=True,
     ).stdout.strip()
 

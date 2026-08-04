@@ -413,6 +413,30 @@ def artifact_self_digest(artifact: dict[str, Any]) -> str:
 # 自 bound head 讀 blob:投影因此是該 commit 的函數,任何人 checkout 它都重算得出同值。
 # fail-closed:git 不可用/commit 不存在/路徑不在該樹 → 該路徑記 None(投影變值 → 導出失敗)。
 # --------------------------------------------------------------------------- #
+# P1-6(2026-08-03 三路複核):本家族所有 git 子行程都沒有 `env=`,於是 ambient
+# `GIT_DIR` 會蓋過 `-C`/`cwd`——E3 實測驗證器回傳的是攻擊者 repo 的內容且零錯誤。
+# 這與 CLAUDE.md 封殺直接 `psql`(ambient `psqlrc`/`PG*` routing)是同一種病。
+# 因此不是「刪掉幾個已知的 GIT_* 變數」(黑名單會漏 GIT_OBJECT_DIRECTORY /
+# GIT_ALTERNATE_OBJECT_DIRECTORIES / GIT_CONFIG_COUNT / GIT_REPLACE_REF_BASE…),
+# 而是只保留執行 git 所需的最小集合,其餘一律不繼承。
+_GIT_ENV_ALLOWLIST = ("PATH", "LANG", "LC_ALL", "TZ")
+
+
+def git_subprocess_env() -> dict[str, str]:
+    """git 子行程的白名單環境;所有 `GIT_*` 與使用者/系統 config routing 都被清掉。"""
+
+    import os
+
+    env = {
+        name: os.environ[name] for name in _GIT_ENV_ALLOWLIST if name in os.environ
+    }
+    env.setdefault("PATH", os.defpath)
+    # HOME 不在白名單 ⇒ 使用者級 config 不生效;系統級與互動提示另外顯式關掉。
+    env["GIT_CONFIG_NOSYSTEM"] = "1"
+    env["GIT_TERMINAL_PROMPT"] = "0"
+    return env
+
+
 def _git_run(repo_root: Path, arguments: list[str]) -> tuple[str, str] | None:
     """跑一次 git,回 ``(stdout, stderr)``;非零離開/無法執行回 ``None``。
 
@@ -428,6 +452,7 @@ def _git_run(repo_root: Path, arguments: list[str]) -> tuple[str, str] | None:
         proc = subprocess.run(
             ["git", "-C", str(repo_root), *arguments],
             capture_output=True,
+            env=git_subprocess_env(),
             text=True,
             timeout=60,
         )
@@ -455,6 +480,7 @@ def git_failure_detail(repo_root: Path) -> str | None:
         proc = subprocess.run(
             ["git", "-C", str(repo_root), "rev-parse", "--git-dir"],
             capture_output=True,
+            env=git_subprocess_env(),
             text=True,
             timeout=60,
         )
@@ -495,6 +521,7 @@ def _git_is_ancestor(repo_root: Path, ancestor: str, descendant: str) -> bool:
                 ancestor, descendant,
             ],
             capture_output=True,
+            env=git_subprocess_env(),
             timeout=30,
         )
     except (OSError, ValueError, subprocess.SubprocessError):
@@ -516,6 +543,7 @@ def _git_head(repo_root: Path) -> str | None:
         proc = subprocess.run(
             ["git", "-C", str(repo_root), "rev-parse", "HEAD"],
             capture_output=True,
+            env=git_subprocess_env(),
             text=True,
             timeout=30,
         )
@@ -598,6 +626,7 @@ def commit_blob_bytes(
             ["git", "-C", str(repo_root), "cat-file", "--batch"],
             input=request,
             capture_output=True,
+            env=git_subprocess_env(),
             timeout=180,
         )
     except (OSError, ValueError, subprocess.SubprocessError):

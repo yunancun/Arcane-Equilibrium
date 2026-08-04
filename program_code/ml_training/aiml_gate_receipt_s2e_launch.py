@@ -17,6 +17,7 @@ from aiml_gate_receipt_schema_core import (
     _contains_github_secret_like_content,
     _load_schema,
     canonical_digest,
+    git_subprocess_env,
 )
 from aiml_gate_receipt_s2e_consumption import (
     build_s2e_launch_consumption_bootstrap_authority_core,
@@ -30,8 +31,8 @@ from aiml_gate_receipt_s2e_consumption import (
 )
 from aiml_gate_receipt_s2e_anchor_floor import (
     durability_anchor_floor_binding_errors, durability_anchor_floor_errors,
-    durability_anchor_transition_order_errors, next_durability_anchor_floor,
-    read_committed_durability_anchor_floor,
+    durability_anchor_transition_order_errors, floor_gate_errors,
+    next_durability_anchor_floor, read_committed_durability_anchor_floor,
 )
 from aiml_gate_receipt_s2e_external_evidence import (
     durability_anchor_digest_or_none, validate_s2e_durability_anchor_attestation,
@@ -242,6 +243,7 @@ def _git(repo_root: Path, *args: str, check: bool = True) -> subprocess.Complete
         cwd=repo_root,
         check=check,
         capture_output=True,
+        env=git_subprocess_env(),
         text=True,
     )
 
@@ -252,6 +254,7 @@ def _git_bytes(repo_root: Path, *args: str) -> bytes:
         cwd=repo_root,
         check=True,
         capture_output=True,
+        env=git_subprocess_env(),
     ).stdout
 
 
@@ -939,22 +942,23 @@ def _transition_common_errors(
             errors.append(
                 "transition consumed-predecessor set differs from authenticated chain"
             )
-    floor, floor_errors = read_committed_durability_anchor_floor(
+    # typed 三欄:非 VERIFIED 一律 floor=None 且 errors 非空(P1-3 不可再靜默放行)。
+    reading = read_committed_durability_anchor_floor(
         repo_root,
         at_commit=(
             receipt.get("source_head") if isinstance(receipt, dict) else None
         ),
     )
-    errors.extend(
-        f"transition durability anchor floor: {error}" for error in floor_errors
-    )
-    if floor is not None:
+    errors.extend(floor_gate_errors(
+        reading, label="transition durability anchor floor"
+    ))
+    if reading.floor is not None:
         errors.extend(durability_anchor_floor_binding_errors(
-            floor=floor,
+            floor=reading.floor,
             predecessor_receipt=predecessor_receipt,
             predecessor_authority=predecessor_authority,
         ))
-    return errors, floor
+    return errors, reading.floor
 
 
 def validate_s2e_launch_transition(
@@ -1228,12 +1232,15 @@ def verify_receipt_carrier_attestation(
         )
     else:
         expected_worm_digest = None
+    # errors 以外的 typed 通道:本機 host key 讀不到時該條沒被執法必須顯式可見。
+    anchor_observations: list[str] = []
     errors.extend(
         f"durability anchor: {error}"
         for error in validate_s2e_durability_anchor_attestation(
             durability_anchor_attestation,
             terminal_payload_digest=expected_worm_digest,
             now=now,
+            observations=anchor_observations,
         )
     )
     anchor_digest = durability_anchor_digest_or_none(durability_anchor_attestation)
@@ -1310,6 +1317,7 @@ def verify_receipt_carrier_attestation(
         "durability_anchor_generation": anchor.get("anchor_generation"),
         "durability_anchor_attestation_digest": anchor_digest,
         "independent_signing_key_available": profile is not None,
+        "host_identity_observations": sorted(set(anchor_observations)),
         "errors": sorted(set(errors)),
     }
     result["verification_result_digest"] = canonical_digest(result)
@@ -1597,17 +1605,16 @@ def validate_s2e_launch_acceptance_review_bundle(
             )
     # §3.3(a):單份 anchor 對 committed floor 的規則。floor 由驗證器自己從 git
     # commit 位元組讀,讀不到／歷史檢查有錯一律 fail-closed,不得 fallback。
-    floor, floor_errors = read_committed_durability_anchor_floor(
+    reading = read_committed_durability_anchor_floor(
         repo_root, at_commit=reviewed_head
     )
-    errors.extend(
-        f"acceptance review durability anchor floor: {error}"
-        for error in floor_errors
-    )
-    if floor is not None:
+    errors.extend(floor_gate_errors(
+        reading, label="acceptance review durability anchor floor"
+    ))
+    if reading.floor is not None:
         errors.extend(durability_anchor_floor_errors(
             durability_anchor_attestation,
-            floor=floor,
+            floor=reading.floor,
             label="acceptance review durability anchor",
             candidate_wave=candidate.get("wave"),
         ))

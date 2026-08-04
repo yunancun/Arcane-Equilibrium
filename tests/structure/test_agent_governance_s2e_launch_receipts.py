@@ -725,14 +725,32 @@ def _floor_bytes(floor: dict) -> bytes:
     ).encode("utf-8")
 
 
-def _commit_floor(repo: Path, floor: dict, message: str) -> str:
+def _publish(repo: Path, commit: str | None = None) -> str:
+    """把 commit 記到受保護 ref 上,模擬「這份 floor 已經過 PR 進 main」。
+
+    P0-1 之後,floor 鏈尾必須是 `_PROTECTED_ANCESTOR_REFS` 某一支的祖先,否則判
+    UNVERIFIED。ref 名單是 code-owned 常數,測試只能改 repo 的 ref 本身,不能傳參
+    數指定——這正是該裁決要保住的性質。
+    """
+
+    target = commit or _git(repo, "rev-parse", "HEAD")
+    _git(repo, "update-ref", anchor_floor._PROTECTED_ANCESTOR_REFS[0], target)
+    return target
+
+
+def _commit_floor(
+    repo: Path, floor: dict, message: str, *, publish: bool = True
+) -> str:
     relative = anchor_floor.durability_anchor_floor_repo_path()
     target = repo / relative
     target.parent.mkdir(parents=True, exist_ok=True)
     target.write_bytes(_floor_bytes(floor))
     _git(repo, "add", relative)
     _git(repo, "commit", "-m", message)
-    return _git(repo, "rev-parse", "HEAD")
+    head = _git(repo, "rev-parse", "HEAD")
+    if publish:
+        _publish(repo, head)
+    return head
 
 
 def _git(repo: Path, *args: str) -> str:
@@ -874,6 +892,8 @@ def _repo(tmp_path: Path) -> tuple[Path, str, str, str]:
     _git(repo, "add", *sorted(launch_carrier_files))
     _git(repo, "commit", "-m", "schema carrier")
     carrier = _git(repo, "rev-parse", "HEAD")
+    # 創世 floor 隨 schema carrier 進 repo,並同步進受保護 ref(P0-1)。
+    _publish(repo, carrier)
     lw1 = _commit(repo, "lw1.txt", "LW1\n", "LW1 checkpoint")
     return repo, baseline, carrier, lw1
 
@@ -2796,7 +2816,7 @@ def test_transition_floor_rules_bind_the_predecessor_to_git(
 
 def _floor_repo(tmp_path: Path) -> Path:
     repo = tmp_path / "floor-repo"
-    repo.mkdir()
+    repo.mkdir(parents=True)
     _git(repo, "init", "-q")
     _git(repo, "config", "user.email", "s2e-floor@example.invalid")
     _git(repo, "config", "user.name", "S2E Floor Test")
@@ -2822,15 +2842,38 @@ def _advanced_floor(generation: int, *, head_suffix: str = "1") -> dict:
     return floor
 
 
+def test_floor_gate_errors_never_returns_empty_for_a_non_verified_reading() -> None:
+    """P1-3 在呼叫端的那一半:UNVERIFIED 不得被當成沒事。
+
+    直接餵一個違反建構不變量的 reading(繞過 `_floor_reading`),證明呼叫端仍拿得到
+    非空 errors——兩個 `if reading.floor is not None:` 呼叫點因此無法靜默放行。
+    """
+
+    silent = anchor_floor.CommittedFloorReading(
+        anchor_floor.FLOOR_UNVERIFIED, None, []
+    )
+    assert anchor_floor.floor_gate_errors(silent, label="transition floor") == [
+        "transition floor: verdict UNVERIFIED carried no stated reason"
+    ]
+    # 建構入口自己也不可能產出那個形狀。
+    built = anchor_floor._floor_reading(anchor_floor.FLOOR_VERIFIED, None, [])
+    assert built.verdict == anchor_floor.FLOOR_REJECTED
+    assert built.floor is None
+    assert built.errors == [
+        "durability anchor floor is VERIFIED without a stated reason"
+    ]
+
+
 def test_absent_committed_floor_is_fail_closed(tmp_path: Path) -> None:
     """檔案不存在 ≠ genesis。讀不到 floor 一律 fail-closed。"""
 
     repo = _floor_repo(tmp_path)
-    floor, errors = anchor_floor.read_committed_durability_anchor_floor(
+    reading = anchor_floor.read_committed_durability_anchor_floor(
         repo, at_commit=_git(repo, "rev-parse", "HEAD")
     )
-    assert floor is None
-    assert errors == [
+    assert reading.verdict == anchor_floor.FLOOR_REJECTED
+    assert reading.floor is None
+    assert reading.errors == [
         "durability anchor floor is absent from the reviewed commit history"
     ]
 
@@ -2842,24 +2885,211 @@ def test_committed_floor_history_accepts_a_strictly_increasing_chain(
     _commit_floor(repo, _genesis_armed_floor(), "arm floor")
     expected = _advanced_floor(1)
     head = _commit_floor(repo, expected, "advance floor")
-    floor, errors = anchor_floor.read_committed_durability_anchor_floor(
+    reading = anchor_floor.read_committed_durability_anchor_floor(
         repo, at_commit=head
     )
-    assert errors == []
-    assert floor == expected
+    assert reading.errors == []
+    assert reading.verdict == anchor_floor.FLOOR_VERIFIED
+    assert reading.floor == expected
+
+
+def test_committed_floor_off_a_protected_ref_is_unverified_not_pass(
+    tmp_path: Path,
+) -> None:
+    """P0-1:同一 writer 用一條 local branch 鑄出的 floor 只能得 UNVERIFIED。
+
+    §LW1「同一 writer 可 coherent rewrite ⇒ 只能得 UNVERIFIED」在此落地:內容完全
+    合法(線性、嚴格遞增、單一 genesis),差別只在鏈尾不是受保護 ref 的祖先。
+    """
+
+    repo = _floor_repo(tmp_path)
+    _commit_floor(repo, _genesis_armed_floor(), "arm floor", publish=False)
+    head = _commit_floor(repo, _advanced_floor(1), "advance floor", publish=False)
+    _publish(repo, _git(repo, "rev-parse", "HEAD~2"))
+    reading = anchor_floor.read_committed_durability_anchor_floor(
+        repo, at_commit=head
+    )
+    assert reading.verdict == anchor_floor.FLOOR_UNVERIFIED
+    assert reading.floor is None
+    assert reading.errors == [
+        "UNVERIFIED: its history tail is not an ancestor of any code-owned "
+        "protected ref, so a single writer could have authored it"
+    ]
+
+
+def test_committed_floor_without_any_protected_ref_is_unverified(
+    tmp_path: Path,
+) -> None:
+    """受保護 ref 一支都解析不出來時不得 fail-open,同樣只能得 UNVERIFIED。"""
+
+    repo = _floor_repo(tmp_path)
+    _commit_floor(repo, _genesis_armed_floor(), "arm floor", publish=False)
+    head = _commit_floor(repo, _advanced_floor(1), "advance floor", publish=False)
+    reading = anchor_floor.read_committed_durability_anchor_floor(
+        repo, at_commit=head
+    )
+    assert reading.verdict == anchor_floor.FLOOR_UNVERIFIED
+    assert reading.errors == [
+        "UNVERIFIED: no code-owned protected ref resolves in this repository, "
+        "so the floor cannot be shown to require a second capability"
+    ]
+
+
+def test_committed_floor_rejects_a_non_exact_commit(tmp_path: Path) -> None:
+    """P1-2:`at_commit` 在任何 git 呼叫之前逐字驗形狀,不合格不進 subprocess。
+
+    PM 於 git 2.55 實測 `--output=<path>` 這種單 token 會讓既有檔案被**截斷為 0
+    bytes** 且 exit 0。這裡用同一個 payload,並斷言哨兵檔案原封不動。
+    """
+
+    repo = _floor_repo(tmp_path)
+    _commit_floor(repo, _genesis_armed_floor(), "arm floor")
+    victim = repo / "victim.txt"
+    victim.write_text("SENTINEL-MUST-SURVIVE\n", encoding="ascii")
+    for injected in ("--output=victim.txt", "HEAD", "", "A" * 40, "abc"):
+        reading = anchor_floor.read_committed_durability_anchor_floor(
+            repo, at_commit=injected
+        )
+        assert reading.verdict == anchor_floor.FLOOR_REJECTED
+        assert reading.errors == [
+            "durability anchor floor requires an exact 40-hex reviewed commit"
+        ], injected
+    assert victim.read_text(encoding="ascii") == "SENTINEL-MUST-SURVIVE\n"
+
+
+def test_committed_zero_byte_floor_is_fail_closed(tmp_path: Path) -> None:
+    """P1-3:已 commit 的 0-byte floor 曾經是零錯誤 fail-open,回 `(None, [])`。"""
+
+    repo = _floor_repo(tmp_path)
+    relative = anchor_floor.durability_anchor_floor_repo_path()
+    target = repo / relative
+    target.parent.mkdir(parents=True, exist_ok=True)
+    target.write_bytes(b"")
+    _git(repo, "add", relative)
+    _git(repo, "commit", "-m", "empty floor")
+    head = _publish(repo)
+    reading = anchor_floor.read_committed_durability_anchor_floor(
+        repo, at_commit=head
+    )
+    assert reading.verdict == anchor_floor.FLOOR_REJECTED
+    assert reading.floor is None
+    assert reading.errors == [
+        f"commit {head[:12]} durability anchor floor JSON is invalid: "
+        "Expecting value: line 1 column 1 (char 0)"
+    ]
+
+
+def test_committed_floor_history_must_begin_with_genesis(tmp_path: Path) -> None:
+    """P1-4:orphan branch 上單一 ADVANCED commit 不得鑄出任意世代。"""
+
+    repo = _floor_repo(tmp_path)
+    head = _commit_floor(repo, _advanced_floor(7), "forge an advanced floor")
+    reading = anchor_floor.read_committed_durability_anchor_floor(
+        repo, at_commit=head
+    )
+    assert reading.verdict == anchor_floor.FLOOR_REJECTED
+    assert reading.errors == [
+        "durability anchor floor history does not begin with its GENESIS_ARMED "
+        "commit"
+    ]
 
 
 def test_committed_floor_rejects_a_non_increasing_generation(tmp_path: Path) -> None:
+    # 鏈首必須是創世(P1-4);舊 fixture 直接從 `_advanced_floor(2)` 起頭,等於把
+    # 「鏈首不必是 GENESIS_ARMED」這個洞固化成正常行為。
     repo = _floor_repo(tmp_path)
+    _commit_floor(repo, _genesis_armed_floor(), "arm floor")
     _commit_floor(repo, _advanced_floor(2), "advance floor")
     head = _commit_floor(repo, _advanced_floor(2, head_suffix="4"), "replay floor")
-    floor, errors = anchor_floor.read_committed_durability_anchor_floor(
+    reading = anchor_floor.read_committed_durability_anchor_floor(
         repo, at_commit=head
     )
-    assert floor is None
-    assert errors == [
+    assert reading.verdict == anchor_floor.FLOOR_REJECTED
+    assert reading.floor is None
+    assert reading.errors == [
         "durability anchor floor generation is not strictly increasing"
     ]
+
+
+def test_committed_floor_rejects_a_changed_invariant_field(tmp_path: Path) -> None:
+    """M11:`_FLOOR_INVARIANT_FIELDS` 跨歷史不可變。
+
+    線性、嚴格遞增、單一 genesis 全部成立,唯一的違例是 locator 被換掉。
+    """
+
+    repo = _floor_repo(tmp_path)
+    _commit_floor(repo, _genesis_armed_floor(), "arm floor")
+    _commit_floor(repo, _advanced_floor(1), "advance floor")
+    switched = _advanced_floor(2, head_suffix="5")
+    switched["anchor_locator"] = ANCHOR_LOCATOR + "-switched"
+    switched["floor_digest"] = anchor_floor.durability_anchor_floor_digest({
+        key: value for key, value in switched.items() if key != "floor_digest"
+    })
+    head = _commit_floor(repo, switched, "switch the anchor locator")
+    reading = anchor_floor.read_committed_durability_anchor_floor(
+        repo, at_commit=head
+    )
+    assert reading.verdict == anchor_floor.FLOOR_REJECTED
+    assert reading.errors == [
+        "durability anchor floor anchor_locator changed across its history"
+    ]
+
+
+def test_committed_floor_rejects_a_shallow_object_store(tmp_path: Path) -> None:
+    """P1-5:shallow clone 讓被 rollback 的那段歷史整段從走訪中消失。"""
+
+    repo = _floor_repo(tmp_path)
+    _commit_floor(repo, _genesis_armed_floor(), "arm floor")
+    _commit_floor(repo, _advanced_floor(2), "advance floor")
+    _commit_floor(repo, _advanced_floor(1, head_suffix="7"), "roll the floor back")
+    shallow = tmp_path / "shallow"
+    _git(repo, "clone", "-q", "--depth", "1", f"file://{repo}", str(shallow))
+    _git(shallow, "update-ref", anchor_floor._PROTECTED_ANCESTOR_REFS[0], "HEAD")
+    reading = anchor_floor.read_committed_durability_anchor_floor(
+        shallow, at_commit=_git(shallow, "rev-parse", "HEAD")
+    )
+    assert reading.verdict == anchor_floor.FLOOR_REJECTED
+    assert reading.errors == [
+        "durability anchor floor cannot be read from a shallow repository"
+    ]
+
+
+def test_committed_floor_rejects_a_replace_ref_object_store(tmp_path: Path) -> None:
+    """P1-5:replace ref 可以把任一 commit 的內容整個換掉。"""
+
+    repo = _floor_repo(tmp_path)
+    _commit_floor(repo, _genesis_armed_floor(), "arm floor")
+    head = _commit_floor(repo, _advanced_floor(1), "advance floor")
+    _git(repo, "update-ref", "refs/replace/" + head, head)
+    reading = anchor_floor.read_committed_durability_anchor_floor(
+        repo, at_commit=head
+    )
+    assert reading.verdict == anchor_floor.FLOOR_REJECTED
+    assert reading.errors == [
+        "durability anchor floor cannot be read from a repository that "
+        "rewrites objects through replace refs"
+    ]
+
+
+def test_committed_floor_ignores_an_ambient_git_dir(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """P1-6:ambient `GIT_DIR` 曾經蓋過 `-C`,讓驗證器讀到攻擊者 repo 且零錯誤。"""
+
+    honest = _floor_repo(tmp_path / "honest")
+    _commit_floor(honest, _genesis_armed_floor(), "arm floor")
+    head = _commit_floor(honest, _advanced_floor(1), "advance floor")
+    attacker = _floor_repo(tmp_path / "attacker")
+    _commit_floor(attacker, _genesis_armed_floor(), "arm forged floor")
+    _commit_floor(attacker, _advanced_floor(9, head_suffix="9"), "forge gen 9")
+    monkeypatch.setenv("GIT_DIR", str(attacker / ".git"))
+    monkeypatch.setenv("GIT_WORK_TREE", str(attacker))
+    reading = anchor_floor.read_committed_durability_anchor_floor(
+        honest, at_commit=head
+    )
+    assert reading.verdict == anchor_floor.FLOOR_VERIFIED
+    assert reading.floor is not None
+    assert reading.floor["floor_generation"] == 1
 
 
 def test_committed_floor_rejects_a_second_genesis(tmp_path: Path) -> None:
@@ -2869,19 +3099,20 @@ def test_committed_floor_rejects_a_second_genesis(tmp_path: Path) -> None:
     _commit_floor(repo, _genesis_armed_floor(), "arm floor")
     _commit_floor(repo, _advanced_floor(1), "advance floor")
     head = _commit_floor(repo, _genesis_armed_floor(), "re-arm floor")
-    floor, errors = anchor_floor.read_committed_durability_anchor_floor(
+    reading = anchor_floor.read_committed_durability_anchor_floor(
         repo, at_commit=head
     )
-    assert floor is None
+    assert reading.floor is None
     assert (
         "durability anchor floor re-enters GENESIS_ARMED after its first commit"
-    ) in errors, errors
+    ) in reading.errors, reading.errors
 
 
 def test_committed_floor_rejects_a_forked_history(tmp_path: Path) -> None:
     """merge topology 下兩份互不為祖先的 floor commit ⇒ 順序歧義,fail-closed。"""
 
     repo = _floor_repo(tmp_path)
+    _commit_floor(repo, _genesis_armed_floor(), "arm floor")
     base = _git(repo, "rev-parse", "HEAD")
     _commit_floor(repo, _advanced_floor(1), "floor on main")
     main_head = _git(repo, "rev-parse", "HEAD")
@@ -2889,14 +3120,70 @@ def test_committed_floor_rejects_a_forked_history(tmp_path: Path) -> None:
     _commit_floor(repo, _advanced_floor(2), "floor on sibling")
     _git(repo, "checkout", "-q", "-")
     _git(repo, "merge", "-q", "--no-edit", "-X", "theirs", "sibling")
-    head = _git(repo, "rev-parse", "HEAD")
+    head = _publish(repo)
     assert head != main_head
-    floor, errors = anchor_floor.read_committed_durability_anchor_floor(
+    reading = anchor_floor.read_committed_durability_anchor_floor(
         repo, at_commit=head
     )
-    assert floor is None
+    assert reading.floor is None
     assert (
         "durability anchor floor history is not a single ancestor chain"
+    ) in reading.errors, reading.errors
+
+
+def test_committed_floor_tail_byte_check_is_reachable_through_its_seam(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """M10:尾端 byte-for-byte 在祖先鏈為真時不可孤立觸發(defense-in-depth)。
+
+    `at_commit` 選一個**不觸碰 floor** 的後續 commit,於是鏈內 `show` 用的是鏈尾
+    SHA、尾端 `show` 用的是 `at_commit`,兩者可分辨;monkeypatch 只改後者。真實
+    git 下兩次必然回同一份 blob,所以這條只能在 seam 層測——但它不是沉默的覆蓋債。
+    """
+
+    repo = _floor_repo(tmp_path)
+    _commit_floor(repo, _genesis_armed_floor(), "arm floor")
+    _commit_floor(repo, _advanced_floor(1), "advance floor")
+    head = _commit(repo, "unrelated.txt", "unrelated\n", "unrelated change")
+    _publish(repo, head)
+    real_git_bytes = anchor_floor._git_bytes
+
+    def tampered(repo_root: Path, *args: str) -> bytes:
+        raw = real_git_bytes(repo_root, *args)
+        if args[0] == "show" and args[-1].startswith(head):
+            return raw + b" "
+        return raw
+
+    monkeypatch.setattr(anchor_floor, "_git_bytes", tampered)
+    reading = anchor_floor.read_committed_durability_anchor_floor(
+        repo, at_commit=head
+    )
+    assert reading.verdict == anchor_floor.FLOOR_REJECTED
+    assert reading.errors == [
+        "durability anchor floor at the reviewed commit differs byte-for-byte "
+        "from its own history tail"
+    ]
+
+
+def test_advanced_floor_rejects_a_replayed_generation(tmp_path: Path) -> None:
+    """M14:ADVANCED floor 下 `anchor_generation == floor_generation` 是重放。
+
+    genesis 分支另有 `generation != 1` 的硬檢查,只有 ADVANCED 這一支裸露。
+    """
+
+    floor = _advanced_floor(4)
+    errors = anchor_floor.durability_anchor_floor_errors(
+        {
+            "anchor_locator": floor["anchor_locator"],
+            "offhost_replica_locator": floor["offhost_replica_locator"],
+            "anchor_generation": floor["floor_generation"],
+            "previous_anchor_head_digest": "sha256:" + "8" * 64,
+        },
+        floor=floor,
+        label="replayed anchor",
+    )
+    assert (
+        "replayed anchor generation does not strictly exceed the committed floor"
     ) in errors, errors
 
 

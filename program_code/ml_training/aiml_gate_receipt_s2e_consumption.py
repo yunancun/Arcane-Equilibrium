@@ -14,7 +14,9 @@ from pathlib import Path
 from typing import Any, Callable
 
 from agent_governance_schema import schema_subset_errors
-from aiml_gate_receipt_schema_core import _load_schema, canonical_digest
+from aiml_gate_receipt_schema_core import (
+    _load_schema, canonical_digest, git_subprocess_env,
+)
 from aiml_gate_receipt_s2e_external_evidence import (
     s2e_predecessor_registry_slot_id,
     validate_s2e_predecessor_registry_attestation,
@@ -542,6 +544,7 @@ def _git_common_dir(repo_root: Path) -> Path:
         cwd=repo_root,
         check=True,
         capture_output=True,
+        env=git_subprocess_env(),
         text=True,
     ).stdout.strip()
     path = Path(raw)

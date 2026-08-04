@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import base64
 import hashlib
 import sys
 from copy import deepcopy
@@ -502,6 +503,95 @@ def test_anchor_rejects_replica_on_the_same_host_identity(trust_profiles):
         "durability anchor replica host fingerprint differs from its fixed "
         "trust root"
     ) in errors
+
+
+def _install_local_host_keys(tmp_path, monkeypatch, *, wire: bytes) -> str:
+    """把 `/etc/ssh` 指到一份 disposable host key,回它的 OpenSSH 指紋。"""
+
+    directory = tmp_path / "etc-ssh"
+    directory.mkdir(exist_ok=True)
+    encoded = base64.b64encode(wire).decode("ascii")
+    (directory / "ssh_host_ed25519_key.pub").write_text(
+        f"ssh-ed25519 {encoded} root@verifier\n", encoding="ascii"
+    )
+    monkeypatch.setattr(evidence, "LOCAL_SSH_HOST_KEY_DIR", directory)
+    digest = base64.b64encode(hashlib.sha256(wire).digest()).decode("ascii")
+    return "SHA256:" + digest.rstrip("=")
+
+
+def test_replica_fingerprint_equal_to_this_hosts_own_key_is_rejected(
+    tmp_path, monkeypatch, trust_profiles
+):
+    """複核 §六-9:與**真實本機 host key** 的逐字比對,不是 loopback 黑名單。
+
+    trust root 也宣告同一個指紋(否則錯誤會退化成「與 trust root 不符」),因此本
+    案唯一被違反的就是「副本不得就是本驗證主機」。
+    """
+
+    local = _install_local_host_keys(tmp_path, monkeypatch, wire=b"local-host-key")
+    monkeypatch.setitem(
+        trust_profiles["replica_profile"], "host_fingerprint", local
+    )
+    artifact = _anchor_case(trust_profiles)
+    forged = deepcopy(artifact)
+    for name in ("signed_core_digest", "signature", "attestation_digest"):
+        forged.pop(name)
+    forged["offhost_replica_readback"]["replica_host_fingerprint"] = local
+    _sign_replica_readback(forged["offhost_replica_readback"], trust_profiles)
+    forged = _sign_anchor(forged, trust_profiles)
+    errors = evidence.validate_s2e_durability_anchor_attestation(
+        forged,
+        terminal_payload_digest=D1,
+        now=ANCHOR + timedelta(minutes=1),
+    )
+    assert (
+        "durability anchor replica host fingerprint is this verifying host's "
+        "own SSH host key"
+    ) in errors, errors
+    assert (
+        "durability anchor replica host fingerprint differs from its fixed "
+        "trust root"
+    ) not in errors, errors
+
+
+def test_local_host_key_skip_is_typed_and_observable(
+    tmp_path, monkeypatch, trust_profiles
+):
+    """讀不到 `/etc/ssh/ssh_host_*.pub` 時是 typed skip,且在 errors 之外可觀測。"""
+
+    empty = tmp_path / "no-etc-ssh"
+    empty.mkdir()
+    monkeypatch.setattr(evidence, "LOCAL_SSH_HOST_KEY_DIR", empty)
+    assert evidence.local_ssh_host_key_fingerprints() == (
+        frozenset(), evidence.LOCAL_HOST_KEYS_UNREADABLE
+    )
+    observations: list[str] = []
+    assert evidence.validate_s2e_durability_anchor_attestation(
+        _anchor_case(trust_profiles),
+        terminal_payload_digest=D1,
+        now=ANCHOR + timedelta(minutes=1),
+        observations=observations,
+    ) == []
+    assert observations == [
+        "durability anchor replica host identity: "
+        + evidence.LOCAL_HOST_KEYS_UNREADABLE
+    ]
+
+    local = _install_local_host_keys(tmp_path, monkeypatch, wire=b"other-host-key")
+    assert evidence.local_ssh_host_key_fingerprints() == (
+        frozenset({local}), evidence.LOCAL_HOST_KEYS_OBSERVED
+    )
+    observed: list[str] = []
+    assert evidence.validate_s2e_durability_anchor_attestation(
+        _anchor_case(trust_profiles),
+        terminal_payload_digest=D1,
+        now=ANCHOR + timedelta(minutes=1),
+        observations=observed,
+    ) == []
+    assert observed == [
+        "durability anchor replica host identity: "
+        + evidence.LOCAL_HOST_KEYS_OBSERVED
+    ]
 
 
 def test_anchor_rejects_anchor_host_fingerprint_off_its_trust_root(trust_profiles):
