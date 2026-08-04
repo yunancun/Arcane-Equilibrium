@@ -2502,6 +2502,48 @@ def test_verified_review_bundle_issues_ready_genesis_receipt(
     assert validator.validate_s2e_launch_genesis_receipt(
         issued, repo_root=repo
     ) == []
+    # E3-B:issuance 是 floor 判定的最高價值出口。VERIFIED 必須以 typed 形式出現,
+    # 而不是靠「沒有錯誤訊息」這種由缺席推論來的證據。
+    assert issuance["anchor_gate_observations"] == {
+        "host_identity": [
+            "durability anchor replica host identity: "
+            + s2e_external.local_ssh_host_key_fingerprints()[1]
+        ],
+        "floor_verdicts": [
+            {
+                "label": "acceptance review durability anchor floor",
+                "verdict": anchor_floor.FLOOR_VERIFIED,
+            },
+        ],
+    }
+
+    # 同一份 floor、同一份 bundle,只把受保護 ref 移開:這正是 operator 2026-08-03
+    # 接受為誠實終態的那個情境(未 merge／未 fetch／CI shallow checkout)。它必須
+    # ①仍然發不出 receipt ②在 typed 出口記成 UNVERIFIED 而不是 REJECTED——後者會
+    # 把「誠實不可驗」誤報成「偽造被拒」。
+    _git(repo, "update-ref", "-d", anchor_floor._PROTECTED_ANCESTOR_REFS[0])
+    unverified = validator.issue_s2e_launch_receipt(
+        candidate,
+        acceptance_review_bundle=bundle,
+        repo_root=repo,
+        governed_capture_record=capture,
+        durability_anchor_attestation=anchor_attestation,
+        disposable_test_effect_chains=[disposable_chain],
+    )
+    assert unverified["status"] == "EXTERNAL_VERIFICATION_PENDING"
+    assert unverified["issued_receipt"] is None
+    assert unverified["next_durability_anchor_floor"] is None
+    assert unverified["anchor_gate_observations"]["floor_verdicts"] == [
+        {
+            "label": "acceptance review durability anchor floor",
+            "verdict": anchor_floor.FLOOR_UNVERIFIED,
+        },
+    ]
+    assert (
+        "acceptance review durability anchor floor: UNVERIFIED: no code-owned "
+        "protected ref resolves in this repository, so the floor's history tail "
+        "cannot be pinned to any code-owned ref"
+    ) in unverified["errors"]
 
 
 def test_generic_validator_never_schema_only_accepts_review_bundle() -> None:
@@ -3602,8 +3644,17 @@ def test_floor_verdict_is_typed_beyond_the_module_boundary(tmp_path: Path) -> No
         label="transition durability anchor floor",
         observations=observations,
     )
-    # 兩者都仍然擋(UNVERIFIED 不是 PASS)。
-    assert unmerged_errors and forged_errors
+    # 兩者都仍然擋(UNVERIFIED 不是 PASS),而且逐字釘住訊息:只斷言「errors 非空」
+    # 會讓「UNVERIFIED 改判 PASS」這種變異在別處補一條無關錯誤時仍然綠。
+    assert unmerged_errors == [
+        "acceptance review durability anchor floor: UNVERIFIED: no code-owned "
+        "protected ref resolves in this repository, so the floor's history tail "
+        "cannot be pinned to any code-owned ref"
+    ]
+    assert forged_errors == [
+        "transition durability anchor floor: durability anchor floor history "
+        "does not begin with its GENESIS_ARMED commit"
+    ]
     # 但 typed 輸出裡分得開,且不需要解析錯誤字串。
     assert observations.as_records() == {
         "host_identity": [],
@@ -3622,3 +3673,18 @@ def test_floor_verdict_is_typed_beyond_the_module_boundary(tmp_path: Path) -> No
     assert anchor_floor.host_identity_sink(observations) is (
         observations.host_identity
     )
+    # 同一條路徑被重跑(issuance 就會)只是噪音,投影必須冪等;但**同一 label 兩個
+    # 不同 verdict** 是真矛盾,不得被去重壓平。
+    repeated = anchor_floor.AnchorGateObservations()
+    for verdict in (
+        anchor_floor.FLOOR_UNVERIFIED,
+        anchor_floor.FLOOR_UNVERIFIED,
+        anchor_floor.FLOOR_REJECTED,
+    ):
+        repeated.floor_verdicts.append(
+            anchor_floor.FloorVerdictObservation("transition floor", verdict)
+        )
+    assert repeated.as_records()["floor_verdicts"] == [
+        {"label": "transition floor", "verdict": anchor_floor.FLOOR_REJECTED},
+        {"label": "transition floor", "verdict": anchor_floor.FLOOR_UNVERIFIED},
+    ]

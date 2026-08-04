@@ -32,7 +32,7 @@ from aiml_gate_receipt_s2e_consumption import (
 from aiml_gate_receipt_s2e_anchor_floor import (
     AnchorGateObservations, durability_anchor_floor_binding_errors,
     durability_anchor_floor_errors, durability_anchor_transition_order_errors,
-    floor_gate_errors, host_identity_sink, next_durability_anchor_floor,
+    floor_gate_errors, host_identity_sink, next_floor_projection,
     read_committed_durability_anchor_floor,
 )
 from aiml_gate_receipt_s2e_external_evidence import (
@@ -1694,6 +1694,8 @@ def issue_s2e_launch_receipt(
 ) -> dict[str, Any]:
     """Issue one ready receipt only after the complete review path verifies."""
 
+    # E3-B:issuance 是 floor 判定的最高價值出口;消費者邊界見 `AnchorGateObservations`。
+    observations = AnchorGateObservations()
     trusted_now = _time(_trusted_issuance_now())
     if isinstance(candidate, dict) and candidate.get("schema_version") == (
         "s2e_launch_genesis_receipt_v1"
@@ -1707,9 +1709,7 @@ def issue_s2e_launch_receipt(
         if predecessor_receipt is None or not isinstance(
             predecessor_authority, dict
         ):
-            errors = [
-                "wave receipt issuance requires exact predecessor authority"
-            ]
+            errors = ["wave receipt issuance requires exact predecessor authority"]
             review_predecessor_chain = []
         else:
             chain_before = predecessor_authority.get(
@@ -1733,6 +1733,7 @@ def issue_s2e_launch_receipt(
                 now=trusted_now,
                 consumed_predecessor_digests=frozenset(consumed),
                 durability_anchor_attestation=durability_anchor_attestation,
+                observations=observations,
             )
         ready_status = "TASK_BRANCH_CHECKPOINT_READY"
     else:
@@ -1749,6 +1750,7 @@ def issue_s2e_launch_receipt(
             durability_anchor_attestation=durability_anchor_attestation,
             repo_root=repo_root,
             now=trusted_now,
+            observations=observations,
         )
     )
     issued_receipt = None
@@ -1811,6 +1813,7 @@ def issue_s2e_launch_receipt(
                     now=trusted_now,
                     consumed_predecessor_digests=frozenset(consumed),
                     durability_anchor_attestation=durability_anchor_attestation,
+                    observations=observations,
                 )
             )
         if errors:
@@ -1830,14 +1833,10 @@ def issue_s2e_launch_receipt(
         ),
         "predecessor_consumption_result": predecessor_consumption_result,
         "issued_receipt": issued_receipt,
-        # §3.3(d):純投影,供 operator/E1 在同一個 PR 內 commit 下一份 floor。
-        # 驗證器永遠不寫檔;沒有 issued receipt 就沒有可推進的 floor。
-        "next_durability_anchor_floor": (
-            next_durability_anchor_floor(issued_receipt, acceptance_review_bundle)
-            if issued_receipt is not None
-            and isinstance(acceptance_review_bundle, dict)
-            else None
+        "next_durability_anchor_floor": next_floor_projection(
+            issued_receipt, acceptance_review_bundle
         ),
+        "anchor_gate_observations": observations.as_records(),
         "errors": sorted(set(errors)),
     }
     result["issuance_result_digest"] = canonical_digest(result)

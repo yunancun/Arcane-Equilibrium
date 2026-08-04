@@ -156,6 +156,18 @@ class AnchorGateObservations:
     刻意是一個具名載體而不是兩個裸 list:兩條觀察沿著同一條驗證路徑產生,分開傳會
     再度出現 E3-E 那種「只接了一半」的縫。`as_records()` 是給 CLI/receipt 序列化用的
     純資料投影——本通道**必須有真消費者**,不得再成為第二個 write-only 通道。
+
+    **消費者邊界(E3-B;逐格具名,兩格成熟度不同,不得被一併宣稱為「有消費者」)**:
+
+    - `floor_verdicts` 的程式消費者有兩處,都是被序列化出去的 stdout JSON 欄位:
+      `agent_governance_s2e_launch_receipts` CLI(`transition-gate` 與 `validate`)
+      與 `issue_s2e_launch_receipt` 回傳的 `launch_receipt_issuance_result_v1`,
+      兩者的欄位名皆為 `anchor_gate_observations`。下游因此能不解析錯誤字串就分辨
+      「偽造/損壞的 floor 被拒(`REJECTED`)」與「未 merge/不可達因而誠實不可驗
+      (`UNVERIFIED`)」。
+    - **gate 行為完全由 `errors` 決定**:本通道不放行、不阻擋、不改變任何 status。
+      `UNVERIFIED` 照樣擋——它不是 PASS,typed 化只讓它「發得出來」,不讓它通過。
+    - `host_identity` 至今**仍無程式消費者**(E2 F-07),僅供 receipt/人工審閱。
     """
 
     def __init__(self) -> None:
@@ -163,11 +175,16 @@ class AnchorGateObservations:
         self.floor_verdicts: list[FloorVerdictObservation] = []
 
     def as_records(self) -> dict[str, Any]:
+        # verdict 以 `(label, verdict)` 去重:一次 issuance 會沿兩條路徑重跑同一組
+        # floor 檢查,重複條目只是噪音。去重刻意做在**配對**上而非 label 上——同一
+        # label 出現兩個不同 verdict 是真矛盾,那種情況仍留兩筆,不會被壓平掉。
         return {
             "host_identity": sorted(set(self.host_identity)),
             "floor_verdicts": [
-                {"label": item.label, "verdict": item.verdict}
-                for item in self.floor_verdicts
+                {"label": label, "verdict": verdict}
+                for label, verdict in sorted({
+                    (item.label, item.verdict) for item in self.floor_verdicts
+                })
             ],
         }
 
@@ -765,3 +782,15 @@ def next_durability_anchor_floor(
     }
     floor["floor_digest"] = durability_anchor_floor_digest(floor)
     return floor
+
+
+def next_floor_projection(issued_receipt: Any, bundle: Any) -> dict[str, Any] | None:
+    """§3.3(d):純投影,供 operator/E1 在同一個 PR 內 commit 下一份 floor。
+
+    驗證器永遠不寫檔;沒有 issued receipt 就沒有可推進的 floor。前置條件放在投影
+    函式自己身上,而不是留在某一個呼叫點——第二個呼叫端因此不可能忘記它。
+    """
+
+    if not isinstance(issued_receipt, dict) or not isinstance(bundle, dict):
+        return None
+    return next_durability_anchor_floor(issued_receipt, bundle)
