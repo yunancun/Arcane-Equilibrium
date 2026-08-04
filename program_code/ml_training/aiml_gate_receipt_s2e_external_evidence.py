@@ -89,6 +89,36 @@ LOCAL_SSH_HOST_KEY_DIR = Path("/etc/ssh")
 LOCAL_SSH_HOST_KEY_GLOB = "ssh_host_*.pub"
 LOCAL_HOST_KEYS_OBSERVED = "LOCAL_HOST_KEYS_OBSERVED"
 LOCAL_HOST_KEYS_UNREADABLE = "LOCAL_HOST_KEYS_UNREADABLE"
+# 一把 SSH host public key 遠小於此;上界只是為了讓「超大檔」不進記憶體。
+MAX_LOCAL_HOST_KEY_BYTES = 64 * 1024
+
+
+def _read_local_host_key_bytes(candidate: Path) -> bytes | None:
+    """讀一個 host key 檔;不是**普通檔案**或讀不完整一律回 `None`。
+
+    E3-E 指出兩個新增的讀取面:
+    - `/etc/ssh` 下一個名為 `ssh_host_*.pub` 的 **FIFO** 會讓 `read_text` 永久阻塞
+      (E3 實測 15s 未止)。因此改用 `os.open(..., O_NONBLOCK)` + `fstat`:FIFO 在
+      O_NONBLOCK 下立刻回 fd,再由 `S_ISREG` 擋掉,且沒有 lstat→open 的 TOCTOU 縫。
+    - 超大檔會讓 `MemoryError` 從 `validate_s2e_durability_anchor_attestation` 裸逸出
+      (它不在舊的 except tuple 內)。因此設位元組上界,並顯式捕捉 `MemoryError`。
+    """
+
+    fd = None
+    try:
+        fd = os.open(candidate, os.O_RDONLY | os.O_NONBLOCK)
+        if not stat.S_ISREG(os.fstat(fd).st_mode):
+            return None
+        raw = os.read(fd, MAX_LOCAL_HOST_KEY_BYTES + 1)
+        return None if len(raw) > MAX_LOCAL_HOST_KEY_BYTES else raw
+    except (OSError, ValueError, MemoryError):
+        return None
+    finally:
+        if fd is not None:
+            try:
+                os.close(fd)
+            except OSError:
+                pass
 
 
 def local_ssh_host_key_fingerprints() -> tuple[frozenset[str], str]:
@@ -104,23 +134,38 @@ def local_ssh_host_key_fingerprints() -> tuple[frozenset[str], str]:
     讀不到時(例如 Mac 開發機沒有 sshd host key)**不得 fail-open**:回空集合 +
     `LOCAL_HOST_KEYS_UNREADABLE`,由驗證器把該 typed skip 顯式帶到 errors 之外的
     observation 通道,而不是在驗證器裡靜默當成「已檢查且通過」。
+
+    E3-E／E2 F-06(2026-08-04):舊版**逐檔失敗靜默 `continue`**,卻仍然回報
+    `LOCAL_HOST_KEYS_OBSERVED`。E2 實測用 `ssh-keygen -C` 把 rsa 那把的 comment 改成
+    合法 UTF-8(非 ASCII)⇒ `read_text(encoding="ascii")` 拋 `UnicodeDecodeError`,
+    那把指紋被靜默排除、狀態仍說「已觀察」,攻擊者拿它當 `replica_host_fingerprint`
+    就不會被抓;E3 另測出 mode 000 同效果。修法兩層:
+    (1) 解碼改成**只取 wire 欄位的位元組**,不再對整行做 ASCII 解碼——comment 是自由
+        文字,本來就不該影響指紋計算;
+    (2) 任何一個 candidate 失敗都**降級狀態**為 `LOCAL_HOST_KEYS_UNREADABLE`。
+        已算出的指紋仍然回傳(它們仍能抓到冒充),但狀態不再宣稱「全部已觀察」。
     """
 
     fingerprints: set[str] = set()
+    degraded = False
     try:
         candidates = sorted(LOCAL_SSH_HOST_KEY_DIR.glob(LOCAL_SSH_HOST_KEY_GLOB))
     except OSError:
-        candidates = []
+        return frozenset(), LOCAL_HOST_KEYS_UNREADABLE
     for candidate in candidates:
+        raw = _read_local_host_key_bytes(candidate)
+        if raw is None:
+            degraded = True
+            continue
         try:
-            parts = candidate.read_text(encoding="ascii").split()
-            wire = base64.b64decode(parts[1], validate=True)
-        except (OSError, UnicodeDecodeError, IndexError, ValueError, TypeError):
+            wire = base64.b64decode(raw.split()[1], validate=True)
+        except (IndexError, ValueError, TypeError):
+            degraded = True
             continue
         digest = base64.b64encode(hashlib.sha256(wire).digest()).decode("ascii")
         fingerprints.add("SHA256:" + digest.rstrip("="))
-    if not fingerprints:
-        return frozenset(), LOCAL_HOST_KEYS_UNREADABLE
+    if degraded or not fingerprints:
+        return frozenset(fingerprints), LOCAL_HOST_KEYS_UNREADABLE
     return frozenset(fingerprints), LOCAL_HOST_KEYS_OBSERVED
 
 
@@ -631,6 +676,18 @@ def validate_s2e_durability_anchor_attestation(
 
     `observations` 是**errors 以外**的 typed 通道:本機 host key 讀不到時,
     「這一條沒被執法」必須顯式出現在這裡,不能靜默當成已檢查(複核 §六-9)。
+
+    **這條通道的消費者(E3-E／E2 F-07,2026-08-04 明確化)**:
+
+    - `aiml_gate_receipt_s2e_launch.verify_receipt_carrier_attestation` 把它投影成
+      result dict 的 `host_identity_observations`。該欄位在 repo 內**沒有程式消費者**,
+      它是 result artifact 上供人工/receipt 審閱的 typed 欄位(被
+      `verification_result_digest` 涵蓋)。此處刻意寫明,免得它被誤讀成一個已被執法的
+      檢查——**不得**因為「有欄位」就推論「已檢查」。
+    - acceptance-review 那條路徑(gate issuance 與 predecessor authority 走的就是它)
+      舊版**根本沒傳** `observations`,於是同一條觀察只接了一半。現在由
+      `AnchorGateObservations` 一路帶到 `agent_governance_s2e_launch_receipts` CLI 的
+      `anchor_gate_observations` 輸出,那是本通道真正的程式消費者。
     """
 
     schema = _load_schema(DURABILITY_ANCHOR_SCHEMA)

@@ -16,6 +16,9 @@ ML_ROOT = REPO_ROOT / "program_code" / "ml_training"
 if str(ML_ROOT) not in sys.path:
     sys.path.insert(0, str(ML_ROOT))
 
+from aiml_gate_receipt_s2e_anchor_floor import (  # noqa: E402
+    AnchorGateObservations,
+)
 from aiml_gate_receipt_s2e_launch import (  # noqa: E402,F401
     build_genesis_candidate,
     build_s2e_launch_predecessor_authority,
@@ -252,6 +255,11 @@ def main(argv: list[str] | None = None) -> int:
             for item in chain
             if isinstance(item, dict)
         } if isinstance(chain, list) else set()
+        # E3-B:`verdict` 出模組後曾被壓平成無型別 errors,下游只能靠
+        # `"UNVERIFIED: "` 子字串去分辨「偽造的 floor 被拒」與「未 merge 因而誠實
+        # 不可驗」。UNVERIFIED 仍然擋(status 照樣 FAIL),但 verdict 現在是 typed
+        # 輸出的一格。同一個載體也帶出 host identity 觀察(E3-E 的另一半)。
+        observations = AnchorGateObservations()
         errors = validate_s2e_launch_transition(
             artifact,
             predecessor_receipt=predecessor,
@@ -262,12 +270,18 @@ def main(argv: list[str] | None = None) -> int:
             durability_anchor_attestation=_read(
                 args.durability_anchor_attestation
             ),
+            observations=observations,
         )
         status = "ADVANCE" if not errors else "FAIL"
-        print(json.dumps({"status": status, "errors": errors}))
+        print(json.dumps({
+            "status": status,
+            "anchor_gate_observations": observations.as_records(),
+            "errors": errors,
+        }))
         return 0 if not errors else 2
     artifact = _read(args.receipt)
     status = "FAIL"
+    observations = AnchorGateObservations()
     if artifact.get("schema_version") == "s2e_launch_genesis_receipt_v1":
         errors = validate_s2e_launch_genesis_receipt(
             artifact, repo_root=args.repo_root
@@ -322,11 +336,16 @@ def main(argv: list[str] | None = None) -> int:
                 durability_anchor_attestation=_read(
                     args.durability_anchor_attestation
                 ),
+                observations=observations,
             )
             status = "ADVANCE" if not errors else "FAIL"
     if artifact.get("schema_version") != "s2e_launch_wave_receipt_v1":
         status = "PASS" if not errors else "FAIL"
-    print(json.dumps({"status": status, "errors": errors}))
+    print(json.dumps({
+        "status": status,
+        "anchor_gate_observations": observations.as_records(),
+        "errors": errors,
+    }))
     return 0 if not errors else 2
 
 

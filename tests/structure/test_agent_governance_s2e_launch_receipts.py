@@ -10,6 +10,7 @@ from datetime import datetime, timedelta, timezone
 from pathlib import Path
 import subprocess
 import sys
+from typing import Any
 
 import pytest
 
@@ -23,6 +24,7 @@ for candidate in (HELPERS, ML_ROOT):
 
 import agent_governance_s2e_launch_receipts as launch  # noqa: E402
 import aiml_gate_receipt_s2e_anchor_floor as anchor_floor  # noqa: E402
+import aiml_gate_receipt_schema_core as schema_core  # noqa: E402
 import aiml_gate_receipt_s2e_dispatch as s2e_dispatch  # noqa: E402
 import aiml_gate_receipt_s2e_external_evidence as s2e_external  # noqa: E402
 import aiml_gate_receipt_s2e_launch as s2e  # noqa: E402
@@ -2056,6 +2058,31 @@ def test_lw1_predicate_oracle_replays_evidence_and_preserves_active_package(
         )
 
 
+def _expected_anchor_observations() -> dict[str, Any]:
+    """CLI 在一次 ADVANCE 上必須輸出的 typed 觀察(兩處 floor + 一條 host identity)。
+
+    host identity 那條逐字綁**本機真實狀態**(而不是列舉兩個可能值),因此在
+    `/etc/ssh` 可讀與不可讀的主機上都是強斷言。
+    """
+
+    return {
+        "host_identity": [
+            "durability anchor replica host identity: "
+            + s2e_external.local_ssh_host_key_fingerprints()[1]
+        ],
+        "floor_verdicts": [
+            {
+                "label": "acceptance review durability anchor floor",
+                "verdict": anchor_floor.FLOOR_VERIFIED,
+            },
+            {
+                "label": "transition durability anchor floor",
+                "verdict": anchor_floor.FLOOR_VERIFIED,
+            },
+        ],
+    }
+
+
 def test_launch_cli_exposes_full_issue_carrier_authority_and_transition_gates(
     tmp_path: Path,
     monkeypatch: pytest.MonkeyPatch,
@@ -2191,6 +2218,7 @@ def test_launch_cli_exposes_full_issue_carrier_authority_and_transition_gates(
     ]) == 0
     assert json.loads(capsys.readouterr().out) == {
         "status": "STRUCTURAL_PASS_NOT_ADVANCE",
+        "anchor_gate_observations": {"host_identity": [], "floor_verdicts": []},
         "errors": [],
     }
     assert launch.main([
@@ -2201,8 +2229,11 @@ def test_launch_cli_exposes_full_issue_carrier_authority_and_transition_gates(
         "--predecessor-authority", str(authority_path),
         "--durability-anchor-attestation", str(candidate_anchor_path),
     ]) == 0
+    # E3-B/E3-E 的真消費者:verdict 與 host identity 觀察都是 typed 輸出的一格,
+    # 下游不必再從錯誤字串裡撈 `"UNVERIFIED: "` 子字串。
     assert json.loads(capsys.readouterr().out) == {
         "status": "ADVANCE",
+        "anchor_gate_observations": _expected_anchor_observations(),
         "errors": [],
     }
     assert clock_samples == [now, now, now, now, now]
@@ -2216,6 +2247,7 @@ def test_launch_cli_exposes_full_issue_carrier_authority_and_transition_gates(
     ]) == 0
     assert json.loads(capsys.readouterr().out) == {
         "status": "ADVANCE",
+        "anchor_gate_observations": _expected_anchor_observations(),
         "errors": [],
     }
     assert clock_samples == [now, now, now, now, now, now]
@@ -2929,10 +2961,13 @@ def test_committed_floor_without_any_protected_ref_is_unverified(
         repo, at_commit=head
     )
     assert reading.verdict == anchor_floor.FLOOR_UNVERIFIED
+    # E2 F-02:舊字串隱含「是祖先時就證明了需要第二組 capability」,那正是已撤回的
+    # 宣稱(module docstring)。訊息只能講它真正能證的那件事。
     assert reading.errors == [
         "UNVERIFIED: no code-owned protected ref resolves in this repository, "
-        "so the floor cannot be shown to require a second capability"
+        "so the floor's history tail cannot be pinned to any code-owned ref"
     ]
+    assert not any("second capability" in error for error in reading.errors)
 
 
 def test_committed_floor_rejects_a_non_exact_commit(tmp_path: Path) -> None:
@@ -2946,7 +2981,13 @@ def test_committed_floor_rejects_a_non_exact_commit(tmp_path: Path) -> None:
     _commit_floor(repo, _genesis_armed_floor(), "arm floor")
     victim = repo / "victim.txt"
     victim.write_text("SENTINEL-MUST-SURVIVE\n", encoding="ascii")
-    for injected in ("--output=victim.txt", "HEAD", "", "A" * 40, "abc"):
+    # E2 F-04:`"a"*40 + "\n"` 曾經通過 `^[0-9a-f]{40}$`(Python 的 `$` 放行尾端
+    # 換行)並真的進了 git argv。git 自己拒 ⇒ 當時仍 fail-closed,但本測試宣稱的
+    # 不變量是假的。`fullmatch` + `\Z` 之後,它在碰 subprocess 之前就被拒。
+    for injected in (
+        "--output=victim.txt", "HEAD", "", "A" * 40, "abc", "a" * 40 + "\n",
+        "\n" + "a" * 40, "a" * 40 + "\n" + "b" * 40,
+    ):
         reading = anchor_floor.read_committed_durability_anchor_floor(
             repo, at_commit=injected
         )
@@ -3293,3 +3334,291 @@ def test_carrier_attestation_window_length_upper_bound_is_enforced(
     assert (
         "carrier attestation freshness window exceeds 600 seconds"
     ) in errors, errors
+
+
+def _graft_file(repo: Path) -> Path:
+    common = Path(_git(repo, "rev-parse", "--git-common-dir"))
+    if not common.is_absolute():
+        common = repo / common
+    return common / "info" / "grafts"
+
+
+def test_committed_floor_rejects_a_grafts_file(tmp_path: Path) -> None:
+    """E2 F-01:grafts 是 replace ref 的前身,舊版只查後者。
+
+    E2 與 E3 對此互相矛盾,E1 於 git 2.55 實測裁定 **E2 對**:
+    - E2 形(`<rollback> <genesis>`)把中間那筆 gen=2 從 `--full-history` 走訪裡整個
+      移除,同一份被 rollback 的 repo 由 REJECTED 翻成 **VERIFIED gen=1**,而且照樣
+      通過受保護 ref 檢查——這才是危險形態。
+    - E3 形(只把創世變成 root)不改動 floor 觸碰序,本來就 REJECTED。
+    修法後兩種構造都必須 fail-closed,而且理由是 grafts 檔案本身而非某一種寫法。
+    """
+
+    repo = _floor_repo(tmp_path)
+    genesis = _commit_floor(repo, _genesis_armed_floor(), "arm floor")
+    _commit_floor(repo, _advanced_floor(2), "advance floor to 2")
+    head = _commit_floor(repo, _advanced_floor(1, head_suffix="7"), "roll back to 1")
+    # 控制組:沒有 grafts 時,回退是被 generation 規則抓到的。
+    assert anchor_floor.read_committed_durability_anchor_floor(
+        repo, at_commit=head
+    ).errors == [
+        "durability anchor floor generation is not strictly increasing"
+    ]
+    grafts = _graft_file(repo)
+    grafts.parent.mkdir(parents=True, exist_ok=True)
+    grafts.write_text(f"{head} {genesis}\n", encoding="ascii")
+    grafted = anchor_floor.read_committed_durability_anchor_floor(
+        repo, at_commit=head
+    )
+    assert grafted.verdict == anchor_floor.FLOOR_REJECTED
+    assert grafted.floor is None
+    assert (
+        "durability anchor floor cannot be read from a repository that "
+        "rewrites commit parentage through a grafts file"
+    ) in grafted.errors, grafted.errors
+    # E3 形:同一條檢查一樣擋得住,不需要辨認寫法。
+    grafts.write_text(f"{genesis}\n", encoding="ascii")
+    assert (
+        "durability anchor floor cannot be read from a repository that "
+        "rewrites commit parentage through a grafts file"
+    ) in anchor_floor.read_committed_durability_anchor_floor(
+        repo, at_commit=head
+    ).errors
+
+
+def test_committed_floor_rejects_a_promisor_partial_clone(tmp_path: Path) -> None:
+    """E3-D:partial clone 不是 shallow,舊版放行後 `git show` 會走網路抓 blob。"""
+
+    repo = _floor_repo(tmp_path)
+    _commit_floor(repo, _genesis_armed_floor(), "arm floor")
+    _commit_floor(repo, _advanced_floor(1), "advance floor")
+    _git(repo, "config", "uploadpack.allowFilter", "true")
+    partial = tmp_path / "partial"
+    _git(
+        repo, "clone", "-q", "--no-local", "--filter=blob:none",
+        f"file://{repo}", str(partial),
+    )
+    _git(partial, "update-ref", anchor_floor._PROTECTED_ANCESTOR_REFS[0], "HEAD")
+    # 前提:promisor clone 自報「不是 shallow」,所以舊的那條檢查守不住。
+    assert _git(partial, "rev-parse", "--is-shallow-repository") == "false"
+    reading = anchor_floor.read_committed_durability_anchor_floor(
+        partial, at_commit=_git(partial, "rev-parse", "HEAD")
+    )
+    assert reading.verdict == anchor_floor.FLOOR_REJECTED
+    assert (
+        "durability anchor floor cannot be read from a promisor partial clone"
+    ) in reading.errors, reading.errors
+
+
+def test_committed_floor_never_resolves_git_from_the_ambient_path(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """E3-A:ambient `PATH` 曾經決定哪個二進位被當成 `git` 執行(RCE)。
+
+    PM 實測:把假 `git` 放到 PATH 最前面,`read_committed_durability_anchor_floor`
+    會真的執行它(uid=501),E3 用完整 stub 應答 7 次呼叫後拿到 `VERIFIED gen=4242`
+    且 repo_root 根本不存在。此處的哨兵檔案是唯一判準:被執行過就必然留下痕跡。
+    """
+
+    repo = _floor_repo(tmp_path)
+    _commit_floor(repo, _genesis_armed_floor(), "arm floor")
+    head = _commit_floor(repo, _advanced_floor(1), "advance floor")
+    hostile = tmp_path / "hostile-bin"
+    hostile.mkdir()
+    sentinel = tmp_path / "hostile-git-was-executed"
+    fake = hostile / "git"
+    fake.write_text(
+        "#!/bin/sh\n"
+        f"echo executed >> {sentinel}\n"
+        'case "$*" in *--is-shallow-repository*) echo false ;; esac\n'
+        "exit 0\n",
+        encoding="ascii",
+    )
+    fake.chmod(0o755)
+    monkeypatch.setenv("PATH", f"{hostile}{os.pathsep}{os.environ.get('PATH', '')}")
+    reading = anchor_floor.read_committed_durability_anchor_floor(
+        repo, at_commit=head
+    )
+    assert not sentinel.exists(), sentinel.read_text(encoding="ascii")
+    assert reading.verdict == anchor_floor.FLOOR_VERIFIED
+    assert reading.floor is not None and reading.floor["floor_generation"] == 1
+    # argv[0] 亦為 code-owned 絕對路徑,不只是靠 env 的 PATH。
+    argv = schema_core.git_argv(repo, "rev-parse", "HEAD")
+    assert argv[0].startswith("/") and str(hostile) not in argv[0]
+    assert schema_core.git_subprocess_env()["PATH"] == os.pathsep.join(
+        schema_core._GIT_SEARCH_PATH
+    )
+    assert str(hostile) not in schema_core.git_subprocess_env()["PATH"]
+    assert schema_core.git_subprocess_env()["LC_ALL"] == "C"
+
+
+def test_committed_floor_reads_a_repository_owned_by_another_uid(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """E2 F-05:白名單同時砍掉 `HOME` 與系統 config ⇒ `safe.directory` 無處可讀。
+
+    §LW1 假設的拓撲(三支 root-owned producer + ncyu-owned repo)下,全家族 git 呼叫
+    會 `rc=128 detected dubious ownership`,floor 永久 REJECTED。所有既有測試都以
+    repo owner 身分在 `tmp_path` 跑,永遠碰不到這條。此處用 git 自己的
+    `GIT_TEST_ASSUME_DIFFERENT_OWNER` 強制走到那條路徑(它被白名單擋在外面,所以測試
+    必須顯式把它加進白名單才能到達 git)。
+    """
+
+    repo = _floor_repo(tmp_path)
+    _commit_floor(repo, _genesis_armed_floor(), "arm floor")
+    head = _commit_floor(repo, _advanced_floor(1), "advance floor")
+    knob = "GIT_TEST_ASSUME_DIFFERENT_OWNER"
+    probe = subprocess.run(
+        [schema_core.git_executable(), "-C", str(repo), "rev-parse", "HEAD"],
+        capture_output=True,
+        text=True,
+        env={**schema_core.git_subprocess_env(), knob: "1"},
+    )
+    if probe.returncode == 0:
+        pytest.skip(f"this git ignores {knob}; the ownership path is unreachable")
+    assert "dubious ownership" in probe.stderr, probe.stderr
+    monkeypatch.setattr(
+        schema_core, "_GIT_ENV_ALLOWLIST", (*schema_core._GIT_ENV_ALLOWLIST, knob)
+    )
+    monkeypatch.setenv(knob, "1")
+    reading = anchor_floor.read_committed_durability_anchor_floor(
+        repo, at_commit=head
+    )
+    assert reading.verdict == anchor_floor.FLOOR_VERIFIED, reading.errors
+    assert reading.floor is not None and reading.floor["floor_generation"] == 1
+
+
+def test_committed_floor_git_calls_are_time_bounded(tmp_path: Path) -> None:
+    """E3-D:本模組曾是同家族唯一沒有 `timeout=` 的 git 呼叫者。"""
+
+    repo = _floor_repo(tmp_path)
+    _commit_floor(repo, _genesis_armed_floor(), "arm floor")
+    head = _commit_floor(repo, _advanced_floor(1), "advance floor")
+    real_run = subprocess.run
+    seen: list[Any] = []
+
+    def spy(*args, **kwargs):
+        seen.append(kwargs.get("timeout"))
+        return real_run(*args, **kwargs)
+
+    with pytest.MonkeyPatch.context() as patch:
+        patch.setattr(subprocess, "run", spy)
+        anchor_floor.read_committed_durability_anchor_floor(repo, at_commit=head)
+    assert seen, "no git subprocess was observed"
+    assert all(
+        isinstance(timeout, (int, float)) and timeout > 0 for timeout in seen
+    ), seen
+    # 逾時必須被捕捉成 fail-closed 判定,不得裸逸出驗證函式。
+    assert subprocess.TimeoutExpired in anchor_floor._GIT_FAILURES or issubclass(
+        subprocess.TimeoutExpired, anchor_floor._GIT_FAILURES
+    )
+
+
+def test_committed_floor_admits_a_legitimate_back_merged_history(
+    tmp_path: Path,
+) -> None:
+    """E3-C:`--full-history` 會列出 merge,舊的 32 上界誤殺合法歷史。
+
+    E3 實測合法的 6 次推進在 3 次 back-merge 下列 31 筆、4 次下列 37 筆。此處直接
+    構造出超過舊上界的合法歷史,並斷言它 **不是** 被上界擋掉的。
+    """
+
+    repo = _floor_repo(tmp_path)
+    _git(repo, "branch", "-M", "main")
+    _commit_floor(repo, _genesis_armed_floor(), "arm floor", publish=False)
+    _git(repo, "checkout", "-q", "-b", "long-lived")
+    rounds = 20
+    for index in range(rounds):
+        _commit_floor(
+            repo, _advanced_floor(index + 1), f"branch advance {index}",
+            publish=False,
+        )
+        if index == rounds - 1:
+            break
+        _git(repo, "checkout", "-q", "main")
+        _git(repo, "merge", "-q", "--no-ff", "--no-edit", "long-lived")
+        _git(repo, "checkout", "-q", "long-lived")
+        _git(repo, "merge", "-q", "--no-ff", "--no-edit", "main")
+    head = _publish(repo)
+    listed = _git(
+        repo, "log", "--format=%H", "--full-history", head, "--",
+        anchor_floor.durability_anchor_floor_repo_path(),
+    ).split()
+    assert len(listed) > 32, len(listed)
+    assert len(listed) <= anchor_floor.MAX_FLOOR_HISTORY_COMMITS, len(listed)
+    reading = anchor_floor.read_committed_durability_anchor_floor(
+        repo, at_commit=head
+    )
+    assert reading.verdict == anchor_floor.FLOOR_VERIFIED, reading.errors
+    assert reading.floor is not None
+    assert reading.floor["floor_generation"] == rounds
+
+
+def test_committed_floor_rejects_a_history_beyond_its_admitted_length(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """上界本身仍必須是 fail-closed 的,只是位置改了。"""
+
+    repo = _floor_repo(tmp_path)
+    _commit_floor(repo, _genesis_armed_floor(), "arm floor")
+    head = _commit_floor(repo, _advanced_floor(1), "advance floor")
+    monkeypatch.setattr(anchor_floor, "MAX_FLOOR_HISTORY_COMMITS", 1)
+    reading = anchor_floor.read_committed_durability_anchor_floor(
+        repo, at_commit=head
+    )
+    assert reading.verdict == anchor_floor.FLOOR_REJECTED
+    assert reading.errors == [
+        "durability anchor floor history exceeds its admitted length"
+    ]
+
+
+def test_floor_verdict_is_typed_beyond_the_module_boundary(tmp_path: Path) -> None:
+    """E3-B:出模組一步就只剩無型別 errors,REJECTED 與 UNVERIFIED 被壓成同一種。
+
+    PM 2026-08-04 裁決:UNVERIFIED 仍然擋,但下游必須能區分「偽造的 floor 被拒」與
+    「未 merge 因而誠實不可驗」,且不得靠 `"UNVERIFIED: "` 子字串。
+    """
+
+    honest = _floor_repo(tmp_path / "unmerged")
+    _commit_floor(honest, _genesis_armed_floor(), "arm floor", publish=False)
+    unmerged_head = _commit_floor(
+        honest, _advanced_floor(1), "advance floor", publish=False
+    )
+    forged = _floor_repo(tmp_path / "forged")
+    forged_head = _commit_floor(forged, _advanced_floor(7), "forge an advanced floor")
+
+    observations = anchor_floor.AnchorGateObservations()
+    unmerged_errors = anchor_floor.floor_gate_errors(
+        anchor_floor.read_committed_durability_anchor_floor(
+            honest, at_commit=unmerged_head
+        ),
+        label="acceptance review durability anchor floor",
+        observations=observations,
+    )
+    forged_errors = anchor_floor.floor_gate_errors(
+        anchor_floor.read_committed_durability_anchor_floor(
+            forged, at_commit=forged_head
+        ),
+        label="transition durability anchor floor",
+        observations=observations,
+    )
+    # 兩者都仍然擋(UNVERIFIED 不是 PASS)。
+    assert unmerged_errors and forged_errors
+    # 但 typed 輸出裡分得開,且不需要解析錯誤字串。
+    assert observations.as_records() == {
+        "host_identity": [],
+        "floor_verdicts": [
+            {
+                "label": "acceptance review durability anchor floor",
+                "verdict": anchor_floor.FLOOR_UNVERIFIED,
+            },
+            {
+                "label": "transition durability anchor floor",
+                "verdict": anchor_floor.FLOOR_REJECTED,
+            },
+        ],
+    }
+    assert anchor_floor.host_identity_sink(None) is None
+    assert anchor_floor.host_identity_sink(observations) is (
+        observations.host_identity
+    )

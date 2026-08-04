@@ -89,7 +89,12 @@ docs/execution_plan/ai_ml_landing/receipts/S2E-LW1-LW5/durability-anchor-floor-v
 | `floor_digest` | digest | canonical self-digest（除自身外全欄） |
 
 **floor 不是新的信任源，只是把「bundle 已經釘住的值」投影到一個驗證器自己會去 git 讀的位置。**
-它的完整性來自 §3.4 的歷史檢查與 PR gate，不來自簽章；因此不需要第四把 key。
+它提供的是 §3.4 的歷史檢查（機械可偵測性），不來自簽章；因此不需要第四把 key。
+
+> **2026-08-04 更正（E2 F-02）**：本段原寫「它的完整性來自 §3.4 的歷史檢查與 **PR gate**」。
+> 「PR gate」那半已撤回：本模組讀的是**本地** repo 與**本地** remote-tracking ref，
+> 能以驗證器 uid 寫 `.git` 的人一條 `git update-ref` 就能滿足它，不需要 GitHub。
+> floor 給的是 tamper-evident，**不是**「需要第二組 capability」。
 
 ### 3.2 新增模組（不擴張既有檔）
 
@@ -97,9 +102,16 @@ docs/execution_plan/ai_ml_landing/receipts/S2E-LW1-LW5/durability-anchor-floor-v
 
 - `DURABILITY_ANCHOR_FLOOR_SCHEMA`、`durability_anchor_floor_repo_path()`
 - `durability_anchor_floor_digest(floor)`
-- `read_committed_durability_anchor_floor(repo_root, *, at_commit) -> tuple[dict|None, list[str]]`
-  —— 以 `git show <at_commit>:<path>` 讀 **commit 物件的位元組**（不是工作樹），內含 §3.4 歷史檢查
-- `durability_anchor_floor_errors(anchor, *, floor, label)` —— 單份 attestation 對 floor 的規則
+- `read_committed_durability_anchor_floor(repo_root, *, at_commit) -> CommittedFloorReading`
+  —— 以 `git show <at_commit>:<path>` 讀 **commit 物件的位元組**（不是工作樹），內含 §3.4 歷史檢查。
+  **2026-08-04 更正**：本行原宣告 2-tuple `(dict|None, list[str])`，實作早已是三欄 typed
+  `CommittedFloorReading(verdict, floor, errors)`（`verdict ∈ {VERIFIED, REJECTED, UNVERIFIED}`），
+  正是為了讓 `(None, [])` 這個靜默 fail-open 形狀在建構期不可能出現
+- `durability_anchor_floor_errors(anchor, *, floor, label, candidate_wave=None)` —— 單份
+  attestation 對 floor 的規則（**2026-08-04 更正**：`candidate_wave` 在實作中存在，用來擋
+  非創世 candidate 去推進 `GENESIS_ARMED` floor）
+- `floor_gate_errors(reading, *, label, observations=None)`、`AnchorGateObservations`
+  —— errors 以外的 typed 觀察通道（floor verdict + 本機 host identity）
 - `durability_anchor_order_errors(sequence)` —— 同一次驗證內多份 anchor 的嚴格排序
 - `next_durability_anchor_floor(receipt, bundle)` —— 純投影，供 issuance 產出下一份 floor 供人 commit
 
@@ -404,18 +416,23 @@ host fingerprint 路線勝出的理由是**可外部核對**：指紋是一個�
   （A5，§4.4）；(c) `OFFHOST_REPLICA_READBACK_SIGNER_CAPABILITY` 是 packet 上的 blocking
   前置，未達成則 receipt 根本不能發射。
 
-**E3 若再攻這一點時的正確答覆**（E1／PM 直接引用，不要自行改寫）：
+**~~E3 若再攻這一點時的正確答覆~~（2026-08-04：SUPERSEDED，不得再引用）**
 
-> §LW1 的兩條否定條款針對的是**單一 writer**。修法後，一次 rollback 需要同時滿足三件事：
-> ①在 GitHub main 上 merge 一份倒退的 anchor floor（或改寫 git history，而後者會讓既發 receipt
-> 釘死的 commit SHA 不可達，`_git_binding_errors:444-457` 與 `_is_ancestor:596-603` 當場 fail）；
-> ②持有 trade-core 的 anchor key；③持有 `ncyu-nas` 的 replica key。
-> 只取得 trade-core root（＝spec 所指的那個「同一 writer」）**得不到 `VERIFIED`**：他可以
-> coherent rewrite 自己的 ledger，但拿不到第二台機器對改寫後 head 的簽章，
-> `validate_s2e_durability_anchor_attestation` 回傳非空 errors ⇒ `EXTERNAL_VERIFICATION_PENDING`。
-> 因此「單一簽章不能防 rollback」與「同一 writer coherent rewrite 只能得 `UNVERIFIED`」
-> **結構上成立**。殘留是「兩台機器同時被攻陷 + GitHub 寫入權」的三重複合場景，
-> 那已不在 spec 這兩條款的語義範圍內，且本設計不宣稱防禦它。
+> **本段原本標註「E1／PM 直接引用，不要自行改寫」，該指示連同答覆本身一併作廢。**
+> 撤回理由（E3-A/E2 F-02 第三輪複核）：條件①「在 GitHub main 上 merge 一份倒退的
+> anchor floor」**已被證偽**。floor 的可達性檢查讀的是 `refs/remotes/origin/main` 這個
+> **本地** remote-tracking ref；能以驗證器的 uid 寫 `.git` 的人一條 `git update-ref` 就能
+> 指定它（本設計自己的測試 fixture 就是這樣建可達歷史的），**完全不需要 GitHub 寫入權、
+> PR、或 required checks**。原答覆是一段會自我複製的過強宣稱，任何引用它的文件都會把
+> 「git = 第二組 capability」再散播一次。
+>
+> **仍然成立、且可以引用的部分**（縮小到代碼真正能證的範圍）：
+> 一次 rollback 仍需同時持有 ②trade-core 的 anchor key 與 ③`ncyu-nas` 的 replica key。
+> 只取得 trade-core root 者可以 coherent rewrite 自己的 ledger，但拿不到第二台機器對改寫
+> 後 head 的簽章 ⇒ `validate_s2e_durability_anchor_attestation` 回傳非空 errors ⇒
+> `EXTERNAL_VERIFICATION_PENDING`。**這一條的力量全部來自兩把 key／兩個 host，
+> 一點都不來自 git。** git 側只提供「同一 writer 可 coherent rewrite ⇒ 判 `UNVERIFIED`」
+> 的機械處置，那是誠實終態，不是 P0-1 已關閉的證明。
 
 **仍然具名未解**（不得因上述而抹掉）：跨 host 的併發推進（§3.6 表末列）——
 single-use consumption ledger 在 `.git` common dir，是 host-local 的。
@@ -643,6 +660,12 @@ S2 未關、LW2 仍 locked。本設計全部是**純驗證函式 + 一份 commit
 無 runtime／PG／broker／order／deploy effect。新增的三個 fixed host path 讀取沿用
 既有 `_read_trust_root` 的 TOCTOU 防護（複核已評為高品質，不得改動其邏輯）。
 
+> **2026-08-04 精確化（E3-D）**：「純驗證函式」原本不完全準確——`git show <commit>:<path>`
+> 在 **promisor（partial）clone** 上會靜默走網路向 promisor remote 抓缺失的 blob，
+> 而 partial clone 自報「不是 shallow」，舊檢查守不住。修法後 `_object_store_errors`
+> 直接拒掉 promisor clone，且所有 git 子行程都帶 `timeout=`；本節的宣稱因此才成立。
+> 這是唯一曾存在的 outbound 路徑，不涉及 PG／broker／order／deploy。
+
 ---
 
 ## 九、給 E1 的實作順序
@@ -758,3 +781,46 @@ commit、CI shallow checkout 等情形現在都會得到具名的 `UNVERIFIED` �
 
 **真正的外部性上界**：需要驗證器不與被驗者共用 uid，即一個獨立的 attestor host
 （與 replica 私鑰放 `ncyu-nas` 同方向）。這是尚未排程的工程，不在本 remediation 範圍。
+
+### 2026-08-04：第三輪 E2/E3 複核 —— PATH 繼承是 RCE、grafts 可隱藏 rollback、上界誤殺合法歷史
+
+**轉變**：§二／§3.1／§5.3 三處對 git 側的敘述再收緊一級；`MAX_FLOOR_HISTORY_COMMITS`
+由 32 上修為 256；`git_subprocess_env()` 的白名單語義由「保留最小 ambient 集合」改為
+「**git 的位置只從代碼常數解析**」。
+
+**證據**（E1 於 git 2.55 實測，非轉述）：
+
+1. **E3-A（唯一該擋 PR 的一項）**：`_GIT_ENV_ALLOWLIST` 曾含 `PATH`，而 CPython 用
+   **白名單後的 env 的 PATH** 解析 `git`。把假 `git` 放到 ambient PATH 最前面，
+   `read_committed_durability_anchor_floor` 會真的執行它（uid=501），E3 用完整 stub
+   應答後拿到 `VERIFIED gen=4242` 且 repo_root 根本不存在。這比上一輪被接受為 P1 的
+   `GIT_DIR` 更糟：不需寫 `.git`、不需 repo，且是任意代碼執行。修法：`PATH` 與 argv[0]
+   都從 `_GIT_SEARCH_PATH` 這組 code-owned 目錄導出；`LANG`/`LC_ALL` 一併釘 `C`。
+2. **E2 F-01（E2 對、E3 錯，經實測裁定）**：`<git-common-dir>/info/grafts` 未被檢查。
+   E2 形 `<rollback-commit> <genesis-commit>` 讓同一份被 rollback 的 repo 由 `REJECTED`
+   翻成 **`VERIFIED gen=1`**（並照樣通過受保護 ref 檢查）；E3 形（把創世變成 root）
+   確實仍 `REJECTED`。修法拒的是 grafts **檔案存在**本身。
+3. **E3-C**：`--full-history` 會列出 merge，舊上界 32 誤殺合法歷史（E3 實測 6 次推進 ＋
+   3 次 back-merge 就到 31）。新上界 256 附推導寫在常數上方。
+4. **E3-D**：promisor（`--filter=blob:none`）clone **不是 shallow**，舊檢查放行後
+   `git show <commit>:<path>` 會走網路抓 blob —— 這使 §8.4「全部是純驗證函式、無 runtime
+   effect」不準確。修法：直接拒 promisor clone，並替所有 git 呼叫加 `timeout=`。
+5. **E2 F-05**：白名單同時砍掉 `HOME` 與系統 config，而 git 只在 protected configuration
+   （system/global/**command**）認 `safe.directory` ⇒ 一旦驗證器 uid ≠ repo owner uid
+   （正是 §LW1 假設的 root-owned producer 拓撲），全家族 git 呼叫 `rc=128 dubious
+   ownership`，floor 永久 `REJECTED`。修法：`git_argv()` 顯式帶 **command 域**的
+   `-c safe.directory=<repo_root>`（值由 repo_root 導出，不從 env 來）。
+   以 git 自己的 `GIT_TEST_ASSUME_DIFFERENT_OWNER=1` 實測前後對照。
+6. **E2 F-04（全 repo 級）**：Python 的 `$` 放行尾端換行。`agent_governance_schema` 是
+   全 repo 556 個 `pattern` 的唯一執行點，`{"h": "<40hex>\n"}` 曾通過 `^[0-9a-f]{40}$`。
+   修法把錨點翻成 ECMA-262 語義（`^`→`\A`、`$`→`\Z`），**不改成 `fullmatch`**——
+   JSON Schema 的 `pattern` 依規範是非錨定 search。
+7. **E3-B（PM 裁決）**：`verdict` 出模組後被壓平。`UNVERIFIED` 仍然擋，但現在經
+   `AnchorGateObservations` 成為 typed 輸出的一格，由 CLI 的 `anchor_gate_observations`
+   發出，下游不必再解析 `"UNVERIFIED: "` 子字串。
+8. **E3-E／E2 F-06/F-07**：本機 host 指紋逐檔失敗曾靜默跳過卻仍報
+   `LOCAL_HOST_KEYS_OBSERVED`；FIFO 會永久阻塞；`MemoryError` 不在 except tuple 內。
+   全部修正，並把 `host_identity_observations` 的消費者邊界寫進 docstring。
+
+**未改變**：`UNVERIFIED` 為誠實終態、git 不提供 §LW1 意義下的外部性、真正的外部性上界
+仍在「驗證器不與被驗者共用 uid」。以上七項都是把**既有邊界守住**，一項都沒有把邊界推前。

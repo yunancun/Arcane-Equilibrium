@@ -15,7 +15,7 @@ from typing import Any, Callable
 
 from agent_governance_schema import schema_subset_errors
 from aiml_gate_receipt_schema_core import (
-    _load_schema, canonical_digest, git_subprocess_env,
+    _load_schema, canonical_digest, git_argv, git_subprocess_env,
 )
 from aiml_gate_receipt_s2e_external_evidence import (
     s2e_predecessor_registry_slot_id,
@@ -540,7 +540,7 @@ def validate_s2e_launch_consumption_bootstrap_authority(
 
 def _git_common_dir(repo_root: Path) -> Path:
     raw = subprocess.run(
-        ["git", "rev-parse", "--git-common-dir"],
+        git_argv(repo_root, "rev-parse", "--git-common-dir"),
         cwd=repo_root,
         check=True,
         capture_output=True,

@@ -17,7 +17,7 @@ from agent_governance_schema import schema_subset_errors
 from aiml_gate_receipt_schema_core import (
     _load_schema,
     canonical_digest,
-    git_subprocess_env,
+    git_argv, git_subprocess_env,
 )
 
 
@@ -239,7 +239,7 @@ def _git(
     repo_root: Path, *args: str, check: bool = True
 ) -> subprocess.CompletedProcess[str]:
     return subprocess.run(
-        ["git", *args],
+        git_argv(repo_root, *args),
         cwd=repo_root,
         check=check,
         capture_output=True,
@@ -250,7 +250,7 @@ def _git(
 
 def _git_bytes(repo_root: Path, *args: str) -> bytes:
     return subprocess.run(
-        ["git", *args],
+        git_argv(repo_root, *args),
         cwd=repo_root,
         check=True,
         capture_output=True,

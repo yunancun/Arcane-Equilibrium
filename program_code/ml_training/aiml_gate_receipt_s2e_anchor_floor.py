@@ -6,21 +6,25 @@ attestation 自報的 `previous_anchor_head_digest` 無法成立——那條鏈�
 
 本模組把 receipt 已經釘在 git 上的 anchor 世代投影成一份 **code-owned 路徑**的
 committed floor,並由驗證器自己以 `git show <commit>:<path>` 讀 **commit 物件的
-位元組**(不是工作樹)。floor 不是新的信任源,也不帶簽章:它的完整性來自
-`floor_history_errors` 的祖先鏈 + 嚴格遞增檢查,以及改寫它需要第二組 capability
-(GitHub 寫入權 + PR + required checks)這件事實。
+位元組**(不是工作樹)。floor 不是新的信任源,也不帶簽章:它只提供**機械可偵測的
+歷史性質**——`floor_history_errors` 的祖先鏈 + 嚴格遞增 + 單一創世檢查。
 
-誠實邊界(不得在註解或 PR 說明裡被寫成更強的宣稱):
+誠實邊界(2026-08-04 撤回上一版的過強宣稱;不得在註解或 PR 說明裡被寫回去):
 
-- git 提供的是 *tamper-evident + 需要第二組 capability*,**不是 WORM**。持有 GitHub
-  寫入權的人可以合法 merge 一份倒退的 floor;本模組只把這件事變成**機械可偵測**。
+- **本模組不提供 §LW1 意義下的外部性,一項都不提供。** 上一版本段落寫「改寫它需要
+  第二組 capability(GitHub 寫入權 + PR + required checks)這件事實」——**該宣稱已
+  撤回,而且已被證偽**:能以驗證器的 uid 寫 `.git` 的人,一條 `git update-ref` 就能
+  改掉 `refs/remotes/origin/main`(本模組的測試 fixture 正是這樣建可達歷史的),
+  完全不需要碰 GitHub。git 在這裡能證的只有 *tamper-evident*,**既不是 WORM,也不是
+  「需要第二組 capability」**。
 - 只有**相鄰世代**宣稱 hash 連結;非相鄰世代之間只宣稱單調遞增。中間條目的
   `entry_digest` 無原像可驗,替 gap 提供 link path 是假的安全性。**本模組不宣稱
   「hash chain 完整性已驗證」。**
-- **`at_commit` 由被驗證者遞來**,因此「floor 已在 git 裡」本身不是外部性。外部性
-  來自 `_PROTECTED_ANCESTOR_REFS`:鏈尾必須是某個 code-owned 受保護 ref 的祖先。
-  不可達時本模組**不判 PASS 也不判 FAIL,而是判 `UNVERIFIED`**——那正是 §LW1
-  「同一 writer 可 coherent rewrite ⇒ 只能得 `UNVERIFIED`」的處置。
+- **`at_commit` 由被驗證者遞來**,`_PROTECTED_ANCESTOR_REFS` 也只是本地 ref;兩者
+  都不構成外部性(見 `_PROTECTED_ANCESTOR_REFS` 上方的誠實邊界)。鏈尾不可達受保護
+  ref 時本模組**不判 PASS 也不判 FAIL,而是判 `UNVERIFIED`**——那是 §LW1「同一
+  writer 可 coherent rewrite ⇒ 只能得 `UNVERIFIED`」的處置,**不是** P0-1 已關閉的
+  證明。任何投影都不得把本模組壓縮成「P0-1 closed」。
 """
 
 from __future__ import annotations
@@ -33,7 +37,7 @@ from typing import Any, NamedTuple
 
 from agent_governance_schema import schema_subset_errors
 from aiml_gate_receipt_schema_core import (
-    _load_schema, canonical_digest, git_subprocess_env,
+    _load_schema, canonical_digest, git_argv, git_subprocess_env,
 )
 
 
@@ -45,8 +49,18 @@ _FLOOR_REPO_PATH = (
     f"docs/execution_plan/ai_ml_landing/receipts/{LAUNCH_ID}/"
     "durability-anchor-floor-v1.json"
 )
-# LW1-LW5 全程最多 6 個 floor commit;上界只用來擋病態歷史,不是效能參數。
-MAX_FLOOR_HISTORY_COMMITS = 32
+# 上界只用來擋病態歷史,不是效能參數。**E3-C 實測推翻上一版的 32**:舊註解只算了
+# 「改動 floor 的 commit」,漏算 `--full-history` 會把**每一個與某個 parent 的 floor
+# blob 不同的 merge** 也列出來。E3 實測合法的 6 次推進在 long-lived branch + 3 次
+# back-merge 下列 31 筆(差一筆撞頂)、4 次下列 37 筆 ⇒ 硬 REJECTED 且無 override。
+# E1 於 git 2.55 重測同一形狀:每一輪 (branch 推進 + merge 進 main + back-merge)
+# 貢獻 1 個推進 + 2 個 merge,故 listed = advances + 2×back-merges(實測 n=0..8 全中)。
+# 重新推導的上界:
+#   (a) 真正改動 floor 的 commit ≤ 16(LW1-LW5 六次推進 + 創世 + 更正/重發餘裕);
+#   (b) 每一次推進最多被 B 條並行 long-lived branch 各帶進 1 個 merge,取 B ≤ 15;
+#   ⇒ 16 × (1 + 15) = 256。
+# 每筆的成本是 1 次 `git show` + 1 次 `merge-base`(皆帶 timeout),故 256 仍有界。
+MAX_FLOOR_HISTORY_COMMITS = 256
 _FLOOR_INVARIANT_FIELDS = ("launch_id", "anchor_locator", "offhost_replica_locator")
 
 # ── P0-1(PM 2026-08-04 裁決;出處:2026-08-03 三路複核 §六「必要」第 1 項的二選一) ──
@@ -61,8 +75,13 @@ _FLOOR_INVARIANT_FIELDS = ("launch_id", "anchor_locator", "offhost_replica_locat
 # **誠實邊界(不得在 PR 說明裡被寫成更強的宣稱)**:`refs/remotes/origin/main` 是
 # **本地** remote-tracking ref。能以驗證器的 uid 寫 `.git` 的人可以 `git update-ref`
 # 直接指定它——本模組的測試就是這樣建可達 fixture 的。因此本條**不是**密碼學外部性,
-# 而是:(1) 把「遞一個 commit」提升為「同時偽造 remote-tracking 狀態」,(2) 在真實
-# CI／clone 上讓該 ref 由 fetch 決定、攻擊者要改就得動 GitHub 那組 capability。
+# 它只做一件事:把「遞一個 commit」提升為「同時偽造本機 remote-tracking 狀態」,
+# 於是**意外與漂移**(未 merge、未 fetch、指錯 commit、CI shallow checkout)會得到
+# 具名的 UNVERIFIED 而不是靜默 PASS。
+# 2026-08-04 撤回:此處原本還寫著「在真實 CI／clone 上讓該 ref 由 fetch 決定、攻擊者
+# 要改就得動 GitHub 那組 capability」。驗證器**無法自證自己跑在那種環境裡**,所以那
+# 句話在代碼裡不是可執法的性質,只是一個假設;留著它會讓「git = 第二組 capability」
+# 這個已撤回的宣稱從側門回來。
 # 真正的外部性上界仍在 §LW1 說的「不同 owner/capability」,那需要驗證器不與被驗者
 # 共用 uid;在受檢主機上執行的驗證器沒有辦法自證這件事(與 §5.3 的資訊論上界同型)。
 _PROTECTED_ANCESTOR_REFS = ("refs/remotes/origin/main",)
@@ -70,7 +89,11 @@ _PROTECTED_ANCESTOR_REFS = ("refs/remotes/origin/main",)
 # revision 位置在 `--` 之前,`--output=<path>` 這種單 token 參數會被當成選項吃掉——
 # PM 於 git 2.55 實測 `git log ... "--output=victim.txt" -- .` 把既有檔案**截斷為
 # 0 bytes** 且 exit 0。因此任何 git 呼叫**之前**先做逐字形狀驗證,不合格不進 subprocess。
-_EXACT_COMMIT_PATTERN = re.compile(r"^[0-9a-f]{40}$")
+# E2 F-04:Python 的 `$` 匹配「字串尾**或尾端換行之前**」,於是 `<40hex>\n` 曾經通過
+# `^[0-9a-f]{40}$` 並真的進了 git argv(git 自己拒 ⇒ 當時 fail-closed,但註解與測試
+# 宣稱的不變量是假的)。改用 `fullmatch` + `\Z`:`fullmatch` 是主防線,`\Z`(而非
+# `$`)是縱深——日後若有人把呼叫改回 `.match`,尾端換行仍然會被拒。
+_EXACT_COMMIT_PATTERN = re.compile(r"[0-9a-f]{40}\Z")
 
 FLOOR_VERIFIED = "VERIFIED"
 FLOOR_REJECTED = "REJECTED"
@@ -113,16 +136,75 @@ def _floor_reading(
     )
 
 
-def floor_gate_errors(reading: CommittedFloorReading, *, label: str) -> list[str]:
+class FloorVerdictObservation(NamedTuple):
+    """一次 floor 判定的 typed 觀察:`label` + `verdict`。
+
+    E3-B:`verdict` 原本在模組外零讀者——兩個呼叫點把 `REJECTED` 與 `UNVERIFIED` 壓成
+    同一串無型別 errors,下游只能靠錯誤訊息裡的 `"UNVERIFIED: "` 子字串去猜。
+    PM 2026-08-04 裁決:`UNVERIFIED` **仍然擋**(它不是 PASS,這點不變),但必須在
+    typed 輸出裡分得開,下游才能區分「偽造的 floor 被拒(REJECTED)」與「未 merge
+    因而誠實不可驗(UNVERIFIED)」。
+    """
+
+    label: str
+    verdict: str
+
+
+class AnchorGateObservations:
+    """errors 之外的 typed 觀察通道(floor verdict + 本機 host identity 各一格)。
+
+    刻意是一個具名載體而不是兩個裸 list:兩條觀察沿著同一條驗證路徑產生,分開傳會
+    再度出現 E3-E 那種「只接了一半」的縫。`as_records()` 是給 CLI/receipt 序列化用的
+    純資料投影——本通道**必須有真消費者**,不得再成為第二個 write-only 通道。
+    """
+
+    def __init__(self) -> None:
+        self.host_identity: list[str] = []
+        self.floor_verdicts: list[FloorVerdictObservation] = []
+
+    def as_records(self) -> dict[str, Any]:
+        return {
+            "host_identity": sorted(set(self.host_identity)),
+            "floor_verdicts": [
+                {"label": item.label, "verdict": item.verdict}
+                for item in self.floor_verdicts
+            ],
+        }
+
+
+def host_identity_sink(
+    observations: AnchorGateObservations | None,
+) -> list[str] | None:
+    """把 typed 通道降解成 `validate_s2e_durability_anchor_attestation` 要的 `list[str]`。
+
+    `None` 保持 `None`(該函式以 `is not None` 判斷要不要記錄),因此「不傳通道」與
+    「傳了空通道」語義不同,不會被混為一談。
+    """
+
+    return None if observations is None else observations.host_identity
+
+
+def floor_gate_errors(
+    reading: CommittedFloorReading,
+    *,
+    label: str,
+    observations: AnchorGateObservations | None = None,
+) -> list[str]:
     """把一次 reading 轉成呼叫端要 extend 的 errors,並保證非 VERIFIED 必留痕。
 
     這是 P1-3 在呼叫端的那一半:`_floor_reading` 保證模組內不可能產出無理由的
     非 VERIFIED,本函式保證即使有人日後繞過該建構入口,呼叫端仍拿得到非空 errors。
+    `observations` 則是 E3-B 的那一半:verdict 在**產生 errors 的同一處**被記成
+    typed 事實,不需要下游解析字串。
     """
 
     errors = [f"{label}: {error}" for error in reading.errors]
     if reading.verdict != FLOOR_VERIFIED and not errors:
         errors.append(f"{label}: verdict {reading.verdict} carried no stated reason")
+    if observations is not None:
+        observations.floor_verdicts.append(
+            FloorVerdictObservation(label, reading.verdict)
+        )
     return errors
 
 
@@ -140,25 +222,49 @@ def durability_anchor_floor_digest(floor: dict[str, Any]) -> str:
     })
 
 
+# E3-D:同家族 `schema_core` 的每一支 git 呼叫都帶 `timeout=`(60/30/180),本模組
+# 曾是唯一例外。E3 實測 `--filter=blob:none` 的 promisor clone **不是 shallow**,舊版
+# `_object_store_errors` 會放行,接著 `git show <commit>:<path>` 會**走網路**向
+# promisor remote 抓 blob;配合阻塞 transport 實測 25s 仍未止且無上界。timeout 是
+# 第二道防線,第一道是 `_object_store_errors` 直接拒掉 promisor(唯一的網路路徑)。
+_GIT_READ_TIMEOUT_SECONDS = 60
+_GIT_PROBE_TIMEOUT_SECONDS = 30
+# `subprocess.TimeoutExpired` **不是** `CalledProcessError` 的子類;兩者的共同父類是
+# `SubprocessError`。舊的 `except (OSError, CalledProcessError)` 若配上 timeout 會讓
+# 逾時裸逸出驗證函式,因此本模組一律捕捉 `SubprocessError`。
+_GIT_FAILURES = (OSError, ValueError, subprocess.SubprocessError)
+
+
 def _git_bytes(repo_root: Path, *args: str) -> bytes:
     # P1-6:`env=` 白名單。沒有它,ambient `GIT_DIR` 會蓋過 `-C`,驗證器讀到的是
     # 攻擊者 repo 的 floor 而且零錯誤(E3 實測)。
+    # E3-A:argv[0] 與 `PATH` 皆由 `git_argv`/`git_subprocess_env` 從 code-owned
+    # 常數導出,ambient `PATH` 不參與 git 二進位的解析。
     return subprocess.run(
-        ["git", "-C", str(repo_root), *args],
+        git_argv(repo_root, *args),
         check=True,
         capture_output=True,
         env=git_subprocess_env(),
+        timeout=_GIT_READ_TIMEOUT_SECONDS,
     ).stdout
 
 
 def _git_ok(repo_root: Path, *args: str) -> bool:
-    """只問離開碼的 git 呼叫(祖先判定、ref 解析);同樣走白名單環境。"""
+    """只問離開碼的 git 呼叫(祖先判定、ref 解析);同樣走白名單環境。
 
-    return subprocess.run(
-        ["git", "-C", str(repo_root), *args],
-        capture_output=True,
-        env=git_subprocess_env(),
-    ).returncode == 0
+    逾時/無法執行一律回 `False`(fail-closed):呼叫端只用它做「是不是祖先/解析得出
+    來」的肯定判定,回 False 只會讓判定更嚴,不會放行。
+    """
+
+    try:
+        return subprocess.run(
+            git_argv(repo_root, *args),
+            capture_output=True,
+            env=git_subprocess_env(),
+            timeout=_GIT_PROBE_TIMEOUT_SECONDS,
+        ).returncode == 0
+    except _GIT_FAILURES:
+        return False
 
 
 def _object_store_errors(repo_root: Path) -> list[str]:
@@ -168,6 +274,22 @@ def _object_store_errors(repo_root: Path) -> list[str]:
     回 `(gen=2, errors=[])`——因為被 rollback 的那段歷史根本不在錐體裡。replace ref
     則可以把任一 commit 的內容整個換掉。這是**驗證器自身環境不合格**,不是被驗對象
     的性質,所以判 REJECTED(拒絕在這個環境裡跑)而不是 UNVERIFIED。
+
+    E2 F-01(E1 於 git 2.55 實測裁定;E2 對、E3 錯):`<git-common-dir>/info/grafts`
+    是 replace ref 的前身、同一種 object-rewrite 機制,而舊版只查 replace ref。
+    兩種構造實測結果不同:
+    - **E2 形(危險)**:`<rollback-commit> <genesis-commit>` 把回退 commit 的 parent
+      直接接到創世,中間那筆 gen=2 從 `--full-history` 走訪裡消失 ⇒ 同一份被 rollback
+      的 repo 由 `REJECTED`(generation is not strictly increasing)翻成 **`VERIFIED
+      gen=1`**,而且照樣通過受保護 ref 檢查。
+    - **E3 形(無害)**:只把創世 commit 變成 root,不改動 floor 觸碰序 ⇒ 仍 `REJECTED`。
+    因此修法必須擋的是 grafts **檔案存在**本身,不是某一種特定寫法。
+    `GIT_GRAFT_FILE` 這條 env 路徑早已被 `git_subprocess_env` 的白名單堵住,git 也沒有
+    對應的 config key,故「檔案不存在」即為完整判定。
+
+    E3-D:promisor(partial)clone 一併拒。它 `--is-shallow-repository` 回 false,
+    卻會讓 `git show <commit>:<path>` 靜默走網路去抓缺失 blob——那是本家族唯一的
+    runtime effect 來源,與設計 §8.4「全部是純驗證函式」直接衝突。
     """
 
     try:
@@ -175,7 +297,8 @@ def _object_store_errors(repo_root: Path) -> list[str]:
         replaced = _git_bytes(
             repo_root, "for-each-ref", "--format=%(refname)", "refs/replace/"
         )
-    except (OSError, subprocess.CalledProcessError) as error:
+        common = _git_bytes(repo_root, "rev-parse", "--git-common-dir")
+    except _GIT_FAILURES as error:
         return [f"durability anchor floor object store is unreadable: {error}"]
     errors: list[str] = []
     if shallow.decode("ascii", errors="replace").strip() != "false":
@@ -187,7 +310,37 @@ def _object_store_errors(repo_root: Path) -> list[str]:
             "durability anchor floor cannot be read from a repository that "
             "rewrites objects through replace refs"
         )
+    if _grafts_file_present(repo_root, common):
+        errors.append(
+            "durability anchor floor cannot be read from a repository that "
+            "rewrites commit parentage through a grafts file"
+        )
+    if _git_ok(
+        repo_root, "config", "--get-regexp",
+        r"^(remote\..*\.(promisor|partialclonefilter)|extensions\.partialclone)$",
+    ):
+        errors.append(
+            "durability anchor floor cannot be read from a promisor partial clone"
+        )
     return errors
+
+
+def _grafts_file_present(repo_root: Path, common_dir: bytes) -> bool:
+    """`<git-common-dir>/info/grafts` 是否存在(路徑解析失敗一律當成存在:fail-closed)。"""
+
+    try:
+        raw = common_dir.decode("utf-8").strip()
+    except UnicodeDecodeError:
+        return True
+    if not raw:
+        return True
+    common = Path(raw)
+    if not common.is_absolute():
+        common = Path(repo_root) / common
+    try:
+        return (common / "info" / "grafts").exists()
+    except OSError:
+        return True
 
 
 def _protected_ancestry_errors(repo_root: Path, commit: str) -> list[str]:
@@ -210,9 +363,12 @@ def _protected_ancestry_errors(repo_root: Path, commit: str) -> list[str]:
         ):
             return []
     if not resolvable:
+        # E2 F-02:舊字串寫「so the floor cannot be shown to require a second
+        # capability」,隱含「是祖先時就證明了需要第二組 capability」——那正是本模組
+        # 已撤回的宣稱(module docstring)。改寫成只講它真正能證的那件事。
         return [
             "UNVERIFIED: no code-owned protected ref resolves in this repository, "
-            "so the floor cannot be shown to require a second capability"
+            "so the floor's history tail cannot be pinned to any code-owned ref"
         ]
     return [
         "UNVERIFIED: its history tail is not an ancestor of any code-owned "
@@ -271,7 +427,9 @@ def floor_history_errors(
     最後再要求鏈尾落在受保護 ref 的祖先集合內(P0-1),否則判 UNVERIFIED。
     """
 
-    if not isinstance(at_commit, str) or not _EXACT_COMMIT_PATTERN.match(at_commit):
+    if not isinstance(at_commit, str) or not _EXACT_COMMIT_PATTERN.fullmatch(
+        at_commit
+    ):
         # P1-2:先驗形狀再碰 subprocess。這一條**必須**在任何 git 呼叫之前。
         return _floor_reading(FLOOR_REJECTED, None, [
             "durability anchor floor requires an exact 40-hex reviewed commit"
@@ -297,7 +455,7 @@ def floor_history_errors(
             "--",
             path,
         ).decode("ascii")
-    except (OSError, subprocess.CalledProcessError) as error:
+    except _GIT_FAILURES as error:
         return _floor_reading(FLOOR_REJECTED, None, [
             f"durability anchor floor history is unavailable: {error}"
         ])
@@ -327,7 +485,7 @@ def floor_history_errors(
             )
         try:
             raw = _git_bytes(repo_root, "show", "--end-of-options", f"{commit}:{path}")
-        except (OSError, subprocess.CalledProcessError) as error:
+        except _GIT_FAILURES as error:
             return _floor_reading(FLOOR_REJECTED, None, errors + [
                 f"durability anchor floor revision is unreadable: {error}"
             ])
@@ -369,7 +527,7 @@ def floor_history_errors(
         last_raw = raw
     try:
         head_raw = _git_bytes(repo_root, "show", "--end-of-options", f"{at_commit}:{path}")
-    except (OSError, subprocess.CalledProcessError) as error:
+    except _GIT_FAILURES as error:
         return _floor_reading(FLOOR_REJECTED, None, errors + [
             f"durability anchor floor is unreadable at the reviewed commit: {error}"
         ])

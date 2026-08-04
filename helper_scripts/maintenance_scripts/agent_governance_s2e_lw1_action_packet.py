@@ -35,6 +35,7 @@ from aiml_gate_receipt_s2e_launch import (  # noqa: E402
 from aiml_gate_receipt_schema_core import (  # noqa: E402
     _contains_github_secret_like_content,
     canonical_digest,
+    git_argv,
     git_subprocess_env,
 )
 
@@ -164,7 +165,7 @@ EXPECTED_ACTION_IDS = (
 
 def _git(repo_root: Path, *args: str) -> str:
     return subprocess.run(
-        ["git", *args],
+        git_argv(repo_root, *args),
         cwd=repo_root,
         check=True,
         capture_output=True,

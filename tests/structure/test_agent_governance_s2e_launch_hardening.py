@@ -805,3 +805,45 @@ def test_consumption_store_crash_after_anchor_recovers_exact_entry(
     assert recovered == expected
     assert store.last_state_recovery_performed is True
     assert store.read() == expected
+
+
+def test_schema_pattern_anchors_reject_a_trailing_newline() -> None:
+    """E2 F-04(全 repo 級):Python 的 `$` 匹配「字串尾**或尾端換行前**」。
+
+    `agent_governance_schema.schema_subset_errors` 是本 repo 全部 `pattern` 的唯一
+    執行點,所以那是一個全 repo 級的假不變量:E2 實測 `{"h": "<40hex>\\n"}` 通過
+    `^[0-9a-f]{40}$`。修法把**錨點**翻成 ECMA-262 語義(`^`→`\\A`、`$`→`\\Z`),
+    而**不是**改成 `fullmatch`——JSON Schema 的 `pattern` 依規範是非錨定 search,
+    本 repo 既有的前綴式與 `not` 式 pattern 都靠 search 語義才正確。
+    """
+
+    import agent_governance_schema as schema_subset
+
+    schema = {
+        "type": "object",
+        "properties": {"h": {"type": "string", "pattern": "^[0-9a-f]{40}$"}},
+    }
+    assert schema_subset.schema_subset_errors({"h": "a" * 40}, schema) == []
+    for forged in ("a" * 40 + "\n", "\n" + "a" * 40, "a" * 40 + "\nx"):
+        assert schema_subset.schema_subset_errors({"h": forged}, schema) == [
+            "$.h: string does not match pattern"
+        ], forged
+    # search 語義必須原封不動:前綴式 pattern 與 `not` 內的路徑遍歷式都靠它。
+    prefix = {"type": "string", "pattern": "^https://api\\.github\\.com/"}
+    assert schema_subset.schema_subset_errors(
+        "https://api.github.com/repos/x/y", prefix
+    ) == []
+    traversal = {"type": "string", "not": {"pattern": "(^|/)\\.\\.(/|$)"}}
+    assert schema_subset.schema_subset_errors("a/b", traversal) == []
+    assert schema_subset.schema_subset_errors("a/../b", traversal) == [
+        "$: matches forbidden not-schema"
+    ]
+    assert schema_subset.schema_subset_errors("..", traversal) == [
+        "$: matches forbidden not-schema"
+    ]
+    # 字元類內與逸出後的 `^`/`$` 仍是字面量,不得被當成錨點翻譯。
+    literal = {"type": "string", "pattern": "[$^]x"}
+    assert schema_subset.schema_subset_errors("a$xb", literal) == []
+    assert schema_subset.schema_subset_errors("a^xb", literal) == []
+    escaped = {"type": "string", "pattern": "a\\$b"}
+    assert schema_subset.schema_subset_errors("za$bz", escaped) == []

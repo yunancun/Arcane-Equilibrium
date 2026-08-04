@@ -17,7 +17,7 @@ from aiml_gate_receipt_schema_core import (
     _contains_github_secret_like_content,
     _load_schema,
     canonical_digest,
-    git_subprocess_env,
+    git_argv, git_subprocess_env,
 )
 from aiml_gate_receipt_s2e_consumption import (
     build_s2e_launch_consumption_bootstrap_authority_core,
@@ -30,9 +30,10 @@ from aiml_gate_receipt_s2e_consumption import (
     validate_s2e_launch_consumption_bootstrap_authority,
 )
 from aiml_gate_receipt_s2e_anchor_floor import (
-    durability_anchor_floor_binding_errors, durability_anchor_floor_errors,
-    durability_anchor_transition_order_errors, floor_gate_errors,
-    next_durability_anchor_floor, read_committed_durability_anchor_floor,
+    AnchorGateObservations, durability_anchor_floor_binding_errors,
+    durability_anchor_floor_errors, durability_anchor_transition_order_errors,
+    floor_gate_errors, host_identity_sink, next_durability_anchor_floor,
+    read_committed_durability_anchor_floor,
 )
 from aiml_gate_receipt_s2e_external_evidence import (
     durability_anchor_digest_or_none, validate_s2e_durability_anchor_attestation,
@@ -239,7 +240,7 @@ def s2e_acceptance_review_bundle_digest(bundle: dict[str, Any]) -> str:
 
 def _git(repo_root: Path, *args: str, check: bool = True) -> subprocess.CompletedProcess[str]:
     return subprocess.run(
-        ["git", *args],
+        git_argv(repo_root, *args),
         cwd=repo_root,
         check=check,
         capture_output=True,
@@ -250,7 +251,7 @@ def _git(repo_root: Path, *args: str, check: bool = True) -> subprocess.Complete
 
 def _git_bytes(repo_root: Path, *args: str) -> bytes:
     return subprocess.run(
-        ["git", *args],
+        git_argv(repo_root, *args),
         cwd=repo_root,
         check=True,
         capture_output=True,
@@ -748,6 +749,7 @@ def validate_s2e_launch_predecessor_authority(
     predecessor_receipt: Any,
     repo_root: Path,
     now: str | datetime,
+    observations: AnchorGateObservations | None = None,
 ) -> list[str]:
     """Recompute the immediate predecessor's signed review and carrier proof."""
 
@@ -804,6 +806,7 @@ def validate_s2e_launch_predecessor_authority(
             ),
             repo_root=repo_root,
             now=now,
+            observations=observations,
             require_current_generation=False,
             # 歷史件:bundle digest 已被 predecessor receipt 釘死,重鑄即改變該
             # receipt 的 payload digest,物理上不可重鑄。對它做 wall-clock 檢查
@@ -908,6 +911,7 @@ def _transition_common_errors(
     repo_root: Path,
     now: str | datetime,
     consumed_predecessor_digests: set[str] | frozenset[str],
+    observations: AnchorGateObservations | None = None,
 ) -> tuple[list[str], dict[str, Any] | None]:
     """Everything a transition checks that does not need the candidate's own anchor.
 
@@ -929,6 +933,7 @@ def _transition_common_errors(
             predecessor_receipt=predecessor_receipt,
             repo_root=repo_root,
             now=now,
+            observations=observations,
         )
     )
     if isinstance(predecessor_authority, dict):
@@ -950,7 +955,7 @@ def _transition_common_errors(
         ),
     )
     errors.extend(floor_gate_errors(
-        reading, label="transition durability anchor floor"
+        reading, label="transition durability anchor floor", observations=observations
     ))
     if reading.floor is not None:
         errors.extend(durability_anchor_floor_binding_errors(
@@ -970,6 +975,7 @@ def validate_s2e_launch_transition(
     now: str | datetime,
     consumed_predecessor_digests: set[str] | frozenset[str],
     durability_anchor_attestation: Any,
+    observations: AnchorGateObservations | None = None,
 ) -> list[str]:
     """Authority-bearing Advance gate; structural validation alone never enters.
 
@@ -985,6 +991,7 @@ def validate_s2e_launch_transition(
         repo_root=repo_root,
         now=now,
         consumed_predecessor_digests=consumed_predecessor_digests,
+        observations=observations,
     )
     if floor is not None:
         errors.extend(durability_anchor_transition_order_errors(
@@ -1151,6 +1158,7 @@ def verify_receipt_carrier_attestation(
     durability 側走 carrier schema 早已宣告的 `TRUSTED_HOST_SSHSIG_APPEND_ONLY_V1`
     adapter:單一 trusted-host 簽章綁 append-only head 與 off-host latest-generation
     回讀,不依賴任何外部付費 WORM 服務。
+    `host_identity_observations` 的消費者邊界見 `validate_s2e_durability_anchor_attestation` docstring(E2 F-07:repo 內無程式消費者,供人工/receipt 審閱)。
     """
 
     from agent_governance_command_capture_v2 import (
@@ -1334,6 +1342,7 @@ def validate_s2e_launch_acceptance_review_bundle(
     durability_anchor_attestation: Any,
     repo_root: Path,
     now: str | datetime,
+    observations: AnchorGateObservations | None = None,
     require_current_generation: bool = True,
     require_current_freshness: bool = True,
 ) -> list[str]:
@@ -1580,6 +1589,7 @@ def validate_s2e_launch_acceptance_review_bundle(
             terminal_payload_digest=expected_worm_digest,
             now=now,
             require_current_freshness=require_current_freshness,
+            observations=host_identity_sink(observations),
         )
     )
     anchor_digest = durability_anchor_digest_or_none(durability_anchor_attestation)
@@ -1609,7 +1619,7 @@ def validate_s2e_launch_acceptance_review_bundle(
         repo_root, at_commit=reviewed_head
     )
     errors.extend(floor_gate_errors(
-        reading, label="acceptance review durability anchor floor"
+        reading, label="acceptance review durability anchor floor", observations=observations
     ))
     if reading.floor is not None:
         errors.extend(durability_anchor_floor_errors(

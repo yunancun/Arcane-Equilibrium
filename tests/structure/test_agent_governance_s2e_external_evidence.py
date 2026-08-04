@@ -835,3 +835,88 @@ def test_absent_attestations_never_validate():
         expected_result_ledger_digest=D3,
         now=ANCHOR,
     )
+
+
+def test_unreadable_local_host_key_degrades_the_observed_status(
+    tmp_path, monkeypatch
+):
+    """E3-E／E2 F-06:逐檔讀失敗曾靜默 `continue`,狀態仍回 LOCAL_HOST_KEYS_OBSERVED。
+
+    後果是攻擊者只要讓自己那把 key 讀不到(E2 用 `ssh-keygen -C` 把 comment 改成合法
+    UTF-8、E3 用 mode 000),就能拿它當 `replica_host_fingerprint` 而不被抓,狀態卻仍
+    宣稱「已觀察」。此處用「非普通檔案」構造,因為它與執行者的 uid 無關(root 也讀不出
+    一個目錄的 key)。
+    """
+
+    good = _install_local_host_keys(tmp_path, monkeypatch, wire=b"good-host-key")
+    directory = evidence.LOCAL_SSH_HOST_KEY_DIR
+    (directory / "ssh_host_broken_key.pub").mkdir()
+    fingerprints, status = evidence.local_ssh_host_key_fingerprints()
+    assert status == evidence.LOCAL_HOST_KEYS_UNREADABLE
+    # 讀得到的那些仍然回傳:它們仍能抓到冒充,只是狀態不再宣稱「全部已觀察」。
+    assert fingerprints == frozenset({good})
+
+
+def test_local_host_key_comment_encoding_no_longer_drops_the_fingerprint(
+    tmp_path, monkeypatch
+):
+    """E2 F-06 的原始 PoC:`ssh-keygen -C` 允許非 ASCII comment。
+
+    舊版對**整行**做 ASCII 解碼,於是那把 key 的指紋被靜默排除。指紋只由 wire 欄位
+    決定,comment 是自由文字,本來就不該影響它。
+    """
+
+    _install_local_host_keys(tmp_path, monkeypatch, wire=b"ed25519-host-key")
+    directory = evidence.LOCAL_SSH_HOST_KEY_DIR
+    wire = b"rsa-host-key"
+    encoded = base64.b64encode(wire).decode("ascii")
+    (directory / "ssh_host_rsa_key.pub").write_text(
+        f"ssh-rsa {encoded} root@主機-é\n", encoding="utf-8"
+    )
+    expected = "SHA256:" + base64.b64encode(
+        hashlib.sha256(wire).digest()
+    ).decode("ascii").rstrip("=")
+    fingerprints, status = evidence.local_ssh_host_key_fingerprints()
+    assert expected in fingerprints, fingerprints
+    assert status == evidence.LOCAL_HOST_KEYS_OBSERVED
+
+
+def test_local_host_key_fifo_does_not_block_the_validator(tmp_path, monkeypatch):
+    """E3-E:名為 `ssh_host_*.pub` 的 FIFO 會讓 `read_text` 永久阻塞(實測 15s 未止)。"""
+
+    import os
+    import threading
+
+    good = _install_local_host_keys(tmp_path, monkeypatch, wire=b"good-host-key")
+    os.mkfifo(evidence.LOCAL_SSH_HOST_KEY_DIR / "ssh_host_fifo_key.pub")
+    outcome: list[tuple] = []
+    worker = threading.Thread(
+        target=lambda: outcome.append(evidence.local_ssh_host_key_fingerprints()),
+        daemon=True,
+    )
+    worker.start()
+    worker.join(timeout=20)
+    assert not worker.is_alive(), "reading a FIFO host key blocked the validator"
+    assert outcome == [(frozenset({good}), evidence.LOCAL_HOST_KEYS_UNREADABLE)]
+
+
+def test_oversized_local_host_key_is_bounded_not_read_whole(tmp_path, monkeypatch):
+    """E3-E:超大檔的 `MemoryError` 不在舊 except tuple 內,會裸逸出驗證函式。
+
+    刻意用一個**其餘部分完全合法**的 key 行,只是超過位元組上界:否則「解析失敗」
+    會替上界背書,測試就殺不掉上界被移除這個 mutation。
+    """
+
+    good = _install_local_host_keys(tmp_path, monkeypatch, wire=b"good-host-key")
+    huge_wire = b"h" * (evidence.MAX_LOCAL_HOST_KEY_BYTES + 64)
+    encoded = base64.b64encode(huge_wire).decode("ascii")
+    oversized = evidence.LOCAL_SSH_HOST_KEY_DIR / "ssh_host_huge_key.pub"
+    oversized.write_text(f"ssh-rsa {encoded} root@huge\n", encoding="ascii")
+    beyond = "SHA256:" + base64.b64encode(
+        hashlib.sha256(huge_wire).digest()
+    ).decode("ascii").rstrip("=")
+    fingerprints, status = evidence.local_ssh_host_key_fingerprints()
+    assert beyond not in fingerprints, "an unbounded read produced this fingerprint"
+    assert (fingerprints, status) == (
+        frozenset({good}), evidence.LOCAL_HOST_KEYS_UNREADABLE
+    )
