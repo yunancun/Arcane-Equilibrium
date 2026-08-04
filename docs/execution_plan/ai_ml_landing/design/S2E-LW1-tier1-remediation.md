@@ -50,14 +50,13 @@ PM/E3 的論證是：receipt 綁 `acceptance_review_bundle_digest`，bundle 綁
 |---|---|
 | bundle 綁 anchor 五欄，bundle digest 進 receipt | **成立**。`:1481-1492` 逐欄綁定，`:1352` 重算 bundle digest，receipt `:1620-1622` 只存 digest。 |
 | 「receipt 已在 git 裡」 | **不成立為 gate**。`docs/execution_plan/ai_ml_landing/receipts/S2E-LW1-LW5/` 目前只有一份 `W0-genesis-pending-review.json`，且**沒有任何代碼讀它**。transition gate 的 `--receipt`／`--predecessor-receipt`／`--predecessor-authority`（`helper_scripts/maintenance_scripts/agent_governance_s2e_launch_receipts.py:128-136`）全部是 caller 提供的任意檔案路徑。目前 gate 的兩側都由 caller 供給，「在 git 裡」是流程事實而非機械事實。 |
-| git 是「外部、由不同 owner/capability 控制」 | **條件成立**。anchor 私鑰的持有者是 trade-core 的 root；改寫 GitHub main 需要另一組 capability（GitHub token + PR + required checks + Codex review + branch protection），與 host root 不是同一把權限。這是本專案能拿到的、最接近 §LW1「不同 owner/capability」的真實分隔。 |
+| git 是「外部、由不同 owner/capability 控制」 | ~~**條件成立**~~ → **2026-08-03 實作後證偽，見下方「演變軌跡」**。原文寫「改寫 GitHub main 需要另一組 capability，與 host root 不是同一把權限」——但驗證器讀的是 `refs/remotes/origin/main` 這個**本地** remote-tracking ref，不是 GitHub 上的 branch。能以驗證器 uid 寫 `.git` 的人一條 `git update-ref` 就能指定它。 |
 | git 位於「可替換 state root 之外」 | **成立且比預期強**。receipt 逐份釘死 commit SHA（`source_head`／`source_tree`／`schema_carrier_head`），`_git_binding_errors`（`:444-457`）與 `_is_ancestor`（`:596-603`）會實際解析它們。**任何 history rewrite 都會讓既發 receipt 釘的 SHA 變成不可達，整條鏈當場 fail-closed**。所以「攻擊者改寫 git 以掩蓋 rollback」不是靜默路徑。 |
 
 **因此本設計採用 git，但必須加一個代碼自己去 git 讀的 pin**：committed durability anchor
 floor（§3）。沒有它，「資料已經在 git 裡」對驗證器而言等於「資料在 caller 手裡」。
 
-**誠實邊界（必須寫進 PR 說明，不得省略）**：git 提供的是 *tamper-evident + 需要第二組
-capability*，不是 WORM。持有 GitHub 寫入權的人可以合法 merge 一份倒退的 floor；本設計用
+**誠實邊界（必須寫進 PR 說明，不得省略；2026-08-03 已再收緊，見文末「演變軌跡」）**：git 提供的是 *tamper-evident*，不是 WORM，**也不是第二組 capability**——驗證器讀的 `refs/remotes/origin/main` 是本地 ref，host root 可直接 `update-ref` 指定。持有 GitHub 寫入權的人可以合法 merge 一份倒退的 floor；本設計用
 「floor 檔案自身歷史的祖先鏈 + 嚴格遞增」把這件事變成**機械可偵測**（§3.4），而不是靠 PR
 人工複審。這是可達成的最強形態，不是理想形態。
 
@@ -722,3 +721,40 @@ S2 未關、LW2 仍 locked。本設計全部是**純驗證函式 + 一份 commit
   仍非代碼可證（見 §5.3 分界線）；本設計只宣稱代碼線內的六條，不宣稱更多。
 - 本設計不改變 §LW1 的其他要求（private-penetration guard、recovery intent family、
   dual-lock manifest、kernel-derived identity、2000 行政策），那些仍是 LW1 的獨立 exit 條件。
+
+## 演變軌跡
+
+### 2026-08-03：§二「git＝外部持久層」被實作後的實測證偽；operator 裁定 `UNVERIFIED` 為誠實終態
+
+**轉變**：§二表格第 3 列原判「git 是外部、由不同 owner/capability 控制＝條件成立」，
+並據此把 committed anchor floor 當成能滿足 §LW1 外部性的機制。**此判定不成立。**
+
+**證據**（PM 2026-08-03 在獨立 clone 上實測，非轉述）：實作照設計把
+`_PROTECTED_ANCESTOR_REFS = ("refs/remotes/origin/main",)` 設為模組級常數、無任何注入路徑。
+對一條從真 GENESIS commit 分岔、帶自製 `ADVANCED/gen=4242` floor 的 local branch：
+
+```
+單純 local branch            → verdict=UNVERIFIED, floor=None, errors 非空
+再 git update-ref refs/remotes/origin/main <攻擊者 commit>
+                             → verdict=VERIFIED,  floor_generation=4242, errors=[]
+```
+
+**根因**：`refs/remotes/origin/main` 是**本地** remote-tracking ref，不是 GitHub 上的 branch。
+驗證器讀它時讀的是本機 `.git`，而能寫本機 `.git` 的正是 §LW1 點名的「同一 writer」
+（trade-core root）。設計當初把「GitHub main 受 branch protection 保護」與「驗證器讀到的
+ref」當成同一件事，這是論證的斷點。E1 在 `aiml_gate_receipt_s2e_anchor_floor.py` 的
+`_PROTECTED_ANCESTOR_REFS` 註解中主動具名此弱點，未在代碼層作出更強宣稱。
+
+**operator 裁決（2026-08-03）**：接受 **`UNVERIFIED` 為誠實終態**，不再宣稱達成外部性。
+理由是 §LW1 自己就規定「同一 writer 可 coherent rewrite 或舊合法 anchor 可重放時**只能得
+`UNVERIFIED`**」——在受檢主機上執行、與攻擊者共用 uid 的驗證器，結構上無法自證外部性
+（與 §5.3 的資訊論上界同型）。因此正確的做法不是繼續加固這條，而是讓判定據實輸出。
+
+**保留 ref 綁定的理由**（不是矛盾）：它擋得住**意外與漂移**——未 merge、未 fetch、指錯
+commit、CI shallow checkout 等情形現在都會得到具名的 `UNVERIFIED` 而非靜默 PASS；
+合法流程（PR merge → fetch → floor 真的在 `origin/main` 上）仍得 `VERIFIED`。
+它擋不住的是 host-root 主動偽造。**這個區分必須逐字保留在 PR 說明與任何後續投影中，
+不得簡化成「已關閉 P0-1」。**
+
+**真正的外部性上界**：需要驗證器不與被驗者共用 uid，即一個獨立的 attestor host
+（與 replica 私鑰放 `ncyu-nas` 同方向）。這是尚未排程的工程，不在本 remediation 範圍。
