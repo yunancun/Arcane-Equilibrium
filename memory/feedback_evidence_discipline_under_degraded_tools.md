@@ -48,3 +48,19 @@ ref：`project_multi_session_memory_race.md`（commit-first / 不認識的改動
 
 - W5 round-6 E2 複驗第一輪 mutation harness 產出 20 個「RED」全是假紅——受限 env（HOME 隔離）下 `/usr/local/bin/python3` 找不到 user-site pytest，pytest 根本沒跑就非零退出。
 - **鐵則**：任何 mutation/紅綠測試前，先在同一 env 跑 pristine 副本證明 GREEN（對照組）；「非零退出」≠「測試抓到突變」。`git archive` 副本（無 `.git`）跑依賴 committed-blob 的 governance 測試也會系統性假紅——用完整 `git clone --shared`。
+
+## 2026-08-05 追加：grep 的大小寫敏感讓我把「已完成」寫成「未完成」
+
+- 查 S2E-LW1 的 E3-B 是否落地時，我用 `grep -n "verdict" launch.py` 找 **`FloorVerdictObservation`**
+  （大寫 V）與 `AnchorGateObservations`，零命中即下結論「未收」，並把該宣稱寫進 commit
+  message 與 `TODO.md`。實際上它們在**同一個 commit** 的 `:33/:752/:914/:978/:1345` 就在。
+  是 E1 複查工單前提時指出的，不是我自己發現的。
+- **教訓比「加 -i」大**：`grep` 零命中是**最弱的一種證據**——它只證明「我這個 pattern 沒
+  匹配到」，不證明「那個東西不存在」。用零命中去否定一項工作是否完成之前，必須至少再用
+  一個**正交**的方法確認（讀該 commit 的 diff、查 import 行、跑一次呼叫）。
+- **方向性**：本專案的複核鏈一直在打「過度宣稱」（把未完成寫成已完成）。這次是**反向**
+  的同一類錯——把已完成寫成未完成。兩者都是帳本不實，都要用 forward-fix 更正，不要因為
+  「保守方向的錯比較安全」就輕放。
+- 對照組：同一輪 E1 對我的四次 push back（grafts 裁定、拒絕把 JSON Schema `pattern` 改
+  `fullmatch`、拒絕在不讀 floor 的函式裡放 verdict、拒絕把真實 verdict 接到只處理
+  caller-supplied 物件的分支）**全部成立**。派工者的指令不是正本，執行者查證後反駁是對的。
