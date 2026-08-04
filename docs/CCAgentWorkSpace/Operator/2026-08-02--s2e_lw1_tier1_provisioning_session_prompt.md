@@ -13,7 +13,7 @@ operator 有 trade-core 的 root，你沒有。你負責：查證精確規格、
 1. `docs/CCAgentWorkSpace/PM/workspace/reports/2026-08-02--s2e_external_evidence_downgrade_proposal.md`
    — Tier 1 降級提案，operator 已於 2026-08-02 裁決**採納 Tier 1**。
 2. `docs/CCAgentWorkSpace/PM/workspace/reports/2026-08-02--s2e_lw1_external_prerequisite_action_packet.json`
-   — 14 項 blocker 的機器正本（Tier 1 下 3 項作廢，見提案 §五）。
+   — **16 項** blocker 的機器正本（12 個 fixed path ＋ 4 個 service）。**無任何一項作廢**：降級提案 §五 曾寫「Tier 1 下 3 項作廢／14→11」，該說法已於 2026-08-03 更正並標為 superseded，總數從未減少，改變的只有組成。
 3. `helper_scripts/maintenance_scripts/agent_governance_s2_5_recovery.py:45-115`
    — 7 個 recovery 能力的 signer identity／namespace／固定路徑／**已釘死的 fingerprint 常數**。
 4. `program_code/ml_training/aiml_gate_receipt_s2e_launch.py:46-48, 265-360`
@@ -40,26 +40,39 @@ operator 有 trade-core 的 root，你沒有。你負責：查證精確規格、
 
 後果：operator 新產的金鑰 fingerprint 一定對不上這 7 個常數。所以順序必須是
 **產金鑰 → 回報公鑰 → 改 source 重新釘 fingerprint（PR）→ 安裝 → 驗收**，
-不能先裝完才發現對不上。9 把裡有 7 把受此影響；另 2 把（兩個 JSON trust profile）只做自洽檢查
+不能先裝完才發現對不上。11 把裡有 7 把受此影響；另 4 把（四個 JSON trust profile）只做自洽檢查
 （`key_fingerprint` 必須等於從 `public_key` 導出的值），不需要改 source。
 
 重新釘 fingerprint **是正常的 provisioning 收尾，不是放寬 gate**：釘死公鑰指紋的目的是防止有人
 事後換掉 trust root，而現在釘的是佔位值。但改動必須在 PR 說明裡明講「以 operator 實際產生的
 公鑰取代未經驗證的佔位常數」，並附 7 個新 fingerprint。
 
-## 3. Phase A — 9 把 keypair（現在可做）
+## 3. Phase A — 11 把 keypair（現在可做）
 
 ### A0 先讓 operator 決定 private key custody（決定點，不要替他決定）
 
-7 個 recovery 能力＋2 個簽章身分各自一把獨立 ed25519 私鑰。這些私鑰**目前沒有消費者**
+7 個 recovery 能力＋4 個簽章身分（receipt signer／predecessor registry／durability anchor／off-host replica readback）各自一把獨立 ed25519 私鑰。這些私鑰**目前沒有消費者**
 （`attest-v2` 等能力尚未實作），所以要先講明：現在產＝先有一批暫時沒人用的私鑰。
 請 operator 明確指定存放位置與保護方式（例如 trade-core 上 root-only 目錄、或離線保管），
 並把決定寫進本 session 的收尾報告（只記位置與保護方式，不記內容）。
-若 operator 選擇延後，合法做法是**只做 A1 的兩個 JSON profile**，7 把 .pub 等能力實作時再產。
+
+> **硬邊界（operator 2026-08-03 裁決，不是建議）：第 11 把（off-host replica readback）的
+> 私鑰必須在 `ncyu-nas` 上產生、且永不離開該機；trade-core 的 root 不得持有它。**
+> 這是整個 2-of-2 的**唯一**支點：若兩把私鑰都在 trade-core，持有 root 的人同時是 anchor
+> writer 與它自己副本的唯一證人，§LW1「單一簽章不能防 rollback」「同一 writer 可 coherent
+> rewrite 只能得 `UNVERIFIED`」就仍然被違反——2026-08-03 的兩輪對抗複核都是卡在這一點。
+> 代碼能執法的到「兩個指紋不等」為止，**私鑰實際在哪台機器，代碼證不了**，只能由這條
+> provisioning 事實承擔。因此：**在 `ncyu-nas` 上 `ssh-keygen`，不要在別處產生後複製過去。**
+>
+> 已知前置缺口（PM 2026-08-03 實測）：`ncyu-nas`（100.77.15.17，linux）在 tailnet 上，但
+> `trade-core → ncyu-nas:22` 是 **Connection refused**——主機在、網路通、**沒有 SSH listener**。
+> 所以第 11 把在 `ncyu-nas` 開得出簽章路徑之前無法產生，這是一個具名 blocking 前置
+> （`OFFHOST_REPLICA_READBACK_SIGNER_CAPABILITY`），與三支未實作的 root-owned producer 同級。
+若 operator 選擇延後，合法做法是**只做 A1 的四個 JSON profile**，7 把 .pub 等能力實作時再產。
 
 ### A1 產生（operator 執行，逐把）
 
-九個目標，identity／namespace 全部由 source 固定，不可自選：
+11 個目標，identity／namespace 全部由 source 固定，不可自選：
 
 | # | 安裝路徑 | signer_identity | signature_namespace |
 |---|---|---|---|
@@ -73,13 +86,15 @@ operator 有 trade-core 的 root，你沒有。你負責：查證精確規格、
 | 8 | `/etc/arcane-equilibrium/aiml/s2e-receipt-trust-root-v1.json` | `aiml-s2e-receipt-signer-v1` | `arcane-equilibrium-aiml-s2e-receipts` |
 | 9 | `/etc/arcane-equilibrium/aiml/s2e-predecessor-registry-trust-root-v1.json` | `aiml-s2e-predecessor-registry-attestor-v1` | `arcane-equilibrium-aiml-s2e-predecessor-registry` |
 | 10 | `/etc/arcane-equilibrium/aiml/s2e-durability-anchor-trust-root-v1.json` | `aiml-s2e-durability-anchor-attestor-v1` | `arcane-equilibrium-aiml-s2e-durability-anchor` |
+| 11 | `/etc/arcane-equilibrium/aiml/s2e-offhost-replica-trust-root-v1.json` | 見 source `_load_offhost_replica_trust_root()` | 同左 |
 
-> **Tier 1 落地後更新(2026-08-02)**:原本是 9 把,現在是 **10 把** —— 外部 WORM provider trust
-> root 被換成 host 側 durability anchor trust root(第 10 列)。三個 JSON profile 的
-> `attestor_class` 現為 `S2E_RECEIPT_SIGNER_V1`／`HOST_APPEND_ONLY_PREDECESSOR_REGISTRY_V1`／
-> `HOST_APPEND_ONLY_DURABILITY_ANCHOR_V1`;正本在
+> **Tier 1 落地後更新(2026-08-02，2026-08-03 remediation 再更新)**:原本 9 把 → Tier 1 的
+> 10 把 → 現在 **11 把**。第 10 列取代了外部 WORM provider trust root；**第 11 列是
+> 2026-08-03 對抗複核後新增的 off-host replica readback 簽章身分**——複核判定原本的
+> 「replica 回讀」由 anchor 自己那把 key 自簽自證，等於沒有第二方，故拆出獨立一把。
+> 四個 JSON profile 的 `attestor_class` 正本在
 > `program_code/ml_training/aiml_gate_receipt_s2e_external_evidence.py` 的
-> `_load_*_trust_root()`,務必逐欄從 source 讀。
+> `_load_*_trust_root()`,**務必逐欄從 source 讀**,不要抄本表。
 
 **你要做的**：逐一從 source 讀出上表「見 source」的實際字串填滿，不要抄本表的省略欄。
 產生一律 `ssh-keygen -t ed25519`，每把獨立、無 passphrase 與否由 operator 決定，
@@ -87,7 +102,7 @@ operator 有 trade-core 的 root，你沒有。你負責：查證精確規格、
 
 ### A2 回報（operator 貼給你）
 
-9 個 public key（`ssh-ed25519 AAAA…` 一行）與對應
+11 個 public key（`ssh-ed25519 AAAA…` 一行）與對應
 `ssh-keygen -lf <pub>` 的 `SHA256:` fingerprint。**這是公開資訊，可以貼。**
 
 ### A3 source 重新釘 fingerprint（你做，走 PR）
@@ -104,7 +119,7 @@ PR 說明必須含：取代的是未驗證佔位值、7 個新 fingerprint、以
 - **7 個 `.pub`**（`_read_fixed_recovery_public_key`，`agent_governance_s2_5_recovery.py:300-327`）：
   regular file、`st_nlink == 1`、非 symlink、owner uid 0、**不得 group/world writable**
   （`mode & 0o022 == 0`）、size 介於 16–4096 bytes、純 ASCII、內容必須以 `ssh-ed25519 ` 開頭。
-- **2 個 JSON profile**（`_read_trust_root`，`aiml_gate_receipt_s2e_external_evidence.py:94-183`）：
+- **4 個 JSON profile**（`_read_trust_root`，`aiml_gate_receipt_s2e_external_evidence.py`）：
   owner uid **必須是 0**、mode **必須剛好 `0644`**、非 symlink、`st_nlink == 1`、≤16 KB、
   UTF-8 嚴格 JSON 且**不得有重複 key**，欄位集合必須**完全等於**這 9 個（多一個少一個都失敗）：
   `schema_version`、`signer_identity`、`signature_namespace`、`algorithm`、`key_generation`、
@@ -119,11 +134,23 @@ PR 說明必須含：取代的是未驗證佔位值、7 個新 fingerprint、以
 
 指令給 operator 時一律**單行**，一次一個檔，不要串成一大段。
 
+**`host_fingerprint` 兩欄的取值來源（2026-08-03 新增，不可自己編）**：durability anchor 與
+off-host replica 兩份 trust root 各要填一個 `host_fingerprint`，且**兩者必須不等**（驗證端
+逐字比對）。取值必須是真實的 SSH host key 指紋：anchor 側＝`trade-core` 的、replica 側＝
+`ncyu-nas` 的。**不得填佔位值**——`agent_governance_s2_5_recovery.py` 那 7 個從未對真實金鑰
+驗過的 `RECOVERY_*_FINGERPRINT` 佔位常數，正是這麼來的（見本文 §2），不要重蹈。
+
 ### A5 驗收（你做，read-only）
 
 透過 `ssh trade-core` 逐檔驗：`stat` 出 uid/mode/nlink、`file` 確認非 symlink、
 `ssh-keygen -lf` 比對 fingerprint 與 A3 釘入的常數是否逐字相同、JSON 以 `python3 -c` 嚴格解析並
 比對欄位集合。**任何一項不符就明講不符，不要四捨五入成通過。**
+
+**兩個 `host_fingerprint` 必須從 Mac 端 `ssh-keyscan` 核對，不要在 trade-core 上取。**
+被檢查的那台機器不能產出自己的檢查證據——在 trade-core 上算出來的「trade-core 指紋」，
+對「這兩份 trust root 是不是同一個 root 寫的」這個問題沒有任何證明力。從 Mac 分別
+`ssh-keyscan` 兩台，再與兩份 JSON 內的宣告值逐字比對。若 `ncyu-nas` 仍無 SSH listener
+（A0 的已知前置缺口），**這一步就做不了，據實記為未完成，不要用 trade-core 的值代替。**
 
 ## 4. Phase B — host-local anchor／registry 能力 ＋ NAS 複寫
 
