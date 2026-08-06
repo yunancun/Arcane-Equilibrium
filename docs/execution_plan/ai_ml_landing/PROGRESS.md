@@ -213,12 +213,19 @@ worker from taking. Full statements are in the W5 derivation record
 hand-maintained projection carried 13 of these rows; that is the drift this generated
 section exists to prevent.
 
-**The persisted receipt set in this tree is bound to `f30ede361` — the S2E.0 final
-head (S2.4-AMEND-1/2 chain `223a479d7`→`e9b26e895`→`a48355a29`→`cc6a8b97a`, round-8
-receipts `c911ea9c1`, projection `23037eb0b`, then the PR#153 Codex-review fixes
-`f30ede361`) — and was committed one commit later, as `3df9d2f45` (round 9).** *Bound to*
+**The persisted receipt set in this tree is bound to `8644c5f00` — the last
+owned-path-affecting head of the Tier 1 durability anchor branch, after four rounds
+of adversarial review — and was committed one commit later, as `6146f8572` (round 10).**
+Round 10 exists because `209793b70` changed three W5-owned paths
+(`aiml_gate_receipt_schema_core.py`, `aiml_gate_receipt_validator.py`,
+`application_bundle_runtime_closure_v1.json`) and emitted nothing, so the round-9
+artifacts spent that whole branch describing a head it no longer was; PA found the
+debt, three review rounds had not. Round 9 was bound to `f30ede361` (the S2E.0 final
+head: S2.4-AMEND-1/2 chain `223a479d7`→`e9b26e895`→`a48355a29`→`cc6a8b97a`, round-8
+receipts `c911ea9c1`, projection `23037eb0b`, then the PR#153 Codex-review fixes)
+and carried by `3df9d2f45`. *Bound to*
 and *committed at* are different facts and the artifacts state the first: each of the
-eight carries `source_head = f30ede36134f1464cef4bc025f808b931aebe180`. Read the
+eight carries `source_head = 8644c5f00f30d212dc85780351c33f4650a98b21`. Read the
 binding out of the artifact field, never out of this paragraph; the discriminator regression
 `tests/structure/test_aiml_w5_receipt_binding_projection.py` mechanically requires one
 unique `source_head` across all eight artifacts and requires every claim of that form in
@@ -254,7 +261,7 @@ round's final head `f30ede361` (round 9) — the emitter enforces the rule mecha
 `W5_RECEIPTS_EMITTED` on the clean committed head). Round 8 changed the ledger digest
 (four typed-status flips); round 9 re-binds owned-path blobs only (ledger unchanged).
 
-W5-RECEIPT-BINDING: source_head=f30ede36134f1464cef4bc025f808b931aebe180 carrier_commit=3df9d2f451ceb7ab66117de6e33fd882d59a9531 artifacts=8 round=9 status=COMMITTED
+W5-RECEIPT-BINDING: source_head=8644c5f00f30d212dc85780351c33f4650a98b21 carrier_commit=6146f857281be6f1dc49ebeff9e98afb4a0a77ec artifacts=8 round=10 status=COMMITTED
 
 | # | `obligation_id` | `typed_status` | `owner_wave` | Spec refs |
 |---|---|---|---|---|
