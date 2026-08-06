@@ -3,7 +3,7 @@
     "reasons": [],
     "status": "ADMITTED"
   },
-  "admission_self_digest": "sha256:54aaa6367917b2596321aba31ada738f4904239502de13bf7f28d83456dbb79b",
+  "admission_self_digest": "sha256:03c5de3c82f6ae257ae8ed41595320fbd294f497350081dd88b7b9151bae8cf9",
   "historical_persisted_w4": {
     "historical_source_head": "f66fe0790ee13c098ad99bbdea3c9001f76328a4",
     "historical_w4_integrity": "VERIFIED",
@@ -21,27 +21,27 @@
     "reasons": [],
     "status": "PASS"
   },
-  "regenerated_w0_wave_exit_self_digest": "sha256:4a27c7833c49bcdd3918f4ed17511fb3af6bc592efe3c96536ddd3d4307c6f5a",
+  "regenerated_w0_wave_exit_self_digest": "sha256:d33e07ebd546540b7e521e2f030c4d6d09c0fb7bd2e13da7f53f9c74fc5727d3",
   "regenerated_w1_wave_exit_derivation": {
     "reasons": [],
     "status": "PASS"
   },
-  "regenerated_w1_wave_exit_self_digest": "sha256:fed9764d10d5aee3f1188381202983ab90c3907ca029986b107a3a8e4abbd806",
+  "regenerated_w1_wave_exit_self_digest": "sha256:8f6e999794c592087781b9e97caa95f485648cdd5517b70d853d1552c1a06d2f",
   "regenerated_w2_wave_exit_derivation": {
     "reasons": [],
     "status": "PASS"
   },
-  "regenerated_w2_wave_exit_self_digest": "sha256:49bee4f839bc16c046dd7ffb30fa9bddc8027dce559421bdd404e98a431fd9e7",
+  "regenerated_w2_wave_exit_self_digest": "sha256:ddd232db525df6c5275a1f4734cfe847315dc465976cd75bc19ccb16cc0ef237",
   "regenerated_w3_wave_exit_derivation": {
     "reasons": [],
     "status": "PASS"
   },
-  "regenerated_w3_wave_exit_self_digest": "sha256:8ed07e878d2798d44ad742247dfac53d41404d4ec0c3917be3bf2969ea95f07e",
+  "regenerated_w3_wave_exit_self_digest": "sha256:70b3b682d63e11c318ebd112fe81de9580e7347c74d9405335c9255a48108d3b",
   "regenerated_w4_wave_exit_derivation": {
     "reasons": [],
     "status": "PASS"
   },
-  "regenerated_w4_wave_exit_self_digest": "sha256:a49352e623acc2dba896b4f618de380165e271e0fabb9ced956df2ccbeb0c22d",
+  "regenerated_w4_wave_exit_self_digest": "sha256:69e651c9148009e5456884c81ab309e370677c6829c37f577501687ac162eca9",
   "remaining_owned_obligation_count": 28,
   "remaining_owned_obligations": [
     {
@@ -366,53 +366,78 @@
   "replay_note": "W5 re-derivation binds source_head == checkout HEAD; to replay, checkout source_head, rebuild the in-memory W0/W1/W2/W3/W4 chain with the same builders, then run derive_wave_exit_status(w5, source_admission_receipt=admission, predecessor_wave_receipt=w4_wave_exit, predecessor_wave_chain=(w0_wave_exit, w1_wave_exit, w2_wave_exit, w3_wave_exit)). A PASS here evidences source structure at this head only: the evidence digests are shape-only (the chain derives PASS on a literal sha256:111...1), so it never evidences that any test ran or that any review happened.",
   "review_provenance": [
     {
-      "note": "all anchors file/line-verified at head; zero new files; frozen-ABI constraint table",
+      "note": "committed anchor floor read from git commit bytes + real 2-of-2 replica signature; also found this branch's unpaid W5 debt (209793b70 changed three W5-owned paths with zero re-emission), which round 1-3 all missed; its own prerequisite arithmetic was wrong twice and is corrected in place at round 4",
       "role": "PA",
-      "scope": "S2E.0 minimum coherent change design at 1255275dd",
+      "scope": "S2E-LW1 Tier 1 remediation design at 9f9649398 (design/S2E-LW1-tier1-remediation.md)",
       "verdict": "DESIGN_ADOPTED_BY_PM"
     },
     {
-      "note": "0 P0 / 0 P1 / 2 P2 (builder silent-FRESH default; derive_plan_expected_topology no self-digest recompute); 5 mutations all killed; full-suite recount byte-identical to builder",
+      "note": "4 P1 + 6 P2; decisive: the implementation violates the very §LW1 sentence cited to authorize it (external monotonic head, single signature cannot prevent rollback, same-writer coherent rewrite may only yield UNVERIFIED), and the entire new binding could be deleted with 72 tests green",
       "role": "E2",
-      "scope": "adversarial review of 223a479d7..a48355a29",
-      "verdict": "PASS_WITH_CONCERNS"
+      "scope": "round-1 adversarial review of the Tier 1 durability anchor",
+      "verdict": "FAIL"
     },
     {
-      "note": "both P2 fixes confirmed real (revert-mutations 6/6 and 1/1 red); one non-blocking P3 nit (bracket KeyError on doubly-absent digest keys in a directly-called leaf) recorded as residual",
+      "note": "the load-bearing git-externality claim was enforced by zero lines of code; runnable PoC: local branch off the real genesis, self-made floor, errors == []; five further P1 including a committed 0-byte floor as a zero-error fail-open and ambient GIT_DIR overriding -C",
       "role": "E2",
-      "scope": "delta re-verify of cc6a8b97a (P2 fixes)",
-      "verdict": "DELTA_ACCEPTED"
+      "scope": "round-2 adversarial review at b1f67d8d7",
+      "verdict": "FAIL"
     },
     {
-      "note": "independent full-suite rerun 2 failed/6337 passed/46 skipped; twelve design test categories all present and substantive; zero test deletions/weakenings; skip census equals baseline",
-      "role": "E4",
-      "scope": "test-evidence verification at cc6a8b97a",
-      "verdict": "PASS"
-    },
-    {
-      "note": "nine authorities remain false; all changes tighten fail-closed surfaces; ledger flips claim source structure only; zero hard-boundary fingerprint hits",
-      "role": "CC",
-      "scope": "constitutional review of 1255275dd..cc6a8b97a",
-      "verdict": "PASS"
-    },
-    {
-      "note": "0 confirmed findings; OBS-1 LOW (2b admission binds live HEAD not plan core source_head - follow-up suggestion), OBS-2/3 INFO recorded",
+      "note": "independently reproduced the same falsification with its own PoC; at_commit and repo_root are both attacker-reachable inputs",
       "role": "E3",
-      "scope": "security review of 1255275dd..cc6a8b97a",
-      "verdict": "PASS"
+      "scope": "round-2 independent security review at b1f67d8d7",
+      "verdict": "FAIL"
+    },
+    {
+      "note": "three must-dos; confirmed require_current_freshness is precisely scoped and found zero date-rot fixtures",
+      "role": "E4",
+      "scope": "round-2 test-evidence verification at b1f67d8d7",
+      "verdict": "PASS_WITH_MUST_DOS"
+    },
+    {
+      "note": "nine findings including E3-A, a real RCE via ambient PATH inheritance into the git invocation; all nine closed in source; E1 correctly refused two PM instructions (JSON Schema pattern is an unanchored search by spec)",
+      "role": "E2",
+      "scope": "round-3 adversarial review at 5ed9d7729..6f563c299",
+      "verdict": "FINDINGS_CLOSED"
+    },
+    {
+      "note": "independently reproduced both P1; 17 of 17 mutations killed, every narrow survivor re-run wider; full closure ledger over rounds 1-3 verified at source rather than from commit messages; five further P2 including the design master's prerequisite arithmetic wrong a second time; NOT REACHED recorded for three mutations and for a full tests/structure run",
+      "role": "E2",
+      "scope": "round-4 adversarial code verification at 8d070334e",
+      "verdict": "FAIL"
+    },
+    {
+      "note": "P1 R4-1: the command-domain safe.directory grant re-enables git's execution of core.fsmonitor from a repo-local config on the git status path, giving code execution as the verifier in exactly the differing-uid topology the flag was added for; measured on git 2.50.1; confirmed by construction that E3-A is closed, that a forged refs/remotes/origin/main does not rescue an orphan floor, and that the 9156-line diff carries no secret",
+      "role": "E3",
+      "scope": "round-4 independent security verification at 8d070334e",
+      "verdict": "FAIL"
+    },
+    {
+      "note": "P1 F-1: the branch leaves SCHEMA_FILES == 93 red against a real 94, green at baseline e8d7d2454, and outside the five S2E files whose 127 passed was the branch's whole evidence; mutation matrix 8/8 killed; manifest cost guard verified honest (baseline 254, head 257, bound 264); also named the no-squash-merge constraint",
+      "role": "E4",
+      "scope": "round-4 test-evidence verification at 8d070334e",
+      "verdict": "FAIL"
+    },
+    {
+      "note": "both P1 and five P2 fixed; widening the regression on E2's prompt found two more SCHEMA_FILES sites and a repo-wide grep found a third, four total; safe.directory removed rather than denylisted because filter.<drv>.clean reaches the same place through .gitattributes; two round-2 should-items (stale packet action id, red bisect window 447e5bad7..acca2095f) carried explicitly, not silently; P0-1 remains the operator's accepted UNVERIFIED terminal state and all three reviewers confirmed no sentence overstates it",
+      "role": "PM",
+      "scope": "round-4 adjudication and remediation at 44edecd91 (report 2026-08-06--s2e_tier1_round4_review.md)",
+      "verdict": "FIXED_AND_RELEASED_FOR_PR"
     }
   ],
   "schema_version": "s2_4_w5_derivation_record_v1_informal",
-  "source_head": "f30ede36134f1464cef4bc025f808b931aebe180",
+  "source_head": "8644c5f00f30d212dc85780351c33f4650a98b21",
   "test_evidence": {
-    "command": "python3 -m pytest -q tests/structure program_code/ml_training/tests (worktree aiml-s2e0-amend12 at f30ede361)",
-    "exit_code": 0,
-    "measured_by": "E1 build run at f30ede361; prior-generation numbers independently re-executed by E2 (684.22s) and E4-verifier (698.93s) at cc6a8b97a",
-    "summary": "6341 passed, 46 skipped, 0 failed at the S2E.0 final head f30ede361 (baseline 1255275dd was 6306/46). Chain: S2.4-AMEND-1 (section 9.2 refresh ingress in APPLY, terminal receipt dependency_refresh_digests, section 9.1 profile discriminators) + S2.4-AMEND-2 (plan-derived expected_topology) + E2 P2 fixes (builder fail-closed contract gate, attestation self-digest recompute) + PR#153 Codex fixes (cluster_identity_ref/pre_hba_digest cross-binding, delta expiry window, derivation hoisted to aggregate precheck step 4b with zero-mutation refusal) + round-8 receipts + projection closure. Obligations 16/23/25/26 flipped to CLOSED_BY_S2_4_AMEND_[12]_SOURCE; E2 mutations 7/7 kill; frozen ABI surfaces unchanged."
+    "command": "python3 -m pytest -q -p no:randomly tests/structure program_code/ml_training/tests (main worktree, branch agent/aiml-s2e-tier1-durability-anchor-20260802 at cedf9a6f2)",
+    "exit_code": 1,
+    "measured_by": "PM full-suite run at cedf9a6f2 (Mac, 28m56s). Prior scoped runs at the same source: five S2E files 127 passed reproduced independently three times (PM 919.94s, E4 19m09s, E2 20m36s); a 14-file widened set at 8d070334e returned 617 passed / 2 failed, which is how two of the four stale SCHEMA_FILES assertions were found.",
+    "scope_boundary": "Repository/command evidence at this head only. LOCAL_REPRODUCIBLE, not a closure-admissible command_capture_v2: no admitted node-id or context artifact was bound. It evidences source structure and test outcomes on a Mac; it evidences nothing about runtime, PG, the three unimplemented root-owned producer capabilities, any real durability anchor, or any off-host replica. Authority 0/9, production effect 0/6.",
+    "summary": "3 failed, 8050 passed, 55 skipped in 1736.94s at cedf9a6f2. None of the three is caused by this branch's source. Two are the G1 context-transport regression that origin/main itself records as its current baseline (test_aiml_s2_effect_host_run.py: test_registry_tracked_bytes_leave_headroom_under_the_execve_single_argument_cap, test_compiled_context_artifact_stays_under_the_execve_cap; main's TODO states 254 passed / 2 failed for that file and assigns it to P0-AIML-G1-CONTEXT-TRANSPORT-REGISTRY-CAP). The third, test_file_line_policy_static.py::test_active_source_and_test_text_does_not_advertise_lower_file_limits, reported three violations: one belonged to this branch (a design-time '<=170 lines' estimate in design/S2E-LW1-tier1-remediation.md, fixed at 8644c5f00 and re-run green for that violation) and two are scan artifacts from sql/migrations/V026__cost_edge_advisor_log.sql:203 on origin/main, seen because the collector rglobs into the linked worktrees under .claude/worktrees/ that exist only on this Mac. This full run was performed specifically because E2 named 'no full tests/structure run' as the branch's evidence gap; the earlier five-file evidence would not have surfaced any of it."
   },
   "w5_wave_exit_derivation": {
     "reasons": [],
     "status": "PASS"
   },
-  "w5_wave_exit_self_digest": "sha256:63b071dce657062ae36fffef035dc2379e7463494c88daa8afdea35eeaa82e3a"
+  "w5_wave_exit_self_digest": "sha256:3c51dc542c446a98c86c7be54baac2d1438ec7c383e93e4b2a8bb5823274b214"
 }
