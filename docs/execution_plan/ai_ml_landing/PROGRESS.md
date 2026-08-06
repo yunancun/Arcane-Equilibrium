@@ -11,9 +11,10 @@ packages are **5/9 source-landed**: `S2E.0`, `S2E.1`, `S2E.2a`,
 `S2E.2b-1`, and `S2E.3`. The only unclosed package entry is `S2E.2b-2`;
 its LW1 subwave is external-blocked, and the dependency order remains
 `LW1 → LW2 → S2E.2b-3 → S2E.4 → S2E.5`.
-`S2E-LW1` has a clean source implementation checkpoint at `44edecd91`
-(Tier 1 durability anchor, after four rounds of adversarial review; candidate PR,
-not merged), but is `WAITING_EXTERNAL_PREREQUISITES`: W0 genesis and LW1 receipts
+`S2E-LW1` has a clean source implementation checkpoint at `cc6e49bbb`
+(Tier 1 durability anchor, after four rounds of adversarial review; candidate PR #178,
+not merged — merge with `--merge`, never squash or rebase, since
+`test_agent_governance_s2e_lw1_committed_action_packet.py` pins `970734ae0` ancestry), but is `WAITING_EXTERNAL_PREREQUISITES`: W0 genesis and LW1 receipts
 are absent, the transition did not `ADVANCE`, and LW2 remains locked. The closed
 machine packet
 at `docs/CCAgentWorkSpace/PM/workspace/reports/2026-08-02--s2e_lw1_external_prerequisite_action_packet.json`
