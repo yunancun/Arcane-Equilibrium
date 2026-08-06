@@ -20,8 +20,8 @@
     "unconditional_production_pending_removed": true
   },
   "schema_version": "s2_4_source_admission_receipt_v1",
-  "self_digest": "sha256:03c5de3c82f6ae257ae8ed41595320fbd294f497350081dd88b7b9151bae8cf9",
-  "source_head": "8644c5f00f30d212dc85780351c33f4650a98b21",
+  "self_digest": "sha256:23a9738c894d5b035fb49fab9e114a49a8a9ffe4fdd1507878369be82a784550",
+  "source_head": "651bd4e38cef0e39545f6f8f378829800feea17f",
   "three_head_projection_digest": "sha256:0ce1503f9a7643420e077db10db9b643712dce7f096a5ab8a2ad1fd07598640b",
   "trust_pin_digests": {
     "independent_test_blob": "901300a8cd6e1760ea00d908c310bd42ca531c52",

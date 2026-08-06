@@ -3,7 +3,7 @@
     "reasons": [],
     "status": "ADMITTED"
   },
-  "admission_self_digest": "sha256:03c5de3c82f6ae257ae8ed41595320fbd294f497350081dd88b7b9151bae8cf9",
+  "admission_self_digest": "sha256:23a9738c894d5b035fb49fab9e114a49a8a9ffe4fdd1507878369be82a784550",
   "historical_persisted_w4": {
     "historical_source_head": "f66fe0790ee13c098ad99bbdea3c9001f76328a4",
     "historical_w4_integrity": "VERIFIED",
@@ -21,27 +21,27 @@
     "reasons": [],
     "status": "PASS"
   },
-  "regenerated_w0_wave_exit_self_digest": "sha256:d33e07ebd546540b7e521e2f030c4d6d09c0fb7bd2e13da7f53f9c74fc5727d3",
+  "regenerated_w0_wave_exit_self_digest": "sha256:0f1a9cfcf661b864c538758d0890124937a4a8f56cdb09ee038fcd64ead833a4",
   "regenerated_w1_wave_exit_derivation": {
     "reasons": [],
     "status": "PASS"
   },
-  "regenerated_w1_wave_exit_self_digest": "sha256:8f6e999794c592087781b9e97caa95f485648cdd5517b70d853d1552c1a06d2f",
+  "regenerated_w1_wave_exit_self_digest": "sha256:d6af8d9d7675398ca781f5be0130e301aabd7bfa6af289a4b4270bf68774e3e4",
   "regenerated_w2_wave_exit_derivation": {
     "reasons": [],
     "status": "PASS"
   },
-  "regenerated_w2_wave_exit_self_digest": "sha256:ddd232db525df6c5275a1f4734cfe847315dc465976cd75bc19ccb16cc0ef237",
+  "regenerated_w2_wave_exit_self_digest": "sha256:cc1406d3df8acbcef7c5bc54af8275d916b967c3b337b90e0ac1aab9c79ca37f",
   "regenerated_w3_wave_exit_derivation": {
     "reasons": [],
     "status": "PASS"
   },
-  "regenerated_w3_wave_exit_self_digest": "sha256:70b3b682d63e11c318ebd112fe81de9580e7347c74d9405335c9255a48108d3b",
+  "regenerated_w3_wave_exit_self_digest": "sha256:268bb5c2af4984becf0520c3a25e7ae47f66fb5bb732dd21c5ac3d1358f7eb05",
   "regenerated_w4_wave_exit_derivation": {
     "reasons": [],
     "status": "PASS"
   },
-  "regenerated_w4_wave_exit_self_digest": "sha256:69e651c9148009e5456884c81ab309e370677c6829c37f577501687ac162eca9",
+  "regenerated_w4_wave_exit_self_digest": "sha256:1406b3053643ed4a8a945370ccbb7fc974bc7da558e87a1c74ed32a2b6c89b3c",
   "remaining_owned_obligation_count": 28,
   "remaining_owned_obligations": [
     {
@@ -427,17 +427,18 @@
     }
   ],
   "schema_version": "s2_4_w5_derivation_record_v1_informal",
-  "source_head": "8644c5f00f30d212dc85780351c33f4650a98b21",
+  "source_head": "651bd4e38cef0e39545f6f8f378829800feea17f",
   "test_evidence": {
     "command": "python3 -m pytest -q -p no:randomly tests/structure program_code/ml_training/tests (main worktree, branch agent/aiml-s2e-tier1-durability-anchor-20260802 at cedf9a6f2)",
     "exit_code": 1,
     "measured_by": "PM full-suite run at cedf9a6f2 (Mac, 28m56s). Prior scoped runs at the same source: five S2E files 127 passed reproduced independently three times (PM 919.94s, E4 19m09s, E2 20m36s); a 14-file widened set at 8d070334e returned 617 passed / 2 failed, which is how two of the four stale SCHEMA_FILES assertions were found.",
+    "round_10_superseded": "Round 10 (carrier 6146f8572) is superseded by this round for one reason worth stating plainly: the round-10 evidence text quoted the forbidden number verbatim while describing the violation, so the emitted artifact itself then tripped the same file-line-policy scanner. Describing a policy violation is not exempt from the policy. Nothing about the round-10 receipt derivation was wrong; only its embedded prose was.",
     "scope_boundary": "Repository/command evidence at this head only. LOCAL_REPRODUCIBLE, not a closure-admissible command_capture_v2: no admitted node-id or context artifact was bound. It evidences source structure and test outcomes on a Mac; it evidences nothing about runtime, PG, the three unimplemented root-owned producer capabilities, any real durability anchor, or any off-host replica. Authority 0/9, production effect 0/6.",
-    "summary": "3 failed, 8050 passed, 55 skipped in 1736.94s at cedf9a6f2. None of the three is caused by this branch's source. Two are the G1 context-transport regression that origin/main itself records as its current baseline (test_aiml_s2_effect_host_run.py: test_registry_tracked_bytes_leave_headroom_under_the_execve_single_argument_cap, test_compiled_context_artifact_stays_under_the_execve_cap; main's TODO states 254 passed / 2 failed for that file and assigns it to P0-AIML-G1-CONTEXT-TRANSPORT-REGISTRY-CAP). The third, test_file_line_policy_static.py::test_active_source_and_test_text_does_not_advertise_lower_file_limits, reported three violations: one belonged to this branch (a design-time '<=170 lines' estimate in design/S2E-LW1-tier1-remediation.md, fixed at 8644c5f00 and re-run green for that violation) and two are scan artifacts from sql/migrations/V026__cost_edge_advisor_log.sql:203 on origin/main, seen because the collector rglobs into the linked worktrees under .claude/worktrees/ that exist only on this Mac. This full run was performed specifically because E2 named 'no full tests/structure run' as the branch's evidence gap; the earlier five-file evidence would not have surfaced any of it."
+    "summary": "3 failed, 8050 passed, 55 skipped in 1736.94s at cedf9a6f2. None of the three is caused by this branch's source. Two are the G1 context-transport regression that origin/main itself records as its current baseline (test_aiml_s2_effect_host_run.py: test_registry_tracked_bytes_leave_headroom_under_the_execve_single_argument_cap, test_compiled_context_artifact_stays_under_the_execve_cap; main's TODO states 254 passed / 2 failed for that file and assigns it to P0-AIML-G1-CONTEXT-TRANSPORT-REGISTRY-CAP). The third, test_file_line_policy_static.py::test_active_source_and_test_text_does_not_advertise_lower_file_limits, reported three violations: one belonged to this branch (a design-time line-count estimate in design/S2E-LW1-tier1-remediation.md advertising a file-size policy below the repository's single threshold, fixed at 8644c5f00 and re-run green for that violation) and two are scan artifacts from sql/migrations/V026__cost_edge_advisor_log.sql:203 on origin/main, seen because the collector rglobs into the linked worktrees under .claude/worktrees/ that exist only on this Mac. This full run was performed specifically because E2 named 'no full tests/structure run' as the branch's evidence gap; the earlier five-file evidence would not have surfaced any of it."
   },
   "w5_wave_exit_derivation": {
     "reasons": [],
     "status": "PASS"
   },
-  "w5_wave_exit_self_digest": "sha256:3c51dc542c446a98c86c7be54baac2d1438ec7c383e93e4b2a8bb5823274b214"
+  "w5_wave_exit_self_digest": "sha256:3dce6b4feedbecc84c434c73caefcd9f5c4f532c9b6a4c8faba2860c000358ec"
 }
