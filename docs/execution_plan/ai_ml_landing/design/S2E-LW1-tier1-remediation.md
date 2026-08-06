@@ -328,7 +328,7 @@ replica trust root 安裝。**任何情況下不得填佔位指紋**（那正是
 
 `helper_scripts/maintenance_scripts/agent_governance_s2e_lw1_action_packet.py`：
 
-- `_PATH_PREREQUISITES`（`:58-114`）新增第 11 列
+- `_PATH_PREREQUISITES`（`:58-114`）新增第 12 列
   `("OFFHOST_REPLICA_TRUST_ROOT", str(OFFHOST_REPLICA_TRUST_ROOT_PATH), "ROOT_OWNED_EXACT_0644_JSON_TRUST_PROFILE")`。
 - `_SERVICE_PREREQUISITES`（`:118-134`）新增第 4 列
   `("OFFHOST_REPLICA_READBACK_SIGNER_CAPABILITY", "operator-config:offhost-replica-readback-signer",
@@ -336,7 +336,12 @@ replica trust root 安裝。**任何情況下不得填佔位指紋**（那正是
   這是 `ncyu-nas` 上的簽章能力＋可達傳輸（現況 SSH:22 refused），**與既有的
   `OFFHOST_APPEND_ONLY_REPLICA` 是兩件事**：後者是副本儲存與複寫路徑，前者是「誰在第二台機器上
   用第二把 key 簽回讀證言」。合併會讓兩個獨立的失敗模式共用一個狀態欄位。
-- **11 path + 4 service = `16` blocked prerequisites。**
+- **12 path + 4 service = `16` blocked prerequisites。**
+  （**E2 round-4 R4-4 更正，2026-08-06**：原寫「新增第 11 列」與「11 path + 4 service = 16」，
+  算式本身就不成立——11+4=15。實測活值為 `len(_PATH_PREREQUISITES)=12`、
+  `len(_SERVICE_PREREQUISITES)=4`、`len(EXPECTED_ACTION_IDS)=8`；代碼、committed packet 與
+  `TODO.md` 一直是對的 16，只有本設計正本的算式錯。這是本檔第二次前置數算錯，
+  故不原地抹除，逐條記在此。）
 - `EXPECTED_ACTION_IDS`（`:137-144`）新增兩項 ⇒ 共 **8** 項：
   `COMMIT_GENESIS_ARMED_DURABILITY_ANCHOR_FLOOR`（§3.5 的 PR 動作）、
   `PROVISION_OFFHOST_REPLICA_READBACK_SIGNER`（`ncyu-nas` 側）。
@@ -349,8 +354,10 @@ replica trust root 安裝。**任何情況下不得填佔位指紋**（那正是
 - provisioning prompt（`docs/CCAgentWorkSpace/Operator/2026-08-02--s2e_lw1_tier1_provisioning_session_prompt.md`）：
   **10 把 → 11 把**（表格新增第 11 列 replica trust root）、`:43-44`「9 把裡有 7 把」→「11 把裡有 7 把」、
   `:50` 標題「Phase A — 9 把 keypair」→ 11 把、`:90` 「9 個 public key」→ 11、
-  `:107-118` JSON profile 段「2 個」→ **3 個**且需說明 anchor／replica 兩份多一個
-  `host_fingerprint` 欄位（欄位集合 10 個，registry 仍 9 個）、`:16`「Tier 1 下 3 項作廢」
+  `:107-118` JSON profile 段「2 個」→ **4 個**且需說明 anchor／replica 兩份多一個
+  `host_fingerprint` 欄位（欄位集合 10 個，registry 與 receipt signer 仍 9 個）
+  （**R4-4 更正**：原寫「3 個」，實際出貨的 profile 是 durability anchor、off-host replica、
+  predecessor registry、receipt signer 共 4 份；prompt 也照 4 份寫）、`:16`「Tier 1 下 3 項作廢」
   與 `:147/150` 的數字一併修正（複核 P2-5 已列，本次一次改完）。
   另需三項**新增內容**：
   - **A0 custody 決定新增一條硬邊界**：第 11 把（replica）的 keypair **必須在 `ncyu-nas` 上產生**，
@@ -808,13 +815,25 @@ commit、CI shallow checkout 等情形現在都會得到具名的 `UNVERIFIED` �
 5. **E2 F-05**：白名單同時砍掉 `HOME` 與系統 config，而 git 只在 protected configuration
    （system/global/**command**）認 `safe.directory` ⇒ 一旦驗證器 uid ≠ repo owner uid
    （正是 §LW1 假設的 root-owned producer 拓撲），全家族 git 呼叫 `rc=128 dubious
-   ownership`，floor 永久 `REJECTED`。修法：`git_argv()` 顯式帶 **command 域**的
+   ownership`，floor 永久 `REJECTED`。當時的修法：`git_argv()` 顯式帶 **command 域**的
    `-c safe.directory=<repo_root>`（值由 repo_root 導出，不從 env 來）。
    以 git 自己的 `GIT_TEST_ASSUME_DIFFERENT_OWNER=1` 實測前後對照。
+   **2026-08-06 已撤回（E3 round-4 R4-1）**：該修法把 git 自己的 fail-closed 拒讀換成
+   「信任這個 repo 的 **local** config」，而本家族實際會跑 `git status`
+   （`_require_clean`，15 處），`git status` 會執行 `.git/config` 裡的 `core.fsmonitor`
+   ⇒ 在它自己引用來授權自己的那個差異 uid 拓撲下，**寫得了 `.git/config` 的非 root
+   repo owner 可以驗證器身分執行任意程式**（git 2.50.1 實測）。`filter.<drv>.clean`
+   經 `.gitattributes` 走同一條路，所以逐鍵 denylist 不收斂。`safe.directory` 已從
+   `git_argv()` 移除，恢復 git 原生拒讀；差異 uid 的放行改由 operator 寫進 **root 自己的**
+   protected config（`git config --system --add safe.directory <path>`，記在 provisioning
+   prompt 的 root-owned producer 前置底下，不新增 machine 前置）。F-05 指出的失敗仍然
+   存在，但它是**大聲且 typed 的 REJECTED**，不是靜默放行——這正是它該有的形狀。
 6. **E2 F-04（全 repo 級）**：Python 的 `$` 放行尾端換行。`agent_governance_schema` 是
    全 repo 556 個 `pattern` 的唯一執行點，`{"h": "<40hex>\n"}` 曾通過 `^[0-9a-f]{40}$`。
    修法把錨點翻成 ECMA-262 語義（`^`→`\A`、`$`→`\Z`），**不改成 `fullmatch`**——
    JSON Schema 的 `pattern` 依規範是非錨定 search。
+   **2026-08-06 補完（E3 round-4 R4-2）**：`patternProperties` 當時漏改，仍是裸
+   `re.compile`，於是「唯一執行點」對那一側不成立。兩側現在共用 `_compiled_pattern`。
 7. **E3-B（PM 裁決）**：`verdict` 出模組後被壓平。`UNVERIFIED` 仍然擋，但現在經
    `AnchorGateObservations` 成為 typed 輸出的一格，由 CLI 的 `anchor_gate_observations`
    發出，下游不必再解析 `"UNVERIFIED: "` 子字串。

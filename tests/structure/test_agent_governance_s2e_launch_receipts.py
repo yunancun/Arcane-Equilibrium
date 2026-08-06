@@ -3494,16 +3494,18 @@ def test_committed_floor_never_resolves_git_from_the_ambient_path(
     assert schema_core.git_subprocess_env()["LC_ALL"] == "C"
 
 
-def test_committed_floor_reads_a_repository_owned_by_another_uid(
+def test_committed_floor_refuses_a_repository_owned_by_another_uid(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
-    """E2 F-05:白名單同時砍掉 `HOME` 與系統 config ⇒ `safe.directory` 無處可讀。
+    """E3 round-4 R4-1:差異 uid 時 git 拒讀,而拒讀就是**正確**的結果。
 
-    §LW1 假設的拓撲(三支 root-owned producer + ncyu-owned repo)下,全家族 git 呼叫
-    會 `rc=128 detected dubious ownership`,floor 永久 REJECTED。所有既有測試都以
-    repo owner 身分在 `tmp_path` 跑,永遠碰不到這條。此處用 git 自己的
-    `GIT_TEST_ASSUME_DIFFERENT_OWNER` 強制走到那條路徑(它被白名單擋在外面,所以測試
-    必須顯式把它加進白名單才能到達 git)。
+    前身是 E2 F-05 的測試,斷言同一情境得 `FLOOR_VERIFIED`——那是因為 `git_argv`
+    當時顯式帶了 command 域的 `safe.directory`。該旗標把 git 自己的 fail-closed
+    拒讀換成「信任這個 repo 的 local config」,而本家族會跑 `git status`
+    (`_require_clean`),`git status` 會執行 `.git/config` 裡的 `core.fsmonitor`
+    ⇒ 寫得了 `.git/config` 的非 root repo owner 能以驗證器身分執行任意程式。
+    旗標已移除;此處把斷言一併翻正:**拒讀、不得 VERIFIED**。差異 uid 拓撲的放行
+    是 operator 寫進 root 自己的 protected config,不是代碼自己認可。
     """
 
     repo = _floor_repo(tmp_path)
@@ -3526,8 +3528,52 @@ def test_committed_floor_reads_a_repository_owned_by_another_uid(
     reading = anchor_floor.read_committed_durability_anchor_floor(
         repo, at_commit=head
     )
-    assert reading.verdict == anchor_floor.FLOOR_VERIFIED, reading.errors
-    assert reading.floor is not None and reading.floor["floor_generation"] == 1
+    assert reading.verdict != anchor_floor.FLOOR_VERIFIED
+    assert reading.floor is None
+    assert reading.errors, "a refused read must name its reason"
+
+
+def test_git_argv_does_not_trust_the_repositorys_own_config(tmp_path: Path) -> None:
+    """E3 round-4 R4-1 的執法面:argv 不得帶 `safe.directory`,且 `.git/config`
+    裡的 `core.fsmonitor` 不得被本家族的 `git status` 執行。
+
+    R4-1 的實測(git 2.50.1)是 `git -c safe.directory=<repo> -C <repo> status`
+    會跑 `core.fsmonitor`。逐鍵 denylist 收斂不了(`filter.<drv>.clean` 經
+    `.gitattributes` 走同一條路),所以這裡釘的是**不認可**這件事本身。
+
+    誠實邊界:同 uid 時 git 本來就讀自己的 local config,`core.fsmonitor` 照跑——
+    那不是提權,因為寫 config 的人就是驗證器自己。有意義的只有**差異 uid** 那條,
+    所以 hook 部分在 `GIT_TEST_ASSUME_DIFFERENT_OWNER` 底下驗。
+    """
+
+    repo = _floor_repo(tmp_path)
+    argv = schema_core.git_argv(repo, "status", "--porcelain=v1")
+    assert not any("safe.directory" in token for token in argv), argv
+
+    sentinel = tmp_path / "fsmonitor-was-executed"
+    hook = tmp_path / "fsmonitor-hook.sh"
+    hook.write_text(
+        "#!/bin/sh\n" f"echo executed >> {sentinel}\n" "exit 0\n", encoding="ascii"
+    )
+    hook.chmod(0o755)
+    subprocess.run(
+        [schema_core.git_executable(), "-C", str(repo), "config", "core.fsmonitor",
+         str(hook)],
+        check=True,
+        capture_output=True,
+    )
+    knob = "GIT_TEST_ASSUME_DIFFERENT_OWNER"
+    env = {**schema_core.git_subprocess_env(), knob: "1"}
+    probe = subprocess.run(
+        schema_core.git_argv(repo, "status", "--porcelain=v1", "--untracked-files=all"),
+        capture_output=True,
+        text=True,
+        env=env,
+    )
+    if probe.returncode == 0:
+        pytest.skip(f"this git ignores {knob}; the escalation path is unreachable")
+    assert "dubious ownership" in probe.stderr, probe.stderr
+    assert not sentinel.exists(), sentinel.read_text(encoding="ascii")
 
 
 def test_committed_floor_git_calls_are_time_bounded(tmp_path: Path) -> None:

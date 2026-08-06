@@ -665,10 +665,21 @@ def validate_s2e_durability_anchor_attestation(
 
     這是 §LW1 spec anchor 選言的第二支。anchor 側簽章綁 append-only monotonic
     head 與 trusted freshness window;replica 側由**第二把 key、第二個 host
-    fingerprint**對同一個 head 再簽一次,並帶自己的時間窗。因此 spec 的兩條否定
-    條款(單一簽章不能防 rollback、同一 writer coherent rewrite 只能得
-    `UNVERIFIED`)在結構上成立:只取得 anchor host 的 root 拿不到第二台機器對改寫
-    後 head 的簽章。caller 不能自選 anchor 或 replica 後端。
+    fingerprint**對同一個 head 再簽一次,並帶自己的時間窗。caller 不能自選 anchor
+    或 replica 後端。
+
+    E3 round-4 R4-3 更正(2026-08-06):本段原本接著寫「因此 spec 的兩條否定條款在
+    結構上成立:只取得 anchor host 的 root 拿不到第二台機器對改寫後 head 的簽章」——
+    **該句是過度宣稱,已刪**。它只涵蓋私鑰放在哪裡,漏掉更強的事實:replica 的信任
+    根是 `/etc/arcane-equilibrium/aiml/s2e-offhost-replica-trust-root-v1.json`,
+    **host root 改得動它**,於是根本不需要第二台機器的 key。設計正本
+    `design/S2E-LW1-tier1-remediation.md` §5.3 寫對了,這裡沒跟上。
+    代碼實際執法的是:兩份 SSHSIG 各自對兩個 root-owned 信任根驗過、兩個
+    `key_fingerprint` 互異且都異於 receipt signer、`replica_host_fingerprint` 等於
+    其信任根宣告的 `host_fingerprint` 且異於 `anchor_host_fingerprint`、且不在
+    `/etc/ssh/ssh_host_*.pub` 之中。**能寫這兩個 `/etc` 檔的人可以在同一台機器產出
+    兩份簽章,代碼偵測不到。** 依 2026-08-03 operator 裁決,本模組不宣稱 §LW1
+    externality;兩條否定條款由 provisioning 事實承擔,不由這裡的代碼承擔。
 
     **代碼不宣稱、也不可能宣稱**:replica 私鑰實際存放在哪台機器。驗證端跑在受檢
     主機上,這是任何在受檢主機執行的驗證器的資訊論上界;該邊界由 provisioning 的

@@ -167,8 +167,12 @@ def schema_subset_errors(
             errors.append(f"{path}: missing required property {key}")
         properties = schema.get("properties", {})
         pattern_properties = schema.get("patternProperties", {})
+        # E3 round-4 R4-2:`patternProperties` 原本直接 `re.compile`,於是
+        # `6f563c299` 宣稱的「本檔是全部 pattern 唯一的 ECMA 忠實執行點」不成立
+        # ——`$` 在 Python 允許尾隨換行,`properties` 側已翻成 `\Z` 而這側沒有。
+        # 兩側改用同一個編譯器;search 語義(JSON Schema 對兩者皆為 search)不變。
         compiled_patterns = [
-            (re.compile(str(pattern)), child_schema)
+            (_compiled_pattern(str(pattern)), child_schema)
             for pattern, child_schema in pattern_properties.items()
         ]
         for key in sorted(set(value) - set(properties)):

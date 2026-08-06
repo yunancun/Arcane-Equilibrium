@@ -121,13 +121,24 @@ PR 說明必須含：取代的是未驗證佔位值、7 個新 fingerprint、以
   （`mode & 0o022 == 0`）、size 介於 16–4096 bytes、純 ASCII、內容必須以 `ssh-ed25519 ` 開頭。
 - **4 個 JSON profile**（`_read_trust_root`，`aiml_gate_receipt_s2e_external_evidence.py`）：
   owner uid **必須是 0**、mode **必須剛好 `0644`**、非 symlink、`st_nlink == 1`、≤16 KB、
-  UTF-8 嚴格 JSON 且**不得有重複 key**，欄位集合必須**完全等於**這 9 個（多一個少一個都失敗）：
+  UTF-8 嚴格 JSON 且**不得有重複 key**，欄位集合必須**完全等於**下列集合（多一個少一個都失敗）。
+  E3 round-4 R4-4 更正（2026-08-06）：本段原本只寫「這 9 個」並對四份 profile 一體適用，
+  **對其中兩份是錯的**，照著做會直接吃到 `trust root fields are not exact`。
+  基礎 9 欄（`_TRUST_ROOT_FIELDS`，`aiml_gate_receipt_s2e_external_evidence.py:68-78`）：
   `schema_version`、`signer_identity`、`signature_namespace`、`algorithm`、`key_generation`、
   `anchor`、`public_key`、`key_fingerprint`、`attestor_class`。
+  **durability anchor 與 off-host replica 兩份是 10 欄**：基礎 9 欄再加 `host_fingerprint`
+  （`_HOST_FINGERPRINT_FIELDS`，同檔 `:79`；`:305-321` 兩處 `extra_fields=`）。
+  predecessor registry 與 receipt signer 不加。
   固定值：`algorithm="SSH-ED25519"`、`key_generation="independent_off_repo_ed25519_v1"`、
   `anchor="fixed_off_repo_public_trust_root_v1"`；`key_fingerprint` 必須等於由 `public_key` 導出的值。
-  predecessor registry 的 `schema_version="s2e_predecessor_registry_trust_root_v1"`、
-  `attestor_class="EXTERNAL_APPEND_ONLY_PREDECESSOR_REGISTRY_V1"`；receipt signer 的
+  各份的 `attestor_class` **逐字**（同檔 `:306`、`:321`、`:332`）：durability anchor＝
+  `HOST_APPEND_ONLY_DURABILITY_ANCHOR_V1`、off-host replica＝
+  `OFFHOST_APPEND_ONLY_REPLICA_READBACK_V1`、predecessor registry＝
+  `HOST_APPEND_ONLY_PREDECESSOR_REGISTRY_V1`。
+  （R4-4：本行原寫 predecessor registry 為 `EXTERNAL_APPEND_ONLY_…`，那是 Tier 1 之前的
+  舊字串，代碼早已改為 `HOST_…`，照舊字串寫必被 `attestor_class is invalid` 拒。）
+  predecessor registry 的 `schema_version="s2e_predecessor_registry_trust_root_v1"`；receipt signer 的
   `schema_version="s2e_receipt_signer_trust_root_v1"`，其欄位集合另見
   `aiml_gate_receipt_s2e_launch.py:340-360`（含 `governed_pytest_provider_profile_id`，與上表不同，
   **必須逐欄從 source 讀，不要套用 registry 的欄位表**）。
@@ -171,9 +182,24 @@ off-host replica 兩份 trust root 各要填一個 `host_fingerprint`，且**兩
 ## 5. 收尾
 
 產出一份 session 報告放 `docs/CCAgentWorkSpace/Operator/`，內容：
-A0 custody 決定（只記位置與保護方式）、9 項逐檔實測狀態、A3 的 PR 連結與 7 個新 fingerprint、
+A0 custody 決定（只記位置與保護方式）、11 項逐檔實測狀態、A3 的 PR 連結與 7 個新 fingerprint、
 未完成項與原因、以及明確聲明本 session 沒有 production effect。
+（R4-4：「9 項」是 Tier 1 之前的舊數；現行為 11 個檔／16 項前置＝12 path＋4 service。）
 
-**誠實邊界**：Phase A 全綠也**不代表** LW1 exit。它只把 14 項 blocker 降到剩
+**若驗證端與 repo 不同 uid**（root-owned producer 讀 `ncyu` 所有的 repo）：git 會
+`fatal: detected dubious ownership` 而整條 floor 讀取永久 REJECTED。這是**正確的
+fail-closed**，不是 bug。放行只能由 operator 寫進 **root 自己的** protected config：
+
+```
+git config --system --add safe.directory /home/ncyu/TradeBot/srv
+```
+
+代碼**不會**再自己帶 command 域的 `safe.directory`（E3 round-4 R4-1：那等於接受 repo
+的 local config，而 `git status` 會執行其中的 `core.fsmonitor`／`filter.*.clean`，
+於是寫得了 `.git/config` 的非 root 使用者能以 root 執行任意程式）。這條屬三支
+root-owned producer 能力的 provisioning 事實，不是新增的 machine 前置——那三支本來就
+blocking，receipt 現在一樣發不出。
+
+**誠實邊界**：Phase A 全綠也**不代表** LW1 exit。它只把 16 項 blocker 降到剩
 `attest-v2` 能力（未實作）＋ Phase B 兩項。W0 genesis 與 LW1 receipt 仍未發、LW2 仍 locked、
 S2 仍未關閉。不要在任何報告裡把 Phase A 完成寫成 wave 前進。

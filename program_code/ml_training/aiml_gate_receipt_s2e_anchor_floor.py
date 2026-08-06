@@ -159,12 +159,17 @@ class AnchorGateObservations:
 
     **消費者邊界(E3-B;逐格具名,兩格成熟度不同,不得被一併宣稱為「有消費者」)**:
 
-    - `floor_verdicts` 的程式消費者有兩處,都是被序列化出去的 stdout JSON 欄位:
+    - `floor_verdicts` 有兩個**序列化出口**,都是 stdout JSON 欄位:
       `agent_governance_s2e_launch_receipts` CLI(`transition-gate` 與 `validate`)
       與 `issue_s2e_launch_receipt` 回傳的 `launch_receipt_issuance_result_v1`,
-      兩者的欄位名皆為 `anchor_gate_observations`。下游因此能不解析錯誤字串就分辨
+      兩者的欄位名皆為 `anchor_gate_observations`。讀者因此能不解析錯誤字串就分辨
       「偽造/損壞的 floor 被拒(`REJECTED`)」與「未 merge/不可達因而誠實不可驗
       (`UNVERIFIED`)」。
+      **E2 round-4 R4-9 更正(2026-08-06)**:本段原寫「程式消費者有兩處」,而那兩處
+      都只是把值序列化出去,**沒有任何程式對 `UNVERIFIED` 與 `REJECTED` 分支**。
+      同一份 dict 裡的 `host_identity` 被誠實記為「無程式消費者」,兩格待遇不一致,
+      而不一致的那一半是寬鬆的那一半。此處統一用「序列化出口」,程式消費者兩格皆
+      **為零**;`floor_verdicts` 比 `host_identity` 多的只是 typed 形狀與具名出口。
     - **gate 行為完全由 `errors` 決定**:本通道不放行、不阻擋、不改變任何 status。
       `UNVERIFIED` 照樣擋——它不是 PASS,typed 化只讓它「發得出來」,不讓它通過。
     - `host_identity` 至今**仍無程式消費者**(E2 F-07),僅供 receipt/人工審閱。

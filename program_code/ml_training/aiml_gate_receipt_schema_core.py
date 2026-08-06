@@ -452,24 +452,33 @@ def git_executable() -> str:
 def git_argv(repo_root: Path | str, *arguments: str) -> list[str]:
     """本家族**唯一**的 git argv 建構入口。
 
-    E2 F-05:白名單同時砍掉 `HOME` 與系統 config(`GIT_CONFIG_NOSYSTEM=1`),而 git 刻意
-    只在「protected configuration」(system/global/**command**)裡認 `safe.directory`。
-    一旦驗證器 uid ≠ repo owner uid——正是 §LW1 假設的拓撲(root-owned producer +
-    ncyu-owned repo)——全家族 git 呼叫會 `rc=128 fatal: detected dubious ownership`,
-    floor 於是永久 REJECTED。所有測試都以 repo owner 身分在 `tmp_path` 跑,永遠碰不到。
-    這裡顯式帶 **command 域**的 `safe.directory`,值由 `repo_root` 導出(code-owned,
-    不從 env 來),不放寬任何邊界也不使用 `*` 萬用值。
-    誠實邊界:認可該 repo 等於接受 git 會讀它的 **local** config;本家族只跑
-    rev-parse/for-each-ref/log/show/merge-base/cat-file/config,都不評估會執行外部程式的
-    config key,而 `_object_store_errors` 另外拒掉 promisor(唯一的網路路徑)。
-    """
+    E3 round-4 R4-1(2026-08-06):**command 域的 `safe.directory` 已移除**,連同它那句
+    不成立的誠實邊界。原本的理由是 E2 F-05——白名單砍掉 `HOME` 與系統 config
+    (`GIT_CONFIG_NOSYSTEM=1`),而 git 只在 protected configuration(system/global/
+    **command**)裡認 `safe.directory`,所以驗證器 uid ≠ repo owner uid 時(正是 §LW1
+    的 root-owned producer + ncyu-owned repo 拓撲)全家族 git 會
+    `rc=128 fatal: detected dubious ownership`。
 
-    import os
+    但那個修法把 git 自己的 fail-closed 拒讀,換成「信任這個 repo 的 **local** config」,
+    而舊註解宣稱的「本家族只跑 rev-parse/for-each-ref/log/show/merge-base/cat-file/config,
+    都不評估會執行外部程式的 config key」**兩個子句都是假的**:本家族實際跑 `git status`
+    (`_require_clean`,15 處),而 `core.fsmonitor` 正是一個會執行外部程式的 config key。
+    R4-1 實測(git 2.50.1):`git -c safe.directory=<repo> -C <repo> status` 會執行
+    `.git/config` 裡的 `core.fsmonitor`——寫得了 `.git/config` 的人(在該拓撲下正是
+    **非 root 的 repo owner**)因此能以驗證器身分執行任意程式。`filter.<drv>.clean`
+    經 `.gitattributes` 也走同一條路,所以逐鍵 denylist 不是可收斂的解。
+
+    現在恢復 git 原生的 fail-closed:ownership 可疑時 git 拒讀該 repo 的 local config,
+    整條執行面隨之消失,而拒讀是**大聲且 typed** 的(`check=True` ⇒ 例外 ⇒ REJECTED),
+    不是靜默放行。差異 uid 拓撲要放行,必須由 operator 把該 repo 寫進 **root 自己的**
+    protected config(`git config --system --add safe.directory <path>`)——那是 git
+    設計 `safe.directory` 的位置,也是 repo owner 寫不到的位置。此事實記在
+    provisioning prompt 的 root-owned producer 前置底下,不新增 machine 前置(三支
+    producer 能力本來就 blocking,receipt 仍發不出)。
+    """
 
     return [
         git_executable(),
-        "-c",
-        f"safe.directory={os.path.abspath(str(repo_root))}",
         "-C",
         str(repo_root),
         *arguments,

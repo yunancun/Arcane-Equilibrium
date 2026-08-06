@@ -100,7 +100,10 @@ def test_anchor_schemas_are_local_only_and_central_schema_count_does_not_change(
     assert SCHEMA_VERSIONS.isdisjoint(validator.SCHEMA_FILES)
     # S2E launch and independent external-evidence contracts are unrelated
     # central increments; these local schemas remain outside that registry.
-    assert len(validator.SCHEMA_FILES) == 93
+    # Tier 1(2026-08-06)退掉 external WORM provider attestation、加入 durability
+    # anchor attestation 與其 committed floor ⇒ 93→94(E4 F-1 的同族;本檔在被挑選的
+    # 五個 S2E 檔之外,所以分支自己的綠色看不見它)。
+    assert len(validator.SCHEMA_FILES) == 94
 
 
 @pytest.mark.parametrize("schema_version", sorted(SCHEMA_VERSIONS))
