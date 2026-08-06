@@ -45,11 +45,12 @@ for candidate in (HELPERS, ML_ROOT, PROGRAM_CODE):
 import agent_governance_s2_4_w5_emit as w5_emit  # noqa: E402
 import aiml_gate_receipt_validator as validator  # noqa: E402
 
-# Tier 1 durability anchor 分支最後一個動到 owned path 的 head(8644c5f00)——八件
-# persisted artifact 當前綁定的 source_head(round 10)。round 9 綁 f30ede361,
+# Tier 1 durability anchor 分支四輪複核後的 head(651bd4e38)——八件 persisted
+# artifact 當前綁定的 source_head(round 11;round 10 因 evidence 文字本身踩到
+# file-line-policy 掃描而被同分支取代)。round 9 綁 f30ede361,
 # 而 `209793b70` 之後改了三條 W5-owned path 卻零 re-emission,故本輪一併償還。
 # 合法 re-emission 時本常量與兩份文檔的 marker 必須在同一 commit 內一起更新。
-EXPECTED_SOURCE_HEAD = "8644c5f00f30d212dc85780351c33f4650a98b21"
+EXPECTED_SOURCE_HEAD = "651bd4e38cef0e39545f6f8f378829800feea17f"
 
 RECEIPT_DIR = ROOT / "docs/execution_plan/ai_ml_landing/receipts/S2.4-WP4-W5"
 TODO_PATH = ROOT / "TODO.md"
@@ -65,7 +66,7 @@ _MARKER_RE = re.compile(
 # E2 round-6 P2-2:全形等號「＝」納入,關掉蓄意規避之外最廉價的變體。
 _CLAIM_RE = re.compile(r"source_head\s*[=＝]\s*`?([0-9a-f]{7,40})")
 # 現行 receipt 世代的 round 序號;re-emission 時與 EXPECTED_SOURCE_HEAD 同 commit 更新。
-EXPECTED_ROUND = 10
+EXPECTED_ROUND = 11
 _ALLOWED_CLASSIFICATIONS = {
     "source_closure_blocker",
     "accepted_carry_forward",

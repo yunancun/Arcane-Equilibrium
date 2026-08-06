@@ -2,7 +2,7 @@
 
 **Program**: `AIML-LONG-LIVED-LANDING-V2`
 **Ledger version**: 26
-**Updated**: 2026-08-06（Tier 1 durability anchor 四輪對抗複核收口；round-3／round-4 補入帳本；W5 round-10 re-emission）
+**Updated**: 2026-08-06（Tier 1 durability anchor 四輪對抗複核收口；round-3／round-4 補入帳本；W5 round-11 re-emission）
 **Overall state**: `PROGRAM_ADOPTED` · **`S1_CLOSED`** · every S2 effect-session
 source-seam predicate is narrowly `SOURCE_READY` (S2.0 + S2.1 + S2.2A + S2.3 +
 S2.4 + S2.5 + S2.2B), while Sprint 2 remains
@@ -213,9 +213,14 @@ worker from taking. Full statements are in the W5 derivation record
 hand-maintained projection carried 13 of these rows; that is the drift this generated
 section exists to prevent.
 
-**The persisted receipt set in this tree is bound to `8644c5f00` — the last
-owned-path-affecting head of the Tier 1 durability anchor branch, after four rounds
-of adversarial review — and was committed one commit later, as `6146f8572` (round 10).**
+**The persisted receipt set in this tree is bound to `651bd4e38` — the Tier 1
+durability anchor branch after four rounds of adversarial review — and was committed
+one commit later, as `f4d94d7ec` (round 11).**
+Round 10 (bound to `8644c5f00`, carried by `6146f8572`) is superseded one commit
+after it landed: its embedded evidence prose quoted the very number the
+file-line-policy scanner forbids while describing the violation it had just fixed,
+so the artifact tripped that scanner. The derivation was sound; only the prose was
+not, and receipt bytes cannot be hand-edited.
 Round 10 exists because `209793b70` changed three W5-owned paths
 (`aiml_gate_receipt_schema_core.py`, `aiml_gate_receipt_validator.py`,
 `application_bundle_runtime_closure_v1.json`) and emitted nothing, so the round-9
@@ -225,7 +230,7 @@ head: S2.4-AMEND-1/2 chain `223a479d7`→`e9b26e895`→`a48355a29`→`cc6a8b97a`
 receipts `c911ea9c1`, projection `23037eb0b`, then the PR#153 Codex-review fixes)
 and carried by `3df9d2f45`. *Bound to*
 and *committed at* are different facts and the artifacts state the first: each of the
-eight carries `source_head = 8644c5f00f30d212dc85780351c33f4650a98b21`. Read the
+eight carries `source_head = 651bd4e38cef0e39545f6f8f378829800feea17f`. Read the
 binding out of the artifact field, never out of this paragraph; the discriminator regression
 `tests/structure/test_aiml_w5_receipt_binding_projection.py` mechanically requires one
 unique `source_head` across all eight artifacts and requires every claim of that form in
@@ -261,7 +266,7 @@ round's final head `f30ede361` (round 9) — the emitter enforces the rule mecha
 `W5_RECEIPTS_EMITTED` on the clean committed head). Round 8 changed the ledger digest
 (four typed-status flips); round 9 re-binds owned-path blobs only (ledger unchanged).
 
-W5-RECEIPT-BINDING: source_head=8644c5f00f30d212dc85780351c33f4650a98b21 carrier_commit=6146f857281be6f1dc49ebeff9e98afb4a0a77ec artifacts=8 round=10 status=COMMITTED
+W5-RECEIPT-BINDING: source_head=651bd4e38cef0e39545f6f8f378829800feea17f carrier_commit=f4d94d7ecbeef8139d08b564f81253a0d60e93c2 artifacts=8 round=11 status=COMMITTED
 
 | # | `obligation_id` | `typed_status` | `owner_wave` | Spec refs |
 |---|---|---|---|---|
