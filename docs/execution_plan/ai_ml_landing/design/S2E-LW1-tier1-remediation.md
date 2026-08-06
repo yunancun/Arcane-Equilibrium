@@ -98,7 +98,12 @@ docs/execution_plan/ai_ml_landing/receipts/S2E-LW1-LW5/durability-anchor-floor-v
 
 ### 3.2 新增模組（不擴張既有檔）
 
-`program_code/ml_training/aiml_gate_receipt_s2e_anchor_floor.py`（預估 ≤170 行），公開面：
+`program_code/ml_training/aiml_gate_receipt_s2e_anchor_floor.py`（新模組，不擴張既有檔），公開面：
+
+（**2026-08-06 更正**：此處原寫一個設計期的行數預估。兩件事都錯：實際交付遠大於該數，
+而且本 repo 只有一個 2000 行門檻——在設計文件裡寫一個更低的數字等於替它宣傳一個不存在的
+政策，`tests/structure/test_file_line_policy_static.py` 正是為此而設，並在第四輪的完整
+回歸裡把這一行判紅。行數不是本模組的驗收條件。）
 
 - `DURABILITY_ANCHOR_FLOOR_SCHEMA`、`durability_anchor_floor_repo_path()`
 - `durability_anchor_floor_digest(floor)`
