@@ -17,7 +17,8 @@ from aiml_gate_receipt_schema_core import (
     _contains_github_secret_like_content,
     _load_schema,
     canonical_digest,
-    git_argv, git_subprocess_env,
+    code_owned_object_view, git_argv, git_own_checkout_guard, git_subprocess_env,
+    resolve_named_revision,
 )
 from aiml_gate_receipt_s2e_consumption import (
     build_s2e_launch_consumption_bootstrap_authority_core,
@@ -191,24 +192,20 @@ def _without_digest(value: dict[str, Any], field: str) -> dict[str, Any]:
 
 
 def _git(repo_root: Path, *args: str, check: bool = True) -> subprocess.CompletedProcess[str]:
-    return subprocess.run(
-        git_argv(repo_root, *args),
-        cwd=repo_root,
-        check=check,
-        capture_output=True,
-        env=git_subprocess_env(),
-        text=True,
-    )
+    # round-5:git 跑在 code-owned bare view 裡,`repo_root` 只提供 object store。
+    with code_owned_object_view(repo_root) as view:
+        return subprocess.run(
+            git_argv(view, *args), cwd=view, check=check,
+            capture_output=True, env=git_subprocess_env(), text=True,
+        )
 
 
 def _git_bytes(repo_root: Path, *args: str) -> bytes:
-    return subprocess.run(
-        git_argv(repo_root, *args),
-        cwd=repo_root,
-        check=True,
-        capture_output=True,
-        env=git_subprocess_env(),
-    ).stdout
+    with code_owned_object_view(repo_root) as view:
+        return subprocess.run(
+            git_argv(view, *args), cwd=view, check=True,
+            capture_output=True, env=git_subprocess_env(),
+        ).stdout
 
 
 def _strict_json_object(raw: bytes) -> Any:
@@ -357,11 +354,15 @@ def load_s2e_receipt_signer_trust_root() -> tuple[dict[str, Any] | None, list[st
 
 
 def _commit(repo_root: Path, head: str) -> str:
-    return _git(repo_root, "rev-parse", "--verify", f"{head}^{{commit}}").stdout.strip()
+    revision = resolve_named_revision(repo_root, head)
+    return _git(repo_root, "rev-parse", "--verify", "--end-of-options",
+                f"{revision}^{{commit}}").stdout.strip()
 
 
 def _tree(repo_root: Path, head: str) -> str:
-    return _git(repo_root, "rev-parse", "--verify", f"{head}^{{tree}}").stdout.strip()
+    revision = resolve_named_revision(repo_root, head)
+    return _git(repo_root, "rev-parse", "--verify", "--end-of-options",
+                f"{revision}^{{tree}}").stdout.strip()
 
 
 def _is_ancestor(repo_root: Path, older: str, newer: str) -> bool:
@@ -370,9 +371,21 @@ def _is_ancestor(repo_root: Path, older: str, newer: str) -> bool:
     ).returncode == 0
 
 
-def _require_clean(repo_root: Path) -> None:
-    status = _git(
-        repo_root, "status", "--porcelain=v1", "--untracked-files=all"
+def _require_own_clean_checkout(repo_root: Path) -> None:
+    """**generation 面專用**:作者為自己剛做完的樹發射 candidate 前,要求該樹乾淨。
+
+    E3 round-5:本家族唯一還會跑 `git status` 的地方,而 `git status` 會執行
+    `core.fsmonitor` 與 `filter.<drv>.clean`。R4-1 的提權形狀是「**驗證器**對**外人
+    所有**的樹跑它」,這裡兩個前提都不成立:驗證面已整組改走
+    `code_owned_object_view`(沒有工作樹 ⇒ 結構上跑不起來,不是自律),而
+    `git_own_checkout_guard` 先驗 `st_uid == geteuid()`。這不是「假設同 uid」——
+    同 uid 是被驗證後才成立的前提。設計全文見 design/S2E-round5-code-owned-object-view.md。
+    """
+
+    own = git_own_checkout_guard(repo_root)
+    status = subprocess.run(
+        git_argv(own, "status", "--porcelain=v1", "--untracked-files=all"),
+        cwd=own, check=True, capture_output=True, env=git_subprocess_env(), text=True,
     ).stdout
     if status:
         raise ValueError("repository must be clean before launch receipt generation")
@@ -1363,14 +1376,17 @@ def validate_s2e_launch_acceptance_review_bundle(
     else:
         return ["acceptance review bundle candidate schema is unsupported"]
     if require_current_generation:
+        # E3 round-5 具名撤回「工作樹乾淨」(原是 `_require_clean` = `git status`,
+        # R4-1 的提權形狀本體):① 跨 uid 取不到;② 不承重——每項投影都走
+        # `<commit>:<path>`,工作樹位元組進不了任何 digest。留下 view 真能證的那條:
+        # 候選必須等於當前 HEAD 的 commit 與 tree。作者側乾淨仍在 generation 面。
         try:
-            _require_clean(repo_root)
             if (
                 _commit(repo_root, "HEAD") != reviewed_head
                 or _tree(repo_root, "HEAD") != reviewed_tree
             ):
                 errors.append(
-                    "acceptance review candidate is not the clean current HEAD"
+                    "acceptance review candidate is not the current HEAD generation"
                 )
         except (OSError, ValueError, subprocess.CalledProcessError) as error:
             errors.append(
@@ -1834,7 +1850,7 @@ def _build_genesis_candidate_payload(
     launch_contract_digest: str,
     generation_task_contract_digest: str,
 ) -> dict[str, Any]:
-    _require_clean(repo_root)
+    _require_own_clean_checkout(repo_root)
     receipt: dict[str, Any] = {
         "schema_version": "s2e_launch_genesis_receipt_v1",
         "launch_id": LAUNCH_ID,
@@ -1895,7 +1911,7 @@ def _build_wave_candidate_payload(
     generation_task_contract_digest: str,
     side_effect_class: str = "SOURCE_ONLY",
 ) -> dict[str, Any]:
-    _require_clean(repo_root)
+    _require_own_clean_checkout(repo_root)
     resolved_source_head = _commit(repo_root, source_head)
     current_head = _commit(repo_root, "HEAD")
     if resolved_source_head != current_head:

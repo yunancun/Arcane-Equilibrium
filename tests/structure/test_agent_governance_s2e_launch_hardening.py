@@ -385,7 +385,50 @@ def test_historical_review_cannot_be_reissued_after_head_advances(
         ],
     )
     assert result["status"] == "EXTERNAL_VERIFICATION_PENDING"
-    assert any("not the clean current HEAD" in error for error in result["errors"])
+    assert any("not the current HEAD generation" in error for error in result["errors"])
+
+
+def test_current_generation_check_never_executes_the_reviewed_repos_fsmonitor(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """E3 round-5 的 fail-first:`require_current_generation` 不得跑 `git status`。
+
+    改動前這條分支先跑 `_require_clean(repo_root)`,而 `git status` 會執行被驗 repo
+    `.git/config` 裡的 `core.fsmonitor`(E1 於 git 2.55 同 uid 實測會寫出哨兵)——
+    差異 uid 拓撲下,寫得了那份 config 的人因此能以驗證器身分執行任意程式(R4-1)。
+    改動後「工作樹乾淨」這一條被具名撤回(它進不了任何 digest,而且跨 uid 取不到),
+    留下的是 view 真的能證的那一條:候選必須等於當前 HEAD 的 commit 與 tree。
+    因此:同一個錯誤仍然要出現,哨兵必須不存在。
+    """
+
+    case = support._issued_genesis_authority_case(tmp_path, monkeypatch)
+    repo = case["repo"]
+    sentinel = tmp_path / "review-fsmonitor-was-executed"
+    hook = tmp_path / "review-fsmonitor-hook.sh"
+    hook.write_text(
+        "#!/bin/sh\n" f"echo executed >> {sentinel}\n" "exit 0\n", encoding="ascii"
+    )
+    hook.chmod(0o755)
+    support._git(repo, "config", "core.fsmonitor", str(hook))
+    (repo / "operator-left-this-here.txt").write_text("dirty\n", encoding="ascii")
+
+    pending = s2e._pending_candidate_from_issued(case["issued"])
+    authority = case["authority"]
+    result = validator.issue_s2e_launch_receipt(
+        pending,
+        acceptance_review_bundle=authority["acceptance_review_bundle"],
+        repo_root=repo,
+        governed_capture_record=authority["review_governed_capture_record"],
+        disposable_test_effect_chains=authority[
+            "review_disposable_test_effect_chains"
+        ],
+        durability_anchor_attestation=authority[
+            "review_durability_anchor_attestation"
+        ],
+    )
+    assert result["status"] == "EXTERNAL_VERIFICATION_PENDING"
+    assert any("not the current HEAD generation" in error for error in result["errors"])
+    assert not sentinel.exists(), sentinel.read_text(encoding="ascii")
 
 
 def test_wave_issuance_binds_effects_and_consumes_predecessor_once(

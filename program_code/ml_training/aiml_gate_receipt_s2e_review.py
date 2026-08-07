@@ -19,7 +19,7 @@ from agent_governance_schema import schema_subset_errors
 from aiml_gate_receipt_schema_core import (
     _load_schema,
     canonical_digest,
-    git_argv, git_subprocess_env,
+    code_owned_object_view, git_argv, git_subprocess_env,
 )
 
 
@@ -240,24 +240,29 @@ _LW1_PREDICATE_PATH_TOKENS = {
 def _git(
     repo_root: Path, *args: str, check: bool = True
 ) -> subprocess.CompletedProcess[str]:
-    return subprocess.run(
-        git_argv(repo_root, *args),
-        cwd=repo_root,
-        check=check,
-        capture_output=True,
-        env=git_subprocess_env(),
-        text=True,
-    )
+    # E3 round-5:本模組每一條 revision 都是 candidate 的 `reviewed_head`(明確 40-hex),
+    # 工作樹本來就不參與;改走 code-owned bare view 之後,被驗者的 config/hook/
+    # attributes 也一併不參與,ownership 檢查同樣不進場。
+    with code_owned_object_view(repo_root) as view:
+        return subprocess.run(
+            git_argv(view, *args),
+            cwd=view,
+            check=check,
+            capture_output=True,
+            env=git_subprocess_env(),
+            text=True,
+        )
 
 
 def _git_bytes(repo_root: Path, *args: str) -> bytes:
-    return subprocess.run(
-        git_argv(repo_root, *args),
-        cwd=repo_root,
-        check=True,
-        capture_output=True,
-        env=git_subprocess_env(),
-    ).stdout
+    with code_owned_object_view(repo_root) as view:
+        return subprocess.run(
+            git_argv(view, *args),
+            cwd=view,
+            check=True,
+            capture_output=True,
+            env=git_subprocess_env(),
+        ).stdout
 
 
 def _tree(repo_root: Path, head: str) -> str:

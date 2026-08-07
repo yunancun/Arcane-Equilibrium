@@ -13,13 +13,14 @@ receipt dependency-graph 結構驗。facade 已超過 2000 行治理上限;把�
 
 from __future__ import annotations
 
+import contextlib
 import hashlib
 import json
 import re
 import sys
 from datetime import datetime, timezone
 from pathlib import Path
-from typing import Any, Callable
+from typing import Any, Callable, Iterator
 
 
 def resolve_facade():
@@ -483,8 +484,15 @@ def git_argv(repo_root: Path | str, *arguments: str) -> list[str]:
     的 repo 的 local config,而該 config 正是 `core.fsmonitor`/`filter.<drv>.clean`
     的來源——於是 repo owner 又拿回以 producer 身分執行程式的能力,也就是 R4-1 本身。
     真正的解不是 config 管道,而是設計層面:驗證面不要對外人所有的工作樹跑
-    `git status`,改從 code-owned 的 bare view 取事實。具名為三支 root-owned producer
-    實作時的前置設計項,**不假裝現在有解**。
+    `git status`,改從 code-owned 的 bare view 取事實。
+
+    **round-5(2026-08-07):上一段具名的那個設計項已實作,見 `code_owned_object_view`。**
+    `git_argv` 本身一個字不改——它仍然只是 `[git, -C, <path>, *args]`,仍是本家族唯一的
+    git argv 建構入口。改的是**傳進去的那個 `<path>`**:驗證面不再把被驗者的工作樹交給
+    git 去 discover,而是交一個**驗證器自己建的 bare repo**,以 `objects/info/alternates`
+    掛上被驗者的 object store。alternates 是純內容定址資料面:git 只從那裡取物件,不讀
+    它的 config/hook/attributes/fsmonitor,也**不對它做 ownership 檢查**。上面兩條死路
+    的共同前提——「把外人所有的目錄當成 repository 打開」——就此整個消失。
     """
 
     return [
@@ -513,25 +521,322 @@ def git_subprocess_env() -> dict[str, str]:
     return env
 
 
+# ── code-owned bare object view(差異 uid 拓撲的唯一取事實面)─────────────────
+#
+# 舊拓撲 `git -C <被驗者>` 讓 git **discover** 外人的目錄為 repository,於是它的
+# `.git/config`(`core.fsmonitor`、`filter.<drv>.clean`…)、hook、`.gitattributes` 與
+# 工作樹全部進場,而 discover 正是 ownership 檢查發生的地方。本 view 反過來:驗證器自建
+# 一個 bare repo,只把被驗者的 `objects/` 以 `objects/info/alternates` 掛上去——那是純
+# 內容定址資料面,git 從那裡取物件,不讀它的 config/hook/attributes,也不做 ownership
+# 檢查。view 的 `refs/` 為空、`HEAD` 指向 unborn branch,不替被驗者解析任何名字。
+# E1 於 git 2.55 實測:**裸** `rev-parse HEAD` 解不出來時回 `rc=0` 並原樣印回 `HEAD`
+# (fail-open),只有 `--verify` 才 `rc=128`;故名字解析一律 `--verify` 或先換 40-hex。
+#
+# 設計全文:docs/execution_plan/ai_ml_landing/design/S2E-round5-code-owned-object-view.md
+_OBJECT_VIEW_MODE = 0o700
+_OBJECT_VIEW_FILE_MODE = 0o600
+_OBJECT_VIEW_CONFIG = (
+    "[core]\n"
+    "\trepositoryformatversion = 0\n"
+    "\tbare = true\n"
+    "\tlogallrefupdates = false\n"
+)
+# 刻意是一個不存在的分支名:`git -C <view> rev-parse --verify HEAD` 必須 rc≠0。
+_OBJECT_VIEW_HEAD = "ref: refs/heads/code-owned-object-view-has-no-refs\n"
+MAX_REF_FILE_BYTES = 4096
+MAX_PACKED_REFS_BYTES = 4 * 1024 * 1024
+MAX_SUBJECT_CONFIG_BYTES = 1024 * 1024
+_MAX_SYMREF_DEPTH = 8
+_REF_NAME_PATTERN = re.compile(r"\Arefs/[A-Za-z0-9][A-Za-z0-9._/-]*\Z")
+
+
+def read_bounded(path: Path, limit: int) -> bytes:
+    """讀一個**常規檔**的前 `limit` 位元組;symlink/非常規檔/超限一律 `OSError`。
+
+    `O_NOFOLLOW` 是關鍵:被驗者的 `refs/` 底下可以放 symlink,而 ref 讀取是本家族唯一
+    還會碰被驗者檔案的地方。跟開就等於讓被驗者指定驗證器要讀哪個檔。
+    """
+
+    import os
+    import stat as stat_module
+
+    flags = os.O_RDONLY | getattr(os, "O_CLOEXEC", 0) | getattr(os, "O_NOFOLLOW", 0)
+    descriptor = os.open(path, flags)
+    try:
+        info = os.fstat(descriptor)
+        if not stat_module.S_ISREG(info.st_mode):
+            raise OSError(f"{path} is not a regular file")
+        if info.st_size > limit:
+            raise OSError(f"{path} exceeds its admitted size")
+        payload = bytearray()
+        while len(payload) < limit:
+            chunk = os.read(descriptor, limit - len(payload))
+            if not chunk:
+                break
+            payload.extend(chunk)
+        return bytes(payload)
+    finally:
+        os.close(descriptor)
+
+
+def subject_git_dir(repo_root: Path | str) -> Path:
+    """被驗者的 gitdir(`.git` 目錄、`gitdir:` 指標檔、或裸 repo 自身)。
+
+    全程只 stat/讀位元組。**絕不**把 `repo_root` 交給 git 去 discover——那正是
+    `git_argv` docstring 記的兩條死路的共同前提。
+    """
+
+    import os
+    import stat as stat_module
+
+    root = Path(os.path.realpath(str(repo_root)))
+    marker = root / ".git"
+    try:
+        info: Any = marker.lstat()
+    except OSError:
+        info = None
+    if info is not None and stat_module.S_ISDIR(info.st_mode):
+        return marker
+    if info is not None and stat_module.S_ISREG(info.st_mode):
+        text = read_bounded(marker, MAX_REF_FILE_BYTES).decode("utf-8", "replace")
+        head, separator, tail = text.partition("gitdir:")
+        if head.strip() or not separator:
+            raise OSError(f"{marker} is not a valid gitdir pointer")
+        target = Path(tail.strip())
+        if not target.is_absolute():
+            target = root / target
+        return Path(os.path.realpath(str(target)))
+    if (root / "objects").is_dir() and (root / "HEAD").is_file():
+        return root
+    raise OSError(f"{root} is not a Git repository this view can read")
+
+
+def subject_common_dir(git_dir: Path) -> Path:
+    """linked worktree 的共用 gitdir(`commondir` 指標);普通 repo 回自己。
+
+    物件庫、`packed-refs`、`info/grafts` 全在共用側,per-worktree 側只有 `HEAD` 這類
+    本地狀態,兩側都要走到。
+    """
+
+    import os
+
+    pointer = git_dir / "commondir"
+    if not pointer.is_file():
+        return git_dir
+    raw = read_bounded(pointer, MAX_REF_FILE_BYTES).decode("utf-8", "replace").strip()
+    if not raw:
+        return git_dir
+    target = Path(raw)
+    if not target.is_absolute():
+        target = git_dir / target
+    return Path(os.path.realpath(str(target)))
+
+
+def _verify_private_directory(path: Path) -> None:
+    """`path` 自身與每一層祖先都不得被本行程以外的身分改寫。
+
+    mkdtemp 的目錄本身是 0700 且原子建立,但它的**位置**來自 ambient `TMPDIR`。若
+    `TMPDIR` 由攻擊者所有,他雖進不去 0700 的 view,卻能 rename/刪掉它換上自己的
+    (他擁有父目錄)⇒ `config` 在建立與使用之間被換掉,`core.fsmonitor` 從側門回來。
+    故祖先只能由 root 或本 uid 所有,group/other 可寫時必須帶 sticky(`/tmp` 的 1777)。
+    """
+
+    import os
+    import stat as stat_module
+
+    euid = os.geteuid()
+    info = os.lstat(path)
+    if (
+        not stat_module.S_ISDIR(info.st_mode)
+        or info.st_uid != euid
+        or stat_module.S_IMODE(info.st_mode) != _OBJECT_VIEW_MODE
+    ):
+        raise OSError(f"{path} is not a private directory owned by this process")
+    current = path.parent
+    while True:
+        ancestor = os.lstat(current)
+        if not stat_module.S_ISDIR(ancestor.st_mode):
+            raise OSError(f"{current} is not a directory")
+        if ancestor.st_uid not in (0, euid):
+            raise OSError(f"{current} is owned by an untrusted uid")
+        writable = ancestor.st_mode & (stat_module.S_IWGRP | stat_module.S_IWOTH)
+        if writable and not ancestor.st_mode & stat_module.S_ISVTX:
+            raise OSError(f"{current} is group/other writable without the sticky bit")
+        parent = current.parent
+        if parent == current:
+            return
+        current = parent
+
+
+def _write_view_file(path: Path, payload: str) -> None:
+    import os
+
+    flags = os.O_WRONLY | os.O_CREAT | os.O_EXCL | getattr(os, "O_CLOEXEC", 0)
+    descriptor = os.open(path, flags, _OBJECT_VIEW_FILE_MODE)
+    try:
+        os.write(descriptor, payload.encode("utf-8"))
+    finally:
+        os.close(descriptor)
+
+
+@contextlib.contextmanager
+def code_owned_object_view(repo_root: Path | str) -> Iterator[Path]:
+    """yield 一個 code-owned bare repo 的路徑,掛著被驗者的 object store。
+
+    這是本家族**唯一**被允許交給 `git_argv` 的 repository 路徑(唯一例外是
+    `git_own_checkout_guard` 守住的 generation 面)。目錄由本行程建立、本 uid 所有、
+    0700、祖先鏈逐層驗過;`config` 逐位元組由代碼寫出(無 remote ⇒ promisor 取不到
+    網路、無 fsmonitor、無 filter driver);無 `hooks/`、無 `info/grafts`、`refs/` 全空
+    (⇒ replace ref 與 graft 不生效);無工作樹(⇒ `git status` 結構上跑不起來)。
+    生命週期每次呼叫一個:無快取、無 module 級可變狀態,故無跨呼叫污染與可變單例。
+    """
+
+    import os
+    import shutil
+    import tempfile
+
+    git_dir = subject_git_dir(repo_root)
+    objects = Path(os.path.realpath(str(subject_common_dir(git_dir) / "objects")))
+    if not objects.is_dir():
+        raise OSError(f"{objects} is not a readable Git object store")
+    # 巢狀 alternates 一律拒(E3 round-5 自審):git 會**遞移**跟隨被驗者自己的
+    # `objects/info/alternates`。驗證器多半是 root,於是被驗者能叫它去讀 root 讀得到、
+    # 自己讀不到的物件庫,再以明確 object id 把位元組拉進 manifest/digest(confused
+    # deputy 讀取放大)。不過濾內容,直接 fail-closed。
+    if (objects / "info" / "alternates").exists():
+        raise OSError(f"{objects} chains to another object store through alternates")
+    if "\n" in str(objects) or "\r" in str(objects):
+        # alternates 是換行分隔的清單;含換行的路徑會被拆成兩筆假路徑。
+        raise OSError("the object store path contains a newline")
+    view = Path(os.path.realpath(tempfile.mkdtemp(prefix="s2e-object-view-")))
+    try:
+        _verify_private_directory(view)
+        (view / "objects" / "info").mkdir(parents=True)
+        (view / "refs").mkdir()
+        _write_view_file(view / "HEAD", _OBJECT_VIEW_HEAD)
+        _write_view_file(view / "config", _OBJECT_VIEW_CONFIG)
+        _write_view_file(view / "objects" / "info" / "alternates", f"{objects}\n")
+        yield view
+    finally:
+        shutil.rmtree(view, ignore_errors=True)
+
+
+def git_own_checkout_guard(repo_root: Path | str) -> Path:
+    """確認 `repo_root` 是**本 uid 自己的** checkout,回其 realpath;否則 `OSError`。
+
+    generation 面(作者為自己剛做完的樹發射 candidate)是本家族唯一還需要工作樹事實的
+    地方——「我的樹是乾淨的」只有工作樹能回答,而 bare view 沒有工作樹。誠實邊界:這
+    **不是**「假設同 uid」,同 uid 是被**驗證**的前提,外人所有的樹一律大聲拒;作者對
+    自己的 repo 跑 `git status`、因此跑到自己寫的 `core.fsmonitor`,不是提權(寫 config
+    的人就是執行者本人)。驗證面不得呼叫本函式。
+    """
+
+    import os
+    import stat as stat_module
+
+    root = Path(os.path.realpath(str(repo_root)))
+    info = os.lstat(root)
+    if not stat_module.S_ISDIR(info.st_mode):
+        raise OSError(f"{root} is not a directory")
+    if info.st_uid != os.geteuid():
+        raise OSError(
+            f"{root} is owned by another uid; the generation face refuses to read a "
+            "foreign working tree (the verification face uses the code-owned object "
+            "view instead)"
+        )
+    return root
+
+
+def _loose_ref_value(git_dir: Path, common: Path, name: str) -> str | None:
+    if any(part in ("", ".", "..") for part in name.split("/")):
+        return None
+    candidates = [git_dir / name] if name == "HEAD" else [git_dir / name, common / name]
+    for candidate in candidates:
+        try:
+            raw = read_bounded(candidate, MAX_REF_FILE_BYTES)
+        except OSError:
+            continue
+        return raw.decode("utf-8", "replace").strip()
+    return None
+
+
+def _packed_ref_value(common: Path, name: str) -> str | None:
+    try:
+        raw = read_bounded(common / "packed-refs", MAX_PACKED_REFS_BYTES)
+    except OSError:
+        return None
+    for line in raw.decode("utf-8", "replace").splitlines():
+        if not line or line[0] in "#^":
+            continue
+        value, _, listed = line.partition(" ")
+        if listed.strip() == name and re.fullmatch(r"[0-9a-f]{40}", value):
+            return value
+    return None
+
+
+def read_subject_ref(repo_root: Path | str, name: str = "HEAD") -> str | None:
+    """把被驗者的 ref 名解析成 40-hex;解不出來一律 `None`(fail-closed)。
+
+    view 的 `refs/` 是空的,所以必須來自被驗者 ref 儲存的事實由這裡以**純位元組讀取**
+    取得,再以明確 40-hex 交給 view。ref 檔是資料不是執行面:讀它不跑任何程式;而 ref
+    值本來就由被驗者決定,沒有交出新的信任。reftable backend 不鏡射,偵到回 `None`。
+    """
+
+    try:
+        git_dir = subject_git_dir(repo_root)
+        common = subject_common_dir(git_dir)
+    except OSError:
+        return None
+    if (common / "reftable").is_dir() or (git_dir / "reftable").is_dir():
+        return None
+    current = name
+    for _ in range(_MAX_SYMREF_DEPTH):
+        if current != "HEAD" and _REF_NAME_PATTERN.fullmatch(current) is None:
+            return None
+        value = _loose_ref_value(git_dir, common, current)
+        if value is None:
+            return _packed_ref_value(common, current)
+        if value.startswith("ref:"):
+            current = value[4:].strip()
+            continue
+        return value if re.fullmatch(r"[0-9a-f]{40}", value) else None
+    return None
+
+
+def resolve_named_revision(repo_root: Path | str, revision: str) -> str:
+    """把 `"HEAD"` 這種名字換成 40-hex;其餘原樣回,讀不到即 `OSError`(fail-closed)。"""
+
+    if revision != "HEAD":
+        return revision
+    head = read_subject_ref(repo_root, "HEAD")
+    if head is None:
+        raise OSError("repository HEAD could not be read from the object view")
+    return head
+
+
 def _git_run(repo_root: Path, arguments: list[str]) -> tuple[str, str] | None:
     """跑一次 git,回 ``(stdout, stderr)``;非零離開/無法執行回 ``None``。
 
-    W5 對抗審計第三輪 P2:舊版把 stderr 整個丟掉,於是「repo 不屬於當前 uid」這個最可能
-    的真實主機故障(git 自己會印 ``detected dubious ownership … git config --global --add
-    safe.directory <path>``)在 operator 眼裡只剩「git is unreadable」。stderr 是 git 唯一
-    給出補救指令的地方,必須被帶出來。
+    W5 對抗審計第三輪 P2:舊版把 stderr 整個丟掉,於是真實主機故障在 operator 眼裡
+    只剩「git is unreadable」。stderr 是 git 唯一給出補救指令的地方,必須被帶出來。
+
+    round-5:git 現在跑在 `code_owned_object_view` 裡,`repo_root` 只提供 object
+    store,所以當年那句最常見的 ``detected dubious ownership`` 已不可能出現(見
+    `git_failure_detail`);剩下的 stderr 多半是「物件缺席」,同樣要帶出來。
     """
 
     import subprocess
 
     try:
-        proc = subprocess.run(
-            git_argv(repo_root, *arguments),
-            capture_output=True,
-            env=git_subprocess_env(),
-            text=True,
-            timeout=60,
-        )
+        with code_owned_object_view(repo_root) as view:
+            proc = subprocess.run(
+                git_argv(view, *arguments),
+                cwd=view,
+                capture_output=True,
+                env=git_subprocess_env(),
+                text=True,
+                timeout=60,
+            )
     except (OSError, ValueError, subprocess.SubprocessError):
         return None
     if proc.returncode != 0:
@@ -545,23 +850,30 @@ def _git_stdout(repo_root: Path, arguments: list[str]) -> str | None:
 
 
 def git_failure_detail(repo_root: Path) -> str | None:
-    """git 為什麼讀不了這棵樹(取 ``rev-parse`` 的 stderr 首行);讀得了回 ``None``。
+    """為什麼讀不了這棵樹的物件(view 建不起來、或 git 自己的 stderr 首行);讀得了回 ``None``。
 
-    只在 fail-closed 路徑上被呼叫,用來把 git 自己的補救指令原文帶進 typed reason。
+    只在 fail-closed 路徑上被呼叫,用來把真正的原因原文帶進 typed reason。
+    round-5:失敗形狀從「git 對被驗者 repo 的抱怨」換成兩段——view 建構失敗(權限/
+    TMPDIR 祖先鏈/物件庫不存在)與 view 內 git 失敗。舊版最常見的那句
+    ``detected dubious ownership … git config --global --add safe.directory`` 已經
+    **不可能**出現:驗證面不再把被驗者的目錄當成 repository 打開,ownership 檢查
+    根本不進場(見 `git_argv` 與 `code_owned_object_view`)。
     """
 
     import subprocess
 
     try:
-        proc = subprocess.run(
-            git_argv(repo_root, "rev-parse", "--git-dir"),
-            capture_output=True,
-            env=git_subprocess_env(),
-            text=True,
-            timeout=60,
-        )
+        with code_owned_object_view(repo_root) as view:
+            proc = subprocess.run(
+                git_argv(view, "rev-parse", "--git-dir"),
+                cwd=view,
+                capture_output=True,
+                env=git_subprocess_env(),
+                text=True,
+                timeout=60,
+            )
     except OSError as error:
-        return f"git could not be executed: {error}"
+        return f"the code-owned object view could not be built: {error}"
     except (ValueError, subprocess.SubprocessError) as error:
         return f"git invocation failed: {error}"
     if proc.returncode == 0:
@@ -591,43 +903,42 @@ def _git_is_ancestor(repo_root: Path, ancestor: str, descendant: str) -> bool:
     ) is None:
         return False
     try:
-        proc = subprocess.run(
-            git_argv(
-                repo_root, "merge-base", "--is-ancestor", ancestor, descendant
-            ),
-            capture_output=True,
-            env=git_subprocess_env(),
-            timeout=30,
-        )
+        with code_owned_object_view(repo_root) as view:
+            proc = subprocess.run(
+                git_argv(
+                    view, "merge-base", "--is-ancestor", ancestor, descendant
+                ),
+                cwd=view,
+                capture_output=True,
+                env=git_subprocess_env(),
+                timeout=30,
+            )
     except (OSError, ValueError, subprocess.SubprocessError):
         return False
     return proc.returncode == 0
 
 
 def _git_head(repo_root: Path) -> str | None:
-    """回傳 repo_root 目前 checkout 的 HEAD 40-hex commit(fail-closed:git 錯誤回 None)。
+    """回傳 repo_root 目前 checkout 的 HEAD 40-hex commit(fail-closed:讀不到回 None)。
 
     T2:admission 的 source_head 必須「等於」目前 checkout HEAD(而非只是兩固定 predecessor 的後代)。
     所有證據皆由目前 checkout 再導出,故若 receipt 宣稱某世代卻從另一世代導出 ADMITTED,即為漂移——
     綁定 HEAD 令 admission 與其真正再導出的樹一致。
+
+    round-5:HEAD 的**名字解析**由 `read_subject_ref` 以純位元組讀取完成(view 的
+    `refs/` 是空的,解不出任何名字);解出來的 40-hex 再交給 view 確認它真的是一個
+    可讀的 commit 物件。名字與物件因此分屬兩個面,兩邊都不碰被驗者的 config。
     """
 
-    import subprocess
-
-    try:
-        proc = subprocess.run(
-            git_argv(repo_root, "rev-parse", "HEAD"),
-            capture_output=True,
-            env=git_subprocess_env(),
-            text=True,
-            timeout=30,
-        )
-    except (OSError, ValueError, subprocess.SubprocessError):
+    head = read_subject_ref(repo_root, "HEAD")
+    if head is None or re.fullmatch(r"[0-9a-f]{40}", head) is None:
         return None
-    if proc.returncode != 0:
+    stdout = _git_stdout(repo_root, ["rev-parse", "--verify", "--end-of-options",
+                                     f"{head}^{{commit}}"])
+    if stdout is None:
         return None
-    head = proc.stdout.strip()
-    return head if re.fullmatch(r"[0-9a-f]{40}", head) else None
+    resolved = stdout.strip()
+    return resolved if re.fullmatch(r"[0-9a-f]{40}", resolved) else None
 
 
 def git_is_shallow_repository(repo_root: Path) -> bool:
@@ -635,18 +946,35 @@ def git_is_shallow_repository(repo_root: Path) -> bool:
 
     W5 對抗審計第三輪 P2:淺樹上 ``merge-base --is-ancestor`` 對不在 graft 裡的物件回非零,
     而那不是「不是祖先」,是「這裡沒有那個物件」。呼叫端據此把訊息從一個假結論換成真補救。
+
+    round-5:改由 `<gitdir>/shallow` 的**存在**判定,不再問被驗者的 git。view 不掛
+    shallow graft,所以缺 parent 會在 view 裡直接炸(E1 於 git 2.55 實測:
+    ``fatal: cannot simplify <c> (because of <parent>)``),而不是靜默把歷史截短。
     """
 
-    return (_git_stdout(repo_root, ["rev-parse", "--is-shallow-repository"]) or "").strip() == "true"
+    try:
+        git_dir = subject_git_dir(repo_root)
+        common = subject_common_dir(git_dir)
+    except OSError:
+        return True  # 讀不到就當成淺樹:fail-closed
+    return (git_dir / "shallow").exists() or (common / "shallow").exists()
 
 
 def resolve_commit_head(repo_root: Path, source_head: str | None = None) -> str | None:
     """把 ``source_head``(或 HEAD)解析為 40-hex commit;不可解析即 None(fail-closed)。"""
 
     revision = source_head if source_head is not None else "HEAD"
-    if re.fullmatch(r"[0-9a-f]{7,40}", str(revision)) is None and revision != "HEAD":
+    if revision == "HEAD":
+        # view 解不出名字(refs/ 全空),HEAD 一律先由 ref 讀取器換成明確 40-hex。
+        resolved_head = read_subject_ref(repo_root, "HEAD")
+        if resolved_head is None:
+            return None
+        revision = resolved_head
+    if re.fullmatch(r"[0-9a-f]{7,40}", str(revision)) is None:
         return None
-    stdout = _git_stdout(repo_root, ["rev-parse", f"{revision}^{{commit}}"])
+    stdout = _git_stdout(
+        repo_root, ["rev-parse", "--verify", "--end-of-options", f"{revision}^{{commit}}"]
+    )
     if stdout is None:
         return None
     head = stdout.strip()
@@ -697,13 +1025,15 @@ def commit_blob_bytes(
         return blobs
     request = "".join(f"{head}:{rel}\n" for rel in ordered).encode("utf-8")
     try:
-        proc = subprocess.run(
-            git_argv(repo_root, "cat-file", "--batch"),
-            input=request,
-            capture_output=True,
-            env=git_subprocess_env(),
-            timeout=180,
-        )
+        with code_owned_object_view(repo_root) as view:
+            proc = subprocess.run(
+                git_argv(view, "cat-file", "--batch"),
+                input=request,
+                cwd=view,
+                capture_output=True,
+                env=git_subprocess_env(),
+                timeout=180,
+            )
     except (OSError, ValueError, subprocess.SubprocessError):
         return blobs
     if proc.returncode != 0:

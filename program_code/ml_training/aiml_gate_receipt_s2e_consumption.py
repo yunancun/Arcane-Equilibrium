@@ -6,7 +6,6 @@ import fcntl
 import json
 import os
 import stat
-import subprocess
 import tempfile
 from copy import deepcopy
 from datetime import datetime, timezone
@@ -15,7 +14,7 @@ from typing import Any, Callable
 
 from agent_governance_schema import schema_subset_errors
 from aiml_gate_receipt_schema_core import (
-    _load_schema, canonical_digest, git_argv, git_subprocess_env,
+    _load_schema, canonical_digest, subject_common_dir, subject_git_dir,
 )
 from aiml_gate_receipt_s2e_external_evidence import (
     s2e_predecessor_registry_slot_id,
@@ -539,16 +538,15 @@ def validate_s2e_launch_consumption_bootstrap_authority(
 
 
 def _git_common_dir(repo_root: Path) -> Path:
-    raw = subprocess.run(
-        git_argv(repo_root, "rev-parse", "--git-common-dir"),
-        cwd=repo_root,
-        check=True,
-        capture_output=True,
-        env=git_subprocess_env(),
-        text=True,
-    ).stdout.strip()
-    path = Path(raw)
-    return (path if path.is_absolute() else repo_root / path).resolve(strict=True)
+    """被驗者的 `<git-common-dir>`,純檔案系統解析。
+
+    E3 round-5:舊版問 `git -C <被驗者> rev-parse --git-common-dir`,而那次呼叫本身就
+    要求 git 把外人所有的目錄當 repository 打開(⇒ 讀它的 config、差異 uid 下 rc=128)。
+    這條事實是 repo **佈局**,不是物件內容,`subject_git_dir`/`subject_common_dir`
+    直接 stat 出來即可,不必請 git 代勞。
+    """
+
+    return subject_common_dir(subject_git_dir(repo_root))
 
 
 def _private_regular_file(descriptor: int, *, label: str) -> None:

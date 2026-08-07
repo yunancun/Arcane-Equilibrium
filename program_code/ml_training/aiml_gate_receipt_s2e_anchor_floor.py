@@ -37,7 +37,10 @@ from typing import Any, NamedTuple
 
 from agent_governance_schema import schema_subset_errors
 from aiml_gate_receipt_schema_core import (
-    _load_schema, canonical_digest, git_argv, git_subprocess_env,
+    MAX_PACKED_REFS_BYTES, MAX_SUBJECT_CONFIG_BYTES,
+    _load_schema, canonical_digest, code_owned_object_view, git_argv,
+    git_failure_detail, git_subprocess_env, read_bounded, read_subject_ref,
+    subject_common_dir, subject_git_dir,
 )
 
 
@@ -251,6 +254,12 @@ def durability_anchor_floor_digest(floor: dict[str, Any]) -> str:
 # 第二道防線,第一道是 `_object_store_errors` 直接拒掉 promisor(唯一的網路路徑)。
 _GIT_READ_TIMEOUT_SECONDS = 60
 _GIT_PROBE_TIMEOUT_SECONDS = 30
+_MAX_REPLACE_REF_SCAN_ENTRIES = 4096
+# 只認 git 真正的鍵形(`remote.<n>.promisor`、`remote.<n>.partialclonefilter`、
+# `extensions.partialclone` 在 INI 裡就是行首這三個鍵)。
+_PROMISOR_CONFIG_KEY = re.compile(
+    r"(?im)^[ \t]*(promisor|partialclonefilter|partialclone)[ \t]*="
+)
 # `subprocess.TimeoutExpired` **不是** `CalledProcessError` 的子類;兩者的共同父類是
 # `SubprocessError`。舊的 `except (OSError, CalledProcessError)` 若配上 timeout 會讓
 # 逾時裸逸出驗證函式,因此本模組一律捕捉 `SubprocessError`。
@@ -262,13 +271,16 @@ def _git_bytes(repo_root: Path, *args: str) -> bytes:
     # 攻擊者 repo 的 floor 而且零錯誤(E3 實測)。
     # E3-A:argv[0] 與 `PATH` 皆由 `git_argv`/`git_subprocess_env` 從 code-owned
     # 常數導出,ambient `PATH` 不參與 git 二進位的解析。
-    return subprocess.run(
-        git_argv(repo_root, *args),
-        check=True,
-        capture_output=True,
-        env=git_subprocess_env(),
-        timeout=_GIT_READ_TIMEOUT_SECONDS,
-    ).stdout
+    # E3 round-5:`repo_root` 只提供 object store,git 跑在 code-owned bare view 裡。
+    with code_owned_object_view(repo_root) as view:
+        return subprocess.run(
+            git_argv(view, *args),
+            cwd=view,
+            check=True,
+            capture_output=True,
+            env=git_subprocess_env(),
+            timeout=_GIT_READ_TIMEOUT_SECONDS,
+        ).stdout
 
 
 def _git_ok(repo_root: Path, *args: str) -> bool:
@@ -279,12 +291,14 @@ def _git_ok(repo_root: Path, *args: str) -> bool:
     """
 
     try:
-        return subprocess.run(
-            git_argv(repo_root, *args),
-            capture_output=True,
-            env=git_subprocess_env(),
-            timeout=_GIT_PROBE_TIMEOUT_SECONDS,
-        ).returncode == 0
+        with code_owned_object_view(repo_root) as view:
+            return subprocess.run(
+                git_argv(view, *args),
+                cwd=view,
+                capture_output=True,
+                env=git_subprocess_env(),
+                timeout=_GIT_PROBE_TIMEOUT_SECONDS,
+            ).returncode == 0
     except _GIT_FAILURES:
         return False
 
@@ -312,57 +326,112 @@ def _object_store_errors(repo_root: Path) -> list[str]:
     E3-D:promisor(partial)clone 一併拒。它 `--is-shallow-repository` 回 false,
     卻會讓 `git show <commit>:<path>` 靜默走網路去抓缺失 blob——那是本家族唯一的
     runtime effect 來源,與設計 §8.4「全部是純驗證函式」直接衝突。
+
+    E3 round-5:四條判定原本是 `git -C <被驗者> rev-parse/for-each-ref/config` 問出來
+    的——那正是「把外人所有的目錄當 repository 打開」的一部分。改由
+    `subject_object_store_findings` 從**檔案系統**判定(`shallow`/`info/grafts`/
+    `refs/replace/`/`objects/pack/*.promisor`),判定同樣完整而不碰任何可執行面。
+    其中三條在 view 底下已經**結構上失效**:view 自己沒有 remote(promisor 抓不到
+    網路,缺物件就是缺)、沒有 grafts、`refs/` 全空(replace ref 不生效),而淺樹缺
+    parent 會在 view 裡直接炸而不是靜默截短(E1 於 git 2.55 實測)。仍然顯式回報,是
+    為了讓 typed reason 保持精確,不是把一條真判定換成泛用錯誤。
     """
 
     try:
-        shallow = _git_bytes(repo_root, "rev-parse", "--is-shallow-repository")
-        replaced = _git_bytes(
-            repo_root, "for-each-ref", "--format=%(refname)", "refs/replace/"
-        )
-        common = _git_bytes(repo_root, "rev-parse", "--git-common-dir")
-    except _GIT_FAILURES as error:
-        return [f"durability anchor floor object store is unreadable: {error}"]
+        git_dir = subject_git_dir(repo_root)
+        common = subject_common_dir(git_dir)
+    except OSError:
+        return [
+            "durability anchor floor object store is unreadable: "
+            f"{git_failure_detail(repo_root) or 'the repository could not be opened'}"
+        ]
     errors: list[str] = []
-    if shallow.decode("ascii", errors="replace").strip() != "false":
-        errors.append(
-            "durability anchor floor cannot be read from a shallow repository"
-        )
-    if replaced.strip():
-        errors.append(
-            "durability anchor floor cannot be read from a repository that "
-            "rewrites objects through replace refs"
-        )
-    if _grafts_file_present(repo_root, common):
-        errors.append(
-            "durability anchor floor cannot be read from a repository that "
-            "rewrites commit parentage through a grafts file"
-        )
-    if _git_ok(
-        repo_root, "config", "--get-regexp",
-        r"^(remote\..*\.(promisor|partialclonefilter)|extensions\.partialclone)$",
-    ):
-        errors.append(
-            "durability anchor floor cannot be read from a promisor partial clone"
-        )
+    try:
+        if (common / "reftable").is_dir() or (git_dir / "reftable").is_dir():
+            errors.append(
+                "durability anchor floor cannot be read from a repository whose ref "
+                "backend the code-owned object view cannot mirror"
+            )
+        if (git_dir / "shallow").exists() or (common / "shallow").exists():
+            errors.append(
+                "durability anchor floor cannot be read from a shallow repository"
+            )
+        if _replace_refs_present(git_dir, common):
+            errors.append(
+                "durability anchor floor cannot be read from a repository that "
+                "rewrites objects through replace refs"
+            )
+        if (common / "info" / "grafts").exists():
+            errors.append(
+                "durability anchor floor cannot be read from a repository that "
+                "rewrites commit parentage through a grafts file"
+            )
+        if (common / "objects" / "info" / "alternates").exists():
+            errors.append(
+                "durability anchor floor cannot be read from a repository whose object "
+                "store chains to another store through alternates"
+            )
+        if _promisor_marks_present(common):
+            errors.append(
+                "durability anchor floor cannot be read from a promisor partial clone"
+            )
+    except OSError as error:
+        return [f"durability anchor floor object store is unreadable: {error}"]
     return errors
 
 
-def _grafts_file_present(repo_root: Path, common_dir: bytes) -> bool:
-    """`<git-common-dir>/info/grafts` 是否存在(路徑解析失敗一律當成存在:fail-closed)。"""
+def _replace_refs_present(git_dir: Path, common: Path) -> bool:
+    """`refs/replace/` 底下有沒有東西(loose 或 packed)。"""
 
+    import os
+
+    for base in {git_dir, common}:
+        root = base / "refs" / "replace"
+        if not root.is_dir():
+            continue
+        visited = 0
+        for _, _, files in os.walk(root):
+            if files:
+                return True
+            visited += 1
+            if visited > _MAX_REPLACE_REF_SCAN_ENTRIES:
+                # 只有空目錄卻多到不合理:當成存在(fail-closed),不無上界地走。
+                return True
     try:
-        raw = common_dir.decode("utf-8").strip()
-    except UnicodeDecodeError:
-        return True
-    if not raw:
-        return True
-    common = Path(raw)
-    if not common.is_absolute():
-        common = Path(repo_root) / common
-    try:
-        return (common / "info" / "grafts").exists()
+        raw = read_bounded(common / "packed-refs", MAX_PACKED_REFS_BYTES)
     except OSError:
-        return True
+        return False
+    return any(
+        line.partition(" ")[2].strip().startswith("refs/replace/")
+        for line in raw.decode("utf-8", "replace").splitlines()
+        if line and line[0] not in "#^"
+    )
+
+
+def _promisor_marks_present(common: Path) -> bool:
+    """partial(promisor)clone 的檔案系統痕跡。
+
+    主判準是 `objects/pack/*.promisor` 標記檔——git 自己為每個從 promisor remote 取來的
+    pack 寫下的。config 文字掃描是第二道,且只認 git 真正的鍵形(不做整檔子字串掃描,
+    後者會被 remote 名稱或 URL 裡的巧合字樣誤觸);它只能讓判定更嚴,永遠不能用來取得
+    任何肯定事實。
+    """
+
+    pack = common / "objects" / "pack"
+    if pack.is_dir():
+        try:
+            if any(entry.suffix == ".promisor" for entry in pack.iterdir()):
+                return True
+        except OSError:
+            return True
+    for name in ("config", "config.worktree"):
+        try:
+            raw = read_bounded(common / name, MAX_SUBJECT_CONFIG_BYTES)
+        except OSError:
+            continue
+        if _PROMISOR_CONFIG_KEY.search(raw.decode("utf-8", "replace")):
+            return True
+    return False
 
 
 def _protected_ancestry_errors(repo_root: Path, commit: str) -> list[str]:
@@ -370,18 +439,25 @@ def _protected_ancestry_errors(repo_root: Path, commit: str) -> list[str]:
 
     只檢查鏈尾:祖先鏈檢查已保證其餘 revision 都是鏈尾的祖先,祖先關係遞移。
     受保護 ref 一個都解析不出來時**不得 fail-open**,同樣回 UNVERIFIED 的理由。
+
+    E3 round-5:ref **名字**由 `read_subject_ref` 以純位元組讀取解析(view 的 `refs/`
+    刻意留空,解不出任何名字),再把 40-hex 交給 view 做祖先判定。名字面與物件面
+    因此分離,兩邊都不經被驗者的 config/hook。ref 值本來就由被驗者決定(他也決定自己
+    commit 什麼),讀它沒有交出新的信任;讀**檔案**則不會執行任何東西。
     """
 
     resolvable = False
     for ref in _PROTECTED_ANCESTOR_REFS:
-        if not _git_ok(
+        resolved = read_subject_ref(repo_root, ref)
+        if resolved is None or not _git_ok(
             repo_root, "rev-parse", "--verify", "--quiet", "--end-of-options",
-            f"{ref}^{{commit}}",
+            f"{resolved}^{{commit}}",
         ):
             continue
         resolvable = True
         if _git_ok(
-            repo_root, "merge-base", "--is-ancestor", "--end-of-options", commit, ref
+            repo_root, "merge-base", "--is-ancestor", "--end-of-options",
+            commit, resolved,
         ):
             return []
     if not resolvable:
