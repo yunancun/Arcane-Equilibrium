@@ -347,9 +347,11 @@ replica trust root 安裝。**任何情況下不得填佔位指紋**（那正是
   `len(_SERVICE_PREREQUISITES)=4`、`len(EXPECTED_ACTION_IDS)=8`；代碼、committed packet 與
   `TODO.md` 一直是對的 16，只有本設計正本的算式錯。這是本檔第二次前置數算錯，
   故不原地抹除，逐條記在此。）
-- `EXPECTED_ACTION_IDS`（`:137-144`）新增兩項 ⇒ 共 **8** 項：
+- `EXPECTED_ACTION_IDS`（`:137-144`）新增兩項 ⇒ 共 ~~**8**~~ 項：
   `COMMIT_GENESIS_ARMED_DURABILITY_ANCHOR_FLOOR`（§3.5 的 PR 動作）、
   `PROVISION_OFFHOST_REPLICA_READBACK_SIGNER`（`ncyu-nas` 側）。
+  （**2026-08-07 起為 7 項**：前者於 `fdf3c0fa6` 完成後即不再是 operator 待辦，
+  見下方「演變軌跡」。此處寫 8 在當時為真，不原地抹除。）
 - `tests/structure/test_agent_governance_s2e_lw1_action_packet.py:116` 的 `== 14` → `== 16`。
 - **committed artifact 必須重生**：
   `docs/CCAgentWorkSpace/PM/workspace/reports/2026-08-02--s2e_lw1_external_prerequisite_action_packet.json`
@@ -857,3 +859,34 @@ commit、CI shallow checkout 等情形現在都會得到具名的 `UNVERIFIED` �
 
 **未改變**：`UNVERIFIED` 為誠實終態、git 不提供 §LW1 意義下的外部性、真正的外部性上界
 仍在「驗證器不與被驗者共用 uid」。以上七項都是把**既有邊界守住**，一項都沒有把邊界推前。
+
+### 2026-08-07：action 清單由 8 → 7；腐化成因是「靜態清單 ＋ 早於事實的 pin」
+
+**轉變**：`EXPECTED_ACTION_IDS`（§七的 8 項）移除
+`COMMIT_GENESIS_ARMED_DURABILITY_ANCHOR_FLOOR`，schema 的 `required_action_ids`
+`const` 同步由 8 降為 7，committed packet 於原 pin 重新發行
+（`sha256:b28d49fe…a9cdf` → `sha256:69dcfec5…8f6b77`，除 `packet_digest` 與
+`required_action_ids` 外逐欄不變）。
+
+**它不是一開始就寫錯**：packet 綁定的 checkpoint `970734ae0` 時間為
+2026-08-03 04:35:38 +0200，該 head 的樹裡 **沒有** floor 檔（實測
+`git cat-file -e 970734ae0:…/durability-anchor-floor-v1.json` → ABSENT）；
+五分鐘後的 `fdf3c0fa6`（04:40:35）才把 `GENESIS_ARMED` floor commit 進 repo。
+所以真正的成因是**靜態清單被一個早於事實的 pin 凍住**，而不是誰算錯項數。
+
+**為什麼沒有測試看得到**：round-2 第 11／12 項與 round-4「具名結轉」都點名過，
+兩次都因為 `EXPECTED_ACTION_IDS` 是靜態 tuple、沒有任何斷言把它和 repo 事實比對而存活。
+**實害**是 operator 照 packet 第 7 步再 commit 一次創世 floor，而
+`aiml_gate_receipt_s2e_anchor_floor` 明文拒絕鏈上第二個 `GENESIS_ARMED`。
+
+**治法不是刪字串**：新增 `REPOSITORY_COMPLETION_WITNESSES`（action → 完成 witness 路徑）
+與 `completed_action_ids()`，並在 emission 的 clean-tree 檢查之後逐項核對；命中即 typed
+`ValueError`，不再靜默。兩支新測試各自以突變實測過會紅：清單與 repo 事實的 disjoint
+斷言（把該 id 放回即紅，訊息直接指名該 id）、以及移除 emission guard 後 build 不再拒絕。
+witness 表目前只有一條，因為其餘七項全是 host 側 provisioning、repo 位元組永遠證明不了
+它們的完成——**這個稀疏性正是靜態清單能腐化多日而 CI 全綠的原因**。
+
+**未改變**：16 項 external prerequisites（12 path ＋ 4 service）、
+`prerequisites`／`blocked_prerequisite_ids`／`closure_projection`／`authority_boundaries`
+的 `const` 硬門、九項 authority 全 false、production effect 0/6。此次只動 operator
+待辦清單，未觸及任何 gate。

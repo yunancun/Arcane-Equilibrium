@@ -158,9 +158,40 @@ EXPECTED_ACTION_IDS = (
     "CONFIGURE_OFFHOST_APPEND_ONLY_REPLICA",
     "PROVISION_OFFHOST_REPLICA_READBACK_SIGNER",
     "PROVISION_DISTINCT_HOST_APPEND_ONLY_PREDECESSOR_REGISTRY",
-    "COMMIT_GENESIS_ARMED_DURABILITY_ANCHOR_FLOOR",
     "RESUME_W0_AND_LW1_RECEIPT_CHAIN_WITH_FRESH_EVIDENCE",
 )
+# 這裡曾有第八項 `COMMIT_GENESIS_ARMED_DURABILITY_ANCHOR_FLOOR`,它不是一開始就寫錯:
+# 在 packet 綁定的 checkpoint `970734ae0`(2026-08-03 04:35:38 +0200)floor 檔確實還
+# 不存在,五分鐘後的 `fdf3c0fa6`(04:40:35)才把 GENESIS_ARMED floor commit 進 repo。
+# 腐化的成因是「靜態清單 + 早於事實的 pin」,round-2 與 round-4 兩度點名都沒有任何
+# 測試看得到。留著的實害是 operator 會照該步再 commit 一次創世 floor,而
+# `aiml_gate_receipt_s2e_anchor_floor` 明文拒絕鏈上第二個 GENESIS_ARMED。
+# 因此治本不是刪掉一個字串,而是讓「repo 位元組已能證明完成」的 action 不可能留在
+# 清單裡:下面這張表把 action 綁到它的完成 witness,emission 前逐項核對。
+REPOSITORY_COMPLETION_WITNESSES = {
+    "COMMIT_GENESIS_ARMED_DURABILITY_ANCHOR_FLOOR": (
+        "docs/execution_plan/ai_ml_landing/receipts/S2E-LW1-LW5/"
+        "durability-anchor-floor-v1.json"
+    ),
+}
+# 只有一條的理由要寫明:其餘七項全是 host 側 provisioning(root-owned 信任根、
+# append-only anchor、off-host replica、predecessor registry),repo 位元組永遠證明
+# 不了它們的完成,故 witness 表天生稀疏。也正因為只有一條,一份靜態清單才能腐化多日
+# 而 CI 全綠——這張表存在的目的就是讓下一條 witness 一出現就被機器抓到。
+
+
+def completed_action_ids(repo_root: Path) -> tuple[str, ...]:
+    """回傳在 `repo_root` 已可由 repo 位元組證明完成的 action id(排序後)。
+
+    只檢查 witness 檔是否存在:build 在此之前已要求 clean worktree,該時點的
+    worktree 位元組即 HEAD 位元組,因此不需要在本模塊新增 git 呼叫點。
+    """
+
+    return tuple(sorted(
+        action_id
+        for action_id, witness in REPOSITORY_COMPLETION_WITNESSES.items()
+        if (repo_root / witness).is_file()
+    ))
 
 
 def _git(repo_root: Path, *args: str) -> str:
@@ -238,6 +269,17 @@ def build_s2e_lw1_operator_action_packet(
     root = repo_root.resolve()
     if _git(root, "status", "--porcelain=v1"):
         raise ValueError("LW1 action packet requires a clean source checkpoint")
+    already_completed = set(completed_action_ids(root))
+    stale_actions = [
+        action_id
+        for action_id in EXPECTED_ACTION_IDS
+        if action_id in already_completed
+    ]
+    if stale_actions:
+        raise ValueError(
+            "LW1 action packet lists actions this source checkpoint already "
+            "completed: " + ", ".join(stale_actions)
+        )
     source_head = _git(root, "rev-parse", "HEAD")
     source_tree = _git(root, "rev-parse", "HEAD^{tree}")
     path_statuses = inventory["fixed_path_statuses"]
