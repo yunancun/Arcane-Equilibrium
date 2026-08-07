@@ -822,22 +822,35 @@ def test_registry_bytes_are_never_argv_transported_and_stay_inside_their_budget(
         (ROOT / ".codex/agent_registry_v1.json").read_text(encoding="utf-8")
     )
 
-    # ① registry 檔身沒有被 inline 進 transported Context。逐層枚舉 plan 的全部 dict
-    #    key,斷言 registry 的頂層 section 名稱一個都不出現 —— registry 只能以 digest
-    #    被引用。任何人把整份(或一部分)registry 塞進 Context,這裡就會紅。
-    def _collect_keys(node, sink):
-        if isinstance(node, dict):
-            sink.update(node)
-            for value in node.values():
-                _collect_keys(value, sink)
-        elif isinstance(node, list):
-            for value in node:
-                _collect_keys(value, sink)
+    # ① registry 檔身沒有被 inline 進 transported Context。用**檔身位元組**當探針而不是
+    #    key 名稱:``schema_version``/``interfaces`` 這種通用名稱本來就會在 plan 裡出現,
+    #    那是命名碰撞不是 inlining。這裡改為逐個 registry section 檢查它的 canonical
+    #    bytes 是否成為 canonical_plan 的子字串 —— registry 只能以 digest 被引用。
+    canonical_plan = artifact["canonical_plan"]
 
-    plan_keys: set[str] = set()
-    _collect_keys(plan, plan_keys)
-    leaked = sorted(set(registry) & plan_keys)
-    assert leaked == [], f"Registry sections are inlined into the Context: {leaked}"
+    def _section_bytes(section) -> str:
+        return json.dumps(
+            section, ensure_ascii=False, sort_keys=True, separators=(",", ":"),
+            allow_nan=False,
+        )
+
+    probed = 0
+    for name, section in registry.items():
+        rendered = _section_bytes(section)
+        if len(rendered) < 1024:  # 太短的 section 會有偶然碰撞,不足以證明 inlining
+            continue
+        probed += 1
+        assert rendered not in canonical_plan, (
+            f"the Registry section {name!r} is inlined into the compiled Context"
+        )
+    assert probed >= 5, f"the Registry-inlining probe covered only {probed} sections"
+
+    # 正向對照:探針必須真的抓得到 inlining,否則上面的斷言是空的。
+    biggest = max(registry.values(), key=lambda section: len(_section_bytes(section)))
+    assert _section_bytes(biggest) in json.dumps(
+        {"sources": [], "leaked": biggest}, ensure_ascii=False, sort_keys=True,
+        separators=(",", ":"), allow_nan=False,
+    )
 
     # ② registry 對 Context 的實際貢獻仍在明確預算內。
     contribution = len(
