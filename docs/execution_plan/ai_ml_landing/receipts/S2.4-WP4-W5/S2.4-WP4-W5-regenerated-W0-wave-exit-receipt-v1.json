@@ -1,9 +1,9 @@
 {
   "capture_digests": [
-    "sha256:1c42742dfd990f6e78c1a9d822712d1cc44e5054fcacdf2fb99b973afda3c685"
+    "sha256:8b86c7415427e15888b7cadbf4cfdb23c596a236f8210e7df3b1bd21f73f55fb"
   ],
   "exported_abi_digest": "sha256:236cbee199c2f4a6949ac9c6e3a4d7c0f3391c9c5ecb33acf7187f2cd05ab830",
-  "owned_path_diff_digest": "sha256:fa506dd05fe0672b9e6905037c3ab6c79bac59a6d7cfa4cd61c2ff263951aa4b",
+  "owned_path_diff_digest": "sha256:392277ed4d55917b016067aea37c65f6930648d1d01e62d7e91b392c6414770f",
   "owned_path_manifest_digest": "sha256:00674c05406657c0a8da16003be1e6bca9a16e0891e582391c31d6fcb9969eb5",
   "predecessor_wave_receipt_digest": null,
   "production_authority_flags": {
@@ -21,14 +21,17 @@
     "sha256:7da96dcef1156537b3cde4461a2910bd18b39d80911f536b081bbc340092c5e8",
     "sha256:96d3d64c0dd795cf79971110d7b2e8c3d09595428ce524ec0a0437a71e91a73c",
     "sha256:0e463256590ffda8b3d327d78fe511ef06c1e1359dfe81dc6300d45b2cccc779",
-    "sha256:5a760f77b67dc110662e55d4feb08e12570173ee38ebae3da99655cceb402def"
+    "sha256:5a760f77b67dc110662e55d4feb08e12570173ee38ebae3da99655cceb402def",
+    "sha256:cab120408c9ff3aa716a0595702a7a2dbaa63af97fb58b79b24ff77f02a270b7",
+    "sha256:9c80cce9f1c77c81e00d8eee033cf9cc439f302307c13985af174470204393d5",
+    "sha256:13abb823568f43248ad84727e14f14275600f6f1da6231d9fd5d4817452d5fe0"
   ],
   "schema_version": "s2_4_wave_exit_receipt_v1",
-  "self_digest": "sha256:0f1a9cfcf661b864c538758d0890124937a4a8f56cdb09ee038fcd64ead833a4",
-  "source_admission_receipt_digest": "sha256:23a9738c894d5b035fb49fab9e114a49a8a9ffe4fdd1507878369be82a784550",
-  "source_head": "651bd4e38cef0e39545f6f8f378829800feea17f",
+  "self_digest": "sha256:f43e23efaf370fecb9b1d2561371711aee621e5fb087c3310f56562ba958c2e7",
+  "source_admission_receipt_digest": "sha256:8275c6981e0c45dbcdf0f541a28c890be5cdffbbc02ec245c6dd0dd647ef1c24",
+  "source_head": "2dd853ddfdc3569939d3de954d90ebd286d77870",
   "test_digests": [
-    "sha256:2890aef194477f4a91a6696c9b6771097ce770f06ba27342c678eab8f61024c8"
+    "sha256:6044260167235915eed758ac4d5e045f69f6d5e6637884ffa4f4086a3c23ae50"
   ],
   "wave": "W0"
 }

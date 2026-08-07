@@ -3,7 +3,7 @@
     "reasons": [],
     "status": "ADMITTED"
   },
-  "admission_self_digest": "sha256:23a9738c894d5b035fb49fab9e114a49a8a9ffe4fdd1507878369be82a784550",
+  "admission_self_digest": "sha256:8275c6981e0c45dbcdf0f541a28c890be5cdffbbc02ec245c6dd0dd647ef1c24",
   "historical_persisted_w4": {
     "historical_source_head": "f66fe0790ee13c098ad99bbdea3c9001f76328a4",
     "historical_w4_integrity": "VERIFIED",
@@ -21,27 +21,27 @@
     "reasons": [],
     "status": "PASS"
   },
-  "regenerated_w0_wave_exit_self_digest": "sha256:0f1a9cfcf661b864c538758d0890124937a4a8f56cdb09ee038fcd64ead833a4",
+  "regenerated_w0_wave_exit_self_digest": "sha256:f43e23efaf370fecb9b1d2561371711aee621e5fb087c3310f56562ba958c2e7",
   "regenerated_w1_wave_exit_derivation": {
     "reasons": [],
     "status": "PASS"
   },
-  "regenerated_w1_wave_exit_self_digest": "sha256:d6af8d9d7675398ca781f5be0130e301aabd7bfa6af289a4b4270bf68774e3e4",
+  "regenerated_w1_wave_exit_self_digest": "sha256:fa0498cf3bad21b84f618c394e637779b096078d4aa871dd817bea071b1383d4",
   "regenerated_w2_wave_exit_derivation": {
     "reasons": [],
     "status": "PASS"
   },
-  "regenerated_w2_wave_exit_self_digest": "sha256:cc1406d3df8acbcef7c5bc54af8275d916b967c3b337b90e0ac1aab9c79ca37f",
+  "regenerated_w2_wave_exit_self_digest": "sha256:7339c2d62be58b6bf3799a961dd4e4a9d25f1a917cb8d1c1800d7ca531c64d90",
   "regenerated_w3_wave_exit_derivation": {
     "reasons": [],
     "status": "PASS"
   },
-  "regenerated_w3_wave_exit_self_digest": "sha256:268bb5c2af4984becf0520c3a25e7ae47f66fb5bb732dd21c5ac3d1358f7eb05",
+  "regenerated_w3_wave_exit_self_digest": "sha256:a5b8111d45240cf9dd4cc70b91b45ea3672de4b8ee626f1ec4aabd846fba50ca",
   "regenerated_w4_wave_exit_derivation": {
     "reasons": [],
     "status": "PASS"
   },
-  "regenerated_w4_wave_exit_self_digest": "sha256:1406b3053643ed4a8a945370ccbb7fc974bc7da558e87a1c74ed32a2b6c89b3c",
+  "regenerated_w4_wave_exit_self_digest": "sha256:7a0dfbc6800f77da94f4dfb5872b0524011b70e3cf82f5774f4fc4d2e5a991e0",
   "remaining_owned_obligation_count": 28,
   "remaining_owned_obligations": [
     {
@@ -424,21 +424,39 @@
       "role": "PM",
       "scope": "round-4 adjudication and remediation at 44edecd91 (report 2026-08-06--s2e_tier1_round4_review.md)",
       "verdict": "FIXED_AND_RELEASED_FOR_PR"
+    },
+    {
+      "note": "4 threads, all verified at source before acting: the transition gate never authenticated the candidate anchor so a forged SSHSIG still printed ADVANCE; the documented safe.directory escape hatch cannot work because GIT_CONFIG_NOSYSTEM blocks both protected scopes, reproduced independently on git 2.55.0; registry key separation omitted the off-host replica; the acceptance-review pending message still demanded a deleted external WORM contract",
+      "role": "E2",
+      "scope": "round-5 automated review of PR #178 at cc6e49bbb (GitHub Codex bot)",
+      "verdict": "FINDINGS_CLOSED"
+    },
+    {
+      "note": "found by construction that the first version of the P1 fix was unsatisfiable for every PENDING_REVIEW candidate, which would have left the new authentication unreachable and wave issuance permanently pending; after the repair, launch receipts 65 passed with forged-signature, altered-digest, wrong-candidate-bundle and non-dict-bundle cases all message-pinned; named the READY wave receipt as still entirely unexercised",
+      "role": "E4",
+      "scope": "round-5 test repair and negative coverage for the authenticated transition gate at 2dd853ddf",
+      "verdict": "PASS"
+    },
+    {
+      "note": "all four threads closed; declined to reopen the safe.directory channel because any grant that makes the read succeed also restores core.fsmonitor/filter.*.clean execution for the repo owner, which is R4-1 one indirection out; differing-uid topology recorded as having no supported path with the design fix named; replica separation verified by mutation; full governed suite 3 failed / 8053 passed / 55 skipped with all three failures pre-existing or environmental",
+      "role": "PM",
+      "scope": "round-5 adjudication and W5 round-12 re-emission at 2dd853ddf",
+      "verdict": "FIXED_AND_RELEASED_FOR_MERGE"
     }
   ],
   "schema_version": "s2_4_w5_derivation_record_v1_informal",
-  "source_head": "651bd4e38cef0e39545f6f8f378829800feea17f",
+  "source_head": "2dd853ddfdc3569939d3de954d90ebd286d77870",
   "test_evidence": {
-    "command": "python3 -m pytest -q -p no:randomly tests/structure program_code/ml_training/tests (main worktree, branch agent/aiml-s2e-tier1-durability-anchor-20260802 at cedf9a6f2)",
+    "command": "python3 -m pytest -q -p no:randomly tests/structure program_code/ml_training/tests (main worktree, branch agent/aiml-s2e-tier1-durability-anchor-20260802 at 2dd853ddf)",
     "exit_code": 1,
-    "measured_by": "PM full-suite run at cedf9a6f2 (Mac, 28m56s). Prior scoped runs at the same source: five S2E files 127 passed reproduced independently three times (PM 919.94s, E4 19m09s, E2 20m36s); a 14-file widened set at 8d070334e returned 617 passed / 2 failed, which is how two of the four stale SCHEMA_FILES assertions were found.",
-    "round_10_superseded": "Round 10 (carrier 6146f8572) is superseded by this round for one reason worth stating plainly: the round-10 evidence text quoted the forbidden number verbatim while describing the violation, so the emitted artifact itself then tripped the same file-line-policy scanner. Describing a policy violation is not exempt from the policy. Nothing about the round-10 receipt derivation was wrong; only its embedded prose was.",
-    "scope_boundary": "Repository/command evidence at this head only. LOCAL_REPRODUCIBLE, not a closure-admissible command_capture_v2: no admitted node-id or context artifact was bound. It evidences source structure and test outcomes on a Mac; it evidences nothing about runtime, PG, the three unimplemented root-owned producer capabilities, any real durability anchor, or any off-host replica. Authority 0/9, production effect 0/6.",
-    "summary": "3 failed, 8050 passed, 55 skipped in 1736.94s at cedf9a6f2. None of the three is caused by this branch's source. Two are the G1 context-transport regression that origin/main itself records as its current baseline (test_aiml_s2_effect_host_run.py: test_registry_tracked_bytes_leave_headroom_under_the_execve_single_argument_cap, test_compiled_context_artifact_stays_under_the_execve_cap; main's TODO states 254 passed / 2 failed for that file and assigns it to P0-AIML-G1-CONTEXT-TRANSPORT-REGISTRY-CAP). The third, test_file_line_policy_static.py::test_active_source_and_test_text_does_not_advertise_lower_file_limits, reported three violations: one belonged to this branch (a design-time line-count estimate in design/S2E-LW1-tier1-remediation.md advertising a file-size policy below the repository's single threshold, fixed at 8644c5f00 and re-run green for that violation) and two are scan artifacts from sql/migrations/V026__cost_edge_advisor_log.sql:203 on origin/main, seen because the collector rglobs into the linked worktrees under .claude/worktrees/ that exist only on this Mac. This full run was performed specifically because E2 named 'no full tests/structure run' as the branch's evidence gap; the earlier five-file evidence would not have surfaced any of it."
+    "measured_by": "PM full-suite run at 2dd853ddf (Mac, 36m46s), after the four PR #178 review threads were closed. The comparable run at cedf9a6f2 before those fixes was 3 failed / 8050 passed / 55 skipped; the delta of three passes is the three regressions added by this round (forged-anchor and bundle-binding coverage in the launch receipts file, replica key-separation in the external evidence file). Component runs at the same source: launch receipts 65 passed, external evidence 39 passed, launch hardening + chain 16 passed.",
+    "round_12_reason": "Round 11 bound 651bd4e38. This round modified aiml_gate_receipt_schema_core.py, which is a W5-owned path, so the round-11 artifacts stopped describing this head the moment that landed. That is the same debt this PR was opened to repay for 209793b70; the difference is that it is being paid in the same round it was incurred rather than three review rounds later.",
+    "scope_boundary": "Repository/command evidence at this head only. LOCAL_REPRODUCIBLE, not a closure-admissible command_capture_v2: no admitted node-id or context artifact was bound. It evidences source structure and test outcomes on a Mac; it evidences nothing about runtime, PG, the three unimplemented root-owned producer capabilities, any real durability anchor, or any off-host replica. Authority 0/9, production effect 0/6, LW2 locked.",
+    "summary": "3 failed, 8053 passed, 55 skipped in 2206.23s at 2dd853ddf. None of the three is attributable to this branch. Two are the G1 context-transport regression that origin/main records as its own current baseline (tests/structure/test_aiml_s2_effect_host_run.py: test_registry_tracked_bytes_leave_headroom_under_the_execve_single_argument_cap and test_compiled_context_artifact_stays_under_the_execve_cap; main's TODO states 254 passed / 2 failed for that file and assigns it to P0-AIML-G1-CONTEXT-TRANSPORT-REGISTRY-CAP). The third, test_file_line_policy_static.py::test_active_source_and_test_text_does_not_advertise_lower_file_limits, now reports exactly two violations, both from sql/migrations/V026__cost_edge_advisor_log.sql line 203 on origin/main, counted twice because the collector rglobs into the linked worktrees under .claude/worktrees/ that exist only on this Mac. This branch's own violation in that test was fixed at 8644c5f00 and does not recur."
   },
   "w5_wave_exit_derivation": {
     "reasons": [],
     "status": "PASS"
   },
-  "w5_wave_exit_self_digest": "sha256:3dce6b4feedbecc84c434c73caefcd9f5c4f532c9b6a4c8faba2860c000358ec"
+  "w5_wave_exit_self_digest": "sha256:c00d0468c0b6b440c96ddca7909615b44f777163cbf5059274719e264f5ddc62"
 }
