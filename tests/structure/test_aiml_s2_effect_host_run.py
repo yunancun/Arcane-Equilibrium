@@ -754,41 +754,110 @@ def test_script_index_documents_every_new_runner_family_script():
         assert len(rows) == 1, path.name
 
 
+# Linux caps a *single* argv element at ``MAX_ARG_STRLEN`` = 32 * PAGE_SIZE,
+# independently of the ~16x larger total ``ARG_MAX``.  Measured read-only on the
+# current runtime host ``trade-core`` on 2026-08-07 (Linux 6.17.0-35-generic
+# x86_64, Ubuntu 24.04.4 LTS): PAGE_SIZE=4096, largest accepted single argv
+# element = 131071 bytes => MAX_ARG_STRLEN = 131072; ARG_MAX = 2097152.
 MAX_ARG_STRLEN = 128 * 1024
+LINUX_PAGE_SIZE_MEASURED_ON_TRADE_CORE = 4096
+
+# G1 的 transport invariant 執法面在
+# ``tests/structure/test_agent_governance_context_transport.py``:
+# ``agent_governance.py`` 的 ``--context-artifact`` 現在**只**接受 ``@path``,inline
+# JSON 是 typed refusal。argv 元素因此恆為一條路徑,與 payload 大小解耦。
+CONTEXT_TRANSPORT_INVARIANT_TEST = (
+    "tests/structure/test_agent_governance_context_transport.py"
+)
+# compiled Context 真正會被送進一次 model call 的部分,是 shared + role 兩個 semantic
+# projection 串起來的 prompt prefix;governing cap 是 Registry 宣告的
+# ``max_prompt_utf8_bytes_per_call``,不是 execve。餘裕以 bytes 明寫,成長會在這裡先紅。
+SEMANTIC_PREFIX_REQUIRED_HEADROOM_BYTES = 16 * 1024
+# registry 對 compiled Context 的**全部**貢獻只有 digest 與由它推導的 DAG binding。
+REGISTRY_CONTRIBUTION_TO_CONTEXT_BUDGET_BYTES = 2048
 
 
-def test_registry_tracked_bytes_leave_headroom_under_the_execve_single_argument_cap():
-    """PR#129 的 ``E2BIG`` 前例的**可重現**量測:只量 tracked 檔身(E2 P2 #14 的處置)。
+def _registry_bytes() -> int:
+    return len((ROOT / ".codex/agent_registry_v1.json").read_bytes())
 
-    原測試以 ``capture_repository_baseline()`` + ``compile_context()`` 量 artifact bytes 並釘
-    8 KiB 餘裕。E2 指出該量測**不可重現**:``compile_context`` 會把當下工作樹的 diff / inventory
-    納入,未提交與未追蹤檔都會推高它。這不是理論顧慮 —— 本次修復期間同一支測試實測:
 
-    ==================================  ==========
-    工作樹狀態                            E1 artifact
-    ==================================  ==========
-    乾淨 @ ``9dfb4d27f``                  115030
-    修復進行中(3 個 source 檔已改)        124107
-    修復進行中(source + 4 個 test 檔)     137488  ← 已越過 131072
-    ==================================  ==========
+def test_registry_bytes_are_never_argv_transported_and_stay_inside_their_budget():
+    """(舊名 ``test_registry_tracked_bytes_leave_headroom_under_the_execve_single_argument_cap``)
 
-    也就是說連「< MAX_ARG_STRLEN」這條硬上限在髒樹上都會紅,它量的是**工作樹**而不是 source。
-    故改量唯一真正被 S2E.2a 的 registry append 推大的 tracked 檔:
-    ``.codex/agent_registry_v1.json``(S2E.2a 前 96035 → 後 96675,+640 bytes),與工作樹髒度
-    完全無關、逐位元組可重現。
+    舊測試把「registry 檔身 + 24 KiB 餘裕」當成 compiled artifact 的**代理**,理由就寫在
+    它自己的 docstring:「乾淨樹上 artifact ≈ registry + ~18 KiB(115030 vs 96675)」。
+    這個代理關係現在**實測不成立**,而且不只是漂移了,是方向本身就錯:
 
-    代理關係:乾淨樹上 artifact ≈ registry + ~18 KiB(115030 vs 96675)⇒ 釘住 registry ≤ 104 KiB
-    等價於在乾淨樹上把 artifact 壓在 ~122 KiB 以下,仍在 ``MAX_ARG_STRLEN``(128 KiB = 131072)
-    之內。canonical 慣例本來就是以 ``@file`` 傳 context artifact 而非塞進單一 argv 元素。
+    * 差距已從 +18 KiB 變成 +27 KiB(registry 107089 vs E1 artifact 134159);
+    * 更關鍵的是,registry **不是** artifact 變大的成因。逐位元組量測:registry 對
+      compiled Context 的全部貢獻是 ``registry_digest``(73 bytes)與由它推導出來的
+      ``execution_dag_binding``(~892 bytes),合計約 1 KiB。artifact 的 134 KiB 幾乎
+      全部來自 context packs 的 source content(docs/README.md 17511、AGENTS.md 16437
+      …),那是**文件**成長,不是 registry 成長。
+
+    而且 registry 從頭到尾由 ``load_registry()`` 從磁碟讀取,**從不進入任何 argv**——
+    所以「registry 的 execve 單參數餘裕」這個量測從一開始就是範疇錯誤。
+
+    語義修復後這裡釘兩條更強的 invariant:
+    ① registry 的**檔身位元組不會進入 transported Context**(結構性,直接量);
+    ② registry 對 Context 的貢獻仍有一條**明確且緊**的 payload budget(2 KiB,現值
+       約 1 KiB),取代那條已失效的 24 KiB 代理餘裕。
+    舊測試唯一仍然成立的硬界(``registry < MAX_ARG_STRLEN``)原封保留。
     """
 
-    registry_bytes = len((ROOT / ".codex/agent_registry_v1.json").read_bytes())
+    registry_bytes = _registry_bytes()
+    # 舊測試中唯一沒有壞掉的斷言,原封保留(非放寬)。
     assert registry_bytes < MAX_ARG_STRLEN, registry_bytes
-    # registry 自身留 ≥ 24 KiB 餘裕:任何一次把它推到 104 KiB 以上的成長都必須被重新評估。
-    assert MAX_ARG_STRLEN - registry_bytes > 24 * 1024, registry_bytes
+
+    dirt = _worktree_dirt()
+    if dirt is not None:
+        pytest.skip(
+            "the Registry-contribution measurement needs a clean worktree "
+            f"(compile_context ingests the working-tree diff): {dirt}"
+        )
+
+    artifact = _measure_context_artifacts()["_artifacts"]["E1"]
+    plan = json.loads(artifact["canonical_plan"])
+    registry = json.loads(
+        (ROOT / ".codex/agent_registry_v1.json").read_text(encoding="utf-8")
+    )
+
+    # ① registry 檔身沒有被 inline 進 transported Context。逐層枚舉 plan 的全部 dict
+    #    key,斷言 registry 的頂層 section 名稱一個都不出現 —— registry 只能以 digest
+    #    被引用。任何人把整份(或一部分)registry 塞進 Context,這裡就會紅。
+    def _collect_keys(node, sink):
+        if isinstance(node, dict):
+            sink.update(node)
+            for value in node.values():
+                _collect_keys(value, sink)
+        elif isinstance(node, list):
+            for value in node:
+                _collect_keys(value, sink)
+
+    plan_keys: set[str] = set()
+    _collect_keys(plan, plan_keys)
+    leaked = sorted(set(registry) & plan_keys)
+    assert leaked == [], f"Registry sections are inlined into the Context: {leaked}"
+
+    # ② registry 對 Context 的實際貢獻仍在明確預算內。
+    contribution = len(
+        json.dumps(
+            {
+                "registry_digest": plan["registry_digest"],
+                "registry_schema_version": plan["registry_schema_version"],
+                "execution_dag_binding": plan["execution_dag_binding"],
+            },
+            separators=(",", ":"), ensure_ascii=False,
+        ).encode("utf-8")
+    )
+    assert contribution <= REGISTRY_CONTRIBUTION_TO_CONTEXT_BUDGET_BYTES, {
+        "registry_file_bytes": registry_bytes,
+        "registry_contribution_to_context_bytes": contribution,
+        "budget": REGISTRY_CONTRIBUTION_TO_CONTEXT_BUDGET_BYTES,
+    }
 
 
-# 這支硬邊界釘量的是 **source**(乾淨工作樹)而不是當下的編輯狀態,故必須有一道「樹必須乾淨」的
+# 這支釘量的是 **source**(乾淨工作樹)而不是當下的編輯狀態,故必須有一道「樹必須乾淨」的
 # 前置。E2 的 M-1:FIX-3 把本測試**綠著刪掉**且未在 commit body 揭露 —— 刪除本身可辯護(髒樹會誤
 # 紅),不揭露不可辯護。本波以「前置 + 誠實 skip 理由」把它復原,使它在 CI / 乾淨 HEAD 上恆跑,
 # 在編輯中的髒樹上誠實 SKIP 而不是誤紅,也不是消失。
@@ -813,27 +882,8 @@ def _worktree_dirt() -> str | None:
     return None
 
 
-def test_compiled_context_artifact_stays_under_the_execve_cap():
-    """compiled artifact 的**硬邊界**釘(``MAX_ARG_STRLEN``;不是可重現的餘裕釘)。
-
-    ``compile_context`` 會把當下工作樹的 diff / inventory 納入 ⇒ 量到的 bytes 依樹狀態而變。
-    本次修復期間同一支測試實測 115030 → 124107 → 137488(最後一個已越過 131072),也就是說在
-    **髒樹**上它量的是工作樹而不是 source,會誤紅。處置**不是**刪掉它,而是加一道前置:
-
-    * 工作樹不乾淨 ⇒ ``pytest.skip`` 並把髒度逐字寫進 skip 理由(fail loud,不靜默通過);
-    * 工作樹乾淨 ⇒ 真的量,且對 E2 實測過的四個角色**逐一**釘住 ``< MAX_ARG_STRLEN``。
-
-    乾淨 HEAD ``50a224af4`` 上的實測(E1 與 E2 兩台各自獨立跑出同一組數字):
-    E1 115468 / E2 115460 / OPS 113033 / PM 95905,registry 檔身 96675 —— 全部 < 131072。
-    canonical 慣例本來就是以 ``@file`` 傳 context artifact 而非塞進單一 argv 元素。
-    """
-
-    dirt = _worktree_dirt()
-    if dirt is not None:
-        pytest.skip(
-            "the execve hard-cap measurement only means anything on a clean worktree "
-            f"(compile_context ingests the working-tree diff): {dirt}"
-        )
+def _measure_context_artifacts() -> dict:
+    """Compile the four E2-measured role Contexts once and return sizes + artifacts."""
 
     from agent_governance_context import capture_repository_baseline
     from agent_governance_execution import compile_context, materialize_context_artifact
@@ -853,15 +903,91 @@ def test_compiled_context_artifact_stays_under_the_execve_cap():
         "previous_failure": "PR#129 registry growth crossed MAX_ARG_STRLEN and raised E2BIG",
     })
     measured: dict[str, int] = {}
+    artifacts: dict[str, dict] = {}
     for role in _EXECVE_CAP_MEASURED_ROLES:
         artifact = materialize_context_artifact(
             compile_context(role, routed["task_facts"], root=ROOT)
         )
+        artifacts[role] = artifact
         measured[role] = len(
             json.dumps(artifact, separators=(",", ":"), ensure_ascii=False).encode("utf-8")
         )
-    assert max(measured.values()) < MAX_ARG_STRLEN, {
-        "measured": measured, "cap": MAX_ARG_STRLEN, "tree_state": baseline,
+    return {**measured, "_artifacts": artifacts, "_baseline": baseline}
+
+
+def test_compiled_context_artifact_transport_is_file_bound_not_argv_bound():
+    """(舊名 ``test_compiled_context_artifact_stays_under_the_execve_cap``)
+
+    舊測試對四個角色逐一釘 ``artifact_bytes < MAX_ARG_STRLEN``。它現在紅,實測
+    E1 134159 / E2 134151 / OPS 120928 / PM 98654,前兩者已越過 131072。
+
+    但把 artifact 壓回 131072 以下**不是**正確的修復,理由是這條 cap 根本不管這個
+    payload:``MAX_ARG_STRLEN`` 只約束**單一 argv 元素**,而 compiled Context 從來不是
+    argv 元素——canonical 慣例是 ``--context-artifact @<context.json>``,argv 裡走的是
+    一條路徑。G1 逐一盤點全 repo 41 個帶該旗標的 tracked 檔後,確認**沒有任何 active
+    caller** 把 payload 放進單一 argv(``.claude/workflows/openclaw-full-audit.js`` 亦
+    無 ``child_process``,它是 in-process model call,並且自帶 byte cap)。
+
+    真正的缺陷是這條 invariant 只有慣例、零 source 執法:``_json_arg`` 對
+    ``--context-artifact`` 同時接受 ``@file`` 與 inline JSON。所以語義修復是**把假設
+    換成結構**,而不是把數字換成另一個數字:
+
+    * transport 面 —— ``--context-artifact`` 現在只接受 ``@path``,inline 是 typed
+      refusal(執法與負面測試在 ``CONTEXT_TRANSPORT_INVARIANT_TEST``);本測試在此處
+      cross-check 該執法仍在,所以任何人把 inline 放回來,這裡就會紅。
+    * payload 面 —— 換成兩條**真正**約束這個 payload 的預算:
+      ① 會進 model call 的 semantic prompt prefix 必須留在 Registry 宣告的
+         ``max_prompt_utf8_bytes_per_call`` 內,且保留 16 KiB 明寫餘裕;
+      ② 整份 artifact 必須留在 CLI 的檔案 transport 預算內。
+
+    這不是放寬:舊斷言只保證「payload 小到即使被誤用成 argv 也不會炸」,新斷言保證
+    「payload 結構上不可能成為 argv」**加上**「payload 在它真正會經過的通道裡有明確餘裕」。
+    """
+
+    dirt = _worktree_dirt()
+    if dirt is not None:
+        pytest.skip(
+            "the compiled-artifact measurement only means anything on a clean worktree "
+            f"(compile_context ingests the working-tree diff): {dirt}"
+        )
+
+    import agent_governance as governance  # noqa: PLC0415 - HELPERS is already on sys.path
+
+    # transport 面:inline 必須仍然被結構性拒絕。
+    source = (HELPERS / "agent_governance.py").read_text(encoding="utf-8")
+    assert "_json_arg(args.context_artifact)" not in source
+    assert "_context_artifact_arg(args.context_artifact)" in source
+    with pytest.raises(ValueError, match=r"must be @"):
+        governance._context_artifact_arg('{"schema_version": "context_artifact_v1"}')
+    assert (ROOT / CONTEXT_TRANSPORT_INVARIANT_TEST).is_file()
+
+    measured = _measure_context_artifacts()
+    artifacts = measured.pop("_artifacts")
+    baseline = measured.pop("_baseline")
+
+    # payload 面 ①:真正會進一次 model call 的 prompt prefix。
+    for role, artifact in artifacts.items():
+        prefix_bytes = len(
+            (
+                artifact["shared_task_context_canonical"]
+                + "\n\n"
+                + artifact["role_context_delta_canonical"]
+            ).encode("utf-8")
+        )
+        cap = json.loads(artifact["budget_authority_canonical"])[
+            "max_prompt_utf8_bytes_per_call"
+        ]
+        assert prefix_bytes + SEMANTIC_PREFIX_REQUIRED_HEADROOM_BYTES <= cap, {
+            "role": role, "semantic_prefix_bytes": prefix_bytes,
+            "max_prompt_utf8_bytes_per_call": cap,
+            "required_headroom": SEMANTIC_PREFIX_REQUIRED_HEADROOM_BYTES,
+        }
+
+    # payload 面 ②:整份 artifact 的檔案 transport 預算。
+    assert max(measured.values()) < governance.CONTEXT_ARTIFACT_MAX_BYTES, {
+        "measured": measured,
+        "file_transport_budget": governance.CONTEXT_ARTIFACT_MAX_BYTES,
+        "tree_state": baseline,
     }
 
 

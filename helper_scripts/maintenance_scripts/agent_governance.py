@@ -388,7 +388,11 @@ def _build_parser() -> argparse.ArgumentParser:
     )
     capture.add_argument("--native-agent", required=True)
     capture.add_argument("--node-id", required=True)
-    capture.add_argument("--context-artifact", required=True)
+    capture.add_argument(
+        "--context-artifact",
+        required=True,
+        help="@<path-to-context.json>; inline JSON is refused so the payload never becomes one execve argument",
+    )
     capture.add_argument("--timeout-seconds", type=int, default=600)
     capture.add_argument("command_argv", nargs=argparse.REMAINDER)
     return parser
@@ -398,6 +402,67 @@ def _json_arg(value: str):
     if value.startswith("@"):
         return json.loads(Path(value[1:]).read_text(encoding="utf-8"))
     return json.loads(value)
+
+
+# Context transport invariant.  A compiled ``context_artifact_v1`` is the one
+# governance payload whose size grows with the Registry and the context packs,
+# so it is the one payload that must never become a single ``execve`` argument.
+# Linux caps a *single* argv element at ``MAX_ARG_STRLEN`` = 32 * PAGE_SIZE,
+# independently of the much larger total ``ARG_MAX``; crossing it raises
+# ``E2BIG`` before the callee ever runs.  Measured read-only on the current
+# runtime host ``trade-core`` (Linux 6.17.0-35-generic x86_64, Ubuntu 24.04.4
+# LTS) on 2026-08-07: PAGE_SIZE=4096, largest accepted single argv element =
+# 131071 bytes, so MAX_ARG_STRLEN = 131072 = 32 * 4096, while ARG_MAX =
+# 2097152.  Compiled artifacts already measure 98..135 KiB, i.e. the same order
+# as the cap, and PR#129 really did hit ``E2BIG`` this way.
+#
+# Every documented caller already passes ``@file``, but until now nothing in
+# source enforced it: ``_json_arg`` accepted inline JSON just as happily.  This
+# loader removes the choice, so the invariant is structural rather than a
+# convention that each new caller has to remember.  The argv element becomes a
+# path (tens of bytes) whose length is decoupled from the payload.
+CONTEXT_ARTIFACT_MAX_BYTES = 4 * 1024 * 1024
+
+
+def _context_artifact_arg(value: str):
+    """Load a Context artifact from ``@path`` only; inline JSON is refused.
+
+    Fails closed with a typed ``ValueError`` (the ``capture-command`` handler
+    renders it as ``DENIED``) rather than a traceback, so a caller that regresses
+    to inline transport is told exactly what to do instead of hitting ``E2BIG``
+    at some later payload size.
+    """
+
+    if not value.startswith("@"):
+        raise ValueError(
+            "--context-artifact must be @<path-to-context.json>: a compiled "
+            "context_artifact_v1 passed inline becomes one execve argument and "
+            "fails with E2BIG once it crosses MAX_ARG_STRLEN (131072 bytes on "
+            "the current Linux runtime host)"
+        )
+    path = Path(value[1:])
+    if not path.is_file():
+        raise ValueError(f"--context-artifact file does not exist: {path}")
+    size = path.stat().st_size
+    if size > CONTEXT_ARTIFACT_MAX_BYTES:
+        raise ValueError(
+            f"--context-artifact file is {size} bytes, above the "
+            f"{CONTEXT_ARTIFACT_MAX_BYTES}-byte transport budget: recompile the "
+            "Context instead of transporting an unbounded payload"
+        )
+    text = path.read_text(encoding="utf-8")
+    try:
+        artifact = json.loads(text)
+    except json.JSONDecodeError as error:
+        # A truncated or partially written file is the realistic failure here,
+        # and it must not be mistaken for a malformed artifact by the callee.
+        raise ValueError(
+            f"--context-artifact file is not valid JSON ({error}): the file may "
+            "be truncated or still being written"
+        ) from error
+    if not isinstance(artifact, dict):
+        raise ValueError("--context-artifact file must contain a JSON object")
+    return artifact
 
 
 def _exact_bundle(
@@ -694,7 +759,8 @@ def main(
         try:
             record = capture_governed_command(
                 native_agent=args.native_agent, node_id=args.node_id,
-                context_artifact=_json_arg(args.context_artifact), argv=command_argv,
+                context_artifact=_context_artifact_arg(args.context_artifact),
+                argv=command_argv,
                 root=Path.cwd(), timeout_seconds=args.timeout_seconds,
             )
         except (OSError, PermissionError, RuntimeError, TypeError, ValueError) as error:
