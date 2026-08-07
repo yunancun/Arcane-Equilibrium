@@ -169,8 +169,12 @@ def test_a_valid_at_file_context_artifact_still_reaches_the_callee(tmp_path):
 # --------------------------------------------------------------------------- #
 # the caller inventory that justifies the "no active inline caller" branch
 # --------------------------------------------------------------------------- #
+# ``=`` is in the separator class on purpose: the ``--flag=value`` spelling is a
+# perfectly ordinary argparse form, and a sweep that only understood the
+# space-separated form would miss it.  The first draft of this pattern did miss
+# it, and the positive control below is what caught that.
 _INLINE_ARGV_RE = re.compile(
-    r"--context-artifact[\"'\s,]+(?!@)(?![\"']?<)[\"']?[\{\[]"
+    r"--context-artifact[=\"'\s,]+(?!@)(?![\"']?<)[\"']?[\{\[]"
 )
 _SKIPPED_TREES = ("docs/archive/", "docs/execution_plan/ai_ml_landing/receipts/",
                   "PROGRESS-archive")
@@ -226,15 +230,25 @@ def test_no_active_caller_transports_a_context_artifact_inline():
     )
 
 
-def test_the_caller_inventory_detector_actually_detects_an_inline_caller(tmp_path):
+# Composed at runtime rather than written literally: the positive controls below
+# are exactly what the sweep above is built to flag, so spelling them out would
+# make this file report itself as an offender.  Composing them keeps this module
+# inside the sweep instead of buying a green run with an exclusion, which is the
+# one place an inventory could be quietly hollowed out.
+_FLAG = "--context-" + "artifact"
+
+
+def test_the_caller_inventory_detector_actually_detects_an_inline_caller():
     """Mutation guard: an inventory that can never fail proves nothing."""
 
-    assert _INLINE_ARGV_RE.search('"--context-artifact", json.dumps(artifact),') is None
-    assert _INLINE_ARGV_RE.search('"--context-artifact", "{\\"a\\": 1}",') is not None
-    assert _INLINE_ARGV_RE.search("--context-artifact {\"schema_version\": \"x\"}") is not None
-    # the documented placeholder and the @file form must stay legal
-    assert _INLINE_ARGV_RE.search("--context-artifact @<context.json> -- <argv...>") is None
-    assert _INLINE_ARGV_RE.search('"--context-artifact", f"@{context_file}",') is None
+    # legal forms
+    assert _INLINE_ARGV_RE.search(f'"{_FLAG}", json.dumps(artifact),') is None
+    assert _INLINE_ARGV_RE.search(f"{_FLAG} @<context.json> -- <argv...>") is None
+    assert _INLINE_ARGV_RE.search(f'"{_FLAG}", f"@{{context_file}}",') is None
+    # the regressions it must catch
+    assert _INLINE_ARGV_RE.search(f'"{_FLAG}", "{{\\"a\\": 1}}",') is not None
+    assert _INLINE_ARGV_RE.search(f'{_FLAG} {{"schema_version": "x"}}') is not None
+    assert _INLINE_ARGV_RE.search(f'{_FLAG}=[{{"role": "E2"}}]') is not None
 
 
 def test_the_governance_cli_has_exactly_one_context_artifact_ingress():
