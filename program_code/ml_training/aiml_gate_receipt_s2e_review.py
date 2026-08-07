@@ -3,7 +3,9 @@
 from __future__ import annotations
 
 import ast
+import base64
 import hashlib
+import json
 import subprocess
 from datetime import datetime, timezone
 from pathlib import Path, PurePath
@@ -1111,3 +1113,91 @@ def validate_s2e_disposable_test_effect_chain(
     ):
         errors.append("disposable test chain admits production authority or effect")
     return sorted(set(errors))
+
+
+# ── S2E payload envelopes(PR #178 review P1 的空間騰挪)────────────────────
+# `validate_s2e_launch_transition` 補上候選 anchor 認證後,launch 葉越過 2000 行
+# 硬門檻。acceptance-review 的簽章主體/WORM payload/bundle digest 本來就是本葉
+# (acceptance review)的內容,共用的 envelope 隨之同遷;launch 葉逐名 import 回去,
+# 公開 ABI 不變。這是把內容放回它該在的葉,不是為了行數硬拆。
+
+
+def _s2e_worm_envelope(
+    schema_version: str,
+    content: bytes,
+    *,
+    digest_field: str,
+    bytes_field: str,
+    bindings: dict[str, Any],
+) -> dict[str, Any]:
+    """One shared exact-byte envelope for carrier and signed-review WORM writes."""
+
+    return {
+        "schema_version": schema_version,
+        **bindings,
+        digest_field: _raw_digest(content),
+        bytes_field: base64.b64encode(content).decode("ascii"),
+    }
+
+def s2e_acceptance_review_signed_bytes(bundle: dict[str, Any]) -> bytes:
+    """Canonical review subject shared by SSHSIG and the external WORM payload."""
+
+    return json.dumps(
+        {
+            key: value
+            for key, value in bundle.items()
+            if key not in {
+                "signed_core_digest",
+                "signature",
+                "durability_anchor_binding",
+                "bundle_digest",
+            }
+        },
+        ensure_ascii=False,
+        sort_keys=True,
+        separators=(",", ":"),
+        allow_nan=False,
+    ).encode("utf-8")
+
+def s2e_acceptance_review_worm_payload(
+    bundle: dict[str, Any],
+) -> dict[str, Any]:
+    signed_bytes = s2e_acceptance_review_signed_bytes(bundle)
+    return _s2e_worm_envelope(
+        "s2e_acceptance_review_worm_payload_v1",
+        signed_bytes,
+        digest_field="signed_core_digest",
+        bytes_field="signed_core_bytes_base64",
+        bindings={
+            "candidate_payload_digest": bundle.get("candidate_payload_digest"),
+            "reviewed_source_head": bundle.get("reviewed_source_head"),
+        },
+    )
+
+def s2e_acceptance_review_bundle_digest(bundle: dict[str, Any]) -> str:
+    return canonical_digest({
+        key: value for key, value in bundle.items() if key != "bundle_digest"
+    })
+
+
+def _bundle_binds_this_candidate(bundle: dict[str, Any], receipt: Any) -> bool:
+    """這份 bundle 是否確實屬於這張 receipt(候選兩個階段各一種合法形狀)。
+
+    已 READY:receipt 帶 `acceptance_review_bundle_digest`,逐位元組比對。
+    `PENDING_REVIEW`:`_common_payload_errors:428` 明文禁止該欄非空,故改由 bundle 的
+    `candidate_payload_digest` 指回這張 receipt——與 `:1392` 既有綁法同形。
+    E4 實測抓到本修復的第一版只寫了前者,於是對每張 wave 候選等式恆假、`elif` 短路,
+    anchor 認證**永遠走不到**,且 wave issuance 會永久 pending;repo 內沒有任何測試
+    把 wave receipt 發到 READY,所以沒有測試會紅。該覆蓋缺口另記。
+    """
+
+    if not isinstance(receipt, dict):
+        return False
+    bound_digest = receipt.get("acceptance_review_bundle_digest")
+    if bound_digest is not None:
+        return s2e_acceptance_review_bundle_digest(bundle) == bound_digest
+    return (
+        receipt.get("checkpoint_status") == "PENDING_REVIEW"
+        and bundle.get("candidate_payload_digest") is not None
+        and bundle.get("candidate_payload_digest") == receipt.get("payload_digest")
+    )

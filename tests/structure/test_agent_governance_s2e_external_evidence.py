@@ -790,6 +790,24 @@ def test_registry_rejects_anchor_shared_key_custody(trust_profiles, monkeypatch)
     assert any("not independent" in error for error in errors), errors
 
 
+def test_registry_rejects_replica_shared_key_custody(trust_profiles, monkeypatch):
+    """registry 與 **off-host replica** 共用 key 亦須 fail closed(PR #178 review P2)。
+
+    peers 原本只有 receipt signer 與 durability anchor,漏了 replica。漏這一格的後果不是
+    形式上的:replica 私鑰依設計放在 `ncyu-nas`,是四把裡最可能被單獨評估風險的一把,
+    而共用它就等於「攻破 replica 也能偽造 single-use registry grant」。
+    """
+
+    registry, candidate, predecessor, entry = _registry_case(trust_profiles)
+    monkeypatch.setattr(
+        evidence,
+        "_load_offhost_replica_trust_root",
+        lambda: (trust_profiles["registry_profile"], []),
+    )
+    errors = _validate_registry(registry, candidate, predecessor, entry)
+    assert any("not independent" in error for error in errors), errors
+
+
 def test_registry_rejects_cross_candidate_head_fork_and_stale(trust_profiles):
     artifact, candidate, predecessor, entry = _registry_case(trust_profiles)
     cases = (

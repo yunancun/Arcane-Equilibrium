@@ -1485,31 +1485,35 @@ def test_acceptance_review_rejects_generic_command_and_cross_generation_capture(
         )
 
 
-def _issued_genesis_authority_case(
+def _signed_review_bundle(
+    candidate: dict,
+    *,
+    repo: Path,
     tmp_path: Path,
     monkeypatch: pytest.MonkeyPatch,
+    private_key: Path,
+    fingerprint: str,
+    external_trust: dict[str, object],
+    issued_at: datetime,
+    context_digest: str = "sha256:" + "6" * 64,
+    predecessor_chain: list[dict] | None = None,
+    consumed_predecessor_digests: list[str] | None = None,
+    anchor_generation: int = 1,
+    anchor_previous_head: str | None = None,
+    anchor_issued_at: datetime | None = None,
 ) -> dict:
-    private_key, _, fingerprint = _install_disposable_s2e_trust_root(
-        tmp_path, monkeypatch
-    )
-    external_trust = _install_disposable_external_evidence_roots(
-        tmp_path, monkeypatch
-    )
-    repo, baseline, schema_carrier, _ = _repo(tmp_path)
-    _git(repo, "checkout", "--detach", schema_carrier)
-    candidate = launch.build_genesis_candidate(
-        repo_root=repo,
-        baseline_head=baseline,
-        schema_carrier_head=schema_carrier,
-        launch_contract_digest=LAUNCH_CONTRACT_DIGEST,
-        generation_task_contract_digest=GENERATION_TASK_CONTRACT_DIGEST,
-    )
-    issued_at = datetime(2026, 7, 30, 12, 0, tzinfo=timezone.utc)
+    """一份候選的完整、簽妥、anchor 已對綁的 acceptance review bundle。
+
+    候選自己的 review anchor 綁的是 `s2e_acceptance_review_worm_payload(bundle)`,
+    不是 receipt——production 的 `validate_s2e_launch_acceptance_review_bundle`
+    與(PR #178 起)`validate_s2e_launch_transition` 都以此認證候選 anchor。
+    """
+
     review_capture = _actual_capture(
         repo,
         carrier_path="schemas/launch.json",
         task_digest=candidate["generation_task_contract_digest"],
-        context_digest="sha256:" + "6" * 64,
+        context_digest=context_digest,
         monkeypatch=monkeypatch,
         argv=validator.s2e_review_test_argv(candidate, repo_root=repo),
     )
@@ -1529,6 +1533,9 @@ def _issued_genesis_authority_case(
         "native_agent": review_capture["native_agent"],
         "permission": review_capture["permission"],
     }
+    source_blob_manifest = validator.s2e_review_source_blob_manifest(
+        candidate, repo_root=repo
+    )
     review_bundle = {
         "schema_version": "s2e_launch_acceptance_review_bundle_v1",
         "candidate_payload_digest": candidate["payload_digest"],
@@ -1540,20 +1547,16 @@ def _issued_genesis_authority_case(
         "generation_task_contract_digest": candidate[
             "generation_task_contract_digest"
         ],
-        "source_blob_manifest": validator.s2e_review_source_blob_manifest(
-            candidate, repo_root=repo
-        ),
+        "source_blob_manifest": source_blob_manifest,
         "predicate_results": validator.s2e_review_predicate_results(
             candidate,
-            source_blob_manifest=validator.s2e_review_source_blob_manifest(
-                candidate, repo_root=repo
-            ),
+            source_blob_manifest=source_blob_manifest,
             governed_capture_record=review_capture,
             disposable_test_effect_chains=[disposable_chain],
-            predecessor_chain=[],
+            predecessor_chain=predecessor_chain or [],
             repo_root=repo,
         ),
-        "consumed_predecessor_digests": [],
+        "consumed_predecessor_digests": consumed_predecessor_digests or [],
         "disposable_test_effect_chain_digests": [
             disposable_chain["chain_digest"]
         ],
@@ -1594,8 +1597,10 @@ def _issued_genesis_authority_case(
     review_anchor_attestation = _durability_anchor_attestation(
         validator.s2e_acceptance_review_worm_payload(review_bundle),
         trust=external_trust,
-        issued_at=issued_at,
+        issued_at=anchor_issued_at or issued_at,
         directory=tmp_path,
+        generation=anchor_generation,
+        previous_head=anchor_previous_head,
     )
     review_bundle["durability_anchor_binding"] = _anchor_binding(
         review_anchor_attestation
@@ -1603,6 +1608,48 @@ def _issued_genesis_authority_case(
     review_bundle["bundle_digest"] = (
         validator.s2e_acceptance_review_bundle_digest(review_bundle)
     )
+    return {
+        "bundle": review_bundle,
+        "capture": review_capture,
+        "chain": disposable_chain,
+        "anchor": review_anchor_attestation,
+    }
+
+
+def _issued_genesis_authority_case(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> dict:
+    private_key, _, fingerprint = _install_disposable_s2e_trust_root(
+        tmp_path, monkeypatch
+    )
+    external_trust = _install_disposable_external_evidence_roots(
+        tmp_path, monkeypatch
+    )
+    repo, baseline, schema_carrier, _ = _repo(tmp_path)
+    _git(repo, "checkout", "--detach", schema_carrier)
+    candidate = launch.build_genesis_candidate(
+        repo_root=repo,
+        baseline_head=baseline,
+        schema_carrier_head=schema_carrier,
+        launch_contract_digest=LAUNCH_CONTRACT_DIGEST,
+        generation_task_contract_digest=GENERATION_TASK_CONTRACT_DIGEST,
+    )
+    issued_at = datetime(2026, 7, 30, 12, 0, tzinfo=timezone.utc)
+    signed_review = _signed_review_bundle(
+        candidate,
+        repo=repo,
+        tmp_path=tmp_path,
+        monkeypatch=monkeypatch,
+        private_key=private_key,
+        fingerprint=fingerprint,
+        external_trust=external_trust,
+        issued_at=issued_at,
+    )
+    review_bundle = signed_review["bundle"]
+    review_capture = signed_review["capture"]
+    disposable_chain = signed_review["chain"]
+    review_anchor_attestation = signed_review["anchor"]
     monkeypatch.setattr(
         s2e,
         "_trusted_issuance_now",
@@ -1785,20 +1832,54 @@ def _issued_genesis_authority_case(
 
 _INHERIT_CARRIER_HEAD = object()
 
+# 候選 anchor 的 observed_at 是 anchor_issued_at + 10s、expires_at 是 +5min,而
+# transition gate 恆在 `case["now"] == issued_at + 3min` 判定。因此 anchor 必須在
+# `now` **之前**鑄出,窗口才真的涵蓋判定時刻——production 對候選 anchor 要求當下
+# 新鮮是對的,該動的是 fixture。全部相對凍結時鐘,無 wall-clock。
+_CANDIDATE_ANCHOR_OFFSET = timedelta(minutes=2, seconds=30)
+
+
+def _wave_review(
+    case: dict, wave: dict, monkeypatch: pytest.MonkeyPatch
+) -> dict:
+    """Wave 候選自己的 signed review bundle + 它的 review anchor(gen 3)。"""
+
+    return _signed_review_bundle(
+        wave,
+        repo=case["repo"],
+        tmp_path=case["tmp_path"],
+        monkeypatch=monkeypatch,
+        private_key=case["private_key"],
+        fingerprint=case["fingerprint"],
+        external_trust=case["external_trust"],
+        issued_at=case["issued_at"],
+        context_digest="sha256:" + "a" * 64,
+        predecessor_chain=[case["issued"]],
+        anchor_generation=3,
+        anchor_previous_head=case["carrier_anchor"]["anchor_head_digest"],
+        anchor_issued_at=case["issued_at"] + _CANDIDATE_ANCHOR_OFFSET,
+    )
+
 
 def _candidate_review_anchor(
     case: dict,
-    payload: dict,
+    bundle: dict,
     *,
     generation: int = 3,
     previous_head: object = _INHERIT_CARRIER_HEAD,
 ) -> dict:
-    """候選自己的 review anchor:必須嚴格晚於前一份的 carrier anchor。"""
+    """候選自己的 review anchor:必須嚴格晚於前一份的 carrier anchor。
+
+    綁的 payload 是候選**自己那份 acceptance review bundle** 的 WORM payload,
+    與 production 一致(`validate_s2e_launch_acceptance_review_bundle` 與 PR #178
+    起的 `validate_s2e_launch_transition` 都以此認證)。舊 fixture 綁的是 wave
+    receipt,只因當時沒有任何路徑認證這份 anchor 才會通過。
+    """
 
     return _durability_anchor_attestation(
-        payload,
+        validator.s2e_acceptance_review_worm_payload(bundle),
         trust=case["external_trust"],
-        issued_at=case["issued_at"] + timedelta(minutes=3),
+        issued_at=case["issued_at"] + _CANDIDATE_ANCHOR_OFFSET,
         directory=case["tmp_path"],
         generation=generation,
         previous_head=(
@@ -1827,7 +1908,9 @@ def test_wave_generation_requires_ready_reviewed_attested_predecessor(
         now=case["now"],
     )
 
-    candidate_anchor = _candidate_review_anchor(case, wave)
+    wave_review = _wave_review(case, wave, monkeypatch)
+    wave_bundle = wave_review["bundle"]
+    candidate_anchor = wave_review["anchor"]
     assert wave["checkpoint_status"] == "PENDING_REVIEW"
     assert wave["wave_exit_id"] == "S2E_2B_2A_SECURITY_RECOVERY_READY"
     assert validator.validate_s2e_launch_transition(
@@ -1838,6 +1921,7 @@ def test_wave_generation_requires_ready_reviewed_attested_predecessor(
         now=case["now"],
         consumed_predecessor_digests=frozenset(),
         durability_anchor_attestation=candidate_anchor,
+        acceptance_review_bundle=wave_bundle,
     ) == []
     mismatched_consumption = validator.validate_s2e_launch_transition(
         wave,
@@ -1849,6 +1933,7 @@ def test_wave_generation_requires_ready_reviewed_attested_predecessor(
             case["issued"]["payload_digest"]
         },
         durability_anchor_attestation=candidate_anchor,
+        acceptance_review_bundle=wave_bundle,
     )
     assert any(
         "consumed-predecessor set differs" in error
@@ -1866,6 +1951,7 @@ def test_wave_generation_requires_ready_reviewed_attested_predecessor(
         now=case["now"],
         consumed_predecessor_digests=frozenset(),
         durability_anchor_attestation=candidate_anchor,
+        acceptance_review_bundle=wave_bundle,
     )
     assert any("not an issued READY" in error for error in pending_errors)
 
@@ -1880,6 +1966,7 @@ def test_wave_generation_requires_ready_reviewed_attested_predecessor(
         now=case["now"],
         consumed_predecessor_digests=frozenset(),
         durability_anchor_attestation=candidate_anchor,
+        acceptance_review_bundle=wave_bundle,
     )
     assert any("review binding differs" in error for error in forged_errors)
     assert any(
@@ -2203,10 +2290,12 @@ def test_launch_cli_exposes_full_issue_carrier_authority_and_transition_gates(
     wave = json.loads(capsys.readouterr().out)
     assert clock_samples == [now, now, now]
     wave_path = _json_file(tmp_path, "wave.json", wave)
+    wave_review = _wave_review(case, wave, monkeypatch)
     candidate_anchor_path = _json_file(
-        tmp_path,
-        "candidate-anchor.json",
-        _candidate_review_anchor(case, wave),
+        tmp_path, "candidate-anchor.json", wave_review["anchor"]
+    )
+    candidate_bundle_path = _json_file(
+        tmp_path, "candidate-review-bundle.json", wave_review["bundle"]
     )
     # candidate 的 review anchor 缺席 ⇒ 只得結構性語義,絕不靜默 Advance。
     assert launch.main([
@@ -2229,6 +2318,23 @@ def test_launch_cli_exposes_full_issue_carrier_authority_and_transition_gates(
         "--predecessor-authority", str(authority_path),
         "--durability-anchor-attestation", str(candidate_anchor_path),
     ]) == 0
+    # anchor 有、bundle 缺 ⇒ 候選 anchor 無從認證(payload binding 只能從 bundle
+    # 實值導出),因此與缺 anchor 同樣降級,絕不靜默 Advance。
+    assert json.loads(capsys.readouterr().out) == {
+        "status": "STRUCTURAL_PASS_NOT_ADVANCE",
+        "anchor_gate_observations": {"host_identity": [], "floor_verdicts": []},
+        "errors": [],
+    }
+    # anchor 與 bundle 都在 ⇒ 完整認證後才 Advance。
+    assert launch.main([
+        "validate",
+        "--repo-root", str(repo),
+        "--receipt", str(wave_path),
+        "--predecessor-receipt", str(files["issued"]),
+        "--predecessor-authority", str(authority_path),
+        "--durability-anchor-attestation", str(candidate_anchor_path),
+        "--acceptance-review-bundle", str(candidate_bundle_path),
+    ]) == 0
     # E3-B/E3-E 的真消費者:verdict 與 host identity 觀察都是 typed 輸出的一格,
     # 下游不必再從錯誤字串裡撈 `"UNVERIFIED: "` 子字串。
     assert json.loads(capsys.readouterr().out) == {
@@ -2236,7 +2342,7 @@ def test_launch_cli_exposes_full_issue_carrier_authority_and_transition_gates(
         "anchor_gate_observations": _expected_anchor_observations(),
         "errors": [],
     }
-    assert clock_samples == [now, now, now, now, now]
+    assert clock_samples == [now, now, now, now, now, now]
     assert launch.main([
         "transition-gate",
         "--repo-root", str(repo),
@@ -2244,13 +2350,14 @@ def test_launch_cli_exposes_full_issue_carrier_authority_and_transition_gates(
         "--predecessor-receipt", str(files["issued"]),
         "--predecessor-authority", str(authority_path),
         "--durability-anchor-attestation", str(candidate_anchor_path),
+        "--acceptance-review-bundle", str(candidate_bundle_path),
     ]) == 0
     assert json.loads(capsys.readouterr().out) == {
         "status": "ADVANCE",
         "anchor_gate_observations": _expected_anchor_observations(),
         "errors": [],
     }
-    assert clock_samples == [now, now, now, now, now, now]
+    assert clock_samples == [now, now, now, now, now, now, now]
     # transition-gate 的新旗標為 required:缺它必須是 argparse 層的硬失敗。
     with pytest.raises(SystemExit):
         launch.main([
@@ -2631,8 +2738,9 @@ def test_generic_validator_never_schema_only_accepts_review_bundle() -> None:
         bundle, now="2026-07-30T12:01:00Z"
     ) == [
         "s2e acceptance review bundle EXTERNAL_VERIFICATION_PENDING: exact "
-        "candidate, governed capture, fixed-root SSHSIG, and external WORM "
-        "evidence are required"
+        "candidate, governed capture, fixed-root SSHSIG, and a trusted-host "
+        "durability anchor attestation with its off-host latest-generation "
+        "readback are required"
     ]
 
 
@@ -2797,7 +2905,16 @@ def test_transition_floor_rules_bind_the_predecessor_to_git(
         now=case["now"],
     )
 
-    def gate(*, predecessor_receipt=None, authority=None, candidate_anchor=None):
+    wave_review = _wave_review(case, wave, monkeypatch)
+    wave_bundle = wave_review["bundle"]
+
+    def gate(
+        *,
+        predecessor_receipt=None,
+        authority=None,
+        candidate_anchor=None,
+        bundle=None,
+    ):
         return validator.validate_s2e_launch_transition(
             wave,
             predecessor_receipt=predecessor_receipt or case["issued"],
@@ -2808,7 +2925,10 @@ def test_transition_floor_rules_bind_the_predecessor_to_git(
             durability_anchor_attestation=(
                 candidate_anchor
                 if candidate_anchor is not None
-                else _candidate_review_anchor(case, wave)
+                else wave_review["anchor"]
+            ),
+            acceptance_review_bundle=(
+                wave_bundle if bundle is None else bundle
             ),
         )
 
@@ -2859,7 +2979,7 @@ def test_transition_floor_rules_bind_the_predecessor_to_git(
 
     # 規則 3b:c 未嚴格晚於 b。
     stalled_errors = gate(
-        candidate_anchor=_candidate_review_anchor(case, wave, generation=2)
+        candidate_anchor=_candidate_review_anchor(case, wave_bundle, generation=2)
     )
     assert (
         "transition candidate review durability anchor generation does not "
@@ -2869,7 +2989,7 @@ def test_transition_floor_rules_bind_the_predecessor_to_git(
     # 規則 4:相鄰世代必須 hash 連結。
     unlinked_errors = gate(
         candidate_anchor=_candidate_review_anchor(
-            case, wave, previous_head="sha256:" + "e" * 64
+            case, wave_bundle, previous_head="sha256:" + "e" * 64
         )
     )
     assert (
@@ -2880,12 +3000,149 @@ def test_transition_floor_rules_bind_the_predecessor_to_git(
     # 規則 5:c 不得無前手(P1-1 的原始 PoC:刪 ledger 尾部後重簽 gen=1/prev=null)。
     truncated_errors = gate(
         candidate_anchor=_candidate_review_anchor(
-            case, wave, generation=1, previous_head=None
+            case, wave_bundle, generation=1, previous_head=None
         )
     )
     assert (
         "transition candidate review durability anchor omits its previous head"
     ) in truncated_errors, truncated_errors
+
+
+def test_transition_authenticates_the_candidate_anchor_and_binds_its_bundle(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """PR #178 review P1:候選 anchor 必須被**認證**,不是只被排序。
+
+    原本把候選的 SSHSIG 與 `attestation_digest` 換成任意值,`transition-gate` 仍印
+    `ADVANCE`;排序檢查只證明世代數字遞增,不證明那份 attestation 是真的。
+    `acceptance_review_bundle` 是這條認證的 payload binding 來源,因此它自己也必須
+    與這張 receipt 對綁,否則呼叫端可以遞一份簽得過、但屬於別張 receipt 的 bundle。
+    """
+
+    case = _issued_genesis_authority_case(tmp_path, monkeypatch)
+    repo = case["repo"]
+    source_head = _commit(repo, "lw1-auth.txt", "LW1\n", "LW1 source")
+    wave = launch.build_wave_candidate(
+        repo_root=repo,
+        wave="S2E-LW1",
+        source_head=source_head,
+        schema_carrier_head=case["schema_carrier"],
+        predecessor_receipt=case["issued"],
+        predecessor_authority=case["authority"],
+        launch_contract_digest=LAUNCH_CONTRACT_DIGEST,
+        generation_task_contract_digest=NEXT_GENERATION_TASK_CONTRACT_DIGEST,
+        now=case["now"],
+    )
+    wave_review = _wave_review(case, wave, monkeypatch)
+    wave_bundle = wave_review["bundle"]
+    good_anchor = wave_review["anchor"]
+
+    def gate(*, anchor=None, bundle=_INHERIT_CARRIER_HEAD):
+        return validator.validate_s2e_launch_transition(
+            wave,
+            predecessor_receipt=case["issued"],
+            predecessor_authority=case["authority"],
+            repo_root=repo,
+            now=case["now"],
+            consumed_predecessor_digests=frozenset(),
+            durability_anchor_attestation=anchor or good_anchor,
+            acceptance_review_bundle=(
+                wave_bundle if bundle is _INHERIT_CARRIER_HEAD else bundle
+            ),
+        )
+
+    anchor_prefix = "transition candidate review durability anchor: "
+    # 基準:完整、真簽、bundle 對綁 ⇒ 這條路徑確實抵達並通過 anchor 認證。
+    assert gate() == []
+
+    # 1) 換掉候選 anchor 的 SSHSIG(Codex 提的原始情境)。
+    forged_signature = deepcopy(good_anchor)
+    forged_signature["signature"]["signature"] = (
+        "-----BEGIN SSH SIGNATURE-----\nQUJDRA==\n-----END SSH SIGNATURE-----"
+    )
+    forged_signature_errors = gate(anchor=forged_signature)
+    assert (
+        anchor_prefix + "durability anchor SSHSIG verification failed"
+    ) in forged_signature_errors, forged_signature_errors
+
+    # 2) 改掉候選 anchor 的 attestation_digest。
+    forged_digest = deepcopy(good_anchor)
+    forged_digest["attestation_digest"] = "sha256:" + "c" * 64
+    forged_digest_errors = gate(anchor=forged_digest)
+    assert (
+        anchor_prefix + "durability anchor attestation digest is invalid"
+    ) in forged_digest_errors, forged_digest_errors
+
+    # 3) 一份格式完整、簽得過,但屬於**別張候選**的 bundle(genesis 那份)。
+    foreign_errors = gate(bundle=case["review_bundle"])
+    assert (
+        "transition acceptance review bundle is not the one this receipt binds"
+    ) in foreign_errors, foreign_errors
+
+    # 4) 缺 bundle / 非 dict ⇒ 必須報錯,絕不是「沒傳就跳過這項檢查」。
+    for absent in (None, "sha256:" + "d" * 64, [], 0):
+        absent_errors = gate(bundle=absent)
+        assert (
+            "transition requires the exact candidate acceptance review bundle"
+        ) in absent_errors, (absent, absent_errors)
+
+
+def test_pending_candidate_bundle_binding_is_by_candidate_payload_digest(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """PENDING 候選的對綁只能走 `candidate_payload_digest`,不能是 digest-only 比對。
+
+    `_common_payload_errors:428` 禁止 PENDING 候選攜帶 `acceptance_review_bundle_digest`,
+    所以「拿 receipt 的該欄位跟 bundle digest 比對」對每一張 wave 候選都恆假——那正是
+    本 PR 第一版把 gate 變成對 wave 永久 fail-closed(連 `issue_s2e_launch_receipt`
+    的 pre-issuance 呼叫都過不了)的原因。若日後有人把它再收緊成 digest-only 比對,
+    這個測試就是那道攔阻。
+    """
+
+    case = _issued_genesis_authority_case(tmp_path, monkeypatch)
+    repo = case["repo"]
+    source_head = _commit(repo, "lw1-pending.txt", "LW1\n", "LW1 source")
+    wave = launch.build_wave_candidate(
+        repo_root=repo,
+        wave="S2E-LW1",
+        source_head=source_head,
+        schema_carrier_head=case["schema_carrier"],
+        predecessor_receipt=case["issued"],
+        predecessor_authority=case["authority"],
+        launch_contract_digest=LAUNCH_CONTRACT_DIGEST,
+        generation_task_contract_digest=NEXT_GENERATION_TASK_CONTRACT_DIGEST,
+        now=case["now"],
+    )
+    wave_review = _wave_review(case, wave, monkeypatch)
+    wave_bundle = wave_review["bundle"]
+
+    def gate(bundle):
+        return validator.validate_s2e_launch_transition(
+            wave,
+            predecessor_receipt=case["issued"],
+            predecessor_authority=case["authority"],
+            repo_root=repo,
+            now=case["now"],
+            consumed_predecessor_digests=frozenset(),
+            durability_anchor_attestation=wave_review["anchor"],
+            acceptance_review_bundle=bundle,
+        )
+
+    # 前提:PENDING 候選確實不帶 bundle digest,digest-only 比對必然恆假。
+    assert wave["checkpoint_status"] == "PENDING_REVIEW"
+    assert wave["acceptance_review_bundle_digest"] is None
+    assert wave_bundle["candidate_payload_digest"] == wave["payload_digest"]
+
+    # 對綁成立 ⇒ 抵達並通過候選 anchor 認證(零錯誤)。
+    assert gate(wave_bundle) == []
+
+    # candidate_payload_digest 對不上 ⇒ 擋下,而且是擋在對綁那一關。
+    mismatched = deepcopy(wave_bundle)
+    mismatched["candidate_payload_digest"] = "sha256:" + "b" * 64
+    mismatched_errors = gate(mismatched)
+    assert (
+        "transition acceptance review bundle is not the one this receipt binds"
+    ) in mismatched_errors, mismatched_errors
 
 
 def _floor_repo(tmp_path: Path) -> Path:

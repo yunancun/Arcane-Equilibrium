@@ -188,17 +188,25 @@ A0 custody 決定（只記位置與保護方式）、11 項逐檔實測狀態、
 
 **若驗證端與 repo 不同 uid**（root-owned producer 讀 `ncyu` 所有的 repo）：git 會
 `fatal: detected dubious ownership` 而整條 floor 讀取永久 REJECTED。這是**正確的
-fail-closed**，不是 bug。放行只能由 operator 寫進 **root 自己的** protected config：
+fail-closed**，不是 bug。
 
-```
-git config --system --add safe.directory /home/ncyu/TradeBot/srv
-```
-
-代碼**不會**再自己帶 command 域的 `safe.directory`（E3 round-4 R4-1：那等於接受 repo
+代碼**不會**自己帶 command 域的 `safe.directory`（E3 round-4 R4-1：那等於接受 repo
 的 local config，而 `git status` 會執行其中的 `core.fsmonitor`／`filter.*.clean`，
-於是寫得了 `.git/config` 的非 root 使用者能以 root 執行任意程式）。這條屬三支
-root-owned producer 能力的 provisioning 事實，不是新增的 machine 前置——那三支本來就
-blocking，receipt 現在一樣發不出。
+於是寫得了 `.git/config` 的非 root 使用者能以 root 執行任意程式）。
+
+**這一段原本叫你去打 `git config --system --add safe.directory <path>`。那句是錯的，
+已刪除，不要照做**（PR #178 review P1）：`git_subprocess_env()` 設
+`GIT_CONFIG_NOSYSTEM=1` 且不帶 `HOME`，system 與 global 兩個 protected 域都讀不到，
+而 `safe.directory` 只在 protected 域生效。實測（git 2.55.0）：不帶
+`GIT_CONFIG_NOSYSTEM` 時差異 owner 讀取成功，帶上即 `dubious ownership`。
+
+而且就算打開那個管道也不該用——放行等於讓 git 去讀非 root 所有的 repo 的 local
+config，`core.fsmonitor`／`filter.*.clean` 隨之回來，也就是 R4-1 本身。
+
+**因此：差異 uid 拓撲目前沒有受支援的放行路徑。** 這不擋你做 Phase A（產 keypair、
+放信任根），它擋的是三支 root-owned producer 的實作——那三支本來就 blocking，
+receipt 現在一樣發不出。實作它們之前必須先定案：驗證面不對外人所有的工作樹跑
+`git status`，改從 code-owned 的 bare view 取事實。
 
 **誠實邊界**：Phase A 全綠也**不代表** LW1 exit。它只把 16 項 blocker 降到剩
 `attest-v2` 能力（未實作）＋ Phase B 兩項。W0 genesis 與 LW1 receipt 仍未發、LW2 仍 locked、

@@ -190,6 +190,47 @@ manifest cost guard 的更正屬實：baseline `e8d7d2454` 實測 **254**、HEAD
 - **三路的 P0-1 判讀一致**：E2 逐檔查遍 source／docstring／design／TODO，**找不到任何一句**
   把 `UNVERIFIED` 講成已達成 §LW1 externality。這是這條鏈上第一次三路都確認誠實面沒有破口。
 
+## 六之二、第五輪(PR #178 Codex review)四條 thread 的收口
+
+開 PR 後 Codex bot 提四條未解 thread,逐條在 source 複驗後全部成立:
+
+- **P1 `aiml_gate_receipt_s2e_launch.py`**:`validate_s2e_launch_transition` 只對候選 anchor
+  做 locator/generation 排序,**從不認證它**;把候選 SSHSIG 與 `attestation_digest` 換成任意值,
+  公開 `transition-gate` CLI 仍回零錯誤並印 `ADVANCE`(PROGRESS 把它列為 LW2 解鎖條件)。
+  前一份的 review anchor 一直有被認證,候選的沒有。收法:`acceptance_review_bundle` 成為
+  必填參數(刻意無 default),bundle 先與這張 receipt 對綁,再以
+  `terminal_payload_digest(s2e_acceptance_review_worm_payload(bundle))` 認證候選 anchor。
+  **修復第一版自己踩到一個洞,由 E4 實測抓到**:`PENDING_REVIEW` 候選依
+  `_common_payload_errors:428` 不得帶 `acceptance_review_bundle_digest`,故第一版的等式
+  恆假、`elif` 短路,**anchor 認證那一支永遠走不到**,且 wave issuance 會永久 pending。
+  repo 內沒有任何測試把 wave receipt 發到 READY,所以沒有測試會紅——具名為覆蓋缺口。
+  現由 `_bundle_binds_this_candidate` 分兩種合法形狀處理。
+- **P1 `aiml_gate_receipt_schema_core.py`**:第四輪撤掉 command 域 `safe.directory` 時,
+  我寫給 operator 的替代出口是 `git config --system --add safe.directory <path>`。
+  **那句是錯的**:`git_subprocess_env()` 設 `GIT_CONFIG_NOSYSTEM=1` 且不帶 `HOME`,
+  system 與 global 兩個 protected 域都讀不到,而 `safe.directory` 只在 protected 域生效。
+  PM 獨立實測(git 2.55.0,以 `GIT_CONFIG_SYSTEM` 指向含該條目的 config):不帶
+  `GIT_CONFIG_NOSYSTEM` 時差異 owner 讀取成功,帶上即 `dubious ownership`。
+  更根本的是**就算打開也不該用**——放行等於讓 git 讀非 root 所有的 repo 的 local config,
+  `core.fsmonitor`／`filter.<drv>.clean` 隨之回來,就是 R4-1 本身。
+  收法:刪掉那條指示,明寫**差異 uid 拓撲目前無受支援的放行路徑**,真正的解在設計層
+  (不對外人所有的工作樹跑 `git status`,改從 code-owned bare view 取事實),
+  列為三支 root-owned producer 實作的前置設計項。同一段兩次都是「想給一條方便的出口」
+  而沒有先實測那條出口——第二次由外部 reviewer 抓到。
+- **P2 `aiml_gate_receipt_s2e_external_evidence.py`**:predecessor registry 的
+  fingerprint 分離只比 receipt signer 與 durability anchor,**漏了 off-host replica**。
+  provisioning 契約要求四個簽章身分互不共用 key;漏這一格等於 replica key 被攻破也能偽造
+  single-use registry grant,而 replica 私鑰依設計放在 `ncyu-nas`。已加入 peers。
+- **P2 `aiml_gate_receipt_s2e_dispatch.py`**:acceptance-review 的 typed pending 訊息仍要求
+  "external WORM evidence",而 Tier 1 已刪掉那份 provider 契約;測試還把該字串硬編下來。
+  照這句去做的 operator 會去要一份不存在的東西。已改為 durability anchor＋off-host readback。
+
+本輪另一項結構後果:`aiml_gate_receipt_s2e_launch.py` 兩度越過 2000 行硬門檻。
+acceptance-review 的簽章主體／WORM payload／bundle digest／共用 envelope 與
+`_bundle_binds_this_candidate` 因此遷入 `aiml_gate_receipt_s2e_review.py`(acceptance review
+本來就是該葉的內容),launch 葉逐名 import 回去,公開 ABI 不變。這是把內容放回它該在的葉,
+不是為了行數硬拆。
+
 ## 七、本輪之後仍未做的事
 
 W5 re-emission（含償還 `209793b70` 的漏發射）在本複核之後執行——`w5-emit` 需

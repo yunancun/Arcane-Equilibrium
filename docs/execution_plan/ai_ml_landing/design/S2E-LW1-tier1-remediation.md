@@ -829,10 +829,19 @@ commit、CI shallow checkout 等情形現在都會得到具名的 `UNVERIFIED` �
    ⇒ 在它自己引用來授權自己的那個差異 uid 拓撲下，**寫得了 `.git/config` 的非 root
    repo owner 可以驗證器身分執行任意程式**（git 2.50.1 實測）。`filter.<drv>.clean`
    經 `.gitattributes` 走同一條路，所以逐鍵 denylist 不收斂。`safe.directory` 已從
-   `git_argv()` 移除，恢復 git 原生拒讀；差異 uid 的放行改由 operator 寫進 **root 自己的**
-   protected config（`git config --system --add safe.directory <path>`，記在 provisioning
-   prompt 的 root-owned producer 前置底下，不新增 machine 前置）。F-05 指出的失敗仍然
+   `git_argv()` 移除，恢復 git 原生拒讀。F-05 指出的失敗仍然
    存在，但它是**大聲且 typed 的 REJECTED**，不是靜默放行——這正是它該有的形狀。
+   **2026-08-06 第二次更正（PR #178 review P1）**：撤回稿當時寫「放行改由 operator 寫進
+   root 自己的 protected config（`git config --system --add safe.directory <path>`）」，
+   **那句同樣是錯的**。`git_subprocess_env()` 設 `GIT_CONFIG_NOSYSTEM=1` 且不帶 `HOME`，
+   system 與 global 兩個 protected 域都讀不到，而 `safe.directory` 只在 protected 域生效
+   （git 2.55.0 實測：以 `GIT_CONFIG_SYSTEM` 指向含該條目的 config，不帶
+   `GIT_CONFIG_NOSYSTEM` 時差異 owner 成功、帶上即 `dubious ownership`）。且即使打開該
+   管道也不該用：放行等於讓 git 讀非 root 所有的 repo 的 local config，`core.fsmonitor`／
+   `filter.<drv>.clean` 隨之回來，就是 R4-1 本身。**結論：差異 uid 拓撲目前無受支援的
+   放行路徑**，真正的解在設計層——驗證面不對外人所有的工作樹跑 `git status`，改從
+   code-owned 的 bare view 取事實。列為三支 root-owned producer 實作的前置設計項。
+   （同一段連錯兩次，兩次都是「想給一條方便的出口」而沒有先實測那條出口。）
 6. **E2 F-04（全 repo 級）**：Python 的 `$` 放行尾端換行。`agent_governance_schema` 是
    全 repo 556 個 `pattern` 的唯一執行點，`{"h": "<40hex>\n"}` 曾通過 `^[0-9a-f]{40}$`。
    修法把錨點翻成 ECMA-262 語義（`^`→`\A`、`$`→`\Z`），**不改成 `fullmatch`**——

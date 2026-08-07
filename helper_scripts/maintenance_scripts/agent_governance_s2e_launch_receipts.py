@@ -90,6 +90,9 @@ def _parser() -> argparse.ArgumentParser:
     # optional:缺省時本分支只做 payload topology,維持現行
     # STRUCTURAL_PASS_NOT_ADVANCE 語義,不會靜默取得 Advance。
     validate.add_argument("--durability-anchor-attestation", type=Path)
+    # PR #178 review P1:候選 anchor 的 payload binding 只能從 bundle 實值導出,
+    # 缺它就無法完整認證候選 ⇒ 與缺 anchor 同樣降級,不得靜默 Advance。
+    validate.add_argument("--acceptance-review-bundle", type=Path)
     issue = subparsers.add_parser("issue")
     issue.add_argument("--repo-root", type=Path, default=REPO_ROOT)
     issue.add_argument("--candidate", type=Path, required=True)
@@ -139,6 +142,9 @@ def _parser() -> argparse.ArgumentParser:
     )
     transition.add_argument(
         "--predecessor-authority", type=Path, required=True
+    )
+    transition.add_argument(
+        "--acceptance-review-bundle", type=Path, required=True
     )
     _add_durability_anchor(transition)
     return parser
@@ -270,6 +276,7 @@ def main(argv: list[str] | None = None) -> int:
             durability_anchor_attestation=_read(
                 args.durability_anchor_attestation
             ),
+            acceptance_review_bundle=_read(args.acceptance_review_bundle),
             observations=observations,
         )
         status = "ADVANCE" if not errors else "FAIL"
@@ -309,8 +316,12 @@ def main(argv: list[str] | None = None) -> int:
                 consumed_predecessor_digests=frozenset(),
             )
             status = "STRUCTURAL_PASS_NOT_ADVANCE" if not errors else "FAIL"
-        elif args.durability_anchor_attestation is None:
-            # authority 有、candidate anchor 沒有 ⇒ 不足以 Advance,只回 payload 語義。
+        elif (
+            args.durability_anchor_attestation is None
+            or args.acceptance_review_bundle is None
+        ):
+            # authority 有、candidate anchor 或其 bundle 沒有 ⇒ 不足以 Advance,
+            # 只回 payload 語義。
             errors = validate_s2e_launch_transition_payload(
                 artifact,
                 predecessor_receipt=predecessor,
@@ -336,6 +347,7 @@ def main(argv: list[str] | None = None) -> int:
                 durability_anchor_attestation=_read(
                     args.durability_anchor_attestation
                 ),
+                acceptance_review_bundle=_read(args.acceptance_review_bundle),
                 observations=observations,
             )
             status = "ADVANCE" if not errors else "FAIL"

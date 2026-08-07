@@ -876,13 +876,20 @@ def validate_s2e_predecessor_registry_attestation(
     errors.extend(signature_errors)
     receipt_profile, receipt_errors = _load_s2e_receipt_signer_profile()
     anchor_profile, anchor_errors = _load_durability_anchor_trust_root()
+    # PR #178 review P2:peers 原本只有 receipt signer 與 durability anchor,漏了
+    # off-host replica。provisioning 契約要求四個簽章身分互不共用 key,漏這一格
+    # 等於「replica key 被攻破也能偽造 single-use registry grant」——而 replica 的
+    # 私鑰依設計放在 `ncyu-nas`,正是最可能被單獨評估風險的那一把。
+    replica_profile, replica_errors = _load_offhost_replica_trust_root()
     errors.extend(receipt_errors)
     errors.extend(anchor_errors)
+    errors.extend(replica_errors)
     errors.extend(_distinct_fingerprint_errors(
         subject=registry_profile,
         peers=[
             ("S2E receipt signer", receipt_profile),
             ("durability anchor", anchor_profile),
+            ("off-host replica", replica_profile),
         ],
         label="predecessor registry",
     ))

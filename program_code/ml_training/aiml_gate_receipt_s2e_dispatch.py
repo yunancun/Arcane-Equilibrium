@@ -33,10 +33,13 @@ def s2e_launch_artifact_errors(
             artifact, payload_receipt=None, repo_root=repo_root, now=now
         )
     if schema_version == "s2e_launch_acceptance_review_bundle_v1":
+        # PR #178 review P2:本句原本要求 "external WORM evidence"。Tier 1 已刪掉
+        # 那份 provider 契約,照這句去找的 operator 會去要一份不存在的東西。
         return [
             "s2e acceptance review bundle EXTERNAL_VERIFICATION_PENDING: exact "
-            "candidate, governed capture, fixed-root SSHSIG, and external WORM "
-            "evidence are required"
+            "candidate, governed capture, fixed-root SSHSIG, and a trusted-host "
+            "durability anchor attestation with its off-host latest-generation "
+            "readback are required"
         ]
     if schema_version == "s2e_launch_consumption_bootstrap_authority_v1":
         return [

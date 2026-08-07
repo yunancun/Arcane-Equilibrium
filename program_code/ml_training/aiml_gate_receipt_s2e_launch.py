@@ -39,7 +39,12 @@ from aiml_gate_receipt_s2e_external_evidence import (
     durability_anchor_digest_or_none, validate_s2e_durability_anchor_attestation,
 )
 from aiml_gate_receipt_s2e_review import (
+    _bundle_binds_this_candidate,
+    _s2e_worm_envelope,
     build_s2e_disposable_test_effect_chain,
+    s2e_acceptance_review_bundle_digest,
+    s2e_acceptance_review_signed_bytes,
+    s2e_acceptance_review_worm_payload,
     s2e_review_predicate_results,
     s2e_review_source_blob_manifest,
     s2e_review_test_argv,
@@ -143,22 +148,6 @@ def s2e_carrier_signed_bytes(attestation: dict[str, Any]) -> bytes:
     ).encode("utf-8")
 
 
-def _s2e_worm_envelope(
-    schema_version: str,
-    content: bytes,
-    *,
-    digest_field: str,
-    bytes_field: str,
-    bindings: dict[str, Any],
-) -> dict[str, Any]:
-    """One shared exact-byte envelope for carrier and signed-review WORM writes."""
-
-    return {
-        "schema_version": schema_version,
-        **bindings,
-        digest_field: _raw_digest(content),
-        bytes_field: base64.b64encode(content).decode("ascii"),
-    }
 
 
 def s2e_carrier_worm_payload(
@@ -195,47 +184,10 @@ def _without_digest(value: dict[str, Any], field: str) -> dict[str, Any]:
     return {key: item for key, item in value.items() if key != field}
 
 
-def s2e_acceptance_review_signed_bytes(bundle: dict[str, Any]) -> bytes:
-    """Canonical review subject shared by SSHSIG and the external WORM payload."""
-
-    return json.dumps(
-        {
-            key: value
-            for key, value in bundle.items()
-            if key not in {
-                "signed_core_digest",
-                "signature",
-                "durability_anchor_binding",
-                "bundle_digest",
-            }
-        },
-        ensure_ascii=False,
-        sort_keys=True,
-        separators=(",", ":"),
-        allow_nan=False,
-    ).encode("utf-8")
 
 
-def s2e_acceptance_review_worm_payload(
-    bundle: dict[str, Any],
-) -> dict[str, Any]:
-    signed_bytes = s2e_acceptance_review_signed_bytes(bundle)
-    return _s2e_worm_envelope(
-        "s2e_acceptance_review_worm_payload_v1",
-        signed_bytes,
-        digest_field="signed_core_digest",
-        bytes_field="signed_core_bytes_base64",
-        bindings={
-            "candidate_payload_digest": bundle.get("candidate_payload_digest"),
-            "reviewed_source_head": bundle.get("reviewed_source_head"),
-        },
-    )
 
 
-def s2e_acceptance_review_bundle_digest(bundle: dict[str, Any]) -> str:
-    return canonical_digest({
-        key: value for key, value in bundle.items() if key != "bundle_digest"
-    })
 
 
 def _git(repo_root: Path, *args: str, check: bool = True) -> subprocess.CompletedProcess[str]:
@@ -975,6 +927,7 @@ def validate_s2e_launch_transition(
     now: str | datetime,
     consumed_predecessor_digests: set[str] | frozenset[str],
     durability_anchor_attestation: Any,
+    acceptance_review_bundle: Any,
     observations: AnchorGateObservations | None = None,
 ) -> list[str]:
     """Authority-bearing Advance gate; structural validation alone never enters.
@@ -982,7 +935,15 @@ def validate_s2e_launch_transition(
     `durability_anchor_attestation` 是**候選自己的 review anchor**,必須由呼叫端
     傳入:wave receipt 只帶 `acceptance_review_bundle_digest`,不帶 binding 實值,
     而 `predecessor_authority` 只帶前一份的兩份 anchor。本參數刻意無 default。
+
+    PR #178 review P1:本函式原本只對候選 anchor 做排序檢查、**從不認證它**,於是把
+    候選的 SSHSIG 與 `attestation_digest` 換成任意值,公開 `transition-gate` CLI 仍
+    回零錯誤並印 `ADVANCE`(PROGRESS 把它列為 LW2 解鎖條件)。排序只證明數字遞增。
+    `acceptance_review_bundle` 因此必填且刻意無 default——payload binding 只能由
+    bundle 實值導出,而「少傳一個參數就自動降級成不驗」正是本輪要關掉的形狀。
     """
+
+    import agent_governance_terminal_receipt_sink as terminal_sink
 
     errors, floor = _transition_common_errors(
         receipt,
@@ -993,6 +954,26 @@ def validate_s2e_launch_transition(
         consumed_predecessor_digests=consumed_predecessor_digests,
         observations=observations,
     )
+    if not isinstance(acceptance_review_bundle, dict):
+        errors.append(
+            "transition requires the exact candidate acceptance review bundle"
+        )
+    elif not _bundle_binds_this_candidate(acceptance_review_bundle, receipt):
+        errors.append(
+            "transition acceptance review bundle is not the one this receipt binds"
+        )
+    else:
+        errors.extend(
+            f"transition candidate review durability anchor: {error}"
+            for error in validate_s2e_durability_anchor_attestation(
+                durability_anchor_attestation,
+                terminal_payload_digest=terminal_sink.terminal_payload_digest(
+                    s2e_acceptance_review_worm_payload(acceptance_review_bundle)
+                ),
+                now=now,
+                observations=host_identity_sink(observations),
+            )
+        )
     if floor is not None:
         errors.extend(durability_anchor_transition_order_errors(
             floor=floor,
@@ -1733,6 +1714,7 @@ def issue_s2e_launch_receipt(
                 now=trusted_now,
                 consumed_predecessor_digests=frozenset(consumed),
                 durability_anchor_attestation=durability_anchor_attestation,
+                acceptance_review_bundle=acceptance_review_bundle,
                 observations=observations,
             )
         ready_status = "TASK_BRANCH_CHECKPOINT_READY"
@@ -1813,6 +1795,7 @@ def issue_s2e_launch_receipt(
                     now=trusted_now,
                     consumed_predecessor_digests=frozenset(consumed),
                     durability_anchor_attestation=durability_anchor_attestation,
+                    acceptance_review_bundle=acceptance_review_bundle,
                     observations=observations,
                 )
             )

@@ -470,11 +470,21 @@ def git_argv(repo_root: Path | str, *arguments: str) -> list[str]:
 
     現在恢復 git 原生的 fail-closed:ownership 可疑時 git 拒讀該 repo 的 local config,
     整條執行面隨之消失,而拒讀是**大聲且 typed** 的(`check=True` ⇒ 例外 ⇒ REJECTED),
-    不是靜默放行。差異 uid 拓撲要放行,必須由 operator 把該 repo 寫進 **root 自己的**
-    protected config(`git config --system --add safe.directory <path>`)——那是 git
-    設計 `safe.directory` 的位置,也是 repo owner 寫不到的位置。此事實記在
-    provisioning prompt 的 root-owned producer 前置底下,不新增 machine 前置(三支
-    producer 能力本來就 blocking,receipt 仍發不出)。
+    不是靜默放行。
+
+    **差異 uid 拓撲目前無受支援的放行路徑**(PR #178 review P1 第二條更正)。本段原本
+    叫 operator 去打 `git config --system --add safe.directory <path>`,那句是錯的:
+    `git_subprocess_env()` 設 `GIT_CONFIG_NOSYSTEM=1` 且不帶 `HOME`,system 與 global
+    兩個 protected 域**都讀不到**,而 `safe.directory` 只在 protected 域生效。
+    實測(git 2.55.0,以 `GIT_CONFIG_SYSTEM` 指向一份含該條目的 config):
+    不帶 `GIT_CONFIG_NOSYSTEM` 時差異 owner 讀取成功;帶上它即 `dubious ownership`。
+
+    更根本的是:就算把那個管道打開也不該用。放行等於讓 git 去讀一個**非 root 所有**
+    的 repo 的 local config,而該 config 正是 `core.fsmonitor`/`filter.<drv>.clean`
+    的來源——於是 repo owner 又拿回以 producer 身分執行程式的能力,也就是 R4-1 本身。
+    真正的解不是 config 管道,而是設計層面:驗證面不要對外人所有的工作樹跑
+    `git status`,改從 code-owned 的 bare view 取事實。具名為三支 root-owned producer
+    實作時的前置設計項,**不假裝現在有解**。
     """
 
     return [
