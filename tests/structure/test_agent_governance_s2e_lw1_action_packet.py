@@ -101,6 +101,50 @@ def test_code_owned_prerequisite_paths_equal_live_fixed_root_constants() -> None
     assert len(action.EXPECTED_PATHS) == 12
 
 
+def test_repository_completed_actions_are_never_listed_as_required() -> None:
+    """已由 repo 位元組證明完成的 action 不得留在 operator 必做清單裡。
+
+    這正是 round-2 與 round-4 兩度點名、兩度沒有任何測試看得到的缺口:floor 於
+    `fdf3c0fa6` commit 之後,`COMMIT_GENESIS_ARMED_DURABILITY_ANCHOR_FLOOR` 仍留在
+    靜態 tuple 裡,operator 會照著再 commit 一次創世 floor,而 anchor floor 驗證器
+    明文拒絕鏈上第二個 GENESIS_ARMED。本測試在該項被移出清單前為紅。
+    """
+
+    action_id = "COMMIT_GENESIS_ARMED_DURABILITY_ANCHOR_FLOOR"
+    witness = action.REPOSITORY_COMPLETION_WITNESSES[action_id]
+    # witness 必須是 HEAD 上真的被追蹤的檔,不能是本地未追蹤產物——否則這條護欄
+    # 會被一個沒進版本控制的檔案誤觸發或誤放行。
+    assert _git(ROOT, "ls-files", "--error-unmatch", witness) == witness
+
+    completed = action.completed_action_ids(ROOT)
+    assert action_id in completed
+    stale = sorted(set(action.EXPECTED_ACTION_IDS) & set(completed))
+    assert not stale, f"operator 必做清單仍列著 repo 已完成的動作:{stale}"
+
+
+def test_build_refuses_an_action_the_checkpoint_already_completed(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """witness 命中仍在清單裡的 action 時,emission 必須 fail closed。
+
+    只刪掉一個字串會讓下一次腐化原樣重演,所以真正的護欄是 emission 前的逐項核對。
+    這裡把一個仍在清單裡的 action 綁到 checkpoint repo 內確實存在的檔,build 必須拒絕。
+    """
+
+    repo = _repo(tmp_path)
+    monkeypatch.setitem(
+        action.REPOSITORY_COMPLETION_WITNESSES,
+        action.EXPECTED_ACTION_IDS[0],
+        "checkpoint.txt",
+    )
+    with pytest.raises(ValueError, match="already completed"):
+        action.build_s2e_lw1_operator_action_packet(
+            repo_root=repo,
+            inventory=_inventory(),
+        )
+
+
 def test_absent_external_prerequisites_build_closed_blocked_packet(
     tmp_path: Path,
 ) -> None:

@@ -39,7 +39,7 @@
   },
   "launch_id": "S2E-LW1-LW5",
   "next_action": "OPERATOR_PROVISION_EXTERNAL_PREREQUISITES_THEN_RESUME_S2E_LW1",
-  "packet_digest": "sha256:b28d49feaeace39adad13e9b626d1d6c5652db5645ddbf6319a5002cd8fa9cdf",
+  "packet_digest": "sha256:69dcfec5cd0ab5fe9365fdda466a343d0621b025b0fcf988a8879ecb578f6b77",
   "prerequisites": [
     {
       "blocking": true,
@@ -226,7 +226,6 @@
     "CONFIGURE_OFFHOST_APPEND_ONLY_REPLICA",
     "PROVISION_OFFHOST_REPLICA_READBACK_SIGNER",
     "PROVISION_DISTINCT_HOST_APPEND_ONLY_PREDECESSOR_REGISTRY",
-    "COMMIT_GENESIS_ARMED_DURABILITY_ANCHOR_FLOOR",
     "RESUME_W0_AND_LW1_RECEIPT_CHAIN_WITH_FRESH_EVIDENCE"
   ],
   "schema_version": "s2e_lw1_operator_action_packet_v1",
