@@ -773,8 +773,19 @@ CONTEXT_TRANSPORT_INVARIANT_TEST = (
 # projection 串起來的 prompt prefix;governing cap 是 Registry 宣告的
 # ``max_prompt_utf8_bytes_per_call``,不是 execve。餘裕以 bytes 明寫,成長會在這裡先紅。
 SEMANTIC_PREFIX_REQUIRED_HEADROOM_BYTES = 16 * 1024
+# 該 cap 由 Registry 的 envelope 宣告,所以它本身必須被釘住 —— 否則「提高餘裕」只要改
+# Registry 一行就成立,那正是本任務禁止的「只調高 cap」。
+EXPECTED_BUDGET_ENVELOPE = "standard"
+EXPECTED_MAX_PROMPT_UTF8_BYTES_PER_CALL = 95996
 # registry 對 compiled Context 的**全部**貢獻只有 digest 與由它推導的 DAG binding。
 REGISTRY_CONTRIBUTION_TO_CONTEXT_BUDGET_BYTES = 2048
+# 舊測試的 24 KiB execve 代理餘裕被移除後,registry **檔身成長**就少了唯一一條警報。
+# 這條取代它:它不是 execve 界(registry 從不進 argv),而是一條維護面的成長絆線,
+# 訂在當前實測 107,089 之上一個窄幅,任何有意義的膨脹都會先在這裡紅。
+REGISTRY_FILE_GROWTH_TRIPWIRE_BYTES = 112 * 1024
+# 整份 artifact 的成長絆線。CLI 的 4 MiB 是**傳輸層硬拒**,不是成長警報:對 134 KiB
+# 的實測值那是 31 倍鬆弛,等於沒有警報。這條訂在實測之上一個窄幅。
+CONTEXT_ARTIFACT_GROWTH_TRIPWIRE_BYTES = 192 * 1024
 
 
 def _registry_bytes() -> int:
@@ -798,16 +809,27 @@ def test_registry_bytes_are_never_argv_transported_and_stay_inside_their_budget(
     而且 registry 從頭到尾由 ``load_registry()`` 從磁碟讀取,**從不進入任何 argv**——
     所以「registry 的 execve 單參數餘裕」這個量測從一開始就是範疇錯誤。
 
-    語義修復後這裡釘兩條更強的 invariant:
+    語義修復後這裡釘三條 invariant:
     ① registry 的**檔身位元組不會進入 transported Context**(結構性,直接量);
     ② registry 對 Context 的貢獻仍有一條**明確且緊**的 payload budget(2 KiB,現值
-       約 1 KiB),取代那條已失效的 24 KiB 代理餘裕。
+       約 1 KiB),取代那條已失效的 24 KiB 代理餘裕;
+    ③ registry **檔身成長**仍有一條絆線。這條是誠實的補回:E2 指出移除 24 KiB 代理
+       餘裕後,雖然那條代理的**理由**已死,它卻是唯一一條會對 registry 成長發出警報的
+       斷言,而 ② 與檔身大小是解耦的。所以這裡不宣稱「純粹更強、零放寬」——被換掉的
+       那條確實少了一個面向,③ 是把那個面向以正確的名義(維護成長絆線,不是 execve
+       界)裝回來。
     舊測試唯一仍然成立的硬界(``registry < MAX_ARG_STRLEN``)原封保留。
     """
 
     registry_bytes = _registry_bytes()
-    # 舊測試中唯一沒有壞掉的斷言,原封保留(非放寬)。
+    # 舊測試中唯一沒有壞掉的斷言,原封保留。
     assert registry_bytes < MAX_ARG_STRLEN, registry_bytes
+    # ③ 檔身成長絆線(取代已失效的 24 KiB execve 代理餘裕)。
+    assert registry_bytes < REGISTRY_FILE_GROWTH_TRIPWIRE_BYTES, {
+        "registry_file_bytes": registry_bytes,
+        "tripwire": REGISTRY_FILE_GROWTH_TRIPWIRE_BYTES,
+        "note": "Registry growth must be reviewed, not absorbed silently",
+    }
 
     dirt = _worktree_dirt()
     if dirt is not None:
@@ -834,23 +856,39 @@ def test_registry_bytes_are_never_argv_transported_and_stay_inside_their_budget(
             allow_nan=False,
         )
 
+    # E4 的發現:只比對**原始**位元組會漏掉本 repo 最主流的嵌入寫法 —— 把 canonical
+    # JSON 當成**字串欄位**塞進去(``canonical_plan``/``budget_authority_canonical``/
+    # ``shared_task_context_canonical`` 全是這個形狀)。那時外層再序列化一次,內層的
+    # 引號會被反斜線轉義,原始子字串永遠對不上。E4 實測:把整份 49,930 bytes 的
+    # ``effect_adapters`` 以字串欄位嵌入,舊探針三種編碼全部綠。所以兩種形狀都要測。
+    def _escaped(rendered: str) -> str:
+        return json.dumps(rendered, ensure_ascii=False)[1:-1]
+
     probed = 0
     for name, section in registry.items():
         rendered = _section_bytes(section)
         if len(rendered) < 1024:  # 太短的 section 會有偶然碰撞,不足以證明 inlining
             continue
         probed += 1
-        assert rendered not in canonical_plan, (
-            f"the Registry section {name!r} is inlined into the compiled Context"
-        )
+        for shape, needle in (("raw", rendered), ("escaped-string", _escaped(rendered))):
+            assert needle not in canonical_plan, (
+                f"the Registry section {name!r} is inlined into the compiled "
+                f"Context as {shape}"
+            )
     assert probed >= 5, f"the Registry-inlining probe covered only {probed} sections"
 
-    # 正向對照:探針必須真的抓得到 inlining,否則上面的斷言是空的。
+    # 正向對照:探針必須真的抓得到 inlining,否則上面的斷言是空的。兩種形狀各一條 ——
+    # 只對照 raw 形狀的話,正是上面剛補起來的那個盲點沒有被守住。
     biggest = max(registry.values(), key=lambda section: len(_section_bytes(section)))
-    assert _section_bytes(biggest) in json.dumps(
-        {"sources": [], "leaked": biggest}, ensure_ascii=False, sort_keys=True,
-        separators=(",", ":"), allow_nan=False,
-    )
+    rendered = _section_bytes(biggest)
+    nested = json.dumps({"sources": [], "leaked": biggest}, ensure_ascii=False,
+                        sort_keys=True, separators=(",", ":"), allow_nan=False)
+    as_string_field = json.dumps({"sources": [], "leaked": rendered},
+                                 ensure_ascii=False, sort_keys=True,
+                                 separators=(",", ":"), allow_nan=False)
+    assert rendered in nested
+    assert rendered not in as_string_field, "escaped embedding must need its own probe"
+    assert _escaped(rendered) in as_string_field
 
     # ② registry 對 Context 的實際貢獻仍在明確預算內。
     contribution = len(
@@ -987,20 +1025,90 @@ def test_compiled_context_artifact_transport_is_file_bound_not_argv_bound():
                 + artifact["role_context_delta_canonical"]
             ).encode("utf-8")
         )
-        cap = json.loads(artifact["budget_authority_canonical"])[
-            "max_prompt_utf8_bytes_per_call"
-        ]
+        authority = json.loads(artifact["budget_authority_canonical"])
+        cap = authority["max_prompt_utf8_bytes_per_call"]
+        # cap 本身必須被釘住。否則這條「餘裕」斷言是 cap-relative 的:改 Registry 的
+        # envelope 一行就能把餘裕抬高數十 KiB,零測試變紅、零 reviewer 訊號 —— 那正是
+        # 本任務的 hard stop「只調高 cap」。envelope 名稱一併釘,因為 routing 漂移到
+        # ``complex`` 會把 cap 從 95,996 換成 167,996。
+        assert authority["envelope"] == EXPECTED_BUDGET_ENVELOPE, authority["envelope"]
+        assert cap == EXPECTED_MAX_PROMPT_UTF8_BYTES_PER_CALL, cap
         assert prefix_bytes + SEMANTIC_PREFIX_REQUIRED_HEADROOM_BYTES <= cap, {
             "role": role, "semantic_prefix_bytes": prefix_bytes,
             "max_prompt_utf8_bytes_per_call": cap,
             "required_headroom": SEMANTIC_PREFIX_REQUIRED_HEADROOM_BYTES,
         }
 
-    # payload 面 ②:整份 artifact 的檔案 transport 預算。
-    assert max(measured.values()) < governance.CONTEXT_ARTIFACT_MAX_BYTES, {
+    # payload 面 ②:整份 artifact 的成長絆線。
+    # E4 指出 CLI 的 4 MiB 是**傳輸層硬拒**,對 134 KiB 實測值是 31 倍鬆弛 —— 當成長
+    # 警報等於沒有警報,而被它取代的舊斷言當時是**正在紅**的(負餘裕)。所以這裡改用
+    # 一條貼著實測的絆線,4 MiB 只保留為 CLI 的硬拒(下面一併斷言兩者的關係)。
+    assert max(measured.values()) < CONTEXT_ARTIFACT_GROWTH_TRIPWIRE_BYTES, {
         "measured": measured,
-        "file_transport_budget": governance.CONTEXT_ARTIFACT_MAX_BYTES,
+        "growth_tripwire": CONTEXT_ARTIFACT_GROWTH_TRIPWIRE_BYTES,
         "tree_state": baseline,
+    }
+    assert (
+        CONTEXT_ARTIFACT_GROWTH_TRIPWIRE_BYTES < governance.CONTEXT_ARTIFACT_MAX_BYTES
+    ), "the growth tripwire must bite before the CLI's hard transport refusal"
+
+
+def test_the_context_store_still_eliminates_the_duplicated_source_content():
+    """G1 exit ③ 的去重面,以及一次**具名的自我更正**。
+
+    本任務的第一版結論是「compiled Context 裡沒有可安全消除的重複,約 31 bytes」,
+    理由是每個候選欄位都落在 saved workflow 的 frozen ABI field list 裡。那個結論是
+    **錯的**,E2 用本 repo 自己已經 shipped 的機制證偽:
+    ``helper_scripts/maintenance_scripts/agent_governance_context_store.py`` 早就把
+    ``canonical_plan`` 與 ``shared_task_context_canonical`` 兩個大負載裡的 source
+    content 抽成 content-addressed blob,fail-closed、可逐位還原
+    (``verify_round_trip`` 端到端驗證)。
+
+    實測(四個角色,乾淨樹):full 487,892 → store 194,318(records 121,428 + blobs
+    72,890),消除 293,574 bytes = **60.2%**,且逐位無損。
+
+    所以誠實的說法是:重複**確實存在且可安全消除**,消除機制**已經存在**;它沒有被
+    接到 transport 面,是因為該模塊自己的硬邊界寫明它是儲存表示層而不是 admission
+    gate —— 所有消費面仍只接受 resolve 後的全量 artifact。本測試把這個能力釘住,
+    避免它在無人注意時腐爛;把它接進 transport 是另一個 scope。
+    """
+
+    dirt = _worktree_dirt()
+    if dirt is not None:
+        pytest.skip(
+            "the dedup ratio is measured from compiled Contexts and needs a clean "
+            f"worktree: {dirt}"
+        )
+
+    import tempfile  # noqa: PLC0415
+    import agent_governance_context_store as store  # noqa: PLC0415
+
+    artifacts = _measure_context_artifacts()["_artifacts"]
+    with tempfile.TemporaryDirectory() as raw_dir:
+        store_dir = Path(raw_dir)
+        full_total = stored_total = 0
+        for artifact in artifacts.values():
+            dehydrated = store.dehydrate_context_artifact(artifact, store_dir)
+            # raises unless resolve(dehydrate(x)) == x byte for byte
+            store.verify_round_trip(artifact, dehydrated, store_dir)
+            full_total += len(
+                json.dumps(artifact, separators=(",", ":"), ensure_ascii=False).encode("utf-8")
+            )
+            stored_total += len(
+                json.dumps(dehydrated, separators=(",", ":"), ensure_ascii=False).encode("utf-8")
+            )
+        blob_total = sum(
+            path.stat().st_size for path in store_dir.rglob("*") if path.is_file()
+        )
+
+    eliminated = full_total - (stored_total + blob_total)
+    ratio = eliminated / full_total
+    assert ratio >= 0.5, {
+        "full_bytes": full_total,
+        "stored_bytes": stored_total + blob_total,
+        "eliminated_bytes": eliminated,
+        "ratio": ratio,
+        "note": "the lossless content-addressed dedup regressed below 50%",
     }
 
 

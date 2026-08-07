@@ -423,6 +423,38 @@ def _json_arg(value: str):
 # path (tens of bytes) whose length is decoupled from the payload.
 CONTEXT_ARTIFACT_MAX_BYTES = 4 * 1024 * 1024
 
+# ``--context-artifact`` is not the only ingress that carries a compiled Context.
+# A ``closure_packet_v1`` embeds the whole artifact under
+# ``dispatch.context_artifact`` (see ``agent_governance_closure.validate_closure``),
+# so a closure packet is strictly *larger* than the artifact it contains: the one
+# real packet in-tree is 233,483 bytes around a 113,129-byte artifact, i.e. 1.78x
+# MAX_ARG_STRLEN.  Those subcommands legitimately accept small inline JSON in
+# tests, so they stay dual-mode, but an inline payload anywhere near the cap is
+# refused and pointed at ``@file``.
+#
+# Note precisely what this does and does not do: by the time Python reads argv,
+# ``execve`` has already succeeded, so this cannot *prevent* E2BIG — the caller's
+# shell would have failed first.  What it does is stop callers well before the
+# cliff and turn a confusing "Argument list too long" into a typed, actionable
+# refusal while there is still margin.
+INLINE_PAYLOAD_MAX_BYTES = 32 * 1024
+
+
+def _context_bearing_json_arg(value: str, *, option: str):
+    """``@path`` or small inline JSON; a cap-sized inline payload is refused."""
+
+    if value.startswith("@"):
+        return _json_arg(value)
+    size = len(value.encode("utf-8"))
+    if size > INLINE_PAYLOAD_MAX_BYTES:
+        raise ValueError(
+            f"{option} inline payload is {size} bytes, above the "
+            f"{INLINE_PAYLOAD_MAX_BYTES}-byte inline limit: pass @<path.json> "
+            "instead. A closure packet embeds the compiled Context, so it "
+            "approaches the 131072-byte execve single-argument cap on Linux"
+        )
+    return json.loads(value)
+
 
 def _context_artifact_arg(value: str):
     """Load a Context artifact from ``@path`` only; inline JSON is refused.
@@ -442,15 +474,24 @@ def _context_artifact_arg(value: str):
         )
     path = Path(value[1:])
     if not path.is_file():
-        raise ValueError(f"--context-artifact file does not exist: {path}")
-    size = path.stat().st_size
-    if size > CONTEXT_ARTIFACT_MAX_BYTES:
+        # 分開兩種情況:不存在,與存在但不是普通檔(目錄、/dev/null、FIFO)。
+        # 兩者的修法完全不同,合併成一句訊息會把 caller 指往錯的方向。
         raise ValueError(
-            f"--context-artifact file is {size} bytes, above the "
-            f"{CONTEXT_ARTIFACT_MAX_BYTES}-byte transport budget: recompile the "
-            "Context instead of transporting an unbounded payload"
+            f"--context-artifact file does not exist: {path}"
+            if not path.exists()
+            else f"--context-artifact is not a regular file: {path}"
         )
-    text = path.read_text(encoding="utf-8")
+    # 預算必須由**讀取本身**執行,不能只看 stat:``stat`` 與 ``read`` 是兩個 syscall,
+    # 中間的窗口足以把檔案換成任意大的內容,先前的版本會照單全收。多讀 1 byte 就足以
+    # 判斷是否超標,同時避免把超大檔整份讀進記憶體。
+    with path.open("r", encoding="utf-8") as handle:
+        text = handle.read(CONTEXT_ARTIFACT_MAX_BYTES + 1)
+    if len(text.encode("utf-8")) > CONTEXT_ARTIFACT_MAX_BYTES:
+        raise ValueError(
+            f"--context-artifact file is above the {CONTEXT_ARTIFACT_MAX_BYTES}-byte "
+            "transport budget: recompile the Context instead of transporting an "
+            "unbounded payload"
+        )
     try:
         artifact = json.loads(text)
     except json.JSONDecodeError as error:
@@ -673,7 +714,14 @@ def main(
         print(json.dumps(result, ensure_ascii=False, sort_keys=True))
         return 0
     if args.action == "closure":
-        errors = validate_closure(_json_arg(args.packet))
+        try:
+            packet = _context_bearing_json_arg(args.packet, option="closure packet")
+        except ValueError as error:
+            print(json.dumps(
+                {"status": "FAIL", "errors": [str(error)]}, ensure_ascii=False, indent=2,
+            ))
+            return 1
+        errors = validate_closure(packet)
         print(json.dumps({"status": "FAIL" if errors else "PASS", "errors": errors}, ensure_ascii=False, indent=2))
         return 1 if errors else 0
     if args.action == "aiml-trusted-finalize":
@@ -704,7 +752,13 @@ def main(
         print(json.dumps(result, ensure_ascii=False, indent=2, sort_keys=True))
         return 0 if result["status"] == "PASS" else 1
     if args.action == "closure-quality":
-        bundle = _json_arg(args.bundle)
+        try:
+            bundle = _context_bearing_json_arg(args.bundle, option="closure-quality bundle")
+        except ValueError as error:
+            print(json.dumps(
+                {"status": "FAIL", "errors": [str(error)]}, ensure_ascii=False, indent=2,
+            ))
+            return 1
         if not isinstance(bundle, dict):
             quality_errors = ["closure-quality bundle must be an object"]
         else:
@@ -726,7 +780,9 @@ def main(
         return 1 if quality_errors else 0
     if args.action == "project-closure":
         try:
-            print(project_closure(_json_arg(args.packet)), end="")
+            print(project_closure(
+                _context_bearing_json_arg(args.packet, option="project-closure packet")
+            ), end="")
         except ValueError as error:
             print(str(error), file=sys.stderr)
             return 1

@@ -32,13 +32,18 @@ if str(HELPERS) not in sys.path:
 import agent_governance as governance  # noqa: E402
 
 
-# Linux caps a *single* argv element at ``MAX_ARG_STRLEN`` = 32 * PAGE_SIZE,
-# independently of the much larger total ``ARG_MAX``.  Measured read-only on the
-# current runtime host ``trade-core`` on 2026-08-07 (Linux 6.17.0-35-generic
-# x86_64, Ubuntu 24.04.4 LTS): PAGE_SIZE=4096, largest accepted single argv
-# element = 131071 bytes => MAX_ARG_STRLEN = 131072 = 32 * 4096; ARG_MAX =
-# 2097152.  The value is re-derived here from the running kernel's page size so
-# a host with a different page size is measured rather than assumed.
+# Linux caps a *single* argv element at ``MAX_ARG_STRLEN`` = 32 * PAGE_SIZE
+# (``include/uapi/linux/binfmts.h``), independently of the much larger total
+# ``ARG_MAX``.  Measured read-only on the current runtime host ``trade-core`` on
+# 2026-08-07 (Linux 6.17.0-35-generic x86_64, Ubuntu 24.04.4 LTS): PAGE_SIZE=4096,
+# largest accepted single argv element = 131071 bytes => MAX_ARG_STRLEN = 131072
+# = 32 * 4096; ARG_MAX = 2097152.
+#
+# These three numbers are the *recorded* trade-core observation.  They are NOT a
+# portable constant: this development Mac reports SC_PAGESIZE=16384, where the
+# same formula gives 524288.  So the test below derives the cap from the running
+# kernel and only compares against the recorded value on Linux; asserting the
+# recorded triple against itself would be a tautology that no host can fail.
 LINUX_MAX_ARG_STRLEN_PAGES = 32
 MEASURED_LINUX_MAX_ARG_STRLEN = 131072
 MEASURED_LINUX_PAGE_SIZE = 4096
@@ -61,7 +66,7 @@ def test_inline_json_context_artifact_is_refused_with_a_typed_denial():
 
     completed = _run([
         "capture-command", "--native-agent", "E2", "--node-id", "independent_review",
-        "--context-artifact", json.dumps({"schema_version": "context_artifact_v1"}),
+        _FLAG, json.dumps({"schema_version": "context_artifact_v1"}),
         "--", "git", "rev-parse", "--is-inside-work-tree",
     ])
     assert completed.returncode == 2, completed.stdout + completed.stderr
@@ -157,6 +162,99 @@ def test_a_file_replaced_between_stat_and_read_cannot_smuggle_a_non_object(tmp_p
         monkey.undo()
 
 
+def test_the_file_budget_survives_a_swap_after_the_size_check(tmp_path):
+    """The budget must be enforced by the read, not by an earlier ``stat``.
+
+    E2 demonstrated the first version accepting a 4,198,411-byte payload: the
+    size was taken from ``stat`` and the parse then called an unbounded
+    ``read_text``, so swapping the file in that window bypassed the budget
+    entirely. The guard is only a guard if the bytes it admits are the bytes it
+    measured.
+    """
+
+    path = tmp_path / "context.json"
+    path.write_text("{}", encoding="utf-8")
+    oversized = json.dumps({"pad": "x" * (governance.CONTEXT_ARTIFACT_MAX_BYTES + 4096)})
+    real_stat = Path.stat
+    swapped = {"done": False}
+
+    def swap_after_stat(self, *args, **kwargs):
+        result = real_stat(self, *args, **kwargs)
+        if self == path and not swapped["done"]:
+            swapped["done"] = True
+            path.write_text(oversized, encoding="utf-8")
+        return result
+
+    monkey = pytest.MonkeyPatch()
+    try:
+        monkey.setattr(Path, "stat", swap_after_stat)
+        with pytest.raises(ValueError, match="transport budget"):
+            governance._context_artifact_arg(f"@{path}")
+    finally:
+        monkey.undo()
+    assert swapped["done"], "the swap never happened; the test proved nothing"
+
+
+# --------------------------------------------------------------------------- #
+# the artifact is not the only ingress that carries a compiled Context
+# --------------------------------------------------------------------------- #
+def test_a_closure_packet_carries_a_context_artifact_and_is_size_guarded(tmp_path):
+    """A closure packet embeds the whole artifact, so it is the larger payload.
+
+    ``validate_closure`` reads ``dispatch.context_artifact``; the one real packet
+    in-tree is 233,483 bytes around a 113,129-byte artifact, i.e. 1.78x the
+    131072-byte single-argument cap. Fixing only ``--context-artifact`` would
+    have left the bigger inline hazard open.
+    """
+
+    packet = {"schema_version": "closure_packet_v1", "pad": "y" * (32 * 1024)}
+    inline = json.dumps(packet)
+    assert len(inline.encode("utf-8")) > governance.INLINE_PAYLOAD_MAX_BYTES
+    completed = _run(["closure", inline])
+    assert completed.returncode == 1, completed.stdout + completed.stderr
+    assert "Traceback" not in completed.stderr, completed.stderr
+    payload = json.loads(completed.stdout)
+    assert payload["status"] == "FAIL"
+    assert any("above the" in error and "inline limit" in error
+               for error in payload["errors"]), payload["errors"]
+
+    # the same payload through @file is accepted by the transport layer and
+    # refused on its own merits by the validator, not by the transport
+    path = tmp_path / "closure.json"
+    path.write_text(inline, encoding="utf-8")
+    via_file = _run(["closure", f"@{path}"])
+    assert "Traceback" not in via_file.stderr, via_file.stderr
+    from_file = json.loads(via_file.stdout)
+    assert not any("inline limit" in error for error in from_file["errors"])
+
+
+def test_a_small_inline_closure_packet_is_still_accepted():
+    """The size guard must not break the legitimate small-inline test callers."""
+
+    completed = _run(["closure", json.dumps({"schema_version": "closure_packet_v1"})])
+    assert "Traceback" not in completed.stderr, completed.stderr
+    payload = json.loads(completed.stdout)
+    assert payload["status"] == "FAIL"  # incomplete packet, but it was parsed
+    assert not any("inline limit" in error for error in payload["errors"])
+
+
+def test_the_real_in_tree_closure_packet_would_be_refused_inline():
+    """Not a hypothetical: measure the packet this repo actually ships."""
+
+    packet = ROOT / (
+        "docs/execution_plan/ai_ml_landing/receipts/S1-closure-fix-2026-07-24/"
+        "S1-closure-packet-v1.json"
+    )
+    if not packet.is_file():
+        pytest.skip(f"the reference closure packet is absent: {packet}")
+    size = packet.stat().st_size
+    assert size > MEASURED_LINUX_MAX_ARG_STRLEN, size
+    with pytest.raises(ValueError, match="inline limit"):
+        governance._context_bearing_json_arg(
+            packet.read_text(encoding="utf-8"), option="closure packet",
+        )
+
+
 def test_a_valid_at_file_context_artifact_still_reaches_the_callee(tmp_path):
     """The invariant must refuse inline transport without breaking the real path."""
 
@@ -169,13 +267,49 @@ def test_a_valid_at_file_context_artifact_still_reaches_the_callee(tmp_path):
 # --------------------------------------------------------------------------- #
 # the caller inventory that justifies the "no active inline caller" branch
 # --------------------------------------------------------------------------- #
-# ``=`` is in the separator class on purpose: the ``--flag=value`` spelling is a
-# perfectly ordinary argparse form, and a sweep that only understood the
-# space-separated form would miss it.  The first draft of this pattern did miss
-# it, and the positive control below is what caught that.
-_INLINE_ARGV_RE = re.compile(
-    r"--context-artifact[=\"'\s,]+(?!@)(?![\"']?<)[\"']?[\{\[]"
-)
+# Three argument *shapes* rather than one mega-pattern.  An earlier draft looked
+# only for a literal ``{``/``[`` next to the flag, which made every realistic
+# programmatic caller invisible — ``json.dumps(artifact)``, a bare ``payload``
+# variable, ``"$(cat context.json)"`` and ``"$CONTEXT_JSON"`` all passed.  The
+# next draft flagged anything that was not an ``@`` path, which then flagged
+# ordinary prose (the CLI's own error message begins with the flag name).
+#
+# Matching the shape instead keeps both properties: in real argv construction the
+# flag is a *closed* token (a quoted argv element, or the equals spelling),
+# whereas in prose it is the first word of a longer sentence.  The bare
+# space-separated form is only meaningful in shell scripts, so it is scoped
+# there.
+# Composed at runtime rather than written literally.  The probes and patterns
+# below are exactly what the sweep is built to flag, so spelling the flag out
+# in them would make this file report itself as an offender.  Composing it keeps
+# this module *inside* the sweep instead of buying a green run with an
+# exclusion, which is the one place an inventory could be quietly hollowed out.
+_FLAG = "--context-" + "artifact"
+
+_CODE_ARG_RE = re.compile(r"""["']""" + _FLAG + r"""["']\s*[,)]\s*(?P<value>\S+)""")
+_EQUALS_ARG_RE = re.compile(_FLAG + r"=(?P<value>\S+)")
+_SHELL_ARG_RE = re.compile(_FLAG + r"\s+(?P<value>\S+)")
+_AT_PATH_RE = re.compile(r"""^(?:[frbFRB]{0,2})?["']?@""")
+_PLACEHOLDER_RE = re.compile(r"""^["']?<""")
+
+
+def _value_is_legal_transport(value: str) -> bool:
+    """Legal iff the value is an ``@path`` (any quoting) or a doc placeholder."""
+
+    return bool(_AT_PATH_RE.match(value) or _PLACEHOLDER_RE.match(value))
+
+
+def _inline_offenses(line: str, suffix: str) -> bool:
+    """True when this line hands the flag something that is not an ``@path``."""
+
+    patterns = [_CODE_ARG_RE, _EQUALS_ARG_RE]
+    if suffix in {".sh", ".bash", ".zsh"}:
+        patterns.append(_SHELL_ARG_RE)
+    for pattern in patterns:
+        match = pattern.search(line)
+        if match and not _value_is_legal_transport(match.group("value")):
+            return True
+    return False
 _SKIPPED_TREES = ("docs/archive/", "docs/execution_plan/ai_ml_landing/receipts/",
                   "PROGRESS-archive")
 
@@ -211,11 +345,12 @@ def test_no_active_caller_transports_a_context_artifact_inline():
             text = path.read_text(encoding="utf-8")
         except (UnicodeDecodeError, OSError):
             continue
-        if "--context-artifact" not in text:
+        if _FLAG not in text:
             continue
         inspected.append(relative)
+        suffix = path.suffix.lower()
         for number, line in enumerate(text.splitlines(), start=1):
-            if _INLINE_ARGV_RE.search(line):
+            if _inline_offenses(line, suffix):
                 offenders.append(f"{relative}:{number}: {line.strip()[:120]}")
     # A sweep that silently stops finding call sites would pass vacuously and
     # would be worse than no test at all.  41 tracked files carried the flag at
@@ -230,25 +365,54 @@ def test_no_active_caller_transports_a_context_artifact_inline():
     )
 
 
-# Composed at runtime rather than written literally: the positive controls below
-# are exactly what the sweep above is built to flag, so spelling them out would
-# make this file report itself as an offender.  Composing them keeps this module
-# inside the sweep instead of buying a green run with an exclusion, which is the
-# one place an inventory could be quietly hollowed out.
-_FLAG = "--context-" + "artifact"
-
-
 def test_the_caller_inventory_detector_actually_detects_an_inline_caller():
     """Mutation guard: an inventory that can never fail proves nothing."""
 
-    # legal forms
-    assert _INLINE_ARGV_RE.search(f'"{_FLAG}", json.dumps(artifact),') is None
-    assert _INLINE_ARGV_RE.search(f"{_FLAG} @<context.json> -- <argv...>") is None
-    assert _INLINE_ARGV_RE.search(f'"{_FLAG}", f"@{{context_file}}",') is None
-    # the regressions it must catch
-    assert _INLINE_ARGV_RE.search(f'"{_FLAG}", "{{\\"a\\": 1}}",') is not None
-    assert _INLINE_ARGV_RE.search(f'{_FLAG} {{"schema_version": "x"}}') is not None
-    assert _INLINE_ARGV_RE.search(f'{_FLAG}=[{{"role": "E2"}}]') is not None
+    # Legal: an @path in any spelling, and the documented <placeholder>.
+    assert not _inline_offenses(f"{_FLAG} @<context.json> -- <argv...>", ".sh")
+    assert not _inline_offenses(f'"{_FLAG}", f"@{{context_file}}",', ".py")
+    assert not _inline_offenses(f'"{_FLAG}", "@" + str(path),', ".py")
+    assert not _inline_offenses(f"{_FLAG}=@/tmp/context.json", ".sh")
+    # The argparse definition itself, and the CLI's own prose error message.
+    assert not _inline_offenses(f'    "{_FLAG}",', ".py")
+    assert not _inline_offenses(f'"{_FLAG} must be @<path-to-context.json>: "', ".py")
+
+    # Regressions it must catch.  ``json.dumps(artifact)`` is listed here, not
+    # under "legal": it is exactly the E2BIG path PR#129 took.  An earlier draft
+    # of this test asserted it was fine, which would have forced anyone
+    # strengthening the sweep to first delete an assertion blessing the bug.
+    assert _inline_offenses(f'"{_FLAG}", json.dumps(artifact),', ".py")
+    assert _inline_offenses(f'"{_FLAG}", "{{\\"a\\": 1}}",', ".py")
+    assert _inline_offenses(f'{_FLAG}=[{{"role": "E2"}}]', ".py")
+    assert _inline_offenses(f'{_FLAG} {{"schema_version": "x"}}', ".sh")
+    assert _inline_offenses(f'{_FLAG} "$(cat context.json)"', ".sh")
+    assert _inline_offenses(f'{_FLAG} "$CONTEXT_JSON"', ".sh")
+    assert _inline_offenses(f'"{_FLAG}", payload,', ".py")
+    assert _inline_offenses(f'"{_FLAG}", artifact_json)', ".py")
+
+
+def test_the_textual_sweep_is_a_backstop_and_names_what_actually_proves_absence():
+    """Be explicit about how much the grep can and cannot prove.
+
+    A textual sweep can never prove the absence of an inline caller — it can
+    only catch the shapes it knows. The guarantee comes from somewhere else:
+    there is exactly one ingress for the artifact, and that ingress refuses
+    every non-``@`` value at runtime regardless of how it was spelled. The sweep
+    is a lint backstop that catches a regression at review time instead of at
+    invocation time.
+    """
+
+    source = GOVERNANCE.read_text(encoding="utf-8")
+    assert source.count("_context_artifact_arg(args.context_artifact)") == 1
+    # whatever a caller writes, the loader is what decides
+    for spelling in (
+        '{"schema_version": "x"}',
+        "$CONTEXT_JSON",
+        "payload",
+        " @/tmp/context.json",  # leading space => not an @path
+    ):
+        with pytest.raises(ValueError, match="must be @"):
+            governance._context_artifact_arg(spelling)
 
 
 def test_the_governance_cli_has_exactly_one_context_artifact_ingress():
@@ -266,15 +430,35 @@ def test_the_governance_cli_has_exactly_one_context_artifact_ingress():
 def test_the_linux_single_argument_cap_is_derived_from_the_running_page_size():
     """Evidence, not a copied constant.
 
-    ``MAX_ARG_STRLEN`` is ``32 * PAGE_SIZE`` in ``include/uapi/linux/binfmts.h``.
-    On the current runtime host the empirical probe agreed with that formula to
-    the byte (largest accepted single argv element = 131071 => cap 131072).
+    An earlier version of this test asserted ``131072 == 32 * 4096`` over three
+    module constants. That can never fail on any host, so it proved nothing —
+    and its own comment claimed a re-derivation it never performed. It is
+    replaced by an actual derivation from the running kernel.
     """
 
-    assert MEASURED_LINUX_MAX_ARG_STRLEN == LINUX_MAX_ARG_STRLEN_PAGES * MEASURED_LINUX_PAGE_SIZE
-    # ARG_MAX (total argv+envp) is ~16x larger and is *not* the binding limit;
+    page_size = os.sysconf("SC_PAGESIZE")
+    derived_cap = LINUX_MAX_ARG_STRLEN_PAGES * page_size
+
+    # ARG_MAX (total argv+envp) is much larger and is *not* the binding limit;
     # confusing the two is what makes an inline payload look survivable.
-    assert os.sysconf("SC_ARG_MAX") > MEASURED_LINUX_MAX_ARG_STRLEN
+    assert os.sysconf("SC_ARG_MAX") > derived_cap
+
+    if sys.platform != "linux":
+        # Apple Silicon is a documented deployment target and reports a 16 KiB
+        # page, where the cap is 524288 rather than 131072. Pinning the recorded
+        # Linux triple here would be wrong, not merely unportable.
+        assert page_size > 0
+        pytest.skip(
+            f"single-argument cap is a Linux constant; this host is {sys.platform} "
+            f"with SC_PAGESIZE={page_size} (derived cap {derived_cap}). The recorded "
+            f"trade-core observation is {MEASURED_LINUX_MAX_ARG_STRLEN}."
+        )
+    assert page_size == MEASURED_LINUX_PAGE_SIZE, (
+        f"this Linux host reports SC_PAGESIZE={page_size}, so MAX_ARG_STRLEN is "
+        f"{derived_cap}, not the recorded {MEASURED_LINUX_MAX_ARG_STRLEN}; "
+        "re-measure before relying on the recorded value"
+    )
+    assert derived_cap == MEASURED_LINUX_MAX_ARG_STRLEN
 
 
 def test_a_path_argument_is_orders_of_magnitude_below_the_cap(tmp_path):
