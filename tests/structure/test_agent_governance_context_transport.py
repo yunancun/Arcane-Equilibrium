@@ -136,30 +136,45 @@ def test_a_json_array_context_artifact_file_is_refused(tmp_path):
         governance._context_artifact_arg(f"@{path}")
 
 
-def test_a_file_replaced_between_stat_and_read_cannot_smuggle_a_non_object(tmp_path):
-    """TOCTOU: the size check and the parse are separate syscalls.
+# The swap is injected at ``Path.is_file`` — the predicate the loader itself
+# calls — rather than at ``Path.stat``.  Codex caught the difference: on Python
+# 3.14 ``Path.is_file()`` delegates to ``os.path.isfile()`` instead of
+# ``Path.stat()``, so a ``stat`` patch never fires there and both TOCTOU tests
+# would pass while proving nothing.  Patching the operation the production code
+# actually invokes is version-independent, and the ``swapped`` guard below fails
+# loudly if the swap ever stops happening.
+def _swap_file_after_is_file(monkey: pytest.MonkeyPatch, path: Path, replacement: str) -> dict:
+    state = {"done": False}
+    real_is_file = Path.is_file
+
+    def swapping_is_file(self, *args, **kwargs):
+        result = real_is_file(self, *args, **kwargs)
+        if self == path and not state["done"]:
+            state["done"] = True
+            path.write_text(replacement, encoding="utf-8")
+        return result
+
+    monkey.setattr(Path, "is_file", swapping_is_file)
+    return state
+
+
+def test_a_file_replaced_after_the_is_file_check_cannot_smuggle_a_non_object(tmp_path):
+    """TOCTOU: the guard and the read are separate syscalls.
 
     The window is real, so the parse must independently re-establish every
-    property the caller relies on rather than trusting the earlier ``stat``.
+    property the caller relies on rather than trusting the earlier check.
     """
 
     path = tmp_path / "context.json"
     path.write_text("{}", encoding="utf-8")
-    real_stat = Path.stat
-
-    def swap_after_stat(self, *args, **kwargs):
-        result = real_stat(self, *args, **kwargs)
-        if self == path:
-            path.write_text("[1, 2, 3]", encoding="utf-8")
-        return result
-
     monkey = pytest.MonkeyPatch()
     try:
-        monkey.setattr(Path, "stat", swap_after_stat)
+        state = _swap_file_after_is_file(monkey, path, "[1, 2, 3]")
         with pytest.raises(ValueError, match="must contain a JSON object"):
             governance._context_artifact_arg(f"@{path}")
     finally:
         monkey.undo()
+    assert state["done"], "the swap never happened; the test proved nothing"
 
 
 def test_the_file_budget_survives_a_swap_after_the_size_check(tmp_path):
@@ -175,24 +190,14 @@ def test_the_file_budget_survives_a_swap_after_the_size_check(tmp_path):
     path = tmp_path / "context.json"
     path.write_text("{}", encoding="utf-8")
     oversized = json.dumps({"pad": "x" * (governance.CONTEXT_ARTIFACT_MAX_BYTES + 4096)})
-    real_stat = Path.stat
-    swapped = {"done": False}
-
-    def swap_after_stat(self, *args, **kwargs):
-        result = real_stat(self, *args, **kwargs)
-        if self == path and not swapped["done"]:
-            swapped["done"] = True
-            path.write_text(oversized, encoding="utf-8")
-        return result
-
     monkey = pytest.MonkeyPatch()
     try:
-        monkey.setattr(Path, "stat", swap_after_stat)
+        state = _swap_file_after_is_file(monkey, path, oversized)
         with pytest.raises(ValueError, match="transport budget"):
             governance._context_artifact_arg(f"@{path}")
     finally:
         monkey.undo()
-    assert swapped["done"], "the swap never happened; the test proved nothing"
+    assert state["done"], "the swap never happened; the test proved nothing"
 
 
 # --------------------------------------------------------------------------- #
