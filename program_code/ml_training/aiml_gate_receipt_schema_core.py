@@ -63,8 +63,11 @@ SCHEMA_FILES = {
     "s2e_launch_consumption_bootstrap_authority_v1": (
         "s2e_launch_consumption_bootstrap_authority_v1.schema.json"
     ),
-    "s2e_external_worm_provider_attestation_v1": (
-        "s2e_external_worm_provider_attestation_v1.schema.json"
+    "s2e_durability_anchor_attestation_v1": (
+        "s2e_durability_anchor_attestation_v1.schema.json"
+    ),
+    "s2e_durability_anchor_floor_v1": (
+        "s2e_durability_anchor_floor_v1.schema.json"
     ),
     "s2e_predecessor_registry_attestation_v1": (
         "s2e_predecessor_registry_attestation_v1.schema.json"
@@ -410,6 +413,106 @@ def artifact_self_digest(artifact: dict[str, Any]) -> str:
 # 自 bound head 讀 blob:投影因此是該 commit 的函數,任何人 checkout 它都重算得出同值。
 # fail-closed:git 不可用/commit 不存在/路徑不在該樹 → 該路徑記 None(投影變值 → 導出失敗)。
 # --------------------------------------------------------------------------- #
+# P1-6(2026-08-03 三路複核):本家族所有 git 子行程都沒有 `env=`,於是 ambient
+# `GIT_DIR` 會蓋過 `-C`/`cwd`——E3 實測驗證器回傳的是攻擊者 repo 的內容且零錯誤。
+# 這與 CLAUDE.md 封殺直接 `psql`(ambient `psqlrc`/`PG*` routing)是同一種病。
+# 因此不是「刪掉幾個已知的 GIT_* 變數」(黑名單會漏 GIT_OBJECT_DIRECTORY /
+# GIT_ALTERNATE_OBJECT_DIRECTORIES / GIT_CONFIG_COUNT / GIT_REPLACE_REF_BASE…),
+# 而是只保留執行 git 所需的最小集合,其餘一律不繼承。
+#
+# E3-A(2026-08-04 第三輪複核;PM 親手復現):上一版把 `PATH` 原封不動從 ambient 繼承,
+# 而 CPython 是用**白名單後的 env 的 PATH** 解析 `git` 的位置。於是把一個假 `git` 放到
+# PATH 最前面就能讓驗證器執行任意二進位、並自行捏造 `VERIFIED gen=N`(repo_root 根本
+# 不必存在)。這比 `GIT_DIR` 更糟:不需寫 `.git`、不需 repo,而且是 RCE。`GIT_EXEC_PATH`
+# 當初被清掉正是為了擋二進位替換,留著 `PATH` 等於把同一條路從側門開回來。
+# 因此 **git 的位置只從代碼常數解析**:`PATH` 不從 ambient 取,argv[0] 亦釘成絕對路徑。
+# `LANG`/`LC_ALL` 一併釘 `C`(E2 F-10):git 的 stderr 會進 `verification_result_digest`,
+# 本地化訊息會讓同一份證據在不同 locale 下 digest 不同;與 `agent_governance_aiml_
+# trusted_host.py` 既有的 `LANG=C/LC_ALL=C` pattern 一致。
+_GIT_ENV_ALLOWLIST = ("TZ",)
+# 只有這些 code-owned 目錄會被搜尋;ambient PATH 一律不參與。找不到 git 時
+# `git_executable()` 仍回一個 code-owned 絕對路徑,於是 subprocess 拋
+# FileNotFoundError,走呼叫端既有的 fail-closed,而不是去 ambient 再找一次。
+_GIT_SEARCH_PATH = ("/usr/bin", "/bin", "/usr/local/bin", "/opt/homebrew/bin")
+_GIT_FALLBACK_EXECUTABLE = "/usr/bin/git"
+
+
+def git_executable() -> str:
+    """git 二進位的絕對路徑,只在 `_GIT_SEARCH_PATH` 這組 code-owned 目錄裡解析。"""
+
+    import os
+
+    for directory in _GIT_SEARCH_PATH:
+        candidate = os.path.join(directory, "git")
+        if os.path.isfile(candidate) and os.access(candidate, os.X_OK):
+            return candidate
+    return _GIT_FALLBACK_EXECUTABLE
+
+
+def git_argv(repo_root: Path | str, *arguments: str) -> list[str]:
+    """本家族**唯一**的 git argv 建構入口。
+
+    E3 round-4 R4-1(2026-08-06):**command 域的 `safe.directory` 已移除**,連同它那句
+    不成立的誠實邊界。原本的理由是 E2 F-05——白名單砍掉 `HOME` 與系統 config
+    (`GIT_CONFIG_NOSYSTEM=1`),而 git 只在 protected configuration(system/global/
+    **command**)裡認 `safe.directory`,所以驗證器 uid ≠ repo owner uid 時(正是 §LW1
+    的 root-owned producer + ncyu-owned repo 拓撲)全家族 git 會
+    `rc=128 fatal: detected dubious ownership`。
+
+    但那個修法把 git 自己的 fail-closed 拒讀,換成「信任這個 repo 的 **local** config」,
+    而舊註解宣稱的「本家族只跑 rev-parse/for-each-ref/log/show/merge-base/cat-file/config,
+    都不評估會執行外部程式的 config key」**兩個子句都是假的**:本家族實際跑 `git status`
+    (`_require_clean`,15 處),而 `core.fsmonitor` 正是一個會執行外部程式的 config key。
+    R4-1 實測(git 2.50.1):`git -c safe.directory=<repo> -C <repo> status` 會執行
+    `.git/config` 裡的 `core.fsmonitor`——寫得了 `.git/config` 的人(在該拓撲下正是
+    **非 root 的 repo owner**)因此能以驗證器身分執行任意程式。`filter.<drv>.clean`
+    經 `.gitattributes` 也走同一條路,所以逐鍵 denylist 不是可收斂的解。
+
+    現在恢復 git 原生的 fail-closed:ownership 可疑時 git 拒讀該 repo 的 local config,
+    整條執行面隨之消失,而拒讀是**大聲且 typed** 的(`check=True` ⇒ 例外 ⇒ REJECTED),
+    不是靜默放行。
+
+    **差異 uid 拓撲目前無受支援的放行路徑**(PR #178 review P1 第二條更正)。本段原本
+    叫 operator 去打 `git config --system --add safe.directory <path>`,那句是錯的:
+    `git_subprocess_env()` 設 `GIT_CONFIG_NOSYSTEM=1` 且不帶 `HOME`,system 與 global
+    兩個 protected 域**都讀不到**,而 `safe.directory` 只在 protected 域生效。
+    實測(git 2.55.0,以 `GIT_CONFIG_SYSTEM` 指向一份含該條目的 config):
+    不帶 `GIT_CONFIG_NOSYSTEM` 時差異 owner 讀取成功;帶上它即 `dubious ownership`。
+
+    更根本的是:就算把那個管道打開也不該用。放行等於讓 git 去讀一個**非 root 所有**
+    的 repo 的 local config,而該 config 正是 `core.fsmonitor`/`filter.<drv>.clean`
+    的來源——於是 repo owner 又拿回以 producer 身分執行程式的能力,也就是 R4-1 本身。
+    真正的解不是 config 管道,而是設計層面:驗證面不要對外人所有的工作樹跑
+    `git status`,改從 code-owned 的 bare view 取事實。具名為三支 root-owned producer
+    實作時的前置設計項,**不假裝現在有解**。
+    """
+
+    return [
+        git_executable(),
+        "-C",
+        str(repo_root),
+        *arguments,
+    ]
+
+
+def git_subprocess_env() -> dict[str, str]:
+    """git 子行程的白名單環境;所有 `GIT_*` 與使用者/系統 config routing 都被清掉。"""
+
+    import os
+
+    env = {
+        name: os.environ[name] for name in _GIT_ENV_ALLOWLIST if name in os.environ
+    }
+    # PATH 是 code-owned 常數,不是 ambient 值(見上方 E3-A)。
+    env["PATH"] = os.pathsep.join(_GIT_SEARCH_PATH)
+    env["LANG"] = "C"
+    env["LC_ALL"] = "C"
+    # HOME 不在白名單 ⇒ 使用者級 config 不生效;系統級與互動提示另外顯式關掉。
+    env["GIT_CONFIG_NOSYSTEM"] = "1"
+    env["GIT_TERMINAL_PROMPT"] = "0"
+    return env
+
+
 def _git_run(repo_root: Path, arguments: list[str]) -> tuple[str, str] | None:
     """跑一次 git,回 ``(stdout, stderr)``;非零離開/無法執行回 ``None``。
 
@@ -423,8 +526,9 @@ def _git_run(repo_root: Path, arguments: list[str]) -> tuple[str, str] | None:
 
     try:
         proc = subprocess.run(
-            ["git", "-C", str(repo_root), *arguments],
+            git_argv(repo_root, *arguments),
             capture_output=True,
+            env=git_subprocess_env(),
             text=True,
             timeout=60,
         )
@@ -450,8 +554,9 @@ def git_failure_detail(repo_root: Path) -> str | None:
 
     try:
         proc = subprocess.run(
-            ["git", "-C", str(repo_root), "rev-parse", "--git-dir"],
+            git_argv(repo_root, "rev-parse", "--git-dir"),
             capture_output=True,
+            env=git_subprocess_env(),
             text=True,
             timeout=60,
         )
@@ -487,11 +592,11 @@ def _git_is_ancestor(repo_root: Path, ancestor: str, descendant: str) -> bool:
         return False
     try:
         proc = subprocess.run(
-            [
-                "git", "-C", str(repo_root), "merge-base", "--is-ancestor",
-                ancestor, descendant,
-            ],
+            git_argv(
+                repo_root, "merge-base", "--is-ancestor", ancestor, descendant
+            ),
             capture_output=True,
+            env=git_subprocess_env(),
             timeout=30,
         )
     except (OSError, ValueError, subprocess.SubprocessError):
@@ -511,8 +616,9 @@ def _git_head(repo_root: Path) -> str | None:
 
     try:
         proc = subprocess.run(
-            ["git", "-C", str(repo_root), "rev-parse", "HEAD"],
+            git_argv(repo_root, "rev-parse", "HEAD"),
             capture_output=True,
+            env=git_subprocess_env(),
             text=True,
             timeout=30,
         )
@@ -592,9 +698,10 @@ def commit_blob_bytes(
     request = "".join(f"{head}:{rel}\n" for rel in ordered).encode("utf-8")
     try:
         proc = subprocess.run(
-            ["git", "-C", str(repo_root), "cat-file", "--batch"],
+            git_argv(repo_root, "cat-file", "--batch"),
             input=request,
             capture_output=True,
+            env=git_subprocess_env(),
             timeout=180,
         )
     except (OSError, ValueError, subprocess.SubprocessError):

@@ -284,7 +284,8 @@ def test_local_recovery_store_schemas_reject_effect_or_authority_relabel(
 def test_local_store_schemas_do_not_expand_central_runtime_closure():
     # S2E launch and independent external-evidence contracts are unrelated
     # central increments; these local schemas remain outside that registry.
-    assert len(validator.SCHEMA_FILES) == 93
+    # Tier 1(2026-08-06):93→94,見 `..._recovery_anchor_schemas.py` 同位註解。
+    assert len(validator.SCHEMA_FILES) == 94
     assert set(SAMPLES).isdisjoint(validator.SCHEMA_FILES)
 
 

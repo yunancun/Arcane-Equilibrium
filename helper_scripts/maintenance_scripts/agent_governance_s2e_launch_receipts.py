@@ -16,6 +16,9 @@ ML_ROOT = REPO_ROOT / "program_code" / "ml_training"
 if str(ML_ROOT) not in sys.path:
     sys.path.insert(0, str(ML_ROOT))
 
+from aiml_gate_receipt_s2e_anchor_floor import (  # noqa: E402
+    AnchorGateObservations,
+)
 from aiml_gate_receipt_s2e_launch import (  # noqa: E402,F401
     build_genesis_candidate,
     build_s2e_launch_predecessor_authority,
@@ -47,32 +50,14 @@ def _read(path: Path) -> Any:
     return json.loads(path.read_text(encoding="utf-8"))
 
 
-def _add_external_triplet(
+def _add_durability_anchor(
     parser: argparse.ArgumentParser, *, prefix: str = ""
 ) -> None:
     option_prefix = f"{prefix}-" if prefix else ""
     destination_prefix = f"{prefix}_" if prefix else ""
     parser.add_argument(
-        f"--{option_prefix}external-append-intent",
-        dest=f"{destination_prefix}external_append_intent",
-        type=Path,
-        required=True,
-    )
-    parser.add_argument(
-        f"--{option_prefix}external-append-result",
-        dest=f"{destination_prefix}external_append_result",
-        type=Path,
-        required=True,
-    )
-    parser.add_argument(
-        f"--{option_prefix}external-readback-ack",
-        dest=f"{destination_prefix}external_readback_ack",
-        type=Path,
-        required=True,
-    )
-    parser.add_argument(
-        f"--{option_prefix}external-worm-provider-attestation",
-        dest=f"{destination_prefix}external_worm_provider_attestation",
+        f"--{option_prefix}durability-anchor-attestation",
+        dest=f"{destination_prefix}durability_anchor_attestation",
         type=Path,
         required=True,
     )
@@ -102,6 +87,12 @@ def _parser() -> argparse.ArgumentParser:
     validate.add_argument("--predecessor-receipt", type=Path)
     validate.add_argument("--predecessor-authority", type=Path)
     validate.add_argument("--payload-receipt", type=Path)
+    # optional:缺省時本分支只做 payload topology,維持現行
+    # STRUCTURAL_PASS_NOT_ADVANCE 語義,不會靜默取得 Advance。
+    validate.add_argument("--durability-anchor-attestation", type=Path)
+    # PR #178 review P1:候選 anchor 的 payload binding 只能從 bundle 實值導出,
+    # 缺它就無法完整認證候選 ⇒ 與缺 anchor 同樣降級,不得靜默 Advance。
+    validate.add_argument("--acceptance-review-bundle", type=Path)
     issue = subparsers.add_parser("issue")
     issue.add_argument("--repo-root", type=Path, default=REPO_ROOT)
     issue.add_argument("--candidate", type=Path, required=True)
@@ -115,13 +106,13 @@ def _parser() -> argparse.ArgumentParser:
     issue.add_argument(
         "--predecessor-consumption-bootstrap-authority", type=Path
     )
-    _add_external_triplet(issue)
+    _add_durability_anchor(issue)
     carrier = subparsers.add_parser("verify-carrier")
     carrier.add_argument("--repo-root", type=Path, default=REPO_ROOT)
     carrier.add_argument("--attestation", type=Path, required=True)
     carrier.add_argument("--payload-receipt", type=Path, required=True)
     carrier.add_argument("--governed-capture-record", type=Path, required=True)
-    _add_external_triplet(carrier)
+    _add_durability_anchor(carrier)
     authority = subparsers.add_parser("build-predecessor-authority")
     authority.add_argument("--repo-root", type=Path, default=REPO_ROOT)
     authority.add_argument("--predecessor-receipt", type=Path, required=True)
@@ -141,8 +132,8 @@ def _parser() -> argparse.ArgumentParser:
     authority.add_argument(
         "--carrier-governed-capture-record", type=Path, required=True
     )
-    _add_external_triplet(authority, prefix="review")
-    _add_external_triplet(authority, prefix="carrier")
+    _add_durability_anchor(authority, prefix="review")
+    _add_durability_anchor(authority, prefix="carrier")
     transition = subparsers.add_parser("transition-gate")
     transition.add_argument("--repo-root", type=Path, default=REPO_ROOT)
     transition.add_argument("--receipt", type=Path, required=True)
@@ -152,6 +143,10 @@ def _parser() -> argparse.ArgumentParser:
     transition.add_argument(
         "--predecessor-authority", type=Path, required=True
     )
+    transition.add_argument(
+        "--acceptance-review-bundle", type=Path, required=True
+    )
+    _add_durability_anchor(transition)
     return parser
 
 
@@ -193,11 +188,8 @@ def main(argv: list[str] | None = None) -> int:
             disposable_test_effect_chains=_read(
                 args.disposable_test_effect_chains
             ),
-            external_append_intent=_read(args.external_append_intent),
-            external_append_result=_read(args.external_append_result),
-            external_readback_ack=_read(args.external_readback_ack),
-            external_worm_provider_attestation=_read(
-                args.external_worm_provider_attestation
+            durability_anchor_attestation=_read(
+                args.durability_anchor_attestation
             ),
             predecessor_receipt=(
                 _read(args.predecessor_receipt)
@@ -225,11 +217,8 @@ def main(argv: list[str] | None = None) -> int:
             repo_root=args.repo_root,
             now=authority_now,
             governed_capture_record=_read(args.governed_capture_record),
-            external_append_intent=_read(args.external_append_intent),
-            external_append_result=_read(args.external_append_result),
-            external_readback_ack=_read(args.external_readback_ack),
-            external_worm_provider_attestation=_read(
-                args.external_worm_provider_attestation
+            durability_anchor_attestation=_read(
+                args.durability_anchor_attestation
             ),
         )
         print(json.dumps(result, ensure_ascii=False, sort_keys=True))
@@ -247,33 +236,15 @@ def main(argv: list[str] | None = None) -> int:
             review_disposable_test_effect_chains=_read(
                 args.review_disposable_test_effect_chains
             ),
-            review_external_append_intent=_read(
-                args.review_external_append_intent
-            ),
-            review_external_append_result=_read(
-                args.review_external_append_result
-            ),
-            review_external_readback_ack=_read(
-                args.review_external_readback_ack
-            ),
-            review_external_worm_provider_attestation=_read(
-                args.review_external_worm_provider_attestation
+            review_durability_anchor_attestation=_read(
+                args.review_durability_anchor_attestation
             ),
             carrier_attestation=_read(args.carrier_attestation),
             carrier_governed_capture_record=_read(
                 args.carrier_governed_capture_record
             ),
-            carrier_external_append_intent=_read(
-                args.carrier_external_append_intent
-            ),
-            carrier_external_append_result=_read(
-                args.carrier_external_append_result
-            ),
-            carrier_external_readback_ack=_read(
-                args.carrier_external_readback_ack
-            ),
-            carrier_external_worm_provider_attestation=_read(
-                args.carrier_external_worm_provider_attestation
+            carrier_durability_anchor_attestation=_read(
+                args.carrier_durability_anchor_attestation
             ),
             repo_root=args.repo_root,
             now=authority_now,
@@ -290,6 +261,11 @@ def main(argv: list[str] | None = None) -> int:
             for item in chain
             if isinstance(item, dict)
         } if isinstance(chain, list) else set()
+        # E3-B:`verdict` 出模組後曾被壓平成無型別 errors,下游只能靠
+        # `"UNVERIFIED: "` 子字串去分辨「偽造的 floor 被拒」與「未 merge 因而誠實
+        # 不可驗」。UNVERIFIED 仍然擋(status 照樣 FAIL),但 verdict 現在是 typed
+        # 輸出的一格。同一個載體也帶出 host identity 觀察(E3-E 的另一半)。
+        observations = AnchorGateObservations()
         errors = validate_s2e_launch_transition(
             artifact,
             predecessor_receipt=predecessor,
@@ -297,12 +273,22 @@ def main(argv: list[str] | None = None) -> int:
             repo_root=args.repo_root,
             now=authority_now,
             consumed_predecessor_digests=frozenset(consumed),
+            durability_anchor_attestation=_read(
+                args.durability_anchor_attestation
+            ),
+            acceptance_review_bundle=_read(args.acceptance_review_bundle),
+            observations=observations,
         )
         status = "ADVANCE" if not errors else "FAIL"
-        print(json.dumps({"status": status, "errors": errors}))
+        print(json.dumps({
+            "status": status,
+            "anchor_gate_observations": observations.as_records(),
+            "errors": errors,
+        }))
         return 0 if not errors else 2
     artifact = _read(args.receipt)
     status = "FAIL"
+    observations = AnchorGateObservations()
     if artifact.get("schema_version") == "s2e_launch_genesis_receipt_v1":
         errors = validate_s2e_launch_genesis_receipt(
             artifact, repo_root=args.repo_root
@@ -330,6 +316,19 @@ def main(argv: list[str] | None = None) -> int:
                 consumed_predecessor_digests=frozenset(),
             )
             status = "STRUCTURAL_PASS_NOT_ADVANCE" if not errors else "FAIL"
+        elif (
+            args.durability_anchor_attestation is None
+            or args.acceptance_review_bundle is None
+        ):
+            # authority 有、candidate anchor 或其 bundle 沒有 ⇒ 不足以 Advance,
+            # 只回 payload 語義。
+            errors = validate_s2e_launch_transition_payload(
+                artifact,
+                predecessor_receipt=predecessor,
+                repo_root=args.repo_root,
+                consumed_predecessor_digests=frozenset(),
+            )
+            status = "STRUCTURAL_PASS_NOT_ADVANCE" if not errors else "FAIL"
         else:
             authority = _read(args.predecessor_authority)
             chain = authority.get("launch_chain_before_predecessor", [])
@@ -345,11 +344,20 @@ def main(argv: list[str] | None = None) -> int:
                 repo_root=args.repo_root,
                 now=authority_now,
                 consumed_predecessor_digests=frozenset(consumed),
+                durability_anchor_attestation=_read(
+                    args.durability_anchor_attestation
+                ),
+                acceptance_review_bundle=_read(args.acceptance_review_bundle),
+                observations=observations,
             )
             status = "ADVANCE" if not errors else "FAIL"
     if artifact.get("schema_version") != "s2e_launch_wave_receipt_v1":
         status = "PASS" if not errors else "FAIL"
-    print(json.dumps({"status": status, "errors": errors}))
+    print(json.dumps({
+        "status": status,
+        "anchor_gate_observations": observations.as_records(),
+        "errors": errors,
+    }))
     return 0 if not errors else 2
 
 

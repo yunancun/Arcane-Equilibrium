@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+from copy import deepcopy
 import hashlib
 import io
 import json
@@ -9,6 +10,7 @@ from datetime import datetime, timedelta, timezone
 from pathlib import Path
 import subprocess
 import sys
+from typing import Any
 
 import pytest
 
@@ -21,6 +23,8 @@ for candidate in (HELPERS, ML_ROOT):
         sys.path.insert(0, str(candidate))
 
 import agent_governance_s2e_launch_receipts as launch  # noqa: E402
+import aiml_gate_receipt_s2e_anchor_floor as anchor_floor  # noqa: E402
+import aiml_gate_receipt_schema_core as schema_core  # noqa: E402
 import aiml_gate_receipt_s2e_dispatch as s2e_dispatch  # noqa: E402
 import aiml_gate_receipt_s2e_external_evidence as s2e_external  # noqa: E402
 import aiml_gate_receipt_s2e_launch as s2e  # noqa: E402
@@ -39,6 +43,9 @@ GENERATION_TASK_CONTRACT_DIGEST = (
     "sha256:fc295b09b791ba50a76dbf82223f14a4c26998cbf818b46e29c857e8e830e775"
 )
 NEXT_GENERATION_TASK_CONTRACT_DIGEST = "sha256:" + "4" * 64
+# 兩台機器的 SSH host key 指紋(disposable fixture 值,形制與真實 keyscan 輸出相同)。
+ANCHOR_HOST_FINGERPRINT = "SHA256:" + "A" * 43
+REPLICA_HOST_FINGERPRINT = "SHA256:" + "B" * 43
 
 
 def _install_disposable_s2e_trust_root(
@@ -106,11 +113,12 @@ def _install_disposable_external_evidence_roots(
         identity: str,
         namespace: str,
         attestor_class: str,
+        host_fingerprint: str | None = None,
     ) -> tuple[Path, dict[str, str]]:
         private, public, fingerprint = __import__("s2_5_testkit").mint_key(
             tmp_path, name
         )
-        return private, {
+        built = {
             "schema_version": name + "_trust_root_v1",
             "signer_identity": identity,
             "signature_namespace": namespace,
@@ -121,29 +129,46 @@ def _install_disposable_external_evidence_roots(
             "key_fingerprint": fingerprint,
             "attestor_class": attestor_class,
         }
+        if host_fingerprint is not None:
+            built["host_fingerprint"] = host_fingerprint
+        return private, built
 
-    provider_private, provider_profile = profile(
-        "s2e_external_worm_provider",
-        s2e_external.EXTERNAL_WORM_PROVIDER_IDENTITY,
-        s2e_external.EXTERNAL_WORM_PROVIDER_NAMESPACE,
-        "S3_OBJECT_LOCK_EXTERNAL_ATTESTOR_V1",
+    anchor_private, anchor_profile = profile(
+        "s2e_durability_anchor",
+        s2e_external.DURABILITY_ANCHOR_IDENTITY,
+        s2e_external.DURABILITY_ANCHOR_NAMESPACE,
+        "HOST_APPEND_ONLY_DURABILITY_ANCHOR_V1",
+        host_fingerprint=ANCHOR_HOST_FINGERPRINT,
+    )
+    replica_private, replica_profile = profile(
+        "s2e_offhost_replica",
+        s2e_external.OFFHOST_REPLICA_IDENTITY,
+        s2e_external.OFFHOST_REPLICA_NAMESPACE,
+        "OFFHOST_APPEND_ONLY_REPLICA_READBACK_V1",
+        host_fingerprint=REPLICA_HOST_FINGERPRINT,
     )
     registry_private, registry_profile = profile(
         "s2e_predecessor_registry",
         s2e_external.PREDECESSOR_REGISTRY_IDENTITY,
         s2e_external.PREDECESSOR_REGISTRY_NAMESPACE,
-        "EXTERNAL_APPEND_ONLY_PREDECESSOR_REGISTRY_V1",
+        "HOST_APPEND_ONLY_PREDECESSOR_REGISTRY_V1",
     )
     fingerprints = {
         receipt_profile["key_fingerprint"],
-        provider_profile["key_fingerprint"],
+        anchor_profile["key_fingerprint"],
+        replica_profile["key_fingerprint"],
         registry_profile["key_fingerprint"],
     }
-    assert len(fingerprints) == 3
+    assert len(fingerprints) == 4
     monkeypatch.setattr(
         s2e_external,
-        "_load_external_worm_provider_trust_root",
-        lambda: (provider_profile, []),
+        "_load_durability_anchor_trust_root",
+        lambda: (anchor_profile, []),
+    )
+    monkeypatch.setattr(
+        s2e_external,
+        "_load_offhost_replica_trust_root",
+        lambda: (replica_profile, []),
     )
     monkeypatch.setattr(
         s2e_external,
@@ -156,8 +181,10 @@ def _install_disposable_external_evidence_roots(
         lambda: (receipt_profile, []),
     )
     return {
-        "provider_private": provider_private,
-        "provider_profile": provider_profile,
+        "anchor_private": anchor_private,
+        "anchor_profile": anchor_profile,
+        "replica_private": replica_private,
+        "replica_profile": replica_profile,
         "registry_private": registry_private,
         "registry_profile": registry_profile,
     }
@@ -467,124 +494,144 @@ def _actual_capture(
     return record
 
 
-def _external_worm_triplet(
-    payload: dict,
+ANCHOR_LOCATOR = "host:append-only-durability-anchor:s2e-aiml"
+REPLICA_LOCATOR = "replica:offhost-append-only:nas-s2e-aiml"
+
+
+def _offhost_replica_readback(
+    artifact: dict,
     *,
-    source_head: str,
-    landing_scope_id: str,
-    learning_runtime_digest: str,
-    issued_at: datetime,
-    intent_id: str,
-) -> tuple[dict, dict, dict]:
-    append_actor = f"{intent_id}-writer"
-    intent = external_sink.build_external_worm_append_intent(
-        intent_id=intent_id,
-        terminal_receipt_type="disposable_proof_payload_v1",
-        final_source_head=source_head,
-        landing_scope_id=landing_scope_id,
-        learning_runtime_digest=learning_runtime_digest,
-        terminal_payload_digest=terminal_sink.terminal_payload_digest(payload),
-        append_actor_id=append_actor,
-        approved_by="PM",
-        approved_at=issued_at.isoformat(),
-        expires_at=(issued_at + timedelta(hours=2)).isoformat(),
-        endpoint="https://s3.us-east-1.amazonaws.com",
-        region="us-east-1",
-        bucket="s2e-disposable-object-lock",
-        object_lock_mode="COMPLIANCE",
-        retain_until=(issued_at + timedelta(days=30)).isoformat(),
-        credential_channel_id="aws-profile:s2e-disposable",
-        compliance_operator_approved=True,
-        now=(issued_at + timedelta(minutes=1)).isoformat(),
-    )
-    client = _DisposableObjectLockS3()
-    result = external_sink.apply_external_worm_append(
-        intent,
-        s3_client=client,
-        append_actor_id=append_actor,
-        terminal_payload=payload,
-        started_at=issued_at.isoformat(),
-        completed_at=(issued_at + timedelta(seconds=1)).isoformat(),
-    )
-    readback = external_sink.independent_readback_ack(
-        result,
-        intent,
-        s3_client=client,
-        verifier_actor_id=f"{intent_id}-independent-readback",
-        observed_at=(issued_at + timedelta(seconds=5)).isoformat(),
-    )
-    return intent, result, readback
+    trust: dict[str, object],
+    observed_at: datetime,
+    directory: Path,
+) -> dict:
+    """第二把 key、第二個 host fingerprint 對同一個 head 的獨立回讀證言。"""
+
+    readback = {
+        "schema_version": s2e_external.OFFHOST_REPLICA_READBACK_SCHEMA,
+        "replica_locator": artifact["offhost_replica_locator"],
+        "replica_host_fingerprint": REPLICA_HOST_FINGERPRINT,
+        "observed_anchor_locator": artifact["anchor_locator"],
+        "replica_generation": artifact["anchor_generation"],
+        "replica_previous_head_digest": artifact["previous_anchor_head_digest"],
+        "replica_entry_digest": artifact["anchor_entry_digest"],
+        "replica_head_digest": artifact["anchor_head_digest"],
+        "observed_at": observed_at.isoformat(),
+        "expires_at": (observed_at + timedelta(minutes=5)).isoformat(),
+        "signer": {
+            "role": "OFFHOST_REPLICA_READBACK_ATTESTOR",
+            "identity": s2e_external.OFFHOST_REPLICA_IDENTITY,
+            "namespace": s2e_external.OFFHOST_REPLICA_NAMESPACE,
+            "key_generation": "independent_off_repo_ed25519_v1",
+            "anchor": "fixed_off_repo_public_trust_root_v1",
+            "key_fingerprint": trust["replica_profile"]["key_fingerprint"],
+        },
+    }
+    signed = s2e_external.offhost_replica_readback_signed_bytes(readback)
+    readback["signed_core_digest"] = "sha256:" + hashlib.sha256(signed).hexdigest()
+    readback["signature"] = {
+        "algorithm": "SSHSIG",
+        "signed_digest": readback["signed_core_digest"],
+        "signature": _sign_sshsig(
+            trust["replica_private"],
+            signed,
+            namespace=s2e_external.OFFHOST_REPLICA_NAMESPACE,
+            directory=directory,
+        ),
+    }
+    return readback
 
 
-def _external_worm_provider_attestation(
-    intent: dict,
-    result: dict,
-    readback: dict,
+def _durability_anchor_attestation(
+    payload: dict,
     *,
     trust: dict[str, object],
     issued_at: datetime,
     directory: Path,
+    generation: int = 1,
+    previous_head: str | None = None,
 ) -> dict:
-    destination = intent["destination_contract"]
+    """建一份 Tier 1 trusted-host durability anchor attestation(無外部服務)。"""
+
     artifact = {
-        "schema_version": s2e_external.EXTERNAL_WORM_SCHEMA,
-        "purpose": "ATTEST_S2E_EXTERNAL_WORM_IMMUTABLE_READBACK",
+        "schema_version": s2e_external.DURABILITY_ANCHOR_SCHEMA,
+        "purpose": "ATTEST_S2E_APPEND_ONLY_DURABILITY_AND_OFFHOST_READBACK",
         "evidence_class": "PLATFORM_OR_EXTERNAL_ATTESTED",
-        "provider_class": "S3_OBJECT_LOCK_EXTERNAL_ATTESTOR_V1",
-        "provider_locator": "aws:s3-object-lock-attestor:external-account",
-        "external_intent_digest": intent["external_intent_digest"],
-        "external_result_digest": result["result_digest"],
-        "external_readback_ack_digest": readback["ack_digest"],
-        "terminal_payload_digest": intent["append_intent"]["payload_binding"][
-            "terminal_payload_digest"
-        ],
-        "destination": {
-            field: destination[field]
-            for field in (
-                "endpoint",
-                "region",
-                "bucket",
-                "credential_channel_id",
-                "object_lock_mode",
-                "retain_until",
-            )
-        },
-        "immutable_object": {
-            "record_locator": result["record_locator"],
-            "object_version_id": result["object_version_id"],
-            "checksum_sha256": result["checksum_sha256"],
-            "append_status": result["append_status"],
-            "readback_ack": readback["ack"],
-            "immutability_proven": readback["immutability_proven"],
-            "object_lock_enabled": readback["object_lock_enabled"],
-        },
+        "anchor_class": "HOST_APPEND_ONLY_DURABILITY_ANCHOR_V1",
+        "anchor_locator": ANCHOR_LOCATOR,
+        "anchor_host_fingerprint": ANCHOR_HOST_FINGERPRINT,
+        "launch_id": s2e_external.LAUNCH_ID,
+        "terminal_payload_digest": terminal_sink.terminal_payload_digest(payload),
+        "anchor_generation": generation,
+        "previous_anchor_head_digest": previous_head,
+        "anchor_entry_digest": "",
+        "anchor_head_digest": "",
+        "offhost_replica_locator": REPLICA_LOCATOR,
+        "offhost_replica_readback": {},
         "observed_at": (issued_at + timedelta(seconds=10)).isoformat(),
         "expires_at": (issued_at + timedelta(minutes=5)).isoformat(),
         "signer": {
-            "role": "EXTERNAL_WORM_PROVIDER_ATTESTOR",
-            "identity": s2e_external.EXTERNAL_WORM_PROVIDER_IDENTITY,
-            "namespace": s2e_external.EXTERNAL_WORM_PROVIDER_NAMESPACE,
+            "role": "DURABILITY_ANCHOR_ATTESTOR",
+            "identity": s2e_external.DURABILITY_ANCHOR_IDENTITY,
+            "namespace": s2e_external.DURABILITY_ANCHOR_NAMESPACE,
             "key_generation": "independent_off_repo_ed25519_v1",
             "anchor": "fixed_off_repo_public_trust_root_v1",
-            "key_fingerprint": trust["provider_profile"]["key_fingerprint"],
+            "key_fingerprint": trust["anchor_profile"]["key_fingerprint"],
         },
     }
-    signed = s2e_external.external_worm_provider_signed_bytes(artifact)
+    artifact["anchor_entry_digest"] = s2e_external.durability_anchor_entry_digest(
+        artifact
+    )
+    artifact["anchor_head_digest"] = s2e_external.durability_anchor_head_digest(
+        artifact
+    )
+    artifact["offhost_replica_readback"] = _offhost_replica_readback(
+        artifact,
+        trust=trust,
+        observed_at=issued_at + timedelta(seconds=5),
+        directory=directory,
+    )
+    signed = s2e_external.durability_anchor_signed_bytes(artifact)
     artifact["signed_core_digest"] = "sha256:" + hashlib.sha256(signed).hexdigest()
     artifact["signature"] = {
         "algorithm": "SSHSIG",
         "signed_digest": artifact["signed_core_digest"],
         "signature": _sign_sshsig(
-            trust["provider_private"],
+            trust["anchor_private"],
             signed,
-            namespace=s2e_external.EXTERNAL_WORM_PROVIDER_NAMESPACE,
+            namespace=s2e_external.DURABILITY_ANCHOR_NAMESPACE,
             directory=directory,
         ),
     }
     artifact["attestation_digest"] = (
-        s2e_external.external_worm_provider_attestation_digest(artifact)
+        s2e_external.durability_anchor_attestation_digest(artifact)
     )
     return artifact
+
+
+def _anchor_immutable_readback(anchor: dict) -> dict:
+    """carrier schema 早已宣告的 trusted-host adapter 投影。"""
+
+    return {
+        "adapter": "TRUSTED_HOST_SSHSIG_APPEND_ONLY_V1",
+        "object_id": anchor["anchor_locator"],
+        "version_id": str(anchor["anchor_generation"]),
+        "readback_digest": anchor["anchor_head_digest"],
+        "provider_attestation_digest": anchor["attestation_digest"],
+    }
+
+
+def _anchor_binding(anchor: dict) -> dict:
+    return {
+        "anchor_locator": anchor["anchor_locator"],
+        "offhost_replica_locator": anchor["offhost_replica_locator"],
+        "anchor_generation": anchor["anchor_generation"],
+        "anchor_head_digest": anchor["anchor_head_digest"],
+        "replica_head_digest": anchor["offhost_replica_readback"][
+            "replica_head_digest"
+        ],
+        "anchor_attestation_digest": anchor["attestation_digest"],
+    }
 
 
 def _predecessor_registry_attestation(
@@ -598,8 +645,8 @@ def _predecessor_registry_attestation(
         "schema_version": s2e_external.PREDECESSOR_REGISTRY_SCHEMA,
         "purpose": "ATTEST_S2E_PREDECESSOR_SINGLE_USE_GRANT",
         "evidence_class": "PLATFORM_OR_EXTERNAL_ATTESTED",
-        "registry_class": "EXTERNAL_APPEND_ONLY_PREDECESSOR_REGISTRY_V1",
-        "registry_locator": "registry:external-append-only:s2e",
+        "registry_class": "HOST_APPEND_ONLY_PREDECESSOR_REGISTRY_V1",
+        "registry_locator": "registry:host-append-only:s2e",
         **{
             field: request[field]
             for field in (
@@ -654,6 +701,58 @@ def _predecessor_registry_attestation(
         s2e_external.predecessor_registry_attestation_digest(artifact)
     )
     return artifact
+
+
+def _genesis_armed_floor() -> dict:
+    """創世 floor:generation 0、無 head、無 bound receipt。只允許出現一次。"""
+
+    floor = {
+        "schema_version": anchor_floor.DURABILITY_ANCHOR_FLOOR_SCHEMA,
+        "launch_id": s2e_external.LAUNCH_ID,
+        "state": "GENESIS_ARMED",
+        "anchor_locator": ANCHOR_LOCATOR,
+        "offhost_replica_locator": REPLICA_LOCATOR,
+        "floor_generation": 0,
+        "floor_head_digest": None,
+        "bound_receipt_payload_digest": None,
+        "bound_acceptance_review_bundle_digest": None,
+    }
+    floor["floor_digest"] = anchor_floor.durability_anchor_floor_digest(floor)
+    return floor
+
+
+def _floor_bytes(floor: dict) -> bytes:
+    return (
+        json.dumps(floor, ensure_ascii=False, indent=2, sort_keys=True) + "\n"
+    ).encode("utf-8")
+
+
+def _publish(repo: Path, commit: str | None = None) -> str:
+    """把 commit 記到受保護 ref 上,模擬「這份 floor 已經過 PR 進 main」。
+
+    P0-1 之後,floor 鏈尾必須是 `_PROTECTED_ANCESTOR_REFS` 某一支的祖先,否則判
+    UNVERIFIED。ref 名單是 code-owned 常數,測試只能改 repo 的 ref 本身,不能傳參
+    數指定——這正是該裁決要保住的性質。
+    """
+
+    target = commit or _git(repo, "rev-parse", "HEAD")
+    _git(repo, "update-ref", anchor_floor._PROTECTED_ANCESTOR_REFS[0], target)
+    return target
+
+
+def _commit_floor(
+    repo: Path, floor: dict, message: str, *, publish: bool = True
+) -> str:
+    relative = anchor_floor.durability_anchor_floor_repo_path()
+    target = repo / relative
+    target.parent.mkdir(parents=True, exist_ok=True)
+    target.write_bytes(_floor_bytes(floor))
+    _git(repo, "add", relative)
+    _git(repo, "commit", "-m", message)
+    head = _git(repo, "rev-parse", "HEAD")
+    if publish:
+        _publish(repo, head)
+    return head
 
 
 def _git(repo: Path, *args: str) -> str:
@@ -772,7 +871,9 @@ def _repo(tmp_path: Path) -> tuple[Path, str, str, str]:
     ):
         if relative_path in launch_carrier_files:
             continue
-        if relative_path == "TODO.md":
+        if relative_path == anchor_floor.durability_anchor_floor_repo_path():
+            content = _floor_bytes(_genesis_armed_floor()).decode("utf-8")
+        elif relative_path == "TODO.md":
             content = (
                 "| ID | Lane | Dependency | Work | Exit |\n"
                 "|---|---|---|---|---|\n"
@@ -793,6 +894,8 @@ def _repo(tmp_path: Path) -> tuple[Path, str, str, str]:
     _git(repo, "add", *sorted(launch_carrier_files))
     _git(repo, "commit", "-m", "schema carrier")
     carrier = _git(repo, "rev-parse", "HEAD")
+    # 創世 floor 隨 schema carrier 進 repo,並同步進受保護 ref(P0-1)。
+    _publish(repo, carrier)
     lw1 = _commit(repo, "lw1.txt", "LW1\n", "LW1 checkpoint")
     return repo, baseline, carrier, lw1
 
@@ -1194,10 +1297,7 @@ def test_fake_trusted_host_objects_return_typed_pending_not_pass(
         repo_root=repo,
         now=issued_at + timedelta(minutes=1),
         governed_capture_record={"schema_version": "command_capture_v2"},
-        external_append_intent={"schema_version": "caller-shaped"},
-        external_append_result={"schema_version": "caller-shaped"},
-        external_readback_ack={"schema_version": "caller-shaped"},
-        external_worm_provider_attestation={"schema_version": "caller-shaped"},
+        durability_anchor_attestation={"schema_version": "caller-shaped"},
     )
 
     assert result["schema_version"] == "receipt_carrier_verification_result_v1"
@@ -1209,7 +1309,7 @@ def test_fake_trusted_host_objects_return_typed_pending_not_pass(
         if key != "verification_result_digest"
     })
     assert any("governed command capture" in error for error in result["errors"])
-    assert any("external worm" in error for error in result["errors"])
+    assert any("durability anchor" in error for error in result["errors"])
 
 
 def test_missing_trusted_host_objects_return_typed_pending_not_exception(
@@ -1223,15 +1323,12 @@ def test_missing_trusted_host_objects_return_typed_pending_not_exception(
         repo_root=repo,
         now=issued_at + timedelta(minutes=1),
         governed_capture_record=None,
-        external_append_intent=None,
-        external_append_result=None,
-        external_readback_ack=None,
-        external_worm_provider_attestation=None,
+        durability_anchor_attestation=None,
     )
 
     assert result["status"] == "EXTERNAL_VERIFICATION_PENDING"
-    assert result["external_result_digest"] is None
-    assert result["external_readback_ack_digest"] is None
+    assert result["durability_anchor_head_digest"] is None
+    assert result["durability_anchor_attestation_digest"] is None
     assert result["errors"]
 
 
@@ -1277,31 +1374,15 @@ def test_independent_key_capture_and_worm_produce_verified_carrier(
     worm_payload = validator.s2e_carrier_worm_payload(
         attestation, payload_receipt=genesis
     )
-    intent, result, readback = _external_worm_triplet(
+    anchor_attestation = _durability_anchor_attestation(
         worm_payload,
-        source_head=attestation["carrier_head"],
-        landing_scope_id=attestation["payload_digest"],
-        learning_runtime_digest=attestation["launch_contract_digest"],
-        issued_at=issued_at,
-        intent_id="s2e-carrier-intent-0001",
-    )
-    provider_attestation = _external_worm_provider_attestation(
-        intent,
-        result,
-        readback,
         trust=external_trust,
         issued_at=issued_at,
         directory=tmp_path,
     )
-    attestation["immutable_readback"] = {
-        "adapter": "EXTERNAL_WORM_V1",
-        "object_id": result["record_locator"],
-        "version_id": result["object_version_id"],
-        "readback_digest": readback["ack_digest"],
-        "provider_attestation_digest": provider_attestation[
-            "attestation_digest"
-        ],
-    }
+    attestation["immutable_readback"] = _anchor_immutable_readback(
+        anchor_attestation
+    )
     _reseal_carrier(attestation)
     attestation["signature"]["signature"] = _sign_sshsig(
         private_key,
@@ -1319,10 +1400,7 @@ def test_independent_key_capture_and_worm_produce_verified_carrier(
         repo_root=repo,
         now=issued_at + timedelta(minutes=1),
         governed_capture_record=capture,
-        external_append_intent=intent,
-        external_append_result=result,
-        external_readback_ack=readback,
-        external_worm_provider_attestation=provider_attestation,
+        durability_anchor_attestation=anchor_attestation,
     )
 
     assert fingerprint != trusted_host.EXPECTED_EXECUTION_SIGNER_FINGERPRINT
@@ -1407,31 +1485,35 @@ def test_acceptance_review_rejects_generic_command_and_cross_generation_capture(
         )
 
 
-def _issued_genesis_authority_case(
+def _signed_review_bundle(
+    candidate: dict,
+    *,
+    repo: Path,
     tmp_path: Path,
     monkeypatch: pytest.MonkeyPatch,
+    private_key: Path,
+    fingerprint: str,
+    external_trust: dict[str, object],
+    issued_at: datetime,
+    context_digest: str = "sha256:" + "6" * 64,
+    predecessor_chain: list[dict] | None = None,
+    consumed_predecessor_digests: list[str] | None = None,
+    anchor_generation: int = 1,
+    anchor_previous_head: str | None = None,
+    anchor_issued_at: datetime | None = None,
 ) -> dict:
-    private_key, _, fingerprint = _install_disposable_s2e_trust_root(
-        tmp_path, monkeypatch
-    )
-    external_trust = _install_disposable_external_evidence_roots(
-        tmp_path, monkeypatch
-    )
-    repo, baseline, schema_carrier, _ = _repo(tmp_path)
-    _git(repo, "checkout", "--detach", schema_carrier)
-    candidate = launch.build_genesis_candidate(
-        repo_root=repo,
-        baseline_head=baseline,
-        schema_carrier_head=schema_carrier,
-        launch_contract_digest=LAUNCH_CONTRACT_DIGEST,
-        generation_task_contract_digest=GENERATION_TASK_CONTRACT_DIGEST,
-    )
-    issued_at = datetime(2026, 7, 30, 12, 0, tzinfo=timezone.utc)
+    """一份候選的完整、簽妥、anchor 已對綁的 acceptance review bundle。
+
+    候選自己的 review anchor 綁的是 `s2e_acceptance_review_worm_payload(bundle)`,
+    不是 receipt——production 的 `validate_s2e_launch_acceptance_review_bundle`
+    與(PR #178 起)`validate_s2e_launch_transition` 都以此認證候選 anchor。
+    """
+
     review_capture = _actual_capture(
         repo,
         carrier_path="schemas/launch.json",
         task_digest=candidate["generation_task_contract_digest"],
-        context_digest="sha256:" + "6" * 64,
+        context_digest=context_digest,
         monkeypatch=monkeypatch,
         argv=validator.s2e_review_test_argv(candidate, repo_root=repo),
     )
@@ -1451,6 +1533,9 @@ def _issued_genesis_authority_case(
         "native_agent": review_capture["native_agent"],
         "permission": review_capture["permission"],
     }
+    source_blob_manifest = validator.s2e_review_source_blob_manifest(
+        candidate, repo_root=repo
+    )
     review_bundle = {
         "schema_version": "s2e_launch_acceptance_review_bundle_v1",
         "candidate_payload_digest": candidate["payload_digest"],
@@ -1462,20 +1547,16 @@ def _issued_genesis_authority_case(
         "generation_task_contract_digest": candidate[
             "generation_task_contract_digest"
         ],
-        "source_blob_manifest": validator.s2e_review_source_blob_manifest(
-            candidate, repo_root=repo
-        ),
+        "source_blob_manifest": source_blob_manifest,
         "predicate_results": validator.s2e_review_predicate_results(
             candidate,
-            source_blob_manifest=validator.s2e_review_source_blob_manifest(
-                candidate, repo_root=repo
-            ),
+            source_blob_manifest=source_blob_manifest,
             governed_capture_record=review_capture,
             disposable_test_effect_chains=[disposable_chain],
-            predecessor_chain=[],
+            predecessor_chain=predecessor_chain or [],
             repo_root=repo,
         ),
-        "consumed_predecessor_digests": [],
+        "consumed_predecessor_digests": consumed_predecessor_digests or [],
         "disposable_test_effect_chain_digests": [
             disposable_chain["chain_digest"]
         ],
@@ -1497,7 +1578,7 @@ def _issued_genesis_authority_case(
             "anchor": "fixed_off_repo_public_trust_root_v1",
             "key_fingerprint": fingerprint,
         },
-        "external_worm_binding": None,
+        "durability_anchor_binding": None,
     }
     signed_bytes = validator.s2e_acceptance_review_signed_bytes(review_bundle)
     review_bundle["signed_core_digest"] = "sha256:" + hashlib.sha256(
@@ -1513,35 +1594,62 @@ def _issued_genesis_authority_case(
             directory=tmp_path,
         ),
     }
-    review_intent, review_result, review_readback = _external_worm_triplet(
+    review_anchor_attestation = _durability_anchor_attestation(
         validator.s2e_acceptance_review_worm_payload(review_bundle),
-        source_head=schema_carrier,
-        landing_scope_id=candidate["payload_digest"],
-        learning_runtime_digest=candidate["launch_contract_digest"],
-        issued_at=issued_at,
-        intent_id="s2e-authority-review-0001",
-    )
-    review_provider_attestation = _external_worm_provider_attestation(
-        review_intent,
-        review_result,
-        review_readback,
         trust=external_trust,
-        issued_at=issued_at,
+        issued_at=anchor_issued_at or issued_at,
         directory=tmp_path,
+        generation=anchor_generation,
+        previous_head=anchor_previous_head,
     )
-    review_bundle["external_worm_binding"] = {
-        "result_digest": review_result["result_digest"],
-        "readback_ack_digest": review_readback["ack_digest"],
-        "record_locator": review_result["record_locator"],
-        "object_version_id": review_result["object_version_id"],
-        "checksum_sha256": review_result["checksum_sha256"],
-        "provider_attestation_digest": review_provider_attestation[
-            "attestation_digest"
-        ],
-    }
+    review_bundle["durability_anchor_binding"] = _anchor_binding(
+        review_anchor_attestation
+    )
     review_bundle["bundle_digest"] = (
         validator.s2e_acceptance_review_bundle_digest(review_bundle)
     )
+    return {
+        "bundle": review_bundle,
+        "capture": review_capture,
+        "chain": disposable_chain,
+        "anchor": review_anchor_attestation,
+    }
+
+
+def _issued_genesis_authority_case(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> dict:
+    private_key, _, fingerprint = _install_disposable_s2e_trust_root(
+        tmp_path, monkeypatch
+    )
+    external_trust = _install_disposable_external_evidence_roots(
+        tmp_path, monkeypatch
+    )
+    repo, baseline, schema_carrier, _ = _repo(tmp_path)
+    _git(repo, "checkout", "--detach", schema_carrier)
+    candidate = launch.build_genesis_candidate(
+        repo_root=repo,
+        baseline_head=baseline,
+        schema_carrier_head=schema_carrier,
+        launch_contract_digest=LAUNCH_CONTRACT_DIGEST,
+        generation_task_contract_digest=GENERATION_TASK_CONTRACT_DIGEST,
+    )
+    issued_at = datetime(2026, 7, 30, 12, 0, tzinfo=timezone.utc)
+    signed_review = _signed_review_bundle(
+        candidate,
+        repo=repo,
+        tmp_path=tmp_path,
+        monkeypatch=monkeypatch,
+        private_key=private_key,
+        fingerprint=fingerprint,
+        external_trust=external_trust,
+        issued_at=issued_at,
+    )
+    review_bundle = signed_review["bundle"]
+    review_capture = signed_review["capture"]
+    disposable_chain = signed_review["chain"]
+    review_anchor_attestation = signed_review["anchor"]
     monkeypatch.setattr(
         s2e,
         "_trusted_issuance_now",
@@ -1553,14 +1661,30 @@ def _issued_genesis_authority_case(
         repo_root=repo,
         governed_capture_record=review_capture,
         disposable_test_effect_chains=[disposable_chain],
-        external_append_intent=review_intent,
-        external_append_result=review_result,
-        external_readback_ack=review_readback,
-        external_worm_provider_attestation=review_provider_attestation,
+        durability_anchor_attestation=review_anchor_attestation,
     )
     assert issuance["status"] == "ISSUED"
     issued = issuance["issued_receipt"]
     assert issued is not None
+    # issuance 只投影下一份 floor,永遠不寫檔;由 operator/E1 在同一個 PR 內 commit。
+    advanced_floor = issuance["next_durability_anchor_floor"]
+    assert advanced_floor == {
+        "schema_version": anchor_floor.DURABILITY_ANCHOR_FLOOR_SCHEMA,
+        "launch_id": s2e_external.LAUNCH_ID,
+        "state": "ADVANCED",
+        "anchor_locator": ANCHOR_LOCATOR,
+        "offhost_replica_locator": REPLICA_LOCATOR,
+        "floor_generation": review_anchor_attestation["anchor_generation"],
+        "floor_head_digest": review_anchor_attestation["anchor_head_digest"],
+        "bound_receipt_payload_digest": issued["payload_digest"],
+        "bound_acceptance_review_bundle_digest": review_bundle["bundle_digest"],
+        "floor_digest": anchor_floor.durability_anchor_floor_digest({
+            key: value
+            for key, value in advanced_floor.items()
+            if key != "floor_digest"
+        }),
+    }
+    _commit_floor(repo, advanced_floor, "advance durability anchor floor to W0")
 
     carrier_path = "receipts/S2E-W0-genesis-ready.json"
     target = repo / carrier_path
@@ -1652,33 +1776,19 @@ def _issued_genesis_authority_case(
         "native_agent": carrier_capture["native_agent"],
         "permission": carrier_capture["permission"],
     }
-    carrier_intent, carrier_result, carrier_readback = _external_worm_triplet(
+    carrier_anchor_attestation = _durability_anchor_attestation(
         validator.s2e_carrier_worm_payload(
             carrier_attestation, payload_receipt=issued
         ),
-        source_head=carrier_head,
-        landing_scope_id=issued["payload_digest"],
-        learning_runtime_digest=issued["launch_contract_digest"],
-        issued_at=issued_at + timedelta(minutes=2),
-        intent_id="s2e-authority-carrier-0001",
-    )
-    carrier_provider_attestation = _external_worm_provider_attestation(
-        carrier_intent,
-        carrier_result,
-        carrier_readback,
         trust=external_trust,
         issued_at=issued_at + timedelta(minutes=2),
         directory=tmp_path,
+        generation=2,
+        previous_head=review_anchor_attestation["anchor_head_digest"],
     )
-    carrier_attestation["immutable_readback"] = {
-        "adapter": "EXTERNAL_WORM_V1",
-        "object_id": carrier_result["record_locator"],
-        "version_id": carrier_result["object_version_id"],
-        "readback_digest": carrier_readback["ack_digest"],
-        "provider_attestation_digest": carrier_provider_attestation[
-            "attestation_digest"
-        ],
-    }
+    carrier_attestation["immutable_readback"] = _anchor_immutable_readback(
+        carrier_anchor_attestation
+    )
     _reseal_carrier(carrier_attestation)
     carrier_attestation["signature"]["signature"] = _sign_sshsig(
         private_key,
@@ -1695,20 +1805,10 @@ def _issued_genesis_authority_case(
         acceptance_review_bundle=review_bundle,
         review_governed_capture_record=review_capture,
         review_disposable_test_effect_chains=[disposable_chain],
-        review_external_append_intent=review_intent,
-        review_external_append_result=review_result,
-        review_external_readback_ack=review_readback,
-        review_external_worm_provider_attestation=(
-            review_provider_attestation
-        ),
+        review_durability_anchor_attestation=review_anchor_attestation,
         carrier_attestation=carrier_attestation,
         carrier_governed_capture_record=carrier_capture,
-        carrier_external_append_intent=carrier_intent,
-        carrier_external_append_result=carrier_result,
-        carrier_external_readback_ack=carrier_readback,
-        carrier_external_worm_provider_attestation=(
-            carrier_provider_attestation
-        ),
+        carrier_durability_anchor_attestation=carrier_anchor_attestation,
         repo_root=repo,
         now=issued_at + timedelta(minutes=3),
     )
@@ -1718,10 +1818,76 @@ def _issued_genesis_authority_case(
         "issued": issued,
         "authority": authority,
         "now": issued_at + timedelta(minutes=3),
+        "issued_at": issued_at,
         "private_key": private_key,
         "fingerprint": fingerprint,
         "external_trust": external_trust,
+        "review_bundle": review_bundle,
+        "review_anchor": review_anchor_attestation,
+        "carrier_anchor": carrier_anchor_attestation,
+        "advanced_floor": advanced_floor,
+        "tmp_path": tmp_path,
     }
+
+
+_INHERIT_CARRIER_HEAD = object()
+
+# 候選 anchor 的 observed_at 是 anchor_issued_at + 10s、expires_at 是 +5min,而
+# transition gate 恆在 `case["now"] == issued_at + 3min` 判定。因此 anchor 必須在
+# `now` **之前**鑄出,窗口才真的涵蓋判定時刻——production 對候選 anchor 要求當下
+# 新鮮是對的,該動的是 fixture。全部相對凍結時鐘,無 wall-clock。
+_CANDIDATE_ANCHOR_OFFSET = timedelta(minutes=2, seconds=30)
+
+
+def _wave_review(
+    case: dict, wave: dict, monkeypatch: pytest.MonkeyPatch
+) -> dict:
+    """Wave 候選自己的 signed review bundle + 它的 review anchor(gen 3)。"""
+
+    return _signed_review_bundle(
+        wave,
+        repo=case["repo"],
+        tmp_path=case["tmp_path"],
+        monkeypatch=monkeypatch,
+        private_key=case["private_key"],
+        fingerprint=case["fingerprint"],
+        external_trust=case["external_trust"],
+        issued_at=case["issued_at"],
+        context_digest="sha256:" + "a" * 64,
+        predecessor_chain=[case["issued"]],
+        anchor_generation=3,
+        anchor_previous_head=case["carrier_anchor"]["anchor_head_digest"],
+        anchor_issued_at=case["issued_at"] + _CANDIDATE_ANCHOR_OFFSET,
+    )
+
+
+def _candidate_review_anchor(
+    case: dict,
+    bundle: dict,
+    *,
+    generation: int = 3,
+    previous_head: object = _INHERIT_CARRIER_HEAD,
+) -> dict:
+    """候選自己的 review anchor:必須嚴格晚於前一份的 carrier anchor。
+
+    綁的 payload 是候選**自己那份 acceptance review bundle** 的 WORM payload,
+    與 production 一致(`validate_s2e_launch_acceptance_review_bundle` 與 PR #178
+    起的 `validate_s2e_launch_transition` 都以此認證)。舊 fixture 綁的是 wave
+    receipt,只因當時沒有任何路徑認證這份 anchor 才會通過。
+    """
+
+    return _durability_anchor_attestation(
+        validator.s2e_acceptance_review_worm_payload(bundle),
+        trust=case["external_trust"],
+        issued_at=case["issued_at"] + _CANDIDATE_ANCHOR_OFFSET,
+        directory=case["tmp_path"],
+        generation=generation,
+        previous_head=(
+            case["carrier_anchor"]["anchor_head_digest"]
+            if previous_head is _INHERIT_CARRIER_HEAD
+            else previous_head
+        ),
+    )
 
 
 def test_wave_generation_requires_ready_reviewed_attested_predecessor(
@@ -1742,6 +1908,9 @@ def test_wave_generation_requires_ready_reviewed_attested_predecessor(
         now=case["now"],
     )
 
+    wave_review = _wave_review(case, wave, monkeypatch)
+    wave_bundle = wave_review["bundle"]
+    candidate_anchor = wave_review["anchor"]
     assert wave["checkpoint_status"] == "PENDING_REVIEW"
     assert wave["wave_exit_id"] == "S2E_2B_2A_SECURITY_RECOVERY_READY"
     assert validator.validate_s2e_launch_transition(
@@ -1751,6 +1920,8 @@ def test_wave_generation_requires_ready_reviewed_attested_predecessor(
         repo_root=repo,
         now=case["now"],
         consumed_predecessor_digests=frozenset(),
+        durability_anchor_attestation=candidate_anchor,
+        acceptance_review_bundle=wave_bundle,
     ) == []
     mismatched_consumption = validator.validate_s2e_launch_transition(
         wave,
@@ -1761,6 +1932,8 @@ def test_wave_generation_requires_ready_reviewed_attested_predecessor(
         consumed_predecessor_digests={
             case["issued"]["payload_digest"]
         },
+        durability_anchor_attestation=candidate_anchor,
+        acceptance_review_bundle=wave_bundle,
     )
     assert any(
         "consumed-predecessor set differs" in error
@@ -1777,6 +1950,8 @@ def test_wave_generation_requires_ready_reviewed_attested_predecessor(
         repo_root=repo,
         now=case["now"],
         consumed_predecessor_digests=frozenset(),
+        durability_anchor_attestation=candidate_anchor,
+        acceptance_review_bundle=wave_bundle,
     )
     assert any("not an issued READY" in error for error in pending_errors)
 
@@ -1790,6 +1965,8 @@ def test_wave_generation_requires_ready_reviewed_attested_predecessor(
         repo_root=repo,
         now=case["now"],
         consumed_predecessor_digests=frozenset(),
+        durability_anchor_attestation=candidate_anchor,
+        acceptance_review_bundle=wave_bundle,
     )
     assert any("review binding differs" in error for error in forged_errors)
     assert any(
@@ -1968,6 +2145,31 @@ def test_lw1_predicate_oracle_replays_evidence_and_preserves_active_package(
         )
 
 
+def _expected_anchor_observations() -> dict[str, Any]:
+    """CLI 在一次 ADVANCE 上必須輸出的 typed 觀察(兩處 floor + 一條 host identity)。
+
+    host identity 那條逐字綁**本機真實狀態**(而不是列舉兩個可能值),因此在
+    `/etc/ssh` 可讀與不可讀的主機上都是強斷言。
+    """
+
+    return {
+        "host_identity": [
+            "durability anchor replica host identity: "
+            + s2e_external.local_ssh_host_key_fingerprints()[1]
+        ],
+        "floor_verdicts": [
+            {
+                "label": "acceptance review durability anchor floor",
+                "verdict": anchor_floor.FLOOR_VERIFIED,
+            },
+            {
+                "label": "transition durability anchor floor",
+                "verdict": anchor_floor.FLOOR_VERIFIED,
+            },
+        ],
+    }
+
+
 def test_launch_cli_exposes_full_issue_carrier_authority_and_transition_gates(
     tmp_path: Path,
     monkeypatch: pytest.MonkeyPatch,
@@ -2004,25 +2206,10 @@ def test_launch_cli_exposes_full_issue_carrier_authority_and_transition_gates(
             "review-chains.json",
             authority["review_disposable_test_effect_chains"],
         ),
-        "review_intent": _json_file(
+        "review_anchor": _json_file(
             tmp_path,
-            "review-intent.json",
-            authority["review_external_append_intent"],
-        ),
-        "review_result": _json_file(
-            tmp_path,
-            "review-result.json",
-            authority["review_external_append_result"],
-        ),
-        "review_readback": _json_file(
-            tmp_path,
-            "review-readback.json",
-            authority["review_external_readback_ack"],
-        ),
-        "review_provider": _json_file(
-            tmp_path,
-            "review-provider.json",
-            authority["review_external_worm_provider_attestation"],
+            "review-anchor.json",
+            authority["review_durability_anchor_attestation"],
         ),
         "carrier_attestation": _json_file(
             tmp_path,
@@ -2034,25 +2221,10 @@ def test_launch_cli_exposes_full_issue_carrier_authority_and_transition_gates(
             "carrier-capture.json",
             authority["carrier_governed_capture_record"],
         ),
-        "carrier_intent": _json_file(
+        "carrier_anchor": _json_file(
             tmp_path,
-            "carrier-intent.json",
-            authority["carrier_external_append_intent"],
-        ),
-        "carrier_result": _json_file(
-            tmp_path,
-            "carrier-result.json",
-            authority["carrier_external_append_result"],
-        ),
-        "carrier_readback": _json_file(
-            tmp_path,
-            "carrier-readback.json",
-            authority["carrier_external_readback_ack"],
-        ),
-        "carrier_provider": _json_file(
-            tmp_path,
-            "carrier-provider.json",
-            authority["carrier_external_worm_provider_attestation"],
+            "carrier-anchor.json",
+            authority["carrier_durability_anchor_attestation"],
         ),
         "empty_chain": _json_file(tmp_path, "empty-chain.json", []),
     }
@@ -2063,10 +2235,7 @@ def test_launch_cli_exposes_full_issue_carrier_authority_and_transition_gates(
         "--acceptance-review-bundle", str(files["review_bundle"]),
         "--governed-capture-record", str(files["review_capture"]),
         "--disposable-test-effect-chains", str(files["review_chains"]),
-        "--external-append-intent", str(files["review_intent"]),
-        "--external-append-result", str(files["review_result"]),
-        "--external-readback-ack", str(files["review_readback"]),
-        "--external-worm-provider-attestation", str(files["review_provider"]),
+        "--durability-anchor-attestation", str(files["review_anchor"]),
     ]) == 2
     stale_issue = json.loads(capsys.readouterr().out)
     assert stale_issue["status"] == "EXTERNAL_VERIFICATION_PENDING"
@@ -2082,10 +2251,7 @@ def test_launch_cli_exposes_full_issue_carrier_authority_and_transition_gates(
         "--attestation", str(files["carrier_attestation"]),
         "--payload-receipt", str(files["issued"]),
         "--governed-capture-record", str(files["carrier_capture"]),
-        "--external-append-intent", str(files["carrier_intent"]),
-        "--external-append-result", str(files["carrier_result"]),
-        "--external-readback-ack", str(files["carrier_readback"]),
-        "--external-worm-provider-attestation", str(files["carrier_provider"]),
+        "--durability-anchor-attestation", str(files["carrier_anchor"]),
     ]) == 0
     assert json.loads(capsys.readouterr().out)["status"] == "VERIFIED"
     assert clock_samples == [now]
@@ -2098,18 +2264,10 @@ def test_launch_cli_exposes_full_issue_carrier_authority_and_transition_gates(
         "--acceptance-review-bundle", str(files["review_bundle"]),
         "--review-governed-capture-record", str(files["review_capture"]),
         "--review-disposable-test-effect-chains", str(files["review_chains"]),
-        "--review-external-append-intent", str(files["review_intent"]),
-        "--review-external-append-result", str(files["review_result"]),
-        "--review-external-readback-ack", str(files["review_readback"]),
-        "--review-external-worm-provider-attestation",
-        str(files["review_provider"]),
+        "--review-durability-anchor-attestation", str(files["review_anchor"]),
         "--carrier-attestation", str(files["carrier_attestation"]),
         "--carrier-governed-capture-record", str(files["carrier_capture"]),
-        "--carrier-external-append-intent", str(files["carrier_intent"]),
-        "--carrier-external-append-result", str(files["carrier_result"]),
-        "--carrier-external-readback-ack", str(files["carrier_readback"]),
-        "--carrier-external-worm-provider-attestation",
-        str(files["carrier_provider"]),
+        "--carrier-durability-anchor-attestation", str(files["carrier_anchor"]),
     ]) == 0
     rebuilt_authority = json.loads(capsys.readouterr().out)
     assert rebuilt_authority["authority_digest"] == authority["authority_digest"]
@@ -2132,6 +2290,14 @@ def test_launch_cli_exposes_full_issue_carrier_authority_and_transition_gates(
     wave = json.loads(capsys.readouterr().out)
     assert clock_samples == [now, now, now]
     wave_path = _json_file(tmp_path, "wave.json", wave)
+    wave_review = _wave_review(case, wave, monkeypatch)
+    candidate_anchor_path = _json_file(
+        tmp_path, "candidate-anchor.json", wave_review["anchor"]
+    )
+    candidate_bundle_path = _json_file(
+        tmp_path, "candidate-review-bundle.json", wave_review["bundle"]
+    )
+    # candidate 的 review anchor 缺席 ⇒ 只得結構性語義,絕不靜默 Advance。
     assert launch.main([
         "validate",
         "--repo-root", str(repo),
@@ -2140,22 +2306,67 @@ def test_launch_cli_exposes_full_issue_carrier_authority_and_transition_gates(
         "--predecessor-authority", str(authority_path),
     ]) == 0
     assert json.loads(capsys.readouterr().out) == {
-        "status": "ADVANCE",
+        "status": "STRUCTURAL_PASS_NOT_ADVANCE",
+        "anchor_gate_observations": {"host_identity": [], "floor_verdicts": []},
         "errors": [],
     }
-    assert clock_samples == [now, now, now, now]
+    assert launch.main([
+        "validate",
+        "--repo-root", str(repo),
+        "--receipt", str(wave_path),
+        "--predecessor-receipt", str(files["issued"]),
+        "--predecessor-authority", str(authority_path),
+        "--durability-anchor-attestation", str(candidate_anchor_path),
+    ]) == 0
+    # anchor 有、bundle 缺 ⇒ 候選 anchor 無從認證(payload binding 只能從 bundle
+    # 實值導出),因此與缺 anchor 同樣降級,絕不靜默 Advance。
+    assert json.loads(capsys.readouterr().out) == {
+        "status": "STRUCTURAL_PASS_NOT_ADVANCE",
+        "anchor_gate_observations": {"host_identity": [], "floor_verdicts": []},
+        "errors": [],
+    }
+    # anchor 與 bundle 都在 ⇒ 完整認證後才 Advance。
+    assert launch.main([
+        "validate",
+        "--repo-root", str(repo),
+        "--receipt", str(wave_path),
+        "--predecessor-receipt", str(files["issued"]),
+        "--predecessor-authority", str(authority_path),
+        "--durability-anchor-attestation", str(candidate_anchor_path),
+        "--acceptance-review-bundle", str(candidate_bundle_path),
+    ]) == 0
+    # E3-B/E3-E 的真消費者:verdict 與 host identity 觀察都是 typed 輸出的一格,
+    # 下游不必再從錯誤字串裡撈 `"UNVERIFIED: "` 子字串。
+    assert json.loads(capsys.readouterr().out) == {
+        "status": "ADVANCE",
+        "anchor_gate_observations": _expected_anchor_observations(),
+        "errors": [],
+    }
+    assert clock_samples == [now, now, now, now, now, now]
     assert launch.main([
         "transition-gate",
         "--repo-root", str(repo),
         "--receipt", str(wave_path),
         "--predecessor-receipt", str(files["issued"]),
         "--predecessor-authority", str(authority_path),
+        "--durability-anchor-attestation", str(candidate_anchor_path),
+        "--acceptance-review-bundle", str(candidate_bundle_path),
     ]) == 0
     assert json.loads(capsys.readouterr().out) == {
         "status": "ADVANCE",
+        "anchor_gate_observations": _expected_anchor_observations(),
         "errors": [],
     }
-    assert clock_samples == [now, now, now, now, now]
+    assert clock_samples == [now, now, now, now, now, now, now]
+    # transition-gate 的新旗標為 required:缺它必須是 argparse 層的硬失敗。
+    with pytest.raises(SystemExit):
+        launch.main([
+            "transition-gate",
+            "--repo-root", str(repo),
+            "--receipt", str(wave_path),
+            "--predecessor-receipt", str(files["issued"]),
+            "--predecessor-authority", str(authority_path),
+        ])
 
 
 def test_verified_review_bundle_issues_ready_genesis_receipt(
@@ -2257,7 +2468,7 @@ def test_verified_review_bundle_issues_ready_genesis_receipt(
             "anchor": "fixed_off_repo_public_trust_root_v1",
             "key_fingerprint": fingerprint,
         },
-        "external_worm_binding": None,
+        "durability_anchor_binding": None,
     }
     signed_bytes = validator.s2e_acceptance_review_signed_bytes(bundle)
     bundle["signed_core_digest"] = "sha256:" + hashlib.sha256(
@@ -2274,32 +2485,13 @@ def test_verified_review_bundle_issues_ready_genesis_receipt(
         ),
     }
     worm_payload = validator.s2e_acceptance_review_worm_payload(bundle)
-    intent, append_result, readback = _external_worm_triplet(
+    anchor_attestation = _durability_anchor_attestation(
         worm_payload,
-        source_head=carrier,
-        landing_scope_id=candidate["payload_digest"],
-        learning_runtime_digest=candidate["launch_contract_digest"],
-        issued_at=issued_at,
-        intent_id="s2e-review-intent-0001",
-    )
-    provider_attestation = _external_worm_provider_attestation(
-        intent,
-        append_result,
-        readback,
         trust=external_trust,
         issued_at=issued_at,
         directory=tmp_path,
     )
-    bundle["external_worm_binding"] = {
-        "result_digest": append_result["result_digest"],
-        "readback_ack_digest": readback["ack_digest"],
-        "record_locator": append_result["record_locator"],
-        "object_version_id": append_result["object_version_id"],
-        "checksum_sha256": append_result["checksum_sha256"],
-        "provider_attestation_digest": provider_attestation[
-            "attestation_digest"
-        ],
-    }
+    bundle["durability_anchor_binding"] = _anchor_binding(anchor_attestation)
     bundle["bundle_digest"] = validator.s2e_acceptance_review_bundle_digest(
         bundle
     )
@@ -2317,10 +2509,7 @@ def test_verified_review_bundle_issues_ready_genesis_receipt(
         governed_capture_record=capture,
         disposable_test_effect_chains=[disposable_chain],
         predecessor_chain=[],
-        external_append_intent=intent,
-        external_append_result=append_result,
-        external_readback_ack=readback,
-        external_worm_provider_attestation=provider_attestation,
+        durability_anchor_attestation=anchor_attestation,
         repo_root=repo,
         now=issued_at + timedelta(minutes=1),
     )
@@ -2339,10 +2528,7 @@ def test_verified_review_bundle_issues_ready_genesis_receipt(
         governed_capture_record=capture,
         disposable_test_effect_chains=[disposable_chain],
         predecessor_chain=[],
-        external_append_intent=intent,
-        external_append_result=append_result,
-        external_readback_ack=readback,
-        external_worm_provider_attestation=provider_attestation,
+        durability_anchor_attestation=anchor_attestation,
         repo_root=repo,
         now=issued_at + timedelta(minutes=1),
     )
@@ -2379,10 +2565,7 @@ def test_verified_review_bundle_issues_ready_genesis_receipt(
         acceptance_review_bundle=bundle,
         repo_root=repo,
         governed_capture_record=capture,
-        external_append_intent=intent,
-        external_append_result=append_result,
-        external_readback_ack=readback,
-        external_worm_provider_attestation=provider_attestation,
+        durability_anchor_attestation=anchor_attestation,
         disposable_test_effect_chains=[disposable_chain],
     )
     assert rejected["status"] == "EXTERNAL_VERIFICATION_PENDING"
@@ -2408,10 +2591,7 @@ def test_verified_review_bundle_issues_ready_genesis_receipt(
         acceptance_review_bundle=bundle,
         repo_root=repo,
         governed_capture_record=capture,
-        external_append_intent=intent,
-        external_append_result=append_result,
-        external_readback_ack=readback,
-        external_worm_provider_attestation=provider_attestation,
+        durability_anchor_attestation=anchor_attestation,
         disposable_test_effect_chains=[disposable_chain],
     )
 
@@ -2429,6 +2609,48 @@ def test_verified_review_bundle_issues_ready_genesis_receipt(
     assert validator.validate_s2e_launch_genesis_receipt(
         issued, repo_root=repo
     ) == []
+    # E3-B:issuance 是 floor 判定的最高價值出口。VERIFIED 必須以 typed 形式出現,
+    # 而不是靠「沒有錯誤訊息」這種由缺席推論來的證據。
+    assert issuance["anchor_gate_observations"] == {
+        "host_identity": [
+            "durability anchor replica host identity: "
+            + s2e_external.local_ssh_host_key_fingerprints()[1]
+        ],
+        "floor_verdicts": [
+            {
+                "label": "acceptance review durability anchor floor",
+                "verdict": anchor_floor.FLOOR_VERIFIED,
+            },
+        ],
+    }
+
+    # 同一份 floor、同一份 bundle,只把受保護 ref 移開:這正是 operator 2026-08-03
+    # 接受為誠實終態的那個情境(未 merge／未 fetch／CI shallow checkout)。它必須
+    # ①仍然發不出 receipt ②在 typed 出口記成 UNVERIFIED 而不是 REJECTED——後者會
+    # 把「誠實不可驗」誤報成「偽造被拒」。
+    _git(repo, "update-ref", "-d", anchor_floor._PROTECTED_ANCESTOR_REFS[0])
+    unverified = validator.issue_s2e_launch_receipt(
+        candidate,
+        acceptance_review_bundle=bundle,
+        repo_root=repo,
+        governed_capture_record=capture,
+        durability_anchor_attestation=anchor_attestation,
+        disposable_test_effect_chains=[disposable_chain],
+    )
+    assert unverified["status"] == "EXTERNAL_VERIFICATION_PENDING"
+    assert unverified["issued_receipt"] is None
+    assert unverified["next_durability_anchor_floor"] is None
+    assert unverified["anchor_gate_observations"]["floor_verdicts"] == [
+        {
+            "label": "acceptance review durability anchor floor",
+            "verdict": anchor_floor.FLOOR_UNVERIFIED,
+        },
+    ]
+    assert (
+        "acceptance review durability anchor floor: UNVERIFIED: no code-owned "
+        "protected ref resolves in this repository, so the floor's history tail "
+        "cannot be pinned to any code-owned ref"
+    ) in unverified["errors"]
 
 
 def test_generic_validator_never_schema_only_accepts_review_bundle() -> None:
@@ -2470,7 +2692,7 @@ def test_generic_validator_never_schema_only_accepts_review_bundle() -> None:
             for predicate_id in (
                 "CANDIDATE_SCHEMA_VALID",
                 "EXACT_SOURCE_HEAD_TREE_VALID",
-                "EXTERNAL_WORM_IMMUTABLE_READBACK_VALID",
+                "DURABILITY_ANCHOR_IMMUTABLE_READBACK_VALID",
                 "INDEPENDENT_GOVERNED_REVIEW_VALID",
                 "INDEPENDENT_SSHSIG_VALID",
             )
@@ -2501,14 +2723,14 @@ def test_generic_validator_never_schema_only_accepts_review_bundle() -> None:
             "signed_digest": digest,
             "signature": "x" * 32,
         },
-        "external_worm_binding": {
-            "result_digest": digest,
-            "readback_ack_digest": digest,
-            "record_locator": "records/" + "a" * 64 + ".record",
-                "object_version_id": "version-1",
-                "checksum_sha256": digest,
-                "provider_attestation_digest": digest,
-            },
+        "durability_anchor_binding": {
+            "anchor_locator": ANCHOR_LOCATOR,
+            "offhost_replica_locator": REPLICA_LOCATOR,
+            "anchor_generation": 1,
+            "anchor_head_digest": digest,
+            "replica_head_digest": digest,
+            "anchor_attestation_digest": digest,
+        },
         "bundle_digest": digest,
     }
 
@@ -2516,6 +2738,1256 @@ def test_generic_validator_never_schema_only_accepts_review_bundle() -> None:
         bundle, now="2026-07-30T12:01:00Z"
     ) == [
         "s2e acceptance review bundle EXTERNAL_VERIFICATION_PENDING: exact "
-        "candidate, governed capture, fixed-root SSHSIG, and external WORM "
-        "evidence are required"
+        "candidate, governed capture, fixed-root SSHSIG, and a trusted-host "
+        "durability anchor attestation with its off-host latest-generation "
+        "readback are required"
+    ]
+
+
+# ── Tier 1 remediation:committed anchor floor / 第二把簽章 / 600s 修法 ──────────
+
+
+def _reviewed_bundle_arguments(case: dict) -> dict:
+    """把已發行 W0 的 review bundle 還原成「歷史件」驗證所需的完整參數。"""
+
+    authority = case["authority"]
+    return {
+        "candidate": s2e._pending_candidate_from_issued(case["issued"]),
+        "governed_capture_record": authority["review_governed_capture_record"],
+        "disposable_test_effect_chains": authority[
+            "review_disposable_test_effect_chains"
+        ],
+        "predecessor_chain": [],
+        "repo_root": case["repo"],
+        "require_current_generation": False,
+    }
+
+
+def _resigned_review_bundle(
+    case: dict, *, issued_at: datetime, window: timedelta
+) -> tuple[dict, dict]:
+    """以指定時間窗重簽同一份 review bundle,並重鑄綁它的 durability anchor。"""
+
+    bundle = deepcopy(case["review_bundle"])
+    bundle["issued_at"] = issued_at.isoformat()
+    bundle["expires_at"] = (issued_at + window).isoformat()
+    bundle["durability_anchor_binding"] = None
+    signed_bytes = validator.s2e_acceptance_review_signed_bytes(bundle)
+    bundle["signed_core_digest"] = "sha256:" + hashlib.sha256(
+        signed_bytes
+    ).hexdigest()
+    bundle["signature"] = {
+        "algorithm": "SSHSIG",
+        "signed_digest": bundle["signed_core_digest"],
+        "signature": _sign_sshsig(
+            case["private_key"],
+            signed_bytes,
+            namespace=s2e.S2E_RECEIPT_SIGNATURE_NAMESPACE,
+            directory=case["tmp_path"],
+        ),
+    }
+    anchor = _durability_anchor_attestation(
+        validator.s2e_acceptance_review_worm_payload(bundle),
+        trust=case["external_trust"],
+        issued_at=issued_at,
+        directory=case["tmp_path"],
+    )
+    bundle["durability_anchor_binding"] = _anchor_binding(anchor)
+    bundle["bundle_digest"] = validator.s2e_acceptance_review_bundle_digest(bundle)
+    return bundle, anchor
+
+
+@pytest.mark.parametrize(
+    ("field", "value"),
+    (
+        ("anchor_locator", "host:append-only-durability-anchor:other-s2e"),
+        ("offhost_replica_locator", "replica:offhost-append-only:other-s2e"),
+        ("anchor_generation", 9),
+        ("anchor_head_digest", "sha256:" + "e" * 64),
+        ("replica_head_digest", "sha256:" + "e" * 64),
+        ("anchor_attestation_digest", "sha256:" + "e" * 64),
+    ),
+)
+def test_review_durability_anchor_binding_is_enforced_field_by_field(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, field: str, value: object
+) -> None:
+    """P1-4 regression:六欄逐欄篡改各一個 case,斷言逐字錯誤訊息。"""
+
+    case = _issued_genesis_authority_case(tmp_path, monkeypatch)
+    arguments = _reviewed_bundle_arguments(case)
+    assert validator.validate_s2e_launch_acceptance_review_bundle(
+        case["review_bundle"],
+        durability_anchor_attestation=case["review_anchor"],
+        now=case["now"],
+        **arguments,
+    ) == []
+    forged = deepcopy(case["review_bundle"])
+    forged["durability_anchor_binding"][field] = value
+    errors = validator.validate_s2e_launch_acceptance_review_bundle(
+        forged,
+        durability_anchor_attestation=case["review_anchor"],
+        now=case["now"],
+        **arguments,
+    )
+    assert (
+        f"acceptance review durability anchor {field} binding differs"
+    ) in errors, errors
+
+
+@pytest.mark.parametrize(
+    "field",
+    ("object_id", "version_id", "readback_digest", "provider_attestation_digest"),
+)
+def test_carrier_immutable_readback_binding_is_enforced_field_by_field(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, field: str
+) -> None:
+    case = _issued_genesis_authority_case(tmp_path, monkeypatch)
+    authority = case["authority"]
+    forged = deepcopy(authority["carrier_attestation"])
+    forged["immutable_readback"][field] = (
+        "caller-chosen" if field in {"object_id", "version_id"}
+        else "sha256:" + "e" * 64
+    )
+    result = validator.verify_receipt_carrier_attestation(
+        forged,
+        payload_receipt=case["issued"],
+        repo_root=case["repo"],
+        now=case["now"],
+        governed_capture_record=authority["carrier_governed_capture_record"],
+        durability_anchor_attestation=case["carrier_anchor"],
+    )
+    assert result["status"] == "EXTERNAL_VERIFICATION_PENDING"
+    assert (
+        f"carrier immutable readback {field} is not bound to durability anchor"
+    ) in result["errors"], result["errors"]
+
+
+def test_external_worm_adapter_is_a_named_typed_refusal(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """§7.1:enum 的第二支留在 schema,但這一代沒有 evidence validator。"""
+
+    case = _issued_genesis_authority_case(tmp_path, monkeypatch)
+    authority = case["authority"]
+    forged = deepcopy(authority["carrier_attestation"])
+    forged["immutable_readback"]["adapter"] = "EXTERNAL_WORM_V1"
+    result = validator.verify_receipt_carrier_attestation(
+        forged,
+        payload_receipt=case["issued"],
+        repo_root=case["repo"],
+        now=case["now"],
+        governed_capture_record=authority["carrier_governed_capture_record"],
+        durability_anchor_attestation=case["carrier_anchor"],
+    )
+    assert (
+        "carrier immutable readback adapter EXTERNAL_WORM_V1 has no admitted "
+        "evidence validator in this generation"
+    ) in result["errors"], result["errors"]
+
+
+def test_transition_floor_rules_bind_the_predecessor_to_git(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """§3.3(b) 五條規則,每條斷言逐字錯誤訊息。"""
+
+    case = _issued_genesis_authority_case(tmp_path, monkeypatch)
+    repo = case["repo"]
+    source_head = _commit(repo, "lw1-floor.txt", "LW1\n", "LW1 source")
+    wave = launch.build_wave_candidate(
+        repo_root=repo,
+        wave="S2E-LW1",
+        source_head=source_head,
+        schema_carrier_head=case["schema_carrier"],
+        predecessor_receipt=case["issued"],
+        predecessor_authority=case["authority"],
+        launch_contract_digest=LAUNCH_CONTRACT_DIGEST,
+        generation_task_contract_digest=NEXT_GENERATION_TASK_CONTRACT_DIGEST,
+        now=case["now"],
+    )
+
+    wave_review = _wave_review(case, wave, monkeypatch)
+    wave_bundle = wave_review["bundle"]
+
+    def gate(
+        *,
+        predecessor_receipt=None,
+        authority=None,
+        candidate_anchor=None,
+        bundle=None,
+    ):
+        return validator.validate_s2e_launch_transition(
+            wave,
+            predecessor_receipt=predecessor_receipt or case["issued"],
+            predecessor_authority=authority or case["authority"],
+            repo_root=repo,
+            now=case["now"],
+            consumed_predecessor_digests=frozenset(),
+            durability_anchor_attestation=(
+                candidate_anchor
+                if candidate_anchor is not None
+                else wave_review["anchor"]
+            ),
+            acceptance_review_bundle=(
+                wave_bundle if bundle is None else bundle
+            ),
+        )
+
+    assert gate() == []
+
+    # 規則 1:caller 換一份 predecessor ⇒ 與 git 上唯一那份 floor 對不上。
+    swapped = dict(case["issued"])
+    swapped["acceptance_review_bundle_digest"] = "sha256:" + "f" * 64
+    swapped["payload_digest"] = validator.launch_payload_digest(swapped)
+    swapped_errors = gate(predecessor_receipt=swapped)
+    assert (
+        "transition predecessor is not the receipt bound by the committed "
+        "durability anchor floor"
+    ) in swapped_errors, swapped_errors
+    assert (
+        "transition predecessor review bundle is not the bundle bound by the "
+        "committed durability anchor floor"
+    ) in swapped_errors
+
+    # 規則 2:caller 改寫前一份 anchor 的世代/head。
+    regressed = deepcopy(case["authority"])
+    regressed["review_durability_anchor_attestation"]["anchor_generation"] = 9
+    regressed["review_durability_anchor_attestation"]["anchor_head_digest"] = (
+        "sha256:" + "e" * 64
+    )
+    regressed_errors = gate(authority=regressed)
+    assert (
+        "transition predecessor review durability anchor generation differs "
+        "from the committed floor"
+    ) in regressed_errors, regressed_errors
+    assert (
+        "transition predecessor review durability anchor head differs from the "
+        "committed floor"
+    ) in regressed_errors
+
+    # 規則 3a:b 未嚴格晚於 a。
+    flattened = deepcopy(case["authority"])
+    flattened["carrier_durability_anchor_attestation"]["anchor_generation"] = 1
+    flattened_errors = gate(authority=flattened)
+    assert (
+        "transition predecessor carrier durability anchor generation does not "
+        "strictly exceed transition predecessor review durability anchor"
+    ) in flattened_errors, flattened_errors
+    assert (
+        "S2E predecessor carrier durability anchor generation does not strictly "
+        "exceed its review durability anchor"
+    ) in flattened_errors
+
+    # 規則 3b:c 未嚴格晚於 b。
+    stalled_errors = gate(
+        candidate_anchor=_candidate_review_anchor(case, wave_bundle, generation=2)
+    )
+    assert (
+        "transition candidate review durability anchor generation does not "
+        "strictly exceed transition predecessor carrier durability anchor"
+    ) in stalled_errors, stalled_errors
+
+    # 規則 4:相鄰世代必須 hash 連結。
+    unlinked_errors = gate(
+        candidate_anchor=_candidate_review_anchor(
+            case, wave_bundle, previous_head="sha256:" + "e" * 64
+        )
+    )
+    assert (
+        "transition candidate review durability anchor does not hash-link to "
+        "the immediately prior head"
+    ) in unlinked_errors, unlinked_errors
+
+    # 規則 5:c 不得無前手(P1-1 的原始 PoC:刪 ledger 尾部後重簽 gen=1/prev=null)。
+    truncated_errors = gate(
+        candidate_anchor=_candidate_review_anchor(
+            case, wave_bundle, generation=1, previous_head=None
+        )
+    )
+    assert (
+        "transition candidate review durability anchor omits its previous head"
+    ) in truncated_errors, truncated_errors
+
+
+def test_transition_authenticates_the_candidate_anchor_and_binds_its_bundle(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """PR #178 review P1:候選 anchor 必須被**認證**,不是只被排序。
+
+    原本把候選的 SSHSIG 與 `attestation_digest` 換成任意值,`transition-gate` 仍印
+    `ADVANCE`;排序檢查只證明世代數字遞增,不證明那份 attestation 是真的。
+    `acceptance_review_bundle` 是這條認證的 payload binding 來源,因此它自己也必須
+    與這張 receipt 對綁,否則呼叫端可以遞一份簽得過、但屬於別張 receipt 的 bundle。
+    """
+
+    case = _issued_genesis_authority_case(tmp_path, monkeypatch)
+    repo = case["repo"]
+    source_head = _commit(repo, "lw1-auth.txt", "LW1\n", "LW1 source")
+    wave = launch.build_wave_candidate(
+        repo_root=repo,
+        wave="S2E-LW1",
+        source_head=source_head,
+        schema_carrier_head=case["schema_carrier"],
+        predecessor_receipt=case["issued"],
+        predecessor_authority=case["authority"],
+        launch_contract_digest=LAUNCH_CONTRACT_DIGEST,
+        generation_task_contract_digest=NEXT_GENERATION_TASK_CONTRACT_DIGEST,
+        now=case["now"],
+    )
+    wave_review = _wave_review(case, wave, monkeypatch)
+    wave_bundle = wave_review["bundle"]
+    good_anchor = wave_review["anchor"]
+
+    def gate(*, anchor=None, bundle=_INHERIT_CARRIER_HEAD):
+        return validator.validate_s2e_launch_transition(
+            wave,
+            predecessor_receipt=case["issued"],
+            predecessor_authority=case["authority"],
+            repo_root=repo,
+            now=case["now"],
+            consumed_predecessor_digests=frozenset(),
+            durability_anchor_attestation=anchor or good_anchor,
+            acceptance_review_bundle=(
+                wave_bundle if bundle is _INHERIT_CARRIER_HEAD else bundle
+            ),
+        )
+
+    anchor_prefix = "transition candidate review durability anchor: "
+    # 基準:完整、真簽、bundle 對綁 ⇒ 這條路徑確實抵達並通過 anchor 認證。
+    assert gate() == []
+
+    # 1) 換掉候選 anchor 的 SSHSIG(Codex 提的原始情境)。
+    forged_signature = deepcopy(good_anchor)
+    forged_signature["signature"]["signature"] = (
+        "-----BEGIN SSH SIGNATURE-----\nQUJDRA==\n-----END SSH SIGNATURE-----"
+    )
+    forged_signature_errors = gate(anchor=forged_signature)
+    assert (
+        anchor_prefix + "durability anchor SSHSIG verification failed"
+    ) in forged_signature_errors, forged_signature_errors
+
+    # 2) 改掉候選 anchor 的 attestation_digest。
+    forged_digest = deepcopy(good_anchor)
+    forged_digest["attestation_digest"] = "sha256:" + "c" * 64
+    forged_digest_errors = gate(anchor=forged_digest)
+    assert (
+        anchor_prefix + "durability anchor attestation digest is invalid"
+    ) in forged_digest_errors, forged_digest_errors
+
+    # 3) 一份格式完整、簽得過,但屬於**別張候選**的 bundle(genesis 那份)。
+    foreign_errors = gate(bundle=case["review_bundle"])
+    assert (
+        "transition acceptance review bundle is not the one this receipt binds"
+    ) in foreign_errors, foreign_errors
+
+    # 4) 缺 bundle / 非 dict ⇒ 必須報錯,絕不是「沒傳就跳過這項檢查」。
+    for absent in (None, "sha256:" + "d" * 64, [], 0):
+        absent_errors = gate(bundle=absent)
+        assert (
+            "transition requires the exact candidate acceptance review bundle"
+        ) in absent_errors, (absent, absent_errors)
+
+
+def test_pending_candidate_bundle_binding_is_by_candidate_payload_digest(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """PENDING 候選的對綁只能走 `candidate_payload_digest`,不能是 digest-only 比對。
+
+    `_common_payload_errors:428` 禁止 PENDING 候選攜帶 `acceptance_review_bundle_digest`,
+    所以「拿 receipt 的該欄位跟 bundle digest 比對」對每一張 wave 候選都恆假——那正是
+    本 PR 第一版把 gate 變成對 wave 永久 fail-closed(連 `issue_s2e_launch_receipt`
+    的 pre-issuance 呼叫都過不了)的原因。若日後有人把它再收緊成 digest-only 比對,
+    這個測試就是那道攔阻。
+    """
+
+    case = _issued_genesis_authority_case(tmp_path, monkeypatch)
+    repo = case["repo"]
+    source_head = _commit(repo, "lw1-pending.txt", "LW1\n", "LW1 source")
+    wave = launch.build_wave_candidate(
+        repo_root=repo,
+        wave="S2E-LW1",
+        source_head=source_head,
+        schema_carrier_head=case["schema_carrier"],
+        predecessor_receipt=case["issued"],
+        predecessor_authority=case["authority"],
+        launch_contract_digest=LAUNCH_CONTRACT_DIGEST,
+        generation_task_contract_digest=NEXT_GENERATION_TASK_CONTRACT_DIGEST,
+        now=case["now"],
+    )
+    wave_review = _wave_review(case, wave, monkeypatch)
+    wave_bundle = wave_review["bundle"]
+
+    def gate(bundle):
+        return validator.validate_s2e_launch_transition(
+            wave,
+            predecessor_receipt=case["issued"],
+            predecessor_authority=case["authority"],
+            repo_root=repo,
+            now=case["now"],
+            consumed_predecessor_digests=frozenset(),
+            durability_anchor_attestation=wave_review["anchor"],
+            acceptance_review_bundle=bundle,
+        )
+
+    # 前提:PENDING 候選確實不帶 bundle digest,digest-only 比對必然恆假。
+    assert wave["checkpoint_status"] == "PENDING_REVIEW"
+    assert wave["acceptance_review_bundle_digest"] is None
+    assert wave_bundle["candidate_payload_digest"] == wave["payload_digest"]
+
+    # 對綁成立 ⇒ 抵達並通過候選 anchor 認證(零錯誤)。
+    assert gate(wave_bundle) == []
+
+    # candidate_payload_digest 對不上 ⇒ 擋下,而且是擋在對綁那一關。
+    mismatched = deepcopy(wave_bundle)
+    mismatched["candidate_payload_digest"] = "sha256:" + "b" * 64
+    mismatched_errors = gate(mismatched)
+    assert (
+        "transition acceptance review bundle is not the one this receipt binds"
+    ) in mismatched_errors, mismatched_errors
+
+
+def _floor_repo(tmp_path: Path) -> Path:
+    repo = tmp_path / "floor-repo"
+    repo.mkdir(parents=True)
+    _git(repo, "init", "-q")
+    _git(repo, "config", "user.email", "s2e-floor@example.invalid")
+    _git(repo, "config", "user.name", "S2E Floor Test")
+    (repo / "seed.txt").write_text("seed\n", encoding="ascii")
+    _git(repo, "add", "seed.txt")
+    _git(repo, "commit", "-qm", "seed")
+    return repo
+
+
+def _advanced_floor(generation: int, *, head_suffix: str = "1") -> dict:
+    floor = {
+        "schema_version": anchor_floor.DURABILITY_ANCHOR_FLOOR_SCHEMA,
+        "launch_id": s2e_external.LAUNCH_ID,
+        "state": "ADVANCED",
+        "anchor_locator": ANCHOR_LOCATOR,
+        "offhost_replica_locator": REPLICA_LOCATOR,
+        "floor_generation": generation,
+        "floor_head_digest": "sha256:" + head_suffix * 64,
+        "bound_receipt_payload_digest": "sha256:" + "2" * 64,
+        "bound_acceptance_review_bundle_digest": "sha256:" + "3" * 64,
+    }
+    floor["floor_digest"] = anchor_floor.durability_anchor_floor_digest(floor)
+    return floor
+
+
+def test_floor_gate_errors_never_returns_empty_for_a_non_verified_reading() -> None:
+    """P1-3 在呼叫端的那一半:UNVERIFIED 不得被當成沒事。
+
+    直接餵一個違反建構不變量的 reading(繞過 `_floor_reading`),證明呼叫端仍拿得到
+    非空 errors——兩個 `if reading.floor is not None:` 呼叫點因此無法靜默放行。
+    """
+
+    silent = anchor_floor.CommittedFloorReading(
+        anchor_floor.FLOOR_UNVERIFIED, None, []
+    )
+    assert anchor_floor.floor_gate_errors(silent, label="transition floor") == [
+        "transition floor: verdict UNVERIFIED carried no stated reason"
+    ]
+    # 建構入口自己也不可能產出那個形狀。
+    built = anchor_floor._floor_reading(anchor_floor.FLOOR_VERIFIED, None, [])
+    assert built.verdict == anchor_floor.FLOOR_REJECTED
+    assert built.floor is None
+    assert built.errors == [
+        "durability anchor floor is VERIFIED without a stated reason"
+    ]
+
+
+def test_absent_committed_floor_is_fail_closed(tmp_path: Path) -> None:
+    """檔案不存在 ≠ genesis。讀不到 floor 一律 fail-closed。"""
+
+    repo = _floor_repo(tmp_path)
+    reading = anchor_floor.read_committed_durability_anchor_floor(
+        repo, at_commit=_git(repo, "rev-parse", "HEAD")
+    )
+    assert reading.verdict == anchor_floor.FLOOR_REJECTED
+    assert reading.floor is None
+    assert reading.errors == [
+        "durability anchor floor is absent from the reviewed commit history"
+    ]
+
+
+def test_committed_floor_history_accepts_a_strictly_increasing_chain(
+    tmp_path: Path,
+) -> None:
+    repo = _floor_repo(tmp_path)
+    _commit_floor(repo, _genesis_armed_floor(), "arm floor")
+    expected = _advanced_floor(1)
+    head = _commit_floor(repo, expected, "advance floor")
+    reading = anchor_floor.read_committed_durability_anchor_floor(
+        repo, at_commit=head
+    )
+    assert reading.errors == []
+    assert reading.verdict == anchor_floor.FLOOR_VERIFIED
+    assert reading.floor == expected
+
+
+def test_committed_floor_off_a_protected_ref_is_unverified_not_pass(
+    tmp_path: Path,
+) -> None:
+    """P0-1:同一 writer 用一條 local branch 鑄出的 floor 只能得 UNVERIFIED。
+
+    §LW1「同一 writer 可 coherent rewrite ⇒ 只能得 UNVERIFIED」在此落地:內容完全
+    合法(線性、嚴格遞增、單一 genesis),差別只在鏈尾不是受保護 ref 的祖先。
+    """
+
+    repo = _floor_repo(tmp_path)
+    _commit_floor(repo, _genesis_armed_floor(), "arm floor", publish=False)
+    head = _commit_floor(repo, _advanced_floor(1), "advance floor", publish=False)
+    _publish(repo, _git(repo, "rev-parse", "HEAD~2"))
+    reading = anchor_floor.read_committed_durability_anchor_floor(
+        repo, at_commit=head
+    )
+    assert reading.verdict == anchor_floor.FLOOR_UNVERIFIED
+    assert reading.floor is None
+    assert reading.errors == [
+        "UNVERIFIED: its history tail is not an ancestor of any code-owned "
+        "protected ref, so a single writer could have authored it"
+    ]
+
+
+def test_committed_floor_without_any_protected_ref_is_unverified(
+    tmp_path: Path,
+) -> None:
+    """受保護 ref 一支都解析不出來時不得 fail-open,同樣只能得 UNVERIFIED。"""
+
+    repo = _floor_repo(tmp_path)
+    _commit_floor(repo, _genesis_armed_floor(), "arm floor", publish=False)
+    head = _commit_floor(repo, _advanced_floor(1), "advance floor", publish=False)
+    reading = anchor_floor.read_committed_durability_anchor_floor(
+        repo, at_commit=head
+    )
+    assert reading.verdict == anchor_floor.FLOOR_UNVERIFIED
+    # E2 F-02:舊字串隱含「是祖先時就證明了需要第二組 capability」,那正是已撤回的
+    # 宣稱(module docstring)。訊息只能講它真正能證的那件事。
+    assert reading.errors == [
+        "UNVERIFIED: no code-owned protected ref resolves in this repository, "
+        "so the floor's history tail cannot be pinned to any code-owned ref"
+    ]
+    assert not any("second capability" in error for error in reading.errors)
+
+
+def test_committed_floor_rejects_a_non_exact_commit(tmp_path: Path) -> None:
+    """P1-2:`at_commit` 在任何 git 呼叫之前逐字驗形狀,不合格不進 subprocess。
+
+    PM 於 git 2.55 實測 `--output=<path>` 這種單 token 會讓既有檔案被**截斷為 0
+    bytes** 且 exit 0。這裡用同一個 payload,並斷言哨兵檔案原封不動。
+    """
+
+    repo = _floor_repo(tmp_path)
+    _commit_floor(repo, _genesis_armed_floor(), "arm floor")
+    victim = repo / "victim.txt"
+    victim.write_text("SENTINEL-MUST-SURVIVE\n", encoding="ascii")
+    # E2 F-04:`"a"*40 + "\n"` 曾經通過 `^[0-9a-f]{40}$`(Python 的 `$` 放行尾端
+    # 換行)並真的進了 git argv。git 自己拒 ⇒ 當時仍 fail-closed,但本測試宣稱的
+    # 不變量是假的。`fullmatch` + `\Z` 之後,它在碰 subprocess 之前就被拒。
+    for injected in (
+        "--output=victim.txt", "HEAD", "", "A" * 40, "abc", "a" * 40 + "\n",
+        "\n" + "a" * 40, "a" * 40 + "\n" + "b" * 40,
+    ):
+        reading = anchor_floor.read_committed_durability_anchor_floor(
+            repo, at_commit=injected
+        )
+        assert reading.verdict == anchor_floor.FLOOR_REJECTED
+        assert reading.errors == [
+            "durability anchor floor requires an exact 40-hex reviewed commit"
+        ], injected
+    assert victim.read_text(encoding="ascii") == "SENTINEL-MUST-SURVIVE\n"
+
+
+def test_committed_zero_byte_floor_is_fail_closed(tmp_path: Path) -> None:
+    """P1-3:已 commit 的 0-byte floor 曾經是零錯誤 fail-open,回 `(None, [])`。"""
+
+    repo = _floor_repo(tmp_path)
+    relative = anchor_floor.durability_anchor_floor_repo_path()
+    target = repo / relative
+    target.parent.mkdir(parents=True, exist_ok=True)
+    target.write_bytes(b"")
+    _git(repo, "add", relative)
+    _git(repo, "commit", "-m", "empty floor")
+    head = _publish(repo)
+    reading = anchor_floor.read_committed_durability_anchor_floor(
+        repo, at_commit=head
+    )
+    assert reading.verdict == anchor_floor.FLOOR_REJECTED
+    assert reading.floor is None
+    assert reading.errors == [
+        f"commit {head[:12]} durability anchor floor JSON is invalid: "
+        "Expecting value: line 1 column 1 (char 0)"
+    ]
+
+
+def test_committed_floor_history_must_begin_with_genesis(tmp_path: Path) -> None:
+    """P1-4:orphan branch 上單一 ADVANCED commit 不得鑄出任意世代。"""
+
+    repo = _floor_repo(tmp_path)
+    head = _commit_floor(repo, _advanced_floor(7), "forge an advanced floor")
+    reading = anchor_floor.read_committed_durability_anchor_floor(
+        repo, at_commit=head
+    )
+    assert reading.verdict == anchor_floor.FLOOR_REJECTED
+    assert reading.errors == [
+        "durability anchor floor history does not begin with its GENESIS_ARMED "
+        "commit"
+    ]
+
+
+def test_committed_floor_rejects_a_non_increasing_generation(tmp_path: Path) -> None:
+    # 鏈首必須是創世(P1-4);舊 fixture 直接從 `_advanced_floor(2)` 起頭,等於把
+    # 「鏈首不必是 GENESIS_ARMED」這個洞固化成正常行為。
+    repo = _floor_repo(tmp_path)
+    _commit_floor(repo, _genesis_armed_floor(), "arm floor")
+    _commit_floor(repo, _advanced_floor(2), "advance floor")
+    head = _commit_floor(repo, _advanced_floor(2, head_suffix="4"), "replay floor")
+    reading = anchor_floor.read_committed_durability_anchor_floor(
+        repo, at_commit=head
+    )
+    assert reading.verdict == anchor_floor.FLOOR_REJECTED
+    assert reading.floor is None
+    assert reading.errors == [
+        "durability anchor floor generation is not strictly increasing"
+    ]
+
+
+def test_committed_floor_rejects_a_changed_invariant_field(tmp_path: Path) -> None:
+    """M11:`_FLOOR_INVARIANT_FIELDS` 跨歷史不可變。
+
+    線性、嚴格遞增、單一 genesis 全部成立,唯一的違例是 locator 被換掉。
+    """
+
+    repo = _floor_repo(tmp_path)
+    _commit_floor(repo, _genesis_armed_floor(), "arm floor")
+    _commit_floor(repo, _advanced_floor(1), "advance floor")
+    switched = _advanced_floor(2, head_suffix="5")
+    switched["anchor_locator"] = ANCHOR_LOCATOR + "-switched"
+    switched["floor_digest"] = anchor_floor.durability_anchor_floor_digest({
+        key: value for key, value in switched.items() if key != "floor_digest"
+    })
+    head = _commit_floor(repo, switched, "switch the anchor locator")
+    reading = anchor_floor.read_committed_durability_anchor_floor(
+        repo, at_commit=head
+    )
+    assert reading.verdict == anchor_floor.FLOOR_REJECTED
+    assert reading.errors == [
+        "durability anchor floor anchor_locator changed across its history"
+    ]
+
+
+def test_committed_floor_rejects_a_shallow_object_store(tmp_path: Path) -> None:
+    """P1-5:shallow clone 讓被 rollback 的那段歷史整段從走訪中消失。"""
+
+    repo = _floor_repo(tmp_path)
+    _commit_floor(repo, _genesis_armed_floor(), "arm floor")
+    _commit_floor(repo, _advanced_floor(2), "advance floor")
+    _commit_floor(repo, _advanced_floor(1, head_suffix="7"), "roll the floor back")
+    shallow = tmp_path / "shallow"
+    _git(repo, "clone", "-q", "--depth", "1", f"file://{repo}", str(shallow))
+    _git(shallow, "update-ref", anchor_floor._PROTECTED_ANCESTOR_REFS[0], "HEAD")
+    reading = anchor_floor.read_committed_durability_anchor_floor(
+        shallow, at_commit=_git(shallow, "rev-parse", "HEAD")
+    )
+    assert reading.verdict == anchor_floor.FLOOR_REJECTED
+    assert reading.errors == [
+        "durability anchor floor cannot be read from a shallow repository"
+    ]
+
+
+def test_committed_floor_rejects_a_replace_ref_object_store(tmp_path: Path) -> None:
+    """P1-5:replace ref 可以把任一 commit 的內容整個換掉。"""
+
+    repo = _floor_repo(tmp_path)
+    _commit_floor(repo, _genesis_armed_floor(), "arm floor")
+    head = _commit_floor(repo, _advanced_floor(1), "advance floor")
+    _git(repo, "update-ref", "refs/replace/" + head, head)
+    reading = anchor_floor.read_committed_durability_anchor_floor(
+        repo, at_commit=head
+    )
+    assert reading.verdict == anchor_floor.FLOOR_REJECTED
+    assert reading.errors == [
+        "durability anchor floor cannot be read from a repository that "
+        "rewrites objects through replace refs"
+    ]
+
+
+def test_committed_floor_ignores_an_ambient_git_dir(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """P1-6:ambient `GIT_DIR` 曾經蓋過 `-C`,讓驗證器讀到攻擊者 repo 且零錯誤。"""
+
+    honest = _floor_repo(tmp_path / "honest")
+    _commit_floor(honest, _genesis_armed_floor(), "arm floor")
+    head = _commit_floor(honest, _advanced_floor(1), "advance floor")
+    attacker = _floor_repo(tmp_path / "attacker")
+    _commit_floor(attacker, _genesis_armed_floor(), "arm forged floor")
+    _commit_floor(attacker, _advanced_floor(9, head_suffix="9"), "forge gen 9")
+    monkeypatch.setenv("GIT_DIR", str(attacker / ".git"))
+    monkeypatch.setenv("GIT_WORK_TREE", str(attacker))
+    reading = anchor_floor.read_committed_durability_anchor_floor(
+        honest, at_commit=head
+    )
+    assert reading.verdict == anchor_floor.FLOOR_VERIFIED
+    assert reading.floor is not None
+    assert reading.floor["floor_generation"] == 1
+
+
+def test_committed_floor_rejects_a_second_genesis(tmp_path: Path) -> None:
+    """想第二次進 genesis,必須 commit 一份把 generation 退回 0 的 floor。"""
+
+    repo = _floor_repo(tmp_path)
+    _commit_floor(repo, _genesis_armed_floor(), "arm floor")
+    _commit_floor(repo, _advanced_floor(1), "advance floor")
+    head = _commit_floor(repo, _genesis_armed_floor(), "re-arm floor")
+    reading = anchor_floor.read_committed_durability_anchor_floor(
+        repo, at_commit=head
+    )
+    assert reading.floor is None
+    assert (
+        "durability anchor floor re-enters GENESIS_ARMED after its first commit"
+    ) in reading.errors, reading.errors
+
+
+def test_committed_floor_rejects_a_forked_history(tmp_path: Path) -> None:
+    """merge topology 下兩份互不為祖先的 floor commit ⇒ 順序歧義,fail-closed。"""
+
+    repo = _floor_repo(tmp_path)
+    _commit_floor(repo, _genesis_armed_floor(), "arm floor")
+    base = _git(repo, "rev-parse", "HEAD")
+    _commit_floor(repo, _advanced_floor(1), "floor on main")
+    main_head = _git(repo, "rev-parse", "HEAD")
+    _git(repo, "checkout", "-q", "-b", "sibling", base)
+    _commit_floor(repo, _advanced_floor(2), "floor on sibling")
+    _git(repo, "checkout", "-q", "-")
+    _git(repo, "merge", "-q", "--no-edit", "-X", "theirs", "sibling")
+    head = _publish(repo)
+    assert head != main_head
+    reading = anchor_floor.read_committed_durability_anchor_floor(
+        repo, at_commit=head
+    )
+    assert reading.floor is None
+    assert (
+        "durability anchor floor history is not a single ancestor chain"
+    ) in reading.errors, reading.errors
+
+
+def test_committed_floor_tail_byte_check_is_reachable_through_its_seam(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """M10:尾端 byte-for-byte 在祖先鏈為真時不可孤立觸發(defense-in-depth)。
+
+    `at_commit` 選一個**不觸碰 floor** 的後續 commit,於是鏈內 `show` 用的是鏈尾
+    SHA、尾端 `show` 用的是 `at_commit`,兩者可分辨;monkeypatch 只改後者。真實
+    git 下兩次必然回同一份 blob,所以這條只能在 seam 層測——但它不是沉默的覆蓋債。
+    """
+
+    repo = _floor_repo(tmp_path)
+    _commit_floor(repo, _genesis_armed_floor(), "arm floor")
+    _commit_floor(repo, _advanced_floor(1), "advance floor")
+    head = _commit(repo, "unrelated.txt", "unrelated\n", "unrelated change")
+    _publish(repo, head)
+    real_git_bytes = anchor_floor._git_bytes
+
+    def tampered(repo_root: Path, *args: str) -> bytes:
+        raw = real_git_bytes(repo_root, *args)
+        if args[0] == "show" and args[-1].startswith(head):
+            return raw + b" "
+        return raw
+
+    monkeypatch.setattr(anchor_floor, "_git_bytes", tampered)
+    reading = anchor_floor.read_committed_durability_anchor_floor(
+        repo, at_commit=head
+    )
+    assert reading.verdict == anchor_floor.FLOOR_REJECTED
+    assert reading.errors == [
+        "durability anchor floor at the reviewed commit differs byte-for-byte "
+        "from its own history tail"
+    ]
+
+
+def test_advanced_floor_rejects_a_replayed_generation(tmp_path: Path) -> None:
+    """M14:ADVANCED floor 下 `anchor_generation == floor_generation` 是重放。
+
+    genesis 分支另有 `generation != 1` 的硬檢查,只有 ADVANCED 這一支裸露。
+    """
+
+    floor = _advanced_floor(4)
+    errors = anchor_floor.durability_anchor_floor_errors(
+        {
+            "anchor_locator": floor["anchor_locator"],
+            "offhost_replica_locator": floor["offhost_replica_locator"],
+            "anchor_generation": floor["floor_generation"],
+            "previous_anchor_head_digest": "sha256:" + "8" * 64,
+        },
+        floor=floor,
+        label="replayed anchor",
+    )
+    assert (
+        "replayed anchor generation does not strictly exceed the committed floor"
+    ) in errors, errors
+
+
+def test_historical_review_bundle_is_freed_from_wall_clock_but_not_from_its_bound(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """§7.4:被 digest 釘死的歷史件免除時鐘謂詞;窗長上界恆檢查。"""
+
+    case = _issued_genesis_authority_case(tmp_path, monkeypatch)
+    arguments = _reviewed_bundle_arguments(case)
+    frozen_now = case["now"]
+    long_past = case["issued_at"] - timedelta(days=365)
+
+    # 1. 歷史件在遠早於凍結 now 的窗內 ⇒ 免除 wall-clock 後完全通過。
+    historical, historical_anchor = _resigned_review_bundle(
+        case, issued_at=long_past, window=timedelta(minutes=5)
+    )
+    assert validator.validate_s2e_launch_acceptance_review_bundle(
+        historical,
+        durability_anchor_attestation=historical_anchor,
+        now=frozen_now,
+        require_current_freshness=False,
+        **arguments,
+    ) == []
+
+    # 2. 同一份歷史件把窗長改成 601 秒 ⇒ 必須仍然紅(鬆綁的是謂詞,不是上界)。
+    over_window, over_window_anchor = _resigned_review_bundle(
+        case, issued_at=long_past, window=timedelta(seconds=601)
+    )
+    over_window_errors = validator.validate_s2e_launch_acceptance_review_bundle(
+        over_window,
+        durability_anchor_attestation=over_window_anchor,
+        now=frozen_now,
+        require_current_freshness=False,
+        **arguments,
+    )
+    assert (
+        "acceptance review freshness window exceeds 600 seconds"
+    ) in over_window_errors, over_window_errors
+
+    # 3. 現時件(candidate 側,預設 True)過期 ⇒ 必須紅。
+    current_errors = validator.validate_s2e_launch_acceptance_review_bundle(
+        historical,
+        durability_anchor_attestation=historical_anchor,
+        now=frozen_now,
+        **arguments,
+    )
+    assert (
+        "acceptance review bundle is stale or not yet valid"
+    ) in current_errors, current_errors
+    assert (
+        "acceptance review durability anchor: durability anchor is stale or not "
+        "yet valid"
+    ) in current_errors
+
+    # 4. carrier 與 carrier anchor 恆維持 wall-clock。
+    authority = case["authority"]
+    late = frozen_now + timedelta(minutes=30)
+    carrier_result = validator.verify_receipt_carrier_attestation(
+        authority["carrier_attestation"],
+        payload_receipt=case["issued"],
+        repo_root=case["repo"],
+        now=late,
+        governed_capture_record=authority["carrier_governed_capture_record"],
+        durability_anchor_attestation=case["carrier_anchor"],
+    )
+    assert carrier_result["status"] == "EXTERNAL_VERIFICATION_PENDING"
+    assert (
+        "durability anchor: durability anchor is stale or not yet valid"
+    ) in carrier_result["errors"], carrier_result["errors"]
+    assert any(
+        "carrier attestation" in error and "stale" in error
+        for error in carrier_result["errors"]
+    ), carrier_result["errors"]
+    late_authority_errors = validator.validate_s2e_launch_predecessor_authority(
+        authority,
+        predecessor_receipt=case["issued"],
+        repo_root=case["repo"],
+        now=late,
+    )
+    assert any(
+        error.startswith("S2E predecessor carrier: ") and "stale" in error
+        for error in late_authority_errors
+    ), late_authority_errors
+    # 5. 歷史側在同一次呼叫裡不得再貢獻任何 stale 錯誤。
+    assert not any(
+        error.startswith("S2E predecessor review: ") and "stale" in error
+        for error in late_authority_errors
+    ), late_authority_errors
+
+
+def test_carrier_attestation_window_length_upper_bound_is_enforced(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """carrier 是現時件,其 600 秒窗長上界與 review 側同樣是恆檢查。"""
+
+    case = _issued_genesis_authority_case(tmp_path, monkeypatch)
+    forged = deepcopy(case["authority"]["carrier_attestation"])
+    issued_at = datetime.fromisoformat(forged["issued_at"])
+    forged["expires_at"] = (issued_at + timedelta(seconds=601)).isoformat()
+    errors = validator.validate_receipt_carrier_attestation(
+        forged,
+        payload_receipt=case["issued"],
+        repo_root=case["repo"],
+        now=(issued_at + timedelta(seconds=1)).isoformat(),
+    )
+    assert (
+        "carrier attestation freshness window exceeds 600 seconds"
+    ) in errors, errors
+
+
+def _graft_file(repo: Path) -> Path:
+    common = Path(_git(repo, "rev-parse", "--git-common-dir"))
+    if not common.is_absolute():
+        common = repo / common
+    return common / "info" / "grafts"
+
+
+def test_committed_floor_rejects_a_grafts_file(tmp_path: Path) -> None:
+    """E2 F-01:grafts 是 replace ref 的前身,舊版只查後者。
+
+    E2 與 E3 對此互相矛盾,E1 於 git 2.55 實測裁定 **E2 對**:
+    - E2 形(`<rollback> <genesis>`)把中間那筆 gen=2 從 `--full-history` 走訪裡整個
+      移除,同一份被 rollback 的 repo 由 REJECTED 翻成 **VERIFIED gen=1**,而且照樣
+      通過受保護 ref 檢查——這才是危險形態。
+    - E3 形(只把創世變成 root)不改動 floor 觸碰序,本來就 REJECTED。
+    修法後兩種構造都必須 fail-closed,而且理由是 grafts 檔案本身而非某一種寫法。
+    """
+
+    repo = _floor_repo(tmp_path)
+    genesis = _commit_floor(repo, _genesis_armed_floor(), "arm floor")
+    _commit_floor(repo, _advanced_floor(2), "advance floor to 2")
+    head = _commit_floor(repo, _advanced_floor(1, head_suffix="7"), "roll back to 1")
+    # 控制組:沒有 grafts 時,回退是被 generation 規則抓到的。
+    assert anchor_floor.read_committed_durability_anchor_floor(
+        repo, at_commit=head
+    ).errors == [
+        "durability anchor floor generation is not strictly increasing"
+    ]
+    grafts = _graft_file(repo)
+    grafts.parent.mkdir(parents=True, exist_ok=True)
+    grafts.write_text(f"{head} {genesis}\n", encoding="ascii")
+    grafted = anchor_floor.read_committed_durability_anchor_floor(
+        repo, at_commit=head
+    )
+    assert grafted.verdict == anchor_floor.FLOOR_REJECTED
+    assert grafted.floor is None
+    assert (
+        "durability anchor floor cannot be read from a repository that "
+        "rewrites commit parentage through a grafts file"
+    ) in grafted.errors, grafted.errors
+    # E3 形:同一條檢查一樣擋得住,不需要辨認寫法。
+    grafts.write_text(f"{genesis}\n", encoding="ascii")
+    assert (
+        "durability anchor floor cannot be read from a repository that "
+        "rewrites commit parentage through a grafts file"
+    ) in anchor_floor.read_committed_durability_anchor_floor(
+        repo, at_commit=head
+    ).errors
+
+
+def test_committed_floor_rejects_a_promisor_partial_clone(tmp_path: Path) -> None:
+    """E3-D:partial clone 不是 shallow,舊版放行後 `git show` 會走網路抓 blob。"""
+
+    repo = _floor_repo(tmp_path)
+    _commit_floor(repo, _genesis_armed_floor(), "arm floor")
+    _commit_floor(repo, _advanced_floor(1), "advance floor")
+    _git(repo, "config", "uploadpack.allowFilter", "true")
+    partial = tmp_path / "partial"
+    _git(
+        repo, "clone", "-q", "--no-local", "--filter=blob:none",
+        f"file://{repo}", str(partial),
+    )
+    _git(partial, "update-ref", anchor_floor._PROTECTED_ANCESTOR_REFS[0], "HEAD")
+    # 前提:promisor clone 自報「不是 shallow」,所以舊的那條檢查守不住。
+    assert _git(partial, "rev-parse", "--is-shallow-repository") == "false"
+    reading = anchor_floor.read_committed_durability_anchor_floor(
+        partial, at_commit=_git(partial, "rev-parse", "HEAD")
+    )
+    assert reading.verdict == anchor_floor.FLOOR_REJECTED
+    assert (
+        "durability anchor floor cannot be read from a promisor partial clone"
+    ) in reading.errors, reading.errors
+
+
+def test_committed_floor_never_resolves_git_from_the_ambient_path(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """E3-A:ambient `PATH` 曾經決定哪個二進位被當成 `git` 執行(RCE)。
+
+    PM 實測:把假 `git` 放到 PATH 最前面,`read_committed_durability_anchor_floor`
+    會真的執行它(uid=501),E3 用完整 stub 應答 7 次呼叫後拿到 `VERIFIED gen=4242`
+    且 repo_root 根本不存在。此處的哨兵檔案是唯一判準:被執行過就必然留下痕跡。
+    """
+
+    repo = _floor_repo(tmp_path)
+    _commit_floor(repo, _genesis_armed_floor(), "arm floor")
+    head = _commit_floor(repo, _advanced_floor(1), "advance floor")
+    hostile = tmp_path / "hostile-bin"
+    hostile.mkdir()
+    sentinel = tmp_path / "hostile-git-was-executed"
+    fake = hostile / "git"
+    fake.write_text(
+        "#!/bin/sh\n"
+        f"echo executed >> {sentinel}\n"
+        'case "$*" in *--is-shallow-repository*) echo false ;; esac\n'
+        "exit 0\n",
+        encoding="ascii",
+    )
+    fake.chmod(0o755)
+    monkeypatch.setenv("PATH", f"{hostile}{os.pathsep}{os.environ.get('PATH', '')}")
+    reading = anchor_floor.read_committed_durability_anchor_floor(
+        repo, at_commit=head
+    )
+    assert not sentinel.exists(), sentinel.read_text(encoding="ascii")
+    assert reading.verdict == anchor_floor.FLOOR_VERIFIED
+    assert reading.floor is not None and reading.floor["floor_generation"] == 1
+    # argv[0] 亦為 code-owned 絕對路徑,不只是靠 env 的 PATH。
+    argv = schema_core.git_argv(repo, "rev-parse", "HEAD")
+    assert argv[0].startswith("/") and str(hostile) not in argv[0]
+    assert schema_core.git_subprocess_env()["PATH"] == os.pathsep.join(
+        schema_core._GIT_SEARCH_PATH
+    )
+    assert str(hostile) not in schema_core.git_subprocess_env()["PATH"]
+    assert schema_core.git_subprocess_env()["LC_ALL"] == "C"
+
+
+def test_committed_floor_refuses_a_repository_owned_by_another_uid(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """E3 round-4 R4-1:差異 uid 時 git 拒讀,而拒讀就是**正確**的結果。
+
+    前身是 E2 F-05 的測試,斷言同一情境得 `FLOOR_VERIFIED`——那是因為 `git_argv`
+    當時顯式帶了 command 域的 `safe.directory`。該旗標把 git 自己的 fail-closed
+    拒讀換成「信任這個 repo 的 local config」,而本家族會跑 `git status`
+    (`_require_clean`),`git status` 會執行 `.git/config` 裡的 `core.fsmonitor`
+    ⇒ 寫得了 `.git/config` 的非 root repo owner 能以驗證器身分執行任意程式。
+    旗標已移除;此處把斷言一併翻正:**拒讀、不得 VERIFIED**。差異 uid 拓撲的放行
+    是 operator 寫進 root 自己的 protected config,不是代碼自己認可。
+    """
+
+    repo = _floor_repo(tmp_path)
+    _commit_floor(repo, _genesis_armed_floor(), "arm floor")
+    head = _commit_floor(repo, _advanced_floor(1), "advance floor")
+    knob = "GIT_TEST_ASSUME_DIFFERENT_OWNER"
+    probe = subprocess.run(
+        [schema_core.git_executable(), "-C", str(repo), "rev-parse", "HEAD"],
+        capture_output=True,
+        text=True,
+        env={**schema_core.git_subprocess_env(), knob: "1"},
+    )
+    if probe.returncode == 0:
+        pytest.skip(f"this git ignores {knob}; the ownership path is unreachable")
+    assert "dubious ownership" in probe.stderr, probe.stderr
+    monkeypatch.setattr(
+        schema_core, "_GIT_ENV_ALLOWLIST", (*schema_core._GIT_ENV_ALLOWLIST, knob)
+    )
+    monkeypatch.setenv(knob, "1")
+    reading = anchor_floor.read_committed_durability_anchor_floor(
+        repo, at_commit=head
+    )
+    assert reading.verdict != anchor_floor.FLOOR_VERIFIED
+    assert reading.floor is None
+    assert reading.errors, "a refused read must name its reason"
+
+
+def test_git_argv_does_not_trust_the_repositorys_own_config(tmp_path: Path) -> None:
+    """E3 round-4 R4-1 的執法面:argv 不得帶 `safe.directory`,且 `.git/config`
+    裡的 `core.fsmonitor` 不得被本家族的 `git status` 執行。
+
+    R4-1 的實測(git 2.50.1)是 `git -c safe.directory=<repo> -C <repo> status`
+    會跑 `core.fsmonitor`。逐鍵 denylist 收斂不了(`filter.<drv>.clean` 經
+    `.gitattributes` 走同一條路),所以這裡釘的是**不認可**這件事本身。
+
+    誠實邊界:同 uid 時 git 本來就讀自己的 local config,`core.fsmonitor` 照跑——
+    那不是提權,因為寫 config 的人就是驗證器自己。有意義的只有**差異 uid** 那條,
+    所以 hook 部分在 `GIT_TEST_ASSUME_DIFFERENT_OWNER` 底下驗。
+    """
+
+    repo = _floor_repo(tmp_path)
+    argv = schema_core.git_argv(repo, "status", "--porcelain=v1")
+    assert not any("safe.directory" in token for token in argv), argv
+
+    sentinel = tmp_path / "fsmonitor-was-executed"
+    hook = tmp_path / "fsmonitor-hook.sh"
+    hook.write_text(
+        "#!/bin/sh\n" f"echo executed >> {sentinel}\n" "exit 0\n", encoding="ascii"
+    )
+    hook.chmod(0o755)
+    subprocess.run(
+        [schema_core.git_executable(), "-C", str(repo), "config", "core.fsmonitor",
+         str(hook)],
+        check=True,
+        capture_output=True,
+    )
+    knob = "GIT_TEST_ASSUME_DIFFERENT_OWNER"
+    env = {**schema_core.git_subprocess_env(), knob: "1"}
+    probe = subprocess.run(
+        schema_core.git_argv(repo, "status", "--porcelain=v1", "--untracked-files=all"),
+        capture_output=True,
+        text=True,
+        env=env,
+    )
+    if probe.returncode == 0:
+        pytest.skip(f"this git ignores {knob}; the escalation path is unreachable")
+    assert "dubious ownership" in probe.stderr, probe.stderr
+    assert not sentinel.exists(), sentinel.read_text(encoding="ascii")
+
+
+def test_committed_floor_git_calls_are_time_bounded(tmp_path: Path) -> None:
+    """E3-D:本模組曾是同家族唯一沒有 `timeout=` 的 git 呼叫者。"""
+
+    repo = _floor_repo(tmp_path)
+    _commit_floor(repo, _genesis_armed_floor(), "arm floor")
+    head = _commit_floor(repo, _advanced_floor(1), "advance floor")
+    real_run = subprocess.run
+    seen: list[Any] = []
+
+    def spy(*args, **kwargs):
+        seen.append(kwargs.get("timeout"))
+        return real_run(*args, **kwargs)
+
+    with pytest.MonkeyPatch.context() as patch:
+        patch.setattr(subprocess, "run", spy)
+        anchor_floor.read_committed_durability_anchor_floor(repo, at_commit=head)
+    assert seen, "no git subprocess was observed"
+    assert all(
+        isinstance(timeout, (int, float)) and timeout > 0 for timeout in seen
+    ), seen
+    # 逾時必須被捕捉成 fail-closed 判定,不得裸逸出驗證函式。
+    assert subprocess.TimeoutExpired in anchor_floor._GIT_FAILURES or issubclass(
+        subprocess.TimeoutExpired, anchor_floor._GIT_FAILURES
+    )
+
+
+def test_committed_floor_admits_a_legitimate_back_merged_history(
+    tmp_path: Path,
+) -> None:
+    """E3-C:`--full-history` 會列出 merge,舊的 32 上界誤殺合法歷史。
+
+    E3 實測合法的 6 次推進在 3 次 back-merge 下列 31 筆、4 次下列 37 筆。此處直接
+    構造出超過舊上界的合法歷史,並斷言它 **不是** 被上界擋掉的。
+    """
+
+    repo = _floor_repo(tmp_path)
+    _git(repo, "branch", "-M", "main")
+    _commit_floor(repo, _genesis_armed_floor(), "arm floor", publish=False)
+    _git(repo, "checkout", "-q", "-b", "long-lived")
+    rounds = 20
+    for index in range(rounds):
+        _commit_floor(
+            repo, _advanced_floor(index + 1), f"branch advance {index}",
+            publish=False,
+        )
+        if index == rounds - 1:
+            break
+        _git(repo, "checkout", "-q", "main")
+        _git(repo, "merge", "-q", "--no-ff", "--no-edit", "long-lived")
+        _git(repo, "checkout", "-q", "long-lived")
+        _git(repo, "merge", "-q", "--no-ff", "--no-edit", "main")
+    head = _publish(repo)
+    listed = _git(
+        repo, "log", "--format=%H", "--full-history", head, "--",
+        anchor_floor.durability_anchor_floor_repo_path(),
+    ).split()
+    assert len(listed) > 32, len(listed)
+    assert len(listed) <= anchor_floor.MAX_FLOOR_HISTORY_COMMITS, len(listed)
+    reading = anchor_floor.read_committed_durability_anchor_floor(
+        repo, at_commit=head
+    )
+    assert reading.verdict == anchor_floor.FLOOR_VERIFIED, reading.errors
+    assert reading.floor is not None
+    assert reading.floor["floor_generation"] == rounds
+
+
+def test_committed_floor_rejects_a_history_beyond_its_admitted_length(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """上界本身仍必須是 fail-closed 的,只是位置改了。"""
+
+    repo = _floor_repo(tmp_path)
+    _commit_floor(repo, _genesis_armed_floor(), "arm floor")
+    head = _commit_floor(repo, _advanced_floor(1), "advance floor")
+    monkeypatch.setattr(anchor_floor, "MAX_FLOOR_HISTORY_COMMITS", 1)
+    reading = anchor_floor.read_committed_durability_anchor_floor(
+        repo, at_commit=head
+    )
+    assert reading.verdict == anchor_floor.FLOOR_REJECTED
+    assert reading.errors == [
+        "durability anchor floor history exceeds its admitted length"
+    ]
+
+
+def test_floor_verdict_is_typed_beyond_the_module_boundary(tmp_path: Path) -> None:
+    """E3-B:出模組一步就只剩無型別 errors,REJECTED 與 UNVERIFIED 被壓成同一種。
+
+    PM 2026-08-04 裁決:UNVERIFIED 仍然擋,但下游必須能區分「偽造的 floor 被拒」與
+    「未 merge 因而誠實不可驗」,且不得靠 `"UNVERIFIED: "` 子字串。
+    """
+
+    honest = _floor_repo(tmp_path / "unmerged")
+    _commit_floor(honest, _genesis_armed_floor(), "arm floor", publish=False)
+    unmerged_head = _commit_floor(
+        honest, _advanced_floor(1), "advance floor", publish=False
+    )
+    forged = _floor_repo(tmp_path / "forged")
+    forged_head = _commit_floor(forged, _advanced_floor(7), "forge an advanced floor")
+
+    observations = anchor_floor.AnchorGateObservations()
+    unmerged_errors = anchor_floor.floor_gate_errors(
+        anchor_floor.read_committed_durability_anchor_floor(
+            honest, at_commit=unmerged_head
+        ),
+        label="acceptance review durability anchor floor",
+        observations=observations,
+    )
+    forged_errors = anchor_floor.floor_gate_errors(
+        anchor_floor.read_committed_durability_anchor_floor(
+            forged, at_commit=forged_head
+        ),
+        label="transition durability anchor floor",
+        observations=observations,
+    )
+    # 兩者都仍然擋(UNVERIFIED 不是 PASS),而且逐字釘住訊息:只斷言「errors 非空」
+    # 會讓「UNVERIFIED 改判 PASS」這種變異在別處補一條無關錯誤時仍然綠。
+    assert unmerged_errors == [
+        "acceptance review durability anchor floor: UNVERIFIED: no code-owned "
+        "protected ref resolves in this repository, so the floor's history tail "
+        "cannot be pinned to any code-owned ref"
+    ]
+    assert forged_errors == [
+        "transition durability anchor floor: durability anchor floor history "
+        "does not begin with its GENESIS_ARMED commit"
+    ]
+    # 但 typed 輸出裡分得開,且不需要解析錯誤字串。
+    assert observations.as_records() == {
+        "host_identity": [],
+        "floor_verdicts": [
+            {
+                "label": "acceptance review durability anchor floor",
+                "verdict": anchor_floor.FLOOR_UNVERIFIED,
+            },
+            {
+                "label": "transition durability anchor floor",
+                "verdict": anchor_floor.FLOOR_REJECTED,
+            },
+        ],
+    }
+    assert anchor_floor.host_identity_sink(None) is None
+    assert anchor_floor.host_identity_sink(observations) is (
+        observations.host_identity
+    )
+    # 同一條路徑被重跑(issuance 就會)只是噪音,投影必須冪等;但**同一 label 兩個
+    # 不同 verdict** 是真矛盾,不得被去重壓平。
+    repeated = anchor_floor.AnchorGateObservations()
+    for verdict in (
+        anchor_floor.FLOOR_UNVERIFIED,
+        anchor_floor.FLOOR_UNVERIFIED,
+        anchor_floor.FLOOR_REJECTED,
+    ):
+        repeated.floor_verdicts.append(
+            anchor_floor.FloorVerdictObservation("transition floor", verdict)
+        )
+    assert repeated.as_records()["floor_verdicts"] == [
+        {"label": "transition floor", "verdict": anchor_floor.FLOOR_REJECTED},
+        {"label": "transition floor", "verdict": anchor_floor.FLOOR_UNVERIFIED},
     ]

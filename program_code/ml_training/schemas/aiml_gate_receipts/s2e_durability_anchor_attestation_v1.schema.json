@@ -1,0 +1,140 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://arcane-equilibrium.local/schemas/s2e_durability_anchor_attestation_v1.schema.json",
+  "title": "s2e_durability_anchor_attestation_v1",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "schema_version", "purpose", "evidence_class", "anchor_class",
+    "anchor_locator", "anchor_host_fingerprint", "launch_id",
+    "terminal_payload_digest",
+    "anchor_generation", "previous_anchor_head_digest", "anchor_entry_digest",
+    "anchor_head_digest", "offhost_replica_locator",
+    "offhost_replica_readback", "observed_at", "expires_at", "signer",
+    "signed_core_digest", "signature", "attestation_digest"
+  ],
+  "properties": {
+    "schema_version": {"const": "s2e_durability_anchor_attestation_v1"},
+    "purpose": {"const": "ATTEST_S2E_APPEND_ONLY_DURABILITY_AND_OFFHOST_READBACK"},
+    "evidence_class": {"const": "PLATFORM_OR_EXTERNAL_ATTESTED"},
+    "anchor_class": {"const": "HOST_APPEND_ONLY_DURABILITY_ANCHOR_V1"},
+    "anchor_locator": {
+      "type": "string",
+      "minLength": 36,
+      "maxLength": 512,
+      "pattern": "^host:append-only-durability-anchor:[a-z0-9][a-z0-9._:/-]*$"
+    },
+    "anchor_host_fingerprint": {"$ref": "#/$defs/ssh_fingerprint"},
+    "launch_id": {"const": "S2E-LW1-LW5"},
+    "terminal_payload_digest": {"$ref": "#/$defs/digest"},
+    "anchor_generation": {"type": "integer", "minimum": 1},
+    "previous_anchor_head_digest": {
+      "oneOf": [{"$ref": "#/$defs/digest"}, {"type": "null"}]
+    },
+    "anchor_entry_digest": {"$ref": "#/$defs/digest"},
+    "anchor_head_digest": {"$ref": "#/$defs/digest"},
+    "offhost_replica_locator": {
+      "type": "string",
+      "minLength": 29,
+      "maxLength": 512,
+      "pattern": "^replica:offhost-append-only:[a-z0-9][a-z0-9._:/-]*$"
+    },
+    "offhost_replica_readback": {"$ref": "#/$defs/replica_readback"},
+    "observed_at": {"$ref": "#/$defs/timestamp"},
+    "expires_at": {"$ref": "#/$defs/timestamp"},
+    "signer": {"$ref": "#/$defs/signer"},
+    "signed_core_digest": {"$ref": "#/$defs/digest"},
+    "signature": {"$ref": "#/$defs/signature"},
+    "attestation_digest": {"$ref": "#/$defs/digest"}
+  },
+  "$defs": {
+    "digest": {"type": "string", "pattern": "^sha256:[0-9a-f]{64}$"},
+    "timestamp": {"type": "string", "format": "date-time"},
+    "ssh_fingerprint": {
+      "type": "string",
+      "pattern": "^SHA256:[A-Za-z0-9+/]{43}$"
+    },
+    "replica_readback": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "schema_version", "replica_locator", "replica_host_fingerprint",
+        "observed_anchor_locator", "replica_generation",
+        "replica_previous_head_digest", "replica_entry_digest",
+        "replica_head_digest", "observed_at", "expires_at", "signer",
+        "signed_core_digest", "signature"
+      ],
+      "properties": {
+        "schema_version": {"const": "s2e_offhost_replica_readback_v1"},
+        "replica_locator": {
+          "type": "string",
+          "minLength": 29,
+          "maxLength": 512,
+          "pattern": "^replica:offhost-append-only:[a-z0-9][a-z0-9._:/-]*$"
+        },
+        "replica_host_fingerprint": {"$ref": "#/$defs/ssh_fingerprint"},
+        "observed_anchor_locator": {
+          "type": "string",
+          "minLength": 36,
+          "maxLength": 512,
+          "pattern": "^host:append-only-durability-anchor:[a-z0-9][a-z0-9._:/-]*$"
+        },
+        "replica_generation": {"type": "integer", "minimum": 1},
+        "replica_previous_head_digest": {
+          "oneOf": [{"$ref": "#/$defs/digest"}, {"type": "null"}]
+        },
+        "replica_entry_digest": {"$ref": "#/$defs/digest"},
+        "replica_head_digest": {"$ref": "#/$defs/digest"},
+        "observed_at": {"$ref": "#/$defs/timestamp"},
+        "expires_at": {"$ref": "#/$defs/timestamp"},
+        "signer": {"$ref": "#/$defs/replica_signer"},
+        "signed_core_digest": {"$ref": "#/$defs/digest"},
+        "signature": {"$ref": "#/$defs/signature"}
+      }
+    },
+    "replica_signer": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "role", "identity", "namespace", "key_generation", "anchor",
+        "key_fingerprint"
+      ],
+      "properties": {
+        "role": {"const": "OFFHOST_REPLICA_READBACK_ATTESTOR"},
+        "identity": {"const": "aiml-s2e-offhost-replica-attestor-v1"},
+        "namespace": {
+          "const": "arcane-equilibrium-aiml-s2e-offhost-replica"
+        },
+        "key_generation": {"const": "independent_off_repo_ed25519_v1"},
+        "anchor": {"const": "fixed_off_repo_public_trust_root_v1"},
+        "key_fingerprint": {"$ref": "#/$defs/ssh_fingerprint"}
+      }
+    },
+    "signer": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "role", "identity", "namespace", "key_generation", "anchor",
+        "key_fingerprint"
+      ],
+      "properties": {
+        "role": {"const": "DURABILITY_ANCHOR_ATTESTOR"},
+        "identity": {"const": "aiml-s2e-durability-anchor-attestor-v1"},
+        "namespace": {"const": "arcane-equilibrium-aiml-s2e-durability-anchor"},
+        "key_generation": {"const": "independent_off_repo_ed25519_v1"},
+        "anchor": {"const": "fixed_off_repo_public_trust_root_v1"},
+        "key_fingerprint": {"$ref": "#/$defs/ssh_fingerprint"}
+      }
+    },
+    "signature": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["algorithm", "signed_digest", "signature"],
+      "properties": {
+        "algorithm": {"const": "SSHSIG"},
+        "signed_digest": {"$ref": "#/$defs/digest"},
+        "signature": {"type": "string", "minLength": 32, "maxLength": 16384}
+      }
+    }
+  }
+}

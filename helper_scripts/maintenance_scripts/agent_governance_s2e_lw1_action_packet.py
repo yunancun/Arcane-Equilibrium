@@ -25,7 +25,8 @@ from aiml_gate_receipt_s2_5_host_capture import (  # noqa: E402
     RECOVERY_HOST_CAPTURE_TRUST_ROOT_PUBLIC_KEY_PATH,
 )
 from aiml_gate_receipt_s2e_external_evidence import (  # noqa: E402
-    EXTERNAL_WORM_PROVIDER_TRUST_ROOT_PATH,
+    DURABILITY_ANCHOR_TRUST_ROOT_PATH,
+    OFFHOST_REPLICA_TRUST_ROOT_PATH,
     PREDECESSOR_REGISTRY_TRUST_ROOT_PATH,
 )
 from aiml_gate_receipt_s2e_launch import (  # noqa: E402
@@ -34,6 +35,8 @@ from aiml_gate_receipt_s2e_launch import (  # noqa: E402
 from aiml_gate_receipt_schema_core import (  # noqa: E402
     _contains_github_secret_like_content,
     canonical_digest,
+    git_argv,
+    git_subprocess_env,
 )
 
 
@@ -62,8 +65,8 @@ _PATH_PREREQUISITES = (
         "ROOT_OWNED_EXACT_0644_JSON_TRUST_PROFILE",
     ),
     (
-        "EXTERNAL_WORM_PROVIDER_TRUST_ROOT",
-        str(EXTERNAL_WORM_PROVIDER_TRUST_ROOT_PATH),
+        "DURABILITY_ANCHOR_TRUST_ROOT",
+        str(DURABILITY_ANCHOR_TRUST_ROOT_PATH),
         "ROOT_OWNED_EXACT_0644_JSON_TRUST_PROFILE",
     ),
     (
@@ -111,22 +114,39 @@ _PATH_PREREQUISITES = (
         HOST_CAPTURE_ATTESTOR_CAPABILITY_PATH,
         "ROOT_OWNED_FIXED_ATTESTOR_DERIVES_COMPLETE_SIGNED_CAPTURE_FROM_IMMUTABLE_SOURCE",
     ),
+    (
+        "OFFHOST_REPLICA_TRUST_ROOT",
+        str(OFFHOST_REPLICA_TRUST_ROOT_PATH),
+        "ROOT_OWNED_EXACT_0644_JSON_TRUST_PROFILE",
+    ),
 )
+# Tier 1(operator 2026-08-02 裁決):durability 走 carrier schema 早已宣告的
+# TRUSTED_HOST_SSHSIG_APPEND_ONLY_V1 adapter。三項改為 host 側 root-owned 能力與
+# off-host 副本,不再需要任何付費外部 custody 服務,也不做不可逆的 COMPLIANCE 保留。
 _SERVICE_PREREQUISITES = (
     (
-        "EXTERNAL_WORM_COMPLIANCE_DESTINATION",
-        "operator-config:external-worm-compliance-destination",
-        "S3_OBJECT_LOCK_COMPLIANCE_WITH_NAMED_CREDENTIAL_CHANNEL",
+        "HOST_APPEND_ONLY_DURABILITY_ANCHOR",
+        "operator-config:host-append-only-durability-anchor",
+        "ROOT_OWNED_FIXED_APPEND_ONLY_ANCHOR_WITH_MONOTONIC_HEAD",
     ),
     (
-        "EXTERNAL_WORM_PROVIDER_ATTESTOR",
-        "operator-config:external-worm-provider-attestor",
-        "DISTINCT_FIXED_ROOT_PLATFORM_OR_EXTERNAL_ATTESTOR",
+        "OFFHOST_APPEND_ONLY_REPLICA",
+        "operator-config:offhost-append-only-replica",
+        "OFFHOST_APPEND_ONLY_REPLICA_WITH_LATEST_GENERATION_READBACK",
     ),
     (
-        "EXTERNAL_APPEND_ONLY_PREDECESSOR_REGISTRY",
-        "operator-config:external-predecessor-registry",
+        "HOST_APPEND_ONLY_PREDECESSOR_REGISTRY",
+        "operator-config:host-predecessor-registry",
         "DISTINCT_FIXED_ROOT_APPEND_ONLY_SINGLE_USE_REGISTRY",
+    ),
+    # 與 OFFHOST_APPEND_ONLY_REPLICA 是兩件事:後者是副本儲存與複寫路徑,前者是
+    # 「誰在第二台機器上用第二把 key 簽回讀證言」。合併會讓 packet 無法表達
+    # 「副本有了但沒人能簽」這個真實中間態。
+    (
+        "OFFHOST_REPLICA_READBACK_SIGNER_CAPABILITY",
+        "operator-config:offhost-replica-readback-signer",
+        "OFFHOST_ROOT_OWNED_SIGNER_ON_SEPARATE_HOST_REACHABLE_FROM_TRADE_CORE_"
+        "PRIVATE_KEY_NEVER_ON_ANCHOR_HOST",
     ),
 )
 EXPECTED_PATHS = tuple(item[1] for item in _PATH_PREREQUISITES)
@@ -134,19 +154,22 @@ EXPECTED_SERVICE_IDS = tuple(item[0] for item in _SERVICE_PREREQUISITES)
 EXPECTED_ACTION_IDS = (
     "PROVISION_FIXED_TRUST_ROOTS",
     "PROVISION_HOST_CAPTURE_ATTESTOR_CAPABILITY",
-    "CONFIGURE_EXTERNAL_WORM_COMPLIANCE_DESTINATION",
-    "CONFIGURE_DISTINCT_EXTERNAL_WORM_PROVIDER_ATTESTOR",
-    "CONFIGURE_DISTINCT_APPEND_ONLY_PREDECESSOR_REGISTRY",
+    "PROVISION_HOST_APPEND_ONLY_DURABILITY_ANCHOR",
+    "CONFIGURE_OFFHOST_APPEND_ONLY_REPLICA",
+    "PROVISION_OFFHOST_REPLICA_READBACK_SIGNER",
+    "PROVISION_DISTINCT_HOST_APPEND_ONLY_PREDECESSOR_REGISTRY",
+    "COMMIT_GENESIS_ARMED_DURABILITY_ANCHOR_FLOOR",
     "RESUME_W0_AND_LW1_RECEIPT_CHAIN_WITH_FRESH_EVIDENCE",
 )
 
 
 def _git(repo_root: Path, *args: str) -> str:
     return subprocess.run(
-        ["git", *args],
+        git_argv(repo_root, *args),
         cwd=repo_root,
         check=True,
         capture_output=True,
+        env=git_subprocess_env(),
         text=True,
     ).stdout.strip()
 

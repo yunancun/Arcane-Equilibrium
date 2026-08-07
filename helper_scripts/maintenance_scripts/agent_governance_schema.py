@@ -4,7 +4,48 @@ from __future__ import annotations
 
 import re
 from datetime import datetime
+from functools import lru_cache
 from typing import Any
+
+
+# ── E2 F-04(2026-08-04 三輪複核;全 repo 級) ─────────────────────────────────
+# Python 的 `$` 匹配「字串尾**或尾端換行之前**」,ECMA-262(JSON Schema 指定的 regex
+# 方言)的 `$` 則只匹配字串尾。E2 實測 `{"h": "<40hex>\n"}` 通過 `^[0-9a-f]{40}$`
+# ——本檔是全 repo 556 個 `pattern` 的唯一執行點,所以那是一個全 repo 級的假不變量。
+#
+# **不改成 `fullmatch`**:JSON Schema 的 `pattern` 依規範是**非錨定的 search**
+# (例:本 repo 既有的 `^https://api\.github\.com/` 前綴式、以及 `not` 裡的
+# `(^|/)\.\.(/|$)` 都靠 search 語義才正確)。改 fullmatch 會讓這兩類 pattern 全部失效。
+# 正解是把**錨點**翻成 ECMA 語義:未逸出且不在字元類內的 `^`→`\A`、`$`→`\Z`,
+# search 語義原封不動。
+@lru_cache(maxsize=512)
+def _compiled_pattern(pattern: str) -> re.Pattern[str]:
+    """把 pattern 的 `^`/`$` 翻成 `\\A`/`\\Z` 後編譯(逸出與字元類內的一律當字面)。"""
+
+    translated: list[str] = []
+    in_class = False
+    index = 0
+    while index < len(pattern):
+        char = pattern[index]
+        if char == "\\" and index + 1 < len(pattern):
+            translated.append(pattern[index:index + 2])
+            index += 2
+            continue
+        if in_class:
+            in_class = char != "]"
+        elif char == "[":
+            in_class = True
+        elif char == "^":
+            translated.append("\\A")
+            index += 1
+            continue
+        elif char == "$":
+            translated.append("\\Z")
+            index += 1
+            continue
+        translated.append(char)
+        index += 1
+    return re.compile("".join(translated))
 
 
 def _schema_pointer(root_schema: dict[str, Any], pointer: str) -> dict[str, Any]:
@@ -80,7 +121,9 @@ def schema_subset_errors(
             errors.append(f"{path}: string is shorter than minLength")
         if "maxLength" in schema and len(value) > int(schema["maxLength"]):
             errors.append(f"{path}: string is longer than maxLength")
-        if "pattern" in schema and re.search(str(schema["pattern"]), value) is None:
+        if "pattern" in schema and _compiled_pattern(
+            str(schema["pattern"])
+        ).search(value) is None:
             errors.append(f"{path}: string does not match pattern")
         if schema.get("format") == "date-time":
             try:
@@ -124,8 +167,12 @@ def schema_subset_errors(
             errors.append(f"{path}: missing required property {key}")
         properties = schema.get("properties", {})
         pattern_properties = schema.get("patternProperties", {})
+        # E3 round-4 R4-2:`patternProperties` 原本直接 `re.compile`,於是
+        # `6f563c299` 宣稱的「本檔是全部 pattern 唯一的 ECMA 忠實執行點」不成立
+        # ——`$` 在 Python 允許尾隨換行,`properties` 側已翻成 `\Z` 而這側沒有。
+        # 兩側改用同一個編譯器;search 語義(JSON Schema 對兩者皆為 search)不變。
         compiled_patterns = [
-            (re.compile(str(pattern)), child_schema)
+            (_compiled_pattern(str(pattern)), child_schema)
             for pattern, child_schema in pattern_properties.items()
         ]
         for key in sorted(set(value) - set(properties)):

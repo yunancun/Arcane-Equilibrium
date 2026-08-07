@@ -100,8 +100,14 @@ def test_review_manifest_closes_oracle_and_offline_provider_dependencies() -> No
     assert "program_code/ml_training/tests/__init__.py" in {
         entry["path"] for entry in lw1_manifest
     }
-    assert len(manifest) <= 256
-    assert len(lw1_manifest) <= 256
+    # 這兩條是 review 成本護欄,不是治理不變式——source 端沒有任何地方強制上界。
+    # 2026-08-03 更正:先前註解寫「由 256 → 257、舊界線已正好卡滿」是錯的。
+    # E2 與 E4 各自獨立實測:baseline `097c879b9` 的 LW1 manifest 是 **254**(尚有
+    # 2 格),本分支新增 anchor_floor 模組、其 schema 與 floor 檔共 +3(並移除舊
+    # WORM provider schema),故 254 → 257,是本次改動吃掉 slack 並超出 1。
+    # 上界收在 264(257 + 7 格,約當一次 remediation 的量),不採先前無依據的 288。
+    assert len(manifest) <= 264
+    assert len(lw1_manifest) <= 264
     genesis_argv = validator.s2e_review_test_argv(
         genesis_candidate,
         repo_root=ROOT,
@@ -189,7 +195,7 @@ def _review_for_wave(
             "anchor": "fixed_off_repo_public_trust_root_v1",
             "key_fingerprint": case["fingerprint"],
         },
-        "external_worm_binding": None,
+        "durability_anchor_binding": None,
     }
     signed = validator.s2e_acceptance_review_signed_bytes(bundle)
     bundle["signed_core_digest"] = "sha256:" + hashlib.sha256(signed).hexdigest()
@@ -203,32 +209,19 @@ def _review_for_wave(
             directory=tmp_path,
         ),
     }
-    intent, result, readback = support._external_worm_triplet(
+    # candidate 自己的 review anchor 必須嚴格晚於前一份的 carrier anchor(gen 2),
+    # 且帶前手 head:committed floor 的跨 receipt 單調性在 transition 上執法。
+    anchor_attestation = support._durability_anchor_attestation(
         validator.s2e_acceptance_review_worm_payload(bundle),
-        source_head=candidate["source_head"],
-        landing_scope_id=candidate["payload_digest"],
-        learning_runtime_digest=candidate["launch_contract_digest"],
-        issued_at=issued_at,
-        intent_id=f"s2e-wave-review-{intent_suffix}",
-    )
-    provider_attestation = support._external_worm_provider_attestation(
-        intent,
-        result,
-        readback,
         trust=case["external_trust"],
         issued_at=issued_at,
         directory=tmp_path,
+        generation=3,
+        previous_head=case["carrier_anchor"]["anchor_head_digest"],
     )
-    bundle["external_worm_binding"] = {
-        "result_digest": result["result_digest"],
-        "readback_ack_digest": readback["ack_digest"],
-        "record_locator": result["record_locator"],
-        "object_version_id": result["object_version_id"],
-        "checksum_sha256": result["checksum_sha256"],
-        "provider_attestation_digest": provider_attestation[
-            "attestation_digest"
-        ],
-    }
+    bundle["durability_anchor_binding"] = support._anchor_binding(
+        anchor_attestation
+    )
     bundle["bundle_digest"] = validator.s2e_acceptance_review_bundle_digest(
         bundle
     )
@@ -291,16 +284,7 @@ def _review_for_wave(
         "_trusted_issuance_now",
         lambda: case["now"] + timedelta(minutes=1),
     )
-    return (
-        bundle,
-        capture,
-        chain,
-        intent,
-        result,
-        readback,
-        provider_attestation,
-        bootstrap,
-    )
+    return (bundle, capture, chain, anchor_attestation, bootstrap)
 
 
 def _issue_wave(
@@ -310,7 +294,7 @@ def _issue_wave(
     *,
     bootstrap_authority: object = _DEFAULT_BOOTSTRAP,
 ) -> dict:
-    bundle, capture, chain, intent, result, readback, provider, bootstrap = review
+    bundle, capture, chain, anchor, bootstrap = review
     selected_bootstrap = (
         bootstrap
         if bootstrap_authority is _DEFAULT_BOOTSTRAP
@@ -322,10 +306,7 @@ def _issue_wave(
         repo_root=case["repo"],
         governed_capture_record=capture,
         disposable_test_effect_chains=[chain],
-        external_append_intent=intent,
-        external_append_result=result,
-        external_readback_ack=readback,
-        external_worm_provider_attestation=provider,
+        durability_anchor_attestation=anchor,
         predecessor_receipt=case["issued"],
         predecessor_authority=case["authority"],
         predecessor_consumption_bootstrap_authority=selected_bootstrap,
@@ -399,11 +380,8 @@ def test_historical_review_cannot_be_reissued_after_head_advances(
         disposable_test_effect_chains=authority[
             "review_disposable_test_effect_chains"
         ],
-        external_append_intent=authority["review_external_append_intent"],
-        external_append_result=authority["review_external_append_result"],
-        external_readback_ack=authority["review_external_readback_ack"],
-        external_worm_provider_attestation=authority[
-            "review_external_worm_provider_attestation"
+        durability_anchor_attestation=authority[
+            "review_durability_anchor_attestation"
         ],
     )
     assert result["status"] == "EXTERNAL_VERIFICATION_PENDING"
@@ -640,7 +618,7 @@ def test_wave_issuance_binds_effects_and_consumes_predecessor_once(
         case,
         sibling_review,
         sibling,
-        bootstrap_authority=review[7],
+        bootstrap_authority=review[4],
     )
     assert cross_candidate_authority["status"] == (
         "EXTERNAL_VERIFICATION_PENDING"
@@ -827,3 +805,45 @@ def test_consumption_store_crash_after_anchor_recovers_exact_entry(
     assert recovered == expected
     assert store.last_state_recovery_performed is True
     assert store.read() == expected
+
+
+def test_schema_pattern_anchors_reject_a_trailing_newline() -> None:
+    """E2 F-04(全 repo 級):Python 的 `$` 匹配「字串尾**或尾端換行前**」。
+
+    `agent_governance_schema.schema_subset_errors` 是本 repo 全部 `pattern` 的唯一
+    執行點,所以那是一個全 repo 級的假不變量:E2 實測 `{"h": "<40hex>\\n"}` 通過
+    `^[0-9a-f]{40}$`。修法把**錨點**翻成 ECMA-262 語義(`^`→`\\A`、`$`→`\\Z`),
+    而**不是**改成 `fullmatch`——JSON Schema 的 `pattern` 依規範是非錨定 search,
+    本 repo 既有的前綴式與 `not` 式 pattern 都靠 search 語義才正確。
+    """
+
+    import agent_governance_schema as schema_subset
+
+    schema = {
+        "type": "object",
+        "properties": {"h": {"type": "string", "pattern": "^[0-9a-f]{40}$"}},
+    }
+    assert schema_subset.schema_subset_errors({"h": "a" * 40}, schema) == []
+    for forged in ("a" * 40 + "\n", "\n" + "a" * 40, "a" * 40 + "\nx"):
+        assert schema_subset.schema_subset_errors({"h": forged}, schema) == [
+            "$.h: string does not match pattern"
+        ], forged
+    # search 語義必須原封不動:前綴式 pattern 與 `not` 內的路徑遍歷式都靠它。
+    prefix = {"type": "string", "pattern": "^https://api\\.github\\.com/"}
+    assert schema_subset.schema_subset_errors(
+        "https://api.github.com/repos/x/y", prefix
+    ) == []
+    traversal = {"type": "string", "not": {"pattern": "(^|/)\\.\\.(/|$)"}}
+    assert schema_subset.schema_subset_errors("a/b", traversal) == []
+    assert schema_subset.schema_subset_errors("a/../b", traversal) == [
+        "$: matches forbidden not-schema"
+    ]
+    assert schema_subset.schema_subset_errors("..", traversal) == [
+        "$: matches forbidden not-schema"
+    ]
+    # 字元類內與逸出後的 `^`/`$` 仍是字面量,不得被當成錨點翻譯。
+    literal = {"type": "string", "pattern": "[$^]x"}
+    assert schema_subset.schema_subset_errors("a$xb", literal) == []
+    assert schema_subset.schema_subset_errors("a^xb", literal) == []
+    escaped = {"type": "string", "pattern": "a\\$b"}
+    assert schema_subset.schema_subset_errors("za$bz", escaped) == []

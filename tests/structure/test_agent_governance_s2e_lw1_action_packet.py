@@ -85,7 +85,8 @@ def _inventory(*, ready: bool = False) -> dict:
 def test_code_owned_prerequisite_paths_equal_live_fixed_root_constants() -> None:
     expected = {
         str(launch.S2E_RECEIPT_TRUST_ROOT_PATH),
-        str(external.EXTERNAL_WORM_PROVIDER_TRUST_ROOT_PATH),
+        str(external.DURABILITY_ANCHOR_TRUST_ROOT_PATH),
+        str(external.OFFHOST_REPLICA_TRUST_ROOT_PATH),
         str(external.PREDECESSOR_REGISTRY_TRUST_ROOT_PATH),
         str(host_capture.RECOVERY_HOST_CAPTURE_TRUST_ROOT_PUBLIC_KEY_PATH),
         host_capture.HOST_CAPTURE_ATTESTOR_CAPABILITY_PATH,
@@ -97,7 +98,7 @@ def test_code_owned_prerequisite_paths_equal_live_fixed_root_constants() -> None
         str(recovery.RECOVERY_VERIFIER_CAPTURE_TRUST_ROOT_PUBLIC_KEY_PATH),
     }
     assert set(action.EXPECTED_PATHS) == expected
-    assert len(action.EXPECTED_PATHS) == 11
+    assert len(action.EXPECTED_PATHS) == 12
 
 
 def test_absent_external_prerequisites_build_closed_blocked_packet(
@@ -112,8 +113,8 @@ def test_absent_external_prerequisites_build_closed_blocked_packet(
         packet, repo_root=repo
     ) == []
     assert packet["state"] == action.BLOCKED_STATE
-    assert len(packet["prerequisites"]) == 14
-    assert len(packet["blocked_prerequisite_ids"]) == 14
+    assert len(packet["prerequisites"]) == 16
+    assert len(packet["blocked_prerequisite_ids"]) == 16
     assert packet["closure_projection"] == {
         "g0_state": "SOURCE_COMPLETE_RUNTIME_INDETERMINATE",
         "lw1_state": "BLOCKED_EXTERNAL_PREREQUISITES",

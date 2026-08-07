@@ -1026,7 +1026,13 @@ def test_cp2b_schema_files_resolve_to_real_files() -> None:
     # closed disposable-test chain and predecessor-consumption ABI, and the
     # purpose-specific consumption bootstrap authority:91; independent WORM
     # provider and predecessor-registry attestations bring the closed set to 93.
-    assert len(SCHEMA_FILES) == 93
+    # Tier 1(2026-08-06)retires the external WORM provider attestation and adds
+    # the durability-anchor attestation plus its committed floor:94。E4 round-4
+    # F-1:此行原本漏改,`test_agent_governance_s2_5_recovery.py` 的孿生斷言
+    # (`schema_resources == 94`)改了而這裡沒有,分支因此留下一條 baseline 綠、
+    # HEAD 紅的測試,而「五個 S2E 檔 127 passed」看不見它——證據範圍由作者挑選時,
+    # 綠色只覆蓋被挑的那五個檔。
+    assert len(SCHEMA_FILES) == 94
     for s2e_key in (
         "s2e_launch_genesis_receipt_v1",
         "s2e_launch_predecessor_consumption_ledger_v1",
