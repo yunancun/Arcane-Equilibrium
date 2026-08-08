@@ -33,13 +33,23 @@ debug1: Offering public key: /Users/ncyu/.ssh/id_ed25519 ED25519 SHA256:uGJ9veN7
 ncyu@trade-core: Permission denied (publickey).
 ```
 
-`ssh-agent` 無任何 identity，唯一被提供的公鑰未被 trade-core 授權。
 順帶一提：該指紋恰等於 `agent_governance_aiml_trusted_host.py:78` 的
 `EXPECTED_EXECUTION_SIGNER_FINGERPRINT`（governed capture 的執行簽章身分）。
 
-後果：§7 的 A5 read-only 驗收我**現在做不到**。兩條路，你選一條：
-（a）授權該公鑰登入 trade-core，我自己跑驗收；
-（b）你照 §7 的指令跑，把輸出貼給我，我逐項比對——但這是你自報，證據等級低於 (a)。
+> **2026-08-08 更正並關閉。** 本節原本斷定「該公鑰未被 trade-core 授權」。**那個診斷是錯的。**
+> 真因是 `~/.ssh/id_ed25519` 有 passphrase，而 `ssh-agent` 內無任何 identity，
+> `BatchMode=yes` 不能提示 passphrase，於是同一個 `Permission denied (publickey)`
+> 被誤讀成授權問題。證偽事實：operator 在互動 shell 用**同一把 key、同一個路徑**輸入
+> passphrase 後即連線成功（四頭 probe 那次），代表該 key 一直都在 trade-core 的
+> `authorized_keys` 內。
+>
+> 解法是 `ssh-add --apple-use-keychain ~/.ssh/id_ed25519`（comment 顯示為
+> `trade-core-admin`），執行後 PM 的非互動 ssh 立即可用。
+>
+> **教訓**：`Permission denied (publickey)` 在 `BatchMode` 下同時涵蓋「金鑰未授權」與
+> 「金鑰無法解鎖」兩種完全不同的成因，不可只憑該訊息斷定是前者；先看 `ssh-add -l`。
+
+因此 §7 的 A5 已由 PM 自行執行（見 §7.1），不再是 operator 自報。
 
 ### 0.2 一個必須先講的既有問題（承 prompt §2）
 
@@ -356,10 +366,16 @@ sudo sh -c 'for f in /etc/arcane-equilibrium/aiml/*.json; do stat -c "%n uid=%u 
 
 ### 7.1 A5 執行結果（2026-08-08，**全項 PASS**）
 
-**證據等級：`operator-reported`。** 指令由 operator 在 trade-core 執行並貼回，非 PM 自行執行
-（原因見 §0.1：Mac→trade-core SSH 未授權）。比對本身由 PM 以 repo 常數與本地產出位元組
-機器執行，排除轉錄誤差；但「這些位元組確實在 trade-core 的 `/etc` 上」這一段仍是自報，
-不是平台證明。
+**證據等級：`LOCAL_REPRODUCIBLE`（PM 自行執行的 read-only 遠端讀取）。**
+PM 以 `ssh trade-core` 直接讀回全部 11 個檔的 `stat`／`sha256sum`／`ssh-keygen -lf`
+與 `/etc/ssh/ssh_host_*.pub`，再以 repo 常數與本地產出位元組機器比對，15/15 PASS。
+無需 `sudo`：`trust/` 為 0755、四個 JSON 為 0644，全部 world-readable；
+`private/`（0700）未被讀取，本節不觸及任何私鑰。
+
+> **本節先前記為 `operator-reported` 並已於同日更正。** 首輪由 operator 執行並貼回，
+> 因為當時誤判 PM 無 SSH 存取（見 §0.1 的更正）。`ssh-add` 之後 PM 重跑同一組檢查，
+> 逐值與 operator 首輪回報**完全一致**——即該次自報本身是準確的，改變的只有證據等級。
+> 仍**不是** `PLATFORM_OR_EXTERNAL_ATTESTED`：PM 自跑的遠端讀取仍非平台證明。
 
 | 檢查 | 結果 |
 |---|---|
@@ -389,6 +405,48 @@ b4a382ab6d3caeb83ae1e3068d694290434cf5492f02c823c86e76800015bfd3  s2e-receipt-tr
 `tests/structure/` 的 `-k "s2_5 or s2e"`：**816 passed / 0 failed / 0 skipped / 0 error**
 （4702 deselected，14m33s，exit 0）。焦點兩檔另跑 109 passed。
 **證據等級 `LOCAL_REPRODUCIBLE`（Mac 本地），非 closure-admissible 強 PASS。**
+
+### 7.3 發布與三端 source sync（2026-08-08）
+
+PR [#181](https://github.com/yunancun/Arcane-Equilibrium/pull/181) 以 `--merge`
+（非 squash/rebase）＋`--match-head-commit d8cb6a79b…` 合入，merge commit
+`2f9b6cde45e43a7cda8bfe0a57ddb6bd2faea064`。CI 10 passed / 0 failed，未解 review thread 0。
+
+`.codex/SYNC.md` §5／§6 之後三個 git head 全等，且**皆由 PM 直接讀取**：
+
+| 側 | HEAD |
+|---|---|
+| Mac canonical `/Users/ncyu/Projects/TradeBot/srv` | `2f9b6cde4…`（`main-post-sync` guard PASS，dirty 0） |
+| 真 `origin/main`（`git ls-remote`） | `2f9b6cde4…` |
+| Linux `/home/ncyu/BybitOpenClaw/srv` | `2f9b6cde4…`（branch `main`，dirty 0） |
+
+**具名偏差**：§1–§3 的 `git_loop_guard.py` `start`／`checkpoint`／`publish`／`post-push`
+四個 phase 未執行，writer lease 未 acquire。§4 的 exact-head merge 有合規執行。
+這是被跳過的步驟，不是通過的步驟。
+
+**四頭 probe 判 `INDETERMINATE`**，原因是第四頭讀不到而非 git 不同步：
+`four_head_reconcile_probe.py:447` 在 `engine_full is None` 時直接短路回傳，
+**走不到** `:459` 的三 git 頭相等判斷。附帶指出 §7 分類表的缺口：
+`SOURCE_ONLY_DRIFT` 與 `HALF_DEPLOY_REBUILD_REQUIRED` 都預設 engine build SHA 可讀，
+「引擎根本沒部署」沒有對應類別。
+
+### 7.4 sync 期間發現的 runtime 事實（未處理，非本輪範圍）
+
+trade-core 上（2026-08-08 PM 實測，read-only）：
+
+| 項目 | 觀測 |
+|---|---|
+| `openclaw_engine` 進程 | 無 |
+| systemd unit | 完全沒有——engine 由 `restart_all.sh` 起為普通進程，非 systemd 管理，故此項為預期 |
+| `openclaw_engine` binary | `find /home/ncyu/BybitOpenClaw -name openclaw_engine` 無結果，未建置 |
+| `var/openclaw/engine.log` mtime | **2026-07-18 03:23** |
+| FastAPI control plane | 運行中，`100.91.109.86:8000`，4 workers |
+| `helper_scripts/canary/engine_watchdog.py` | 運行中約 22 天，`--stale-threshold 45` |
+
+即控制面與 watchdog 都活著，但 Rust 引擎自 2026-07-18 起未運行且 binary 未建置；
+watchdog 22 天未使該狀態成為可見告警。考量此期間為 source-only 階段
+（production effect 0/6、runtime 全程標 dormant），引擎停置**可能**是預期的——
+本檔不對此下判斷。rebuild／restart 屬獨立授權 effect，本輪未執行亦未提議執行。
 
 ---
 
