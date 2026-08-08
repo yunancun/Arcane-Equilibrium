@@ -344,7 +344,10 @@ replica trust root 安裝。**任何情況下不得填佔位指紋**（那正是
 - **12 path + 4 service = `16` blocked prerequisites。**
   （**E2 round-4 R4-4 更正，2026-08-06**：原寫「新增第 11 列」與「11 path + 4 service = 16」，
   算式本身就不成立——11+4=15。實測活值為 `len(_PATH_PREREQUISITES)=12`、
-  `len(_SERVICE_PREREQUISITES)=4`、`len(EXPECTED_ACTION_IDS)=8`；代碼、committed packet 與
+  `len(_SERVICE_PREREQUISITES)=4`、`len(EXPECTED_ACTION_IDS)=8`（**2026-08-09 更正**：
+  `EXPECTED_ACTION_IDS` 這個符號已不存在，對應的活值改讀
+  `len(CANONICAL_ACTION_IDS)=8`；前兩個數字仍為當前實測值。此處保留原句是因為它記錄
+  2026-08-06 當時的量測，只更正符號已消失這件事）；代碼、committed packet 與
   `TODO.md` 一直是對的 16，只有本設計正本的算式錯。這是本檔第二次前置數算錯，
   故不原地抹除，逐條記在此。）
 - `EXPECTED_ACTION_IDS`（`:137-144`）新增兩項 ⇒ 共 ~~**8**~~ 項：
@@ -871,6 +874,15 @@ commit、CI shallow checkout 等情形現在都會得到具名的 `UNVERIFIED` �
 committed packet **repin 到 `2f9b6cde4`**（floor 已在該樹內），於該 head 導出 7 項
 （`sha256:b28d49fe…a9cdf` → `sha256:8c495279…6436ba`，除 `packet_digest` 與
 `source_binding` 外逐欄不變）。
+
+**兩項具名代價（E2 P3-2／P3-3，接受而非隱藏）**：①`required_action_ids` 不再能離線驗——
+舊 `const` 只需 packet 位元組＋schema 即可核對，現在需要一個含該 pinned commit 的 repo，
+否則得到 typed `LW1 packet source binding cannot be verified`。方向是 fail-closed（不會假
+PASS），但歸檔證據包或 operator 筆電確實查不了這一欄，與 CLAUDE.md「standalone CLI 做離線
+結構／完整性檢查」的期待有落差。②若未來某個 commit 讓八項 witness 全部命中，
+`build` 會拒發（`actions == ()`），而 schema 的 `minItems: 1` 也拒絕空陣列 ⇒ committed
+artifact 會變成永久無法驗證。七項是 host 側、永遠不可能有 repo witness，所以極遠，但這是
+設計出來的死路而不是被接住的錯誤，具名留給下一次改這張表的人。
 
 **中途的錯誤必須記下來，因為它是同一個坑的鏡像**：第一版（2026-08-07）直接把
 `COMMIT_GENESIS_ARMED_DURABILITY_ANCHOR_FLOOR` 從清單**全域刪除**。那治好了

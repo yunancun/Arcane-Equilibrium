@@ -200,8 +200,28 @@ def completed_action_ids(repo_root: Path, *, at_commit: str) -> tuple[str, ...]:
     return tuple(sorted(
         action_id
         for action_id, witness in REPOSITORY_COMPLETION_WITNESSES.items()
-        if _git(repo_root, "ls-tree", "--name-only", at_commit, "--", witness)
+        if _witness_is_committed_blob(repo_root, at_commit, witness)
     ))
+
+
+def _witness_is_committed_blob(
+    repo_root: Path, at_commit: str, witness: str
+) -> bool:
+    """witness 是否在 `at_commit` 的樹裡、且確實是一個 blob。
+
+    `--full-tree` 不能省(E2 P2-1,已實測):`ls-tree` 的 pathspec 預設相對於 `-C` 的
+    prefix,而同一函式裡的 `rev-parse` 是 prefix 無關的。少了它,只要把 `--repo-root`
+    指到任一子目錄,witness 就查不到 ⇒ 導出清單多一項 ⇒ **那份已經腐化的 8 項 packet
+    反而通過驗證**,正是本次改動要消滅的那個缺陷。
+
+    另外要求 type 是 `blob`:`ls-tree` 對一個目錄同樣會回一列,於是一個剛好同名的
+    tree 會被當成「該步驟已完成」。今天 witness 表只有一條具體的 `.json`,但這張表
+    的存在意義就是「下一條 witness 一出現就被機器接住」,守衛必須先於那一條存在。
+    """
+
+    entry = _git(repo_root, "ls-tree", "--full-tree", at_commit, "--", witness)
+    fields = entry.split(maxsplit=2)
+    return len(fields) >= 2 and fields[1] == "blob"
 
 
 def required_action_ids(repo_root: Path, *, at_commit: str) -> tuple[str, ...]:

@@ -240,6 +240,54 @@ def test_schema_still_bounds_the_action_array_after_const_was_replaced(
     assert any(expected in error for error in errors), errors
 
 
+def test_completion_probe_is_independent_of_the_repo_root_prefix(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """把 `--repo-root` 指到子目錄不得改變導出結果(E2 P2-1)。
+
+    `ls-tree` 的 pathspec 預設相對於 `-C` 的 prefix,而同函式的 `rev-parse` 不是。
+    少了 `--full-tree`,子目錄下 witness 查不到 ⇒ 清單多一項 ⇒ 那份已腐化的 8 項
+    packet 反而通過驗證,恰好復活本次改動要消滅的缺陷。
+    """
+
+    repo = _repo(tmp_path)
+    witness = "nested/witness-floor.json"
+    action_id = "COMMIT_GENESIS_ARMED_DURABILITY_ANCHOR_FLOOR"
+    monkeypatch.setitem(action.REPOSITORY_COMPLETION_WITNESSES, action_id, witness)
+    (repo / "nested").mkdir()
+    (repo / witness).write_text("{}\n", encoding="ascii")
+    _git(repo, "add", witness)
+    _git(repo, "commit", "-qm", "commit the witness")
+    head = _git(repo, "rev-parse", "HEAD")
+
+    from_top = action.required_action_ids(repo, at_commit=head)
+    assert action_id not in from_top
+    for subdirectory in ("nested", "."):
+        assert action.required_action_ids(
+            repo / subdirectory, at_commit=head
+        ) == from_top, f"repo_root={subdirectory} 改變了導出結果"
+
+
+def test_completion_probe_does_not_accept_a_tree_as_a_witness(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """witness 必須是 blob;同名目錄不得被當成「該步驟已完成」(E2 P3-1)。"""
+
+    repo = _repo(tmp_path)
+    action_id = "COMMIT_GENESIS_ARMED_DURABILITY_ANCHOR_FLOOR"
+    monkeypatch.setitem(action.REPOSITORY_COMPLETION_WITNESSES, action_id, "nested")
+    (repo / "nested").mkdir()
+    (repo / "nested" / "unrelated.txt").write_text("x\n", encoding="ascii")
+    _git(repo, "add", "nested/unrelated.txt")
+    _git(repo, "commit", "-qm", "commit a directory at the witness path")
+
+    head = _git(repo, "rev-parse", "HEAD")
+    assert action.completed_action_ids(repo, at_commit=head) == ()
+    assert action_id in action.required_action_ids(repo, at_commit=head)
+
+
 def test_completion_probe_rejects_a_non_hex_commit(tmp_path: Path) -> None:
     """`at_commit` 在 validate 路徑上來自受檢 packet,進 git 前必須先驗形狀。"""
 

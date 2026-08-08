@@ -276,14 +276,24 @@ G2 的依賴欄補上 `S2E.2b-1`（與 G1 同一條 lineage predecessor）。該
   `docs_projection`(TW) → `docs_integrity_review`(R4)
 - `task_execution_control`：`continuation_mode=finite`、`automatic_wakeup_admitted=false`
 
-**具名 skip（fail loud，不假裝跑過）**：E2／E4／TW／R4 四個 delegated 節點本輪**未派工**。
+**E2／E4 已實際派工並各自回 FAIL，修完才放行（2026-08-09，依 PR #180 Codex P1）**。
+初版把這兩個節點記成「具名 skip，代償＝PR bot」，Codex 判定不成立——AGENTS.md 的
+source-implementation 硬邊界不是可以用殘餘風險敘述換掉的，admitted node 就是 mandatory。
+**這條反駁成立，已照辦。** 兩份審查都不是橡皮圖章：
 
-- **原因**：operator 將本輪 scope 定為決策與投影，且未授權本 session 派生 subagent；
-  source 改動面是一個 tuple 元素、一個 emission guard、兩支測試與一份重生 artifact。
-- **殘餘風險**：這一條 code-owned 契約改動沒有獨立對抗複核。**代償**：PR 上的 Codex bot
-  review 是獨立一路，其 thread 必須逐條讀過、修過、resolved 後才 merge；且兩支新測試
-  均已逐一突變實測會紅（見 §4.2），不是「加了測試就算數」。
-- **owner**：PM。若 Codex review 提出 P1，退回本 row 修，不得帶病 merge。
+| 角色 | 初判 | 決定性發現 | 處置 |
+|---|---|---|---|
+| E2 | **FAIL** | `git ls-tree` 少了 `--full-tree`，pathspec 相對於 `-C` prefix 解析，而同函式的 `rev-parse` 是 prefix 無關的。把 `--repo-root` 指到**任一子目錄**，witness 就查不到 ⇒ 導出多一項 ⇒ **那份已腐化的 8 項 packet 反而通過驗證**。我逐條復現：toplevel 正確、`<root>/docs` 與 `<root>/docs/execution_plan` 皆反轉 | 加 `--full-tree`；補 prefix-independence 測試，移除該旗標實測轉紅 |
+| E2 | P3 | witness 若解析成 **tree**（同名目錄）也被算作完成 | 加 blob type 檢查；補測試，移除檢查實測轉紅 |
+| E4 | **FAIL** | 突變 **M3**（validator 改在 `repo_root` 的 HEAD 導出，而非 packet 綁定的 head）**全套件存活**——每份受測 packet 都剛好綁在「導出結果與 current HEAD 相同」的 head 上。本次改動最承重的一句話當時**零測試** | 補 divergent-head validator 測試；M3 現實測轉紅 |
+| E4 | 覆蓋缺口 | 該測試前五句斷言拿 `CANONICAL_ACTION_IDS` 當右手邊 ⇒ 目錄被縮短時一起縮短、毫無鑑別力，全部鑑別力壓在單一差分句上；validator 層無亂序測試；schema 由 `const` 換成 enum 陣列後完全未被測 | 補字面 id 斷言、validator 層亂序測試、四條 schema 形狀負向測試 |
+
+E2 另具名兩項**接受而非隱藏**的代價（離線可驗性喪失、八項 witness 全命中時的死路），
+以及一項它自己的證據缺口：對抗探針無法經 `capture-command` 擷取（wrapper 拒絕 repo 外
+腳本路徑與 inline argv 的控制字元），故那些探針只有 `LOCAL_REPRODUCIBLE` 等級。
+
+**仍具名 skip**：TW／R4 兩個 docs 節點未派工，文件投影由 PM 自己寫。殘餘風險＝文件層
+無獨立漂移複核；owner=PM。
 
 ---
 
