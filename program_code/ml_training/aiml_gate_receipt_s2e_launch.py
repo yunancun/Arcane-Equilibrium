@@ -1377,9 +1377,11 @@ def validate_s2e_launch_acceptance_review_bundle(
         return ["acceptance review bundle candidate schema is unsupported"]
     if require_current_generation:
         # E3 round-5 具名撤回「工作樹乾淨」(原是 `_require_clean` = `git status`,
-        # R4-1 的提權形狀本體):① 跨 uid 取不到;② 不承重——每項投影都走
-        # `<commit>:<path>`,工作樹位元組進不了任何 digest。留下 view 真能證的那條:
-        # 候選必須等於當前 HEAD 的 commit 與 tree。作者側乾淨仍在 generation 面。
+        # R4-1 的提權形狀本體)。**唯一成立的理由是「跨 uid 取不到」**;E2 round-5 F1
+        # 證偽了原本並列的第二個理由:下方 `validate_governed_command_capture(
+        # reexecute=True)` 會經 command_capture_v2 → generation_summary 把 `git diff`
+        # 與 untracked 清單摘進 digest ⇒ 工作樹位元組**確實**進得了驗證面的 digest,
+        # 而那條路仍以 ambient env 對被驗者跑 git(設計檔 §5 debt,不在本輪 scope)。
         try:
             if (
                 _commit(repo_root, "HEAD") != reviewed_head

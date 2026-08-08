@@ -94,16 +94,40 @@ promisor 的 config 文字掃描只是第二道,且只能讓判定更嚴,永遠�
   同 uid 是被驗證後才成立的前提。作者跑到自己寫的 `core.fsmonitor` 不是提權,
   寫 config 的人就是執行者本人。
 - **驗證面**(`_acceptance_review_bundle_errors(require_current_generation=True)`):
-  **撤回**「工作樹乾淨」這一條,並在代碼裡具名。理由兩條,缺一不可:
-  1. **取不到**:跨 uid 沒有任何不經被驗者可寫執行面的取得方式(§1 兩條死路)。
-  2. **不承重**:本家族每一項投影都走 `<commit>:<path>`(`commit_blob_bytes`),
-     工作樹的位元組進不了任何 digest;髒樹改不了該 bundle 的任何結論。
+  **撤回**「工作樹乾淨」這一條,並在代碼裡具名。
 
   留下的是 view 真的能證、而且正是這個檢查要的那一條:**候選必須等於當前 HEAD 的
   commit 與 tree**。錯誤字串同步從 `not the clean current HEAD` 改為
   `not the current HEAD generation`——舊字串會繼續宣稱一件已經不再檢查的事。
 
+  > **更正(E2 round-5 F1,CONFIRMED)。** 本節初版給了兩條並列理由,第二條是假的,
+  > 已在代碼與此處改掉,不得寫回去:
+  >
+  > 1. **取不到**(成立):跨 uid 沒有任何不經被驗者可寫執行面的取得方式(§1 兩條死路)。
+  > 2. ~~**不承重**:每項投影都走 `<commit>:<path>`,工作樹位元組進不了任何 digest。~~
+  >    **證偽。** 同一個函式往下 110 行,`validate_governed_command_capture(...,
+  >    reexecute=_commit(repo_root, "HEAD") == reviewed_head)` 會經
+  >    `agent_governance_command_capture_v2._replay_errors` →
+  >    `agent_governance_generation_summary.capture_generation_summary`,而後者
+  >    (`:275-279`)把 `git diff --binary` 的串流摘要與 untracked 清單放進
+  >    `generation_digest`。**工作樹位元組確實進得了驗證面的 digest,髒樹確實改得了
+  >    結論。** 而且 `_git_root`(`:60-63`)以 **ambient env 與 ambient PATH** 跑
+  >    `git rev-parse --show-toplevel`、`cwd=<被驗者>`——那正是本輪要消掉的 discover
+  >    動作,在差異 uid 下 rc=128 且該 `ValueError` 一路無人接,會變成未捕捉例外而不是
+  >    typed verdict。
+  >
+  >    撤回本身仍然正確(理由 1 獨立成立,而恢復 `git status` 等於恢復 R4-1 的 RCE),
+  >    但 `agent_governance_command_capture_v2` / `agent_governance_generation_summary`
+  >    是**同一缺陷類別的未修實例**,且不在本輪 path manifest 內。見 §5 debt 4。
+
 ## 4. 這組改動證得到什麼、證不到什麼
+
+> **本節的宣稱範圍已被 round-5 的 E2/E3 複核收窄。** 下面「證得到」的三條仍然成立
+> (E3 以武裝 `core.fsmonitor`/`filter.*.clean/process`/`diff.*.textconv`/`core.hooksPath`
+> /`core.pager`/`core.editor`/`uploadpack.packObjectsHook`/`include.path` 的被驗者實測:
+> 零 sentinel 命中、事實全數取得,`_GIT_ENV_ALLOWLIST` 與 `safe.directory` 皆未回歸),
+> 但**「view 只從 alternate 取內容定址物件」這句是假的**,而且 §5 記了三條
+> CONFIRMED-exploitable 的殘留。本輪的 gate verdict 是 **FAIL**,不是 PASS。
 
 **證得到(本輪測試涵蓋)**
 
@@ -151,3 +175,82 @@ promisor 的 config 文字掃描只是第二道,且只能讓判定更嚴,永遠�
    `_require_own_clean_checkout` 補上 `git_own_checkout_guard`。
 3. **reftable ref backend 未鏡射**,偵到即 fail-closed。若未來被驗者改用 reftable,
    需要一條純資料的 reftable 讀取器,或改由 producer 側提供已解析的 40-hex。
+
+## 6. round-5 對抗複核的未收發現(E2 / E3;本輪 gate verdict = FAIL)
+
+本輪跑了獨立的 E2(對抗代碼複核)與 E3(信任邊界安全複核)。兩者都確認核心機制成立
+(見 §4 的方框),也都找到**本輪未收**的缺陷。下列全部是 CONFIRMED,除非另註。
+**在 P0-A/B/C 收口之前,本分支不得 merge,也不得被任何 receipt 當成 §LW1 的證據。**
+
+### P0-A(E3 P0-1,high)指標重導向:`gitdir:` / `commondir` / `objects` symlink
+
+`subject_git_dir` 跟隨 `.git` 檔裡的 `gitdir: <絕對路徑>`、`subject_common_dir` 跟隨
+`commondir`、`code_owned_object_view` realpath `<common>/objects`——**三者都不驗 owner、
+不驗與 `repo_root` 的關係**。E3 實測:被驗者寫 `gitdir: /path/to/victim/.git`,驗證器
+(root)就把 victim repo 的 `TODO.md` 位元組讀了出來。`commondir` 與 `objects` symlink
+兩條路等價。
+
+比讀取更糟:`aiml_gate_receipt_s2e_consumption` 由 `subject_common_dir(subject_git_dir(...))`
+導出 consume-once ledger 的 `state_path`/`lock_path`,所以**被驗者選得了防重放帳本的
+位置**(指到空目錄 ⇒ 帳本重新變空),並讓 root 在他指定的目錄裡建檔。
+
+誠實歸因:`git rev-parse --git-common-dir` 本來就跟隨同樣的指標,所以重導向不是新的;
+**新的是 git 的 ownership 檢查原本是那道意外屏障,而本輪刻意移除它卻沒有補上替代**。
+修法:記下 `lstat(repo_root).st_uid`,要求 gitdir/commondir/objects 三者的 owner 都等於
+它(不是等於 euid——驗證器是 root,被驗者不是)。
+
+### P0-B(E3 P0-2,high)巢狀 alternates 的拒絕是 check-then-use
+
+`code_owned_object_view` 的 `exists()` 檢查之後、git 真的開檔之前,隔著 mkdtemp + 祖先
+驗證 + 三次寫入 + subprocess spawn。被驗者擁有 `objects/info/`,在那個窗口內建檔即可。
+E3 的樸素競爭器 400 次試驗:**leaked 134 / refused 161 / clean 105**。
+
+### P0-C(E3 P0-3,high)alternate 的資料面不是純內容定址
+
+git 也會從 alternate 載入 `objects/info/commit-graph`、`commit-graphs/*`、
+`objects/pack/multi-pack-index`、`*.bitmap`——**攻擊者撰寫、非內容定址、git 不對物件
+複驗**。E3 實測:對 `c3` 的 CDAT parent1 欄位改 4 個位元組,`floor_history_errors` 的
+`log --full-history` 走訪就**少掉 c2**,而 `_object_store_errors` 回 `[]`、
+`merge-base --is-ancestor` 仍 True、`git commit-graph verify` 也 rc=0 ⇒
+`read_committed_durability_anchor_floor` 回 `FLOOR_VERIFIED`。這正好打掉
+`--full-history` 那條具名防線。
+
+**P0-B 與 P0-C 有共同的結構解**:不要把 view 的 `objects` 指向被驗者的目錄,改成在
+view 內物化一個只含「loose object fanout 目錄」與 `pack/*.{pack,idx}` 的 symlink 集合
+——不連 `info/`(⇒ 沒有 alternates、沒有 commit-graph)、不連 `multi-pack-index`、
+不連 `*.bitmap`。一次改動同時關掉競爭窗口與圖偽造。
+
+### P1 級(未收)
+
+| # | 來源 | 內容 |
+|---|---|---|
+| P1-D | E2 F2 | `code_owned_object_view` 的 `OSError` 會從 `_is_ancestor` 逸出到四個未包 try 的呼叫點(`s2e_launch:502/529/570/1062`),把 `-> list[str]` 的驗證器變成 crash。**合法的 `git clone --shared` 就會觸發**。 |
+| P1-E | E3 P1-5 | `s2e_launch` 與 `s2e_review` 的 git 呼叫**沒有 `timeout=`、沒有輸出上界**。E3 實測 1.2 MB 的 `.git` 用一顆零填充 blob 把驗證器 RSS 推到 687 MB(~250x)。舊拓撲下這些呼叫在 rc=128 就死了,本輪把它變成活的解析面。 |
+| P1-F | E3 P1-6 | `git_own_checkout_guard` 只看目錄 owner,不看 mode、不走祖先鏈——與它旁邊 `_verify_private_directory` 的標準不一致。group/world-writable 的 `.git` 仍會讓 `git status` 跑到攻擊者寫的 `core.fsmonitor`。已在該函式 docstring 具名。 |
+| P1-G | E2 F6 | `resolve_named_revision` 只改寫字面 `"HEAD"`,於是 generation 面**不再解析 branch/tag/`HEAD~1`**;CLI 傳 `--source-head main` 從發得出 receipt 變成 traceback。fail-closed,但未文件化、未測試。 |
+| P1-H | E2 F5b/F9b、E3 P2 | `agent_governance_s2e_lw1_action_packet.py` 仍 `git -C <被驗者>` 跑 `status`(`:239`)與 `rev-parse`(`:382/384`),而 `:382` 在 **`validate_…` 驗證面**上——比 §5 debt 2 原本寫的「只有 generation 面」更廣。該檔屬 PM lane,本輪硬停止。 |
+| P1-I | E2 F9 | 測試鑑別性:(a) hardening 的 fsmonitor 測試落在 `reviewed_head != HEAD` 分支,而該分支本來就跳過唯一會碰工作樹的 `_replay_errors`,故對 F1 那條路不具鑑別性;(b) `test_verification_face_never_hands_the_subject_repository_to_git` 只驅動 floor 路徑,名稱卻宣稱整個驗證面;(c) `test_only_the_generation_face_may_read_a_working_tree` 是對**識別字名**的字面代理,`view = repo_root` 即可滿足,且不掃 `cwd=`、不含 action packet。 |
+
+### 本輪已收(post-review)
+
+- **E3 P1-4 / E2 F3(FIFO)**:`read_bounded` 加 `O_NONBLOCK`。`O_NOFOLLOW` 不擋 FIFO
+  而 `S_ISREG` 拒絕在 open 之後,`mkfifo .git/HEAD` 原本能讓驗證器**永久**阻塞
+  (in-process,家族裡每個 subprocess `timeout=` 都救不到)。
+- **E2 F4(衛生判定 fail-open)**:`_replace_refs_present` / `_promisor_marks_present`
+  的每一條 `except OSError` 由「當成沒有」改為 fail-closed,`os.walk` 補 `onerror`;
+  `config.worktree` 改從 per-worktree gitdir 讀。實測(0000 權限):unreadable
+  `packed-refs`、`refs/replace`、`config` 三者現在都判紅。
+  **殘留(未收,P1-J)**:polarity 對了,但**理由字串在說謊**——「讀不到」會被報成
+  「rewrites objects through replace refs」/「is a promisor partial clone」。
+  fail-closed 的判定沒錯,但 operator 拿到的是一個假的具名原因。應該分出一條
+  「object store hygiene could not be determined」而不是借用既有原因。
+- **E2 F7(ref 解析回錯的 sha)**:loose ref「存在但讀不到」不再回落 packed-refs,
+  `HEAD` 永不從 packed-refs 解析,非 HEAD ref 改為 common-dir 優先。
+- **E2 F5a**:指向已不存在的 `subject_object_store_findings` 的 docstring、以及殘留的
+  `__pycache__/aiml_gate_receipt_git_view.cpython-310.pyc`。
+- **E2 F1**:§3 的假理由已更正(見該節方框)。
+
+### 未複核
+
+`_promisor_marks_present` 改讀 per-worktree `config.worktree`、以及上列「本輪已收」的
+五項修補,**是在 E2/E3 交件之後才寫的,沒有經過第二輪對抗複核**。

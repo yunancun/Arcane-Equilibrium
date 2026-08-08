@@ -524,13 +524,15 @@ def git_subprocess_env() -> dict[str, str]:
 # ── code-owned bare object view(差異 uid 拓撲的唯一取事實面)─────────────────
 #
 # 舊拓撲 `git -C <被驗者>` 讓 git **discover** 外人的目錄為 repository,於是它的
-# `.git/config`(`core.fsmonitor`、`filter.<drv>.clean`…)、hook、`.gitattributes` 與
-# 工作樹全部進場,而 discover 正是 ownership 檢查發生的地方。本 view 反過來:驗證器自建
-# 一個 bare repo,只把被驗者的 `objects/` 以 `objects/info/alternates` 掛上去——那是純
-# 內容定址資料面,git 從那裡取物件,不讀它的 config/hook/attributes,也不做 ownership
-# 檢查。view 的 `refs/` 為空、`HEAD` 指向 unborn branch,不替被驗者解析任何名字。
-# E1 於 git 2.55 實測:**裸** `rev-parse HEAD` 解不出來時回 `rc=0` 並原樣印回 `HEAD`
-# (fail-open),只有 `--verify` 才 `rc=128`;故名字解析一律 `--verify` 或先換 40-hex。
+# `.git/config`(`core.fsmonitor`、`filter.<drv>.clean`…)、hook、`.gitattributes` 與工作樹
+# 全部進場,而 discover 正是 ownership 檢查發生的地方。本 view 反過來:驗證器自建一個
+# bare repo,只把被驗者的 `objects/` 以 `objects/info/alternates` 掛上去;git 從那裡取
+# 物件,不讀它的 config/hook/attributes,也不做 ownership 檢查。view 的 `refs/` 為空、
+# `HEAD` 指向 unborn branch,不替被驗者解析任何名字。E1 於 git 2.55 實測:裸
+# `rev-parse HEAD` 解不出來時回 `rc=0` 並原樣印回 `HEAD`(fail-open),只有 `--verify`
+# 才 `rc=128`;故名字解析一律 `--verify` 或先換 40-hex。
+# **這個資料面不是純內容定址的**(E3 round-5):commit-graph / midx / bitmap 也從
+# alternate 載入且未被驗證——見設計檔 §5 debt,本輪未收。
 #
 # 設計全文:docs/execution_plan/ai_ml_landing/design/S2E-round5-code-owned-object-view.md
 _OBJECT_VIEW_MODE = 0o700
@@ -553,14 +555,18 @@ _REF_NAME_PATTERN = re.compile(r"\Arefs/[A-Za-z0-9][A-Za-z0-9._/-]*\Z")
 def read_bounded(path: Path, limit: int) -> bytes:
     """讀一個**常規檔**的前 `limit` 位元組;symlink/非常規檔/超限一律 `OSError`。
 
-    `O_NOFOLLOW` 是關鍵:被驗者的 `refs/` 底下可以放 symlink,而 ref 讀取是本家族唯一
-    還會碰被驗者檔案的地方。跟開就等於讓被驗者指定驗證器要讀哪個檔。
+    `O_NOFOLLOW` 擋最後一節的 symlink。`O_NONBLOCK` 同樣必要(E3 round-5 實測):它不擋
+    FIFO,而 `S_ISREG` 的拒絕在 open **之後**,故 `mkfifo .git/HEAD` 能讓驗證器永遠卡在
+    open——in-process 阻塞,家族裡每個 subprocess `timeout=` 都救不到。
     """
 
     import os
     import stat as stat_module
 
-    flags = os.O_RDONLY | getattr(os, "O_CLOEXEC", 0) | getattr(os, "O_NOFOLLOW", 0)
+    flags = (
+        os.O_RDONLY | getattr(os, "O_NONBLOCK", 0)
+        | getattr(os, "O_CLOEXEC", 0) | getattr(os, "O_NOFOLLOW", 0)
+    )
     descriptor = os.open(path, flags)
     try:
         info = os.fstat(descriptor)
@@ -582,8 +588,8 @@ def read_bounded(path: Path, limit: int) -> bytes:
 def subject_git_dir(repo_root: Path | str) -> Path:
     """被驗者的 gitdir(`.git` 目錄、`gitdir:` 指標檔、或裸 repo 自身)。
 
-    全程只 stat/讀位元組。**絕不**把 `repo_root` 交給 git 去 discover——那正是
-    `git_argv` docstring 記的兩條死路的共同前提。
+    全程只 stat/讀位元組,絕不把 `repo_root` 交給 git 去 discover。**警告**:`gitdir:`/
+    `commondir` 指標與 `objects` symlink 目前只跟隨、不驗 owner(E3 round-5 P0-1)。
     """
 
     import os
@@ -614,8 +620,7 @@ def subject_git_dir(repo_root: Path | str) -> Path:
 def subject_common_dir(git_dir: Path) -> Path:
     """linked worktree 的共用 gitdir(`commondir` 指標);普通 repo 回自己。
 
-    物件庫、`packed-refs`、`info/grafts` 全在共用側,per-worktree 側只有 `HEAD` 這類
-    本地狀態,兩側都要走到。
+    物件庫、`packed-refs`、`info/grafts` 在共用側;`HEAD` 這類本地狀態在 per-worktree 側。
     """
 
     import os
@@ -635,10 +640,10 @@ def subject_common_dir(git_dir: Path) -> Path:
 def _verify_private_directory(path: Path) -> None:
     """`path` 自身與每一層祖先都不得被本行程以外的身分改寫。
 
-    mkdtemp 的目錄本身是 0700 且原子建立,但它的**位置**來自 ambient `TMPDIR`。若
-    `TMPDIR` 由攻擊者所有,他雖進不去 0700 的 view,卻能 rename/刪掉它換上自己的
-    (他擁有父目錄)⇒ `config` 在建立與使用之間被換掉,`core.fsmonitor` 從側門回來。
-    故祖先只能由 root 或本 uid 所有,group/other 可寫時必須帶 sticky(`/tmp` 的 1777)。
+    mkdtemp 的目錄是 0700 且原子建立,但它的**位置**來自 ambient `TMPDIR`。若 `TMPDIR`
+    由攻擊者所有,他能 rename/刪掉 view 換上自己的 ⇒ `config` 在建立與使用之間被換掉,
+    `core.fsmonitor` 從側門回來。故祖先只能由 root 或本 uid 所有,group/other 可寫時
+    必須帶 sticky(`/tmp` 的 1777)。
     """
 
     import os
@@ -683,12 +688,11 @@ def _write_view_file(path: Path, payload: str) -> None:
 def code_owned_object_view(repo_root: Path | str) -> Iterator[Path]:
     """yield 一個 code-owned bare repo 的路徑,掛著被驗者的 object store。
 
-    這是本家族**唯一**被允許交給 `git_argv` 的 repository 路徑(唯一例外是
-    `git_own_checkout_guard` 守住的 generation 面)。目錄由本行程建立、本 uid 所有、
-    0700、祖先鏈逐層驗過;`config` 逐位元組由代碼寫出(無 remote ⇒ promisor 取不到
-    網路、無 fsmonitor、無 filter driver);無 `hooks/`、無 `info/grafts`、`refs/` 全空
-    (⇒ replace ref 與 graft 不生效);無工作樹(⇒ `git status` 結構上跑不起來)。
-    生命週期每次呼叫一個:無快取、無 module 級可變狀態,故無跨呼叫污染與可變單例。
+    本家族的驗證面只把這個路徑交給 `git_argv`(generation 面另有 `git_own_checkout_guard`;
+    `agent_governance_s2e_lw1_action_packet` 仍是未收的殘留,見設計檔 §5)。目錄由本行程
+    建立、本 uid 所有、0700、祖先鏈逐層驗過;`config` 逐位元組由代碼寫出(無 remote、
+    無 fsmonitor、無 filter driver);無 `hooks/`、無 `info/grafts`、`refs/` 全空;無工作樹
+    (⇒ `git status` 結構上跑不起來)。每次呼叫建一個:無快取、無 module 級可變狀態。
     """
 
     import os
@@ -699,10 +703,9 @@ def code_owned_object_view(repo_root: Path | str) -> Iterator[Path]:
     objects = Path(os.path.realpath(str(subject_common_dir(git_dir) / "objects")))
     if not objects.is_dir():
         raise OSError(f"{objects} is not a readable Git object store")
-    # 巢狀 alternates 一律拒(E3 round-5 自審):git 會**遞移**跟隨被驗者自己的
-    # `objects/info/alternates`。驗證器多半是 root,於是被驗者能叫它去讀 root 讀得到、
-    # 自己讀不到的物件庫,再以明確 object id 把位元組拉進 manifest/digest(confused
-    # deputy 讀取放大)。不過濾內容,直接 fail-closed。
+    # 巢狀 alternates 一律拒:git 會**遞移**跟隨被驗者的 `objects/info/alternates`,
+    # 讓 root 驗證器去讀被驗者自己讀不到的物件庫(confused deputy 讀取放大)。
+    # 注意這是 check-then-use,E3 round-5 實測可被競爭繞過——見設計檔 §5 debt。
     if (objects / "info" / "alternates").exists():
         raise OSError(f"{objects} chains to another object store through alternates")
     if "\n" in str(objects) or "\r" in str(objects):
@@ -724,11 +727,10 @@ def code_owned_object_view(repo_root: Path | str) -> Iterator[Path]:
 def git_own_checkout_guard(repo_root: Path | str) -> Path:
     """確認 `repo_root` 是**本 uid 自己的** checkout,回其 realpath;否則 `OSError`。
 
-    generation 面(作者為自己剛做完的樹發射 candidate)是本家族唯一還需要工作樹事實的
-    地方——「我的樹是乾淨的」只有工作樹能回答,而 bare view 沒有工作樹。誠實邊界:這
-    **不是**「假設同 uid」,同 uid 是被**驗證**的前提,外人所有的樹一律大聲拒;作者對
-    自己的 repo 跑 `git status`、因此跑到自己寫的 `core.fsmonitor`,不是提權(寫 config
-    的人就是執行者本人)。驗證面不得呼叫本函式。
+    generation 面(作者為自己的樹發射 candidate)是本家族唯一還需要工作樹事實的地方。
+    誠實邊界:這**不是**「假設同 uid」,同 uid 是被**驗證**的前提;但本檢查只看目錄
+    owner,不看 mode 也不走祖先鏈,所以 group/world-writable 的 `.git` 仍能過關
+    (E3 round-5 P1-6,本輪未收)。驗證面不得呼叫本函式。
     """
 
     import os
@@ -747,15 +749,22 @@ def git_own_checkout_guard(repo_root: Path | str) -> Path:
     return root
 
 
-def _loose_ref_value(git_dir: Path, common: Path, name: str) -> str | None:
+# 「存在但讀不到」與「不存在」必須分開:前者不得回落 packed-refs,否則被驗者把 loose
+# ref 弄成讀不到、同時在 packed-refs 手寫一行,就能讓解析回錯的 sha(E2 F7)。
+_REF_UNREADABLE = object()
+
+
+def _loose_ref_value(git_dir: Path, common: Path, name: str) -> Any:
     if any(part in ("", ".", "..") for part in name.split("/")):
         return None
-    candidates = [git_dir / name] if name == "HEAD" else [git_dir / name, common / name]
+    candidates = [git_dir / name] if name == "HEAD" else [common / name, git_dir / name]
     for candidate in candidates:
         try:
             raw = read_bounded(candidate, MAX_REF_FILE_BYTES)
-        except OSError:
+        except FileNotFoundError:
             continue
+        except OSError:
+            return _REF_UNREADABLE
         return raw.decode("utf-8", "replace").strip()
     return None
 
@@ -777,9 +786,9 @@ def _packed_ref_value(common: Path, name: str) -> str | None:
 def read_subject_ref(repo_root: Path | str, name: str = "HEAD") -> str | None:
     """把被驗者的 ref 名解析成 40-hex;解不出來一律 `None`(fail-closed)。
 
-    view 的 `refs/` 是空的,所以必須來自被驗者 ref 儲存的事實由這裡以**純位元組讀取**
-    取得,再以明確 40-hex 交給 view。ref 檔是資料不是執行面:讀它不跑任何程式;而 ref
-    值本來就由被驗者決定,沒有交出新的信任。reftable backend 不鏡射,偵到回 `None`。
+    view 的 `refs/` 是空的,故必須來自被驗者 ref 儲存的事實在此以**純位元組讀取**取得,
+    再以明確 40-hex 交給 view。ref 檔是資料不是執行面,且 ref 值本來就由被驗者決定。
+    reftable backend 不鏡射,偵到回 `None`。
     """
 
     try:
@@ -794,8 +803,11 @@ def read_subject_ref(repo_root: Path | str, name: str = "HEAD") -> str | None:
         if current != "HEAD" and _REF_NAME_PATTERN.fullmatch(current) is None:
             return None
         value = _loose_ref_value(git_dir, common, current)
+        if value is _REF_UNREADABLE:
+            return None
         if value is None:
-            return _packed_ref_value(common, current)
+            # git 從不從 packed-refs 解析 HEAD。
+            return None if current == "HEAD" else _packed_ref_value(common, current)
         if value.startswith("ref:"):
             current = value[4:].strip()
             continue

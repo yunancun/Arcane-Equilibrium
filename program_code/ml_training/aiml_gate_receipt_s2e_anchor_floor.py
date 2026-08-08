@@ -329,7 +329,7 @@ def _object_store_errors(repo_root: Path) -> list[str]:
 
     E3 round-5:四條判定原本是 `git -C <被驗者> rev-parse/for-each-ref/config` 問出來
     的——那正是「把外人所有的目錄當 repository 打開」的一部分。改由
-    `subject_object_store_findings` 從**檔案系統**判定(`shallow`/`info/grafts`/
+    `_object_store_errors` 自己從**檔案系統**判定(`shallow`/`info/grafts`/
     `refs/replace/`/`objects/pack/*.promisor`),判定同樣完整而不碰任何可執行面。
     其中三條在 view 底下已經**結構上失效**:view 自己沒有 remote(promisor 抓不到
     網路,缺物件就是缺)、沒有 grafts、`refs/` 全空(replace ref 不生效),而淺樹缺
@@ -371,7 +371,7 @@ def _object_store_errors(repo_root: Path) -> list[str]:
                 "durability anchor floor cannot be read from a repository whose object "
                 "store chains to another store through alternates"
             )
-        if _promisor_marks_present(common):
+        if _promisor_marks_present(common, git_dir):
             errors.append(
                 "durability anchor floor cannot be read from a promisor partial clone"
             )
@@ -381,26 +381,37 @@ def _object_store_errors(repo_root: Path) -> list[str]:
 
 
 def _replace_refs_present(git_dir: Path, common: Path) -> bool:
-    """`refs/replace/` 底下有沒有東西(loose 或 packed)。"""
+    """`refs/replace/` 底下有沒有東西(loose 或 packed)。
+
+    E2 F4:每一條 except 都必須 fail-**closed**。它取代的 `git for-each-ref` 在任何失敗
+    上都會拋 `_GIT_FAILURES` 並產出「object store is unreadable」;若這裡把「讀不到」
+    當成「沒有 replace ref」,被驗者只要讓 `packed-refs` 超出上界或不可讀,就能把一條
+    真判定靜默關掉。`os.walk` 的 `onerror` 同理——預設是靜默吞掉。
+    """
 
     import os
 
+    unreadable: list[OSError] = []
     for base in {git_dir, common}:
         root = base / "refs" / "replace"
         if not root.is_dir():
             continue
         visited = 0
-        for _, _, files in os.walk(root):
-            if files:
+        for _, _, files in os.walk(root, onerror=unreadable.append):
+            if files or unreadable:
                 return True
             visited += 1
             if visited > _MAX_REPLACE_REF_SCAN_ENTRIES:
                 # 只有空目錄卻多到不合理:當成存在(fail-closed),不無上界地走。
                 return True
+        if unreadable:
+            return True
     try:
         raw = read_bounded(common / "packed-refs", MAX_PACKED_REFS_BYTES)
-    except OSError:
+    except FileNotFoundError:
         return False
+    except OSError:
+        return True
     return any(
         line.partition(" ")[2].strip().startswith("refs/replace/")
         for line in raw.decode("utf-8", "replace").splitlines()
@@ -408,7 +419,7 @@ def _replace_refs_present(git_dir: Path, common: Path) -> bool:
     )
 
 
-def _promisor_marks_present(common: Path) -> bool:
+def _promisor_marks_present(common: Path, git_dir: Path) -> bool:
     """partial(promisor)clone 的檔案系統痕跡。
 
     主判準是 `objects/pack/*.promisor` 標記檔——git 自己為每個從 promisor remote 取來的
@@ -424,13 +435,16 @@ def _promisor_marks_present(common: Path) -> bool:
                 return True
         except OSError:
             return True
-    for name in ("config", "config.worktree"):
-        try:
-            raw = read_bounded(common / name, MAX_SUBJECT_CONFIG_BYTES)
-        except OSError:
-            continue
-        if _PROMISOR_CONFIG_KEY.search(raw.decode("utf-8", "replace")):
-            return True
+    for base in {common, git_dir}:
+        for name in ("config", "config.worktree"):
+            try:
+                raw = read_bounded(base / name, MAX_SUBJECT_CONFIG_BYTES)
+            except FileNotFoundError:
+                continue
+            except OSError:
+                return True  # E2 F4:讀不到 config 不得當成「不是 promisor」
+            if _PROMISOR_CONFIG_KEY.search(raw.decode("utf-8", "replace")):
+                return True
     return False
 
 
