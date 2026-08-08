@@ -29,7 +29,7 @@ runtime、零 broker、零 order
 | 所有 active callers 有 machine-checkable 安全 transport | caller inventory 41 tracked 檔、零 active inline caller；`--context-artifact` 改 `@path`-only typed refusal（`agent_governance.py:459`）；`closure`／`closure-quality`／`project-closure` 的寬鬆 loader 一併補 size guard | MET |
 | 原兩個 failing tests 經語義修復後全綠 | `tests/structure/test_aiml_s2_effect_host_run.py` = **48 passed／0 failed／0 skipped／0 error**（改動前 47 collected／45 passed／2 failed） | MET |
 | adjacent regression 全綠 | 含新增 `test_agent_governance_context_transport.py` 合計 **65 passed／1 skipped**（skip = Linux 常數測試在 darwin 誠實跳過，非規避）；`test_development_agent_governance.py` ＋ `test_agent_governance_command_capture_v2.py` = **55 passed** | MET |
-| Registry／context payload headroom 有 current Linux limit 證據 | trade-core 唯讀實測 PAGE_SIZE=4096、單 argv 上限 131,071 ⇒ MAX_ARG_STRLEN=131,072、ARG_MAX=2,097,152 | MET **但見 §五**：該實測由前一 session 當日取得，**本 session 無法複驗** |
+| Registry／context payload headroom 有 current Linux limit 證據 | **2026-08-09 由 PM 本 session 直接複驗**：`getconf PAGE_SIZE`=4096、`getconf ARG_MAX`=2,097,152、單一 argv 元素上限以二分搜尋實測 **131,071 bytes** ⇒ `MAX_ARG_STRLEN`=131,072 | MET（**不再是轉述**） |
 | `agent_governance.py validate` PASS | `{"status": "PASS", "roles": 20}`（本輪重跑） | MET |
 
 ### 1.2 反作弊複核（由 operator 複驗、本輪採信）
@@ -224,14 +224,22 @@ packet，屬 caller 可控輸入）、全部動作皆完成時不得再發 block
 **witness 表只有一條**，因為其餘七項全是 host 側 provisioning，repo 位元組永遠證明不了
 它們的完成。這個稀疏性本身就是靜態清單能腐化多日而 CI 全綠的原因。
 
-### 4.4 具名未複驗：committed packet 的 host 觀察已對不上
+### 4.4 committed packet 的 host 觀察確定過期，但本 PR 刻意不刷新
 
-PR #181（2026-08-08 merge）記錄 operator 已開 `ncyu-nas:22` 並 provision 11 個信任根。
-committed packet 的 `readonly_observation` 仍是 **2026-08-02 的全 ABSENT 觀察**，與該報告
-不一致。**本輪不刷新它**：刷新需要一次 trade-core 上的新鮮唯讀 inventory 擷取，PM session
-的 `ssh trade-core` 被 publickey 拒；憑 operator 報告改寫 inventory 位元組會是**捏造主機觀察**。
-故 16 項 prerequisites 的 `status`／`blocking` 維持原樣並具名標記為 stale。
-（PR #181 只改 fingerprint 常數、未改路徑，故 `EXPECTED_PATHS` 與 packet 的 locator 仍相符。）
+2026-08-09 PM 以 ssh 唯讀重新觀察 12 個 fixed path：**11 PRESENT，唯一 ABSENT 是
+`/usr/local/libexec/arcane-equilibrium/s2-5-recovery-host-capture-attest-v2`**（＝三支尚未
+實作的 root-owned producer 之一）。committed packet 的 `readonly_observation`（2026-08-02，
+全 ABSENT）因此**確定過期**，不再只是「可能過期」。
+
+**不在本 PR 內重生的理由**：刷新會改動 `blocked_prerequisite_ids`——那是 operator 實際照著
+做事的欄位。本 PR 的 E2/E4 審查對象是 action 清單的**導出機制**，不是 host 觀察；把後者混
+進來等於讓已簽核的範圍靜默變形，正是本專案反覆被咬的形狀。另立
+`P2-LW1-READONLY-INVENTORY-REFRESH`，並在該 row 寫明：**不得**憑 operator 報告或 shell 觀察
+直接改寫 inventory 位元組，必須走 inventory 擷取路徑產生完整 artifact，`PRESENT_UNVERIFIED`
+與 `READY` 的判別必須由該路徑執法。
+
+（PR #181 只改 fingerprint 常數、未改路徑，故 `EXPECTED_PATHS` 與 packet 的 locator 仍相符；
+刷新後也不解鎖任何 wave——四個 service 與三支 producer 仍缺。）
 
 ### 4.5 未觸及
 
@@ -254,10 +262,30 @@ G2 的依賴欄補上 `S2E.2b-1`（與 G1 同一條 lineage predecessor）。該
 
 ---
 
-## 五、未複驗項與誠實邊界
+## 五、證據狀態（2026-08-09 更正：先前的「無法複驗」是誤判）
 
-| 項目 | 狀態 |
+初版寫「`ssh trade-core` 回 `Permission denied (publickey)`，本 session 無法複驗」。
+**那個診斷是錯的**：key 帶 passphrase 而 agent 是空的，`ssh-add` 之後即可連線（與 PR #182
+對 A5 的更正同因）。因此下列三項由**我自己**重新量，不再是轉述：
+
+| 項目 | 本 session 實測 |
 |---|---|
+| trade-core `PAGE_SIZE` | `getconf PAGE_SIZE` = **4096** |
+| trade-core `ARG_MAX` | `getconf ARG_MAX` = **2,097,152** |
+| 單一 argv 元素上限 | 對 `/bin/true` 做二分搜尋，最大成功長度 **131,071 bytes** ⇒ `MAX_ARG_STRLEN` = **131,072** |
+| Linux source sync | `srv` 在 `main`、乾淨、head = `cd09a59a6` ＝當時 `origin/main`。**已同步** |
+| 12 個 fixed host path | **11 PRESENT，1 ABSENT**（`/usr/local/libexec/arcane-equilibrium/s2-5-recovery-host-capture-attest-v2`，＝三支未實作 producer 之一） |
+
+**仍然成立的誠實邊界**：以上是 shell 唯讀觀察，`UNAUTHENTICATED_READ_ONLY_OBSERVATION`
+等級，**不是** platform-attested runtime evidence，也不改變任何 gate。本輪測試證據仍全部是
+Mac 本地 `LOCAL_REPRODUCIBLE`。runtime 仍 unverified／not observed；正式 V2 units 與
+canonical roots 不存在；legacy ALR active 不等於 V2 landed。九項 authority 全 false、
+production effect 0/6、S2 未關閉。
+
+**這一段本身就是教訓**：把一個環境問題（agent 沒 key）寫成能力邊界（沒有存取權），
+會讓後續每一輪都照抄那句話。診斷要做到能複現，才可以寫進誠實邊界。
+
+---|---|
 | trade-core `PAGE_SIZE=4096`／單 argv 上限 `131,071`／`ARG_MAX=2,097,152` | **本 session 未複驗**。這是前一 session 當日的唯讀實測；本 session `ssh trade-core` 回 `Permission denied (publickey)`，無獨立複驗管道。沿用但具名標記，**不靜默採信** |
 | Linux 端是否已 ff-only 同步到 `b1d2eea03` | **未確認**，同上原因 |
 | 本輪全部測試證據 | Mac 本地 `LOCAL_REPRODUCIBLE`；不是 closure-admissible 強 PASS |
