@@ -52,7 +52,7 @@ RECOVERY_HOST_CAPTURE_TRUST_ROOT_PUBLIC_KEY_PATH = Path(
     "/etc/arcane-equilibrium/trust/s2-5-recovery-host-capture.pub"
 )
 RECOVERY_HOST_CAPTURE_TRUST_ROOT_FINGERPRINT = (
-    "SHA256:2u6gW8YQXyZc0nR1mM3vA4bB5cC6dD7eE8fF9gG0hHI"
+    "SHA256:PAGVj4FLrFphzKUVJ1W3wHqoJ3St+PkbYGnPUB2y8GU"
 )
 MAX_HOST_CAPTURE_TTL = timedelta(minutes=15)
 _SIGNED_BINDING_KEYS = frozenset({

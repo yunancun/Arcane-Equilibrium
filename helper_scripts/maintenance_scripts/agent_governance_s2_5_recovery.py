@@ -78,38 +78,38 @@ RECOVERY_AUTHORIZATION_TRUST_ROOT_PUBLIC_KEY_PATH = Path(
     "/etc/arcane-equilibrium/trust/s2-5-recovery-authorization.pub"
 )
 RECOVERY_AUTHORIZATION_TRUST_ROOT_FINGERPRINT = (
-    "SHA256:sJ9ORYOXbpR9NqrNxpPXyQcliBG1j/idb9lLzrTPRdc"
+    "SHA256:Hvp49uUIZTcVFNyGZjpYJ6NwkoZRId0G+7UWCO27HI8"
 )
 RECOVERY_ANCHOR_TRUST_ROOT_PUBLIC_KEY_PATH = Path(
     "/etc/arcane-equilibrium/trust/s2-5-recovery-anchor.pub"
 )
 RECOVERY_ANCHOR_TRUST_ROOT_FINGERPRINT = (
-    "SHA256:RUYp2kjHqzfmMSWnHFOlxBBj7vS9ws+OPAeJNKTUeLA"
+    "SHA256:xQmuPgFjpIkpLnHZtyG6PNKiORqS7G+rdBvBQdO3GLs"
 )
 RECOVERY_ANCHOR_READBACK_TRUST_ROOT_PUBLIC_KEY_PATH = Path(
     "/etc/arcane-equilibrium/trust/s2-5-recovery-anchor-readback.pub"
 )
 RECOVERY_ANCHOR_READBACK_TRUST_ROOT_FINGERPRINT = (
-    "SHA256:f4cGt6LzU8quxQUmrfd6wg9Xx+hBPrWcCXhbZ+mTguI"
+    "SHA256:w/WwhH2ReaZEtwhERSA1jEfV4xSxzNNG/pHvTSr2S9M"
 )
 RECOVERY_ANCHOR_EXTERNAL_STORE_ID = "s2-5-recovery-anchor-worm-v1"
 RECOVERY_CONSUMPTION_TRUST_ROOT_PUBLIC_KEY_PATH = Path(
     "/etc/arcane-equilibrium/trust/s2-5-recovery-consumption.pub"
 )
 RECOVERY_CONSUMPTION_TRUST_ROOT_FINGERPRINT = (
-    "SHA256:zanTk+tXTHROIEqNHC5miSIsd+Z3V3NOdZW/mLz1PcY"
+    "SHA256:Qoai81W7fU35Nr1+NxWO4cT3sRui6klP9aeHvQaWJ0s"
 )
 RECOVERY_ACTOR_CAPTURE_TRUST_ROOT_PUBLIC_KEY_PATH = Path(
     "/etc/arcane-equilibrium/trust/s2-5-recovery-actor-capture.pub"
 )
 RECOVERY_ACTOR_CAPTURE_TRUST_ROOT_FINGERPRINT = (
-    "SHA256:3u7dOQhWe22HlXBECoqbYC9tje+SZ5AI47Bwy1fZ2aQ"
+    "SHA256:h9pIv6rvjCzPsyqHUTjHBhUsMeJay0lEU+NpHyWrXoQ"
 )
 RECOVERY_VERIFIER_CAPTURE_TRUST_ROOT_PUBLIC_KEY_PATH = Path(
     "/etc/arcane-equilibrium/trust/s2-5-recovery-verifier-capture.pub"
 )
 RECOVERY_VERIFIER_CAPTURE_TRUST_ROOT_FINGERPRINT = (
-    "SHA256:cWa7aFhQougPNj98pCDzjvHKKOdaFgKPaEplyZ5zFVA"
+    "SHA256:HcUxM9d/yXTeX8ztqEEyY//NqqpC9jNOceQdSZj92Qg"
 )
 _BINDING_KEYS = frozenset({
     "task_digest", "unresolved_state_digest", "state_root_identity", "journal_set",
