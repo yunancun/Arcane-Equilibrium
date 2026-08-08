@@ -16,7 +16,7 @@ runtime、零 broker、零 order
 | 1 | G1 收口 | `DONE_SOURCE_LANDED`；同一 commit 內 G2 接任唯一 ACTIVE row，不出現零 ACTIVE 中間態 |
 | 2 | G2 本體 | `LW1@SOURCE_READY` 與 `LW1@EXTERNAL_ATTESTED` 判定為**兩個必須機械獨立**的述詞；只 re-admit **LW2 source slice**；LW3–LW5 維持 WAITING；`S3.1A` **有條件**成為第二 writer |
 | 3 | context store 結轉 | **不接進 transport／admission 面**；若日後要接，只接 persist 面，owner=E5→E1，先有 profile 才有實作 |
-| 4 | action packet 過期 | 8 → 7 項；成因是「靜態清單 ＋ 早於事實的 pin」；已補 emission guard ＋ 兩支突變實測會紅的測試 |
+| 4 | action packet 過期 | 目錄維持 8 項，**必做清單改由 bound checkout 導出**；成因是「靜態清單 ＋ 早於事實的 pin」。第一版全域刪除是錯的（造出反向錯誤），已依 PR #180 Codex P1 更正 |
 
 ---
 
@@ -75,7 +75,7 @@ Connection refused、三支 root-owned producer 未實作。
 
 | | `LW1@SOURCE_READY` | `LW1@EXTERNAL_ATTESTED` |
 |---|---|---|
-| 由什麼證明 | repo 位元組：LW1 owned source manifest 已 landed 於 current head、其測試於該 head 綠、review debt 已收 | W0 genesis receipt ＋ LW1 wave receipt ＋ transition `ADVANCE`，且 16 項 prerequisites READY |
+| 由什麼證明 | **只有 repo 位元組**：LW1 owned source manifest 於 bound head 存在且 generation 相符 | W0 genesis receipt ＋ LW1 wave receipt ＋ transition `ADVANCE`，且 16 項 prerequisites READY |
 | 誰可以計算 | 任何 checkout，離線、無私鑰 | 只有具備 out-of-band trusted-host capability 的驗證面 |
 | 它**授予**什麼 | 僅：**撰寫**下一個 wave 的 source slice 的權限 | receipt 發行、wave 關閉、`SOURCE_LANDED` 投影、任何 effect |
 | 它**永遠不**授予 | `lw2_unlocked`、任何 exit id、任何 receipt、任何 effect、任何 authority | —— |
@@ -98,6 +98,15 @@ attestation／S2 closure 的要求，不得降低、改名、以模擬錨替代�
    - `closure_projection` 的七個 `const: false` 欄位不得被本述詞觸及。
 4. **不得動**：`S2E_WAVE_EXIT_IDS`、`_ready_status_for`、transition gate、receipt schema、launch spec §LW1 全文。
 5. **route**：PM → PA（介面）→ E1 → E2 → E4；surfaces 不含 runtime／bybit／ibkr。
+6. **`SOURCE_READY` 的語義刻意收窄到「結構存在」（2026-08-09 依 Codex P2 更正）**。初稿把
+   「exact-head 測試綠、review debt 已收」也寫進定義，但述詞的輸入只有 `repo_root`／`wave`／
+   path manifest——**兩個 repo 位元組完全相同、但測試執行結果與 review 結論不同的狀態，
+   在該輸入下不可區分**。所以照初稿實作只有兩種下場：要嘛忽略那兩項要求，要嘛謊稱已建立。
+   正確的切法是：測試綠與 review provenance 屬於**另一個證據類別**（`command_capture_v2`／
+   review provenance），repo 位元組推導不出來，硬塞進去會把這個「弱述詞」重新拖回需要
+   attested capture。因此 `SOURCE_READY` **只**斷言結構存在；authoring admission 另外要求
+   PM 在 task contract 的 `claim_inputs` 綁定 exact-head 測試 capture 與 review provenance，
+   **在述詞之外**。述詞弱，是設計，不是疏漏。
 
 ### 2.4 LW2–LW5 逐波裁決
 
@@ -188,41 +197,59 @@ compiled-artifact 磁碟成長是實際瓶頸，才可派 E1——與
 **實害**：operator 照 packet 第 7 步會再 commit 一次創世 floor，而
 `aiml_gate_receipt_s2e_anchor_floor.py:533` 明文拒絕鏈上第二個 `GENESIS_ARMED`。
 
-### 4.2 修法（不是刪一個字串）
+### 4.2 第一版修法是錯的，Codex P1 抓到（2026-08-09 更正）
+
+**初版把該 action 從清單全域刪除。** 那治好了「已完成卻仍要求」，卻造出反向錯誤：
+packet 綁定的 pin `970734ae0` 的樹裡**沒有** floor 檔，在該 pin 上重建（
+`test_committed_action_packet_is_regenerable_by_its_generator` 正是這麼做的）會產生一份
+**漏掉一個當時真正必要步驟**的 packet，而且照樣通過驗證。逐條複驗後成立：全域刪除只是把
+一種腐化換成另一種。
+
+### 4.3 正解：清單由 bound checkout 推導
 
 | 檔 | 改動 |
 |---|---|
-| `agent_governance_s2e_lw1_action_packet.py` | `EXPECTED_ACTION_IDS` 8 → 7；新增 `REPOSITORY_COMPLETION_WITNESSES`（action → 完成 witness 路徑）與 `completed_action_ids()`；**emission 在 clean-tree 檢查之後逐項核對，命中即 typed `ValueError`** |
-| `.codex/schemas/s2e_lw1_operator_action_packet_v1.schema.json` | `required_action_ids` 的 `const` 陣列同步 8 → 7（**保留 `const`，未降級為 enum-array**） |
-| committed packet artifact | 於**原 pin `970734ae0`** 重新發行；`sha256:b28d49fe…a9cdf` → `sha256:69dcfec5…8f6b77`；除 `packet_digest` 與 `required_action_ids` 外**逐欄不變**（source_binding、inventory、16 項 prerequisites、closure_projection、authority_boundaries 全部原樣） |
-| `S2E-LW1-tier1-remediation.md` | §七的「共 8 項」加前向標記（不原地抹除），全文記入「演變軌跡 2026-08-07」 |
+| `agent_governance_s2e_lw1_action_packet.py` | `CANONICAL_ACTION_IDS` 維持 **8 項有序目錄**；新增 `REPOSITORY_COMPLETION_WITNESSES`、`completed_action_ids(repo_root, at_commit=…)`（讀該 commit 的樹，不是工作樹）與 `required_action_ids(…)`＝目錄減去已完成項；validator 在 **packet 自己綁定的 head** 重算並要求逐項相等 |
+| `.codex/schemas/…schema.json` | `required_action_ids` 由固定 8 項 `const` 改為「目錄成員、唯一、1–8 項」的陣列約束；**逐項相等改由 code-owned validator 執法**。這比原 `const` **更嚴**——`const` 無法隨 checkout 調整，它只能在「對舊 pin 錯」與「對新 pin 錯」之間二選一 |
+| committed packet artifact | **repin 到 `2f9b6cde4`**（floor 已在該樹內），於該 head 導出 **7 項**；`sha256:b28d49fe…a9cdf` → `sha256:8c495279…6436ba`；除 `packet_digest` 與 `source_binding` 外**逐欄不變**（inventory、16 項 prerequisites、closure_projection、authority_boundaries 全部原樣） |
+| `S2E-LW1-tier1-remediation.md` | §七的「共 8 項」加前向標記（不原地抹除），全文記入「演變軌跡」 |
 
-**兩支新測試，各自以突變實測會紅**：
-
-| 測試 | 突變 | 結果 |
-|---|---|---|
-| `test_repository_completed_actions_are_never_listed_as_required` | 把該 action id 放回 `EXPECTED_ACTION_IDS` | **FAILED**，訊息直接指名 `['COMMIT_GENESIS_ARMED_DURABILITY_ANCHOR_FLOOR']` |
-| `test_build_refuses_an_action_the_checkpoint_already_completed` | 移除 emission guard | **FAILED** |
-
-第一支同時斷言 witness 檔是 HEAD 上**真的被追蹤**的檔（`git ls-files --error-unmatch`），
-避免一個未追蹤的本地產物誤觸發或誤放行這條護欄。
+**測試（`test_required_actions_are_derived_from_the_bound_checkout` 同時釘兩個方向）**：
+在合成 repo 裡，witness 未 commit 時必須得到完整 8 項（**這一條對「全域刪除」版本為紅**），
+commit witness 之後必須得到 7 項且其餘項順序不變，且同一 repo 的兩個 head 必須給出不同答案
+——這正是「清單綁 checkout」與「清單是靜態常數」的可測差別。另有：current HEAD 上該項必須
+從必做清單消失、`at_commit` 非 40-hex 必須在進 git 前被拒（validate 路徑上它來自受檢
+packet，屬 caller 可控輸入）、全部動作皆完成時不得再發 blocked packet。
 
 **witness 表只有一條**，因為其餘七項全是 host 側 provisioning，repo 位元組永遠證明不了
-它們的完成。這個稀疏性本身就是靜態清單能腐化多日而 CI 全綠的原因；這張表存在的目的是
-讓下一條 witness 一出現就被機器抓到。
+它們的完成。這個稀疏性本身就是靜態清單能腐化多日而 CI 全綠的原因。
 
-### 4.3 未觸及
+### 4.4 具名未複驗：committed packet 的 host 觀察已對不上
+
+PR #181（2026-08-08 merge）記錄 operator 已開 `ncyu-nas:22` 並 provision 11 個信任根。
+committed packet 的 `readonly_observation` 仍是 **2026-08-02 的全 ABSENT 觀察**，與該報告
+不一致。**本輪不刷新它**：刷新需要一次 trade-core 上的新鮮唯讀 inventory 擷取，PM session
+的 `ssh trade-core` 被 publickey 拒；憑 operator 報告改寫 inventory 位元組會是**捏造主機觀察**。
+故 16 項 prerequisites 的 `status`／`blocking` 維持原樣並具名標記為 stale。
+（PR #181 只改 fingerprint 常數、未改路徑，故 `EXPECTED_PATHS` 與 packet 的 locator 仍相符。）
+
+### 4.5 未觸及
 
 16 項 prerequisites（12 path ＋ 4 service）、`prerequisites`／`blocked_prerequisite_ids`／
 `closure_projection`／`authority_boundaries` 的 `const` 硬門、launch spec §LW1 全文、
 receipt schema、九項 authority、production effect 0/6。本次只動 operator 待辦清單。
 
-### 4.4 一項具名的 scope 擴張
+### 4.6 兩項具名的 scope 擴張
 
 原路徑 manifest 不含 `.codex/schemas/s2e_lw1_operator_action_packet_v1.schema.json`
 與 design master。但該 schema 以 `const` 陣列釘死同一份清單，只改 code 會讓 generator 被
 自己的 schema 擋掉、build 直接 raise、committed packet 重建不出來。**operator 2026-08-07
-裁定擴入這兩檔**。該 schema 不在 validator 的 `SCHEMA_FILES` 註冊表、不是 receipt schema、
+裁定擴入這兩檔**。第二項（2026-08-09）：Codex 的 CI 失敗指向
+`tests/structure/test_agent_governance_context_pack_reachability.py`——它斷言 ACTIVE row 的
+投影必須帶出其 S2E lineage predecessor。這**不是**被釘死的舊字串，而是一條真的 Context
+可達性不變量：我的 G2 row 依賴欄沒有任何 `S2E.` token，於是編譯出的 Context 少了 lineage
+predecessor——那是 Context 品質的退步，不只是測試紅。**修 TODO（在 manifest 內），不修測試**：
+G2 的依賴欄補上 `S2E.2b-1`（與 G1 同一條 lineage predecessor）。該 schema 不在 validator 的 `SCHEMA_FILES` 註冊表、不是 receipt schema、
 引用者只有 generator ＋ committed artifact ＋ 該設計檔，與並行 uid lane 的 hard-stop 檔零交集。
 
 ---
@@ -234,6 +261,7 @@ receipt schema、九項 authority、production effect 0/6。本次只動 operato
 | trade-core `PAGE_SIZE=4096`／單 argv 上限 `131,071`／`ARG_MAX=2,097,152` | **本 session 未複驗**。這是前一 session 當日的唯讀實測；本 session `ssh trade-core` 回 `Permission denied (publickey)`，無獨立複驗管道。沿用但具名標記，**不靜默採信** |
 | Linux 端是否已 ff-only 同步到 `b1d2eea03` | **未確認**，同上原因 |
 | 本輪全部測試證據 | Mac 本地 `LOCAL_REPRODUCIBLE`；不是 closure-admissible 強 PASS |
+| PR #181（2026-08-08 merge）的 provisioning | operator 已開 `ncyu-nas:22`、provision 11 個信任根，證據等級 `operator-reported`。**本 session 同樣無法自驗**；且 committed packet 的 2026-08-02 inventory 因此已對不上（見 §4.4），刷新需要一次新鮮唯讀擷取，不得憑報告改寫 inventory 位元組 |
 | runtime | unverified／not observed。正式 V2 units／canonical roots 不存在；legacy `openclaw-alr-shadow.service` active 不等於 V2 landed |
 
 ---

@@ -350,7 +350,8 @@ replica trust root 安裝。**任何情況下不得填佔位指紋**（那正是
 - `EXPECTED_ACTION_IDS`（`:137-144`）新增兩項 ⇒ 共 ~~**8**~~ 項：
   `COMMIT_GENESIS_ARMED_DURABILITY_ANCHOR_FLOOR`（§3.5 的 PR 動作）、
   `PROVISION_OFFHOST_REPLICA_READBACK_SIGNER`（`ncyu-nas` 側）。
-  （**2026-08-07 起為 7 項**：前者於 `fdf3c0fa6` 完成後即不再是 operator 待辦，
+  （**2026-08-09 起，這 8 項是「目錄」而不是「必做清單」**：必做清單由 packet 綁定的
+  checkout 導出，前者於 `fdf3c0fa6` 之後的 head 上不再是待辦，但在早於它的 pin 上仍是。
   見下方「演變軌跡」。此處寫 8 在當時為真，不原地抹除。）
 - `tests/structure/test_agent_governance_s2e_lw1_action_packet.py:116` 的 `== 14` → `== 16`。
 - **committed artifact 必須重生**：
@@ -860,13 +861,24 @@ commit、CI shallow checkout 等情形現在都會得到具名的 `UNVERIFIED` �
 **未改變**：`UNVERIFIED` 為誠實終態、git 不提供 §LW1 意義下的外部性、真正的外部性上界
 仍在「驗證器不與被驗者共用 uid」。以上七項都是把**既有邊界守住**，一項都沒有把邊界推前。
 
-### 2026-08-07：action 清單由 8 → 7；腐化成因是「靜態清單 ＋ 早於事實的 pin」
+### 2026-08-07／09：action 清單改為由 bound checkout 導出；中途走錯一次並被 Codex 攔下
 
-**轉變**：`EXPECTED_ACTION_IDS`（§七的 8 項）移除
-`COMMIT_GENESIS_ARMED_DURABILITY_ANCHOR_FLOOR`，schema 的 `required_action_ids`
-`const` 同步由 8 降為 7，committed packet 於原 pin 重新發行
-（`sha256:b28d49fe…a9cdf` → `sha256:69dcfec5…8f6b77`，除 `packet_digest` 與
-`required_action_ids` 外逐欄不變）。
+**轉變**：`EXPECTED_ACTION_IDS`（靜態 8 項）拆成兩層——`CANONICAL_ACTION_IDS`
+（**仍是 8 項有序目錄**）與 `required_action_ids(repo_root, at_commit=…)`
+（＝目錄減去該 commit 樹裡已可證明完成的項）。validator 在 **packet 自己綁定的 head**
+重算並要求逐項相等。schema 的 `required_action_ids` 由固定 8 項 `const` 改為
+「目錄成員、唯一、1–8 項」的陣列約束，逐項相等改由 code-owned validator 執法。
+committed packet **repin 到 `2f9b6cde4`**（floor 已在該樹內），於該 head 導出 7 項
+（`sha256:b28d49fe…a9cdf` → `sha256:8c495279…6436ba`，除 `packet_digest` 與
+`source_binding` 外逐欄不變）。
+
+**中途的錯誤必須記下來，因為它是同一個坑的鏡像**：第一版（2026-08-07）直接把
+`COMMIT_GENESIS_ARMED_DURABILITY_ANCHOR_FLOOR` 從清單**全域刪除**。那治好了
+「已完成卻仍要求」，卻造出反向錯誤——packet 綁定的 pin `970734ae0` 的樹裡沒有 floor 檔，
+在該 pin 上重建（`test_committed_action_packet_is_regenerable_by_its_generator` 正是這麼做的）
+會產生一份**漏掉當時真正必要步驟**的 packet，而且照樣通過驗證。PR #180 的 Codex review
+以 P1 指出，逐條複驗成立。**教訓**：把「隨時間變的事實」寫成常數，無論寫哪一個值都會錯；
+唯一的解是讓它由它所描述的那個 checkout 決定。
 
 **它不是一開始就寫錯**：packet 綁定的 checkpoint `970734ae0` 時間為
 2026-08-03 04:35:38 +0200，該 head 的樹裡 **沒有** floor 檔（實測
@@ -879,10 +891,12 @@ commit、CI shallow checkout 等情形現在都會得到具名的 `UNVERIFIED` �
 **實害**是 operator 照 packet 第 7 步再 commit 一次創世 floor，而
 `aiml_gate_receipt_s2e_anchor_floor` 明文拒絕鏈上第二個 `GENESIS_ARMED`。
 
-**治法不是刪字串**：新增 `REPOSITORY_COMPLETION_WITNESSES`（action → 完成 witness 路徑）
-與 `completed_action_ids()`，並在 emission 的 clean-tree 檢查之後逐項核對；命中即 typed
-`ValueError`，不再靜默。兩支新測試各自以突變實測過會紅：清單與 repo 事實的 disjoint
-斷言（把該 id 放回即紅，訊息直接指名該 id）、以及移除 emission guard 後 build 不再拒絕。
+**治法不是刪字串**：新增 `REPOSITORY_COMPLETION_WITNESSES`（action → 完成 witness 路徑）、
+`completed_action_ids(repo_root, at_commit=…)`（讀該 commit 的樹而非工作樹；`at_commit`
+先過 40-hex 驗證再進 git，因為它在 validate 路徑上來自受檢 packet）與
+`required_action_ids(…)`。核心測試 `test_required_actions_are_derived_from_the_bound_checkout`
+同時釘兩個方向：witness 未 commit 時必須得到完整 8 項（**這一條對「全域刪除」版本為紅**），
+commit 之後必須得到 7 項且其餘項順序不變，且同一 repo 的兩個 head 必須給出不同答案。
 witness 表目前只有一條，因為其餘七項全是 host 側 provisioning、repo 位元組永遠證明不了
 它們的完成——**這個稀疏性正是靜態清單能腐化多日而 CI 全綠的原因**。
 
