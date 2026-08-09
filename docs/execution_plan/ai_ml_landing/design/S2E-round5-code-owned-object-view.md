@@ -54,7 +54,7 @@ view 的性質(逐條被 `test_object_view_is_private_and_carries_no_executable_
 | 沒有 `hooks/`、沒有 `info/grafts`、`refs/` 全空 | replace ref 與 graft 都不生效,被驗者改寫不了物件圖 |
 | 沒有工作樹 | `git status` 在這裡是**結構上**跑不起來(`fatal: this operation must be run in a work tree`),不是靠自律不去呼叫 |
 | 每次呼叫建一個、離開即刪 | 無快取、無 module 級可變狀態 ⇒ 沒有跨呼叫污染,也沒有需要註冊的可變單例。實測 ~28 ms/次(含 126 條 symlink) |
-| object store 是物化的,不是掛 alternates | 沒有 `info/` ⇒ 沒有 alternates(P0-B 的競爭窗口消失)、沒有 commit-graph(P0-C 的圖偽造面消失);沒有 midx/bitmap/promisor。剩下能換的只有物件位元組,而那是內容定址、git 讀出來會複驗 sha |
+| object store 是物化的,不是掛 alternates | 沒有 `info/` ⇒ 沒有 alternates、沒有 commit-graph;沒有 midx/bitmap/promisor。**這一格原本還寫「剩下能換的只有物件位元組,而那是內容定址、git 讀出來會複驗 sha」——已撤回,那句是假的(§6 NEW-P0-1)** |
 | gitdir / commondir / objects 全部 owner-pin + 佈局不變式 | 被驗者書寫的 `gitdir:`/`commondir`/symlink 不得把 root 驗證器帶去別人的資料(P0-A) |
 
 ### 2.1 名字面與物件面分離
@@ -133,9 +133,10 @@ promisor 的 config 文字掃描只是第二道,且只能讓判定更嚴,永遠�
 > (E3 以武裝 `core.fsmonitor`/`filter.*.clean/process`/`diff.*.textconv`/`core.hooksPath`
 > /`core.pager`/`core.editor`/`uploadpack.packObjectsHook`/`include.path` 的被驗者實測:
 > 零 sentinel 命中、事實全數取得,`_GIT_ENV_ALLOWLIST` 與 `safe.directory` 皆未回歸),
-> 初版「view 只從 alternate 取內容定址物件」那句是假的,已改寫;三條
-> CONFIRMED-exploitable 的殘留(§6 P0-A/B/C)在 operator 2026-08-08 授權的拆分波中收掉,
-> 各帶回歸測試。**仍未經第二輪對抗複核**(§6 末)。
+> 拆分波之後又跑了第二輪 E2/E3。結論:**P0-B 與 P0-C 確實關掉了**(兩位各自重建復現:
+> alternates 競爭器 400 次 leaked 0,偽造 commit-graph 經 view 走訪回誠實歷史),
+> **P0-A 只關掉跨 uid 那一半**,而拆分波用來論證 B/C「結構上關掉」的那句話是假的,
+> 因此又冒出三條 NEW P0。本輪 gate verdict 仍是 **FAIL**,見 §6。
 
 **證得到(本輪測試涵蓋)**
 
@@ -233,27 +234,126 @@ multi-pack-index 的 repo 經 view 走訪,結果等於誠實歷史。回歸:
 | — | E2 F7 | loose ref「存在但讀不到」不再回落 packed-refs,`HEAD` 永不從 packed-refs 解析,非 HEAD ref 改為 common-dir 優先 |
 | — | E2 F1 | §3 的假理由已更正(見該節方框) |
 
+### round-6 第二輪 E2/E3:兩條真關掉,一條半關,三條新 P0
+
+拆分波之後跑了第二輪獨立 E2/E3。兩位都從零重建復現,不採信本檔的描述。
+
+**確認關掉(可以不用再扛)**
+
+- **P0-B**:alternates 競爭器 400 次 `leaked 0 / refused 0 / clean 400`(原 134/400)。
+  結構性的:view 的 `objects/` 只接受 `[0-9a-f]{2}` 與 `pack/*.{pack,idx}`,`info` 兩個
+  過濾器都不匹配,而 view 目錄 0700/驗證器所有。
+- **P0-C**:重建 CDAT parent1 的 4-byte 偽造。被驗者自己的 git 仍被騙
+  (`--full-history` 少一筆),經 view 走訪回誠實歷史。midx/`.bitmap`/`.rev` 的排除也
+  查過沒有造成 git 答錯,只是變慢。
+- FIFO wedge、group/world-writable `.git`:關掉。
+- 五(六)個登記面:E2 逐項驗過——closure `self_digest` 確為重算且與中央閘導出一致
+  (`runtime_import_closure_size: 61`,雙向 exact-match),§10.1.2 (b) 的 46 條**恰好**等於
+  `(W3∪W4∪W5) \ §10.1 逐字清單`,45→46 與 1.73×→1.77× 算術正確,wave 歸屬
+  (W0/W2/W3/W5,不在 W1/W4)與 `schema_core` 完全平行、不是缺口。
+
+**NEW P0-1(兩位各自 CONFIRMED)——「物件位元組是內容定址、git 會複驗 sha」是假的**
+
+這是拆分波用來論證 B/C 殘餘風險有界的那一句,寫在 `git_view` docstring、
+`_materialize_object_store` 與本檔 §2 表格。git **只有** `fsck`/`verify-pack` 會複驗,
+而本家族兩者都不跑。`parse_object()` 走的路徑(`ls-tree`/`log`/`rev-list`/`merge-base`)
+是安全的;`git show <rev>:<path>` 與 `cat-file --batch` 走的是
+`read_object_file`→`get_tree_entry`,**不驗**。兩位在 git 2.55.0 各自實證 loose 與 packed
+兩種形式都能讓一個 object id 回出攻擊者選定的位元組,`git fsck` 是唯一會發現的東西。
+
+落點兩處,都在本輪要保護的證據面上:
+
+- `s2e_anchor_floor.py:522/564` 只用 `show {commit}:{path}` 讀 floor,無 blob-id 交叉比對
+  ⇒ 攻擊者可在走訪的每一個 commit 上自撰 floor 內容,而 commit 鏈、祖先鏈、受保護 ref
+  錨定與 `_object_store_errors` 全部保持誠實。效果等同原 P0-C,而且不需要競爭。
+- `s2e_review.py:494-508` 的 `s2e_review_source_blob_manifest` 從 `ls-tree` 取
+  `git_blob`(誠實)、從 `show` 取 `sha256`(攻擊者選),**兩者從不比對**。於是簽出去的
+  source blob manifest 帶著一個任何第三方重建同一 commit 都重現不出來的 digest。
+
+放大器兩個:全 packed 的 store 也不安全(同名 loose object 會蓋過 pack);而
+`_materialize_object_store` 只驗 fanout **目錄**不是 symlink、**不看目錄內容**,所以
+`objects/<xx>/<yyy>` 放 symlink 即可無競爭讀到外部物件庫(E2 實測 100%,findings `[]`)。
+**這代表 P0-B 的 confused-deputy 讀取只是換了路徑,沒有被關掉。**
+
+收法(未做):讀出位元組後對 tree 記錄的 blob id 重算比對——`review.py` 上一行就已經有
+`blob`,`anchor_floor` 補一次 `ls-tree` 即可;以及逐物件物化(`S_ISREG` + owner 檢查)
+或 hardlink/copy,而不是逐目錄 symlink。
+
+**NEW P0-2(E3 CONFIRMED)——物化不是快照**
+
+被驗者事先建好 256 個空 fanout 目錄(對 git 無害),全部會被連上,於是 store 在 view 的
+整個生命週期內都是**活**的:`t0` 與 `t1` 可以回不同位元組。而且每次 git 呼叫都建新 view
+(`anchor_floor:271/290`、`review:246/258`),所以驗證面**沒有任何跨呼叫一致性**。
+另外,列舉時 `S_ISDIR(lstat)`、git 在讀取時才解析 symlink 鏈 ⇒ 列舉後把已連結的 fanout
+換成 symlink,就能讀到 `subject_layout` 明確拒絕過的 store。
+
+**NEW P0-3(E3 CONFIRMED)——ledger 可被重指到*任意*目錄**
+
+`git_view.subject_common_dir` 完全沒有驗證(無 owner pin、無佈局不變式),而
+`s2e_consumption.py:549` 是 `subject_common_dir(subject_git_dir(repo_root))` ——對同一個
+攻擊者可寫的 `commondir` 檔做了**兩次獨立讀取**,第二次不驗。E3 racer 3000 次:
+`RELOCATED 555 / refused 983 / honest 1462`。目標**不受 owner pin 約束**,因為第二次讀取
+根本不驗。`read()` 在三個檔都不存在時回 `_empty_ledger()` ⇒ 18.5%/次的重放繞過,
+且 `_atomic_write`/`_open_lock` 會讓驗證器在攻擊者指定的目錄裡建檔。
+**這比 §5 記的「殘留 #4」嚴重,而且是本輪代碼引入的,不是繼承自 git。**
+一行可收:改用 `subject_layout(repo_root).common_dir` 這個唯一釘過的值,刪掉相容 re-read。
+
+**P0-A 只關掉一半**
+
+owner pin 真的擋掉跨 uid 的三條向量(`gitdir:`、`commondir`、`objects` symlink,三條實測
+皆 refused),那部分該留。但**回指不變式是空的**:owner pin 允許的目標恰好是被驗者所有的
+目錄,所以他對任何通過 pin 的目標都寫得了 `<gitdir>/gitdir`(兩位各自一行復現)。
+E3 另外構造出一個只含 `objects/` 與 `worktrees/w/{gitdir,commondir,HEAD,refs}` 的合成
+common dir,無競爭地取得任意 ledger 目錄。而
+`test_subject_cannot_redirect_the_verifier_with_a_gitdir_pointer` **不具鑑別性**:它的
+fixture 同 uid,卻刻意不寫攻擊者會寫的那一個檔。
+
 ### 未收(具名留給下一輪)
 
-1. **`command_capture_v2` / `generation_summary` 是同一缺陷類別的未修實例**(E2 F1):
-   `_git_root` 以 ambient env/PATH 跑 `git rev-parse --show-toplevel`、`cwd=<被驗者>`,
-   而 `capture_generation_summary` 把 `git diff --binary` 與 untracked 清單摘進
-   `generation_digest`。不在本輪 path manifest 內。
-2. **輸出上界**(E3 P1-5 的後半):`capture_output=True` 沒有尺寸上界,E3 實測 1.2 MB
-   的 `.git` 用一顆零填充 blob 把 RSS 推到 687 MB(~250x)。timeout 已補,記憶體未封。
-3. **`agent_governance_s2e_lw1_action_packet.py`**(E2 F5b、E3 P2):仍
-   `git -C <被驗者>` 跑 `status`(`:239`)與 `rev-parse`(`:382/384`),而 `:382` 在
-   **驗證面**上。PM lane 獨佔,本輪硬停止。建議比照 `require_own_clean_checkout`。
-4. **ledger 仍可在被驗者自己擁有的目錄之間重指**(P0-A 的誠實邊界):owner pin 之後
-   跨 uid 已擋,但把 commondir 指到自己另一個 repo 仍能拿到空帳本。那是
-   `--git-common-dir` 語義的既有性質;要收需把 ledger 綁到 caller 選不了的身分。
-5. **測試鑑別性**(E2 F9):hardening 的 fsmonitor 測試落在 `reviewed_head != HEAD`
-   分支,對 F1 那條路不具鑑別性;`test_verification_face_never_hands_the_subject_
-   repository_to_git` 只驅動 floor 路徑;`test_only_the_generation_face_may_read_a_
-   working_tree` 是對識別字名的字面代理(本輪已擴到六個模組,但仍不掃 `cwd=`)。
-6. **reftable ref backend 未鏡射**,偵到即 fail-closed。
+0. **上面的 NEW P0-1 / P0-2 / P0-3 與 P0-A 的另一半,全部未收。**
+   最小再複核集合:(a) 讀出的位元組對 tree 記錄的 blob id 重算比對;(b) 逐物件
+   hardlink/copy 物化(含 `O_NOFOLLOW`),不要逐目錄 symlink;(c) 刪掉未驗證的
+   `subject_common_dir` re-read;(d) 拿掉或替換回指不變式,並恢復 `--separate-git-dir`
+   與 submodule 支援;(e) 撤回而不是改寫那幾句假宣稱(本輪已撤回,見 §2 與各 docstring)。
+1. ~~**第七個登記面被漏掉(E2 P1-3)**~~ **已收,且該發現一半不成立。** E2 報
+   「簽名不再涵蓋這段代碼」——實測不對:`_s2e_review_source_paths` 走
+   `_repo_python_import_closure`,而 `schema_core` 於 top-level 匯入 view 葉,所以它本來
+   就在 reviewer 簽名的 `source_blob_manifest` 裡(實測 175 條 closure 內含它)。
+   成立的另一半是:涵蓋不該只靠某條 import 恰好存在。已依 `s2e_dispatch.py` 的先例把它
+   顯式列進 `S2E_REVIEW_BASE_PATHS`,並在既有的先例斷言旁加上同型斷言。
+2. **已 commit 的 wave-exit receipt 因本輪失效(E2 P1-4;自行複算後修正數字)**:
+   把新葉列進 `_W0/_W2/_W3/_W5_OWNED_PATHS` 改變了
+   `canonical_digest(sorted(_WX_OWNED_PATHS))`,而 `wave_w2:468`/`wave_w3:751`/
+   `wave_w5:1630` 拿它與 receipt 的 `owned_path_manifest_digest` 比對。實測
+   `docs/.../receipts/S2.4-WP4-W{0,2,3,5}/` 底下 **14 份** receipt(含 `regenerated-*`)
+   現在對不上;E2 報 4 份是低估。
+   **一點必要的區分**:其中 `S2.4-WP4-W0-wave-exit-receipt-v1.json` 帶 `74e51a48…`,
+   而各波的 `regenerated-W0-*` 帶 `00674c05…`——兩者本來就不一致,**那一份在本輪之前
+   就是 stale 的**,不能算到本輪頭上。其餘 13 份是本輪造成的。
+   `owned_path_diff_digest` 同步移動。這是與 W5 re-emission 同一類的投影義務,屬
+   PM/operator 範疇,本輪只揭露不代發。
+3. **`--separate-git-dir` 與 submodule 工作樹被拒(E2 P2-6 / E3 P1-5)**:git 只為 linked
+   worktree 寫 `<gitdir>/gitdir`,而本輪對所有 `.git` 指標檔都要求它;且錯誤被報成
+   `STORE_UNREADABLE` →「object store is unreadable」,理由字串說謊。symlink 形的 `.git`
+   同樣被拒。
+4. **例外紀律仍不完整(E2 P2-8)**:`s2e_launch:1497`(與 `:1379` 同一函式,只有 1379 有
+   try)、`:1180`、`s2e_review` 八處、以及 `_git_binding_errors` 沒接 `TimeoutExpired`
+   (本輪剛加了 `timeout=180`,所以現在可達)。
+5. **`command_capture_v2` / `generation_summary`** 仍是同一缺陷類別的未修實例(round-5
+   E2 F1),不在 path manifest 內。
+6. **subprocess 輸出無尺寸上界**(E3 round-5 P1-5 後半):E3 實測 1.2 MB 的 `.git` 把
+   RSS 推到 687 MB。timeout 已補,記憶體未封。
+7. **`agent_governance_s2e_lw1_action_packet.py`**:PM lane 獨佔,未碰。
+8. **測試鑑別性**:P0-A 的回歸測試如上不具鑑別性;
+   `test_materialized_store_excludes_the_graph_surfaces...` 的走訪斷言對 P0-C 是空的
+   (它寫的 commit-graph 是誠實的),真正承重的只有 `assert not (view/objects/info).exists()`,
+   而 docstring 宣稱的 multi-pack-index 那一句沒有對應斷言。
+9. **reftable ref backend 未鏡射**,偵到即 fail-closed。
+10. **owner pin 的前提未寫明(E3 P2)**:`repo_root` 先 realpath 再由目標導出 owner,
+    所以 pin 對「連 repo_root 路徑本身都被重指」的情形自我一致、偵測不到。應由 producer
+    傳入預期 owner uid,而不是自行導出。
 
 ### 未複核
 
-拆分波的全部改動(三條 P0 的收口、五個登記面、六條 P1、以及 `require_own_clean_checkout`
-的搬遷)**在 E2/E3 交件之後才寫,沒有經過第二輪對抗複核**。
+本輪的撤回(§2、`git_view` 與 `schema_core.git_argv` 的 docstring、本節)寫在 E2/E3
+第二輪交件之後,**未經第三輪複核**。

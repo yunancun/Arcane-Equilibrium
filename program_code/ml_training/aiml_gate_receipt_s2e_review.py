@@ -111,6 +111,11 @@ S2E_REVIEW_BASE_PATHS = (
         "durability-anchor-floor-v1.json"
     ),
     "program_code/ml_training/application_bundle_runtime_closure_v1.json",
+    # 2026-08-09 拆分波:view 葉。import 閉包本來就已經涵蓋它(`schema_core` 於
+    # top-level 匯入),實測在 175 條 closure 內;顯式列名是為了讓涵蓋不再只是
+    # 「碰巧經由某個 import」——日後若那條 import 改成延遲載入,簽名涵蓋面不該
+    # 因此靜默縮小。前例:`aiml_gate_receipt_s2e_dispatch.py` 同型處置。
+    "program_code/ml_training/aiml_gate_receipt_git_view.py",
     "program_code/ml_training/aiml_gate_receipt_s2e_anchor_floor.py",
     "program_code/ml_training/aiml_gate_receipt_s2e_consumption.py",
     "program_code/ml_training/aiml_gate_receipt_s2e_dispatch.py",

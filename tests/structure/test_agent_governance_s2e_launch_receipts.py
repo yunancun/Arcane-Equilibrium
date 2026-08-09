@@ -304,6 +304,12 @@ def test_s2e_dispatch_split_preserves_facade_abi_and_line_policy() -> None:
     assert "program_code/ml_training/aiml_gate_receipt_s2e_dispatch.py" in (
         s2e_review.S2E_REVIEW_BASE_PATHS
     )
+    # 同型處置:2026-08-09 拆分波的 view 葉。E2 round-6 P1-3 報「簽名不再涵蓋它」——
+    # 那一半不對(import 閉包經 `schema_core` 的 top-level 匯入已涵蓋,實測在 175 條
+    # closure 內),但顯式列名這一半是對的:涵蓋不該只靠某條 import 恰好存在。
+    assert "program_code/ml_training/aiml_gate_receipt_git_view.py" in (
+        s2e_review.S2E_REVIEW_BASE_PATHS
+    )
 
 
 def test_central_validator_delegates_s2e_branch_unchanged(
@@ -4087,40 +4093,44 @@ def test_only_the_generation_face_may_read_a_working_tree(tmp_path: Path) -> Non
         assert repositories <= {"view", "own"}, (module.__name__, repositories)
 
 
-def test_subject_cannot_redirect_the_verifier_with_a_gitdir_pointer(
+def test_gitdir_pointer_redirect_is_pinned_to_the_subjects_own_uid(
     tmp_path: Path,
 ) -> None:
-    """E3 round-5 P0-A:`.git` 檔的 `gitdir:` 指標不得把驗證器帶去另一個 repo。
+    """E3 round-5 P0-A:`.git` 檔的 `gitdir:` 指標曾能把驗證器帶去任何它讀得到的 repo。
 
-    fail-first。改動前 `subject_git_dir` 只跟隨、不驗,E3 實測 root 驗證器因此讀出了
-    victim repo 的位元組,而且 `aiml_gate_receipt_s2e_consumption` 的 consume-once
-    ledger 路徑由同一條指標導出 ⇒ 防重放帳本的位置由被驗者選(指到空目錄就重新變空)。
+    E3 實測 root 驗證器因此讀出 victim 的位元組,而 `s2e_consumption` 的 consume-once
+    ledger 路徑由同一條指標導出 ⇒ 防重放帳本的位置也由被驗者選。git 的 ownership 檢查
+    本來是那道意外屏障,移除它就得自己補。收法是 **owner pin**:指標目標必須屬於
+    `repo_root` 自己的 owner。
 
-    收法兩條:owner pin(擋跨 uid),加上 git 自己的 linked-worktree **回指**不變式
-    ——git 為每個 linked worktree 在 `<gitdir>/gitdir` 寫回該 worktree 的 `.git` 路徑。
-    本測試兩個 repo 同 uid,所以 owner pin 不會觸發:這裡驗的正是回指那一條。
+    **這條測試同時釘住尚未收掉的那一半**,免得它躲在設計文件裡:owner pin 允許的目標
+    恰好是被驗者所有的目錄,所以**同 uid 之間的重指仍然成立**。round-6 曾加一條
+    linked-worktree 回指不變式想擋它,兩位複核者各以一行(把回指寫進目標)證明那是空的,
+    而代價是拒絕 `--separate-git-dir` 與 submodule 工作樹,所以整條已移除。
     """
 
-    victim = _floor_repo(tmp_path / "victim")
-    (Path(victim) / "SECRET.md").write_text("victim bytes\n", encoding="ascii")
-    _git(victim, "add", "SECRET.md")
-    _git(victim, "commit", "-qm", "victim secret")
-    attacker = _floor_repo(tmp_path / "attacker")
-    (Path(attacker) / ".git").rename(Path(attacker) / ".git.real")
-    (Path(attacker) / ".git").write_text(
-        f"gitdir: {Path(victim).resolve()}/.git\n", encoding="ascii"
-    )
+    subject = _floor_repo(tmp_path / "subject")
+    (Path(subject) / ".git").rename(Path(subject) / ".git.real")
 
+    # 跨 uid:被拒。`/usr` 屬 root,是這台機器上不需要提權就能指到的真實外人目錄。
+    (Path(subject) / ".git").write_text("gitdir: /usr\n", encoding="ascii")
     with pytest.raises(OSError) as failure:
-        git_view.subject_layout(attacker)
-    assert "back pointer" in str(failure.value), str(failure.value)
-    with pytest.raises(OSError):
-        consumption_module._git_common_dir(Path(attacker))
-    assert git_view.read_subject_ref(attacker) is None
-    assert git_view.subject_object_store_findings(attacker) == [
+        git_view.subject_layout(subject)
+    assert "not by the subject repository's owner uid" in str(failure.value)
+    assert git_view.read_subject_ref(subject) is None
+    assert git_view.subject_object_store_findings(subject) == [
         git_view.STORE_UNREADABLE
     ]
-    # 真的 linked worktree 仍然要解得出來,否則這條閘就是把功能關掉而不是把洞補上。
+
+    # 同 uid:**目前仍然通得過**,這是具名未收的殘留(設計檔 §6 P0-A)。斷言它成立,
+    # 是為了讓「收掉了」這件事必須靠改測試來宣告,不能靠改文件。
+    peer = _floor_repo(tmp_path / "peer")
+    (Path(subject) / ".git").write_text(
+        f"gitdir: {Path(peer).resolve()}/.git\n", encoding="ascii"
+    )
+    assert git_view.subject_layout(subject).git_dir == (Path(peer).resolve() / ".git")
+
+    # 合法佈局不得被誤殺——閘不能是把功能關掉。
     layout = git_view.subject_layout(ROOT)
     assert layout.git_dir.exists() and layout.objects.is_dir()
     assert git_view.read_subject_ref(ROOT) is not None

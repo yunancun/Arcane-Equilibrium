@@ -35,8 +35,21 @@ round-5 的 E3 對抗複核推翻了初版的三個前提,三條都在本檔收�
 B 與 C 有共同的結構解,即 `_materialize_object_store`:view 的 `objects/` 由本模組建立,
 裡面**只有** loose-object fanout 目錄與 `pack/*.{pack,idx}` 的 symlink。沒有 `info/`
 (⇒ 沒有 alternates、沒有 commit-graph)、沒有 `multi-pack-index`、沒有 `*.bitmap`。
-被驗者寫不進 view(0700、驗證器所有),所以那些面不是「被檢查掉」而是**不存在**。
-剩下能被替換的只有物件位元組本身,而那是內容定址的:git 讀出來會複驗 sha,對不上就報錯。
+被驗者寫不進 view 目錄本身(0700、驗證器所有),所以**那兩個具體的面**不存在。
+E2 與 E3 round-6 各自實測確認:alternates 競爭器 400 次 leaked 0(原 134),帶偽造
+commit-graph 的 repo 經 view 走訪回誠實歷史。B 與 C 這兩條向量確實關掉了。
+
+**但本段初版還寫了一句「剩下能被替換的只有物件位元組本身,而那是內容定址的:git 讀出來
+會複驗 sha」——那句是假的,已撤回,不得寫回去。** E2 與 E3 於 git 2.55.0 各自獨立實證:
+`git cat-file -p` / `--batch` / `show <rev>:<path>` 這條 blob 讀取路徑**不**複驗 sha
+(只有 `fsck`/`verify-pack` 會,而本家族兩者都不跑),loose 與 packed 兩種形式都能讓
+一個 object id 回出攻擊者選定的位元組。而 `commit_blob_bytes` 正是走 `cat-file --batch`。
+此外本模組只驗 fanout **目錄**不是 symlink,不看目錄**內容**:被驗者在
+`objects/<xx>/<yyy>` 放 symlink 就能無競爭地把外部物件庫的位元組送進來(E2 實測 100%)。
+因此 P0-B 那條 confused-deputy 讀取**只是換了路徑,沒有關掉**;view 目前只保證
+「不經被驗者的 config/hook/attributes/graph 面」,**不保證所送位元組與 object id 相符**。
+真正的收法是讀出位元組後自行對 tree 記錄的 blob id 重算比對,以及逐物件(而非逐目錄)
+物化。兩者都未做,見設計檔 §6「未收」。
 """
 
 from __future__ import annotations
@@ -169,18 +182,25 @@ def subject_layout(repo_root: Path | str) -> SubjectLayout:
     整個換位置。重導向本身不是新的(`git rev-parse --git-common-dir` 一向跟隨同樣的
     指標),**新的是 git 的 ownership 檢查原本是那道意外屏障,而本輪刻意移除了它**。
 
-    這裡補上的替代是兩條,缺一不可:
+    這裡補上的替代是 **owner pin**:gitdir/commondir/objects 都必須屬於 `repo_root`
+    自己的 owner(不是 euid——驗證器多半是 root,被驗者不是),`objects` 還必須是
+    commondir 底下的**真**子目錄而非 symlink。被驗者因此只能指向他本來就讀得到的東西。
+    E2/E3 round-6 各自實測三條跨 uid 向量(`gitdir:`、`commondir`、`objects` symlink)
+    皆被拒。
 
-    1. **owner pin**:三者都必須屬於 `repo_root` 自己的 owner(不是 euid——驗證器多半
-       是 root,被驗者不是)。被驗者因此只能指向他本來就讀得到的東西,沒有任何放大。
-    2. **佈局不變式**:gitdir 與 commondir 要嘛相同,要嘛符合 git 自己的 linked-worktree
-       形狀 `<commondir>/worktrees/<name>`;`objects` 必須是 commondir 底下的**真**
-       子目錄,不得是 symlink。
+    **round-6 撤回。** 初版還加了第二條「linked-worktree 回指不變式」(要求
+    `<gitdir>/gitdir` 指回被驗者的 `.git`),並宣稱它能擋住同 uid 兩個 repo 之間的重指。
+    **那個推論是空的**:owner pin 允許的目標恰好是被驗者所有的目錄,所以他對任何通過
+    pin 的目標都寫得了回指——E2 與 E3 各以一行復現。它唯一擋到的是「忘了寫回指」的
+    天真重指,代價卻是**拒絕兩種 git 接受的合法佈局**(`--separate-git-dir` 與 submodule
+    工作樹都用 `.git` 指標檔而沒有回指),而且錯誤被報成「object store is unreadable」。
+    買不到安全又擋掉合法輸入,所以整條移除。
 
-    誠實邊界:owner pin 之後被驗者仍可在**自己擁有的目錄之間**重指(例如把 commondir
-    指到另一個自己的 repo,拿到一份空的 consume-once ledger)。那是 `--git-common-dir`
-    語義本身的既有性質,不是本輪引入;要收它需要把 ledger 綁到 caller 選不了的身分,
-    屬另一個 scope。
+    **誠實邊界(未收)**:同 uid 的重指**沒有被擋住**——被驗者可以把 commondir 指到另一個
+    自己的 repo,拿到一份空的 consume-once ledger,甚至用一個只含 `objects/` 與
+    `worktrees/w/` 的合成目錄。要收它需要把 ledger 綁到 caller 選不了的身分。另外 owner
+    是從 realpath 後的 `repo_root` 自行導出的,所以對「連 `repo_root` 路徑本身都被重指」
+    的情形自我一致、偵測不到——理想上該由 producer 傳入預期 owner uid。見設計檔 §6。
     """
 
     import os
@@ -207,30 +227,6 @@ def subject_layout(repo_root: Path | str) -> SubjectLayout:
         git_dir = _real_directory(
             Path(os.path.realpath(str(target))), owner=owner, label="subject gitdir"
         )
-        # 指標必須**雙向**成立。git 為每個 linked worktree 在 `<gitdir>/gitdir` 寫回
-        # 該 worktree 的 `.git` 檔路徑;只驗單向的話,被驗者把 `.git` 指到任何一個他
-        # 讀得到的 repo 就能讓驗證器改讀那份 repo(E3 P0-1 的核心)。owner pin 已擋掉
-        # 指向別人所有的 repo,這一條再擋掉指向**自己另一個** repo——包括把
-        # consume-once ledger 換到一份空帳本上。要偽造回指必須寫進目標 gitdir,
-        # 而那正是 owner pin 已經釘住的東西。
-        try:
-            back = read_bounded(git_dir / "gitdir", MAX_REF_FILE_BYTES)
-        except OSError as error:
-            raise OSError(
-                f"{git_dir} does not carry the linked-worktree back pointer git "
-                f"writes for {marker}: {error}"
-            ) from error
-        first = back.decode("utf-8", "replace").splitlines()
-        pointed = Path(os.path.realpath(first[0].strip())) if first else Path("")
-        if pointed != Path(os.path.realpath(str(marker))):
-            raise OSError(
-                f"{git_dir} points back at {pointed}, not at {marker}"
-            )
-    elif (root / "objects").is_dir() and (root / "HEAD").is_file():
-        git_dir = _real_directory(root, owner=owner, label="subject gitdir")
-    else:
-        raise OSError(f"{root} is not a Git repository this view can read")
-
     pointer = git_dir / "commondir"
     common_dir = git_dir
     if pointer.is_file():
@@ -345,9 +341,14 @@ def _materialize_object_store(objects: Path, target: Path) -> None:
     回 `[]`、`merge-base --is-ancestor` 仍 True、`git commit-graph verify` 也 rc=0。
     物化之後這兩個面在 view 裡**不存在**,不是「被檢查掉」——沒有窗口可競爭。
 
-    仍可被替換的只有物件位元組本身,而那是內容定址的:git 讀出來複驗 sha,對不上就報錯,
-    所以換不出另一個物件,也讀不到任意檔案。列舉之後才出現的 fanout 目錄看不到 ⇒ 缺物件
-    ⇒ fail-closed,這是刻意的快照語義。
+    **誠實邊界(round-6 撤回兩句)。** 初版寫「仍可被替換的只有物件位元組,而那是內容
+    定址的,git 會複驗 sha」與「列舉之後才出現的 fanout 看不到 ⇒ 快照語義」——兩句都被
+    實證推翻:(1) git 在 blob 讀取路徑不複驗 sha,一個 object id 可以回出任意位元組;
+    (2) 被驗者只要事先建好 256 個空 fanout 目錄,store 在 view 的整個生命週期內都是**活**
+    的,而且本函式只驗目錄不是 symlink、不看目錄內容,所以 `objects/<xx>/<yyy>` 放 symlink
+    即可無競爭地引入外部物件庫;列舉後把已連結的 fanout 換成 symlink 也能讀到 owner pin
+    拒絕過的 store。逐物件物化(`S_ISREG` + owner 檢查)與讀出後對 blob id 重算,兩者
+    都未做——見設計檔 §6。
     """
 
     import os

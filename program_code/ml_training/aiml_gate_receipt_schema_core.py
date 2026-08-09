@@ -488,10 +488,16 @@ def git_argv(repo_root: Path | str, *arguments: str) -> list[str]:
     **round-5(2026-08-07):上一段具名的那個設計項已實作,見 `code_owned_object_view`。**
     `git_argv` 本身一個字不改——它仍然只是 `[git, -C, <path>, *args]`,仍是本家族唯一的
     git argv 建構入口。改的是**傳進去的那個 `<path>`**:驗證面不再把被驗者的工作樹交給
-    git 去 discover,而是交一個**驗證器自己建的 bare repo**,以 `objects/info/alternates`
-    掛上被驗者的 object store。alternates 是純內容定址資料面:git 只從那裡取物件,不讀
-    它的 config/hook/attributes/fsmonitor,也**不對它做 ownership 檢查**。上面兩條死路
-    的共同前提——「把外人所有的目錄當成 repository 打開」——就此整個消失。
+    git 去 discover,而是交一個**驗證器自己建的 bare repo**。
+
+    **round-6 更正(E2 P2-7)。** 本段原本接著寫「以 `objects/info/alternates` 掛上被驗者
+    的 object store。alternates 是純內容定址資料面」——兩句都已作廢:掛載式已換成
+    `_materialize_object_store` 的物化,而「內容定址」在本設計裡**不得再用來承重**
+    (E2/E3 於 git 2.55.0 各自實證:blob 讀取路徑不複驗 sha)。仍然成立、也是這條路真正
+    買到的東西是:git 不讀被驗者的 config/hook/attributes/fsmonitor,也**不對它做
+    ownership 檢查**——上面兩條死路的共同前提「把外人所有的目錄當成 repository 打開」
+    確實整個消失。完整現況與未收項見
+    `docs/execution_plan/ai_ml_landing/design/S2E-round5-code-owned-object-view.md` §6。
     """
 
     return [
