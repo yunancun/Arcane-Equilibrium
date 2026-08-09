@@ -37,10 +37,12 @@ from typing import Any, NamedTuple
 
 from agent_governance_schema import schema_subset_errors
 from aiml_gate_receipt_schema_core import (
-    MAX_PACKED_REFS_BYTES, MAX_SUBJECT_CONFIG_BYTES,
+    STORE_GRAFTS, STORE_INDETERMINATE, STORE_NESTED_ALTERNATES, STORE_PROMISOR,
+    STORE_REPLACE_REFS, STORE_SHALLOW, STORE_UNREADABLE,
+    STORE_UNSUPPORTED_REF_BACKEND,
     _load_schema, canonical_digest, code_owned_object_view, git_argv,
-    git_failure_detail, git_subprocess_env, read_bounded, read_subject_ref,
-    subject_common_dir, subject_git_dir,
+    git_failure_detail, git_subprocess_env, read_subject_ref,
+    subject_object_store_findings,
 )
 
 
@@ -254,12 +256,6 @@ def durability_anchor_floor_digest(floor: dict[str, Any]) -> str:
 # 第二道防線,第一道是 `_object_store_errors` 直接拒掉 promisor(唯一的網路路徑)。
 _GIT_READ_TIMEOUT_SECONDS = 60
 _GIT_PROBE_TIMEOUT_SECONDS = 30
-_MAX_REPLACE_REF_SCAN_ENTRIES = 4096
-# 只認 git 真正的鍵形(`remote.<n>.promisor`、`remote.<n>.partialclonefilter`、
-# `extensions.partialclone` 在 INI 裡就是行首這三個鍵)。
-_PROMISOR_CONFIG_KEY = re.compile(
-    r"(?im)^[ \t]*(promisor|partialclonefilter|partialclone)[ \t]*="
-)
 # `subprocess.TimeoutExpired` **不是** `CalledProcessError` 的子類;兩者的共同父類是
 # `SubprocessError`。舊的 `except (OSError, CalledProcessError)` 若配上 timeout 會讓
 # 逾時裸逸出驗證函式,因此本模組一律捕捉 `SubprocessError`。
@@ -337,115 +333,42 @@ def _object_store_errors(repo_root: Path) -> list[str]:
     為了讓 typed reason 保持精確,不是把一條真判定換成泛用錯誤。
     """
 
-    try:
-        git_dir = subject_git_dir(repo_root)
-        common = subject_common_dir(git_dir)
-    except OSError:
+    findings = subject_object_store_findings(repo_root)
+    if STORE_UNREADABLE in findings:
         return [
             "durability anchor floor object store is unreadable: "
             f"{git_failure_detail(repo_root) or 'the repository could not be opened'}"
         ]
-    errors: list[str] = []
-    try:
-        if (common / "reftable").is_dir() or (git_dir / "reftable").is_dir():
-            errors.append(
-                "durability anchor floor cannot be read from a repository whose ref "
-                "backend the code-owned object view cannot mirror"
-            )
-        if (git_dir / "shallow").exists() or (common / "shallow").exists():
-            errors.append(
-                "durability anchor floor cannot be read from a shallow repository"
-            )
-        if _replace_refs_present(git_dir, common):
-            errors.append(
-                "durability anchor floor cannot be read from a repository that "
-                "rewrites objects through replace refs"
-            )
-        if (common / "info" / "grafts").exists():
-            errors.append(
-                "durability anchor floor cannot be read from a repository that "
-                "rewrites commit parentage through a grafts file"
-            )
-        if (common / "objects" / "info" / "alternates").exists():
-            errors.append(
-                "durability anchor floor cannot be read from a repository whose object "
-                "store chains to another store through alternates"
-            )
-        if _promisor_marks_present(common, git_dir):
-            errors.append(
-                "durability anchor floor cannot be read from a promisor partial clone"
-            )
-    except OSError as error:
-        return [f"durability anchor floor object store is unreadable: {error}"]
-    return errors
-
-
-def _replace_refs_present(git_dir: Path, common: Path) -> bool:
-    """`refs/replace/` 底下有沒有東西(loose 或 packed)。
-
-    E2 F4:每一條 except 都必須 fail-**closed**。它取代的 `git for-each-ref` 在任何失敗
-    上都會拋 `_GIT_FAILURES` 並產出「object store is unreadable」;若這裡把「讀不到」
-    當成「沒有 replace ref」,被驗者只要讓 `packed-refs` 超出上界或不可讀,就能把一條
-    真判定靜默關掉。`os.walk` 的 `onerror` 同理——預設是靜默吞掉。
-    """
-
-    import os
-
-    unreadable: list[OSError] = []
-    for base in {git_dir, common}:
-        root = base / "refs" / "replace"
-        if not root.is_dir():
-            continue
-        visited = 0
-        for _, _, files in os.walk(root, onerror=unreadable.append):
-            if files or unreadable:
-                return True
-            visited += 1
-            if visited > _MAX_REPLACE_REF_SCAN_ENTRIES:
-                # 只有空目錄卻多到不合理:當成存在(fail-closed),不無上界地走。
-                return True
-        if unreadable:
-            return True
-    try:
-        raw = read_bounded(common / "packed-refs", MAX_PACKED_REFS_BYTES)
-    except FileNotFoundError:
-        return False
-    except OSError:
-        return True
-    return any(
-        line.partition(" ")[2].strip().startswith("refs/replace/")
-        for line in raw.decode("utf-8", "replace").splitlines()
-        if line and line[0] not in "#^"
-    )
-
-
-def _promisor_marks_present(common: Path, git_dir: Path) -> bool:
-    """partial(promisor)clone 的檔案系統痕跡。
-
-    主判準是 `objects/pack/*.promisor` 標記檔——git 自己為每個從 promisor remote 取來的
-    pack 寫下的。config 文字掃描是第二道,且只認 git 真正的鍵形(不做整檔子字串掃描,
-    後者會被 remote 名稱或 URL 裡的巧合字樣誤觸);它只能讓判定更嚴,永遠不能用來取得
-    任何肯定事實。
-    """
-
-    pack = common / "objects" / "pack"
-    if pack.is_dir():
-        try:
-            if any(entry.suffix == ".promisor" for entry in pack.iterdir()):
-                return True
-        except OSError:
-            return True
-    for base in {common, git_dir}:
-        for name in ("config", "config.worktree"):
-            try:
-                raw = read_bounded(base / name, MAX_SUBJECT_CONFIG_BYTES)
-            except FileNotFoundError:
-                continue
-            except OSError:
-                return True  # E2 F4:讀不到 config 不得當成「不是 promisor」
-            if _PROMISOR_CONFIG_KEY.search(raw.decode("utf-8", "replace")):
-                return True
-    return False
+    # E2 round-5 F4 的續集(P1-J):polarity 修好之後,「查不出來」一度借用了別條原因的
+    # 字串,於是 operator 拿到一個假的具名理由。查不出來要有自己的名字。
+    reasons = {
+        STORE_INDETERMINATE: (
+            "durability anchor floor object store hygiene could not be determined"
+        ),
+        STORE_UNSUPPORTED_REF_BACKEND: (
+            "durability anchor floor cannot be read from a repository whose ref "
+            "backend the code-owned object view cannot mirror"
+        ),
+        STORE_SHALLOW: (
+            "durability anchor floor cannot be read from a shallow repository"
+        ),
+        STORE_REPLACE_REFS: (
+            "durability anchor floor cannot be read from a repository that "
+            "rewrites objects through replace refs"
+        ),
+        STORE_GRAFTS: (
+            "durability anchor floor cannot be read from a repository that "
+            "rewrites commit parentage through a grafts file"
+        ),
+        STORE_NESTED_ALTERNATES: (
+            "durability anchor floor cannot be read from a repository whose object "
+            "store chains to another store through alternates"
+        ),
+        STORE_PROMISOR: (
+            "durability anchor floor cannot be read from a promisor partial clone"
+        ),
+    }
+    return [reasons[finding] for finding in findings if finding in reasons]
 
 
 def _protected_ancestry_errors(repo_root: Path, commit: str) -> list[str]:

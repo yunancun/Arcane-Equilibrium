@@ -13,14 +13,13 @@ receipt dependency-graph 結構驗。facade 已超過 2000 行治理上限;把�
 
 from __future__ import annotations
 
-import contextlib
 import hashlib
 import json
 import re
 import sys
 from datetime import datetime, timezone
 from pathlib import Path
-from typing import Any, Callable, Iterator
+from typing import Any, Callable
 
 
 def resolve_facade():
@@ -521,309 +520,58 @@ def git_subprocess_env() -> dict[str, str]:
     return env
 
 
-# ── code-owned bare object view(差異 uid 拓撲的唯一取事實面)─────────────────
-#
-# 舊拓撲 `git -C <被驗者>` 讓 git **discover** 外人的目錄為 repository,於是它的
-# `.git/config`(`core.fsmonitor`、`filter.<drv>.clean`…)、hook、`.gitattributes` 與工作樹
-# 全部進場,而 discover 正是 ownership 檢查發生的地方。本 view 反過來:驗證器自建一個
-# bare repo,只把被驗者的 `objects/` 以 `objects/info/alternates` 掛上去;git 從那裡取
-# 物件,不讀它的 config/hook/attributes,也不做 ownership 檢查。view 的 `refs/` 為空、
-# `HEAD` 指向 unborn branch,不替被驗者解析任何名字。E1 於 git 2.55 實測:裸
-# `rev-parse HEAD` 解不出來時回 `rc=0` 並原樣印回 `HEAD`(fail-open),只有 `--verify`
-# 才 `rc=128`;故名字解析一律 `--verify` 或先換 40-hex。
-# **這個資料面不是純內容定址的**(E3 round-5):commit-graph / midx / bitmap 也從
-# alternate 載入且未被驗證——見設計檔 §5 debt,本輪未收。
-#
-# 設計全文:docs/execution_plan/ai_ml_landing/design/S2E-round5-code-owned-object-view.md
-_OBJECT_VIEW_MODE = 0o700
-_OBJECT_VIEW_FILE_MODE = 0o600
-_OBJECT_VIEW_CONFIG = (
-    "[core]\n"
-    "\trepositoryformatversion = 0\n"
-    "\tbare = true\n"
-    "\tlogallrefupdates = false\n"
+# code-owned object view、被驗者佈局解析(owner-pin)、ref 讀取器與 object-store 衛生
+# 事實的實作正本在下層純葉模組 `aiml_gate_receipt_git_view`(2026-08-08 operator 授權的
+# 拆分波:信任邊界值得單獨審,且併回本檔會越過 2000 行治理上限)。本檔 re-export,
+# 消費者的匯入形狀不變;方向是單向的 schema_core -> git_view,無環。
+from aiml_gate_receipt_git_view import (  # noqa: F401
+    MAX_PACKED_REFS_BYTES,
+    MAX_REF_FILE_BYTES,
+    MAX_SUBJECT_CONFIG_BYTES,
+    STORE_GRAFTS,
+    STORE_INDETERMINATE,
+    STORE_NESTED_ALTERNATES,
+    STORE_PROMISOR,
+    STORE_REPLACE_REFS,
+    STORE_SHALLOW,
+    STORE_UNREADABLE,
+    STORE_UNSUPPORTED_REF_BACKEND,
+    _OBJECT_VIEW_CONFIG,
+    _verify_private_directory,
+    code_owned_object_view,
+    git_own_checkout_guard,
+    read_bounded,
+    read_subject_ref,
+    resolve_named_revision,
+    subject_common_dir,
+    subject_git_dir,
+    subject_layout,
+    subject_object_store_findings,
 )
-# 刻意是一個不存在的分支名:`git -C <view> rev-parse --verify HEAD` 必須 rc≠0。
-_OBJECT_VIEW_HEAD = "ref: refs/heads/code-owned-object-view-has-no-refs\n"
-MAX_REF_FILE_BYTES = 4096
-MAX_PACKED_REFS_BYTES = 4 * 1024 * 1024
-MAX_SUBJECT_CONFIG_BYTES = 1024 * 1024
-_MAX_SYMREF_DEPTH = 8
-_REF_NAME_PATTERN = re.compile(r"\Arefs/[A-Za-z0-9][A-Za-z0-9._/-]*\Z")
 
 
-def read_bounded(path: Path, limit: int) -> bytes:
-    """讀一個**常規檔**的前 `limit` 位元組;symlink/非常規檔/超限一律 `OSError`。
+def require_own_clean_checkout(repo_root: Path) -> None:
+    """**generation 面專用**:作者為自己剛做完的樹發射 candidate 前,要求該樹乾淨。
 
-    `O_NOFOLLOW` 擋最後一節的 symlink。`O_NONBLOCK` 同樣必要(E3 round-5 實測):它不擋
-    FIFO,而 `S_ISREG` 的拒絕在 open **之後**,故 `mkfifo .git/HEAD` 能讓驗證器永遠卡在
-    open——in-process 阻塞,家族裡每個 subprocess `timeout=` 都救不到。
+    E3 round-5:本家族唯一還會跑 `git status` 的地方,而 `git status` 會執行
+    `core.fsmonitor` 與 `filter.<drv>.clean`。R4-1 的提權形狀是「**驗證器**對**外人
+    所有**的樹跑它」,這裡兩個前提都不成立:驗證面已整組改走
+    `code_owned_object_view`(沒有工作樹 ⇒ 結構上跑不起來,不是自律),而
+    `git_own_checkout_guard` 先驗 `st_uid == geteuid()`。這不是「假設同 uid」——
+    同 uid 是被驗證後才成立的前提。設計全文見 `docs/execution_plan/ai_ml_landing/design/`
+    `S2E-round5-code-owned-object-view.md`。
     """
 
-    import os
-    import stat as stat_module
+    import subprocess
 
-    flags = (
-        os.O_RDONLY | getattr(os, "O_NONBLOCK", 0)
-        | getattr(os, "O_CLOEXEC", 0) | getattr(os, "O_NOFOLLOW", 0)
-    )
-    descriptor = os.open(path, flags)
-    try:
-        info = os.fstat(descriptor)
-        if not stat_module.S_ISREG(info.st_mode):
-            raise OSError(f"{path} is not a regular file")
-        if info.st_size > limit:
-            raise OSError(f"{path} exceeds its admitted size")
-        payload = bytearray()
-        while len(payload) < limit:
-            chunk = os.read(descriptor, limit - len(payload))
-            if not chunk:
-                break
-            payload.extend(chunk)
-        return bytes(payload)
-    finally:
-        os.close(descriptor)
-
-
-def subject_git_dir(repo_root: Path | str) -> Path:
-    """被驗者的 gitdir(`.git` 目錄、`gitdir:` 指標檔、或裸 repo 自身)。
-
-    全程只 stat/讀位元組,絕不把 `repo_root` 交給 git 去 discover。**警告**:`gitdir:`/
-    `commondir` 指標與 `objects` symlink 目前只跟隨、不驗 owner(E3 round-5 P0-1)。
-    """
-
-    import os
-    import stat as stat_module
-
-    root = Path(os.path.realpath(str(repo_root)))
-    marker = root / ".git"
-    try:
-        info: Any = marker.lstat()
-    except OSError:
-        info = None
-    if info is not None and stat_module.S_ISDIR(info.st_mode):
-        return marker
-    if info is not None and stat_module.S_ISREG(info.st_mode):
-        text = read_bounded(marker, MAX_REF_FILE_BYTES).decode("utf-8", "replace")
-        head, separator, tail = text.partition("gitdir:")
-        if head.strip() or not separator:
-            raise OSError(f"{marker} is not a valid gitdir pointer")
-        target = Path(tail.strip())
-        if not target.is_absolute():
-            target = root / target
-        return Path(os.path.realpath(str(target)))
-    if (root / "objects").is_dir() and (root / "HEAD").is_file():
-        return root
-    raise OSError(f"{root} is not a Git repository this view can read")
-
-
-def subject_common_dir(git_dir: Path) -> Path:
-    """linked worktree 的共用 gitdir(`commondir` 指標);普通 repo 回自己。
-
-    物件庫、`packed-refs`、`info/grafts` 在共用側;`HEAD` 這類本地狀態在 per-worktree 側。
-    """
-
-    import os
-
-    pointer = git_dir / "commondir"
-    if not pointer.is_file():
-        return git_dir
-    raw = read_bounded(pointer, MAX_REF_FILE_BYTES).decode("utf-8", "replace").strip()
-    if not raw:
-        return git_dir
-    target = Path(raw)
-    if not target.is_absolute():
-        target = git_dir / target
-    return Path(os.path.realpath(str(target)))
-
-
-def _verify_private_directory(path: Path) -> None:
-    """`path` 自身與每一層祖先都不得被本行程以外的身分改寫。
-
-    mkdtemp 的目錄是 0700 且原子建立,但它的**位置**來自 ambient `TMPDIR`。若 `TMPDIR`
-    由攻擊者所有,他能 rename/刪掉 view 換上自己的 ⇒ `config` 在建立與使用之間被換掉,
-    `core.fsmonitor` 從側門回來。故祖先只能由 root 或本 uid 所有,group/other 可寫時
-    必須帶 sticky(`/tmp` 的 1777)。
-    """
-
-    import os
-    import stat as stat_module
-
-    euid = os.geteuid()
-    info = os.lstat(path)
-    if (
-        not stat_module.S_ISDIR(info.st_mode)
-        or info.st_uid != euid
-        or stat_module.S_IMODE(info.st_mode) != _OBJECT_VIEW_MODE
-    ):
-        raise OSError(f"{path} is not a private directory owned by this process")
-    current = path.parent
-    while True:
-        ancestor = os.lstat(current)
-        if not stat_module.S_ISDIR(ancestor.st_mode):
-            raise OSError(f"{current} is not a directory")
-        if ancestor.st_uid not in (0, euid):
-            raise OSError(f"{current} is owned by an untrusted uid")
-        writable = ancestor.st_mode & (stat_module.S_IWGRP | stat_module.S_IWOTH)
-        if writable and not ancestor.st_mode & stat_module.S_ISVTX:
-            raise OSError(f"{current} is group/other writable without the sticky bit")
-        parent = current.parent
-        if parent == current:
-            return
-        current = parent
-
-
-def _write_view_file(path: Path, payload: str) -> None:
-    import os
-
-    flags = os.O_WRONLY | os.O_CREAT | os.O_EXCL | getattr(os, "O_CLOEXEC", 0)
-    descriptor = os.open(path, flags, _OBJECT_VIEW_FILE_MODE)
-    try:
-        os.write(descriptor, payload.encode("utf-8"))
-    finally:
-        os.close(descriptor)
-
-
-@contextlib.contextmanager
-def code_owned_object_view(repo_root: Path | str) -> Iterator[Path]:
-    """yield 一個 code-owned bare repo 的路徑,掛著被驗者的 object store。
-
-    本家族的驗證面只把這個路徑交給 `git_argv`(generation 面另有 `git_own_checkout_guard`;
-    `agent_governance_s2e_lw1_action_packet` 仍是未收的殘留,見設計檔 §5)。目錄由本行程
-    建立、本 uid 所有、0700、祖先鏈逐層驗過;`config` 逐位元組由代碼寫出(無 remote、
-    無 fsmonitor、無 filter driver);無 `hooks/`、無 `info/grafts`、`refs/` 全空;無工作樹
-    (⇒ `git status` 結構上跑不起來)。每次呼叫建一個:無快取、無 module 級可變狀態。
-    """
-
-    import os
-    import shutil
-    import tempfile
-
-    git_dir = subject_git_dir(repo_root)
-    objects = Path(os.path.realpath(str(subject_common_dir(git_dir) / "objects")))
-    if not objects.is_dir():
-        raise OSError(f"{objects} is not a readable Git object store")
-    # 巢狀 alternates 一律拒:git 會**遞移**跟隨被驗者的 `objects/info/alternates`,
-    # 讓 root 驗證器去讀被驗者自己讀不到的物件庫(confused deputy 讀取放大)。
-    # 注意這是 check-then-use,E3 round-5 實測可被競爭繞過——見設計檔 §5 debt。
-    if (objects / "info" / "alternates").exists():
-        raise OSError(f"{objects} chains to another object store through alternates")
-    if "\n" in str(objects) or "\r" in str(objects):
-        # alternates 是換行分隔的清單;含換行的路徑會被拆成兩筆假路徑。
-        raise OSError("the object store path contains a newline")
-    view = Path(os.path.realpath(tempfile.mkdtemp(prefix="s2e-object-view-")))
-    try:
-        _verify_private_directory(view)
-        (view / "objects" / "info").mkdir(parents=True)
-        (view / "refs").mkdir()
-        _write_view_file(view / "HEAD", _OBJECT_VIEW_HEAD)
-        _write_view_file(view / "config", _OBJECT_VIEW_CONFIG)
-        _write_view_file(view / "objects" / "info" / "alternates", f"{objects}\n")
-        yield view
-    finally:
-        shutil.rmtree(view, ignore_errors=True)
-
-
-def git_own_checkout_guard(repo_root: Path | str) -> Path:
-    """確認 `repo_root` 是**本 uid 自己的** checkout,回其 realpath;否則 `OSError`。
-
-    generation 面(作者為自己的樹發射 candidate)是本家族唯一還需要工作樹事實的地方。
-    誠實邊界:這**不是**「假設同 uid」,同 uid 是被**驗證**的前提;但本檢查只看目錄
-    owner,不看 mode 也不走祖先鏈,所以 group/world-writable 的 `.git` 仍能過關
-    (E3 round-5 P1-6,本輪未收)。驗證面不得呼叫本函式。
-    """
-
-    import os
-    import stat as stat_module
-
-    root = Path(os.path.realpath(str(repo_root)))
-    info = os.lstat(root)
-    if not stat_module.S_ISDIR(info.st_mode):
-        raise OSError(f"{root} is not a directory")
-    if info.st_uid != os.geteuid():
-        raise OSError(
-            f"{root} is owned by another uid; the generation face refuses to read a "
-            "foreign working tree (the verification face uses the code-owned object "
-            "view instead)"
-        )
-    return root
-
-
-# 「存在但讀不到」與「不存在」必須分開:前者不得回落 packed-refs,否則被驗者把 loose
-# ref 弄成讀不到、同時在 packed-refs 手寫一行,就能讓解析回錯的 sha(E2 F7)。
-_REF_UNREADABLE = object()
-
-
-def _loose_ref_value(git_dir: Path, common: Path, name: str) -> Any:
-    if any(part in ("", ".", "..") for part in name.split("/")):
-        return None
-    candidates = [git_dir / name] if name == "HEAD" else [common / name, git_dir / name]
-    for candidate in candidates:
-        try:
-            raw = read_bounded(candidate, MAX_REF_FILE_BYTES)
-        except FileNotFoundError:
-            continue
-        except OSError:
-            return _REF_UNREADABLE
-        return raw.decode("utf-8", "replace").strip()
-    return None
-
-
-def _packed_ref_value(common: Path, name: str) -> str | None:
-    try:
-        raw = read_bounded(common / "packed-refs", MAX_PACKED_REFS_BYTES)
-    except OSError:
-        return None
-    for line in raw.decode("utf-8", "replace").splitlines():
-        if not line or line[0] in "#^":
-            continue
-        value, _, listed = line.partition(" ")
-        if listed.strip() == name and re.fullmatch(r"[0-9a-f]{40}", value):
-            return value
-    return None
-
-
-def read_subject_ref(repo_root: Path | str, name: str = "HEAD") -> str | None:
-    """把被驗者的 ref 名解析成 40-hex;解不出來一律 `None`(fail-closed)。
-
-    view 的 `refs/` 是空的,故必須來自被驗者 ref 儲存的事實在此以**純位元組讀取**取得,
-    再以明確 40-hex 交給 view。ref 檔是資料不是執行面,且 ref 值本來就由被驗者決定。
-    reftable backend 不鏡射,偵到回 `None`。
-    """
-
-    try:
-        git_dir = subject_git_dir(repo_root)
-        common = subject_common_dir(git_dir)
-    except OSError:
-        return None
-    if (common / "reftable").is_dir() or (git_dir / "reftable").is_dir():
-        return None
-    current = name
-    for _ in range(_MAX_SYMREF_DEPTH):
-        if current != "HEAD" and _REF_NAME_PATTERN.fullmatch(current) is None:
-            return None
-        value = _loose_ref_value(git_dir, common, current)
-        if value is _REF_UNREADABLE:
-            return None
-        if value is None:
-            # git 從不從 packed-refs 解析 HEAD。
-            return None if current == "HEAD" else _packed_ref_value(common, current)
-        if value.startswith("ref:"):
-            current = value[4:].strip()
-            continue
-        return value if re.fullmatch(r"[0-9a-f]{40}", value) else None
-    return None
-
-
-def resolve_named_revision(repo_root: Path | str, revision: str) -> str:
-    """把 `"HEAD"` 這種名字換成 40-hex;其餘原樣回,讀不到即 `OSError`(fail-closed)。"""
-
-    if revision != "HEAD":
-        return revision
-    head = read_subject_ref(repo_root, "HEAD")
-    if head is None:
-        raise OSError("repository HEAD could not be read from the object view")
-    return head
+    own = git_own_checkout_guard(repo_root)
+    status = subprocess.run(
+        git_argv(own, "status", "--porcelain=v1", "--untracked-files=all"),
+        cwd=own, check=True, capture_output=True, env=git_subprocess_env(),
+        text=True, timeout=180,
+    ).stdout
+    if status:
+        raise ValueError("repository must be clean before launch receipt generation")
 
 
 def _git_run(repo_root: Path, arguments: list[str]) -> tuple[str, str] | None:
@@ -964,12 +712,8 @@ def git_is_shallow_repository(repo_root: Path) -> bool:
     ``fatal: cannot simplify <c> (because of <parent>)``),而不是靜默把歷史截短。
     """
 
-    try:
-        git_dir = subject_git_dir(repo_root)
-        common = subject_common_dir(git_dir)
-    except OSError:
-        return True  # 讀不到就當成淺樹:fail-closed
-    return (git_dir / "shallow").exists() or (common / "shallow").exists()
+    findings = subject_object_store_findings(repo_root)
+    return STORE_SHALLOW in findings or STORE_UNREADABLE in findings
 
 
 def resolve_commit_head(repo_root: Path, source_head: str | None = None) -> str | None:

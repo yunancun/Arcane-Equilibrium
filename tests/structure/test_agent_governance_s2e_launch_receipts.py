@@ -12,6 +12,7 @@ from pathlib import Path
 import stat
 import subprocess
 import sys
+import threading
 from typing import Any
 
 import pytest
@@ -28,6 +29,7 @@ import agent_governance_s2e_launch_receipts as launch  # noqa: E402
 import aiml_gate_receipt_s2e_anchor_floor as anchor_floor  # noqa: E402
 import aiml_gate_receipt_schema_core as schema_core  # noqa: E402
 import aiml_gate_receipt_s2e_consumption as consumption_module  # noqa: E402
+import aiml_gate_receipt_git_view as git_view  # noqa: E402
 import aiml_gate_receipt_s2e_dispatch as s2e_dispatch  # noqa: E402
 import aiml_gate_receipt_s2e_external_evidence as s2e_external  # noqa: E402
 import aiml_gate_receipt_s2e_launch as s2e  # noqa: E402
@@ -3929,9 +3931,24 @@ def test_object_view_is_private_and_carries_no_executable_surface(
         assert (view / "config").read_text(
             encoding="utf-8"
         ) == schema_core._OBJECT_VIEW_CONFIG
-        assert (view / "objects" / "info" / "alternates").read_text(
-            encoding="utf-8"
-        ).strip() == str(objects)
+        # round-5 拆分波:object store 是**物化**的,不是掛 alternates。裡面只有
+        # fanout 目錄與 pack/*.{pack,idx} 的 symlink;沒有 `info/` 就沒有 alternates、
+        # 沒有 commit-graph,沒有 midx/bitmap ⇒ P0-B 的競爭窗口與 P0-C 的圖偽造面
+        # 在 view 裡**不存在**,不是被檢查掉。
+        store = view / "objects"
+        assert not (store / "info").exists(), "a materialized store must carry no info/"
+        assert not (store / "pack" / "multi-pack-index").exists()
+        linked = sorted(entry.name for entry in store.iterdir())
+        assert linked, linked
+        for name in linked:
+            assert name == "pack" or re.fullmatch(r"[0-9a-f]{2}", name), name
+            if name != "pack":
+                assert (store / name).is_symlink()
+                assert (store / name).resolve() == (objects / name).resolve()
+        if (store / "pack").exists():
+            for entry in (store / "pack").iterdir():
+                assert entry.name.endswith((".pack", ".idx")), entry.name
+                assert entry.is_symlink()
         assert not (view / "hooks").exists()
         assert not (view / "info" / "grafts").exists()
         assert list((view / "refs").iterdir()) == []
@@ -4022,17 +4039,16 @@ def test_object_store_hygiene_is_decided_from_the_filesystem(tmp_path: Path) -> 
     _only_reason("promisor partial clone")
     (pack / "pack-deadbeef.promisor").unlink()
 
-    # E3 round-5 自審:git 會**遞移**跟隨被驗者自己的 alternates。驗證器多半是 root,
-    # 於是被驗者能叫它去讀 root 讀得到、自己讀不到的物件庫,再以明確 object id 把那些
-    # 位元組拉進 manifest/digest(confused deputy 的讀取放大)。view 直接拒建。
+    # 巢狀 alternates 會被 git **遞移**跟隨,讓 root 驗證器去讀被驗者自己讀不到的
+    # 物件庫(confused deputy 讀取放大)。物化之後 view 不再需要「拒建」——它根本
+    # 不讀那個檔,所以照常建得起來(P0-B 的競爭測試正是靠這一點);typed reason 仍在,
+    # 因為缺物件的失敗訊息遠不如具名理由有用。
     alternates = git_dir / "objects" / "info" / "alternates"
     alternates.parent.mkdir(parents=True, exist_ok=True)
     alternates.write_text("/somewhere/else/objects\n", encoding="ascii")
     _only_reason("chains to another store through alternates")
-    with pytest.raises(OSError) as failure:
-        with schema_core.code_owned_object_view(repo):
-            pass
-    assert "alternates" in str(failure.value)
+    with schema_core.code_owned_object_view(repo) as view:
+        assert not (view / "objects" / "info").exists()
     alternates.unlink()
 
     # config 的 promisor 掃描只認 git 真正的鍵形:remote 名稱或 URL 裡的巧合字樣
@@ -4050,23 +4066,154 @@ def test_only_the_generation_face_may_read_a_working_tree(tmp_path: Path) -> Non
     """
 
     call_pattern = re.compile(r"git_argv\(\s*(\w+)\s*,")
+    modules = (schema_core, git_view, anchor_floor, s2e_review, s2e, consumption_module)
     status_calls = [
-        line.strip()
-        for line in Path(s2e.__file__).read_text(encoding="utf-8").splitlines()
+        (module.__name__, line.strip())
+        for module in modules
+        for line in Path(module.__file__).read_text(encoding="utf-8").splitlines()
         if "git_argv(" in line and '"status"' in line
     ]
     assert len(status_calls) == 1, status_calls
-    assert status_calls[0].startswith("git_argv(own,"), status_calls
-    guarded = inspect.getsource(s2e._require_own_clean_checkout)
+    assert status_calls[0][1].startswith("git_argv(own,"), status_calls
+    guarded = inspect.getsource(schema_core.require_own_clean_checkout)
     assert "git_own_checkout_guard" in guarded
     assert guarded.index("git_own_checkout_guard") < guarded.index('"status"')
     # 每一次 git 呼叫的 repository 引數都必須是 `view`;唯一的例外是 generation 面
     # 那一支 `own`(已由 `git_own_checkout_guard` 驗過同 uid)。view 沒有工作樹,
     # 所以驗證面跑不出 `git status`——那是結構上的不可能,不是自律。
-    for module in (schema_core, anchor_floor, s2e_review, s2e, consumption_module):
+    for module in modules:
         text = Path(module.__file__).read_text(encoding="utf-8")
         repositories = set(call_pattern.findall(text))
         assert repositories <= {"view", "own"}, (module.__name__, repositories)
+
+
+def test_subject_cannot_redirect_the_verifier_with_a_gitdir_pointer(
+    tmp_path: Path,
+) -> None:
+    """E3 round-5 P0-A:`.git` 檔的 `gitdir:` 指標不得把驗證器帶去另一個 repo。
+
+    fail-first。改動前 `subject_git_dir` 只跟隨、不驗,E3 實測 root 驗證器因此讀出了
+    victim repo 的位元組,而且 `aiml_gate_receipt_s2e_consumption` 的 consume-once
+    ledger 路徑由同一條指標導出 ⇒ 防重放帳本的位置由被驗者選(指到空目錄就重新變空)。
+
+    收法兩條:owner pin(擋跨 uid),加上 git 自己的 linked-worktree **回指**不變式
+    ——git 為每個 linked worktree 在 `<gitdir>/gitdir` 寫回該 worktree 的 `.git` 路徑。
+    本測試兩個 repo 同 uid,所以 owner pin 不會觸發:這裡驗的正是回指那一條。
+    """
+
+    victim = _floor_repo(tmp_path / "victim")
+    (Path(victim) / "SECRET.md").write_text("victim bytes\n", encoding="ascii")
+    _git(victim, "add", "SECRET.md")
+    _git(victim, "commit", "-qm", "victim secret")
+    attacker = _floor_repo(tmp_path / "attacker")
+    (Path(attacker) / ".git").rename(Path(attacker) / ".git.real")
+    (Path(attacker) / ".git").write_text(
+        f"gitdir: {Path(victim).resolve()}/.git\n", encoding="ascii"
+    )
+
+    with pytest.raises(OSError) as failure:
+        git_view.subject_layout(attacker)
+    assert "back pointer" in str(failure.value), str(failure.value)
+    with pytest.raises(OSError):
+        consumption_module._git_common_dir(Path(attacker))
+    assert git_view.read_subject_ref(attacker) is None
+    assert git_view.subject_object_store_findings(attacker) == [
+        git_view.STORE_UNREADABLE
+    ]
+    # 真的 linked worktree 仍然要解得出來,否則這條閘就是把功能關掉而不是把洞補上。
+    layout = git_view.subject_layout(ROOT)
+    assert layout.git_dir.exists() and layout.objects.is_dir()
+    assert git_view.read_subject_ref(ROOT) is not None
+
+
+def test_materialized_store_excludes_the_graph_surfaces_git_does_not_verify(
+    tmp_path: Path,
+) -> None:
+    """E3 round-5 P0-C:攻擊者撰寫的 commit-graph 不得改變 `--full-history` 的走訪。
+
+    fail-first。掛 alternates 的初版會讓 git 從被驗者的 `objects/info/` 載入
+    commit-graph——那**不是**內容定址面,git 不對物件複驗。E3 實測改 4 個位元組即可讓
+    一筆 floor revision 從走訪中消失,而 `_object_store_errors` 回 `[]`、
+    `merge-base --is-ancestor` 仍 True、`git commit-graph verify` 也 rc=0。
+
+    物化之後 view 的 `objects/` 沒有 `info/`,那個面在 view 裡不存在。這裡不偽造圖
+    (偽造要改 CDAT 的位元組偏移,脆弱),而是釘住更強的性質:**即使被驗者有
+    commit-graph 與 multi-pack-index,view 都不會載入它們,走訪結果等於誠實歷史。**
+    """
+
+    repo = _floor_repo(tmp_path)
+    heads = [
+        _commit(repo, "docs/floor.txt", f"gen {index}\n", f"gen {index}")
+        for index in range(4)
+    ]
+    subprocess.run(
+        [schema_core.git_executable(), "-C", str(repo), "commit-graph", "write",
+         "--reachable"],
+        check=True, capture_output=True, env=schema_core.git_subprocess_env(),
+    )
+    assert (Path(repo) / ".git" / "objects" / "info" / "commit-graph").exists()
+
+    with schema_core.code_owned_object_view(repo) as view:
+        assert not (view / "objects" / "info").exists()
+        walk = subprocess.run(
+            schema_core.git_argv(
+                view, "log", "--format=%H", "--reverse", "--topo-order",
+                "--full-history", "--end-of-options", heads[-1], "--", "docs/floor.txt",
+            ),
+            capture_output=True, text=True, env=schema_core.git_subprocess_env(),
+        )
+    assert walk.returncode == 0, walk.stderr
+    assert walk.stdout.split() == heads, (walk.stdout.split(), heads)
+
+
+def test_materialized_store_has_no_window_for_injected_alternates(
+    tmp_path: Path,
+) -> None:
+    """E3 round-5 P0-B:巢狀 alternates 的拒絕曾是 check-then-use,400 次 leaked 134。
+
+    初版在 `exists()` 與 git 真的開檔之間隔著 mkdtemp、祖先驗證、三次寫入與 spawn,
+    而被驗者擁有 `objects/info/`。物化之後 view 根本沒有 `info/`,所以沒有窗口可競爭
+    ——這裡在被驗者持續寫入 alternates 的同時反覆建 view,斷言一次都不洩漏。
+    """
+
+    victim = _floor_repo(tmp_path / "victim")
+    (Path(victim) / "SECRET.md").write_text("victim bytes\n", encoding="ascii")
+    _git(victim, "add", "SECRET.md")
+    victim_head = _commit(victim, "SECRET.md", "victim bytes\n", "victim secret")
+    subject = _floor_repo(tmp_path / "subject")
+    alternates = Path(subject) / ".git" / "objects" / "info" / "alternates"
+    alternates.parent.mkdir(parents=True, exist_ok=True)
+    victim_objects = str((Path(victim) / ".git" / "objects").resolve())
+
+    stop = threading.Event()
+
+    def racer() -> None:
+        while not stop.is_set():
+            try:
+                alternates.write_text(victim_objects + "\n", encoding="ascii")
+                alternates.unlink()
+            except OSError:
+                pass
+
+    worker = threading.Thread(target=racer, daemon=True)
+    worker.start()
+    try:
+        leaked = 0
+        for _ in range(60):
+            with schema_core.code_owned_object_view(subject) as view:
+                assert not (view / "objects" / "info").exists()
+                probe = subprocess.run(
+                    schema_core.git_argv(
+                        view, "cat-file", "-p", f"{victim_head}:SECRET.md"
+                    ),
+                    capture_output=True, text=True,
+                    env=schema_core.git_subprocess_env(),
+                )
+                leaked += int("victim bytes" in probe.stdout)
+    finally:
+        stop.set()
+        worker.join(timeout=5)
+    assert leaked == 0, f"the foreign object store leaked through {leaked} times"
 
 
 def test_generation_face_refuses_a_foreign_owned_checkout(
@@ -4089,7 +4236,7 @@ def test_generation_face_refuses_a_foreign_owned_checkout(
         patch.setattr(subprocess, "run", spy)
         patch.setattr(os, "geteuid", lambda: os.stat(repo).st_uid + 1)
         with pytest.raises(OSError) as failure:
-            s2e._require_own_clean_checkout(repo)
+            schema_core.require_own_clean_checkout(repo)
     assert "owned by another uid" in str(failure.value)
     assert calls == [], "a refused generation face must not execute git"
 

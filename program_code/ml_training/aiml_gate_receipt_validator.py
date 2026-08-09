@@ -313,6 +313,10 @@ _W0_OWNED_PATHS = (
     "helper_scripts/maintenance_scripts/agent_governance_pg_observer_bootstrap.py",
     "program_code/ml_training/aiml_gate_receipt_adoption.py",
     "program_code/ml_training/aiml_gate_receipt_classifiers.py",
+    # 2026-08-08 拆分波:`schema_core` 的下層 view 葉(信任邊界獨立成檔)。它進入
+    # engine-scanner 的 runtime import 閉包,不列入 owned scope 的話,對它的削弱性
+    # 修改不會改變 owned_path_diff_digest ⇒ 治理不變量覆蓋面靜默收窄。
+    "program_code/ml_training/aiml_gate_receipt_git_view.py",
     "program_code/ml_training/aiml_gate_receipt_s2_4_contracts.py",
     "program_code/ml_training/aiml_gate_receipt_schema_core.py",
     "program_code/ml_training/aiml_gate_receipt_validator.py",

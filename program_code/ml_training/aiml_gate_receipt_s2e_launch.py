@@ -17,8 +17,8 @@ from aiml_gate_receipt_schema_core import (
     _contains_github_secret_like_content,
     _load_schema,
     canonical_digest,
-    code_owned_object_view, git_argv, git_own_checkout_guard, git_subprocess_env,
-    resolve_named_revision,
+    code_owned_object_view, git_argv, git_subprocess_env,
+    require_own_clean_checkout, resolve_named_revision,
 )
 from aiml_gate_receipt_s2e_consumption import (
     build_s2e_launch_consumption_bootstrap_authority_core,
@@ -191,11 +191,16 @@ def _without_digest(value: dict[str, Any], field: str) -> dict[str, Any]:
 
 
 
+# E3 round-5 P1-5:本模組原本是家族裡唯一沒有 timeout 的 git 呼叫面。舊拓撲下這些呼叫
+# 在 `rc=128 dubious ownership` 就死了,view 把它變成活的、吃被驗者資料的解析面。
+_GIT_TIMEOUT_SECONDS = 180
+
+
 def _git(repo_root: Path, *args: str, check: bool = True) -> subprocess.CompletedProcess[str]:
     # round-5:git 跑在 code-owned bare view 裡,`repo_root` 只提供 object store。
     with code_owned_object_view(repo_root) as view:
         return subprocess.run(
-            git_argv(view, *args), cwd=view, check=check,
+            git_argv(view, *args), cwd=view, check=check, timeout=_GIT_TIMEOUT_SECONDS,
             capture_output=True, env=git_subprocess_env(), text=True,
         )
 
@@ -203,7 +208,7 @@ def _git(repo_root: Path, *args: str, check: bool = True) -> subprocess.Complete
 def _git_bytes(repo_root: Path, *args: str) -> bytes:
     with code_owned_object_view(repo_root) as view:
         return subprocess.run(
-            git_argv(view, *args), cwd=view, check=True,
+            git_argv(view, *args), cwd=view, check=True, timeout=_GIT_TIMEOUT_SECONDS,
             capture_output=True, env=git_subprocess_env(),
         ).stdout
 
@@ -366,29 +371,16 @@ def _tree(repo_root: Path, head: str) -> str:
 
 
 def _is_ancestor(repo_root: Path, older: str, newer: str) -> bool:
-    return _git(
-        repo_root, "merge-base", "--is-ancestor", older, newer, check=False
-    ).returncode == 0
-
-
-def _require_own_clean_checkout(repo_root: Path) -> None:
-    """**generation 面專用**:作者為自己剛做完的樹發射 candidate 前,要求該樹乾淨。
-
-    E3 round-5:本家族唯一還會跑 `git status` 的地方,而 `git status` 會執行
-    `core.fsmonitor` 與 `filter.<drv>.clean`。R4-1 的提權形狀是「**驗證器**對**外人
-    所有**的樹跑它」,這裡兩個前提都不成立:驗證面已整組改走
-    `code_owned_object_view`(沒有工作樹 ⇒ 結構上跑不起來,不是自律),而
-    `git_own_checkout_guard` 先驗 `st_uid == geteuid()`。這不是「假設同 uid」——
-    同 uid 是被驗證後才成立的前提。設計全文見 design/S2E-round5-code-owned-object-view.md。
-    """
-
-    own = git_own_checkout_guard(repo_root)
-    status = subprocess.run(
-        git_argv(own, "status", "--porcelain=v1", "--untracked-files=all"),
-        cwd=own, check=True, capture_output=True, env=git_subprocess_env(), text=True,
-    ).stdout
-    if status:
-        raise ValueError("repository must be clean before launch receipt generation")
+    # E2 round-5 F2:view 以 `OSError` 拒絕(巢狀 alternates、指標不合佈局、TMPDIR
+    # 祖先不安全…),而四個呼叫點都在 `-> list[str]` 的驗證器裡且沒有 try。合法的
+    # `git clone --shared` 就會把 typed verdict 變成 crash。這裡收成 False:呼叫端
+    # 一律以 `if not _is_ancestor(...)` 用它,故 False 是 fail-closed 的那一邊。
+    try:
+        return _git(
+            repo_root, "merge-base", "--is-ancestor", older, newer, check=False
+        ).returncode == 0
+    except (OSError, subprocess.SubprocessError):
+        return False
 
 
 def _schema_errors(receipt: Any, schema_version: str) -> list[str]:
@@ -1852,7 +1844,7 @@ def _build_genesis_candidate_payload(
     launch_contract_digest: str,
     generation_task_contract_digest: str,
 ) -> dict[str, Any]:
-    _require_own_clean_checkout(repo_root)
+    require_own_clean_checkout(repo_root)
     receipt: dict[str, Any] = {
         "schema_version": "s2e_launch_genesis_receipt_v1",
         "launch_id": LAUNCH_ID,
@@ -1913,7 +1905,7 @@ def _build_wave_candidate_payload(
     generation_task_contract_digest: str,
     side_effect_class: str = "SOURCE_ONLY",
 ) -> dict[str, Any]:
-    _require_own_clean_checkout(repo_root)
+    require_own_clean_checkout(repo_root)
     resolved_source_head = _commit(repo_root, source_head)
     current_head = _commit(repo_root, "HEAD")
     if resolved_source_head != current_head:
