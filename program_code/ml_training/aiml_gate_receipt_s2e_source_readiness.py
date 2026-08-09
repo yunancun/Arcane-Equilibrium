@@ -21,6 +21,13 @@ from aiml_gate_receipt_schema_core import git_argv, git_subprocess_env
 
 _COMMIT_RE = re.compile(r"\A[0-9a-f]{40}\Z")
 _REGULAR_BLOB_MODES = frozenset({"100644", "100755"})
+S2E_SOURCE_READINESS_WAVES = (
+    "S2E-LW1",
+    "S2E-LW2",
+    "S2E-LW3",
+    "S2E-LW4",
+    "S2E-LW5",
+)
 
 
 class S2EWaveSourceReadinessStatus(str, Enum):
@@ -40,6 +47,7 @@ class S2EWaveSourceDiagnosticCode(str, Enum):
     DUPLICATE_PATH = "DUPLICATE_PATH"
     INVALID_COMMIT = "INVALID_COMMIT"
     GIT_TREE_UNREADABLE = "GIT_TREE_UNREADABLE"
+    UNSAFE_OBJECT_ALTERNATES = "UNSAFE_OBJECT_ALTERNATES"
     MISSING_PATH = "MISSING_PATH"
     NON_REGULAR_BLOB = "NON_REGULAR_BLOB"
     UNREADABLE_BLOB = "UNREADABLE_BLOB"
@@ -97,7 +105,7 @@ def _result(
             if ordered
             else S2EWaveSourceReadinessStatus.SOURCE_READY
         ),
-        wave=wave if isinstance(wave, str) else "",
+        wave=wave if type(wave) is str else "",
         generation=generation,
         owned_paths=tuple(sorted(set(owned_paths))),
         diagnostics=ordered,
@@ -107,6 +115,7 @@ def _result(
 def _git_env() -> dict[str, str]:
     environment = git_subprocess_env()
     environment["GIT_NO_LAZY_FETCH"] = "1"
+    environment["GIT_NO_REPLACE_OBJECTS"] = "1"
     return environment
 
 
@@ -169,6 +178,49 @@ def _resolved_top_level(
     return root, None
 
 
+def _alternate_object_store_diagnostic(
+    repo_root: Path,
+) -> S2EWaveSourceDiagnostic | None:
+    common_probe = _git(repo_root, "rev-parse", "--git-common-dir")
+    if common_probe is None or common_probe.returncode != 0:
+        return S2EWaveSourceDiagnostic(
+            S2EWaveSourceDiagnosticCode.INVALID_REPO_ROOT
+        )
+    try:
+        common_dir = Path(common_probe.stdout.strip())
+        if not common_dir.is_absolute():
+            common_dir = repo_root / common_dir
+        common_dir = common_dir.resolve(strict=True)
+        if not common_dir.is_dir():
+            raise OSError("Git common directory is not a directory")
+    except (OSError, RuntimeError, ValueError):
+        return S2EWaveSourceDiagnostic(
+            S2EWaveSourceDiagnosticCode.INVALID_REPO_ROOT
+        )
+
+    for name in ("alternates", "http-alternates"):
+        control = common_dir / "objects" / "info" / name
+        try:
+            if control.is_symlink():
+                return S2EWaveSourceDiagnostic(
+                    S2EWaveSourceDiagnosticCode.UNSAFE_OBJECT_ALTERNATES,
+                    detail=name,
+                )
+            if not control.exists():
+                continue
+            if not control.is_file() or control.stat().st_size != 0:
+                return S2EWaveSourceDiagnostic(
+                    S2EWaveSourceDiagnosticCode.UNSAFE_OBJECT_ALTERNATES,
+                    detail=name,
+                )
+        except OSError:
+            return S2EWaveSourceDiagnostic(
+                S2EWaveSourceDiagnosticCode.UNSAFE_OBJECT_ALTERNATES,
+                detail=name,
+            )
+    return None
+
+
 def s2e_wave_source_readiness_v1(
     *,
     repo_root: Path,
@@ -178,14 +230,14 @@ def s2e_wave_source_readiness_v1(
     """Classify structural source existence at one exact commit generation."""
 
     diagnostics: list[S2EWaveSourceDiagnostic] = []
-    if not isinstance(wave, str) or not wave.strip() or wave != wave.strip():
+    if type(wave) is not str or wave not in S2E_SOURCE_READINESS_WAVES:
         diagnostics.append(S2EWaveSourceDiagnostic(
             S2EWaveSourceDiagnosticCode.INVALID_WAVE
         ))
 
     try:
         entries = tuple(owned_source_manifest)
-    except TypeError:
+    except Exception:
         entries = ()
         diagnostics.append(S2EWaveSourceDiagnostic(
             S2EWaveSourceDiagnosticCode.INVALID_MANIFEST_ENTRY
@@ -198,27 +250,35 @@ def s2e_wave_source_readiness_v1(
     paths: list[str] = []
     generations: list[str] = []
     for entry in entries:
-        if not isinstance(entry, S2EWaveOwnedSource):
+        if type(entry) is not S2EWaveOwnedSource:
             diagnostics.append(S2EWaveSourceDiagnostic(
                 S2EWaveSourceDiagnosticCode.INVALID_MANIFEST_ENTRY
             ))
             continue
-        if isinstance(entry.path, str):
-            paths.append(entry.path)
-        if not _canonical_owned_path(entry.path):
+        try:
+            path = entry.path
+            expected_generation = entry.expected_generation
+        except Exception:
+            diagnostics.append(S2EWaveSourceDiagnostic(
+                S2EWaveSourceDiagnosticCode.INVALID_MANIFEST_ENTRY
+            ))
+            continue
+        if type(path) is str:
+            paths.append(path)
+        if not _canonical_owned_path(path):
             diagnostics.append(S2EWaveSourceDiagnostic(
                 S2EWaveSourceDiagnosticCode.INVALID_PATH,
-                path=entry.path if isinstance(entry.path, str) else None,
+                path=path if type(path) is str else None,
             ))
-        if not isinstance(entry.expected_generation, str) or not _COMMIT_RE.fullmatch(
-            entry.expected_generation
+        if type(expected_generation) is not str or not _COMMIT_RE.fullmatch(
+            expected_generation
         ):
             diagnostics.append(S2EWaveSourceDiagnostic(
                 S2EWaveSourceDiagnosticCode.INVALID_GENERATION,
-                path=entry.path if isinstance(entry.path, str) else None,
+                path=path if type(path) is str else None,
             ))
         else:
-            generations.append(entry.expected_generation)
+            generations.append(expected_generation)
 
     duplicate_paths = sorted(
         path for path, count in Counter(paths).items() if count > 1
@@ -240,6 +300,10 @@ def s2e_wave_source_readiness_v1(
     root, root_error = _resolved_top_level(repo_root)
     if root_error is not None:
         diagnostics.append(root_error)
+    elif root is not None:
+        alternate_error = _alternate_object_store_diagnostic(root)
+        if alternate_error is not None:
+            diagnostics.append(alternate_error)
     if diagnostics or root is None or generation is None:
         return _result(
             wave=wave,
