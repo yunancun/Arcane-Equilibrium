@@ -385,18 +385,63 @@ fanout 是真目錄,裡面逐檔 symlink,每檔連結時驗 `S_ISREG`(拒 symlin
     所以 pin 對「連 repo_root 路徑本身都被重指」的情形自我一致、偵測不到。應由 producer
     傳入預期 owner uid,而不是自行導出。
 
+### round-8 第三輪 E2/E3:P0-3 真關,另外兩條被同一個結構理由推翻
+
+第三輪 E2/E3 各自從零重建復現。**結論:這一輪的收法又被推翻,而且與前兩輪是同一個
+結構原因** —— 兩位不約而同的措辭是「檢查放在攻擊者控制的那一層**之上**一層」。
+
+| 項 | 判定 |
+|---|---|
+| NEW P0-3(ledger 重指) | **真關掉,可以不用再扛。** 兩位各自 3000 次 racer:relocated **0**(原 555) |
+| NEW P0-2(物化) | **半關。** round-2 的兩條原始向量都死透(預建 fanout、build-time in-fanout symlink);但 view 存的是**路徑** symlink,git 在讀取時才解析,所以 `S_ISREG`+owner 是 check-then-use。E3 racer 300 次 leaked 21(~7%),E2 另給出視窗內確定性交換 |
+| NEW P0-1(位元組完整性) | **完全沒關掉。** 見下 |
+
+#### 為什麼 P0-1 沒關掉:雜湊綁的是 `payload ↔ oid`,不是 `oid ↔ path`
+
+`commit_blob_bytes` 用 `git_blob_sha1(payload) != header[0]` 把位元組釘回 `--batch`
+標頭的 object id。但那個 id 是 git **走 tree** 解出來的,而 **tree 物件本身從不被複驗**。
+被驗者改寫 tree,標頭 id 就指向他挑的 blob,而那個 blob 完美地雜湊成自己的 id。
+無競爭、單一路徑、同一個 commit id 兩個 store 兩種答案。
+
+E3 把它一路推到 gate:改寫 `_FLOOR_REPO_PATH` 沿線的 tree 之後,
+`read_committed_durability_anchor_floor` 回 **`VERIFIED`、`floor_generation = 9`、
+攻擊者選定的 `bound_receipt_payload_digest`、`errors: []`**,而 receipt 釘的那個 commit
+內容是 generation 1,`subject_object_store_findings` 也回 `[]`。
+
+還有第二條獨立 bypass:`--batch` 串流在**非 blob**(tree/commit/tag,有 payload)回應上
+不跳過 payload,只 `continue`,於是 offset 留在物件內容裡,之後每一筆的「標頭」都從
+攻擊者撰寫的位元組裡讀出來——**雜湊檢查因此恆真**(兩邊都來自同一份攻擊者位元組)。
+E2 以 gitlink 的 commit message 夾帶偽造記錄,讓 `target.txt` 回 `b'EVIL'`;不必偽造
+也能讓 `c.txt` 拿到 `b.txt` 的位元組。落點包含 `owned_path_blob_projection`
+(W0/W1/W2/W3/W5 的 `owned_path_diff_digest`)、`committed_source_identity_digests`、
+`s2e_review_source_blob_manifest`、以及會**寫檔**的 `materialize_commit_paths`。
+
+#### 兩位一致的結論:這不能再靠加一個檢查修
+
+E3:「current design cannot be patched by adding one more `git_blob_sha1` call」。
+正解是驗**整條解析鏈**(commit → tree → blob)而不是只驗最後一跳,或在信任 view 之前
+對它跑 `fsck`/`verify-pack`;而且物化要用 hardlink/copy(round-2 的建議 (b),round-7
+實作成 symlink,保留了讀取時解參考)。這是**設計變更**,不是補丁,而且合理的形狀是
+「一次驗證一個 view、在建構時驗完所有物件、以複製而非 symlink 定住」——那需要把 view
+從「每次 git 呼叫一個」改成「每次驗證一個」,是本輪刻意避開的那個重構。
+
+**本輪不再嘗試第四次補丁。** 連續三輪的修復都因同一個結構理由被推翻,再補一次是重複
+複核者已經具名的錯誤。
+
+#### 本輪順手收掉、與結構問題無關的兩條
+
+- `_MAX_VIEW_OBJECT_LINKS` 從 4096 提到 200000。round-6 它數 fanout 目錄(≤256),
+  round-7 改數物件卻沒改常數,於是掉到 git `gc.auto` 預設 6700 以下——E2 實測 5003 個
+  loose 物件的正常 repo 被拒,而 findings 還回 `[]`。
+- `test_materialized_store_links_objects_not_directories` 的 (b) 半段原本是
+  `assert ... or True`(無條件成立),而且新物件的 oid 幾乎不會落在已鏡射的 fanout
+  (E2 實測 60 次 0 中)。改成直接寫進一個確定已鏡射的 fanout,斷言才真的承重。
+
+#### 兩位確認我先前的兩個反駁
+
+- E2 P1-3 我說一半不成立 —— **E2 收回**:`schema_core` 於 module scope 匯入該葉,
+  `_repo_python_import_closure` 用 `ast.walk`,位置無關,簽名一向涵蓋(實測
+  `W0-GENESIS 175/175`、`S2E-LW1 258/258`)。
+- 14 份 stale receipt(而非 4 份)、其中 1 份在 `b1d2eea03` 就已 stale —— **E2 複算確認**。
+
 ### 複核狀態(2026-08-09)
-
-| 輪 | E2 / E3 | 結果 |
-|---|---|---|
-| round-5 初版 | 都跑了 | E2 F1 等 + E3 三條 P0 |
-| round-6 拆分波 | 都跑了 | P0-B/P0-C 確認關閉;P0-A 半關;三條 NEW P0 |
-| round-7 三條 P0 收口 | **未跑** | 派工當下撞到 usage 上限,見下 |
-
-**round-7 的全部改動未經對抗複核。** 前兩輪各自證明了「上一輪的修復本身帶新缺陷」
-(round-6 修 round-5,被 round-6 複核抓到三條新 P0;round-7 修那三條),所以這一輪
-**必須**補第三輪 E2/E3 才能談 merge。已派工但因 usage 上限中止,待額度恢復後重派。
-
-證據面現況:凍結 HEAD `41dfab03a`、乾淨工作樹的完整掃描為
-**8087 passed / 0 failed / 56 skipped / 0 error**(68 分 06 秒,exit 0)。這證明沒有回歸,
-**不**證明三條 P0 的收法沒有新洞——那正是第三輪要查的。

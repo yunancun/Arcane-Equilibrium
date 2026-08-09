@@ -88,8 +88,12 @@ MAX_PACKED_REFS_BYTES = 4 * 1024 * 1024
 MAX_SUBJECT_CONFIG_BYTES = 1024 * 1024
 _MAX_SYMREF_DEPTH = 8
 _MAX_REPLACE_REF_SCAN_ENTRIES = 4096
-# loose fanout 上界 256 + pack 檔;超出即病態,fail-closed 而不是無上界地連。
-_MAX_VIEW_OBJECT_LINKS = 4096
+# round-8:這個常數在 round-6 數的是 **fanout 目錄**(≤256),round-7 改成數 **物件**
+# 卻沒跟著改,於是 4096 掉進 git 自己 `gc.auto` 預設 6700 以下——一個 git 刻意容忍的
+# 正常 repo(E2 實測 5003 個 loose 物件)會被拒,而且 `subject_object_store_findings`
+# 還回 `[]`(只有 `git_failure_detail` 說得出原因)。上界改成遠高於 `gc.auto`;
+# 「超上界要成為 typed finding 而不是只在 failure_detail 裡」仍未收,見設計檔 §6。
+_MAX_VIEW_OBJECT_LINKS = 200_000
 _REF_NAME_PATTERN = re.compile(r"\Arefs/[A-Za-z0-9][A-Za-z0-9._/-]*\Z")
 _FANOUT_PATTERN = re.compile(r"\A[0-9a-f]{2}\Z")
 # 只連這兩種副檔名。`.rev`/`.bitmap`/`multi-pack-index` 都只是加速結構,git 沒有它們

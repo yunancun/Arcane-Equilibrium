@@ -4332,13 +4332,19 @@ def test_materialized_store_links_objects_not_directories(tmp_path: Path) -> Non
         )
         assert leak.returncode != 0 and "VICTIM" not in leak.stdout, leak.stdout
 
-        # 事後注入:view 已建好,對已鏡射的 fanout 寫入新物件,view 不得看見。
-        injected = _commit(subject, "late.txt", "INJECTED\n", "late object")
-        assert schema_core.commit_blob_bytes(
-            subject, ["late.txt"], source_head=injected
-        ) == {"late.txt": None} or True  # 這一行只驅動 subject 端寫入
-        late_oid = _git(subject, "rev-parse", f"{injected}:late.txt")
-        assert not (view / "objects" / late_oid[:2] / late_oid[2:]).exists()
+        # 事後注入:view 已建好,對**已鏡射**的 fanout 寫入新物件,view 不得看見。
+        # E2 round-8:舊寫法有兩個毛病——`... or True` 是無條件成立的假斷言,而且新物件
+        # 的 oid 幾乎不會落在已鏡射的 fanout(實測 60 次 0 中),所以這一半根本沒測到。
+        # 改成直接把物件寫進**一個確定已鏡射的** fanout,讓斷言必然承重。
+        mirrored_fanouts = sorted(
+            entry.name for entry in (view / "objects").iterdir() if entry.name != "pack"
+        )
+        assert mirrored_fanouts, "no fanout was mirrored, the vector is untestable"
+        chosen = mirrored_fanouts[0]
+        late = Path(subject) / ".git" / "objects" / chosen / ("f" * 38)
+        late.write_bytes(b"late object planted after the view was built")
+        assert late.exists()
+        assert not (view / "objects" / chosen / ("f" * 38)).exists()
 
 
 def test_consumption_ledger_resolves_its_common_dir_exactly_once(
