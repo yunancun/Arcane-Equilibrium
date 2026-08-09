@@ -227,6 +227,14 @@ def subject_layout(repo_root: Path | str) -> SubjectLayout:
         git_dir = _real_directory(
             Path(os.path.realpath(str(target))), owner=owner, label="subject gitdir"
         )
+    elif (root / "objects").is_dir() and (root / "HEAD").is_file():
+        git_dir = _real_directory(root, owner=owner, label="subject gitdir")
+    else:
+        # 這兩支必須留著:少了它們,不是 repo 的路徑會走到下面的 `git_dir` 而拋
+        # `UnboundLocalError`——那**不是** `OSError`,呼叫端的 fail-closed 接不到,
+        # 於是「讀不到」變成 crash。round-6 移除回指檢查時真的把它們一起刪掉了,
+        # `test_owned_path_projection_is_fail_closed_without_a_resolvable_commit` 抓到。
+        raise OSError(f"{root} is not a Git repository this view can read")
     pointer = git_dir / "commondir"
     common_dir = git_dir
     if pointer.is_file():
