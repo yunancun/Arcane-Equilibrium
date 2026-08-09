@@ -5,8 +5,8 @@ attestation 自報的 `previous_anchor_head_digest` 無法成立——那條鏈�
 四個 digest 全部由 attestation 自己的欄位重算,驗證端從不與任何真實前手比對。
 
 本模組把 receipt 已經釘在 git 上的 anchor 世代投影成一份 **code-owned 路徑**的
-committed floor,並由驗證器自己以 `git show <commit>:<path>` 讀 **commit 物件的
-位元組**(不是工作樹)。floor 不是新的信任源,也不帶簽章:它只提供**機械可偵測的
+committed floor,並由驗證器自己以 `verified_blob_bytes` 讀 **commit 物件的位元組**
+(不是工作樹;round-7 起不再用 `git show`,位元組要對 `--batch` 標頭的 object id 重算)。floor 不是新的信任源,也不帶簽章:它只提供**機械可偵測的
 歷史性質**——`floor_history_errors` 的祖先鏈 + 嚴格遞增 + 單一創世檢查。
 
 誠實邊界(2026-08-04 撤回上一版的過強宣稱;不得在註解或 PR 說明裡被寫回去):
@@ -588,10 +588,11 @@ def floor_history_errors(
         return _floor_reading(FLOOR_REJECTED, None, errors + [
             f"durability anchor floor is unreadable at the reviewed commit: {error}"
         ])
-    # 尾端 byte-for-byte:祖先鏈檢查為真時**不可孤立觸發**——`at_commit` 讀到的 blob
-    # 必然等於最後一個觸碰該路徑的 commit 的 blob。E2 與 E4 獨立同意構造不出孤立
-    # 違例,故本條屬 defense-in-depth;其可執行性由 seam 層測試(monkeypatch
-    # `_git_bytes`)背書,不留成沉默的覆蓋債。
+    # 尾端 byte-for-byte。**round-8 更正**:此處原本寫「祖先鏈為真時不可孤立觸發,故屬
+    # defense-in-depth」——E2 第三輪指出那已不成立。被驗者改寫 `at_commit` 的 tree 就能
+    # 讓這裡讀到的 blob 與歷史鏈尾分歧,而雜湊比對擋不住(它綁 payload↔oid,不綁
+    # oid↔path;tree 沒有被驗)。也就是說本條是**目前少數會抓到 tree 竄改的檢查之一**,
+    # 承重,不是裝飾。其可執行性由 seam 層測試(monkeypatch `_verified_bytes`)背書。
     if head_raw != last_raw:
         errors.append(
             "durability anchor floor at the reviewed commit differs byte-for-byte "

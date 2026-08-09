@@ -45,20 +45,36 @@ commit-graph 的 repo 經 view 走訪回誠實歷史。B 與 C 這兩條向量�
 (只有 `fsck`/`verify-pack` 會,而本家族兩者都不跑),loose 與 packed 兩種形式都能讓
 一個 object id 回出攻擊者選定的位元組。
 
-**round-7 用兩條配套收掉它,不再靠 git 的任何隱含保證:**
+round-7 加了兩條緩解,round-8 的第三輪 E2/E3 又各自把它們的**強版本**推翻。以下是
+收窄後、代碼真的背得起來的宣稱:
 
-- **來源**:`_materialize_object_store` 改為逐**物件**物化。view 內的 fanout 是真目錄,
-  裡面逐檔 symlink,每檔連結時驗 `S_ISREG`(拒 symlink)且驗 owner。於是
-  `objects/<xx>/<yyy>` 的 symlink 不會被連(E2 那條 100% 無競爭洩漏關掉),列舉後才出現
-  的物件也不在 view 裡(真快照,E3 那條「預建 256 個空 fanout 讓 store 保持活的」關掉)。
-- **內容**:`schema_core.commit_blob_bytes` ——本家族**唯一**的 blob 讀取原語——讀出後
-  自行以 `git_blob_sha1` 對 `cat-file --batch` 標頭裡那個 git 從 tree 解出的 object id
-  重算比對,對不上就當缺席。`anchor_floor` 與 `s2e_review` 原本用 `show` 的每一處都改走
-  `verified_blob_bytes`,家族內已無未驗證的 blob 讀取。實測:同一個被竄改的 loose 物件,
-  直接 `git cat-file -p` 回 `EVIL CONTENT`,經本家族一律回 `None`/`OSError`。
+- **來源**:`_materialize_object_store` 逐**物件**物化,每檔連結時驗 `S_ISREG` 與 owner。
+  這關掉了兩條具體向量(建構時就存在的 in-fanout symlink;列舉後**新建**的物件)。
+  **但 view 存的是路徑 symlink,git 在讀取時才解參考**,所以 `S_ISREG`/owner 是
+  check-then-use:已連結物件的內容與型別在整個 view 生命週期內仍是活的,連結後把該檔
+  換成指向別的 store 的 symlink 仍然讀得到(E3 racer 300 次中 21 次)。
+- **內容**:`commit_blob_bytes` 對 `cat-file --batch` 標頭的 object id 重算 sha1。
+  這綁的是 **`payload ↔ oid`**,**不是 `oid ↔ path`** —— 那個 oid 是 git 走 **tree**
+  解出來的,而 tree 物件從不被複驗。改寫 tree 即可讓標頭指向攻擊者挑的 blob,而該 blob
+  完美地雜湊成自己的 id(E2/E3 各自無競爭復現;E3 據此讓 floor gate 回 `VERIFIED`、
+  `floor_generation = 9`、`errors: []`)。commit 物件同樣未驗。
 
-sha256 object format 因此必須顯式拒(`STORE_UNSUPPORTED_OBJECT_FORMAT`):sha1 重算對它
-恆假,而恆假的完整性檢查比沒有更糟。
+**因此本模組的誠實宣稱範圍是:**
+
+1. **已關且經復現確認**:R4-1 那條「以驗證器身分執行任意程式」。E3 把
+   `core.fsmonitor`/`filter.*.clean`/`diff.*.textconv`/`core.hooksPath`/`core.pager`/
+   `core.editor`/`uploadpack.packObjectsHook`/`include.path` 全部武裝後實測零命中,而事實
+   照樣取得。這是本輪真正買到的東西。
+2. **tamper-evident,對「意外損壞」有效**:物件位元組與 object id 不符會被擋
+   (損壞、gc 讀到一半、store 被改寫)。
+3. **對敵意 repo owner 不成立**:被驗者能讓本家族證明他挑的位元組。
+   **§LW1 意義下的外部性一項都不提供**,任何投影都不得把本模組讀成「P0-1 已關」或
+   「receipt 可抗同一 writer 改寫」。要達到那個級別需要驗**整條解析鏈**(commit → tree
+   → blob)或對 view 跑 `fsck`/`verify-pack`,並以 hardlink/copy 而非 symlink 物化——
+   那是「一次驗證一個 view」的重構,尚未進行。見設計檔 §6。
+
+sha256 object format 顯式拒(`STORE_UNSUPPORTED_OBJECT_FORMAT`):sha1 重算對它恆假,
+而恆假的完整性檢查比沒有更糟。
 """
 
 from __future__ import annotations
@@ -369,17 +385,17 @@ def _materialize_object_store(objects: Path, target: Path, *, owner: int) -> Non
     回 `[]`、`merge-base --is-ancestor` 仍 True、`git commit-graph verify` 也 rc=0。
     物化之後這兩個面在 view 裡**不存在**,不是「被檢查掉」——沒有窗口可競爭。
 
-    **round-7:改為逐「物件」物化。** round-6 是逐**目錄** symlink,E2/E3 各自實證那不夠:
-    (a) 被驗者事先建好 256 個空 fanout(對 git 無害),store 在 view 的整個生命週期內就是
-    **活**的,不是快照;(b) 本函式只驗目錄不是 symlink、不看目錄內容,所以
-    `objects/<xx>/<yyy>` 放 symlink 就能無競爭引入外部物件庫;(c) 列舉後把已連結的 fanout
-    換成 symlink,還能讀到 owner pin 拒絕過的 store。現在 view 內的 fanout 是**真目錄**,
-    裡面逐檔 symlink,每一檔在連結時驗 `S_ISREG`(拒 symlink)且驗 owner。於是列舉之後
-    才出現的物件不在 view 裡(真正的快照語義),fanout 也換不掉。實測 216 個 loose 物件
-    +3 個 pack 的 repo,一次 view 約 30 ms。
+    逐**物件**物化:view 內的 fanout 是真目錄,裡面逐檔 symlink,每檔連結時驗 `S_ISREG`
+    (拒 symlink)且驗 owner。這關掉 round-6 的兩條具體向量——建構時就存在的 in-fanout
+    symlink,以及列舉後**新建**的物件(後者靠預建 256 個空 fanout 也拿不到)。實測 216 個
+    loose 物件 +3 個 pack 的 repo,一次 view 約 30 ms。
 
-    這一條與「讀出的位元組必須對 tree 記錄的 blob id 重算比對」
-    (`commit_blob_bytes`)是配套的:後者擋內容,前者擋來源。
+    **誠實邊界(round-8 收窄,不得再寫成「真正的快照語義」)。** 這裡連的是**路徑**
+    symlink,git 在讀取時才解參考,所以 `S_ISREG` 與 owner 是 check-then-use:只有**名字
+    集合**是快照,已連結物件的**內容與型別**在整個 view 生命週期內都還是活的。連結通過
+    檢查之後把該檔換成指向別的 store 的 symlink,仍然讀得到(E3 racer 300 次中 21 次;
+    E2 另給出視窗內的確定性交換)。要真正定住需要 hardlink/copy 而非 symlink,屬未進行的
+    「一次驗證一個 view」重構。
     """
 
     import os

@@ -3504,11 +3504,12 @@ def test_committed_floor_tail_byte_check_is_reachable_through_its_seam(
         raw = real_verified(repo_root, path, at_commit=at_commit)
         return raw + b" " if at_commit.startswith(head) else raw
 
-    # round-7:floor 的 blob 讀取由 `_git_bytes(..., "show", ...)` 改走
-    # `_verified_bytes`(位元組必須對 tree 記錄的 object id 重算比對),所以縫在這裡。
-    # 這也讓本測試的定位更清楚:真實路徑上這種分歧**已經不可能**——`show` 回不同位元組
-    # 會被雜湊比對擋掉——所以尾端 byte-for-byte 純粹是 defense-in-depth,而本測試證的是
-    # 它仍然可達、不是死碼。
+    # round-7:floor 的 blob 讀取由 `_git_bytes(..., "show", ...)` 改走 `_verified_bytes`
+    # (位元組要對 `--batch` 標頭的 object id 重算比對),所以縫在這裡。
+    # **round-8 更正**:此處一度寫成「真實路徑上這種分歧已經不可能」。錯的——雜湊比對綁
+    # 的是 payload↔oid,不綁 oid↔path,而 tree 沒有被驗,所以改寫 `at_commit` 的 tree
+    # 就能造成真實分歧。尾端 byte-for-byte 因此是**承重**檢查(目前少數抓得到 tree 竄改
+    # 的其中一條),本測試證的是它可達、不是死碼。
     monkeypatch.setattr(anchor_floor, "_verified_bytes", tampered)
     reading = anchor_floor.read_committed_durability_anchor_floor(
         repo, at_commit=head

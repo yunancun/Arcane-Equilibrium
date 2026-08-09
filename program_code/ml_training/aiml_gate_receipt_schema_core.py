@@ -809,22 +809,33 @@ def commit_blob_bytes(
             break
         header = stream[offset:newline].decode("utf-8", "replace").split(" ")
         offset = newline + 1
-        if len(header) != 3 or header[1] != "blob":
-            # "missing" / "ambiguous" / 非 blob(目錄、submodule)→ fail-closed 記 None。
+        # round-8 E2:標頭第一欄必須是 40-hex,否則「有 payload」的判斷會被檔名騙。
+        # `cat-file --batch` 的缺席回應是 `<請求字串> missing`,而請求字串含空白時
+        # (git 允許路徑有空白)`"A blob missing"` 會 split 成剛好三段、第二段是 `blob`
+        # ——舊版於是把 `int("missing")` 當成尺寸、`break`,整份 manifest 靜默全 None。
+        is_object = (
+            len(header) == 3
+            and re.fullmatch(r"[0-9a-f]{40}", header[0]) is not None
+            and header[2].isdigit()
+        )
+        if not is_object:
+            # "missing" / "ambiguous" → 沒有 payload,直接下一筆。
             continue
-        try:
-            size = int(header[2])
-        except ValueError:
-            break
+        size = int(header[2])
         payload = stream[offset : offset + size]
         offset += size + 1  # 每筆物件後接一個換行
-        # ── round-7 P0-1:自行對 tree 記錄的 object id 重算,對不上就當缺席。
-        # E2 與 E3 於 git 2.55.0 各自實證:git **只有** `fsck`/`verify-pack` 會複驗物件
-        # 雜湊,blob 讀取路徑(`cat-file --batch`、`show <rev>:<path>`)不驗。於是被驗者
-        # 可以讓一個 object id 回出任意位元組——loose(把 zlib blob 寫在別的 sha 的路徑
-        # 上)與 packed(自製 idx 宣稱另一個 id)兩種形式都成立。本函式是本家族**唯一**
-        # 的 blob 讀取原語,所以檢查放這裡就覆蓋所有投影與 manifest。
-        # header[0] 是 git 從 tree 解析出來的 id;payload 必須真的雜湊成它。
+        # round-8 E2/E3:**非 blob 也帶 payload**(tree/commit/tag)。舊版只 `continue`
+        # 而不吃掉那段位元組,於是 offset 留在物件內容裡,之後每一筆的「標頭」都從
+        # 物件內容讀出來——串流失步。那不只是安全問題:路徑清單裡有一個目錄就足以讓
+        # 下一個路徑拿到**別人的**位元組(E2 實測,無需任何偽造)。payload 必須先吃掉,
+        # 再判型別。
+        if header[1] != "blob":
+            continue
+        # 自行對 object id 重算。git **只有** `fsck`/`verify-pack` 會複驗物件雜湊,
+        # blob 讀取路徑不驗(E2/E3 於 git 2.55.0 各自實證,loose 與 packed 皆然),
+        # 所以這一步擋的是「位元組與 object id 不符」——**損壞**,以及最外層那一跳的
+        # 竄改。**它不擋 tree 竄改**:`header[0]` 是 git 走 tree 解出來的,而 tree 本身
+        # 沒有被驗。誠實邊界見模組層 docstring 與設計檔 §6,不得把這裡讀成完整性保證。
         if git_blob_sha1(payload) != header[0]:
             continue
         blobs[rel] = payload
@@ -840,6 +851,10 @@ def verified_blob_bytes(
     不複驗雜湊(E2/E3 各自實證),而 `commit_blob_bytes` 走 `cat-file --batch`,其標頭
     帶著 git 從 tree 解出的 object id,因此可以在原語層就把位元組釘回那個 id。
     對不上、缺席、非 blob 一律回 `None`(fail-closed)。
+
+    **誠實邊界**:這綁的是 `payload ↔ oid`,**不是** `oid ↔ path`。tree 物件本身沒有被
+    驗,所以改寫 tree 就能讓 oid 指向攻擊者挑的 blob(E2/E3 round-8 各自無競爭復現)。
+    本函式擋的是**位元組損壞與最外層竄改**,不是敵意 repo owner。見設計檔 §6。
     """
 
     return commit_blob_bytes(repo_root, [path], source_head=at_commit).get(path)

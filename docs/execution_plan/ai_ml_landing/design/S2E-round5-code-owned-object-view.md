@@ -1,8 +1,13 @@
 # S2E round-5 — 差異 uid 拓撲:從 code-owned bare object view 取事實
 
-- 狀態:source 設計修復已落地(本輪)。**不含**三支 root-owned producer 本體、不含
-  信任根 provision、不含任何 receipt/runtime/deploy/PG/broker 動作。九項 authority
-  維持全 false,production effect 維持 0/6。
+- 狀態:source 設計修復已落地。**不含**三支 root-owned producer 本體、不含信任根
+  provision、不含任何 receipt/runtime/deploy/PG/broker 動作。九項 authority 維持全
+  false,production effect 維持 0/6。
+- **宣稱範圍(operator 2026-08-09 裁定的選項 C;讀本檔任何一節前先讀這三行)**:
+  1. **已關且經三輪復現確認**:R4-1「以驗證器身分執行任意程式」。這是本工作真正買到的。
+  2. **tamper-evident,對意外損壞有效**:位元組與 object id 不符會被擋。
+  3. **對敵意 repo owner 不成立**:被驗者能讓本家族證明他挑的位元組(§6 round-8)。
+     **§LW1 意義下的外部性一項都不提供**,任何投影都不得把本檔讀成「P0-1 已關」。
 - 對應代碼:`aiml_gate_receipt_git_view.py`(**新葉**;view / 佈局解析 / ref 讀取器 /
   衛生事實的實作正本)、`aiml_gate_receipt_schema_core.py`(re-export + `git_argv` +
   唯一的工作樹讀取原語)、`aiml_gate_receipt_s2e_{launch,anchor_floor,consumption,review}.py`
@@ -129,14 +134,15 @@ promisor 的 config 文字掃描只是第二道,且只能讓判定更嚴,永遠�
 
 ## 4. 這組改動證得到什麼、證不到什麼
 
-> **本節的宣稱範圍曾被 round-5 的 E2/E3 複核收窄,round-6 拆分波已收口三條 P0。** 下面「證得到」的三條仍然成立
-> (E3 以武裝 `core.fsmonitor`/`filter.*.clean/process`/`diff.*.textconv`/`core.hooksPath`
-> /`core.pager`/`core.editor`/`uploadpack.packObjectsHook`/`include.path` 的被驗者實測:
-> 零 sentinel 命中、事實全數取得,`_GIT_ENV_ALLOWLIST` 與 `safe.directory` 皆未回歸),
-> 拆分波之後又跑了第二輪 E2/E3。結論:**P0-B 與 P0-C 確實關掉了**(兩位各自重建復現:
-> alternates 競爭器 400 次 leaked 0,偽造 commit-graph 經 view 走訪回誠實歷史),
-> **P0-A 只關掉跨 uid 那一半**,而拆分波用來論證 B/C「結構上關掉」的那句話是假的,
-> 因此又冒出三條 NEW P0。本輪 gate verdict 仍是 **FAIL**,見 §6。
+> **三輪 E2/E3 之後的收斂結論(完整版見 §6)。** 下面「證得到」的三條**仍然成立**:
+> E3 把 `core.fsmonitor`/`filter.*.clean/process`/`diff.*.textconv`/`core.hooksPath`/
+> `core.pager`/`core.editor`/`uploadpack.packObjectsHook`/`include.path` 全部武裝到被驗者
+> 身上實測——零 sentinel 命中、事實全數取得,`_GIT_ENV_ALLOWLIST` 與 `safe.directory`
+> 皆未回歸。**R4-1 的任意程式執行確實關掉了,這是本工作真正買到的東西。**
+>
+> 同樣關掉的:P0-3(ledger 重指,3000 次 racer relocated 0)、P0-B/P0-C 的具體向量。
+> **未關掉的:位元組完整性對敵意 repo owner 不成立** —— 雜湊綁 `payload↔oid` 而 tree
+> 未驗。operator 2026-08-09 裁定選項 C:**收窄宣稱後 merge**,不追那個尚未進行的重構。
 
 **證得到(本輪測試涵蓋)**
 
@@ -443,5 +449,26 @@ E3:「current design cannot be patched by adding one more `git_blob_sha1` call�
   `_repo_python_import_closure` 用 `ast.walk`,位置無關,簽名一向涵蓋(實測
   `W0-GENESIS 175/175`、`S2E-LW1 258/258`)。
 - 14 份 stale receipt(而非 4 份)、其中 1 份在 `b1d2eea03` 就已 stale —— **E2 複算確認**。
+
+### operator 裁決:選項 C(2026-08-09)
+
+三輪複核之後,operator 裁定 **收窄宣稱後 merge**,理由是:
+
+- 這條分支真正買到的東西(R4-1 的任意程式執行關閉、差異 uid 下取得事實、P0-3、
+  registration 正確性)都是實的,不該因為一個**它從一開始就沒達成過**的性質而全部擱著
+  ——`anchor_floor` 的模組 docstring 早在 2026-08-04 就寫著「本模組不提供 §LW1 意義下的
+  外部性,一項都不提供」。
+- 剩下的缺口不是資安事故:這條路徑上沒有網路、沒有 remote、沒有外部輸入,九項 authority
+  全 false、production effect 0/6。「攻擊者」是 §LW1 拓撲自己定義的角色——**被驗 repo 的
+  owner**,也就是 operator 本人。現實中最可能觸發它的是**與惡意無法區分的意外**
+  (物件損壞、gc 讀到一半、store 被改寫),而那一類雜湊檢查是擋得住的。
+- 因此阻礙不是**危險**,是**宣稱**。收窄之後,代碼背得起它說的每一句。
+
+隨之收窄的位置:本檔 §0 狀態列、§2/§4 方框、`git_view` 模組 docstring 與
+`_materialize_object_store`、`schema_core.git_argv` 與 `verified_blob_bytes`、
+`anchor_floor` 模組 docstring 與尾端 byte-for-byte 註解、以及 seam 測試的註解。
+
+**S2E 家族自此不得宣稱 §LW1 的外部性**,直到「一次驗證一個 view + 全鏈驗證
+(commit→tree→blob)+ copy/hardlink 物化」的重構完成。
 
 ### 複核狀態(2026-08-09)
