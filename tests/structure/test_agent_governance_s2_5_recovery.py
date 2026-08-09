@@ -1941,7 +1941,10 @@ def test_host_capture_leaf_and_schema_extend_closure_without_lifecycle_roots():
     assert expected_resources <= set(closure["schema_resources"])
     # The launch review oracle and its centrally registered disposable-test
     # chain are application-reachable; lifecycle roots remain excluded.
-    assert len(closure["python_modules"]) == 60
+    # 2026-08-09 拆分波:60 -> 61,新增 `aiml_gate_receipt_git_view.py`。它由
+    # `schema_core` 於 top-level 匯入,因此真的進入 engine-scanner 的 runtime import
+    # 閉包;`derive_application_runtime_closure_status` 的雙向 exact-match 已重驗通過。
+    assert len(closure["python_modules"]) == 61
     assert len(closure["schema_resources"]) == 94
     assert closure["runtime_lazy_helper_roots"] == [{
         "module": "agent_governance_sealed_build",
