@@ -39,10 +39,10 @@ from agent_governance_schema import schema_subset_errors
 from aiml_gate_receipt_schema_core import (
     STORE_GRAFTS, STORE_INDETERMINATE, STORE_NESTED_ALTERNATES, STORE_PROMISOR,
     STORE_REPLACE_REFS, STORE_SHALLOW, STORE_UNREADABLE,
-    STORE_UNSUPPORTED_REF_BACKEND,
+    STORE_UNSUPPORTED_OBJECT_FORMAT, STORE_UNSUPPORTED_REF_BACKEND,
     _load_schema, canonical_digest, code_owned_object_view, git_argv,
     git_failure_detail, git_subprocess_env, read_subject_ref,
-    subject_object_store_findings,
+    subject_object_store_findings, verified_blob_bytes,
 )
 
 
@@ -299,6 +299,24 @@ def _git_ok(repo_root: Path, *args: str) -> bool:
         return False
 
 
+def _verified_bytes(repo_root: Path, path: str, *, at_commit: str) -> bytes:
+    """`<at_commit>:<path>` 的 blob 位元組,已對 tree 記錄的 object id 重算比對。
+
+    round-7 P0-1:本模組原本用 `git show <rev>:<path>`,而那條路徑**不**複驗物件雜湊
+    (E2/E3 各自於 git 2.55.0 實證,loose 與 packed 兩種形式皆可讓一個 object id 回出
+    任意位元組)。改走 `schema_core.verified_blob_bytes`;讀不到或對不上一律拋
+    `OSError`,由既有的 `_GIT_FAILURES` / 呼叫端 fail-closed 接手。
+    """
+
+    payload = verified_blob_bytes(repo_root, path, at_commit=at_commit)
+    if payload is None:
+        raise OSError(
+            f"{path} at {at_commit[:12]} is absent, unreadable, or its bytes do not "
+            "hash to the object id recorded in the commit's tree"
+        )
+    return payload
+
+
 def _object_store_errors(repo_root: Path) -> list[str]:
     """P1-5:非完整 object store 會讓整組歷史檢查靜默變成 no-op。
 
@@ -348,6 +366,10 @@ def _object_store_errors(repo_root: Path) -> list[str]:
         STORE_UNSUPPORTED_REF_BACKEND: (
             "durability anchor floor cannot be read from a repository whose ref "
             "backend the code-owned object view cannot mirror"
+        ),
+        STORE_UNSUPPORTED_OBJECT_FORMAT: (
+            "durability anchor floor cannot be read from a sha256 object-format "
+            "repository, whose object ids the byte-integrity check cannot recompute"
         ),
         STORE_SHALLOW: (
             "durability anchor floor cannot be read from a shallow repository"
@@ -519,7 +541,7 @@ def floor_history_errors(
                 "durability anchor floor history is not a single ancestor chain"
             )
         try:
-            raw = _git_bytes(repo_root, "show", "--end-of-options", f"{commit}:{path}")
+            raw = _verified_bytes(repo_root, path, at_commit=commit)
         except _GIT_FAILURES as error:
             return _floor_reading(FLOOR_REJECTED, None, errors + [
                 f"durability anchor floor revision is unreadable: {error}"
@@ -561,7 +583,7 @@ def floor_history_errors(
         revision_index += 1
         last_raw = raw
     try:
-        head_raw = _git_bytes(repo_root, "show", "--end-of-options", f"{at_commit}:{path}")
+        head_raw = _verified_bytes(repo_root, path, at_commit=at_commit)
     except _GIT_FAILURES as error:
         return _floor_reading(FLOOR_REJECTED, None, errors + [
             f"durability anchor floor is unreadable at the reviewed commit: {error}"

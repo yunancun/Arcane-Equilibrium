@@ -39,17 +39,26 @@ B 與 C 有共同的結構解,即 `_materialize_object_store`:view 的 `objects/
 E2 與 E3 round-6 各自實測確認:alternates 競爭器 400 次 leaked 0(原 134),帶偽造
 commit-graph 的 repo 經 view 走訪回誠實歷史。B 與 C 這兩條向量確實關掉了。
 
-**但本段初版還寫了一句「剩下能被替換的只有物件位元組本身,而那是內容定址的:git 讀出來
-會複驗 sha」——那句是假的,已撤回,不得寫回去。** E2 與 E3 於 git 2.55.0 各自獨立實證:
-`git cat-file -p` / `--batch` / `show <rev>:<path>` 這條 blob 讀取路徑**不**複驗 sha
+**round-6 曾在此寫過一句「剩下能被替換的只有物件位元組本身,而那是內容定址的:git 讀出來
+會複驗 sha」——那句是假的,永久撤回,不得寫回去。** E2 與 E3 於 git 2.55.0 各自實證:
+`cat-file -p` / `--batch` / `show <rev>:<path>` 這條 blob 讀取路徑**不**複驗 sha
 (只有 `fsck`/`verify-pack` 會,而本家族兩者都不跑),loose 與 packed 兩種形式都能讓
-一個 object id 回出攻擊者選定的位元組。而 `commit_blob_bytes` 正是走 `cat-file --batch`。
-此外本模組只驗 fanout **目錄**不是 symlink,不看目錄**內容**:被驗者在
-`objects/<xx>/<yyy>` 放 symlink 就能無競爭地把外部物件庫的位元組送進來(E2 實測 100%)。
-因此 P0-B 那條 confused-deputy 讀取**只是換了路徑,沒有關掉**;view 目前只保證
-「不經被驗者的 config/hook/attributes/graph 面」,**不保證所送位元組與 object id 相符**。
-真正的收法是讀出位元組後自行對 tree 記錄的 blob id 重算比對,以及逐物件(而非逐目錄)
-物化。兩者都未做,見設計檔 §6「未收」。
+一個 object id 回出攻擊者選定的位元組。
+
+**round-7 用兩條配套收掉它,不再靠 git 的任何隱含保證:**
+
+- **來源**:`_materialize_object_store` 改為逐**物件**物化。view 內的 fanout 是真目錄,
+  裡面逐檔 symlink,每檔連結時驗 `S_ISREG`(拒 symlink)且驗 owner。於是
+  `objects/<xx>/<yyy>` 的 symlink 不會被連(E2 那條 100% 無競爭洩漏關掉),列舉後才出現
+  的物件也不在 view 裡(真快照,E3 那條「預建 256 個空 fanout 讓 store 保持活的」關掉)。
+- **內容**:`schema_core.commit_blob_bytes` ——本家族**唯一**的 blob 讀取原語——讀出後
+  自行以 `git_blob_sha1` 對 `cat-file --batch` 標頭裡那個 git 從 tree 解出的 object id
+  重算比對,對不上就當缺席。`anchor_floor` 與 `s2e_review` 原本用 `show` 的每一處都改走
+  `verified_blob_bytes`,家族內已無未驗證的 blob 讀取。實測:同一個被竄改的 loose 物件,
+  直接 `git cat-file -p` 回 `EVIL CONTENT`,經本家族一律回 `None`/`OSError`。
+
+sha256 object format 因此必須顯式拒(`STORE_UNSUPPORTED_OBJECT_FORMAT`):sha1 重算對它
+恆假,而恆假的完整性檢查比沒有更糟。
 """
 
 from __future__ import annotations
@@ -98,6 +107,7 @@ STORE_PROMISOR = "PROMISOR"
 STORE_UNSUPPORTED_REF_BACKEND = "UNSUPPORTED_REF_BACKEND"
 STORE_NESTED_ALTERNATES = "NESTED_ALTERNATES"
 STORE_INDETERMINATE = "INDETERMINATE"
+STORE_UNSUPPORTED_OBJECT_FORMAT = "UNSUPPORTED_OBJECT_FORMAT"
 
 # 只認 git 真正的鍵形(`remote.<n>.promisor`、`remote.<n>.partialclonefilter`、
 # `extensions.partialclone` 在 INI 裡就是行首這三個鍵),不做整檔子字串掃描——後者會被
@@ -105,6 +115,11 @@ STORE_INDETERMINATE = "INDETERMINATE"
 _PROMISOR_CONFIG_KEY = re.compile(
     r"(?im)^[ \t]*(promisor|partialclonefilter|partialclone)[ \t]*="
 )
+# round-7:`commit_blob_bytes` 用 sha1 對 object id 重算(P0-1)。sha256 object format
+# 的 repo 那個比對會恆假,而恆假的完整性檢查比沒有更糟——它看起來像在保護。顯式拒。
+# view 的 config 寫死 `repositoryformatversion = 0`,sha256 本來也讀不了,所以這條只是
+# 把既有的隱性失敗換成具名理由。
+_SHA256_OBJECT_FORMAT = re.compile(r"(?im)^[ \t]*objectformat[ \t]*=[ \t]*sha256")
 
 
 def read_bounded(path: Path, limit: int) -> bytes:
@@ -268,22 +283,23 @@ def subject_git_dir(repo_root: Path | str) -> Path:
     return subject_layout(repo_root).git_dir
 
 
-def subject_common_dir(git_dir: Path) -> Path:
-    """`<git-common-dir>`。呼叫端已持有 gitdir 時的相容入口(見 `subject_layout`)。"""
+def subject_common_dir(repo_root: Path | str) -> Path:
+    """`<git-common-dir>`,取自**唯一一次**已驗證的 `subject_layout` 解析。
 
-    import os
+    P0-3(E3 round-6,CONFIRMED):本函式原本收 `git_dir` 並**重讀一次**
+    `<gitdir>/commondir`——同一個被驗者可寫的檔被讀兩次,第二次完全不驗(無 owner pin、
+    無佈局不變式)。`s2e_consumption._git_common_dir` 正是
+    `subject_common_dir(subject_git_dir(repo_root))` 這個組合,於是被驗者只要在兩次讀取
+    之間改寫 `commondir`,就能把 consume-once ledger 的 `state_path`/`lock_path` 指到
+    **任意**目錄(E3 racer 3000 次:relocated 555)。帳本三個檔都不存在時 `read()` 回
+    `_empty_ledger()` ⇒ 重放繞過,而且 `_atomic_write`/`_open_lock` 會讓驗證器在攻擊者
+    指定的目錄裡建檔。目標不受 owner pin 約束,因為第二次讀取根本不驗。
 
-    pointer = git_dir / "commondir"
-    if not pointer.is_file():
-        return git_dir
-    raw = read_bounded(pointer, MAX_REF_FILE_BYTES).decode("utf-8", "replace")
-    first = raw.splitlines()[0].strip() if raw.strip() else ""
-    if not first:
-        return git_dir
-    target = Path(first)
-    if not target.is_absolute():
-        target = git_dir / target
-    return Path(os.path.realpath(str(target)))
+    改成收 `repo_root` 並回 `subject_layout(repo_root).common_dir`:全程只有一次讀取,
+    而且是驗過的那一次。
+    """
+
+    return subject_layout(repo_root).common_dir
 
 
 def _verify_private_directory(path: Path) -> None:
@@ -332,7 +348,7 @@ def _write_view_file(path: Path, payload: str) -> None:
         os.close(descriptor)
 
 
-def _materialize_object_store(objects: Path, target: Path) -> None:
+def _materialize_object_store(objects: Path, target: Path, *, owner: int) -> None:
     """在 view 內建一個**只含物件**的 store(P0-B / P0-C 的共同結構解)。
 
     `target` 由本模組建立、驗證器所有、被驗者寫不進去,裡面只有:
@@ -349,14 +365,17 @@ def _materialize_object_store(objects: Path, target: Path) -> None:
     回 `[]`、`merge-base --is-ancestor` 仍 True、`git commit-graph verify` 也 rc=0。
     物化之後這兩個面在 view 裡**不存在**,不是「被檢查掉」——沒有窗口可競爭。
 
-    **誠實邊界(round-6 撤回兩句)。** 初版寫「仍可被替換的只有物件位元組,而那是內容
-    定址的,git 會複驗 sha」與「列舉之後才出現的 fanout 看不到 ⇒ 快照語義」——兩句都被
-    實證推翻:(1) git 在 blob 讀取路徑不複驗 sha,一個 object id 可以回出任意位元組;
-    (2) 被驗者只要事先建好 256 個空 fanout 目錄,store 在 view 的整個生命週期內都是**活**
-    的,而且本函式只驗目錄不是 symlink、不看目錄內容,所以 `objects/<xx>/<yyy>` 放 symlink
-    即可無競爭地引入外部物件庫;列舉後把已連結的 fanout 換成 symlink 也能讀到 owner pin
-    拒絕過的 store。逐物件物化(`S_ISREG` + owner 檢查)與讀出後對 blob id 重算,兩者
-    都未做——見設計檔 §6。
+    **round-7:改為逐「物件」物化。** round-6 是逐**目錄** symlink,E2/E3 各自實證那不夠:
+    (a) 被驗者事先建好 256 個空 fanout(對 git 無害),store 在 view 的整個生命週期內就是
+    **活**的,不是快照;(b) 本函式只驗目錄不是 symlink、不看目錄內容,所以
+    `objects/<xx>/<yyy>` 放 symlink 就能無競爭引入外部物件庫;(c) 列舉後把已連結的 fanout
+    換成 symlink,還能讀到 owner pin 拒絕過的 store。現在 view 內的 fanout 是**真目錄**,
+    裡面逐檔 symlink,每一檔在連結時驗 `S_ISREG`(拒 symlink)且驗 owner。於是列舉之後
+    才出現的物件不在 view 裡(真正的快照語義),fanout 也換不掉。實測 216 個 loose 物件
+    +3 個 pack 的 repo,一次 view 約 30 ms。
+
+    這一條與「讀出的位元組必須對 tree 記錄的 blob id 重算比對」
+    (`commit_blob_bytes`)是配套的:後者擋內容,前者擋來源。
     """
 
     import os
@@ -364,17 +383,26 @@ def _materialize_object_store(objects: Path, target: Path) -> None:
 
     target.mkdir()
     linked = 0
-    with os.scandir(objects) as entries:
-        for entry in entries:
-            if _FANOUT_PATTERN.fullmatch(entry.name) is None:
+    with os.scandir(objects) as fanouts:
+        for fanout in sorted(fanouts, key=lambda item: item.name):
+            if _FANOUT_PATTERN.fullmatch(fanout.name) is None:
                 continue
-            if not stat_module.S_ISDIR(entry.stat(follow_symlinks=False).st_mode):
-                # fanout 位置放 symlink 是被驗者在重指物件來源:略過,缺物件會 fail-closed。
+            if not stat_module.S_ISDIR(fanout.stat(follow_symlinks=False).st_mode):
+                # fanout 位置放 symlink 是被驗者在重指物件來源:略過,缺物件 fail-closed。
                 continue
-            linked += 1
-            if linked > _MAX_VIEW_OBJECT_LINKS:
-                raise OSError("subject object store exceeds its admitted entry count")
-            os.symlink(entry.path, target / entry.name)
+            mirrored = target / fanout.name
+            mirrored.mkdir()
+            with os.scandir(fanout.path) as loose:
+                for entry in loose:
+                    info = entry.stat(follow_symlinks=False)
+                    if not stat_module.S_ISREG(info.st_mode) or info.st_uid != owner:
+                        continue
+                    linked += 1
+                    if linked > _MAX_VIEW_OBJECT_LINKS:
+                        raise OSError(
+                            "subject object store exceeds its admitted entry count"
+                        )
+                    os.symlink(entry.path, mirrored / entry.name)
     pack_source = objects / "pack"
     try:
         pack_info = os.lstat(pack_source)
@@ -388,7 +416,8 @@ def _materialize_object_store(objects: Path, target: Path) -> None:
         for entry in entries:
             if not entry.name.endswith(_LINKED_PACK_SUFFIXES):
                 continue
-            if not stat_module.S_ISREG(entry.stat(follow_symlinks=False).st_mode):
+            info = entry.stat(follow_symlinks=False)
+            if not stat_module.S_ISREG(info.st_mode) or info.st_uid != owner:
                 continue
             linked += 1
             if linked > _MAX_VIEW_OBJECT_LINKS:
@@ -417,7 +446,7 @@ def code_owned_object_view(repo_root: Path | str) -> Iterator[Path]:
     view = Path(os.path.realpath(tempfile.mkdtemp(prefix="s2e-object-view-")))
     try:
         _verify_private_directory(view)
-        _materialize_object_store(layout.objects, view / "objects")
+        _materialize_object_store(layout.objects, view / "objects", owner=layout.owner)
         (view / "refs").mkdir()
         _write_view_file(view / "HEAD", _OBJECT_VIEW_HEAD)
         _write_view_file(view / "config", _OBJECT_VIEW_CONFIG)
@@ -622,6 +651,22 @@ def _promisor_marks_present(common: Path, git_dir: Path) -> bool:
     return False
 
 
+
+def _sha256_object_format(common: Path, git_dir: Path) -> bool:
+    """被驗者是否使用 sha256 object format(P0-1 的 sha1 重算對它不成立)。"""
+
+    for base in {common, git_dir}:
+        try:
+            raw = read_bounded(base / "config", MAX_SUBJECT_CONFIG_BYTES)
+        except FileNotFoundError:
+            continue
+        except OSError:
+            return True
+        if _SHA256_OBJECT_FORMAT.search(raw.decode("utf-8", "replace")):
+            return True
+    return False
+
+
 def subject_object_store_findings(repo_root: Path | str) -> list[str]:
     """被驗者 object store 的 typed 衛生事實,全部由檔案系統判定。
 
@@ -641,6 +686,8 @@ def subject_object_store_findings(repo_root: Path | str) -> list[str]:
     try:
         if (common / "reftable").is_dir() or (git_dir / "reftable").is_dir():
             findings.append(STORE_UNSUPPORTED_REF_BACKEND)
+        if _sha256_object_format(common, git_dir):
+            findings.append(STORE_UNSUPPORTED_OBJECT_FORMAT)
         if (git_dir / "shallow").exists() or (common / "shallow").exists():
             findings.append(STORE_SHALLOW)
         if (common / "info" / "grafts").exists():

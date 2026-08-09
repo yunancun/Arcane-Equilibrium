@@ -541,6 +541,7 @@ from aiml_gate_receipt_git_view import (  # noqa: F401
     STORE_REPLACE_REFS,
     STORE_SHALLOW,
     STORE_UNREADABLE,
+    STORE_UNSUPPORTED_OBJECT_FORMAT,
     STORE_UNSUPPORTED_REF_BACKEND,
     _OBJECT_VIEW_CONFIG,
     _verify_private_directory,
@@ -815,9 +816,33 @@ def commit_blob_bytes(
             size = int(header[2])
         except ValueError:
             break
-        blobs[rel] = stream[offset : offset + size]
+        payload = stream[offset : offset + size]
         offset += size + 1  # 每筆物件後接一個換行
+        # ── round-7 P0-1:自行對 tree 記錄的 object id 重算,對不上就當缺席。
+        # E2 與 E3 於 git 2.55.0 各自實證:git **只有** `fsck`/`verify-pack` 會複驗物件
+        # 雜湊,blob 讀取路徑(`cat-file --batch`、`show <rev>:<path>`)不驗。於是被驗者
+        # 可以讓一個 object id 回出任意位元組——loose(把 zlib blob 寫在別的 sha 的路徑
+        # 上)與 packed(自製 idx 宣稱另一個 id)兩種形式都成立。本函式是本家族**唯一**
+        # 的 blob 讀取原語,所以檢查放這裡就覆蓋所有投影與 manifest。
+        # header[0] 是 git 從 tree 解析出來的 id;payload 必須真的雜湊成它。
+        if git_blob_sha1(payload) != header[0]:
+            continue
+        blobs[rel] = payload
     return blobs
+
+
+def verified_blob_bytes(
+    repo_root: Path, path: str, *, at_commit: str
+) -> bytes | None:
+    """`<at_commit>:<path>` 的 blob 位元組,**已對 tree 記錄的 object id 重算比對**。
+
+    round-7 P0-1:凡是用 `git show <rev>:<path>` 讀位元組的地方都應改用本函式。`show`
+    不複驗雜湊(E2/E3 各自實證),而 `commit_blob_bytes` 走 `cat-file --batch`,其標頭
+    帶著 git 從 tree 解出的 object id,因此可以在原語層就把位元組釘回那個 id。
+    對不上、缺席、非 blob 一律回 `None`(fail-closed)。
+    """
+
+    return commit_blob_bytes(repo_root, [path], source_head=at_commit).get(path)
 
 
 def owned_path_blob_projection(

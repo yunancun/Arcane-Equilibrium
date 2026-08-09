@@ -19,7 +19,7 @@ from agent_governance_schema import schema_subset_errors
 from aiml_gate_receipt_schema_core import (
     _load_schema,
     canonical_digest,
-    code_owned_object_view, git_argv, git_subprocess_env,
+    code_owned_object_view, git_argv, git_subprocess_env, verified_blob_bytes,
 )
 
 
@@ -270,6 +270,24 @@ def _git_bytes(repo_root: Path, *args: str) -> bytes:
         ).stdout
 
 
+def _verified_bytes(repo_root: Path, path: str, *, at_commit: str) -> bytes:
+    """`<at_commit>:<path>` 的 blob 位元組,已對 tree 記錄的 object id 重算比對。
+
+    round-7 P0-1:本模組原本用 `git show <rev>:<path>`,而那條路徑**不**複驗物件雜湊
+    (E2/E3 各自於 git 2.55.0 實證,loose 與 packed 兩種形式皆可讓一個 object id 回出
+    任意位元組)。改走 `schema_core.verified_blob_bytes`;讀不到或對不上一律拋
+    `OSError`,由既有的 `_GIT_FAILURES` / 呼叫端 fail-closed 接手。
+    """
+
+    payload = verified_blob_bytes(repo_root, path, at_commit=at_commit)
+    if payload is None:
+        raise OSError(
+            f"{path} at {at_commit[:12]} is absent, unreadable, or its bytes do not "
+            "hash to the object id recorded in the commit's tree"
+        )
+    return payload
+
+
 def _tree(repo_root: Path, head: str) -> str:
     return _git(
         repo_root, "rev-parse", "--verify", f"{head}^{{tree}}"
@@ -391,7 +409,7 @@ def _repo_python_import_closure(
         parsed.add(path)
         try:
             tree = ast.parse(
-                _git_bytes(repo_root, "show", f"{reviewed_head}:{path}"),
+                _verified_bytes(repo_root, path, at_commit=reviewed_head),
                 filename=path,
             )
         except (SyntaxError, UnicodeDecodeError) as error:
@@ -507,7 +525,7 @@ def s2e_review_source_blob_manifest(
             "100755",
         }:
             raise ValueError(f"S2E review path is not one regular Git blob: {path}")
-        raw = _git_bytes(repo_root, "show", f"{reviewed_head}:{path}")
+        raw = _verified_bytes(repo_root, path, at_commit=reviewed_head)
         manifest.append({
             "path": path,
             "mode": mode,
@@ -605,17 +623,14 @@ def _line_policy_evidence(
     entry = next((item for item in manifest if item["path"] == path), None)
     if entry is None:
         raise ValueError("LW1 line-policy validator blob is absent")
-    raw = _git_bytes(repo_root, "show", f"{reviewed_head}:{path}")
+    raw = _verified_bytes(repo_root, path, at_commit=reviewed_head)
     line_count = raw.count(b"\n") + int(bool(raw) and not raw.endswith(b"\n"))
     policy_branch = "ACTUAL_SPLIT_AT_OR_BELOW_2000"
     if line_count > 2000:
-        registry = _git_bytes(
+        registry = _verified_bytes(
             repo_root,
-            "show",
-            (
-                f"{reviewed_head}:"
-                "docs/references/2000_line_exception_registry.md"
-            ),
+            "docs/references/2000_line_exception_registry.md",
+            at_commit=reviewed_head,
         ).decode("utf-8")
         required_markers = (
             f"`{path}`",
@@ -649,8 +664,8 @@ def _exit_boundary_evidence(
     entry = next((item for item in manifest if item["path"] == "TODO.md"), None)
     if entry is None:
         raise ValueError("LW1 exit-boundary TODO blob is absent")
-    text = _git_bytes(
-        repo_root, "show", f"{reviewed_head}:TODO.md"
+    text = _verified_bytes(
+        repo_root, "TODO.md", at_commit=reviewed_head
     ).decode("utf-8")
     rows = [
         line

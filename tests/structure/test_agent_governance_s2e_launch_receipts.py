@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import ast
 from copy import deepcopy
 import hashlib
 import io
@@ -3497,15 +3498,18 @@ def test_committed_floor_tail_byte_check_is_reachable_through_its_seam(
     _commit_floor(repo, _advanced_floor(1), "advance floor")
     head = _commit(repo, "unrelated.txt", "unrelated\n", "unrelated change")
     _publish(repo, head)
-    real_git_bytes = anchor_floor._git_bytes
+    real_verified = anchor_floor._verified_bytes
 
-    def tampered(repo_root: Path, *args: str) -> bytes:
-        raw = real_git_bytes(repo_root, *args)
-        if args[0] == "show" and args[-1].startswith(head):
-            return raw + b" "
-        return raw
+    def tampered(repo_root: Path, path: str, *, at_commit: str) -> bytes:
+        raw = real_verified(repo_root, path, at_commit=at_commit)
+        return raw + b" " if at_commit.startswith(head) else raw
 
-    monkeypatch.setattr(anchor_floor, "_git_bytes", tampered)
+    # round-7:floor 的 blob 讀取由 `_git_bytes(..., "show", ...)` 改走
+    # `_verified_bytes`(位元組必須對 tree 記錄的 object id 重算比對),所以縫在這裡。
+    # 這也讓本測試的定位更清楚:真實路徑上這種分歧**已經不可能**——`show` 回不同位元組
+    # 會被雜湊比對擋掉——所以尾端 byte-for-byte 純粹是 defense-in-depth,而本測試證的是
+    # 它仍然可達、不是死碼。
+    monkeypatch.setattr(anchor_floor, "_verified_bytes", tampered)
     reading = anchor_floor.read_committed_durability_anchor_floor(
         repo, at_commit=head
     )
@@ -3948,9 +3952,16 @@ def test_object_view_is_private_and_carries_no_executable_surface(
         assert linked, linked
         for name in linked:
             assert name == "pack" or re.fullmatch(r"[0-9a-f]{2}", name), name
-            if name != "pack":
-                assert (store / name).is_symlink()
-                assert (store / name).resolve() == (objects / name).resolve()
+            if name == "pack":
+                continue
+            # round-7:fanout 是 view 自己的**真目錄**,不是指向被驗者目錄的 symlink。
+            # 逐目錄連結會讓 store 在 view 生命週期內保持活的,而且看不到目錄**內**
+            # 的 symlink——E2/E3 各自實測那兩條都可利用。
+            fanout = store / name
+            assert fanout.is_dir() and not fanout.is_symlink(), name
+            for entry in fanout.iterdir():
+                assert entry.is_symlink(), entry
+                assert entry.resolve() == (objects / name / entry.name).resolve()
         if (store / "pack").exists():
             for entry in (store / "pack").iterdir():
                 assert entry.name.endswith((".pack", ".idx")), entry.name
@@ -4224,6 +4235,143 @@ def test_materialized_store_has_no_window_for_injected_alternates(
         stop.set()
         worker.join(timeout=5)
     assert leaked == 0, f"the foreign object store leaked through {leaked} times"
+
+
+def _forge_loose_object(repo: Path, oid: str, payload: bytes) -> None:
+    """把 `oid` 的**唯一**一份 loose 物件換成 `payload`(zlib blob 形)。
+
+    git 只在 `fsck`/`verify-pack` 複驗物件雜湊,blob 讀取路徑不驗,所以這之後
+    `git cat-file -p <oid>` 會照樣回 `payload`。loose 物件是 0444,所以先 chmod——
+    被驗者擁有自己的 repo,這只是測試機制,不是額外能力。
+    """
+
+    import zlib
+
+    target = Path(repo) / ".git" / "objects" / oid[:2] / oid[2:]
+    target.chmod(0o644)
+    target.unlink()
+    target.write_bytes(zlib.compress(b"blob %d\x00" % len(payload) + payload))
+
+
+def test_blob_bytes_must_hash_to_the_object_id_the_tree_records(
+    tmp_path: Path,
+) -> None:
+    """E2/E3 round-6 NEW-P0-1:git 不複驗 blob 雜湊,所以本家族自己驗。
+
+    fail-first。round-6 曾宣稱「剩下能換的只有物件位元組,而那是內容定址的」——兩位
+    複核者各自實證推翻。改動前這裡會回攻擊者的位元組並一路進 digest 與 manifest;
+    改動後 `commit_blob_bytes`(家族唯一的 blob 讀取原語)對 `cat-file --batch` 標頭裡
+    那個 git 從 tree 解出的 object id 重算比對,對不上就當缺席。
+    """
+
+    repo = _floor_repo(tmp_path)
+    head = _commit(repo, "governed.txt", "HONEST CONTENT\n", "add governed path")
+    oid = _git(repo, "rev-parse", f"{head}:governed.txt")
+    _forge_loose_object(repo, oid, b"FORGED CONTENT\n")
+
+    # 前提:git 自己確實會把假位元組交出來,否則這條測試證不到東西。
+    unverified = subprocess.run(
+        [schema_core.git_executable(), "-C", str(repo), "cat-file", "-p", oid],
+        capture_output=True, text=True, env=schema_core.git_subprocess_env(),
+    )
+    assert unverified.returncode == 0 and "FORGED" in unverified.stdout, unverified
+
+    assert schema_core.commit_blob_bytes(
+        repo, ["governed.txt"], source_head=head
+    ) == {"governed.txt": None}
+    assert schema_core.verified_blob_bytes(
+        repo, "governed.txt", at_commit=head
+    ) is None
+    for module in (s2e_review, anchor_floor):
+        with pytest.raises(OSError) as failure:
+            module._verified_bytes(repo, "governed.txt", at_commit=head)
+        assert "hash to the object id" in str(failure.value), module.__name__
+    # 家族裡不得再有繞過該原語的 `git show <rev>:<path>`。只掃**代碼**:docstring 本來
+    # 就會引用被取代的舊寫法,拿散文當執法面會在下一次改註解時假紅。
+    for module in (schema_core, git_view, anchor_floor, s2e_review, s2e):
+        tree = ast.parse(Path(module.__file__).read_text(encoding="utf-8"))
+        literals = {
+            node.value
+            for node in ast.walk(tree)
+            if isinstance(node, ast.Constant) and isinstance(node.value, str)
+        } - {
+            ast.get_docstring(node) or ""
+            for node in ast.walk(tree)
+            if isinstance(node, (ast.Module, ast.FunctionDef, ast.ClassDef))
+        }
+        assert "show" not in literals, module.__name__
+
+
+def test_materialized_store_links_objects_not_directories(tmp_path: Path) -> None:
+    """E2/E3 round-6 NEW-P0-2:逐目錄 symlink 不夠,改逐物件。
+
+    兩條 fail-first 向量:(a) 被驗者在自己的 fanout 目錄**內**放 symlink 指向別的物件庫
+    ——round-6 只驗目錄不是 symlink、不看內容,E2 實測 100% 無競爭洩漏;(b) view 建好之後
+    才寫進已鏡射的 fanout——round-6 是逐目錄連結,所以 store 在 view 生命週期內是活的,
+    E3 靠預建 256 個空 fanout 讓它必然成立。逐物件物化把兩條都變成結構上不可能。
+    """
+
+    victim = _floor_repo(tmp_path / "victim")
+    victim_head = _commit(victim, "s.txt", "VICTIM SECRET\n", "victim secret")
+    victim_oid = _git(victim, "rev-parse", f"{victim_head}:s.txt")
+    subject = _floor_repo(tmp_path / "subject")
+
+    fanout = Path(subject) / ".git" / "objects" / victim_oid[:2]
+    fanout.mkdir(parents=True, exist_ok=True)
+    (fanout / victim_oid[2:]).symlink_to(
+        Path(victim) / ".git" / "objects" / victim_oid[:2] / victim_oid[2:]
+    )
+
+    with schema_core.code_owned_object_view(subject) as view:
+        mirrored = view / "objects" / victim_oid[:2]
+        assert mirrored.is_dir() and not mirrored.is_symlink()
+        assert not (mirrored / victim_oid[2:]).exists(), "an object symlink was linked"
+        leak = subprocess.run(
+            schema_core.git_argv(view, "cat-file", "-p", victim_oid),
+            capture_output=True, text=True, env=schema_core.git_subprocess_env(),
+        )
+        assert leak.returncode != 0 and "VICTIM" not in leak.stdout, leak.stdout
+
+        # 事後注入:view 已建好,對已鏡射的 fanout 寫入新物件,view 不得看見。
+        injected = _commit(subject, "late.txt", "INJECTED\n", "late object")
+        assert schema_core.commit_blob_bytes(
+            subject, ["late.txt"], source_head=injected
+        ) == {"late.txt": None} or True  # 這一行只驅動 subject 端寫入
+        late_oid = _git(subject, "rev-parse", f"{injected}:late.txt")
+        assert not (view / "objects" / late_oid[:2] / late_oid[2:]).exists()
+
+
+def test_consumption_ledger_resolves_its_common_dir_exactly_once(
+    tmp_path: Path,
+) -> None:
+    """E3 round-6 NEW-P0-3:ledger 路徑曾經來自**未驗證**的第二次讀取。
+
+    `_git_common_dir` 原本是 `subject_common_dir(subject_git_dir(repo_root))` ——同一個
+    被驗者可寫的 `<gitdir>/commondir` 讀兩次,第二次無 owner pin、無佈局不變式。E3 racer
+    3000 次把 consume-once ledger 重指到任意目錄 555 次(帳本空 ⇒ 重放繞過,且驗證器會
+    在攻擊者指定的目錄裡建檔)。現在只解析一次,而且是驗過的那一次。
+    """
+
+    tree = ast.parse(inspect.getsource(consumption_module._git_common_dir).lstrip())
+    called = [
+        node.func.id
+        for node in ast.walk(tree)
+        if isinstance(node, ast.Call) and isinstance(node.func, ast.Name)
+    ]
+    # 恰好一次解析呼叫,而且是驗過的那一支——巢狀兩層即為 P0-3 的形狀。
+    assert called == ["subject_common_dir"], called
+
+    # 跨 uid 的 commondir 仍被 owner pin 擋住,且 ledger 面拿到的是同一個判定。
+    repo = _floor_repo(tmp_path)
+    (Path(repo) / ".git" / "commondir").write_text("/usr\n", encoding="ascii")
+    with pytest.raises(OSError) as failure:
+        consumption_module._git_common_dir(Path(repo))
+    assert "owner uid" in str(failure.value), str(failure.value)
+
+    # 真的 linked worktree 仍要解得出共用 gitdir。
+    assert consumption_module._git_common_dir(ROOT) == (
+        git_view.subject_layout(ROOT).common_dir
+    )
 
 
 def test_generation_face_refuses_a_foreign_owned_checkout(

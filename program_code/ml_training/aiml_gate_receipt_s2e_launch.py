@@ -18,7 +18,7 @@ from aiml_gate_receipt_schema_core import (
     _load_schema,
     canonical_digest,
     code_owned_object_view, git_argv, git_subprocess_env,
-    require_own_clean_checkout, resolve_named_revision,
+    require_own_clean_checkout, resolve_named_revision, verified_blob_bytes,
 )
 from aiml_gate_receipt_s2e_consumption import (
     build_s2e_launch_consumption_bootstrap_authority_core,
@@ -1062,9 +1062,17 @@ def validate_receipt_carrier_attestation(
             "--verify",
             f"{attestation['carrier_head']}:{attestation['carrier_path']}",
         ).stdout.strip()
-        carrier_bytes = _git_bytes(
-            repo_root, "show", f"{attestation['carrier_head']}:{attestation['carrier_path']}"
+        # round-7 P0-1:carrier 位元組同樣要對 tree 的 object id 重算(`show` 不複驗)。
+        carrier_bytes = verified_blob_bytes(
+            repo_root,
+            attestation["carrier_path"],
+            at_commit=attestation["carrier_head"],
         )
+        if carrier_bytes is None:
+            raise OSError(
+                "attestation carrier bytes are absent, unreadable, or do not hash to "
+                "the object id recorded in the carrier commit's tree"
+            )
         carrier_text = carrier_bytes.decode("utf-8")
         if _contains_github_secret_like_content(carrier_text):
             errors.append("carrier contains secret-like raw carrier content")

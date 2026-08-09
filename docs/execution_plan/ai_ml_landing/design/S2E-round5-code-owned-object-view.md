@@ -308,13 +308,45 @@ common dir,無競爭地取得任意 ledger 目錄。而
 `test_subject_cannot_redirect_the_verifier_with_a_gitdir_pointer` **不具鑑別性**:它的
 fixture 同 uid,卻刻意不寫攻擊者會寫的那一個檔。
 
+### round-7:三條 NEW P0 收口(operator 2026-08-09 授權)
+
+**NEW P0-1(位元組不是內容定址的)** —— 兩條配套,不再依賴 git 的任何隱含保證:
+
+- *內容*:`schema_core.commit_blob_bytes`(家族**唯一**的 blob 讀取原語)讀出後以
+  `git_blob_sha1` 對 `cat-file --batch` 標頭裡那個 git 從 tree 解出的 object id 重算
+  比對,對不上就當缺席。新增 `verified_blob_bytes` 單路徑入口;`anchor_floor`、
+  `s2e_review`、`s2e_launch`(carrier)原本用 `show` 的**每一處**都改走它。家族內
+  已無未驗證的 blob 讀取,並由 AST 斷言執法(只掃代碼字面量,不掃 docstring)。
+- *前提*:sha256 object format 顯式拒(`STORE_UNSUPPORTED_OBJECT_FORMAT`)——sha1 重算
+  對它恆假,而恆假的完整性檢查比沒有更糟。
+- 實測:竄改唯一一份 loose 物件後,`git cat-file -p` 回 `EVIL CONTENT`(rc=0),
+  `commit_blob_bytes` 回 `{path: None}`,兩支 `_verified_bytes` 都 `OSError`。
+
+**NEW P0-2(物化不是快照)** —— `_materialize_object_store` 改為逐**物件**:view 內的
+fanout 是真目錄,裡面逐檔 symlink,每檔連結時驗 `S_ISREG`(拒 symlink)且驗 owner。
+實測:被驗者在自己 fanout **內**放的 symlink 不被連(E2 那條 100% 無競爭洩漏關掉,
+`cat-file` rc=128);view 建好後才寫入的物件不可見(E3 靠預建 256 個空 fanout 讓 store
+保持活的那條關掉)。216 個 loose 物件的 repo 一次 view 約 30 ms。
+
+**NEW P0-3(ledger 可重指到任意目錄)** —— `subject_common_dir` 改收 `repo_root` 並回
+`subject_layout(repo_root).common_dir`,`s2e_consumption._git_common_dir` 隨之只解析一次
+且是驗過的那一次。原本的巢狀兩層(`subject_common_dir(subject_git_dir(...))`)對同一個
+被驗者可寫檔讀兩次、第二次不驗,E3 racer 3000 次 relocated 555。回歸測試以 AST 斷言
+「恰好一次解析呼叫,而且是驗過的那一支」。
+
+三條各帶回歸測試(`test_blob_bytes_must_hash_to_the_object_id_the_tree_records`、
+`test_materialized_store_links_objects_not_directories`、
+`test_consumption_ledger_resolves_its_common_dir_exactly_once`),每一條都先確認
+「不修的話 git 真的會把假東西交出來」再斷言本家族拒收。
+
 ### 未收(具名留給下一輪)
 
-0. **上面的 NEW P0-1 / P0-2 / P0-3 與 P0-A 的另一半,全部未收。**
-   最小再複核集合:(a) 讀出的位元組對 tree 記錄的 blob id 重算比對;(b) 逐物件
-   hardlink/copy 物化(含 `O_NOFOLLOW`),不要逐目錄 symlink;(c) 刪掉未驗證的
-   `subject_common_dir` re-read;(d) 拿掉或替換回指不變式,並恢復 `--separate-git-dir`
-   與 submodule 支援;(e) 撤回而不是改寫那幾句假宣稱(本輪已撤回,見 §2 與各 docstring)。
+0. **P0-A 的另一半仍未收**:同 uid 的重指沒有被擋住(被驗者可把 commondir 指到另一個
+   自己的 repo,或用只含 `objects/` 與 `worktrees/w/` 的合成目錄,取得一份空的
+   consume-once ledger)。owner pin 擋掉跨 uid,回指不變式已因空洞而移除。真正的收法是
+   把 ledger 綁到 caller 選不了的身分,屬另一個 scope。該缺口已寫進
+   `test_gitdir_pointer_redirect_is_pinned_to_the_subjects_own_uid` 的斷言,所以「收掉了」
+   必須靠改測試宣告,不能靠改文件。
 1. ~~**第七個登記面被漏掉(E2 P1-3)**~~ **已收,且該發現一半不成立。** E2 報
    「簽名不再涵蓋這段代碼」——實測不對:`_s2e_review_source_paths` 走
    `_repo_python_import_closure`,而 `schema_core` 於 top-level 匯入 view 葉,所以它本來
