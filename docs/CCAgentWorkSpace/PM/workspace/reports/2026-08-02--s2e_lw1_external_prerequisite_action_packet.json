@@ -39,7 +39,7 @@
   },
   "launch_id": "S2E-LW1-LW5",
   "next_action": "OPERATOR_PROVISION_EXTERNAL_PREREQUISITES_THEN_RESUME_S2E_LW1",
-  "packet_digest": "sha256:b28d49feaeace39adad13e9b626d1d6c5652db5645ddbf6319a5002cd8fa9cdf",
+  "packet_digest": "sha256:8c495279ea07920a99528c61cc7910c80bdbf5991f74142c124318839f6436ba",
   "prerequisites": [
     {
       "blocking": true,
@@ -226,7 +226,6 @@
     "CONFIGURE_OFFHOST_APPEND_ONLY_REPLICA",
     "PROVISION_OFFHOST_REPLICA_READBACK_SIGNER",
     "PROVISION_DISTINCT_HOST_APPEND_ONLY_PREDECESSOR_REGISTRY",
-    "COMMIT_GENESIS_ARMED_DURABILITY_ANCHOR_FLOOR",
     "RESUME_W0_AND_LW1_RECEIPT_CHAIN_WITH_FRESH_EVIDENCE"
   ],
   "schema_version": "s2e_lw1_operator_action_packet_v1",
@@ -236,8 +235,8 @@
     "private_key_material_permitted": false
   },
   "source_binding": {
-    "implementation_checkpoint_head": "970734ae053accc6487e0b5de3c2f0b2d8102d44",
-    "implementation_checkpoint_tree": "7948e5aa4d2572b6a00ceadca50a59b7de936c27",
+    "implementation_checkpoint_head": "2f9b6cde45e43a7cda8bfe0a57ddb6bd2faea064",
+    "implementation_checkpoint_tree": "1b96916106db6898ce76403627792923fd34836d",
     "worktree_clean_at_build": true
   },
   "state": "BLOCKED_EXTERNAL_PREREQUISITES_ACTION_PACKET_READY",
