@@ -473,6 +473,32 @@ def test_noncanonical_or_unsafe_paths_are_rejected(
     )
 
 
+def test_str_subclass_owned_path_fails_closed_without_becoming_verified(
+    tmp_path: Path,
+) -> None:
+    class PathSubclass(str):
+        pass
+
+    repo = _repo(tmp_path)
+    head = _git(repo, "rev-parse", "HEAD")
+
+    readiness = s2e_wave_source_readiness_v1(
+        repo_root=repo,
+        wave="S2E-LW1",
+        owned_source_manifest=(
+            S2EWaveOwnedSource(PathSubclass("definitely/missing"), head),
+        ),
+    )
+
+    assert readiness.status is S2EWaveSourceReadinessStatus.SOURCE_INCOMPLETE
+    assert readiness.status is not S2EWaveSourceReadinessStatus.SOURCE_READY
+    assert any(
+        item.code is S2EWaveSourceDiagnosticCode.INVALID_PATH
+        for item in readiness.diagnostics
+    )
+    assert readiness.owned_paths == ()
+
+
 def test_duplicate_owned_paths_are_rejected(tmp_path: Path) -> None:
     repo = _repo(tmp_path)
     head = _git(repo, "rev-parse", "HEAD")

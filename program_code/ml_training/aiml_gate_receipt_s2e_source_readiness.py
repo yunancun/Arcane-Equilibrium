@@ -135,7 +135,7 @@ def _git(
 
 
 def _canonical_owned_path(path: Any) -> bool:
-    if not isinstance(path, str) or not path or "\\" in path:
+    if type(path) is not str or not path or "\\" in path:
         return False
     if unicodedata.normalize("NFC", path) != path:
         return False
