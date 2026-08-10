@@ -7,6 +7,7 @@ import argparse
 from copy import deepcopy
 import json
 from pathlib import Path
+import re
 import subprocess
 import sys
 from typing import Any
@@ -151,7 +152,19 @@ _SERVICE_PREREQUISITES = (
 )
 EXPECTED_PATHS = tuple(item[1] for item in _PATH_PREREQUISITES)
 EXPECTED_SERVICE_IDS = tuple(item[0] for item in _SERVICE_PREREQUISITES)
-EXPECTED_ACTION_IDS = (
+# 完整的有序動作目錄。它是**目錄**,不是「operator 現在必做的清單」——後者由
+# `required_action_ids()` 從 packet 綁定的那個 checkout 推導。
+#
+# 為什麼要分這兩層(PR #180 Codex P1,複驗成立):`COMMIT_GENESIS_ARMED_DURABILITY_
+# ANCHOR_FLOOR` 曾被本檔全域刪除,理由是該 floor 已於 `fdf3c0fa6` commit。但 packet
+# 綁定的 checkpoint `970734ae0`(2026-08-03 04:35:38 +0200)比它早五分鐘,那個 head 的
+# 樹裡**沒有** floor 檔;在該 pin 上重建 packet 於是漏掉一個當時真正必要的步驟,而且
+# 照樣通過驗證。全域刪除把一種腐化(該做的已做完)換成了另一種(還沒做的被當成做完)。
+#
+# 腐化的真正成因是「靜態清單 + 早於事實的 pin」,round-2 與 round-4 兩度點名都沒有
+# 任何測試看得到。所以正解是讓清單**恆等於 bound checkout 的事實**:目錄固定,
+# 已完成項由該 commit 的樹決定,validator 在同一個 head 重算後逐項比對。
+CANONICAL_ACTION_IDS = (
     "PROVISION_FIXED_TRUST_ROOTS",
     "PROVISION_HOST_CAPTURE_ATTESTOR_CAPABILITY",
     "PROVISION_HOST_APPEND_ONLY_DURABILITY_ANCHOR",
@@ -161,6 +174,65 @@ EXPECTED_ACTION_IDS = (
     "COMMIT_GENESIS_ARMED_DURABILITY_ANCHOR_FLOOR",
     "RESUME_W0_AND_LW1_RECEIPT_CHAIN_WITH_FRESH_EVIDENCE",
 )
+REPOSITORY_COMPLETION_WITNESSES = {
+    "COMMIT_GENESIS_ARMED_DURABILITY_ANCHOR_FLOOR": (
+        "docs/execution_plan/ai_ml_landing/receipts/S2E-LW1-LW5/"
+        "durability-anchor-floor-v1.json"
+    ),
+}
+# 只有一條的理由要寫明:其餘七項全是 host 側 provisioning(root-owned 信任根、
+# append-only anchor、off-host replica、predecessor registry),repo 位元組永遠證明
+# 不了它們的完成,故 witness 表天生稀疏。也正因為只有一條,一份靜態清單才能腐化多日
+# 而 CI 全綠——這張表存在的目的就是讓下一條 witness 一出現就被機器抓到。
+_COMMIT_RE = re.compile(r"\A[0-9a-f]{40}\Z")
+
+
+def completed_action_ids(repo_root: Path, *, at_commit: str) -> tuple[str, ...]:
+    """回傳在 `at_commit` 的樹裡已可由 repo 位元組證明完成的 action id(排序後)。
+
+    刻意讀該 commit 的樹而不是工作樹:packet 的 pin 可能遠早於 current HEAD,
+    而「當時該不該做這一步」只有那個 head 答得出來。`at_commit` 先做 40-hex 驗證
+    再進 git——它在 validate 路徑上來自受檢 packet,屬於 caller 可控輸入。
+    """
+
+    if not _COMMIT_RE.match(at_commit):
+        raise ValueError(f"LW1 completion probe needs a 40-hex commit: {at_commit!r}")
+    return tuple(sorted(
+        action_id
+        for action_id, witness in REPOSITORY_COMPLETION_WITNESSES.items()
+        if _witness_is_committed_blob(repo_root, at_commit, witness)
+    ))
+
+
+def _witness_is_committed_blob(
+    repo_root: Path, at_commit: str, witness: str
+) -> bool:
+    """witness 是否在 `at_commit` 的樹裡、且確實是一個 blob。
+
+    `--full-tree` 不能省(E2 P2-1,已實測):`ls-tree` 的 pathspec 預設相對於 `-C` 的
+    prefix,而同一函式裡的 `rev-parse` 是 prefix 無關的。少了它,只要把 `--repo-root`
+    指到任一子目錄,witness 就查不到 ⇒ 導出清單多一項 ⇒ **那份已經腐化的 8 項 packet
+    反而通過驗證**,正是本次改動要消滅的那個缺陷。
+
+    另外要求 type 是 `blob`:`ls-tree` 對一個目錄同樣會回一列,於是一個剛好同名的
+    tree 會被當成「該步驟已完成」。今天 witness 表只有一條具體的 `.json`,但這張表
+    的存在意義就是「下一條 witness 一出現就被機器接住」,守衛必須先於那一條存在。
+    """
+
+    entry = _git(repo_root, "ls-tree", "--full-tree", at_commit, "--", witness)
+    fields = entry.split(maxsplit=2)
+    return len(fields) >= 2 and fields[1] == "blob"
+
+
+def required_action_ids(repo_root: Path, *, at_commit: str) -> tuple[str, ...]:
+    """目錄減去該 checkout 已能證明完成的項;目錄順序保留。"""
+
+    completed = set(completed_action_ids(repo_root, at_commit=at_commit))
+    return tuple(
+        action_id
+        for action_id in CANONICAL_ACTION_IDS
+        if action_id not in completed
+    )
 
 
 def _git(repo_root: Path, *args: str) -> str:
@@ -240,6 +312,12 @@ def build_s2e_lw1_operator_action_packet(
         raise ValueError("LW1 action packet requires a clean source checkpoint")
     source_head = _git(root, "rev-parse", "HEAD")
     source_tree = _git(root, "rev-parse", "HEAD^{tree}")
+    actions = required_action_ids(root, at_commit=source_head)
+    if not actions:
+        raise ValueError(
+            "this checkpoint already completes every LW1 operator action; "
+            "do not emit a blocked packet"
+        )
     path_statuses = inventory["fixed_path_statuses"]
     service_statuses = inventory["service_statuses"]
     prerequisites = [
@@ -297,7 +375,7 @@ def build_s2e_lw1_operator_action_packet(
         },
         "prerequisites": prerequisites,
         "blocked_prerequisite_ids": blocked_ids,
-        "required_action_ids": list(EXPECTED_ACTION_IDS),
+        "required_action_ids": list(actions),
         "closure_projection": {
             "g0_state": "SOURCE_COMPLETE_RUNTIME_INDETERMINATE",
             "lw1_state": "BLOCKED_EXTERNAL_PREREQUISITES",
@@ -374,8 +452,6 @@ def validate_s2e_lw1_operator_action_packet(
         errors.append("LW1 blocked packet has no blocked prerequisite")
     if packet["blocked_prerequisite_ids"] != expected_blocked:
         errors.append("LW1 packet blocked prerequisite projection differs")
-    if tuple(packet["required_action_ids"]) != EXPECTED_ACTION_IDS:
-        errors.append("LW1 packet action sequence differs from code-owned sequence")
     binding = packet["source_binding"]
     try:
         head = binding["implementation_checkpoint_head"]
@@ -385,7 +461,16 @@ def validate_s2e_lw1_operator_action_packet(
             "implementation_checkpoint_tree"
         ]:
             errors.append("LW1 packet implementation checkpoint tree differs")
-    except (OSError, subprocess.CalledProcessError):
+        # 動作清單在 packet **自己綁定的 head** 上重算,不是在 repo_root 的 HEAD 上。
+        # 兩者常常不同,而「那時該不該做這一步」只有 bound head 答得出來。
+        if tuple(packet["required_action_ids"]) != required_action_ids(
+            repo_root, at_commit=head
+        ):
+            errors.append(
+                "LW1 packet action sequence differs from the sequence its bound "
+                "checkpoint requires"
+            )
+    except (OSError, ValueError, subprocess.CalledProcessError):
         errors.append("LW1 packet source binding cannot be verified")
     if packet["packet_digest"] != packet_digest(packet):
         errors.append("LW1 packet digest is invalid")
