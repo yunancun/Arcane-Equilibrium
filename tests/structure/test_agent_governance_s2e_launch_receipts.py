@@ -4381,6 +4381,40 @@ def test_consumption_ledger_resolves_its_common_dir_exactly_once(
     )
 
 
+def test_shared_refs_resolve_only_from_the_common_dir(tmp_path: Path) -> None:
+    """Codex PR#183 P2:共用 ref 不得從 per-worktree gitdir 回退解析。
+
+    fail-first。舊版對非 HEAD 的 ref 會先看 common dir、找不到就退到 per-worktree
+    gitdir。那不是 git 的語義:`refs/heads/*`、`refs/tags/*`、`refs/remotes/*` 是共用
+    的,git 只從 common dir 讀。於是被驗者在自己的 `worktrees/<n>/refs/heads/` 底下放一
+    個檔,就能造出一個 **git 不承認、但本家族解得出來** 的 ref——而
+    `_PROTECTED_ANCESTOR_REFS` 正是靠 ref 解析,足以把未錨定的 floor 推成 VERIFIED。
+    """
+
+    main = _floor_repo(tmp_path / "main")
+    _git(main, "worktree", "add", "-q", str(tmp_path / "wt"), "-b", "side")
+    worktree = tmp_path / "wt"
+    head = _git(main, "rev-parse", "HEAD")
+
+    ghost = Path(main) / ".git" / "worktrees" / "wt" / "refs" / "heads"
+    ghost.mkdir(parents=True, exist_ok=True)
+    (ghost / "ghost").write_text(head + "\n", encoding="ascii")
+
+    # 前提:git 自己不承認這個 ref,否則這條測試證不到東西。
+    probe = subprocess.run(
+        schema_core.git_argv(worktree, "rev-parse", "--verify", "refs/heads/ghost"),
+        capture_output=True, text=True, env=schema_core.git_subprocess_env(),
+    )
+    assert probe.returncode != 0, probe.stdout
+
+    assert git_view.read_subject_ref(worktree, "refs/heads/ghost") is None
+    # 共用 ref 與 HEAD 仍要解得出來——閘不能是把功能關掉。分支名由 repo 自己問出來:
+    # `_floor_repo` 不帶 `-b`,預設分支隨 `init.defaultBranch` 而定。
+    shared = _git(main, "symbolic-ref", "--short", "HEAD")
+    assert git_view.read_subject_ref(worktree, f"refs/heads/{shared}") == head
+    assert git_view.read_subject_ref(worktree) is not None
+
+
 def test_generation_face_refuses_a_foreign_owned_checkout(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:

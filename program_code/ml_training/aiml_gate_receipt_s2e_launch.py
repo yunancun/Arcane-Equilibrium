@@ -413,7 +413,11 @@ def _git_binding_errors(
     try:
         resolved_head = _commit(repo_root, head)
         resolved_tree = _tree(repo_root, head)
-    except (OSError, subprocess.CalledProcessError) as error:
+    # Codex PR#183 P2:`_git` 本輪才加上 `timeout=180`,而 `TimeoutExpired` 是
+    # `SubprocessError` 而**不是** `CalledProcessError` 的子類。只接後者的話,一個慢的
+    # object store 會讓這支 `-> list[str]` 的驗證器拋例外而不是回 typed 錯誤——
+    # fail-closed 變成 crash。`anchor_floor._GIT_FAILURES` 早就接對了,這裡補齊。
+    except (OSError, subprocess.SubprocessError) as error:
         return [f"{label} is not a readable Git commit: {error}"]
     errors: list[str] = []
     if resolved_head != head:

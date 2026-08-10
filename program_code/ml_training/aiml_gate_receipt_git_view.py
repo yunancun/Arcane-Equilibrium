@@ -517,10 +517,24 @@ def git_own_checkout_guard(repo_root: Path | str) -> Path:
 _REF_UNREADABLE = object()
 
 
+# git 的 per-worktree ref 命名空間就這幾個;其餘(`refs/heads/*`、`refs/tags/*`、
+# `refs/remotes/*`…)是**共用**的,git 只從 common dir 讀。
+_PER_WORKTREE_REF_PREFIXES = ("refs/bisect/", "refs/worktree/", "refs/rewritten/")
+
+
 def _loose_ref_value(git_dir: Path, common: Path, name: str) -> Any:
     if any(part in ("", ".", "..") for part in name.split("/")):
         return None
-    candidates = [git_dir / name] if name == "HEAD" else [common / name, git_dir / name]
+    # Codex PR#183 P2:舊版對非 HEAD 的 ref 會在 common dir 找不到時**回退**到
+    # per-worktree gitdir。那不是 git 的語義:共用 ref 只從 common dir 解析。實測
+    # (git 2.43)per-worktree 底下自己放一個 `refs/heads/ghost`,
+    # `git rev-parse --verify refs/heads/ghost` 回 rc=128,而舊版 `read_subject_ref`
+    # 回它的 sha ——被驗者因此能造出一個 git 不承認的 ref,而
+    # `_PROTECTED_ANCESTOR_REFS` 正是靠 ref 解析,足以把未錨定的 floor 推成 VERIFIED。
+    if name == "HEAD" or name.startswith(_PER_WORKTREE_REF_PREFIXES):
+        candidates = [git_dir / name]
+    else:
+        candidates = [common / name]
     for candidate in candidates:
         try:
             raw = read_bounded(candidate, MAX_REF_FILE_BYTES)
