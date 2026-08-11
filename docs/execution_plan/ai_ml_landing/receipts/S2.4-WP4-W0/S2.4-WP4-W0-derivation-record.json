@@ -3,57 +3,47 @@
     "reasons": [],
     "status": "ADMITTED"
   },
-  "admission_self_digest": "sha256:d40bed03b0a2ac3736bf62114717e869691143cf66cba186646447aa8ccbaf12",
+  "admission_self_digest": "sha256:ef3a021a2ca99b1043f00fbada65240871fd04a7e793ebda495df9d0e5cfb658",
   "replay_note": "re-derivation binds source_head == checkout HEAD; to replay, checkout source_head and run derive_source_admission_status/derive_wave_exit_status",
   "review_provenance": [
     {
-      "branch": "agent/aiml-s2-wp3-unit-ledger",
-      "kind": "w0_review_provenance",
-      "merge_head": "560d64be8",
-      "pr": 135,
-      "scope": "S2.1 system-unit amendment ledger event (Blocker-1 recorded, ledger v12)",
-      "verdict": "merged; PM ledger projection"
+      "note": "Round 5 raised three P0s; round 6 confirmed P0-B and P0-C closed and raised three more; round 8 confirmed P0-3 closed (0/3000 relocations, was 555/3000) and refuted the byte-integrity closure: the hash binds payload to oid, not oid to path, and trees are unverified. Drove it to a gate flip: FLOOR_VERIFIED with floor_generation 9 against a commit holding 1.",
+      "role": "E3",
+      "scope": "S2E code-owned object view, rounds 5/6/8 at 0a829d667, 491787b71, d49ba4ded",
+      "verdict": "FAIL_WITH_CONFIRMED_FINDINGS"
     },
     {
-      "branch": "agent/aiml-s2-wp4-w0",
-      "kind": "w0_review_provenance",
-      "merge_head": "f87bae724",
-      "pr": 136,
-      "scope": "W0 admission alignment + W0a authenticity hardening (reachable S2.0 production gate; Codex 5xP1 resolved; 2000-line governance cap split of observer crypto layer)",
-      "verdict": "merged after Codex closeout; findings resolved"
+      "note": "Independently reproduced the tree-forgery and a cat-file --batch stream desync where a plain directory in the path list hands one path's bytes to another key. Withdrew its own P1-3 after measurement (the import closure already covered the leaf, 175/175 and 258/258). Verified 14 stale wave-exit receipts, one already stale at b1d2eea03.",
+      "role": "E2",
+      "scope": "same branch, rounds 5/6/8",
+      "verdict": "FAIL_WITH_CONFIRMED_FINDINGS"
     },
     {
-      "branch": "agent/aiml-s2-wp4-w0b",
-      "kind": "w0_review_provenance",
-      "merge_head": "9572a2c06602106d5c41068d3aff911f279128c8",
-      "pr": 137,
-      "scope": "S2.4 source-admission + wave-exit machinery (validator-derived, never self-declared); negative_tests_pass binding; wave-exit boundary pin; 3 tamper-test gaps + 7 Codex authenticity findings closed",
-      "verdict": "merged after Codex closeout; findings resolved"
+      "note": "Two P2s fixed in ae22391a1: shared refs must resolve only from the common dir (a per-worktree-only ref git denies at rc 128 was resolving, and PROTECTED_ANCESTOR_REFS uses ref resolution), and TimeoutExpired must become a typed error. Three accepted and recorded: receipt re-emission (this emission), dirty-checkout capture execution, and one view per verification.",
+      "role": "Codex",
+      "scope": "PR #183 automated review at 24d69c9b8",
+      "verdict": "FIVE_FINDINGS_TWO_FIXED_THREE_ACCEPTED"
     },
     {
-      "branch": "agent/aiml-s2-wp4-unit-contract-fix",
-      "kind": "w0_review_provenance",
-      "merge_head": "PENDING_MERGE_AT_EMISSION_TIME",
-      "pr": 138,
-      "scope": "PM contract amendment: S2.4 unit identity reconciled to arcane-equilibrium-aiml-engine-scanner.service (W0 fork #4/#5)",
-      "verdict": "open at emission time; W0 admission binds the WP3 system-level property, not the exact unit name (per S2.4-W0-admission-alignment.md §7 #4 property-only binding)"
+      "note": "Claims scoped to what the code backs: R4-1 arbitrary code execution closed and confirmed by reproduction; tamper-evident against accidental corruption; NOT sound against a hostile repo owner and no LW1 externality whatsoever. The S2E family must not claim LW1 externality until the one-view-per-verification refactor lands.",
+      "role": "operator",
+      "scope": "claim scope decision 2026-08-09",
+      "verdict": "OPTION_C_NARROW_THE_CLAIMS_AND_MERGE"
     }
   ],
   "schema_version": "s2_4_w0_derivation_record_v1_informal",
-  "source_head": "37cb9094956b8ee2b3af33efd610ee0d8566557f",
+  "source_head": "ae22391a187dbf64370fb3d2462a71c1e8815e51",
   "test_evidence": {
-    "command": "python3 -m pytest tests/structure/test_s2_4_w0_admission.py tests/structure/test_agent_governance_s2_4_install.py -q",
-    "executed_at": "2026-07-25T13:13:56Z",
+    "command": "python3 -m pytest -q -p no:cacheprovider tests/structure program_code/ml_training/tests",
+    "evidence_class": "LOCAL_REPRODUCIBLE",
     "exit_code": 0,
-    "host_role": "mac_development_checkout",
-    "kind": "w0_formal_exit_test_run",
-    "python": "Python 3.10.1",
-    "source_head": "37cb9094956b8ee2b3af33efd610ee0d8566557f",
-    "summary_line": "40 passed in 1.59s"
+    "honest_boundary": "Source and test facts only. Not a governed capture, no runtime attestation, and it does not show the three open items in design section 6 are closed.",
+    "measured_by": "E1 full-suite run on the linked worktree at a61ee30e0 (Mac, 1h48m), frozen HEAD and clean tree for the entire run. A prior run at 24d69c9b8 gave 8087 passed / 0 failed / 56 skipped; the delta of twelve is the PM-lane commits merged in from main, not this branch's work. Earlier sweeps in this program reported 27 failures that were self-inflicted measurement error (committing mid-run); re-running the affected files on a frozen tree gave 89 passed.",
+    "result": "8099 passed / 0 failed / 56 skipped / 0 error"
   },
   "wave_exit_derivation": {
     "reasons": [],
     "status": "PASS"
   },
-  "wave_exit_self_digest": "sha256:6c86008f343b93367d845779baaef12d002ba710e073c6953a0b57badad78a16"
+  "wave_exit_self_digest": "sha256:8e1addd62c395e16a554b89f2bdd6843b936bc756a13b77f5182407e1742d0b7"
 }

@@ -51,7 +51,7 @@ import aiml_gate_receipt_validator as validator  # noqa: E402
 # 而被取代)。round 9 綁 f30ede361,
 # 而 `209793b70` 之後改了三條 W5-owned path 卻零 re-emission,故本輪一併償還。
 # 合法 re-emission 時本常量與兩份文檔的 marker 必須在同一 commit 內一起更新。
-EXPECTED_SOURCE_HEAD = "2dd853ddfdc3569939d3de954d90ebd286d77870"
+EXPECTED_SOURCE_HEAD = "ae22391a187dbf64370fb3d2462a71c1e8815e51"
 
 RECEIPT_DIR = ROOT / "docs/execution_plan/ai_ml_landing/receipts/S2.4-WP4-W5"
 TODO_PATH = ROOT / "TODO.md"
@@ -67,7 +67,7 @@ _MARKER_RE = re.compile(
 # E2 round-6 P2-2:全形等號「＝」納入,關掉蓄意規避之外最廉價的變體。
 _CLAIM_RE = re.compile(r"source_head\s*[=＝]\s*`?([0-9a-f]{7,40})")
 # 現行 receipt 世代的 round 序號;re-emission 時與 EXPECTED_SOURCE_HEAD 同 commit 更新。
-EXPECTED_ROUND = 12
+EXPECTED_ROUND = 13
 _ALLOWED_CLASSIFICATIONS = {
     "source_closure_blocker",
     "accepted_carry_forward",

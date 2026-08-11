@@ -3,83 +3,71 @@
     "reasons": [],
     "status": "ADMITTED"
   },
-  "admission_self_digest": "sha256:668b08335aa45cbea52f9531c2a96a6b0b5b366aabf0bdcfef63256ebd671628",
+  "admission_self_digest": "sha256:ef3a021a2ca99b1043f00fbada65240871fd04a7e793ebda495df9d0e5cfb658",
   "historical_persisted_w2": {
-    "historical_source_head": "a3ddecbf48f6ad336bd58496a8dcc1fab20fc984",
+    "historical_source_head": "ae22391a187dbf64370fb3d2462a71c1e8815e51",
     "historical_w2_integrity": "VERIFIED",
-    "persisted_dir": "/Users/ncyu/Projects/TradeBot/.codex-worktrees/aiml-s2-wp4-w0/docs/execution_plan/ai_ml_landing/receipts/S2.4-WP4-W2",
-    "regenerated_w0_admission_self_digest": "sha256:d08e04c4a7c1cc1aef9c7a228815bc49eecaf1c5eabe165c661daad3907b7e88",
-    "regenerated_w0_wave_exit_self_digest": "sha256:a1de31a8e57f5d21825e2ec3adc401f15fefd0d2e2a59856bbcbf88faa8104eb",
-    "regenerated_w1_wave_exit_self_digest": "sha256:e9c89deea03d57d3a835c4c30c925604eb61b5518cb8860bb7e6a1cf3523b0b5",
-    "w2_wave_exit_self_digest": "sha256:9bb1dc5e6b09a0c341bdc5989ab1402c06d6eba3a55dbd019b00a3d9960e2862"
+    "persisted_dir": "/Users/ncyu/Projects/TradeBot/srv/.claude/worktrees/diff-uid-topology-verify-4c1573/docs/execution_plan/ai_ml_landing/receipts/S2.4-WP4-W2",
+    "regenerated_w0_admission_self_digest": "sha256:ef3a021a2ca99b1043f00fbada65240871fd04a7e793ebda495df9d0e5cfb658",
+    "regenerated_w0_wave_exit_self_digest": "sha256:8e1addd62c395e16a554b89f2bdd6843b936bc756a13b77f5182407e1742d0b7",
+    "regenerated_w1_wave_exit_self_digest": "sha256:c18a9dbaf9c0f56b9d8a3c8ad0e785982714d450dcad4da1cbb0288f1d5141e2",
+    "w2_wave_exit_self_digest": "sha256:0b61f1185d9741f8703624faaed415d57d3b8b545bd11fde261789986be2cba5"
   },
   "regenerated_w0_wave_exit_derivation": {
     "reasons": [],
     "status": "PASS"
   },
-  "regenerated_w0_wave_exit_self_digest": "sha256:1360f7f45f018db98cb815eb066bbf13b3e6bf3e338eecfaf5e7fc4c57101362",
+  "regenerated_w0_wave_exit_self_digest": "sha256:8e1addd62c395e16a554b89f2bdd6843b936bc756a13b77f5182407e1742d0b7",
   "regenerated_w1_wave_exit_derivation": {
     "reasons": [],
     "status": "PASS"
   },
-  "regenerated_w1_wave_exit_self_digest": "sha256:95c6360d2c14243c40a49543d90f67f6f216b0fdf7b693b2047ae540fa0935a8",
+  "regenerated_w1_wave_exit_self_digest": "sha256:c18a9dbaf9c0f56b9d8a3c8ad0e785982714d450dcad4da1cbb0288f1d5141e2",
   "regenerated_w2_wave_exit_derivation": {
     "reasons": [],
     "status": "PASS"
   },
-  "regenerated_w2_wave_exit_self_digest": "sha256:b3f5f088f6e25e74c4048dbf43b78617f94e1fe5039ba540f2a494c800a5f241",
+  "regenerated_w2_wave_exit_self_digest": "sha256:0b61f1185d9741f8703624faaed415d57d3b8b545bd11fde261789986be2cba5",
   "replay_note": "W3 re-derivation binds source_head == checkout HEAD; to replay, checkout source_head, rebuild the in-memory W0/W1/W2 chain with the same builders, then run derive_wave_exit_status(w3, source_admission_receipt=admission, predecessor_wave_receipt=w2_wave_exit, predecessor_wave_chain=(w0_wave_exit, w1_wave_exit))",
   "review_provenance": [
     {
-      "agent_id": "ae24e5e481bce48ec",
-      "kind": "w3_review_provenance",
-      "recheck_head": "2445299c8b5a005c5ef62c14e92b3adbcd3cebb2",
-      "recheck_verdict": "RECHECK_PASS (no P0/P1; PRECHECK_FAILED divergence and refuse-or-noop reading both CONFIRMED; five P2 residuals)",
-      "reviewed_head": "9c22f770d48f6f84e487ca79276f80437b49adb9",
-      "role": "E2",
-      "verdict": "DONE+FAIL (six P1: fixture-minted PLATFORM_ATTESTED, permit-plan binding, unowned engine-scanner overwrite, exact_pre_state_restored from 'nothing raised', PUBLIC under-restore, task-owned re-apply inexactness)"
-    },
-    {
-      "agent_id": "a21b75d245d31df85",
-      "kind": "w3_review_provenance",
-      "reviewed_head": "9c22f770d48f6f84e487ca79276f80437b49adb9",
+      "note": "Round 5 raised three P0s; round 6 confirmed P0-B and P0-C closed and raised three more; round 8 confirmed P0-3 closed (0/3000 relocations, was 555/3000) and refuted the byte-integrity closure: the hash binds payload to oid, not oid to path, and trees are unverified. Drove it to a gate flip: FLOOR_VERIFIED with floor_generation 9 against a commit holding 1.",
       "role": "E3",
-      "verdict": "PASS_WITH_NOTES with five P1 arming blockers (uid/gid unconstrained enabling a postgres-UID collision, driver exception text reaching serializable reasons with the secret scanner unwired, unvalidated ownership_evidence, cluster-wide PUBLIC strip unclassified, permit-plan binding)"
+      "scope": "S2E code-owned object view, rounds 5/6/8 at 0a829d667, 491787b71, d49ba4ded",
+      "verdict": "FAIL_WITH_CONFIRMED_FINDINGS"
     },
     {
-      "agent_id": "a6262db60da4ce1db",
-      "kind": "w3_review_provenance",
-      "reviewed_head": "9c22f770d48f6f84e487ca79276f80437b49adb9",
-      "role": "E4",
-      "verdict": "EVIDENCE_CONFIRMED (8/8 checks EXECUTED; disposable lanes proven live by flipping them to honest skips with the toolchain off PATH)"
+      "note": "Independently reproduced the tree-forgery and a cat-file --batch stream desync where a plain directory in the path list hands one path's bytes to another key. Withdrew its own P1-3 after measurement (the import closure already covered the leaf, 175/175 and 258/258). Verified 14 stale wave-exit receipts, one already stale at b1d2eea03.",
+      "role": "E2",
+      "scope": "same branch, rounds 5/6/8",
+      "verdict": "FAIL_WITH_CONFIRMED_FINDINGS"
     },
     {
-      "commits": [
-        "2445299c8",
-        "8c04a18f7"
-      ],
-      "kind": "w3_review_provenance",
-      "note": "eight W3-owned defects then five P2 residuals; four W4-owned obligations recorded in the exported ABI (permit-plan binding, replay-ledger append, encrypted-blob digest ordering, independent post-compensation postcheck) so removing one breaks the wave-exit digest",
-      "role": "PM",
-      "scope": "wave fix rounds"
+      "note": "Two P2s fixed in ae22391a1: shared refs must resolve only from the common dir (a per-worktree-only ref git denies at rc 128 was resolving, and PROTECTED_ANCESTOR_REFS uses ref resolution), and TimeoutExpired must become a typed error. Three accepted and recorded: receipt re-emission (this emission), dirty-checkout capture execution, and one view per verification.",
+      "role": "Codex",
+      "scope": "PR #183 automated review at 24d69c9b8",
+      "verdict": "FIVE_FINDINGS_TWO_FIXED_THREE_ACCEPTED"
+    },
+    {
+      "note": "Claims scoped to what the code backs: R4-1 arbitrary code execution closed and confirmed by reproduction; tamper-evident against accidental corruption; NOT sound against a hostile repo owner and no LW1 externality whatsoever. The S2E family must not claim LW1 externality until the one-view-per-verification refactor lands.",
+      "role": "operator",
+      "scope": "claim scope decision 2026-08-09",
+      "verdict": "OPTION_C_NARROW_THE_CLAIMS_AND_MERGE"
     }
   ],
   "schema_version": "s2_4_w3_derivation_record_v1_informal",
-  "source_head": "8c04a18f748c1750fb411a14b8a6d42e7e04a669",
+  "source_head": "ae22391a187dbf64370fb3d2462a71c1e8815e51",
   "test_evidence": {
-    "command": "python3 -m pytest tests/structure program_code/ml_training/tests -q",
-    "disposable_lanes": "engine-scanner ACL, consumer-resilience connect-time classification and the PG_ROLE_ACL_MIGRATION apply/postcheck/rollback cycle all ran against real throwaway PG clusters (36 passed, zero skips)",
-    "executed_at": "2026-07-26T10:32:21Z",
+    "command": "python3 -m pytest -q -p no:cacheprovider tests/structure program_code/ml_training/tests",
+    "evidence_class": "LOCAL_REPRODUCIBLE",
     "exit_code": 0,
-    "host_role": "mac_development_checkout",
-    "kind": "w3_formal_exit_test_run",
-    "load_bearing_regressions": "each W3 review fix carries a regression proven to fail against its pristine parent tree",
-    "source_head": "8c04a18f748c1750fb411a14b8a6d42e7e04a669",
-    "summary_line": "5564 passed, 46 skipped in 664.02s (0:11:04)"
+    "honest_boundary": "Source and test facts only. Not a governed capture, no runtime attestation, and it does not show the three open items in design section 6 are closed.",
+    "measured_by": "E1 full-suite run on the linked worktree at a61ee30e0 (Mac, 1h48m), frozen HEAD and clean tree for the entire run. A prior run at 24d69c9b8 gave 8087 passed / 0 failed / 56 skipped; the delta of twelve is the PM-lane commits merged in from main, not this branch's work. Earlier sweeps in this program reported 27 failures that were self-inflicted measurement error (committing mid-run); re-running the affected files on a frozen tree gave 89 passed.",
+    "result": "8099 passed / 0 failed / 56 skipped / 0 error"
   },
   "w3_wave_exit_derivation": {
     "reasons": [],
     "status": "PASS"
   },
-  "w3_wave_exit_self_digest": "sha256:bc4367a5de20ff89da8898f2eb86e10600425a602535b8a36d24fc1819699cba"
+  "w3_wave_exit_self_digest": "sha256:d90d9cff28d92a051c86fa0d66802270ff675e251fbfacec1f34aa7a6aaf66ce"
 }

@@ -20,12 +20,12 @@
     "unconditional_production_pending_removed": true
   },
   "schema_version": "s2_4_source_admission_receipt_v1",
-  "self_digest": "sha256:668b08335aa45cbea52f9531c2a96a6b0b5b366aabf0bdcfef63256ebd671628",
-  "source_head": "8c04a18f748c1750fb411a14b8a6d42e7e04a669",
+  "self_digest": "sha256:ef3a021a2ca99b1043f00fbada65240871fd04a7e793ebda495df9d0e5cfb658",
+  "source_head": "ae22391a187dbf64370fb3d2462a71c1e8815e51",
   "three_head_projection_digest": "sha256:0ce1503f9a7643420e077db10db9b643712dce7f096a5ab8a2ad1fd07598640b",
   "trust_pin_digests": {
-    "independent_test_blob": "2364f2cab6340e0c746e567ed717f1440c50314f",
-    "independent_test_sha256": "sha256:ce6727536f3820d808d01553330cca87fce8d13455d3a0b4276d86f5041dabc7",
+    "independent_test_blob": "901300a8cd6e1760ea00d908c310bd42ca531c52",
+    "independent_test_sha256": "sha256:6b3e775dd05159681366f8046caebc816dd89025de422412d319d45ca49370b7",
     "operator_fingerprint": "SHA256:uGJ9veN7PoE6BBgfsSP2aiMndrwgbt7o/7/YfdzNzCQ",
     "trusted_host_module_blob": "8b494cd2678ee70e4afc4efe62561a0ef0f2169e",
     "trusted_host_module_sha256": "sha256:00b568a577afbe8d29bb2ab5b33da8487c6fdda1c73f0c7fc63b5b11254d09eb"

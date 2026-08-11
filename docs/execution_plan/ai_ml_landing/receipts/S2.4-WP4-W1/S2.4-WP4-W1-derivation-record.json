@@ -3,93 +3,59 @@
     "reasons": [],
     "status": "ADMITTED"
   },
-  "admission_self_digest": "sha256:6805273415b022154ef2305aad4bc2c38171933c5be0ceeba02cdf3f7e543709",
+  "admission_self_digest": "sha256:ef3a021a2ca99b1043f00fbada65240871fd04a7e793ebda495df9d0e5cfb658",
   "historical_persisted_w0": {
-    "admission_self_digest": "sha256:d40bed03b0a2ac3736bf62114717e869691143cf66cba186646447aa8ccbaf12",
-    "historical_source_head": "37cb9094956b8ee2b3af33efd610ee0d8566557f",
+    "admission_self_digest": "sha256:ef3a021a2ca99b1043f00fbada65240871fd04a7e793ebda495df9d0e5cfb658",
+    "historical_source_head": "ae22391a187dbf64370fb3d2462a71c1e8815e51",
     "historical_w0_integrity": "VERIFIED",
-    "persisted_dir": "/Users/ncyu/Projects/TradeBot/.codex-worktrees/aiml-s2-wp4-w0/docs/execution_plan/ai_ml_landing/receipts/S2.4-WP4-W0",
-    "wave_exit_self_digest": "sha256:6c86008f343b93367d845779baaef12d002ba710e073c6953a0b57badad78a16"
+    "persisted_dir": "/Users/ncyu/Projects/TradeBot/srv/.claude/worktrees/diff-uid-topology-verify-4c1573/docs/execution_plan/ai_ml_landing/receipts/S2.4-WP4-W0",
+    "wave_exit_self_digest": "sha256:8e1addd62c395e16a554b89f2bdd6843b936bc756a13b77f5182407e1742d0b7"
   },
   "regenerated_w0_wave_exit_derivation": {
     "reasons": [],
     "status": "PASS"
   },
-  "regenerated_w0_wave_exit_self_digest": "sha256:505c82fad19568bd452708044d1b41064a6aef344614628c45505276c93f5b75",
+  "regenerated_w0_wave_exit_self_digest": "sha256:8e1addd62c395e16a554b89f2bdd6843b936bc756a13b77f5182407e1742d0b7",
   "replay_note": "W1 re-derivation binds source_head == checkout HEAD; to replay, checkout source_head, rebuild the in-memory W0 chain with the same builders, then run derive_wave_exit_status(w1, source_admission_receipt=admission, predecessor_wave_receipt=w0_wave_exit)",
   "review_provenance": [
     {
-      "agent_id": "a82ddee3af5e4a6e3",
-      "kind": "w1_review_provenance",
-      "recheck_head": "5f713333f669bf387bc1cc9ad75ecb064b7b3d5d",
-      "recheck_verdict": "RECHECK_PASS (P2-1/P3-2/P3-3 closed; residual P3 notes accepted; PM lineage ruling landed as 6288f5414)",
-      "reviewed_head": "498bfbd0ddcff1405a25252d61342cc204f4fef3",
-      "role": "E2",
-      "verdict": "PASS (no P0/P1; 1xP2 + 3xP3, all closed or accepted)"
-    },
-    {
-      "agent_id": "aaccfb813cf778f69",
-      "kind": "w1_review_provenance",
-      "reviewed_head": "498bfbd0ddcff1405a25252d61342cc204f4fef3",
+      "note": "Round 5 raised three P0s; round 6 confirmed P0-B and P0-C closed and raised three more; round 8 confirmed P0-3 closed (0/3000 relocations, was 555/3000) and refuted the byte-integrity closure: the hash binds payload to oid, not oid to path, and trees are unverified. Drove it to a gate flip: FLOOR_VERIFIED with floor_generation 9 against a commit holding 1.",
       "role": "E3",
-      "verdict": "PASS_WITH_NOTES (no P0/P1; four P2 hardening notes: ledger head-anchoring is a W6 driver obligation, freshness default, id shape guard, evidence scan — the latter three closed in 5f713333f)"
+      "scope": "S2E code-owned object view, rounds 5/6/8 at 0a829d667, 491787b71, d49ba4ded",
+      "verdict": "FAIL_WITH_CONFIRMED_FINDINGS"
     },
     {
-      "agent_id": "aba9f38d50ec18fde",
-      "kind": "w1_review_provenance",
-      "reviewed_head": "498bfbd0ddcff1405a25252d61342cc204f4fef3",
-      "role": "E4",
-      "verdict": "EVIDENCE_CONFIRMED (all six checks EXECUTED, zero mismatches; W1 derivation clean-and-tamper probe both held)"
+      "note": "Independently reproduced the tree-forgery and a cat-file --batch stream desync where a plain directory in the path list hands one path's bytes to another key. Withdrew its own P1-3 after measurement (the import closure already covered the leaf, 175/175 and 258/258). Verified 14 stale wave-exit receipts, one already stale at b1d2eea03.",
+      "role": "E2",
+      "scope": "same branch, rounds 5/6/8",
+      "verdict": "FAIL_WITH_CONFIRMED_FINDINGS"
     },
     {
-      "commits": [
-        "5f713333f",
-        "6288f5414"
-      ],
-      "kind": "w1_review_provenance",
-      "note": "wall-clock fail-closed freshness default, id shape guard, lineage self-digest recompute plus hard-refuse ruling, secret-like evidence scan; regression pins added for each",
-      "role": "PM",
-      "scope": "wave-fix rounds"
+      "note": "Two P2s fixed in ae22391a1: shared refs must resolve only from the common dir (a per-worktree-only ref git denies at rc 128 was resolving, and PROTECTED_ANCESTOR_REFS uses ref resolution), and TimeoutExpired must become a typed error. Three accepted and recorded: receipt re-emission (this emission), dirty-checkout capture execution, and one view per verification.",
+      "role": "Codex",
+      "scope": "PR #183 automated review at 24d69c9b8",
+      "verdict": "FIVE_FINDINGS_TWO_FIXED_THREE_ACCEPTED"
     },
     {
-      "agent_id": "a2661150dd29eb566",
-      "kind": "w1_review_provenance",
-      "reviewed_head": "3a781e311e3f4834a2361eb13731648028c5fb68",
-      "role": "CC",
-      "verdict": "PASS_WITH_NOTES grade A (hard boundaries zero touches; DRIFT-1 registry denial-string unit-name drift, closed by 58d62a0e1)"
-    },
-    {
-      "agent_id": "a36c3e23cd28a9e9e",
-      "kind": "w1_review_provenance",
-      "reviewed_head": "3a781e311e3f4834a2361eb13731648028c5fb68",
-      "role": "OPS",
-      "verdict": "PASS_WITH_CONCERNS (effect-phase contract encoded four-layer redundant; zero runtime reach today; F1 unit-name drift closed by 58d62a0e1; F2/F3/F5 P3 notes queued for W2; F4 W6 builder obligations recorded)"
-    },
-    {
-      "commits": [
-        "58d62a0e1"
-      ],
-      "kind": "w1_review_provenance",
-      "note": "two CP5 registry denial strings retargeted to arcane-equilibrium-aiml-engine-scanner.service per CC DRIFT-1 / OPS F1",
-      "role": "PM",
-      "scope": "post-review drift fix"
+      "note": "Claims scoped to what the code backs: R4-1 arbitrary code execution closed and confirmed by reproduction; tamper-evident against accidental corruption; NOT sound against a hostile repo owner and no LW1 externality whatsoever. The S2E family must not claim LW1 externality until the one-view-per-verification refactor lands.",
+      "role": "operator",
+      "scope": "claim scope decision 2026-08-09",
+      "verdict": "OPTION_C_NARROW_THE_CLAIMS_AND_MERGE"
     }
   ],
   "schema_version": "s2_4_w1_derivation_record_v1_informal",
-  "source_head": "58d62a0e1707f04f9c996ed65361fa1bad5da13c",
+  "source_head": "ae22391a187dbf64370fb3d2462a71c1e8815e51",
   "test_evidence": {
-    "command": "python3 -m pytest tests/structure/test_agent_governance_s2_4_install.py tests/structure/test_agent_governance_s2_4_install_integration.py tests/structure/test_s2_4_w0_admission.py program_code/ml_training/tests -q",
-    "executed_at": "2026-07-25T19:28:57Z",
+    "command": "python3 -m pytest -q -p no:cacheprovider tests/structure program_code/ml_training/tests",
+    "evidence_class": "LOCAL_REPRODUCIBLE",
     "exit_code": 0,
-    "host_role": "mac_development_checkout",
-    "kind": "w1_formal_exit_test_run",
-    "note": "full tests/structure re-run executes at this publication head immediately before push; result recorded in the publication PR body",
-    "source_head": "58d62a0e1707f04f9c996ed65361fa1bad5da13c",
-    "summary_line": "2485 passed, 39 skipped in 46.33s"
+    "honest_boundary": "Source and test facts only. Not a governed capture, no runtime attestation, and it does not show the three open items in design section 6 are closed.",
+    "measured_by": "E1 full-suite run on the linked worktree at a61ee30e0 (Mac, 1h48m), frozen HEAD and clean tree for the entire run. A prior run at 24d69c9b8 gave 8087 passed / 0 failed / 56 skipped; the delta of twelve is the PM-lane commits merged in from main, not this branch's work. Earlier sweeps in this program reported 27 failures that were self-inflicted measurement error (committing mid-run); re-running the affected files on a frozen tree gave 89 passed.",
+    "result": "8099 passed / 0 failed / 56 skipped / 0 error"
   },
   "w1_wave_exit_derivation": {
     "reasons": [],
     "status": "PASS"
   },
-  "w1_wave_exit_self_digest": "sha256:3b462d91531dff77c5843d86b103293302398579915b8ef247ee331b5333001e"
+  "w1_wave_exit_self_digest": "sha256:c18a9dbaf9c0f56b9d8a3c8ad0e785982714d450dcad4da1cbb0288f1d5141e2"
 }
