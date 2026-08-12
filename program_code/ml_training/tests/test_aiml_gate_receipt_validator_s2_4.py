@@ -1999,3 +1999,30 @@ def test_w2_exported_abi_carries_the_three_builder_probe_identities() -> None:
     assert projection["connect_error_locale_contract_digest"].startswith("sha256:")
     # P1-5 可見性:owned scope 的工作樹差異是投影的一部分(髒發射不再是靜默事實)。
     assert isinstance(projection["owned_scope_worktree_delta"], list)
+
+
+def test_w2_persisted_structure_survives_a_carrier_only_commit(tmp_path: Path) -> None:
+    """W2 semantic ABI 未變時,receipt 不得因承載它的後續 commit 而失效。"""
+    repo = tmp_path / "w2-carrier-repo"
+    _subprocess.run(
+        ["git", "clone", "-q", "--no-local", str(_REPO_ROOT), str(repo)],
+        check=True,
+    )
+    _git(repo, "config", "user.email", "w2@test")
+    _git(repo, "config", "user.name", "w2")
+
+    receipt = {
+        "wave": "W2",
+        "predecessor_wave_receipt_digest": "sha256:" + "0" * 64,
+        "owned_path_manifest_digest": canonical_digest(sorted(_w0._W2_OWNED_PATHS)),
+        "owned_path_diff_digest": _w0.w2_owned_path_diff_digest(repo),
+        "exported_abi_digest": canonical_digest(_w0.w2_exported_abi_projection(repo)),
+    }
+    assert _w0.w2_structural_errors(receipt, repo) == []
+
+    carrier = repo / "docs" / "w2-carrier-only.txt"
+    carrier.write_text("carrier commit; no declared application/W2 semantic bytes\n")
+    _git(repo, "add", str(carrier.relative_to(repo)))
+    _git(repo, "commit", "-q", "-m", "add W2 receipt carrier")
+
+    assert _w0.w2_structural_errors(receipt, repo) == []
