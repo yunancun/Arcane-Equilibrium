@@ -755,18 +755,23 @@ calendar weeks** as a planning range, not a delivery guarantee and never as a
 promise that an eligible edge or profit will exist.
 
 The next runtime acceptance target remains non-dispatchable until UID/source/
-effect admission: current-head dedicated runtime, pinned LightGBM/ONNX, one
+effect admission. PM owns fresh re-admission but no role chain is preselected;
+only after named unblock evidence and the surfaces, path scopes and uncertainty
+are bound may each bounded Session derive its own risk DAG and roles. The target
+remains current-head dedicated runtime, pinned LightGBM/ONNX, one
 natural candidate-matched fit with `model_training_performed=true`, a
 content-addressed artifact and qualified registry row, a Rust shadow-consumer
 ACK, and zero broker/order/live authority. PM must split that target through the
 existing S3-S6 dependencies; it is not permission to skip a Sprint.
 
-Recurring work with no verified state transition or downstream consumer ACK is
-exactly `NO_PROGRESS`. PM may recommend or queue `slow`, `rotate` or `stop`, but
-may not perform those effects from this rule. Any actual schedule/service/cron/
-runtime change requires fresh classified effect authority, an authorized
-Adapter/Operator path, rollback and independent postcheck. Repeated artifacts
-alone do not advance this plan.
+Recurring work with no verified state transition is exactly `NO_PROGRESS`
+unless a downstream consumer ACK is Adapter-validated or carried by a reviewed
+task-owned artifact. An unauthenticated or self-reported ACK with no verified
+state transition remains exactly `NO_PROGRESS`. PM may recommend or queue
+`slow`, `rotate` or `stop`, but may not perform those effects from this rule.
+Any actual schedule/service/cron/runtime change requires fresh classified
+effect authority, an authorized Adapter/Operator path, rollback and independent
+postcheck. Repeated artifacts alone do not advance this plan.
 
 All un-attested 2026-08-12 runtime/service/source-pin/maintenance/killboard
 outputs are `UNVERIFIED_OBSERVATION` context only. Paths and timestamps may

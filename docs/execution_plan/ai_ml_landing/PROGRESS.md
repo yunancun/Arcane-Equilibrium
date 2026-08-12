@@ -95,19 +95,24 @@ range is 37-69 engineering days plus evidence waits (12-20 calendar weeks only
 under uninterrupted assumptions), not an edge/profit guarantee.
 
 The downstream `P0-AIML-RUNTIME-LEARNING-VERTICAL-SLICE` is `WAITING` and not
-dispatchable; the unverified observations above do not admit it. After
-UID/source/effect admission, its acceptance target is a
+dispatchable; the unverified observations above do not admit it. PM owns fresh
+re-admission, but no role chain is preselected. Only after named unblock
+evidence and the surfaces, path scopes and uncertainty are bound may each
+bounded Session derive its own risk DAG and roles. After UID/source/effect
+admission, its acceptance target is a
 current-head dedicated runtime, pinned LightGBM/ONNX, one natural
 candidate-matched `model_training_performed=true` fit, content-addressed
 artifact plus qualified registry row, Rust shadow-consumer ACK and zero
 broker/order/live authority. Existing S3-S6 dependencies remain binding.
 
 **Artifact-churn rule**: repeated output with the same blocker/source/evidence
-fingerprint and no verified state transition or downstream consumer ACK is
-exactly `NO_PROGRESS`. PM may only recommend or queue `slow`, `rotate` or
-`stop`. Any actual schedule/service/cron/runtime change requires fresh
-classified effect authority, an authorized Adapter/Operator path, rollback and
-independent postcheck.
+fingerprint and no verified state transition is exactly `NO_PROGRESS` unless a
+downstream consumer ACK is Adapter-validated or carried by a reviewed
+task-owned artifact. An unauthenticated or self-reported ACK with no verified
+state transition remains exactly `NO_PROGRESS`. PM may only recommend or queue
+`slow`, `rotate` or `stop`. Any actual schedule/service/cron/runtime change
+requires fresh classified effect authority, an authorized Adapter/Operator
+path, rollback and independent postcheck.
 
 ## Ledger Contract
 

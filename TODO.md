@@ -294,7 +294,7 @@ Agent 接到 Sprint 命令後，對每個 READY Session 依序執行下列 Wave�
 4. 自然停止包括:任一 Session closure 落帳+投影後交棒;目標 Sprint exit;無其他 READY 工作且遇到不可自行解除的外部/authority blocker;`OPERATOR_STOP_NOW`。
 5. 禁止為了續作而 stash/reset/clean、吸收不明 dirty files、降低 Cost Gate、擴大 runtime/order authority，或把 source／CI 說成 runtime／profit proof。
 6. 最終回報固定列出：完成 Session、仍未完成 Session、並行 slot 使用、tests/CI/effect、blocker、下一個 exact Session。不得只回報 commit 或報告路徑。
-7. Artifact churn 有界：同一 blocker/source/evidence fingerprint 的 recurring job 若沒有產生可驗證 state transition 或 downstream consumer ACK，精確記為 `NO_PROGRESS`，不得計入進度。PM 只能建議／排隊 `slow`、`rotate` 或 `stop`；任何 schedule/service/cron/runtime 實際變更都須 fresh classified effect authority、authorized Adapter／Operator path、rollback 與 independent postcheck，不得由本規則直接執行。
+7. Artifact churn 有界：同一 blocker/source/evidence fingerprint 的 recurring job 若沒有產生可驗證 state transition，或只有未經驗證／self-reported consumer ACK，精確記為 `NO_PROGRESS`，不得計入進度。consumer ACK 只有經 Adapter 驗證，或由 reviewed task-owned artifact 承載，才可計入。PM 只能建議／排隊 `slow`、`rotate` 或 `stop`；任何 schedule/service/cron/runtime 實際變更都須 fresh classified effect authority、authorized Adapter／Operator path、rollback 與 independent postcheck，不得由本規則直接執行。
 
 ## §0 影響派發的當前事實
 
@@ -379,7 +379,7 @@ Agent 接到 Sprint 命令後，對每個 READY Session 依序執行下列 Wave�
 
 | ID | 優先級 | 狀態 | Owner 路徑 | 驗收條件 | 最新證據 | 具名解除條件 |
 |---|---:|---|---|---|---|---|
-| `P0-AIML-RUNTIME-LEARNING-VERTICAL-SLICE` | 0 | **WAITING_UID_SOURCE_EFFECT_ADMISSION** | PM fresh re-admission → PA/QC/MIT → E1 → E2/E4 → CC/E3/OPS → QA/PM | current-head dedicated V2 runtime（legacy unit 不可冒充）；pinned LightGBM/ONNX；一次由自然 controller 觸發、candidate-matched 且 `model_training_performed=true` 的 fit；content-addressed artifact＋qualified registry row；Rust shadow-consumer ACK；broker/order/live authority 全為 false。這是跨 S2-S6 的 acceptance target，不繞過 Sprint predecessor。 | 未有上述 acceptance 的 durable attested receipts；2026-08-12 units/source-pin/LightGBM 線索均為 `UNVERIFIED_OBSERVATION`，不是 admission input；PG=`UNVERIFIED`。 | uid lane closed/merged＋fresh combined-main proof＋S2E source/effect packet 與 fresh authority admission；之後由 PM 依 S3-S6 dependency 拆成 bounded Sessions，不能自動轉 ACTIVE。 |
+| `P0-AIML-RUNTIME-LEARNING-VERTICAL-SLICE` | 0 | **WAITING_UID_SOURCE_EFFECT_ADMISSION** | PM owns fresh re-admission；不預選角色鏈。具名 unblock evidence 成立並綁定 surfaces、path scopes、uncertainty 後，才逐一為 bounded Session 派生 risk DAG／roles。 | current-head dedicated V2 runtime（legacy unit 不可冒充）；pinned LightGBM/ONNX；一次由自然 controller 觸發、candidate-matched 且 `model_training_performed=true` 的 fit；content-addressed artifact＋qualified registry row；Rust shadow-consumer ACK；broker/order/live authority 全為 false。這是跨 S2-S6 的 acceptance target，不繞過 Sprint predecessor。 | 未有上述 acceptance 的 durable attested receipts；2026-08-12 units/source-pin/LightGBM 線索均為 `UNVERIFIED_OBSERVATION`，不是 admission input；PG=`UNVERIFIED`。 | uid lane closed/merged＋fresh combined-main proof＋S2E source/effect packet 與 fresh authority admission；之後由 PM 依 S3-S6 dependency 拆成 bounded Sessions，不能自動轉 ACTIVE。 |
 
 ## §2 已關閉且不得重複派發的標記
 

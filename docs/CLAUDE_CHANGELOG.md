@@ -17,11 +17,13 @@
 - 原始 43-80 engineering days 以 S0-S1 已關閉重算為剩餘 37-69 days，另加 72 小時、
   七日、樣本、Demo/economic 與 authority waits；12-20 calendar weeks 只作條件式 planning
   range。S3-S8 全部保持 open，不承諾 edge 或盈利日期。
-- 新增非派發的 WAITING runtime vertical slice、source→profit capability ladder 與 artifact
-  churn 有界規則；沒有 verified state transition／downstream consumer ACK 的重複 artifact
-  精確記為 `NO_PROGRESS`。PM 只能建議／排隊 slow、rotate 或 stop；任何 schedule/service/
-  cron/runtime 變更仍須 fresh classified effect authority、authorized Adapter／Operator path、
-  rollback 與 independent postcheck。
+- 新增非派發的 WAITING runtime vertical slice（PM 只持有 fresh re-admission；具名 unblock
+  evidence 與 surfaces/path scopes/uncertainty 綁定後，才逐 Session 派生 risk DAG／roles）、
+  source→profit capability ladder 與 artifact churn 有界規則。沒有 verified state transition，
+  或 ACK 未經 Adapter 驗證且不在 reviewed task-owned artifact 中，均精確記為
+  `NO_PROGRESS`；self-reported ACK 不計。PM 只能建議／排隊 slow、rotate 或 stop；任何
+  schedule/service/cron/runtime 變更仍須 fresh classified effect authority、authorized
+  Adapter／Operator path、rollback 與 independent postcheck。
 
 ## TODO v871 增量：LW1 attestor-owned host capture hardening（2026-08-02）
 
