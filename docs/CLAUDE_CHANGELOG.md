@@ -1,7 +1,22 @@
 # CLAUDE_CHANGELOG.md — 開發歷史歸檔
 
 > 從 CLAUDE.md / TODO.md 遷出的 Wave/Sprint/Batch + TODO version-increment 歷史敘事。新 session 不需要讀此文件，僅供回顧歷史時查閱。
-> 最後更新：2026-08-12（TODO v875 AI/ML capability／remaining-effort calibration）
+> 最後更新：2026-08-12（TODO v876 uid-topology local carrier projection）
+
+---
+
+## TODO v876 增量：uid-topology local carrier projection（2026-08-12）
+
+- `origin/main` 已以 non-rewriting merge 整合進 local branch
+  `agent/p0-aiml-s2e-uid-topology-validation-publication-20260812`；semantic source
+  `90713b5565fb49a4d36193b05a4ddff48cf32fbc` 與 33/33 canonical W0-W5 artifact
+  chain 已本地提交，W5 persisted set 以 carrier
+  `407cf1b8de6bb34d5f0a56ada3f6706c4f2e7258` 承載 round 14。
+- exact-semantic-head E2 governed review PASS，record digest
+  `sha256:2404748509c54fbf24386e959e21f16c078305711c29ca0b662d779b7e82aa40`；
+  carrier-head E2→E3→E4 仍待完成。UID 狀態保持
+  `ACTIVE_PENDING_FRESH_REVIEW_AND_PUBLICATION`；未授 GitHub publication、merge、
+  source sync、runtime/effect 或 LW2 authority。
 
 ---
 
