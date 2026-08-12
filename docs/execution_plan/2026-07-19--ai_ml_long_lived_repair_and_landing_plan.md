@@ -2,14 +2,17 @@
 
 **Plan ID**: `AIML-LONG-LIVED-LANDING-V2`
 **Original date**: 2026-07-19
-**Revised**: 2026-07-22
+**Revised**: 2026-08-12 (status/remaining-effort calibration; architecture unchanged)
 **Planning baseline**: `b486c0718d1c26820cdb6308cccf74c686547b22`
+**Observed calibration baseline**: `2ed906607ca9eae641ee08940f3159463d86692c`
+(source snapshot only; not runtime identity or a permanently-current main pointer)
 **Adopted source lineage**: reviewed head
 `1a933fcc28e9f7341e023b5d401c479957c14c5f`, merged as
 `fed223bebd278c50b0ab3330980e66441a30c9ed`; neither ref is runtime identity.
 **Owner**: PM
 **Execution mode**: bounded Sessions and Sprints, not an autonomous Codex loop
-**Adoption state**: `PROGRAM_ADOPTED` (S0 closed; S1 ready; source adoption only)
+**Adoption state**: `PROGRAM_ADOPTED` (S0 and S1 closed; S2 open at 5/9
+source packages, production effect 0/6 and authority 0/9; source adoption only)
 **Adoption receipt**:
 `docs/execution_plan/ai_ml_landing/receipts/S0.3-program-adoption-receipt-v1.json`
 (`sha256:1a124bcaebb741a69c97e37a828e5b85c9b6499cdf053e8ef62451448878f93b`)
@@ -738,6 +741,29 @@ sync, deploy or runtime proof. Sprint 8 performs the final global synchronizatio
 Critical engineering estimate: **43-80 engineering days**, plus the explicit
 72-hour and seven-day gates and sample-dependent Demo/economic evidence. Parallel
 source Sessions can reduce calendar time but cannot shorten evidence windows.
+
+### 10.1 2026-08-12 Remaining-Work Rebase
+
+S0-S1 consumed the original 6-11 day segment and are closed. S2 remains open at
+5/9 source packages, production effect 0/6 and authority 0/9; S3, S4, S5, S6,
+S7 and S8 remain open. The planning remainder is therefore **37-69 engineering
+days**, plus the 72-hour/two-cycle gate, seven unattended days, independent
+sample collection, authorized Demo/economic windows and external authority
+waits. Under uninterrupted runtime/data/review availability, use **12-20
+calendar weeks** as a planning range, not a delivery guarantee and never as a
+promise that an eligible edge or profit will exist.
+
+The next runtime acceptance target remains non-dispatchable until UID/source/
+effect admission: current-head dedicated runtime, pinned LightGBM/ONNX, one
+natural candidate-matched fit with `model_training_performed=true`, a
+content-addressed artifact and qualified registry row, a Rust shadow-consumer
+ACK, and zero broker/order/live authority. PM must split that target through the
+existing S3-S6 dependencies; it is not permission to skip a Sprint.
+
+Recurring work is progress only when it produces a verified state transition or
+downstream consumer ACK. An unchanged blocker/source/evidence fingerprint must
+be slowed, rotated or stopped until a named input delta, review date or operator
+action exists; repeated artifacts alone do not advance this plan.
 
 ## 11. Non-Goals
 
