@@ -3,77 +3,68 @@
     "reasons": [],
     "status": "ADMITTED"
   },
-  "admission_self_digest": "sha256:ef3a021a2ca99b1043f00fbada65240871fd04a7e793ebda495df9d0e5cfb658",
+  "admission_self_digest": "sha256:feaaa6b0d174f721408aa1d71905f4da1a9ba0920f7a54376d4028afb63c5887",
   "historical_persisted_w3": {
-    "historical_source_head": "ae22391a187dbf64370fb3d2462a71c1e8815e51",
+    "historical_source_head": "90713b5565fb49a4d36193b05a4ddff48cf32fbc",
     "historical_w3_integrity": "VERIFIED",
-    "persisted_dir": "/Users/ncyu/Projects/TradeBot/srv/.claude/worktrees/diff-uid-topology-verify-4c1573/docs/execution_plan/ai_ml_landing/receipts/S2.4-WP4-W3",
-    "regenerated_w0_admission_self_digest": "sha256:ef3a021a2ca99b1043f00fbada65240871fd04a7e793ebda495df9d0e5cfb658",
-    "regenerated_w0_wave_exit_self_digest": "sha256:8e1addd62c395e16a554b89f2bdd6843b936bc756a13b77f5182407e1742d0b7",
-    "regenerated_w1_wave_exit_self_digest": "sha256:c18a9dbaf9c0f56b9d8a3c8ad0e785982714d450dcad4da1cbb0288f1d5141e2",
-    "regenerated_w2_wave_exit_self_digest": "sha256:0b61f1185d9741f8703624faaed415d57d3b8b545bd11fde261789986be2cba5",
-    "w3_wave_exit_self_digest": "sha256:d90d9cff28d92a051c86fa0d66802270ff675e251fbfacec1f34aa7a6aaf66ce"
+    "persisted_dir": "/Users/ncyu/Projects/TradeBot/.codex-worktrees/p0-aiml-s2e-uid-topology-validation-publication-20260812/docs/execution_plan/ai_ml_landing/receipts/S2.4-WP4-W3",
+    "regenerated_w0_admission_self_digest": "sha256:feaaa6b0d174f721408aa1d71905f4da1a9ba0920f7a54376d4028afb63c5887",
+    "regenerated_w0_wave_exit_self_digest": "sha256:82b38ee5b4183002ab3fd23edb23ca7b1cff46f142240a9a19ea310e4fdee6d4",
+    "regenerated_w1_wave_exit_self_digest": "sha256:282be4792b0f70c2660d572979c97c9cc02dfe0387e63de5ebced9d27d4dd257",
+    "regenerated_w2_wave_exit_self_digest": "sha256:b6fc672ac4806fb532af1b2dfab9a529968f2ac3f0341f0960870b1148331453",
+    "w3_wave_exit_self_digest": "sha256:ca563a6d9cacca636b57979e5abaf3ea0af9d22020bb79f0572869b2adc719ce"
   },
   "regenerated_w0_wave_exit_derivation": {
     "reasons": [],
     "status": "PASS"
   },
-  "regenerated_w0_wave_exit_self_digest": "sha256:8e1addd62c395e16a554b89f2bdd6843b936bc756a13b77f5182407e1742d0b7",
+  "regenerated_w0_wave_exit_self_digest": "sha256:82b38ee5b4183002ab3fd23edb23ca7b1cff46f142240a9a19ea310e4fdee6d4",
   "regenerated_w1_wave_exit_derivation": {
     "reasons": [],
     "status": "PASS"
   },
-  "regenerated_w1_wave_exit_self_digest": "sha256:c18a9dbaf9c0f56b9d8a3c8ad0e785982714d450dcad4da1cbb0288f1d5141e2",
+  "regenerated_w1_wave_exit_self_digest": "sha256:282be4792b0f70c2660d572979c97c9cc02dfe0387e63de5ebced9d27d4dd257",
   "regenerated_w2_wave_exit_derivation": {
     "reasons": [],
     "status": "PASS"
   },
-  "regenerated_w2_wave_exit_self_digest": "sha256:0b61f1185d9741f8703624faaed415d57d3b8b545bd11fde261789986be2cba5",
+  "regenerated_w2_wave_exit_self_digest": "sha256:b6fc672ac4806fb532af1b2dfab9a529968f2ac3f0341f0960870b1148331453",
   "regenerated_w3_wave_exit_derivation": {
     "reasons": [],
     "status": "PASS"
   },
-  "regenerated_w3_wave_exit_self_digest": "sha256:d90d9cff28d92a051c86fa0d66802270ff675e251fbfacec1f34aa7a6aaf66ce",
+  "regenerated_w3_wave_exit_self_digest": "sha256:ca563a6d9cacca636b57979e5abaf3ea0af9d22020bb79f0572869b2adc719ce",
   "replay_note": "W4 re-derivation binds source_head == checkout HEAD; to replay, checkout source_head, rebuild the in-memory W0/W1/W2/W3 chain with the same builders, then run derive_wave_exit_status(w4, source_admission_receipt=admission, predecessor_wave_receipt=w3_wave_exit, predecessor_wave_chain=(w0_wave_exit, w1_wave_exit, w2_wave_exit))",
   "review_provenance": [
     {
-      "note": "Round 5 raised three P0s; round 6 confirmed P0-B and P0-C closed and raised three more; round 8 confirmed P0-3 closed (0/3000 relocations, was 555/3000) and refuted the byte-integrity closure: the hash binds payload to oid, not oid to path, and trees are unverified. Drove it to a gate flip: FLOOR_VERIFIED with floor_generation 9 against a commit holding 1.",
-      "role": "E3",
-      "scope": "S2E code-owned object view, rounds 5/6/8 at 0a829d667, 491787b71, d49ba4ded",
-      "verdict": "FAIL_WITH_CONFIRMED_FINDINGS"
-    },
-    {
-      "note": "Independently reproduced the tree-forgery and a cat-file --batch stream desync where a plain directory in the path list hands one path's bytes to another key. Withdrew its own P1-3 after measurement (the import closure already covered the leaf, 175/175 and 258/258). Verified 14 stale wave-exit receipts, one already stale at b1d2eea03.",
+      "context_artifact_digest": "sha256:108de2650146460ca633cf1dae5ebd7515f71c3d99d68659b95602db61ca0f27",
+      "exact_head": "90713b5565fb49a4d36193b05a4ddff48cf32fbc",
+      "exact_tree": "3e6c64fe1d95e12f69e760e9c20caf4982ebe6df",
+      "note": "Independent exact-head review closed the prior Git-discovery, subject-repository access, and case-insensitive .git findings; governed capture used a fresh private committed tree and copied object database, returned 111 passed, and left the caller generation unchanged.",
+      "record_digest": "sha256:2404748509c54fbf24386e959e21f16c078305711c29ca0b662d779b7e82aa40",
       "role": "E2",
-      "scope": "same branch, rounds 5/6/8",
-      "verdict": "FAIL_WITH_CONFIRMED_FINDINGS"
-    },
-    {
-      "note": "Two P2s fixed in ae22391a1: shared refs must resolve only from the common dir (a per-worktree-only ref git denies at rc 128 was resolving, and PROTECTED_ANCESTOR_REFS uses ref resolution), and TimeoutExpired must become a typed error. Three accepted and recorded: receipt re-emission (this emission), dirty-checkout capture execution, and one view per verification.",
-      "role": "Codex",
-      "scope": "PR #183 automated review at 24d69c9b8",
-      "verdict": "FIVE_FINDINGS_TWO_FIXED_THREE_ACCEPTED"
-    },
-    {
-      "note": "Claims scoped to what the code backs: R4-1 arbitrary code execution closed and confirmed by reproduction; tamper-evident against accidental corruption; NOT sound against a hostile repo owner and no LW1 externality whatsoever. The S2E family must not claim LW1 externality until the one-view-per-verification refactor lands.",
-      "role": "operator",
-      "scope": "claim scope decision 2026-08-09",
-      "verdict": "OPTION_C_NARROW_THE_CLAIMS_AND_MERGE"
+      "scope": "P0-AIML-S2E-UID-TOPOLOGY-VALIDATION-PUBLICATION semantic source review",
+      "verdict": "PASS"
     }
   ],
   "schema_version": "s2_4_w4_derivation_record_v1_informal",
-  "source_head": "ae22391a187dbf64370fb3d2462a71c1e8815e51",
+  "source_head": "90713b5565fb49a4d36193b05a4ddff48cf32fbc",
   "test_evidence": {
-    "command": "python3 -m pytest -q -p no:cacheprovider tests/structure program_code/ml_training/tests",
+    "command": "governed E2 committed-tree pytest: tests/structure/test_agent_governance_command_capture_v2.py tests/structure/test_agent_governance_s2e_launch_receipts.py",
+    "context_artifact_digest": "sha256:108de2650146460ca633cf1dae5ebd7515f71c3d99d68659b95602db61ca0f27",
     "evidence_class": "LOCAL_REPRODUCIBLE",
     "exit_code": 0,
-    "honest_boundary": "Source and test facts only. Not a governed capture, no runtime attestation, and it does not show the three open items in design section 6 are closed.",
-    "measured_by": "E1 full-suite run on the linked worktree at a61ee30e0 (Mac, 1h48m), frozen HEAD and clean tree for the entire run. A prior run at 24d69c9b8 gave 8087 passed / 0 failed / 56 skipped; the delta of twelve is the PM-lane commits merged in from main, not this branch's work. Earlier sweeps in this program reported 27 failures that were self-inflicted measurement error (committing mid-run); re-running the affected files on a frozen tree gave 89 passed.",
-    "result": "8099 passed / 0 failed / 56 skipped / 0 error"
+    "honest_boundary": "Exact committed-source local review evidence only; no GitHub CI, merge, source sync, runtime, deploy, broker, order, external-attestation, or effect claim.",
+    "materialization_kind": "FRESH_PRIVATE_COMMITTED_TREE",
+    "private_git_metadata_kind": "PRIVATE_COPIED_OBJECT_DATABASE",
+    "record_digest": "sha256:2404748509c54fbf24386e959e21f16c078305711c29ca0b662d779b7e82aa40",
+    "result": "111 passed in 283.54s",
+    "source_head": "90713b5565fb49a4d36193b05a4ddff48cf32fbc",
+    "source_tree": "3e6c64fe1d95e12f69e760e9c20caf4982ebe6df"
   },
   "w4_wave_exit_derivation": {
     "reasons": [],
     "status": "PASS"
   },
-  "w4_wave_exit_self_digest": "sha256:92744734a1b8ec7152f4682a31e0c52b48fbb5cf5011127b17a6889373798878"
+  "w4_wave_exit_self_digest": "sha256:bc4756dbe4ff7514656bd4e809a6e4fb206efb73abf609c6af4c9cacd323202d"
 }

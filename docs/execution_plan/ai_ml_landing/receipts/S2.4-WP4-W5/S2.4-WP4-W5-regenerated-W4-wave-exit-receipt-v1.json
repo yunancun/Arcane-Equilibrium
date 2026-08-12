@@ -1,28 +1,25 @@
 {
   "capture_digests": [
-    "sha256:a5afa730c3763df436cb47100d2817556bb032f0403b9d39ad16e13b36d3a7a4"
+    "sha256:125ca0f531d3347b6324fcfb960f5502e63af5a0bb345a740019ec372666bae8"
   ],
   "exported_abi_digest": "sha256:c95dd5e0f4d821a1c93ca8454fbb3c1490a9d144a070b93d06b4c344ffdb52ea",
   "owned_path_diff_digest": "sha256:a2a2b2bdaab15399c736dc5ffdcd3021eac8a1fa1a5bf510d522e6b8780826da",
   "owned_path_manifest_digest": "sha256:b887ddd300c4ee93d261fe54ef204c746ce1dc369ba30616ecb62f129090f200",
-  "predecessor_wave_receipt_digest": "sha256:d90d9cff28d92a051c86fa0d66802270ff675e251fbfacec1f34aa7a6aaf66ce",
+  "predecessor_wave_receipt_digest": "sha256:ca563a6d9cacca636b57979e5abaf3ea0af9d22020bb79f0572869b2adc719ce",
   "production_authority_flags": {
     "nine_authorities_false": true,
     "production_apply_performed": false,
     "running_attested": false
   },
   "review_fragment_digests": [
-    "sha256:83522bd71e463411d1eaf581ec78b7413815ae0c253fe2cbcc248ec31492c71e",
-    "sha256:2d6a7f7f25fc81deb5b369c6d2f5a240f7797719057ab7b71c7587dd6f69ed90",
-    "sha256:cef655a12b4f8a236b6c6fd7a403f066d67d0eafae6a3f7801cd195dbb3043fb",
-    "sha256:eb6eada7d4038218e768d9b1a6bdcc5017d7b70ff4e81142ac8296ace2391427"
+    "sha256:afe6d233d8bf4855b0f094da3c8c4b13b9c2dc9f1a5d834464bbdaa83db1557c"
   ],
   "schema_version": "s2_4_wave_exit_receipt_v1",
-  "self_digest": "sha256:92744734a1b8ec7152f4682a31e0c52b48fbb5cf5011127b17a6889373798878",
-  "source_admission_receipt_digest": "sha256:ef3a021a2ca99b1043f00fbada65240871fd04a7e793ebda495df9d0e5cfb658",
-  "source_head": "ae22391a187dbf64370fb3d2462a71c1e8815e51",
+  "self_digest": "sha256:bc4756dbe4ff7514656bd4e809a6e4fb206efb73abf609c6af4c9cacd323202d",
+  "source_admission_receipt_digest": "sha256:feaaa6b0d174f721408aa1d71905f4da1a9ba0920f7a54376d4028afb63c5887",
+  "source_head": "90713b5565fb49a4d36193b05a4ddff48cf32fbc",
   "test_digests": [
-    "sha256:431570e23e3051bebe6ea91dc2df7ee62675f89b4c3d48c64221c42512a28e8e"
+    "sha256:0f37b9d5a8cd89e60b62744c8ad124b46083e6de9785ca09328ec71ae1896706"
   ],
   "wave": "W4"
 }
