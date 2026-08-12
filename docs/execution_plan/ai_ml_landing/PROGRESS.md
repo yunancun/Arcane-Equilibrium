@@ -1,8 +1,8 @@
 # AI/ML Landing Progress Ledger
 
 **Program**: `AIML-LONG-LIVED-LANDING-V2`
-**Ledger version**: 28
-**Updated**: 2026-08-12（uid-topology local carrier projection；validation/publication 仍是唯一 ACTIVE；LW2 等待 uid closure）
+**Ledger version**: 29
+**Updated**: 2026-08-12（uid-topology round-15 receipt repair；final validation/publication 仍是唯一 ACTIVE；LW2 等待 uid closure）
 **Overall state**: `PROGRAM_ADOPTED` · **`S1_CLOSED`** · every S2 effect-session
 source-seam predicate is narrowly `SOURCE_READY` (S2.0 + S2.1 + S2.2A + S2.3 +
 S2.4 + S2.5 + S2.2B), while Sprint 2 remains
@@ -39,13 +39,14 @@ Nine authorities remain false; G2 is `DONE_SOURCE_LANDED` at source PR #184
 `32550666488aba7664d0ed354455957f8f9ff5ee`). The one ACTIVE lane is
 `P0-AIML-S2E-UID-TOPOLOGY-VALIDATION-PUBLICATION` with status
 `ACTIVE_PENDING_FRESH_REVIEW_AND_PUBLICATION`, now projected from local integration
-branch `agent/p0-aiml-s2e-uid-topology-validation-publication-20260812` at carrier
-head `407cf1b8de6bb34d5f0a56ada3f6706c4f2e7258`. That branch non-rewriting integrated
-`origin/main`; semantic source `90713b5565fb49a4d36193b05a4ddff48cf32fbc`
-and the 33/33 canonical W0-W5 artifact chain (round 14) are locally committed.
-The exact-semantic-head E2 governed review passed with record digest
-`sha256:2404748509c54fbf24386e959e21f16c078305711c29ca0b662d779b7e82aa40`;
-carrier-head E2→E3→E4 is still pending. No GitHub publication, merge, source sync,
+branch `agent/p0-aiml-s2e-uid-topology-validation-publication-20260812` at receipt
+carrier head `070591dd33ff318389302d4efb0ecd5a4543e902`. That branch non-rewriting integrated
+`origin/main`; semantic source `6fd4ea739b736b6d00000f7e66913f7c8ee8a8e1`
+and the 33/33 canonical W0-W5 artifact chain (round 15) are locally committed;
+the current-head structural validator reports 21/21 PASS. The exact-semantic-head
+E2 governed review passed with record digest
+`sha256:c79714ad23eff5c17bb084db3fda6003aba86630e663995b23ad381425de1f09`;
+final carrier-head E2→E3→E4 is still pending. No GitHub publication, merge, source sync,
 or runtime authority was granted. No production effect may start before the S2E
 source waves close and a newly emitted packet receives fresh exact authority.
 The 2026-07-30 calibration-checkpoint narrative and the S0/S1
@@ -204,6 +205,7 @@ closed S0.x/S1.x rows(全部 DONE)已遷 `PROGRESS-archive-1.md`(資訊守恆);�
 
 | Time | Session | Event | Evidence |
 |---|---|---|---|
+| 2026-08-12 | uid-topology W2 final receipt repair | **Round 15 is locally committed and remains publication-pending.** PA proved that W2 folded application/launch builder instance digests containing current HEAD, so any receipt/docs carrier commit invalidated four persisted W2 instances. The repair keeps real production builders and their self-digest/application/base/foreign-application checks, but feeds W2 a head-independent semantic projection that still retains `learning_runtime_digest_v2` and declared application bytes. A carrier-only regression failed on the baseline and passes after repair. Exact-semantic-head E2 initially rejected an over-broad exclusion, then passed after `learning_runtime_digest_v2` was restored. Canonical emitters rewrote exactly 26 existing W2–W5 JSON files in strict W2→W5 order; W0/W1 directories are byte-identical. Current-head structural validation is 21/21 PASS and the four W2 instances all carry `sha256:9b2751b3659f4676459bc29d575255835ebdfba0e254af0eb030f92849bab89c`. Status stays `ACTIVE_PENDING_FRESH_REVIEW_AND_PUBLICATION` until final carrier-head E2→E3→E4; no publication, merge, sync, runtime, effect, or LW2 authority. | semantic source `6fd4ea739b736b6d00000f7e66913f7c8ee8a8e1`; receipt carrier `070591dd33ff318389302d4efb0ecd5a4543e902`; E2 `sha256:c79714ad23eff5c17bb084db3fda6003aba86630e663995b23ad381425de1f09`; 21/21 PASS |
 | 2026-08-12 | G2 source closure / uid projection | **G2 is `DONE_SOURCE_LANDED`.** Source PR [#184](https://github.com/yunancun/Arcane-Equilibrium/pull/184) reviewed head `bacb20648e18a6c50e1f4b89a257ac071df9d21a`, merge SHA `32550666488aba7664d0ed354455957f8f9ff5ee`; Mac/GitHub/Linux source all equal the merge SHA. four-head is `INDETERMINATE` only because engine process/build is unavailable, so the source posture is `SOURCE_SYNCED_RUNTIME_PENDING`, with no runtime/effect claim. **Named correction, preserving the valid 2026-08-07 event:** “seven closure false” was a stale count. The six closure false fields are `w0_genesis_receipt_issued`, `lw1_wave_receipt_issued`, `lw1_transition_gate_advance`, `lw2_unlocked`, `s2e_2b_2_closed`, `s2_closed`; the two authority false fields are `production_runtime_effect_performed_by_task`, `production_deploy_restart_pg_broker_order_authorized`. The one ACTIVE lane is uid-topology validation/publication, not ready/landed/security-closed; LW2 waits for uid closure and fresh combined-main unreachability proof. S2E remains 5/9, effect 0/6, authority 0/9, receipts absent, S2 open. | PR #184; reviewed `bacb20648e18a6c50e1f4b89a257ac071df9d21a`; merged/synced `32550666488aba7664d0ed354455957f8f9ff5ee`; current uid local carrier `agent/p0-aiml-s2e-uid-topology-validation-publication-20260812` @ `407cf1b8de6bb34d5f0a56ada3f6706c4f2e7258`, unpublished/unmerged/unsynced |
 | 2026-08-09 | G1/G2 evidence correction | **The "no ssh access" line in this branch's records was a misdiagnosis, and it had already been copied forward twice.** The key carries a passphrase and the agent was empty; `ssh-add` and it connects — the same root cause PR #182 corrected for A5. Re-measured directly rather than restated: `getconf PAGE_SIZE` 4096, `getconf ARG_MAX` 2,097,152, and a binary search on `/bin/true` puts the largest single argv element at **131,071 bytes**, so `MAX_ARG_STRLEN` is 131,072 — the three values G1's transport budget rests on are now first-hand. trade-core's `srv` is on `main`, clean, at `cd09a59a6`, so the Linux sync claim is confirmed too. A read-only sweep of the twelve fixed host paths returns **eleven present, one absent** (`…/s2-5-recovery-host-capture-attest-v2`, one of the three unwritten producers), which makes the committed packet's 2026-08-02 all-ABSENT inventory definitively stale rather than merely suspect. **Not refreshed in this PR on purpose:** refreshing moves `blocked_prerequisite_ids`, the field an operator acts on, while this PR's E2/E4 review covered the derivation mechanism and not the host observation — folding it in would silently reshape an already signed-off scope. Filed as `P2-LW1-READONLY-INVENTORY-REFRESH`, with the rule that inventory bytes may never be hand-edited from a report or a shell sweep. **The lesson is the misdiagnosis itself:** an environment fault written up as a capability boundary gets quoted forward by every later round. Everything above is `UNAUTHENTICATED_READ_ONLY_OBSERVATION`, not platform-attested, and changes no gate. | ssh read-only on trade-core; `P2-LW1-READONLY-INVENTORY-REFRESH`; authority 0/9, effect 0/6 |
 | 2026-08-09 | S2E-LW1 action packet | **Round-2's eleventh item closed — and the first fix for it was wrong in the mirror-image way, which the PR review caught.** The packet was never miswritten: its pinned checkpoint `970734ae0` is 04:35:38 and its tree provably lacks the floor file, while `fdf3c0fa6` commits it at 04:40:35, five minutes later. The rot came from **a static list frozen behind a pin that predates the fact**, which is why round-2 and round-4 both named it and nothing ever went red. The first fix deleted the entry globally — that cured "already done but still demanded" and created "not yet done but treated as done": regenerating at the packet's own pin, which the committed-artifact test does by construction, then silently omitted a genuinely required step and still validated. Codex raised it as P1 and it reproduced. **Writing a time-varying fact as a constant is wrong at every value you can pick**; the only fix is to let the checkout it describes decide. So the catalogue stays at eight ordered entries and `required_action_ids(repo_root, at_commit=...)` subtracts whatever that commit's tree already proves done, with the validator recomputing at the packet's own bound head — not at `repo_root`'s HEAD, which is usually a different commit. `at_commit` is 40-hex validated before reaching git, because on the validate path it arrives from the packet under inspection. The schema's `const` becomes an enum-constrained array and exact equality moves into code — stricter, not looser, since a `const` cannot adapt to a checkout and can only choose which pin to be wrong about. The artifact is repinned to `2f9b6cde4`, where the floor exists, and derives seven; every field but `packet_digest` and `source_binding` is byte-identical. **Named and not refreshed:** the packet's `readonly_observation` is still the 2026-08-02 all-ABSENT capture and now disagrees with the 2026-08-08 operator-reported provisioning — refreshing it needs a fresh read-only inventory on trade-core, and rewriting inventory bytes from a report would be fabricating a host observation. | `agent_governance_s2e_lw1_action_packet.py`; `s2e_lw1_operator_action_packet_v1.schema.json`; design master 演變軌跡 2026-08-07/09; PR #180 Codex P1 |
@@ -267,11 +269,13 @@ worker from taking. Full statements are in the W5 derivation record
 hand-maintained projection carried 13 of these rows; that is the drift this generated
 section exists to prevent.
 
-**The persisted receipt set in this tree is bound to `90713b556` and was
-committed one commit later, as `407cf1b8d` (round 14).** This canonical re-emission
-follows the current-main integration and the exact-semantic-head E2 governed PASS;
-it does not grant publication, merge, source-sync, runtime, effect, or LW2 authority.
-The preceding round 13 set was bound to `ae22391a1` and committed as `b896eaf8c`.
+**The persisted receipt set in this tree is bound to `6fd4ea739` and was
+committed as `070591dd3` (round 15).** This canonical W2→W5 re-emission follows the
+W2 carrier-identity source repair and the exact-semantic-head E2 governed PASS;
+W0/W1 historical directories remain byte-identical, and this grants no publication,
+merge, source-sync, runtime, effect, or LW2 authority. The preceding round 14 set was
+bound to `90713b556` and committed as `407cf1b8d`; round 13 was bound to `ae22391a1`
+and committed as `b896eaf8c`.
 Round 12 was bound to `2dd853ddf` — the Tier 1 durability anchor
 branch after the four PR #178 review threads closed — and committed as `e21f4d1cc`.
 Round 12 exists because closing those threads modified
@@ -292,7 +296,7 @@ head: S2.4-AMEND-1/2 chain `223a479d7`→`e9b26e895`→`a48355a29`→`cc6a8b97a`
 receipts `c911ea9c1`, projection `23037eb0b`, then the PR#153 Codex-review fixes)
 and carried by `3df9d2f45`. *Bound to*
 and *committed at* are different facts and the artifacts state the first: each of the
-current eight carries `source_head = 90713b5565fb49a4d36193b05a4ddff48cf32fbc`. Read the
+current eight carries `source_head = 6fd4ea739b736b6d00000f7e66913f7c8ee8a8e1`. Read the
 binding out of the artifact field, never out of this paragraph; the discriminator regression
 `tests/structure/test_aiml_w5_receipt_binding_projection.py` mechanically requires one
 unique `source_head` across all eight artifacts and requires every claim of that form in
@@ -328,7 +332,7 @@ round's final head `f30ede361` (round 9) — the emitter enforces the rule mecha
 `W5_RECEIPTS_EMITTED` on the clean committed head). Round 8 changed the ledger digest
 (four typed-status flips); round 9 re-binds owned-path blobs only (ledger unchanged).
 
-W5-RECEIPT-BINDING: source_head=90713b5565fb49a4d36193b05a4ddff48cf32fbc carrier_commit=407cf1b8de6bb34d5f0a56ada3f6706c4f2e7258 artifacts=8 round=14 status=COMMITTED
+W5-RECEIPT-BINDING: source_head=6fd4ea739b736b6d00000f7e66913f7c8ee8a8e1 carrier_commit=070591dd33ff318389302d4efb0ecd5a4543e902 artifacts=8 round=15 status=COMMITTED
 
 | # | `obligation_id` | `typed_status` | `owner_wave` | Spec refs |
 |---|---|---|---|---|

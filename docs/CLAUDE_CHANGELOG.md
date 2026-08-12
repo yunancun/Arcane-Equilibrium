@@ -1,7 +1,25 @@
 # CLAUDE_CHANGELOG.md — 開發歷史歸檔
 
 > 從 CLAUDE.md / TODO.md 遷出的 Wave/Sprint/Batch + TODO version-increment 歷史敘事。新 session 不需要讀此文件，僅供回顧歷史時查閱。
-> 最後更新：2026-08-12（TODO v876 uid-topology local carrier projection）
+> 最後更新：2026-08-12（TODO v877 uid-topology W2 final receipt repair）
+
+---
+
+## TODO v877 增量：uid-topology W2 final receipt repair（2026-08-12）
+
+- 根因是 W2 exported ABI 把 application／launch builder 的 current-HEAD-bound
+  instance digest 當成語義身分；receipt 或 docs carrier commit 因而使四份 W2
+  persisted instance 過期。production builders 與真實 self-digest、application/base
+  binding、foreign-application rejection 均保留，只把 `source_head`／`self_digest`
+  排除於 probe semantic projection；`learning_runtime_digest_v2` 與 declared bytes 保留。
+- baseline carrier-only regression RED；修補後四個 focused tests PASS。E2 首輪抓出
+  `learning_runtime_digest_v2` 被過度排除並拒絕，校正後在 semantic source
+  `6fd4ea739b736b6d00000f7e66913f7c8ee8a8e1` PASS，governed record digest
+  `sha256:c79714ad23eff5c17bb084db3fda6003aba86630e663995b23ad381425de1f09`。
+- canonical emitter 依 W2→W5 順序精確重寫 26 份既有 JSON；W0/W1 目錄不變。
+  receipt carrier=`070591dd33ff318389302d4efb0ecd5a4543e902`，round 15，current-head
+  structural validator=21/21 PASS。final carrier-head E2→E3→E4 與 GitHub
+  publication 仍待完成；無 merge、sync、runtime/effect 或 LW2 authority。
 
 ---
 
