@@ -230,9 +230,10 @@ worker from taking. Full statements are in the W5 derivation record
 hand-maintained projection carried 13 of these rows; that is the drift this generated
 section exists to prevent.
 
-**The persisted receipt set in this tree is bound to `2dd853ddf` — the Tier 1
-durability anchor branch after the four PR #178 review threads closed — and was
-committed one commit later, as `e21f4d1cc` (round 12).**
+**The persisted receipt set in this tree is bound to `ae22391a1` and was
+committed one commit later, as `b896eaf8c` (round 13).**
+The preceding round 12 set was bound to `2dd853ddf` — the Tier 1 durability anchor
+branch after the four PR #178 review threads closed — and committed as `e21f4d1cc`.
 Round 12 exists because closing those threads modified
 `aiml_gate_receipt_schema_core.py`, a W5-owned path, which is the same debt this
 branch was opened to repay for `209793b70` — paid this time in the round that
@@ -251,7 +252,7 @@ head: S2.4-AMEND-1/2 chain `223a479d7`→`e9b26e895`→`a48355a29`→`cc6a8b97a`
 receipts `c911ea9c1`, projection `23037eb0b`, then the PR#153 Codex-review fixes)
 and carried by `3df9d2f45`. *Bound to*
 and *committed at* are different facts and the artifacts state the first: each of the
-eight carries `source_head = 2dd853ddfdc3569939d3de954d90ebd286d77870`. Read the
+current eight carries `source_head = ae22391a187dbf64370fb3d2462a71c1e8815e51`. Read the
 binding out of the artifact field, never out of this paragraph; the discriminator regression
 `tests/structure/test_aiml_w5_receipt_binding_projection.py` mechanically requires one
 unique `source_head` across all eight artifacts and requires every claim of that form in
@@ -287,7 +288,7 @@ round's final head `f30ede361` (round 9) — the emitter enforces the rule mecha
 `W5_RECEIPTS_EMITTED` on the clean committed head). Round 8 changed the ledger digest
 (four typed-status flips); round 9 re-binds owned-path blobs only (ledger unchanged).
 
-W5-RECEIPT-BINDING: source_head=2dd853ddfdc3569939d3de954d90ebd286d77870 carrier_commit=e21f4d1cc29498dbd8540db52073ca901deab17b artifacts=8 round=12 status=COMMITTED
+W5-RECEIPT-BINDING: source_head=ae22391a187dbf64370fb3d2462a71c1e8815e51 carrier_commit=b896eaf8c4ea7e256b7117ee2421a2d4f9e78c70 artifacts=8 round=13 status=COMMITTED
 
 | # | `obligation_id` | `typed_status` | `owner_wave` | Spec refs |
 |---|---|---|---|---|
