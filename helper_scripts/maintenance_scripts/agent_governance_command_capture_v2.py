@@ -46,6 +46,13 @@ from agent_governance_routing import route_task
 from agent_governance_workflow_receipts import canonical_digest
 
 
+ML_TRAINING_ROOT = Path(__file__).resolve().parents[2] / "program_code" / "ml_training"
+if str(ML_TRAINING_ROOT) not in sys.path:
+    sys.path.insert(0, str(ML_TRAINING_ROOT))
+
+from aiml_gate_receipt_git_view import code_owned_object_view  # noqa: E402
+
+
 DIGEST_RE = re.compile(r"^sha256:[0-9a-f]{64}$")
 DURATION_RE = re.compile(rb"(?<![A-Za-z0-9_.])\d+(?:\.\d+)?(?:ms|s)(?![A-Za-z0-9_.])")
 PREVIEW_LIMIT = 4096
@@ -127,8 +134,47 @@ SOURCE_MATERIALIZATION_FIELDS = {
     "schema_version", "materialization_kind", "source_head", "source_tree",
     "manifest_digest", "materialized_file_count", "materialized_bytes",
     "executable_file_count", "materialized_symlink_count",
-    "materialized_symlink_manifest_digest", "private_root_mode", "cleanup_status",
+    "materialized_symlink_manifest_digest", "git_metadata_kind",
+    "git_object_graph_digest", "git_metadata_manifest_digest",
+    "private_root_mode", "cleanup_status",
 }
+PRIVATE_GIT_CONFIG = (
+    "[core]\n"
+    "\trepositoryformatversion = 0\n"
+    "\tfilemode = true\n"
+    "\tbare = false\n"
+    "\tlogallrefupdates = false\n"
+)
+PRIVATE_GIT_METADATA_KIND = "PRIVATE_COPIED_OBJECT_DATABASE"
+PRIVATE_GIT_GRAPH_VERIFICATION = "GIT_FSCK_STRICT_FULL_AND_VERIFY_PACK_V1"
+GIT_SEARCH_PATH = ("/usr/bin", "/bin", "/usr/local/bin", "/opt/homebrew/bin")
+
+
+def _governed_git_executable() -> str:
+    for directory in GIT_SEARCH_PATH:
+        candidate = Path(directory) / "git"
+        if candidate.is_file() and os.access(candidate, os.X_OK):
+            return str(candidate)
+    return "/usr/bin/git"
+
+
+def _governed_git_argv(repository: Path, *args: str) -> list[str]:
+    return [_governed_git_executable(), "-C", str(repository), *args]
+
+
+def _governed_git_environment() -> dict[str, str]:
+    environment = {
+        "PATH": os.pathsep.join(GIT_SEARCH_PATH),
+        "LANG": "C",
+        "LC_ALL": "C",
+        "GIT_CONFIG_NOSYSTEM": "1",
+        "GIT_CONFIG_GLOBAL": os.devnull,
+        "GIT_OPTIONAL_LOCKS": "0",
+        "GIT_TERMINAL_PROMPT": "0",
+    }
+    if "TZ" in os.environ:
+        environment["TZ"] = os.environ["TZ"]
+    return environment
 SAFE_INHERITED_ENVIRONMENT = {
     "PATH", "LANG", "LC_ALL", "LC_CTYPE", "TERM", "SYSTEMROOT",
 }
@@ -757,7 +803,10 @@ def _safe_materialized_path(path: str) -> bool:
         and "\\" not in path
         and "\x00" not in path
         and not relative.is_absolute()
-        and all(part not in {"", ".", "..", ".git"} for part in relative.parts)
+        and all(
+            part not in {"", ".", ".."} and part.casefold() != ".git"
+            for part in relative.parts
+        )
     )
 
 
@@ -767,36 +816,230 @@ def _git_blob_sha1(payload: bytes) -> str:
     ).hexdigest()
 
 
+def _private_git_run(
+    git_dir: Path,
+    *args: str,
+    text: bool = False,
+    input_bytes: bytes | None = None,
+) -> subprocess.CompletedProcess[Any]:
+    return subprocess.run(
+        _governed_git_argv(git_dir, "--no-replace-objects", *args),
+        cwd=git_dir,
+        check=True,
+        input=input_bytes,
+        capture_output=True,
+        env=_governed_git_environment(),
+        text=text,
+        timeout=180,
+    )
+
+
+def _replace_private_file(path: Path, payload: bytes, mode: int = 0o600) -> None:
+    try:
+        metadata = path.lstat()
+    except FileNotFoundError:
+        metadata = None
+    if metadata is not None:
+        if not stat.S_ISREG(metadata.st_mode):
+            raise ValueError(f"private Git metadata path is not regular: {path.name}")
+        path.unlink()
+    descriptor = os.open(
+        path,
+        os.O_WRONLY | os.O_CREAT | os.O_EXCL | getattr(os, "O_CLOEXEC", 0)
+        | getattr(os, "O_NOFOLLOW", 0),
+        mode,
+    )
+    try:
+        written = 0
+        while written < len(payload):
+            count = os.write(descriptor, payload[written:])
+            if count <= 0:
+                raise OSError("private Git metadata write made no progress")
+            written += count
+        os.fsync(descriptor)
+    finally:
+        os.close(descriptor)
+    path.chmod(mode)
+
+
+def _private_git_file_manifest(root: Path) -> list[dict[str, Any]]:
+    manifest: list[dict[str, Any]] = []
+    for path in sorted(root.rglob("*")):
+        metadata = path.lstat()
+        if stat.S_ISDIR(metadata.st_mode):
+            continue
+        if not stat.S_ISREG(metadata.st_mode) or metadata.st_nlink != 1:
+            raise ValueError("private copied Git metadata contains a link or special entry")
+        manifest.append({
+            "path": path.relative_to(root).as_posix(),
+            "bytes": metadata.st_size,
+            "sha256": _raw_file_digest(path),
+        })
+    return manifest
+
+
+def _build_private_git_database(
+    repository: Path,
+    source_head: str,
+    git_dir: Path,
+) -> dict[str, str]:
+    """Copy and verify one exact commit graph without opening the subject checkout."""
+
+    import shutil
+
+    if re.fullmatch(r"[0-9a-f]{40}", source_head) is None:
+        raise ValueError("committed review source head is invalid")
+    source_ref = "refs/heads/code-owned-review-source"
+    source_view_text = ""
+    with code_owned_object_view(repository) as view:
+        _private_git_run(view, "update-ref", source_ref, source_head)
+        _private_git_run(view, "symbolic-ref", "HEAD", source_ref)
+        source_view_text = str(view)
+        subprocess.run(
+            [
+                _governed_git_executable(),
+                "clone", "--bare", "--no-local", "--no-tags",
+                str(view), str(git_dir),
+            ],
+            cwd=git_dir.parent,
+            check=True,
+            capture_output=True,
+            env=_governed_git_environment(),
+            timeout=180,
+        )
+    if not stat.S_ISDIR(git_dir.lstat().st_mode):
+        raise ValueError("private copied Git database is not a directory")
+    _replace_private_file(git_dir / "HEAD", (source_head + "\n").encode("ascii"))
+    _replace_private_file(git_dir / "config", PRIVATE_GIT_CONFIG.encode("ascii"))
+    refs = _private_git_run(
+        git_dir, "for-each-ref", "--format=%(refname)", text=True
+    ).stdout.splitlines()
+    for ref in refs:
+        _private_git_run(git_dir, "update-ref", "-d", ref)
+    for removable in (git_dir / "hooks", git_dir / "logs"):
+        if removable.exists():
+            if removable.is_symlink() or not removable.is_dir():
+                raise ValueError("private copied Git executable metadata is unsafe")
+            shutil.rmtree(removable)
+    for index in sorted((git_dir / "objects" / "pack").glob("*.idx")):
+        metadata = index.lstat()
+        if not stat.S_ISREG(metadata.st_mode):
+            raise ValueError("private copied Git pack index is not regular")
+        subprocess.run(
+            [_governed_git_executable(), "verify-pack", "-v", str(index)],
+            cwd=git_dir,
+            check=True,
+            stdout=subprocess.DEVNULL,
+            stderr=subprocess.PIPE,
+            env=_governed_git_environment(),
+            timeout=180,
+        )
+    _private_git_run(git_dir, "fsck", "--strict", "--full", "--no-dangling")
+    resolved_head = _private_git_run(
+        git_dir, "rev-parse", "--verify", f"{source_head}^{{commit}}", text=True
+    ).stdout.strip()
+    source_tree = _private_git_run(
+        git_dir, "rev-parse", "--verify", f"{source_head}^{{tree}}", text=True
+    ).stdout.strip()
+    if resolved_head != source_head:
+        raise ValueError("private copied Git database lost the exact source head")
+    _private_git_run(git_dir.parent, "read-tree", source_head)
+    index_tree = _private_git_run(
+        git_dir.parent, "write-tree", text=True
+    ).stdout.strip()
+    if index_tree != source_tree:
+        raise ValueError("private copied Git index differs from the exact source tree")
+    metadata_manifest = _private_git_file_manifest(git_dir)
+    forbidden = tuple(
+        value.encode("utf-8") for value in (str(repository.resolve()), source_view_text)
+    )
+    for entry in metadata_manifest:
+        if entry["path"].startswith("objects/"):
+            continue
+        payload = (git_dir / entry["path"]).read_bytes()
+        if any(token and token in payload for token in forbidden):
+            raise ValueError("private copied Git metadata retains its source path")
+    reachable = _private_git_run(
+        git_dir, "rev-list", "--objects", source_head
+    ).stdout.splitlines()
+    object_ids = sorted({line.split(b" ", 1)[0].decode("ascii") for line in reachable})
+    if not object_ids or any(
+        re.fullmatch(r"[0-9a-f]{40}", object_id) is None
+        for object_id in object_ids
+    ):
+        raise ValueError("private copied Git reachable object inventory is invalid")
+    checked = _private_git_run(
+        git_dir,
+        "cat-file", "--batch-check=%(objectname) %(objecttype) %(objectsize)",
+        input_bytes=b"".join(object_id.encode("ascii") + b"\n" for object_id in object_ids),
+    ).stdout.splitlines()
+    object_manifest: list[dict[str, Any]] = []
+    if len(checked) != len(object_ids):
+        raise ValueError("private copied Git object inventory is incomplete")
+    for expected, line in zip(object_ids, checked, strict=True):
+        fields = line.decode("ascii", errors="strict").split()
+        if (
+            len(fields) != 3 or fields[0] != expected
+            or fields[1] not in {"blob", "commit", "tag", "tree"}
+            or not fields[2].isdigit()
+        ):
+            raise ValueError("private copied Git object metadata is invalid")
+        object_manifest.append({
+            "oid": expected, "type": fields[1], "bytes": int(fields[2]),
+        })
+    refs_after = _private_git_run(
+        git_dir, "for-each-ref", "--format=%(refname)", text=True
+    ).stdout.splitlines()
+    remotes_after = _private_git_run(git_dir, "remote", text=True).stdout.splitlines()
+    metadata_policy = {
+        "detached_head": resolved_head,
+        "index_tree": index_tree,
+        "refs": refs_after,
+        "remotes": remotes_after,
+        "hooks_present": (git_dir / "hooks").exists(),
+        "alternates_present": (git_dir / "objects" / "info" / "alternates").exists(),
+    }
+    if refs_after or remotes_after or metadata_policy["hooks_present"] or metadata_policy[
+        "alternates_present"
+    ]:
+        raise ValueError("private copied Git metadata policy is not closed")
+    return {
+        "source_tree": source_tree,
+        "git_metadata_kind": PRIVATE_GIT_METADATA_KIND,
+        "git_object_graph_digest": canonical_digest({
+            "schema_version": "private_copied_git_object_graph_v1",
+            "verification": PRIVATE_GIT_GRAPH_VERIFICATION,
+            "source_head": source_head,
+            "source_tree": source_tree,
+            "entries": object_manifest,
+        }),
+        "git_metadata_manifest_digest": canonical_digest({
+            "schema_version": "private_copied_git_metadata_policy_v1",
+            "source_head": source_head,
+            "source_tree": source_tree,
+            **metadata_policy,
+        }),
+    }
+
+
 def _committed_tree_inventory(
-    repository: Path, source_head: str,
+    private_git_dir: Path, source_head: str,
 ) -> tuple[str, list[dict[str, Any]], list[dict[str, Any]]]:
     if re.fullmatch(r"[0-9a-f]{40}", source_head) is None:
         raise ValueError("committed review source head is invalid")
-    common = {
-        "cwd": repository,
-        "check": True,
-        "capture_output": True,
-        "env": _git_read_environment(),
-        "timeout": 180,
-    }
-    resolved = subprocess.run(
-        ["git", "--no-replace-objects", "rev-parse", "--verify", f"{source_head}^{{commit}}"],
+    resolved = _private_git_run(
+        private_git_dir, "rev-parse", "--verify", f"{source_head}^{{commit}}",
         text=True,
-        **common,
     ).stdout.strip()
     if resolved != source_head:
         raise ValueError("committed review source head does not resolve exactly")
-    source_tree = subprocess.run(
-        ["git", "--no-replace-objects", "rev-parse", "--verify", f"{source_head}^{{tree}}"],
+    source_tree = _private_git_run(
+        private_git_dir, "rev-parse", "--verify", f"{source_head}^{{tree}}",
         text=True,
-        **common,
     ).stdout.strip()
-    listing = subprocess.run(
-        [
-            "git", "--no-replace-objects", "ls-tree", "-r", "-z", "-l",
-            "--full-tree", source_head,
-        ],
-        **common,
+    listing = _private_git_run(
+        private_git_dir, "ls-tree", "-r", "-z", "-l", "--full-tree",
+        source_head,
     ).stdout
     regular: list[dict[str, Any]] = []
     symlinks: list[dict[str, Any]] = []
@@ -844,7 +1087,7 @@ def _committed_tree_inventory(
 
 
 def _materialize_committed_blobs(
-    repository: Path,
+    private_git_dir: Path,
     target: Path,
     entries: list[dict[str, Any]],
 ) -> None:
@@ -852,14 +1095,8 @@ def _materialize_committed_blobs(
     request = b"".join(
         str(entry["git_blob"]).encode("ascii") + b"\n" for entry in ordered
     )
-    completed = subprocess.run(
-        ["git", "--no-replace-objects", "cat-file", "--batch"],
-        cwd=repository,
-        check=True,
-        input=request,
-        capture_output=True,
-        env=_git_read_environment(),
-        timeout=180,
+    completed = _private_git_run(
+        private_git_dir, "cat-file", "--batch", input_bytes=request,
     )
     stream = completed.stdout
     offset = 0
@@ -939,36 +1176,47 @@ def _fresh_committed_tree(
     *,
     parent: Path,
 ) -> Iterator[tuple[Path, dict[str, Any]]]:
-    source_tree, entries, symlinks = _committed_tree_inventory(
-        repository, source_head
-    )
     materialized = Path(tempfile.mkdtemp(prefix="review-source-", dir=parent))
     materialized.chmod(0o700)
-    evidence: dict[str, Any] = {
-        "schema_version": "source_materialization_v1",
-        "materialization_kind": "FRESH_PRIVATE_COMMITTED_TREE",
-        "source_head": source_head,
-        "source_tree": source_tree,
-        "manifest_digest": canonical_digest({
-            "schema_version": "committed_tree_regular_file_manifest_v1",
-            "entries": entries,
-        }),
-        "materialized_file_count": len(entries),
-        "materialized_bytes": sum(entry["bytes"] for entry in entries),
-        "executable_file_count": sum(
-            entry["mode"] == "100755" for entry in entries
-        ),
-        "materialized_symlink_count": len(symlinks),
-        "materialized_symlink_manifest_digest": canonical_digest({
-            "schema_version": "committed_tree_symlink_manifest_v1",
-            "entries": symlinks,
-        }),
-        "private_root_mode": "0700",
-        "cleanup_status": "PENDING",
-    }
+    evidence: dict[str, Any] = {}
     try:
+        git_evidence = _build_private_git_database(
+            repository, source_head, materialized / ".git"
+        )
+        source_tree, entries, symlinks = _committed_tree_inventory(
+            materialized / ".git", source_head
+        )
+        if source_tree != git_evidence["source_tree"]:
+            raise ValueError("private copied Git inventory changed its source tree")
+        evidence.update({
+            "schema_version": "source_materialization_v1",
+            "materialization_kind": "FRESH_PRIVATE_COMMITTED_TREE",
+            "source_head": source_head,
+            "source_tree": source_tree,
+            "manifest_digest": canonical_digest({
+                "schema_version": "committed_tree_regular_file_manifest_v1",
+                "entries": entries,
+            }),
+            "materialized_file_count": len(entries),
+            "materialized_bytes": sum(entry["bytes"] for entry in entries),
+            "executable_file_count": sum(
+                entry["mode"] == "100755" for entry in entries
+            ),
+            "materialized_symlink_count": len(symlinks),
+            "materialized_symlink_manifest_digest": canonical_digest({
+                "schema_version": "committed_tree_symlink_manifest_v1",
+                "entries": symlinks,
+            }),
+            "git_metadata_kind": git_evidence["git_metadata_kind"],
+            "git_object_graph_digest": git_evidence["git_object_graph_digest"],
+            "git_metadata_manifest_digest": git_evidence[
+                "git_metadata_manifest_digest"
+            ],
+            "private_root_mode": "0700",
+            "cleanup_status": "PENDING",
+        })
         _materialize_committed_blobs(
-            repository, materialized, [*entries, *symlinks]
+            materialized / ".git", materialized, [*entries, *symlinks]
         )
         yield materialized, evidence
     finally:
@@ -1487,9 +1735,16 @@ def _source_materialization_errors(
         if materialization.get(field) != expected:
             errors.append(f"governed pytest source materialization {field} is invalid")
     try:
-        source_tree, entries, symlinks = _committed_tree_inventory(
-            root, str(materialization.get("source_head", ""))
-        )
+        with tempfile.TemporaryDirectory(
+            prefix="governed-materialization-validation-"
+        ) as isolated:
+            private_git_dir = Path(isolated) / ".git"
+            git_evidence = _build_private_git_database(
+                root, str(materialization.get("source_head", "")), private_git_dir
+            )
+            source_tree, entries, symlinks = _committed_tree_inventory(
+                private_git_dir, str(materialization.get("source_head", ""))
+            )
     except (OSError, ValueError, subprocess.SubprocessError) as error:
         return sorted(set(errors + [
             f"governed pytest committed source inventory is unavailable: {error}"
@@ -1510,6 +1765,11 @@ def _source_materialization_errors(
             "schema_version": "committed_tree_symlink_manifest_v1",
             "entries": symlinks,
         }),
+        "git_metadata_kind": git_evidence["git_metadata_kind"],
+        "git_object_graph_digest": git_evidence["git_object_graph_digest"],
+        "git_metadata_manifest_digest": git_evidence[
+            "git_metadata_manifest_digest"
+        ],
     }
     for field, expected in expected_values.items():
         if materialization.get(field) != expected:

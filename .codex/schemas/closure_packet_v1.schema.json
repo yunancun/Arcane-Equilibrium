@@ -1169,6 +1169,8 @@
         "source_tree", "manifest_digest", "materialized_file_count",
         "materialized_bytes", "executable_file_count",
         "materialized_symlink_count", "materialized_symlink_manifest_digest",
+        "git_metadata_kind", "git_object_graph_digest",
+        "git_metadata_manifest_digest",
         "private_root_mode", "cleanup_status"
       ],
       "properties": {
@@ -1182,6 +1184,9 @@
         "executable_file_count": {"type": "integer", "minimum": 0},
         "materialized_symlink_count": {"type": "integer", "minimum": 0},
         "materialized_symlink_manifest_digest": {"$ref": "#/$defs/digest"},
+        "git_metadata_kind": {"const": "PRIVATE_COPIED_OBJECT_DATABASE"},
+        "git_object_graph_digest": {"$ref": "#/$defs/digest"},
+        "git_metadata_manifest_digest": {"$ref": "#/$defs/digest"},
         "private_root_mode": {"const": "0700"},
         "cleanup_status": {"const": "REMOVED"}
       }

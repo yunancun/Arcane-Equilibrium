@@ -511,28 +511,13 @@ def test_committed_tree_materialization_preserves_executable_mode(
 
 
 def test_committed_tree_inventory_rejects_traversal_and_special_entries(
-    tmp_path: Path, monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
 ) -> None:
     repository, head = _commit_test_repository(
         tmp_path, assertion="VALUE == 1"
     )
 
-    def unsafe(*args, **kwargs):
-        command = args[0]
-        if "ls-tree" in command:
-            return subprocess.CompletedProcess(
-                command, 0,
-                stdout=b"100644 blob " + b"a" * 40 + b" 1\t../escape.py\0",
-                stderr=b"",
-            )
-        return real_run(*args, **kwargs)
-
-    real_run = subprocess.run
-    monkeypatch.setattr(capture_v2.subprocess, "run", unsafe)
-    with pytest.raises(ValueError, match="entry is unsafe"):
-        capture_v2._committed_tree_inventory(repository, head)
-
-    monkeypatch.setattr(capture_v2.subprocess, "run", real_run)
+    assert capture_v2._safe_materialized_path("../escape.py") is False
     subprocess.run(
         [
             "git", "update-index", "--add", "--cacheinfo",
@@ -549,14 +534,92 @@ def test_committed_tree_inventory_rejects_traversal_and_special_entries(
         ["git", "commit-tree", tree, "-p", head, "-m", "special entry"],
         cwd=repository, check=True, capture_output=True, text=True,
     ).stdout.strip()
+    parent = tmp_path / "private"
+    parent.mkdir(mode=0o700)
     with pytest.raises(ValueError, match="special entry"):
-        capture_v2._committed_tree_inventory(repository, special_commit)
+        with capture_v2._fresh_committed_tree(
+            repository, special_commit, parent=parent
+        ):
+            pytest.fail("special entry was materialized")
 
 
 def test_committed_tree_materialization_rejects_git_metadata_components() -> None:
     assert capture_v2._safe_materialized_path(".git/config") is False
+    assert capture_v2._safe_materialized_path("nested/.GIT/hooks/probe") is False
+    assert capture_v2._safe_materialized_path("nested/.Git/index") is False
     assert capture_v2._safe_materialized_path("nested/.git/hooks/probe") is False
     assert capture_v2._safe_materialized_path("nested/git/source.py") is True
+
+
+def test_fresh_committed_tree_has_private_git_metadata_and_no_subject_links(
+    tmp_path: Path,
+) -> None:
+    repository, head = _commit_test_repository(
+        tmp_path, assertion="VALUE == 1"
+    )
+    source_tree = subprocess.run(
+        ["git", "rev-parse", f"{head}^{{tree}}"], cwd=repository, check=True,
+        capture_output=True, text=True,
+    ).stdout.strip()
+    parent = tmp_path / "private"
+    parent.mkdir(mode=0o700)
+
+    with capture_v2._fresh_committed_tree(
+        repository, head, parent=parent
+    ) as (materialized, evidence):
+        assert subprocess.run(
+            ["git", "rev-parse", "HEAD"], cwd=materialized, check=True,
+            capture_output=True, text=True,
+        ).stdout.strip() == head
+        assert subprocess.run(
+            ["git", "rev-parse", "HEAD^{tree}"], cwd=materialized, check=True,
+            capture_output=True, text=True,
+        ).stdout.strip() == source_tree
+        assert evidence["git_metadata_kind"] == "PRIVATE_COPIED_OBJECT_DATABASE"
+        assert evidence["git_object_graph_digest"].startswith("sha256:")
+        assert evidence["git_metadata_manifest_digest"].startswith("sha256:")
+        for path in (materialized / ".git").rglob("*"):
+            assert not path.is_symlink(), path
+        assert not (materialized / ".git" / "objects" / "info" / "alternates").exists()
+        first_digests = (
+            evidence["git_object_graph_digest"],
+            evidence["git_metadata_manifest_digest"],
+        )
+    with capture_v2._fresh_committed_tree(
+        repository, head, parent=parent
+    ) as (_, replay_evidence):
+        assert (
+            replay_evidence["git_object_graph_digest"],
+            replay_evidence["git_metadata_manifest_digest"],
+        ) == first_digests
+
+
+def test_committed_inventory_and_blobs_never_open_the_subject_as_a_git_repo(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    repository, head = _commit_test_repository(
+        tmp_path, assertion="VALUE == 1"
+    )
+    subject = repository.resolve()
+    real_run = subprocess.run
+    git_repository_paths: list[Path] = []
+
+    def spy(argv, *args, **kwargs):
+        if isinstance(argv, (list, tuple)) and argv and Path(str(argv[0])).name == "git":
+            if "-C" in argv:
+                git_repository_paths.append(Path(str(argv[argv.index("-C") + 1])).resolve())
+            elif kwargs.get("cwd") is not None:
+                git_repository_paths.append(Path(kwargs["cwd"]).resolve())
+        return real_run(argv, *args, **kwargs)
+
+    monkeypatch.setattr(capture_v2.subprocess, "run", spy)
+    parent = tmp_path / "private"
+    parent.mkdir(mode=0o700)
+    with capture_v2._fresh_committed_tree(repository, head, parent=parent):
+        pass
+
+    assert git_repository_paths
+    assert subject not in git_repository_paths
 
 
 def test_committed_tree_materialization_writes_every_blob_byte_after_short_write(
@@ -571,16 +634,19 @@ def test_committed_tree_materialization_writes_every_blob_byte_after_short_write
         ["git", "rev-parse", "HEAD"], cwd=repository, check=True,
         capture_output=True, text=True,
     ).stdout.strip()
-    _, entries, _ = capture_v2._committed_tree_inventory(repository, head)
-    target = tmp_path / "materialized"
+    parent = tmp_path / "private"
+    parent.mkdir(mode=0o700)
+    target = parent / "materialized"
     target.mkdir(mode=0o700)
+    capture_v2._build_private_git_database(repository, head, target / ".git")
+    _, entries, _ = capture_v2._committed_tree_inventory(target / ".git", head)
     real_write = os.write
 
     def short_write(descriptor: int, data: bytes) -> int:
         return real_write(descriptor, data[:1])
 
     monkeypatch.setattr(capture_v2.os, "write", short_write)
-    capture_v2._materialize_committed_blobs(repository, target, entries)
+    capture_v2._materialize_committed_blobs(target / ".git", target, entries)
 
     assert (target / "payload.bin").read_bytes() == payload
 
