@@ -3,62 +3,58 @@
     "reasons": [],
     "status": "ADMITTED"
   },
-  "admission_self_digest": "sha256:feaaa6b0d174f721408aa1d71905f4da1a9ba0920f7a54376d4028afb63c5887",
+  "admission_self_digest": "sha256:f66f93336cf0074af51fcb5436354c771e0e5fd846c0d8f1427f78afe09dea65",
   "historical_persisted_w2": {
-    "historical_source_head": "90713b5565fb49a4d36193b05a4ddff48cf32fbc",
+    "historical_source_head": "6fd4ea739b736b6d00000f7e66913f7c8ee8a8e1",
     "historical_w2_integrity": "VERIFIED",
     "persisted_dir": "/Users/ncyu/Projects/TradeBot/.codex-worktrees/p0-aiml-s2e-uid-topology-validation-publication-20260812/docs/execution_plan/ai_ml_landing/receipts/S2.4-WP4-W2",
-    "regenerated_w0_admission_self_digest": "sha256:feaaa6b0d174f721408aa1d71905f4da1a9ba0920f7a54376d4028afb63c5887",
-    "regenerated_w0_wave_exit_self_digest": "sha256:82b38ee5b4183002ab3fd23edb23ca7b1cff46f142240a9a19ea310e4fdee6d4",
-    "regenerated_w1_wave_exit_self_digest": "sha256:282be4792b0f70c2660d572979c97c9cc02dfe0387e63de5ebced9d27d4dd257",
-    "w2_wave_exit_self_digest": "sha256:b6fc672ac4806fb532af1b2dfab9a529968f2ac3f0341f0960870b1148331453"
+    "regenerated_w0_admission_self_digest": "sha256:f66f93336cf0074af51fcb5436354c771e0e5fd846c0d8f1427f78afe09dea65",
+    "regenerated_w0_wave_exit_self_digest": "sha256:97293ab4cf7aedc868cf9763c89b5ae9ed393c6e8e16d8292c2570ab26ed84ee",
+    "regenerated_w1_wave_exit_self_digest": "sha256:0c3218f0984b2a939c4089184e7266450cb532622f9c4acac4e3d1feedc50d13",
+    "w2_wave_exit_self_digest": "sha256:e2605997ed442bb6a4f3a5cf3183f84f01196bbd1a762dbebb89280b470b462e"
   },
   "regenerated_w0_wave_exit_derivation": {
     "reasons": [],
     "status": "PASS"
   },
-  "regenerated_w0_wave_exit_self_digest": "sha256:82b38ee5b4183002ab3fd23edb23ca7b1cff46f142240a9a19ea310e4fdee6d4",
+  "regenerated_w0_wave_exit_self_digest": "sha256:97293ab4cf7aedc868cf9763c89b5ae9ed393c6e8e16d8292c2570ab26ed84ee",
   "regenerated_w1_wave_exit_derivation": {
     "reasons": [],
     "status": "PASS"
   },
-  "regenerated_w1_wave_exit_self_digest": "sha256:282be4792b0f70c2660d572979c97c9cc02dfe0387e63de5ebced9d27d4dd257",
+  "regenerated_w1_wave_exit_self_digest": "sha256:0c3218f0984b2a939c4089184e7266450cb532622f9c4acac4e3d1feedc50d13",
   "regenerated_w2_wave_exit_derivation": {
     "reasons": [],
     "status": "PASS"
   },
-  "regenerated_w2_wave_exit_self_digest": "sha256:b6fc672ac4806fb532af1b2dfab9a529968f2ac3f0341f0960870b1148331453",
+  "regenerated_w2_wave_exit_self_digest": "sha256:e2605997ed442bb6a4f3a5cf3183f84f01196bbd1a762dbebb89280b470b462e",
   "replay_note": "W3 re-derivation binds source_head == checkout HEAD; to replay, checkout source_head, rebuild the in-memory W0/W1/W2 chain with the same builders, then run derive_wave_exit_status(w3, source_admission_receipt=admission, predecessor_wave_receipt=w2_wave_exit, predecessor_wave_chain=(w0_wave_exit, w1_wave_exit))",
   "review_provenance": [
     {
-      "context_artifact_digest": "sha256:108de2650146460ca633cf1dae5ebd7515f71c3d99d68659b95602db61ca0f27",
-      "exact_head": "90713b5565fb49a4d36193b05a4ddff48cf32fbc",
-      "exact_tree": "3e6c64fe1d95e12f69e760e9c20caf4982ebe6df",
-      "note": "Independent exact-head review closed the prior Git-discovery, subject-repository access, and case-insensitive .git findings; governed capture used a fresh private committed tree and copied object database, returned 111 passed, and left the caller generation unchanged.",
-      "record_digest": "sha256:2404748509c54fbf24386e959e21f16c078305711c29ca0b662d779b7e82aa40",
+      "context_artifact_digest": "sha256:711318bb250928450e673cb8c02b37464ac99e15e90c2305323f11c6341e9b4f",
+      "exact_head": "6fd4ea739b736b6d00000f7e66913f7c8ee8a8e1",
+      "note": "Independent exact-head E2 review confirmed carrier-head independence while retaining learning-runtime semantics, declared application bytes, real builder execution, manifest self-digests, application/base binding, and foreign-application rejection.",
+      "record_digest": "sha256:c79714ad23eff5c17bb084db3fda6003aba86630e663995b23ad381425de1f09",
       "role": "E2",
-      "scope": "P0-AIML-S2E-UID-TOPOLOGY-VALIDATION-PUBLICATION semantic source review",
+      "scope": "P0-AIML-S2E-UID final W2 semantic source repair",
       "verdict": "PASS"
     }
   ],
   "schema_version": "s2_4_w3_derivation_record_v1_informal",
-  "source_head": "90713b5565fb49a4d36193b05a4ddff48cf32fbc",
+  "source_head": "6fd4ea739b736b6d00000f7e66913f7c8ee8a8e1",
   "test_evidence": {
-    "command": "governed E2 committed-tree pytest: tests/structure/test_agent_governance_command_capture_v2.py tests/structure/test_agent_governance_s2e_launch_receipts.py",
-    "context_artifact_digest": "sha256:108de2650146460ca633cf1dae5ebd7515f71c3d99d68659b95602db61ca0f27",
+    "command": "governed E2 no-site pytest: carrier-only W2 persistence plus three existing W2 builder and application-binding guards",
+    "context_artifact_digest": "sha256:711318bb250928450e673cb8c02b37464ac99e15e90c2305323f11c6341e9b4f",
     "evidence_class": "LOCAL_REPRODUCIBLE",
     "exit_code": 0,
-    "honest_boundary": "Exact committed-source local review evidence only; no GitHub CI, merge, source sync, runtime, deploy, broker, order, external-attestation, or effect claim.",
-    "materialization_kind": "FRESH_PRIVATE_COMMITTED_TREE",
-    "private_git_metadata_kind": "PRIVATE_COPIED_OBJECT_DATABASE",
-    "record_digest": "sha256:2404748509c54fbf24386e959e21f16c078305711c29ca0b662d779b7e82aa40",
-    "result": "111 passed in 283.54s",
-    "source_head": "90713b5565fb49a4d36193b05a4ddff48cf32fbc",
-    "source_tree": "3e6c64fe1d95e12f69e760e9c20caf4982ebe6df"
+    "honest_boundary": "Exact committed-source local review evidence only; no GitHub CI, publication, merge, source sync, runtime, deploy, PostgreSQL, broker, order, external-attestation, or effect claim.",
+    "record_digest": "sha256:c79714ad23eff5c17bb084db3fda6003aba86630e663995b23ad381425de1f09",
+    "result": "4 passed in 21.98s",
+    "source_head": "6fd4ea739b736b6d00000f7e66913f7c8ee8a8e1"
   },
   "w3_wave_exit_derivation": {
     "reasons": [],
     "status": "PASS"
   },
-  "w3_wave_exit_self_digest": "sha256:ca563a6d9cacca636b57979e5abaf3ea0af9d22020bb79f0572869b2adc719ce"
+  "w3_wave_exit_self_digest": "sha256:6f6d124caf2a3b534d52b80f0e2818732da8de1867b7695dd033b5d4dd99044d"
 }
