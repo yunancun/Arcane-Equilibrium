@@ -187,10 +187,6 @@ def _without_digest(value: dict[str, Any], field: str) -> dict[str, Any]:
 
 
 
-
-
-
-
 # E3 round-5 P1-5:本模組原本是家族裡唯一沒有 timeout 的 git 呼叫面。舊拓撲下這些呼叫
 # 在 `rc=128 dubious ownership` 就死了,view 把它變成活的、吃被驗者資料的解析面。
 _GIT_TIMEOUT_SECONDS = 180
