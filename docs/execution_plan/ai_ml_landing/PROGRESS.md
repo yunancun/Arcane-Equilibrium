@@ -83,27 +83,31 @@ grant production runtime/build/PG/migration/deploy/ML5/ML6/broker/order
 authority. All nine grants remain false and source adoption is not production
 runtime readiness.
 
-**2026-08-12 calibration (projection only; no Session closure)**: source
-observation baseline=`2ed906607ca9eae641ee08940f3159463d86692c`. S2 remains
-5/9, production effect 0/6 and authority 0/9; S3-S8 remain open. Fresh read-only
-Linux evidence still found both formal V2 units absent; the active legacy ALR
-process remains pinned to `275901baa09656e842f14b11e94c00f9bfe0c380` and the
-2026-08-12T01:17Z maintenance cycle is `error` because LightGBM is absent and
-other strategy samples are below threshold. PG live rows remain `UNVERIFIED`
-until LR0A exists. Remaining planning range is 37-69 engineering days plus
-evidence waits (12-20 calendar weeks only under uninterrupted assumptions), not
-an edge/profit guarantee.
+**2026-08-12 calibration (projection only; no Session closure)**: S2 remains
+5/9, production effect 0/6 and authority 0/9; S3-S8 remain open. Without a
+`PLATFORM_OR_EXTERNAL_ATTESTED` durable receipt, source observation
+`2ed906607ca9eae641ee08940f3159463d86692c`, formal-unit output, legacy process
+pin `275901baa09656e842f14b11e94c00f9bfe0c380`, and the 2026-08-12T01:17Z
+maintenance/LightGBM/sample output are all `UNVERIFIED_OBSERVATION` context.
+They cannot supply S2/S3 current runtime truth, admission, routing or closure
+input. PG live rows remain `UNVERIFIED` until LR0A exists. Remaining planning
+range is 37-69 engineering days plus evidence waits (12-20 calendar weeks only
+under uninterrupted assumptions), not an edge/profit guarantee.
 
 The downstream `P0-AIML-RUNTIME-LEARNING-VERTICAL-SLICE` is `WAITING` and not
-dispatchable. After UID/source/effect admission, its acceptance target is a
+dispatchable; the unverified observations above do not admit it. After
+UID/source/effect admission, its acceptance target is a
 current-head dedicated runtime, pinned LightGBM/ONNX, one natural
 candidate-matched `model_training_performed=true` fit, content-addressed
 artifact plus qualified registry row, Rust shadow-consumer ACK and zero
 broker/order/live authority. Existing S3-S6 dependencies remain binding.
 
 **Artifact-churn rule**: repeated output with the same blocker/source/evidence
-fingerprint and no verified state transition or downstream consumer ACK is not
-progress; slow, rotate or stop it until a named delta exists.
+fingerprint and no verified state transition or downstream consumer ACK is
+exactly `NO_PROGRESS`. PM may only recommend or queue `slow`, `rotate` or
+`stop`. Any actual schedule/service/cron/runtime change requires fresh
+classified effect authority, an authorized Adapter/Operator path, rollback and
+independent postcheck.
 
 ## Ledger Contract
 

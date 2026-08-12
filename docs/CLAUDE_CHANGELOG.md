@@ -10,15 +10,18 @@
 - 將會自行過期的「當前 main=`325506664…`」改成具時間語義的 source 觀察基線
   `2ed906607ca9eae641ee08940f3159463d86692c`；保留唯一 ACTIVE uid-topology lane、
   S2E 5/9、production effect 0/6、authority 0/9、S2 open。
-- fresh runtime 指針維持 fail-closed：正式 V2 units absent；legacy ALR 仍綁舊 pin；
-  ML maintenance 因 LightGBM 缺失／其他策略樣本不足而 `error`；PG live rows 在 LR0A
-  前保持 `UNVERIFIED`。
+- 2026-08-12 runtime／service／source-pin／maintenance／killboard 線索全部校正為
+  `UNVERIFIED_OBSERVATION`：無 `PLATFORM_OR_EXTERNAL_ATTESTED` durable receipt，路徑、時間與
+  payload 只供後續 governed observation 定位，不得作 S2/S3 current runtime truth、admission、
+  routing 或 closure input；PG live rows 在 LR0A 前保持 `UNVERIFIED`。
 - 原始 43-80 engineering days 以 S0-S1 已關閉重算為剩餘 37-69 days，另加 72 小時、
   七日、樣本、Demo/economic 與 authority waits；12-20 calendar weeks 只作條件式 planning
   range。S3-S8 全部保持 open，不承諾 edge 或盈利日期。
 - 新增非派發的 WAITING runtime vertical slice、source→profit capability ladder 與 artifact
   churn 有界規則；沒有 verified state transition／downstream consumer ACK 的重複 artifact
-  不計進度，必須 slow、rotate 或 stop。
+  精確記為 `NO_PROGRESS`。PM 只能建議／排隊 slow、rotate 或 stop；任何 schedule/service/
+  cron/runtime 變更仍須 fresh classified effect authority、authorized Adapter／Operator path、
+  rollback 與 independent postcheck。
 
 ## TODO v871 增量：LW1 attestor-owned host capture hardening（2026-08-02）
 

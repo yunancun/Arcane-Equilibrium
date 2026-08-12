@@ -4,8 +4,9 @@
 **Original date**: 2026-07-19
 **Revised**: 2026-08-12 (status/remaining-effort calibration; architecture unchanged)
 **Planning baseline**: `b486c0718d1c26820cdb6308cccf74c686547b22`
-**Observed calibration baseline**: `2ed906607ca9eae641ee08940f3159463d86692c`
-(source snapshot only; not runtime identity or a permanently-current main pointer)
+**Observed calibration baseline**: `UNVERIFIED_OBSERVATION`
+`2ed906607ca9eae641ee08940f3159463d86692c` (source context only; not a durable
+receipt, runtime identity or permanently-current main pointer)
 **Adopted source lineage**: reviewed head
 `1a933fcc28e9f7341e023b5d401c479957c14c5f`, merged as
 `fed223bebd278c50b0ab3330980e66441a30c9ed`; neither ref is runtime identity.
@@ -760,10 +761,17 @@ content-addressed artifact and qualified registry row, a Rust shadow-consumer
 ACK, and zero broker/order/live authority. PM must split that target through the
 existing S3-S6 dependencies; it is not permission to skip a Sprint.
 
-Recurring work is progress only when it produces a verified state transition or
-downstream consumer ACK. An unchanged blocker/source/evidence fingerprint must
-be slowed, rotated or stopped until a named input delta, review date or operator
-action exists; repeated artifacts alone do not advance this plan.
+Recurring work with no verified state transition or downstream consumer ACK is
+exactly `NO_PROGRESS`. PM may recommend or queue `slow`, `rotate` or `stop`, but
+may not perform those effects from this rule. Any actual schedule/service/cron/
+runtime change requires fresh classified effect authority, an authorized
+Adapter/Operator path, rollback and independent postcheck. Repeated artifacts
+alone do not advance this plan.
+
+All un-attested 2026-08-12 runtime/service/source-pin/maintenance/killboard
+outputs are `UNVERIFIED_OBSERVATION` context only. Paths and timestamps may
+guide a new governed observation, but cannot supply S2/S3 current runtime truth,
+admission, routing or closure input; PG remains `UNVERIFIED` until LR0A.
 
 ## 11. Non-Goals
 
