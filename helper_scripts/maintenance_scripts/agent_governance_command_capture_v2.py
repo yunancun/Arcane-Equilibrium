@@ -3,10 +3,12 @@
 from __future__ import annotations
 
 import base64
+import contextlib
 import hashlib
 import io
 import json
 import os
+import posixpath
 import re
 import stat
 import subprocess
@@ -15,7 +17,7 @@ import tempfile
 import zipfile
 from datetime import datetime
 from pathlib import Path, PurePosixPath
-from typing import Any, BinaryIO
+from typing import Any, BinaryIO, Iterator
 
 from agent_governance_capture import (
     LOCAL_REPRODUCIBLE,
@@ -71,10 +73,11 @@ RECORD_FIELDS = {
     "timeout_seconds", "started_at", "completed_at", "exit_code",
     "timed_out", "result", "stdout", "stderr", "repository_before",
     "repository_after", "whole_repository_before", "whole_repository_after",
-    "pytest_provider", "effect_enforcement", "host_sandbox_attestation_ref",
+    "pytest_provider", "source_materialization", "effect_enforcement",
+    "host_sandbox_attestation_ref",
     "record_digest",
 }
-LEGACY_RECORD_FIELDS = RECORD_FIELDS - {"pytest_provider"}
+LEGACY_RECORD_FIELDS = RECORD_FIELDS - {"pytest_provider", "source_materialization"}
 PYTEST_PROVIDER_FIELDS = {
     "schema_version", "profile_id", "bootstrap_digest", "interpreter_path",
     "interpreter_digest_before", "interpreter_digest_after",
@@ -119,6 +122,12 @@ PYTEST_PROVIDER_HARD_LIMITS = {
     "max_members_per_wheel": 2048,
     "max_member_bytes": 8 * 1024 * 1024,
     "max_total_uncompressed_bytes": 32 * 1024 * 1024,
+}
+SOURCE_MATERIALIZATION_FIELDS = {
+    "schema_version", "materialization_kind", "source_head", "source_tree",
+    "manifest_digest", "materialized_file_count", "materialized_bytes",
+    "executable_file_count", "materialized_symlink_count",
+    "materialized_symlink_manifest_digest", "private_root_mode", "cleanup_status",
 }
 SAFE_INHERITED_ENVIRONMENT = {
     "PATH", "LANG", "LC_ALL", "LC_CTYPE", "TERM", "SYSTEMROOT",
@@ -727,6 +736,250 @@ def _controlled_environment(
     return environment
 
 
+def _git_read_environment() -> dict[str, str]:
+    environment = {
+        key: value for key, value in os.environ.items()
+        if key in SAFE_INHERITED_ENVIRONMENT
+    }
+    environment.update({
+        "GIT_CONFIG_NOSYSTEM": "1",
+        "GIT_CONFIG_GLOBAL": os.devnull,
+        "GIT_OPTIONAL_LOCKS": "0",
+        "GIT_TERMINAL_PROMPT": "0",
+    })
+    return environment
+
+
+def _safe_materialized_path(path: str) -> bool:
+    relative = PurePosixPath(path)
+    return (
+        bool(path)
+        and "\\" not in path
+        and "\x00" not in path
+        and not relative.is_absolute()
+        and all(part not in {"", ".", "..", ".git"} for part in relative.parts)
+    )
+
+
+def _git_blob_sha1(payload: bytes) -> str:
+    return hashlib.sha1(
+        b"blob " + str(len(payload)).encode("ascii") + b"\x00" + payload
+    ).hexdigest()
+
+
+def _committed_tree_inventory(
+    repository: Path, source_head: str,
+) -> tuple[str, list[dict[str, Any]], list[dict[str, Any]]]:
+    if re.fullmatch(r"[0-9a-f]{40}", source_head) is None:
+        raise ValueError("committed review source head is invalid")
+    common = {
+        "cwd": repository,
+        "check": True,
+        "capture_output": True,
+        "env": _git_read_environment(),
+        "timeout": 180,
+    }
+    resolved = subprocess.run(
+        ["git", "--no-replace-objects", "rev-parse", "--verify", f"{source_head}^{{commit}}"],
+        text=True,
+        **common,
+    ).stdout.strip()
+    if resolved != source_head:
+        raise ValueError("committed review source head does not resolve exactly")
+    source_tree = subprocess.run(
+        ["git", "--no-replace-objects", "rev-parse", "--verify", f"{source_head}^{{tree}}"],
+        text=True,
+        **common,
+    ).stdout.strip()
+    listing = subprocess.run(
+        [
+            "git", "--no-replace-objects", "ls-tree", "-r", "-z", "-l",
+            "--full-tree", source_head,
+        ],
+        **common,
+    ).stdout
+    regular: list[dict[str, Any]] = []
+    symlinks: list[dict[str, Any]] = []
+    for record in listing.split(b"\x00"):
+        if not record:
+            continue
+        metadata, separator, path_raw = record.partition(b"\t")
+        fields = metadata.split()
+        try:
+            path = path_raw.decode("utf-8", errors="strict")
+        except UnicodeDecodeError as error:
+            raise ValueError("committed review tree path is not UTF-8") from error
+        if not separator or len(fields) != 4 or not _safe_materialized_path(path):
+            raise ValueError("committed review tree entry is unsafe")
+        mode, object_type, object_id, size_raw = (
+            item.decode("ascii", errors="strict") for item in fields
+        )
+        if re.fullmatch(r"[0-9a-f]{40}", object_id) is None:
+            raise ValueError("committed review tree object id is invalid")
+        if mode == "120000" and object_type == "blob":
+            if not size_raw.isdigit():
+                raise ValueError("committed review symlink size is invalid")
+            symlinks.append({
+                "path": path,
+                "mode": mode,
+                "git_blob": object_id,
+                "bytes": int(size_raw),
+            })
+            continue
+        if mode not in {"100644", "100755"} or object_type != "blob":
+            raise ValueError(
+                f"committed review tree contains a special entry: {path} ({mode} {object_type})"
+            )
+        if not size_raw.isdigit():
+            raise ValueError("committed review blob size is invalid")
+        regular.append({
+            "path": path,
+            "mode": mode,
+            "git_blob": object_id,
+            "bytes": int(size_raw),
+        })
+    return source_tree, sorted(regular, key=lambda item: item["path"]), sorted(
+        symlinks, key=lambda item: item["path"]
+    )
+
+
+def _materialize_committed_blobs(
+    repository: Path,
+    target: Path,
+    entries: list[dict[str, Any]],
+) -> None:
+    ordered = sorted(entries, key=lambda item: item["path"])
+    request = b"".join(
+        str(entry["git_blob"]).encode("ascii") + b"\n" for entry in ordered
+    )
+    completed = subprocess.run(
+        ["git", "--no-replace-objects", "cat-file", "--batch"],
+        cwd=repository,
+        check=True,
+        input=request,
+        capture_output=True,
+        env=_git_read_environment(),
+        timeout=180,
+    )
+    stream = completed.stdout
+    offset = 0
+    symlink_payloads: list[tuple[dict[str, Any], str]] = []
+    for entry in ordered:
+        newline = stream.find(b"\n", offset)
+        if newline < 0:
+            raise ValueError("committed review blob stream ended before its header")
+        header = stream[offset:newline].decode("ascii", errors="strict").split()
+        offset = newline + 1
+        if (
+            len(header) != 3
+            or header[0] != entry["git_blob"]
+            or header[1] != "blob"
+            or not header[2].isdigit()
+            or int(header[2]) != entry["bytes"]
+        ):
+            raise ValueError("committed review blob header differs from its tree entry")
+        size = entry["bytes"]
+        payload = stream[offset : offset + size]
+        offset += size
+        if len(payload) != size or stream[offset : offset + 1] != b"\n":
+            raise ValueError("committed review blob stream is truncated")
+        offset += 1
+        if _git_blob_sha1(payload) != entry["git_blob"]:
+            raise ValueError("committed review blob bytes do not hash to their tree id")
+        destination = target.joinpath(*PurePosixPath(entry["path"]).parts)
+        destination.parent.mkdir(parents=True, exist_ok=True, mode=0o700)
+        if entry["mode"] == "120000":
+            try:
+                link_target = payload.decode("utf-8", errors="strict")
+            except UnicodeDecodeError as error:
+                raise ValueError("committed review symlink target is not UTF-8") from error
+            resolved = posixpath.normpath(
+                posixpath.join(posixpath.dirname(entry["path"]), link_target)
+            )
+            if (
+                not link_target
+                or "\x00" in link_target
+                or PurePosixPath(link_target).is_absolute()
+                or resolved == ".."
+                or resolved.startswith("../")
+            ):
+                raise ValueError(
+                    f"committed review symlink escapes its private tree: {entry['path']}"
+                )
+            symlink_payloads.append((entry, link_target))
+            continue
+        descriptor = os.open(
+            destination,
+            os.O_WRONLY | os.O_CREAT | os.O_EXCL | getattr(os, "O_CLOEXEC", 0)
+            | getattr(os, "O_NOFOLLOW", 0),
+            0o700 if entry["mode"] == "100755" else 0o600,
+        )
+        try:
+            written = 0
+            while written < len(payload):
+                count = os.write(descriptor, payload[written:])
+                if count <= 0:
+                    raise OSError("committed review blob write made no progress")
+                written += count
+            os.fsync(descriptor)
+        finally:
+            os.close(descriptor)
+        destination.chmod(0o700 if entry["mode"] == "100755" else 0o600)
+    if offset != len(stream):
+        raise ValueError("committed review blob stream contains trailing bytes")
+    for entry, link_target in symlink_payloads:
+        destination = target.joinpath(*PurePosixPath(entry["path"]).parts)
+        os.symlink(link_target, destination)
+
+
+@contextlib.contextmanager
+def _fresh_committed_tree(
+    repository: Path,
+    source_head: str,
+    *,
+    parent: Path,
+) -> Iterator[tuple[Path, dict[str, Any]]]:
+    source_tree, entries, symlinks = _committed_tree_inventory(
+        repository, source_head
+    )
+    materialized = Path(tempfile.mkdtemp(prefix="review-source-", dir=parent))
+    materialized.chmod(0o700)
+    evidence: dict[str, Any] = {
+        "schema_version": "source_materialization_v1",
+        "materialization_kind": "FRESH_PRIVATE_COMMITTED_TREE",
+        "source_head": source_head,
+        "source_tree": source_tree,
+        "manifest_digest": canonical_digest({
+            "schema_version": "committed_tree_regular_file_manifest_v1",
+            "entries": entries,
+        }),
+        "materialized_file_count": len(entries),
+        "materialized_bytes": sum(entry["bytes"] for entry in entries),
+        "executable_file_count": sum(
+            entry["mode"] == "100755" for entry in entries
+        ),
+        "materialized_symlink_count": len(symlinks),
+        "materialized_symlink_manifest_digest": canonical_digest({
+            "schema_version": "committed_tree_symlink_manifest_v1",
+            "entries": symlinks,
+        }),
+        "private_root_mode": "0700",
+        "cleanup_status": "PENDING",
+    }
+    try:
+        _materialize_committed_blobs(
+            repository, materialized, [*entries, *symlinks]
+        )
+        yield materialized, evidence
+    finally:
+        import shutil
+
+        shutil.rmtree(materialized, ignore_errors=False)
+        if materialized.exists():
+            raise RuntimeError("committed review materialization cleanup failed")
+        evidence["cleanup_status"] = "REMOVED"
+
+
 def _execute(
     argv: list[str],
     *,
@@ -734,6 +987,7 @@ def _execute(
     timeout_seconds: int,
     replay_contract: str,
     provider_source_head: str | None = None,
+    execution_source_head: str | None = None,
 ) -> dict[str, Any]:
     with (
         tempfile.TemporaryDirectory(prefix="governed-command-") as isolated,
@@ -745,6 +999,7 @@ def _execute(
         timed_out = False
         provider_capsule: Path | None = None
         pytest_provider: dict[str, Any] | None = None
+        source_materialization: dict[str, Any] | None = None
         try:
             if _is_governed_pytest_argv(argv) and provider_source_head is None:
                 provider_source_head = subprocess.run(
@@ -764,17 +1019,26 @@ def _execute(
                 if pytest_provider is not None
                 else argv
             )
-            completed = subprocess.run(
-                execution_argv, cwd=root, shell=False, stdin=subprocess.DEVNULL,
-                stdout=stdout_file, stderr=stderr_file, timeout=timeout_seconds,
-                check=False,
-                env=_controlled_environment(
-                    isolated_root,
-                    argv=argv,
-                    pytest_provider=provider_capsule,
-                ),
+            materialization = (
+                _fresh_committed_tree(
+                    root, execution_source_head, parent=isolated_root
+                )
+                if _is_governed_pytest_argv(argv)
+                and execution_source_head is not None
+                else contextlib.nullcontext((root, None))
             )
-            exit_code = completed.returncode
+            with materialization as (execution_root, source_materialization):
+                completed = subprocess.run(
+                    execution_argv, cwd=execution_root, shell=False,
+                    stdin=subprocess.DEVNULL, stdout=stdout_file,
+                    stderr=stderr_file, timeout=timeout_seconds, check=False,
+                    env=_controlled_environment(
+                        isolated_root,
+                        argv=argv,
+                        pytest_provider=provider_capsule,
+                    ),
+                )
+                exit_code = completed.returncode
         except subprocess.TimeoutExpired:
             timed_out, exit_code = True, -1
         except (OSError, ValueError) as error:
@@ -795,6 +1059,7 @@ def _execute(
             "stdout": _output_summary(stdout_file, replay_contract),
             "stderr": _output_summary(stderr_file, replay_contract),
             "pytest_provider": pytest_provider,
+            "source_materialization": source_materialization,
         }
 
 
@@ -888,6 +1153,7 @@ def capture_governed_command(
         command_argv_value, root=repository, timeout_seconds=timeout_seconds,
         replay_contract=replay_contract,
         provider_source_head=provider_source_head,
+        execution_source_head=whole_before["source_head"],
     )
     repository_after = _generation_summary(path_scope, repository)
     whole_after = _generation_summary(["."], repository)
@@ -1193,6 +1459,66 @@ def _pytest_provider_errors(
     return sorted(set(errors))
 
 
+def _source_materialization_errors(
+    materialization: Any,
+    *,
+    argv: list[str],
+    expected_source_head: str | None,
+    root: Path,
+) -> list[str]:
+    governed = _is_governed_pytest_argv(argv)
+    if not governed:
+        return (
+            [] if materialization is None
+            else ["non-pytest command cannot bind a source materialization"]
+        )
+    if not isinstance(materialization, dict):
+        return ["governed pytest source materialization is absent"]
+    errors: list[str] = []
+    if set(materialization) != SOURCE_MATERIALIZATION_FIELDS:
+        return ["governed pytest source materialization fields are invalid"]
+    for field, expected in (
+        ("schema_version", "source_materialization_v1"),
+        ("materialization_kind", "FRESH_PRIVATE_COMMITTED_TREE"),
+        ("source_head", expected_source_head),
+        ("private_root_mode", "0700"),
+        ("cleanup_status", "REMOVED"),
+    ):
+        if materialization.get(field) != expected:
+            errors.append(f"governed pytest source materialization {field} is invalid")
+    try:
+        source_tree, entries, symlinks = _committed_tree_inventory(
+            root, str(materialization.get("source_head", ""))
+        )
+    except (OSError, ValueError, subprocess.SubprocessError) as error:
+        return sorted(set(errors + [
+            f"governed pytest committed source inventory is unavailable: {error}"
+        ]))
+    expected_values = {
+        "source_tree": source_tree,
+        "manifest_digest": canonical_digest({
+            "schema_version": "committed_tree_regular_file_manifest_v1",
+            "entries": entries,
+        }),
+        "materialized_file_count": len(entries),
+        "materialized_bytes": sum(entry["bytes"] for entry in entries),
+        "executable_file_count": sum(
+            entry["mode"] == "100755" for entry in entries
+        ),
+        "materialized_symlink_count": len(symlinks),
+        "materialized_symlink_manifest_digest": canonical_digest({
+            "schema_version": "committed_tree_symlink_manifest_v1",
+            "entries": symlinks,
+        }),
+    }
+    for field, expected in expected_values.items():
+        if materialization.get(field) != expected:
+            errors.append(
+                f"governed pytest source materialization {field} differs from Git"
+            )
+    return sorted(set(errors))
+
+
 def validate_governed_command_capture(
     record: Any,
     *,
@@ -1273,6 +1599,17 @@ def validate_governed_command_capture(
         argv=argv,
         expected_source_head=provider_expected_source_head,
     ))
+    whole_before = record.get("whole_repository_before")
+    errors.extend(_source_materialization_errors(
+        record.get("source_materialization"),
+        argv=argv,
+        expected_source_head=(
+            whole_before.get("source_head")
+            if isinstance(whole_before, dict)
+            else None
+        ),
+        root=Path(root),
+    ))
     authorization = record.get("authorization")
     expected_authorization = authorize_native_command(str(record.get("native_agent", "")), command)
     if authorization != expected_authorization:
@@ -1337,10 +1674,13 @@ def _replay_errors(record: dict[str, Any], *, root: Path) -> list[str]:
             if isinstance(record.get("pytest_provider"), dict)
             else None
         ),
+        execution_source_head=record["whole_repository_before"]["source_head"],
     )
     errors: list[str] = []
     if replay["pytest_provider"] != record.get("pytest_provider"):
         errors.append("governed pytest provider does not reproduce")
+    if replay["source_materialization"] != record.get("source_materialization"):
+        errors.append("governed pytest source materialization does not reproduce")
     if any(replay[field] != record[field] for field in ("exit_code", "timed_out", "result")):
         errors.append("governed command result does not reproduce")
     for stream in ("stdout", "stderr"):

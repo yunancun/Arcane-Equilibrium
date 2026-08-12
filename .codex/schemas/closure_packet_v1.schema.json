@@ -1161,6 +1161,31 @@
         "repository_root_fixed": {"const": true}
       }
     },
+    "sourceMaterialization": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "schema_version", "materialization_kind", "source_head",
+        "source_tree", "manifest_digest", "materialized_file_count",
+        "materialized_bytes", "executable_file_count",
+        "materialized_symlink_count", "materialized_symlink_manifest_digest",
+        "private_root_mode", "cleanup_status"
+      ],
+      "properties": {
+        "schema_version": {"const": "source_materialization_v1"},
+        "materialization_kind": {"const": "FRESH_PRIVATE_COMMITTED_TREE"},
+        "source_head": {"type": "string", "pattern": "^[0-9a-f]{40}$"},
+        "source_tree": {"type": "string", "pattern": "^[0-9a-f]{40}$"},
+        "manifest_digest": {"$ref": "#/$defs/digest"},
+        "materialized_file_count": {"type": "integer", "minimum": 1},
+        "materialized_bytes": {"type": "integer", "minimum": 0},
+        "executable_file_count": {"type": "integer", "minimum": 0},
+        "materialized_symlink_count": {"type": "integer", "minimum": 0},
+        "materialized_symlink_manifest_digest": {"$ref": "#/$defs/digest"},
+        "private_root_mode": {"const": "0700"},
+        "cleanup_status": {"const": "REMOVED"}
+      }
+    },
     "commandCaptureV2": {
       "type": "object",
       "additionalProperties": false,
@@ -1172,7 +1197,7 @@
         "timeout_seconds", "started_at", "completed_at", "exit_code",
         "timed_out", "result", "stdout", "stderr", "repository_before",
         "repository_after", "whole_repository_before", "whole_repository_after",
-        "pytest_provider", "effect_enforcement",
+        "pytest_provider", "source_materialization", "effect_enforcement",
         "host_sandbox_attestation_ref", "record_digest"
       ],
       "properties": {
@@ -1215,6 +1240,12 @@
         "pytest_provider": {
           "anyOf": [
             {"$ref": "#/$defs/governedPytestProvider"},
+            {"type": "null"}
+          ]
+        },
+        "source_materialization": {
+          "anyOf": [
+            {"$ref": "#/$defs/sourceMaterialization"},
             {"type": "null"}
           ]
         },

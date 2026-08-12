@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import ast
+import contextlib
 from copy import deepcopy
 import hashlib
 import io
@@ -3878,6 +3879,93 @@ def test_review_manifest_reads_a_repository_git_refuses_to_open(
     assert s2e_review._git_bytes(repo, "show", f"{head}:TODO.md") == b"# todo\n"
     assert not fsmonitor_sentinel.exists()
     assert not clean_sentinel.exists()
+
+
+def test_review_manifest_uses_one_invocation_scoped_object_view(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    repo = _floor_repo(tmp_path)
+    (repo / "reviewed.py").write_text("VALUE = 1\n", encoding="utf-8")
+    _git(repo, "add", "reviewed.py")
+    _git(repo, "commit", "-qm", "reviewed source")
+    head = _git(repo, "rev-parse", "HEAD")
+    tree = _git(repo, "rev-parse", f"{head}^{{tree}}")
+    candidate = {
+        "schema_version": "s2e_launch_genesis_receipt_v1",
+        "wave": s2e_review.GENESIS_WAVE,
+        "schema_carrier_head": head,
+        "schema_carrier_tree": tree,
+    }
+    monkeypatch.setattr(s2e_review, "S2E_REVIEW_BASE_PATHS", ("reviewed.py",))
+    real_view = s2e_review.code_owned_object_view
+    real_run = subprocess.run
+    calls = 0
+    git_calls: list[list[str]] = []
+
+    @contextlib.contextmanager
+    def counted_view(subject: Path):
+        nonlocal calls
+        calls += 1
+        with real_view(subject) as view:
+            yield view
+
+    monkeypatch.setattr(s2e_review, "code_owned_object_view", counted_view)
+    def counted_run(argv, *args, **kwargs):
+        if isinstance(argv, (list, tuple)):
+            git_calls.append([str(item) for item in argv])
+        return real_run(argv, *args, **kwargs)
+
+    monkeypatch.setattr(s2e_review.subprocess, "run", counted_run)
+    first = s2e_review.s2e_review_source_blob_manifest(candidate, repo_root=repo)
+
+    assert calls == 1
+    assert sum("ls-tree" in call for call in git_calls) == 1
+    assert sum("cat-file" in call and "--batch" in call for call in git_calls) == 1
+    assert first == [{
+        "path": "reviewed.py",
+        "mode": "100644",
+        "git_blob": _git(repo, "rev-parse", f"{head}:reviewed.py"),
+        "sha256": "sha256:" + hashlib.sha256(b"VALUE = 1\n").hexdigest(),
+    }]
+    second = s2e_review.s2e_review_source_blob_manifest(candidate, repo_root=repo)
+    assert calls == 2
+    assert sum("ls-tree" in call for call in git_calls) == 2
+    assert sum("cat-file" in call and "--batch" in call for call in git_calls) == 2
+    assert second == first
+
+
+def test_s2e_review_text_and_bytes_git_timeouts_are_bounded_and_typed(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    repo = _floor_repo(tmp_path)
+    observed: list[int | None] = []
+
+    def timeout(*args, **kwargs):
+        observed.append(kwargs.get("timeout"))
+        raise subprocess.TimeoutExpired(args[0], kwargs.get("timeout"))
+
+    monkeypatch.setattr(s2e_review.subprocess, "run", timeout)
+    with pytest.raises(subprocess.SubprocessError):
+        s2e_review._git(repo, "rev-parse", "HEAD")
+    with pytest.raises(subprocess.SubprocessError):
+        s2e_review._git_bytes(repo, "show", "HEAD:seed.txt")
+    assert observed == [180, 180]
+
+    monkeypatch.setattr(
+        s2e,
+        "_git",
+        lambda *args, **kwargs: (_ for _ in ()).throw(
+            subprocess.TimeoutExpired(["git"], 180)
+        ),
+    )
+    errors = s2e._git_binding_errors(
+        repo,
+        head="0" * 40,
+        tree="1" * 40,
+        label="timeout fixture",
+    )
+    assert len(errors) == 1
+    assert errors[0].startswith("timeout fixture is not a readable Git commit:")
 
 
 def test_verification_face_never_hands_the_subject_repository_to_git(

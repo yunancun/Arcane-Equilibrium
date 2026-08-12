@@ -6,8 +6,10 @@ import inspect
 import io
 import json
 import os
+import stat
 import subprocess
 import sys
+import tempfile
 import zipfile
 from copy import deepcopy
 from pathlib import Path
@@ -99,6 +101,31 @@ def _git_repository(tmp_path: Path) -> Path:
     subprocess.run(["git", "add", "scope.txt"], cwd=repository, check=True)
     subprocess.run(["git", "commit", "-qm", "fixture"], cwd=repository, check=True)
     return repository
+
+
+def _commit_test_repository(tmp_path: Path, *, assertion: str) -> tuple[Path, str]:
+    repository = _git_repository(tmp_path)
+    (repository / "subject.py").write_text("VALUE = 1\n", encoding="utf-8")
+    (repository / "test_subject.py").write_text(
+        "from subject import VALUE\n\n"
+        f"def test_subject():\n    assert {assertion}\n",
+        encoding="utf-8",
+    )
+    subprocess.run(
+        ["git", "add", "subject.py", "test_subject.py"],
+        cwd=repository,
+        check=True,
+    )
+    subprocess.run(
+        ["git", "commit", "-qm", "add committed test"],
+        cwd=repository,
+        check=True,
+    )
+    head = subprocess.run(
+        ["git", "rev-parse", "HEAD"], cwd=repository, check=True,
+        capture_output=True, text=True,
+    ).stdout.strip()
+    return repository, head
 
 
 def _patch_test_binding(monkeypatch: pytest.MonkeyPatch) -> None:
@@ -366,6 +393,254 @@ def test_huge_output_is_streamed_bounded_and_directly_readable() -> None:
     assert stdout["digest"].startswith("sha256:")
 
 
+def test_governed_pytest_executes_the_exact_committed_tree_not_a_dirty_fix(
+    tmp_path: Path,
+) -> None:
+    repository, head = _commit_test_repository(
+        tmp_path, assertion="VALUE == 2"
+    )
+    (repository / "subject.py").write_text("VALUE = 2\n", encoding="utf-8")
+
+    executed = capture_v2._execute(
+        [
+            *capture_v2.GOVERNED_PYTEST_PREFIX,
+            *capture_v2.GOVERNED_PYTEST_REQUIRED_ARGS,
+            "-q",
+            "test_subject.py",
+        ],
+        root=repository,
+        timeout_seconds=30,
+        replay_contract="CANONICAL_TEST_OUTPUT_V1",
+        execution_source_head=head,
+    )
+
+    assert executed["result"] == "FAIL"
+    evidence = executed["source_materialization"]
+    assert evidence["materialization_kind"] == "FRESH_PRIVATE_COMMITTED_TREE"
+    assert evidence["source_head"] == head
+    assert evidence["source_tree"] == subprocess.run(
+        ["git", "rev-parse", f"{head}^{{tree}}"], cwd=repository, check=True,
+        capture_output=True, text=True,
+    ).stdout.strip()
+    assert evidence["cleanup_status"] == "REMOVED"
+
+
+def test_governed_pytest_ignores_a_dirty_tracked_failure(
+    tmp_path: Path,
+) -> None:
+    repository, head = _commit_test_repository(
+        tmp_path, assertion="VALUE == 1"
+    )
+    (repository / "subject.py").write_text("VALUE = 999\n", encoding="utf-8")
+
+    executed = capture_v2._execute(
+        [
+            *capture_v2.GOVERNED_PYTEST_PREFIX,
+            *capture_v2.GOVERNED_PYTEST_REQUIRED_ARGS,
+            "-q",
+            "test_subject.py",
+        ],
+        root=repository,
+        timeout_seconds=30,
+        replay_contract="CANONICAL_TEST_OUTPUT_V1",
+        execution_source_head=head,
+    )
+
+    assert executed["result"] == "PASS"
+    assert executed["source_materialization"]["source_head"] == head
+    assert (repository / "subject.py").read_text(encoding="utf-8") == "VALUE = 999\n"
+
+
+def test_governed_pytest_ignores_untracked_shadow_modules_and_conftest(
+    tmp_path: Path,
+) -> None:
+    repository, head = _commit_test_repository(
+        tmp_path, assertion="VALUE == 1"
+    )
+    shadow = repository / "untracked-shadow"
+    shadow.mkdir()
+    (shadow / "subject.py").write_text("VALUE = 999\n", encoding="utf-8")
+    (repository / "conftest.py").write_text(
+        "raise RuntimeError('untracked conftest executed')\n", encoding="utf-8"
+    )
+
+    executed = capture_v2._execute(
+        [
+            *capture_v2.GOVERNED_PYTEST_PREFIX,
+            *capture_v2.GOVERNED_PYTEST_REQUIRED_ARGS,
+            "-q",
+            "test_subject.py",
+        ],
+        root=repository,
+        timeout_seconds=30,
+        replay_contract="CANONICAL_TEST_OUTPUT_V1",
+        execution_source_head=head,
+    )
+
+    assert executed["result"] == "PASS"
+    assert executed["source_materialization"]["materialized_file_count"] == 3
+
+
+def test_committed_tree_materialization_preserves_executable_mode(
+    tmp_path: Path,
+) -> None:
+    repository = _git_repository(tmp_path)
+    executable = repository / "executable-test.py"
+    executable.write_text(
+        "#!/usr/bin/env python3\nprint('committed executable')\n",
+        encoding="utf-8",
+    )
+    executable.chmod(0o755)
+    subprocess.run(["git", "add", "executable-test.py"], cwd=repository, check=True)
+    subprocess.run(["git", "commit", "-qm", "executable"], cwd=repository, check=True)
+    head = subprocess.run(
+        ["git", "rev-parse", "HEAD"], cwd=repository, check=True,
+        capture_output=True, text=True,
+    ).stdout.strip()
+    parent = tmp_path / "private"
+    parent.mkdir(mode=0o700)
+
+    with capture_v2._fresh_committed_tree(
+        repository, head, parent=parent
+    ) as (materialized, evidence):
+        mode = stat.S_IMODE((materialized / "executable-test.py").stat().st_mode)
+        assert mode == 0o700
+        assert evidence["executable_file_count"] == 1
+    assert evidence["cleanup_status"] == "REMOVED"
+    assert not materialized.exists()
+
+
+def test_committed_tree_inventory_rejects_traversal_and_special_entries(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    repository, head = _commit_test_repository(
+        tmp_path, assertion="VALUE == 1"
+    )
+
+    def unsafe(*args, **kwargs):
+        command = args[0]
+        if "ls-tree" in command:
+            return subprocess.CompletedProcess(
+                command, 0,
+                stdout=b"100644 blob " + b"a" * 40 + b" 1\t../escape.py\0",
+                stderr=b"",
+            )
+        return real_run(*args, **kwargs)
+
+    real_run = subprocess.run
+    monkeypatch.setattr(capture_v2.subprocess, "run", unsafe)
+    with pytest.raises(ValueError, match="entry is unsafe"):
+        capture_v2._committed_tree_inventory(repository, head)
+
+    monkeypatch.setattr(capture_v2.subprocess, "run", real_run)
+    subprocess.run(
+        [
+            "git", "update-index", "--add", "--cacheinfo",
+            "160000," + head + ",nested",
+        ],
+        cwd=repository,
+        check=True,
+    )
+    tree = subprocess.run(
+        ["git", "write-tree"], cwd=repository, check=True,
+        capture_output=True, text=True,
+    ).stdout.strip()
+    special_commit = subprocess.run(
+        ["git", "commit-tree", tree, "-p", head, "-m", "special entry"],
+        cwd=repository, check=True, capture_output=True, text=True,
+    ).stdout.strip()
+    with pytest.raises(ValueError, match="special entry"):
+        capture_v2._committed_tree_inventory(repository, special_commit)
+
+
+def test_committed_tree_materialization_rejects_git_metadata_components() -> None:
+    assert capture_v2._safe_materialized_path(".git/config") is False
+    assert capture_v2._safe_materialized_path("nested/.git/hooks/probe") is False
+    assert capture_v2._safe_materialized_path("nested/git/source.py") is True
+
+
+def test_committed_tree_materialization_writes_every_blob_byte_after_short_write(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    repository = _git_repository(tmp_path)
+    payload = b"0123456789abcdef\n"
+    (repository / "payload.bin").write_bytes(payload)
+    subprocess.run(["git", "add", "payload.bin"], cwd=repository, check=True)
+    subprocess.run(["git", "commit", "-qm", "payload"], cwd=repository, check=True)
+    head = subprocess.run(
+        ["git", "rev-parse", "HEAD"], cwd=repository, check=True,
+        capture_output=True, text=True,
+    ).stdout.strip()
+    _, entries, _ = capture_v2._committed_tree_inventory(repository, head)
+    target = tmp_path / "materialized"
+    target.mkdir(mode=0o700)
+    real_write = os.write
+
+    def short_write(descriptor: int, data: bytes) -> int:
+        return real_write(descriptor, data[:1])
+
+    monkeypatch.setattr(capture_v2.os, "write", short_write)
+    capture_v2._materialize_committed_blobs(repository, target, entries)
+
+    assert (target / "payload.bin").read_bytes() == payload
+
+
+def test_committed_tree_rejects_an_escaping_symlink_and_cleans_up(
+    tmp_path: Path,
+) -> None:
+    repository = _git_repository(tmp_path)
+    os.symlink("../../outside", repository / "escaping-link")
+    subprocess.run(["git", "add", "escaping-link"], cwd=repository, check=True)
+    subprocess.run(["git", "commit", "-qm", "escaping link"], cwd=repository, check=True)
+    head = subprocess.run(
+        ["git", "rev-parse", "HEAD"], cwd=repository, check=True,
+        capture_output=True, text=True,
+    ).stdout.strip()
+    parent = tmp_path / "private"
+    parent.mkdir(mode=0o700)
+
+    with pytest.raises(ValueError, match="symlink escapes"):
+        with capture_v2._fresh_committed_tree(repository, head, parent=parent):
+            pytest.fail("escaping symlink was materialized")
+    assert list(parent.iterdir()) == []
+
+
+def test_governed_pytest_timeout_cleans_the_private_materialization(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    repository = _git_repository(tmp_path)
+    (repository / "test_slow.py").write_text(
+        "import time\n\ndef test_slow():\n    time.sleep(5)\n",
+        encoding="utf-8",
+    )
+    subprocess.run(["git", "add", "test_slow.py"], cwd=repository, check=True)
+    subprocess.run(["git", "commit", "-qm", "slow test"], cwd=repository, check=True)
+    head = subprocess.run(
+        ["git", "rev-parse", "HEAD"], cwd=repository, check=True,
+        capture_output=True, text=True,
+    ).stdout.strip()
+    temp_parent = tmp_path / "command-temp"
+    temp_parent.mkdir(mode=0o700)
+    monkeypatch.setattr(tempfile, "tempdir", str(temp_parent))
+
+    executed = capture_v2._execute(
+        [
+            *capture_v2.GOVERNED_PYTEST_PREFIX,
+            *capture_v2.GOVERNED_PYTEST_REQUIRED_ARGS,
+            "-q",
+            "test_slow.py",
+        ],
+        root=repository,
+        timeout_seconds=1,
+        replay_contract="CANONICAL_TEST_OUTPUT_V1",
+        execution_source_head=head,
+    )
+
+    assert executed["result"] == "TIMED_OUT"
+    assert executed["source_materialization"]["cleanup_status"] == "REMOVED"
+    assert list(temp_parent.iterdir()) == []
+
+
 def test_secret_environment_is_removed_and_secret_preview_is_redacted(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
@@ -436,6 +711,13 @@ def test_closed_command_capture_schema_requires_nullable_provider_field() -> Non
     assert command_capture["properties"]["pytest_provider"] == {
         "anyOf": [
             {"$ref": "#/$defs/governedPytestProvider"},
+            {"type": "null"},
+        ]
+    }
+    assert "source_materialization" in command_capture["required"]
+    assert command_capture["properties"]["source_materialization"] == {
+        "anyOf": [
+            {"$ref": "#/$defs/sourceMaterialization"},
             {"type": "null"},
         ]
     }

@@ -1079,7 +1079,7 @@ def validate_receipt_carrier_attestation(
         carrier_payload = _strict_json_object(carrier_bytes)
     except (
         OSError,
-        subprocess.CalledProcessError,
+        subprocess.SubprocessError,
         UnicodeDecodeError,
         json.JSONDecodeError,
         ValueError,
@@ -1390,7 +1390,7 @@ def validate_s2e_launch_acceptance_review_bundle(
                 errors.append(
                     "acceptance review candidate is not the current HEAD generation"
                 )
-        except (OSError, ValueError, subprocess.CalledProcessError) as error:
+        except (OSError, ValueError, subprocess.SubprocessError) as error:
             errors.append(
                 f"acceptance review current generation is unavailable: {error}"
             )
@@ -1414,7 +1414,7 @@ def validate_s2e_launch_acceptance_review_bundle(
         expected_blob_manifest = s2e_review_source_blob_manifest(
             candidate, repo_root=repo_root
         )
-    except (OSError, ValueError, subprocess.CalledProcessError) as error:
+    except (OSError, ValueError, subprocess.SubprocessError) as error:
         expected_blob_manifest = []
         errors.append(f"acceptance review Git blob replay failed: {error}")
     if bundle.get("source_blob_manifest") != expected_blob_manifest:
@@ -1458,7 +1458,7 @@ def validate_s2e_launch_acceptance_review_bundle(
         OSError,
         TypeError,
         ValueError,
-        subprocess.CalledProcessError,
+        subprocess.SubprocessError,
     ) as error:
         expected_predicate_results = []
         errors.append(f"acceptance review predicate oracle failed: {error}")
@@ -1539,7 +1539,7 @@ def validate_s2e_launch_acceptance_review_bundle(
             expected_argv = s2e_review_test_argv(
                 candidate, repo_root=repo_root
             )
-        except (OSError, ValueError, subprocess.CalledProcessError) as error:
+        except (OSError, ValueError, subprocess.SubprocessError) as error:
             expected_argv = []
             errors.append(f"acceptance review test profile failed: {error}")
         if governed_capture_record.get("argv") != expected_argv:
@@ -1789,7 +1789,7 @@ def issue_s2e_launch_receipt(
                 OSError,
                 TypeError,
                 ValueError,
-                subprocess.CalledProcessError,
+                subprocess.SubprocessError,
             ) as error:
                 errors.append(
                     f"wave predecessor durable consumption failed: {error}"
