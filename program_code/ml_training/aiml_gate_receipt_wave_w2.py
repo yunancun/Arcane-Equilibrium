@@ -181,13 +181,13 @@ _PROBE_BUILD_TOOL_VERSIONS = {"python3": "3.12.3", "uv": "0.5.0"}
 def _application_bundle_probe_identity(manifest: dict[str, Any]) -> str:
     """Application builder 的 head-independent 語義投影身分。
 
-    entries 已逐 byte 綁定全部 declared application 路徑;source_head 與由它再封出的
-    learning_runtime_digest_v2/self_digest 只是這次 builder instance 的 carrier 身分。
+    entries 與 learning_runtime_digest_v2 綁定 declared application 的 byte/語義面;
+    source_head 與 self_digest 只屬這次 builder instance 的 carrier 身分。
     """
     semantic = {
         key: value
         for key, value in manifest.items()
-        if key not in {"source_head", "learning_runtime_digest_v2", "self_digest"}
+        if key not in {"source_head", "self_digest"}
     }
     return canonical_digest({
         "schema_version": "application_bundle_probe_projection_v1",
