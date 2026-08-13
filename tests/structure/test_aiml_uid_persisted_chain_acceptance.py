@@ -179,9 +179,13 @@ for path in (
 ):
     sys.path.insert(0, str(path))
 
-from aiml_gate_receipt_schema_core import canonical_digest
-from aiml_gate_receipt_validator import derive_wave_exit_status, validate_aiml_artifact
-from aiml_gate_receipt_wave_w2 import w2_exported_abi_projection
+from aiml_gate_receipt_validator import (
+    artifact_self_digest,
+    canonical_digest,
+    derive_wave_exit_status,
+    validate_aiml_artifact,
+    w2_exported_abi_projection,
+)
 
 payload = json.load(sys.stdin)
 derivation = payload["derivation"]
@@ -203,18 +207,14 @@ result = {
     "validations": validations,
     "derivations": derivations,
     "self_links": [
-        receipt["self_digest"] == canonical_digest({
-            key: value for key, value in receipt.items() if key != "self_digest"
-        })
+        receipt["self_digest"] == artifact_self_digest(receipt)
         for receipt in (admission, *exits)
     ],
 }
 if payload["exercise_negatives"]:
     broken_terminal = copy.deepcopy(exits[-1])
     broken_terminal["predecessor_wave_receipt_digest"] = "sha256:" + "0" * 64
-    broken_terminal["self_digest"] = canonical_digest({
-        key: value for key, value in broken_terminal.items() if key != "self_digest"
-    })
+    broken_terminal["self_digest"] = artifact_self_digest(broken_terminal)
     result["predecessor_tamper"] = derive_wave_exit_status(
         broken_terminal,
         source_admission_receipt=admission,
@@ -226,9 +226,7 @@ if payload["exercise_negatives"]:
     )
     broken_w2 = copy.deepcopy(exits[w2_index])
     broken_w2["exported_abi_digest"] = "sha256:" + "0" * 64
-    broken_w2["self_digest"] = canonical_digest({
-        key: value for key, value in broken_w2.items() if key != "self_digest"
-    })
+    broken_w2["self_digest"] = artifact_self_digest(broken_w2)
     result["w2_abi_tamper_validation"] = validate_aiml_artifact(broken_w2)
     result["w2_abi_tamper"] = derive_wave_exit_status(
         broken_w2,
