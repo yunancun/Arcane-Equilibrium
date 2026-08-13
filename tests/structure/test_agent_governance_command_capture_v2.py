@@ -192,11 +192,81 @@ def test_native_node_and_dispatch_scope_are_derived_not_caller_asserted() -> Non
     artifact, _ = _review_context()
     with pytest.raises(PermissionError, match="does not own"):
         capture_v2._bound_execution_task(artifact, "QA", "independent_review", ROOT)
-    with pytest.raises(ValueError, match="not one canonical"):
+    with pytest.raises(ValueError, match="not one validated Context execution task"):
         capture_v2._bound_execution_task(artifact, "E2", "forged-node", ROOT)
     assert "path_scope" not in inspect.signature(
         capture_v2.capture_governed_command
     ).parameters
+
+
+def test_adaptive_e4_node_uses_validated_context_binding_and_verification_scope() -> None:
+    dirty_scope = [
+        "helper_scripts/maintenance_scripts/agent_governance_command_capture_v2.py"
+    ]
+    verification_scope = [
+        "tests/structure/test_agent_governance_command_capture_v2.py"
+    ]
+    facts = {
+        "task_shape": "review",
+        "surfaces": ["python"],
+        "risk": "medium",
+        "uncertainty": "low",
+        "side_effect_class": "none",
+        "objective": "capture one adaptive regression verification",
+        "scope": [*dirty_scope, *verification_scope],
+        "dirty_scope": dirty_scope,
+        "verification_scope": verification_scope,
+        "acceptance_criteria": ["validated adaptive node executes read-only"],
+        "hard_stops": ["no runtime effect"],
+        "baseline": capture_repository_baseline(),
+        "direct_interfaces": ["capture_governed_command"],
+        "previous_failure": "capture recomputed the canonical route",
+    }
+    routed = route_task(facts)
+    canonical = compile_context("E4", routed["task_facts"])
+    adaptive = {
+        "node_id": "adaptive_regression",
+        "role": "E4",
+        "native_agent": "E4-verifier",
+        "requires": [canonical["execution_dag_binding"]["nodes"][-1]["node_id"]],
+        "node_class": "verification",
+        "permission": "read_only",
+    }
+    plan = compile_context(
+        "E4",
+        routed["task_facts"],
+        execution_dag=[*canonical["execution_dag_binding"]["nodes"], adaptive],
+    )
+    artifact = materialize_context_artifact(plan)
+    validated = capture_v2.validate_context_artifact(artifact, root=ROOT)
+    assert validated["errors"] == []
+    assert not any(
+        task["node_id"] == adaptive["node_id"]
+        for task in route_task(validated["plan"]["task_contract"])[
+            "required_role_nodes"
+        ]
+    )
+
+    record = capture_v2.capture_governed_command(
+        native_agent="E4-verifier",
+        node_id=adaptive["node_id"],
+        context_artifact=artifact,
+        argv=["git", "rev-parse", "--is-inside-work-tree"],
+        root=ROOT,
+    )
+    assert record["result"] == "PASS"
+    assert record["execution_task"] == {**adaptive, "path_scope": []}
+    assert record["path_scope"] == verification_scope
+    assert record["path_scope"] != dirty_scope
+
+    with pytest.raises(ValueError, match="not one validated Context execution task"):
+        capture_v2.capture_governed_command(
+            native_agent="E4-verifier",
+            node_id="forged-adaptive-node",
+            context_artifact=artifact,
+            argv=["git", "rev-parse", "--is-inside-work-tree"],
+            root=ROOT,
+        )
 
 
 def test_full_w0_default_capture_ceiling_is_bounded_600_seconds() -> None:

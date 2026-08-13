@@ -42,7 +42,6 @@ from agent_governance_pytest_provider import (
     GOVERNED_PYTEST_REQUIRED_ARGS,
 )
 from agent_governance_registry import native_agent_contract
-from agent_governance_routing import route_task
 from agent_governance_workflow_receipts import canonical_digest
 
 
@@ -1319,14 +1318,22 @@ def _bound_execution_task(
         raise ValueError("context artifact is invalid: " + "; ".join(validated["errors"]))
     plan = validated["plan"]
     task_contract = plan["task_contract"]
-    route = route_task(task_contract)
     matches = [
-        task for task in route["required_role_nodes"]
-        if task.get("node_id") == node_id
+        task for task in plan["execution_dag_binding"]["nodes"]
+        if task["node_id"] == node_id
     ]
     if len(matches) != 1:
-        raise ValueError("node_id is not one canonical routed execution task")
-    task = {field: matches[0].get(field) for field in EXECUTION_TASK_FIELDS}
+        raise ValueError("node_id is not one validated Context execution task")
+    bound = matches[0]
+    task = {
+        "node_id": bound["node_id"],
+        "role": bound["role"],
+        "native_agent": bound["native_agent"],
+        "node_class": bound["node_class"],
+        "permission": bound["permission"],
+        "requires": bound["requires"],
+        "path_scope": [],
+    }
     identity = native_agent_contract(native_agent)
     if (
         task["native_agent"] != native_agent
