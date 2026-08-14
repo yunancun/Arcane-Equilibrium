@@ -777,6 +777,59 @@ def test_governed_pytest_timeout_cleans_the_private_materialization(
     assert list(temp_parent.iterdir()) == []
 
 
+def test_materialization_subprocess_failure_is_bounded_and_cleans_up(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    repository, head = _commit_test_repository(
+        tmp_path, assertion="VALUE == 1"
+    )
+    temp_parent = tmp_path / "command-temp"
+    temp_parent.mkdir(mode=0o700)
+    monkeypatch.setattr(tempfile, "tempdir", str(temp_parent))
+
+    def fail_materialization(*_args: object, **_kwargs: object) -> dict:
+        raise subprocess.CalledProcessError(128, ["git", "materialize"])
+
+    monkeypatch.setattr(
+        capture_v2, "_build_private_git_database", fail_materialization
+    )
+    argv = [
+        *capture_v2.GOVERNED_PYTEST_PREFIX,
+        *capture_v2.GOVERNED_PYTEST_REQUIRED_ARGS,
+        "-q",
+        "test_subject.py",
+    ]
+    executed = capture_v2._execute(
+        argv,
+        root=repository,
+        timeout_seconds=30,
+        replay_contract="CANONICAL_TEST_OUTPUT_V1",
+        execution_source_head=head,
+    )
+    assert executed["result"] == "FAIL"
+    assert executed["exit_code"] == 127
+    assert executed["timed_out"] is False
+    assert "Traceback" not in executed["stderr"]["preview_text"]
+    assert list(temp_parent.iterdir()) == []
+
+    _patch_test_binding(monkeypatch)
+    with pytest.raises(
+        RuntimeError, match="governed pytest source materialization is absent"
+    ) as denied:
+        capture_v2.capture_governed_command(
+            native_agent="E2",
+            node_id="review",
+            context_artifact={
+                "artifact_digest": "sha256:" + "a" * 64,
+                "task_contract_digest": "sha256:" + "b" * 64,
+            },
+            argv=argv,
+            root=repository,
+        )
+    assert "materialize" not in str(denied.value)
+    assert list(temp_parent.iterdir()) == []
+
+
 def test_secret_environment_is_removed_and_secret_preview_is_redacted(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
@@ -1042,6 +1095,115 @@ def test_plain_pytest_argv_is_rejected_before_execution(
             argv=["python3", "-m", "pytest", "-q", "scope.txt"],
             root=repository,
         )
+
+
+def test_absolute_governed_pytest_target_is_rejected_before_execution_and_validation(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    repository = _git_repository(tmp_path)
+    _patch_test_binding(monkeypatch)
+    calls: list[list[str]] = []
+    execute = capture_v2._execute
+
+    def fail_if_executed(argv: list[str], **kwargs: object) -> dict:
+        if capture_v2._is_governed_pytest_argv(argv):
+            calls.append(argv)
+            raise AssertionError("absolute pytest target reached execution")
+        return execute(argv, **kwargs)
+
+    monkeypatch.setattr(capture_v2, "_execute", fail_if_executed)
+    absolute_target = str(repository / "scope.txt")
+    governed_prefix = [
+        *capture_v2.GOVERNED_PYTEST_PREFIX,
+        *capture_v2.GOVERNED_PYTEST_REQUIRED_ARGS,
+        "-q",
+    ]
+    with pytest.raises(PermissionError, match="absolute pytest collection target"):
+        capture_v2.capture_governed_command(
+            native_agent="E2",
+            node_id="review",
+            context_artifact={
+                "artifact_digest": "sha256:" + "a" * 64,
+                "task_contract_digest": "sha256:" + "b" * 64,
+            },
+            argv=[*governed_prefix, absolute_target],
+            root=repository,
+        )
+    assert calls == []
+
+    baseline = capture_v2.capture_governed_command(
+        native_agent="E2",
+        node_id="review",
+        context_artifact={
+            "artifact_digest": "sha256:" + "a" * 64,
+            "task_contract_digest": "sha256:" + "b" * 64,
+        },
+        argv=["git", "rev-parse", "--is-inside-work-tree"],
+        root=repository,
+    )
+    absolute = deepcopy(baseline)
+    absolute["argv"] = [*governed_prefix, absolute_target]
+    absolute["command"] = capture_v2.command_argv(absolute["argv"])[1]
+    absolute["record_digest"] = capture_v2._self_digest(absolute)
+    assert any(
+        "absolute pytest collection target" in error
+        for error in capture_v2.validate_governed_command_capture(
+            absolute, root=repository
+        )
+    )
+
+    relative = deepcopy(absolute)
+    relative["argv"][-1] = "scope.txt"
+    relative["command"] = capture_v2.command_argv(relative["argv"])[1]
+    relative["record_digest"] = capture_v2._self_digest(relative)
+    assert not any(
+        "absolute pytest collection target" in error
+        for error in capture_v2.validate_governed_command_capture(
+            relative, root=repository
+        )
+    )
+
+
+def test_intermediate_non_pytest_record_without_source_materialization_is_valid(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    repository = _git_repository(tmp_path)
+    _patch_test_binding(monkeypatch)
+    record = capture_v2.capture_governed_command(
+        native_agent="E2",
+        node_id="review",
+        context_artifact={
+            "artifact_digest": "sha256:" + "a" * 64,
+            "task_contract_digest": "sha256:" + "b" * 64,
+        },
+        argv=["git", "rev-parse", "--is-inside-work-tree"],
+        root=repository,
+    )
+    assert "pytest_provider" in record
+    assert record["pytest_provider"] is None
+
+    intermediate = deepcopy(record)
+    intermediate.pop("source_materialization")
+    intermediate["record_digest"] = capture_v2._self_digest(intermediate)
+    assert capture_v2.validate_governed_command_capture(
+        intermediate, root=repository
+    ) == []
+
+    governed = deepcopy(intermediate)
+    governed["argv"] = [
+        *capture_v2.GOVERNED_PYTEST_PREFIX,
+        *capture_v2.GOVERNED_PYTEST_REQUIRED_ARGS,
+        "-q",
+        "scope.txt",
+    ]
+    governed["command"] = capture_v2.command_argv(governed["argv"])[1]
+    governed["replay_contract"] = capture_v2.replay_contract_for(
+        governed["argv"], governed["authorization"]["policy_class"]
+    )
+    governed["record_digest"] = capture_v2._self_digest(governed)
+    assert "governed pytest source materialization is absent" in (
+        capture_v2.validate_governed_command_capture(governed, root=repository)
+    )
 
 
 def test_forged_scope_and_host_attestation_are_rejected() -> None:

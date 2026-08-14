@@ -84,6 +84,9 @@ RECORD_FIELDS = {
     "record_digest",
 }
 LEGACY_RECORD_FIELDS = RECORD_FIELDS - {"pytest_provider", "source_materialization"}
+PRE_SOURCE_MATERIALIZATION_RECORD_FIELDS = RECORD_FIELDS - {
+    "source_materialization"
+}
 PYTEST_PROVIDER_FIELDS = {
     "schema_version", "profile_id", "bootstrap_digest", "interpreter_path",
     "interpreter_digest_before", "interpreter_digest_after",
@@ -322,6 +325,21 @@ def _is_governed_pytest_argv(argv: list[str]) -> bool:
         tuple(argv[:4]) == GOVERNED_PYTEST_PREFIX
         and tuple(argv[4:required_end]) == GOVERNED_PYTEST_REQUIRED_ARGS
     )
+
+
+def _pytest_collection_target_errors(argv: list[str]) -> list[str]:
+    if not _is_governed_pytest_argv(argv):
+        return []
+    required_end = 4 + len(GOVERNED_PYTEST_REQUIRED_ARGS)
+    for argument in argv[required_end:]:
+        if argument.startswith("-"):
+            continue
+        target = argument.split("::", 1)[0]
+        if PurePosixPath(target).is_absolute():
+            return [
+                "governed pytest absolute pytest collection target is forbidden"
+            ]
+    return []
 
 
 def _raw_file_digest(path: Path) -> str:
@@ -1288,7 +1306,7 @@ def _execute(
                 exit_code = completed.returncode
         except subprocess.TimeoutExpired:
             timed_out, exit_code = True, -1
-        except (OSError, ValueError) as error:
+        except (OSError, ValueError, subprocess.SubprocessError) as error:
             exit_code = 127
             stderr_file.write(str(error).encode("utf-8", errors="replace"))
         finally:
@@ -1379,6 +1397,9 @@ def capture_governed_command(
             "pytest capture requires the no-site governed bootstrap and "
             "--noconftest"
         )
+    pytest_target_errors = _pytest_collection_target_errors(command_argv_value)
+    if pytest_target_errors:
+        raise PermissionError(pytest_target_errors[0])
     authorization = authorize_native_command(native_agent, command)
     if not authorization.get("allowed"):
         raise PermissionError(f"command is not authorized: {authorization.get('reason')}")
@@ -1404,12 +1425,17 @@ def capture_governed_command(
             text=True,
         ).stdout.strip()
     )
-    executed = _execute(
-        command_argv_value, root=repository, timeout_seconds=timeout_seconds,
-        replay_contract=replay_contract,
-        provider_source_head=provider_source_head,
-        execution_source_head=whole_before["source_head"],
-    )
+    try:
+        executed = _execute(
+            command_argv_value, root=repository, timeout_seconds=timeout_seconds,
+            replay_contract=replay_contract,
+            provider_source_head=provider_source_head,
+            execution_source_head=whole_before["source_head"],
+        )
+    except subprocess.SubprocessError:
+        raise RuntimeError(
+            "governed command execution was denied after a subprocess failure"
+        ) from None
     repository_after = _generation_summary(path_scope, repository)
     whole_after = _generation_summary(["."], repository)
     record: dict[str, Any] = {
@@ -1804,6 +1830,7 @@ def validate_governed_command_capture(
     errors: list[str] = []
     if frozenset(record) not in {
         frozenset(RECORD_FIELDS),
+        frozenset(PRE_SOURCE_MATERIALIZATION_RECORD_FIELDS),
         frozenset(LEGACY_RECORD_FIELDS),
     }:
         errors.append("governed command capture fields do not match contract")
@@ -1851,6 +1878,7 @@ def validate_governed_command_capture(
     except ValueError as error:
         argv, command = [], ""
         errors.append(f"governed command argv is invalid: {error}")
+    errors.extend(_pytest_collection_target_errors(argv))
     provider_expected_source_head = None
     try:
         if Path(root).resolve() == Path(__file__).resolve().parents[2]:
