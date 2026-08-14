@@ -1,7 +1,30 @@
 # CLAUDE_CHANGELOG.md — 開發歷史歸檔
 
 > 從 CLAUDE.md / TODO.md 遷出的 Wave/Sprint/Batch + TODO version-increment 歷史敘事。新 session 不需要讀此文件，僅供回顧歷史時查閱。
-> 最後更新：2026-08-12（TODO v877 uid-topology W2 final receipt repair）
+> 最後更新：2026-08-14（TODO v878 UID validation/publication closure）
+
+---
+
+## TODO v878 增量：UID validation/publication closure（2026-08-14）
+
+- UID lane 已由 `ACTIVE_PENDING_FRESH_REVIEW_AND_PUBLICATION` 一次性轉為
+  `UID_VALIDATION_PUBLICATION_CLOSED`。H1=
+  `3e33a66c29a1318ab19472804bd604d22c0274ff`、tree=
+  `6b3050a35a8c7e568bef948249b6337d55ca6742`；closure schema 同時接受
+  current/intermediate/legacy lineage，且 materialization-only 仍 fail closed。
+- PR [#187](https://github.com/yunancun/Arcane-Equilibrium/pull/187) 的 current-head
+  Codex review 無 major issue，CI run `31765112169` 全部 success/skipped，review
+  threads 全關閉；以 direct merge 產生 M1=
+  `c7f9de914a51cfba20b59ad3e76921b0cf87dd00`，tree 與 H1 相同。
+- exact-M1 governed combined proof 為 5 passed，record=
+  `sha256:8c99bf46e1a8d582c52bbba35c7267bdecc62acaa1497a60d3e5ea6a3c1567ce`；
+  source inspection 對禁用 readiness identifiers 的預期 no-match record=
+  `sha256:78883b5ae6789748e146733d5feb6fa819668ed8708f80bcd6544e4976b3fd4f`。
+- successor 只標成 `LW2_RE_ADMISSION_READY`；physical queue 仍為 `WAITING`、
+  `dispatchable=false`，目前沒有 LW2 task contract、routed DAG、writer lease、
+  source write、materialized Context artifact 或 receipt。S2E=5/9、production
+  effect=0/6、authority=0/9，W0/LW1 receipts absent，16 項 external prerequisites
+  全數保留；本增量不授 runtime、deploy、PG、broker、order 或 trading authority。
 
 ---
 

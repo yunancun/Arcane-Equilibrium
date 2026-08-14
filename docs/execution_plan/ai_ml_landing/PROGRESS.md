@@ -1,8 +1,8 @@
 # AI/ML Landing Progress Ledger
 
 **Program**: `AIML-LONG-LIVED-LANDING-V2`
-**Ledger version**: 29
-**Updated**: 2026-08-12（uid-topology round-15 receipt repair；final validation/publication 仍是唯一 ACTIVE；LW2 等待 uid closure）
+**Ledger version**: 30
+**Updated**: 2026-08-14（UID validation/publication 已關閉；LW2 僅 re-admission-ready，仍 WAITING／non-dispatchable）
 **Overall state**: `PROGRAM_ADOPTED` · **`S1_CLOSED`** · every S2 effect-session
 source-seam predicate is narrowly `SOURCE_READY` (S2.0 + S2.1 + S2.2A + S2.3 +
 S2.4 + S2.5 + S2.2B), while Sprint 2 remains
@@ -15,11 +15,12 @@ its LW1 subwave is external-blocked, and the dependency order remains
 (Tier 1 durability anchor, after four rounds of adversarial review; PR #178 was
 merged at `777f939f1`, preserving the ancestry pinned by
 `test_agent_governance_s2e_lw1_committed_action_packet.py`). W0 genesis and LW1 receipts
-are absent, the transition did not `ADVANCE`, and `S2E.2b-2`/LW2 is
-`WAITING_UID_TOPOLOGY_CLOSURE`. G2 landed satisfies only admission condition 1;
-condition 2 is formal uid-lane close/merge, and condition 3 is a fresh proof on
-main containing both final merged generations that `S2E_WAVE_EXIT_IDS["S2E-LW2"]`
-is unreachable from source readiness. The closed
+are absent, the transition did not `ADVANCE`, and `S2E.2b-2`/LW2 has only the
+successor label `LW2_RE_ADMISSION_READY`; its physical queue remains `WAITING`
+with `dispatchable=false`. G2 landed, formal UID close/merge and the fresh
+exact-M1 proof that `S2E_WAVE_EXIT_IDS["S2E-LW2"]` is unreachable from source
+readiness satisfy the previous re-admission evidence prerequisites, but no
+task/DAG/lease/source write/Context artifact/receipt exists. The closed
 machine packet
 at `docs/CCAgentWorkSpace/PM/workspace/reports/2026-08-02--s2e_lw1_external_prerequisite_action_packet.json`
 records 16 blocking prerequisites (12 fixed paths + 4 services) at its own pinned
@@ -36,19 +37,21 @@ host-side durability-anchor/replica/registry service prerequisites are
 `NOT_OBSERVED`, not self-declared ready.
 Nine authorities remain false; G2 is `DONE_SOURCE_LANDED` at source PR #184
 (reviewed `bacb20648e18a6c50e1f4b89a257ac071df9d21a`, merged/synced
-`32550666488aba7664d0ed354455957f8f9ff5ee`). The one ACTIVE lane is
-`P0-AIML-S2E-UID-TOPOLOGY-VALIDATION-PUBLICATION` with status
-`ACTIVE_PENDING_FRESH_REVIEW_AND_PUBLICATION`, now projected from local integration
-branch `agent/p0-aiml-s2e-uid-topology-validation-publication-20260812` at receipt
-carrier head `070591dd33ff318389302d4efb0ecd5a4543e902`. That branch non-rewriting integrated
-`origin/main`; semantic source `6fd4ea739b736b6d00000f7e66913f7c8ee8a8e1`
-and the 33/33 canonical W0-W5 artifact chain (round 15) are locally committed;
-the current-head structural validator reports 21/21 PASS. The exact-semantic-head
-E2 governed review passed with record digest
-`sha256:c79714ad23eff5c17bb084db3fda6003aba86630e663995b23ad381425de1f09`;
-final carrier-head E2→E3→E4 is still pending. No GitHub publication, merge, source sync,
-or runtime authority was granted. No production effect may start before the S2E
-source waves close and a newly emitted packet receives fresh exact authority.
+`32550666488aba7664d0ed354455957f8f9ff5ee`). UID validation/publication is
+`UID_VALIDATION_PUBLICATION_CLOSED`: H1
+`3e33a66c29a1318ab19472804bd604d22c0274ff`, tree
+`6b3050a35a8c7e568bef948249b6337d55ca6742`, landed through PR #187 after a
+current-head Codex review with no major issue, CI run `31765112169`
+success/skipped and all review threads closed. Direct merge M1
+`c7f9de914a51cfba20b59ad3e76921b0cf87dd00` has the same tree. The closure
+schema supports current/intermediate/legacy lineage and rejects
+materialization-only. The exact-M1 governed combined proof is 5 passed, record
+`sha256:8c99bf46e1a8d582c52bbba35c7267bdecc62acaa1497a60d3e5ea6a3c1567ce`;
+the expected no-match source inspection is record
+`sha256:78883b5ae6789748e146733d5feb6fa819668ed8708f80bcd6544e4976b3fd4f`.
+There are now zero ACTIVE AIML source lanes. No production effect may start
+before fresh PM re-admission, the remaining S2E source waves close and a newly
+emitted packet receives fresh exact authority.
 The 2026-07-30 calibration-checkpoint narrative and the S0/S1
 finalization/provenance narrative were moved verbatim to
 `PROGRESS-archive-1.md`(2026-08-01 generation split; information-
@@ -68,16 +71,13 @@ does not change those receipt/effect conclusions.
 (`sha256:1a124bcaebb741a69c97e37a828e5b85c9b6499cdf053e8ef62451448878f93b`);
 finalization attestation + trusted execution bundle (each plus `.sig`, verifying
 against the adopted source trust root) live in the same receipts directory.
-**Next gate**: fresh-review and publish the uid-topology lane through
-`PM → PA → E1` (only if integration/artifact repair is required) `→ E2 → E3 → E4 → PM`.
-Acceptance rechecks branch/main divergence and integration; launch/schema/validator/
-wave/runtime-closure strong gates; the R4 inventory of 14 stale wave-exit manifests
-(13 possibly lane-introduced, never reused blindly); hostile-repo-owner, same-uid
-pointer redirect and read-time symlink residuals. None may be relabelled as
-attestation, receipt or security closure. Only after formal uid close/merge and the
-fresh combined-main LW2 exit-id unreachability proof may PM consider LW2 source
-re-admission. The 16 external prerequisites remain intact and no W0/LW1 receipt can
-be emitted until their independent requirements are met. Then the later order remains
+**Next gate**: no source task is dispatchable. The only successor label is
+`LW2_RE_ADMISSION_READY`, while the physical queue remains `WAITING` and
+`dispatchable=false`. PM may consider a new LW2 source admission only by binding
+a fresh explicit task contract, routed DAG, writer lease and materialized Context
+on current source; none exists now. The 16 external prerequisites remain intact
+and no W0/LW1 receipt can be emitted until their independent requirements are met.
+Then the later order remains
 `LW2 → S2E.2b-3 → S2E.4 → S2E.5`; do not reopen the five completed packages.
 The production effect DAG remains
 `S2.0→S2.4→S2.5A→S2.1→S2.5B→S2.2B` and then requires fresh exact Operator
@@ -102,11 +102,12 @@ range is 37-69 engineering days plus evidence waits (12-20 calendar weeks only
 under uninterrupted assumptions), not an edge/profit guarantee.
 
 The downstream `P0-AIML-RUNTIME-LEARNING-VERTICAL-SLICE` is `WAITING` and not
-dispatchable; the unverified observations above do not admit it. PM owns fresh
-re-admission, but no role chain is preselected. Only after named unblock
+dispatchable; UID closure/source proof alone and the unverified observations
+above do not admit it. PM owns fresh re-admission, but no role chain is
+preselected. Only after named unblock
 evidence and the surfaces, path scopes and uncertainty are bound may each
-bounded Session derive its own risk DAG and roles. After UID/source/effect
-admission, its acceptance target is a
+bounded Session derive its own risk DAG and roles. After source/effect admission,
+its acceptance target is a
 current-head dedicated runtime, pinned LightGBM/ONNX, one natural
 candidate-matched `model_training_performed=true` fit, content-addressed
 artifact plus qualified registry row, Rust shadow-consumer ACK and zero
@@ -205,6 +206,7 @@ closed S0.x/S1.x rows(全部 DONE)已遷 `PROGRESS-archive-1.md`(資訊守恆);�
 
 | Time | Session | Event | Evidence |
 |---|---|---|---|
+| 2026-08-14 | UID validation/publication closure | **Canonical transition: `UID_VALIDATION_PUBLICATION_CLOSED`; successor label only `LW2_RE_ADMISSION_READY`.** H1 `3e33a66c29a1318ab19472804bd604d22c0274ff` (tree `6b3050a35a8c7e568bef948249b6337d55ca6742`) includes the closure-schema compatibility repair: current/intermediate/legacy lineage accepted, materialization-only rejected. PR #187 current-head Codex reported no major issue, CI run `31765112169` finished success/skipped and all review threads closed; direct merge M1 `c7f9de914a51cfba20b59ad3e76921b0cf87dd00` preserves the same tree. Exact-M1 governed combined proof is 5 passed; expected source inspection is an `rg` no-match. AIML now has zero ACTIVE source rows. LW2 remains physical `WAITING`, `dispatchable=false`, with no task contract, routed DAG, writer lease, source write, materialized Context artifact or receipt. S2E remains 5/9, effect 0/6, authority 0/9, W0/LW1 receipts absent and all 16 external prerequisites intact. | PR #187; H1/M1/tree above; combined record `sha256:8c99bf46e1a8d582c52bbba35c7267bdecc62acaa1497a60d3e5ea6a3c1567ce`; expected no-match record `sha256:78883b5ae6789748e146733d5feb6fa819668ed8708f80bcd6544e4976b3fd4f` |
 | 2026-08-12 | uid-topology W2 final receipt repair | **Round 15 is locally committed and remains publication-pending.** PA proved that W2 folded application/launch builder instance digests containing current HEAD, so any receipt/docs carrier commit invalidated four persisted W2 instances. The repair keeps real production builders and their self-digest/application/base/foreign-application checks, but feeds W2 a head-independent semantic projection that still retains `learning_runtime_digest_v2` and declared application bytes. A carrier-only regression failed on the baseline and passes after repair. Exact-semantic-head E2 initially rejected an over-broad exclusion, then passed after `learning_runtime_digest_v2` was restored. Canonical emitters rewrote exactly 26 existing W2–W5 JSON files in strict W2→W5 order; W0/W1 directories are byte-identical. Current-head structural validation is 21/21 PASS and the four W2 instances all carry `sha256:9b2751b3659f4676459bc29d575255835ebdfba0e254af0eb030f92849bab89c`. Status stays `ACTIVE_PENDING_FRESH_REVIEW_AND_PUBLICATION` until final carrier-head E2→E3→E4; no publication, merge, sync, runtime, effect, or LW2 authority. | semantic source `6fd4ea739b736b6d00000f7e66913f7c8ee8a8e1`; receipt carrier `070591dd33ff318389302d4efb0ecd5a4543e902`; E2 `sha256:c79714ad23eff5c17bb084db3fda6003aba86630e663995b23ad381425de1f09`; 21/21 PASS |
 | 2026-08-12 | G2 source closure / uid projection | **G2 is `DONE_SOURCE_LANDED`.** Source PR [#184](https://github.com/yunancun/Arcane-Equilibrium/pull/184) reviewed head `bacb20648e18a6c50e1f4b89a257ac071df9d21a`, merge SHA `32550666488aba7664d0ed354455957f8f9ff5ee`; Mac/GitHub/Linux source all equal the merge SHA. four-head is `INDETERMINATE` only because engine process/build is unavailable, so the source posture is `SOURCE_SYNCED_RUNTIME_PENDING`, with no runtime/effect claim. **Named correction, preserving the valid 2026-08-07 event:** “seven closure false” was a stale count. The six closure false fields are `w0_genesis_receipt_issued`, `lw1_wave_receipt_issued`, `lw1_transition_gate_advance`, `lw2_unlocked`, `s2e_2b_2_closed`, `s2_closed`; the two authority false fields are `production_runtime_effect_performed_by_task`, `production_deploy_restart_pg_broker_order_authorized`. The one ACTIVE lane is uid-topology validation/publication, not ready/landed/security-closed; LW2 waits for uid closure and fresh combined-main unreachability proof. S2E remains 5/9, effect 0/6, authority 0/9, receipts absent, S2 open. | PR #184; reviewed `bacb20648e18a6c50e1f4b89a257ac071df9d21a`; merged/synced `32550666488aba7664d0ed354455957f8f9ff5ee`; then-current uid local carrier `agent/p0-aiml-s2e-uid-topology-validation-publication-20260812` @ `407cf1b8de6bb34d5f0a56ada3f6706c4f2e7258`, unpublished/unmerged/unsynced |
 | 2026-08-09 | G1/G2 evidence correction | **The "no ssh access" line in this branch's records was a misdiagnosis, and it had already been copied forward twice.** The key carries a passphrase and the agent was empty; `ssh-add` and it connects — the same root cause PR #182 corrected for A5. Re-measured directly rather than restated: `getconf PAGE_SIZE` 4096, `getconf ARG_MAX` 2,097,152, and a binary search on `/bin/true` puts the largest single argv element at **131,071 bytes**, so `MAX_ARG_STRLEN` is 131,072 — the three values G1's transport budget rests on are now first-hand. trade-core's `srv` is on `main`, clean, at `cd09a59a6`, so the Linux sync claim is confirmed too. A read-only sweep of the twelve fixed host paths returns **eleven present, one absent** (`…/s2-5-recovery-host-capture-attest-v2`, one of the three unwritten producers), which makes the committed packet's 2026-08-02 all-ABSENT inventory definitively stale rather than merely suspect. **Not refreshed in this PR on purpose:** refreshing moves `blocked_prerequisite_ids`, the field an operator acts on, while this PR's E2/E4 review covered the derivation mechanism and not the host observation — folding it in would silently reshape an already signed-off scope. Filed as `P2-LW1-READONLY-INVENTORY-REFRESH`, with the rule that inventory bytes may never be hand-edited from a report or a shell sweep. **The lesson is the misdiagnosis itself:** an environment fault written up as a capability boundary gets quoted forward by every later round. Everything above is `UNAUTHENTICATED_READ_ONLY_OBSERVATION`, not platform-attested, and changes no gate. | ssh read-only on trade-core; `P2-LW1-READONLY-INVENTORY-REFRESH`; authority 0/9, effect 0/6 |

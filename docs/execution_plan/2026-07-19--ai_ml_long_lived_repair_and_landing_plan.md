@@ -754,15 +754,32 @@ waits. Under uninterrupted runtime/data/review availability, use **12-20
 calendar weeks** as a planning range, not a delivery guarantee and never as a
 promise that an eligible edge or profit will exist.
 
-The next runtime acceptance target remains non-dispatchable until UID/source/
-effect admission. PM owns fresh re-admission but no role chain is preselected;
-only after named unblock evidence and the surfaces, path scopes and uncertainty
-are bound may each bounded Session derive its own risk DAG and roles. The target
-remains current-head dedicated runtime, pinned LightGBM/ONNX, one
-natural candidate-matched fit with `model_training_performed=true`, a
-content-addressed artifact and qualified registry row, a Rust shadow-consumer
-ACK, and zero broker/order/live authority. PM must split that target through the
-existing S3-S6 dependencies; it is not permission to skip a Sprint.
+**2026-08-14 UID publication transition.** H1
+`3e33a66c29a1318ab19472804bd604d22c0274ff` (tree
+`6b3050a35a8c7e568bef948249b6337d55ca6742`) landed through PR #187 as direct
+merge M1 `c7f9de914a51cfba20b59ad3e76921b0cf87dd00` with the same tree after
+current-head review, successful required CI and thread closure. The exact-M1
+five-test governed record is
+`sha256:8c99bf46e1a8d582c52bbba35c7267bdecc62acaa1497a60d3e5ea6a3c1567ce`;
+the expected no-match source-inspection record is
+`sha256:78883b5ae6789748e146733d5feb6fa819668ed8708f80bcd6544e4976b3fd4f`.
+The canonical transition is `UID_VALIDATION_PUBLICATION_CLOSED` and only
+`LW2_RE_ADMISSION_READY`; it grants no runtime/effect/receipt/trading authority.
+
+The next runtime acceptance target remains non-dispatchable. AIML has zero
+ACTIVE source rows; LW2 remains in the physical `WAITING` queue with
+`dispatchable=false`. A fresh PM re-admission on current source must bind a new
+explicit task contract, routed DAG, writer lease and materialized Context before
+any LW2 source work; none exists now. S2E remains 5/9, production effect 0/6,
+authority 0/9, W0/LW1 receipts absent and all 16 external prerequisites intact.
+Only after fresh admission and named unblock evidence binds the surfaces, path
+scopes and uncertainty may each bounded Session derive its own risk DAG and
+roles. The later runtime target remains current-head dedicated runtime, pinned
+LightGBM/ONNX, one natural candidate-matched fit with
+`model_training_performed=true`, a content-addressed artifact and qualified
+registry row, a Rust shadow-consumer ACK, and zero broker/order/live authority.
+PM must split that target through the existing S3-S6 dependencies; it is not
+permission to skip a Sprint.
 
 Recurring work with no verified state transition is exactly `NO_PROGRESS`
 unless a downstream consumer ACK is Adapter-validated or carried by a reviewed
