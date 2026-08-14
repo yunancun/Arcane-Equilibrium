@@ -17,7 +17,8 @@ from aiml_gate_receipt_schema_core import (
     _contains_github_secret_like_content,
     _load_schema,
     canonical_digest,
-    git_argv, git_subprocess_env,
+    code_owned_object_view, git_argv, git_subprocess_env,
+    require_own_clean_checkout, resolve_named_revision, verified_blob_bytes,
 )
 from aiml_gate_receipt_s2e_consumption import (
     build_s2e_launch_consumption_bootstrap_authority_core,
@@ -186,29 +187,26 @@ def _without_digest(value: dict[str, Any], field: str) -> dict[str, Any]:
 
 
 
-
-
+# E3 round-5 P1-5:本模組原本是家族裡唯一沒有 timeout 的 git 呼叫面。舊拓撲下這些呼叫
+# 在 `rc=128 dubious ownership` 就死了,view 把它變成活的、吃被驗者資料的解析面。
+_GIT_TIMEOUT_SECONDS = 180
 
 
 def _git(repo_root: Path, *args: str, check: bool = True) -> subprocess.CompletedProcess[str]:
-    return subprocess.run(
-        git_argv(repo_root, *args),
-        cwd=repo_root,
-        check=check,
-        capture_output=True,
-        env=git_subprocess_env(),
-        text=True,
-    )
+    # round-5:git 跑在 code-owned bare view 裡,`repo_root` 只提供 object store。
+    with code_owned_object_view(repo_root) as view:
+        return subprocess.run(
+            git_argv(view, *args), cwd=view, check=check, timeout=_GIT_TIMEOUT_SECONDS,
+            capture_output=True, env=git_subprocess_env(), text=True,
+        )
 
 
 def _git_bytes(repo_root: Path, *args: str) -> bytes:
-    return subprocess.run(
-        git_argv(repo_root, *args),
-        cwd=repo_root,
-        check=True,
-        capture_output=True,
-        env=git_subprocess_env(),
-    ).stdout
+    with code_owned_object_view(repo_root) as view:
+        return subprocess.run(
+            git_argv(view, *args), cwd=view, check=True, timeout=_GIT_TIMEOUT_SECONDS,
+            capture_output=True, env=git_subprocess_env(),
+        ).stdout
 
 
 def _strict_json_object(raw: bytes) -> Any:
@@ -357,25 +355,28 @@ def load_s2e_receipt_signer_trust_root() -> tuple[dict[str, Any] | None, list[st
 
 
 def _commit(repo_root: Path, head: str) -> str:
-    return _git(repo_root, "rev-parse", "--verify", f"{head}^{{commit}}").stdout.strip()
+    revision = resolve_named_revision(repo_root, head)
+    return _git(repo_root, "rev-parse", "--verify", "--end-of-options",
+                f"{revision}^{{commit}}").stdout.strip()
 
 
 def _tree(repo_root: Path, head: str) -> str:
-    return _git(repo_root, "rev-parse", "--verify", f"{head}^{{tree}}").stdout.strip()
+    revision = resolve_named_revision(repo_root, head)
+    return _git(repo_root, "rev-parse", "--verify", "--end-of-options",
+                f"{revision}^{{tree}}").stdout.strip()
 
 
 def _is_ancestor(repo_root: Path, older: str, newer: str) -> bool:
-    return _git(
-        repo_root, "merge-base", "--is-ancestor", older, newer, check=False
-    ).returncode == 0
-
-
-def _require_clean(repo_root: Path) -> None:
-    status = _git(
-        repo_root, "status", "--porcelain=v1", "--untracked-files=all"
-    ).stdout
-    if status:
-        raise ValueError("repository must be clean before launch receipt generation")
+    # E2 round-5 F2:view 以 `OSError` 拒絕(巢狀 alternates、指標不合佈局、TMPDIR
+    # 祖先不安全…),而四個呼叫點都在 `-> list[str]` 的驗證器裡且沒有 try。合法的
+    # `git clone --shared` 就會把 typed verdict 變成 crash。這裡收成 False:呼叫端
+    # 一律以 `if not _is_ancestor(...)` 用它,故 False 是 fail-closed 的那一邊。
+    try:
+        return _git(
+            repo_root, "merge-base", "--is-ancestor", older, newer, check=False
+        ).returncode == 0
+    except (OSError, subprocess.SubprocessError):
+        return False
 
 
 def _schema_errors(receipt: Any, schema_version: str) -> list[str]:
@@ -408,7 +409,11 @@ def _git_binding_errors(
     try:
         resolved_head = _commit(repo_root, head)
         resolved_tree = _tree(repo_root, head)
-    except (OSError, subprocess.CalledProcessError) as error:
+    # Codex PR#183 P2:`_git` 本輪才加上 `timeout=180`,而 `TimeoutExpired` 是
+    # `SubprocessError` 而**不是** `CalledProcessError` 的子類。只接後者的話,一個慢的
+    # object store 會讓這支 `-> list[str]` 的驗證器拋例外而不是回 typed 錯誤——
+    # fail-closed 變成 crash。`anchor_floor._GIT_FAILURES` 早就接對了,這裡補齊。
+    except (OSError, subprocess.SubprocessError) as error:
         return [f"{label} is not a readable Git commit: {error}"]
     errors: list[str] = []
     if resolved_head != head:
@@ -1057,16 +1062,24 @@ def validate_receipt_carrier_attestation(
             "--verify",
             f"{attestation['carrier_head']}:{attestation['carrier_path']}",
         ).stdout.strip()
-        carrier_bytes = _git_bytes(
-            repo_root, "show", f"{attestation['carrier_head']}:{attestation['carrier_path']}"
+        # round-7 P0-1:carrier 位元組同樣要對 tree 的 object id 重算(`show` 不複驗)。
+        carrier_bytes = verified_blob_bytes(
+            repo_root,
+            attestation["carrier_path"],
+            at_commit=attestation["carrier_head"],
         )
+        if carrier_bytes is None:
+            raise OSError(
+                "attestation carrier bytes are absent, unreadable, or do not hash to "
+                "the object id recorded in the carrier commit's tree"
+            )
         carrier_text = carrier_bytes.decode("utf-8")
         if _contains_github_secret_like_content(carrier_text):
             errors.append("carrier contains secret-like raw carrier content")
         carrier_payload = _strict_json_object(carrier_bytes)
     except (
         OSError,
-        subprocess.CalledProcessError,
+        subprocess.SubprocessError,
         UnicodeDecodeError,
         json.JSONDecodeError,
         ValueError,
@@ -1363,16 +1376,21 @@ def validate_s2e_launch_acceptance_review_bundle(
     else:
         return ["acceptance review bundle candidate schema is unsupported"]
     if require_current_generation:
+        # E3 round-5 具名撤回「工作樹乾淨」(原是 `_require_clean` = `git status`,
+        # R4-1 的提權形狀本體)。**唯一成立的理由是「跨 uid 取不到」**;E2 round-5 F1
+        # 證偽了原本並列的第二個理由:下方 `validate_governed_command_capture(
+        # reexecute=True)` 會經 command_capture_v2 → generation_summary 把 `git diff`
+        # 與 untracked 清單摘進 digest ⇒ 工作樹位元組**確實**進得了驗證面的 digest,
+        # 而那條路仍以 ambient env 對被驗者跑 git(設計檔 §5 debt,不在本輪 scope)。
         try:
-            _require_clean(repo_root)
             if (
                 _commit(repo_root, "HEAD") != reviewed_head
                 or _tree(repo_root, "HEAD") != reviewed_tree
             ):
                 errors.append(
-                    "acceptance review candidate is not the clean current HEAD"
+                    "acceptance review candidate is not the current HEAD generation"
                 )
-        except (OSError, ValueError, subprocess.CalledProcessError) as error:
+        except (OSError, ValueError, subprocess.SubprocessError) as error:
             errors.append(
                 f"acceptance review current generation is unavailable: {error}"
             )
@@ -1396,7 +1414,7 @@ def validate_s2e_launch_acceptance_review_bundle(
         expected_blob_manifest = s2e_review_source_blob_manifest(
             candidate, repo_root=repo_root
         )
-    except (OSError, ValueError, subprocess.CalledProcessError) as error:
+    except (OSError, ValueError, subprocess.SubprocessError) as error:
         expected_blob_manifest = []
         errors.append(f"acceptance review Git blob replay failed: {error}")
     if bundle.get("source_blob_manifest") != expected_blob_manifest:
@@ -1440,7 +1458,7 @@ def validate_s2e_launch_acceptance_review_bundle(
         OSError,
         TypeError,
         ValueError,
-        subprocess.CalledProcessError,
+        subprocess.SubprocessError,
     ) as error:
         expected_predicate_results = []
         errors.append(f"acceptance review predicate oracle failed: {error}")
@@ -1521,7 +1539,7 @@ def validate_s2e_launch_acceptance_review_bundle(
             expected_argv = s2e_review_test_argv(
                 candidate, repo_root=repo_root
             )
-        except (OSError, ValueError, subprocess.CalledProcessError) as error:
+        except (OSError, ValueError, subprocess.SubprocessError) as error:
             expected_argv = []
             errors.append(f"acceptance review test profile failed: {error}")
         if governed_capture_record.get("argv") != expected_argv:
@@ -1771,7 +1789,7 @@ def issue_s2e_launch_receipt(
                 OSError,
                 TypeError,
                 ValueError,
-                subprocess.CalledProcessError,
+                subprocess.SubprocessError,
             ) as error:
                 errors.append(
                     f"wave predecessor durable consumption failed: {error}"
@@ -1834,7 +1852,7 @@ def _build_genesis_candidate_payload(
     launch_contract_digest: str,
     generation_task_contract_digest: str,
 ) -> dict[str, Any]:
-    _require_clean(repo_root)
+    require_own_clean_checkout(repo_root)
     receipt: dict[str, Any] = {
         "schema_version": "s2e_launch_genesis_receipt_v1",
         "launch_id": LAUNCH_ID,
@@ -1895,7 +1913,7 @@ def _build_wave_candidate_payload(
     generation_task_contract_digest: str,
     side_effect_class: str = "SOURCE_ONLY",
 ) -> dict[str, Any]:
-    _require_clean(repo_root)
+    require_own_clean_checkout(repo_root)
     resolved_source_head = _commit(repo_root, source_head)
     current_head = _commit(repo_root, "HEAD")
     if resolved_source_head != current_head:

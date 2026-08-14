@@ -3,83 +3,58 @@
     "reasons": [],
     "status": "ADMITTED"
   },
-  "admission_self_digest": "sha256:668b08335aa45cbea52f9531c2a96a6b0b5b366aabf0bdcfef63256ebd671628",
+  "admission_self_digest": "sha256:f66f93336cf0074af51fcb5436354c771e0e5fd846c0d8f1427f78afe09dea65",
   "historical_persisted_w2": {
-    "historical_source_head": "a3ddecbf48f6ad336bd58496a8dcc1fab20fc984",
+    "historical_source_head": "6fd4ea739b736b6d00000f7e66913f7c8ee8a8e1",
     "historical_w2_integrity": "VERIFIED",
-    "persisted_dir": "/Users/ncyu/Projects/TradeBot/.codex-worktrees/aiml-s2-wp4-w0/docs/execution_plan/ai_ml_landing/receipts/S2.4-WP4-W2",
-    "regenerated_w0_admission_self_digest": "sha256:d08e04c4a7c1cc1aef9c7a228815bc49eecaf1c5eabe165c661daad3907b7e88",
-    "regenerated_w0_wave_exit_self_digest": "sha256:a1de31a8e57f5d21825e2ec3adc401f15fefd0d2e2a59856bbcbf88faa8104eb",
-    "regenerated_w1_wave_exit_self_digest": "sha256:e9c89deea03d57d3a835c4c30c925604eb61b5518cb8860bb7e6a1cf3523b0b5",
-    "w2_wave_exit_self_digest": "sha256:9bb1dc5e6b09a0c341bdc5989ab1402c06d6eba3a55dbd019b00a3d9960e2862"
+    "persisted_dir": "/Users/ncyu/Projects/TradeBot/.codex-worktrees/p0-aiml-s2e-uid-topology-validation-publication-20260812/docs/execution_plan/ai_ml_landing/receipts/S2.4-WP4-W2",
+    "regenerated_w0_admission_self_digest": "sha256:f66f93336cf0074af51fcb5436354c771e0e5fd846c0d8f1427f78afe09dea65",
+    "regenerated_w0_wave_exit_self_digest": "sha256:97293ab4cf7aedc868cf9763c89b5ae9ed393c6e8e16d8292c2570ab26ed84ee",
+    "regenerated_w1_wave_exit_self_digest": "sha256:0c3218f0984b2a939c4089184e7266450cb532622f9c4acac4e3d1feedc50d13",
+    "w2_wave_exit_self_digest": "sha256:e2605997ed442bb6a4f3a5cf3183f84f01196bbd1a762dbebb89280b470b462e"
   },
   "regenerated_w0_wave_exit_derivation": {
     "reasons": [],
     "status": "PASS"
   },
-  "regenerated_w0_wave_exit_self_digest": "sha256:1360f7f45f018db98cb815eb066bbf13b3e6bf3e338eecfaf5e7fc4c57101362",
+  "regenerated_w0_wave_exit_self_digest": "sha256:97293ab4cf7aedc868cf9763c89b5ae9ed393c6e8e16d8292c2570ab26ed84ee",
   "regenerated_w1_wave_exit_derivation": {
     "reasons": [],
     "status": "PASS"
   },
-  "regenerated_w1_wave_exit_self_digest": "sha256:95c6360d2c14243c40a49543d90f67f6f216b0fdf7b693b2047ae540fa0935a8",
+  "regenerated_w1_wave_exit_self_digest": "sha256:0c3218f0984b2a939c4089184e7266450cb532622f9c4acac4e3d1feedc50d13",
   "regenerated_w2_wave_exit_derivation": {
     "reasons": [],
     "status": "PASS"
   },
-  "regenerated_w2_wave_exit_self_digest": "sha256:b3f5f088f6e25e74c4048dbf43b78617f94e1fe5039ba540f2a494c800a5f241",
+  "regenerated_w2_wave_exit_self_digest": "sha256:e2605997ed442bb6a4f3a5cf3183f84f01196bbd1a762dbebb89280b470b462e",
   "replay_note": "W3 re-derivation binds source_head == checkout HEAD; to replay, checkout source_head, rebuild the in-memory W0/W1/W2 chain with the same builders, then run derive_wave_exit_status(w3, source_admission_receipt=admission, predecessor_wave_receipt=w2_wave_exit, predecessor_wave_chain=(w0_wave_exit, w1_wave_exit))",
   "review_provenance": [
     {
-      "agent_id": "ae24e5e481bce48ec",
-      "kind": "w3_review_provenance",
-      "recheck_head": "2445299c8b5a005c5ef62c14e92b3adbcd3cebb2",
-      "recheck_verdict": "RECHECK_PASS (no P0/P1; PRECHECK_FAILED divergence and refuse-or-noop reading both CONFIRMED; five P2 residuals)",
-      "reviewed_head": "9c22f770d48f6f84e487ca79276f80437b49adb9",
+      "context_artifact_digest": "sha256:711318bb250928450e673cb8c02b37464ac99e15e90c2305323f11c6341e9b4f",
+      "exact_head": "6fd4ea739b736b6d00000f7e66913f7c8ee8a8e1",
+      "note": "Independent exact-head E2 review confirmed carrier-head independence while retaining learning-runtime semantics, declared application bytes, real builder execution, manifest self-digests, application/base binding, and foreign-application rejection.",
+      "record_digest": "sha256:c79714ad23eff5c17bb084db3fda6003aba86630e663995b23ad381425de1f09",
       "role": "E2",
-      "verdict": "DONE+FAIL (six P1: fixture-minted PLATFORM_ATTESTED, permit-plan binding, unowned engine-scanner overwrite, exact_pre_state_restored from 'nothing raised', PUBLIC under-restore, task-owned re-apply inexactness)"
-    },
-    {
-      "agent_id": "a21b75d245d31df85",
-      "kind": "w3_review_provenance",
-      "reviewed_head": "9c22f770d48f6f84e487ca79276f80437b49adb9",
-      "role": "E3",
-      "verdict": "PASS_WITH_NOTES with five P1 arming blockers (uid/gid unconstrained enabling a postgres-UID collision, driver exception text reaching serializable reasons with the secret scanner unwired, unvalidated ownership_evidence, cluster-wide PUBLIC strip unclassified, permit-plan binding)"
-    },
-    {
-      "agent_id": "a6262db60da4ce1db",
-      "kind": "w3_review_provenance",
-      "reviewed_head": "9c22f770d48f6f84e487ca79276f80437b49adb9",
-      "role": "E4",
-      "verdict": "EVIDENCE_CONFIRMED (8/8 checks EXECUTED; disposable lanes proven live by flipping them to honest skips with the toolchain off PATH)"
-    },
-    {
-      "commits": [
-        "2445299c8",
-        "8c04a18f7"
-      ],
-      "kind": "w3_review_provenance",
-      "note": "eight W3-owned defects then five P2 residuals; four W4-owned obligations recorded in the exported ABI (permit-plan binding, replay-ledger append, encrypted-blob digest ordering, independent post-compensation postcheck) so removing one breaks the wave-exit digest",
-      "role": "PM",
-      "scope": "wave fix rounds"
+      "scope": "P0-AIML-S2E-UID final W2 semantic source repair",
+      "verdict": "PASS"
     }
   ],
   "schema_version": "s2_4_w3_derivation_record_v1_informal",
-  "source_head": "8c04a18f748c1750fb411a14b8a6d42e7e04a669",
+  "source_head": "6fd4ea739b736b6d00000f7e66913f7c8ee8a8e1",
   "test_evidence": {
-    "command": "python3 -m pytest tests/structure program_code/ml_training/tests -q",
-    "disposable_lanes": "engine-scanner ACL, consumer-resilience connect-time classification and the PG_ROLE_ACL_MIGRATION apply/postcheck/rollback cycle all ran against real throwaway PG clusters (36 passed, zero skips)",
-    "executed_at": "2026-07-26T10:32:21Z",
+    "command": "governed E2 no-site pytest: carrier-only W2 persistence plus three existing W2 builder and application-binding guards",
+    "context_artifact_digest": "sha256:711318bb250928450e673cb8c02b37464ac99e15e90c2305323f11c6341e9b4f",
+    "evidence_class": "LOCAL_REPRODUCIBLE",
     "exit_code": 0,
-    "host_role": "mac_development_checkout",
-    "kind": "w3_formal_exit_test_run",
-    "load_bearing_regressions": "each W3 review fix carries a regression proven to fail against its pristine parent tree",
-    "source_head": "8c04a18f748c1750fb411a14b8a6d42e7e04a669",
-    "summary_line": "5564 passed, 46 skipped in 664.02s (0:11:04)"
+    "honest_boundary": "Exact committed-source local review evidence only; no GitHub CI, publication, merge, source sync, runtime, deploy, PostgreSQL, broker, order, external-attestation, or effect claim.",
+    "record_digest": "sha256:c79714ad23eff5c17bb084db3fda6003aba86630e663995b23ad381425de1f09",
+    "result": "4 passed in 21.98s",
+    "source_head": "6fd4ea739b736b6d00000f7e66913f7c8ee8a8e1"
   },
   "w3_wave_exit_derivation": {
     "reasons": [],
     "status": "PASS"
   },
-  "w3_wave_exit_self_digest": "sha256:bc4367a5de20ff89da8898f2eb86e10600425a602535b8a36d24fc1819699cba"
+  "w3_wave_exit_self_digest": "sha256:6f6d124caf2a3b534d52b80f0e2818732da8de1867b7695dd033b5d4dd99044d"
 }

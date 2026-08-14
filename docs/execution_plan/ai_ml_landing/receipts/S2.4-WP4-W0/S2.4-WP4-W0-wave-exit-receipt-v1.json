@@ -1,10 +1,10 @@
 {
   "capture_digests": [
-    "sha256:e09ed61fed76d04f03abb3ca35b77c75f31925c7b0b05d9fb7584229130dc8e5"
+    "sha256:125ca0f531d3347b6324fcfb960f5502e63af5a0bb345a740019ec372666bae8"
   ],
   "exported_abi_digest": "sha256:236cbee199c2f4a6949ac9c6e3a4d7c0f3391c9c5ecb33acf7187f2cd05ab830",
-  "owned_path_diff_digest": "sha256:572013cd11cc7ae3e28101727294bfa5d0a13281b303cbbcf2a55c2a4314b671",
-  "owned_path_manifest_digest": "sha256:74e51a484040ddf1b165b914bcea7af2cc3242ade54f08cd3890890c6af83332",
+  "owned_path_diff_digest": "sha256:5eb145e261f4a281edaee0a439d2704ebefe36ca7baf827870893455d427b660",
+  "owned_path_manifest_digest": "sha256:da40df22d578f2a511b7b00daa300cc80592f83dd571bb334a81ac9eee06177c",
   "predecessor_wave_receipt_digest": null,
   "production_authority_flags": {
     "nine_authorities_false": true,
@@ -12,17 +12,14 @@
     "running_attested": false
   },
   "review_fragment_digests": [
-    "sha256:29a472c076ee9f26b331d24b0c37e8af482e7344cf1478857aee8d6056d878fb",
-    "sha256:59aa16c1ccdcdfea4f41eacc82aa958fd10018b948ef71718bad39644f4b10a0",
-    "sha256:7a008276e46fc906e6d8609daee6bee5e224ecbc74ee6d6204f5c486e9fbce52",
-    "sha256:434e71bd1cf46abe2782d473138a9436a219c50fe03d5c3a105fa3a6721de560"
+    "sha256:afe6d233d8bf4855b0f094da3c8c4b13b9c2dc9f1a5d834464bbdaa83db1557c"
   ],
   "schema_version": "s2_4_wave_exit_receipt_v1",
-  "self_digest": "sha256:6c86008f343b93367d845779baaef12d002ba710e073c6953a0b57badad78a16",
-  "source_admission_receipt_digest": "sha256:d40bed03b0a2ac3736bf62114717e869691143cf66cba186646447aa8ccbaf12",
-  "source_head": "37cb9094956b8ee2b3af33efd610ee0d8566557f",
+  "self_digest": "sha256:82b38ee5b4183002ab3fd23edb23ca7b1cff46f142240a9a19ea310e4fdee6d4",
+  "source_admission_receipt_digest": "sha256:feaaa6b0d174f721408aa1d71905f4da1a9ba0920f7a54376d4028afb63c5887",
+  "source_head": "90713b5565fb49a4d36193b05a4ddff48cf32fbc",
   "test_digests": [
-    "sha256:c40b45a21b47f278fcd01de267ba222a578a3c7839c0c00e707c4eabdfab41a1"
+    "sha256:0f37b9d5a8cd89e60b62744c8ad124b46083e6de9785ca09328ec71ae1896706"
   ],
   "wave": "W0"
 }

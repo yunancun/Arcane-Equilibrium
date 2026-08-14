@@ -1,10 +1,10 @@
 {
   "capture_digests": [
-    "sha256:cff3bc2e638aa13cb98c4bd47ab59069e89e5913f10b938dd70115e3cc0195f3"
+    "sha256:c0c1f1ed4f91882f938993b287cf258c23a6ed0db4aee3bd94358b5ca8e20048"
   ],
   "exported_abi_digest": "sha256:236cbee199c2f4a6949ac9c6e3a4d7c0f3391c9c5ecb33acf7187f2cd05ab830",
-  "owned_path_diff_digest": "sha256:849422bf96736a5b9f1974f20a4e641acf92887c12b3bbe87ad3e4bb6edfe5fb",
-  "owned_path_manifest_digest": "sha256:00674c05406657c0a8da16003be1e6bca9a16e0891e582391c31d6fcb9969eb5",
+  "owned_path_diff_digest": "sha256:5eb145e261f4a281edaee0a439d2704ebefe36ca7baf827870893455d427b660",
+  "owned_path_manifest_digest": "sha256:da40df22d578f2a511b7b00daa300cc80592f83dd571bb334a81ac9eee06177c",
   "predecessor_wave_receipt_digest": null,
   "production_authority_flags": {
     "nine_authorities_false": true,
@@ -12,20 +12,14 @@
     "running_attested": false
   },
   "review_fragment_digests": [
-    "sha256:ca132d98a2efc5cab45f646c6ca165c72fcc8cc075b50be946d0335bc43762a5",
-    "sha256:d821b6d8c4e4516df62e84e38deb9664626f63f646cab9630fa06182b023e9cd",
-    "sha256:943980108ce1918edcbee16437ec6bbe535a28bec77fe2a763a71f83b4d5e11f",
-    "sha256:5e118cd390114848520741c60ac596bcbd56f53cf30b073d77f0580676477c0b",
-    "sha256:fc5bd3a285e9634fe7517a5a784d9396af681dd3abc7a7a28c2c553315e79c67",
-    "sha256:2b38448ca4c66c93c83bca64d47f0eb2fc90b0a69c0c9ce03005bf2a2c6347c1",
-    "sha256:f834d90e8ce2db120f415828f8cc4316a141327bbed0ae872c5cd09924a49f2f"
+    "sha256:ab47523082185bd1aad829dbd4eccc716bc4910af0384f39c50544bcabb88215"
   ],
   "schema_version": "s2_4_wave_exit_receipt_v1",
-  "self_digest": "sha256:a1de31a8e57f5d21825e2ec3adc401f15fefd0d2e2a59856bbcbf88faa8104eb",
-  "source_admission_receipt_digest": "sha256:d08e04c4a7c1cc1aef9c7a228815bc49eecaf1c5eabe165c661daad3907b7e88",
-  "source_head": "a3ddecbf48f6ad336bd58496a8dcc1fab20fc984",
+  "self_digest": "sha256:97293ab4cf7aedc868cf9763c89b5ae9ed393c6e8e16d8292c2570ab26ed84ee",
+  "source_admission_receipt_digest": "sha256:f66f93336cf0074af51fcb5436354c771e0e5fd846c0d8f1427f78afe09dea65",
+  "source_head": "6fd4ea739b736b6d00000f7e66913f7c8ee8a8e1",
   "test_digests": [
-    "sha256:f88e73f42b24682e471abb27e7a2e59230fe13c0f68b627d2d6780f1a63a8c26"
+    "sha256:e7b85a1a86ffe979d2300a2a814c6be40cda59c52509448fbfe257f34b2d86e8"
   ],
   "wave": "W0"
 }

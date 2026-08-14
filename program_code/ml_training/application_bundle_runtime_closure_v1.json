@@ -51,6 +51,7 @@
     "helper_scripts/maintenance_scripts/agent_governance_sealed_build.py",
     "program_code/ml_training/aiml_gate_receipt_adoption.py",
     "program_code/ml_training/aiml_gate_receipt_classifiers.py",
+    "program_code/ml_training/aiml_gate_receipt_git_view.py",
     "program_code/ml_training/aiml_gate_receipt_s2_4_contracts.py",
     "program_code/ml_training/aiml_gate_receipt_s2_5_host_capture.py",
     "program_code/ml_training/aiml_gate_receipt_s2e_anchor_floor.py",
@@ -203,7 +204,7 @@
     "program_code/ml_training/schemas/aiml_gate_receipts/terminal_receipt_sink_v1.schema.json"
   ],
   "schema_version": "application_bundle_runtime_closure_v1",
-  "self_digest": "sha256:86c34fcedb90cdb552937da172a793d4ef1892517864bb387e03622e33e9ccfe",
+  "self_digest": "sha256:d464e5d931151a2ea9da0a7241298168eb202cfb48aa0cc923d84a15fda094ba",
   "sql_fingerprints": [
     "sql/migrations/V151__alr_persistence_foundation.sql",
     "sql/migrations/V152__alr_operational_artifacts.sql",

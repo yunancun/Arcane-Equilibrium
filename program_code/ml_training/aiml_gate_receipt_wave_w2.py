@@ -54,6 +54,10 @@ _W2_OWNED_PATHS = tuple(sorted((
     "helper_scripts/maintenance_scripts/agent_governance_s2_4_install.py",
     "helper_scripts/maintenance_scripts/agent_governance_s2_4_render.py",
     "helper_scripts/maintenance_scripts/agent_governance_s2_4_sql_scan.py",
+    # 2026-08-08 拆分波:`schema_core` 的下層 view 葉(信任邊界獨立成檔)。它進入
+    # engine-scanner 的 runtime import 閉包,不列入 owned scope 的話,對它的削弱性
+    # 修改不會改變 owned_path_diff_digest ⇒ 治理不變量覆蓋面靜默收窄。
+    "program_code/ml_training/aiml_gate_receipt_git_view.py",
     "program_code/ml_training/aiml_gate_receipt_schema_core.py",
     "program_code/ml_training/aiml_gate_receipt_validator.py",
     "program_code/ml_training/aiml_gate_receipt_wave_w2.py",
@@ -174,6 +178,44 @@ _PROBE_TARGET_PLATFORM = "x86_64-unknown-linux-gnu"
 _PROBE_BUILD_TOOL_VERSIONS = {"python3": "3.12.3", "uv": "0.5.0"}
 
 
+def _application_bundle_probe_identity(manifest: dict[str, Any]) -> str:
+    """Application builder 的 head-independent 語義投影身分。
+
+    entries 與 learning_runtime_digest_v2 綁定 declared application 的 byte/語義面;
+    source_head 與 self_digest 只屬這次 builder instance 的 carrier 身分。
+    """
+    semantic = {
+        key: value
+        for key, value in manifest.items()
+        if key not in {"source_head", "self_digest"}
+    }
+    return canonical_digest({
+        "schema_version": "application_bundle_probe_projection_v1",
+        "semantic_manifest": semantic,
+    })
+
+
+def _launch_bundle_probe_identity(
+    manifest: dict[str, Any], *, application_probe_identity: str
+) -> str:
+    """Launch builder 的 head-independent 語義投影,仍綁同一 application 語義。"""
+    semantic = {
+        key: value
+        for key, value in manifest.items()
+        if key
+        not in {
+            "application_bundle_digest",
+            "application_source_head",
+            "self_digest",
+        }
+    }
+    semantic["application_bundle_probe_identity"] = application_probe_identity
+    return canonical_digest({
+        "schema_version": "launch_bundle_probe_projection_v1",
+        "semantic_manifest": semantic,
+    })
+
+
 def _builder_probe(repo_root: Path) -> dict[str, Any]:
     """三個 §8.1 builder 的活再導出(全部在 tmp 目錄;零生產路徑、零網路)。"""
     import tempfile
@@ -219,7 +261,10 @@ def _builder_probe(repo_root: Path) -> dict[str, Any]:
             "application_bundle_digest"
         ):
             return probe
-        probe["application_bundle_probe_digest"] = bundle["application_bundle_digest"]
+        application_probe_identity = _application_bundle_probe_identity(
+            bundle["manifest"]
+        )
+        probe["application_bundle_probe_digest"] = application_probe_identity
         probe["application_bundle_worktree_delta"] = list(
             bundle["declared_paths_worktree_delta"]
         )
@@ -235,8 +280,14 @@ def _builder_probe(repo_root: Path) -> dict[str, Any]:
             application_source_head=bundle["source_head"],
         )
         probe["launch_bundle_status"] = launch["status"]
-        if launch["status"] == "BUILT":
-            probe["launch_bundle_probe_digest"] = launch["launch_bundle_digest"]
+        if (
+            launch["status"] == "BUILT"
+            and launch["manifest"]["self_digest"] == launch.get("launch_bundle_digest")
+        ):
+            probe["launch_bundle_probe_digest"] = _launch_bundle_probe_identity(
+                launch["manifest"],
+                application_probe_identity=application_probe_identity,
+            )
             probe["launch_binds_probed_application"] = bool(
                 launch["manifest"]["application_bundle_digest"]
                 == bundle["application_bundle_digest"]

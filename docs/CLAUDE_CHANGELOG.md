@@ -1,7 +1,40 @@
 # CLAUDE_CHANGELOG.md — 開發歷史歸檔
 
 > 從 CLAUDE.md / TODO.md 遷出的 Wave/Sprint/Batch + TODO version-increment 歷史敘事。新 session 不需要讀此文件，僅供回顧歷史時查閱。
-> 最後更新：2026-08-12（TODO v875 AI/ML capability／remaining-effort calibration）
+> 最後更新：2026-08-12（TODO v877 uid-topology W2 final receipt repair）
+
+---
+
+## TODO v877 增量：uid-topology W2 final receipt repair（2026-08-12）
+
+- 根因是 W2 exported ABI 把 application／launch builder 的 current-HEAD-bound
+  instance digest 當成語義身分；receipt 或 docs carrier commit 因而使四份 W2
+  persisted instance 過期。production builders 與真實 self-digest、application/base
+  binding、foreign-application rejection 均保留，只把 `source_head`／`self_digest`
+  排除於 probe semantic projection；`learning_runtime_digest_v2` 與 declared bytes 保留。
+- baseline carrier-only regression RED；修補後四個 focused tests PASS。E2 首輪抓出
+  `learning_runtime_digest_v2` 被過度排除並拒絕，校正後在 semantic source
+  `6fd4ea739b736b6d00000f7e66913f7c8ee8a8e1` PASS，governed record digest
+  `sha256:c79714ad23eff5c17bb084db3fda6003aba86630e663995b23ad381425de1f09`。
+- canonical emitter 依 W2→W5 順序精確重寫 26 份既有 JSON；W0/W1 目錄不變。
+  receipt carrier=`070591dd33ff318389302d4efb0ecd5a4543e902`，round 15，current-head
+  structural validator=21/21 PASS。final carrier-head E2→E3→E4 與 GitHub
+  publication 仍待完成；無 merge、sync、runtime/effect 或 LW2 authority。
+
+---
+
+## TODO v876 增量：uid-topology local carrier projection（2026-08-12）
+
+- `origin/main` 已以 non-rewriting merge 整合進 local branch
+  `agent/p0-aiml-s2e-uid-topology-validation-publication-20260812`；semantic source
+  `90713b5565fb49a4d36193b05a4ddff48cf32fbc` 與 33/33 canonical W0-W5 artifact
+  chain 已本地提交，W5 persisted set 以 carrier
+  `407cf1b8de6bb34d5f0a56ada3f6706c4f2e7258` 承載 round 14。
+- exact-semantic-head E2 governed review PASS，record digest
+  `sha256:2404748509c54fbf24386e959e21f16c078305711c29ca0b662d779b7e82aa40`；
+  carrier-head E2→E3→E4 仍待完成。UID 狀態保持
+  `ACTIVE_PENDING_FRESH_REVIEW_AND_PUBLICATION`；未授 GitHub publication、merge、
+  source sync、runtime/effect 或 LW2 authority。
 
 ---
 

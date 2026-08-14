@@ -1161,6 +1161,36 @@
         "repository_root_fixed": {"const": true}
       }
     },
+    "sourceMaterialization": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "schema_version", "materialization_kind", "source_head",
+        "source_tree", "manifest_digest", "materialized_file_count",
+        "materialized_bytes", "executable_file_count",
+        "materialized_symlink_count", "materialized_symlink_manifest_digest",
+        "git_metadata_kind", "git_object_graph_digest",
+        "git_metadata_manifest_digest",
+        "private_root_mode", "cleanup_status"
+      ],
+      "properties": {
+        "schema_version": {"const": "source_materialization_v1"},
+        "materialization_kind": {"const": "FRESH_PRIVATE_COMMITTED_TREE"},
+        "source_head": {"type": "string", "pattern": "^[0-9a-f]{40}$"},
+        "source_tree": {"type": "string", "pattern": "^[0-9a-f]{40}$"},
+        "manifest_digest": {"$ref": "#/$defs/digest"},
+        "materialized_file_count": {"type": "integer", "minimum": 1},
+        "materialized_bytes": {"type": "integer", "minimum": 0},
+        "executable_file_count": {"type": "integer", "minimum": 0},
+        "materialized_symlink_count": {"type": "integer", "minimum": 0},
+        "materialized_symlink_manifest_digest": {"$ref": "#/$defs/digest"},
+        "git_metadata_kind": {"const": "PRIVATE_COPIED_OBJECT_DATABASE"},
+        "git_object_graph_digest": {"$ref": "#/$defs/digest"},
+        "git_metadata_manifest_digest": {"$ref": "#/$defs/digest"},
+        "private_root_mode": {"const": "0700"},
+        "cleanup_status": {"const": "REMOVED"}
+      }
+    },
     "commandCaptureV2": {
       "type": "object",
       "additionalProperties": false,
@@ -1172,8 +1202,24 @@
         "timeout_seconds", "started_at", "completed_at", "exit_code",
         "timed_out", "result", "stdout", "stderr", "repository_before",
         "repository_after", "whole_repository_before", "whole_repository_after",
-        "pytest_provider", "effect_enforcement",
-        "host_sandbox_attestation_ref", "record_digest"
+        "effect_enforcement", "host_sandbox_attestation_ref", "record_digest"
+      ],
+      "oneOf": [
+        {
+          "required": ["pytest_provider", "source_materialization"]
+        },
+        {
+          "required": ["pytest_provider"],
+          "not": {"required": ["source_materialization"]}
+        },
+        {
+          "not": {
+            "anyOf": [
+              {"required": ["pytest_provider"]},
+              {"required": ["source_materialization"]}
+            ]
+          }
+        }
       ],
       "properties": {
         "schema_version": {"const": "command_capture_v2"},
@@ -1218,10 +1264,33 @@
             {"type": "null"}
           ]
         },
+        "source_materialization": {
+          "anyOf": [
+            {"$ref": "#/$defs/sourceMaterialization"},
+            {"type": "null"}
+          ]
+        },
         "effect_enforcement": {"const": "repository_policy_only"},
         "host_sandbox_attestation_ref": {"type": "null"},
         "record_digest": {"$ref": "#/$defs/digest"}
-      }
+      },
+      "allOf": [
+        {
+          "if": {
+            "properties": {
+              "replay_contract": {"const": "CANONICAL_TEST_OUTPUT_V1"}
+            },
+            "required": ["replay_contract"]
+          },
+          "then": {
+            "required": ["pytest_provider", "source_materialization"],
+            "properties": {
+              "pytest_provider": {"$ref": "#/$defs/governedPytestProvider"},
+              "source_materialization": {"$ref": "#/$defs/sourceMaterialization"}
+            }
+          }
+        }
+      ]
     },
     "telemetryMetrics": {
       "type": "object",

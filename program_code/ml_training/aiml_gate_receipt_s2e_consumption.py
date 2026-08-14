@@ -6,7 +6,6 @@ import fcntl
 import json
 import os
 import stat
-import subprocess
 import tempfile
 from copy import deepcopy
 from datetime import datetime, timezone
@@ -15,7 +14,7 @@ from typing import Any, Callable
 
 from agent_governance_schema import schema_subset_errors
 from aiml_gate_receipt_schema_core import (
-    _load_schema, canonical_digest, git_argv, git_subprocess_env,
+    _load_schema, canonical_digest, subject_common_dir,
 )
 from aiml_gate_receipt_s2e_external_evidence import (
     s2e_predecessor_registry_slot_id,
@@ -539,16 +538,22 @@ def validate_s2e_launch_consumption_bootstrap_authority(
 
 
 def _git_common_dir(repo_root: Path) -> Path:
-    raw = subprocess.run(
-        git_argv(repo_root, "rev-parse", "--git-common-dir"),
-        cwd=repo_root,
-        check=True,
-        capture_output=True,
-        env=git_subprocess_env(),
-        text=True,
-    ).stdout.strip()
-    path = Path(raw)
-    return (path if path.is_absolute() else repo_root / path).resolve(strict=True)
+    """被驗者的 `<git-common-dir>`,純檔案系統解析。
+
+    E3 round-5:舊版問 `git -C <被驗者> rev-parse --git-common-dir`,而那次呼叫本身就
+    要求 git 把外人所有的目錄當 repository 打開(⇒ 讀它的 config、差異 uid 下 rc=128)。
+    這條事實是 repo **佈局**,不是物件內容,stat 出來即可,不必請 git 代勞。
+
+    round-7 P0-3(E3 round-6,CONFIRMED):本函式原本是
+    `subject_common_dir(subject_git_dir(repo_root))` ——對同一個被驗者可寫的
+    `<gitdir>/commondir` 讀**兩次**,而第二次完全不驗(無 owner pin、無佈局不變式)。
+    被驗者只要在兩次之間改寫它,就能把 consume-once ledger 的 `state_path`/`lock_path`
+    指到任意目錄(E3 racer 3000 次:relocated 555);帳本三個檔都不存在時 `read()` 回
+    空帳本 ⇒ 重放繞過,而且 `_atomic_write`/`_open_lock` 會讓驗證器在攻擊者指定的目錄
+    裡建檔。現在只呼叫一次已驗證的解析。
+    """
+
+    return subject_common_dir(repo_root)
 
 
 def _private_regular_file(descriptor: int, *, label: str) -> None:

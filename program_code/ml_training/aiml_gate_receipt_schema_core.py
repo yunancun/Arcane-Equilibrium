@@ -483,8 +483,21 @@ def git_argv(repo_root: Path | str, *arguments: str) -> list[str]:
     的 repo 的 local config,而該 config 正是 `core.fsmonitor`/`filter.<drv>.clean`
     的來源——於是 repo owner 又拿回以 producer 身分執行程式的能力,也就是 R4-1 本身。
     真正的解不是 config 管道,而是設計層面:驗證面不要對外人所有的工作樹跑
-    `git status`,改從 code-owned 的 bare view 取事實。具名為三支 root-owned producer
-    實作時的前置設計項,**不假裝現在有解**。
+    `git status`,改從 code-owned 的 bare view 取事實。
+
+    **round-5(2026-08-07):上一段具名的那個設計項已實作,見 `code_owned_object_view`。**
+    `git_argv` 本身一個字不改——它仍然只是 `[git, -C, <path>, *args]`,仍是本家族唯一的
+    git argv 建構入口。改的是**傳進去的那個 `<path>`**:驗證面不再把被驗者的工作樹交給
+    git 去 discover,而是交一個**驗證器自己建的 bare repo**。
+
+    **round-6 更正(E2 P2-7)。** 本段原本接著寫「以 `objects/info/alternates` 掛上被驗者
+    的 object store。alternates 是純內容定址資料面」——兩句都已作廢:掛載式已換成
+    `_materialize_object_store` 的物化,而「內容定址」在本設計裡**不得再用來承重**
+    (E2/E3 於 git 2.55.0 各自實證:blob 讀取路徑不複驗 sha)。仍然成立、也是這條路真正
+    買到的東西是:git 不讀被驗者的 config/hook/attributes/fsmonitor,也**不對它做
+    ownership 檢查**——上面兩條死路的共同前提「把外人所有的目錄當成 repository 打開」
+    確實整個消失。完整現況與未收項見
+    `docs/execution_plan/ai_ml_landing/design/S2E-round5-code-owned-object-view.md` §6。
     """
 
     return [
@@ -513,25 +526,84 @@ def git_subprocess_env() -> dict[str, str]:
     return env
 
 
+# code-owned object view、被驗者佈局解析(owner-pin)、ref 讀取器與 object-store 衛生
+# 事實的實作正本在下層純葉模組 `aiml_gate_receipt_git_view`(2026-08-08 operator 授權的
+# 拆分波:信任邊界值得單獨審,且併回本檔會越過 2000 行治理上限)。本檔 re-export,
+# 消費者的匯入形狀不變;方向是單向的 schema_core -> git_view,無環。
+from aiml_gate_receipt_git_view import (  # noqa: F401
+    MAX_PACKED_REFS_BYTES,
+    MAX_REF_FILE_BYTES,
+    MAX_SUBJECT_CONFIG_BYTES,
+    STORE_GRAFTS,
+    STORE_INDETERMINATE,
+    STORE_NESTED_ALTERNATES,
+    STORE_PROMISOR,
+    STORE_REPLACE_REFS,
+    STORE_SHALLOW,
+    STORE_UNREADABLE,
+    STORE_UNSUPPORTED_OBJECT_FORMAT,
+    STORE_UNSUPPORTED_REF_BACKEND,
+    _OBJECT_VIEW_CONFIG,
+    _verify_private_directory,
+    code_owned_object_view,
+    git_own_checkout_guard,
+    read_bounded,
+    read_subject_ref,
+    resolve_named_revision,
+    subject_common_dir,
+    subject_git_dir,
+    subject_layout,
+    subject_object_store_findings,
+)
+
+
+def require_own_clean_checkout(repo_root: Path) -> None:
+    """**generation 面專用**:作者為自己剛做完的樹發射 candidate 前,要求該樹乾淨。
+
+    E3 round-5:本家族唯一還會跑 `git status` 的地方,而 `git status` 會執行
+    `core.fsmonitor` 與 `filter.<drv>.clean`。R4-1 的提權形狀是「**驗證器**對**外人
+    所有**的樹跑它」,這裡兩個前提都不成立:驗證面已整組改走
+    `code_owned_object_view`(沒有工作樹 ⇒ 結構上跑不起來,不是自律),而
+    `git_own_checkout_guard` 先驗 `st_uid == geteuid()`。這不是「假設同 uid」——
+    同 uid 是被驗證後才成立的前提。設計全文見 `docs/execution_plan/ai_ml_landing/design/`
+    `S2E-round5-code-owned-object-view.md`。
+    """
+
+    import subprocess
+
+    own = git_own_checkout_guard(repo_root)
+    status = subprocess.run(
+        git_argv(own, "status", "--porcelain=v1", "--untracked-files=all"),
+        cwd=own, check=True, capture_output=True, env=git_subprocess_env(),
+        text=True, timeout=180,
+    ).stdout
+    if status:
+        raise ValueError("repository must be clean before launch receipt generation")
+
+
 def _git_run(repo_root: Path, arguments: list[str]) -> tuple[str, str] | None:
     """跑一次 git,回 ``(stdout, stderr)``;非零離開/無法執行回 ``None``。
 
-    W5 對抗審計第三輪 P2:舊版把 stderr 整個丟掉,於是「repo 不屬於當前 uid」這個最可能
-    的真實主機故障(git 自己會印 ``detected dubious ownership … git config --global --add
-    safe.directory <path>``)在 operator 眼裡只剩「git is unreadable」。stderr 是 git 唯一
-    給出補救指令的地方,必須被帶出來。
+    W5 對抗審計第三輪 P2:舊版把 stderr 整個丟掉,於是真實主機故障在 operator 眼裡
+    只剩「git is unreadable」。stderr 是 git 唯一給出補救指令的地方,必須被帶出來。
+
+    round-5:git 現在跑在 `code_owned_object_view` 裡,`repo_root` 只提供 object
+    store,所以當年那句最常見的 ``detected dubious ownership`` 已不可能出現(見
+    `git_failure_detail`);剩下的 stderr 多半是「物件缺席」,同樣要帶出來。
     """
 
     import subprocess
 
     try:
-        proc = subprocess.run(
-            git_argv(repo_root, *arguments),
-            capture_output=True,
-            env=git_subprocess_env(),
-            text=True,
-            timeout=60,
-        )
+        with code_owned_object_view(repo_root) as view:
+            proc = subprocess.run(
+                git_argv(view, *arguments),
+                cwd=view,
+                capture_output=True,
+                env=git_subprocess_env(),
+                text=True,
+                timeout=60,
+            )
     except (OSError, ValueError, subprocess.SubprocessError):
         return None
     if proc.returncode != 0:
@@ -545,23 +617,30 @@ def _git_stdout(repo_root: Path, arguments: list[str]) -> str | None:
 
 
 def git_failure_detail(repo_root: Path) -> str | None:
-    """git 為什麼讀不了這棵樹(取 ``rev-parse`` 的 stderr 首行);讀得了回 ``None``。
+    """為什麼讀不了這棵樹的物件(view 建不起來、或 git 自己的 stderr 首行);讀得了回 ``None``。
 
-    只在 fail-closed 路徑上被呼叫,用來把 git 自己的補救指令原文帶進 typed reason。
+    只在 fail-closed 路徑上被呼叫,用來把真正的原因原文帶進 typed reason。
+    round-5:失敗形狀從「git 對被驗者 repo 的抱怨」換成兩段——view 建構失敗(權限/
+    TMPDIR 祖先鏈/物件庫不存在)與 view 內 git 失敗。舊版最常見的那句
+    ``detected dubious ownership … git config --global --add safe.directory`` 已經
+    **不可能**出現:驗證面不再把被驗者的目錄當成 repository 打開,ownership 檢查
+    根本不進場(見 `git_argv` 與 `code_owned_object_view`)。
     """
 
     import subprocess
 
     try:
-        proc = subprocess.run(
-            git_argv(repo_root, "rev-parse", "--git-dir"),
-            capture_output=True,
-            env=git_subprocess_env(),
-            text=True,
-            timeout=60,
-        )
+        with code_owned_object_view(repo_root) as view:
+            proc = subprocess.run(
+                git_argv(view, "rev-parse", "--git-dir"),
+                cwd=view,
+                capture_output=True,
+                env=git_subprocess_env(),
+                text=True,
+                timeout=60,
+            )
     except OSError as error:
-        return f"git could not be executed: {error}"
+        return f"the code-owned object view could not be built: {error}"
     except (ValueError, subprocess.SubprocessError) as error:
         return f"git invocation failed: {error}"
     if proc.returncode == 0:
@@ -591,43 +670,42 @@ def _git_is_ancestor(repo_root: Path, ancestor: str, descendant: str) -> bool:
     ) is None:
         return False
     try:
-        proc = subprocess.run(
-            git_argv(
-                repo_root, "merge-base", "--is-ancestor", ancestor, descendant
-            ),
-            capture_output=True,
-            env=git_subprocess_env(),
-            timeout=30,
-        )
+        with code_owned_object_view(repo_root) as view:
+            proc = subprocess.run(
+                git_argv(
+                    view, "merge-base", "--is-ancestor", ancestor, descendant
+                ),
+                cwd=view,
+                capture_output=True,
+                env=git_subprocess_env(),
+                timeout=30,
+            )
     except (OSError, ValueError, subprocess.SubprocessError):
         return False
     return proc.returncode == 0
 
 
 def _git_head(repo_root: Path) -> str | None:
-    """回傳 repo_root 目前 checkout 的 HEAD 40-hex commit(fail-closed:git 錯誤回 None)。
+    """回傳 repo_root 目前 checkout 的 HEAD 40-hex commit(fail-closed:讀不到回 None)。
 
     T2:admission 的 source_head 必須「等於」目前 checkout HEAD(而非只是兩固定 predecessor 的後代)。
     所有證據皆由目前 checkout 再導出,故若 receipt 宣稱某世代卻從另一世代導出 ADMITTED,即為漂移——
     綁定 HEAD 令 admission 與其真正再導出的樹一致。
+
+    round-5:HEAD 的**名字解析**由 `read_subject_ref` 以純位元組讀取完成(view 的
+    `refs/` 是空的,解不出任何名字);解出來的 40-hex 再交給 view 確認它真的是一個
+    可讀的 commit 物件。名字與物件因此分屬兩個面,兩邊都不碰被驗者的 config。
     """
 
-    import subprocess
-
-    try:
-        proc = subprocess.run(
-            git_argv(repo_root, "rev-parse", "HEAD"),
-            capture_output=True,
-            env=git_subprocess_env(),
-            text=True,
-            timeout=30,
-        )
-    except (OSError, ValueError, subprocess.SubprocessError):
+    head = read_subject_ref(repo_root, "HEAD")
+    if head is None or re.fullmatch(r"[0-9a-f]{40}", head) is None:
         return None
-    if proc.returncode != 0:
+    stdout = _git_stdout(repo_root, ["rev-parse", "--verify", "--end-of-options",
+                                     f"{head}^{{commit}}"])
+    if stdout is None:
         return None
-    head = proc.stdout.strip()
-    return head if re.fullmatch(r"[0-9a-f]{40}", head) else None
+    resolved = stdout.strip()
+    return resolved if re.fullmatch(r"[0-9a-f]{40}", resolved) else None
 
 
 def git_is_shallow_repository(repo_root: Path) -> bool:
@@ -635,18 +713,31 @@ def git_is_shallow_repository(repo_root: Path) -> bool:
 
     W5 對抗審計第三輪 P2:淺樹上 ``merge-base --is-ancestor`` 對不在 graft 裡的物件回非零,
     而那不是「不是祖先」,是「這裡沒有那個物件」。呼叫端據此把訊息從一個假結論換成真補救。
+
+    round-5:改由 `<gitdir>/shallow` 的**存在**判定,不再問被驗者的 git。view 不掛
+    shallow graft,所以缺 parent 會在 view 裡直接炸(E1 於 git 2.55 實測:
+    ``fatal: cannot simplify <c> (because of <parent>)``),而不是靜默把歷史截短。
     """
 
-    return (_git_stdout(repo_root, ["rev-parse", "--is-shallow-repository"]) or "").strip() == "true"
+    findings = subject_object_store_findings(repo_root)
+    return STORE_SHALLOW in findings or STORE_UNREADABLE in findings
 
 
 def resolve_commit_head(repo_root: Path, source_head: str | None = None) -> str | None:
     """把 ``source_head``(或 HEAD)解析為 40-hex commit;不可解析即 None(fail-closed)。"""
 
     revision = source_head if source_head is not None else "HEAD"
-    if re.fullmatch(r"[0-9a-f]{7,40}", str(revision)) is None and revision != "HEAD":
+    if revision == "HEAD":
+        # view 解不出名字(refs/ 全空),HEAD 一律先由 ref 讀取器換成明確 40-hex。
+        resolved_head = read_subject_ref(repo_root, "HEAD")
+        if resolved_head is None:
+            return None
+        revision = resolved_head
+    if re.fullmatch(r"[0-9a-f]{7,40}", str(revision)) is None:
         return None
-    stdout = _git_stdout(repo_root, ["rev-parse", f"{revision}^{{commit}}"])
+    stdout = _git_stdout(
+        repo_root, ["rev-parse", "--verify", "--end-of-options", f"{revision}^{{commit}}"]
+    )
     if stdout is None:
         return None
     head = stdout.strip()
@@ -697,13 +788,15 @@ def commit_blob_bytes(
         return blobs
     request = "".join(f"{head}:{rel}\n" for rel in ordered).encode("utf-8")
     try:
-        proc = subprocess.run(
-            git_argv(repo_root, "cat-file", "--batch"),
-            input=request,
-            capture_output=True,
-            env=git_subprocess_env(),
-            timeout=180,
-        )
+        with code_owned_object_view(repo_root) as view:
+            proc = subprocess.run(
+                git_argv(view, "cat-file", "--batch"),
+                input=request,
+                cwd=view,
+                capture_output=True,
+                env=git_subprocess_env(),
+                timeout=180,
+            )
     except (OSError, ValueError, subprocess.SubprocessError):
         return blobs
     if proc.returncode != 0:
@@ -716,16 +809,55 @@ def commit_blob_bytes(
             break
         header = stream[offset:newline].decode("utf-8", "replace").split(" ")
         offset = newline + 1
-        if len(header) != 3 or header[1] != "blob":
-            # "missing" / "ambiguous" / 非 blob(目錄、submodule)→ fail-closed 記 None。
+        # round-8 E2:標頭第一欄必須是 40-hex,否則「有 payload」的判斷會被檔名騙。
+        # `cat-file --batch` 的缺席回應是 `<請求字串> missing`,而請求字串含空白時
+        # (git 允許路徑有空白)`"A blob missing"` 會 split 成剛好三段、第二段是 `blob`
+        # ——舊版於是把 `int("missing")` 當成尺寸、`break`,整份 manifest 靜默全 None。
+        is_object = (
+            len(header) == 3
+            and re.fullmatch(r"[0-9a-f]{40}", header[0]) is not None
+            and header[2].isdigit()
+        )
+        if not is_object:
+            # "missing" / "ambiguous" → 沒有 payload,直接下一筆。
             continue
-        try:
-            size = int(header[2])
-        except ValueError:
-            break
-        blobs[rel] = stream[offset : offset + size]
+        size = int(header[2])
+        payload = stream[offset : offset + size]
         offset += size + 1  # 每筆物件後接一個換行
+        # round-8 E2/E3:**非 blob 也帶 payload**(tree/commit/tag)。舊版只 `continue`
+        # 而不吃掉那段位元組,於是 offset 留在物件內容裡,之後每一筆的「標頭」都從
+        # 物件內容讀出來——串流失步。那不只是安全問題:路徑清單裡有一個目錄就足以讓
+        # 下一個路徑拿到**別人的**位元組(E2 實測,無需任何偽造)。payload 必須先吃掉,
+        # 再判型別。
+        if header[1] != "blob":
+            continue
+        # 自行對 object id 重算。git **只有** `fsck`/`verify-pack` 會複驗物件雜湊,
+        # blob 讀取路徑不驗(E2/E3 於 git 2.55.0 各自實證,loose 與 packed 皆然),
+        # 所以這一步擋的是「位元組與 object id 不符」——**損壞**,以及最外層那一跳的
+        # 竄改。**它不擋 tree 竄改**:`header[0]` 是 git 走 tree 解出來的,而 tree 本身
+        # 沒有被驗。誠實邊界見模組層 docstring 與設計檔 §6,不得把這裡讀成完整性保證。
+        if git_blob_sha1(payload) != header[0]:
+            continue
+        blobs[rel] = payload
     return blobs
+
+
+def verified_blob_bytes(
+    repo_root: Path, path: str, *, at_commit: str
+) -> bytes | None:
+    """`<at_commit>:<path>` 的 blob 位元組,**已對 tree 記錄的 object id 重算比對**。
+
+    round-7 P0-1:凡是用 `git show <rev>:<path>` 讀位元組的地方都應改用本函式。`show`
+    不複驗雜湊(E2/E3 各自實證),而 `commit_blob_bytes` 走 `cat-file --batch`,其標頭
+    帶著 git 從 tree 解出的 object id,因此可以在原語層就把位元組釘回那個 id。
+    對不上、缺席、非 blob 一律回 `None`(fail-closed)。
+
+    **誠實邊界**:這綁的是 `payload ↔ oid`,**不是** `oid ↔ path`。tree 物件本身沒有被
+    驗,所以改寫 tree 就能讓 oid 指向攻擊者挑的 blob(E2/E3 round-8 各自無競爭復現)。
+    本函式擋的是**位元組損壞與最外層竄改**,不是敵意 repo owner。見設計檔 §6。
+    """
+
+    return commit_blob_bytes(repo_root, [path], source_head=at_commit).get(path)
 
 
 def owned_path_blob_projection(

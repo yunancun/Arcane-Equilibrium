@@ -74,6 +74,10 @@ _W5_OWNED_PATHS = tuple(sorted((
     "helper_scripts/maintenance_scripts/agent_governance_s2_4_install.py",
     "helper_scripts/maintenance_scripts/agent_governance_s2_4_w5_emit.py",
     "program_code/ml_training/aiml_gate_receipt_s2_4_contracts.py",
+    # 2026-08-08 拆分波:`schema_core` 的下層 view 葉(信任邊界獨立成檔)。它進入
+    # engine-scanner 的 runtime import 閉包,不列入 owned scope 的話,對它的削弱性
+    # 修改不會改變 owned_path_diff_digest ⇒ 治理不變量覆蓋面靜默收窄。
+    "program_code/ml_training/aiml_gate_receipt_git_view.py",
     "program_code/ml_training/aiml_gate_receipt_schema_core.py",
     "program_code/ml_training/aiml_gate_receipt_validator.py",
     # 2000 行治理拆分(第三輪):§10.3 誠實面帳本的純資料葉。它是 W5 擁有的內容,故必須

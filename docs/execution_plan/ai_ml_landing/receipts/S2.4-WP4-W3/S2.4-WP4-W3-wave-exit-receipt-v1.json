@@ -1,28 +1,25 @@
 {
   "capture_digests": [
-    "sha256:52467ded5ed9ec3da586d163c92d70f7f1f63cda65c7ef1c5fbd58d104f4f008"
+    "sha256:c0c1f1ed4f91882f938993b287cf258c23a6ed0db4aee3bd94358b5ca8e20048"
   ],
-  "exported_abi_digest": "sha256:e5b7f2e317155112c14fbbd6f45d83112803f07c02c9e53929013bcb8fd438ad",
-  "owned_path_diff_digest": "sha256:715334bb9c96cef28d811a4e66bb48257381a7ca525b545bf036c58259e4c227",
-  "owned_path_manifest_digest": "sha256:5a995838b555273fd2c92b4895707f54add0485cdbe7d11ae28200ef8645196c",
-  "predecessor_wave_receipt_digest": "sha256:b3f5f088f6e25e74c4048dbf43b78617f94e1fe5039ba540f2a494c800a5f241",
+  "exported_abi_digest": "sha256:5dbf97e6b43065eabdf277e6dc8e11f53fd18452f590bcd3666c626c80bddc5d",
+  "owned_path_diff_digest": "sha256:ec2df88bbc647accffa014674f9bc4b91b13891bb146b36527091cf76e479bb3",
+  "owned_path_manifest_digest": "sha256:2094ba64bd145db45eb3a6f6aa472730a456b4a55ec79ffadb449ce40806b15e",
+  "predecessor_wave_receipt_digest": "sha256:e2605997ed442bb6a4f3a5cf3183f84f01196bbd1a762dbebb89280b470b462e",
   "production_authority_flags": {
     "nine_authorities_false": true,
     "production_apply_performed": false,
     "running_attested": false
   },
   "review_fragment_digests": [
-    "sha256:08e2f61ce8b8d6e1e2ca4eb3637926c2eab0ee8a9aa9b31344bc2fc93f5595c9",
-    "sha256:6abfd848ec17c73d42bce62d0b18492486431173a26a14d9fc6f5173a875ef56",
-    "sha256:897a6f7df885381f8a6bd126eeb0ba5678ca4803f1f5d8501b5b4b444663f875",
-    "sha256:f9e77bf7be60ee0c0e3396fa16d216a2c510767fe6bf4a03db4a92032eb784c0"
+    "sha256:ab47523082185bd1aad829dbd4eccc716bc4910af0384f39c50544bcabb88215"
   ],
   "schema_version": "s2_4_wave_exit_receipt_v1",
-  "self_digest": "sha256:bc4367a5de20ff89da8898f2eb86e10600425a602535b8a36d24fc1819699cba",
-  "source_admission_receipt_digest": "sha256:668b08335aa45cbea52f9531c2a96a6b0b5b366aabf0bdcfef63256ebd671628",
-  "source_head": "8c04a18f748c1750fb411a14b8a6d42e7e04a669",
+  "self_digest": "sha256:6f6d124caf2a3b534d52b80f0e2818732da8de1867b7695dd033b5d4dd99044d",
+  "source_admission_receipt_digest": "sha256:f66f93336cf0074af51fcb5436354c771e0e5fd846c0d8f1427f78afe09dea65",
+  "source_head": "6fd4ea739b736b6d00000f7e66913f7c8ee8a8e1",
   "test_digests": [
-    "sha256:606df5a333395331ade843d1a1f80cc724523f332b5be5cd882e9509532d9aad"
+    "sha256:e7b85a1a86ffe979d2300a2a814c6be40cda59c52509448fbfe257f34b2d86e8"
   ],
   "wave": "W3"
 }

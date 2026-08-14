@@ -53,6 +53,10 @@ _W3_OWNED_PATHS = tuple(sorted((
     "helper_scripts/maintenance_scripts/agent_governance_s2_4_render.py",
     "helper_scripts/maintenance_scripts/agent_governance_s2_4_topology.py",
     "helper_scripts/maintenance_scripts/agent_governance_s2_4_w3_emit.py",
+    # 2026-08-08 拆分波:`schema_core` 的下層 view 葉(信任邊界獨立成檔)。它進入
+    # engine-scanner 的 runtime import 閉包,不列入 owned scope 的話,對它的削弱性
+    # 修改不會改變 owned_path_diff_digest ⇒ 治理不變量覆蓋面靜默收窄。
+    "program_code/ml_training/aiml_gate_receipt_git_view.py",
     "program_code/ml_training/aiml_gate_receipt_schema_core.py",
     "program_code/ml_training/aiml_gate_receipt_validator.py",
     "program_code/ml_training/aiml_gate_receipt_wave_w3.py",

@@ -6,8 +6,10 @@ import inspect
 import io
 import json
 import os
+import stat
 import subprocess
 import sys
+import tempfile
 import zipfile
 from copy import deepcopy
 from pathlib import Path
@@ -32,6 +34,7 @@ from agent_governance_generation_summary import (  # noqa: E402
     capture_generation_summary,
 )
 from agent_governance_routing import route_task  # noqa: E402
+from agent_governance_schema import schema_subset_errors  # noqa: E402
 
 
 def _review_context() -> tuple[dict, dict]:
@@ -101,18 +104,48 @@ def _git_repository(tmp_path: Path) -> Path:
     return repository
 
 
-def _patch_test_binding(monkeypatch: pytest.MonkeyPatch) -> None:
+def _commit_test_repository(tmp_path: Path, *, assertion: str) -> tuple[Path, str]:
+    repository = _git_repository(tmp_path)
+    (repository / "subject.py").write_text("VALUE = 1\n", encoding="utf-8")
+    (repository / "test_subject.py").write_text(
+        "from subject import VALUE\n\n"
+        f"def test_subject():\n    assert {assertion}\n",
+        encoding="utf-8",
+    )
+    subprocess.run(
+        ["git", "add", "subject.py", "test_subject.py"],
+        cwd=repository,
+        check=True,
+    )
+    subprocess.run(
+        ["git", "commit", "-qm", "add committed test"],
+        cwd=repository,
+        check=True,
+    )
+    head = subprocess.run(
+        ["git", "rev-parse", "HEAD"], cwd=repository, check=True,
+        capture_output=True, text=True,
+    ).stdout.strip()
+    return repository, head
+
+
+def _patch_test_binding(
+    monkeypatch: pytest.MonkeyPatch,
+    *,
+    path_scope: list[str] | None = None,
+) -> None:
+    bound_scope = path_scope or ["scope.txt"]
     task = {
         "node_id": "review", "role": "E2", "native_agent": "E2",
         "node_class": "verification", "permission": "read_only",
-        "requires": [], "path_scope": ["scope.txt"],
+        "requires": [], "path_scope": bound_scope,
     }
     monkeypatch.setattr(
         capture_v2, "_bound_execution_task",
         lambda _context, _native, _node, _root: (
             task,
-            {"dirty_scope": ["scope.txt"]},
-            ["scope.txt"],
+            {"dirty_scope": bound_scope},
+            bound_scope,
         ),
     )
     monkeypatch.setattr(
@@ -165,11 +198,81 @@ def test_native_node_and_dispatch_scope_are_derived_not_caller_asserted() -> Non
     artifact, _ = _review_context()
     with pytest.raises(PermissionError, match="does not own"):
         capture_v2._bound_execution_task(artifact, "QA", "independent_review", ROOT)
-    with pytest.raises(ValueError, match="not one canonical"):
+    with pytest.raises(ValueError, match="not one validated Context execution task"):
         capture_v2._bound_execution_task(artifact, "E2", "forged-node", ROOT)
     assert "path_scope" not in inspect.signature(
         capture_v2.capture_governed_command
     ).parameters
+
+
+def test_adaptive_e4_node_uses_validated_context_binding_and_verification_scope() -> None:
+    dirty_scope = [
+        "helper_scripts/maintenance_scripts/agent_governance_command_capture_v2.py"
+    ]
+    verification_scope = [
+        "tests/structure/test_agent_governance_command_capture_v2.py"
+    ]
+    facts = {
+        "task_shape": "review",
+        "surfaces": ["python"],
+        "risk": "medium",
+        "uncertainty": "low",
+        "side_effect_class": "none",
+        "objective": "capture one adaptive regression verification",
+        "scope": [*dirty_scope, *verification_scope],
+        "dirty_scope": dirty_scope,
+        "verification_scope": verification_scope,
+        "acceptance_criteria": ["validated adaptive node executes read-only"],
+        "hard_stops": ["no runtime effect"],
+        "baseline": capture_repository_baseline(),
+        "direct_interfaces": ["capture_governed_command"],
+        "previous_failure": "capture recomputed the canonical route",
+    }
+    routed = route_task(facts)
+    canonical = compile_context("E4", routed["task_facts"])
+    adaptive = {
+        "node_id": "adaptive_regression",
+        "role": "E4",
+        "native_agent": "E4-verifier",
+        "requires": [canonical["execution_dag_binding"]["nodes"][-1]["node_id"]],
+        "node_class": "verification",
+        "permission": "read_only",
+    }
+    plan = compile_context(
+        "E4",
+        routed["task_facts"],
+        execution_dag=[*canonical["execution_dag_binding"]["nodes"], adaptive],
+    )
+    artifact = materialize_context_artifact(plan)
+    validated = capture_v2.validate_context_artifact(artifact, root=ROOT)
+    assert validated["errors"] == []
+    assert not any(
+        task["node_id"] == adaptive["node_id"]
+        for task in route_task(validated["plan"]["task_contract"])[
+            "required_role_nodes"
+        ]
+    )
+
+    record = capture_v2.capture_governed_command(
+        native_agent="E4-verifier",
+        node_id=adaptive["node_id"],
+        context_artifact=artifact,
+        argv=["git", "rev-parse", "--is-inside-work-tree"],
+        root=ROOT,
+    )
+    assert record["result"] == "PASS"
+    assert record["execution_task"] == {**adaptive, "path_scope": []}
+    assert record["path_scope"] == verification_scope
+    assert record["path_scope"] != dirty_scope
+
+    with pytest.raises(ValueError, match="not one validated Context execution task"):
+        capture_v2.capture_governed_command(
+            native_agent="E4-verifier",
+            node_id="forged-adaptive-node",
+            context_artifact=artifact,
+            argv=["git", "rev-parse", "--is-inside-work-tree"],
+            root=ROOT,
+        )
 
 
 def test_full_w0_default_capture_ceiling_is_bounded_600_seconds() -> None:
@@ -366,6 +469,373 @@ def test_huge_output_is_streamed_bounded_and_directly_readable() -> None:
     assert stdout["digest"].startswith("sha256:")
 
 
+def test_governed_pytest_executes_the_exact_committed_tree_not_a_dirty_fix(
+    tmp_path: Path,
+) -> None:
+    repository, head = _commit_test_repository(
+        tmp_path, assertion="VALUE == 2"
+    )
+    (repository / "subject.py").write_text("VALUE = 2\n", encoding="utf-8")
+
+    executed = capture_v2._execute(
+        [
+            *capture_v2.GOVERNED_PYTEST_PREFIX,
+            *capture_v2.GOVERNED_PYTEST_REQUIRED_ARGS,
+            "-q",
+            "test_subject.py",
+        ],
+        root=repository,
+        timeout_seconds=30,
+        replay_contract="CANONICAL_TEST_OUTPUT_V1",
+        execution_source_head=head,
+    )
+
+    assert executed["result"] == "FAIL"
+    evidence = executed["source_materialization"]
+    assert evidence["materialization_kind"] == "FRESH_PRIVATE_COMMITTED_TREE"
+    assert evidence["source_head"] == head
+    assert evidence["source_tree"] == subprocess.run(
+        ["git", "rev-parse", f"{head}^{{tree}}"], cwd=repository, check=True,
+        capture_output=True, text=True,
+    ).stdout.strip()
+    assert evidence["cleanup_status"] == "REMOVED"
+
+
+def test_governed_pytest_ignores_a_dirty_tracked_failure(
+    tmp_path: Path,
+) -> None:
+    repository, head = _commit_test_repository(
+        tmp_path, assertion="VALUE == 1"
+    )
+    (repository / "subject.py").write_text("VALUE = 999\n", encoding="utf-8")
+
+    executed = capture_v2._execute(
+        [
+            *capture_v2.GOVERNED_PYTEST_PREFIX,
+            *capture_v2.GOVERNED_PYTEST_REQUIRED_ARGS,
+            "-q",
+            "test_subject.py",
+        ],
+        root=repository,
+        timeout_seconds=30,
+        replay_contract="CANONICAL_TEST_OUTPUT_V1",
+        execution_source_head=head,
+    )
+
+    assert executed["result"] == "PASS"
+    assert executed["source_materialization"]["source_head"] == head
+    assert (repository / "subject.py").read_text(encoding="utf-8") == "VALUE = 999\n"
+
+
+def test_governed_pytest_ignores_untracked_shadow_modules_and_conftest(
+    tmp_path: Path,
+) -> None:
+    repository, head = _commit_test_repository(
+        tmp_path, assertion="VALUE == 1"
+    )
+    shadow = repository / "untracked-shadow"
+    shadow.mkdir()
+    (shadow / "subject.py").write_text("VALUE = 999\n", encoding="utf-8")
+    (repository / "conftest.py").write_text(
+        "raise RuntimeError('untracked conftest executed')\n", encoding="utf-8"
+    )
+
+    executed = capture_v2._execute(
+        [
+            *capture_v2.GOVERNED_PYTEST_PREFIX,
+            *capture_v2.GOVERNED_PYTEST_REQUIRED_ARGS,
+            "-q",
+            "test_subject.py",
+        ],
+        root=repository,
+        timeout_seconds=30,
+        replay_contract="CANONICAL_TEST_OUTPUT_V1",
+        execution_source_head=head,
+    )
+
+    assert executed["result"] == "PASS"
+    assert executed["source_materialization"]["materialized_file_count"] == 3
+
+
+def test_committed_tree_materialization_preserves_executable_mode(
+    tmp_path: Path,
+) -> None:
+    repository = _git_repository(tmp_path)
+    executable = repository / "executable-test.py"
+    executable.write_text(
+        "#!/usr/bin/env python3\nprint('committed executable')\n",
+        encoding="utf-8",
+    )
+    executable.chmod(0o755)
+    subprocess.run(["git", "add", "executable-test.py"], cwd=repository, check=True)
+    subprocess.run(["git", "commit", "-qm", "executable"], cwd=repository, check=True)
+    head = subprocess.run(
+        ["git", "rev-parse", "HEAD"], cwd=repository, check=True,
+        capture_output=True, text=True,
+    ).stdout.strip()
+    parent = tmp_path / "private"
+    parent.mkdir(mode=0o700)
+
+    with capture_v2._fresh_committed_tree(
+        repository, head, parent=parent
+    ) as (materialized, evidence):
+        mode = stat.S_IMODE((materialized / "executable-test.py").stat().st_mode)
+        assert mode == 0o700
+        assert evidence["executable_file_count"] == 1
+    assert evidence["cleanup_status"] == "REMOVED"
+    assert not materialized.exists()
+
+
+def test_committed_tree_inventory_rejects_traversal_and_special_entries(
+    tmp_path: Path,
+) -> None:
+    repository, head = _commit_test_repository(
+        tmp_path, assertion="VALUE == 1"
+    )
+
+    assert capture_v2._safe_materialized_path("../escape.py") is False
+    subprocess.run(
+        [
+            "git", "update-index", "--add", "--cacheinfo",
+            "160000," + head + ",nested",
+        ],
+        cwd=repository,
+        check=True,
+    )
+    tree = subprocess.run(
+        ["git", "write-tree"], cwd=repository, check=True,
+        capture_output=True, text=True,
+    ).stdout.strip()
+    special_commit = subprocess.run(
+        ["git", "commit-tree", tree, "-p", head, "-m", "special entry"],
+        cwd=repository, check=True, capture_output=True, text=True,
+    ).stdout.strip()
+    parent = tmp_path / "private"
+    parent.mkdir(mode=0o700)
+    with pytest.raises(ValueError, match="special entry"):
+        with capture_v2._fresh_committed_tree(
+            repository, special_commit, parent=parent
+        ):
+            pytest.fail("special entry was materialized")
+
+
+def test_committed_tree_materialization_rejects_git_metadata_components() -> None:
+    assert capture_v2._safe_materialized_path(".git/config") is False
+    assert capture_v2._safe_materialized_path("nested/.GIT/hooks/probe") is False
+    assert capture_v2._safe_materialized_path("nested/.Git/index") is False
+    assert capture_v2._safe_materialized_path("nested/.git/hooks/probe") is False
+    assert capture_v2._safe_materialized_path("nested/git/source.py") is True
+
+
+def test_fresh_committed_tree_has_private_git_metadata_and_no_subject_links(
+    tmp_path: Path,
+) -> None:
+    repository, head = _commit_test_repository(
+        tmp_path, assertion="VALUE == 1"
+    )
+    source_tree = subprocess.run(
+        ["git", "rev-parse", f"{head}^{{tree}}"], cwd=repository, check=True,
+        capture_output=True, text=True,
+    ).stdout.strip()
+    parent = tmp_path / "private"
+    parent.mkdir(mode=0o700)
+
+    with capture_v2._fresh_committed_tree(
+        repository, head, parent=parent
+    ) as (materialized, evidence):
+        assert subprocess.run(
+            ["git", "rev-parse", "HEAD"], cwd=materialized, check=True,
+            capture_output=True, text=True,
+        ).stdout.strip() == head
+        assert subprocess.run(
+            ["git", "rev-parse", "HEAD^{tree}"], cwd=materialized, check=True,
+            capture_output=True, text=True,
+        ).stdout.strip() == source_tree
+        assert evidence["git_metadata_kind"] == "PRIVATE_COPIED_OBJECT_DATABASE"
+        assert evidence["git_object_graph_digest"].startswith("sha256:")
+        assert evidence["git_metadata_manifest_digest"].startswith("sha256:")
+        for path in (materialized / ".git").rglob("*"):
+            assert not path.is_symlink(), path
+        assert not (materialized / ".git" / "objects" / "info" / "alternates").exists()
+        first_digests = (
+            evidence["git_object_graph_digest"],
+            evidence["git_metadata_manifest_digest"],
+        )
+    with capture_v2._fresh_committed_tree(
+        repository, head, parent=parent
+    ) as (_, replay_evidence):
+        assert (
+            replay_evidence["git_object_graph_digest"],
+            replay_evidence["git_metadata_manifest_digest"],
+        ) == first_digests
+
+
+def test_committed_inventory_and_blobs_never_open_the_subject_as_a_git_repo(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    repository, head = _commit_test_repository(
+        tmp_path, assertion="VALUE == 1"
+    )
+    subject = repository.resolve()
+    real_run = subprocess.run
+    git_repository_paths: list[Path] = []
+
+    def spy(argv, *args, **kwargs):
+        if isinstance(argv, (list, tuple)) and argv and Path(str(argv[0])).name == "git":
+            if "-C" in argv:
+                git_repository_paths.append(Path(str(argv[argv.index("-C") + 1])).resolve())
+            elif kwargs.get("cwd") is not None:
+                git_repository_paths.append(Path(kwargs["cwd"]).resolve())
+        return real_run(argv, *args, **kwargs)
+
+    monkeypatch.setattr(capture_v2.subprocess, "run", spy)
+    parent = tmp_path / "private"
+    parent.mkdir(mode=0o700)
+    with capture_v2._fresh_committed_tree(repository, head, parent=parent):
+        pass
+
+    assert git_repository_paths
+    assert subject not in git_repository_paths
+
+
+def test_committed_tree_materialization_writes_every_blob_byte_after_short_write(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    repository = _git_repository(tmp_path)
+    payload = b"0123456789abcdef\n"
+    (repository / "payload.bin").write_bytes(payload)
+    subprocess.run(["git", "add", "payload.bin"], cwd=repository, check=True)
+    subprocess.run(["git", "commit", "-qm", "payload"], cwd=repository, check=True)
+    head = subprocess.run(
+        ["git", "rev-parse", "HEAD"], cwd=repository, check=True,
+        capture_output=True, text=True,
+    ).stdout.strip()
+    parent = tmp_path / "private"
+    parent.mkdir(mode=0o700)
+    target = parent / "materialized"
+    target.mkdir(mode=0o700)
+    capture_v2._build_private_git_database(repository, head, target / ".git")
+    _, entries, _ = capture_v2._committed_tree_inventory(target / ".git", head)
+    real_write = os.write
+
+    def short_write(descriptor: int, data: bytes) -> int:
+        return real_write(descriptor, data[:1])
+
+    monkeypatch.setattr(capture_v2.os, "write", short_write)
+    capture_v2._materialize_committed_blobs(target / ".git", target, entries)
+
+    assert (target / "payload.bin").read_bytes() == payload
+
+
+def test_committed_tree_rejects_an_escaping_symlink_and_cleans_up(
+    tmp_path: Path,
+) -> None:
+    repository = _git_repository(tmp_path)
+    os.symlink("../../outside", repository / "escaping-link")
+    subprocess.run(["git", "add", "escaping-link"], cwd=repository, check=True)
+    subprocess.run(["git", "commit", "-qm", "escaping link"], cwd=repository, check=True)
+    head = subprocess.run(
+        ["git", "rev-parse", "HEAD"], cwd=repository, check=True,
+        capture_output=True, text=True,
+    ).stdout.strip()
+    parent = tmp_path / "private"
+    parent.mkdir(mode=0o700)
+
+    with pytest.raises(ValueError, match="symlink escapes"):
+        with capture_v2._fresh_committed_tree(repository, head, parent=parent):
+            pytest.fail("escaping symlink was materialized")
+    assert list(parent.iterdir()) == []
+
+
+def test_governed_pytest_timeout_cleans_the_private_materialization(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    repository = _git_repository(tmp_path)
+    (repository / "test_slow.py").write_text(
+        "import time\n\ndef test_slow():\n    time.sleep(5)\n",
+        encoding="utf-8",
+    )
+    subprocess.run(["git", "add", "test_slow.py"], cwd=repository, check=True)
+    subprocess.run(["git", "commit", "-qm", "slow test"], cwd=repository, check=True)
+    head = subprocess.run(
+        ["git", "rev-parse", "HEAD"], cwd=repository, check=True,
+        capture_output=True, text=True,
+    ).stdout.strip()
+    temp_parent = tmp_path / "command-temp"
+    temp_parent.mkdir(mode=0o700)
+    monkeypatch.setattr(tempfile, "tempdir", str(temp_parent))
+
+    executed = capture_v2._execute(
+        [
+            *capture_v2.GOVERNED_PYTEST_PREFIX,
+            *capture_v2.GOVERNED_PYTEST_REQUIRED_ARGS,
+            "-q",
+            "test_slow.py",
+        ],
+        root=repository,
+        timeout_seconds=1,
+        replay_contract="CANONICAL_TEST_OUTPUT_V1",
+        execution_source_head=head,
+    )
+
+    assert executed["result"] == "TIMED_OUT"
+    assert executed["source_materialization"]["cleanup_status"] == "REMOVED"
+    assert list(temp_parent.iterdir()) == []
+
+
+def test_materialization_subprocess_failure_is_bounded_and_cleans_up(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    repository, head = _commit_test_repository(
+        tmp_path, assertion="VALUE == 1"
+    )
+    temp_parent = tmp_path / "command-temp"
+    temp_parent.mkdir(mode=0o700)
+    monkeypatch.setattr(tempfile, "tempdir", str(temp_parent))
+
+    def fail_materialization(*_args: object, **_kwargs: object) -> dict:
+        raise subprocess.CalledProcessError(128, ["git", "materialize"])
+
+    monkeypatch.setattr(
+        capture_v2, "_build_private_git_database", fail_materialization
+    )
+    argv = [
+        *capture_v2.GOVERNED_PYTEST_PREFIX,
+        *capture_v2.GOVERNED_PYTEST_REQUIRED_ARGS,
+        "-q",
+        "test_subject.py",
+    ]
+    executed = capture_v2._execute(
+        argv,
+        root=repository,
+        timeout_seconds=30,
+        replay_contract="CANONICAL_TEST_OUTPUT_V1",
+        execution_source_head=head,
+    )
+    assert executed["result"] == "FAIL"
+    assert executed["exit_code"] == 127
+    assert executed["timed_out"] is False
+    assert "Traceback" not in executed["stderr"]["preview_text"]
+    assert list(temp_parent.iterdir()) == []
+
+    _patch_test_binding(monkeypatch)
+    with pytest.raises(
+        RuntimeError, match="governed pytest source materialization is absent"
+    ) as denied:
+        capture_v2.capture_governed_command(
+            native_agent="E2",
+            node_id="review",
+            context_artifact={
+                "artifact_digest": "sha256:" + "a" * 64,
+                "task_contract_digest": "sha256:" + "b" * 64,
+            },
+            argv=argv,
+            root=repository,
+        )
+    assert "materialize" not in str(denied.value)
+    assert list(temp_parent.iterdir()) == []
+
+
 def test_secret_environment_is_removed_and_secret_preview_is_redacted(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
@@ -424,7 +894,7 @@ def test_controlled_pytest_environment_uses_only_bound_provider_capsule(
     assert "PYTHONPATH" not in read_only_environment
 
 
-def test_closed_command_capture_schema_requires_nullable_provider_field() -> None:
+def test_closed_command_capture_schema_enumerates_three_field_sets() -> None:
     schema = json.loads(
         (ROOT / ".codex/schemas/closure_packet_v1.schema.json").read_text(
             encoding="utf-8"
@@ -432,13 +902,132 @@ def test_closed_command_capture_schema_requires_nullable_provider_field() -> Non
     )
     command_capture = schema["$defs"]["commandCaptureV2"]
 
-    assert "pytest_provider" in command_capture["required"]
+    assert command_capture["additionalProperties"] is False
+    assert set(command_capture["required"]) == capture_v2.LEGACY_RECORD_FIELDS
+    assert "pytest_provider" not in command_capture["required"]
+    assert "source_materialization" not in command_capture["required"]
+    assert command_capture["oneOf"] == [
+        {"required": ["pytest_provider", "source_materialization"]},
+        {
+            "required": ["pytest_provider"],
+            "not": {"required": ["source_materialization"]},
+        },
+        {
+            "not": {
+                "anyOf": [
+                    {"required": ["pytest_provider"]},
+                    {"required": ["source_materialization"]},
+                ]
+            }
+        },
+    ]
     assert command_capture["properties"]["pytest_provider"] == {
         "anyOf": [
             {"$ref": "#/$defs/governedPytestProvider"},
             {"type": "null"},
         ]
     }
+    assert command_capture["properties"]["source_materialization"] == {
+        "anyOf": [
+            {"$ref": "#/$defs/sourceMaterialization"},
+            {"type": "null"},
+        ]
+    }
+    assert command_capture["allOf"] == [
+        {
+            "if": {
+                "properties": {
+                    "replay_contract": {"const": "CANONICAL_TEST_OUTPUT_V1"}
+                },
+                "required": ["replay_contract"],
+            },
+            "then": {
+                "required": ["pytest_provider", "source_materialization"],
+                "properties": {
+                    "pytest_provider": {
+                        "$ref": "#/$defs/governedPytestProvider"
+                    },
+                    "source_materialization": {
+                        "$ref": "#/$defs/sourceMaterialization"
+                    },
+                },
+            },
+        }
+    ]
+
+
+def _closed_command_capture_schema_errors(record: dict) -> list[str]:
+    schema = json.loads(
+        (ROOT / ".codex/schemas/closure_packet_v1.schema.json").read_text(
+            encoding="utf-8"
+        )
+    )
+    return schema_subset_errors(
+        record, schema["$defs"]["commandCaptureV2"], schema
+    )
+
+
+def _reseal_through_public_digest(record: dict) -> None:
+    record["record_digest"] = governance.canonical_digest({
+        key: value for key, value in record.items() if key != "record_digest"
+    })
+
+
+def _real_non_pytest_capture(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> tuple[Path, dict]:
+    repository = _git_repository(tmp_path)
+    _patch_test_binding(monkeypatch)
+    record = capture_v2.capture_governed_command(
+        native_agent="E2",
+        node_id="review",
+        context_artifact={
+            "artifact_digest": "sha256:" + "a" * 64,
+            "task_contract_digest": "sha256:" + "b" * 64,
+        },
+        argv=["git", "rev-parse", "--is-inside-work-tree"],
+        root=repository,
+    )
+    return repository, record
+
+
+def _real_governed_pytest_capture(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> tuple[Path, dict]:
+    repository = _git_repository(tmp_path)
+    test_path = repository / "test_probe.py"
+    test_path.write_text("def test_probe():\n    assert True\n", encoding="utf-8")
+    subprocess.run(
+        ["git", "add", "test_probe.py"], cwd=repository, check=True
+    )
+    subprocess.run(
+        ["git", "commit", "-qm", "add governed pytest probe"],
+        cwd=repository,
+        check=True,
+    )
+    _patch_test_binding(
+        monkeypatch, path_scope=["scope.txt", "test_probe.py"]
+    )
+    record = capture_v2.capture_governed_command(
+        native_agent="E2",
+        node_id="review",
+        context_artifact={
+            "artifact_digest": "sha256:" + "a" * 64,
+            "task_contract_digest": "sha256:" + "b" * 64,
+        },
+        argv=[
+            *capture_v2.GOVERNED_PYTEST_PREFIX,
+            *capture_v2.GOVERNED_PYTEST_REQUIRED_ARGS,
+            "-q",
+            "test_probe.py",
+        ],
+        root=repository,
+        timeout_seconds=30,
+    )
+    assert record["result"] == "PASS"
+    return repository, record
 
 
 def test_nested_capture_recovers_code_owned_pytest_provider(
@@ -624,6 +1213,241 @@ def test_plain_pytest_argv_is_rejected_before_execution(
             argv=["python3", "-m", "pytest", "-q", "scope.txt"],
             root=repository,
         )
+
+
+def test_absolute_governed_pytest_target_is_rejected_before_execution_and_validation(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    repository = _git_repository(tmp_path)
+    _patch_test_binding(monkeypatch)
+    calls: list[list[str]] = []
+    execute = capture_v2._execute
+
+    def fail_if_executed(argv: list[str], **kwargs: object) -> dict:
+        if capture_v2._is_governed_pytest_argv(argv):
+            calls.append(argv)
+            raise AssertionError("absolute pytest target reached execution")
+        return execute(argv, **kwargs)
+
+    monkeypatch.setattr(capture_v2, "_execute", fail_if_executed)
+    absolute_target = str(repository / "scope.txt")
+    governed_prefix = [
+        *capture_v2.GOVERNED_PYTEST_PREFIX,
+        *capture_v2.GOVERNED_PYTEST_REQUIRED_ARGS,
+        "-q",
+    ]
+    with pytest.raises(PermissionError, match="absolute pytest collection target"):
+        capture_v2.capture_governed_command(
+            native_agent="E2",
+            node_id="review",
+            context_artifact={
+                "artifact_digest": "sha256:" + "a" * 64,
+                "task_contract_digest": "sha256:" + "b" * 64,
+            },
+            argv=[*governed_prefix, absolute_target],
+            root=repository,
+        )
+    assert calls == []
+
+    baseline = capture_v2.capture_governed_command(
+        native_agent="E2",
+        node_id="review",
+        context_artifact={
+            "artifact_digest": "sha256:" + "a" * 64,
+            "task_contract_digest": "sha256:" + "b" * 64,
+        },
+        argv=["git", "rev-parse", "--is-inside-work-tree"],
+        root=repository,
+    )
+    absolute = deepcopy(baseline)
+    absolute["argv"] = [*governed_prefix, absolute_target]
+    absolute["command"] = capture_v2.command_argv(absolute["argv"])[1]
+    absolute["record_digest"] = capture_v2._self_digest(absolute)
+    assert any(
+        "absolute pytest collection target" in error
+        for error in capture_v2.validate_governed_command_capture(
+            absolute, root=repository
+        )
+    )
+
+    relative = deepcopy(absolute)
+    relative["argv"][-1] = "scope.txt"
+    relative["command"] = capture_v2.command_argv(relative["argv"])[1]
+    relative["record_digest"] = capture_v2._self_digest(relative)
+    assert not any(
+        "absolute pytest collection target" in error
+        for error in capture_v2.validate_governed_command_capture(
+            relative, root=repository
+        )
+    )
+
+
+def test_current_non_pytest_record_with_null_compatibility_fields_is_valid(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    repository, record = _real_non_pytest_capture(tmp_path, monkeypatch)
+    assert record["pytest_provider"] is None
+    assert record["source_materialization"] is None
+    assert _closed_command_capture_schema_errors(record) == []
+    assert capture_v2.validate_governed_command_capture(
+        record, root=repository
+    ) == []
+
+
+def test_intermediate_non_pytest_record_without_source_materialization_is_valid(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    repository, record = _real_non_pytest_capture(tmp_path, monkeypatch)
+
+    intermediate = deepcopy(record)
+    intermediate.pop("source_materialization")
+    _reseal_through_public_digest(intermediate)
+    assert _closed_command_capture_schema_errors(intermediate) == []
+    assert capture_v2.validate_governed_command_capture(
+        intermediate, root=repository
+    ) == []
+
+    governed = deepcopy(intermediate)
+    governed["argv"] = [
+        *capture_v2.GOVERNED_PYTEST_PREFIX,
+        *capture_v2.GOVERNED_PYTEST_REQUIRED_ARGS,
+        "-q",
+        "scope.txt",
+    ]
+    governed["command"] = capture_v2.command_argv(governed["argv"])[1]
+    governed["replay_contract"] = capture_v2.replay_contract_for(
+        governed["argv"], governed["authorization"]["policy_class"]
+    )
+    governed["record_digest"] = capture_v2._self_digest(governed)
+    assert "governed pytest source materialization is absent" in (
+        capture_v2.validate_governed_command_capture(governed, root=repository)
+    )
+
+
+def test_legacy_non_pytest_record_without_compatibility_fields_is_valid(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    repository, record = _real_non_pytest_capture(tmp_path, monkeypatch)
+    legacy = deepcopy(record)
+    legacy.pop("pytest_provider")
+    legacy.pop("source_materialization")
+    _reseal_through_public_digest(legacy)
+
+    assert _closed_command_capture_schema_errors(legacy) == []
+    assert capture_v2.validate_governed_command_capture(
+        legacy, root=repository
+    ) == []
+
+
+def test_governed_pytest_typed_current_record_is_valid(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    repository, record = _real_governed_pytest_capture(tmp_path, monkeypatch)
+
+    assert isinstance(record["pytest_provider"], dict)
+    assert isinstance(record["source_materialization"], dict)
+    assert _closed_command_capture_schema_errors(record) == []
+    assert capture_v2.validate_governed_command_capture(
+        record, root=repository
+    ) == []
+
+
+def test_governed_pytest_without_materialization_fails_closed(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    repository, record = _real_governed_pytest_capture(tmp_path, monkeypatch)
+    missing = deepcopy(record)
+    missing.pop("source_materialization")
+    _reseal_through_public_digest(missing)
+
+    assert any(
+        "missing required property source_materialization" in error
+        for error in _closed_command_capture_schema_errors(missing)
+    )
+    assert "governed pytest source materialization is absent" in (
+        capture_v2.validate_governed_command_capture(missing, root=repository)
+    )
+
+
+def test_materialization_only_field_set_fails_closed(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    repository, record = _real_non_pytest_capture(tmp_path, monkeypatch)
+    materialization_only = deepcopy(record)
+    materialization_only.pop("pytest_provider")
+    _reseal_through_public_digest(materialization_only)
+
+    assert any(
+        "satisfies 0 oneOf branches" in error
+        for error in _closed_command_capture_schema_errors(materialization_only)
+    )
+    assert "governed command capture fields do not match contract" in (
+        capture_v2.validate_governed_command_capture(
+            materialization_only, root=repository
+        )
+    )
+
+
+def test_missing_unrelated_required_capture_key_fails_closed(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    repository, record = _real_non_pytest_capture(tmp_path, monkeypatch)
+    missing = deepcopy(record)
+    missing.pop("result")
+    _reseal_through_public_digest(missing)
+
+    assert "$: missing required property result" in (
+        _closed_command_capture_schema_errors(missing)
+    )
+    assert "governed command capture fields do not match contract" in (
+        capture_v2.validate_governed_command_capture(missing, root=repository)
+    )
+
+
+def test_unknown_capture_field_fails_closed(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    repository, record = _real_non_pytest_capture(tmp_path, monkeypatch)
+    extra = deepcopy(record)
+    extra["surprise"] = False
+    _reseal_through_public_digest(extra)
+
+    assert "$: unexpected property surprise" in (
+        _closed_command_capture_schema_errors(extra)
+    )
+    assert "governed command capture fields do not match contract" in (
+        capture_v2.validate_governed_command_capture(extra, root=repository)
+    )
+
+
+def test_wrong_source_materialization_type_fails_closed(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    repository, record = _real_non_pytest_capture(tmp_path, monkeypatch)
+    wrong_type = deepcopy(record)
+    wrong_type["source_materialization"] = "not-a-materialization"
+    _reseal_through_public_digest(wrong_type)
+
+    assert any(
+        "source_materialization" in error and "does not satisfy anyOf" in error
+        for error in _closed_command_capture_schema_errors(wrong_type)
+    )
+    assert "non-pytest command cannot bind a source materialization" in (
+        capture_v2.validate_governed_command_capture(wrong_type, root=repository)
+    )
+
+
+def test_stale_capture_digest_fails_semantic_validation(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    repository, record = _real_non_pytest_capture(tmp_path, monkeypatch)
+    stale = deepcopy(record)
+    stale["stdout"]["preview_text"] = "tampered\n"
+
+    assert _closed_command_capture_schema_errors(stale) == []
+    assert "governed command capture self-digest is invalid" in (
+        capture_v2.validate_governed_command_capture(stale, root=repository)
+    )
 
 
 def test_forged_scope_and_host_attestation_are_rejected() -> None:

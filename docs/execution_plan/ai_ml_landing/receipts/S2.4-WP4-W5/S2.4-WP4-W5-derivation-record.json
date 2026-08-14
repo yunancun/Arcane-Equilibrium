@@ -3,17 +3,17 @@
     "reasons": [],
     "status": "ADMITTED"
   },
-  "admission_self_digest": "sha256:8275c6981e0c45dbcdf0f541a28c890be5cdffbbc02ec245c6dd0dd647ef1c24",
+  "admission_self_digest": "sha256:f66f93336cf0074af51fcb5436354c771e0e5fd846c0d8f1427f78afe09dea65",
   "historical_persisted_w4": {
-    "historical_source_head": "f66fe0790ee13c098ad99bbdea3c9001f76328a4",
+    "historical_source_head": "6fd4ea739b736b6d00000f7e66913f7c8ee8a8e1",
     "historical_w4_integrity": "VERIFIED",
     "persisted_dir": "docs/execution_plan/ai_ml_landing/receipts/S2.4-WP4-W4",
-    "regenerated_w0_admission_self_digest": "sha256:adeb39b7f70e51c20db6a5175dc1b9c37d619597a2f2b28c7a2d37738781163b",
-    "regenerated_w0_wave_exit_self_digest": "sha256:cdd4516920cb6b4004dc7b551cb68818d453f7922bd78f8ec0da7e82a829c3d6",
-    "regenerated_w1_wave_exit_self_digest": "sha256:57814db9446335a57c6695d793f17ef9b7c56798796ce65b33934f20ea57776d",
-    "regenerated_w2_wave_exit_self_digest": "sha256:3d177dc0c60db298b1e1e80c8589b2f26bf890ee8c5bba35f37df8d2d10245d1",
-    "regenerated_w3_wave_exit_self_digest": "sha256:f0b54fb1088fc0e3a3b5944c32407a38223c28e3942da757bd0f150c493fb01c",
-    "w4_wave_exit_self_digest": "sha256:79db18bb568b896e12718de468d15089544084b3d5fd5c36acc242d4614e7bad"
+    "regenerated_w0_admission_self_digest": "sha256:f66f93336cf0074af51fcb5436354c771e0e5fd846c0d8f1427f78afe09dea65",
+    "regenerated_w0_wave_exit_self_digest": "sha256:97293ab4cf7aedc868cf9763c89b5ae9ed393c6e8e16d8292c2570ab26ed84ee",
+    "regenerated_w1_wave_exit_self_digest": "sha256:0c3218f0984b2a939c4089184e7266450cb532622f9c4acac4e3d1feedc50d13",
+    "regenerated_w2_wave_exit_self_digest": "sha256:e2605997ed442bb6a4f3a5cf3183f84f01196bbd1a762dbebb89280b470b462e",
+    "regenerated_w3_wave_exit_self_digest": "sha256:6f6d124caf2a3b534d52b80f0e2818732da8de1867b7695dd033b5d4dd99044d",
+    "w4_wave_exit_self_digest": "sha256:304513eb8bf8063d8a1c08a6dd52254c58c65f5f54d3e2a998d29e82e57d57ae"
   },
   "obligation_ledger_digest": "sha256:90f9261845b4782e577ef34e40369b3bcaf30381ce46d62d7246c087b3ed208e",
   "obligation_ledger_note": "Enumerated from aiml_gate_receipt_wave_w5._W5_EXPORTED_ABI['remaining_owned_obligations'] at emission time, never hand-copied. This is the operator's W6 precondition list: at W6 incident time it must be readable from this artifact alone, without importing a Python module from any branch. Compare obligation_ledger_digest against canonical_digest over the live ABI list to detect a hand-edited copy. Every row is UNCLOSED at this source head; owner_wave names who must close it.",
@@ -21,27 +21,27 @@
     "reasons": [],
     "status": "PASS"
   },
-  "regenerated_w0_wave_exit_self_digest": "sha256:f43e23efaf370fecb9b1d2561371711aee621e5fb087c3310f56562ba958c2e7",
+  "regenerated_w0_wave_exit_self_digest": "sha256:97293ab4cf7aedc868cf9763c89b5ae9ed393c6e8e16d8292c2570ab26ed84ee",
   "regenerated_w1_wave_exit_derivation": {
     "reasons": [],
     "status": "PASS"
   },
-  "regenerated_w1_wave_exit_self_digest": "sha256:fa0498cf3bad21b84f618c394e637779b096078d4aa871dd817bea071b1383d4",
+  "regenerated_w1_wave_exit_self_digest": "sha256:0c3218f0984b2a939c4089184e7266450cb532622f9c4acac4e3d1feedc50d13",
   "regenerated_w2_wave_exit_derivation": {
     "reasons": [],
     "status": "PASS"
   },
-  "regenerated_w2_wave_exit_self_digest": "sha256:7339c2d62be58b6bf3799a961dd4e4a9d25f1a917cb8d1c1800d7ca531c64d90",
+  "regenerated_w2_wave_exit_self_digest": "sha256:e2605997ed442bb6a4f3a5cf3183f84f01196bbd1a762dbebb89280b470b462e",
   "regenerated_w3_wave_exit_derivation": {
     "reasons": [],
     "status": "PASS"
   },
-  "regenerated_w3_wave_exit_self_digest": "sha256:a5b8111d45240cf9dd4cc70b91b45ea3672de4b8ee626f1ec4aabd846fba50ca",
+  "regenerated_w3_wave_exit_self_digest": "sha256:6f6d124caf2a3b534d52b80f0e2818732da8de1867b7695dd033b5d4dd99044d",
   "regenerated_w4_wave_exit_derivation": {
     "reasons": [],
     "status": "PASS"
   },
-  "regenerated_w4_wave_exit_self_digest": "sha256:7a0dfbc6800f77da94f4dfb5872b0524011b70e3cf82f5774f4fc4d2e5a991e0",
+  "regenerated_w4_wave_exit_self_digest": "sha256:304513eb8bf8063d8a1c08a6dd52254c58c65f5f54d3e2a998d29e82e57d57ae",
   "remaining_owned_obligation_count": 28,
   "remaining_owned_obligations": [
     {
@@ -366,97 +366,30 @@
   "replay_note": "W5 re-derivation binds source_head == checkout HEAD; to replay, checkout source_head, rebuild the in-memory W0/W1/W2/W3/W4 chain with the same builders, then run derive_wave_exit_status(w5, source_admission_receipt=admission, predecessor_wave_receipt=w4_wave_exit, predecessor_wave_chain=(w0_wave_exit, w1_wave_exit, w2_wave_exit, w3_wave_exit)). A PASS here evidences source structure at this head only: the evidence digests are shape-only (the chain derives PASS on a literal sha256:111...1), so it never evidences that any test ran or that any review happened.",
   "review_provenance": [
     {
-      "note": "committed anchor floor read from git commit bytes + real 2-of-2 replica signature; also found this branch's unpaid W5 debt (209793b70 changed three W5-owned paths with zero re-emission), which round 1-3 all missed; its own prerequisite arithmetic was wrong twice and is corrected in place at round 4",
-      "role": "PA",
-      "scope": "S2E-LW1 Tier 1 remediation design at 9f9649398 (design/S2E-LW1-tier1-remediation.md)",
-      "verdict": "DESIGN_ADOPTED_BY_PM"
-    },
-    {
-      "note": "4 P1 + 6 P2; decisive: the implementation violates the very §LW1 sentence cited to authorize it (external monotonic head, single signature cannot prevent rollback, same-writer coherent rewrite may only yield UNVERIFIED), and the entire new binding could be deleted with 72 tests green",
+      "context_artifact_digest": "sha256:711318bb250928450e673cb8c02b37464ac99e15e90c2305323f11c6341e9b4f",
+      "exact_head": "6fd4ea739b736b6d00000f7e66913f7c8ee8a8e1",
+      "note": "Independent exact-head E2 review confirmed carrier-head independence while retaining learning-runtime semantics, declared application bytes, real builder execution, manifest self-digests, application/base binding, and foreign-application rejection.",
+      "record_digest": "sha256:c79714ad23eff5c17bb084db3fda6003aba86630e663995b23ad381425de1f09",
       "role": "E2",
-      "scope": "round-1 adversarial review of the Tier 1 durability anchor",
-      "verdict": "FAIL"
-    },
-    {
-      "note": "the load-bearing git-externality claim was enforced by zero lines of code; runnable PoC: local branch off the real genesis, self-made floor, errors == []; five further P1 including a committed 0-byte floor as a zero-error fail-open and ambient GIT_DIR overriding -C",
-      "role": "E2",
-      "scope": "round-2 adversarial review at b1f67d8d7",
-      "verdict": "FAIL"
-    },
-    {
-      "note": "independently reproduced the same falsification with its own PoC; at_commit and repo_root are both attacker-reachable inputs",
-      "role": "E3",
-      "scope": "round-2 independent security review at b1f67d8d7",
-      "verdict": "FAIL"
-    },
-    {
-      "note": "three must-dos; confirmed require_current_freshness is precisely scoped and found zero date-rot fixtures",
-      "role": "E4",
-      "scope": "round-2 test-evidence verification at b1f67d8d7",
-      "verdict": "PASS_WITH_MUST_DOS"
-    },
-    {
-      "note": "nine findings including E3-A, a real RCE via ambient PATH inheritance into the git invocation; all nine closed in source; E1 correctly refused two PM instructions (JSON Schema pattern is an unanchored search by spec)",
-      "role": "E2",
-      "scope": "round-3 adversarial review at 5ed9d7729..6f563c299",
-      "verdict": "FINDINGS_CLOSED"
-    },
-    {
-      "note": "independently reproduced both P1; 17 of 17 mutations killed, every narrow survivor re-run wider; full closure ledger over rounds 1-3 verified at source rather than from commit messages; five further P2 including the design master's prerequisite arithmetic wrong a second time; NOT REACHED recorded for three mutations and for a full tests/structure run",
-      "role": "E2",
-      "scope": "round-4 adversarial code verification at 8d070334e",
-      "verdict": "FAIL"
-    },
-    {
-      "note": "P1 R4-1: the command-domain safe.directory grant re-enables git's execution of core.fsmonitor from a repo-local config on the git status path, giving code execution as the verifier in exactly the differing-uid topology the flag was added for; measured on git 2.50.1; confirmed by construction that E3-A is closed, that a forged refs/remotes/origin/main does not rescue an orphan floor, and that the 9156-line diff carries no secret",
-      "role": "E3",
-      "scope": "round-4 independent security verification at 8d070334e",
-      "verdict": "FAIL"
-    },
-    {
-      "note": "P1 F-1: the branch leaves SCHEMA_FILES == 93 red against a real 94, green at baseline e8d7d2454, and outside the five S2E files whose 127 passed was the branch's whole evidence; mutation matrix 8/8 killed; manifest cost guard verified honest (baseline 254, head 257, bound 264); also named the no-squash-merge constraint",
-      "role": "E4",
-      "scope": "round-4 test-evidence verification at 8d070334e",
-      "verdict": "FAIL"
-    },
-    {
-      "note": "both P1 and five P2 fixed; widening the regression on E2's prompt found two more SCHEMA_FILES sites and a repo-wide grep found a third, four total; safe.directory removed rather than denylisted because filter.<drv>.clean reaches the same place through .gitattributes; two round-2 should-items (stale packet action id, red bisect window 447e5bad7..acca2095f) carried explicitly, not silently; P0-1 remains the operator's accepted UNVERIFIED terminal state and all three reviewers confirmed no sentence overstates it",
-      "role": "PM",
-      "scope": "round-4 adjudication and remediation at 44edecd91 (report 2026-08-06--s2e_tier1_round4_review.md)",
-      "verdict": "FIXED_AND_RELEASED_FOR_PR"
-    },
-    {
-      "note": "4 threads, all verified at source before acting: the transition gate never authenticated the candidate anchor so a forged SSHSIG still printed ADVANCE; the documented safe.directory escape hatch cannot work because GIT_CONFIG_NOSYSTEM blocks both protected scopes, reproduced independently on git 2.55.0; registry key separation omitted the off-host replica; the acceptance-review pending message still demanded a deleted external WORM contract",
-      "role": "E2",
-      "scope": "round-5 automated review of PR #178 at cc6e49bbb (GitHub Codex bot)",
-      "verdict": "FINDINGS_CLOSED"
-    },
-    {
-      "note": "found by construction that the first version of the P1 fix was unsatisfiable for every PENDING_REVIEW candidate, which would have left the new authentication unreachable and wave issuance permanently pending; after the repair, launch receipts 65 passed with forged-signature, altered-digest, wrong-candidate-bundle and non-dict-bundle cases all message-pinned; named the READY wave receipt as still entirely unexercised",
-      "role": "E4",
-      "scope": "round-5 test repair and negative coverage for the authenticated transition gate at 2dd853ddf",
+      "scope": "P0-AIML-S2E-UID final W2 semantic source repair",
       "verdict": "PASS"
-    },
-    {
-      "note": "all four threads closed; declined to reopen the safe.directory channel because any grant that makes the read succeed also restores core.fsmonitor/filter.*.clean execution for the repo owner, which is R4-1 one indirection out; differing-uid topology recorded as having no supported path with the design fix named; replica separation verified by mutation; full governed suite 3 failed / 8053 passed / 55 skipped with all three failures pre-existing or environmental",
-      "role": "PM",
-      "scope": "round-5 adjudication and W5 round-12 re-emission at 2dd853ddf",
-      "verdict": "FIXED_AND_RELEASED_FOR_MERGE"
     }
   ],
   "schema_version": "s2_4_w5_derivation_record_v1_informal",
-  "source_head": "2dd853ddfdc3569939d3de954d90ebd286d77870",
+  "source_head": "6fd4ea739b736b6d00000f7e66913f7c8ee8a8e1",
   "test_evidence": {
-    "command": "python3 -m pytest -q -p no:randomly tests/structure program_code/ml_training/tests (main worktree, branch agent/aiml-s2e-tier1-durability-anchor-20260802 at 2dd853ddf)",
-    "exit_code": 1,
-    "measured_by": "PM full-suite run at 2dd853ddf (Mac, 36m46s), after the four PR #178 review threads were closed. The comparable run at cedf9a6f2 before those fixes was 3 failed / 8050 passed / 55 skipped; the delta of three passes is the three regressions added by this round (forged-anchor and bundle-binding coverage in the launch receipts file, replica key-separation in the external evidence file). Component runs at the same source: launch receipts 65 passed, external evidence 39 passed, launch hardening + chain 16 passed.",
-    "round_12_reason": "Round 11 bound 651bd4e38. This round modified aiml_gate_receipt_schema_core.py, which is a W5-owned path, so the round-11 artifacts stopped describing this head the moment that landed. That is the same debt this PR was opened to repay for 209793b70; the difference is that it is being paid in the same round it was incurred rather than three review rounds later.",
-    "scope_boundary": "Repository/command evidence at this head only. LOCAL_REPRODUCIBLE, not a closure-admissible command_capture_v2: no admitted node-id or context artifact was bound. It evidences source structure and test outcomes on a Mac; it evidences nothing about runtime, PG, the three unimplemented root-owned producer capabilities, any real durability anchor, or any off-host replica. Authority 0/9, production effect 0/6, LW2 locked.",
-    "summary": "3 failed, 8053 passed, 55 skipped in 2206.23s at 2dd853ddf. None of the three is attributable to this branch. Two are the G1 context-transport regression that origin/main records as its own current baseline (tests/structure/test_aiml_s2_effect_host_run.py: test_registry_tracked_bytes_leave_headroom_under_the_execve_single_argument_cap and test_compiled_context_artifact_stays_under_the_execve_cap; main's TODO states 254 passed / 2 failed for that file and assigns it to P0-AIML-G1-CONTEXT-TRANSPORT-REGISTRY-CAP). The third, test_file_line_policy_static.py::test_active_source_and_test_text_does_not_advertise_lower_file_limits, now reports exactly two violations, both from sql/migrations/V026__cost_edge_advisor_log.sql line 203 on origin/main, counted twice because the collector rglobs into the linked worktrees under .claude/worktrees/ that exist only on this Mac. This branch's own violation in that test was fixed at 8644c5f00 and does not recur."
+    "command": "governed E2 no-site pytest: carrier-only W2 persistence plus three existing W2 builder and application-binding guards",
+    "context_artifact_digest": "sha256:711318bb250928450e673cb8c02b37464ac99e15e90c2305323f11c6341e9b4f",
+    "evidence_class": "LOCAL_REPRODUCIBLE",
+    "exit_code": 0,
+    "honest_boundary": "Exact committed-source local review evidence only; no GitHub CI, publication, merge, source sync, runtime, deploy, PostgreSQL, broker, order, external-attestation, or effect claim.",
+    "record_digest": "sha256:c79714ad23eff5c17bb084db3fda6003aba86630e663995b23ad381425de1f09",
+    "result": "4 passed in 21.98s",
+    "source_head": "6fd4ea739b736b6d00000f7e66913f7c8ee8a8e1"
   },
   "w5_wave_exit_derivation": {
     "reasons": [],
     "status": "PASS"
   },
-  "w5_wave_exit_self_digest": "sha256:c00d0468c0b6b440c96ddca7909615b44f777163cbf5059274719e264f5ddc62"
+  "w5_wave_exit_self_digest": "sha256:794014be200ad09a4ef57adda1368f85f481b33fa4ca1c3cebe4a69233c9aa53"
 }

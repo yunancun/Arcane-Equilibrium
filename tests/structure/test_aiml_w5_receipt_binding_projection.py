@@ -31,6 +31,7 @@ from __future__ import annotations
 
 import json
 import re
+import subprocess
 import sys
 from pathlib import Path
 
@@ -45,13 +46,11 @@ for candidate in (HELPERS, ML_ROOT, PROGRAM_CODE):
 import agent_governance_s2_4_w5_emit as w5_emit  # noqa: E402
 import aiml_gate_receipt_validator as validator  # noqa: E402
 
-# Tier 1 durability anchor 分支收完 PR #178 四條 thread 後的 head(2dd853ddf)——八件
-# persisted artifact 當前綁定的 source_head(round 12;round 10 因 evidence 文字本身踩到
-# file-line-policy 掃描而被取代,round 11 因 PR #178 複核修復又動到 W5-owned path
-# 而被取代)。round 9 綁 f30ede361,
-# 而 `209793b70` 之後改了三條 W5-owned path 卻零 re-emission,故本輪一併償還。
+# UID topology validation/publication 的 final semantic source head——八件 persisted
+# artifact 當前綁定的 source_head(round 15)。本輪修正 W2 builder probe 的 carrier
+# identity 漂移後，由 canonical emitter 依 W2→W5 重發；W0/W1 歷史目錄不變。
 # 合法 re-emission 時本常量與兩份文檔的 marker 必須在同一 commit 內一起更新。
-EXPECTED_SOURCE_HEAD = "2dd853ddfdc3569939d3de954d90ebd286d77870"
+EXPECTED_SOURCE_HEAD = "6fd4ea739b736b6d00000f7e66913f7c8ee8a8e1"
 
 RECEIPT_DIR = ROOT / "docs/execution_plan/ai_ml_landing/receipts/S2.4-WP4-W5"
 TODO_PATH = ROOT / "TODO.md"
@@ -67,7 +66,7 @@ _MARKER_RE = re.compile(
 # E2 round-6 P2-2:全形等號「＝」納入,關掉蓄意規避之外最廉價的變體。
 _CLAIM_RE = re.compile(r"source_head\s*[=＝]\s*`?([0-9a-f]{7,40})")
 # 現行 receipt 世代的 round 序號;re-emission 時與 EXPECTED_SOURCE_HEAD 同 commit 更新。
-EXPECTED_ROUND = 12
+EXPECTED_ROUND = 15
 _ALLOWED_CLASSIFICATIONS = {
     "source_closure_blocker",
     "accepted_carry_forward",
@@ -223,3 +222,43 @@ def test_derivation_record_ledger_matches_the_live_abi() -> None:
     assert record["obligation_ledger_digest"] == validator.canonical_digest(
         live_ledger
     ), "persisted obligation ledger drifted from the live ABI"
+
+
+def _git(cwd: Path, *args: str) -> str:
+    return subprocess.run(
+        ["git", "-C", str(cwd), *args],
+        capture_output=True,
+        text=True,
+        check=True,
+    ).stdout.strip()
+
+
+def test_w2_persisted_structure_survives_a_carrier_only_commit(tmp_path: Path) -> None:
+    """W2 semantic ABI 未變時,receipt 不得因承載它的後續 commit 而失效。"""
+    repo = tmp_path / "w2-carrier-repo"
+    subprocess.run(
+        ["git", "clone", "-q", "--no-local", str(ROOT), str(repo)],
+        check=True,
+    )
+    _git(repo, "config", "user.email", "w2@test")
+    _git(repo, "config", "user.name", "w2")
+
+    receipt = {
+        "wave": "W2",
+        "predecessor_wave_receipt_digest": "sha256:" + "0" * 64,
+        "owned_path_manifest_digest": validator.canonical_digest(
+            sorted(validator._W2_OWNED_PATHS)
+        ),
+        "owned_path_diff_digest": validator.w2_owned_path_diff_digest(repo),
+        "exported_abi_digest": validator.canonical_digest(
+            validator.w2_exported_abi_projection(repo)
+        ),
+    }
+    assert validator.w2_structural_errors(receipt, repo) == []
+
+    carrier = repo / "docs" / "w2-carrier-only.txt"
+    carrier.write_text("carrier commit; no declared application/W2 semantic bytes\n")
+    _git(repo, "add", str(carrier.relative_to(repo)))
+    _git(repo, "commit", "-q", "-m", "add W2 receipt carrier")
+
+    assert validator.w2_structural_errors(receipt, repo) == []

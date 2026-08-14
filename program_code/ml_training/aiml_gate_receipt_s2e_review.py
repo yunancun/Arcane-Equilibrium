@@ -6,9 +6,10 @@ import ast
 import base64
 import hashlib
 import json
+import re
 import subprocess
 from datetime import datetime, timezone
-from pathlib import Path, PurePath
+from pathlib import Path, PurePath, PurePosixPath
 from typing import Any
 
 from agent_governance_pytest_provider import (
@@ -19,12 +20,13 @@ from agent_governance_schema import schema_subset_errors
 from aiml_gate_receipt_schema_core import (
     _load_schema,
     canonical_digest,
-    git_argv, git_subprocess_env,
+    code_owned_object_view, git_argv, git_subprocess_env, verified_blob_bytes,
 )
 
 
 GENESIS_WAVE = "W0-GENESIS"
 LAUNCH_WAVES = ("S2E-LW1", "S2E-LW2", "S2E-LW3", "S2E-LW4", "S2E-LW5")
+_GIT_TIMEOUT_SECONDS = 180
 S2E_RECEIPT_SIGNER_IDENTITY = "aiml-s2e-receipt-signer-v1"
 S2E_RECEIPT_SIGNATURE_NAMESPACE = "arcane-equilibrium-aiml-s2e-receipts"
 
@@ -111,6 +113,11 @@ S2E_REVIEW_BASE_PATHS = (
         "durability-anchor-floor-v1.json"
     ),
     "program_code/ml_training/application_bundle_runtime_closure_v1.json",
+    # 2026-08-09 拆分波:view 葉。import 閉包本來就已經涵蓋它(`schema_core` 於
+    # top-level 匯入),實測在 175 條 closure 內;顯式列名是為了讓涵蓋不再只是
+    # 「碰巧經由某個 import」——日後若那條 import 改成延遲載入,簽名涵蓋面不該
+    # 因此靜默縮小。前例:`aiml_gate_receipt_s2e_dispatch.py` 同型處置。
+    "program_code/ml_training/aiml_gate_receipt_git_view.py",
     "program_code/ml_training/aiml_gate_receipt_s2e_anchor_floor.py",
     "program_code/ml_training/aiml_gate_receipt_s2e_consumption.py",
     "program_code/ml_training/aiml_gate_receipt_s2e_dispatch.py",
@@ -240,24 +247,150 @@ _LW1_PREDICATE_PATH_TOKENS = {
 def _git(
     repo_root: Path, *args: str, check: bool = True
 ) -> subprocess.CompletedProcess[str]:
-    return subprocess.run(
-        git_argv(repo_root, *args),
-        cwd=repo_root,
-        check=check,
-        capture_output=True,
-        env=git_subprocess_env(),
-        text=True,
-    )
+    # E3 round-5:本模組每一條 revision 都是 candidate 的 `reviewed_head`(明確 40-hex),
+    # 工作樹本來就不參與;改走 code-owned bare view 之後,被驗者的 config/hook/
+    # attributes 也一併不參與,ownership 檢查同樣不進場。
+    with code_owned_object_view(repo_root) as view:
+        return subprocess.run(
+            git_argv(view, *args),
+            cwd=view,
+            check=check,
+            capture_output=True,
+            env=git_subprocess_env(),
+            text=True,
+            timeout=_GIT_TIMEOUT_SECONDS,
+        )
 
 
 def _git_bytes(repo_root: Path, *args: str) -> bytes:
+    with code_owned_object_view(repo_root) as view:
+        return subprocess.run(
+            git_argv(view, *args),
+            cwd=view,
+            check=True,
+            capture_output=True,
+            env=git_subprocess_env(),
+            timeout=_GIT_TIMEOUT_SECONDS,
+        ).stdout
+
+
+def _view_git(
+    view: Path, *args: str, text: bool = True,
+) -> subprocess.CompletedProcess[Any]:
     return subprocess.run(
-        git_argv(repo_root, *args),
-        cwd=repo_root,
-        check=True,
-        capture_output=True,
-        env=git_subprocess_env(),
+        git_argv(view, *args), cwd=view, check=True, capture_output=True,
+        env=git_subprocess_env(), text=text, timeout=_GIT_TIMEOUT_SECONDS,
+    )
+
+
+def _view_tree_metadata(
+    view: Path, reviewed_head: str,
+) -> dict[str, dict[str, Any]]:
+    listing = _view_git(
+        view, "ls-tree", "-r", "-z", "-l", "--full-tree", reviewed_head,
+        text=False,
     ).stdout
+    metadata: dict[str, dict[str, Any]] = {}
+    for record in listing.split(b"\x00"):
+        if not record:
+            continue
+        header, separator, raw_path = record.partition(b"\t")
+        fields = header.split()
+        try:
+            path = raw_path.decode("utf-8", errors="strict")
+            mode, object_type, object_id, size_raw = (
+                item.decode("ascii", errors="strict") for item in fields
+            )
+        except (UnicodeDecodeError, ValueError) as error:
+            raise ValueError("S2E review tree metadata is not canonical") from error
+        relative = PurePosixPath(path)
+        if (
+            not separator
+            or len(fields) != 4
+            or not path
+            or relative.is_absolute()
+            or any(part in {"", ".", ".."} for part in relative.parts)
+            or path in metadata
+            or re.fullmatch(r"[0-9a-f]{40}", object_id) is None
+        ):
+            raise ValueError("S2E review tree metadata is unsafe or duplicated")
+        metadata[path] = {
+            "path": path,
+            "mode": mode,
+            "object_type": object_type,
+            "git_blob": object_id,
+            "bytes": int(size_raw) if size_raw.isdigit() else None,
+        }
+    return metadata
+
+
+def _git_blob_sha1(payload: bytes) -> str:
+    return hashlib.sha1(
+        b"blob " + str(len(payload)).encode("ascii") + b"\x00" + payload
+    ).hexdigest()
+
+
+def _view_verified_blobs(
+    view: Path,
+    metadata: dict[str, dict[str, Any]],
+    paths: set[str],
+) -> dict[str, bytes]:
+    ordered = sorted(path for path in paths if path in metadata)
+    request = b"".join(
+        metadata[path]["git_blob"].encode("ascii") + b"\n" for path in ordered
+    )
+    completed = subprocess.run(
+        git_argv(view, "cat-file", "--batch"), cwd=view, check=True,
+        input=request, capture_output=True, env=git_subprocess_env(),
+        timeout=_GIT_TIMEOUT_SECONDS,
+    )
+    stream = completed.stdout
+    offset = 0
+    blobs: dict[str, bytes] = {}
+    for path in ordered:
+        newline = stream.find(b"\n", offset)
+        if newline < 0:
+            raise OSError("S2E review blob batch ended before its header")
+        header = stream[offset:newline].decode("ascii", errors="strict").split()
+        offset = newline + 1
+        entry = metadata[path]
+        if (
+            len(header) != 3
+            or header[0] != entry["git_blob"]
+            or header[1] != "blob"
+            or not header[2].isdigit()
+        ):
+            raise OSError(f"S2E review blob header differs from tree: {path}")
+        size = int(header[2])
+        payload = stream[offset : offset + size]
+        offset += size
+        if len(payload) != size or stream[offset : offset + 1] != b"\n":
+            raise OSError(f"S2E review blob stream is truncated: {path}")
+        offset += 1
+        if _git_blob_sha1(payload) != entry["git_blob"]:
+            raise OSError(f"S2E review blob bytes do not hash to tree id: {path}")
+        blobs[path] = payload
+    if offset != len(stream):
+        raise OSError("S2E review blob batch contains trailing bytes")
+    return blobs
+
+
+def _verified_bytes(repo_root: Path, path: str, *, at_commit: str) -> bytes:
+    """`<at_commit>:<path>` 的 blob 位元組,已對 tree 記錄的 object id 重算比對。
+
+    round-7 P0-1:本模組原本用 `git show <rev>:<path>`,而那條路徑**不**複驗物件雜湊
+    (E2/E3 各自於 git 2.55.0 實證,loose 與 packed 兩種形式皆可讓一個 object id 回出
+    任意位元組)。改走 `schema_core.verified_blob_bytes`;讀不到或對不上一律拋
+    `OSError`,由既有的 `_GIT_FAILURES` / 呼叫端 fail-closed 接手。
+    """
+
+    payload = verified_blob_bytes(repo_root, path, at_commit=at_commit)
+    if payload is None:
+        raise OSError(
+            f"{path} at {at_commit[:12]} is absent, unreadable, or its bytes do not "
+            "hash to the object id recorded in the commit's tree"
+        )
+    return payload
 
 
 def _tree(repo_root: Path, head: str) -> str:
@@ -330,8 +463,7 @@ def _repo_python_import_closure(
     selected: set[str],
     *,
     tracked: list[str],
-    reviewed_head: str,
-    repo_root: Path,
+    blobs: dict[str, bytes],
 ) -> set[str]:
     """Expand every repo-local import from exact candidate Git blobs."""
 
@@ -381,9 +513,13 @@ def _repo_python_import_closure(
         parsed.add(path)
         try:
             tree = ast.parse(
-                _git_bytes(repo_root, "show", f"{reviewed_head}:{path}"),
+                blobs[path],
                 filename=path,
             )
+        except KeyError as error:
+            raise ValueError(
+                f"S2E review dependency blob is absent or unreadable: {path}"
+            ) from error
         except (SyntaxError, UnicodeDecodeError) as error:
             raise ValueError(
                 f"S2E review dependency blob is not parseable Python: {path}: {error}"
@@ -448,13 +584,9 @@ def _repo_python_import_closure(
 
 
 def _s2e_review_source_paths(
-    candidate: dict[str, Any], *, repo_root: Path
+    candidate: dict[str, Any], *, tracked: list[str], blobs: dict[str, bytes]
 ) -> list[str]:
     wave = str(candidate.get("wave", ""))
-    reviewed_head, _ = _reviewed_head_tree(candidate)
-    tracked = _git(
-        repo_root, "ls-tree", "-r", "--name-only", reviewed_head
-    ).stdout.splitlines()
     if wave == GENESIS_WAVE:
         selected = set(S2E_REVIEW_BASE_PATHS)
     elif wave == "S2E-LW1":
@@ -470,8 +602,7 @@ def _s2e_review_source_paths(
     return sorted(_repo_python_import_closure(
         selected,
         tracked=tracked,
-        reviewed_head=reviewed_head,
-        repo_root=repo_root,
+        blobs=blobs,
     ))
 
 
@@ -481,30 +612,62 @@ def s2e_review_source_blob_manifest(
     """Re-read every governed source/test byte from the candidate's Git tree."""
 
     reviewed_head, reviewed_tree = _reviewed_head_tree(candidate)
-    if _tree(repo_root, reviewed_head) != reviewed_tree:
-        raise ValueError("reviewed source tree differs from candidate")
-    manifest: list[dict[str, str]] = []
-    for path in _s2e_review_source_paths(candidate, repo_root=repo_root):
-        listing = _git(
-            repo_root, "ls-tree", reviewed_head, "--", path
-        ).stdout.rstrip("\n")
-        if not listing:
-            raise ValueError(f"required S2E review Git blob is missing: {path}")
-        metadata, listed_path = listing.split("\t", 1)
-        mode, object_type, blob = metadata.split()
-        if listed_path != path or object_type != "blob" or mode not in {
-            "100644",
-            "100755",
-        }:
-            raise ValueError(f"S2E review path is not one regular Git blob: {path}")
-        raw = _git_bytes(repo_root, "show", f"{reviewed_head}:{path}")
-        manifest.append({
-            "path": path,
-            "mode": mode,
-            "git_blob": blob,
-            "sha256": _raw_digest(raw),
-        })
-    return manifest
+    wave = str(candidate.get("wave", ""))
+    with code_owned_object_view(repo_root) as view:
+        actual_tree = _view_git(
+            view, "rev-parse", "--verify", f"{reviewed_head}^{{tree}}"
+        ).stdout.strip()
+        if actual_tree != reviewed_tree:
+            raise ValueError("reviewed source tree differs from candidate")
+        metadata = _view_tree_metadata(view, reviewed_head)
+        tracked = sorted(metadata)
+        if wave == GENESIS_WAVE:
+            selected = set(S2E_REVIEW_BASE_PATHS)
+        elif wave == "S2E-LW1":
+            selected = set(S2E_REVIEW_BASE_PATHS)
+            selected.update(S2E_LW1_REVIEW_PATHS)
+            selected.update(
+                path
+                for path in tracked
+                if any(path.startswith(prefix) for prefix in S2E_LW1_REVIEW_PREFIXES)
+            )
+        else:
+            raise ValueError(f"{wave} acceptance review profile is not implemented")
+        python_paths = {
+            path
+            for path in tracked
+            if path.endswith(".py")
+            and path.startswith((
+                "helper_scripts/maintenance_scripts/",
+                "program_code/ml_training/",
+                "tests/structure/",
+            ))
+        }
+        blobs = _view_verified_blobs(view, metadata, selected | python_paths)
+        reviewed_paths = _s2e_review_source_paths(
+            candidate, tracked=tracked, blobs=blobs
+        )
+        manifest: list[dict[str, str]] = []
+        for path in reviewed_paths:
+            entry = metadata.get(path)
+            if entry is None:
+                raise ValueError(f"required S2E review Git blob is missing: {path}")
+            if entry["object_type"] != "blob" or entry["mode"] not in {
+                "100644", "100755",
+            }:
+                raise ValueError(
+                    f"S2E review path is not one regular Git blob: {path}"
+                )
+            raw = blobs.get(path)
+            if raw is None:
+                raise ValueError(f"required S2E review Git blob is unreadable: {path}")
+            manifest.append({
+                "path": path,
+                "mode": entry["mode"],
+                "git_blob": entry["git_blob"],
+                "sha256": _raw_digest(raw),
+            })
+        return manifest
 
 
 def s2e_review_test_argv(
@@ -595,17 +758,14 @@ def _line_policy_evidence(
     entry = next((item for item in manifest if item["path"] == path), None)
     if entry is None:
         raise ValueError("LW1 line-policy validator blob is absent")
-    raw = _git_bytes(repo_root, "show", f"{reviewed_head}:{path}")
+    raw = _verified_bytes(repo_root, path, at_commit=reviewed_head)
     line_count = raw.count(b"\n") + int(bool(raw) and not raw.endswith(b"\n"))
     policy_branch = "ACTUAL_SPLIT_AT_OR_BELOW_2000"
     if line_count > 2000:
-        registry = _git_bytes(
+        registry = _verified_bytes(
             repo_root,
-            "show",
-            (
-                f"{reviewed_head}:"
-                "docs/references/2000_line_exception_registry.md"
-            ),
+            "docs/references/2000_line_exception_registry.md",
+            at_commit=reviewed_head,
         ).decode("utf-8")
         required_markers = (
             f"`{path}`",
@@ -639,8 +799,8 @@ def _exit_boundary_evidence(
     entry = next((item for item in manifest if item["path"] == "TODO.md"), None)
     if entry is None:
         raise ValueError("LW1 exit-boundary TODO blob is absent")
-    text = _git_bytes(
-        repo_root, "show", f"{reviewed_head}:TODO.md"
+    text = _verified_bytes(
+        repo_root, "TODO.md", at_commit=reviewed_head
     ).decode("utf-8")
     rows = [
         line

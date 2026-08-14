@@ -3,57 +3,38 @@
     "reasons": [],
     "status": "ADMITTED"
   },
-  "admission_self_digest": "sha256:d40bed03b0a2ac3736bf62114717e869691143cf66cba186646447aa8ccbaf12",
+  "admission_self_digest": "sha256:feaaa6b0d174f721408aa1d71905f4da1a9ba0920f7a54376d4028afb63c5887",
   "replay_note": "re-derivation binds source_head == checkout HEAD; to replay, checkout source_head and run derive_source_admission_status/derive_wave_exit_status",
   "review_provenance": [
     {
-      "branch": "agent/aiml-s2-wp3-unit-ledger",
-      "kind": "w0_review_provenance",
-      "merge_head": "560d64be8",
-      "pr": 135,
-      "scope": "S2.1 system-unit amendment ledger event (Blocker-1 recorded, ledger v12)",
-      "verdict": "merged; PM ledger projection"
-    },
-    {
-      "branch": "agent/aiml-s2-wp4-w0",
-      "kind": "w0_review_provenance",
-      "merge_head": "f87bae724",
-      "pr": 136,
-      "scope": "W0 admission alignment + W0a authenticity hardening (reachable S2.0 production gate; Codex 5xP1 resolved; 2000-line governance cap split of observer crypto layer)",
-      "verdict": "merged after Codex closeout; findings resolved"
-    },
-    {
-      "branch": "agent/aiml-s2-wp4-w0b",
-      "kind": "w0_review_provenance",
-      "merge_head": "9572a2c06602106d5c41068d3aff911f279128c8",
-      "pr": 137,
-      "scope": "S2.4 source-admission + wave-exit machinery (validator-derived, never self-declared); negative_tests_pass binding; wave-exit boundary pin; 3 tamper-test gaps + 7 Codex authenticity findings closed",
-      "verdict": "merged after Codex closeout; findings resolved"
-    },
-    {
-      "branch": "agent/aiml-s2-wp4-unit-contract-fix",
-      "kind": "w0_review_provenance",
-      "merge_head": "PENDING_MERGE_AT_EMISSION_TIME",
-      "pr": 138,
-      "scope": "PM contract amendment: S2.4 unit identity reconciled to arcane-equilibrium-aiml-engine-scanner.service (W0 fork #4/#5)",
-      "verdict": "open at emission time; W0 admission binds the WP3 system-level property, not the exact unit name (per S2.4-W0-admission-alignment.md §7 #4 property-only binding)"
+      "context_artifact_digest": "sha256:108de2650146460ca633cf1dae5ebd7515f71c3d99d68659b95602db61ca0f27",
+      "exact_head": "90713b5565fb49a4d36193b05a4ddff48cf32fbc",
+      "exact_tree": "3e6c64fe1d95e12f69e760e9c20caf4982ebe6df",
+      "note": "Independent exact-head review closed the prior Git-discovery, subject-repository access, and case-insensitive .git findings; governed capture used a fresh private committed tree and copied object database, returned 111 passed, and left the caller generation unchanged.",
+      "record_digest": "sha256:2404748509c54fbf24386e959e21f16c078305711c29ca0b662d779b7e82aa40",
+      "role": "E2",
+      "scope": "P0-AIML-S2E-UID-TOPOLOGY-VALIDATION-PUBLICATION semantic source review",
+      "verdict": "PASS"
     }
   ],
   "schema_version": "s2_4_w0_derivation_record_v1_informal",
-  "source_head": "37cb9094956b8ee2b3af33efd610ee0d8566557f",
+  "source_head": "90713b5565fb49a4d36193b05a4ddff48cf32fbc",
   "test_evidence": {
-    "command": "python3 -m pytest tests/structure/test_s2_4_w0_admission.py tests/structure/test_agent_governance_s2_4_install.py -q",
-    "executed_at": "2026-07-25T13:13:56Z",
+    "command": "governed E2 committed-tree pytest: tests/structure/test_agent_governance_command_capture_v2.py tests/structure/test_agent_governance_s2e_launch_receipts.py",
+    "context_artifact_digest": "sha256:108de2650146460ca633cf1dae5ebd7515f71c3d99d68659b95602db61ca0f27",
+    "evidence_class": "LOCAL_REPRODUCIBLE",
     "exit_code": 0,
-    "host_role": "mac_development_checkout",
-    "kind": "w0_formal_exit_test_run",
-    "python": "Python 3.10.1",
-    "source_head": "37cb9094956b8ee2b3af33efd610ee0d8566557f",
-    "summary_line": "40 passed in 1.59s"
+    "honest_boundary": "Exact committed-source local review evidence only; no GitHub CI, merge, source sync, runtime, deploy, broker, order, external-attestation, or effect claim.",
+    "materialization_kind": "FRESH_PRIVATE_COMMITTED_TREE",
+    "private_git_metadata_kind": "PRIVATE_COPIED_OBJECT_DATABASE",
+    "record_digest": "sha256:2404748509c54fbf24386e959e21f16c078305711c29ca0b662d779b7e82aa40",
+    "result": "111 passed in 283.54s",
+    "source_head": "90713b5565fb49a4d36193b05a4ddff48cf32fbc",
+    "source_tree": "3e6c64fe1d95e12f69e760e9c20caf4982ebe6df"
   },
   "wave_exit_derivation": {
     "reasons": [],
     "status": "PASS"
   },
-  "wave_exit_self_digest": "sha256:6c86008f343b93367d845779baaef12d002ba710e073c6953a0b57badad78a16"
+  "wave_exit_self_digest": "sha256:82b38ee5b4183002ab3fd23edb23ca7b1cff46f142240a9a19ea310e4fdee6d4"
 }

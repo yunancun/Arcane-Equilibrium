@@ -288,6 +288,7 @@ def test_w5_owned_paths_are_live_and_cover_the_w5_surface() -> None:
     required = {
         "helper_scripts/maintenance_scripts/agent_governance_s2_4_install.py",
         "helper_scripts/maintenance_scripts/agent_governance_s2_4_w5_emit.py",
+        "program_code/ml_training/aiml_gate_receipt_git_view.py",
         "program_code/ml_training/aiml_gate_receipt_s2_4_contracts.py",
         "program_code/ml_training/aiml_gate_receipt_schema_core.py",
         "program_code/ml_training/aiml_gate_receipt_validator.py",

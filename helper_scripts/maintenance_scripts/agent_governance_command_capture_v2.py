@@ -3,10 +3,12 @@
 from __future__ import annotations
 
 import base64
+import contextlib
 import hashlib
 import io
 import json
 import os
+import posixpath
 import re
 import stat
 import subprocess
@@ -15,7 +17,7 @@ import tempfile
 import zipfile
 from datetime import datetime
 from pathlib import Path, PurePosixPath
-from typing import Any, BinaryIO
+from typing import Any, BinaryIO, Iterator
 
 from agent_governance_capture import (
     LOCAL_REPRODUCIBLE,
@@ -40,8 +42,14 @@ from agent_governance_pytest_provider import (
     GOVERNED_PYTEST_REQUIRED_ARGS,
 )
 from agent_governance_registry import native_agent_contract
-from agent_governance_routing import route_task
 from agent_governance_workflow_receipts import canonical_digest
+
+
+ML_TRAINING_ROOT = Path(__file__).resolve().parents[2] / "program_code" / "ml_training"
+if str(ML_TRAINING_ROOT) not in sys.path:
+    sys.path.insert(0, str(ML_TRAINING_ROOT))
+
+from aiml_gate_receipt_git_view import code_owned_object_view  # noqa: E402
 
 
 DIGEST_RE = re.compile(r"^sha256:[0-9a-f]{64}$")
@@ -71,10 +79,14 @@ RECORD_FIELDS = {
     "timeout_seconds", "started_at", "completed_at", "exit_code",
     "timed_out", "result", "stdout", "stderr", "repository_before",
     "repository_after", "whole_repository_before", "whole_repository_after",
-    "pytest_provider", "effect_enforcement", "host_sandbox_attestation_ref",
+    "pytest_provider", "source_materialization", "effect_enforcement",
+    "host_sandbox_attestation_ref",
     "record_digest",
 }
-LEGACY_RECORD_FIELDS = RECORD_FIELDS - {"pytest_provider"}
+LEGACY_RECORD_FIELDS = RECORD_FIELDS - {"pytest_provider", "source_materialization"}
+PRE_SOURCE_MATERIALIZATION_RECORD_FIELDS = RECORD_FIELDS - {
+    "source_materialization"
+}
 PYTEST_PROVIDER_FIELDS = {
     "schema_version", "profile_id", "bootstrap_digest", "interpreter_path",
     "interpreter_digest_before", "interpreter_digest_after",
@@ -120,6 +132,51 @@ PYTEST_PROVIDER_HARD_LIMITS = {
     "max_member_bytes": 8 * 1024 * 1024,
     "max_total_uncompressed_bytes": 32 * 1024 * 1024,
 }
+SOURCE_MATERIALIZATION_FIELDS = {
+    "schema_version", "materialization_kind", "source_head", "source_tree",
+    "manifest_digest", "materialized_file_count", "materialized_bytes",
+    "executable_file_count", "materialized_symlink_count",
+    "materialized_symlink_manifest_digest", "git_metadata_kind",
+    "git_object_graph_digest", "git_metadata_manifest_digest",
+    "private_root_mode", "cleanup_status",
+}
+PRIVATE_GIT_CONFIG = (
+    "[core]\n"
+    "\trepositoryformatversion = 0\n"
+    "\tfilemode = true\n"
+    "\tbare = false\n"
+    "\tlogallrefupdates = false\n"
+)
+PRIVATE_GIT_METADATA_KIND = "PRIVATE_COPIED_OBJECT_DATABASE"
+PRIVATE_GIT_GRAPH_VERIFICATION = "GIT_FSCK_STRICT_FULL_AND_VERIFY_PACK_V1"
+GIT_SEARCH_PATH = ("/usr/bin", "/bin", "/usr/local/bin", "/opt/homebrew/bin")
+
+
+def _governed_git_executable() -> str:
+    for directory in GIT_SEARCH_PATH:
+        candidate = Path(directory) / "git"
+        if candidate.is_file() and os.access(candidate, os.X_OK):
+            return str(candidate)
+    return "/usr/bin/git"
+
+
+def _governed_git_argv(repository: Path, *args: str) -> list[str]:
+    return [_governed_git_executable(), "-C", str(repository), *args]
+
+
+def _governed_git_environment() -> dict[str, str]:
+    environment = {
+        "PATH": os.pathsep.join(GIT_SEARCH_PATH),
+        "LANG": "C",
+        "LC_ALL": "C",
+        "GIT_CONFIG_NOSYSTEM": "1",
+        "GIT_CONFIG_GLOBAL": os.devnull,
+        "GIT_OPTIONAL_LOCKS": "0",
+        "GIT_TERMINAL_PROMPT": "0",
+    }
+    if "TZ" in os.environ:
+        environment["TZ"] = os.environ["TZ"]
+    return environment
 SAFE_INHERITED_ENVIRONMENT = {
     "PATH", "LANG", "LC_ALL", "LC_CTYPE", "TERM", "SYSTEMROOT",
 }
@@ -268,6 +325,21 @@ def _is_governed_pytest_argv(argv: list[str]) -> bool:
         tuple(argv[:4]) == GOVERNED_PYTEST_PREFIX
         and tuple(argv[4:required_end]) == GOVERNED_PYTEST_REQUIRED_ARGS
     )
+
+
+def _pytest_collection_target_errors(argv: list[str]) -> list[str]:
+    if not _is_governed_pytest_argv(argv):
+        return []
+    required_end = 4 + len(GOVERNED_PYTEST_REQUIRED_ARGS)
+    for argument in argv[required_end:]:
+        if argument.startswith("-"):
+            continue
+        target = argument.split("::", 1)[0]
+        if PurePosixPath(target).is_absolute():
+            return [
+                "governed pytest absolute pytest collection target is forbidden"
+            ]
+    return []
 
 
 def _raw_file_digest(path: Path) -> str:
@@ -727,6 +799,452 @@ def _controlled_environment(
     return environment
 
 
+def _git_read_environment() -> dict[str, str]:
+    environment = {
+        key: value for key, value in os.environ.items()
+        if key in SAFE_INHERITED_ENVIRONMENT
+    }
+    environment.update({
+        "GIT_CONFIG_NOSYSTEM": "1",
+        "GIT_CONFIG_GLOBAL": os.devnull,
+        "GIT_OPTIONAL_LOCKS": "0",
+        "GIT_TERMINAL_PROMPT": "0",
+    })
+    return environment
+
+
+def _safe_materialized_path(path: str) -> bool:
+    relative = PurePosixPath(path)
+    return (
+        bool(path)
+        and "\\" not in path
+        and "\x00" not in path
+        and not relative.is_absolute()
+        and all(
+            part not in {"", ".", ".."} and part.casefold() != ".git"
+            for part in relative.parts
+        )
+    )
+
+
+def _git_blob_sha1(payload: bytes) -> str:
+    return hashlib.sha1(
+        b"blob " + str(len(payload)).encode("ascii") + b"\x00" + payload
+    ).hexdigest()
+
+
+def _private_git_run(
+    git_dir: Path,
+    *args: str,
+    text: bool = False,
+    input_bytes: bytes | None = None,
+) -> subprocess.CompletedProcess[Any]:
+    return subprocess.run(
+        _governed_git_argv(git_dir, "--no-replace-objects", *args),
+        cwd=git_dir,
+        check=True,
+        input=input_bytes,
+        capture_output=True,
+        env=_governed_git_environment(),
+        text=text,
+        timeout=180,
+    )
+
+
+def _replace_private_file(path: Path, payload: bytes, mode: int = 0o600) -> None:
+    try:
+        metadata = path.lstat()
+    except FileNotFoundError:
+        metadata = None
+    if metadata is not None:
+        if not stat.S_ISREG(metadata.st_mode):
+            raise ValueError(f"private Git metadata path is not regular: {path.name}")
+        path.unlink()
+    descriptor = os.open(
+        path,
+        os.O_WRONLY | os.O_CREAT | os.O_EXCL | getattr(os, "O_CLOEXEC", 0)
+        | getattr(os, "O_NOFOLLOW", 0),
+        mode,
+    )
+    try:
+        written = 0
+        while written < len(payload):
+            count = os.write(descriptor, payload[written:])
+            if count <= 0:
+                raise OSError("private Git metadata write made no progress")
+            written += count
+        os.fsync(descriptor)
+    finally:
+        os.close(descriptor)
+    path.chmod(mode)
+
+
+def _private_git_file_manifest(root: Path) -> list[dict[str, Any]]:
+    manifest: list[dict[str, Any]] = []
+    for path in sorted(root.rglob("*")):
+        metadata = path.lstat()
+        if stat.S_ISDIR(metadata.st_mode):
+            continue
+        if not stat.S_ISREG(metadata.st_mode) or metadata.st_nlink != 1:
+            raise ValueError("private copied Git metadata contains a link or special entry")
+        manifest.append({
+            "path": path.relative_to(root).as_posix(),
+            "bytes": metadata.st_size,
+            "sha256": _raw_file_digest(path),
+        })
+    return manifest
+
+
+def _build_private_git_database(
+    repository: Path,
+    source_head: str,
+    git_dir: Path,
+) -> dict[str, str]:
+    """Copy and verify one exact commit graph without opening the subject checkout."""
+
+    import shutil
+
+    if re.fullmatch(r"[0-9a-f]{40}", source_head) is None:
+        raise ValueError("committed review source head is invalid")
+    source_ref = "refs/heads/code-owned-review-source"
+    source_view_text = ""
+    with code_owned_object_view(repository) as view:
+        _private_git_run(view, "update-ref", source_ref, source_head)
+        _private_git_run(view, "symbolic-ref", "HEAD", source_ref)
+        source_view_text = str(view)
+        subprocess.run(
+            [
+                _governed_git_executable(),
+                "clone", "--bare", "--no-local", "--no-tags",
+                str(view), str(git_dir),
+            ],
+            cwd=git_dir.parent,
+            check=True,
+            capture_output=True,
+            env=_governed_git_environment(),
+            timeout=180,
+        )
+    if not stat.S_ISDIR(git_dir.lstat().st_mode):
+        raise ValueError("private copied Git database is not a directory")
+    _replace_private_file(git_dir / "HEAD", (source_head + "\n").encode("ascii"))
+    _replace_private_file(git_dir / "config", PRIVATE_GIT_CONFIG.encode("ascii"))
+    refs = _private_git_run(
+        git_dir, "for-each-ref", "--format=%(refname)", text=True
+    ).stdout.splitlines()
+    for ref in refs:
+        _private_git_run(git_dir, "update-ref", "-d", ref)
+    for removable in (git_dir / "hooks", git_dir / "logs"):
+        if removable.exists():
+            if removable.is_symlink() or not removable.is_dir():
+                raise ValueError("private copied Git executable metadata is unsafe")
+            shutil.rmtree(removable)
+    for index in sorted((git_dir / "objects" / "pack").glob("*.idx")):
+        metadata = index.lstat()
+        if not stat.S_ISREG(metadata.st_mode):
+            raise ValueError("private copied Git pack index is not regular")
+        subprocess.run(
+            [_governed_git_executable(), "verify-pack", "-v", str(index)],
+            cwd=git_dir,
+            check=True,
+            stdout=subprocess.DEVNULL,
+            stderr=subprocess.PIPE,
+            env=_governed_git_environment(),
+            timeout=180,
+        )
+    _private_git_run(git_dir, "fsck", "--strict", "--full", "--no-dangling")
+    resolved_head = _private_git_run(
+        git_dir, "rev-parse", "--verify", f"{source_head}^{{commit}}", text=True
+    ).stdout.strip()
+    source_tree = _private_git_run(
+        git_dir, "rev-parse", "--verify", f"{source_head}^{{tree}}", text=True
+    ).stdout.strip()
+    if resolved_head != source_head:
+        raise ValueError("private copied Git database lost the exact source head")
+    _private_git_run(git_dir.parent, "read-tree", source_head)
+    index_tree = _private_git_run(
+        git_dir.parent, "write-tree", text=True
+    ).stdout.strip()
+    if index_tree != source_tree:
+        raise ValueError("private copied Git index differs from the exact source tree")
+    metadata_manifest = _private_git_file_manifest(git_dir)
+    forbidden = tuple(
+        value.encode("utf-8") for value in (str(repository.resolve()), source_view_text)
+    )
+    for entry in metadata_manifest:
+        if entry["path"].startswith("objects/"):
+            continue
+        payload = (git_dir / entry["path"]).read_bytes()
+        if any(token and token in payload for token in forbidden):
+            raise ValueError("private copied Git metadata retains its source path")
+    reachable = _private_git_run(
+        git_dir, "rev-list", "--objects", source_head
+    ).stdout.splitlines()
+    object_ids = sorted({line.split(b" ", 1)[0].decode("ascii") for line in reachable})
+    if not object_ids or any(
+        re.fullmatch(r"[0-9a-f]{40}", object_id) is None
+        for object_id in object_ids
+    ):
+        raise ValueError("private copied Git reachable object inventory is invalid")
+    checked = _private_git_run(
+        git_dir,
+        "cat-file", "--batch-check=%(objectname) %(objecttype) %(objectsize)",
+        input_bytes=b"".join(object_id.encode("ascii") + b"\n" for object_id in object_ids),
+    ).stdout.splitlines()
+    object_manifest: list[dict[str, Any]] = []
+    if len(checked) != len(object_ids):
+        raise ValueError("private copied Git object inventory is incomplete")
+    for expected, line in zip(object_ids, checked, strict=True):
+        fields = line.decode("ascii", errors="strict").split()
+        if (
+            len(fields) != 3 or fields[0] != expected
+            or fields[1] not in {"blob", "commit", "tag", "tree"}
+            or not fields[2].isdigit()
+        ):
+            raise ValueError("private copied Git object metadata is invalid")
+        object_manifest.append({
+            "oid": expected, "type": fields[1], "bytes": int(fields[2]),
+        })
+    refs_after = _private_git_run(
+        git_dir, "for-each-ref", "--format=%(refname)", text=True
+    ).stdout.splitlines()
+    remotes_after = _private_git_run(git_dir, "remote", text=True).stdout.splitlines()
+    metadata_policy = {
+        "detached_head": resolved_head,
+        "index_tree": index_tree,
+        "refs": refs_after,
+        "remotes": remotes_after,
+        "hooks_present": (git_dir / "hooks").exists(),
+        "alternates_present": (git_dir / "objects" / "info" / "alternates").exists(),
+    }
+    if refs_after or remotes_after or metadata_policy["hooks_present"] or metadata_policy[
+        "alternates_present"
+    ]:
+        raise ValueError("private copied Git metadata policy is not closed")
+    return {
+        "source_tree": source_tree,
+        "git_metadata_kind": PRIVATE_GIT_METADATA_KIND,
+        "git_object_graph_digest": canonical_digest({
+            "schema_version": "private_copied_git_object_graph_v1",
+            "verification": PRIVATE_GIT_GRAPH_VERIFICATION,
+            "source_head": source_head,
+            "source_tree": source_tree,
+            "entries": object_manifest,
+        }),
+        "git_metadata_manifest_digest": canonical_digest({
+            "schema_version": "private_copied_git_metadata_policy_v1",
+            "source_head": source_head,
+            "source_tree": source_tree,
+            **metadata_policy,
+        }),
+    }
+
+
+def _committed_tree_inventory(
+    private_git_dir: Path, source_head: str,
+) -> tuple[str, list[dict[str, Any]], list[dict[str, Any]]]:
+    if re.fullmatch(r"[0-9a-f]{40}", source_head) is None:
+        raise ValueError("committed review source head is invalid")
+    resolved = _private_git_run(
+        private_git_dir, "rev-parse", "--verify", f"{source_head}^{{commit}}",
+        text=True,
+    ).stdout.strip()
+    if resolved != source_head:
+        raise ValueError("committed review source head does not resolve exactly")
+    source_tree = _private_git_run(
+        private_git_dir, "rev-parse", "--verify", f"{source_head}^{{tree}}",
+        text=True,
+    ).stdout.strip()
+    listing = _private_git_run(
+        private_git_dir, "ls-tree", "-r", "-z", "-l", "--full-tree",
+        source_head,
+    ).stdout
+    regular: list[dict[str, Any]] = []
+    symlinks: list[dict[str, Any]] = []
+    for record in listing.split(b"\x00"):
+        if not record:
+            continue
+        metadata, separator, path_raw = record.partition(b"\t")
+        fields = metadata.split()
+        try:
+            path = path_raw.decode("utf-8", errors="strict")
+        except UnicodeDecodeError as error:
+            raise ValueError("committed review tree path is not UTF-8") from error
+        if not separator or len(fields) != 4 or not _safe_materialized_path(path):
+            raise ValueError("committed review tree entry is unsafe")
+        mode, object_type, object_id, size_raw = (
+            item.decode("ascii", errors="strict") for item in fields
+        )
+        if re.fullmatch(r"[0-9a-f]{40}", object_id) is None:
+            raise ValueError("committed review tree object id is invalid")
+        if mode == "120000" and object_type == "blob":
+            if not size_raw.isdigit():
+                raise ValueError("committed review symlink size is invalid")
+            symlinks.append({
+                "path": path,
+                "mode": mode,
+                "git_blob": object_id,
+                "bytes": int(size_raw),
+            })
+            continue
+        if mode not in {"100644", "100755"} or object_type != "blob":
+            raise ValueError(
+                f"committed review tree contains a special entry: {path} ({mode} {object_type})"
+            )
+        if not size_raw.isdigit():
+            raise ValueError("committed review blob size is invalid")
+        regular.append({
+            "path": path,
+            "mode": mode,
+            "git_blob": object_id,
+            "bytes": int(size_raw),
+        })
+    return source_tree, sorted(regular, key=lambda item: item["path"]), sorted(
+        symlinks, key=lambda item: item["path"]
+    )
+
+
+def _materialize_committed_blobs(
+    private_git_dir: Path,
+    target: Path,
+    entries: list[dict[str, Any]],
+) -> None:
+    ordered = sorted(entries, key=lambda item: item["path"])
+    request = b"".join(
+        str(entry["git_blob"]).encode("ascii") + b"\n" for entry in ordered
+    )
+    completed = _private_git_run(
+        private_git_dir, "cat-file", "--batch", input_bytes=request,
+    )
+    stream = completed.stdout
+    offset = 0
+    symlink_payloads: list[tuple[dict[str, Any], str]] = []
+    for entry in ordered:
+        newline = stream.find(b"\n", offset)
+        if newline < 0:
+            raise ValueError("committed review blob stream ended before its header")
+        header = stream[offset:newline].decode("ascii", errors="strict").split()
+        offset = newline + 1
+        if (
+            len(header) != 3
+            or header[0] != entry["git_blob"]
+            or header[1] != "blob"
+            or not header[2].isdigit()
+            or int(header[2]) != entry["bytes"]
+        ):
+            raise ValueError("committed review blob header differs from its tree entry")
+        size = entry["bytes"]
+        payload = stream[offset : offset + size]
+        offset += size
+        if len(payload) != size or stream[offset : offset + 1] != b"\n":
+            raise ValueError("committed review blob stream is truncated")
+        offset += 1
+        if _git_blob_sha1(payload) != entry["git_blob"]:
+            raise ValueError("committed review blob bytes do not hash to their tree id")
+        destination = target.joinpath(*PurePosixPath(entry["path"]).parts)
+        destination.parent.mkdir(parents=True, exist_ok=True, mode=0o700)
+        if entry["mode"] == "120000":
+            try:
+                link_target = payload.decode("utf-8", errors="strict")
+            except UnicodeDecodeError as error:
+                raise ValueError("committed review symlink target is not UTF-8") from error
+            resolved = posixpath.normpath(
+                posixpath.join(posixpath.dirname(entry["path"]), link_target)
+            )
+            if (
+                not link_target
+                or "\x00" in link_target
+                or PurePosixPath(link_target).is_absolute()
+                or resolved == ".."
+                or resolved.startswith("../")
+            ):
+                raise ValueError(
+                    f"committed review symlink escapes its private tree: {entry['path']}"
+                )
+            symlink_payloads.append((entry, link_target))
+            continue
+        descriptor = os.open(
+            destination,
+            os.O_WRONLY | os.O_CREAT | os.O_EXCL | getattr(os, "O_CLOEXEC", 0)
+            | getattr(os, "O_NOFOLLOW", 0),
+            0o700 if entry["mode"] == "100755" else 0o600,
+        )
+        try:
+            written = 0
+            while written < len(payload):
+                count = os.write(descriptor, payload[written:])
+                if count <= 0:
+                    raise OSError("committed review blob write made no progress")
+                written += count
+            os.fsync(descriptor)
+        finally:
+            os.close(descriptor)
+        destination.chmod(0o700 if entry["mode"] == "100755" else 0o600)
+    if offset != len(stream):
+        raise ValueError("committed review blob stream contains trailing bytes")
+    for entry, link_target in symlink_payloads:
+        destination = target.joinpath(*PurePosixPath(entry["path"]).parts)
+        os.symlink(link_target, destination)
+
+
+@contextlib.contextmanager
+def _fresh_committed_tree(
+    repository: Path,
+    source_head: str,
+    *,
+    parent: Path,
+) -> Iterator[tuple[Path, dict[str, Any]]]:
+    materialized = Path(tempfile.mkdtemp(prefix="review-source-", dir=parent))
+    materialized.chmod(0o700)
+    evidence: dict[str, Any] = {}
+    try:
+        git_evidence = _build_private_git_database(
+            repository, source_head, materialized / ".git"
+        )
+        source_tree, entries, symlinks = _committed_tree_inventory(
+            materialized / ".git", source_head
+        )
+        if source_tree != git_evidence["source_tree"]:
+            raise ValueError("private copied Git inventory changed its source tree")
+        evidence.update({
+            "schema_version": "source_materialization_v1",
+            "materialization_kind": "FRESH_PRIVATE_COMMITTED_TREE",
+            "source_head": source_head,
+            "source_tree": source_tree,
+            "manifest_digest": canonical_digest({
+                "schema_version": "committed_tree_regular_file_manifest_v1",
+                "entries": entries,
+            }),
+            "materialized_file_count": len(entries),
+            "materialized_bytes": sum(entry["bytes"] for entry in entries),
+            "executable_file_count": sum(
+                entry["mode"] == "100755" for entry in entries
+            ),
+            "materialized_symlink_count": len(symlinks),
+            "materialized_symlink_manifest_digest": canonical_digest({
+                "schema_version": "committed_tree_symlink_manifest_v1",
+                "entries": symlinks,
+            }),
+            "git_metadata_kind": git_evidence["git_metadata_kind"],
+            "git_object_graph_digest": git_evidence["git_object_graph_digest"],
+            "git_metadata_manifest_digest": git_evidence[
+                "git_metadata_manifest_digest"
+            ],
+            "private_root_mode": "0700",
+            "cleanup_status": "PENDING",
+        })
+        _materialize_committed_blobs(
+            materialized / ".git", materialized, [*entries, *symlinks]
+        )
+        yield materialized, evidence
+    finally:
+        import shutil
+
+        shutil.rmtree(materialized, ignore_errors=False)
+        if materialized.exists():
+            raise RuntimeError("committed review materialization cleanup failed")
+        evidence["cleanup_status"] = "REMOVED"
+
+
 def _execute(
     argv: list[str],
     *,
@@ -734,6 +1252,7 @@ def _execute(
     timeout_seconds: int,
     replay_contract: str,
     provider_source_head: str | None = None,
+    execution_source_head: str | None = None,
 ) -> dict[str, Any]:
     with (
         tempfile.TemporaryDirectory(prefix="governed-command-") as isolated,
@@ -745,6 +1264,7 @@ def _execute(
         timed_out = False
         provider_capsule: Path | None = None
         pytest_provider: dict[str, Any] | None = None
+        source_materialization: dict[str, Any] | None = None
         try:
             if _is_governed_pytest_argv(argv) and provider_source_head is None:
                 provider_source_head = subprocess.run(
@@ -764,20 +1284,29 @@ def _execute(
                 if pytest_provider is not None
                 else argv
             )
-            completed = subprocess.run(
-                execution_argv, cwd=root, shell=False, stdin=subprocess.DEVNULL,
-                stdout=stdout_file, stderr=stderr_file, timeout=timeout_seconds,
-                check=False,
-                env=_controlled_environment(
-                    isolated_root,
-                    argv=argv,
-                    pytest_provider=provider_capsule,
-                ),
+            materialization = (
+                _fresh_committed_tree(
+                    root, execution_source_head, parent=isolated_root
+                )
+                if _is_governed_pytest_argv(argv)
+                and execution_source_head is not None
+                else contextlib.nullcontext((root, None))
             )
-            exit_code = completed.returncode
+            with materialization as (execution_root, source_materialization):
+                completed = subprocess.run(
+                    execution_argv, cwd=execution_root, shell=False,
+                    stdin=subprocess.DEVNULL, stdout=stdout_file,
+                    stderr=stderr_file, timeout=timeout_seconds, check=False,
+                    env=_controlled_environment(
+                        isolated_root,
+                        argv=argv,
+                        pytest_provider=provider_capsule,
+                    ),
+                )
+                exit_code = completed.returncode
         except subprocess.TimeoutExpired:
             timed_out, exit_code = True, -1
-        except (OSError, ValueError) as error:
+        except (OSError, ValueError, subprocess.SubprocessError) as error:
             exit_code = 127
             stderr_file.write(str(error).encode("utf-8", errors="replace"))
         finally:
@@ -795,6 +1324,7 @@ def _execute(
             "stdout": _output_summary(stdout_file, replay_contract),
             "stderr": _output_summary(stderr_file, replay_contract),
             "pytest_provider": pytest_provider,
+            "source_materialization": source_materialization,
         }
 
 
@@ -806,14 +1336,22 @@ def _bound_execution_task(
         raise ValueError("context artifact is invalid: " + "; ".join(validated["errors"]))
     plan = validated["plan"]
     task_contract = plan["task_contract"]
-    route = route_task(task_contract)
     matches = [
-        task for task in route["required_role_nodes"]
-        if task.get("node_id") == node_id
+        task for task in plan["execution_dag_binding"]["nodes"]
+        if task["node_id"] == node_id
     ]
     if len(matches) != 1:
-        raise ValueError("node_id is not one canonical routed execution task")
-    task = {field: matches[0].get(field) for field in EXECUTION_TASK_FIELDS}
+        raise ValueError("node_id is not one validated Context execution task")
+    bound = matches[0]
+    task = {
+        "node_id": bound["node_id"],
+        "role": bound["role"],
+        "native_agent": bound["native_agent"],
+        "node_class": bound["node_class"],
+        "permission": bound["permission"],
+        "requires": bound["requires"],
+        "path_scope": [],
+    }
     identity = native_agent_contract(native_agent)
     if (
         task["native_agent"] != native_agent
@@ -859,6 +1397,9 @@ def capture_governed_command(
             "pytest capture requires the no-site governed bootstrap and "
             "--noconftest"
         )
+    pytest_target_errors = _pytest_collection_target_errors(command_argv_value)
+    if pytest_target_errors:
+        raise PermissionError(pytest_target_errors[0])
     authorization = authorize_native_command(native_agent, command)
     if not authorization.get("allowed"):
         raise PermissionError(f"command is not authorized: {authorization.get('reason')}")
@@ -884,11 +1425,17 @@ def capture_governed_command(
             text=True,
         ).stdout.strip()
     )
-    executed = _execute(
-        command_argv_value, root=repository, timeout_seconds=timeout_seconds,
-        replay_contract=replay_contract,
-        provider_source_head=provider_source_head,
-    )
+    try:
+        executed = _execute(
+            command_argv_value, root=repository, timeout_seconds=timeout_seconds,
+            replay_contract=replay_contract,
+            provider_source_head=provider_source_head,
+            execution_source_head=whole_before["source_head"],
+        )
+    except subprocess.SubprocessError:
+        raise RuntimeError(
+            "governed command execution was denied after a subprocess failure"
+        ) from None
     repository_after = _generation_summary(path_scope, repository)
     whole_after = _generation_summary(["."], repository)
     record: dict[str, Any] = {
@@ -1193,6 +1740,78 @@ def _pytest_provider_errors(
     return sorted(set(errors))
 
 
+def _source_materialization_errors(
+    materialization: Any,
+    *,
+    argv: list[str],
+    expected_source_head: str | None,
+    root: Path,
+) -> list[str]:
+    governed = _is_governed_pytest_argv(argv)
+    if not governed:
+        return (
+            [] if materialization is None
+            else ["non-pytest command cannot bind a source materialization"]
+        )
+    if not isinstance(materialization, dict):
+        return ["governed pytest source materialization is absent"]
+    errors: list[str] = []
+    if set(materialization) != SOURCE_MATERIALIZATION_FIELDS:
+        return ["governed pytest source materialization fields are invalid"]
+    for field, expected in (
+        ("schema_version", "source_materialization_v1"),
+        ("materialization_kind", "FRESH_PRIVATE_COMMITTED_TREE"),
+        ("source_head", expected_source_head),
+        ("private_root_mode", "0700"),
+        ("cleanup_status", "REMOVED"),
+    ):
+        if materialization.get(field) != expected:
+            errors.append(f"governed pytest source materialization {field} is invalid")
+    try:
+        with tempfile.TemporaryDirectory(
+            prefix="governed-materialization-validation-"
+        ) as isolated:
+            private_git_dir = Path(isolated) / ".git"
+            git_evidence = _build_private_git_database(
+                root, str(materialization.get("source_head", "")), private_git_dir
+            )
+            source_tree, entries, symlinks = _committed_tree_inventory(
+                private_git_dir, str(materialization.get("source_head", ""))
+            )
+    except (OSError, ValueError, subprocess.SubprocessError) as error:
+        return sorted(set(errors + [
+            f"governed pytest committed source inventory is unavailable: {error}"
+        ]))
+    expected_values = {
+        "source_tree": source_tree,
+        "manifest_digest": canonical_digest({
+            "schema_version": "committed_tree_regular_file_manifest_v1",
+            "entries": entries,
+        }),
+        "materialized_file_count": len(entries),
+        "materialized_bytes": sum(entry["bytes"] for entry in entries),
+        "executable_file_count": sum(
+            entry["mode"] == "100755" for entry in entries
+        ),
+        "materialized_symlink_count": len(symlinks),
+        "materialized_symlink_manifest_digest": canonical_digest({
+            "schema_version": "committed_tree_symlink_manifest_v1",
+            "entries": symlinks,
+        }),
+        "git_metadata_kind": git_evidence["git_metadata_kind"],
+        "git_object_graph_digest": git_evidence["git_object_graph_digest"],
+        "git_metadata_manifest_digest": git_evidence[
+            "git_metadata_manifest_digest"
+        ],
+    }
+    for field, expected in expected_values.items():
+        if materialization.get(field) != expected:
+            errors.append(
+                f"governed pytest source materialization {field} differs from Git"
+            )
+    return sorted(set(errors))
+
+
 def validate_governed_command_capture(
     record: Any,
     *,
@@ -1211,6 +1830,7 @@ def validate_governed_command_capture(
     errors: list[str] = []
     if frozenset(record) not in {
         frozenset(RECORD_FIELDS),
+        frozenset(PRE_SOURCE_MATERIALIZATION_RECORD_FIELDS),
         frozenset(LEGACY_RECORD_FIELDS),
     }:
         errors.append("governed command capture fields do not match contract")
@@ -1258,6 +1878,7 @@ def validate_governed_command_capture(
     except ValueError as error:
         argv, command = [], ""
         errors.append(f"governed command argv is invalid: {error}")
+    errors.extend(_pytest_collection_target_errors(argv))
     provider_expected_source_head = None
     try:
         if Path(root).resolve() == Path(__file__).resolve().parents[2]:
@@ -1272,6 +1893,17 @@ def validate_governed_command_capture(
         record.get("pytest_provider"),
         argv=argv,
         expected_source_head=provider_expected_source_head,
+    ))
+    whole_before = record.get("whole_repository_before")
+    errors.extend(_source_materialization_errors(
+        record.get("source_materialization"),
+        argv=argv,
+        expected_source_head=(
+            whole_before.get("source_head")
+            if isinstance(whole_before, dict)
+            else None
+        ),
+        root=Path(root),
     ))
     authorization = record.get("authorization")
     expected_authorization = authorize_native_command(str(record.get("native_agent", "")), command)
@@ -1337,10 +1969,13 @@ def _replay_errors(record: dict[str, Any], *, root: Path) -> list[str]:
             if isinstance(record.get("pytest_provider"), dict)
             else None
         ),
+        execution_source_head=record["whole_repository_before"]["source_head"],
     )
     errors: list[str] = []
     if replay["pytest_provider"] != record.get("pytest_provider"):
         errors.append("governed pytest provider does not reproduce")
+    if replay["source_materialization"] != record.get("source_materialization"):
+        errors.append("governed pytest source materialization does not reproduce")
     if any(replay[field] != record[field] for field in ("exit_code", "timed_out", "result")):
         errors.append("governed command result does not reproduce")
     for stream in ("stdout", "stderr"):

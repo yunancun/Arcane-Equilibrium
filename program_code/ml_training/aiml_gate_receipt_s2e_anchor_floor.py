@@ -5,8 +5,8 @@ attestation 自報的 `previous_anchor_head_digest` 無法成立——那條鏈�
 四個 digest 全部由 attestation 自己的欄位重算,驗證端從不與任何真實前手比對。
 
 本模組把 receipt 已經釘在 git 上的 anchor 世代投影成一份 **code-owned 路徑**的
-committed floor,並由驗證器自己以 `git show <commit>:<path>` 讀 **commit 物件的
-位元組**(不是工作樹)。floor 不是新的信任源,也不帶簽章:它只提供**機械可偵測的
+committed floor,並由驗證器自己以 `verified_blob_bytes` 讀 **commit 物件的位元組**
+(不是工作樹;round-7 起不再用 `git show`,位元組要對 `--batch` 標頭的 object id 重算)。floor 不是新的信任源,也不帶簽章:它只提供**機械可偵測的
 歷史性質**——`floor_history_errors` 的祖先鏈 + 嚴格遞增 + 單一創世檢查。
 
 誠實邊界(2026-08-04 撤回上一版的過強宣稱;不得在註解或 PR 說明裡被寫回去):
@@ -37,7 +37,12 @@ from typing import Any, NamedTuple
 
 from agent_governance_schema import schema_subset_errors
 from aiml_gate_receipt_schema_core import (
-    _load_schema, canonical_digest, git_argv, git_subprocess_env,
+    STORE_GRAFTS, STORE_INDETERMINATE, STORE_NESTED_ALTERNATES, STORE_PROMISOR,
+    STORE_REPLACE_REFS, STORE_SHALLOW, STORE_UNREADABLE,
+    STORE_UNSUPPORTED_OBJECT_FORMAT, STORE_UNSUPPORTED_REF_BACKEND,
+    _load_schema, canonical_digest, code_owned_object_view, git_argv,
+    git_failure_detail, git_subprocess_env, read_subject_ref,
+    subject_object_store_findings, verified_blob_bytes,
 )
 
 
@@ -262,13 +267,16 @@ def _git_bytes(repo_root: Path, *args: str) -> bytes:
     # 攻擊者 repo 的 floor 而且零錯誤(E3 實測)。
     # E3-A:argv[0] 與 `PATH` 皆由 `git_argv`/`git_subprocess_env` 從 code-owned
     # 常數導出,ambient `PATH` 不參與 git 二進位的解析。
-    return subprocess.run(
-        git_argv(repo_root, *args),
-        check=True,
-        capture_output=True,
-        env=git_subprocess_env(),
-        timeout=_GIT_READ_TIMEOUT_SECONDS,
-    ).stdout
+    # E3 round-5:`repo_root` 只提供 object store,git 跑在 code-owned bare view 裡。
+    with code_owned_object_view(repo_root) as view:
+        return subprocess.run(
+            git_argv(view, *args),
+            cwd=view,
+            check=True,
+            capture_output=True,
+            env=git_subprocess_env(),
+            timeout=_GIT_READ_TIMEOUT_SECONDS,
+        ).stdout
 
 
 def _git_ok(repo_root: Path, *args: str) -> bool:
@@ -279,14 +287,34 @@ def _git_ok(repo_root: Path, *args: str) -> bool:
     """
 
     try:
-        return subprocess.run(
-            git_argv(repo_root, *args),
-            capture_output=True,
-            env=git_subprocess_env(),
-            timeout=_GIT_PROBE_TIMEOUT_SECONDS,
-        ).returncode == 0
+        with code_owned_object_view(repo_root) as view:
+            return subprocess.run(
+                git_argv(view, *args),
+                cwd=view,
+                capture_output=True,
+                env=git_subprocess_env(),
+                timeout=_GIT_PROBE_TIMEOUT_SECONDS,
+            ).returncode == 0
     except _GIT_FAILURES:
         return False
+
+
+def _verified_bytes(repo_root: Path, path: str, *, at_commit: str) -> bytes:
+    """`<at_commit>:<path>` 的 blob 位元組,已對 tree 記錄的 object id 重算比對。
+
+    round-7 P0-1:本模組原本用 `git show <rev>:<path>`,而那條路徑**不**複驗物件雜湊
+    (E2/E3 各自於 git 2.55.0 實證,loose 與 packed 兩種形式皆可讓一個 object id 回出
+    任意位元組)。改走 `schema_core.verified_blob_bytes`;讀不到或對不上一律拋
+    `OSError`,由既有的 `_GIT_FAILURES` / 呼叫端 fail-closed 接手。
+    """
+
+    payload = verified_blob_bytes(repo_root, path, at_commit=at_commit)
+    if payload is None:
+        raise OSError(
+            f"{path} at {at_commit[:12]} is absent, unreadable, or its bytes do not "
+            "hash to the object id recorded in the commit's tree"
+        )
+    return payload
 
 
 def _object_store_errors(repo_root: Path) -> list[str]:
@@ -312,57 +340,57 @@ def _object_store_errors(repo_root: Path) -> list[str]:
     E3-D:promisor(partial)clone 一併拒。它 `--is-shallow-repository` 回 false,
     卻會讓 `git show <commit>:<path>` 靜默走網路去抓缺失 blob——那是本家族唯一的
     runtime effect 來源,與設計 §8.4「全部是純驗證函式」直接衝突。
+
+    E3 round-5:四條判定原本是 `git -C <被驗者> rev-parse/for-each-ref/config` 問出來
+    的——那正是「把外人所有的目錄當 repository 打開」的一部分。改由
+    `_object_store_errors` 自己從**檔案系統**判定(`shallow`/`info/grafts`/
+    `refs/replace/`/`objects/pack/*.promisor`),判定同樣完整而不碰任何可執行面。
+    其中三條在 view 底下已經**結構上失效**:view 自己沒有 remote(promisor 抓不到
+    網路,缺物件就是缺)、沒有 grafts、`refs/` 全空(replace ref 不生效),而淺樹缺
+    parent 會在 view 裡直接炸而不是靜默截短(E1 於 git 2.55 實測)。仍然顯式回報,是
+    為了讓 typed reason 保持精確,不是把一條真判定換成泛用錯誤。
     """
 
-    try:
-        shallow = _git_bytes(repo_root, "rev-parse", "--is-shallow-repository")
-        replaced = _git_bytes(
-            repo_root, "for-each-ref", "--format=%(refname)", "refs/replace/"
-        )
-        common = _git_bytes(repo_root, "rev-parse", "--git-common-dir")
-    except _GIT_FAILURES as error:
-        return [f"durability anchor floor object store is unreadable: {error}"]
-    errors: list[str] = []
-    if shallow.decode("ascii", errors="replace").strip() != "false":
-        errors.append(
+    findings = subject_object_store_findings(repo_root)
+    if STORE_UNREADABLE in findings:
+        return [
+            "durability anchor floor object store is unreadable: "
+            f"{git_failure_detail(repo_root) or 'the repository could not be opened'}"
+        ]
+    # E2 round-5 F4 的續集(P1-J):polarity 修好之後,「查不出來」一度借用了別條原因的
+    # 字串,於是 operator 拿到一個假的具名理由。查不出來要有自己的名字。
+    reasons = {
+        STORE_INDETERMINATE: (
+            "durability anchor floor object store hygiene could not be determined"
+        ),
+        STORE_UNSUPPORTED_REF_BACKEND: (
+            "durability anchor floor cannot be read from a repository whose ref "
+            "backend the code-owned object view cannot mirror"
+        ),
+        STORE_UNSUPPORTED_OBJECT_FORMAT: (
+            "durability anchor floor cannot be read from a sha256 object-format "
+            "repository, whose object ids the byte-integrity check cannot recompute"
+        ),
+        STORE_SHALLOW: (
             "durability anchor floor cannot be read from a shallow repository"
-        )
-    if replaced.strip():
-        errors.append(
+        ),
+        STORE_REPLACE_REFS: (
             "durability anchor floor cannot be read from a repository that "
             "rewrites objects through replace refs"
-        )
-    if _grafts_file_present(repo_root, common):
-        errors.append(
+        ),
+        STORE_GRAFTS: (
             "durability anchor floor cannot be read from a repository that "
             "rewrites commit parentage through a grafts file"
-        )
-    if _git_ok(
-        repo_root, "config", "--get-regexp",
-        r"^(remote\..*\.(promisor|partialclonefilter)|extensions\.partialclone)$",
-    ):
-        errors.append(
+        ),
+        STORE_NESTED_ALTERNATES: (
+            "durability anchor floor cannot be read from a repository whose object "
+            "store chains to another store through alternates"
+        ),
+        STORE_PROMISOR: (
             "durability anchor floor cannot be read from a promisor partial clone"
-        )
-    return errors
-
-
-def _grafts_file_present(repo_root: Path, common_dir: bytes) -> bool:
-    """`<git-common-dir>/info/grafts` 是否存在(路徑解析失敗一律當成存在:fail-closed)。"""
-
-    try:
-        raw = common_dir.decode("utf-8").strip()
-    except UnicodeDecodeError:
-        return True
-    if not raw:
-        return True
-    common = Path(raw)
-    if not common.is_absolute():
-        common = Path(repo_root) / common
-    try:
-        return (common / "info" / "grafts").exists()
-    except OSError:
-        return True
+        ),
+    }
+    return [reasons[finding] for finding in findings if finding in reasons]
 
 
 def _protected_ancestry_errors(repo_root: Path, commit: str) -> list[str]:
@@ -370,18 +398,25 @@ def _protected_ancestry_errors(repo_root: Path, commit: str) -> list[str]:
 
     只檢查鏈尾:祖先鏈檢查已保證其餘 revision 都是鏈尾的祖先,祖先關係遞移。
     受保護 ref 一個都解析不出來時**不得 fail-open**,同樣回 UNVERIFIED 的理由。
+
+    E3 round-5:ref **名字**由 `read_subject_ref` 以純位元組讀取解析(view 的 `refs/`
+    刻意留空,解不出任何名字),再把 40-hex 交給 view 做祖先判定。名字面與物件面
+    因此分離,兩邊都不經被驗者的 config/hook。ref 值本來就由被驗者決定(他也決定自己
+    commit 什麼),讀它沒有交出新的信任;讀**檔案**則不會執行任何東西。
     """
 
     resolvable = False
     for ref in _PROTECTED_ANCESTOR_REFS:
-        if not _git_ok(
+        resolved = read_subject_ref(repo_root, ref)
+        if resolved is None or not _git_ok(
             repo_root, "rev-parse", "--verify", "--quiet", "--end-of-options",
-            f"{ref}^{{commit}}",
+            f"{resolved}^{{commit}}",
         ):
             continue
         resolvable = True
         if _git_ok(
-            repo_root, "merge-base", "--is-ancestor", "--end-of-options", commit, ref
+            repo_root, "merge-base", "--is-ancestor", "--end-of-options",
+            commit, resolved,
         ):
             return []
     if not resolvable:
@@ -506,7 +541,7 @@ def floor_history_errors(
                 "durability anchor floor history is not a single ancestor chain"
             )
         try:
-            raw = _git_bytes(repo_root, "show", "--end-of-options", f"{commit}:{path}")
+            raw = _verified_bytes(repo_root, path, at_commit=commit)
         except _GIT_FAILURES as error:
             return _floor_reading(FLOOR_REJECTED, None, errors + [
                 f"durability anchor floor revision is unreadable: {error}"
@@ -548,15 +583,16 @@ def floor_history_errors(
         revision_index += 1
         last_raw = raw
     try:
-        head_raw = _git_bytes(repo_root, "show", "--end-of-options", f"{at_commit}:{path}")
+        head_raw = _verified_bytes(repo_root, path, at_commit=at_commit)
     except _GIT_FAILURES as error:
         return _floor_reading(FLOOR_REJECTED, None, errors + [
             f"durability anchor floor is unreadable at the reviewed commit: {error}"
         ])
-    # 尾端 byte-for-byte:祖先鏈檢查為真時**不可孤立觸發**——`at_commit` 讀到的 blob
-    # 必然等於最後一個觸碰該路徑的 commit 的 blob。E2 與 E4 獨立同意構造不出孤立
-    # 違例,故本條屬 defense-in-depth;其可執行性由 seam 層測試(monkeypatch
-    # `_git_bytes`)背書,不留成沉默的覆蓋債。
+    # 尾端 byte-for-byte。**round-8 更正**:此處原本寫「祖先鏈為真時不可孤立觸發,故屬
+    # defense-in-depth」——E2 第三輪指出那已不成立。被驗者改寫 `at_commit` 的 tree 就能
+    # 讓這裡讀到的 blob 與歷史鏈尾分歧,而雜湊比對擋不住(它綁 payload↔oid,不綁
+    # oid↔path;tree 沒有被驗)。也就是說本條是**目前少數會抓到 tree 竄改的檢查之一**,
+    # 承重,不是裝飾。其可執行性由 seam 層測試(monkeypatch `_verified_bytes`)背書。
     if head_raw != last_raw:
         errors.append(
             "durability anchor floor at the reviewed commit differs byte-for-byte "

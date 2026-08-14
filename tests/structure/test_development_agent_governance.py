@@ -2316,6 +2316,59 @@ def _valid_failed_review_closure() -> dict:
     return packet
 
 
+def test_public_validate_closure_accepts_intermediate_non_pytest_capture() -> None:
+    governance = _load_module()
+    packet = _valid_failed_review_closure()
+    assert governance.validate_closure(packet) == []
+    task = next(
+        item
+        for item in packet["dispatch"]["required_role_nodes"]
+        if item["permission"] == "read_only"
+    )
+    context = packet["dispatch"]["context_artifact"]
+    task_contract = json.loads(context["canonical_plan"])["task_contract"]
+    capture = governance.capture_governed_command(
+        native_agent=task["native_agent"],
+        node_id=task["node_id"],
+        context_artifact=context,
+        argv=["git", "rev-parse", "--is-inside-work-tree"],
+        root=ROOT,
+    )
+    intermediate = deepcopy(capture)
+    del intermediate["source_materialization"]
+    intermediate["record_digest"] = governance.canonical_digest({
+        key: value
+        for key, value in intermediate.items()
+        if key != "record_digest"
+    })
+    expected_task = {
+        field: task.get(field)
+        for field in (
+            "node_id", "role", "native_agent", "node_class", "permission",
+            "requires", "path_scope",
+        )
+    }
+    expected_path_scope = task.get("path_scope") or task_contract["dirty_scope"]
+    assert governance.validate_governed_command_capture(
+        intermediate,
+        expected_context_artifact_digest=context["artifact_digest"],
+        expected_task_contract_digest=context["task_contract_digest"],
+        expected_execution_task=expected_task,
+        expected_path_scope=expected_path_scope,
+        expected_source_head=packet["baseline"]["source_head"],
+        root=ROOT,
+    ) == []
+    packet["evidence"].append({
+        "id": "ev-intermediate-command",
+        "scope": "test",
+        "kind": "command_capture_v2",
+        "digest": intermediate["record_digest"],
+        "artifact": intermediate,
+    })
+
+    assert governance.validate_closure(packet) == []
+
+
 def test_closure_packet_separates_work_completion_from_gate_verdict() -> None:
     governance = _load_module()
     schema = json.loads(
