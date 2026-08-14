@@ -232,6 +232,25 @@ def _git_value(repo: Path, expression: str) -> str:
     ).stdout.strip()
 
 
+def _clone_exact_head_as_main(source: Path, destination: Path) -> str:
+    source_head = _git_value(source, "HEAD")
+    subprocess.run(
+        [
+            "git", "clone", "--quiet", "--no-checkout",
+            str(source), str(destination),
+        ],
+        check=True,
+        capture_output=True,
+    )
+    subprocess.run(
+        ["git", "checkout", "--quiet", "-B", "main", source_head],
+        cwd=destination,
+        check=True,
+    )
+    assert _git_value(destination, "HEAD") == source_head
+    return source_head
+
+
 def _real_claims(repo: Path) -> tuple[dict[str, str], dict[str, object]]:
     head, tree = _git_value(repo, "HEAD"), _git_value(repo, "HEAD^{tree}")
     evidence_facts = {
@@ -444,12 +463,7 @@ def real_lw2_evidence(
     tmp_path_factory: pytest.TempPathFactory,
 ) -> tuple[Path, dict[str, str], dict[str, object]]:
     repo = tmp_path_factory.mktemp("lw2-real-evidence") / "repo"
-    subprocess.run(
-        ["git", "clone", "--quiet", str(ROOT), str(repo)],
-        check=True,
-        capture_output=True,
-    )
-    subprocess.run(["git", "branch", "-M", "main"], cwd=repo, check=True)
+    _clone_exact_head_as_main(ROOT, repo)
     subprocess.run(
         ["git", "remote", "set-url", "origin", LW2_REPOSITORY_URL],
         cwd=repo,
@@ -1100,6 +1114,32 @@ def test_objective_text_alone_never_selects_lw2() -> None:
     assert routed["task_facts"]["lane_id"] is None
 
 
+def test_governed_evidence_clone_attaches_detached_source_head_as_main(
+    tmp_path: Path,
+) -> None:
+    source = tmp_path / "detached-source"
+    _clone_exact_head_as_main(ROOT, source)
+    exact_head = _git_value(source, "HEAD")
+    subprocess.run(
+        ["git", "checkout", "--quiet", "--detach", exact_head],
+        cwd=source,
+        check=True,
+    )
+    materialized = tmp_path / "materialized"
+
+    cloned_head = _clone_exact_head_as_main(source, materialized)
+
+    assert cloned_head == exact_head
+    assert _git_value(materialized, "HEAD") == exact_head
+    assert subprocess.run(
+        ["git", "symbolic-ref", "--quiet", "--short", "HEAD"],
+        cwd=materialized,
+        check=True,
+        capture_output=True,
+        text=True,
+    ).stdout.strip() == "main"
+
+
 def test_lw2_protected_inventory_is_complete_and_deterministic() -> None:
     inventory = lw2_protected_inventory(ROOT)
     policy = load_registry()["lw2_readmission_policy"]
@@ -1512,7 +1552,7 @@ def test_lw2_lease_lifecycle_is_bound_to_admission_and_generation(
             owner="E1",
         )
         assert bypass["status"] == "FAIL"
-        assert bypass["reasons"] == ["LW2_ADMISSION_ACTION_REQUIRED"]
+        assert bypass["reasons"] == ["TASK_ADMISSION_ID_REQUIRED"]
     relabelled = filesystem_writer_lease_action(
         action="acquire",
         repo=repo,

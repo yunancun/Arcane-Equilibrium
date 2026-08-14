@@ -19,9 +19,12 @@ from agent_governance_task_control import (  # noqa: E402
     InMemoryWriterLeaseStore,
     WorktreeIdentity,
     acquire_writer_lease,
+    filesystem_writer_lease_action,
+    inspect_worktree,
     _adjudicate_continuation,
     compile_task_execution_policy,
     is_dispatchable,
+    main as task_control_main,
     next_action_may_be_null,
     operator_loop_request_digest,
     progress_snapshot,
@@ -30,6 +33,7 @@ from agent_governance_task_control import (  # noqa: E402
     renew_writer_lease,
     validate_writer_lease,
 )
+from agent_governance_task_admission import acquire_task_admission  # noqa: E402
 from agent_governance import main as governance_main  # noqa: E402
 from agent_governance_context import capture_repository_baseline  # noqa: E402
 from agent_governance_routing import (  # noqa: E402
@@ -158,6 +162,26 @@ def _init_repo(tmp_path: Path) -> Path:
         check=True,
     )
     return repo
+
+
+def _init_linked_repo(tmp_path: Path) -> Path:
+    repo = _init_repo(tmp_path)
+    owned = repo / "owned.txt"
+    owned.write_text("base\n", encoding="utf-8")
+    subprocess.run(["git", "-C", str(repo), "add", "owned.txt"], check=True)
+    subprocess.run(
+        ["git", "-C", str(repo), "commit", "-q", "-m", "owned"],
+        check=True,
+    )
+    linked = tmp_path / "linked"
+    subprocess.run(
+        [
+            "git", "-C", str(repo), "worktree", "add", "-q", "-b",
+            "agent/ordinary-lease", str(linked), "main",
+        ],
+        check=True,
+    )
+    return linked
 
 
 def test_finite_is_the_default_terminal_boundary_without_wakeup() -> None:
@@ -544,6 +568,92 @@ def test_writer_lease_is_exclusive_and_fenced(tmp_path: Path) -> None:
     )
     assert released["status"] == "PASS"
     assert store.read()["leases"] == {}
+
+
+def test_filesystem_writer_acquire_requires_active_task_admission(
+    tmp_path: Path,
+    capsys,
+) -> None:
+    repo = _init_linked_repo(tmp_path)
+    identity = inspect_worktree(repo)
+    store = FileWriterLeaseStore(identity.common_dir)
+
+    wrapper = filesystem_writer_lease_action(
+        action="acquire", repo=repo, task_id="ordinary-task", owner="owner",
+    )
+    assert wrapper["status"] == "FAIL"
+    assert wrapper["reasons"] == ["TASK_ADMISSION_ID_REQUIRED"]
+    exported = acquire_writer_lease(
+        store, identity, task_id="ordinary-task", owner="owner",
+    )
+    assert exported["status"] == "FAIL"
+    assert exported["reasons"] == ["TASK_ADMISSION_ID_REQUIRED"]
+    invalid = filesystem_writer_lease_action(
+        action="acquire",
+        repo=repo,
+        task_id="ordinary-task",
+        owner="owner",
+        admission_id="0" * 32,
+    )
+    assert invalid["status"] == "FAIL"
+    assert invalid["reasons"] == ["TASK_ADMISSION_MISSING"]
+    for cli, argv in (
+        (
+            governance_main,
+            [
+                "writer-lease", "--lease-action", "acquire",
+                "--repo", str(repo), "--task-id", "ordinary-task",
+                "--owner", "owner",
+            ],
+        ),
+        (
+            task_control_main,
+            [
+                "writer-lease", "--action", "acquire",
+                "--repo", str(repo), "--task-id", "ordinary-task",
+                "--owner", "owner",
+            ],
+        ),
+    ):
+        assert cli(argv) == 3
+        packet = json.loads(capsys.readouterr().out)
+        assert packet["reasons"] == ["TASK_ADMISSION_ID_REQUIRED"]
+    assert store.read()["leases"] == {}
+
+
+def test_ordinary_admission_authorizes_seven_field_filesystem_lease(
+    tmp_path: Path,
+) -> None:
+    repo = _init_linked_repo(tmp_path)
+    admission = acquire_task_admission(
+        repo=repo,
+        task_id="ordinary-task",
+        owner="owner",
+        task_contract=_admission_contract(repo, "finite", "ordinary write"),
+    )
+    identity = inspect_worktree(repo)
+    wrong = filesystem_writer_lease_action(
+        action="acquire",
+        repo=repo,
+        task_id="ordinary-task",
+        owner="owner",
+        admission_id="0" * 32,
+    )
+    assert wrong["status"] == "FAIL"
+    assert wrong["reasons"] == ["TASK_ADMISSION_ID_MISMATCH"]
+    acquired = acquire_writer_lease(
+        FileWriterLeaseStore(identity.common_dir),
+        identity,
+        task_id="ordinary-task",
+        owner="owner",
+        admission_id=admission["admission_id"],
+    )
+
+    assert acquired["status"] == "PASS"
+    assert set(acquired["lease"]) == {
+        "lease_id", "task_id", "owner", "worktree", "branch",
+        "acquired_at", "expires_at",
+    }
 
 
 def test_writer_lease_rejects_primary_or_dirty_worktree(tmp_path: Path) -> None:

@@ -371,10 +371,28 @@ def acquire_writer_lease(
     *,
     task_id: str,
     owner: str,
+    admission_id: str | None = None,
     ttl_seconds: int = DEFAULT_LEASE_TTL_SECONDS,
     now: datetime | None = None,
 ) -> dict[str, Any]:
-    """Acquire an ordinary low-level lease, never LW2 source authority."""
+    """Acquire in memory, or require production task-admission authority."""
+
+    if isinstance(store, FileWriterLeaseStore):
+        if store.common_dir != identity.common_dir.resolve():
+            return _lease_result(
+                "acquire", status="FAIL",
+                reasons=["WRITER_LEASE_STORE_MISMATCH"],
+                identity=identity, lease=None,
+            )
+        return filesystem_writer_lease_action(
+            action="acquire",
+            repo=Path(identity.worktree),
+            task_id=task_id,
+            owner=owner,
+            admission_id=admission_id,
+            ttl_seconds=ttl_seconds,
+            now=now,
+        )
 
     from agent_governance_lw2_readmission import lw2_contract_selected
 
@@ -384,29 +402,6 @@ def acquire_writer_lease(
             reasons=["LW2_ADMISSION_ACTION_REQUIRED"],
             identity=identity, lease=None,
         )
-    if isinstance(store, FileWriterLeaseStore):
-        from agent_governance_task_admission import FileTaskAdmissionStore
-
-        admission_store = FileTaskAdmissionStore(identity.common_dir)
-
-        def acquire_under_admission_lock(
-            state: dict[str, Any],
-        ) -> dict[str, Any]:
-            record = state["admissions"].get(identity.worktree)
-            if record is not None and lw2_contract_selected(
-                record["task_contract"], task_id=record["task_id"]
-            ):
-                return _lease_result(
-                    "acquire", status="FAIL",
-                    reasons=["LW2_ADMISSION_ACTION_REQUIRED"],
-                    identity=identity, lease=None,
-                )
-            return _acquire_writer_lease(
-                store, identity, task_id=task_id, owner=owner,
-                ttl_seconds=ttl_seconds, now=now,
-            )
-
-        return admission_store.serialized_read(acquire_under_admission_lock)
     return _acquire_writer_lease(
         store, identity, task_id=task_id, owner=owner,
         ttl_seconds=ttl_seconds, now=now,
@@ -657,6 +652,7 @@ def filesystem_writer_lease_action(
     lease_id: str | None = None,
     admission_id: str | None = None,
     ttl_seconds: int = DEFAULT_LEASE_TTL_SECONDS,
+    now: datetime | None = None,
 ) -> dict[str, Any]:
     """Run one explicit production writer-lease action."""
 
@@ -677,24 +673,52 @@ def filesystem_writer_lease_action(
     def action_under_admission_lock(state: dict[str, Any]) -> dict[str, Any]:
         record = state["admissions"].get(identity.worktree)
         lease = store.read()["leases"].get(identity.worktree)
-        selected = (
-            lw2_contract_selected({}, task_id=task_id)
-            or (
-                record is not None
-                and lw2_contract_selected(
-                    record["task_contract"], task_id=record["task_id"]
+        if action == "acquire":
+            if not admission_id:
+                return _lease_result(
+                    action, status="FAIL",
+                    reasons=["TASK_ADMISSION_ID_REQUIRED"],
+                    identity=identity, lease=None,
+                )
+            admission_reasons: list[str] = []
+            if record is None:
+                admission_reasons.append("TASK_ADMISSION_MISSING")
+            else:
+                if record["task_id"] != task_id:
+                    admission_reasons.append("TASK_ADMISSION_TASK_MISMATCH")
+                if record["owner"] != owner:
+                    admission_reasons.append("TASK_ADMISSION_OWNER_MISMATCH")
+                if record["admission_id"] != admission_id:
+                    admission_reasons.append("TASK_ADMISSION_ID_MISMATCH")
+                if record["state"] != "ACTIVE":
+                    admission_reasons.append("TASK_ADMISSION_TERMINAL")
+            if admission_reasons:
+                return _lease_result(
+                    action, status="FAIL", reasons=admission_reasons,
+                    identity=identity, lease=None,
+                )
+            selected = lw2_contract_selected(
+                record["task_contract"], task_id=record["task_id"]
+            )
+        else:
+            selected = (
+                lw2_contract_selected({}, task_id=task_id)
+                or (
+                    record is not None
+                    and lw2_contract_selected(
+                        record["task_contract"], task_id=record["task_id"]
+                    )
+                )
+                or (
+                    isinstance(lease, dict)
+                    and set(lease) == LW2_WRITER_LEASE_FIELDS
                 )
             )
-            or (
-                isinstance(lease, dict)
-                and set(lease) == LW2_WRITER_LEASE_FIELDS
-            )
-        )
         if not selected:
             if action == "acquire":
                 return _acquire_writer_lease(
                     store, identity, task_id=task_id, owner=owner,
-                    ttl_seconds=ttl_seconds,
+                    ttl_seconds=ttl_seconds, now=now,
                 )
             if not lease_id:
                 return _lease_result(
@@ -808,6 +832,7 @@ def filesystem_writer_lease_action(
                 task_id=task_id,
                 owner=owner,
                 ttl_seconds=ttl_seconds,
+                now=now,
                 admission_binding={
                     "admission_id": admission_id,
                     "accepted_generation_digest": accepted_generation_digest,

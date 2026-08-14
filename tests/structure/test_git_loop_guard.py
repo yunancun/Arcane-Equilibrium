@@ -22,6 +22,9 @@ from agent_governance_task_control import (  # noqa: E402
     acquire_writer_lease,
     inspect_worktree,
 )
+from agent_governance_context import capture_repository_baseline  # noqa: E402
+from agent_governance_routing import route_task, task_contract_projection  # noqa: E402
+from agent_governance_task_admission import acquire_task_admission  # noqa: E402
 SYNC = (ROOT / ".codex/SYNC.md").read_text(encoding="utf-8")
 SUBAGENT = (ROOT / ".codex/SUBAGENT_EXECUTION_RULES.md").read_text(
     encoding="utf-8"
@@ -78,12 +81,37 @@ def _fixture(tmp_path: Path) -> tuple[Path, Path, Path, dict[str, str]]:
     _git(origin, "symbolic-ref", "HEAD", "refs/heads/main")
     feature = tmp_path / "feature"
     _git(repo, "worktree", "add", "-q", "-b", "agent/test-loop", str(feature), "main")
+    routed = route_task({
+        "task_shape": "implementation",
+        "surfaces": ["python"],
+        "risk": "low",
+        "uncertainty": "low",
+        "side_effect_class": "repo_write",
+        "objective": "exercise the guarded writer loop",
+        "scope": ["owned.txt"],
+        "dirty_scope": ["owned.txt"],
+        "verification_scope": ["owned.txt"],
+        "acceptance_criteria": ["guarded bytes changed"],
+        "hard_stops": ["no runtime effect"],
+        "baseline": capture_repository_baseline(feature),
+        "direct_interfaces": ["owned.txt"],
+        "previous_failure": "none",
+        "task_prompt": "exercise the guarded writer loop",
+        "continuation_mode": "finite",
+    })
+    admission = acquire_task_admission(
+        repo=feature,
+        task_id="guard-test",
+        owner="pytest",
+        task_contract=task_contract_projection(routed["task_facts"]),
+    )
     identity = inspect_worktree(feature)
     acquired = acquire_writer_lease(
         FileWriterLeaseStore(identity.common_dir),
         identity,
         task_id="guard-test",
         owner="pytest",
+        admission_id=admission["admission_id"],
     )
     assert acquired["status"] == "PASS"
     lease = {
