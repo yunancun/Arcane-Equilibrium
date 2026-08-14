@@ -24,6 +24,11 @@ from agent_governance_task_control import (
     validate_progress_snapshot,
 )
 from agent_governance_writer_lease import inspect_worktree
+from agent_governance_lw2_readmission import (
+    LW2_ADMISSION_PROFILE,
+    capture_current_repository_identity,
+    validate_lw2_readmission_eligibility,
+)
 from agent_governance_routing import (
     TASK_CONTRACT_FIELDS,
     _normalize_task_facts,
@@ -46,6 +51,7 @@ TASK_ADMISSION_RECORD_FIELDS = {
 TASK_ID_RE = re.compile(r"[A-Za-z0-9][A-Za-z0-9_.:-]{0,127}")
 OWNER_RE = re.compile(r"[A-Za-z0-9][A-Za-z0-9_.:@/-]{0,127}")
 ADMISSION_ID_RE = re.compile(r"[0-9a-f]{32}")
+LW2_TASK_ID = "S2E-LW2"
 OperatorRequestVerifier = Callable[[dict[str, Any]], bool]
 
 
@@ -220,6 +226,22 @@ def acquire_task_admission(
         )
     identity = inspect_worktree(repo)
     task_contract = _normalized_task_contract(task_contract)
+    if task_id == LW2_TASK_ID and task_contract["admission_profile"] != LW2_ADMISSION_PROFILE:
+        raise ValueError("S2E-LW2 task admission requires the exact LW2 admission_profile")
+    if task_contract["admission_profile"] == LW2_ADMISSION_PROFILE and task_id != LW2_TASK_ID:
+        raise ValueError("LW2 admission_profile requires canonical task_id S2E-LW2")
+    if task_contract["admission_profile"] == LW2_ADMISSION_PROFILE:
+        current_head, current_tree = capture_current_repository_identity(
+            Path(identity.worktree)
+        )
+        validate_lw2_readmission_eligibility(
+            admission_profile=task_contract["admission_profile"],
+            claim_inputs=task_contract["claim_inputs"],
+            claim_payloads=task_contract["claim_payloads"],
+            current_head=current_head,
+            current_tree=current_tree,
+            expected_writer_identity=owner,
+        )
     control = compile_task_execution_policy(task_contract)
     contract_digest = control["task_contract_digest"]
     if control["continuation_mode"] == "operator_loop":

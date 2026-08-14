@@ -247,3 +247,149 @@ def project_todo_active_rows(data: bytes, spec: dict[str, Any]) -> bytes:
     if len(projection) > 8 * 1024:
         raise ValueError("todo_active_rows projection exceeds 8KiB")
     return projection
+
+
+EMPTY_DISPATCH_MARKER = (
+    "S2E-DISPATCH-PROJECTION:\n"
+    "schema_version=todo_dispatch_projection_v1\n"
+    "queue_state=NO_ACTIVE_UNIT\n"
+    "active_unit_id=null\n"
+    "active_count=0\n"
+    "next_candidate=S2E-LW2\n"
+    "next_candidate_state=WAITING_FRESH_ADMISSION\n"
+    "dispatchable=false\n"
+    "next_action=null\n"
+)
+
+
+def project_todo_dispatch_projection(
+    data: bytes, spec: dict[str, Any]
+) -> dict[str, Any]:
+    """Project a legal empty dispatch lane from one exact TODO section."""
+
+    heading = spec.get("heading")
+    if not isinstance(heading, str) or not heading:
+        raise ValueError("todo_dispatch_projection heading must be exact")
+    lines = _markdown_lines(data)
+    matches: list[tuple[int, int]] = []
+    for index, line in enumerate(lines):
+        match = HEADING_RE.match(line.rstrip("\r\n"))
+        if match and line.rstrip("\r\n")[len(match.group(1)):].strip() == heading:
+            matches.append((index, len(match.group(1))))
+    if len(matches) != 1:
+        raise ValueError("todo_dispatch_projection heading must match exactly once")
+    start, level = matches[0]
+    end = len(lines)
+    for index in range(start + 1, len(lines)):
+        match = HEADING_RE.match(lines[index].rstrip("\r\n"))
+        if match and len(match.group(1)) <= level:
+            end = index
+            break
+    section_lines = lines[start + 1:end]
+    section = "".join(section_lines)
+    tables: list[list[str]] = []
+    cursor = 0
+    while cursor < len(section_lines):
+        if not section_lines[cursor].lstrip().startswith("|"):
+            cursor += 1
+            continue
+        table: list[str] = []
+        while (
+            cursor < len(section_lines)
+            and section_lines[cursor].lstrip().startswith("|")
+        ):
+            table.append(section_lines[cursor])
+            cursor += 1
+        if len(table) >= 2:
+            separator = _table_cells(table[1])
+            if separator and all(
+                re.fullmatch(r":?-{3,}:?", cell) for cell in separator
+            ):
+                tables.append(table)
+    if len(tables) != 1:
+        raise ValueError(
+            "todo_dispatch_projection section must contain exactly one Markdown table"
+        )
+    table = tables[0]
+    headers = _table_cells(table[0])
+    required_columns = (
+        spec.get("id_column"),
+        spec.get("status_column"),
+        spec.get("dependency_column"),
+    )
+    if any(
+        not isinstance(column, str) or headers.count(column) != 1
+        for column in required_columns
+    ):
+        raise ValueError(
+            "todo_dispatch_projection required columns must each occur exactly once"
+        )
+    id_index, status_index, dependency_index = (
+        headers.index(column) for column in required_columns
+    )
+    rows: list[tuple[str, list[str], str]] = []
+    by_id: dict[str, tuple[str, list[str], str]] = {}
+    for raw_line in table[2:]:
+        cells = _table_cells(raw_line)
+        if len(cells) != len(headers):
+            raise ValueError("todo_dispatch_projection table width is inconsistent")
+        row_id = _plain_cell(cells[id_index])
+        if not row_id or row_id in by_id:
+            raise ValueError(
+                "todo_dispatch_projection IDs must be non-empty and unique"
+            )
+        row = (raw_line, cells, row_id)
+        rows.append(row)
+        by_id[row_id] = row
+    active_rows = [
+        row for row in rows
+        if _plain_cell(row[1][status_index]).upper().startswith("ACTIVE")
+    ]
+    marker_count = section.count(EMPTY_DISPATCH_MARKER)
+    marker_label_count = section.count("S2E-DISPATCH-PROJECTION:")
+    if active_rows and marker_label_count:
+        raise ValueError(
+            "todo_dispatch_projection EMPTY marker cannot coexist with ACTIVE rows"
+        )
+    if len(active_rows) > 1:
+        raise ValueError("todo_dispatch_projection permits at most one ACTIVE row")
+    if not active_rows and marker_count != 1:
+        raise ValueError("todo_dispatch_projection EMPTY marker must match exactly once")
+    if active_rows:
+        active_row = active_rows[0]
+        dependency_ids = ACTIVE_ID_RE.findall(active_row[1][dependency_index])
+        missing = sorted(set(dependency_ids) - set(by_id))
+        if missing:
+            raise ValueError(
+                f"todo_dispatch_projection missing dependency rows: {missing}"
+            )
+        dependency_rows = [
+            row for row in rows if row[2] in set(dependency_ids)
+        ]
+        selected_lines = [
+            table[0], table[1],
+            *[row[0] for row in dependency_rows],
+            active_row[0],
+        ]
+        projection = "".join(selected_lines)
+        if len(projection.encode("utf-8")) > 8 * 1024:
+            raise ValueError("todo_dispatch_projection projection exceeds 8KiB")
+        return {
+            "schema_version": "todo_dispatch_projection_v1",
+            "projection_state": "ACTIVE",
+            "active_rows": [{
+                "active_unit_id": active_row[2],
+                "content": projection,
+            }],
+            "active_count": 1,
+            "dispatchable": True,
+            "next_action": active_row[2],
+        }
+    return {
+        "schema_version": "todo_dispatch_projection_v1",
+        "projection_state": "EMPTY",
+        "active_rows": [],
+        "active_count": 0,
+        "dispatchable": False,
+        "next_action": None,
+    }

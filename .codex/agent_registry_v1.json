@@ -353,7 +353,7 @@
   },
   "context_packs": {
     "core": ["AGENTS.md", "CLAUDE.md#Product Boundary", "CLAUDE.md#Root Principles", "CLAUDE.md#Hard Boundaries"],
-    "active_state": [{"source": "TODO.md#S2E 當前 ACTIVE 派發", "kind": "todo_active_rows", "heading": "S2E 當前 ACTIVE 派發", "id_column": "ID", "status_column": "Lane／狀態", "dependency_column": "依賴", "dependency_depth": 1, "required_when": {"surfaces_any": ["operations", "runtime", "deploy", "service", "cron", "pg", "full_audit", "profit_diagnosis", "incident_rca"], "claims_any": ["runtime_claim", "end_to_end_claim"], "uncertainty_any": ["high", "unknown"]}}],
+    "active_state": [{"source": "TODO.md#S2E 當前派發投影", "kind": "todo_dispatch_projection", "heading": "S2E 當前派發投影", "id_column": "ID", "status_column": "Lane／狀態", "dependency_column": "依賴", "dependency_depth": 1, "required_when": {"surfaces_any": ["operations", "runtime", "deploy", "service", "cron", "pg", "full_audit", "profit_diagnosis", "incident_rca"], "claims_any": ["runtime_claim", "end_to_end_claim"], "uncertainty_any": ["high", "unknown"]}}],
     "architecture": [
       {"source": "CONTEXT.md", "kind": "repository_inventory", "paths": ["CONTEXT.md"], "min_matches": 1},
       {"source": "relevant docs/adr/*", "kind": "repository_inventory", "paths": ["docs/adr/*.md"], "min_matches": 1}

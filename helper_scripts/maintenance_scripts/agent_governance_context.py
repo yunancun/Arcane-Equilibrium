@@ -20,6 +20,7 @@ from agent_governance_registry import REPO_ROOT
 from agent_governance_context_refs import (
     project_history_refs,
     project_todo_active_rows,
+    project_todo_dispatch_projection,
 )
 from agent_governance_context_specs import source_name
 from agent_governance_routing import TASK_CONTRACT_FIELDS, _sha256_bytes
@@ -554,6 +555,99 @@ def _todo_active_rows_record(
     }
 
 
+def _todo_dispatch_projection_record(
+    spec: dict[str, Any], *, root: Path, evidence_state: dict[str, Any],
+    actual_baseline: dict[str, str] | None,
+) -> dict[str, Any]:
+    """Capture one exact typed EMPTY or ACTIVE dispatch projection."""
+
+    source = source_name(spec)
+    raw_path, _, selector = source.partition("#")
+    base = {"source": source, "selector": selector or spec.get("heading")}
+    if evidence_state.get(source) is not None:
+        return {
+            **base,
+            "status": "trusted_producer_override_rejected",
+            "digest": None,
+            "planned_tokens": 32,
+            "artifact_error": (
+                "todo_dispatch_projection is locally produced and cannot be "
+                "caller-supplied"
+            ),
+        }
+    local_file, local_error = _safe_artifact(raw_path, root)
+    if local_file is None:
+        return {
+            **base,
+            "status": "todo_dispatch_projection_invalid",
+            "digest": None,
+            "planned_tokens": 32,
+            "artifact_error": local_error,
+        }
+    data = local_file.read_bytes()
+    try:
+        payload = project_todo_dispatch_projection(data, spec)
+    except ValueError as error:
+        payload = {
+            "schema_version": "todo_dispatch_projection_error_v1",
+            "projection_state": "INVALID",
+            "error": str(error),
+        }
+        raw = json.dumps(
+            payload,
+            ensure_ascii=False,
+            sort_keys=True,
+            separators=(",", ":"),
+            allow_nan=False,
+        ).encode("utf-8")
+        digest = _sha256_bytes(raw)
+        observed_at, expires_at = _capture_times("source_snapshot")
+        return {
+            **base,
+            "status": "todo_dispatch_projection_invalid",
+            "capture_kind": "source_snapshot",
+            "producer": "repository_bytes_v1",
+            "baseline": actual_baseline,
+            "observed_at": observed_at,
+            "expires_at": expires_at,
+            "content_encoding": "json",
+            "content": payload,
+            "digest": digest,
+            "content_digest": digest,
+            "bytes": len(raw),
+            "source_bytes": len(data),
+            "full_file_token_estimate": max(1, (len(data) + 3) // 4),
+            "planned_tokens": max(1, (len(raw) + 3) // 4),
+            "artifact_error": str(error),
+        }
+    raw = json.dumps(
+        payload,
+        ensure_ascii=False,
+        sort_keys=True,
+        separators=(",", ":"),
+        allow_nan=False,
+    ).encode("utf-8")
+    digest = _sha256_bytes(raw)
+    observed_at, expires_at = _capture_times("source_snapshot")
+    return {
+        **base,
+        "status": "pinned",
+        "capture_kind": "source_snapshot",
+        "producer": "repository_bytes_v1",
+        "baseline": actual_baseline,
+        "observed_at": observed_at,
+        "expires_at": expires_at,
+        "content_encoding": "json",
+        "content": payload,
+        "digest": digest,
+        "content_digest": digest,
+        "bytes": len(raw),
+        "source_bytes": len(data),
+        "full_file_token_estimate": max(1, (len(data) + 3) // 4),
+        "planned_tokens": max(1, (len(raw) + 3) // 4),
+    }
+
+
 def _history_refs_record(
     spec: dict[str, Any], *, root: Path, evidence_state: dict[str, Any],
     normalized_facts: dict[str, Any],
@@ -656,6 +750,13 @@ def _source_provenance_record(
     spec_kind = source_spec.get("kind") if isinstance(source_spec, dict) else None
     if spec_kind == "todo_active_rows":
         return _todo_active_rows_record(
+            source_spec,
+            root=root,
+            evidence_state=evidence_state,
+            actual_baseline=actual_baseline,
+        )
+    if spec_kind == "todo_dispatch_projection":
+        return _todo_dispatch_projection_record(
             source_spec,
             root=root,
             evidence_state=evidence_state,

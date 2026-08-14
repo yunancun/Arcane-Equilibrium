@@ -6,6 +6,7 @@ import hashlib
 import json
 import re
 from pathlib import PurePosixPath
+from pathlib import Path
 from typing import Any, Iterable
 
 from agent_governance_aiml_adoption import (
@@ -21,8 +22,14 @@ from agent_governance_execution_policy import (
     execution_policy_digest,
     promote_execution_envelope,
 )
+from agent_governance_lw2_readmission import (
+    LW2_ADMISSION_PROFILE,
+    canonical_claim_digest,
+    capture_current_repository_identity,
+    validate_lw2_readmission_eligibility,
+)
 from agent_governance_context_refs import normalize_history_refs
-from agent_governance_registry import load_registry, native_agent_binding
+from agent_governance_registry import REPO_ROOT, load_registry, native_agent_binding
 from agent_governance_task_control import (
     CONTINUATION_MODES,
     DEFAULT_CONTINUATION_MODE,
@@ -37,7 +44,8 @@ TASK_FACT_FIELDS = {
     "objective", "scope", "acceptance_criteria", "hard_stops", "baseline",
     "direct_interfaces", "previous_failure", "evidence_state", "expected_output",
     "side_effect_class", "uncertainty", "dirty_scope", "operator_risk_acceptance",
-    "verification_scope", "focus", "claim_inputs",
+    "verification_scope", "focus", "claim_inputs", "claim_payloads",
+    "admission_profile",
     "task_prompt", "task_prompt_digest", "continuation_mode",
     "operator_loop_request_digest", "history_refs",
 }
@@ -312,7 +320,8 @@ TASK_CONTRACT_FIELDS = (
     "task_shape", "surfaces", "risk", "runtime_claim", "end_to_end_claim",
     "uncertainty", "side_effect_class", "objective", "scope", "acceptance_criteria", "hard_stops",
     "baseline", "dirty_scope", "verification_scope", "direct_interfaces", "previous_failure", "focus",
-    "claim_inputs", "task_prompt", "task_prompt_digest", "continuation_mode",
+    "claim_inputs", "claim_payloads", "admission_profile",
+    "task_prompt", "task_prompt_digest", "continuation_mode",
     "operator_loop_request_digest", "history_refs",
 )
 
@@ -890,6 +899,29 @@ def _normalize_task_facts(task_facts: dict[str, Any]) -> dict[str, Any]:
     normalized["claim_inputs"] = {
         key.strip(): claim_inputs[key] for key in sorted(claim_inputs)
     }
+    admission_profile = normalized.get("admission_profile")
+    if admission_profile not in {None, LW2_ADMISSION_PROFILE}:
+        raise ValueError("task facts admission_profile is invalid")
+    normalized["admission_profile"] = admission_profile
+    claim_payloads = normalized.get("claim_payloads", {})
+    if not isinstance(claim_payloads, dict) or any(
+        not isinstance(key, str) or not key.strip()
+        for key in claim_payloads
+    ):
+        raise ValueError("task facts claim_payloads must map non-empty names to JSON payloads")
+    normalized_payloads: dict[str, Any] = {}
+    for key in sorted(claim_payloads):
+        normalized_key = key.strip()
+        if normalized_key not in normalized["claim_inputs"]:
+            raise ValueError(
+                f"task facts claim_payloads key lacks claim_inputs digest: {normalized_key}"
+            )
+        if canonical_claim_digest(claim_payloads[key]) != normalized["claim_inputs"][normalized_key]:
+            raise ValueError(
+                f"task facts claim_payloads digest mismatch: {normalized_key}"
+            )
+        normalized_payloads[normalized_key] = claim_payloads[key]
+    normalized["claim_payloads"] = normalized_payloads
     if "previous_failure" in normalized and not isinstance(
         normalized["previous_failure"], str
     ):
@@ -901,11 +933,23 @@ def route_task(
     task_facts: dict[str, Any],
     *,
     registry: dict[str, Any] | None = None,
+    repo: Path | None = None,
 ) -> dict[str, Any]:
     """Compile task facts into the mandatory hybrid DAG."""
 
     registry = load_registry() if registry is None else registry
     facts = _normalize_task_facts(task_facts)
+    if facts["admission_profile"] == LW2_ADMISSION_PROFILE:
+        current_head, current_tree = capture_current_repository_identity(
+            REPO_ROOT if repo is None else repo
+        )
+        validate_lw2_readmission_eligibility(
+            admission_profile=facts["admission_profile"],
+            claim_inputs=facts["claim_inputs"],
+            claim_payloads=facts["claim_payloads"],
+            current_head=current_head,
+            current_tree=current_tree,
+        )
     surfaces, shape, risk = set(facts["surfaces"]), facts["task_shape"], facts["risk"]
     uncertainty = facts["uncertainty"]
     runtime_claim = facts.get("runtime_claim", False)

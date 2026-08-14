@@ -23,7 +23,11 @@ from agent_governance_execution import (  # noqa: E402
 )
 from agent_governance_execution import context_plan_digest  # noqa: E402
 import agent_governance_context as context_producer  # noqa: E402
-from agent_governance_context_refs import project_todo_active_rows  # noqa: E402
+from agent_governance_context_refs import (  # noqa: E402
+    EMPTY_DISPATCH_MARKER,
+    project_todo_active_rows,
+    project_todo_dispatch_projection,
+)
 from agent_governance_registry import load_registry, validate_registry  # noqa: E402
 
 
@@ -189,12 +193,20 @@ def test_full_profit_and_incident_context_activate_bounded_current_todo() -> Non
         )
         todo = next(
             source for source in plan["sources"]
-            if source["source"] == "TODO.md#S2E 當前 ACTIVE 派發"
+            if source["source"] == "TODO.md#S2E 當前派發投影"
         )
+        assert todo["content"] == {
+            "schema_version": "todo_dispatch_projection_v1",
+            "projection_state": "EMPTY",
+            "active_rows": [],
+            "active_count": 0,
+            "dispatchable": False,
+            "next_action": None,
+        }
         assert todo["planned_tokens"] < todo["full_file_token_estimate"]
 
 
-def test_active_state_contains_only_unique_active_row_and_direct_dependencies() -> None:
+def test_active_state_contains_the_exact_empty_dispatch_projection() -> None:
     plan = compile_context(
         "PM",
         _facts(
@@ -205,14 +217,17 @@ def test_active_state_contains_only_unique_active_row_and_direct_dependencies() 
     )
     todo = next(
         source for source in plan["sources"]
-        if source["source"] == "TODO.md#S2E 當前 ACTIVE 派發"
+        if source["source"] == "TODO.md#S2E 當前派發投影"
     )
     content = todo["content"]
-    assert "`S2E.2b-1`" in content
-    assert "`S2E.2b-2`" in content
-    assert "`S2E.0`" not in content
-    assert "`S2E.4`" not in content
-    assert content.count("\n|") == 3
+    assert content == {
+        "schema_version": "todo_dispatch_projection_v1",
+        "projection_state": "EMPTY",
+        "active_rows": [],
+        "active_count": 0,
+        "dispatchable": False,
+        "next_action": None,
+    }
     assert todo["bytes"] < 8_192
     assert todo["planned_tokens"] < 2_048
     assert todo["digest"] == todo["content_digest"]
@@ -247,6 +262,306 @@ def test_active_state_projection_fails_closed_for_duplicate_active_or_missing_de
         project_todo_active_rows(missing, spec)
 
 
+def test_dispatch_projection_accepts_the_exact_empty_marker() -> None:
+    document = (
+        "# TODO\n\n"
+        "### S2E 當前派發投影\n\n"
+        "S2E-DISPATCH-PROJECTION:\n"
+        "schema_version=todo_dispatch_projection_v1\n"
+        "queue_state=NO_ACTIVE_UNIT\n"
+        "active_unit_id=null\n"
+        "active_count=0\n"
+        "next_candidate=S2E-LW2\n"
+        "next_candidate_state=WAITING_FRESH_ADMISSION\n"
+        "dispatchable=false\n"
+        "next_action=null\n\n"
+        "| ID | Lane／狀態 | 依賴 | 精確工作 | 驗收／下一步 |\n"
+        "|---|---|---|---|---|\n"
+        "| `S2E.2b-2` | WAITING | S2E.2b-1 | future | later |\n"
+    ).encode()
+    spec = {
+        "source": "TODO.md#S2E 當前派發投影",
+        "kind": "todo_dispatch_projection",
+        "heading": "S2E 當前派發投影",
+        "id_column": "ID",
+        "status_column": "Lane／狀態",
+        "dependency_column": "依賴",
+        "dependency_depth": 1,
+        "required_when": {"surfaces_any": ["runtime"]},
+    }
+
+    assert project_todo_dispatch_projection(document, spec) == {
+        "schema_version": "todo_dispatch_projection_v1",
+        "projection_state": "EMPTY",
+        "active_rows": [],
+        "active_count": 0,
+        "dispatchable": False,
+        "next_action": None,
+    }
+
+
+def test_dispatch_projection_rejects_empty_marker_with_an_active_row() -> None:
+    document = (
+        "# TODO\n\n"
+        "### S2E 當前派發投影\n\n"
+        "S2E-DISPATCH-PROJECTION:\n"
+        "schema_version=todo_dispatch_projection_v1\n"
+        "queue_state=NO_ACTIVE_UNIT\n"
+        "active_unit_id=null\n"
+        "active_count=0\n"
+        "next_candidate=S2E-LW2\n"
+        "next_candidate_state=WAITING_FRESH_ADMISSION\n"
+        "dispatchable=false\n"
+        "next_action=null\n\n"
+        "| ID | Lane／狀態 | 依賴 | 精確工作 | 驗收／下一步 |\n"
+        "|---|---|---|---|---|\n"
+        "| `S2E.2b-2` | ACTIVE | S2E.2b-1 | current | pass |\n"
+    ).encode()
+    spec = {
+        "source": "TODO.md#S2E 當前派發投影",
+        "kind": "todo_dispatch_projection",
+        "heading": "S2E 當前派發投影",
+        "id_column": "ID",
+        "status_column": "Lane／狀態",
+        "dependency_column": "依賴",
+        "dependency_depth": 1,
+        "required_when": {"surfaces_any": ["runtime"]},
+    }
+
+    with pytest.raises(ValueError, match="EMPTY marker cannot coexist with ACTIVE"):
+        project_todo_dispatch_projection(document, spec)
+
+
+def test_dispatch_projection_preserves_one_active_row_and_direct_dependencies() -> None:
+    document = (
+        "# TODO\n\n"
+        "### S2E 當前派發投影\n\n"
+        "| ID | Lane／狀態 | 依賴 | 精確工作 | 驗收／下一步 |\n"
+        "|---|---|---|---|---|\n"
+        "| `S2E.2b-1` | SOURCE_LANDED | none | dependency | done |\n"
+        "| `S2E.2b-2` | ACTIVE | S2E.2b-1 | current | pass |\n"
+        "| `S2E.2b-3` | WAITING | S2E.2b-2 | later | later |\n"
+    ).encode()
+    spec = {
+        "source": "TODO.md#S2E 當前派發投影",
+        "kind": "todo_dispatch_projection",
+        "heading": "S2E 當前派發投影",
+        "id_column": "ID",
+        "status_column": "Lane／狀態",
+        "dependency_column": "依賴",
+        "dependency_depth": 1,
+        "required_when": {"surfaces_any": ["runtime"]},
+    }
+
+    payload = project_todo_dispatch_projection(document, spec)
+
+    assert payload["schema_version"] == "todo_dispatch_projection_v1"
+    assert payload["projection_state"] == "ACTIVE"
+    assert payload["active_count"] == 1
+    assert payload["dispatchable"] is True
+    assert payload["next_action"] == "S2E.2b-2"
+    assert len(payload["active_rows"]) == 1
+    projection = payload["active_rows"][0]["content"]
+    assert "`S2E.2b-1`" in projection
+    assert "`S2E.2b-2`" in projection
+    assert "`S2E.2b-3`" not in projection
+
+
+def test_empty_dispatch_context_capture_contains_payload_and_full_file_estimate(
+    tmp_path: Path,
+) -> None:
+    repo = tmp_path / "repo"
+    repo.mkdir()
+    todo = repo / "TODO.md"
+    todo.write_text(
+        "# TODO\n\n"
+        "unselected full-file bytes\n\n"
+        "### S2E 當前派發投影\n\n"
+        "S2E-DISPATCH-PROJECTION:\n"
+        "schema_version=todo_dispatch_projection_v1\n"
+        "queue_state=NO_ACTIVE_UNIT\n"
+        "active_unit_id=null\n"
+        "active_count=0\n"
+        "next_candidate=S2E-LW2\n"
+        "next_candidate_state=WAITING_FRESH_ADMISSION\n"
+        "dispatchable=false\n"
+        "next_action=null\n\n"
+        "| ID | Lane／狀態 | 依賴 | 精確工作 | 驗收／下一步 |\n"
+        "|---|---|---|---|---|\n"
+        "| `S2E.2b-2` | WAITING | S2E.2b-1 | future | later |\n",
+        encoding="utf-8",
+    )
+    for args in (
+        ("init",),
+        ("config", "user.email", "context-test@example.invalid"),
+        ("config", "user.name", "Context Test"),
+        ("add", "."),
+        ("commit", "-m", "baseline"),
+    ):
+        subprocess.run(["git", *args], cwd=repo, check=True, capture_output=True)
+    registry = deepcopy(load_registry())
+    registry["roles"]["PM"]["context_packs"] = ["active_state"]
+    registry["context_packs"]["active_state"] = [{
+        "source": "TODO.md#S2E 當前派發投影",
+        "kind": "todo_dispatch_projection",
+        "heading": "S2E 當前派發投影",
+        "id_column": "ID",
+        "status_column": "Lane／狀態",
+        "dependency_column": "依賴",
+        "dependency_depth": 1,
+        "required_when": {"surfaces_any": ["runtime"]},
+    }]
+    facts = _facts(
+        surfaces=["runtime"],
+        risk="high",
+        uncertainty="high",
+        baseline=capture_repository_baseline(repo),
+        scope=["TODO.md"],
+        dirty_scope=["TODO.md"],
+    )
+
+    plan = compile_context("PM", facts, registry, repo)
+    source = plan["sources"][0]
+
+    assert source["status"] == "pinned"
+    assert source["content"] == {
+        "schema_version": "todo_dispatch_projection_v1",
+        "projection_state": "EMPTY",
+        "active_rows": [],
+        "active_count": 0,
+        "dispatchable": False,
+        "next_action": None,
+    }
+    full_bytes = todo.read_bytes()
+    assert source["source_bytes"] == len(full_bytes)
+    assert source["full_file_token_estimate"] == max(1, (len(full_bytes) + 3) // 4)
+
+
+@pytest.mark.parametrize(
+    ("document", "message"),
+    [
+        (
+            "### S2E 當前派發投影\n\n"
+            "| ID | Lane／狀態 | 依賴 | 精確工作 | 驗收／下一步 |\n"
+            "|---|---|---|---|---|\n"
+            "| `S2E.2b-2` | WAITING | S2E.2b-1 | future | later |\n",
+            "EMPTY marker",
+        ),
+        (
+            "### S2E 當前派發投影\n\n"
+            "S2E-DISPATCH-PROJECTION:\n"
+            "schema_version=todo_dispatch_projection_v1\n"
+            "queue_state=NO_ACTIVE_UNIT\nactive_unit_id=null\nactive_count=0\n"
+            "next_candidate=S2E-LW2\n"
+            "next_candidate_state=WAITING_FRESH_ADMISSION\n"
+            "dispatchable=true\nnext_action=null\n\n"
+            "| ID | Lane／狀態 | 依賴 | 精確工作 | 驗收／下一步 |\n"
+            "|---|---|---|---|---|\n"
+            "| `S2E.2b-2` | WAITING | S2E.2b-1 | future | later |\n",
+            "EMPTY marker",
+        ),
+        (
+            "### S2E 當前派發投影\n\n"
+            "S2E-DISPATCH-PROJECTION:\n"
+            "schema_version=todo_dispatch_projection_v1\n"
+            "queue_state=NO_ACTIVE_UNIT\nactive_unit_id=null\nactive_count=0\n"
+            "next_candidate=S2E-LW2\n"
+            "next_candidate_state=WAITING_FRESH_ADMISSION\n"
+            "dispatchable=false\nnext_action=S2E-LW2\n\n"
+            "| ID | Lane／狀態 | 依賴 | 精確工作 | 驗收／下一步 |\n"
+            "|---|---|---|---|---|\n"
+            "| `S2E.2b-2` | WAITING | S2E.2b-1 | future | later |\n",
+            "EMPTY marker",
+        ),
+        (
+            "### S2E 當前派發投影\n\n"
+            "S2E-DISPATCH-PROJECTION:\n"
+            "schema_version=todo_dispatch_projection_v1\n"
+            "queue_state=ACTIVE_UNIT\nactive_unit_id=S2E.2b-2\nactive_count=1\n"
+            "next_candidate=S2E-LW2\n"
+            "next_candidate_state=WAITING_FRESH_ADMISSION\n"
+            "dispatchable=true\nnext_action=S2E.2b-2\n\n"
+            "| ID | Lane／狀態 | 依賴 | 精確工作 | 驗收／下一步 |\n"
+            "|---|---|---|---|---|\n"
+            "| `S2E.2b-1` | SOURCE_LANDED | none | dependency | done |\n"
+            "| `S2E.2b-2` | ACTIVE | S2E.2b-1 | current | pass |\n",
+            "EMPTY marker cannot coexist with ACTIVE",
+        ),
+        (
+            "### S2E 當前派發投影\n\n"
+            f"{EMPTY_DISPATCH_MARKER}\n{EMPTY_DISPATCH_MARKER}\n"
+            "| ID | Lane／狀態 | 依賴 | 精確工作 | 驗收／下一步 |\n"
+            "|---|---|---|---|---|\n"
+            "| `S2E.2b-2` | WAITING | S2E.2b-1 | future | later |\n",
+            "EMPTY marker",
+        ),
+        (
+            "### S2E 當前派發投影\n\n"
+            "| ID | Lane／狀態 | 依賴 | 精確工作 | 驗收／下一步 |\n"
+            "|---|---|---|---|---|\n"
+            "| `S2E.2b-1` | SOURCE_LANDED | none | dependency | done |\n"
+            "| `S2E.2b-2` | ACTIVE | S2E.2b-1 | current | pass |\n"
+            "| `S2E.2b-3` | ACTIVE | S2E.2b-1 | current | pass |\n",
+            "at most one ACTIVE",
+        ),
+        (
+            "### S2E 當前 ACTIVE 派發\n\n"
+            "| ID | Lane／狀態 | 依賴 | 精確工作 | 驗收／下一步 |\n"
+            "|---|---|---|---|---|\n"
+            "| `S2E.2b-2` | ACTIVE | S2E.2b-1 | current | pass |\n",
+            "heading",
+        ),
+    ],
+)
+def test_dispatch_projection_fails_closed_for_illegal_queue_states(
+    document: str, message: str,
+) -> None:
+    spec = {
+        "source": "TODO.md#S2E 當前派發投影",
+        "kind": "todo_dispatch_projection",
+        "heading": "S2E 當前派發投影",
+        "id_column": "ID",
+        "status_column": "Lane／狀態",
+        "dependency_column": "依賴",
+        "dependency_depth": 1,
+        "required_when": {"surfaces_any": ["runtime"]},
+    }
+    with pytest.raises(ValueError, match=message):
+        project_todo_dispatch_projection(document.encode(), spec)
+
+
+def test_dispatch_projection_ignores_active_rows_outside_the_exact_section() -> None:
+    marker = (
+        "S2E-DISPATCH-PROJECTION:\n"
+        "schema_version=todo_dispatch_projection_v1\n"
+        "queue_state=NO_ACTIVE_UNIT\nactive_unit_id=null\nactive_count=0\n"
+        "next_candidate=S2E-LW2\n"
+        "next_candidate_state=WAITING_FRESH_ADMISSION\n"
+        "dispatchable=false\nnext_action=null\n"
+    )
+    document = (
+        "### Another lane\n\n"
+        "| ID | Lane／狀態 | 依賴 |\n|---|---|---|\n"
+        "| `OTHER` | ACTIVE | none |\n\n"
+        "### S2E 當前派發投影\n\n"
+        f"{marker}\n"
+        "| ID | Lane／狀態 | 依賴 | 精確工作 | 驗收／下一步 |\n"
+        "|---|---|---|---|---|\n"
+        "| `S2E.2b-2` | WAITING | S2E.2b-1 | future | later |\n"
+    ).encode()
+    spec = {
+        "source": "TODO.md#S2E 當前派發投影",
+        "kind": "todo_dispatch_projection",
+        "heading": "S2E 當前派發投影",
+        "id_column": "ID",
+        "status_column": "Lane／狀態",
+        "dependency_column": "依賴",
+        "dependency_depth": 1,
+        "required_when": {"surfaces_any": ["runtime"]},
+    }
+    assert project_todo_dispatch_projection(document, spec)["projection_state"] == "EMPTY"
+
+
 def test_unrelated_todo_row_does_not_change_model_visible_context(
     tmp_path: Path,
 ) -> None:
@@ -254,7 +569,7 @@ def test_unrelated_todo_row_does_not_change_model_visible_context(
     repo.mkdir()
     todo = repo / "TODO.md"
     prefix = (
-        "# TODO\n\n### S2E 當前 ACTIVE 派發\n\n"
+        "# TODO\n\n### S2E 當前派發投影\n\n"
         "| ID | Lane／狀態 | 依賴 | 精確工作 | 驗收／下一步 |\n"
         "|---|---|---|---|---|\n"
         "| `S2E.1` | SOURCE_LANDED | none | dependency | done |\n"

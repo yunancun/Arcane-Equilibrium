@@ -282,6 +282,7 @@ def _build_parser() -> argparse.ArgumentParser:
     render = subparsers.add_parser("render", help="render platform/profile Adapter views")
     render.add_argument("--check", action="store_true", help="report drift without writing")
     route = subparsers.add_parser("route", help="compile JSON task facts into a hybrid DAG")
+    route.add_argument("--repo", type=Path, default=Path("."))
     route.add_argument("task_facts", help="JSON object or @path-to-JSON")
     review_control = subparsers.add_parser(
         "review-control",
@@ -537,7 +538,19 @@ def main(
         print(json.dumps({"status": "PASS", "roles": len(registry["roles"])}, ensure_ascii=False))
         return 0
     if args.action == "route":
-        print(json.dumps(route_task(_json_arg(args.task_facts)), ensure_ascii=False, indent=2))
+        try:
+            routed = route_task(_json_arg(args.task_facts), repo=args.repo)
+        except (OSError, TypeError, ValueError) as error:
+            print(json.dumps(
+                {"status": "FAIL", "error": str(error)},
+                ensure_ascii=False,
+            ))
+            return 2
+        print(json.dumps(
+            routed,
+            ensure_ascii=False,
+            indent=2,
+        ))
         return 0
     if args.action == "review-control":
         try:
