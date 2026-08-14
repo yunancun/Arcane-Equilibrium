@@ -115,9 +115,11 @@ Context 不是一段可任意重寫的 prompt。Compiler 先把 exact `task_prom
 shape/surfaces/risk、必填 `low|medium|high|unknown` uncertainty、runtime/E2E claim、
 `side_effect_class`、objective/scope/acceptance/hard stops、三欄 source baseline、
 `dirty_scope`、可選 `verification_scope`、direct interfaces、previous failure、
-可選 `history_refs` 與 verdict-relevant `claim_inputs` 正規化成
-`task_contract`。`claim_inputs` 是 name→canonical digest map；任何會影響結論的 prior/
-evidence 都必須在 admission 時綁定，不能藏在 free-form prompt 內替換。其 canonical
+可選 `history_refs`、verdict-relevant `claim_inputs`、typed `claim_payloads` 與可選
+`admission_profile` 正規化成 `task_contract`。`claim_inputs` 是 name→canonical digest
+map；每份 `claim_payloads` 都必須 canonical-hash 回同名 digest。任何會影響結論的 prior/
+evidence 都必須在 admission 時綁定，不能藏在 free-form prompt、task ID、filename、TODO
+label 或 summary 內推導 profile 或替換。其 canonical
 SHA-256 以 `task_contract_digest` 同時綁在 plan、artifact、每個 `role_fragment_v1` 與最終
 closure。Closure 在 `adjudicated_at` 重新驗 artifact exact fields、canonical bytes、source
 bytes/digest、producer、capture-kind TTL、baseline 與 compiler-derived budget authority；
@@ -129,11 +131,18 @@ verifier `path_scope` 為空時採用，並先於 `dirty_scope` fallback。它�
 writer ownership、mutation authority 或 ACL，也不能取代 writer `dirty_scope` 或 whole-repo
 generation checks。
 
-`active_state` 不再投影整個 `TODO.md`：compiler 只讀 exact
-`S2E 當前 ACTIVE 派發` 表，選唯一 ACTIVE row 與 direct dependency rows，最多
-8 KiB，並對投影 bytes 計 digest。`history_refs` 每項綁 allowlisted safe path、exact H2
-heading 與 digest，單段 16 KiB、總量 32 KiB；glob、whole-file、symlink、traversal、
-未選 section 均拒絕。因而無關 TODO/history 變更不再破壞 shared Context/cache key。
+`active_state` 不再投影整個 `TODO.md`：Registry 的 current S2E selector 使用
+`todo_dispatch_projection`，只讀 exact `S2E 當前派發投影` section。單一 ACTIVE row
+仍只投影該 row 與 direct dependencies、最多 8 KiB；零 ACTIVE 則必須有唯一且逐欄 exact
+的 `S2E-DISPATCH-PROJECTION` marker，產生 typed JSON content：
+`projection_state=EMPTY`、`active_rows=[]`、`active_count=0`、
+`dispatchable=false`、`next_action=null`。Capture 仍具 content digest/bytes/provenance、
+`source_bytes` 與由完整 TODO 真實計算的 `full_file_token_estimate`。missing/renamed heading、
+malformed marker、EMPTY+ACTIVE、其他 section 補數或多個 ACTIVE 全部 fail closed，且沒有
+full-file fallback；legacy `todo_active_rows` callers 仍要求 exactly-one ACTIVE。
+`history_refs` 每項綁 allowlisted safe path、exact H2 heading 與 digest，單段 16 KiB、總量
+32 KiB；glob、whole-file、symlink、traversal、未選 section 均拒絕。因而無關
+TODO/history 變更不再破壞 shared Context/cache key。
 
 Budget 分開管理 single-call planned lower bound、exact prompt bytes、workflow planned
 lower bound、unique nodes、call attempts 與 retry：
@@ -217,7 +226,9 @@ Task-facts seam 是 typed、fail-closed：exact `task_prompt`、`task_shape`、`
 scope、acceptance、hard stops、baseline、`dirty_scope`、可選 `verification_scope`、
 direct interfaces、previous failure、可選 `history_refs` 與可選
 `evidence_state` 供 Context Interface 使用；verdict-relevant prior/evidence 另由
-`claim_inputs` 以 canonical digest 固定。`continuation_mode` 缺省只正規化為
+`claim_inputs` 以 canonical digest 固定；optional `claim_payloads` 必須逐一 canonical-hash
+回同名 digest，optional `admission_profile` 只接受 compiler 已知 profile。
+`continuation_mode` 缺省只正規化為
 `finite`；只有 exact Operator request 第一控制行精確等於 `/loop` 才可用
 `operator_loop`，並將 marker 綁入原始 admitted task contract digest。
 `side_effect_class` 必須明示為 `none`、repo/test/
@@ -231,6 +242,17 @@ runtime-effect/incident-RCA 等 operational surface 才觸發 OPS，避免 sourc
 runtime code change 機械式增加 review。沒有 intervening effect 的 read-only/source lane
 只產一個 `ops_observation`；只有 admitted effect 才保留 separated preflight →
 effect Adapter → postcheck。
+
+`aiml_s2e_lw2_readmission_v1` 是最窄的 future-LW2 executable guard，不由 prompt、
+task ID、filename 或 TODO wording 推斷；profile 一旦明示，task admission 另與 canonical
+`S2E-LW2` task ID 交叉綁定。它要求 exactly three current-head claim pairs：combined-main
+raw 40-hex head/tree identity、同 head/tree 的 governed read-only focused/unreachability
+`command_capture_v2` PASS、以及 distinct reviewer（reviewer != writer）對該 capture digest
+作出的同-head governed read-only PASS review。Route 先以實際 repository HEAD/tree 驗證
+bundle 才可建 DAG；persisted task admission 再以實際 worktree HEAD/tree 與 admission owner
+驗證才可寫 store，故 missing/stale/mismatch、digest/payload substitution、self-review 或
+writer/owner mismatch 都在 DAG/lease/source write 前 fail closed。該 guard 只回 eligibility，
+不建立 LW2 task、DAG、lease、source write、Context artifact 或 receipt。
 
 `public_web_read` 僅是 read-only evidence acquisition：必須實際開啟 public URL，保留
 citation/capture provenance；平台是否提供 WebSearch/WebFetch 是另一個 availability fact，

@@ -1,7 +1,29 @@
 # CLAUDE_CHANGELOG.md — 開發歷史歸檔
 
 > 從 CLAUDE.md / TODO.md 遷出的 Wave/Sprint/Batch + TODO version-increment 歷史敘事。新 session 不需要讀此文件，僅供回顧歷史時查閱。
-> 最後更新：2026-08-14（TODO v878 UID validation/publication closure）
+> 最後更新：2026-08-14（TODO v879 empty-queue Context / LW2 admission binding repair）
+
+---
+
+## TODO v879 增量：empty-queue Context / LW2 admission binding repair（2026-08-14）
+
+- `active_state` Registry selector 改綁 `TODO.md#S2E 當前派發投影` 與新的
+  `todo_dispatch_projection`。零 ACTIVE 只有在 exact canonical EMPTY marker 合法時
+  才可產生 typed `projection_state=EMPTY` capture；capture 保留 `content`、實際完整
+  TODO bytes 所算的 `full_file_token_estimate`、digest/bytes/provenance。舊
+  `todo_active_rows` 的 exactly-one ACTIVE 語義不變，沒有 full-file fallback。
+- 未來 `S2E-LW2` fresh admission 只接受 `aiml_s2e_lw2_readmission_v1`：三份
+  `claim_inputs` 必須逐一以 canonical digest 綁定 payload，且共同指向實際 current
+  combined-main raw 40-hex head/tree；其內容分別是 identity、同-head governed
+  focused/unreachability `command_capture_v2` PASS，以及 distinct reviewer 對該 capture
+  digest 的同-head read-only PASS review。route 在建 DAG 前驗證，task admission 在
+  store/lease 前以實際 owner/current HEAD/tree 再驗證；missing、stale、mismatch、payload
+  substitution 或 self-review 均 fail closed。
+- 此 transition 只修 executable control-plane gate。UID 保持
+  `UID_VALIDATION_PUBLICATION_CLOSED`；LW2 保持 physical `WAITING`、
+  `dispatchable=false`，目前沒有 LW2 task contract、DAG、lease、source write、Context
+  artifact 或 receipt。S2E=5/9、production effect=0/6、authority=0/9；不構成
+  runtime、deploy、PG、broker、order 或 trading authority。
 
 ---
 

@@ -2,7 +2,7 @@
 
 **Plan ID**: `AIML-LONG-LIVED-LANDING-V2`
 **Original date**: 2026-07-19
-**Revised**: 2026-08-14 (status/remaining-effort calibration; architecture unchanged)
+**Revised**: 2026-08-14 (status/remaining-effort calibration plus empty-queue/LW2 admission control-plane repair)
 **Planning baseline**: `b486c0718d1c26820cdb6308cccf74c686547b22`
 **Observed calibration baseline**: `UNVERIFIED_OBSERVATION`
 `2ed906607ca9eae641ee08940f3159463d86692c` (source context only; not a durable
@@ -766,11 +766,25 @@ the expected no-match source-inspection record is
 The canonical transition is `UID_VALIDATION_PUBLICATION_CLOSED` and only
 `LW2_RE_ADMISSION_READY`; it grants no runtime/effect/receipt/trading authority.
 
+**2026-08-14 executable control-plane repair.** The current S2E Registry source
+now selects the exact `S2E 當前派發投影` section through
+`todo_dispatch_projection`. Its canonical marker represents a legal zero-ACTIVE
+projection and produces complete typed EMPTY Context content, digest/bytes/
+provenance and a full-file token estimate; legacy `todo_active_rows` remains
+exactly-one. This repairs Context compilation only and does not make LW2 ACTIVE.
+
 The next runtime acceptance target remains non-dispatchable. AIML has zero
 ACTIVE source rows; LW2 remains in the physical `WAITING` queue with
-`dispatchable=false`. A fresh PM re-admission on current source must bind a new
-explicit task contract, routed DAG, writer lease and materialized Context before
-any LW2 source work; none exists now. S2E remains 5/9, production effect 0/6,
+`dispatchable=false`. A fresh PM re-admission on current source must first use
+`aiml_s2e_lw2_readmission_v1` and canonical-digest-bind exactly three payloads to
+the same actual combined-main head/tree: raw 40-hex identity, governed read-only
+focused/unreachability PASS capture, and an independent same-head PASS review
+whose distinct reviewer binds that capture digest. Route rejects missing,
+stale/mismatched, substituted or self-reviewed claims before DAG construction;
+task admission repeats the check against actual worktree HEAD/tree and owner
+before store/lease. Only then may a new explicit task contract, routed DAG,
+writer lease and materialized Context be created; none exists now. S2E remains
+5/9, production effect 0/6,
 authority 0/9, W0/LW1 receipts absent and all 16 external prerequisites intact.
 Only after fresh admission and named unblock evidence binds the surfaces, path
 scopes and uncertainty may each bounded Session derive its own risk DAG and
