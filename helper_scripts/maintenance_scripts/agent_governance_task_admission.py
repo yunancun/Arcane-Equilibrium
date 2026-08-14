@@ -30,6 +30,8 @@ from agent_governance_lw2_readmission import (
     LW2_ADMISSION_PROFILE,
     capture_current_repository_identity,
     lw2_contract_selected,
+    lw2_protected_inventory,
+    validate_lw2_protected_inventory_scope,
     validate_lw2_contract_binding,
     validate_lw2_readmission_eligibility,
 )
@@ -166,7 +168,6 @@ def _validate_record(record: Any, *, worktree: str) -> None:
         if (
             generation["schema_version"]
             != "task_admission_repository_generation_v1"
-            or generation["scope"] != record["task_contract"]["dirty_scope"]
             or not re.fullmatch(r"[0-9a-f]{40}", str(generation["source_head"]))
             or not re.fullmatch(r"[0-9a-f]{40}", str(generation["source_tree"]))
             or not re.fullmatch(
@@ -175,6 +176,7 @@ def _validate_record(record: Any, *, worktree: str) -> None:
             )
         ):
             raise ValueError("LW2 task admission accepted_generation is invalid")
+        validate_lw2_protected_inventory_scope(generation["scope"])
     elif generation is not None:
         raise ValueError("ordinary task admission must remain legacy-readable")
 
@@ -185,9 +187,12 @@ def capture_task_admission_generation(
 ) -> dict[str, Any]:
     """Capture exact HEAD/tree plus task-owned repository generation."""
 
-    scope = task_contract.get("dirty_scope")
-    if not isinstance(scope, list) or not scope:
+    dirty_scope = task_contract.get("dirty_scope")
+    if not isinstance(dirty_scope, list) or not dirty_scope:
         raise ValueError("LW2 task admission generation requires dirty_scope")
+    scope = list(lw2_protected_inventory(repo))
+    if not set(dirty_scope).issubset(scope):
+        raise ValueError("LW2 task admission dirty_scope is outside protected inventory")
     repository = capture_repository(scope, root=repo)
     source_head, source_tree = capture_current_repository_identity(repo)
     if repository["source_head"] != source_head:
@@ -304,7 +309,11 @@ def acquire_task_admission(
     task_contract = _normalized_task_contract(task_contract)
     selected_lw2 = lw2_contract_selected(task_contract, task_id=task_id)
     if selected_lw2:
-        validate_lw2_contract_binding(task_contract, task_id=task_id)
+        validate_lw2_contract_binding(
+            task_contract,
+            task_id=task_id,
+            repo=Path(identity.worktree),
+        )
         current_head, current_tree = capture_current_repository_identity(
             Path(identity.worktree)
         )
@@ -436,6 +445,15 @@ def continue_admitted_task(
         if record["state"] != "ACTIVE":
             result["reasons"] = ["TASK_ADMISSION_TERMINAL"]
             return state
+        if lw2_contract_selected(
+            record["task_contract"], task_id=record["task_id"]
+        ):
+            current_generation = capture_task_admission_generation(
+                Path(identity.worktree), record["task_contract"]
+            )
+            if current_generation != record.get("accepted_generation"):
+                result["reasons"] = ["TASK_ADMISSION_GENERATION_MISMATCH"]
+                return state
         previous = record["last_snapshot"]
         current = progress_snapshot(
             round_number=previous["round"] + 1,

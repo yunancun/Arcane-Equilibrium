@@ -169,6 +169,94 @@ def _scope_values(contract: dict[str, Any]) -> tuple[str, ...]:
     return tuple(values)
 
 
+def _policy_protected_path(path: Any, policy: dict[str, Any]) -> bool:
+    return isinstance(path, str) and (
+        path in policy["protected_scope_paths"]
+        or any(
+            path.startswith(prefix)
+            for prefix in policy["protected_scope_prefixes"]
+        )
+    )
+
+
+def lw2_protected_inventory(
+    repo: Path,
+    *,
+    registry: dict[str, Any] | None = None,
+) -> tuple[str, ...]:
+    """Resolve the complete deterministic LW2 protected repository inventory."""
+
+    policy = lw2_readmission_policy(registry)
+    try:
+        cached = subprocess.run(
+            ["git", "ls-files", "--cached", "-z"],
+            cwd=repo,
+            check=True,
+            capture_output=True,
+        )
+        completed = subprocess.run(
+            [
+                "git", "ls-files", "--cached", "--others",
+                "--exclude-standard", "-z",
+            ],
+            cwd=repo,
+            check=True,
+            capture_output=True,
+        )
+        tracked = {
+            raw.decode("utf-8")
+            for raw in cached.stdout.split(b"\0")
+            if raw
+        }
+        candidates = {
+            raw.decode("utf-8")
+            for raw in completed.stdout.split(b"\0")
+            if raw
+        }
+    except (OSError, UnicodeDecodeError, subprocess.CalledProcessError) as error:
+        raise ValueError("LW2 protected inventory is unavailable") from error
+    exact_paths = set(policy["protected_scope_paths"])
+    if not exact_paths.issubset(tracked):
+        raise ValueError("LW2 protected inventory is missing an exact required path")
+    inventory = set(exact_paths)
+    for prefix in policy["protected_scope_prefixes"]:
+        matches = {path for path in candidates if path.startswith(prefix)}
+        if not matches:
+            raise ValueError(
+                f"LW2 protected inventory prefix has no repository files: {prefix}"
+            )
+        inventory.update(matches)
+    for relative in inventory:
+        target = repo / relative
+        if target.is_symlink() or not target.is_file():
+            raise ValueError(
+                f"LW2 protected inventory path is not a regular file: {relative}"
+            )
+    return tuple(sorted(inventory))
+
+
+def validate_lw2_protected_inventory_scope(
+    scope: Any,
+    *,
+    registry: dict[str, Any] | None = None,
+) -> None:
+    """Validate a persisted canonical protected inventory without recapturing."""
+
+    policy = lw2_readmission_policy(registry)
+    if (
+        not isinstance(scope, list)
+        or not scope
+        or scope != sorted(set(scope))
+        or not set(policy["protected_scope_paths"]).issubset(scope)
+        or any(not _policy_protected_path(path, policy) for path in scope)
+        or any(
+            not any(path.startswith(prefix) for path in scope)
+            for prefix in policy["protected_scope_prefixes"]
+        )
+    ):
+        raise ValueError("LW2 accepted generation protected inventory is invalid")
+
+
 def lw2_contract_selected(
     contract: Any,
     *,
@@ -206,9 +294,7 @@ def lw2_contract_selected(
     if contract.get("admission_profile") == policy["admission_profile"]:
         return True
     for path in _scope_values(contract):
-        if path in policy["protected_scope_paths"] or any(
-            path.startswith(prefix) for prefix in policy["protected_scope_prefixes"]
-        ):
+        if _policy_protected_path(path, policy):
             return True
     return False
 
@@ -218,6 +304,7 @@ def validate_lw2_contract_binding(
     *,
     task_id: str | None = None,
     registry: dict[str, Any] | None = None,
+    repo: Path | None = None,
 ) -> None:
     """Require the exact canonical contract whenever any LW2 signal selects."""
 
@@ -235,6 +322,18 @@ def validate_lw2_contract_binding(
             errors.append(f"{field}={value}")
     if contract.get("direct_interfaces") != [policy["direct_interface"]]:
         errors.append(f"direct_interfaces=[{policy['direct_interface']}]")
+    dirty_scope = contract.get("dirty_scope")
+    if (
+        not isinstance(dirty_scope, list)
+        or not dirty_scope
+        or dirty_scope != sorted(set(dirty_scope))
+        or any(not _policy_protected_path(path, policy) for path in dirty_scope)
+    ):
+        errors.append("nonempty protected-only dirty_scope")
+    elif repo is not None and not set(dirty_scope).issubset(
+        lw2_protected_inventory(repo, registry=registry)
+    ):
+        errors.append("dirty_scope contained in current protected inventory")
     if not isinstance(contract.get("claim_inputs"), dict) or set(
         contract["claim_inputs"]
     ) != set(policy["claim_keys"]):

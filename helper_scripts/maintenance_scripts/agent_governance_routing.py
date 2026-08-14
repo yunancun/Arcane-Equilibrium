@@ -953,7 +953,11 @@ def route_task(
     registry = load_registry() if registry is None else registry
     facts = _normalize_task_facts(task_facts)
     if lw2_contract_selected(facts, registry=registry):
-        validate_lw2_contract_binding(facts, registry=registry)
+        validate_lw2_contract_binding(
+            facts,
+            registry=registry,
+            repo=REPO_ROOT if repo is None else repo,
+        )
         current_head, current_tree = capture_current_repository_identity(
             REPO_ROOT if repo is None else repo
         )

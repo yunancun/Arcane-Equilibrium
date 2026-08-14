@@ -501,6 +501,10 @@ def test_writer_lease_is_exclusive_and_fenced(tmp_path: Path) -> None:
         store, identity, task_id="task-a", owner="owner-a", now=NOW
     )
     assert acquired["status"] == "PASS"
+    assert set(acquired["lease"]) == {
+        "lease_id", "task_id", "owner", "worktree", "branch",
+        "acquired_at", "expires_at",
+    }
     lease_id = acquired["lease"]["lease_id"]
 
     duplicate = acquire_writer_lease(
