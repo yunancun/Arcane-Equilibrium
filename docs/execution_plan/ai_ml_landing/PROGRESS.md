@@ -1,8 +1,8 @@
 # AI/ML Landing Progress Ledger
 
 **Program**: `AIML-LONG-LIVED-LANDING-V2`
-**Ledger version**: 31
-**Updated**: 2026-08-14（empty-queue Context executable contract 已修復；UID closed，LW2 仍 WAITING／non-dispatchable）
+**Ledger version**: 32
+**Updated**: 2026-08-14（EMPTY queue Context source seam 已修復；LW2 readmission authority closure provisional exact-code-head E2/E4 accepted，final gates/publication pending）
 **Overall state**: `PROGRAM_ADOPTED` · **`S1_CLOSED`** · every S2 effect-session
 source-seam predicate is narrowly `SOURCE_READY` (S2.0 + S2.1 + S2.2A + S2.3 +
 S2.4 + S2.5 + S2.2B), while Sprint 2 remains
@@ -20,8 +20,15 @@ successor label `LW2_RE_ADMISSION_READY`; its physical queue remains `WAITING`
 with `dispatchable=false`. G2 landed, formal UID close/merge and the exact-M1
 proof that `S2E_WAVE_EXIT_IDS["S2E-LW2"]` is unreachable from source readiness
 remain historical evidence, not a reusable current-head admission bundle. The
-empty-queue Context executable contract is repaired, but no fresh three-claim
-bundle, task/DAG/lease/source write/Context artifact/receipt exists. The closed
+EMPTY queue Context source seam is repaired. LW2 readmission source authority
+closure is implemented and provisionally accepted by E2/E4 at exact code head
+`4f20a5dc75e74ae723feea57cb62d4c724f8e700` (tree
+`fb8283cbb86b95e1ef000a05916a9e88047bcef2`), while final post-docs exact-head
+gates, PR #189 publication/CI/thread closure, merge and post-merge evidence remain
+pending. Production deliberately fails closed until a genuine non-caller-controlled
+`ExternalEvidenceVerifier` provider attests destination-bound publication and an
+independent E2 request. No fresh three-claim bundle, task/DAG/lease/source
+write/Context artifact/receipt exists. The closed
 machine packet
 at `docs/CCAgentWorkSpace/PM/workspace/reports/2026-08-02--s2e_lw1_external_prerequisite_action_packet.json`
 records 16 blocking prerequisites (12 fixed paths + 4 services) at its own pinned
@@ -53,6 +60,12 @@ the expected no-match source inspection is record
 There are now zero ACTIVE AIML source lanes. No production effect may start
 before fresh PM re-admission, the remaining S2E source waves close and a newly
 emitted packet receives fresh exact authority.
+LW2 itself remains physical `WAITING`, `dispatchable=false`, and has never become
+`ACTIVE`, `SOURCE_READY`, `LANDED` or `CLOSED`. Outside isolated tests, this
+repair created no actual LW2 admission, DAG, lease or source slice. It generated
+no receipt, round bump, docs-only carrier or synthetic ACTIVE row and caused no
+runtime, service, PG, broker, order, funds or trading readiness/effect. S2E stays
+5/9, production effect 0/6 and authority 0/9; UID remains closed.
 The 2026-07-30 calibration-checkpoint narrative and the S0/S1
 finalization/provenance narrative were moved verbatim to
 `PROGRESS-archive-1.md`(2026-08-01 generation split; information-
@@ -211,6 +224,7 @@ closed S0.x/S1.x rows(全部 DONE)已遷 `PROGRESS-archive-1.md`(資訊守恆);�
 
 | Time | Session | Event | Evidence |
 |---|---|---|---|
+| 2026-08-14 | LW2 readmission authority closure candidate | **Source-authority closure implemented; final publication pending.** EMPTY queue Context source seam remains fixed. Registry-owned LW2 selection, destination-bound publication and independent-E2 verification through a non-caller-controlled `ExternalEvidenceVerifier`, full protected-generation fencing, admission persistence/continuation checks, and admission-bound filesystem writer leases are implemented. Provisional exact code head `4f20a5dc75e74ae723feea57cb62d4c724f8e700` (tree `fb8283cbb86b95e1ef000a05916a9e88047bcef2`) was accepted by E2/E4; final post-docs exact-head E2/E3/E4/CC/R4, PR #189 current-head CI/threads, merge and post-merge evidence remain pending. The production verifier provider does not yet exist, so admission deliberately fails closed. UID remains closed; LW2 remains `WAITING`, `dispatchable=false`, never `ACTIVE`/`SOURCE_READY`/`LANDED`/`CLOSED`. No actual LW2 admission/DAG/lease/source slice outside isolated tests; no receipt/round/docs-only carrier/synthetic ACTIVE row; S2E 5/9, effect 0/6, authority 0/9; no runtime/service/PG/broker/order/funds/trading effect. | provisional code head/tree above; no merge/landing/evidence-ready claim |
 | 2026-08-14 | empty-queue Context / LW2 admission binding repair | **Executable control-plane transition only.** Registry `active_state` now binds exact `TODO.md#S2E 當前派發投影` through `todo_dispatch_projection`; the unique canonical marker yields a complete typed EMPTY capture while legacy `todo_active_rows` stays exactly-one. Future `S2E-LW2` route/admission requires `aiml_s2e_lw2_readmission_v1` plus canonical digests for current combined-main head/tree identity, same-head governed focused/unreachability PASS capture, and a distinct same-head PASS reviewer bound to that capture; invalid bundles fail before DAG/store/lease/source write. UID remains `UID_VALIDATION_PUBLICATION_CLOSED`; LW2 remains physical `WAITING`, `dispatchable=false`, with no task/DAG/lease/source/Context artifact/receipt. S2E 5/9, effect 0/6, authority 0/9. | source/tests transition in current candidate; exact-head review/publication and post-merge evidence remain outside this ledger event until completed |
 | 2026-08-14 | UID validation/publication closure | **Canonical transition: `UID_VALIDATION_PUBLICATION_CLOSED`; successor label only `LW2_RE_ADMISSION_READY`.** H1 `3e33a66c29a1318ab19472804bd604d22c0274ff` (tree `6b3050a35a8c7e568bef948249b6337d55ca6742`) includes the closure-schema compatibility repair: current/intermediate/legacy lineage accepted, materialization-only rejected. PR #187 current-head Codex reported no major issue, CI run `31765112169` finished success/skipped and all review threads closed; direct merge M1 `c7f9de914a51cfba20b59ad3e76921b0cf87dd00` preserves the same tree. Exact-M1 governed combined proof is 5 passed; expected source inspection is an `rg` no-match. AIML now has zero ACTIVE source rows. LW2 remains physical `WAITING`, `dispatchable=false`, with no task contract, routed DAG, writer lease, source write, materialized Context artifact or receipt. S2E remains 5/9, effect 0/6, authority 0/9, W0/LW1 receipts absent and all 16 external prerequisites intact. | PR #187; H1/M1/tree above; combined record `sha256:8c99bf46e1a8d582c52bbba35c7267bdecc62acaa1497a60d3e5ea6a3c1567ce`; expected no-match record `sha256:78883b5ae6789748e146733d5feb6fa819668ed8708f80bcd6544e4976b3fd4f` |
 | 2026-08-12 | uid-topology W2 final receipt repair | **Round 15 is locally committed and remains publication-pending.** PA proved that W2 folded application/launch builder instance digests containing current HEAD, so any receipt/docs carrier commit invalidated four persisted W2 instances. The repair keeps real production builders and their self-digest/application/base/foreign-application checks, but feeds W2 a head-independent semantic projection that still retains `learning_runtime_digest_v2` and declared application bytes. A carrier-only regression failed on the baseline and passes after repair. Exact-semantic-head E2 initially rejected an over-broad exclusion, then passed after `learning_runtime_digest_v2` was restored. Canonical emitters rewrote exactly 26 existing W2–W5 JSON files in strict W2→W5 order; W0/W1 directories are byte-identical. Current-head structural validation is 21/21 PASS and the four W2 instances all carry `sha256:9b2751b3659f4676459bc29d575255835ebdfba0e254af0eb030f92849bab89c`. Status stays `ACTIVE_PENDING_FRESH_REVIEW_AND_PUBLICATION` until final carrier-head E2→E3→E4; no publication, merge, sync, runtime, effect, or LW2 authority. | semantic source `6fd4ea739b736b6d00000f7e66913f7c8ee8a8e1`; receipt carrier `070591dd33ff318389302d4efb0ecd5a4543e902`; E2 `sha256:c79714ad23eff5c17bb084db3fda6003aba86630e663995b23ad381425de1f09`; 21/21 PASS |

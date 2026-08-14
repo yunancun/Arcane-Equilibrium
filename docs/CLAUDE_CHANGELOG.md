@@ -1,7 +1,29 @@
 # CLAUDE_CHANGELOG.md — 開發歷史歸檔
 
 > 從 CLAUDE.md / TODO.md 遷出的 Wave/Sprint/Batch + TODO version-increment 歷史敘事。新 session 不需要讀此文件，僅供回顧歷史時查閱。
-> 最後更新：2026-08-14（TODO v879 empty-queue Context / LW2 admission binding repair）
+> 最後更新：2026-08-14（TODO v880 LW2 readmission authority closure candidate）
+
+---
+
+## TODO v880 增量：LW2 readmission source-authority closure candidate（2026-08-14）
+
+- EMPTY queue Context source seam 保持已修復。LW2 readmission authority 現在由單一
+  Registry-owned selector、destination-bound publication identity、非 caller 控制的
+  `ExternalEvidenceVerifier`、完整 protected-scope generation fence，以及 admission-bound
+  filesystem writer lease 串起；saved-workflow 與 Python surface 同步 fail closed。
+- provisional exact code head
+  `4f20a5dc75e74ae723feea57cb62d4c724f8e700`（tree
+  `fb8283cbb86b95e1ef000a05916a9e88047bcef2`）已獲 E2/E4 接受；post-docs
+  exact-head E2/E3/E4/CC/R4、current-head PR #189 CI/thread、publication/merge 與 post-merge
+  evidence 仍待完成，因此不宣稱 merged、landed 或 evidence-ready。
+- production 目前沒有真正非 caller 控制的 verifier provider 可證明 destination-bound
+  publication 與 independent E2 request；缺此 attestation 時 deliberate fail closed，不能以
+  caller-authored PASS、inline JSON 或結構 digest 降級替代。
+- UID 保持 `UID_VALIDATION_PUBLICATION_CLOSED`。LW2 保持 physical `WAITING`、
+  `dispatchable=false`，從未成為 `ACTIVE`／`SOURCE_READY`／`LANDED`／`CLOSED`；除隔離測試
+  外沒有建立 LW2 admission、DAG、lease 或 source slice。S2E=5/9、production effect=0/6、
+  authority=0/9；沒有 receipt、round bump、docs-only carrier、synthetic ACTIVE row，亦無
+  runtime、service、PG、broker、order、funds 或 trading readiness/effect。
 
 ---
 

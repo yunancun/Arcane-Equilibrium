@@ -2,7 +2,7 @@
 
 **Plan ID**: `AIML-LONG-LIVED-LANDING-V2`
 **Original date**: 2026-07-19
-**Revised**: 2026-08-14 (status/remaining-effort calibration plus empty-queue/LW2 admission control-plane repair)
+**Revised**: 2026-08-14 (status/remaining-effort calibration plus empty-queue/LW2 readmission authority closure)
 **Planning baseline**: `b486c0718d1c26820cdb6308cccf74c686547b22`
 **Observed calibration baseline**: `UNVERIFIED_OBSERVATION`
 `2ed906607ca9eae641ee08940f3159463d86692c` (source context only; not a durable
@@ -772,6 +772,30 @@ now selects the exact `S2E 當前派發投影` section through
 projection and produces complete typed EMPTY Context content, digest/bytes/
 provenance and a full-file token estimate; legacy `todo_active_rows` remains
 exactly-one. This repairs Context compilation only and does not make LW2 ACTIVE.
+
+**2026-08-14 LW2 readmission source-authority closure candidate.** The EMPTY
+queue Context source seam remains fixed. On provisional exact code head
+`4f20a5dc75e74ae723feea57cb62d4c724f8e700` (tree
+`fb8283cbb86b95e1ef000a05916a9e88047bcef2`), E2 and E4 accepted the source
+closure that shares a Registry-owned LW2 selector across route/admission/lease,
+requires destination-bound publication and independent review through a
+non-caller-controlled `ExternalEvidenceVerifier`, fences the complete protected
+repository generation through admission and continuation, and requires every
+filesystem writer lease to bind an active persisted admission. Saved workflows
+fail before model/DAG/store/lease when the trusted verifier boundary is absent.
+Final post-docs exact-head gates, PR #189 publication/CI/thread closure, merge
+and post-merge evidence remain pending; this is not a merged, landed or
+evidence-ready claim.
+
+Production currently has no genuine non-caller-controlled verifier provider
+that can attest destination-bound publication and an independent E2 request,
+so the future path deliberately remains fail closed. UID remains closed. LW2
+remains physical `WAITING`, `dispatchable=false`, and has never become
+`ACTIVE`, `SOURCE_READY`, `LANDED` or `CLOSED`. No actual LW2 admission, DAG,
+lease or source slice was created outside isolated tests; no receipt, round
+bump, docs-only carrier or synthetic ACTIVE row was generated. S2E stays 5/9,
+production effect 0/6 and authority 0/9, with no runtime, service, PG, broker,
+order, funds or trading readiness/effect.
 
 The next runtime acceptance target remains non-dispatchable. AIML has zero
 ACTIVE source rows; LW2 remains in the physical `WAITING` queue with
