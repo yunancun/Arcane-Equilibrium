@@ -555,6 +555,54 @@ def _todo_active_rows_record(
     }
 
 
+def _todo_dispatch_projection_diagnostic(
+    *, base: dict[str, Any], status: str, error: str,
+    actual_baseline: dict[str, str] | None, source_data: bytes | None,
+) -> dict[str, Any]:
+    """Build one complete but explicitly non-admissible diagnostic capture."""
+
+    payload = {
+        "schema_version": "todo_dispatch_projection_error_v1",
+        "projection_state": "INVALID",
+        "error": error,
+    }
+    raw = json.dumps(
+        payload,
+        ensure_ascii=False,
+        sort_keys=True,
+        separators=(",", ":"),
+        allow_nan=False,
+    ).encode("utf-8")
+    observed_at, expires_at = _capture_times("source_snapshot")
+    source_available = source_data is not None
+    source_bytes = len(source_data) if source_data is not None else None
+    return {
+        **base,
+        "status": status,
+        "capture_kind": "source_snapshot",
+        "producer": "repository_bytes_v1",
+        "baseline": actual_baseline,
+        "observed_at": observed_at,
+        "expires_at": expires_at,
+        "content_encoding": "json",
+        "content": payload,
+        "digest": None,
+        "content_digest": _sha256_bytes(raw),
+        "bytes": len(raw),
+        "source_bytes": source_bytes,
+        "source_bytes_status": "measured" if source_available else "unavailable",
+        "full_file_token_estimate": (
+            max(1, (source_bytes + 3) // 4)
+            if source_bytes is not None else None
+        ),
+        "full_file_token_estimate_status": (
+            "estimated_from_source_bytes" if source_available else "unavailable"
+        ),
+        "planned_tokens": max(1, (len(raw) + 3) // 4),
+        "artifact_error": error,
+    }
+
+
 def _todo_dispatch_projection_record(
     spec: dict[str, Any], *, root: Path, evidence_state: dict[str, Any],
     actual_baseline: dict[str, str] | None,
@@ -564,62 +612,37 @@ def _todo_dispatch_projection_record(
     source = source_name(spec)
     raw_path, _, selector = source.partition("#")
     base = {"source": source, "selector": selector or spec.get("heading")}
+    local_file, local_error = _safe_artifact(raw_path, root)
+    data = local_file.read_bytes() if local_file is not None else None
     if evidence_state.get(source) is not None:
-        return {
-            **base,
-            "status": "trusted_producer_override_rejected",
-            "digest": None,
-            "planned_tokens": 32,
-            "artifact_error": (
+        return _todo_dispatch_projection_diagnostic(
+            base=base,
+            status="trusted_producer_override_rejected",
+            error=(
                 "todo_dispatch_projection is locally produced and cannot be "
                 "caller-supplied"
             ),
-        }
-    local_file, local_error = _safe_artifact(raw_path, root)
-    if local_file is None:
-        return {
-            **base,
-            "status": "todo_dispatch_projection_invalid",
-            "digest": None,
-            "planned_tokens": 32,
-            "artifact_error": local_error,
-        }
-    data = local_file.read_bytes()
+            actual_baseline=actual_baseline,
+            source_data=data,
+        )
+    if data is None:
+        return _todo_dispatch_projection_diagnostic(
+            base=base,
+            status="todo_dispatch_projection_invalid",
+            error=str(local_error),
+            actual_baseline=actual_baseline,
+            source_data=None,
+        )
     try:
         payload = project_todo_dispatch_projection(data, spec)
     except ValueError as error:
-        payload = {
-            "schema_version": "todo_dispatch_projection_error_v1",
-            "projection_state": "INVALID",
-            "error": str(error),
-        }
-        raw = json.dumps(
-            payload,
-            ensure_ascii=False,
-            sort_keys=True,
-            separators=(",", ":"),
-            allow_nan=False,
-        ).encode("utf-8")
-        digest = _sha256_bytes(raw)
-        observed_at, expires_at = _capture_times("source_snapshot")
-        return {
-            **base,
-            "status": "todo_dispatch_projection_invalid",
-            "capture_kind": "source_snapshot",
-            "producer": "repository_bytes_v1",
-            "baseline": actual_baseline,
-            "observed_at": observed_at,
-            "expires_at": expires_at,
-            "content_encoding": "json",
-            "content": payload,
-            "digest": digest,
-            "content_digest": digest,
-            "bytes": len(raw),
-            "source_bytes": len(data),
-            "full_file_token_estimate": max(1, (len(data) + 3) // 4),
-            "planned_tokens": max(1, (len(raw) + 3) // 4),
-            "artifact_error": str(error),
-        }
+        return _todo_dispatch_projection_diagnostic(
+            base=base,
+            status="todo_dispatch_projection_invalid",
+            error=str(error),
+            actual_baseline=actual_baseline,
+            source_data=data,
+        )
     raw = json.dumps(
         payload,
         ensure_ascii=False,

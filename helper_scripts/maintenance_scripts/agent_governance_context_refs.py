@@ -345,16 +345,50 @@ def project_todo_dispatch_projection(
         row for row in rows
         if _plain_cell(row[1][status_index]).upper().startswith("ACTIVE")
     ]
-    marker_count = section.count(EMPTY_DISPATCH_MARKER)
-    marker_label_count = section.count("S2E-DISPATCH-PROJECTION:")
-    if active_rows and marker_label_count:
+    marker_label = "S2E-DISPATCH-PROJECTION:"
+    marker_lines = [
+        index for index, raw_line in enumerate(section_lines)
+        if raw_line.rstrip("\r\n").lstrip().startswith(marker_label)
+    ]
+    if active_rows and marker_lines:
         raise ValueError(
             "todo_dispatch_projection EMPTY marker cannot coexist with ACTIVE rows"
         )
     if len(active_rows) > 1:
         raise ValueError("todo_dispatch_projection permits at most one ACTIVE row")
-    if not active_rows and marker_count != 1:
-        raise ValueError("todo_dispatch_projection EMPTY marker must match exactly once")
+    if not active_rows:
+        if len(marker_lines) != 1:
+            raise ValueError(
+                "todo_dispatch_projection EMPTY marker label must match exactly once"
+            )
+        marker_index = marker_lines[0]
+        marker_block = EMPTY_DISPATCH_MARKER.splitlines(keepends=True)
+        if section_lines[marker_index:marker_index + len(marker_block)] != marker_block:
+            raise ValueError(
+                "todo_dispatch_projection EMPTY marker label and block must be exact"
+            )
+        boundary_index = marker_index + len(marker_block)
+        if (
+            boundary_index >= len(section_lines)
+            or section_lines[boundary_index] not in {"\n", "\r\n"}
+        ):
+            raise ValueError(
+                "todo_dispatch_projection EMPTY marker assignment block must end at a blank line"
+            )
+        expected_assignment_lines = list(
+            range(marker_index + 1, marker_index + len(marker_block))
+        )
+        actual_assignment_lines = [
+            index for index, raw_line in enumerate(section_lines)
+            if re.fullmatch(
+                r"[A-Za-z_][A-Za-z0-9_]*=[^\r\n]*",
+                raw_line.rstrip("\r\n").lstrip(),
+            )
+        ]
+        if actual_assignment_lines != expected_assignment_lines:
+            raise ValueError(
+                "todo_dispatch_projection EMPTY marker assignments must be exact and unique"
+            )
     if active_rows:
         active_row = active_rows[0]
         dependency_ids = ACTIVE_ID_RE.findall(active_row[1][dependency_index])

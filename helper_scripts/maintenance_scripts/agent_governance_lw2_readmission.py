@@ -1,8 +1,9 @@
-"""Pure eligibility gate for a future fresh S2E LW2 admission.
+"""Eligibility gate for a future fresh S2E LW2 admission.
 
-The gate authenticates no external fact and creates no task, DAG, admission,
-lease, source write, or artifact.  It only rejects a non-canonical or stale
-three-claim bundle before those later control-plane objects may be constructed.
+Validation is offline and structural by default: it authenticates no platform
+identity and creates no task, DAG, admission, lease, source write, or artifact.
+Task admission may additionally replay the exact deterministic read-only proof
+before it persists admission state.
 """
 
 from __future__ import annotations
@@ -13,6 +14,12 @@ import re
 import subprocess
 from pathlib import Path
 from typing import Any
+
+from agent_governance_pytest_provider import (
+    GOVERNED_PYTEST_PREFIX,
+    GOVERNED_PYTEST_REQUIRED_ARGS,
+)
+from agent_governance_execution_dag import execution_dag_digest
 
 
 LW2_ADMISSION_PROFILE = "aiml_s2e_lw2_readmission_v1"
@@ -25,13 +32,70 @@ HEAD_RE = re.compile(r"[0-9a-f]{40}")
 DIGEST_RE = re.compile(r"sha256:[0-9a-f]{64}")
 IDENTITY_FIELDS = {"schema_version", "head", "tree"}
 CAPTURE_FIELDS = {
-    "schema_version", "head", "tree", "status", "command_capture_schema",
-    "governed", "permission", "producer_identity",
+    "schema_version", "head", "tree", "context_artifact_digest",
+    "task_contract_digest", "capture_digest", "evidence_dag_digest",
+    "command_capture",
 }
 REVIEW_FIELDS = {
-    "schema_version", "head", "tree", "status", "permission", "governed",
-    "reviewer_identity", "writer_identity", "reviewed_capture_digest",
+    "schema_version", "head", "tree", "context_artifact_digest",
+    "task_contract_digest", "workflow_call_record", "role_fragment",
+    "trust_ceiling", "evidence_dag_digest",
 }
+ROLE_FRAGMENT_FIELDS = {
+    "schema_version", "id", "node_id", "role", "task_contract_digest",
+    "context_artifact_digest", "producer_call_ref",
+    "producer_call_receipt_digest", "producer_record_kind", "work_status",
+    "gate_verdict", "classification", "confidence", "summary",
+    "evidence_refs", "concerns", "next_action", "consumption",
+    "payload_kind", "payload",
+}
+REVIEW_PAYLOAD_FIELDS = {
+    "schema_version", "status", "reviewed_head", "reviewed_tree",
+    "reviewed_capture_digest", "writer_native_identity", "trust_ceiling",
+}
+LW2_CAPTURE_NODE_ID = "lw2_combined_main_unreachability_capture"
+LW2_REVIEW_NODE_ID = "independent_review"
+LW2_CAPTURE_PATH_SCOPE = (
+    "tests/structure/test_agent_governance_context_pack_reachability.py",
+    "tests/structure/test_agent_governance_s2e_launch_chain.py",
+)
+LW2_FOCUSED_CAPTURE_ARGV = (
+    *GOVERNED_PYTEST_PREFIX,
+    *GOVERNED_PYTEST_REQUIRED_ARGS,
+    "-q",
+    (
+        "tests/structure/test_agent_governance_context_pack_reachability.py::"
+        "test_active_state_contains_the_exact_empty_dispatch_projection"
+    ),
+    (
+        "tests/structure/test_agent_governance_s2e_launch_chain.py::"
+        "test_lw1_through_lw5_require_the_exact_unconsumed_prior_digest"
+    ),
+    (
+        "tests/structure/test_agent_governance_s2e_launch_chain.py::"
+        "test_lw2_rejects_a_predecessor_receipt_from_a_sibling_branch"
+    ),
+)
+LW2_TRUST_CEILING = "ORCHESTRATOR_BOUND_STRUCTURAL_PROVENANCE_ONLY"
+LW2_EVIDENCE_DAG = (
+    {
+        "node_id": LW2_CAPTURE_NODE_ID,
+        "role": "E3",
+        "native_agent": "E3",
+        "requires": [],
+        "node_class": "verification",
+        "permission": "read_only",
+    },
+    {
+        "node_id": LW2_REVIEW_NODE_ID,
+        "role": "E2",
+        "native_agent": "E2",
+        "requires": [LW2_CAPTURE_NODE_ID],
+        "node_class": "verification",
+        "permission": "read_only",
+    },
+)
+LW2_EVIDENCE_DAG_DIGEST = execution_dag_digest(list(LW2_EVIDENCE_DAG))
 
 
 def canonical_claim_digest(value: Any) -> str:
@@ -97,6 +161,8 @@ def validate_lw2_readmission_eligibility(
     current_head: str,
     current_tree: str,
     expected_writer_identity: str | None = None,
+    repo: Path | None = None,
+    reexecute_capture: bool = False,
 ) -> bool:
     """Return only eligibility for the exact current-head LW2 claim bundle."""
 
@@ -126,24 +192,64 @@ def validate_lw2_readmission_eligibility(
     if (head, tree) != (current_head, current_tree):
         raise ValueError("LW2 combined-main identity is not current repository HEAD/tree")
 
-    capture = _exact_object(
-        claim_payloads["lw2_combined_main_unreachability_capture"],
-        CAPTURE_FIELDS,
-        "LW2 combined-main capture",
-    )
+    raw_capture = claim_payloads["lw2_combined_main_unreachability_capture"]
+    if not isinstance(raw_capture, dict) or set(raw_capture) != CAPTURE_FIELDS:
+        raise ValueError(
+            "LW2 combined-main capture must embed one complete command_capture_v2"
+        )
+    capture = raw_capture
     if capture["schema_version"] != "lw2_combined_main_unreachability_capture_v1":
         raise ValueError("LW2 combined-main capture schema is invalid")
     if _identity(capture, label="LW2 combined-main capture") != (head, tree):
         raise ValueError("LW2 combined-main capture head/tree mismatch")
+    command_capture = capture["command_capture"]
+    if not isinstance(command_capture, dict):
+        raise ValueError(
+            "LW2 combined-main capture must embed one complete command_capture_v2"
+        )
+    if repo is None:
+        raise ValueError("LW2 combined-main capture validation requires repository root")
+    expected_execution_task = {
+        "node_id": LW2_CAPTURE_NODE_ID,
+        "role": "E3",
+        "native_agent": "E3",
+        "node_class": "verification",
+        "permission": "read_only",
+        "requires": [],
+        "path_scope": [],
+    }
+    from agent_governance_command_capture_v2 import (  # local to avoid cycle
+        validate_governed_command_capture,
+    )
+    capture_validation = {
+        "expected_context_artifact_digest": capture["context_artifact_digest"],
+        "expected_task_contract_digest": capture["task_contract_digest"],
+        "expected_execution_task": expected_execution_task,
+        "expected_path_scope": list(LW2_CAPTURE_PATH_SCOPE),
+        "expected_source_head": head,
+        "root": Path(repo),
+    }
+    capture_errors = validate_governed_command_capture(
+        command_capture,
+        reexecute=False,
+        **capture_validation,
+    )
+    if capture_errors:
+        raise ValueError(
+            "LW2 governed command capture is invalid: " + "; ".join(capture_errors)
+        )
     if (
-        capture["status"] != "PASS"
-        or capture["command_capture_schema"] != "command_capture_v2"
-        or capture["governed"] is not True
-        or capture["permission"] != "read-only"
-        or not isinstance(capture["producer_identity"], str)
-        or not capture["producer_identity"].strip()
+        capture["capture_digest"] != command_capture.get("record_digest")
+        or capture["evidence_dag_digest"] != LW2_EVIDENCE_DAG_DIGEST
+        or command_capture.get("schema_version") != "command_capture_v2"
+        or command_capture.get("argv") != list(LW2_FOCUSED_CAPTURE_ARGV)
+        or command_capture.get("result") != "PASS"
+        or command_capture.get("exit_code") != 0
+        or command_capture.get("timed_out") is not False
     ):
-        raise ValueError("LW2 combined-main capture must be governed read-only PASS")
+        raise ValueError(
+            "LW2 capture must bind the exact governed focused PASS record"
+        )
 
     review = _exact_object(
         claim_payloads["lw2_independent_review"],
@@ -155,23 +261,102 @@ def validate_lw2_readmission_eligibility(
     if _identity(review, label="LW2 independent review") != (head, tree):
         raise ValueError("LW2 independent review head/tree mismatch")
     if (
-        review["status"] != "PASS"
-        or review["permission"] != "read-only"
-        or review["governed"] is not True
-        or not isinstance(review["reviewer_identity"], str)
-        or not review["reviewer_identity"].strip()
-        or not isinstance(review["writer_identity"], str)
-        or not review["writer_identity"].strip()
-        or review["writer_identity"] != capture["producer_identity"]
-        or review["reviewer_identity"] == review["writer_identity"]
+        review["trust_ceiling"] != LW2_TRUST_CEILING
+        or review["task_contract_digest"] != capture["task_contract_digest"]
+        or review["context_artifact_digest"] == capture["context_artifact_digest"]
+        or review["evidence_dag_digest"] != LW2_EVIDENCE_DAG_DIGEST
     ):
-        raise ValueError("LW2 independent review must be read-only PASS and not self-review")
-    capture_digest = claim_inputs["lw2_combined_main_unreachability_capture"]
-    if review["reviewed_capture_digest"] != capture_digest:
-        raise ValueError("LW2 independent review does not bind the governed capture")
+        raise ValueError(
+            "LW2 review must bind a distinct E2 Context and the capture task contract"
+        )
+    call = review["workflow_call_record"]
+    fragment = review["role_fragment"]
+    if not isinstance(call, dict) or not isinstance(fragment, dict):
+        raise ValueError(
+            "LW2 independent review must embed workflow_call_record_v1 and role_fragment_v1"
+        )
+    from agent_governance_workflow_receipts import (  # local to avoid cycle
+        validate_role_fragment_producer,
+        validate_workflow_call_record,
+    )
+    call_errors = validate_workflow_call_record(
+        call,
+        expected_task_contract_digest=review["task_contract_digest"],
+        expected_context_artifact_digest=review["context_artifact_digest"],
+        expected_node_id=LW2_REVIEW_NODE_ID,
+        expected_role_id="E2",
+    )
+    if call_errors:
+        raise ValueError(
+            "LW2 independent review call is invalid: " + "; ".join(call_errors)
+        )
+    if (
+        call.get("returned_null") is not False
+        or call.get("dag_digest") != LW2_EVIDENCE_DAG_DIGEST
+        or call.get("requires") != [LW2_CAPTURE_NODE_ID]
+        or call.get("producer_generation")
+        != {LW2_CAPTURE_NODE_ID: command_capture["record_digest"]}
+    ):
+        raise ValueError(
+            "LW2 independent review producer generation must bind the command capture"
+        )
+    if set(fragment) != ROLE_FRAGMENT_FIELDS:
+        raise ValueError("LW2 independent review role fragment fields are not exact")
+    producer_errors = validate_role_fragment_producer(
+        fragment,
+        calls_by_id={str(call.get("logical_call_id")): call},
+        wave_records_by_digest={},
+        expected_task_contract_digest=review["task_contract_digest"],
+        expected_context_artifact_digest=review["context_artifact_digest"],
+    )
+    if producer_errors:
+        raise ValueError(
+            "LW2 independent review role fragment is invalid: "
+            + "; ".join(producer_errors)
+        )
+    payload = fragment.get("payload")
+    if not isinstance(payload, dict) or set(payload) != REVIEW_PAYLOAD_FIELDS:
+        raise ValueError("LW2 independent review judgment payload fields are not exact")
+    writer_identity = payload.get("writer_native_identity")
+    if (
+        fragment.get("schema_version") != "role_fragment_v1"
+        or fragment.get("node_id") != LW2_REVIEW_NODE_ID
+        or fragment.get("role") != "E2"
+        or fragment.get("payload_kind") != "review_fragment_v1"
+        or fragment.get("work_status") != "DONE"
+        or fragment.get("gate_verdict") != "PASS"
+        or fragment.get("classification") != "FACT"
+        or fragment.get("confidence") != "high"
+        or fragment.get("concerns") != []
+        or payload.get("schema_version")
+        != "lw2_independent_review_judgment_v1"
+        or payload.get("status") != "PASS"
+        or payload.get("reviewed_head") != head
+        or payload.get("reviewed_tree") != tree
+        or payload.get("reviewed_capture_digest")
+        != command_capture["record_digest"]
+        or payload.get("trust_ceiling") != LW2_TRUST_CEILING
+        or not isinstance(writer_identity, str)
+        or not writer_identity.strip()
+        or writer_identity == "E2"
+    ):
+        raise ValueError(
+            "LW2 independent review must be exact E2 read-only PASS and not self-review"
+        )
     if (
         expected_writer_identity is not None
-        and review["writer_identity"] != expected_writer_identity
+        and writer_identity != expected_writer_identity
     ):
         raise ValueError("LW2 declared writer identity differs from admission owner")
+    if reexecute_capture:
+        replay_errors = validate_governed_command_capture(
+            command_capture,
+            reexecute=True,
+            **capture_validation,
+        )
+        if replay_errors:
+            raise ValueError(
+                "LW2 governed command capture replay is invalid: "
+                + "; ".join(replay_errors)
+            )
     return True

@@ -300,6 +300,77 @@ def test_dispatch_projection_accepts_the_exact_empty_marker() -> None:
     }
 
 
+def test_dispatch_projection_rejects_a_canonical_block_plus_malformed_second_label() -> None:
+    document = (
+        "### S2E 當前派發投影\n\n"
+        f"{EMPTY_DISPATCH_MARKER}\n"
+        "S2E-DISPATCH-PROJECTION: stale-copy\n\n"
+        "| ID | Lane／狀態 | 依賴 | 精確工作 | 驗收／下一步 |\n"
+        "|---|---|---|---|---|\n"
+        "| `S2E.2b-2` | WAITING | S2E.2b-1 | future | later |\n"
+    ).encode()
+    spec = {
+        "source": "TODO.md#S2E 當前派發投影",
+        "kind": "todo_dispatch_projection",
+        "heading": "S2E 當前派發投影",
+        "id_column": "ID",
+        "status_column": "Lane／狀態",
+        "dependency_column": "依賴",
+        "dependency_depth": 1,
+        "required_when": {"surfaces_any": ["runtime"]},
+    }
+
+    with pytest.raises(ValueError, match="marker label"):
+        project_todo_dispatch_projection(document, spec)
+
+
+def test_dispatch_projection_rejects_unknown_assignment_after_the_canonical_block() -> None:
+    document = (
+        "### S2E 當前派發投影\n\n"
+        f"{EMPTY_DISPATCH_MARKER}unknown_field=surplus\n\n"
+        "| ID | Lane／狀態 | 依賴 | 精確工作 | 驗收／下一步 |\n"
+        "|---|---|---|---|---|\n"
+        "| `S2E.2b-2` | WAITING | S2E.2b-1 | future | later |\n"
+    ).encode()
+    spec = {
+        "source": "TODO.md#S2E 當前派發投影",
+        "kind": "todo_dispatch_projection",
+        "heading": "S2E 當前派發投影",
+        "id_column": "ID",
+        "status_column": "Lane／狀態",
+        "dependency_column": "依賴",
+        "dependency_depth": 1,
+        "required_when": {"surfaces_any": ["runtime"]},
+    }
+
+    with pytest.raises(ValueError, match="assignment"):
+        project_todo_dispatch_projection(document, spec)
+
+
+def test_dispatch_projection_rejects_a_duplicate_marker_assignment_after_a_blank() -> None:
+    document = (
+        "### S2E 當前派發投影\n\n"
+        f"{EMPTY_DISPATCH_MARKER}\n"
+        "active_count=0\n\n"
+        "| ID | Lane／狀態 | 依賴 | 精確工作 | 驗收／下一步 |\n"
+        "|---|---|---|---|---|\n"
+        "| `S2E.2b-2` | WAITING | S2E.2b-1 | future | later |\n"
+    ).encode()
+    spec = {
+        "source": "TODO.md#S2E 當前派發投影",
+        "kind": "todo_dispatch_projection",
+        "heading": "S2E 當前派發投影",
+        "id_column": "ID",
+        "status_column": "Lane／狀態",
+        "dependency_column": "依賴",
+        "dependency_depth": 1,
+        "required_when": {"surfaces_any": ["runtime"]},
+    }
+
+    with pytest.raises(ValueError, match="assignment"):
+        project_todo_dispatch_projection(document, spec)
+
+
 def test_dispatch_projection_rejects_empty_marker_with_an_active_row() -> None:
     document = (
         "# TODO\n\n"
@@ -435,6 +506,114 @@ def test_empty_dispatch_context_capture_contains_payload_and_full_file_estimate(
     full_bytes = todo.read_bytes()
     assert source["source_bytes"] == len(full_bytes)
     assert source["full_file_token_estimate"] == max(1, (len(full_bytes) + 3) // 4)
+
+
+def test_dispatch_projection_override_rejection_keeps_a_complete_diagnostic_envelope(
+    tmp_path: Path,
+) -> None:
+    repo = tmp_path / "repo"
+    repo.mkdir()
+    todo = repo / "TODO.md"
+    todo.write_text(
+        "# TODO\n\n### S2E 當前派發投影\n\n"
+        f"{EMPTY_DISPATCH_MARKER}\n"
+        "| ID | Lane／狀態 | 依賴 | 精確工作 | 驗收／下一步 |\n"
+        "|---|---|---|---|---|\n"
+        "| `S2E.2b-2` | WAITING | none | future | later |\n",
+        encoding="utf-8",
+    )
+    for args in (
+        ("init",),
+        ("config", "user.email", "context-test@example.invalid"),
+        ("config", "user.name", "Context Test"),
+        ("add", "."),
+        ("commit", "-m", "baseline"),
+    ):
+        subprocess.run(["git", *args], cwd=repo, check=True, capture_output=True)
+    registry = deepcopy(load_registry())
+    registry["roles"]["PM"]["context_packs"] = ["active_state"]
+    source_name = "TODO.md#S2E 當前派發投影"
+    facts = _facts(
+        surfaces=["runtime"],
+        risk="high",
+        uncertainty="high",
+        baseline=capture_repository_baseline(repo),
+        scope=["TODO.md"],
+        dirty_scope=["TODO.md"],
+        evidence_state={source_name: {"content": "caller-forged"}},
+    )
+
+    source = compile_context("PM", facts, registry, repo)["sources"][0]
+    raw = todo.read_bytes()
+
+    assert source["status"] == "trusted_producer_override_rejected"
+    assert source["content_encoding"] == "json"
+    assert source["content"] == {
+        "schema_version": "todo_dispatch_projection_error_v1",
+        "projection_state": "INVALID",
+        "error": source["artifact_error"],
+    }
+    assert source["bytes"] > 0
+    assert source["source_bytes"] == len(raw)
+    assert source["source_bytes_status"] == "measured"
+    assert source["full_file_token_estimate"] == max(1, (len(raw) + 3) // 4)
+    assert source["full_file_token_estimate_status"] == "estimated_from_source_bytes"
+    assert source["capture_kind"] == "source_snapshot"
+    assert source["producer"] == "repository_bytes_v1"
+    assert source["observed_at"] < source["expires_at"]
+    assert source["digest"] is None
+
+
+@pytest.mark.parametrize("raw_source", ["TODO.md", "../TODO.md"])
+def test_unavailable_dispatch_projection_source_has_explicit_size_semantics(
+    tmp_path: Path, raw_source: str,
+) -> None:
+    repo = tmp_path / "repo"
+    repo.mkdir()
+    (repo / "placeholder.md").write_text("# placeholder\n", encoding="utf-8")
+    for args in (
+        ("init",),
+        ("config", "user.email", "context-test@example.invalid"),
+        ("config", "user.name", "Context Test"),
+        ("add", "."),
+        ("commit", "-m", "baseline"),
+    ):
+        subprocess.run(["git", *args], cwd=repo, check=True, capture_output=True)
+    registry = deepcopy(load_registry())
+    registry["roles"]["PM"]["context_packs"] = ["active_state"]
+    registry["context_packs"]["active_state"] = [{
+        "source": f"{raw_source}#S2E 當前派發投影",
+        "kind": "todo_dispatch_projection",
+        "heading": "S2E 當前派發投影",
+        "id_column": "ID",
+        "status_column": "Lane／狀態",
+        "dependency_column": "依賴",
+        "dependency_depth": 1,
+        "required_when": {"surfaces_any": ["runtime"]},
+    }]
+    facts = _facts(
+        surfaces=["runtime"],
+        risk="high",
+        uncertainty="high",
+        baseline=capture_repository_baseline(repo),
+        scope=["placeholder.md"],
+        dirty_scope=["placeholder.md"],
+    )
+
+    source = compile_context("PM", facts, registry, repo)["sources"][0]
+
+    assert source["status"] == "todo_dispatch_projection_invalid"
+    assert source["content_encoding"] == "json"
+    assert source["content"]["schema_version"] == (
+        "todo_dispatch_projection_error_v1"
+    )
+    assert source["content"]["error"] == source["artifact_error"]
+    assert source["bytes"] > 0
+    assert source["source_bytes"] is None
+    assert source["source_bytes_status"] == "unavailable"
+    assert source["full_file_token_estimate"] is None
+    assert source["full_file_token_estimate_status"] == "unavailable"
+    assert source["digest"] is None
 
 
 @pytest.mark.parametrize(

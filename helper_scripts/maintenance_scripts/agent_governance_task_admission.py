@@ -241,6 +241,8 @@ def acquire_task_admission(
             current_head=current_head,
             current_tree=current_tree,
             expected_writer_identity=owner,
+            repo=Path(identity.worktree),
+            reexecute_capture=True,
         )
     control = compile_task_execution_policy(task_contract)
     contract_digest = control["task_contract_digest"]

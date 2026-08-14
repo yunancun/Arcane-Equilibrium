@@ -949,6 +949,7 @@ def route_task(
             claim_payloads=facts["claim_payloads"],
             current_head=current_head,
             current_tree=current_tree,
+            repo=REPO_ROOT if repo is None else repo,
         )
     surfaces, shape, risk = set(facts["surfaces"]), facts["task_shape"], facts["risk"]
     uncertainty = facts["uncertainty"]
