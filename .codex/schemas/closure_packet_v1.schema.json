@@ -1202,8 +1202,24 @@
         "timeout_seconds", "started_at", "completed_at", "exit_code",
         "timed_out", "result", "stdout", "stderr", "repository_before",
         "repository_after", "whole_repository_before", "whole_repository_after",
-        "pytest_provider", "source_materialization", "effect_enforcement",
-        "host_sandbox_attestation_ref", "record_digest"
+        "effect_enforcement", "host_sandbox_attestation_ref", "record_digest"
+      ],
+      "oneOf": [
+        {
+          "required": ["pytest_provider", "source_materialization"]
+        },
+        {
+          "required": ["pytest_provider"],
+          "not": {"required": ["source_materialization"]}
+        },
+        {
+          "not": {
+            "anyOf": [
+              {"required": ["pytest_provider"]},
+              {"required": ["source_materialization"]}
+            ]
+          }
+        }
       ],
       "properties": {
         "schema_version": {"const": "command_capture_v2"},
@@ -1257,7 +1273,24 @@
         "effect_enforcement": {"const": "repository_policy_only"},
         "host_sandbox_attestation_ref": {"type": "null"},
         "record_digest": {"$ref": "#/$defs/digest"}
-      }
+      },
+      "allOf": [
+        {
+          "if": {
+            "properties": {
+              "replay_contract": {"const": "CANONICAL_TEST_OUTPUT_V1"}
+            },
+            "required": ["replay_contract"]
+          },
+          "then": {
+            "required": ["pytest_provider", "source_materialization"],
+            "properties": {
+              "pytest_provider": {"$ref": "#/$defs/governedPytestProvider"},
+              "source_materialization": {"$ref": "#/$defs/sourceMaterialization"}
+            }
+          }
+        }
+      ]
     },
     "telemetryMetrics": {
       "type": "object",
