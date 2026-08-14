@@ -2,7 +2,7 @@
 
 **Plan ID**: `AIML-LONG-LIVED-LANDING-V2`
 **Original date**: 2026-07-19
-**Revised**: 2026-08-12 (status/remaining-effort calibration; architecture unchanged)
+**Revised**: 2026-08-14 (status/remaining-effort calibration; architecture unchanged)
 **Planning baseline**: `b486c0718d1c26820cdb6308cccf74c686547b22`
 **Observed calibration baseline**: `UNVERIFIED_OBSERVATION`
 `2ed906607ca9eae641ee08940f3159463d86692c` (source context only; not a durable
