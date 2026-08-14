@@ -484,6 +484,7 @@ def filesystem_writer_lease_action(
     task_id: str,
     owner: str,
     lease_id: str | None = None,
+    admission_id: str | None = None,
     ttl_seconds: int = DEFAULT_LEASE_TTL_SECONDS,
 ) -> dict[str, Any]:
     """Run one explicit production writer-lease action."""
@@ -491,6 +492,71 @@ def filesystem_writer_lease_action(
     identity = inspect_worktree(repo)
     store = FileWriterLeaseStore(identity.common_dir)
     if action == "acquire":
+        from agent_governance_lw2_readmission import (  # local: admission imports us
+            lw2_contract_selected,
+            validate_lw2_contract_binding,
+        )
+
+        if lw2_contract_selected({}, task_id=task_id):
+            if not admission_id:
+                return _lease_result(
+                    action,
+                    status="FAIL",
+                    reasons=["TASK_ADMISSION_ID_REQUIRED"],
+                    identity=identity,
+                    lease=None,
+                )
+            from agent_governance_task_admission import (  # local: avoid cycle
+                FileTaskAdmissionStore,
+                capture_task_admission_generation,
+            )
+
+            admission_store = FileTaskAdmissionStore(identity.common_dir)
+
+            def acquire_under_admission_lock(
+                state: dict[str, Any],
+            ) -> dict[str, Any]:
+                record = state["admissions"].get(identity.worktree)
+                reasons: list[str] = []
+                if record is None:
+                    reasons.append("TASK_ADMISSION_MISSING")
+                else:
+                    if record["task_id"] != task_id:
+                        reasons.append("TASK_ADMISSION_TASK_MISMATCH")
+                    if record["owner"] != owner:
+                        reasons.append("TASK_ADMISSION_OWNER_MISMATCH")
+                    if record["admission_id"] != admission_id:
+                        reasons.append("TASK_ADMISSION_ID_MISMATCH")
+                    if record["state"] != "ACTIVE":
+                        reasons.append("TASK_ADMISSION_TERMINAL")
+                if reasons:
+                    return _lease_result(
+                        action, status="FAIL", reasons=reasons,
+                        identity=identity, lease=None,
+                    )
+                validate_lw2_contract_binding(
+                    record["task_contract"], task_id=task_id
+                )
+                current_generation = capture_task_admission_generation(
+                    Path(identity.worktree), record["task_contract"]
+                )
+                if current_generation != record.get("accepted_generation"):
+                    return _lease_result(
+                        action,
+                        status="FAIL",
+                        reasons=["TASK_ADMISSION_GENERATION_MISMATCH"],
+                        identity=identity,
+                        lease=None,
+                    )
+                return acquire_writer_lease(
+                    store,
+                    identity,
+                    task_id=task_id,
+                    owner=owner,
+                    ttl_seconds=ttl_seconds,
+                )
+
+            return admission_store.serialized_read(acquire_under_admission_lock)
         return acquire_writer_lease(
             store,
             identity,

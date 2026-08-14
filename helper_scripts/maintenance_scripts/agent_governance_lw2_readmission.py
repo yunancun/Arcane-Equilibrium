@@ -15,6 +15,8 @@ import subprocess
 from pathlib import Path
 from typing import Any
 
+from agent_governance_capture import PLATFORM_OR_EXTERNAL_ATTESTED
+from agent_governance_external_evidence import ExternalEvidenceVerifier
 from agent_governance_pytest_provider import (
     GOVERNED_PYTEST_PREFIX,
     GOVERNED_PYTEST_REQUIRED_ARGS,
@@ -30,7 +32,17 @@ LW2_CLAIM_KEYS = frozenset({
 })
 HEAD_RE = re.compile(r"[0-9a-f]{40}")
 DIGEST_RE = re.compile(r"sha256:[0-9a-f]{64}")
-IDENTITY_FIELDS = {"schema_version", "head", "tree"}
+LW2_REPOSITORY_URL = "https://github.com/yunancun/Arcane-Equilibrium.git"
+LW2_DESTINATION_REF = "refs/heads/main"
+IDENTITY_FIELDS = {
+    "schema_version", "repository_url", "destination_ref", "head", "tree",
+    "publication_provenance",
+}
+PUBLICATION_FIELDS = {
+    "schema_version", "trust_tier", "provider", "provider_record_id",
+    "repository_url", "destination_ref", "head", "tree", "status",
+    "record_digest",
+}
 CAPTURE_FIELDS = {
     "schema_version", "head", "tree", "context_artifact_digest",
     "task_contract_digest", "capture_digest", "evidence_dag_digest",
@@ -98,6 +110,148 @@ LW2_EVIDENCE_DAG = (
 LW2_EVIDENCE_DAG_DIGEST = execution_dag_digest(list(LW2_EVIDENCE_DAG))
 
 
+def lw2_readmission_policy(
+    registry: dict[str, Any] | None = None,
+) -> dict[str, Any]:
+    """Return the one Registry-owned LW2 selector and exact binding policy."""
+
+    if registry is None:
+        from agent_governance_registry import load_registry  # local: avoid cycle
+
+        registry = load_registry()
+    policy = registry.get("lw2_readmission_policy")
+    required = {
+        "schema_version", "work_item_id", "lane_id", "task_id_aliases",
+        "lane_id_aliases", "direct_interface", "direct_interface_signals",
+        "protected_scope_prefixes", "protected_scope_paths",
+        "admission_profile", "claim_keys",
+    }
+    if not isinstance(policy, dict) or set(policy) != required:
+        raise ValueError("Registry LW2 readmission policy fields are not exact")
+    if (
+        policy["schema_version"] != "lw2_readmission_policy_v1"
+        or policy["work_item_id"] != "S2E-LW2"
+        or policy["lane_id"] != "S2E.2b-2"
+        or policy["direct_interface"] != "S2E-LW2"
+        or policy["admission_profile"] != LW2_ADMISSION_PROFILE
+        or set(policy["claim_keys"]) != LW2_CLAIM_KEYS
+    ):
+        raise ValueError("Registry LW2 readmission policy canonical binding is invalid")
+    for field in (
+        "task_id_aliases", "lane_id_aliases", "direct_interface_signals",
+        "protected_scope_prefixes", "protected_scope_paths", "claim_keys",
+    ):
+        value = policy[field]
+        if (
+            not isinstance(value, list)
+            or not value
+            or len(value) != len(set(value))
+            or any(not isinstance(item, str) or not item for item in value)
+        ):
+            raise ValueError(f"Registry LW2 readmission policy {field} is invalid")
+    return policy
+
+
+def _separator_normalized_lw2_id(value: Any) -> bool:
+    if not isinstance(value, str):
+        return False
+    return re.sub(r"[._:]", "-", value) == "S2E-LW2"
+
+
+def _scope_values(contract: dict[str, Any]) -> tuple[str, ...]:
+    values: list[str] = []
+    for field in ("scope", "dirty_scope", "verification_scope"):
+        supplied = contract.get(field, [])
+        if isinstance(supplied, str):
+            supplied = [supplied]
+        if isinstance(supplied, list):
+            values.extend(item for item in supplied if isinstance(item, str))
+    return tuple(values)
+
+
+def lw2_contract_selected(
+    contract: Any,
+    *,
+    task_id: str | None = None,
+    registry: dict[str, Any] | None = None,
+) -> bool:
+    """Select LW2 from identifiers, claims, interface, or protected source scope.
+
+    Objective text is deliberately excluded.  Alias signals select so that they
+    fail the subsequent exact binding check rather than bypassing it.
+    """
+
+    if not isinstance(contract, dict):
+        return False
+    policy = lw2_readmission_policy(registry)
+    identifiers = (task_id, contract.get("work_item_id"))
+    if any(_separator_normalized_lw2_id(value) for value in identifiers):
+        return True
+    lane_id = contract.get("lane_id")
+    if lane_id == policy["lane_id"] or lane_id in policy["lane_id_aliases"]:
+        return True
+    if task_id in policy["task_id_aliases"]:
+        return True
+    interfaces = contract.get("direct_interfaces", [])
+    if isinstance(interfaces, list) and set(interfaces).intersection(
+        policy["direct_interface_signals"]
+    ):
+        return True
+    for field in ("claim_inputs", "claim_payloads"):
+        claims = contract.get(field)
+        if isinstance(claims, dict) and set(claims).intersection(
+            policy["claim_keys"]
+        ):
+            return True
+    if contract.get("admission_profile") == policy["admission_profile"]:
+        return True
+    for path in _scope_values(contract):
+        if path in policy["protected_scope_paths"] or any(
+            path.startswith(prefix) for prefix in policy["protected_scope_prefixes"]
+        ):
+            return True
+    return False
+
+
+def validate_lw2_contract_binding(
+    contract: Any,
+    *,
+    task_id: str | None = None,
+    registry: dict[str, Any] | None = None,
+) -> None:
+    """Require the exact canonical contract whenever any LW2 signal selects."""
+
+    if not isinstance(contract, dict):
+        raise ValueError("LW2 selected contract requires an object")
+    policy = lw2_readmission_policy(registry)
+    errors: list[str] = []
+    expected = {
+        "work_item_id": policy["work_item_id"],
+        "lane_id": policy["lane_id"],
+        "admission_profile": policy["admission_profile"],
+    }
+    for field, value in expected.items():
+        if contract.get(field) != value:
+            errors.append(f"{field}={value}")
+    if contract.get("direct_interfaces") != [policy["direct_interface"]]:
+        errors.append(f"direct_interfaces=[{policy['direct_interface']}]")
+    if not isinstance(contract.get("claim_inputs"), dict) or set(
+        contract["claim_inputs"]
+    ) != set(policy["claim_keys"]):
+        errors.append("exact three claim_inputs")
+    if not isinstance(contract.get("claim_payloads"), dict) or set(
+        contract["claim_payloads"]
+    ) != set(policy["claim_keys"]):
+        errors.append("exact three claim_payloads")
+    if task_id is not None and task_id != policy["work_item_id"]:
+        errors.append(f"task_id={policy['work_item_id']}")
+    if errors:
+        raise ValueError(
+            "LW2 selected contract requires exact canonical binding: "
+            + ", ".join(errors)
+        )
+
+
 def canonical_claim_digest(value: Any) -> str:
     """Return the task-contract claim digest for one exact JSON payload."""
 
@@ -139,6 +293,53 @@ def capture_current_repository_identity(repo: Path) -> tuple[str, str]:
     return head, tree
 
 
+def _git_text(repo: Path, *args: str) -> str:
+    try:
+        completed = subprocess.run(
+            ["git", *args], cwd=repo, check=True, capture_output=True, text=True,
+        )
+    except (OSError, subprocess.CalledProcessError) as error:
+        raise ValueError("LW2 admission local merged-main identity is unavailable") from error
+    return completed.stdout.strip()
+
+
+def validate_local_merged_main(repo: Path, *, head: str, tree: str) -> None:
+    """Bind eligibility to a published local checkout of exact origin/main."""
+
+    actual_head, actual_tree = capture_current_repository_identity(repo)
+    branch = _git_text(repo, "symbolic-ref", "--quiet", "--short", "HEAD")
+    origin_url = _git_text(repo, "remote", "get-url", "origin")
+    origin_main = _git_text(repo, "rev-parse", "refs/remotes/origin/main")
+    if branch != "main":
+        raise ValueError("LW2 combined-main validation requires local branch main")
+    if origin_url != LW2_REPOSITORY_URL:
+        raise ValueError("LW2 combined-main validation requires the exact origin URL")
+    if origin_main != actual_head:
+        raise ValueError("LW2 combined-main validation requires origin/main == HEAD")
+    if (actual_head, actual_tree) != (head, tree):
+        raise ValueError("LW2 combined-main local HEAD/tree differs from claims")
+
+
+def _record_self_digest(record: dict[str, Any]) -> str:
+    return canonical_claim_digest({
+        key: value for key, value in record.items() if key != "record_digest"
+    })
+
+
+def _require_external_verification(
+    verifier: ExternalEvidenceVerifier | None,
+    request: dict[str, Any],
+    *,
+    label: str,
+) -> None:
+    try:
+        verified = verifier is not None and verifier(request) is True
+    except Exception:
+        verified = False
+    if not verified:
+        raise ValueError(f"{label} requires an out-of-band trusted verifier")
+
+
 def _exact_object(value: Any, fields: set[str], label: str) -> dict[str, Any]:
     if not isinstance(value, dict) or set(value) != fields:
         raise ValueError(f"{label} fields are not exact")
@@ -163,6 +364,7 @@ def validate_lw2_readmission_eligibility(
     expected_writer_identity: str | None = None,
     repo: Path | None = None,
     reexecute_capture: bool = False,
+    external_evidence_verifier: ExternalEvidenceVerifier | None = None,
 ) -> bool:
     """Return only eligibility for the exact current-head LW2 claim bundle."""
 
@@ -186,11 +388,50 @@ def validate_lw2_readmission_eligibility(
         IDENTITY_FIELDS,
         "LW2 combined-main identity",
     )
-    if identity["schema_version"] != "lw2_combined_main_identity_v1":
+    if identity["schema_version"] != "lw2_combined_main_identity_v2":
         raise ValueError("LW2 combined-main identity schema is invalid")
+    if (
+        identity["repository_url"] != LW2_REPOSITORY_URL
+        or identity["destination_ref"] != LW2_DESTINATION_REF
+    ):
+        raise ValueError("LW2 combined-main identity destination is invalid")
     head, tree = _identity(identity, label="LW2 combined-main identity")
     if (head, tree) != (current_head, current_tree):
         raise ValueError("LW2 combined-main identity is not current repository HEAD/tree")
+    publication = _exact_object(
+        identity["publication_provenance"],
+        PUBLICATION_FIELDS,
+        "LW2 combined-main publication provenance",
+    )
+    if (
+        publication["schema_version"]
+        != "lw2_destination_publication_provenance_v1"
+        or publication["trust_tier"] != PLATFORM_OR_EXTERNAL_ATTESTED
+        or publication["provider"] != "github"
+        or not isinstance(publication["provider_record_id"], str)
+        or not publication["provider_record_id"].strip()
+        or publication["repository_url"] != LW2_REPOSITORY_URL
+        or publication["destination_ref"] != LW2_DESTINATION_REF
+        or (publication["head"], publication["tree"]) != (head, tree)
+        or publication["status"] != "PUBLISHED"
+        or publication["record_digest"] != _record_self_digest(publication)
+    ):
+        raise ValueError("LW2 combined-main publication provenance is invalid")
+    if repo is None:
+        raise ValueError("LW2 combined-main validation requires repository root")
+    validate_local_merged_main(Path(repo), head=head, tree=tree)
+    _require_external_verification(
+        external_evidence_verifier,
+        {
+            "schema_version": "lw2_publication_verification_request_v1",
+            "repository_url": LW2_REPOSITORY_URL,
+            "destination_ref": LW2_DESTINATION_REF,
+            "head": head,
+            "tree": tree,
+            "publication_provenance": publication,
+        },
+        label="LW2 combined-main publication provenance",
+    )
 
     raw_capture = claim_payloads["lw2_combined_main_unreachability_capture"]
     if not isinstance(raw_capture, dict) or set(raw_capture) != CAPTURE_FIELDS:
@@ -207,8 +448,6 @@ def validate_lw2_readmission_eligibility(
         raise ValueError(
             "LW2 combined-main capture must embed one complete command_capture_v2"
         )
-    if repo is None:
-        raise ValueError("LW2 combined-main capture validation requires repository root")
     expected_execution_task = {
         "node_id": LW2_CAPTURE_NODE_ID,
         "role": "E3",
@@ -348,6 +587,26 @@ def validate_lw2_readmission_eligibility(
         and writer_identity != expected_writer_identity
     ):
         raise ValueError("LW2 declared writer identity differs from admission owner")
+    _require_external_verification(
+        external_evidence_verifier,
+        {
+            "schema_version": "lw2_independent_review_verification_request_v1",
+            "repository_url": LW2_REPOSITORY_URL,
+            "destination_ref": LW2_DESTINATION_REF,
+            "head": head,
+            "tree": tree,
+            "task_contract_digest": review["task_contract_digest"],
+            "context_artifact_digest": review["context_artifact_digest"],
+            "evidence_dag_digest": review["evidence_dag_digest"],
+            "node_id": LW2_REVIEW_NODE_ID,
+            "capture_digest": command_capture["record_digest"],
+            "reviewer_identity": "E2",
+            "workflow_call_record_digest": call["record_digest"],
+            "role_fragment_digest": canonical_claim_digest(fragment),
+            "verdict": "PASS",
+        },
+        label="LW2 independent review provenance",
+    )
     if reexecute_capture:
         replay_errors = validate_governed_command_capture(
             command_capture,

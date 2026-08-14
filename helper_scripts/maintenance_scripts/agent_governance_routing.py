@@ -9,6 +9,8 @@ from pathlib import PurePosixPath
 from pathlib import Path
 from typing import Any, Iterable
 
+from agent_governance_external_evidence import ExternalEvidenceVerifier
+
 from agent_governance_aiml_adoption import (
     PROGRAM_REVIEW_NODES, aiml_program_adoption_selected, validate_aiml_finalization_facts,
 )
@@ -26,6 +28,8 @@ from agent_governance_lw2_readmission import (
     LW2_ADMISSION_PROFILE,
     canonical_claim_digest,
     capture_current_repository_identity,
+    lw2_contract_selected,
+    validate_lw2_contract_binding,
     validate_lw2_readmission_eligibility,
 )
 from agent_governance_context_refs import normalize_history_refs
@@ -45,7 +49,7 @@ TASK_FACT_FIELDS = {
     "direct_interfaces", "previous_failure", "evidence_state", "expected_output",
     "side_effect_class", "uncertainty", "dirty_scope", "operator_risk_acceptance",
     "verification_scope", "focus", "claim_inputs", "claim_payloads",
-    "admission_profile",
+    "admission_profile", "work_item_id", "lane_id",
     "task_prompt", "task_prompt_digest", "continuation_mode",
     "operator_loop_request_digest", "history_refs",
 }
@@ -321,6 +325,7 @@ TASK_CONTRACT_FIELDS = (
     "uncertainty", "side_effect_class", "objective", "scope", "acceptance_criteria", "hard_stops",
     "baseline", "dirty_scope", "verification_scope", "direct_interfaces", "previous_failure", "focus",
     "claim_inputs", "claim_payloads", "admission_profile",
+    "work_item_id", "lane_id",
     "task_prompt", "task_prompt_digest", "continuation_mode",
     "operator_loop_request_digest", "history_refs",
 )
@@ -903,6 +908,13 @@ def _normalize_task_facts(task_facts: dict[str, Any]) -> dict[str, Any]:
     if admission_profile not in {None, LW2_ADMISSION_PROFILE}:
         raise ValueError("task facts admission_profile is invalid")
     normalized["admission_profile"] = admission_profile
+    for field in ("work_item_id", "lane_id"):
+        value = normalized.get(field)
+        if value is not None and (
+            not isinstance(value, str) or not value or value != value.strip()
+        ):
+            raise ValueError(f"task facts {field} must be null or a non-empty exact string")
+        normalized[field] = value
     claim_payloads = normalized.get("claim_payloads", {})
     if not isinstance(claim_payloads, dict) or any(
         not isinstance(key, str) or not key.strip()
@@ -934,12 +946,14 @@ def route_task(
     *,
     registry: dict[str, Any] | None = None,
     repo: Path | None = None,
+    external_evidence_verifier: ExternalEvidenceVerifier | None = None,
 ) -> dict[str, Any]:
     """Compile task facts into the mandatory hybrid DAG."""
 
     registry = load_registry() if registry is None else registry
     facts = _normalize_task_facts(task_facts)
-    if facts["admission_profile"] == LW2_ADMISSION_PROFILE:
+    if lw2_contract_selected(facts, registry=registry):
+        validate_lw2_contract_binding(facts, registry=registry)
         current_head, current_tree = capture_current_repository_identity(
             REPO_ROOT if repo is None else repo
         )
@@ -950,6 +964,7 @@ def route_task(
             current_head=current_head,
             current_tree=current_tree,
             repo=REPO_ROOT if repo is None else repo,
+            external_evidence_verifier=external_evidence_verifier,
         )
     surfaces, shape, risk = set(facts["surfaces"]), facts["task_shape"], facts["risk"]
     uncertainty = facts["uncertainty"]

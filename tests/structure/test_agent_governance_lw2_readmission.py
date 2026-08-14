@@ -20,6 +20,7 @@ if str(HELPERS) not in sys.path:
 
 from agent_governance_lw2_readmission import (  # noqa: E402
     LW2_ADMISSION_PROFILE,
+    lw2_contract_selected,
     validate_lw2_readmission_eligibility,
 )
 from agent_governance_command_capture_v2 import (  # noqa: E402
@@ -55,6 +56,7 @@ from agent_governance_task_admission import (  # noqa: E402
 from agent_governance import main as governance_main  # noqa: E402
 from agent_governance_writer_lease import (  # noqa: E402
     FileWriterLeaseStore,
+    filesystem_writer_lease_action,
     inspect_worktree,
 )
 
@@ -80,6 +82,25 @@ LW2_FOCUSED_TEST_TARGETS = [
     ),
 ]
 LW2_TRUST_CEILING = "ORCHESTRATOR_BOUND_STRUCTURAL_PROVENANCE_ONLY"
+LW2_REPOSITORY_URL = "https://github.com/yunancun/Arcane-Equilibrium.git"
+LW2_DESTINATION_REF = "refs/heads/main"
+
+
+def _trusted_external_verifier(request: dict[str, object]) -> bool:
+    return (
+        request.get("schema_version") in {
+            "lw2_publication_verification_request_v1",
+            "lw2_independent_review_verification_request_v1",
+        }
+        and request.get("repository_url") == LW2_REPOSITORY_URL
+        and request.get("destination_ref") == LW2_DESTINATION_REF
+        and isinstance(request.get("head"), str)
+        and isinstance(request.get("tree"), str)
+    )
+
+
+def _throwing_external_verifier(_request: dict[str, object]) -> bool:
+    raise RuntimeError("trusted host unavailable")
 
 
 def _digest(value: object) -> str:
@@ -97,10 +118,25 @@ def _claims(
     *, head: str = HEAD, tree: str = TREE,
     reviewer: str = "E2", writer: str = "E1",
 ) -> tuple[dict[str, str], dict[str, object]]:
-    identity = {
-        "schema_version": "lw2_combined_main_identity_v1",
+    publication = {
+        "schema_version": "lw2_destination_publication_provenance_v1",
+        "trust_tier": "PLATFORM_OR_EXTERNAL_ATTESTED",
+        "provider": "github",
+        "provider_record_id": f"refs/heads/main@{head}",
+        "repository_url": LW2_REPOSITORY_URL,
+        "destination_ref": LW2_DESTINATION_REF,
         "head": head,
         "tree": tree,
+        "status": "PUBLISHED",
+    }
+    publication["record_digest"] = _digest(publication)
+    identity = {
+        "schema_version": "lw2_combined_main_identity_v2",
+        "repository_url": LW2_REPOSITORY_URL,
+        "destination_ref": LW2_DESTINATION_REF,
+        "head": head,
+        "tree": tree,
+        "publication_provenance": publication,
     }
     capture = {
         "schema_version": "lw2_combined_main_unreachability_capture_v1",
@@ -160,7 +196,7 @@ def _real_claims(repo: Path) -> tuple[dict[str, str], dict[str, object]]:
         "acceptance_criteria": ["governed focused unreachability suite passes"],
         "hard_stops": ["no runtime or trading effect"],
         "baseline": capture_repository_baseline(repo),
-        "direct_interfaces": ["S2E-LW2"],
+        "direct_interfaces": ["lw2_unreachability_capture_v1"],
         "previous_failure": "summary-only evidence was accepted",
     }
     routed = route_task(evidence_facts, repo=repo)
@@ -313,10 +349,25 @@ def _real_claims(repo: Path) -> tuple[dict[str, str], dict[str, object]]:
         },
         "payload_kind": registry["roles"]["E2"]["payload_kind"],
     }
-    identity = {
-        "schema_version": "lw2_combined_main_identity_v1",
+    publication = {
+        "schema_version": "lw2_destination_publication_provenance_v1",
+        "trust_tier": "PLATFORM_OR_EXTERNAL_ATTESTED",
+        "provider": "github",
+        "provider_record_id": f"refs/heads/main@{head}",
+        "repository_url": LW2_REPOSITORY_URL,
+        "destination_ref": LW2_DESTINATION_REF,
         "head": head,
         "tree": tree,
+        "status": "PUBLISHED",
+    }
+    publication["record_digest"] = _digest(publication)
+    identity = {
+        "schema_version": "lw2_combined_main_identity_v2",
+        "repository_url": LW2_REPOSITORY_URL,
+        "destination_ref": LW2_DESTINATION_REF,
+        "head": head,
+        "tree": tree,
+        "publication_provenance": publication,
     }
     review_wrapper = {
         "schema_version": "lw2_independent_review_v1",
@@ -346,6 +397,17 @@ def real_lw2_evidence(
         ["git", "clone", "--quiet", str(ROOT), str(repo)],
         check=True,
         capture_output=True,
+    )
+    subprocess.run(["git", "branch", "-M", "main"], cwd=repo, check=True)
+    subprocess.run(
+        ["git", "remote", "set-url", "origin", LW2_REPOSITORY_URL],
+        cwd=repo,
+        check=True,
+    )
+    subprocess.run(
+        ["git", "update-ref", "refs/remotes/origin/main", "HEAD"],
+        cwd=repo,
+        check=True,
     )
     claim_inputs, claim_payloads = _real_claims(repo)
     return repo, claim_inputs, claim_payloads
@@ -431,6 +493,20 @@ def _invalid_claims(
     elif case == "stale_capture_head":
         claim_payloads["lw2_combined_main_unreachability_capture"]["head"] = "3" * 40
         claim_inputs = _claim_digests(claim_payloads)
+    elif case == "wrong_destination":
+        identity = claim_payloads["lw2_combined_main_identity"]
+        identity["destination_ref"] = "refs/heads/feature"
+        publication = identity["publication_provenance"]
+        publication["destination_ref"] = "refs/heads/feature"
+        _rehash_record(publication)
+        claim_inputs = _claim_digests(claim_payloads)
+    elif case == "unpublished_provenance":
+        publication = claim_payloads[
+            "lw2_combined_main_identity"
+        ]["publication_provenance"]
+        publication["status"] = "UNPUBLISHED"
+        _rehash_record(publication)
+        claim_inputs = _claim_digests(claim_payloads)
     elif case == "capture_non_pass":
         command_capture = claim_payloads[
             "lw2_combined_main_unreachability_capture"
@@ -467,6 +543,23 @@ def _invalid_claims(
         ]["role_fragment"]
         fragment["payload"]["reviewed_capture_digest"] = "sha256:" + "f" * 64
         _refresh_review_record(claim_payloads)
+        claim_inputs = _claim_digests(claim_payloads)
+    elif case == "stale_task_contract":
+        review = claim_payloads["lw2_independent_review"]
+        review["task_contract_digest"] = "sha256:" + "a" * 64
+        claim_inputs = _claim_digests(claim_payloads)
+    elif case == "stale_context":
+        review = claim_payloads["lw2_independent_review"]
+        review["context_artifact_digest"] = "sha256:" + "b" * 64
+        claim_inputs = _claim_digests(claim_payloads)
+    elif case == "stale_review_node":
+        review = claim_payloads["lw2_independent_review"]
+        call = review["workflow_call_record"]
+        call["node_id"] = "copied_independent_review"
+        _rehash_record(call)
+        review["role_fragment"]["producer_call_receipt_digest"] = (
+            call["record_digest"]
+        )
         claim_inputs = _claim_digests(claim_payloads)
     elif case == "other_argv":
         command_capture = claim_payloads[
@@ -513,19 +606,62 @@ def test_real_capture_and_review_are_eligible_only(
         current_head=head,
         current_tree=tree,
         repo=repo,
+        external_evidence_verifier=_trusted_external_verifier,
     ) is True
 
 
-def test_handwritten_summary_only_lw2_claims_are_ineligible() -> None:
-    claim_inputs, claim_payloads = _claims()
+def test_structural_review_and_publication_claims_require_a_trusted_host(
+    real_lw2_evidence: tuple[Path, dict[str, str], dict[str, object]],
+) -> None:
+    repo, claim_inputs, claim_payloads = real_lw2_evidence
+    with pytest.raises(ValueError, match="out-of-band trusted verifier"):
+        validate_lw2_readmission_eligibility(
+            admission_profile=LW2_ADMISSION_PROFILE,
+            claim_inputs=claim_inputs,
+            claim_payloads=claim_payloads,
+            current_head=_git_value(repo, "HEAD"),
+            current_tree=_git_value(repo, "HEAD^{tree}"),
+            repo=repo,
+        )
+
+
+@pytest.mark.parametrize(
+    "verifier",
+    [None, lambda _request: False, _throwing_external_verifier],
+)
+def test_none_false_or_throwing_trusted_verifier_fails_closed(
+    verifier: object,
+    real_lw2_evidence: tuple[Path, dict[str, str], dict[str, object]],
+) -> None:
+    repo, claim_inputs, claim_payloads = real_lw2_evidence
+    with pytest.raises(ValueError, match="out-of-band trusted verifier"):
+        validate_lw2_readmission_eligibility(
+            admission_profile=LW2_ADMISSION_PROFILE,
+            claim_inputs=claim_inputs,
+            claim_payloads=claim_payloads,
+            current_head=_git_value(repo, "HEAD"),
+            current_tree=_git_value(repo, "HEAD^{tree}"),
+            repo=repo,
+            external_evidence_verifier=verifier,
+        )
+
+
+def test_handwritten_summary_only_lw2_claims_are_ineligible(
+    real_lw2_evidence: tuple[Path, dict[str, str], dict[str, object]],
+) -> None:
+    repo, _, _ = real_lw2_evidence
+    head, tree = _git_value(repo, "HEAD"), _git_value(repo, "HEAD^{tree}")
+    claim_inputs, claim_payloads = _claims(head=head, tree=tree)
 
     with pytest.raises(ValueError, match="complete command_capture_v2"):
         validate_lw2_readmission_eligibility(
             admission_profile=LW2_ADMISSION_PROFILE,
             claim_inputs=claim_inputs,
             claim_payloads=claim_payloads,
-            current_head=HEAD,
-            current_tree=TREE,
+            current_head=head,
+            current_tree=tree,
+            repo=repo,
+            external_evidence_verifier=_trusted_external_verifier,
         )
 
 
@@ -541,11 +677,16 @@ def test_handwritten_summary_only_lw2_claims_are_ineligible() -> None:
         "stale_head",
         "stale_tree",
         "stale_capture_head",
+        "wrong_destination",
+        "unpublished_provenance",
         "capture_non_pass",
         "capture_non_governed",
         "review_non_pass",
         "review_self_identity",
         "wrong_reviewed_capture_digest",
+        "stale_task_contract",
+        "stale_context",
+        "stale_review_node",
         "other_argv",
         "malformed_rehashed_capture",
         "bare_reviewer_labels",
@@ -569,6 +710,69 @@ def test_lw2_pure_validator_fails_closed_for_every_binding_break(
             current_head=_git_value(repo, "HEAD"),
             current_tree=_git_value(repo, "HEAD^{tree}"),
             repo=repo,
+            external_evidence_verifier=_trusted_external_verifier,
+        )
+
+
+@pytest.mark.parametrize(
+    ("case", "error"),
+    [
+        ("feature_branch", "local branch main"),
+        ("detached_head", "local merged-main identity is unavailable"),
+        ("unpublished_head", "origin/main == HEAD"),
+        ("wrong_origin", "exact origin URL"),
+    ],
+)
+def test_lw2_local_checkout_must_be_exact_published_origin_main(
+    case: str,
+    error: str,
+    tmp_path: Path,
+    real_lw2_evidence: tuple[Path, dict[str, str], dict[str, object]],
+) -> None:
+    source, claim_inputs, claim_payloads = real_lw2_evidence
+    repo = tmp_path / case
+    subprocess.run(
+        ["git", "clone", "--quiet", str(source), str(repo)], check=True,
+    )
+    subprocess.run(["git", "branch", "-M", "main"], cwd=repo, check=True)
+    subprocess.run(
+        ["git", "remote", "set-url", "origin", LW2_REPOSITORY_URL],
+        cwd=repo,
+        check=True,
+    )
+    subprocess.run(
+        ["git", "update-ref", "refs/remotes/origin/main", "HEAD"],
+        cwd=repo,
+        check=True,
+    )
+    if case == "feature_branch":
+        subprocess.run(["git", "branch", "-M", "feature"], cwd=repo, check=True)
+    elif case == "detached_head":
+        subprocess.run(["git", "checkout", "--detach", "-q"], cwd=repo, check=True)
+    elif case == "unpublished_head":
+        subprocess.run(
+            ["git", "update-ref", "refs/remotes/origin/main", "HEAD^"],
+            cwd=repo,
+            check=True,
+        )
+    elif case == "wrong_origin":
+        subprocess.run(
+            ["git", "remote", "set-url", "origin", "https://example.invalid/repo.git"],
+            cwd=repo,
+            check=True,
+        )
+    else:
+        raise AssertionError(case)
+
+    with pytest.raises(ValueError, match=error):
+        validate_lw2_readmission_eligibility(
+            admission_profile=LW2_ADMISSION_PROFILE,
+            claim_inputs=claim_inputs,
+            claim_payloads=claim_payloads,
+            current_head=_git_value(repo, "HEAD"),
+            current_tree=_git_value(repo, "HEAD^{tree}"),
+            repo=repo,
+            external_evidence_verifier=_trusted_external_verifier,
         )
 
 
@@ -596,6 +800,8 @@ def _route_facts(
         "acceptance_criteria": ["fresh LW2 evidence is bound before work"],
         "hard_stops": ["no runtime or trading effect"],
         "direct_interfaces": ["S2E-LW2"],
+        "work_item_id": "S2E-LW2",
+        "lane_id": "S2E.2b-2",
         "previous_failure": "fresh combined-main evidence was not executable",
         "admission_profile": LW2_ADMISSION_PROFILE,
         "claim_inputs": deepcopy(claim_inputs),
@@ -609,7 +815,11 @@ def test_lw2_route_validates_current_claims_before_constructing_the_dag(
     repo, claim_inputs, claim_payloads = real_lw2_evidence
     facts = _route_facts(repo, claim_inputs, claim_payloads)
 
-    routed = route_task(facts, repo=repo)
+    routed = route_task(
+        facts,
+        repo=repo,
+        external_evidence_verifier=_trusted_external_verifier,
+    )
 
     assert routed["task_facts"]["admission_profile"] == LW2_ADMISSION_PROFILE
     assert task_contract_projection(routed["task_facts"])["claim_payloads"] == (
@@ -620,7 +830,7 @@ def test_lw2_route_validates_current_claims_before_constructing_the_dag(
     missing["claim_payloads"] = dict(facts["claim_payloads"])
     missing["claim_inputs"].pop("lw2_independent_review")
     missing["claim_payloads"].pop("lw2_independent_review")
-    with pytest.raises(ValueError, match="exactly three"):
+    with pytest.raises(ValueError, match="exact three"):
         route_task(missing, repo=repo)
 
 
@@ -636,11 +846,16 @@ def test_lw2_route_validates_current_claims_before_constructing_the_dag(
         "stale_head",
         "stale_tree",
         "stale_capture_head",
+        "wrong_destination",
+        "unpublished_provenance",
         "capture_non_pass",
         "capture_non_governed",
         "review_non_pass",
         "review_self_identity",
         "wrong_reviewed_capture_digest",
+        "stale_task_contract",
+        "stale_context",
+        "stale_review_node",
         "other_argv",
         "malformed_rehashed_capture",
         "bare_reviewer_labels",
@@ -659,7 +874,11 @@ def test_every_invalid_lw2_route_stops_before_returning_a_dag(
     facts = _route_facts(repo, claim_inputs, claim_payloads)
     dag = None
     with pytest.raises(ValueError):
-        dag = route_task(facts, repo=repo)
+        dag = route_task(
+            facts,
+            repo=repo,
+            external_evidence_verifier=_trusted_external_verifier,
+        )
     assert dag is None
 
 
@@ -684,9 +903,13 @@ def test_ordinary_contract_defaults_remain_context_and_schema_compatible() -> No
         "previous_failure": "none",
     })
     assert routed["task_facts"]["admission_profile"] is None
+    assert routed["task_facts"]["work_item_id"] is None
+    assert routed["task_facts"]["lane_id"] is None
     assert routed["task_facts"]["claim_payloads"] == {}
     contract = task_contract_projection(routed["task_facts"])
     assert contract["admission_profile"] is None
+    assert contract["work_item_id"] is None
+    assert contract["lane_id"] is None
     assert contract["claim_payloads"] == {}
 
     plan = compile_context("E1", routed["task_facts"], root=ROOT)
@@ -698,6 +921,79 @@ def test_ordinary_contract_defaults_remain_context_and_schema_compatible() -> No
     assert validation["errors"] == []
 
 
+def _ordinary_route_facts() -> dict[str, object]:
+    return {
+        "task_shape": "implementation",
+        "surfaces": ["python"],
+        "risk": "low",
+        "uncertainty": "low",
+        "side_effect_class": "repo_write",
+        "objective": "ordinary source repair",
+        "scope": ["helper_scripts/maintenance_scripts/agent_governance_routing.py"],
+        "dirty_scope": [
+            "helper_scripts/maintenance_scripts/agent_governance_routing.py"
+        ],
+        "direct_interfaces": [],
+    }
+
+
+@pytest.mark.parametrize(
+    "signal",
+    [
+        {"work_item_id": "S2E-LW2"},
+        {"work_item_id": "S2E.LW2"},
+        {"work_item_id": "S2E_LW2"},
+        {"work_item_id": "S2E:LW2"},
+        {"lane_id": "S2E.2b-2"},
+        {"lane_id": "S2E.2b-2B"},
+        {"lane_id": "P0-AIML-LONG-LIVED-RUNTIME-REPAIR"},
+        {"direct_interfaces": ["S2E-LW2"]},
+        {
+            "direct_interfaces": [
+                "S2E_2B_2B_HOST_RUNNER_CHECKPOINT_READY"
+            ]
+        },
+        {
+            "scope": [
+                "helper_scripts/maintenance_scripts/"
+                "agent_governance_s2_5_host_runner.py"
+            ],
+            "dirty_scope": [
+                "helper_scripts/maintenance_scripts/"
+                "agent_governance_s2_5_host_runner.py"
+            ],
+        },
+        {
+            "scope": [
+                "program_code/ml_training/schemas/aiml_gate_receipts/"
+                "s2e_launch_wave_receipt_v1.schema.json"
+            ],
+            "dirty_scope": [
+                "program_code/ml_training/schemas/aiml_gate_receipts/"
+                "s2e_launch_wave_receipt_v1.schema.json"
+            ],
+        },
+    ],
+)
+def test_any_lw2_signal_selects_and_requires_the_exact_contract_before_dag(
+    signal: dict[str, object],
+) -> None:
+    facts = {**_ordinary_route_facts(), **signal}
+    assert lw2_contract_selected(facts) is True
+    with pytest.raises(ValueError, match="LW2 selected contract requires"):
+        route_task(facts)
+
+
+def test_objective_text_alone_never_selects_lw2() -> None:
+    facts = _ordinary_route_facts()
+    facts["objective"] = "please implement S2E-LW2 after readmission"
+
+    assert lw2_contract_selected(facts) is False
+    routed = route_task(facts)
+    assert routed["task_facts"]["work_item_id"] is None
+    assert routed["task_facts"]["lane_id"] is None
+
+
 @pytest.fixture(scope="module")
 def real_lw2_contract(
     real_lw2_evidence: tuple[Path, dict[str, str], dict[str, object]],
@@ -706,6 +1002,7 @@ def real_lw2_contract(
     routed = route_task(
         _route_facts(repo, claim_inputs, claim_payloads),
         repo=repo,
+        external_evidence_verifier=_trusted_external_verifier,
     )
     return repo, task_contract_projection(routed["task_facts"])
 
@@ -724,6 +1021,17 @@ def _clone_evidence_repo(source: Path, tmp_path: Path) -> Path:
     )
     subprocess.run(
         ["git", "config", "user.name", "LW2 Test"],
+        cwd=repo,
+        check=True,
+    )
+    subprocess.run(["git", "branch", "-M", "main"], cwd=repo, check=True)
+    subprocess.run(
+        ["git", "remote", "set-url", "origin", LW2_REPOSITORY_URL],
+        cwd=repo,
+        check=True,
+    )
+    subprocess.run(
+        ["git", "update-ref", "refs/remotes/origin/main", "HEAD"],
         cwd=repo,
         check=True,
     )
@@ -766,6 +1074,7 @@ def test_lw2_task_admission_revalidates_current_head_before_store_mutation(
             task_id="S2E-LW2",
             owner="E1",
             task_contract=contract,
+            external_evidence_verifier=_trusted_external_verifier,
         )
 
     _assert_no_admission_or_lease(repo)
@@ -792,9 +1101,50 @@ def test_lw2_task_admission_replays_before_store_and_rejects_dirty_generation(
             task_id="S2E-LW2",
             owner="E1",
             task_contract=deepcopy(contract),
+            external_evidence_verifier=_trusted_external_verifier,
         )
 
     _assert_no_admission_or_lease(repo)
+
+
+def test_lw2_task_admission_recaptures_generation_inside_store_lock(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+    real_lw2_contract: tuple[Path, dict[str, object]],
+) -> None:
+    source, contract = real_lw2_contract
+    repo = _clone_evidence_repo(source, tmp_path)
+    original_update = FileTaskAdmissionStore.update
+
+    def mutate_after_replay(
+        store: FileTaskAdmissionStore,
+        mutation: object,
+    ) -> dict[str, object]:
+        governed_source = (
+            repo / "helper_scripts" / "maintenance_scripts"
+            / "agent_governance_lw2_readmission.py"
+        )
+        governed_source.write_text(
+            governed_source.read_text(encoding="utf-8")
+            + "\n# post replay pre-store mutation\n",
+            encoding="utf-8",
+        )
+        return original_update(store, mutation)
+
+    monkeypatch.setattr(FileTaskAdmissionStore, "update", mutate_after_replay)
+    with pytest.raises(ValueError, match="changed after replay before admission store"):
+        acquire_task_admission(
+            repo=repo,
+            task_id="S2E-LW2",
+            owner="E1",
+            task_contract=deepcopy(contract),
+            external_evidence_verifier=_trusted_external_verifier,
+        )
+
+    identity = inspect_worktree(repo)
+    assert FileTaskAdmissionStore(identity.common_dir).read()["admissions"] == {}
+    assert FileTaskAdmissionStore(identity.common_dir).state_path.exists() is False
+    assert FileWriterLeaseStore(identity.common_dir).read()["leases"] == {}
 
 
 def test_lw2_route_cli_returns_typed_failure_without_a_dag(
@@ -815,7 +1165,7 @@ def test_lw2_route_cli_returns_typed_failure_without_a_dag(
 
     assert exit_code == 2
     assert result["status"] == "FAIL"
-    assert "exactly three" in result["error"]
+    assert "exact three" in result["error"]
     assert "nodes" not in result
     assert "dag_digest" not in result
 
@@ -831,12 +1181,105 @@ def test_eligible_temp_repo_admission_never_auto_creates_a_writer_lease(
         task_id="S2E-LW2",
         owner="E1",
         task_contract=deepcopy(contract),
+        external_evidence_verifier=_trusted_external_verifier,
     )
 
     assert result["status"] == "PASS"
     common_dir = inspect_worktree(repo).common_dir
-    assert FileTaskAdmissionStore(common_dir).read()["admissions"]
+    records = FileTaskAdmissionStore(common_dir).read()["admissions"]
+    record = next(iter(records.values()))
+    assert record["accepted_generation"] == result["admission"]["accepted_generation"]
+    assert record["accepted_generation"]["source_head"] == _git_value(repo, "HEAD")
+    assert record["accepted_generation"]["source_tree"] == _git_value(
+        repo, "HEAD^{tree}"
+    )
     lease_store = FileWriterLeaseStore(common_dir)
+    assert lease_store.read()["leases"] == {}
+    assert lease_store.state_path.exists() is False
+
+
+def test_direct_lw2_lease_requires_exact_admission_token_and_generation(
+    tmp_path: Path,
+    real_lw2_contract: tuple[Path, dict[str, object]],
+) -> None:
+    source, contract = real_lw2_contract
+    repo = _clone_evidence_repo(source, tmp_path)
+    admission = acquire_task_admission(
+        repo=repo,
+        task_id="S2E-LW2",
+        owner="E1",
+        task_contract=deepcopy(contract),
+        external_evidence_verifier=_trusted_external_verifier,
+    )
+    assert admission["status"] == "PASS"
+
+    missing = filesystem_writer_lease_action(
+        action="acquire", repo=repo, task_id="S2E-LW2", owner="E1",
+    )
+    assert missing["status"] == "FAIL"
+    assert missing["reasons"] == ["TASK_ADMISSION_ID_REQUIRED"]
+
+    wrong = filesystem_writer_lease_action(
+        action="acquire",
+        repo=repo,
+        task_id="S2E-LW2",
+        owner="E1",
+        admission_id="0" * 32,
+    )
+    assert wrong["status"] == "FAIL"
+    assert wrong["reasons"] == ["TASK_ADMISSION_ID_MISMATCH"]
+
+    wrong_task = filesystem_writer_lease_action(
+        action="acquire",
+        repo=repo,
+        task_id="S2E.LW2",
+        owner="E1",
+        admission_id=admission["admission_id"],
+    )
+    assert wrong_task["status"] == "FAIL"
+    assert wrong_task["reasons"] == ["TASK_ADMISSION_TASK_MISMATCH"]
+
+    wrong_owner = filesystem_writer_lease_action(
+        action="acquire",
+        repo=repo,
+        task_id="S2E-LW2",
+        owner="E2",
+        admission_id=admission["admission_id"],
+    )
+    assert wrong_owner["status"] == "FAIL"
+    assert wrong_owner["reasons"] == ["TASK_ADMISSION_OWNER_MISMATCH"]
+
+    other_root = tmp_path / "other-worktree"
+    other_root.mkdir()
+    other_repo = _clone_evidence_repo(source, other_root)
+    wrong_worktree = filesystem_writer_lease_action(
+        action="acquire",
+        repo=other_repo,
+        task_id="S2E-LW2",
+        owner="E1",
+        admission_id=admission["admission_id"],
+    )
+    assert wrong_worktree["status"] == "FAIL"
+    assert wrong_worktree["reasons"] == ["TASK_ADMISSION_MISSING"]
+
+    governed_source = (
+        repo / "helper_scripts" / "maintenance_scripts"
+        / "agent_governance_lw2_readmission.py"
+    )
+    governed_source.write_text(
+        governed_source.read_text(encoding="utf-8") + "\n# lease race\n",
+        encoding="utf-8",
+    )
+    stale = filesystem_writer_lease_action(
+        action="acquire",
+        repo=repo,
+        task_id="S2E-LW2",
+        owner="E1",
+        admission_id=admission["admission_id"],
+    )
+    assert stale["status"] == "FAIL"
+    assert stale["reasons"] == ["TASK_ADMISSION_GENERATION_MISMATCH"]
+    lease_store = FileWriterLeaseStore(inspect_worktree(repo).common_dir)
     assert lease_store.read()["leases"] == {}
     assert lease_store.state_path.exists() is False
 
@@ -847,12 +1290,13 @@ def test_lw2_task_id_and_profile_are_cross_bound_before_admission_state(
 ) -> None:
     source, lw2_contract = real_lw2_contract
     repo = _clone_evidence_repo(source, tmp_path)
-    with pytest.raises(ValueError, match="canonical task_id S2E-LW2"):
+    with pytest.raises(ValueError, match="exact canonical binding"):
         acquire_task_admission(
             repo=repo,
             task_id="NOT-LW2",
             owner="E1",
             task_contract=lw2_contract,
+            external_evidence_verifier=_trusted_external_verifier,
         )
 
     ordinary = route_task({
@@ -871,12 +1315,13 @@ def test_lw2_task_id_and_profile_are_cross_bound_before_admission_state(
             "agent_governance_lw2_readmission.py",
         ],
     })
-    with pytest.raises(ValueError, match="requires the exact LW2 admission_profile"):
+    with pytest.raises(ValueError, match="exact canonical binding"):
         acquire_task_admission(
             repo=repo,
             task_id="S2E-LW2",
             owner="E1",
             task_contract=task_contract_projection(ordinary["task_facts"]),
+            external_evidence_verifier=_trusted_external_verifier,
         )
     _assert_no_admission_or_lease(repo)
 
@@ -894,6 +1339,7 @@ def test_lw2_admission_binds_declared_writer_to_owner_and_rejects_self_review(
                 task_id="S2E-LW2",
                 owner=owner,
                 task_contract=deepcopy(contract),
+                external_evidence_verifier=_trusted_external_verifier,
             )
 
     self_review = deepcopy(contract)
@@ -910,5 +1356,6 @@ def test_lw2_admission_binds_declared_writer_to_owner_and_rejects_self_review(
             task_id="S2E-LW2",
             owner="E1",
             task_contract=self_review,
+            external_evidence_verifier=_trusted_external_verifier,
         )
     _assert_no_admission_or_lease(repo)
