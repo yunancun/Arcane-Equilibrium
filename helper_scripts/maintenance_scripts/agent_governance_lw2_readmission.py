@@ -169,7 +169,14 @@ def _scope_values(contract: dict[str, Any]) -> tuple[str, ...]:
     return tuple(values)
 
 
-def _policy_protected_path(path: Any, policy: dict[str, Any]) -> bool:
+def lw2_protected_path(
+    path: Any,
+    *,
+    registry: dict[str, Any] | None = None,
+) -> bool:
+    """Return Registry-owned protectedness even when the path was deleted."""
+
+    policy = lw2_readmission_policy(registry)
     return isinstance(path, str) and (
         path in policy["protected_scope_paths"]
         or any(
@@ -248,7 +255,7 @@ def validate_lw2_protected_inventory_scope(
         or not scope
         or scope != sorted(set(scope))
         or not set(policy["protected_scope_paths"]).issubset(scope)
-        or any(not _policy_protected_path(path, policy) for path in scope)
+        or any(not lw2_protected_path(path, registry=registry) for path in scope)
         or any(
             not any(path.startswith(prefix) for path in scope)
             for prefix in policy["protected_scope_prefixes"]
@@ -294,7 +301,7 @@ def lw2_contract_selected(
     if contract.get("admission_profile") == policy["admission_profile"]:
         return True
     for path in _scope_values(contract):
-        if _policy_protected_path(path, policy):
+        if lw2_protected_path(path, registry=registry):
             return True
     return False
 
@@ -327,7 +334,10 @@ def validate_lw2_contract_binding(
         not isinstance(dirty_scope, list)
         or not dirty_scope
         or dirty_scope != sorted(set(dirty_scope))
-        or any(not _policy_protected_path(path, policy) for path in dirty_scope)
+        or any(
+            not lw2_protected_path(path, registry=registry)
+            for path in dirty_scope
+        )
     ):
         errors.append("nonempty protected-only dirty_scope")
     elif repo is not None and not set(dirty_scope).issubset(

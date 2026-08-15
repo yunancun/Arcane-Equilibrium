@@ -20,6 +20,7 @@ from typing import Any, Callable, Protocol
 
 
 WRITER_LEASE_SCHEMA_VERSION = "writer_leases_v1"
+WRITER_LEASE_BINDING_SCHEMA_VERSION = "writer_lease_admission_bindings_v1"
 DEFAULT_LEASE_TTL_SECONDS = 7200
 MIN_LEASE_TTL_SECONDS = 60
 MAX_LEASE_TTL_SECONDS = 86400
@@ -29,6 +30,10 @@ LEGACY_WRITER_LEASE_FIELDS = {
 }
 LW2_WRITER_LEASE_FIELDS = LEGACY_WRITER_LEASE_FIELDS | {
     "admission_id", "accepted_generation_digest",
+}
+WRITER_LEASE_BINDING_FIELDS = {
+    "lease_id", "task_id", "owner", "worktree", "admission_id",
+    "task_contract_digest",
 }
 
 
@@ -88,6 +93,9 @@ class FileWriterLeaseStore:
     def __init__(self, common_dir: Path) -> None:
         self.common_dir = common_dir.resolve()
         self.state_path = self.common_dir / "codex-writer-leases-v1.json"
+        self.binding_path = (
+            self.common_dir / "codex-writer-lease-admission-bindings-v1.json"
+        )
         self.lock_path = self.common_dir / "codex-writer-leases-v1.lock"
 
     def read(self) -> dict[str, Any]:
@@ -130,6 +138,80 @@ class FileWriterLeaseStore:
                 temporary_path.unlink(missing_ok=True)
             return json.loads(json.dumps(candidate))
 
+    def read_admission_bindings(self) -> dict[str, Any]:
+        """Read ordinary admission bindings serialized by the writer lock."""
+
+        if self.binding_path.is_symlink():
+            raise ValueError("writer lease admission bindings must not be a symlink")
+        try:
+            raw = json.loads(self.binding_path.read_text(encoding="utf-8"))
+        except FileNotFoundError:
+            return {
+                "schema_version": WRITER_LEASE_BINDING_SCHEMA_VERSION,
+                "bindings": {},
+            }
+        except (OSError, json.JSONDecodeError) as error:
+            raise ValueError(
+                f"writer lease admission bindings are unreadable: {error}"
+            ) from error
+        _validate_binding_state(raw)
+        return raw
+
+    def transact(
+        self,
+        action: Callable[
+            [dict[str, Any], dict[str, Any]],
+            tuple[dict[str, Any], dict[str, Any], dict[str, Any], bool],
+        ],
+    ) -> dict[str, Any]:
+        """Serialize lease and sidecar decisions under the one writer lock."""
+
+        self.common_dir.mkdir(parents=True, exist_ok=True)
+        if any(
+            path.is_symlink()
+            for path in (self.lock_path, self.state_path, self.binding_path)
+        ):
+            raise ValueError("writer lease files must not be symlinks")
+        with self.lock_path.open("a+", encoding="utf-8") as lock_handle:
+            fcntl.flock(lock_handle.fileno(), fcntl.LOCK_EX)
+            lease_state = self.read()
+            binding_state = self.read_admission_bindings()
+            lease_state, binding_state, result, persist = action(
+                lease_state, binding_state
+            )
+            _validate_lease_state(lease_state)
+            _validate_binding_state(binding_state)
+            if persist:
+                # A crash between replaces leaves an unbound lease, which is
+                # fail-closed and exact-cleanup-only. Never publish PASS before
+                # the binding is durable.
+                self._replace_json(
+                    self.state_path, "codex-writer-leases-v1.", lease_state
+                )
+                self._replace_json(
+                    self.binding_path,
+                    "codex-writer-lease-admission-bindings-v1.",
+                    binding_state,
+                )
+            return result
+
+    def _replace_json(
+        self, path: Path, prefix: str, value: dict[str, Any]
+    ) -> None:
+        fd, temporary_name = tempfile.mkstemp(
+            prefix=prefix, suffix=".tmp", dir=self.common_dir
+        )
+        temporary_path = Path(temporary_name)
+        try:
+            with os.fdopen(fd, "w", encoding="utf-8") as handle:
+                json.dump(value, handle, ensure_ascii=False, sort_keys=True)
+                handle.write("\n")
+                handle.flush()
+                os.fsync(handle.fileno())
+            os.replace(temporary_path, path)
+        finally:
+            temporary_path.unlink(missing_ok=True)
+
 
 def _validate_lease_state(state: Any) -> None:
     if not isinstance(state, dict) or set(state) != {"schema_version", "leases"}:
@@ -165,6 +247,41 @@ def _validate_lease_state(state: Any) -> None:
             raise ValueError("LW2 writer lease admission binding is invalid")
         _parse_timestamp(lease["acquired_at"])
         _parse_timestamp(lease["expires_at"])
+
+
+def _validate_binding_state(state: Any) -> None:
+    if not isinstance(state, dict) or set(state) != {"schema_version", "bindings"}:
+        raise ValueError(
+            "writer lease admission binding state must contain only schema_version "
+            "and bindings"
+        )
+    if state["schema_version"] != WRITER_LEASE_BINDING_SCHEMA_VERSION:
+        raise ValueError("writer lease admission binding schema_version is invalid")
+    if not isinstance(state["bindings"], dict):
+        raise ValueError("writer lease admission bindings must be an object")
+    for worktree, binding in state["bindings"].items():
+        if (
+            not isinstance(worktree, str)
+            or not isinstance(binding, dict)
+            or set(binding) != WRITER_LEASE_BINDING_FIELDS
+            or binding["worktree"] != worktree
+        ):
+            raise ValueError("writer lease admission binding shape is invalid")
+        if any(
+            not isinstance(binding[field], str) or not binding[field]
+            for field in WRITER_LEASE_BINDING_FIELDS
+        ):
+            raise ValueError(
+                "writer lease admission binding fields must be non-empty strings"
+            )
+        if (
+            not re.fullmatch(r"[0-9a-f]{32}", binding["lease_id"])
+            or not re.fullmatch(r"[0-9a-f]{32}", binding["admission_id"])
+            or not re.fullmatch(
+                r"sha256:[0-9a-f]{64}", binding["task_contract_digest"]
+            )
+        ):
+            raise ValueError("writer lease admission binding identity is invalid")
 
 
 @dataclass(frozen=True)
@@ -221,6 +338,40 @@ def inspect_worktree(repo: Path) -> WorktreeIdentity:
     )
 
 
+def _capture_dirty_paths(repo: Path) -> tuple[list[str], list[str]]:
+    """Recapture exact dirty and staged paths without trusting porcelain text."""
+
+    def nul_paths(*args: str) -> list[str]:
+        try:
+            completed = subprocess.run(
+                ["git", "-C", str(repo), *args],
+                check=True,
+                capture_output=True,
+                timeout=20,
+            )
+            return [
+                raw.decode("utf-8")
+                for raw in completed.stdout.split(b"\0")
+                if raw
+            ]
+        except (
+            OSError,
+            UnicodeDecodeError,
+            subprocess.CalledProcessError,
+            subprocess.TimeoutExpired,
+        ) as error:
+            raise ValueError("writer dirty path state is unavailable") from error
+
+    tracked = nul_paths(
+        "diff", "--no-renames", "--name-only", "-z", "HEAD", "--"
+    )
+    untracked = nul_paths(
+        "ls-files", "--others", "--exclude-standard", "-z", "--"
+    )
+    staged = nul_paths("diff", "--cached", "--name-only", "-z", "--")
+    return sorted(set(tracked + untracked)), sorted(set(staged))
+
+
 def _lease_result(
     action: str,
     *,
@@ -239,6 +390,7 @@ def _lease_result(
         "head": identity.head,
         "linked_worktree": identity.linked,
         "lease": lease,
+        "admission_scope": None,
     }
 
 
@@ -459,6 +611,12 @@ def validate_writer_lease(
 ) -> dict[str, Any]:
     """Validate an ordinary lease; bound LW2 leases require the action API."""
 
+    if isinstance(store, FileWriterLeaseStore):
+        return _lease_result(
+            "validate", status="FAIL",
+            reasons=["TASK_ADMISSION_ACTION_REQUIRED"],
+            identity=identity, lease=None,
+        )
     try:
         lease = store.read()["leases"].get(identity.worktree)
     except ValueError:
@@ -553,6 +711,12 @@ def renew_writer_lease(
 ) -> dict[str, Any]:
     """Renew an ordinary lease; bound LW2 leases require the action API."""
 
+    if isinstance(store, FileWriterLeaseStore):
+        return _lease_result(
+            "renew", status="FAIL",
+            reasons=["TASK_ADMISSION_ACTION_REQUIRED"],
+            identity=identity, lease=None,
+        )
     try:
         lease = store.read()["leases"].get(identity.worktree)
     except ValueError:
@@ -627,6 +791,12 @@ def release_writer_lease(
 ) -> dict[str, Any]:
     """Release an ordinary lease; bound LW2 leases require the action API."""
 
+    if isinstance(store, FileWriterLeaseStore):
+        return _lease_result(
+            "release", status="FAIL",
+            reasons=["TASK_ADMISSION_ACTION_REQUIRED"],
+            identity=identity, lease=None,
+        )
     try:
         lease = store.read()["leases"].get(identity.worktree)
     except ValueError:
@@ -669,80 +839,48 @@ def filesystem_writer_lease_action(
     )
 
     admission_store = FileTaskAdmissionStore(identity.common_dir)
+    current_time = now or _utc_now()
+
+    def admission_reasons(
+        record: dict[str, Any] | None,
+        *,
+        require_active: bool,
+    ) -> list[str]:
+        reasons: list[str] = []
+        if record is None:
+            return ["TASK_ADMISSION_MISSING"]
+        if record["task_id"] != task_id:
+            reasons.append("TASK_ADMISSION_TASK_MISMATCH")
+        if record["owner"] != owner:
+            reasons.append("TASK_ADMISSION_OWNER_MISMATCH")
+        if record["admission_id"] != admission_id:
+            reasons.append("TASK_ADMISSION_ID_MISMATCH")
+        if require_active and record["state"] != "ACTIVE":
+            reasons.append("TASK_ADMISSION_TERMINAL")
+        return reasons
+
+    def exact_lease_result(
+        lease: dict[str, str] | None,
+        locked_identity: WorktreeIdentity,
+    ) -> dict[str, Any]:
+        reasons = _lease_validation_reasons(
+            lease,
+            locked_identity,
+            task_id=task_id,
+            lease_id=lease_id or "",
+            owner=owner,
+            now=current_time,
+        )
+        return _lease_result(
+            action,
+            status="FAIL" if reasons else "PASS",
+            reasons=reasons,
+            identity=locked_identity,
+            lease=lease,
+        )
 
     def action_under_admission_lock(state: dict[str, Any]) -> dict[str, Any]:
         record = state["admissions"].get(identity.worktree)
-        lease = store.read()["leases"].get(identity.worktree)
-        if action == "acquire":
-            if not admission_id:
-                return _lease_result(
-                    action, status="FAIL",
-                    reasons=["TASK_ADMISSION_ID_REQUIRED"],
-                    identity=identity, lease=None,
-                )
-            admission_reasons: list[str] = []
-            if record is None:
-                admission_reasons.append("TASK_ADMISSION_MISSING")
-            else:
-                if record["task_id"] != task_id:
-                    admission_reasons.append("TASK_ADMISSION_TASK_MISMATCH")
-                if record["owner"] != owner:
-                    admission_reasons.append("TASK_ADMISSION_OWNER_MISMATCH")
-                if record["admission_id"] != admission_id:
-                    admission_reasons.append("TASK_ADMISSION_ID_MISMATCH")
-                if record["state"] != "ACTIVE":
-                    admission_reasons.append("TASK_ADMISSION_TERMINAL")
-            if admission_reasons:
-                return _lease_result(
-                    action, status="FAIL", reasons=admission_reasons,
-                    identity=identity, lease=None,
-                )
-            selected = lw2_contract_selected(
-                record["task_contract"], task_id=record["task_id"]
-            )
-        else:
-            selected = (
-                lw2_contract_selected({}, task_id=task_id)
-                or (
-                    record is not None
-                    and lw2_contract_selected(
-                        record["task_contract"], task_id=record["task_id"]
-                    )
-                )
-                or (
-                    isinstance(lease, dict)
-                    and set(lease) == LW2_WRITER_LEASE_FIELDS
-                )
-            )
-        if not selected:
-            if action == "acquire":
-                return _acquire_writer_lease(
-                    store, identity, task_id=task_id, owner=owner,
-                    ttl_seconds=ttl_seconds, now=now,
-                )
-            if not lease_id:
-                return _lease_result(
-                    action, status="FAIL",
-                    reasons=["WRITER_LEASE_ID_REQUIRED"],
-                    identity=identity, lease=None,
-                )
-            if action == "status":
-                return _validate_writer_lease(
-                    store, identity, task_id=task_id, owner=owner,
-                    lease_id=lease_id,
-                )
-            if action == "renew":
-                return _renew_writer_lease(
-                    store, identity, task_id=task_id, owner=owner,
-                    lease_id=lease_id, ttl_seconds=ttl_seconds,
-                )
-            if action == "release":
-                return _release_writer_lease(
-                    store, identity, task_id=task_id, owner=owner,
-                    lease_id=lease_id,
-                )
-            raise ValueError(f"unsupported writer lease action: {action}")
-
         if not admission_id:
             return _lease_result(
                 action, status="FAIL",
@@ -756,121 +894,302 @@ def filesystem_writer_lease_action(
                 identity=identity, lease=None,
             )
 
-        if action == "release":
+        def writer_transaction(
+            lease_state: dict[str, Any],
+            binding_state: dict[str, Any],
+        ) -> tuple[dict[str, Any], dict[str, Any], dict[str, Any], bool]:
+            locked_identity = inspect_worktree(repo)
             if (
-                isinstance(lease, dict)
-                and set(lease) == LW2_WRITER_LEASE_FIELDS
-                and lease["admission_id"] != admission_id
+                locked_identity.worktree != identity.worktree
+                or locked_identity.common_dir != identity.common_dir
+                or locked_identity.branch != identity.branch
+                or locked_identity.head != identity.head
             ):
-                return _lease_result(
+                result = _lease_result(
                     action, status="FAIL",
-                    reasons=["TASK_ADMISSION_ID_MISMATCH"],
-                    identity=identity, lease=None,
+                    reasons=["WRITER_LEASE_IDENTITY_DRIFT"],
+                    identity=locked_identity, lease=None,
                 )
-            if record is not None:
-                reasons = []
-                if record["task_id"] != task_id:
-                    reasons.append("TASK_ADMISSION_TASK_MISMATCH")
-                if record["owner"] != owner:
-                    reasons.append("TASK_ADMISSION_OWNER_MISMATCH")
-                if record["admission_id"] != admission_id:
-                    reasons.append("TASK_ADMISSION_ID_MISMATCH")
-                if reasons:
-                    return _lease_result(
-                        action, status="FAIL", reasons=reasons,
-                        identity=identity, lease=None,
+                return lease_state, binding_state, result, False
+            lease = lease_state["leases"].get(identity.worktree)
+            binding = binding_state["bindings"].get(identity.worktree)
+            selected = (
+                lw2_contract_selected({}, task_id=task_id)
+                or (
+                    record is not None
+                    and lw2_contract_selected(
+                        record["task_contract"], task_id=record["task_id"]
                     )
-            return _release_writer_lease(
-                store, identity, task_id=task_id, owner=owner,
-                lease_id=lease_id,
-            )
-
-        reasons: list[str] = []
-        if record is None:
-            reasons.append("TASK_ADMISSION_MISSING")
-        else:
-            if record["task_id"] != task_id:
-                reasons.append("TASK_ADMISSION_TASK_MISMATCH")
-            if record["owner"] != owner:
-                reasons.append("TASK_ADMISSION_OWNER_MISMATCH")
-            if record["admission_id"] != admission_id:
-                reasons.append("TASK_ADMISSION_ID_MISMATCH")
-            if record["state"] != "ACTIVE":
-                reasons.append("TASK_ADMISSION_TERMINAL")
-        if reasons:
-            return _lease_result(
-                action, status="FAIL", reasons=reasons,
-                identity=identity, lease=None,
-            )
-        validate_lw2_contract_binding(
-            record["task_contract"],
-            task_id=record["task_id"],
-            repo=Path(identity.worktree),
-        )
-        accepted_generation_digest = canonical_claim_digest(
-            record["accepted_generation"]
-        )
-
-        def generation_reasons() -> list[str]:
-            current_generation = capture_task_admission_generation(
-                Path(identity.worktree), record["task_contract"]
-            )
-            if current_generation != record.get("accepted_generation"):
-                return ["TASK_ADMISSION_GENERATION_MISMATCH"]
-            return []
-
-        if action == "acquire":
-            generation = generation_reasons()
-            if generation:
-                return _lease_result(
-                    action, status="FAIL", reasons=generation,
-                    identity=identity, lease=None,
                 )
-            return _acquire_writer_lease(
-                store,
-                identity,
-                task_id=task_id,
-                owner=owner,
-                ttl_seconds=ttl_seconds,
-                now=now,
-                admission_binding={
+                or (
+                    isinstance(lease, dict)
+                    and set(lease) == LW2_WRITER_LEASE_FIELDS
+                )
+            )
+
+            if action == "release":
+                if selected:
+                    if (
+                        not isinstance(lease, dict)
+                        or set(lease) != LW2_WRITER_LEASE_FIELDS
+                    ):
+                        result = _lease_result(
+                            action, status="FAIL",
+                            reasons=["LW2_LEASE_BINDING_MISSING"],
+                            identity=locked_identity, lease=None,
+                        )
+                        return lease_state, binding_state, result, False
+                    if lease["admission_id"] != admission_id:
+                        result = _lease_result(
+                            action, status="FAIL",
+                            reasons=["TASK_ADMISSION_ID_MISMATCH"],
+                            identity=locked_identity, lease=None,
+                        )
+                        return lease_state, binding_state, result, False
+                elif (
+                    binding is not None
+                    and isinstance(lease, dict)
+                    and binding["lease_id"] == lease.get("lease_id")
+                ):
+                    expected_binding = {
+                        "lease_id": lease_id,
+                        "task_id": task_id,
+                        "owner": owner,
+                        "worktree": identity.worktree,
+                        "admission_id": admission_id,
+                        "task_contract_digest": binding["task_contract_digest"],
+                    }
+                    if binding != expected_binding:
+                        result = _lease_result(
+                            action, status="FAIL",
+                            reasons=["WRITER_LEASE_ADMISSION_BINDING_MISMATCH"],
+                            identity=locked_identity, lease=None,
+                        )
+                        return lease_state, binding_state, result, False
+                result = exact_lease_result(lease, locked_identity)
+                if result["status"] != "PASS":
+                    return lease_state, binding_state, result, False
+                del lease_state["leases"][identity.worktree]
+                binding_state["bindings"].pop(identity.worktree, None)
+                result["lease"] = None
+                return lease_state, binding_state, result, True
+
+            reasons = admission_reasons(record, require_active=True)
+            if reasons:
+                result = _lease_result(
+                    action, status="FAIL", reasons=reasons,
+                    identity=locked_identity, lease=None,
+                )
+                return lease_state, binding_state, result, False
+            assert record is not None
+
+            if action == "acquire":
+                acquire_reasons: list[str] = []
+                if ttl_seconds < MIN_LEASE_TTL_SECONDS or ttl_seconds > MAX_LEASE_TTL_SECONDS:
+                    acquire_reasons.append("LEASE_TTL_OUT_OF_RANGE")
+                if not locked_identity.linked:
+                    acquire_reasons.append("LINKED_WORKTREE_REQUIRED")
+                if locked_identity.branch in {None, "main"}:
+                    acquire_reasons.append("ATTACHED_FEATURE_BRANCH_REQUIRED")
+                if locked_identity.dirty and not selected:
+                    acquire_reasons.append("CLEAN_WORKTREE_REQUIRED")
+                if lease and _active_lease(lease, current_time):
+                    acquire_reasons.append("WORKTREE_WRITER_LEASE_HELD")
+                if acquire_reasons:
+                    result = _lease_result(
+                        action, status="FAIL", reasons=acquire_reasons,
+                        identity=locked_identity, lease=None,
+                    )
+                    return lease_state, binding_state, result, False
+                if selected:
+                    validate_lw2_contract_binding(
+                        record["task_contract"],
+                        task_id=record["task_id"],
+                        repo=Path(identity.worktree),
+                    )
+                    accepted_generation = record["accepted_generation"]
+                    if locked_identity.head != accepted_generation["source_head"]:
+                        result = _lease_result(
+                            action, status="FAIL",
+                            reasons=["TASK_ADMISSION_GENERATION_MISMATCH"],
+                            identity=locked_identity, lease=None,
+                        )
+                        return lease_state, binding_state, result, False
+                    try:
+                        dirty_paths, staged_paths = _capture_dirty_paths(
+                            Path(identity.worktree)
+                        )
+                        current_generation = capture_task_admission_generation(
+                            Path(identity.worktree), record["task_contract"]
+                        )
+                    except ValueError:
+                        result = _lease_result(
+                            action, status="FAIL",
+                            reasons=["TASK_ADMISSION_GENERATION_UNAVAILABLE"],
+                            identity=locked_identity, lease=None,
+                        )
+                        return lease_state, binding_state, result, False
+                    if staged_paths:
+                        result = _lease_result(
+                            action, status="FAIL",
+                            reasons=["PREEXISTING_STAGED_CHANGES"],
+                            identity=locked_identity, lease=None,
+                        )
+                        return lease_state, binding_state, result, False
+                    if not set(dirty_paths).issubset(
+                        record["task_contract"]["dirty_scope"]
+                    ):
+                        result = _lease_result(
+                            action, status="FAIL",
+                            reasons=["DIRTY_PATH_OUTSIDE_ADMITTED_SCOPE"],
+                            identity=locked_identity, lease=None,
+                        )
+                        return lease_state, binding_state, result, False
+                    if current_generation != record.get("accepted_generation"):
+                        result = _lease_result(
+                            action, status="FAIL",
+                            reasons=["TASK_ADMISSION_GENERATION_MISMATCH"],
+                            identity=locked_identity, lease=None,
+                        )
+                        return lease_state, binding_state, result, False
+                new_lease = {
+                    "lease_id": secrets.token_hex(16),
+                    "task_id": task_id,
+                    "owner": owner,
+                    "worktree": identity.worktree,
+                    "branch": locked_identity.branch or "",
+                    "acquired_at": _timestamp(current_time),
+                    "expires_at": _timestamp(
+                        current_time + timedelta(seconds=ttl_seconds)
+                    ),
+                }
+                if selected:
+                    new_lease.update({
+                        "admission_id": admission_id,
+                        "accepted_generation_digest": canonical_claim_digest(
+                            record["accepted_generation"]
+                        ),
+                    })
+                    binding_state["bindings"].pop(identity.worktree, None)
+                else:
+                    binding_state["bindings"][identity.worktree] = {
+                        "lease_id": new_lease["lease_id"],
+                        "task_id": task_id,
+                        "owner": owner,
+                        "worktree": identity.worktree,
+                        "admission_id": admission_id,
+                        "task_contract_digest": record["task_contract_digest"],
+                    }
+                lease_state["leases"][identity.worktree] = new_lease
+                result = _lease_result(
+                    action, status="PASS", reasons=[],
+                    identity=locked_identity, lease=new_lease,
+                )
+                return lease_state, binding_state, result, True
+
+            if selected:
+                validate_lw2_contract_binding(
+                    record["task_contract"],
+                    task_id=record["task_id"],
+                    repo=Path(identity.worktree),
+                )
+                if (
+                    not isinstance(lease, dict)
+                    or set(lease) != LW2_WRITER_LEASE_FIELDS
+                ):
+                    result = _lease_result(
+                        action, status="FAIL",
+                        reasons=["LW2_LEASE_BINDING_MISSING"],
+                        identity=locked_identity, lease=None,
+                    )
+                    return lease_state, binding_state, result, False
+                accepted_digest = canonical_claim_digest(
+                    record["accepted_generation"]
+                )
+                if lease["admission_id"] != admission_id:
+                    result = _lease_result(
+                        action, status="FAIL",
+                        reasons=["TASK_ADMISSION_ID_MISMATCH"],
+                        identity=locked_identity, lease=None,
+                    )
+                    return lease_state, binding_state, result, False
+                if lease["accepted_generation_digest"] != accepted_digest:
+                    result = _lease_result(
+                        action, status="FAIL",
+                        reasons=["TASK_ADMISSION_GENERATION_MISMATCH"],
+                        identity=locked_identity, lease=None,
+                    )
+                    return lease_state, binding_state, result, False
+                current_generation = capture_task_admission_generation(
+                    Path(identity.worktree), record["task_contract"]
+                )
+                if current_generation != record.get("accepted_generation"):
+                    result = _lease_result(
+                        action, status="FAIL",
+                        reasons=["TASK_ADMISSION_GENERATION_MISMATCH"],
+                        identity=locked_identity, lease=None,
+                    )
+                    return lease_state, binding_state, result, False
+            else:
+                ordinary_lease_result = exact_lease_result(
+                    lease, locked_identity
+                )
+                if ordinary_lease_result["status"] != "PASS":
+                    return (
+                        lease_state,
+                        binding_state,
+                        ordinary_lease_result,
+                        False,
+                    )
+                if binding is None:
+                    result = _lease_result(
+                        action, status="FAIL",
+                        reasons=["WRITER_LEASE_ADMISSION_BINDING_MISSING"],
+                        identity=locked_identity, lease=None,
+                    )
+                    return lease_state, binding_state, result, False
+                expected_binding = {
+                    "lease_id": lease_id,
+                    "task_id": task_id,
+                    "owner": owner,
+                    "worktree": identity.worktree,
                     "admission_id": admission_id,
-                    "accepted_generation_digest": accepted_generation_digest,
-                },
-                pre_persist_validate=generation_reasons,
-            )
-        if not isinstance(lease, dict) or set(lease) != LW2_WRITER_LEASE_FIELDS:
-            return _lease_result(
-                action, status="FAIL", reasons=["LW2_LEASE_BINDING_MISSING"],
-                identity=identity, lease=None,
-            )
-        binding_reasons: list[str] = []
-        if lease["admission_id"] != admission_id:
-            binding_reasons.append("TASK_ADMISSION_ID_MISMATCH")
-        if lease["accepted_generation_digest"] != accepted_generation_digest:
-            binding_reasons.append("TASK_ADMISSION_GENERATION_MISMATCH")
-        if binding_reasons:
-            return _lease_result(
-                action, status="FAIL", reasons=binding_reasons,
-                identity=identity, lease=None,
-            )
-        if action == "status":
-            generation = generation_reasons()
-            if generation:
-                return _lease_result(
-                    action, status="FAIL", reasons=generation,
-                    identity=identity, lease=None,
+                    "task_contract_digest": record["task_contract_digest"],
+                }
+                if binding != expected_binding:
+                    result = _lease_result(
+                        action, status="FAIL",
+                        reasons=["WRITER_LEASE_ADMISSION_BINDING_MISMATCH"],
+                        identity=locked_identity, lease=None,
+                    )
+                    return lease_state, binding_state, result, False
+
+            result = exact_lease_result(lease, locked_identity)
+            if result["status"] == "PASS" and action == "status":
+                result["admission_scope"] = {
+                    "task_contract_digest": record["task_contract_digest"],
+                    "dirty_scope": list(record["task_contract"]["dirty_scope"]),
+                    "lw2_selected": selected,
+                }
+                return lease_state, binding_state, result, False
+            if result["status"] != "PASS":
+                return lease_state, binding_state, result, False
+            if action == "renew":
+                if ttl_seconds < MIN_LEASE_TTL_SECONDS or ttl_seconds > MAX_LEASE_TTL_SECONDS:
+                    result = _lease_result(
+                        action, status="FAIL",
+                        reasons=["LEASE_TTL_OUT_OF_RANGE"],
+                        identity=locked_identity, lease=None,
+                    )
+                    return lease_state, binding_state, result, False
+                assert lease is not None
+                lease["expires_at"] = _timestamp(
+                    current_time + timedelta(seconds=ttl_seconds)
                 )
-            return _validate_writer_lease(
-                store, identity, task_id=task_id, owner=owner,
-                lease_id=lease_id,
-            )
-        if action == "renew":
-            return _renew_writer_lease(
-                store, identity, task_id=task_id, owner=owner,
-                lease_id=lease_id, ttl_seconds=ttl_seconds,
-                pre_renew_validate=generation_reasons,
-            )
-        raise ValueError(f"unsupported writer lease action: {action}")
+                result["lease"] = lease
+                return lease_state, binding_state, result, True
+            raise ValueError(f"unsupported writer lease action: {action}")
+
+        return store.transact(writer_transaction)
 
     return admission_store.serialized_read(action_under_admission_lock)

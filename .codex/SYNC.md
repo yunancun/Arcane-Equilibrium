@@ -1,6 +1,6 @@
 # Git Publication and Three-Side Sync Contract
 
-Last updated: 2026-07-20
+Last updated: 2026-08-15
 
 This is the canonical Git state machine for finite Codex feature tasks and
 explicitly requested long-running loops. The three
@@ -46,8 +46,11 @@ It emits `git_loop_guard_v1`, exits `3` on failure, and never mutates Git.
 Phases:
 
 - `start`: exact branch + exact HEAD + clean feature worktree.
-- `checkpoint`: dirty paths are inside the selected work item's allowlist;
-  default ceiling is 12 files, 1500 tracked diff lines, and 2 MB untracked.
+- `checkpoint`: dirty paths are inside both the persisted task-admission
+  `dirty_scope` and the selected work item's narrower caller allowlist; default
+  ceiling is 12 files, 1500 tracked diff lines, and 2 MB untracked. A caller
+  allowlist never widens admission authority, and an ordinary admission cannot
+  checkpoint a Registry-protected LW2 path.
 - `publish`: clean feature branch, fresh local `origin/main`, upstream absent or
   correct for the not-yet-pushed branch, and true origin main is an ancestor of
   the exact head.
@@ -66,13 +69,26 @@ clean attached non-main linked worktree, PM runs:
 ```bash
 python3 helper_scripts/maintenance_scripts/agent_governance.py writer-lease \
   --lease-action acquire --repo . \
-  --task-id "$WRITER_TASK_ID" --owner "$WRITER_OWNER"
+  --task-id "$WRITER_TASK_ID" --owner "$WRITER_OWNER" \
+  --admission-id "$WRITER_ADMISSION_ID"
 ```
 
 Keep the returned `lease_id` as local, untracked execution state in
-`WRITER_LEASE_ID`; never commit it to a task packet/report. Never infer it from
-a different task, copy it to another worktree, or ask the read-only guard to
-acquire/steal it. Renew/release requires the same task, owner, and fencing token.
+`WRITER_LEASE_ID`, and keep the task-admission fencing token in
+`WRITER_ADMISSION_ID` under the same private boundary; never commit either to a
+task packet/report. Never infer either token from a different task, copy it to
+another worktree, or ask the read-only guard to acquire/steal authority.
+Status/renew requires the exact ACTIVE admission; exact cleanup release keeps
+the same task, owner, lease ID, and admission ID even after that admission is
+terminal or released. A legacy seven-field lease without its admission-binding
+sidecar is cleanup-only and cannot status/renew.
+
+An LW2-protected byte or HEAD change never advances an existing admission's
+accepted generation. Its old status/renew must fail closed. The owner performs
+exact lease cleanup, releases that admission, obtains a fresh governed
+current-generation evidence/admission, switches to the same admitted feature
+HEAD, and acquires a fresh bound lease before checkpoint/start/publication.
+This lifecycle is re-admission, not silent generation repair.
 
 ## 1. Loop bootstrap and resume
 
@@ -96,6 +112,7 @@ python3 helper_scripts/maintenance_scripts/git_loop_guard.py \
   --writer-task-id "$WRITER_TASK_ID" \
   --writer-owner "$WRITER_OWNER" \
   --writer-lease-id "$WRITER_LEASE_ID" \
+  --writer-admission-id "$WRITER_ADMISSION_ID" \
   --human
 ```
 
@@ -115,6 +132,7 @@ python3 helper_scripts/maintenance_scripts/git_loop_guard.py \
   --writer-task-id "$WRITER_TASK_ID" \
   --writer-owner "$WRITER_OWNER" \
   --writer-lease-id "$WRITER_LEASE_ID" \
+  --writer-admission-id "$WRITER_ADMISSION_ID" \
   --allow-path path/to/owned-file \
   --allow-path path/to/owned-prefix/ \
   --human
@@ -142,9 +160,9 @@ iteration.
 2. Integrate current `origin/main` without rewriting already published history.
 3. Rerun affected local regression and update `CHECKPOINT_HEAD`.
 4. Run `git_loop_guard.py --phase publish` with the exact branch/head and the
-   same task/owner/lease arguments.
+   same task/owner/lease/admission arguments.
 5. Push the feature branch once, without force.
-6. Run `--phase post-push` with that same lease; its
+6. Run `--phase post-push` with that same lease and admission ID; its
    `true_remote_branch_head` must equal the exact checkpoint head.
 7. Request one current-head review and let path-classified CI run once.
 

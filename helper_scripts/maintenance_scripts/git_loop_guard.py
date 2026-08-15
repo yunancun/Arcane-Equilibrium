@@ -18,10 +18,10 @@ from pathlib import Path
 from typing import Any
 
 from agent_governance_task_control import (
-    FileWriterLeaseStore,
+    filesystem_writer_lease_action,
     inspect_worktree,
-    validate_writer_lease,
 )
+from agent_governance_lw2_readmission import lw2_protected_path
 
 
 SCHEMA_VERSION = "git_loop_guard_v1"
@@ -140,7 +140,9 @@ def inspect_repository(repo: Path) -> dict[str, Any]:
     branch = _text(repo, "symbolic-ref", "--quiet", "--short", "HEAD")
     head = _text(repo, "rev-parse", "HEAD")
     upstream = _text(repo, "rev-parse", "--abbrev-ref", "--symbolic-full-name", "@{u}")
-    tracked = _nul_paths(repo, "diff", "--name-only", "-z", "HEAD", "--")
+    tracked = _nul_paths(
+        repo, "diff", "--no-renames", "--name-only", "-z", "HEAD", "--"
+    )
     staged = _nul_paths(repo, "diff", "--cached", "--name-only", "-z", "--")
     untracked = _nul_paths(
         repo, "ls-files", "--others", "--exclude-standard", "-z", "--"
@@ -185,6 +187,7 @@ def evaluate(
     writer_task_id: str | None = None,
     writer_lease_id: str | None = None,
     writer_owner: str | None = None,
+    writer_admission_id: str | None = None,
     allow_paths: Iterable[str] = (),
     max_dirty_files: int = DEFAULT_MAX_DIRTY_FILES,
     max_diff_lines: int = DEFAULT_MAX_DIFF_LINES,
@@ -199,6 +202,7 @@ def evaluate(
     dirty = state["dirty_paths"]
     true_main = state["true_origin_main"]
     local_main = state["local_origin_main"]
+    admission_scope: dict[str, Any] | None = None
 
     if branch is None:
         reasons.append("DETACHED_HEAD")
@@ -227,20 +231,30 @@ def evaluate(
             reasons.append("UPSTREAM_MISMATCH")
         if not writer_task_id or not writer_owner or not writer_lease_id:
             reasons.append("WRITER_LEASE_REQUIRED")
-        else:
+        if not writer_admission_id:
+            reasons.append("WRITER_ADMISSION_ID_REQUIRED")
+        if (
+            writer_task_id
+            and writer_owner
+            and writer_lease_id
+            and writer_admission_id
+        ):
             try:
                 identity = inspect_worktree(repo)
                 if not identity.linked:
                     reasons.append("LINKED_WORKTREE_REQUIRED")
-                lease_result = validate_writer_lease(
-                    FileWriterLeaseStore(identity.common_dir),
-                    identity,
+                lease_result = filesystem_writer_lease_action(
+                    action="status",
+                    repo=repo,
                     task_id=writer_task_id,
                     lease_id=writer_lease_id,
                     owner=writer_owner,
+                    admission_id=writer_admission_id,
                 )
                 if lease_result["status"] != "PASS":
                     reasons.extend(lease_result["reasons"])
+                else:
+                    admission_scope = lease_result.get("admission_scope")
                 lease = lease_result.get("lease")
                 state["writer_lease"] = (
                     {
@@ -259,6 +273,21 @@ def evaluate(
         reasons.append("DIRTY_WORKTREE")
 
     if phase == "checkpoint":
+        admitted_paths = (
+            admission_scope.get("dirty_scope")
+            if isinstance(admission_scope, dict)
+            else None
+        )
+        if not isinstance(admitted_paths, list):
+            reasons.append("WRITER_ADMISSION_SCOPE_UNAVAILABLE")
+        elif any(not _allowed(path, admitted_paths) for path in dirty):
+            reasons.append("DIRTY_PATH_OUTSIDE_ADMITTED_SCOPE")
+        if (
+            isinstance(admission_scope, dict)
+            and admission_scope.get("lw2_selected") is False
+            and any(lw2_protected_path(path) for path in dirty)
+        ):
+            reasons.append("LW2_PROTECTED_PATH_REQUIRES_LW2_ADMISSION")
         allow = tuple(allow_paths)
         if not allow:
             reasons.append("ALLOWLIST_REQUIRED")
@@ -343,6 +372,7 @@ def _parse_args(argv: list[str] | None = None) -> argparse.Namespace:
     parser.add_argument("--writer-task-id")
     parser.add_argument("--writer-lease-id")
     parser.add_argument("--writer-owner")
+    parser.add_argument("--writer-admission-id")
     parser.add_argument("--allow-path", action="append", default=[])
     parser.add_argument("--max-dirty-files", type=int, default=DEFAULT_MAX_DIRTY_FILES)
     parser.add_argument("--max-diff-lines", type=int, default=DEFAULT_MAX_DIFF_LINES)
@@ -380,6 +410,7 @@ def main(argv: list[str] | None = None) -> int:
         writer_task_id=args.writer_task_id,
         writer_lease_id=args.writer_lease_id,
         writer_owner=args.writer_owner,
+        writer_admission_id=args.writer_admission_id,
         allow_paths=args.allow_path,
         max_dirty_files=args.max_dirty_files,
         max_diff_lines=args.max_diff_lines,
