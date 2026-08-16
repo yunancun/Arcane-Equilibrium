@@ -498,6 +498,30 @@ def test_sync_contract_covers_exact_head_publication_merge_and_three_sides() -> 
     assert "upstream absent or\n  correct" in SYNC
     assert "upstream is exactly `origin/<branch>`" in SYNC
 
+    writer_release_command = """python3 helper_scripts/maintenance_scripts/agent_governance.py writer-lease \\
+  --lease-action release --repo . \\
+  --task-id "$WRITER_TASK_ID" --owner "$WRITER_OWNER" \\
+  --lease-id "$WRITER_LEASE_ID" \\
+  --admission-id "$WRITER_ADMISSION_ID"""  # noqa: E501
+    admission_release_command = """python3 helper_scripts/maintenance_scripts/agent_governance.py task-admission \\
+  --admission-action release --repo . \\
+  --task-id "$WRITER_TASK_ID" --owner "$WRITER_OWNER" \\
+  --admission-id "$WRITER_ADMISSION_ID"""  # noqa: E501
+    assert writer_release_command in SYNC
+    assert admission_release_command in SYNC
+    assert SYNC.index(writer_release_command) < SYNC.index(
+        admission_release_command
+    )
+    normalized_sync = " ".join(SYNC.split())
+    for required in (
+        "Legitimate renames must admit and allow both",
+        "deleted source and the added destination",
+        "Bound cleanup verifies the exact admission ID",
+        "cannot prove its historical admission binding",
+        "exact task/owner/lease cleanup-only",
+    ):
+        assert required in normalized_sync
+
 
 def test_loop_contract_cannot_advance_with_unbounded_dirty_or_unsynced_heads() -> None:
     for source in (SUBAGENT, PROFIT_LOOP, ALR_LOOP):

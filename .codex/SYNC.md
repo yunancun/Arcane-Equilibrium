@@ -50,7 +50,9 @@ Phases:
   `dirty_scope` and the selected work item's narrower caller allowlist; default
   ceiling is 12 files, 1500 tracked diff lines, and 2 MB untracked. A caller
   allowlist never widens admission authority, and an ordinary admission cannot
-  checkpoint a Registry-protected LW2 path.
+  checkpoint a Registry-protected LW2 path. Legitimate renames must admit and
+  allow both the deleted source and the added destination; rename detection
+  cannot hide a protected source behind an unprotected destination.
 - `publish`: clean feature branch, fresh local `origin/main`, upstream absent or
   correct for the not-yet-pushed branch, and true origin main is an ancestor of
   the exact head.
@@ -78,10 +80,27 @@ Keep the returned `lease_id` as local, untracked execution state in
 `WRITER_ADMISSION_ID` under the same private boundary; never commit either to a
 task packet/report. Never infer either token from a different task, copy it to
 another worktree, or ask the read-only guard to acquire/steal authority.
-Status/renew requires the exact ACTIVE admission; exact cleanup release keeps
-the same task, owner, lease ID, and admission ID even after that admission is
-terminal or released. A legacy seven-field lease without its admission-binding
-sidecar is cleanup-only and cannot status/renew.
+Status/renew requires the exact ACTIVE admission. Bound cleanup verifies the
+exact admission ID and keeps the same task, owner, lease ID, and admission ID
+even after that admission is terminal or released. A legacy seven-field lease
+without its admission-binding sidecar cannot prove its historical admission
+binding and is exact task/owner/lease cleanup-only; it cannot status/renew, and
+its retained admission ID is not independently verifiable without the sidecar.
+
+The normal cleanup order releases the writer lease before releasing its task
+admission:
+
+```bash
+python3 helper_scripts/maintenance_scripts/agent_governance.py writer-lease \
+  --lease-action release --repo . \
+  --task-id "$WRITER_TASK_ID" --owner "$WRITER_OWNER" \
+  --lease-id "$WRITER_LEASE_ID" \
+  --admission-id "$WRITER_ADMISSION_ID"
+python3 helper_scripts/maintenance_scripts/agent_governance.py task-admission \
+  --admission-action release --repo . \
+  --task-id "$WRITER_TASK_ID" --owner "$WRITER_OWNER" \
+  --admission-id "$WRITER_ADMISSION_ID"
+```
 
 An LW2-protected byte or HEAD change never advances an existing admission's
 accepted generation. Its old status/renew must fail closed. The owner performs
