@@ -158,7 +158,10 @@ def _table_cells(line: str) -> list[str]:
 
 
 def _plain_cell(value: str) -> str:
-    return re.sub(r"[*_`]", "", value).strip()
+    cell = value.strip()
+    if len(cell) >= 2 and cell.startswith("`") and cell.endswith("`"):
+        return cell[1:-1]
+    return cell
 
 
 def _is_active_status(value: str) -> bool:

@@ -262,7 +262,10 @@ def test_active_state_projection_fails_closed_for_duplicate_active_or_missing_de
         project_todo_active_rows(missing, spec)
 
 
-def test_public_todo_projectors_require_the_exact_active_status() -> None:
+@pytest.mark.parametrize("projector", ["active_rows", "dispatch"])
+def test_public_todo_projectors_only_unwrap_single_whole_cell_backticks(
+    projector: str,
+) -> None:
     active_spec = {
         "source": "TODO.md#S2E 當前 ACTIVE 派發",
         "kind": "todo_active_rows",
@@ -279,27 +282,57 @@ def test_public_todo_projectors_require_the_exact_active_status() -> None:
         "kind": "todo_dispatch_projection",
         "heading": "S2E 當前派發投影",
     }
-    for fake_status in ("ACTIVELY_WAITING", "ACTIVEISH"):
+    wrapped_rows = (
+        "| ID | Lane／狀態 | 依賴 | 精確工作 | 驗收／下一步 |\n"
+        "|---|---|---|---|---|\n"
+        "| `DEP` | SOURCE_LANDED | none | dependency | done |\n"
+        "| `S2E.2` | `ACTIVE` | `DEP` | current | pass |\n"
+    )
+    heading = (
+        "S2E 當前 ACTIVE 派發"
+        if projector == "active_rows"
+        else "S2E 當前派發投影"
+    )
+    spec = active_spec if projector == "active_rows" else dispatch_spec
+    document = (f"### {heading}\n\n" + wrapped_rows).encode()
+    if projector == "active_rows":
+        projection = project_todo_active_rows(document, spec).decode("utf-8")
+    else:
+        projection = project_todo_dispatch_projection(document, spec)[
+            "active_rows"
+        ][0]["content"]
+    assert "| `DEP` |" in projection
+    assert "| `S2E.2` |" in projection
+
+    for fake_status in (
+        "ACTIVELY_WAITING",
+        "ACTIVEISH",
+        "ACT_IVE",
+        "ACTIVE__",
+        "A*CTIVE",
+        "ACT`IVE",
+    ):
         rows = (
             "| ID | Lane／狀態 | 依賴 | 精確工作 | 驗收／下一步 |\n"
             "|---|---|---|---|---|\n"
-            "| `S2E.1` | SOURCE_LANDED | none | dependency | done |\n"
-            f"| `S2E.2` | {fake_status} | S2E.1 | fake | forbidden |\n"
+            "| `DEP` | SOURCE_LANDED | none | dependency | done |\n"
+            f"| `S2E.2` | {fake_status} | DEP | fake | forbidden |\n"
         )
-        active_document = (
-            "### S2E 當前 ACTIVE 派發\n\n" + rows
-        ).encode()
-        with pytest.raises(ValueError, match="exactly one ACTIVE"):
-            project_todo_active_rows(active_document, active_spec)
-
-        dispatch_document = (
-            "### S2E 當前派發投影\n\n"
-            f"{EMPTY_DISPATCH_MARKER}\n"
-            f"{rows}"
-        ).encode()
-        assert project_todo_dispatch_projection(
-            dispatch_document, dispatch_spec
-        )["projection_state"] == "EMPTY"
+        if projector == "active_rows":
+            active_document = (
+                "### S2E 當前 ACTIVE 派發\n\n" + rows
+            ).encode()
+            with pytest.raises(ValueError, match="exactly one ACTIVE"):
+                project_todo_active_rows(active_document, active_spec)
+        else:
+            dispatch_document = (
+                "### S2E 當前派發投影\n\n"
+                f"{EMPTY_DISPATCH_MARKER}\n"
+                f"{rows}"
+            ).encode()
+            assert project_todo_dispatch_projection(
+                dispatch_document, dispatch_spec
+            )["projection_state"] == "EMPTY"
 
 
 def test_public_todo_projectors_resolve_non_s2e_dependency_by_exact_row_id() -> None:
@@ -420,6 +453,53 @@ def test_public_todo_projectors_reject_inexact_dependency_cells(
     ).encode()
 
     with pytest.raises(ValueError, match="dependenc"):
+        if projector == "active_rows":
+            project_todo_active_rows(document, spec)
+        else:
+            project_todo_dispatch_projection(document, spec)
+
+
+@pytest.mark.parametrize("projector", ["active_rows", "dispatch"])
+@pytest.mark.parametrize(
+    ("declared_id", "dependency_cell"),
+    [
+        ("DEP", "D_EP"),
+        ("DEP", "DE*P"),
+        ("DEP", "DE`P"),
+        ("D_EP", "DEP"),
+    ],
+)
+def test_public_todo_projectors_preserve_internal_dependency_markers(
+    declared_id: str, dependency_cell: str, projector: str,
+) -> None:
+    heading = (
+        "S2E 當前 ACTIVE 派發"
+        if projector == "active_rows"
+        else "S2E 當前派發投影"
+    )
+    spec = {
+        "source": f"TODO.md#{heading}",
+        "kind": (
+            "todo_active_rows"
+            if projector == "active_rows"
+            else "todo_dispatch_projection"
+        ),
+        "heading": heading,
+        "id_column": "ID",
+        "status_column": "Lane／狀態",
+        "dependency_column": "依賴",
+        "dependency_depth": 1,
+        "required_when": {"surfaces_any": ["runtime"]},
+    }
+    document = (
+        f"### {heading}\n\n"
+        "| ID | Lane／狀態 | 依賴 | 精確工作 | 驗收／下一步 |\n"
+        "|---|---|---|---|---|\n"
+        f"| `{declared_id}` | SOURCE_LANDED | none | dependency | done |\n"
+        f"| `S2E.2` | ACTIVE | {dependency_cell} | current | pass |\n"
+    ).encode()
+
+    with pytest.raises(ValueError, match="missing dependency"):
         if projector == "active_rows":
             project_todo_active_rows(document, spec)
         else:
