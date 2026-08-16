@@ -455,6 +455,30 @@ def _exact_object(value: Any, fields: set[str], label: str) -> dict[str, Any]:
     return value
 
 
+def _registered_work_writer(value: Any) -> dict[str, str]:
+    if not isinstance(value, str) or not value:
+        raise ValueError("LW2 writer identity must be a registered work writer")
+    from agent_governance_registry import (  # local to avoid cycle
+        native_agent_contract,
+    )
+    try:
+        contract = native_agent_contract(value)
+    except ValueError as error:
+        raise ValueError(
+            "LW2 writer identity must be a registered work writer"
+        ) from error
+    if contract.get("role_id") == "E2":
+        raise ValueError(
+            "LW2 writer identity must be a registered work writer and not self-review"
+        )
+    if (
+        contract.get("node_class") != "work"
+        or not str(contract.get("permission", "")).endswith("_writer")
+    ):
+        raise ValueError("LW2 writer identity must be a registered work writer")
+    return contract
+
+
 def _identity(value: Any, *, label: str) -> tuple[str, str]:
     if not HEAD_RE.fullmatch(str(value.get("head", ""))):
         raise ValueError(f"{label} head must be raw lowercase 40-hex")
@@ -529,18 +553,6 @@ def validate_lw2_readmission_eligibility(
     if repo is None:
         raise ValueError("LW2 combined-main validation requires repository root")
     validate_local_merged_main(Path(repo), head=head, tree=tree)
-    _require_external_verification(
-        external_evidence_verifier,
-        {
-            "schema_version": "lw2_publication_verification_request_v1",
-            "repository_url": LW2_REPOSITORY_URL,
-            "destination_ref": LW2_DESTINATION_REF,
-            "head": head,
-            "tree": tree,
-            "publication_provenance": publication,
-        },
-        label="LW2 combined-main publication provenance",
-    )
 
     raw_capture = claim_payloads["lw2_combined_main_unreachability_capture"]
     if not isinstance(raw_capture, dict) or set(raw_capture) != CAPTURE_FIELDS:
@@ -666,6 +678,12 @@ def validate_lw2_readmission_eligibility(
     if not isinstance(payload, dict) or set(payload) != REVIEW_PAYLOAD_FIELDS:
         raise ValueError("LW2 independent review judgment payload fields are not exact")
     writer_identity = payload.get("writer_native_identity")
+    writer_contract = _registered_work_writer(writer_identity)
+    if (
+        expected_writer_identity is not None
+        and writer_contract["role_id"] != expected_writer_identity
+    ):
+        raise ValueError("LW2 declared writer identity differs from admission owner")
     if (
         fragment.get("schema_version") != "role_fragment_v1"
         or fragment.get("node_id") != LW2_REVIEW_NODE_ID
@@ -684,18 +702,23 @@ def validate_lw2_readmission_eligibility(
         or payload.get("reviewed_capture_digest")
         != command_capture["record_digest"]
         or payload.get("trust_ceiling") != LW2_TRUST_CEILING
-        or not isinstance(writer_identity, str)
-        or not writer_identity.strip()
-        or writer_identity == "E2"
+        or payload.get("writer_native_identity") != writer_identity
     ):
         raise ValueError(
             "LW2 independent review must be exact E2 read-only PASS and not self-review"
         )
-    if (
-        expected_writer_identity is not None
-        and writer_identity != expected_writer_identity
-    ):
-        raise ValueError("LW2 declared writer identity differs from admission owner")
+    _require_external_verification(
+        external_evidence_verifier,
+        {
+            "schema_version": "lw2_publication_verification_request_v1",
+            "repository_url": LW2_REPOSITORY_URL,
+            "destination_ref": LW2_DESTINATION_REF,
+            "head": head,
+            "tree": tree,
+            "publication_provenance": publication,
+        },
+        label="LW2 combined-main publication provenance",
+    )
     _require_external_verification(
         external_evidence_verifier,
         {

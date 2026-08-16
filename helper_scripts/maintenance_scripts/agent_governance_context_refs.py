@@ -16,7 +16,6 @@ HISTORY_PATH_RE = re.compile(
     r"^docs/CCAgentWorkSpace/[A-Za-z0-9_-]+/"
     r"(?:memory(?:-archive)?\.md|workspace/reports/(?:[^/]+/)*[^/]+\.md)$"
 )
-ACTIVE_ID_RE = re.compile(r"\bS2E\.[A-Za-z0-9]+(?:[.-][A-Za-z0-9]+)*\b")
 MAX_HISTORY_REFS = 4
 MAX_HISTORY_SECTION_BYTES = 16 * 1024
 MAX_HISTORY_TOTAL_BYTES = 32 * 1024
@@ -162,6 +161,32 @@ def _plain_cell(value: str) -> str:
     return re.sub(r"[*_`]", "", value).strip()
 
 
+def _is_active_status(value: str) -> bool:
+    return _plain_cell(value).upper() == "ACTIVE"
+
+
+def _direct_dependency_ids(
+    value: str,
+    by_id: dict[str, tuple[str, list[str], str]],
+    *,
+    projector: str,
+) -> tuple[str, ...]:
+    dependency_cell = _plain_cell(value)
+    if dependency_cell.lower() == "none":
+        return ()
+    dependency_ids = tuple(
+        item.strip() for item in dependency_cell.split(",")
+    )
+    if len(dependency_ids) != len(set(dependency_ids)):
+        raise ValueError(f"{projector} dependency rows must be unique")
+    missing = sorted({
+        item for item in dependency_ids if not item or item not in by_id
+    })
+    if missing:
+        raise ValueError(f"{projector} missing dependency rows: {missing}")
+    return dependency_ids
+
+
 def project_todo_active_rows(data: bytes, spec: dict[str, Any]) -> bytes:
     """Project the unique ACTIVE row and its direct dependency rows."""
 
@@ -230,15 +255,14 @@ def project_todo_active_rows(data: bytes, spec: dict[str, Any]) -> bytes:
         by_id[row_id] = row
     active = [
         row for row in rows
-        if _plain_cell(row[1][status_index]).upper().startswith("ACTIVE")
+        if _is_active_status(row[1][status_index])
     ]
     if len(active) != 1:
         raise ValueError("todo_active_rows requires exactly one ACTIVE row")
     active_row = active[0]
-    dependency_ids = ACTIVE_ID_RE.findall(active_row[1][dependency_index])
-    missing = sorted(set(dependency_ids) - set(by_id))
-    if missing:
-        raise ValueError(f"todo_active_rows missing dependency rows: {missing}")
+    dependency_ids = _direct_dependency_ids(
+        active_row[1][dependency_index], by_id, projector="todo_active_rows"
+    )
     dependency_rows = [
         row for row in rows if row[2] in set(dependency_ids)
     ]
@@ -343,7 +367,7 @@ def project_todo_dispatch_projection(
         by_id[row_id] = row
     active_rows = [
         row for row in rows
-        if _plain_cell(row[1][status_index]).upper().startswith("ACTIVE")
+        if _is_active_status(row[1][status_index])
     ]
     marker_label = "S2E-DISPATCH-PROJECTION:"
     marker_lines = [
@@ -391,12 +415,11 @@ def project_todo_dispatch_projection(
             )
     if active_rows:
         active_row = active_rows[0]
-        dependency_ids = ACTIVE_ID_RE.findall(active_row[1][dependency_index])
-        missing = sorted(set(dependency_ids) - set(by_id))
-        if missing:
-            raise ValueError(
-                f"todo_dispatch_projection missing dependency rows: {missing}"
-            )
+        dependency_ids = _direct_dependency_ids(
+            active_row[1][dependency_index],
+            by_id,
+            projector="todo_dispatch_projection",
+        )
         dependency_rows = [
             row for row in rows if row[2] in set(dependency_ids)
         ]

@@ -686,6 +686,77 @@ def test_real_capture_and_review_are_eligible_only(
     ) is True
 
 
+@pytest.mark.parametrize(
+    "writer_identity", ["E2", "worker", "E2/worker", "UNKNOWN", "E3"]
+)
+def test_lw2_writer_identity_must_resolve_to_a_registered_work_writer_before_external_verification(
+    writer_identity: str,
+    real_lw2_evidence: tuple[Path, dict[str, str], dict[str, object]],
+) -> None:
+    repo, _, base_payloads = real_lw2_evidence
+    claim_payloads = deepcopy(base_payloads)
+    fragment = claim_payloads["lw2_independent_review"]["role_fragment"]
+    fragment["payload"]["writer_native_identity"] = writer_identity
+    _refresh_review_record(claim_payloads)
+    claim_inputs = _claim_digests(claim_payloads)
+    external_requests: list[dict[str, object]] = []
+
+    def external_verifier(request: dict[str, object]) -> bool:
+        external_requests.append(deepcopy(request))
+        return True
+
+    with pytest.raises(ValueError, match="registered work writer"):
+        validate_lw2_readmission_eligibility(
+            admission_profile=LW2_ADMISSION_PROFILE,
+            claim_inputs=claim_inputs,
+            claim_payloads=claim_payloads,
+            current_head=_git_value(repo, "HEAD"),
+            current_tree=_git_value(repo, "HEAD^{tree}"),
+            repo=repo,
+            external_evidence_verifier=external_verifier,
+        )
+    assert external_requests == []
+
+
+def test_lw2_native_writer_identity_binds_to_its_logical_admission_owner(
+    real_lw2_evidence: tuple[Path, dict[str, str], dict[str, object]],
+) -> None:
+    repo, _, base_payloads = real_lw2_evidence
+    claim_payloads = deepcopy(base_payloads)
+    fragment = claim_payloads["lw2_independent_review"]["role_fragment"]
+    fragment["payload"]["writer_native_identity"] = "PA-design-writer"
+    _refresh_review_record(claim_payloads)
+    claim_inputs = _claim_digests(claim_payloads)
+
+    trusted_verifier = _strict_external_verifier(claim_payloads)
+    assert validate_lw2_readmission_eligibility(
+        admission_profile=LW2_ADMISSION_PROFILE,
+        claim_inputs=claim_inputs,
+        claim_payloads=claim_payloads,
+        current_head=_git_value(repo, "HEAD"),
+        current_tree=_git_value(repo, "HEAD^{tree}"),
+        expected_writer_identity="PA",
+        repo=repo,
+        external_evidence_verifier=trusted_verifier,
+    ) is True
+    assert trusted_verifier.seen == trusted_verifier.expected
+
+    for wrong_owner in ("PA-design-writer", "E1"):
+        rejected_verifier = _strict_external_verifier(claim_payloads)
+        with pytest.raises(ValueError, match="differs from admission owner"):
+            validate_lw2_readmission_eligibility(
+                admission_profile=LW2_ADMISSION_PROFILE,
+                claim_inputs=claim_inputs,
+                claim_payloads=claim_payloads,
+                current_head=_git_value(repo, "HEAD"),
+                current_tree=_git_value(repo, "HEAD^{tree}"),
+                expected_writer_identity=wrong_owner,
+                repo=repo,
+                external_evidence_verifier=rejected_verifier,
+            )
+        assert rejected_verifier.seen == []
+
+
 def test_structural_review_and_publication_claims_require_a_trusted_host(
     real_lw2_evidence: tuple[Path, dict[str, str], dict[str, object]],
 ) -> None:
