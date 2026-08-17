@@ -6,11 +6,14 @@ no continuation or scheduling authority.
 
 from __future__ import annotations
 
+import base64
 import fcntl
+import hashlib
 import json
 import os
 import re
 import secrets
+import stat
 import subprocess
 import tempfile
 from dataclasses import dataclass
@@ -298,12 +301,29 @@ class WorktreeIdentity:
         return self.git_dir != self.common_dir
 
 
-def _git_text(repo: Path, *args: str) -> str | None:
+def _native_git_environment() -> dict[str, str]:
+    environment = os.environ.copy()
+    environment.pop("GIT_REPLACE_REF_BASE", None)
+    return environment
+
+
+def _git_text(
+    repo: Path,
+    *args: str,
+    native_graph: bool = False,
+) -> str | None:
     try:
         result = subprocess.run(
-            ["git", "-C", str(repo), *args],
+            [
+                "git",
+                *(["--no-replace-objects"] if native_graph else []),
+                "-C",
+                str(repo),
+                *args,
+            ],
             check=False,
             capture_output=True,
+            env=_native_git_environment() if native_graph else None,
             text=True,
             timeout=20,
         )
@@ -312,41 +332,79 @@ def _git_text(repo: Path, *args: str) -> str | None:
     return result.stdout.strip() if result.returncode == 0 else None
 
 
-def inspect_worktree(repo: Path) -> WorktreeIdentity:
+def inspect_worktree(
+    repo: Path,
+    *,
+    native_graph: bool = False,
+) -> WorktreeIdentity:
     """Resolve the exact checkout identity without mutating Git."""
 
-    root_text = _git_text(repo, "rev-parse", "--show-toplevel")
+    root_text = _git_text(
+        repo, "rev-parse", "--show-toplevel", native_graph=native_graph
+    )
     common_text = _git_text(
-        repo, "rev-parse", "--path-format=absolute", "--git-common-dir"
+        repo,
+        "rev-parse",
+        "--path-format=absolute",
+        "--git-common-dir",
+        native_graph=native_graph,
     )
     git_dir_text = _git_text(
-        repo, "rev-parse", "--path-format=absolute", "--absolute-git-dir"
+        repo,
+        "rev-parse",
+        "--path-format=absolute",
+        "--absolute-git-dir",
+        native_graph=native_graph,
     )
     if not root_text or not common_text or not git_dir_text:
         raise ValueError("repository worktree identity is unavailable")
     root = Path(root_text).resolve()
-    status = _git_text(root, "status", "--porcelain=v1", "--untracked-files=all")
+    status = _git_text(
+        root,
+        "status",
+        "--porcelain=v1",
+        "--untracked-files=all",
+        native_graph=native_graph,
+    )
     if status is None:
         raise ValueError("repository dirty state is unavailable")
     return WorktreeIdentity(
         worktree=str(root),
-        branch=_git_text(root, "symbolic-ref", "--quiet", "--short", "HEAD"),
-        head=_git_text(root, "rev-parse", "HEAD"),
+        branch=_git_text(
+            root,
+            "symbolic-ref",
+            "--quiet",
+            "--short",
+            "HEAD",
+            native_graph=native_graph,
+        ),
+        head=_git_text(root, "rev-parse", "HEAD", native_graph=native_graph),
         common_dir=Path(common_text).resolve(),
         git_dir=Path(git_dir_text).resolve(),
         dirty=bool(status),
     )
 
 
-def _capture_dirty_paths(repo: Path) -> tuple[list[str], list[str]]:
+def _capture_dirty_paths(
+    repo: Path,
+    *,
+    native_graph: bool = False,
+) -> tuple[list[str], list[str]]:
     """Recapture exact dirty and staged paths without trusting porcelain text."""
 
     def nul_paths(*args: str) -> list[str]:
         try:
             completed = subprocess.run(
-                ["git", "-C", str(repo), *args],
+                [
+                    "git",
+                    *(["--no-replace-objects"] if native_graph else []),
+                    "-C",
+                    str(repo),
+                    *args,
+                ],
                 check=True,
                 capture_output=True,
+                env=_native_git_environment() if native_graph else None,
                 timeout=20,
             )
             return [
@@ -370,6 +428,596 @@ def _capture_dirty_paths(repo: Path) -> tuple[list[str], list[str]]:
     )
     staged = nul_paths("diff", "--cached", "--name-only", "-z", "--")
     return sorted(set(tracked + untracked)), sorted(set(staged))
+
+
+def _git_bytes(repo: Path, *args: str) -> bytes:
+    """Return exact Git bytes for publication evidence or fail closed."""
+
+    try:
+        completed = subprocess.run(
+            ["git", "--no-replace-objects", "-C", str(repo), *args],
+            check=True,
+            capture_output=True,
+            env=_native_git_environment(),
+            timeout=20,
+        )
+    except (OSError, subprocess.CalledProcessError, subprocess.TimeoutExpired) as error:
+        raise ValueError("LW2 publication Git evidence is unavailable") from error
+    return completed.stdout
+
+
+def _sha256_bytes(value: bytes) -> str:
+    return "sha256:" + hashlib.sha256(value).hexdigest()
+
+
+def _native_commit(repo: Path, commit: str) -> tuple[str, list[str]]:
+    """Read one commit's native tree and parents from raw object headers."""
+
+    if not re.fullmatch(r"[0-9a-f]{40}", commit):
+        raise ValueError("LW2 publication commit identity is invalid")
+    raw = _git_bytes(repo, "cat-file", "commit", commit)
+    header = raw.split(b"\n\n", 1)[0]
+    tree: str | None = None
+    parents: list[str] = []
+    try:
+        for line in header.splitlines():
+            if line.startswith(b"tree "):
+                if tree is not None:
+                    raise ValueError("LW2 publication commit tree is ambiguous")
+                tree = line.removeprefix(b"tree ").decode("ascii")
+            elif line.startswith(b"parent "):
+                parents.append(line.removeprefix(b"parent ").decode("ascii"))
+    except UnicodeDecodeError as error:
+        raise ValueError("LW2 publication commit headers are invalid") from error
+    if (
+        tree is None
+        or not re.fullmatch(r"[0-9a-f]{40}", tree)
+        or any(not re.fullmatch(r"[0-9a-f]{40}", parent) for parent in parents)
+    ):
+        raise ValueError("LW2 publication commit headers are invalid")
+    return tree, parents
+
+
+def _native_is_ancestor(repo: Path, ancestor: str, descendant: str) -> bool:
+    """Resolve native reachability from raw parent headers only."""
+
+    pending = [descendant]
+    seen: set[str] = set()
+    while pending:
+        current = pending.pop()
+        if current == ancestor:
+            return True
+        if current in seen:
+            continue
+        if len(seen) >= 100_000:
+            raise ValueError("LW2 publication native graph is too large")
+        seen.add(current)
+        _, parents = _native_commit(repo, current)
+        pending.extend(parent for parent in parents if parent not in seen)
+    return False
+
+
+def _unsafe_replace_namespace(namespace: Path) -> bool:
+    """Reject loose replace material without following filesystem indirection."""
+
+    try:
+        metadata = namespace.lstat()
+    except FileNotFoundError:
+        return False
+    except OSError:
+        return True
+    if (
+        stat.S_ISLNK(metadata.st_mode)
+        or not stat.S_ISDIR(metadata.st_mode)
+        or metadata.st_mode & 0o444 == 0
+        or metadata.st_mode & 0o111 == 0
+    ):
+        return True
+    try:
+        with os.scandir(namespace) as entries:
+            return next(entries, None) is not None
+    except OSError:
+        return True
+
+
+def _capture_native_graph_safety(
+    *,
+    repo: Path,
+    common_dir: Path,
+    canonical_claim_digest: Callable[[Any], str],
+) -> tuple[dict[str, Any] | None, bool]:
+    """Capture absence of every local Git graph projection mechanism."""
+
+    ambient_replace_base = "GIT_REPLACE_REF_BASE" in os.environ
+    try:
+        raw_refs = _git_bytes(
+            repo, "for-each-ref", "--format=%(refname)", "refs/replace/"
+        )
+        replace_refs = sorted(
+            line.decode("utf-8") for line in raw_refs.splitlines() if line
+        )
+    except (UnicodeDecodeError, ValueError):
+        return None, True
+    replace_namespace_unsafe = _unsafe_replace_namespace(
+        common_dir / "refs" / "replace"
+    )
+    grafts = common_dir / "info" / "grafts"
+    try:
+        grafts.lstat()
+    except FileNotFoundError:
+        grafts_present = False
+    except OSError:
+        grafts_present = True
+    else:
+        grafts_present = True
+    if (
+        ambient_replace_base
+        or replace_refs
+        or replace_namespace_unsafe
+        or grafts_present
+    ):
+        return None, True
+    empty_digest = canonical_claim_digest([])
+    native_graph = {
+        "schema_version": "lw2_native_git_graph_v1",
+        "read_mode": "git_--no-replace-objects",
+        "git_replace_ref_base": "ABSENT",
+        "replace_namespace": "refs/replace/",
+        "replace_ref_count": 0,
+        "replace_refs_digest": empty_digest,
+        "grafts": "ABSENT",
+        "grafts_digest": empty_digest,
+    }
+    return native_graph, False
+
+
+def _native_protected_inventory(repo: Path) -> list[str]:
+    from agent_governance_lw2_readmission import lw2_readmission_policy
+
+    policy = lw2_readmission_policy()
+    try:
+        tracked = {
+            raw.decode("utf-8")
+            for raw in _git_bytes(repo, "ls-files", "--cached", "-z").split(b"\0")
+            if raw
+        }
+        candidates = {
+            raw.decode("utf-8")
+            for raw in _git_bytes(
+                repo,
+                "ls-files",
+                "--cached",
+                "--others",
+                "--exclude-standard",
+                "-z",
+            ).split(b"\0")
+            if raw
+        }
+    except UnicodeDecodeError as error:
+        raise ValueError("LW2 protected inventory is unavailable") from error
+    exact_paths = set(policy["protected_scope_paths"])
+    if not exact_paths.issubset(tracked):
+        raise ValueError("LW2 protected inventory is incomplete")
+    inventory = set(exact_paths)
+    for prefix in policy["protected_scope_prefixes"]:
+        matches = {path for path in candidates if path.startswith(prefix)}
+        if not matches:
+            raise ValueError("LW2 protected inventory prefix is empty")
+        inventory.update(matches)
+    for relative in inventory:
+        target = repo / relative
+        if target.is_symlink() or not target.is_file():
+            raise ValueError("LW2 protected inventory contains a non-regular file")
+    return sorted(inventory)
+
+
+def _byte_capture(value: bytes) -> dict[str, Any]:
+    return {
+        "encoding": "base64",
+        "content": base64.b64encode(value).decode("ascii"),
+        "bytes": len(value),
+        "digest": _sha256_bytes(value),
+    }
+
+
+def _capture_lw2_publication_generation(
+    repo: Path,
+    task_contract: dict[str, Any],
+    *,
+    canonical_claim_digest: Callable[[Any], str],
+) -> dict[str, Any]:
+    """Capture the exact current feature generation using only native Git reads."""
+
+    scope = _native_protected_inventory(repo)
+    dirty_scope = task_contract.get("dirty_scope")
+    if not isinstance(dirty_scope, list) or not set(dirty_scope).issubset(scope):
+        raise ValueError("LW2 publication dirty scope is outside protected inventory")
+
+    def git_generation() -> tuple[str, bytes, list[str], list[str]]:
+        head = _git_bytes(repo, "rev-parse", "HEAD").decode("ascii").strip()
+        tracked = _git_bytes(
+            repo, "diff", "--no-ext-diff", "--binary", "HEAD", "--", *scope
+        )
+        tracked_paths = sorted(
+            raw.decode("utf-8")
+            for raw in _git_bytes(
+                repo,
+                "diff",
+                "--no-ext-diff",
+                "--name-only",
+                "-z",
+                "HEAD",
+                "--",
+                *scope,
+            ).split(b"\0")
+            if raw
+        )
+        untracked_paths = sorted(
+            raw.decode("utf-8")
+            for raw in _git_bytes(
+                repo,
+                "ls-files",
+                "--others",
+                "--exclude-standard",
+                "-z",
+                "--",
+                *scope,
+            ).split(b"\0")
+            if raw
+        )
+        if not re.fullmatch(r"[0-9a-f]{40}", head):
+            raise ValueError("LW2 publication feature HEAD is invalid")
+        return head, tracked, tracked_paths, untracked_paths
+
+    try:
+        first = git_generation()
+    except UnicodeDecodeError as error:
+        raise ValueError("LW2 publication feature generation is unavailable") from error
+    source_head, tracked, tracked_paths, untracked_paths = first
+    if not set(tracked_paths + untracked_paths).issubset(scope):
+        raise ValueError("LW2 publication generation escaped protected inventory")
+    untracked: list[dict[str, Any]] = []
+    for relative in untracked_paths:
+        candidate = repo / relative
+        if candidate.is_symlink() or not candidate.is_file():
+            raise ValueError("LW2 publication untracked path is not a regular file")
+        untracked.append({"path": relative, **_byte_capture(candidate.read_bytes())})
+    repeated = git_generation()
+    if repeated != first or any(
+        (repo / item["path"]).read_bytes()
+        != base64.b64decode(item["content"])
+        for item in untracked
+    ):
+        raise ValueError("LW2 publication generation changed during capture")
+    changed_paths = sorted(set(tracked_paths) | set(untracked_paths))
+    generation_fields = {
+        "scope": scope,
+        "source_head": source_head,
+        "tracked_diff": _byte_capture(tracked),
+        "tracked_paths": tracked_paths,
+        "untracked": untracked,
+        "changed_paths": changed_paths,
+        "change_manifest_digest": canonical_claim_digest(changed_paths),
+        "untracked_manifest_digest": canonical_claim_digest(untracked),
+    }
+    source_tree, _ = _native_commit(repo, source_head)
+    return {
+        "schema_version": "task_admission_repository_generation_v1",
+        "source_head": source_head,
+        "source_tree": source_tree,
+        "scope": scope,
+        "repository_generation_digest": canonical_claim_digest(generation_fields),
+    }
+
+
+def _lw2_publication_status(
+    *,
+    repo: Path,
+    identity: WorktreeIdentity,
+    record: dict[str, Any],
+    canonical_claim_digest: Callable[[Any], str],
+) -> tuple[dict[str, Any] | None, list[str]]:
+    """Recapture a read-only, admission-bound LW2 publication transition."""
+
+    from agent_governance_capture import PLATFORM_OR_EXTERNAL_ATTESTED
+    from agent_governance_lw2_readmission import (
+        LW2_DESTINATION_REF,
+        LW2_REPOSITORY_URL,
+    )
+
+    accepted = record["accepted_generation"]
+    task_contract = record["task_contract"]
+    accepted_head = accepted["source_head"]
+    accepted_tree = accepted["source_tree"]
+    reasons: list[str] = []
+    native_graph, graph_projection_present = _capture_native_graph_safety(
+        repo=repo,
+        common_dir=identity.common_dir,
+        canonical_claim_digest=canonical_claim_digest,
+    )
+    if graph_projection_present:
+        return None, ["LW2_PUBLICATION_GRAPH_PROJECTION_PRESENT"]
+    assert native_graph is not None
+
+    claim_inputs = task_contract.get("claim_inputs")
+    claim_payloads = task_contract.get("claim_payloads")
+    base_identity = (
+        claim_payloads.get("lw2_combined_main_identity")
+        if isinstance(claim_payloads, dict)
+        else None
+    )
+    identity_fields = {
+        "schema_version", "repository_url", "destination_ref", "head", "tree",
+        "publication_provenance",
+    }
+    publication_fields = {
+        "schema_version", "trust_tier", "provider", "provider_record_id",
+        "repository_url", "destination_ref", "head", "tree", "status",
+        "record_digest",
+    }
+    publication = (
+        base_identity.get("publication_provenance")
+        if isinstance(base_identity, dict)
+        else None
+    )
+    if (
+        not isinstance(base_identity, dict)
+        or set(base_identity) != identity_fields
+        or base_identity.get("schema_version") != "lw2_combined_main_identity_v2"
+        or base_identity.get("repository_url") != LW2_REPOSITORY_URL
+        or base_identity.get("destination_ref") != LW2_DESTINATION_REF
+        or (base_identity.get("head"), base_identity.get("tree"))
+        != (accepted_head, accepted_tree)
+        or not isinstance(claim_inputs, dict)
+        or claim_inputs.get("lw2_combined_main_identity")
+        != canonical_claim_digest(base_identity)
+    ):
+        reasons.append("LW2_PUBLICATION_ACCEPTED_BASE_CLAIM_MISMATCH")
+    if (
+        not isinstance(publication, dict)
+        or set(publication) != publication_fields
+        or publication.get("schema_version")
+        != "lw2_destination_publication_provenance_v1"
+        or publication.get("trust_tier") != PLATFORM_OR_EXTERNAL_ATTESTED
+        or publication.get("provider") != "github"
+        or not isinstance(publication.get("provider_record_id"), str)
+        or not publication.get("provider_record_id", "").strip()
+        or publication.get("repository_url") != LW2_REPOSITORY_URL
+        or publication.get("destination_ref") != LW2_DESTINATION_REF
+        or (publication.get("head"), publication.get("tree"))
+        != (accepted_head, accepted_tree)
+        or publication.get("status") != "PUBLISHED"
+        or publication.get("record_digest")
+        != canonical_claim_digest({
+            key: value
+            for key, value in publication.items()
+            if key != "record_digest"
+        })
+    ):
+        reasons.append("LW2_PUBLICATION_BASE_PROVENANCE_INVALID")
+    if (
+        not identity.linked
+        or identity.branch in {None, "main"}
+    ):
+        reasons.append("LW2_PUBLICATION_FEATURE_WORKTREE_REQUIRED")
+
+    try:
+        dirty_paths, staged_paths = _capture_dirty_paths(repo, native_graph=True)
+    except ValueError:
+        dirty_paths, staged_paths = [], []
+        reasons.append("LW2_PUBLICATION_DIRTY_STATE_UNAVAILABLE")
+    origin_main = _git_text(
+        repo,
+        "rev-parse",
+        "refs/remotes/origin/main",
+        native_graph=True,
+    )
+    origin_url = _git_text(
+        repo, "remote", "get-url", "origin", native_graph=True
+    )
+    try:
+        accepted_object_tree, _ = _native_commit(repo, accepted_head)
+    except ValueError:
+        accepted_object_tree = None
+    if accepted_object_tree != accepted_tree:
+        reasons.append("LW2_PUBLICATION_ACCEPTED_BASE_OBJECT_MISMATCH")
+    if origin_url != LW2_REPOSITORY_URL:
+        reasons.append("LW2_PUBLICATION_ORIGIN_REMOTE_MISMATCH")
+    if origin_main != accepted_head:
+        reasons.append("LW2_PUBLICATION_ORIGIN_MAIN_DRIFT")
+    if staged_paths:
+        reasons.append("LW2_PUBLICATION_STAGED_CHANGES")
+    if identity.dirty or dirty_paths:
+        reasons.append("LW2_PUBLICATION_DIRTY_WORKTREE")
+    try:
+        current_inventory = _native_protected_inventory(repo)
+        if current_inventory != accepted["scope"]:
+            reasons.append("LW2_PUBLICATION_PROTECTED_INVENTORY_DRIFT")
+    except ValueError:
+        reasons.append("LW2_PUBLICATION_PROTECTED_INVENTORY_DRIFT")
+    try:
+        feature_generation = _capture_lw2_publication_generation(
+            repo,
+            task_contract,
+            canonical_claim_digest=canonical_claim_digest,
+        )
+    except ValueError:
+        feature_generation = None
+        reasons.append("LW2_PUBLICATION_FEATURE_GENERATION_UNAVAILABLE")
+
+    feature_head = identity.head or ""
+    try:
+        feature_tree, _ = _native_commit(repo, feature_head)
+    except ValueError:
+        feature_tree = ""
+        reasons.append("LW2_PUBLICATION_COMMIT_EVIDENCE_UNAVAILABLE")
+    if feature_generation is not None:
+        if (
+            feature_generation["source_head"],
+            feature_generation["source_tree"],
+        ) != (feature_head, feature_tree):
+            reasons.append("LW2_PUBLICATION_FEATURE_IDENTITY_DRIFT")
+
+    commit_path_records: list[dict[str, Any]] = []
+    patch_records: list[dict[str, str]] = []
+    try:
+        base_is_ancestor = _native_is_ancestor(
+            repo, accepted_head, feature_head
+        )
+    except ValueError:
+        base_is_ancestor = None
+        reasons.append("LW2_PUBLICATION_TOPOLOGY_UNAVAILABLE")
+    if base_is_ancestor is False:
+        reasons.append("LW2_PUBLICATION_BASE_NOT_ANCESTOR")
+    try:
+        reverse_records: list[tuple[dict[str, Any], dict[str, str]]] = []
+        current = feature_head
+        seen: set[str] = set()
+        while base_is_ancestor and current != accepted_head:
+            if current in seen or len(seen) >= 100_000:
+                reasons.append("LW2_PUBLICATION_TOPOLOGY_UNAVAILABLE")
+                break
+            seen.add(current)
+            tree, parents = _native_commit(repo, current)
+            if len(parents) > 1:
+                reasons.append("LW2_PUBLICATION_NONLINEAR_HISTORY")
+                break
+            if not parents:
+                reasons.append("LW2_PUBLICATION_BASE_NOT_ANCESTOR")
+                break
+            parent = parents[0]
+            parent_tree, _ = _native_commit(repo, parent)
+            raw_paths = _git_bytes(
+                repo,
+                "diff-tree", "-r", "--no-commit-id", "--no-renames",
+                "--name-only", "-z", parent_tree, tree, "--",
+            )
+            paths = sorted({
+                raw.decode("utf-8")
+                for raw in raw_paths.split(b"\0")
+                if raw
+            })
+            patch = _git_bytes(
+                repo,
+                "diff-tree", "-r", "--no-commit-id", "--no-renames",
+                "--no-ext-diff", "--no-textconv", "--binary", "--full-index",
+                "-p", parent_tree, tree, "--",
+            )
+            reverse_records.append(({
+                "commit": current,
+                "parent": parent,
+                "tree": tree,
+                "paths": paths,
+            }, {
+                "commit": current,
+                "binary_patch_digest": _sha256_bytes(patch),
+            }))
+            current = parent
+        if current == accepted_head:
+            reverse_records.reverse()
+            commit_path_records = [item[0] for item in reverse_records]
+            patch_records = [item[1] for item in reverse_records]
+    except (UnicodeDecodeError, ValueError):
+        reasons.append("LW2_PUBLICATION_COMMIT_EVIDENCE_UNAVAILABLE")
+
+    if base_is_ancestor and not commit_path_records:
+        reasons.append("LW2_PUBLICATION_EMPTY_COMMIT_RANGE")
+    touched_paths = sorted({
+        path
+        for commit_record in commit_path_records
+        for path in commit_record["paths"]
+    })
+    if not set(touched_paths).issubset(task_contract["dirty_scope"]):
+        reasons.append("LW2_PUBLICATION_COMMITTED_PATH_OUTSIDE_ADMITTED_SCOPE")
+
+    try:
+        final_generation = _capture_lw2_publication_generation(
+            repo,
+            task_contract,
+            canonical_claim_digest=canonical_claim_digest,
+        )
+    except ValueError:
+        final_generation = None
+        reasons.append("LW2_PUBLICATION_FINAL_RECAPTURE_UNAVAILABLE")
+    final_native_graph, final_graph_projection_present = (
+        _capture_native_graph_safety(
+            repo=repo,
+            common_dir=identity.common_dir,
+            canonical_claim_digest=canonical_claim_digest,
+        )
+    )
+    if final_graph_projection_present or final_native_graph != native_graph:
+        return None, ["LW2_PUBLICATION_GRAPH_PROJECTION_PRESENT"]
+    try:
+        final_identity = inspect_worktree(repo, native_graph=True)
+        final_tree, _ = _native_commit(repo, final_identity.head or "")
+        final_origin_main = _git_text(
+            repo,
+            "rev-parse",
+            "refs/remotes/origin/main",
+            native_graph=True,
+        )
+        final_origin_url = _git_text(
+            repo, "remote", "get-url", "origin", native_graph=True
+        )
+        final_dirty_paths, final_staged_paths = _capture_dirty_paths(
+            repo, native_graph=True
+        )
+    except ValueError:
+        final_identity = None
+        reasons.append("LW2_PUBLICATION_FINAL_RECAPTURE_UNAVAILABLE")
+    if final_identity is not None and (
+        final_identity.worktree != identity.worktree
+        or final_identity.common_dir != identity.common_dir
+        or final_identity.branch != identity.branch
+        or final_identity.head != feature_head
+        or final_tree != feature_tree
+        or final_origin_main != origin_main
+        or final_origin_url != origin_url
+        or final_identity.dirty != identity.dirty
+        or final_dirty_paths != dirty_paths
+        or final_staged_paths != staged_paths
+    ):
+        reasons.append("LW2_PUBLICATION_FINAL_RECAPTURE_DRIFT")
+    if (
+        feature_generation is not None
+        and final_generation is not None
+        and (
+            final_generation["source_tree"] != feature_tree
+            or final_generation != feature_generation
+        )
+    ):
+        reasons.append("LW2_PUBLICATION_FINAL_RECAPTURE_DRIFT")
+    if reasons:
+        return None, list(dict.fromkeys(reasons))
+
+    assert isinstance(publication, dict)
+    assert feature_generation is not None
+    return {
+        "schema_version": "lw2_writer_publication_status_v1",
+        "accepted_base": {
+            "head": accepted_head,
+            "tree": accepted_tree,
+            "generation_digest": canonical_claim_digest(accepted),
+            "publication_provenance_digest": publication["record_digest"],
+        },
+        "feature": {
+            "head": feature_head,
+            "tree": feature_tree,
+            "generation_digest": canonical_claim_digest(feature_generation),
+        },
+        "ordered_commits": [
+            item["commit"] for item in commit_path_records
+        ],
+        "touched_paths": touched_paths,
+        "native_graph": native_graph,
+        "native_graph_digest": canonical_claim_digest(native_graph),
+        "ordered_commit_path_digest": canonical_claim_digest(commit_path_records),
+        "binary_patch_digest": canonical_claim_digest({
+            "native_graph_digest": canonical_claim_digest(native_graph),
+            "patch_records": patch_records,
+        }),
+    }, []
 
 
 def _lease_result(
@@ -826,7 +1474,9 @@ def filesystem_writer_lease_action(
 ) -> dict[str, Any]:
     """Run one explicit production writer-lease action."""
 
-    identity = inspect_worktree(repo)
+    identity = inspect_worktree(
+        repo, native_graph=action == "publication-status"
+    )
     store = FileWriterLeaseStore(identity.common_dir)
     from agent_governance_lw2_readmission import (  # local: avoid cycle
         canonical_claim_digest,
@@ -898,7 +1548,9 @@ def filesystem_writer_lease_action(
             lease_state: dict[str, Any],
             binding_state: dict[str, Any],
         ) -> tuple[dict[str, Any], dict[str, Any], dict[str, Any], bool]:
-            locked_identity = inspect_worktree(repo)
+            locked_identity = inspect_worktree(
+                repo, native_graph=action == "publication-status"
+            )
             if (
                 locked_identity.worktree != identity.worktree
                 or locked_identity.common_dir != identity.common_dir
@@ -1091,7 +1743,11 @@ def filesystem_writer_lease_action(
                 validate_lw2_contract_binding(
                     record["task_contract"],
                     task_id=record["task_id"],
-                    repo=Path(identity.worktree),
+                    repo=(
+                        None
+                        if action == "publication-status"
+                        else Path(identity.worktree)
+                    ),
                 )
                 if (
                     not isinstance(lease, dict)
@@ -1120,16 +1776,17 @@ def filesystem_writer_lease_action(
                         identity=locked_identity, lease=None,
                     )
                     return lease_state, binding_state, result, False
-                current_generation = capture_task_admission_generation(
-                    Path(identity.worktree), record["task_contract"]
-                )
-                if current_generation != record.get("accepted_generation"):
-                    result = _lease_result(
-                        action, status="FAIL",
-                        reasons=["TASK_ADMISSION_GENERATION_MISMATCH"],
-                        identity=locked_identity, lease=None,
+                if action != "publication-status":
+                    current_generation = capture_task_admission_generation(
+                        Path(identity.worktree), record["task_contract"]
                     )
-                    return lease_state, binding_state, result, False
+                    if current_generation != record.get("accepted_generation"):
+                        result = _lease_result(
+                            action, status="FAIL",
+                            reasons=["TASK_ADMISSION_GENERATION_MISMATCH"],
+                            identity=locked_identity, lease=None,
+                        )
+                        return lease_state, binding_state, result, False
             else:
                 ordinary_lease_result = exact_lease_result(
                     lease, locked_identity
@@ -1165,12 +1822,30 @@ def filesystem_writer_lease_action(
                     return lease_state, binding_state, result, False
 
             result = exact_lease_result(lease, locked_identity)
-            if result["status"] == "PASS" and action == "status":
+            if result["status"] == "PASS" and action in {
+                "status", "publication-status",
+            }:
                 result["admission_scope"] = {
                     "task_contract_digest": record["task_contract_digest"],
                     "dirty_scope": list(record["task_contract"]["dirty_scope"]),
                     "lw2_selected": selected,
                 }
+                if action == "publication-status" and selected:
+                    assert lease is not None
+                    publication_status, publication_reasons = (
+                        _lw2_publication_status(
+                            repo=Path(identity.worktree),
+                            identity=locked_identity,
+                            record=record,
+                            canonical_claim_digest=canonical_claim_digest,
+                        )
+                    )
+                    if publication_reasons:
+                        result["status"] = "FAIL"
+                        result["reasons"] = publication_reasons
+                        result["admission_scope"] = None
+                        return lease_state, binding_state, result, False
+                    result["publication_status"] = publication_status
                 return lease_state, binding_state, result, False
             if result["status"] != "PASS":
                 return lease_state, binding_state, result, False

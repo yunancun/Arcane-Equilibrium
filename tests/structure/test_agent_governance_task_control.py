@@ -737,6 +737,73 @@ def test_ordinary_filesystem_lease_lifecycle_requires_exact_active_admission(
     assert released["status"] == "PASS"
 
 
+def test_publication_status_cli_preserves_ordinary_status_semantics(
+    tmp_path: Path,
+    capsys: pytest.CaptureFixture[str],
+) -> None:
+    repo = _init_linked_repo(tmp_path)
+    admission = acquire_task_admission(
+        repo=repo,
+        task_id="ordinary-task",
+        owner="owner",
+        task_contract=_admission_contract(repo, "finite", "ordinary write"),
+    )
+    acquired = filesystem_writer_lease_action(
+        action="acquire",
+        repo=repo,
+        task_id="ordinary-task",
+        owner="owner",
+        admission_id=admission["admission_id"],
+    )
+    lease_id = acquired["lease"]["lease_id"]
+    store = FileWriterLeaseStore(inspect_worktree(repo).common_dir)
+    persisted_before = (
+        store.state_path.read_bytes(),
+        store.binding_path.read_bytes(),
+    )
+    direct = filesystem_writer_lease_action(
+        action="status",
+        repo=repo,
+        task_id="ordinary-task",
+        owner="owner",
+        lease_id=lease_id,
+        admission_id=admission["admission_id"],
+    )
+
+    calls = (
+        (
+            governance_main,
+            [
+                "writer-lease", "--lease-action", "publication-status",
+                "--repo", str(repo), "--task-id", "ordinary-task",
+                "--owner", "owner", "--lease-id", lease_id,
+                "--admission-id", admission["admission_id"],
+            ],
+        ),
+        (
+            task_control_main,
+            [
+                "writer-lease", "--action", "publication-status",
+                "--repo", str(repo), "--task-id", "ordinary-task",
+                "--owner", "owner", "--lease-id", lease_id,
+                "--admission-id", admission["admission_id"],
+            ],
+        ),
+    )
+    for cli, argv in calls:
+        assert cli(argv) == 0
+        packet = json.loads(capsys.readouterr().out)
+        assert packet["status"] == direct["status"] == "PASS"
+        assert packet["reasons"] == direct["reasons"] == []
+        assert packet["lease"] == direct["lease"]
+        assert packet["admission_scope"] == direct["admission_scope"]
+        assert "publication_status" not in packet
+    assert persisted_before == (
+        store.state_path.read_bytes(),
+        store.binding_path.read_bytes(),
+    )
+
+
 def test_legacy_unbound_filesystem_lease_is_cleanup_only(tmp_path: Path) -> None:
     repo = _init_linked_repo(tmp_path)
     admission = acquire_task_admission(

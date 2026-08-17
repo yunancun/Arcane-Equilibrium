@@ -328,7 +328,9 @@ def _build_parser() -> argparse.ArgumentParser:
         "writer-lease", help="acquire, inspect, renew, or release a linked-worktree writer lease"
     )
     writer_lease.add_argument(
-        "--lease-action", choices=("acquire", "status", "renew", "release"), required=True
+        "--lease-action",
+        choices=("acquire", "status", "publication-status", "renew", "release"),
+        required=True,
     )
     writer_lease.add_argument("--repo", type=Path, default=Path("."))
     writer_lease.add_argument("--task-id", required=True)

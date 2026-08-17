@@ -489,7 +489,11 @@ def _parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(description=__doc__)
     subparsers = parser.add_subparsers(dest="action", required=True)
     lease = subparsers.add_parser("writer-lease")
-    lease.add_argument("--action", choices=("acquire", "status", "renew", "release"), required=True)
+    lease.add_argument(
+        "--action",
+        choices=("acquire", "status", "publication-status", "renew", "release"),
+        required=True,
+    )
     lease.add_argument("--repo", type=Path, default=Path("."))
     lease.add_argument("--task-id", required=True)
     lease.add_argument("--owner", required=True)

@@ -244,7 +244,11 @@ def evaluate(
                 if not identity.linked:
                     reasons.append("LINKED_WORKTREE_REQUIRED")
                 lease_result = filesystem_writer_lease_action(
-                    action="status",
+                    action=(
+                        "publication-status"
+                        if phase in {"publish", "post-push"}
+                        else "status"
+                    ),
                     repo=repo,
                     task_id=writer_task_id,
                     lease_id=writer_lease_id,
@@ -255,6 +259,10 @@ def evaluate(
                     reasons.extend(lease_result["reasons"])
                 else:
                     admission_scope = lease_result.get("admission_scope")
+                    if lease_result.get("publication_status") is not None:
+                        state["writer_publication_status"] = lease_result[
+                            "publication_status"
+                        ]
                 lease = lease_result.get("lease")
                 state["writer_lease"] = (
                     {
