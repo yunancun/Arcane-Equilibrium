@@ -523,6 +523,29 @@ def test_sync_contract_covers_exact_head_publication_merge_and_three_sides() -> 
         assert required in normalized_sync
 
 
+def test_sync_contract_documents_publish_only_lw2_authority_transition() -> None:
+    normalized_sync = " ".join(SYNC.split())
+    for required in (
+        "publication-status",
+        "read-only, nonrenewing, and nonpersisting",
+        "exact ACTIVE task admission and its exact bound ACTIVE writer lease",
+        "trusted entry and final recapture times",
+        "accepted externally attested published-main base",
+        "clean, strictly linear admitted native feature range",
+        "native graph, provenance, committed paths, and generation",
+        "only the `publish` and `post-push` guard phases",
+        "generic `status`/`renew` and the `start`/`checkpoint` guard phases",
+        "does not authorize further edits",
+        "post-merge readmission is main-only",
+    ):
+        assert required in normalized_sync
+
+    assert (
+        "acquires a fresh bound lease before checkpoint/start/publication"
+        not in normalized_sync
+    )
+
+
 def test_loop_contract_cannot_advance_with_unbounded_dirty_or_unsynced_heads() -> None:
     for source in (SUBAGENT, PROFIT_LOOP, ALR_LOOP):
         assert "git_loop_guard.py" in source

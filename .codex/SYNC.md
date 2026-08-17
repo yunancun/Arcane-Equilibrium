@@ -1,6 +1,6 @@
 # Git Publication and Three-Side Sync Contract
 
-Last updated: 2026-08-15
+Last updated: 2026-08-18
 
 This is the canonical Git state machine for finite Codex feature tasks and
 explicitly requested long-running loops. The three
@@ -103,11 +103,25 @@ python3 helper_scripts/maintenance_scripts/agent_governance.py task-admission \
 ```
 
 An LW2-protected byte or HEAD change never advances an existing admission's
-accepted generation. Its old status/renew must fail closed. The owner performs
-exact lease cleanup, releases that admission, obtains a fresh governed
-current-generation evidence/admission, switches to the same admitted feature
-HEAD, and acquires a fresh bound lease before checkpoint/start/publication.
-This lifecycle is re-admission, not silent generation repair.
+accepted generation. The generic `status`/`renew` and the `start`/`checkpoint`
+guard phases therefore continue to deny post-admission generation drift.
+
+The public writer-lease `publication-status` action is a read-only,
+nonrenewing, and nonpersisting publish-only transition. It requires the exact
+ACTIVE task admission and its exact bound ACTIVE writer lease to remain
+unexpired at trusted entry and final recapture times. For LW2, it binds the
+accepted externally attested published-main base to a clean, strictly linear
+admitted native feature range and recaptures its native graph, provenance,
+committed paths, and generation before returning PASS. `git_loop_guard.py` uses
+`publication-status` for only the `publish` and `post-push` guard phases;
+post-push remains an immediate exact-remote-head verification gate.
+
+A `publication-status` PASS does not repair or advance the accepted generation
+and does not authorize further edits, start/checkpoint, generic status/renew,
+or admission/lease mutation. After merge, release the exact feature lease and
+admission; post-merge readmission is main-only against the newly published main
+generation. This lifecycle is bounded publication followed by re-admission,
+not silent generation repair.
 
 ## 1. Loop bootstrap and resume
 
