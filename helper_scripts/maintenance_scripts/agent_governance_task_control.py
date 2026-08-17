@@ -489,11 +489,16 @@ def _parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(description=__doc__)
     subparsers = parser.add_subparsers(dest="action", required=True)
     lease = subparsers.add_parser("writer-lease")
-    lease.add_argument("--action", choices=("acquire", "status", "renew", "release"), required=True)
+    lease.add_argument(
+        "--action",
+        choices=("acquire", "status", "publication-status", "renew", "release"),
+        required=True,
+    )
     lease.add_argument("--repo", type=Path, default=Path("."))
     lease.add_argument("--task-id", required=True)
     lease.add_argument("--owner", required=True)
     lease.add_argument("--lease-id")
+    lease.add_argument("--admission-id")
     lease.add_argument("--ttl-seconds", type=int, default=DEFAULT_LEASE_TTL_SECONDS)
     return parser
 
@@ -502,7 +507,8 @@ def main(argv: list[str] | None = None) -> int:
     args = _parser().parse_args(argv)
     packet = filesystem_writer_lease_action(
         action=args.action, repo=args.repo, task_id=args.task_id,
-        owner=args.owner, lease_id=args.lease_id, ttl_seconds=args.ttl_seconds,
+        owner=args.owner, lease_id=args.lease_id,
+        admission_id=args.admission_id, ttl_seconds=args.ttl_seconds,
     )
     print(json.dumps(packet, ensure_ascii=False, indent=2, sort_keys=True))
     return 0 if packet.get("status", "PASS") == "PASS" else 3

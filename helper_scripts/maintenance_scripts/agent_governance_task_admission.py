@@ -17,6 +17,7 @@ from copy import deepcopy
 from pathlib import Path
 from typing import Any, Callable
 
+from agent_governance_capture import capture_repository, repository_generation_digest
 from agent_governance_task_control import (
     _adjudicate_continuation,
     compile_task_execution_policy,
@@ -24,6 +25,16 @@ from agent_governance_task_control import (
     validate_progress_snapshot,
 )
 from agent_governance_writer_lease import inspect_worktree
+from agent_governance_external_evidence import ExternalEvidenceVerifier
+from agent_governance_lw2_readmission import (
+    LW2_ADMISSION_PROFILE,
+    capture_current_repository_identity,
+    lw2_contract_selected,
+    lw2_protected_inventory,
+    validate_lw2_protected_inventory_scope,
+    validate_lw2_contract_binding,
+    validate_lw2_readmission_eligibility,
+)
 from agent_governance_routing import (
     TASK_CONTRACT_FIELDS,
     _normalize_task_facts,
@@ -32,7 +43,7 @@ from agent_governance_routing import (
 
 
 TASK_ADMISSION_SCHEMA_VERSION = "task_execution_admissions_v1"
-TASK_ADMISSION_RECORD_FIELDS = {
+LEGACY_TASK_ADMISSION_RECORD_FIELDS = {
     "admission_id",
     "task_id",
     "owner",
@@ -43,9 +54,17 @@ TASK_ADMISSION_RECORD_FIELDS = {
     "last_snapshot",
     "state",
 }
+TASK_ADMISSION_RECORD_FIELDS = LEGACY_TASK_ADMISSION_RECORD_FIELDS | {
+    "accepted_generation",
+}
+ACCEPTED_GENERATION_FIELDS = {
+    "schema_version", "source_head", "source_tree", "scope",
+    "repository_generation_digest",
+}
 TASK_ID_RE = re.compile(r"[A-Za-z0-9][A-Za-z0-9_.:-]{0,127}")
 OWNER_RE = re.compile(r"[A-Za-z0-9][A-Za-z0-9_.:@/-]{0,127}")
 ADMISSION_ID_RE = re.compile(r"[0-9a-f]{32}")
+LW2_TASK_ID = "S2E-LW2"
 OperatorRequestVerifier = Callable[[dict[str, Any]], bool]
 
 
@@ -99,9 +118,24 @@ class FileTaskAdmissionStore:
                 temporary_path.unlink(missing_ok=True)
             return candidate
 
+    def serialized_read(
+        self, action: Callable[[dict[str, Any]], dict[str, Any]]
+    ) -> dict[str, Any]:
+        """Run a read/decision while holding the admission serialization lock."""
+
+        self.common_dir.mkdir(parents=True, exist_ok=True)
+        if self.state_path.is_symlink() or self.lock_path.is_symlink():
+            raise ValueError("task admission files must not be symlinks")
+        with self.lock_path.open("a+", encoding="utf-8") as lock_handle:
+            fcntl.flock(lock_handle.fileno(), fcntl.LOCK_EX)
+            return action(self.read())
+
 
 def _validate_record(record: Any, *, worktree: str) -> None:
-    if not isinstance(record, dict) or set(record) != TASK_ADMISSION_RECORD_FIELDS:
+    if not isinstance(record, dict) or frozenset(record) not in {
+        frozenset(LEGACY_TASK_ADMISSION_RECORD_FIELDS),
+        frozenset(TASK_ADMISSION_RECORD_FIELDS),
+    }:
         raise ValueError("task admission record fields are not exact")
     if record["worktree"] != worktree:
         raise ValueError("task admission key must match worktree")
@@ -121,6 +155,55 @@ def _validate_record(record: Any, *, worktree: str) -> None:
     snapshot = validate_progress_snapshot(record["last_snapshot"])
     if snapshot["task_contract_digest"] != record["task_contract_digest"]:
         raise ValueError("task admission snapshot contract binding is invalid")
+    selected_lw2 = lw2_contract_selected(
+        record["task_contract"], task_id=record["task_id"]
+    )
+    generation = record.get("accepted_generation")
+    if selected_lw2:
+        validate_lw2_contract_binding(
+            record["task_contract"], task_id=record["task_id"]
+        )
+        if not isinstance(generation, dict) or set(generation) != ACCEPTED_GENERATION_FIELDS:
+            raise ValueError("LW2 task admission accepted_generation fields are not exact")
+        if (
+            generation["schema_version"]
+            != "task_admission_repository_generation_v1"
+            or not re.fullmatch(r"[0-9a-f]{40}", str(generation["source_head"]))
+            or not re.fullmatch(r"[0-9a-f]{40}", str(generation["source_tree"]))
+            or not re.fullmatch(
+                r"sha256:[0-9a-f]{64}",
+                str(generation["repository_generation_digest"]),
+            )
+        ):
+            raise ValueError("LW2 task admission accepted_generation is invalid")
+        validate_lw2_protected_inventory_scope(generation["scope"])
+    elif generation is not None:
+        raise ValueError("ordinary task admission must remain legacy-readable")
+
+
+def capture_task_admission_generation(
+    repo: Path,
+    task_contract: dict[str, Any],
+) -> dict[str, Any]:
+    """Capture exact HEAD/tree plus task-owned repository generation."""
+
+    dirty_scope = task_contract.get("dirty_scope")
+    if not isinstance(dirty_scope, list) or not dirty_scope:
+        raise ValueError("LW2 task admission generation requires dirty_scope")
+    scope = list(lw2_protected_inventory(repo))
+    if not set(dirty_scope).issubset(scope):
+        raise ValueError("LW2 task admission dirty_scope is outside protected inventory")
+    repository = capture_repository(scope, root=repo)
+    source_head, source_tree = capture_current_repository_identity(repo)
+    if repository["source_head"] != source_head:
+        raise ValueError("LW2 repository generation HEAD changed during capture")
+    return {
+        "schema_version": "task_admission_repository_generation_v1",
+        "source_head": source_head,
+        "source_tree": source_tree,
+        "scope": list(scope),
+        "repository_generation_digest": repository_generation_digest(repository),
+    }
 
 
 def _validate_state(state: Any) -> None:
@@ -137,7 +220,7 @@ def _validate_state(state: Any) -> None:
 
 
 def _projection(record: dict[str, Any]) -> dict[str, Any]:
-    return {
+    projection = {
         "task_id": record["task_id"],
         "owner": record["owner"],
         "worktree": record["worktree"],
@@ -147,6 +230,9 @@ def _projection(record: dict[str, Any]) -> dict[str, Any]:
         "last_round": record["last_snapshot"]["round"],
         "last_progress_digest": record["last_snapshot"]["progress_digest"],
     }
+    if "accepted_generation" in record:
+        projection["accepted_generation"] = deepcopy(record["accepted_generation"])
+    return projection
 
 
 def _result(
@@ -209,6 +295,7 @@ def acquire_task_admission(
     owner: str,
     task_contract: dict[str, Any],
     operator_request_verifier: OperatorRequestVerifier | None = None,
+    external_evidence_verifier: ExternalEvidenceVerifier | None = None,
 ) -> dict[str, Any]:
     """Persist the first task contract for one worktree and return its token once."""
 
@@ -220,6 +307,32 @@ def acquire_task_admission(
         )
     identity = inspect_worktree(repo)
     task_contract = _normalized_task_contract(task_contract)
+    selected_lw2 = lw2_contract_selected(task_contract, task_id=task_id)
+    if selected_lw2:
+        validate_lw2_contract_binding(
+            task_contract,
+            task_id=task_id,
+            repo=Path(identity.worktree),
+        )
+        current_head, current_tree = capture_current_repository_identity(
+            Path(identity.worktree)
+        )
+        validate_lw2_readmission_eligibility(
+            admission_profile=task_contract["admission_profile"],
+            claim_inputs=task_contract["claim_inputs"],
+            claim_payloads=task_contract["claim_payloads"],
+            current_head=current_head,
+            current_tree=current_tree,
+            expected_writer_identity=owner,
+            repo=Path(identity.worktree),
+            reexecute_capture=True,
+            external_evidence_verifier=external_evidence_verifier,
+        )
+        accepted_generation = capture_task_admission_generation(
+            Path(identity.worktree), task_contract
+        )
+    else:
+        accepted_generation = None
     control = compile_task_execution_policy(task_contract)
     contract_digest = control["task_contract_digest"]
     if control["continuation_mode"] == "operator_loop":
@@ -257,6 +370,14 @@ def acquire_task_admission(
     result: dict[str, Any] = {}
 
     def mutation(state: dict[str, Any]) -> dict[str, Any]:
+        if accepted_generation is not None:
+            locked_generation = capture_task_admission_generation(
+                Path(identity.worktree), task_contract
+            )
+            if locked_generation != accepted_generation:
+                raise ValueError(
+                    "LW2 repository generation changed after replay before admission store"
+                )
         if identity.worktree in state["admissions"]:
             result["collision"] = True
             return state
@@ -272,6 +393,8 @@ def acquire_task_admission(
             "last_snapshot": baseline,
             "state": "ACTIVE",
         }
+        if accepted_generation is not None:
+            record["accepted_generation"] = accepted_generation
         state["admissions"][identity.worktree] = record
         result["record"] = record
         return state
@@ -322,6 +445,15 @@ def continue_admitted_task(
         if record["state"] != "ACTIVE":
             result["reasons"] = ["TASK_ADMISSION_TERMINAL"]
             return state
+        if lw2_contract_selected(
+            record["task_contract"], task_id=record["task_id"]
+        ):
+            current_generation = capture_task_admission_generation(
+                Path(identity.worktree), record["task_contract"]
+            )
+            if current_generation != record.get("accepted_generation"):
+                result["reasons"] = ["TASK_ADMISSION_GENERATION_MISMATCH"]
+                return state
         previous = record["last_snapshot"]
         current = progress_snapshot(
             round_number=previous["round"] + 1,

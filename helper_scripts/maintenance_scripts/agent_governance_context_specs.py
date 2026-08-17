@@ -16,6 +16,7 @@ SOURCE_KINDS = {
     "repository_inventory",
     "evidence_artifact",
     "todo_active_rows",
+    "todo_dispatch_projection",
     "history_refs",
 }
 CAPTURE_KINDS = {
@@ -76,6 +77,13 @@ def context_source_spec_errors(value: Any) -> list[str]:
             "dependency_column",
             "dependency_depth",
         },
+        "todo_dispatch_projection": common | {
+            "heading",
+            "id_column",
+            "status_column",
+            "dependency_column",
+            "dependency_depth",
+        },
         "history_refs": {"source", "kind"},
     }.get(kind)
     if allowed is None:
@@ -86,7 +94,7 @@ def context_source_spec_errors(value: Any) -> list[str]:
         required |= {"paths", "min_matches"}
     if kind == "evidence_artifact":
         required |= {"capture_kind", "required_when"}
-    if kind == "todo_active_rows":
+    if kind in {"todo_active_rows", "todo_dispatch_projection"}:
         required |= {
             "heading",
             "id_column",
@@ -116,12 +124,12 @@ def context_source_spec_errors(value: Any) -> list[str]:
             errors.append("repository_inventory min_matches must be non-negative int")
     if kind == "evidence_artifact" and value.get("capture_kind") not in CAPTURE_KINDS:
         errors.append("evidence_artifact capture_kind is invalid")
-    if kind == "todo_active_rows":
+    if kind in {"todo_active_rows", "todo_dispatch_projection"}:
         for field in ("heading", "id_column", "status_column", "dependency_column"):
             if not isinstance(value.get(field), str) or not value[field].strip():
-                errors.append(f"todo_active_rows {field} must be non-empty")
+                errors.append(f"{kind} {field} must be non-empty")
         if value.get("dependency_depth") != 1:
-            errors.append("todo_active_rows dependency_depth must equal one")
+            errors.append(f"{kind} dependency_depth must equal one")
     return errors
 
 

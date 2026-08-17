@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import ast
 import importlib.util
 import re
 from copy import deepcopy
@@ -10,6 +11,12 @@ ROOT = Path(__file__).resolve().parents[2]
 MODULE_PATH = (
     ROOT / "helper_scripts" / "maintenance_scripts" / "agent_governance.py"
 )
+WRITER_LEASE_PATH = (
+    ROOT
+    / "helper_scripts"
+    / "maintenance_scripts"
+    / "agent_governance_writer_lease.py"
+)
 
 
 def _load_governance():
@@ -18,6 +25,96 @@ def _load_governance():
     module = importlib.util.module_from_spec(spec)
     spec.loader.exec_module(module)
     return module
+
+
+def test_lw2_publication_status_static_surface_is_read_only() -> None:
+    tree = ast.parse(WRITER_LEASE_PATH.read_text(encoding="utf-8"))
+    publication = next(
+        node
+        for node in tree.body
+        if isinstance(node, ast.FunctionDef)
+        and node.name == "_lw2_publication_status"
+    )
+    forbidden_git_mutations = {
+        "add", "branch", "checkout", "clean", "commit", "fetch", "merge",
+        "pull", "push", "rebase", "reset", "restore", "switch", "tag",
+        "update-ref", "worktree",
+    }
+    git_commands: set[str] = set()
+    for node in ast.walk(publication):
+        if (
+            isinstance(node, ast.Call)
+            and isinstance(node.func, ast.Name)
+            and node.func.id in {"_git_bytes", "_git_text"}
+            and len(node.args) >= 2
+            and isinstance(node.args[1], ast.Constant)
+            and isinstance(node.args[1].value, str)
+        ):
+            git_commands.add(node.args[1].value)
+        if (
+            isinstance(node, ast.Call)
+            and isinstance(node.func, ast.Attribute)
+            and node.func.attr == "run"
+            and node.args
+            and isinstance(node.args[0], ast.List)
+        ):
+            git_commands.update(
+                element.value
+                for element in node.args[0].elts
+                if isinstance(element, ast.Constant)
+                and isinstance(element.value, str)
+            )
+    assert git_commands.isdisjoint(forbidden_git_mutations)
+    assert not any(
+        isinstance(node, ast.Call)
+        and isinstance(node.func, ast.Attribute)
+        and node.func.attr
+        in {"transact", "update", "write", "write_bytes", "write_text"}
+        for node in ast.walk(publication)
+    )
+    for node in ast.walk(publication):
+        targets: list[ast.expr] = []
+        if isinstance(node, (ast.Assign, ast.AnnAssign, ast.AugAssign)):
+            raw_targets = node.targets if isinstance(node, ast.Assign) else [node.target]
+            targets.extend(raw_targets)
+        assert not any(
+            isinstance(target, ast.Subscript)
+            and isinstance(target.value, ast.Name)
+            and target.value.id in {"record", "lease", "accepted", "task_contract"}
+            for target in targets
+        )
+
+
+def test_lw2_publication_status_uses_only_native_git_graph_reads() -> None:
+    source = WRITER_LEASE_PATH.read_text(encoding="utf-8")
+    tree = ast.parse(source)
+    functions = {
+        node.name: node
+        for node in tree.body
+        if isinstance(node, ast.FunctionDef)
+    }
+    git_bytes_source = ast.get_source_segment(source, functions["_git_bytes"])
+    native_env_source = ast.get_source_segment(
+        source, functions["_native_git_environment"]
+    )
+    publication_source = ast.get_source_segment(
+        source, functions["_lw2_publication_status"]
+    )
+    action_source = ast.get_source_segment(
+        source, functions["filesystem_writer_lease_action"]
+    )
+    assert git_bytes_source is not None
+    assert '"--no-replace-objects"' in git_bytes_source
+    assert "env=_native_git_environment()" in git_bytes_source
+    assert native_env_source is not None
+    assert '.pop("GIT_REPLACE_REF_BASE", None)' in native_env_source
+    assert publication_source is not None
+    assert '"merge-base"' not in publication_source
+    assert '"rev-list"' not in publication_source
+    assert '"cat-file"' in source
+    assert "native_graph=True" in publication_source
+    assert action_source is not None
+    assert 'native_graph=action == "publication-status"' in action_source
 
 
 def test_read_only_command_preflight_rejects_every_ascii_control_character() -> None:
@@ -165,7 +262,7 @@ def test_ci_runs_the_cheap_development_agent_governance_gate() -> None:
 
     for required in (
         "runs-on: ubuntu-latest",
-        "timeout-minutes: 30",
+        "timeout-minutes: 45",
         "python3 helper_scripts/maintenance_scripts/agent_governance.py validate",
         "python3 helper_scripts/maintenance_scripts/agent_governance.py render --check",
         "tests/structure/test_development_agent_governance.py",

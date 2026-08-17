@@ -30,7 +30,8 @@ summary is not a substitute.
 These facts are normalized into one exact `task_contract`: task shape, sorted
 surfaces, risk, runtime/end-to-end claims, `side_effect_class`, objective, scope,
 acceptance, hard stops, source baseline, `dirty_scope`, optional
-`verification_scope`, direct interfaces, and previous failure.
+`verification_scope`, direct interfaces, previous failure, optional typed
+`admission_profile`, and its exact `claim_payloads`.
 `dirty_scope` is normalized to unique, safe repository-relative paths sorted by
 Unicode scalar value; unpaired surrogates and Git/pathspec-like spellings fail
 closed. `verification_scope` uses the same portable path ordering and safety.
@@ -38,10 +39,12 @@ Reserved documentation/frontend path tokens use ASCII-only case folding in both
 Python and saved-workflow JS; Unicode confusables never acquire those ownership
 classes.
 Any prior/evidence digest that may determine a verdict is also admitted under
-`claim_inputs`; the free-form prompt is not an authority channel for replacing
-it. The canonical task-contract digest follows the Context artifact into every
-role fragment and final closure. A later prompt, fragment, or summary cannot
-silently widen scope, change acceptance/evidence inputs, or switch effect class.
+`claim_inputs`; each supplied typed payload must canonically hash to its named
+digest. The free-form prompt, task ID, filename, TODO label, or summary is not an
+authority channel for inferring a profile or replacing evidence. The canonical
+task-contract digest follows the Context artifact into every role fragment and
+final closure. A later prompt, fragment, or summary cannot silently widen scope,
+change acceptance/evidence inputs, or switch effect class.
 
 `verification_scope` is an optional canonical, sorted/unique list of literal,
 safe repository-relative paths used only for read-only command-capture generation
@@ -100,10 +103,18 @@ external/actual-usage claims require the third tier.
 The Registry defines packs; the compiler selects and deduplicates pointers:
 
 - `core`: relevant product/root/hard-boundary sections
-- `active_state`: exact rows from the `S2E 當前 ACTIVE 派發` table only when
-  current state can change the answer; the compiler selects the unique ACTIVE
-  task row plus direct dependency rows, caps the projection at 8 KiB, and hashes
-  the projected bytes rather than all of `TODO.md`
+- `active_state`: the Registry uses `todo_dispatch_projection` on the exact
+  `S2E 當前派發投影` section when current state can change the answer. One ACTIVE
+  row projects that row plus direct dependencies and stays capped at 8 KiB. Zero
+  ACTIVE rows are legal only with the exact, unique
+  `S2E-DISPATCH-PROJECTION` EMPTY marker; the typed JSON content is
+  `projection_state=EMPTY`, `active_rows=[]`, `active_count=0`,
+  `dispatchable=false`, and `next_action=null`. Missing/renamed headings,
+  malformed or mixed EMPTY+ACTIVE state, other-section rows, and more than one
+  ACTIVE row fail closed without full-file fallback. The capture still records
+  content digest/bytes/provenance, source bytes, and a real
+  `full_file_token_estimate` from complete `TODO.md` bytes. Legacy
+  `todo_active_rows` callers retain exactly-one ACTIVE semantics.
 - `architecture`: CONTEXT + relevant ADR
 - `source_change`: diff, direct interfaces/callers, focused acceptance tests
 - `runtime`: active evidence + sub-agent hygiene

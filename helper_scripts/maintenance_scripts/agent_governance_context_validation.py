@@ -91,6 +91,10 @@ CONTRACT_FIELDS = {
     "previous_failure",
     "focus",
     "claim_inputs",
+    "claim_payloads",
+    "admission_profile",
+    "work_item_id",
+    "lane_id",
     "task_prompt",
     "task_prompt_digest",
     "continuation_mode",
@@ -232,7 +236,9 @@ def _expected_facts_errors(
             errors.append(f"task contract does not match expected task facts field {field}")
     optional_projection = {
         "direct_interfaces", "dirty_scope", "verification_scope", "previous_failure", "focus",
-        "claim_inputs", "runtime_claim", "end_to_end_claim", "continuation_mode",
+        "claim_inputs", "claim_payloads", "admission_profile",
+        "work_item_id", "lane_id",
+        "runtime_claim", "end_to_end_claim", "continuation_mode",
         "operator_loop_request_digest", "history_refs",
     }
     for field in optional_projection & set(expected):

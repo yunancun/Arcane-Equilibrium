@@ -40,6 +40,16 @@ from agent_governance_aiml_adoption import (  # noqa: E402
     AIML_PROGRAM_ADOPTION_PREDECESSOR_DIGESTS,
     AIML_PROGRAM_ADOPTION_SELECTOR_DIGEST,
 )
+from agent_governance_lw2_readmission import (  # noqa: E402
+    canonical_claim_digest,
+    lw2_contract_selected,
+)
+
+
+LW2_PARITY_FIXTURE = (
+    ROOT / "tests" / "structure" / "fixtures"
+    / "lw2_readmission_parity_v1.json"
+)
 
 
 def _async_function_syntax(source: str) -> subprocess.CompletedProcess[str]:
@@ -122,6 +132,125 @@ def test_generated_path_canonicalization_matches_python_unicode_order(
         assert (
             "Object.keys(value).sort(unicodeCodePointCompareV1)" in source
         )
+
+
+def test_lw2_selector_uses_one_byte_identical_python_node_fixture(
+    tmp_path: Path,
+) -> None:
+    raw_fixture = LW2_PARITY_FIXTURE.read_bytes()
+    fixture = json.loads(raw_fixture)
+    assert fixture["schema_version"] == "lw2_readmission_parity_v1"
+    expected = [case["selected"] for case in fixture["cases"]]
+    assert [
+        lw2_contract_selected(case["contract"], task_id=case["task_id"])
+        for case in fixture["cases"]
+    ] == expected
+
+    script = "\n".join((
+        "const fs = require('fs');",
+        "const canonicalJson = value => JSON.stringify(value);",
+        render_context_admission_block(),
+        "const raw = fs.readFileSync(process.argv[2]);",
+        "const fixture = JSON.parse(raw.toString('utf8'));",
+        "const selected = fixture.cases.map(item => canonicalLW2SelectedV1(item.contract, item.task_id));",
+        "process.stdout.write(JSON.stringify({selected, hex: raw.toString('hex')}));",
+    ))
+    script_path = tmp_path / "lw2-parity.js"
+    script_path.write_text(script, encoding="utf-8")
+    completed = subprocess.run(
+        ["node", str(script_path), str(LW2_PARITY_FIXTURE)],
+        cwd=ROOT,
+        text=True,
+        capture_output=True,
+        check=False,
+    )
+    assert completed.returncode == 0, completed.stderr
+    result = json.loads(completed.stdout)
+    assert result["selected"] == expected
+    assert result["hex"] == raw_fixture.hex()
+
+
+def test_saved_workflow_rejects_selected_lw2_before_route_without_host_verifier(
+    tmp_path: Path,
+) -> None:
+    routed = route_task({
+        "task_shape": "query",
+        "surfaces": ["comments"],
+        "risk": "low",
+        "uncertainty": "low",
+        "runtime_claim": False,
+        "end_to_end_claim": False,
+        "scope": ["AGENTS.md"],
+        "dirty_scope": [],
+        "verification_scope": [],
+        "direct_interfaces": [],
+        "claim_inputs": {},
+        "task_prompt": "ordinary canonical query contract",
+    })
+    contract = task_contract_projection(routed["task_facts"])
+    contract["direct_interfaces"] = ["S2E-LW2"]
+    malformed = deepcopy(contract)
+    malformed["work_item_id"] = " S2E-LW2 "
+    fabricated = deepcopy(contract)
+    fabricated["direct_interfaces"] = []
+    fabricated["claim_payloads"] = {
+        key: {
+            "schema_version": "caller_fabricated_v1",
+            "second_field": "wrong",
+        }
+        for key in (
+            "lw2_combined_main_identity",
+            "lw2_combined_main_unreachability_capture",
+            "lw2_independent_review",
+        )
+    }
+    fabricated["claim_inputs"] = {
+        key: canonical_claim_digest(payload)
+        for key, payload in fabricated["claim_payloads"].items()
+    }
+    script = "\n".join((
+        "const canonicalJson = value => JSON.stringify(value);",
+        render_context_admission_block(),
+        f"const contract = {json.dumps(contract)};",
+        f"const malformed = {json.dumps(malformed)};",
+        f"const fabricated = {json.dumps(fabricated)};",
+        "let selectedError = null;",
+        "let fabricatedError = null;",
+        "try { canonicalRouteCallNodesV1(null, contract); } catch (error) {",
+        "  selectedError = {code: error.error_code, message: error.message};",
+        "}",
+        "try { canonicalRouteCallNodesV1(null, fabricated); } catch (error) {",
+        "  fabricatedError = {code: error.error_code, message: error.message};",
+        "}",
+        "process.stdout.write(JSON.stringify({",
+        "  selectedError, fabricatedError,",
+        "  malformed: canonicalRouteCallNodesV1(null, malformed),",
+        "}));",
+    ))
+    script_path = tmp_path / "lw2-trusted-validator-unavailable.js"
+    script_path.write_text(script, encoding="utf-8")
+    completed = subprocess.run(
+        ["node", str(script_path)], cwd=ROOT, text=True,
+        capture_output=True, check=False,
+    )
+    assert completed.returncode == 0, completed.stderr
+    assert json.loads(completed.stdout) == {
+        "selectedError": {
+            "code": "LW2_TRUSTED_VALIDATOR_UNAVAILABLE",
+            "message": (
+                "LW2_TRUSTED_VALIDATOR_UNAVAILABLE: saved workflow has no "
+                "out-of-band LW2 verifier seam"
+            ),
+        },
+        "fabricatedError": {
+            "code": "LW2_TRUSTED_VALIDATOR_UNAVAILABLE",
+            "message": (
+                "LW2_TRUSTED_VALIDATOR_UNAVAILABLE: saved workflow has no "
+                "out-of-band LW2 verifier seam"
+            ),
+        },
+        "malformed": None,
+    }
 
 
 def test_generated_generic_route_core_matches_python_corpus(

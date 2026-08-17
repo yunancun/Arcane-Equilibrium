@@ -22,6 +22,9 @@ from agent_governance_task_control import (  # noqa: E402
     acquire_writer_lease,
     inspect_worktree,
 )
+from agent_governance_context import capture_repository_baseline  # noqa: E402
+from agent_governance_routing import route_task, task_contract_projection  # noqa: E402
+from agent_governance_task_admission import acquire_task_admission  # noqa: E402
 SYNC = (ROOT / ".codex/SYNC.md").read_text(encoding="utf-8")
 SUBAGENT = (ROOT / ".codex/SUBAGENT_EXECUTION_RULES.md").read_text(
     encoding="utf-8"
@@ -63,7 +66,12 @@ def _write(path: Path, text: str) -> None:
     path.write_text(text, encoding="utf-8")
 
 
-def _fixture(tmp_path: Path) -> tuple[Path, Path, Path, dict[str, str]]:
+def _fixture(
+    tmp_path: Path,
+    *,
+    extra_tracked: dict[str, str] | None = None,
+    dirty_scope: list[str] | None = None,
+) -> tuple[Path, Path, Path, dict[str, str]]:
     origin = tmp_path / "origin.git"
     subprocess.run(["git", "init", "-q", "--bare", str(origin)], check=True)
     repo = tmp_path / "repo"
@@ -71,25 +79,53 @@ def _fixture(tmp_path: Path) -> tuple[Path, Path, Path, dict[str, str]]:
     _git(repo, "config", "user.email", "test@example.invalid")
     _git(repo, "config", "user.name", "Test User")
     _write(repo / "owned.txt", "base\n")
-    _git(repo, "add", "owned.txt")
+    for path, text in (extra_tracked or {}).items():
+        _write(repo / path, text)
+    _git(repo, "add", ".")
     _git(repo, "commit", "-q", "-m", "base")
     _git(repo, "remote", "add", "origin", str(origin))
     _git(repo, "push", "-q", "-u", "origin", "main")
     _git(origin, "symbolic-ref", "HEAD", "refs/heads/main")
     feature = tmp_path / "feature"
     _git(repo, "worktree", "add", "-q", "-b", "agent/test-loop", str(feature), "main")
+    routed = route_task({
+        "task_shape": "implementation",
+        "surfaces": ["python"],
+        "risk": "low",
+        "uncertainty": "low",
+        "side_effect_class": "repo_write",
+        "objective": "exercise the guarded writer loop",
+        "scope": dirty_scope or ["owned.txt"],
+        "dirty_scope": dirty_scope or ["owned.txt"],
+        "verification_scope": dirty_scope or ["owned.txt"],
+        "acceptance_criteria": ["guarded bytes changed"],
+        "hard_stops": ["no runtime effect"],
+        "baseline": capture_repository_baseline(feature),
+        "direct_interfaces": ["owned.txt"],
+        "previous_failure": "none",
+        "task_prompt": "exercise the guarded writer loop",
+        "continuation_mode": "finite",
+    })
+    admission = acquire_task_admission(
+        repo=feature,
+        task_id="guard-test",
+        owner="pytest",
+        task_contract=task_contract_projection(routed["task_facts"]),
+    )
     identity = inspect_worktree(feature)
     acquired = acquire_writer_lease(
         FileWriterLeaseStore(identity.common_dir),
         identity,
         task_id="guard-test",
         owner="pytest",
+        admission_id=admission["admission_id"],
     )
     assert acquired["status"] == "PASS"
     lease = {
         "writer_task_id": "guard-test",
         "writer_owner": "pytest",
         "writer_lease_id": acquired["lease"]["lease_id"],
+        "writer_admission_id": admission["admission_id"],
     }
     return feature, origin, repo, lease
 
@@ -212,6 +248,87 @@ def test_checkpoint_passes_exact_unstaged_allowlist(tmp_path: Path) -> None:
     assert "PREEXISTING_STAGED_CHANGES" in staged["reasons"]
 
 
+def test_checkpoint_caller_allowlist_cannot_widen_admitted_dirty_scope(
+    tmp_path: Path,
+) -> None:
+    repo, _, _, lease = _fixture(tmp_path)
+    head = _git(repo, "rev-parse", "HEAD")
+    _write(repo / "outside.txt", "not admitted\n")
+
+    packet = guard.evaluate(
+        repo,
+        phase="checkpoint",
+        expected_branch="agent/test-loop",
+        expected_head=head,
+        allow_paths=["outside.txt"],
+        **lease,
+    )
+
+    assert packet["status"] == "FAIL"
+    assert "DIRTY_PATH_OUTSIDE_ADMITTED_SCOPE" in packet["reasons"]
+
+
+def test_checkpoint_protected_path_requires_lw2_admission(tmp_path: Path) -> None:
+    repo, _, _, lease = _fixture(tmp_path)
+    head = _git(repo, "rev-parse", "HEAD")
+    protected = (
+        "helper_scripts/maintenance_scripts/"
+        "agent_governance_s2e_launch_receipts.py"
+    )
+    _write(repo / protected, "protected mutation\n")
+
+    packet = guard.evaluate(
+        repo,
+        phase="checkpoint",
+        expected_branch="agent/test-loop",
+        expected_head=head,
+        allow_paths=[protected],
+        **lease,
+    )
+
+    assert packet["status"] == "FAIL"
+    assert (
+        "LW2_PROTECTED_PATH_REQUIRES_LW2_ADMISSION" in packet["reasons"]
+    )
+
+
+def test_checkpoint_rename_cannot_hide_protected_source_from_ordinary_scope(
+    tmp_path: Path,
+) -> None:
+    protected = (
+        "helper_scripts/maintenance_scripts/"
+        "agent_governance_s2e_launch_receipts.py"
+    )
+    destination = "renamed.txt"
+    repo, _, _, lease = _fixture(
+        tmp_path,
+        extra_tracked={
+            protected: "protected source bytes\n",
+        },
+        dirty_scope=[destination],
+    )
+    head = _git(repo, "rev-parse", "HEAD")
+    _git(repo, "config", "diff.renames", "true")
+    (repo / protected).rename(repo / destination)
+    _git(repo, "add", "-N", "--", destination)
+    assert _git(repo, "diff", "--cached", "--name-only", "--") == ""
+    assert _git(repo, "diff", "--name-only", "HEAD", "--") == destination
+
+    packet = guard.evaluate(
+        repo,
+        phase="checkpoint",
+        expected_branch="agent/test-loop",
+        expected_head=head,
+        allow_paths=[destination],
+        **lease,
+    )
+
+    assert packet["status"] == "FAIL"
+    assert protected in packet["state"]["dirty_paths"]
+    assert "DIRTY_PATH_OUTSIDE_ADMITTED_SCOPE" in packet["reasons"]
+    assert "LW2_PROTECTED_PATH_REQUIRES_LW2_ADMISSION" in packet["reasons"]
+
+
 def test_publish_and_post_push_bind_remote_branch_head(tmp_path: Path) -> None:
     repo, _, _, lease = _fixture(tmp_path)
     _write(repo / "owned.txt", "feature\n")
@@ -308,6 +425,19 @@ def test_feature_guard_requires_valid_lease_and_linked_worktree(tmp_path: Path) 
     )
     assert "WRITER_LEASE_REQUIRED" in missing["reasons"]
 
+    missing_admission = guard.evaluate(
+        repo,
+        phase="start",
+        expected_branch="agent/test-loop",
+        expected_head=head,
+        **{
+            field: value
+            for field, value in lease.items()
+            if field != "writer_admission_id"
+        },
+    )
+    assert "WRITER_ADMISSION_ID_REQUIRED" in missing_admission["reasons"]
+
     missing_owner = guard.evaluate(
         repo,
         phase="start",
@@ -345,6 +475,8 @@ def test_sync_contract_covers_exact_head_publication_merge_and_three_sides() -> 
         "git_loop_guard.py",
         "--phase start",
         "--phase checkpoint",
+        "--writer-admission-id",
+        "--admission-id",
         "--phase publish",
         "--phase post-push",
         "--phase main-sync",
@@ -365,6 +497,53 @@ def test_sync_contract_covers_exact_head_publication_merge_and_three_sides() -> 
         assert "must not recapture" in source
     assert "upstream absent or\n  correct" in SYNC
     assert "upstream is exactly `origin/<branch>`" in SYNC
+
+    writer_release_command = """python3 helper_scripts/maintenance_scripts/agent_governance.py writer-lease \\
+  --lease-action release --repo . \\
+  --task-id "$WRITER_TASK_ID" --owner "$WRITER_OWNER" \\
+  --lease-id "$WRITER_LEASE_ID" \\
+  --admission-id "$WRITER_ADMISSION_ID"""  # noqa: E501
+    admission_release_command = """python3 helper_scripts/maintenance_scripts/agent_governance.py task-admission \\
+  --admission-action release --repo . \\
+  --task-id "$WRITER_TASK_ID" --owner "$WRITER_OWNER" \\
+  --admission-id "$WRITER_ADMISSION_ID"""  # noqa: E501
+    assert writer_release_command in SYNC
+    assert admission_release_command in SYNC
+    assert SYNC.index(writer_release_command) < SYNC.index(
+        admission_release_command
+    )
+    normalized_sync = " ".join(SYNC.split())
+    for required in (
+        "Legitimate renames must admit and allow both",
+        "deleted source and the added destination",
+        "Bound cleanup verifies the exact admission ID",
+        "cannot prove its historical admission binding",
+        "exact task/owner/lease cleanup-only",
+    ):
+        assert required in normalized_sync
+
+
+def test_sync_contract_documents_publish_only_lw2_authority_transition() -> None:
+    normalized_sync = " ".join(SYNC.split())
+    for required in (
+        "publication-status",
+        "read-only, nonrenewing, and nonpersisting",
+        "exact ACTIVE task admission and its exact bound ACTIVE writer lease",
+        "trusted entry and final recapture times",
+        "accepted externally attested published-main base",
+        "clean, strictly linear admitted native feature range",
+        "native graph, provenance, committed paths, and generation",
+        "only the `publish` and `post-push` guard phases",
+        "generic `status`/`renew` and the `start`/`checkpoint` guard phases",
+        "does not authorize further edits",
+        "post-merge readmission is main-only",
+    ):
+        assert required in normalized_sync
+
+    assert (
+        "acquires a fresh bound lease before checkpoint/start/publication"
+        not in normalized_sync
+    )
 
 
 def test_loop_contract_cannot_advance_with_unbounded_dirty_or_unsynced_heads() -> None:

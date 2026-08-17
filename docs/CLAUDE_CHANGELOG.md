@@ -1,7 +1,51 @@
 # CLAUDE_CHANGELOG.md — 開發歷史歸檔
 
 > 從 CLAUDE.md / TODO.md 遷出的 Wave/Sprint/Batch + TODO version-increment 歷史敘事。新 session 不需要讀此文件，僅供回顧歷史時查閱。
-> 最後更新：2026-08-14（TODO v878 UID validation/publication closure）
+> 最後更新：2026-08-14（TODO v880 LW2 readmission authority closure candidate）
+
+---
+
+## TODO v880 增量：LW2 readmission source-authority closure candidate（2026-08-14）
+
+- EMPTY queue Context source seam 保持已修復。LW2 readmission authority 現在由單一
+  Registry-owned selector、destination-bound publication identity、非 caller 控制的
+  `ExternalEvidenceVerifier`、完整 protected-scope generation fence，以及 admission-bound
+  filesystem writer lease 串起；saved-workflow 與 Python surface 同步 fail closed。
+- provisional exact code head
+  `4f20a5dc75e74ae723feea57cb62d4c724f8e700`（tree
+  `fb8283cbb86b95e1ef000a05916a9e88047bcef2`）已獲 E2/E4 接受；post-docs
+  exact-head E2/E3/E4/CC/R4、current-head PR #189 CI/thread、publication/merge 與 post-merge
+  evidence 仍待完成，因此不宣稱 merged、landed 或 evidence-ready。
+- production 目前沒有真正非 caller 控制的 verifier provider 可證明 destination-bound
+  publication 與 independent E2 request；缺此 attestation 時 deliberate fail closed，不能以
+  caller-authored PASS、inline JSON 或結構 digest 降級替代。
+- UID 保持 `UID_VALIDATION_PUBLICATION_CLOSED`。LW2 保持 physical `WAITING`、
+  `dispatchable=false`，從未成為 `ACTIVE`／`SOURCE_READY`／`LANDED`／`CLOSED`；除隔離測試
+  外沒有建立 LW2 admission、DAG、lease 或 source slice。S2E=5/9、production effect=0/6、
+  authority=0/9；沒有 receipt、round bump、docs-only carrier、synthetic ACTIVE row，亦無
+  runtime、service、PG、broker、order、funds 或 trading readiness/effect。
+
+---
+
+## TODO v879 增量：empty-queue Context / LW2 admission binding repair（2026-08-14）
+
+- `active_state` Registry selector 改綁 `TODO.md#S2E 當前派發投影` 與新的
+  `todo_dispatch_projection`。零 ACTIVE 只有在 exact canonical EMPTY marker 合法時
+  才可產生 typed `projection_state=EMPTY` capture；capture 保留 `content`、實際完整
+  TODO bytes 所算的 `full_file_token_estimate`、digest/bytes/provenance。舊
+  `todo_active_rows` 的 exactly-one ACTIVE 語義不變，沒有 full-file fallback。
+- 未來 `S2E-LW2` fresh admission 只接受 `aiml_s2e_lw2_readmission_v1`：三份
+  `claim_inputs` 必須逐一以 canonical digest 綁定 payload，且共同指向實際 current
+  combined-main raw 40-hex head/tree；其內容分別是 identity、同-head governed
+  focused/unreachability `command_capture_v2` PASS，以及 distinct reviewer 對該 capture
+  digest 的同-head read-only PASS review。route 在建 DAG 前驗證，task admission 在
+  store/lease 前以實際 owner/current HEAD/tree 再驗證；missing、stale、mismatch、payload
+  substitution 或 self-review 均 fail closed。
+- 此 transition 只修 executable control-plane gate。UID 保持
+  `UID_VALIDATION_PUBLICATION_CLOSED`；LW2 保持 physical `WAITING`、
+  `dispatchable=false`，目前沒有 LW2 task contract、DAG、lease、source write、Context
+  artifact 或 receipt。S2E=5/9、production effect=0/6、authority=0/9；不構成
+  runtime、deploy、PG、broker、order 或 trading authority。
 
 ---
 

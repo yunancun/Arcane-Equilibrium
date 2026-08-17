@@ -52,6 +52,7 @@ from agent_governance_authority import (  # noqa: E402
 )
 from agent_governance_effects import build_ops_evidence  # noqa: E402
 from agent_governance_external_evidence import (  # noqa: E402
+    ExternalEvidenceVerifier,
     validate_external_evidence_capture,
 )
 from agent_governance_aiml_trusted_host import (  # noqa: E402
@@ -282,6 +283,7 @@ def _build_parser() -> argparse.ArgumentParser:
     render = subparsers.add_parser("render", help="render platform/profile Adapter views")
     render.add_argument("--check", action="store_true", help="report drift without writing")
     route = subparsers.add_parser("route", help="compile JSON task facts into a hybrid DAG")
+    route.add_argument("--repo", type=Path, default=Path("."))
     route.add_argument("task_facts", help="JSON object or @path-to-JSON")
     review_control = subparsers.add_parser(
         "review-control",
@@ -326,12 +328,15 @@ def _build_parser() -> argparse.ArgumentParser:
         "writer-lease", help="acquire, inspect, renew, or release a linked-worktree writer lease"
     )
     writer_lease.add_argument(
-        "--lease-action", choices=("acquire", "status", "renew", "release"), required=True
+        "--lease-action",
+        choices=("acquire", "status", "publication-status", "renew", "release"),
+        required=True,
     )
     writer_lease.add_argument("--repo", type=Path, default=Path("."))
     writer_lease.add_argument("--task-id", required=True)
     writer_lease.add_argument("--owner", required=True)
     writer_lease.add_argument("--lease-id")
+    writer_lease.add_argument("--admission-id")
     writer_lease.add_argument("--ttl-seconds", type=int, default=7200)
     context = subparsers.add_parser("context", help="compile a lossless adaptive context plan")
     context.add_argument("--role", required=True)
@@ -524,6 +529,7 @@ def main(
     argv: list[str] | None = None,
     *,
     operator_request_verifier: OperatorRequestVerifier | None = None,
+    external_evidence_verifier: ExternalEvidenceVerifier | None = None,
 ) -> int:
     raw_argv = list(sys.argv[1:] if argv is None else argv)
     args = _build_parser().parse_args(raw_argv)
@@ -537,7 +543,23 @@ def main(
         print(json.dumps({"status": "PASS", "roles": len(registry["roles"])}, ensure_ascii=False))
         return 0
     if args.action == "route":
-        print(json.dumps(route_task(_json_arg(args.task_facts)), ensure_ascii=False, indent=2))
+        try:
+            routed = route_task(
+                _json_arg(args.task_facts),
+                repo=args.repo,
+                external_evidence_verifier=external_evidence_verifier,
+            )
+        except (OSError, TypeError, ValueError) as error:
+            print(json.dumps(
+                {"status": "FAIL", "error": str(error)},
+                ensure_ascii=False,
+            ))
+            return 2
+        print(json.dumps(
+            routed,
+            ensure_ascii=False,
+            indent=2,
+        ))
         return 0
     if args.action == "review-control":
         try:
@@ -588,6 +610,7 @@ def main(
                     owner=args.owner,
                     task_contract=_json_arg(args.task_contract),
                     operator_request_verifier=operator_request_verifier,
+                    external_evidence_verifier=external_evidence_verifier,
                 )
             else:
                 if args.task_contract is not None or not args.admission_id:
@@ -638,6 +661,7 @@ def main(
                 task_id=args.task_id,
                 owner=args.owner,
                 lease_id=args.lease_id,
+                admission_id=args.admission_id,
                 ttl_seconds=args.ttl_seconds,
             )
         except (OSError, TypeError, ValueError) as error:

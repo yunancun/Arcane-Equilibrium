@@ -11,7 +11,7 @@ const CONTEXT_ADMISSION_V1 = Object.freeze({
   knownSurfaces: Object.freeze(__KNOWN_SURFACES__),
   controllerPermission: __CONTROLLER_PERMISSION__,
   routePolicy: Object.freeze(__GENERIC_ROUTE_POLICY__),
-  contractFields: Object.freeze(['task_shape', 'surfaces', 'risk', 'runtime_claim', 'end_to_end_claim', 'uncertainty', 'side_effect_class', 'objective', 'scope', 'acceptance_criteria', 'hard_stops', 'baseline', 'dirty_scope', 'verification_scope', 'direct_interfaces', 'previous_failure', 'focus', 'claim_inputs', 'task_prompt', 'task_prompt_digest', 'continuation_mode', 'operator_loop_request_digest', 'history_refs']),
+  contractFields: Object.freeze(['task_shape', 'surfaces', 'risk', 'runtime_claim', 'end_to_end_claim', 'uncertainty', 'side_effect_class', 'objective', 'scope', 'acceptance_criteria', 'hard_stops', 'baseline', 'dirty_scope', 'verification_scope', 'direct_interfaces', 'previous_failure', 'focus', 'claim_inputs', 'claim_payloads', 'admission_profile', 'work_item_id', 'lane_id', 'task_prompt', 'task_prompt_digest', 'continuation_mode', 'operator_loop_request_digest', 'history_refs']),
   mandatoryFields: Object.freeze(['objective', 'scope', 'acceptance_criteria', 'hard_stops', 'baseline', 'direct_interfaces', 'previous_failure', 'task_prompt', 'task_prompt_digest']),
   budgetFields: Object.freeze(['envelope', 'target_context_tokens', 'quality_reserve_context_tokens', 'accounting_basis', 'max_context_tokens_per_call', 'max_prompt_utf8_bytes_per_call', 'estimated_tokens', 'compiler_estimated_input_tokens', 'action', 'review_required', 'review_rationale', 'mandatory_truncated', 'quality_reserve_reasons', 'authority', 'authority_canonical', 'authority_digest', 'call_allowed', 'claim_pass_eligible', 'pass_allowed']),
   authorityFields: Object.freeze(['schema_version', 'envelope', 'target_context_tokens', 'quality_reserve_context_tokens', 'accounting_basis', 'max_context_tokens_per_call', 'max_prompt_utf8_bytes_per_call', 'max_workflow_planned_input_tokens', 'max_unique_nodes', 'max_call_attempts', 'retry_budget', 'max_followup_attempts', 'max_total_model_turns', 'max_wait_cycles', 'max_no_delta_wakeups', 'max_wall_clock_ms', 'max_call_duration_ms', 'max_wave_duration_ms', 'max_concurrent_calls', 'max_spawn_depth_from_root', 'platform_token_cap']),
@@ -304,6 +304,40 @@ const routeSelectorStateV1 = claimInputs => {
   }
   return { aimlSelected, p0bPhase, s2Step, claimKeys: keys }
 }
+const canonicalLW2SelectedV1 = (contract, taskId = null) => {
+  if (!contract || typeof contract !== 'object' || Array.isArray(contract)) return false
+  const policy = CONTEXT_ADMISSION_V1.routePolicy.lw2_readmission
+  const normalizedId = value => (
+    typeof value === 'string' && value.replace(/[._:]/g, '-') === policy.work_item_id
+  )
+  if (
+    normalizedId(taskId) || normalizedId(contract.work_item_id) ||
+    policy.task_id_aliases.includes(taskId) ||
+    contract.lane_id === policy.lane_id ||
+    policy.lane_id_aliases.includes(contract.lane_id)
+  ) return true
+  if (
+    Array.isArray(contract.direct_interfaces) &&
+    contract.direct_interfaces.some(value => policy.direct_interface_signals.includes(value))
+  ) return true
+  if (['claim_inputs', 'claim_payloads'].some(field => (
+    contract[field] && typeof contract[field] === 'object' &&
+    !Array.isArray(contract[field]) &&
+    Object.keys(contract[field]).some(key => policy.claim_keys.includes(key))
+  ))) return true
+  if (contract.admission_profile === policy.admission_profile) return true
+  const scope = ['scope', 'dirty_scope', 'verification_scope'].flatMap(field => (
+    typeof contract[field] === 'string'
+      ? [contract[field]]
+      : Array.isArray(contract[field]) ? contract[field] : []
+  ))
+  return scope.some(path => (
+    typeof path === 'string' && (
+      policy.protected_scope_paths.includes(path) ||
+      policy.protected_scope_prefixes.some(prefix => path.startsWith(prefix))
+    )
+  ))
+}
 const canonicalRouteCallNodesV1 = (surface, contract) => {
   if (!contract || typeof contract !== 'object' || Array.isArray(contract)) return null
   if (surface !== null && !['full_audit', 'profit_diagnosis'].includes(surface)) return null
@@ -345,9 +379,31 @@ const canonicalRouteCallNodesV1 = (surface, contract) => {
     !validRepositoryScopeV1(contract.dirty_scope) ||
     !validVerificationScopeV1(contract.verification_scope) ||
     typeof contract.focus !== 'string' || contract.focus !== contract.focus.trim() ||
+    !contract.claim_payloads || typeof contract.claim_payloads !== 'object' ||
+    Array.isArray(contract.claim_payloads) ||
+    Object.keys(contract.claim_payloads).some(key => (
+      typeof key !== 'string' || !key.trim() || key !== key.trim() ||
+      !Object.prototype.hasOwnProperty.call(contract.claim_inputs, key)
+    )) ||
+    ![null, 'aiml_s2e_lw2_readmission_v1'].includes(contract.admission_profile) ||
+    ![null, undefined].includes(contract.work_item_id) && (
+      typeof contract.work_item_id !== 'string' || !contract.work_item_id ||
+      contract.work_item_id !== contract.work_item_id.trim()
+    ) ||
+    ![null, undefined].includes(contract.lane_id) && (
+      typeof contract.lane_id !== 'string' || !contract.lane_id ||
+      contract.lane_id !== contract.lane_id.trim()
+    ) ||
     !Array.isArray(contract.direct_interfaces) ||
     contract.direct_interfaces.some(item => typeof item !== 'string' || !item.trim())
   ) return null
+  if (canonicalLW2SelectedV1(contract)) {
+    const error = new Error('LW2_TRUSTED_VALIDATOR_UNAVAILABLE: saved workflow has no out-of-band LW2 verifier seam')
+    Object.defineProperty(error, 'error_code', {
+      value: 'LW2_TRUSTED_VALIDATOR_UNAVAILABLE', enumerable: true,
+    })
+    throw error
+  }
   const shape = contract.task_shape
   const surfaceSet = new Set(surfaces)
   const selectorState = routeSelectorStateV1(contract.claim_inputs)
