@@ -1211,11 +1211,18 @@ def test_governed_evidence_clone_attaches_detached_source_head_as_main(
         cwd=source,
         check=True,
     )
-    materialized = tmp_path / "materialized"
+    advertised_refs = _git_output(
+        source, "for-each-ref", "--format=%(refname)"
+    ).splitlines()
+    for ref in advertised_refs:
+        subprocess.run(
+            ["git", "update-ref", "-d", ref],
+            cwd=source,
+            check=True,
+        )
+    assert _git_output(source, "for-each-ref") == ""
+    materialized = _clone_evidence_repo(source, tmp_path)
 
-    cloned_head = _clone_exact_head_as_main(source, materialized)
-
-    assert cloned_head == exact_head
     assert _git_value(materialized, "HEAD") == exact_head
     assert subprocess.run(
         ["git", "symbolic-ref", "--quiet", "--short", "HEAD"],
@@ -1224,6 +1231,10 @@ def test_governed_evidence_clone_attaches_detached_source_head_as_main(
         capture_output=True,
         text=True,
     ).stdout.strip() == "main"
+    assert _git_value(materialized, "refs/remotes/origin/main") == exact_head
+    assert _git_output(materialized, "remote", "get-url", "origin") == (
+        LW2_REPOSITORY_URL
+    )
 
 
 def test_lw2_protected_inventory_is_complete_and_deterministic() -> None:
@@ -1252,11 +1263,7 @@ def real_lw2_contract(
 
 def _clone_evidence_repo(source: Path, tmp_path: Path) -> Path:
     repo = tmp_path / "repo"
-    subprocess.run(
-        ["git", "clone", "--quiet", str(source), str(repo)],
-        check=True,
-        capture_output=True,
-    )
+    _clone_exact_head_as_main(source, repo)
     subprocess.run(
         ["git", "config", "user.email", "lw2-test@example.invalid"],
         cwd=repo,
@@ -1267,7 +1274,6 @@ def _clone_evidence_repo(source: Path, tmp_path: Path) -> Path:
         cwd=repo,
         check=True,
     )
-    subprocess.run(["git", "branch", "-M", "main"], cwd=repo, check=True)
     subprocess.run(
         ["git", "remote", "set-url", "origin", LW2_REPOSITORY_URL],
         cwd=repo,
