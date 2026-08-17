@@ -7,7 +7,7 @@ import json
 import subprocess
 import sys
 from copy import deepcopy
-from datetime import datetime, timezone
+from datetime import datetime, timedelta, timezone
 from pathlib import Path
 
 import pytest
@@ -2065,6 +2065,196 @@ def test_lw2_publication_status_final_recapture_rejects_generation_capture_race(
     assert publication["reasons"] == ["LW2_PUBLICATION_FINAL_RECAPTURE_DRIFT"]
 
 
+def test_lw2_publication_status_rejects_expiry_during_evidence_evaluation(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+    real_lw2_contract: tuple[Path, dict[str, object]],
+) -> None:
+    source, contract = real_lw2_contract
+    repo, admission, acquired = _admitted_lw2_publication_feature(
+        source=source,
+        contract=contract,
+        tmp_path=tmp_path,
+        branch="agent/lw2-publication-mid-evaluation-expiry",
+        marker="admitted mid-evaluation expiry baseline",
+    )
+    identity = inspect_worktree(repo)
+    admission_store = FileTaskAdmissionStore(identity.common_dir)
+    lease_store = FileWriterLeaseStore(identity.common_dir)
+    persisted_before = {
+        "admission": admission_store.state_path.read_bytes(),
+        "lease": lease_store.state_path.read_bytes(),
+        "binding": lease_store.binding_path.read_bytes(),
+    }
+    expires_at = datetime.fromisoformat(
+        acquired["lease"]["expires_at"].replace("Z", "+00:00")
+    )
+    trusted_times = iter([
+        expires_at - timedelta(microseconds=1),
+        expires_at,
+    ])
+    monkeypatch.setattr(
+        writer_lease_module, "_utc_now", lambda: next(trusted_times)
+    )
+
+    publication = filesystem_writer_lease_action(
+        action="publication-status",
+        repo=repo,
+        task_id="S2E-LW2",
+        owner="E1",
+        lease_id=acquired["lease"]["lease_id"],
+        admission_id=admission["admission_id"],
+    )
+
+    assert publication["status"] == "FAIL"
+    assert publication["reasons"] == ["WRITER_LEASE_EXPIRED"]
+    assert publication["admission_scope"] is None
+    assert "publication_status" not in publication
+    assert persisted_before == {
+        "admission": admission_store.state_path.read_bytes(),
+        "lease": lease_store.state_path.read_bytes(),
+        "binding": lease_store.binding_path.read_bytes(),
+    }
+
+
+def test_publication_status_denies_caller_backdating_for_ordinary_lease(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    repo = _linked_main_evidence_repo(ROOT, tmp_path)
+    contract = task_contract_projection(route_task(
+        {
+            **_ordinary_route_facts(),
+            "baseline": capture_repository_baseline(repo),
+        },
+        repo=repo,
+    )["task_facts"])
+    admission = acquire_task_admission(
+        repo=repo,
+        task_id="ORDINARY-PUBLICATION-EXPIRY",
+        owner="E1",
+        task_contract=contract,
+    )
+    subprocess.run(
+        ["git", "switch", "-q", "-c", "agent/ordinary-publication-expiry"],
+        cwd=repo,
+        check=True,
+    )
+    lease_start = datetime(2030, 1, 1, tzinfo=timezone.utc)
+    acquired = filesystem_writer_lease_action(
+        action="acquire",
+        repo=repo,
+        task_id="ORDINARY-PUBLICATION-EXPIRY",
+        owner="E1",
+        admission_id=admission["admission_id"],
+        now=lease_start,
+    )
+    expires_at = datetime.fromisoformat(
+        acquired["lease"]["expires_at"].replace("Z", "+00:00")
+    )
+    identity = inspect_worktree(repo)
+    admission_store = FileTaskAdmissionStore(identity.common_dir)
+    lease_store = FileWriterLeaseStore(identity.common_dir)
+    persisted_before = {
+        "admission": admission_store.state_path.read_bytes(),
+        "lease": lease_store.state_path.read_bytes(),
+        "binding": lease_store.binding_path.read_bytes(),
+    }
+    monkeypatch.setattr(writer_lease_module, "_utc_now", lambda: expires_at)
+
+    publication = filesystem_writer_lease_action(
+        action="publication-status",
+        repo=repo,
+        task_id="ORDINARY-PUBLICATION-EXPIRY",
+        owner="E1",
+        lease_id=acquired["lease"]["lease_id"],
+        admission_id=admission["admission_id"],
+        now=lease_start,
+    )
+
+    assert publication["status"] == "FAIL"
+    assert publication["reasons"] == ["WRITER_LEASE_EXPIRED"]
+    assert publication["admission_scope"] is None
+    assert "publication_status" not in publication
+    assert persisted_before == {
+        "admission": admission_store.state_path.read_bytes(),
+        "lease": lease_store.state_path.read_bytes(),
+        "binding": lease_store.binding_path.read_bytes(),
+    }
+
+
+def test_publication_status_passes_only_when_both_trusted_times_are_unexpired(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    repo = _linked_main_evidence_repo(ROOT, tmp_path)
+    contract = task_contract_projection(route_task(
+        {
+            **_ordinary_route_facts(),
+            "baseline": capture_repository_baseline(repo),
+        },
+        repo=repo,
+    )["task_facts"])
+    admission = acquire_task_admission(
+        repo=repo,
+        task_id="ORDINARY-PUBLICATION-STRICTLY-UNEXPIRED",
+        owner="E1",
+        task_contract=contract,
+    )
+    subprocess.run(
+        [
+            "git", "switch", "-q", "-c",
+            "agent/ordinary-publication-strictly-unexpired",
+        ],
+        cwd=repo,
+        check=True,
+    )
+    lease_start = datetime(2031, 1, 1, tzinfo=timezone.utc)
+    acquired = filesystem_writer_lease_action(
+        action="acquire",
+        repo=repo,
+        task_id="ORDINARY-PUBLICATION-STRICTLY-UNEXPIRED",
+        owner="E1",
+        admission_id=admission["admission_id"],
+        now=lease_start,
+    )
+    expires_at = datetime.fromisoformat(
+        acquired["lease"]["expires_at"].replace("Z", "+00:00")
+    )
+    expected_times = [
+        expires_at - timedelta(microseconds=2),
+        expires_at - timedelta(microseconds=1),
+    ]
+    trusted_times = iter(expected_times)
+    observed_times: list[datetime] = []
+
+    def trusted_now() -> datetime:
+        observed = next(trusted_times)
+        observed_times.append(observed)
+        return observed
+
+    monkeypatch.setattr(writer_lease_module, "_utc_now", trusted_now)
+    publication = filesystem_writer_lease_action(
+        action="publication-status",
+        repo=repo,
+        task_id="ORDINARY-PUBLICATION-STRICTLY-UNEXPIRED",
+        owner="E1",
+        lease_id=acquired["lease"]["lease_id"],
+        admission_id=admission["admission_id"],
+        now=datetime(2000, 1, 1, tzinfo=timezone.utc),
+    )
+
+    assert publication["status"] == "PASS"
+    assert publication["reasons"] == []
+    assert publication["admission_scope"] == {
+        "task_contract_digest": admission["admission"]["task_contract_digest"],
+        "dirty_scope": list(contract["dirty_scope"]),
+        "lw2_selected": False,
+    }
+    assert "publication_status" not in publication
+    assert observed_times == expected_times
+
+
 def test_lw2_publication_status_rejects_git_replace_graph_projection(
     tmp_path: Path,
     real_lw2_contract: tuple[Path, dict[str, object]],
@@ -2423,6 +2613,23 @@ def test_git_loop_guard_uses_publication_status_only_for_publish_phases(
         expected_head=feature_head,
         **authority,
     )
+    expires_at = datetime.fromisoformat(
+        acquired["lease"]["expires_at"].replace("Z", "+00:00")
+    )
+    trusted_times = iter([
+        expires_at - timedelta(microseconds=1),
+        expires_at,
+    ])
+    monkeypatch.setattr(
+        writer_lease_module, "_utc_now", lambda: next(trusted_times)
+    )
+    expired_publish = git_guard.evaluate(
+        repo,
+        phase="publish",
+        expected_branch="agent/lw2-publication-guard",
+        expected_head=feature_head,
+        **authority,
+    )
 
     assert start["status"] == "FAIL"
     assert "TASK_ADMISSION_GENERATION_MISMATCH" in start["reasons"]
@@ -2437,6 +2644,9 @@ def test_git_loop_guard_uses_publication_status_only_for_publish_phases(
     assert post_push["state"]["writer_publication_status"] == publish["state"][
         "writer_publication_status"
     ]
+    assert expired_publish["status"] == "FAIL"
+    assert expired_publish["reasons"] == ["WRITER_LEASE_EXPIRED"]
+    assert expired_publish["state"]["writer_lease"]["status"] == "FAIL"
 
 
 @pytest.mark.parametrize(
@@ -2679,13 +2889,6 @@ def test_lw2_publication_status_requires_exact_unexpired_fencing_tuple(
         ({**base, "admission_id": "0" * 32}, "TASK_ADMISSION_ID_MISMATCH"),
         ({**base, "lease_id": "0" * 32}, "WRITER_LEASE_ID_MISMATCH"),
         ({**base, "owner": "E1a"}, "TASK_ADMISSION_OWNER_MISMATCH"),
-        (
-            {
-                **base,
-                "now": datetime(2100, 1, 1, tzinfo=timezone.utc),
-            },
-            "WRITER_LEASE_EXPIRED",
-        ),
     )
 
     for arguments, reason in cases:

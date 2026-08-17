@@ -1489,7 +1489,9 @@ def filesystem_writer_lease_action(
     )
 
     admission_store = FileTaskAdmissionStore(identity.common_dir)
-    current_time = now or _utc_now()
+    current_time = (
+        None if action == "publication-status" else (now or _utc_now())
+    )
 
     def admission_reasons(
         record: dict[str, Any] | None,
@@ -1512,14 +1514,18 @@ def filesystem_writer_lease_action(
     def exact_lease_result(
         lease: dict[str, str] | None,
         locked_identity: WorktreeIdentity,
+        *,
+        validation_time: datetime | None = None,
     ) -> dict[str, Any]:
+        effective_time = validation_time or current_time
+        assert effective_time is not None
         reasons = _lease_validation_reasons(
             lease,
             locked_identity,
             task_id=task_id,
             lease_id=lease_id or "",
             owner=owner,
-            now=current_time,
+            now=effective_time,
         )
         return _lease_result(
             action,
@@ -1563,6 +1569,10 @@ def filesystem_writer_lease_action(
                     identity=locked_identity, lease=None,
                 )
                 return lease_state, binding_state, result, False
+            lease_validation_time = (
+                _utc_now() if action == "publication-status" else current_time
+            )
+            assert lease_validation_time is not None
             lease = lease_state["leases"].get(identity.worktree)
             binding = binding_state["bindings"].get(identity.worktree)
             selected = (
@@ -1789,7 +1799,9 @@ def filesystem_writer_lease_action(
                         return lease_state, binding_state, result, False
             else:
                 ordinary_lease_result = exact_lease_result(
-                    lease, locked_identity
+                    lease,
+                    locked_identity,
+                    validation_time=lease_validation_time,
                 )
                 if ordinary_lease_result["status"] != "PASS":
                     return (
@@ -1821,15 +1833,21 @@ def filesystem_writer_lease_action(
                     )
                     return lease_state, binding_state, result, False
 
-            result = exact_lease_result(lease, locked_identity)
+            result = exact_lease_result(
+                lease,
+                locked_identity,
+                validation_time=lease_validation_time,
+            )
             if result["status"] == "PASS" and action in {
                 "status", "publication-status",
             }:
-                result["admission_scope"] = {
+                admission_scope = {
                     "task_contract_digest": record["task_contract_digest"],
                     "dirty_scope": list(record["task_contract"]["dirty_scope"]),
                     "lw2_selected": selected,
                 }
+                publication_status = None
+                publication_reasons: list[str] = []
                 if action == "publication-status" and selected:
                     assert lease is not None
                     publication_status, publication_reasons = (
@@ -1840,11 +1858,19 @@ def filesystem_writer_lease_action(
                             canonical_claim_digest=canonical_claim_digest,
                         )
                     )
+                if action == "publication-status":
+                    assert lease is not None
+                    publication_final_time = _utc_now()
+                    if not _active_lease(lease, publication_final_time):
+                        result["status"] = "FAIL"
+                        result["reasons"] = ["WRITER_LEASE_EXPIRED"]
+                        return lease_state, binding_state, result, False
                     if publication_reasons:
                         result["status"] = "FAIL"
                         result["reasons"] = publication_reasons
-                        result["admission_scope"] = None
                         return lease_state, binding_state, result, False
+                result["admission_scope"] = admission_scope
+                if publication_status is not None:
                     result["publication_status"] = publication_status
                 return lease_state, binding_state, result, False
             if result["status"] != "PASS":
