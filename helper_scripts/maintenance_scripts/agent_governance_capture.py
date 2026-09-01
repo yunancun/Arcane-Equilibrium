@@ -454,6 +454,11 @@ def _protected_filesystem_snapshot(
             )
         return parts
 
+    def scan_names(descriptor: int, prefix: str | None = None) -> list[str]:
+        with os.scandir(descriptor) as iterator:
+            names = [safe_component(entry.name) for entry in iterator]
+        return sorted(name for name in names if prefix is None or name.startswith(prefix))
+
     def open_directory_at(parent: int, name: str, relative: str) -> int:
         try:
             descriptor = os.open(
@@ -541,10 +546,7 @@ def _protected_filesystem_snapshot(
                     "type": "directory",
                     "mode": mode_text(opened),
                 }
-                with os.scandir(descriptor) as iterator:
-                    children = sorted(
-                        safe_component(entry.name) for entry in iterator
-                    )
+                children = scan_names(descriptor)
                 if directory_identity(os.fstat(descriptor)) != directory_identity(opened):
                     raise NativeEvidenceMismatch(
                         "LW2 protected filesystem directory changed during scan"
@@ -559,6 +561,10 @@ def _protected_filesystem_snapshot(
                 if directory_identity(os.fstat(descriptor)) != directory_identity(opened):
                     raise NativeEvidenceMismatch(
                         "LW2 protected filesystem directory changed during capture"
+                    )
+                if scan_names(descriptor) != children:
+                    raise NativeEvidenceMismatch(
+                        "LW2 protected filesystem directory membership changed"
                     )
                 return
             if not stat.S_ISREG(metadata.st_mode):
@@ -630,12 +636,7 @@ def _protected_filesystem_snapshot(
             parent_relative = "/".join(parent_parts)
             parent = directory_for_parts(parent_parts)
             try:
-                with os.scandir(parent) as iterator:
-                    matches = sorted(
-                        safe_component(entry.name)
-                        for entry in iterator
-                        if safe_component(entry.name).startswith(name_prefix)
-                    )
+                matches = scan_names(parent, name_prefix)
                 if not matches:
                     raise NativeEvidenceMismatch(
                         "LW2 protected inventory prefix is empty"
@@ -646,6 +647,10 @@ def _protected_filesystem_snapshot(
                         else f"{parent_relative}/{name}"
                     )
                     visit_at(parent, name, relative, directory_allowed=True)
+                if scan_names(parent, name_prefix) != matches:
+                    raise NativeEvidenceMismatch(
+                        "LW2 protected filesystem prefix membership changed"
+                    )
             finally:
                 os.close(parent)
         for relative, expected in list(directory_identities.items()):

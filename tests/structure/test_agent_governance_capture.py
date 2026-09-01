@@ -611,66 +611,47 @@ def test_protected_generation_fails_closed_on_ignored_filesystem_members(
             capture_task_admission_generation(repo, contract)
 
 
+def _protected_member(repo: Path, relative: str = "protected/member.py") -> Path:
+    member = repo / relative
+    member.parent.mkdir(parents=True, exist_ok=True)
+    member.write_text("bound\n", encoding="utf-8")
+    _git(repo, "add", relative)
+    _git(repo, "commit", "-qm", f"protected {relative}")
+    return member
+
+def _set_protected_policy(monkeypatch, *, paths=("tracked.txt",), prefixes=()):
+    policy = {"protected_scope_paths": list(paths), "protected_scope_prefixes": list(prefixes)}
+    monkeypatch.setattr(lw2_readmission_module, "lw2_readmission_policy", lambda *_a, **_k: policy)
+
 def test_protected_filesystem_capture_has_typed_mismatch_and_unavailable_errors(
-    tmp_path: Path,
-    monkeypatch: pytest.MonkeyPatch,
-) -> None:
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
     repo = _repo(tmp_path)
-    protected = repo / "protected"
-    protected.mkdir()
-    (protected / "baseline.py").write_text("baseline\n", encoding="utf-8")
-    _git(repo, "add", "protected/baseline.py")
-    _git(repo, "commit", "-qm", "protected baseline")
-    monkeypatch.setattr(
-        lw2_readmission_module,
-        "lw2_readmission_policy",
-        lambda *_args, **_kwargs: {
-            "protected_scope_paths": ["tracked.txt"],
-            "protected_scope_prefixes": ["protected/"],
-        },
-    )
+    protected = _protected_member(repo).parent
+    _set_protected_policy(monkeypatch, prefixes=("protected/",))
     projected = protected / "projected.py"
     projected.symlink_to(tmp_path / "outside.py")
     with pytest.raises(NativeEvidenceMismatch):
         capture_native_protected_snapshot(repo)
     projected.unlink()
-
     native_scandir = capture_module.os.scandir
     scan_count = 0
-
     def unavailable(path):
         nonlocal scan_count
         scan_count += 1
         if scan_count == 2:
             raise PermissionError("deliberately unavailable")
         return native_scandir(path)
-
     monkeypatch.setattr(capture_module.os, "scandir", unavailable)
     with pytest.raises(NativeEvidenceUnavailable):
         capture_native_protected_snapshot(repo)
 
-
-@pytest.mark.parametrize(
-    "unsafe_member",
-    ["symlink-parent", "replaced-parent", "fifo"],
-)
+@pytest.mark.parametrize("unsafe_member", ["symlink-parent", "replaced-parent", "fifo"])
 def test_protected_capture_fails_closed_on_unsafe_parent_and_member_types(
-    tmp_path: Path,
-    monkeypatch: pytest.MonkeyPatch,
-    unsafe_member: str,
-) -> None:
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, unsafe_member: str) -> None:
     repo = _repo(tmp_path)
-    protected = repo / "protected"
-    protected.mkdir()
-    member = protected / "member.py"
-    member.write_text("bound\n", encoding="utf-8")
-    _git(repo, "add", "protected/member.py")
-    _git(repo, "commit", "-qm", "protected member")
-    policy = {
-        "protected_scope_paths": ["protected/member.py"],
-        "protected_scope_prefixes": [],
-    }
-
+    member = _protected_member(repo)
+    protected = member.parent
+    policy = {"paths": ("protected/member.py",), "prefixes": ()}
     if unsafe_member == "symlink-parent":
         outside = tmp_path / "outside"
         protected.rename(outside)
@@ -682,35 +663,54 @@ def test_protected_capture_fails_closed_on_unsafe_parent_and_member_types(
         moved = repo / "protected-before-race"
         native_scandir = capture_module.os.scandir
         raced = False
-
         def racing_scandir(path):
             nonlocal raced
             iterator = native_scandir(path)
-            if (
-                not raced
-                and (isinstance(path, int) or Path(path) == protected)
-            ):
+            if not raced and (isinstance(path, int) or Path(path) == protected):
                 raced = True
                 protected.rename(moved)
                 protected.symlink_to(outside, target_is_directory=True)
             return iterator
-
         monkeypatch.setattr(capture_module.os, "scandir", racing_scandir)
-        policy = {
-            "protected_scope_paths": ["tracked.txt"],
-            "protected_scope_prefixes": ["protected/member"],
-        }
+        policy = {"paths": ("tracked.txt",), "prefixes": ("protected/member",)}
     elif unsafe_member == "fifo":
         member.unlink()
         os.mkfifo(member)
-    monkeypatch.setattr(
-        lw2_readmission_module,
-        "lw2_readmission_policy",
-        lambda *_args, **_kwargs: policy,
-    )
+    _set_protected_policy(monkeypatch, **policy)
     with pytest.raises(NativeEvidenceMismatch):
         capture_native_protected_snapshot(repo)
 
+@pytest.mark.parametrize(("surface", "mutation"), [(surface, mutation)
+    for surface in ("recursive", "prefix") for mutation in ("add", "remove", "rename")])
+def test_protected_capture_revalidates_directory_membership(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, surface: str, mutation: str) -> None:
+    repo = _repo(tmp_path)
+    if surface == "recursive":
+        member = _protected_member(repo)
+        prefix, rescan = "protected/", 3
+    else:
+        member = _protected_member(repo, "protected-member.py")
+        prefix, rescan = "protected-", 2
+    parent = member.parent
+    _set_protected_policy(monkeypatch, prefixes=(prefix,))
+    native_scandir = capture_module.os.scandir
+    calls = 0
+    def racing_scandir(path):
+        nonlocal calls
+        calls += 1
+        if calls == rescan:
+            if mutation == "add":
+                added = parent / ("added.py" if surface == "recursive" else "protected-added.py")
+                added.write_text("raced\n", encoding="utf-8")
+            elif mutation == "remove":
+                member.unlink()
+            else:
+                renamed = parent / ("renamed.py" if surface == "recursive" else "protected-renamed.py")
+                member.rename(renamed)
+        return native_scandir(path)
+    monkeypatch.setattr(capture_module.os, "scandir", racing_scandir)
+    with pytest.raises(NativeEvidenceMismatch):
+        capture_native_protected_snapshot(repo)
 
 def test_protected_capture_rejects_non_utf8_filesystem_members(
     tmp_path: Path,

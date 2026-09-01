@@ -94,47 +94,47 @@ def test_lw2_publication_status_static_surface_is_read_only() -> None:
 def test_lw2_publication_status_uses_only_native_git_graph_reads() -> None:
     source = WRITER_LEASE_PATH.read_text(encoding="utf-8")
     tree = ast.parse(source)
-    functions = {
-        node.name: node
-        for node in tree.body
-        if isinstance(node, ast.FunctionDef)
-    }
+    functions = {node.name: node for node in tree.body if isinstance(node, ast.FunctionDef)}
     git_bytes_source = ast.get_source_segment(source, functions["_git_bytes"])
-    native_env_source = ast.get_source_segment(
-        source, functions["_native_git_environment"]
-    )
-    publication_source = ast.get_source_segment(
-        source, functions["_lw2_publication_status"]
-    )
-    action_source = ast.get_source_segment(
-        source, functions["filesystem_writer_lease_action"]
-    )
-    assert git_bytes_source is not None
-    assert "_native_git_command(repo, *args)" in git_bytes_source
+    native_env_source = ast.get_source_segment(source, functions["_native_git_environment"])
+    publication_source = ast.get_source_segment(source, functions["_lw2_publication_status"])
+    boundary = functions["_publication_boundary"]
+    action_source = ast.get_source_segment(source, functions["filesystem_writer_lease_action"])
+    assert git_bytes_source is not None and "_native_git_command(repo, *args)" in git_bytes_source
     assert "env=_native_git_environment()" in git_bytes_source
-    assert native_env_source is not None
-    assert "native_git_environment" in native_env_source
-    assert publication_source is not None
-    assert '"merge-base"' not in publication_source
-    assert '"rev-list"' not in publication_source
+    assert native_env_source is not None and "native_git_environment" in native_env_source
+    assert publication_source is not None and '"merge-base"' not in publication_source
+    assert '"rev-list"' not in publication_source and "native_graph=True" in publication_source
     assert '"cat-file"' in source
-    assert "native_graph=True" in publication_source
-    assert action_source is not None
-    assert 'native_graph=action == "publication-status"' in action_source
-
+    assert action_source is not None and 'native_graph=action == "publication-status"' in action_source
+    calls: dict[str, list[int]] = {}
+    for node in ast.walk(boundary):
+        if isinstance(node, ast.Call):
+            name = node.func.id if isinstance(node.func, ast.Name) else getattr(node.func, "attr", "")
+            calls.setdefault(name, []).append(node.lineno)
+    identity_lines = sorted(calls["inspect_worktree"])
+    dirty_lines = sorted(calls["_capture_dirty_paths"])
+    snapshot_line, origin_line, local_main_line, clock_line = (
+        calls[name][0] for name in (
+            "capture_native_protected_snapshot", "_origin_urls", "_git_text", "_utc_now")
+    )
+    remote_lines = sorted(calls["_canonical_remote_head"])
+    assert identity_lines[0] < dirty_lines[0] < snapshot_line < identity_lines[-1]
+    assert identity_lines[-1] < dirty_lines[-1] < origin_line < local_main_line
+    assert local_main_line < remote_lines[0] < remote_lines[-1] < clock_line
+    pure_after_clock = {"_active_lease", "_timestamp", "any", "append", "fromkeys", "get", "isinstance", "len", "list"}
+    assert all(name in pure_after_clock for name, lines in calls.items()
+               if any(line > clock_line for line in lines))
     capture_source = CAPTURE_PATH.read_text(encoding="utf-8")
     assert 'TRUSTED_GIT_EXECUTABLE = "/usr/bin/git"' in capture_source
     assert "TRUSTED_GIT_EXECUTABLE," in capture_source
     assert '"--no-replace-objects"' in capture_source
     assert '"core.fsmonitor=false"' in capture_source
     assert '"core.hooksPath=/dev/null"' in capture_source
-    for required in (
-        "GIT_CONFIG_GLOBAL", "GIT_CONFIG_NOSYSTEM", "GIT_ATTR_NOSYSTEM",
-        "GIT_CONFIG_COUNT", "GIT_CONFIG_PARAMETERS", "GIT_REPLACE_REF_BASE",
-        "GIT_OPTIONAL_LOCKS", "GIT_TERMINAL_PROMPT", "LC_ALL",
-    ):
+    for required in ("GIT_CONFIG_GLOBAL", "GIT_CONFIG_NOSYSTEM", "GIT_ATTR_NOSYSTEM",
+                     "GIT_CONFIG_COUNT", "GIT_CONFIG_PARAMETERS", "GIT_REPLACE_REF_BASE",
+                     "GIT_OPTIONAL_LOCKS", "GIT_TERMINAL_PROMPT", "LC_ALL"):
         assert required in capture_source
-
 
 def test_authority_diff_argv_disables_ext_diff_and_textconv_everywhere() -> None:
     for path in (CAPTURE_PATH, WRITER_LEASE_PATH, GUARD_PATH):

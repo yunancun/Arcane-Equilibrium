@@ -30,11 +30,13 @@ _CONTROL_PLANE_PATHS = {
 _RUST_WORKSPACE_FILES = {"rust/Cargo.toml", "rust/Cargo.lock"}
 _GIT_WORKFLOW_FILES = {
     "helper_scripts/ci/select_pytest_shard.py",
+    "helper_scripts/ci/verify_pytest_shards.py",
     "helper_scripts/maintenance_scripts/git_loop_guard.py",
     "tests/ci/test_classify_ci_changes.py",
     "tests/ci/test_github_ci_workflow_static.py",
     "tests/ci/test_ci_workflow_ibkr_job_static.py",
     "tests/ci/test_select_pytest_shard.py",
+    "tests/ci/test_verify_pytest_shards.py",
     "tests/structure/test_git_loop_guard.py",
     "docs/CCAgentWorkSpace/PM/workspace/ai_ml_todo_stub/"
     "2026-07-09--scanner_driven_alr/loop_contract.md",

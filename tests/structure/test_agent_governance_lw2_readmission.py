@@ -63,6 +63,7 @@ from agent_governance_capture import (  # noqa: E402
     NativeEvidenceMismatch,
     NativeEvidenceUnavailable,
 )
+import agent_governance_capture as capture_module  # noqa: E402
 from agent_governance import main as governance_main  # noqa: E402
 import agent_governance_task_admission as task_admission_module  # noqa: E402
 from agent_governance_writer_lease import (  # noqa: E402
@@ -2277,7 +2278,16 @@ def test_publication_final_observation_holds_both_authority_locks(
     base = _git_value(repo, "refs/remotes/origin/main")
     feature = _git_value(repo, "HEAD")
     observed_locked = False
-
+    events: list[str] = []
+    original_snapshot = capture_module.capture_native_protected_snapshot
+    def observed_snapshot(*args, **kwargs):
+        snapshot = original_snapshot(*args, **kwargs)
+        events.append("snapshot")
+        return snapshot
+    original_clock = writer_lease_module._utc_now
+    def observed_clock():
+        events.append("clock")
+        return original_clock()
     def locked_remote_head(_repo: Path, _url: str, ref: str) -> str | None:
         nonlocal observed_locked
         probe = subprocess.run(
@@ -2296,8 +2306,13 @@ def test_publication_final_observation_holds_both_authority_locks(
         )
         assert probe.returncode == 73
         observed_locked = True
+        events.append(ref)
         return base if ref == LW2_DESTINATION_REF else feature
 
+    monkeypatch.setattr(
+        capture_module, "capture_native_protected_snapshot", observed_snapshot
+    )
+    monkeypatch.setattr(writer_lease_module, "_utc_now", observed_clock)
     monkeypatch.setattr(
         writer_lease_module, "_canonical_remote_head", locked_remote_head
     )
@@ -2308,13 +2323,15 @@ def test_publication_final_observation_holds_both_authority_locks(
         owner="E1",
         lease_id=acquired["lease"]["lease_id"],
         admission_id=admission["admission_id"],
-        publication_phase="publish",
+        publication_phase="post-push",
         publication_expected_branch=identity.branch,
         publication_expected_head=feature,
     )
 
     assert publication["status"] == "PASS"
     assert observed_locked is True
+    final_snapshot = max(index for index, event in enumerate(events) if event == "snapshot")
+    assert events[final_snapshot + 1:] == [LW2_DESTINATION_REF, f"refs/heads/{identity.branch}", "clock"]
 
 
 @pytest.mark.parametrize("feature_race", ["head", "worktree"])
@@ -2333,11 +2350,12 @@ def test_publication_finalization_rejects_feature_mutation_after_status_capture(
         marker=f"admitted final {feature_race} race",
     )
     expected_head = _git_value(repo, "HEAD")
-    base = _git_value(repo, "refs/remotes/origin/main")
     mutated = False
+    original_snapshot = capture_module.capture_native_protected_snapshot
 
-    def racing_remote_head(_repo: Path, _url: str, ref: str) -> str | None:
+    def racing_snapshot(*args, **kwargs):
         nonlocal mutated
+        snapshot = original_snapshot(*args, **kwargs)
         if not mutated:
             mutated = True
             if feature_race == "head":
@@ -2352,11 +2370,9 @@ def test_publication_finalization_rejects_feature_mutation_after_status_capture(
                     governed.read_text(encoding="utf-8") + "\n# race bytes\n",
                     encoding="utf-8",
                 )
-        return base if ref == LW2_DESTINATION_REF else expected_head
+        return snapshot
 
-    monkeypatch.setattr(
-        writer_lease_module, "_canonical_remote_head", racing_remote_head
-    )
+    monkeypatch.setattr(capture_module, "capture_native_protected_snapshot", racing_snapshot)
     publication = filesystem_writer_lease_action(
         action="publication-status",
         repo=repo,
@@ -2464,25 +2480,21 @@ def test_lw2_publication_status_rejects_final_origin_url_race(
         branch="agent/lw2-publication-url-race",
         marker="admitted URL race feature",
     )
-    original = writer_lease_module._origin_urls
-    calls = 0
+    original = capture_module.capture_native_protected_snapshot
 
-    def change_after_initial(repository: Path) -> tuple[list[str], list[str]]:
-        nonlocal calls
-        urls = original(repository)
-        calls += 1
-        if calls == 1:
-            subprocess.run(
-                [
-                    "git", "config", "remote.origin.pushurl",
-                    "https://example.invalid/raced.git",
-                ],
-                cwd=repository,
-                check=True,
-            )
-        return urls
+    def change_after_final_snapshot(repository: Path, **kwargs):
+        snapshot = original(repository, **kwargs)
+        subprocess.run(
+            [
+                "git", "config", "remote.origin.pushurl",
+                "https://example.invalid/raced.git",
+            ],
+            cwd=repository,
+            check=True,
+        )
+        return snapshot
 
-    monkeypatch.setattr(writer_lease_module, "_origin_urls", change_after_initial)
+    monkeypatch.setattr(capture_module, "capture_native_protected_snapshot", change_after_final_snapshot)
     publication = filesystem_writer_lease_action(
         action="publication-status",
         repo=repo,
@@ -2493,9 +2505,8 @@ def test_lw2_publication_status_rejects_final_origin_url_race(
     )
 
     assert publication["status"] == "FAIL"
-    assert publication["reasons"] == [
-        "LW2_PUBLICATION_FINAL_ORIGIN_URL_DRIFT"
-    ]
+    assert "FINAL_ORIGIN_URL_MISMATCH" in publication["reasons"]
+    assert "LW2_PUBLICATION_FINAL_ORIGIN_URL_DRIFT" in publication["reasons"]
 
 
 def test_lw2_publication_status_rejects_final_local_main_race(
@@ -2512,29 +2523,20 @@ def test_lw2_publication_status_rejects_final_local_main_race(
         marker="admitted local main race feature",
     )
     feature_head = _git_output(repo, "rev-parse", "HEAD")
-    original = writer_lease_module._capture_native_graph_safety
-    calls = 0
+    original = capture_module.capture_native_protected_snapshot
 
-    def change_before_final_local_main(**kwargs):
-        nonlocal calls
-        graph = original(**kwargs)
-        calls += 1
-        if calls == 2:
-            subprocess.run(
-                [
-                    "git", "update-ref", "refs/remotes/origin/main",
-                    feature_head,
-                ],
-                cwd=repo,
-                check=True,
-            )
-        return graph
+    def change_after_final_snapshot(repository: Path, **kwargs):
+        snapshot = original(repository, **kwargs)
+        subprocess.run(
+            [
+                "git", "update-ref", "refs/remotes/origin/main", feature_head,
+            ],
+            cwd=repository,
+            check=True,
+        )
+        return snapshot
 
-    monkeypatch.setattr(
-        writer_lease_module,
-        "_capture_native_graph_safety",
-        change_before_final_local_main,
-    )
+    monkeypatch.setattr(capture_module, "capture_native_protected_snapshot", change_after_final_snapshot)
     publication = filesystem_writer_lease_action(
         action="publication-status",
         repo=repo,
@@ -2545,9 +2547,7 @@ def test_lw2_publication_status_rejects_final_local_main_race(
     )
 
     assert publication["status"] == "FAIL"
-    assert publication["reasons"] == [
-        "LW2_PUBLICATION_FINAL_RECAPTURE_DRIFT"
-    ]
+    assert publication["reasons"] == ["FINAL_TRUE_ORIGIN_MAIN_DRIFT"]
 
 
 def test_lw2_admission_and_publication_never_execute_configured_textconv(

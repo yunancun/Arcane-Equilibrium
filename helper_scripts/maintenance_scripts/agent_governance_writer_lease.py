@@ -487,52 +487,14 @@ def _publication_boundary(
     reasons: list[str] = []
 
     try:
-        fetch_urls, push_urls = _origin_urls(repo)
-    except ValueError:
-        fetch_urls, push_urls = [], []
-        reasons.append("FINAL_ORIGIN_URL_UNAVAILABLE")
-    repository_url = LW2_REPOSITORY_URL if selected else (
-        fetch_urls[0] if len(fetch_urls) == 1 else ""
-    )
-    if len(fetch_urls) != 1 or len(push_urls) != 1 or fetch_urls != push_urls:
-        reasons.append("FINAL_ORIGIN_URL_MISMATCH")
-    if selected and (fetch_urls != [LW2_REPOSITORY_URL] or push_urls != [LW2_REPOSITORY_URL]):
-        reasons.append("LW2_PUBLICATION_FINAL_ORIGIN_URL_DRIFT")
-
-    local_main = _git_text(
-        repo, "rev-parse", "refs/remotes/origin/main", native_graph=True
-    )
-    canonical_main = (
-        _canonical_remote_head(repo, repository_url, LW2_DESTINATION_REF)
-        if repository_url
-        else None
-    )
-    canonical_branch = (
-        _canonical_remote_head(repo, repository_url, f"refs/heads/{branch}")
-        if repository_url and final_phase == "post-push" and branch
-        else None
-    )
-
-    try:
         final_identity = inspect_worktree(repo, native_graph=True)
         dirty_paths, staged_paths = _capture_dirty_paths(repo, native_graph=True)
     except ValueError:
         final_identity = None
         dirty_paths, staged_paths = [], []
         reasons.append("PUBLICATION_FINAL_FEATURE_UNAVAILABLE")
-    if final_identity is not None and (
-        final_identity.worktree != identity.worktree
-        or final_identity.common_dir != identity.common_dir
-        or final_identity.branch != branch
-        or final_identity.head != source_sha
-        or final_identity.dirty
-        or dirty_paths
-        or staged_paths
-    ):
-        reasons.append("PUBLICATION_FINAL_FEATURE_DRIFT")
-
+    final_native_snapshot = None
     if selected:
-        final_native_snapshot = None
         try:
             final_native_snapshot = capture_native_protected_snapshot(
                 repo, allowed_worktree_differences=record["task_contract"]["dirty_scope"]
@@ -540,14 +502,6 @@ def _publication_boundary(
         except NativeEvidenceUnavailable:
             reasons.append("LW2_PUBLICATION_FINAL_GENERATION_UNAVAILABLE")
         except (NativeEvidenceMismatch, ValueError):
-            reasons.append("LW2_PUBLICATION_FINAL_GENERATION_MISMATCH")
-        feature = publication_status.get("feature") if isinstance(publication_status, dict) else None
-        if (
-            not isinstance(feature, dict)
-            or feature.get("head") != source_sha
-            or publication_native_snapshot is None
-            or final_native_snapshot != publication_native_snapshot
-        ):
             reasons.append("LW2_PUBLICATION_FINAL_GENERATION_MISMATCH")
 
     try:
@@ -559,17 +513,56 @@ def _publication_boundary(
         post_generation_identity = None
         post_generation_dirty, post_generation_staged = [], []
         reasons.append("PUBLICATION_FINAL_FEATURE_UNAVAILABLE")
+    try:
+        fetch_urls, push_urls = _origin_urls(repo)
+    except ValueError:
+        fetch_urls, push_urls = [], []
+        reasons.append("FINAL_ORIGIN_URL_UNAVAILABLE")
+    repository_url = LW2_REPOSITORY_URL if selected else (
+        fetch_urls[0] if len(fetch_urls) == 1 else ""
+    )
+    local_main = _git_text(
+        repo, "rev-parse", "refs/remotes/origin/main", native_graph=True
+    )
+    canonical_main = (
+        _canonical_remote_head(repo, repository_url, LW2_DESTINATION_REF)
+        if repository_url else None
+    )
+    canonical_branch = (
+        _canonical_remote_head(repo, repository_url, f"refs/heads/{branch}")
+        if repository_url and final_phase == "post-push" and branch else None
+    )
+    final_time = _utc_now()
+    # Pure in-memory checks only below this line.
+    if len(fetch_urls) != 1 or len(push_urls) != 1 or fetch_urls != push_urls:
+        reasons.append("FINAL_ORIGIN_URL_MISMATCH")
+    if selected and (fetch_urls != [LW2_REPOSITORY_URL] or push_urls != [LW2_REPOSITORY_URL]):
+        reasons.append("LW2_PUBLICATION_FINAL_ORIGIN_URL_DRIFT")
+    if final_identity is not None and (
+        final_identity.worktree != identity.worktree
+        or final_identity.common_dir != identity.common_dir
+        or final_identity.branch != branch
+        or final_identity.head != source_sha
+        or final_identity.dirty or dirty_paths or staged_paths
+    ):
+        reasons.append("PUBLICATION_FINAL_FEATURE_DRIFT")
+    feature = publication_status.get("feature") if isinstance(publication_status, dict) else None
+    if selected and (
+        not isinstance(feature, dict)
+        or feature.get("head") != source_sha
+        or publication_native_snapshot is None
+        or final_native_snapshot != publication_native_snapshot
+    ):
+        reasons.append("LW2_PUBLICATION_FINAL_GENERATION_MISMATCH")
     if post_generation_identity is not None and (
         post_generation_identity.worktree != identity.worktree
         or post_generation_identity.common_dir != identity.common_dir
         or post_generation_identity.branch != branch
         or post_generation_identity.head != source_sha
-        or post_generation_identity.dirty
-        or post_generation_dirty
+        or post_generation_identity.dirty or post_generation_dirty
         or post_generation_staged
     ):
         reasons.append("PUBLICATION_FINAL_FEATURE_DRIFT")
-
     accepted_base = (
         publication_status.get("accepted_base")
         if isinstance(publication_status, dict)
@@ -591,9 +584,6 @@ def _publication_boundary(
         reasons.append("FINAL_TRUE_ORIGIN_MAIN_DRIFT")
     if final_phase == "post-push" and canonical_branch != source_sha:
         reasons.append("REMOTE_BRANCH_HEAD_MISMATCH")
-
-    final_time = _utc_now()
-    # Pure in-memory checks only below this line.
     if record.get("state") != "ACTIVE":
         reasons.append("TASK_ADMISSION_TERMINAL")
     if not _active_lease(lease, final_time):

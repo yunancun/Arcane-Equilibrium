@@ -32,7 +32,9 @@ def test_ci_control_plane_change_forces_every_gate() -> None:
 def test_governance_shard_selector_and_contract_test_trigger_governance() -> None:
     for path in (
         "helper_scripts/ci/select_pytest_shard.py",
+        "helper_scripts/ci/verify_pytest_shards.py",
         "tests/ci/test_select_pytest_shard.py",
+        "tests/ci/test_verify_pytest_shards.py",
     ):
         result = classify_paths([path])
         assert result["governance"] is True, path
