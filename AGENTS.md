@@ -280,11 +280,23 @@ for work-only write nodes. OPS/QA/effect Adapter claims require their direct
 runtime/outcome/receipt evidence classes, not a generic source digest. A unit
 test cannot prove E2E behavior, source capture cannot prove runtime state, and a
 repository snapshot cannot prove mutation. Repo mutation needs exactly one
-task/role/node/scope-bound record per admitted writer in canonical writer order.
-Writer scopes are non-empty/disjoint. Every record binds its node-owned mutation
-and exact task-wide generation; serialized writers form G0 -> G1 -> ... -> Gn,
-with adjacent after/before generation digests equal. Gn and every owned after-
-state must be current; one mixed record cannot satisfy two writer nodes.
+task/role/node/effective-scope-bound record per admitted writer in canonical
+writer order. The digest-bound `repository_writer_scope_contract_v1` constrains
+that effective scope; it never overrides raw dispatch authority. A literal path
+from a raw canonical or adaptive scope may transfer only to a later, transitively
+serialized adaptive writer with the same dispatched role and permission. The
+resulting effective scopes remain non-empty/disjoint and their exact union is the
+task `dirty_scope`.
+
+The change chain has two fail-closed modes. A clean committed chain binds the
+admitted baseline, pairs clean task-wide and writer-owned endpoints, requires
+adjacent head and generation equality, and proves a nonempty config-isolated
+native strictly-linear commit range for each writer with every commit path inside
+that writer's effective scope. Only the final writer `owned_after` and final
+task-wide generation must be current. A same-HEAD dirty chain instead keeps every
+writer `owned_after` current. Mixing committed and dirty modes, or using one
+record for two writers, fails closed. Neither mode grants LW2, runtime, service,
+broker, order, funds, or trading effects.
 
 Actual token/cache/tool/time consumption may be claimed only from
 `PLATFORM_OR_EXTERNAL_ATTESTED` telemetry. An orchestrator wave ledger may report

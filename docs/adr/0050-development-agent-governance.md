@@ -213,10 +213,19 @@ NEEDS_CONTEXT 仍需 owner/action。`BLOCKED_NO_DELTA` 只存在於 packet-level
 
 Route 與 adaptive admission 在 spawn 前綁 `role + native_agent + node_class + permission`；
 PA/E4 writer 與 read-only verifier 是不同 native TOML identity。多 writer repo mutation 以
-canonical writer order 證明；每個 node-owned scope non-empty/disjoint，shared-worktree
-writer transitively serialized。Receipt 同時捕獲 owned mutation 與 task-wide generation，
-相鄰 writer exact G0 -> G1 -> ... -> Gn，且 Gn/owned after current。單一 mixed-role
-record 不得替代兩個 writer receipts。
+canonical writer order 證明。Digest-bound `repository_writer_scope_contract_v1` 只約束
+effective scope，絕不是 raw dispatch authority override。Raw canonical/adaptive scope 的
+identical literal path 只可轉交給較後、transitively serialized、且 dispatched role 與
+permission 相同的 adaptive writer；所得 effective scopes 必須 non-empty/disjoint，exact
+union 仍等於 task `dirty_scope`。
+
+Clean committed chain 綁 admitted baseline，成對重驗 clean task-wide/owned endpoints、
+相鄰 writer 的 head 與 generation，並為每個 writer 取得 nonempty、config-isolated native
+strictly-linear commit range；每一 commit path 都只能落在該 writer effective scope。此模式
+只要求 final writer `owned_after` 與 final task-wide generation current。Same-HEAD dirty chain
+則保留每個 writer `owned_after` current；混合 committed/dirty mode 一律 fail closed，單一
+mixed-role record 也不得替代兩份 writer receipts。兩種證明都不授予 LW2、runtime、service、
+broker、order、funds 或 trading effect。
 
 Evidence assurance 分三層：`LOCAL_REPRODUCIBLE` repo/command capture、
 `ORCHESTRATOR_BOUND` controller provenance、`PLATFORM_OR_EXTERNAL_ATTESTED` runtime/

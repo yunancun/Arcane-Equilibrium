@@ -605,10 +605,20 @@ Generic source/runtime/data digest 不再能自證 PASS。每個 fragment 先以
 record 驗 task/context/node/role/result binding，再依上表驗 evidence class/trust tier。
 Acceptance PASS 至少引用 closure 重驗的 direct capture，並由同一 refs 的 independent
 call-bound FACT verifier 支持。Repo mutation 必須由每個 admitted writer 恰好一個
-task/role/node/scope-bound `repository_change_record_v1` 依 canonical writer order 組成；
-node-owned scopes 必須 non-empty/disjoint、writer transitively serialized；每份 receipt
-同時綁 owned mutation 與 task-wide generation，形成 exact G0 -> G1 -> ... -> Gn，且
-Gn/owned after current。單一 mixed record、snapshot 或 legacy summary 不證明 mutation。
+task/role/node/effective-scope-bound `repository_change_record_v1` 依 canonical writer order
+組成。Digest-bound `repository_writer_scope_contract_v1` 是 effective-scope constraint，不能
+覆寫 raw dispatch authority；raw canonical/adaptive scope 的 identical literal path 只可轉交
+給較後、transitively serialized、且 dispatched role 與 permission 相同的 adaptive writer。
+轉交後所有 effective scopes 仍須 non-empty/disjoint，且 exact union 等於 task
+`dirty_scope`。
+
+Clean committed chain 綁 admitted baseline，task-wide/owned before-after endpoints 必須成對
+clean，相鄰 writers 的 head/generation exact 相接。每個 writer 另須一段 nonempty、
+config-isolated native strictly-linear commit range，且其中每一 commit path 只能屬於該
+writer effective scope；只有 final writer `owned_after` 與 final task-wide generation 要求
+current。Same-HEAD dirty chain 則要求每個 writer `owned_after` 都維持 current。Committed/
+dirty mixed mode、單一 mixed record、snapshot 或 legacy summary 均 fail closed，且兩種模式
+都不建立或授予 LW2/runtime/service/deploy/PG/broker/order/funds/trading effect。
 
 Closure 只接受 deterministic required node 或明確 admitted node 的 fragment。任何
 admitted verification FAIL/CONDITIONAL/UNVERIFIED/缺席都阻止 global PASS；因此
