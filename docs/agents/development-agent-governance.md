@@ -432,6 +432,14 @@ Canonical snapshot producer 由 persisted normalized task contract 的 `dirty_sc
 有效 delta/authority。External-only delta 必須由獨立 validated Adapter 或 reviewed
 task-owned artifact 落入 admitted scope。
 
+普通 task admission 只接受 clean repository，並以 config-isolated native Git 持久化 exact
+`HEAD`/tree 為 `task_admission_accepted_base_v1`。在 task-admission store lock 內，producer
+先重驗 clean identity，產生 progress snapshot 後再重驗一次；baseline 的 `source_head` 與
+`task_source_manifest` 必須逐字等於從 immutable accepted tree 以 raw tree/blob 重新導出的
+manifest，故短暫 dirty 後還原也不能留下 stale baseline。缺少 `accepted_base` 的 legacy
+ordinary record 只保留 exact release/cleanup 相容性，不能作 acquire、renew 或 publication
+authority。
+
 每個 writable task 只持有一個 attached non-main linked-worktree lease，帶 task/owner、
 branch、TTL 與 random fencing token。公開 `agent_governance.py writer-lease` action 集合逐字
 固定為 `acquire`、`status`、`publication-status`、`renew`、`release`。Acquire 要求 clean
@@ -445,13 +453,25 @@ transition；它不改 admission/lease store，也不修補 accepted generation�
 lock 再持有 writer lock，直到整個 publication boundary 完成；期間要求 exact ACTIVE
 admission 與其 exact bound ACTIVE writer lease 在可信 entry time 與 final time 都未過期。
 
+普通 task publication 也必須從 persisted `accepted_base` 到 expected feature SHA 取得
+nonempty、strictly linear 的 native commit range。所有 object/parent/tree/path/patch evidence
+均以 config-isolated `--no-replace-objects` Git 讀取，且關閉 rename detection、external diff
+與 textconv；每一個 commit 的每一個 touched path 都必須屬於 admitted `dirty_scope`。因此
+中途修改後 revert、rename 的 source/destination，以及單一 mixed-scope commit 都會被逐
+commit 捕獲，不能由 final tree diff 隱藏。
+
 LW2 publication status 先把 externally attested published-main accepted base 綁到 clean、
 strictly linear、只觸 admitted path 的 native feature range，拒絕 replace/graft projection、
 staged/uncommitted bytes、origin/main 或 feature generation drift；同一鎖區只做一次完整
 task-admission generation capture，再用 lightweight final native protected snapshot 對賬，
-而不是重跑第二次完整 generation producer。Final boundary 必須觀察 canonical singleton
-remote：恰一個 `origin` fetch URL、恰一個 push URL，兩者逐字相同（LW2 再固定為既定
-repository/destination）；唯一 publication refspec 是
+而不是重跑第二次完整 generation producer。
+
+任何 remote-head producer callback 前，Final boundary 先 pure-validate canonical singleton
+remote：恰一個 `origin` fetch URL、恰一個 push URL，兩者逐字相同，且必須是無 credential
+的 exact public `https://github.com/<owner>/<repo>.git` repository；同時驗 exact
+`refs/heads/main`，`post-push` 再驗 exact feature ref（LW2 另固定既定
+repository/destination）。Private、credentialed、malformed 或 local-filesystem origin
+都在此 fence 直接 fail closed 並產生零次 remote producer callback。唯一 publication refspec 是
 `<expected-sha>:refs/heads/<expected-branch>`。它最後 live 查 remote `main`；`post-push` 再
 要求 live feature ref exact 等於 expected SHA，然後以 trusted clock 作最後 I/O boundary，
 其後只允許 pure in-memory adjudication。任何 URL/ref/HEAD/generation/expiry race 都 fail

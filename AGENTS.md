@@ -120,6 +120,14 @@ progress digest closes the run as `BLOCKED_NO_DELTA`, with
 ordinary finite task stops the current admission and requires explicit
 re-admission; it never silently creates a loop.
 
+An ordinary task admission starts only from a clean repository and persists the
+exact config-isolated native `HEAD` and tree as `task_admission_accepted_base_v1`.
+While holding the admission-store lock it rechecks that clean identity before
+and after progress capture, and the baseline task-source manifest must exactly
+match a raw tree/blob manifest re-derived from that immutable accepted tree.
+Legacy ordinary records without `accepted_base` remain readable only for exact
+cleanup; they cannot be used to acquire or renew authority or to publish.
+
 Queue state is separate from role work status. Only the physical `ACTIVE` lane
 is dispatchable. `WAITING`/`DEFERRED` requires a named new delta and PM
 re-admission before returning to ACTIVE; `CLOSED` is never selected. A completed
@@ -136,8 +144,19 @@ expected feature branch, and exact expected 40-hex SHA. The task-admission lock
 and then the writer lock remain held while it verifies the exact ACTIVE
 admission/lease is unexpired at trusted entry and final times. For LW2 it
 performs one full admitted-generation capture plus the lightweight final native
-snapshot. The final boundary requires one canonical `origin` fetch URL and one
-identical push URL, derives only the exact
+snapshot. For an ordinary task it also requires a nonempty, strictly linear
+native `accepted_base`-to-feature commit range with replace projection, rename
+detection, external diff, and text conversion disabled. Every commit is
+inspected, its binary patch is bound, and every touched path must be inside the
+admitted `dirty_scope`; an intermediate revert, both sides of a rename, or one
+mixed-scope commit therefore cannot disappear from the decision.
+
+Before any remote-head producer callback, the final boundary purely validates
+exactly one canonical `origin` fetch URL and one identical push URL as a
+credential-free exact public `https://github.com/<owner>/<repo>.git` repository,
+and validates the exact `refs/heads/main` and, for `post-push`, feature ref.
+A private, credentialed, malformed, or local-filesystem origin causes zero
+remote producer callbacks and fails closed. The boundary derives only the exact
 `<expected-sha>:refs/heads/<expected-branch>` refspec, checks the final live
 remote (`main`, and the feature ref for `post-push`), and finally reads the
 trusted clock. Native config-isolated `git ls-remote` remains the primary live

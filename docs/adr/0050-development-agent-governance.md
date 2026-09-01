@@ -132,6 +132,12 @@ noise 都不算 progress。External-only delta 必須由獨立 validated domain 
 task-owned artifact 提供；
 相同 digest 結案為 `BLOCKED_NO_DELTA`，不得 PASS、wakeup 或 executable next action。
 
+普通 task admission 只可從 clean repository 開始，並持久化 config-isolated native exact
+`HEAD`/tree `accepted_base`。Admission-store lock 內在 progress capture 前後都重驗該 clean
+identity，且 baseline task-source manifest 必須等於從 immutable accepted tree 以 raw
+tree/blob 導出的 manifest。缺少 `accepted_base` 的 legacy ordinary record 只可 exact
+release/cleanup，不可 acquire、renew 或 publication。
+
 Queue 的 ACTIVE/WAITING/CLOSED lane 與 role work status 分離；只有 exact ACTIVE 可被
 selector 消費，IN_PROGRESS 已被 claim，不能重派。WAITING/DEFERRED 要有 named delta 並
 重新 admission，CLOSED 永不 replay。每個 writable task 另需 Git common-dir atomic store
@@ -146,9 +152,17 @@ boundary；authority 綁 exact ACTIVE admission/lease、trusted entry/final expi
 admitted-generation capture 與 lightweight final native snapshot、canonical singleton 且
 fetch/push 相同的 remote URL、唯一
 `<expected-sha>:refs/heads/<expected-branch>` refspec、final live remote `main`，以及
-`post-push` 的 exact live feature ref。LW2 另要求 externally attested published-main base、
+`post-push` 的 exact live feature ref。普通 publication 另要求 nonempty、strictly linear
+的 native `accepted_base`→feature commit range，以 config-isolated `--no-replace-objects`
+讀 object/parent/tree/path/binary patch 並關閉 rename detection、external diff、textconv；
+每一 commit 的每一 touched path 都必須在 `dirty_scope`，故 intermediate revert、rename pair
+與 mixed-scope commit 均不能被 final diff 隱藏。LW2 另要求 externally attested published-main base、
 clean strictly-linear admitted native feature range 與無 graph projection。任何 drift/race 都
-fail closed。Live ref read 以 config-isolated native `git ls-remote` 為 primary；只有 transport
+fail closed。任何 remote-head producer callback 前，必須 pure-validate 恰一個 origin fetch
+URL 與一個逐字相同的 push URL，且是無 credential 的 exact public
+`https://github.com/<owner>/<repo>.git`，並驗 exact `refs/heads/main` 與 `post-push` feature ref；
+private、credentialed、malformed 或 local-filesystem origin 都產生零 callback 並 fail closed。
+Live ref read 以 config-isolated native `git ls-remote` 為 primary；只有 transport
 unavailable 且 origin 是 exact public `https://github.com/<owner>/<repo>.git` 時，才可用 pinned、
 config-disabled、unauthenticated GitHub REST `git/ref` read，並逐字綁 expected ref、commit type
 與 lowercase 40-hex SHA。此 fallback 不帶 credential、private-repository 或 ref-mutation
