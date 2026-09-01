@@ -18,6 +18,7 @@ from agent_governance_execution_dag import (  # noqa: E402
     delegated_execution_projection,
     execution_dag_digest,
     non_call_controller_node_ids,
+    task_execution_projection,
     topological_waves,
 )
 from agent_governance_dispatch_validation import validate_dispatch_projection  # noqa: E402
@@ -278,3 +279,80 @@ def test_ordinary_workflow_cannot_hide_an_admitted_result_as_nested_payload() ->
         role_registry=load_registry()["roles"],
     )
     assert any("nested_payload is not owned" in error for error in result["errors"])
+
+
+def test_dispatch_binds_effective_writer_scopes_to_ten_three_eight_claim() -> None:
+    implementation_paths = [f"src/p{index:02d}.py" for index in range(18)]
+    docs_paths = [f"docs/d{index}.md" for index in range(3)]
+    dirty_scope = sorted([*implementation_paths, *docs_paths])
+    route = route_task({
+        "task_shape": "implementation", "surfaces": ["python", "docs"],
+        "risk": "high", "uncertainty": "medium",
+        "side_effect_class": "repo_write",
+        "task_prompt": "bind a serialized adaptive correction scope",
+        "dirty_scope": dirty_scope,
+    })
+    correction_paths = implementation_paths[-8:]
+    implementation_effective = implementation_paths[:-8]
+    admission = {
+        "node_id": "change_chain_correction", "role": "E1",
+        "native_agent": "E1", "node_class": "work",
+        "permission": "source_writer", "requires": ["docs_integrity_review"],
+        "path_scope": correction_paths,
+        "reason": "correct the final committed writer chain",
+        "result_binding": "role_fragment",
+    }
+    projection, projection_errors = task_execution_projection(
+        route["required_role_nodes"], [admission],
+        task_facts=route["task_facts"], require_fixed_admissions=True,
+    )
+    assert projection_errors == []
+    dispatch = {
+        "admitted_role_nodes": [admission],
+        "dag_digest": execution_dag_digest(projection),
+    }
+    contract = {
+        "schema_version": "repository_writer_scope_contract_v1",
+        "writers": [
+            {
+                "node_id": "implementation", "role": "E1",
+                "path_scope": implementation_effective,
+            },
+            {
+                "node_id": "docs_projection", "role": "TW",
+                "path_scope": docs_paths,
+            },
+            {
+                "node_id": "change_chain_correction", "role": "E1",
+                "path_scope": correction_paths,
+            },
+        ],
+    }
+    result = validate_dispatch_projection(
+        dispatch, expected_route=route,
+        expected_required_nodes=route["required_role_nodes"],
+        task_contract={
+            "dirty_scope": dirty_scope,
+            "claim_payloads": {"repository_writer_scope_contract": contract},
+        },
+        role_registry=load_registry()["roles"],
+    )
+
+    assert result["errors"] == []
+    assert [len(scope) for scope in result["writer_scopes"].values()] == [10, 3, 8]
+
+    mismatched = deepcopy(contract)
+    mismatched["writers"][0]["path_scope"].append(correction_paths[0])
+    mismatched["writers"][0]["path_scope"].sort()
+    rejected = validate_dispatch_projection(
+        dispatch, expected_route=route,
+        expected_required_nodes=route["required_role_nodes"],
+        task_contract={
+            "dirty_scope": dirty_scope,
+            "claim_payloads": {
+                "repository_writer_scope_contract": mismatched,
+            },
+        },
+        role_registry=load_registry()["roles"],
+    )
+    assert any("terminal claimant" in error for error in rejected["errors"])

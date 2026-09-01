@@ -7,6 +7,7 @@ from datetime import datetime, timedelta, timezone
 import importlib.util
 import json
 from pathlib import Path
+import subprocess
 import sys
 
 
@@ -15,6 +16,9 @@ HELPERS = ROOT / "helper_scripts/maintenance_scripts"
 if str(HELPERS) not in sys.path:
     sys.path.insert(0, str(HELPERS))
 import agent_governance_trust as trust  # noqa: E402
+from agent_governance_capture import capture_repository  # noqa: E402
+from agent_governance_capture_binding import collect_capture_evidence  # noqa: E402
+from agent_governance_repository_changes import capture_repository_change  # noqa: E402
 from agent_governance_trust import _acceptance_errors  # noqa: E402
 SUPPORT_PATH = ROOT / "tests/structure/test_development_agent_governance.py"
 
@@ -25,6 +29,10 @@ def _support():
     module = importlib.util.module_from_spec(spec)
     spec.loader.exec_module(module)
     return module
+
+
+def _git(repo: Path, *args: str) -> None:
+    subprocess.run(["git", *args], cwd=repo, check=True, capture_output=True)
 
 
 def _passing_packet():
@@ -42,6 +50,44 @@ def _passing_packet():
         ),
     ) == []
     return support, governance, packet
+
+
+def test_capture_binding_accepts_committed_change_endpoint_after_task_baseline(
+    tmp_path: Path,
+) -> None:
+    repo = tmp_path / "capture-binding-commit"
+    repo.mkdir()
+    _git(repo, "init", "-q")
+    _git(repo, "config", "user.email", "binding@example.invalid")
+    _git(repo, "config", "user.name", "Binding Test")
+    (repo / "owned.py").write_text("before\n", encoding="utf-8")
+    _git(repo, "add", "owned.py")
+    _git(repo, "commit", "-qm", "fixture")
+    baseline = capture_repository(["owned.py"], root=repo)
+    (repo / "owned.py").write_text("after\n", encoding="utf-8")
+    _git(repo, "add", "owned.py")
+    _git(repo, "commit", "-qm", "owned commit")
+    task_digest = "sha256:" + "a" * 64
+    change = capture_repository_change(
+        before=baseline, task_contract_digest=task_digest,
+        node_id="implementation", role_id="E1", scope=["owned.py"],
+        owned_before=baseline, root=repo,
+    )
+    captured = collect_capture_evidence(
+        [{
+            "id": "change:implementation", "scope": "source",
+            "kind": "repository_change_record_v1",
+            "digest": change["record_digest"], "artifact": change,
+        }],
+        expected_scope=["owned.py"],
+        expected_source_head=baseline["source_head"],
+        expected_task_contract_digest=task_digest,
+        expected_context_artifact_digest="sha256:" + "b" * 64,
+        require_current_repository=False,
+    )
+
+    assert captured["errors"] == []
+    assert captured["changes"] == {"change:implementation": change}
 
 
 def test_refresh_rebinds_delayed_packet_to_new_context_generation_clock() -> None:

@@ -331,6 +331,7 @@ def validate_closure(
     admitted_role_nodes = dispatch_validation["admitted_nodes"]
     admitted_by_node = dispatch_validation["admitted_by_node"]
     writer_scopes = dispatch_validation["writer_scopes"]
+    writer_roles = dispatch_validation["writer_roles"]
     errors.extend(validate_node_scoped_permissions(captures, expected_route, admitted_by_node))
     if expected_route is not None:
         admitted_roles = {node.get("role") for node in admitted_by_node.values()}
@@ -765,6 +766,10 @@ def validate_closure(
                     validate_repository_change_chain(
                         captured_change_records,
                         expected_writer_scopes=writer_scopes,
+                        expected_writer_roles=writer_roles,
+                        expected_source_head=task_contract.get(
+                            "baseline", {}
+                        ).get("source_head"),
                         require_final_current=True,
                     )
                 )
