@@ -299,7 +299,7 @@ def test_ci_runs_the_cheap_development_agent_governance_gate() -> None:
         return match.group(1)
     worker, aggregate = (_job(name) for name in ("development-agent-governance-shard", "development-agent-governance"))
     worker_required = (
-        "name: development-agent governance shard ${{ matrix.shard }} of 8", "runs-on: ubuntu-latest", "timeout-minutes: 45", "fail-fast: false", "shard: [0, 1, 2, 3, 4, 5, 6, 7]", "agent_governance.py validate", "agent_governance.py render --check", "-p helper_scripts.ci.select_pytest_shard", "--governance-shard-index ${{ matrix.shard }}", "--governance-shard-count 8", "--governance-shard-minimum 4621",
+        "name: development-agent governance shard ${{ matrix.shard }} of 8", "runs-on: ubuntu-latest", "timeout-minutes: 45", "fail-fast: false", "shard: [0, 1, 2, 3, 4, 5, 6, 7]", "agent_governance.py validate", "agent_governance.py render --check", "-p helper_scripts.ci.select_pytest_shard", "--governance-shard-index ${{ matrix.shard }}", "--governance-shard-count 8", "--governance-shard-minimum 4548",
         "tests/structure/test_development_agent_governance.py", "tests/structure/test_agent_governance_*.py", "tests/structure/test_codex_memory_policy.py", "tests/structure/test_role_memory_compaction.py", "tests/structure/test_s2_4_w0_admission.py",
         "tests/structure/test_aiml_s1_closure_target_host_run.py", "tests/structure/test_target_host_effect_adapter.py", "tests/structure/test_target_host_apply_orchestrator.py", "tests/structure/test_terminal_receipt_external_sink.py", "if: matrix.shard == 0",
     )

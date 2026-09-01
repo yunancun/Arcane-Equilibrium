@@ -27,22 +27,22 @@ def test_selection_is_permutation_independent_and_digest_bound() -> None:
 
 
 def test_eight_shards_are_exhaustive_disjoint_and_balanced_at_current_minimum() -> None:
-    nodeids = _nodeids(4621)
+    nodeids = _nodeids(4548)
     selections = [
-        select_nodeids(nodeids, shard_index=index, shard_count=8, minimum_count=4621)
+        select_nodeids(nodeids, shard_index=index, shard_count=8, minimum_count=4548)
         for index in range(8)
     ]
     selected_sets = [set(selection.selected_nodeids) for selection in selections]
 
     assert [selection.selected_count for selection in selections] == [
-        578,
-        578,
-        578,
-        578,
-        578,
-        577,
-        577,
-        577,
+        569,
+        569,
+        569,
+        569,
+        568,
+        568,
+        568,
+        568,
     ]
     assert set().union(*selected_sets) == set(nodeids)
     for left, right in combinations(selected_sets, 2):

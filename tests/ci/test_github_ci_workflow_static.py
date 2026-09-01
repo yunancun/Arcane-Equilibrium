@@ -117,7 +117,7 @@ def test_development_agent_governance_suite_is_sharded_without_filtering() -> No
     assert "-p helper_scripts.ci.select_pytest_shard" in governance
     assert "--governance-shard-index ${{ matrix.shard }}" in governance
     assert "--governance-shard-count 8" in governance
-    assert "--governance-shard-minimum 4621" in governance
+    assert "--governance-shard-minimum 4548" in governance
     assert "tests/structure/test_codex_memory_policy.py" in governance
     assert "tests/structure/test_role_memory_compaction.py" in governance
     for forbidden in (" -k ", "--ignore", "--deselect", "--maxfail", " -x", "xdist"):

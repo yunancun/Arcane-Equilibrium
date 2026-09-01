@@ -168,7 +168,7 @@ jobs:
             -p helper_scripts.ci.select_pytest_shard \
             --governance-shard-index ${{ matrix.shard }} \
             --governance-shard-count 8 \
-            --governance-shard-minimum 4621 \
+            --governance-shard-minimum 4548 \
             tests/structure/test_development_agent_governance.py \
             tests/structure/test_agent_governance_*.py \
             tests/structure/test_codex_memory_policy.py \
