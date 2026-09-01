@@ -360,15 +360,18 @@ def test_bound_writer_scope_contract_transfers_only_to_serialized_adaptive_write
     nodes = [
         {
             "node_id": "implementation", "role": "E1", "node_class": "work",
-            "requires": [], "path_scope": ["a.py", "b.py"],
+            "permission": "source_writer", "requires": [],
+            "path_scope": ["a.py", "b.py"],
         },
         {
             "node_id": "review", "role": "E2", "node_class": "verification",
-            "requires": ["implementation"], "path_scope": [],
+            "permission": "read_only", "requires": ["implementation"],
+            "path_scope": [],
         },
         {
             "node_id": "correction", "role": "E1", "node_class": "work",
-            "requires": ["review"], "path_scope": ["b.py"],
+            "permission": "source_writer", "requires": ["review"],
+            "path_scope": ["b.py"],
         },
     ]
     contract = {
@@ -475,6 +478,64 @@ def test_bound_writer_scope_contract_transfers_only_to_serialized_adaptive_write
             adaptive_writer_node_ids={"correction", "second_correction"},
         )[1]
     )
+
+
+def test_writer_scope_transfer_rejects_cross_role_terminal_writer() -> None:
+    nodes = [
+        {
+            "node_id": "implementation", "role": "E1", "node_class": "work",
+            "permission": "source_writer", "requires": [],
+            "path_scope": ["a.py", "shared.py"],
+        },
+        {
+            "node_id": "correction", "role": "TW", "node_class": "work",
+            "permission": "source_writer", "requires": ["implementation"],
+            "path_scope": ["shared.py"],
+        },
+    ]
+    contract = {
+        "schema_version": "repository_writer_scope_contract_v1",
+        "writers": [
+            {"node_id": "implementation", "role": "E1", "path_scope": ["a.py"]},
+            {"node_id": "correction", "role": "TW", "path_scope": ["shared.py"]},
+        ],
+    }
+
+    _, errors = writer_scope_contracts(
+        nodes, expected_dirty_scope=["a.py", "shared.py"],
+        scope_contract=contract, adaptive_writer_node_ids={"correction"},
+    )
+
+    assert any("transfer writer roles differ" in error for error in errors)
+
+
+def test_writer_scope_transfer_rejects_cross_permission_terminal_writer() -> None:
+    nodes = [
+        {
+            "node_id": "implementation", "role": "E1", "node_class": "work",
+            "permission": "source_writer", "requires": [],
+            "path_scope": ["a.py", "shared.py"],
+        },
+        {
+            "node_id": "correction", "role": "E1", "node_class": "work",
+            "permission": "docs_writer", "requires": ["implementation"],
+            "path_scope": ["shared.py"],
+        },
+    ]
+    contract = {
+        "schema_version": "repository_writer_scope_contract_v1",
+        "writers": [
+            {"node_id": "implementation", "role": "E1", "path_scope": ["a.py"]},
+            {"node_id": "correction", "role": "E1", "path_scope": ["shared.py"]},
+        ],
+    }
+
+    _, errors = writer_scope_contracts(
+        nodes, expected_dirty_scope=["a.py", "shared.py"],
+        scope_contract=contract, adaptive_writer_node_ids={"correction"},
+    )
+
+    assert any("transfer writer permissions differ" in error for error in errors)
 
 
 def test_closure_projection_rejects_writer_permission_on_verification_call() -> None:

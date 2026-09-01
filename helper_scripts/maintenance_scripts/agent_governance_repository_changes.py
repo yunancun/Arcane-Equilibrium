@@ -384,6 +384,18 @@ def writer_scope_contracts(
                 )
                 continue
             prior, terminal = raw
+            if node_by_id.get(prior, {}).get("role") != node_by_id.get(
+                terminal, {}
+            ).get("role"):
+                errors.append(
+                    f"repository path transfer writer roles differ: {path}"
+                )
+            if node_by_id.get(prior, {}).get("permission") != node_by_id.get(
+                terminal, {}
+            ).get("permission"):
+                errors.append(
+                    f"repository path transfer writer permissions differ: {path}"
+                )
             if terminal not in adaptive_ids:
                 errors.append(
                     f"repository path transfer targets non-adaptive writer: {path}"
