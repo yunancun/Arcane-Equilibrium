@@ -3,7 +3,6 @@
 from __future__ import annotations
 
 import fcntl
-import hashlib
 import json
 import os
 import re
@@ -441,10 +440,6 @@ def _git_bytes(repo: Path, *args: str) -> bytes:
     return completed.stdout
 
 
-def _sha256_bytes(value: bytes) -> str:
-    return "sha256:" + hashlib.sha256(value).hexdigest()
-
-
 def _origin_urls(repo: Path) -> tuple[list[str], list[str]]:
     from agent_governance_capture import native_origin_urls
     return native_origin_urls(repo)
@@ -479,6 +474,7 @@ def _publication_boundary(
         NativeEvidenceMismatch,
         NativeEvidenceUnavailable,
         capture_native_protected_snapshot,
+        validate_public_github_repository_ref,
     )
 
     final_phase = phase
@@ -518,24 +514,35 @@ def _publication_boundary(
     except ValueError:
         fetch_urls, push_urls = [], []
         reasons.append("FINAL_ORIGIN_URL_UNAVAILABLE")
-    repository_url = LW2_REPOSITORY_URL if selected else (
-        fetch_urls[0] if len(fetch_urls) == 1 else ""
+    main_ref = LW2_DESTINATION_REF
+    branch_ref = f"refs/heads/{branch}" if isinstance(branch, str) else ""
+    urls_match = len(fetch_urls) == 1 and fetch_urls == push_urls
+    repository_url = fetch_urls[0] if urls_match else ""
+    public_origin_valid = bool(
+        repository_url
+        and validate_public_github_repository_ref(repository_url, main_ref)
+        and (
+            final_phase != "post-push"
+            or validate_public_github_repository_ref(repository_url, branch_ref)
+        )
     )
     local_main = _git_text(
         repo, "rev-parse", "refs/remotes/origin/main", native_graph=True
     )
     canonical_main = (
-        _canonical_remote_head(repo, repository_url, LW2_DESTINATION_REF)
-        if repository_url else None
+        _canonical_remote_head(repo, repository_url, main_ref)
+        if public_origin_valid else None
     )
     canonical_branch = (
-        _canonical_remote_head(repo, repository_url, f"refs/heads/{branch}")
-        if repository_url and final_phase == "post-push" and branch else None
+        _canonical_remote_head(repo, repository_url, branch_ref)
+        if public_origin_valid and final_phase == "post-push" else None
     )
     final_time = _utc_now()
     # Pure in-memory checks only below this line.
-    if len(fetch_urls) != 1 or len(push_urls) != 1 or fetch_urls != push_urls:
+    if not urls_match:
         reasons.append("FINAL_ORIGIN_URL_MISMATCH")
+    elif not public_origin_valid:
+        reasons.append("FINAL_ORIGIN_URL_INVALID")
     if selected and (fetch_urls != [LW2_REPOSITORY_URL] or push_urls != [LW2_REPOSITORY_URL]):
         reasons.append("LW2_PUBLICATION_FINAL_ORIGIN_URL_DRIFT")
     if final_identity is not None and (
@@ -603,53 +610,6 @@ def _publication_boundary(
         "observed_at": _timestamp(final_time),
     }
     return boundary, list(dict.fromkeys(reasons)), final_time
-
-
-def _native_commit(repo: Path, commit: str) -> tuple[str, list[str]]:
-    """Read one commit's native tree and parents from raw object headers."""
-
-    if not re.fullmatch(r"[0-9a-f]{40}", commit):
-        raise ValueError("LW2 publication commit identity is invalid")
-    raw = _git_bytes(repo, "cat-file", "commit", commit)
-    header = raw.split(b"\n\n", 1)[0]
-    tree: str | None = None
-    parents: list[str] = []
-    try:
-        for line in header.splitlines():
-            if line.startswith(b"tree "):
-                if tree is not None:
-                    raise ValueError("LW2 publication commit tree is ambiguous")
-                tree = line.removeprefix(b"tree ").decode("ascii")
-            elif line.startswith(b"parent "):
-                parents.append(line.removeprefix(b"parent ").decode("ascii"))
-    except UnicodeDecodeError as error:
-        raise ValueError("LW2 publication commit headers are invalid") from error
-    if (
-        tree is None
-        or not re.fullmatch(r"[0-9a-f]{40}", tree)
-        or any(not re.fullmatch(r"[0-9a-f]{40}", parent) for parent in parents)
-    ):
-        raise ValueError("LW2 publication commit headers are invalid")
-    return tree, parents
-
-
-def _native_is_ancestor(repo: Path, ancestor: str, descendant: str) -> bool:
-    """Resolve native reachability from raw parent headers only."""
-
-    pending = [descendant]
-    seen: set[str] = set()
-    while pending:
-        current = pending.pop()
-        if current == ancestor:
-            return True
-        if current in seen:
-            continue
-        if len(seen) >= 100_000:
-            raise ValueError("LW2 publication native graph is too large")
-        seen.add(current)
-        _, parents = _native_commit(repo, current)
-        pending.extend(parent for parent in parents if parent not in seen)
-    return False
 
 
 def _unsafe_replace_namespace(namespace: Path) -> bool:
@@ -738,6 +698,72 @@ def _capture_lw2_publication_generation(
     return capture_task_admission_generation_evidence(repo, task_contract)
 
 
+def _ordinary_publication_status(
+    *,
+    repo: Path,
+    record: dict[str, Any],
+    expected_head: str,
+    canonical_claim_digest: Callable[[Any], str],
+) -> tuple[dict[str, Any] | None, list[str]]:
+    """Bind one ordinary publication to its admitted native commit range."""
+
+    from agent_governance_capture import (
+        NativeEvidenceMismatch,
+        NativeEvidenceUnavailable,
+        capture_native_linear_commit_range,
+        native_commit_identity,
+    )
+
+    accepted = record.get("accepted_base")
+    if not isinstance(accepted, dict):
+        return None, ["ORDINARY_PUBLICATION_ACCEPTED_BASE_MISSING"]
+    accepted_head = accepted["head"]
+    accepted_tree = accepted["tree"]
+    reasons: list[str] = []
+    try:
+        base_object_tree, _ = native_commit_identity(repo, accepted_head)
+        feature_tree, _ = native_commit_identity(repo, expected_head)
+    except (NativeEvidenceMismatch, NativeEvidenceUnavailable):
+        return None, ["ORDINARY_PUBLICATION_COMMIT_EVIDENCE_UNAVAILABLE"]
+    if base_object_tree != accepted_tree:
+        reasons.append("ORDINARY_PUBLICATION_ACCEPTED_BASE_OBJECT_MISMATCH")
+    commit_records, patch_records, range_reasons = (
+        capture_native_linear_commit_range(repo, accepted_head, expected_head)
+    )
+    reasons.extend({
+        "NATIVE_COMMIT_RANGE_UNAVAILABLE": "ORDINARY_PUBLICATION_COMMIT_EVIDENCE_UNAVAILABLE",
+        "NATIVE_COMMIT_RANGE_BASE_NOT_ANCESTOR": "ORDINARY_PUBLICATION_BASE_NOT_ANCESTOR",
+        "NATIVE_COMMIT_RANGE_NONLINEAR_HISTORY": "ORDINARY_PUBLICATION_NONLINEAR_HISTORY",
+        "NATIVE_COMMIT_RANGE_EMPTY": "ORDINARY_PUBLICATION_EMPTY_COMMIT_RANGE",
+    }[reason] for reason in range_reasons)
+    touched_paths = sorted({
+        path for commit in commit_records for path in commit["paths"]
+    })
+    if not set(touched_paths).issubset(record["task_contract"]["dirty_scope"]):
+        reasons.append(
+            "ORDINARY_PUBLICATION_COMMITTED_PATH_OUTSIDE_ADMITTED_SCOPE"
+        )
+    if reasons:
+        return None, list(dict.fromkeys(reasons))
+    native_range = {
+        "schema_version": "native_linear_commit_range_v1",
+        "read_mode": "git_--no-replace-objects",
+        "rename_detection": "disabled",
+        "textconv": "disabled",
+    }
+    return {
+        "schema_version": "ordinary_writer_publication_status_v1",
+        "accepted_base": dict(accepted),
+        "feature": {"head": expected_head, "tree": feature_tree},
+        "ordered_commits": [item["commit"] for item in commit_records],
+        "touched_paths": touched_paths,
+        "native_range": native_range,
+        "native_range_digest": canonical_claim_digest(native_range),
+        "ordered_commit_path_digest": canonical_claim_digest(commit_records),
+        "binary_patch_digest": canonical_claim_digest(patch_records),
+    }, []
+
+
 def _lw2_publication_status(
     *,
     repo: Path,
@@ -751,6 +777,8 @@ def _lw2_publication_status(
         NativeEvidenceMismatch,
         NativeEvidenceUnavailable,
         PLATFORM_OR_EXTERNAL_ATTESTED,
+        capture_native_linear_commit_range,
+        native_commit_identity,
     )
     from agent_governance_lw2_readmission import (
         LW2_DESTINATION_REF,
@@ -849,8 +877,8 @@ def _lw2_publication_status(
     except ValueError:
         origin_fetch_urls, origin_push_urls = [], []
     try:
-        accepted_object_tree, _ = _native_commit(repo, accepted_head)
-    except ValueError:
+        accepted_object_tree, _ = native_commit_identity(repo, accepted_head)
+    except (NativeEvidenceMismatch, NativeEvidenceUnavailable):
         accepted_object_tree = None
     if accepted_object_tree != accepted_tree:
         reasons.append("LW2_PUBLICATION_ACCEPTED_BASE_OBJECT_MISMATCH")
@@ -866,75 +894,19 @@ def _lw2_publication_status(
         reasons.append("LW2_PUBLICATION_DIRTY_WORKTREE")
     feature_head = identity.head or ""
     try:
-        feature_tree, _ = _native_commit(repo, feature_head)
-    except ValueError:
+        feature_tree, _ = native_commit_identity(repo, feature_head)
+    except (NativeEvidenceMismatch, NativeEvidenceUnavailable):
         feature_tree = ""
         reasons.append("LW2_PUBLICATION_COMMIT_EVIDENCE_UNAVAILABLE")
-    commit_path_records: list[dict[str, Any]] = []
-    patch_records: list[dict[str, str]] = []
-    try:
-        base_is_ancestor = _native_is_ancestor(
-            repo, accepted_head, feature_head
-        )
-    except ValueError:
-        base_is_ancestor = None
-        reasons.append("LW2_PUBLICATION_TOPOLOGY_UNAVAILABLE")
-    if base_is_ancestor is False:
-        reasons.append("LW2_PUBLICATION_BASE_NOT_ANCESTOR")
-    try:
-        reverse_records: list[tuple[dict[str, Any], dict[str, str]]] = []
-        current = feature_head
-        seen: set[str] = set()
-        while base_is_ancestor and current != accepted_head:
-            if current in seen or len(seen) >= 100_000:
-                reasons.append("LW2_PUBLICATION_TOPOLOGY_UNAVAILABLE")
-                break
-            seen.add(current)
-            tree, parents = _native_commit(repo, current)
-            if len(parents) > 1:
-                reasons.append("LW2_PUBLICATION_NONLINEAR_HISTORY")
-                break
-            if not parents:
-                reasons.append("LW2_PUBLICATION_BASE_NOT_ANCESTOR")
-                break
-            parent = parents[0]
-            parent_tree, _ = _native_commit(repo, parent)
-            raw_paths = _git_bytes(
-                repo,
-                "diff-tree", "-r", "--no-commit-id", "--no-renames",
-                "--no-ext-diff", "--no-textconv",
-                "--name-only", "-z", parent_tree, tree, "--",
-            )
-            paths = sorted({
-                raw.decode("utf-8")
-                for raw in raw_paths.split(b"\0")
-                if raw
-            })
-            patch = _git_bytes(
-                repo,
-                "diff-tree", "-r", "--no-commit-id", "--no-renames",
-                "--no-ext-diff", "--no-textconv", "--binary", "--full-index",
-                "-p", parent_tree, tree, "--",
-            )
-            reverse_records.append(({
-                "commit": current,
-                "parent": parent,
-                "tree": tree,
-                "paths": paths,
-            }, {
-                "commit": current,
-                "binary_patch_digest": _sha256_bytes(patch),
-            }))
-            current = parent
-        if current == accepted_head:
-            reverse_records.reverse()
-            commit_path_records = [item[0] for item in reverse_records]
-            patch_records = [item[1] for item in reverse_records]
-    except (UnicodeDecodeError, ValueError):
-        reasons.append("LW2_PUBLICATION_COMMIT_EVIDENCE_UNAVAILABLE")
-
-    if base_is_ancestor and not commit_path_records:
-        reasons.append("LW2_PUBLICATION_EMPTY_COMMIT_RANGE")
+    commit_path_records, patch_records, range_reasons = (
+        capture_native_linear_commit_range(repo, accepted_head, feature_head)
+    )
+    reasons.extend({
+        "NATIVE_COMMIT_RANGE_UNAVAILABLE": "LW2_PUBLICATION_COMMIT_EVIDENCE_UNAVAILABLE",
+        "NATIVE_COMMIT_RANGE_BASE_NOT_ANCESTOR": "LW2_PUBLICATION_BASE_NOT_ANCESTOR",
+        "NATIVE_COMMIT_RANGE_NONLINEAR_HISTORY": "LW2_PUBLICATION_NONLINEAR_HISTORY",
+        "NATIVE_COMMIT_RANGE_EMPTY": "LW2_PUBLICATION_EMPTY_COMMIT_RANGE",
+    }[reason] for reason in range_reasons)
     touched_paths = sorted({
         path
         for commit_record in commit_path_records
@@ -954,8 +926,8 @@ def _lw2_publication_status(
         return None, ["LW2_PUBLICATION_GRAPH_PROJECTION_PRESENT"], None
     try:
         final_identity = inspect_worktree(repo, native_graph=True)
-        final_tree, _ = _native_commit(repo, final_identity.head or "")
-    except ValueError:
+        final_tree, _ = native_commit_identity(repo, final_identity.head or "")
+    except (ValueError, NativeEvidenceMismatch, NativeEvidenceUnavailable):
         final_identity = None
         final_tree = None
         reasons.append("LW2_PUBLICATION_FINAL_RECAPTURE_UNAVAILABLE")
@@ -1773,6 +1745,34 @@ def filesystem_writer_lease_action(
                             identity=locked_identity, lease=None,
                         )
                         return lease_state, binding_state, result, False
+                else:
+                    accepted_base = record.get("accepted_base")
+                    if not isinstance(accepted_base, dict):
+                        result = _lease_result(
+                            action, status="FAIL",
+                            reasons=["TASK_ADMISSION_ACCEPTED_BASE_MISSING"],
+                            identity=locked_identity, lease=None,
+                        )
+                        return lease_state, binding_state, result, False
+                    try:
+                        from agent_governance_capture import capture_native_head_tree
+                        current_base = capture_native_head_tree(
+                            Path(identity.worktree)
+                        )
+                    except (NativeEvidenceMismatch, NativeEvidenceUnavailable):
+                        result = _lease_result(
+                            action, status="FAIL",
+                            reasons=["TASK_ADMISSION_ACCEPTED_BASE_UNAVAILABLE"],
+                            identity=locked_identity, lease=None,
+                        )
+                        return lease_state, binding_state, result, False
+                    if current_base != accepted_base:
+                        result = _lease_result(
+                            action, status="FAIL",
+                            reasons=["TASK_ADMISSION_ACCEPTED_BASE_MISMATCH"],
+                            identity=locked_identity, lease=None,
+                        )
+                        return lease_state, binding_state, result, False
                 new_lease = {
                     "lease_id": secrets.token_hex(16),
                     "task_id": task_id,
@@ -1924,14 +1924,26 @@ def filesystem_writer_lease_action(
                 publication_native_snapshot = None
                 publication_boundary = None
                 publication_reasons: list[str] = []
-                if action == "publication-status" and selected:
+                if action == "publication-status":
                     assert lease is not None
-                    publication_status, publication_reasons, publication_native_snapshot = (
-                        _lw2_publication_status(
-                            repo=Path(identity.worktree), identity=locked_identity,
-                            record=record, canonical_claim_digest=canonical_claim_digest,
+                    if selected:
+                        publication_status, publication_reasons, publication_native_snapshot = (
+                            _lw2_publication_status(
+                                repo=Path(identity.worktree), identity=locked_identity,
+                                record=record,
+                                canonical_claim_digest=canonical_claim_digest,
+                            )
                         )
-                    )
+                    else:
+                        assert publication_expected_head is not None
+                        publication_status, publication_reasons = (
+                            _ordinary_publication_status(
+                                repo=Path(identity.worktree),
+                                record=record,
+                                expected_head=publication_expected_head,
+                                canonical_claim_digest=canonical_claim_digest,
+                            )
+                        )
                 if action == "publication-status":
                     assert lease is not None
                     if publication_reasons:

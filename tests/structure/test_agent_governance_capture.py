@@ -98,6 +98,48 @@ def test_native_remote_head_keeps_git_primary_and_never_calls_rest_on_success(
     assert "ls-remote" in calls[0]
 
 
+@pytest.mark.parametrize(
+    ("repository_url", "ref", "expected"),
+    [
+        (
+            "https://github.com/yunancun/Arcane-Equilibrium.git",
+            "refs/heads/main",
+            True,
+        ),
+        (
+            "https://token@github.com/yunancun/Arcane-Equilibrium.git",
+            "refs/heads/main",
+            False,
+        ),
+        (
+            "https://github.com/yunancun/Arcane-Equilibrium.git?token=x",
+            "refs/heads/main",
+            False,
+        ),
+        (
+            "https://github.com/yunancun/Arcane-Equilibrium.git",
+            "refs/heads/../main",
+            False,
+        ),
+    ],
+)
+def test_public_github_repository_ref_validation_is_exact_and_pure(
+    monkeypatch: pytest.MonkeyPatch,
+    repository_url: str,
+    ref: str,
+    expected: bool,
+) -> None:
+    monkeypatch.setattr(
+        capture_module.subprocess,
+        "run",
+        lambda *_args, **_kwargs: pytest.fail("pure validation ran transport"),
+    )
+
+    assert capture_module.validate_public_github_repository_ref(
+        repository_url, ref
+    ) is expected
+
+
 def test_native_remote_head_uses_bounded_public_github_rest_fallback(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:

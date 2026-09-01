@@ -36,11 +36,14 @@ from agent_governance_task_control import (  # noqa: E402
     validate_writer_lease,
 )
 from agent_governance_task_admission import (  # noqa: E402
+    FileTaskAdmissionStore,
     acquire_task_admission,
     continue_admitted_task,
     release_task_admission,
 )
 from agent_governance import main as governance_main  # noqa: E402
+import agent_governance_writer_lease as writer_lease_module  # noqa: E402
+import agent_governance_task_admission as task_admission_module  # noqa: E402
 from agent_governance_context import capture_repository_baseline  # noqa: E402
 from agent_governance_routing import (  # noqa: E402
     route_task,
@@ -662,6 +665,200 @@ def test_ordinary_admission_authorizes_seven_field_filesystem_lease(
     }
 
 
+@pytest.mark.parametrize("dirty_kind", ["tracked", "staged", "untracked"])
+def test_ordinary_admission_requires_a_clean_native_base(
+    tmp_path: Path,
+    dirty_kind: str,
+) -> None:
+    repo = _init_linked_repo(tmp_path)
+    contract = _admission_contract(repo, "finite", "ordinary clean base")
+    if dirty_kind == "untracked":
+        (repo / "untracked.txt").write_text("dirty\n", encoding="utf-8")
+    else:
+        (repo / "owned.txt").write_text("dirty\n", encoding="utf-8")
+        if dirty_kind == "staged":
+            subprocess.run(
+                ["git", "-C", str(repo), "add", "owned.txt"], check=True
+            )
+
+    with pytest.raises(ValueError, match="clean repository base"):
+        acquire_task_admission(
+            repo=repo,
+            task_id="ordinary-task",
+            owner="owner",
+            task_contract=contract,
+        )
+
+    store = FileTaskAdmissionStore(inspect_worktree(repo).common_dir)
+    assert store.read()["admissions"] == {}
+
+
+def test_ordinary_admission_persists_and_rechecks_exact_native_base(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    repo = _init_linked_repo(tmp_path)
+    contract = _admission_contract(repo, "finite", "ordinary accepted base")
+    original_update = FileTaskAdmissionStore.update
+
+    def mutate_before_store(
+        store: FileTaskAdmissionStore,
+        mutation: object,
+    ) -> dict[str, object]:
+        (repo / "raced.txt").write_text("race\n", encoding="utf-8")
+        return original_update(store, mutation)
+
+    monkeypatch.setattr(FileTaskAdmissionStore, "update", mutate_before_store)
+    with pytest.raises(ValueError, match="clean repository base"):
+        acquire_task_admission(
+            repo=repo,
+            task_id="ordinary-task",
+            owner="owner",
+            task_contract=contract,
+        )
+    store = FileTaskAdmissionStore(inspect_worktree(repo).common_dir)
+    assert store.read()["admissions"] == {}
+
+    (repo / "raced.txt").unlink()
+    monkeypatch.setattr(FileTaskAdmissionStore, "update", original_update)
+    admission = acquire_task_admission(
+        repo=repo,
+        task_id="ordinary-task",
+        owner="owner",
+        task_contract=contract,
+    )
+    assert admission["admission"]["accepted_base"] == {
+        "schema_version": "task_admission_accepted_base_v1",
+        "head": subprocess.run(
+            ["git", "-C", str(repo), "rev-parse", "HEAD"],
+            check=True, capture_output=True, text=True,
+        ).stdout.strip(),
+        "tree": subprocess.run(
+            ["git", "-C", str(repo), "rev-parse", "HEAD^{tree}"],
+            check=True, capture_output=True, text=True,
+        ).stdout.strip(),
+    }
+
+
+def test_ordinary_admission_rejects_transient_stale_progress_baseline(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    repo = _init_linked_repo(tmp_path)
+    contract = _admission_contract(repo, "finite", "ordinary stable baseline")
+    original_progress = task_admission_module.progress_snapshot
+    original = (repo / "owned.txt").read_bytes()
+    def transient_progress(**kwargs: object) -> dict:
+        (repo / "owned.txt").write_bytes(b"transient dirty\n")
+        try:
+            return original_progress(**kwargs)
+        finally:
+            (repo / "owned.txt").write_bytes(original)
+
+    monkeypatch.setattr(
+        task_admission_module, "progress_snapshot", transient_progress
+    )
+    with pytest.raises(ValueError, match="does not match accepted tree"):
+        acquire_task_admission(
+            repo=repo,
+            task_id="ordinary-task",
+            owner="owner",
+            task_contract=contract,
+        )
+
+    identity = inspect_worktree(repo)
+    assert FileTaskAdmissionStore(identity.common_dir).read()["admissions"] == {}
+    assert FileWriterLeaseStore(identity.common_dir).read()["leases"] == {}
+
+
+def test_ordinary_lease_revalidates_base_and_legacy_record_is_cleanup_only(
+    tmp_path: Path,
+) -> None:
+    repo = _init_linked_repo(tmp_path)
+    admission = acquire_task_admission(
+        repo=repo,
+        task_id="ordinary-task",
+        owner="owner",
+        task_contract=_admission_contract(repo, "finite", "ordinary base fence"),
+    )
+    subprocess.run(
+        ["git", "-C", str(repo), "commit", "-q", "--allow-empty", "-m", "drift"],
+        check=True,
+    )
+    drifted = filesystem_writer_lease_action(
+        action="acquire",
+        repo=repo,
+        task_id="ordinary-task",
+        owner="owner",
+        admission_id=admission["admission_id"],
+    )
+    assert drifted["status"] == "FAIL"
+    assert drifted["reasons"] == ["TASK_ADMISSION_ACCEPTED_BASE_MISMATCH"]
+
+    legacy_root = tmp_path / "legacy"
+    legacy_root.mkdir()
+    repo = _init_linked_repo(legacy_root)
+    admission = acquire_task_admission(
+        repo=repo,
+        task_id="ordinary-task",
+        owner="owner",
+        task_contract=_admission_contract(repo, "finite", "legacy base fence"),
+    )
+    lease = filesystem_writer_lease_action(
+        action="acquire",
+        repo=repo,
+        task_id="ordinary-task",
+        owner="owner",
+        admission_id=admission["admission_id"],
+    )["lease"]
+    identity = inspect_worktree(repo)
+    admission_store = FileTaskAdmissionStore(identity.common_dir)
+    state = admission_store.read()
+    state["admissions"][identity.worktree].pop("accepted_base")
+    admission_store.state_path.write_text(
+        json.dumps(state, sort_keys=True) + "\n", encoding="utf-8"
+    )
+    assert admission_store.read()["admissions"][identity.worktree]["task_id"] == (
+        "ordinary-task"
+    )
+    legacy = filesystem_writer_lease_action(
+        action="publication-status",
+        repo=repo,
+        task_id="ordinary-task",
+        owner="owner",
+        lease_id=lease["lease_id"],
+        admission_id=admission["admission_id"],
+        publication_phase="publish",
+        publication_expected_branch=identity.branch,
+        publication_expected_head=identity.head,
+    )
+    assert legacy["status"] == "FAIL"
+    assert legacy["reasons"] == ["ORDINARY_PUBLICATION_ACCEPTED_BASE_MISSING"]
+    assert filesystem_writer_lease_action(
+        action="release",
+        repo=repo,
+        task_id="ordinary-task",
+        owner="owner",
+        lease_id=lease["lease_id"],
+        admission_id=admission["admission_id"],
+    )["status"] == "PASS"
+    reacquire = filesystem_writer_lease_action(
+        action="acquire",
+        repo=repo,
+        task_id="ordinary-task",
+        owner="owner",
+        admission_id=admission["admission_id"],
+    )
+    assert reacquire["status"] == "FAIL"
+    assert reacquire["reasons"] == ["TASK_ADMISSION_ACCEPTED_BASE_MISSING"]
+    assert release_task_admission(
+        repo=repo,
+        task_id="ordinary-task",
+        owner="owner",
+        admission_id=admission["admission_id"],
+    )["status"] == "PASS"
+
+
 def test_ordinary_filesystem_lease_lifecycle_requires_exact_active_admission(
     tmp_path: Path,
 ) -> None:
@@ -737,14 +934,17 @@ def test_ordinary_filesystem_lease_lifecycle_requires_exact_active_admission(
     assert released["status"] == "PASS"
 
 
-def test_publication_status_cli_preserves_ordinary_status_semantics(
+def test_publication_status_cli_binds_ordinary_native_range_evidence(
     tmp_path: Path,
     capsys: pytest.CaptureFixture[str],
+    monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     repo = _init_linked_repo(tmp_path)
-    canonical = tmp_path / "repo"
     subprocess.run(
-        ["git", "-C", str(repo), "remote", "add", "origin", str(canonical)],
+        [
+            "git", "-C", str(repo), "remote", "add", "origin",
+            "https://github.com/example/public.git",
+        ],
         check=True,
     )
     subprocess.run(
@@ -769,6 +969,20 @@ def test_publication_status_cli_preserves_ordinary_status_semantics(
         task_id="ordinary-task",
         owner="owner",
         admission_id=admission["admission_id"],
+    )
+    (repo / "owned.txt").write_text("published\n", encoding="utf-8")
+    subprocess.run(["git", "-C", str(repo), "add", "owned.txt"], check=True)
+    subprocess.run(
+        ["git", "-C", str(repo), "commit", "-q", "-m", "ordinary change"],
+        check=True,
+    )
+    monkeypatch.setattr(
+        writer_lease_module,
+        "_canonical_remote_head",
+        lambda active_repo, _url, _ref: subprocess.run(
+            ["git", "-C", str(active_repo), "rev-parse", "refs/remotes/origin/main"],
+            check=True, capture_output=True, text=True,
+        ).stdout.strip(),
     )
     lease_id = acquired["lease"]["lease_id"]
     identity = inspect_worktree(repo)
@@ -820,11 +1034,213 @@ def test_publication_status_cli_preserves_ordinary_status_semantics(
         assert packet["reasons"] == direct["reasons"] == []
         assert packet["lease"] == direct["lease"]
         assert packet["admission_scope"] == direct["admission_scope"]
-        assert "publication_status" not in packet
+        assert packet["publication_status"]["schema_version"] == (
+            "ordinary_writer_publication_status_v1"
+        )
+        assert packet["publication_status"]["touched_paths"] == ["owned.txt"]
     assert persisted_before == (
         store.state_path.read_bytes(),
         store.binding_path.read_bytes(),
     )
+
+
+def _ordinary_publication_fixture(
+    tmp_path: Path,
+    *,
+    origin: str = "https://github.com/example/public.git",
+) -> tuple[Path, dict, dict]:
+    repo = _init_linked_repo(tmp_path)
+    subprocess.run(
+        ["git", "-C", str(repo), "remote", "add", "origin", origin], check=True
+    )
+    subprocess.run(
+        ["git", "-C", str(repo), "update-ref", "refs/remotes/origin/main", "HEAD"],
+        check=True,
+    )
+    admission = acquire_task_admission(
+        repo=repo,
+        task_id="ordinary-task",
+        owner="owner",
+        task_contract=_admission_contract(repo, "finite", "ordinary publication"),
+    )
+    lease = filesystem_writer_lease_action(
+        action="acquire",
+        repo=repo,
+        task_id="ordinary-task",
+        owner="owner",
+        admission_id=admission["admission_id"],
+    )
+    return repo, admission, lease
+
+
+def _commit_paths(repo: Path, message: str, *paths: str) -> None:
+    subprocess.run(["git", "-C", str(repo), "add", "--", *paths], check=True)
+    subprocess.run(
+        ["git", "-C", str(repo), "commit", "-q", "-m", message], check=True
+    )
+
+
+@pytest.mark.parametrize(
+    ("mutation", "expected_reason"),
+    [
+        ("in-scope", None),
+        ("outside", "ORDINARY_PUBLICATION_COMMITTED_PATH_OUTSIDE_ADMITTED_SCOPE"),
+        ("reverted", "ORDINARY_PUBLICATION_COMMITTED_PATH_OUTSIDE_ADMITTED_SCOPE"),
+        ("mixed", "ORDINARY_PUBLICATION_COMMITTED_PATH_OUTSIDE_ADMITTED_SCOPE"),
+        ("rename", "ORDINARY_PUBLICATION_COMMITTED_PATH_OUTSIDE_ADMITTED_SCOPE"),
+        ("nonlinear", "ORDINARY_PUBLICATION_NONLINEAR_HISTORY"),
+        ("empty", "ORDINARY_PUBLICATION_EMPTY_COMMIT_RANGE"),
+        ("nonancestor", "ORDINARY_PUBLICATION_BASE_NOT_ANCESTOR"),
+        ("unavailable", "ORDINARY_PUBLICATION_COMMIT_EVIDENCE_UNAVAILABLE"),
+    ],
+)
+def test_ordinary_publication_validates_the_entire_native_commit_range(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+    mutation: str,
+    expected_reason: str | None,
+) -> None:
+    repo, admission, acquired = _ordinary_publication_fixture(tmp_path)
+    base = admission["admission"]["accepted_base"]["head"]
+    expected_head: str | None = None
+    if mutation == "in-scope":
+        (repo / "owned.txt").write_text("changed\n", encoding="utf-8")
+        _commit_paths(repo, "in scope", "owned.txt")
+    elif mutation in {"outside", "reverted"}:
+        (repo / "outside.txt").write_text("outside\n", encoding="utf-8")
+        _commit_paths(repo, "outside", "outside.txt")
+        if mutation == "reverted":
+            (repo / "outside.txt").unlink()
+            _commit_paths(repo, "revert outside", "outside.txt")
+    elif mutation == "mixed":
+        (repo / "owned.txt").write_text("changed\n", encoding="utf-8")
+        (repo / "outside.txt").write_text("outside\n", encoding="utf-8")
+        _commit_paths(repo, "mixed", "owned.txt", "outside.txt")
+    elif mutation == "rename":
+        subprocess.run(
+            ["git", "-C", str(repo), "mv", "--", "owned.txt", "outside.txt"],
+            check=True,
+        )
+        subprocess.run(
+            ["git", "-C", str(repo), "commit", "-q", "-m", "rename"], check=True
+        )
+    elif mutation == "nonlinear":
+        subprocess.run(
+            ["git", "-C", str(repo), "switch", "-q", "-c", "side", base],
+            check=True,
+        )
+        subprocess.run(
+            ["git", "-C", str(repo), "commit", "-q", "--allow-empty", "-m", "side"],
+            check=True,
+        )
+        subprocess.run(
+            ["git", "-C", str(repo), "switch", "-q", "agent/ordinary-lease"],
+            check=True,
+        )
+        (repo / "owned.txt").write_text("changed\n", encoding="utf-8")
+        _commit_paths(repo, "feature", "owned.txt")
+        subprocess.run(
+            ["git", "-C", str(repo), "merge", "-q", "--no-ff", "side", "-m", "merge"],
+            check=True,
+        )
+    elif mutation == "nonancestor":
+        parent = subprocess.run(
+            ["git", "-C", str(repo), "rev-parse", f"{base}^"],
+            check=True, capture_output=True, text=True,
+        ).stdout.strip()
+        tree = subprocess.run(
+            ["git", "-C", str(repo), "rev-parse", f"{base}^{{tree}}"],
+            check=True, capture_output=True, text=True,
+        ).stdout.strip()
+        sibling = subprocess.run(
+            ["git", "-C", str(repo), "commit-tree", tree, "-p", parent, "-m", "sibling"],
+            check=True, capture_output=True, text=True,
+        ).stdout.strip()
+        subprocess.run(
+            ["git", "-C", str(repo), "update-ref", "refs/heads/agent/ordinary-lease", sibling],
+            check=True,
+        )
+    elif mutation == "unavailable":
+        expected_head = "f" * 40
+
+    monkeypatch.setattr(
+        writer_lease_module,
+        "_canonical_remote_head",
+        lambda active_repo, _url, _ref: subprocess.run(
+            ["git", "-C", str(active_repo), "rev-parse", "refs/remotes/origin/main"],
+            check=True, capture_output=True, text=True,
+        ).stdout.strip(),
+    )
+    identity = inspect_worktree(repo)
+    publication = filesystem_writer_lease_action(
+        action="publication-status",
+        repo=repo,
+        task_id="ordinary-task",
+        owner="owner",
+        lease_id=acquired["lease"]["lease_id"],
+        admission_id=admission["admission_id"],
+        publication_phase="publish",
+        publication_expected_branch=identity.branch,
+        publication_expected_head=expected_head or identity.head,
+    )
+
+    if expected_reason is None:
+        assert publication["status"] == "PASS"
+        assert publication["publication_status"]["touched_paths"] == ["owned.txt"]
+        assert publication["publication_status"]["native_range"] == {
+            "schema_version": "native_linear_commit_range_v1",
+            "read_mode": "git_--no-replace-objects",
+            "rename_detection": "disabled",
+            "textconv": "disabled",
+        }
+    else:
+        assert publication["status"] == "FAIL"
+        assert expected_reason in publication["reasons"]
+
+
+@pytest.mark.parametrize(
+    "origin",
+    [
+        "https://token@github.com/example/public.git",
+        "https://github.com/example/public.git?token=secret",
+        "git@github.com:example/public.git",
+        "https://example.invalid/public.git",
+    ],
+)
+def test_ordinary_publication_rejects_origin_before_remote_callback(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+    origin: str,
+) -> None:
+    repo, admission, acquired = _ordinary_publication_fixture(
+        tmp_path, origin=origin
+    )
+    (repo / "owned.txt").write_text("changed\n", encoding="utf-8")
+    _commit_paths(repo, "in scope", "owned.txt")
+    callbacks: list[tuple[str, str]] = []
+    monkeypatch.setattr(
+        writer_lease_module,
+        "_canonical_remote_head",
+        lambda _repo, repository_url, ref: callbacks.append(
+            (repository_url, ref)
+        ),
+    )
+    identity = inspect_worktree(repo)
+    publication = filesystem_writer_lease_action(
+        action="publication-status",
+        repo=repo,
+        task_id="ordinary-task",
+        owner="owner",
+        lease_id=acquired["lease"]["lease_id"],
+        admission_id=admission["admission_id"],
+        publication_phase="publish",
+        publication_expected_branch=identity.branch,
+        publication_expected_head=identity.head,
+    )
+
+    assert publication["status"] == "FAIL"
+    assert "FINAL_ORIGIN_URL_INVALID" in publication["reasons"]
+    assert callbacks == []
 
 
 def test_legacy_unbound_filesystem_lease_is_cleanup_only(tmp_path: Path) -> None:

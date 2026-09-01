@@ -20,7 +20,9 @@ from typing import Any, Callable
 from agent_governance_capture import (
     NativeEvidenceMismatch,
     NativeEvidenceUnavailable,
+    capture_native_head_tree,
     capture_native_protected_snapshot,
+    capture_native_task_source_manifest,
     capture_repository,
     repository_generation_digest,
 )
@@ -60,13 +62,17 @@ LEGACY_TASK_ADMISSION_RECORD_FIELDS = {
     "last_snapshot",
     "state",
 }
-TASK_ADMISSION_RECORD_FIELDS = LEGACY_TASK_ADMISSION_RECORD_FIELDS | {
+LW2_TASK_ADMISSION_RECORD_FIELDS = LEGACY_TASK_ADMISSION_RECORD_FIELDS | {
     "accepted_generation",
+}
+ORDINARY_TASK_ADMISSION_RECORD_FIELDS = LEGACY_TASK_ADMISSION_RECORD_FIELDS | {
+    "accepted_base",
 }
 ACCEPTED_GENERATION_FIELDS = {
     "schema_version", "source_head", "source_tree", "scope",
     "repository_generation_digest",
 }
+ACCEPTED_BASE_FIELDS = {"schema_version", "head", "tree"}
 TASK_ID_RE = re.compile(r"[A-Za-z0-9][A-Za-z0-9_.:-]{0,127}")
 OWNER_RE = re.compile(r"[A-Za-z0-9][A-Za-z0-9_.:@/-]{0,127}")
 ADMISSION_ID_RE = re.compile(r"[0-9a-f]{32}")
@@ -140,7 +146,8 @@ class FileTaskAdmissionStore:
 def _validate_record(record: Any, *, worktree: str) -> None:
     if not isinstance(record, dict) or frozenset(record) not in {
         frozenset(LEGACY_TASK_ADMISSION_RECORD_FIELDS),
-        frozenset(TASK_ADMISSION_RECORD_FIELDS),
+        frozenset(LW2_TASK_ADMISSION_RECORD_FIELDS),
+        frozenset(ORDINARY_TASK_ADMISSION_RECORD_FIELDS),
     }:
         raise ValueError("task admission record fields are not exact")
     if record["worktree"] != worktree:
@@ -165,6 +172,7 @@ def _validate_record(record: Any, *, worktree: str) -> None:
         record["task_contract"], task_id=record["task_id"]
     )
     generation = record.get("accepted_generation")
+    accepted_base = record.get("accepted_base")
     if selected_lw2:
         validate_lw2_contract_binding(
             record["task_contract"], task_id=record["task_id"]
@@ -183,8 +191,20 @@ def _validate_record(record: Any, *, worktree: str) -> None:
         ):
             raise ValueError("LW2 task admission accepted_generation is invalid")
         validate_lw2_protected_inventory_scope(generation["scope"])
-    elif generation is not None:
-        raise ValueError("ordinary task admission must remain legacy-readable")
+        if accepted_base is not None:
+            raise ValueError("LW2 task admission accepted_base is forbidden")
+    else:
+        if generation is not None:
+            raise ValueError("ordinary task admission accepted_generation is forbidden")
+        if accepted_base is not None and (
+            not isinstance(accepted_base, dict)
+            or set(accepted_base) != ACCEPTED_BASE_FIELDS
+            or accepted_base.get("schema_version")
+            != "task_admission_accepted_base_v1"
+            or not re.fullmatch(r"[0-9a-f]{40}", str(accepted_base.get("head")))
+            or not re.fullmatch(r"[0-9a-f]{40}", str(accepted_base.get("tree")))
+        ):
+            raise ValueError("ordinary task admission accepted_base is invalid")
 
 
 def capture_task_admission_generation(
@@ -276,6 +296,8 @@ def _projection(record: dict[str, Any]) -> dict[str, Any]:
     }
     if "accepted_generation" in record:
         projection["accepted_generation"] = deepcopy(record["accepted_generation"])
+    if "accepted_base" in record:
+        projection["accepted_base"] = deepcopy(record["accepted_base"])
     return projection
 
 
@@ -352,6 +374,7 @@ def acquire_task_admission(
     identity = inspect_worktree(repo)
     task_contract = _normalized_task_contract(task_contract)
     selected_lw2 = lw2_contract_selected(task_contract, task_id=task_id)
+    clean_protected_snapshot = None
     if selected_lw2:
         validate_lw2_contract_binding(
             task_contract,
@@ -372,11 +395,18 @@ def acquire_task_admission(
             reexecute_capture=True,
             external_evidence_verifier=external_evidence_verifier,
         )
+        clean_protected_snapshot = capture_native_protected_snapshot(
+            Path(identity.worktree)
+        )
         accepted_generation = capture_task_admission_generation(
             Path(identity.worktree), task_contract
         )
+        accepted_base = None
     else:
         accepted_generation = None
+        if identity.dirty:
+            raise ValueError("ordinary task admission requires a clean repository base")
+        accepted_base = capture_native_head_tree(Path(identity.worktree))
     control = compile_task_execution_policy(task_contract)
     contract_digest = control["task_contract_digest"]
     if control["continuation_mode"] == "operator_loop":
@@ -403,19 +433,15 @@ def acquire_task_admission(
                 status="FAIL",
                 reasons=["OPERATOR_REQUEST_ATTESTATION_REQUIRED"],
             )
-    baseline = progress_snapshot(
-        round_number=0,
-        work_status="ACTIVE",
-        repo=Path(identity.worktree),
-        task_contract=task_contract,
-        admitted_task_contract_digest=contract_digest,
-    )
     store = FileTaskAdmissionStore(identity.common_dir)
     result: dict[str, Any] = {}
 
     def mutation(state: dict[str, Any]) -> dict[str, Any]:
-        if accepted_generation is not None:
+        if selected_lw2:
             try:
+                locked_clean_snapshot = capture_native_protected_snapshot(
+                    Path(identity.worktree)
+                )
                 locked_generation = capture_task_admission_generation(
                     Path(identity.worktree), task_contract
                 )
@@ -434,6 +460,74 @@ def acquire_task_admission(
                 raise ValueError(
                     "LW2 repository generation changed after replay before admission store"
                 )
+            if locked_clean_snapshot != clean_protected_snapshot:
+                raise ValueError(
+                    "LW2 clean protected baseline changed before admission store"
+                )
+        else:
+            locked_identity = inspect_worktree(Path(identity.worktree))
+            if locked_identity.dirty:
+                raise ValueError(
+                    "ordinary task admission requires a clean repository base"
+                )
+            locked_base = capture_native_head_tree(Path(identity.worktree))
+            if locked_base != accepted_base:
+                raise ValueError(
+                    "ordinary task admission base changed before admission store"
+                )
+        baseline = progress_snapshot(
+            round_number=0,
+            work_status="ACTIVE",
+            repo=Path(identity.worktree),
+            task_contract=task_contract,
+            admitted_task_contract_digest=contract_digest,
+        )
+        if selected_lw2:
+            final_clean_snapshot = capture_native_protected_snapshot(
+                Path(identity.worktree)
+            )
+            final_head, final_tree = capture_current_repository_identity(
+                Path(identity.worktree)
+            )
+            if (
+                final_clean_snapshot != clean_protected_snapshot
+                or (final_head, final_tree)
+                != (
+                    accepted_generation["source_head"],
+                    accepted_generation["source_tree"],
+                )
+            ):
+                raise ValueError(
+                    "LW2 clean protected baseline changed during progress capture"
+                )
+        else:
+            final_identity = inspect_worktree(Path(identity.worktree))
+            final_base = capture_native_head_tree(Path(identity.worktree))
+            if final_identity.dirty or final_base != accepted_base:
+                raise ValueError(
+                    "ordinary task admission base changed during progress capture"
+                )
+        accepted_head = (
+            accepted_generation["source_head"]
+            if selected_lw2 else accepted_base["head"]
+        )
+        accepted_tree = (
+            accepted_generation["source_tree"]
+            if selected_lw2 else accepted_base["tree"]
+        )
+        native_manifest = capture_native_task_source_manifest(
+            Path(identity.worktree),
+            accepted_head=accepted_head,
+            accepted_tree=accepted_tree,
+            scope=task_contract["dirty_scope"],
+        )
+        if (
+            baseline["source_head"] != accepted_head
+            or baseline["task_source_manifest"] != native_manifest
+        ):
+            raise ValueError(
+                "task admission progress baseline does not match accepted tree"
+            )
         if identity.worktree in state["admissions"]:
             result["collision"] = True
             return state
@@ -451,6 +545,8 @@ def acquire_task_admission(
         }
         if accepted_generation is not None:
             record["accepted_generation"] = accepted_generation
+        if accepted_base is not None:
+            record["accepted_base"] = accepted_base
         state["admissions"][identity.worktree] = record
         result["record"] = record
         return state

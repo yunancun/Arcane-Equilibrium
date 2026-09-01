@@ -1435,87 +1435,76 @@ def _assert_no_admission_or_lease(repo: Path) -> None:
     ],
     ids=["exact", "prefix"],
 )
-def test_lw2_public_admission_and_writer_lifecycle_accept_owned_tracked_deletion(
+def test_lw2_public_admission_rejects_preexisting_owned_tracked_deletion(
     tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
     real_lw2_contract: tuple[Path, dict[str, object]],
     deleted: str,
 ) -> None:
-    source, _ = real_lw2_contract
+    source, contract = real_lw2_contract
     repo = _linked_main_evidence_repo(source, tmp_path)
-    original = (repo / deleted).read_bytes()
     (repo / deleted).unlink()
-    claim_inputs, claim_payloads = _real_claims(repo)
-    routed = route_task(
-        _route_facts(
-            repo,
-            claim_inputs,
-            claim_payloads,
-            dirty_scope=[deleted],
-        ),
-        repo=repo,
-        external_evidence_verifier=_strict_external_verifier(claim_payloads),
-    )
-    owned_contract = task_contract_projection(routed["task_facts"])
-
-    admission = acquire_task_admission(
-        repo=repo,
-        task_id="S2E-LW2",
-        owner="E1",
-        task_contract=owned_contract,
-        external_evidence_verifier=_strict_external_verifier(
-            owned_contract["claim_payloads"]
-        ),
+    monkeypatch.setattr(
+        task_admission_module,
+        "validate_lw2_readmission_eligibility",
+        lambda **_kwargs: None,
     )
 
-    assert admission["status"] == "PASS"
-    assert deleted in admission["admission"]["accepted_generation"]["scope"]
-    subprocess.run(
-        ["git", "switch", "-q", "-c", f"agent/lw2-{deleted.rsplit('/', 1)[-1]}"],
-        cwd=repo,
-        check=True,
-    )
-    acquired = filesystem_writer_lease_action(
-        action="acquire",
-        repo=repo,
-        task_id="S2E-LW2",
-        owner="E1",
-        admission_id=admission["admission_id"],
-    )
-    assert acquired["status"] == "PASS"
-    lease_id = acquired["lease"]["lease_id"]
-    for action in ("status", "renew"):
-        current = filesystem_writer_lease_action(
-            action=action,
+    with pytest.raises(NativeEvidenceMismatch, match="LW2 protected filesystem"):
+        acquire_task_admission(
             repo=repo,
             task_id="S2E-LW2",
             owner="E1",
-            lease_id=lease_id,
-            admission_id=admission["admission_id"],
+            task_contract=deepcopy(contract),
+            external_evidence_verifier=_strict_external_verifier(
+                contract["claim_payloads"]
+            ),
         )
-        assert current["status"] == "PASS"
+    _assert_no_admission_or_lease(repo)
 
-    (repo / deleted).write_bytes(original)
-    restored = filesystem_writer_lease_action(
-        action="status",
-        repo=repo,
-        task_id="S2E-LW2",
-        owner="E1",
-        lease_id=lease_id,
-        admission_id=admission["admission_id"],
+
+@pytest.mark.parametrize("dirty_kind", ["tracked", "staged", "untracked"])
+def test_lw2_admission_rejects_preexisting_protected_dirty_bytes(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+    real_lw2_contract: tuple[Path, dict[str, object]],
+    dirty_kind: str,
+) -> None:
+    source, contract = real_lw2_contract
+    repo = _clone_evidence_repo(source, tmp_path)
+    if dirty_kind == "untracked":
+        path = (
+            repo / "program_code/ml_training/"
+            "aiml_gate_receipt_s2e_preexisting.py"
+        )
+        path.write_text("dirty\n", encoding="utf-8")
+    else:
+        governed = repo / LW2_WRITABLE_PATH
+        governed.write_text(
+            governed.read_text(encoding="utf-8") + "\n# preexisting\n",
+            encoding="utf-8",
+        )
+        if dirty_kind == "staged":
+            subprocess.run(
+                ["git", "add", "--", LW2_WRITABLE_PATH], cwd=repo, check=True
+            )
+    monkeypatch.setattr(
+        task_admission_module,
+        "validate_lw2_readmission_eligibility",
+        lambda **_kwargs: None,
     )
-    assert restored["status"] == "FAIL"
-    assert restored["reasons"] == ["TASK_ADMISSION_GENERATION_MISMATCH"]
-    (repo / deleted).write_bytes(original + b"\n# mutation after admission\n")
-    mutated = filesystem_writer_lease_action(
-        action="renew",
-        repo=repo,
-        task_id="S2E-LW2",
-        owner="E1",
-        lease_id=lease_id,
-        admission_id=admission["admission_id"],
-    )
-    assert mutated["status"] == "FAIL"
-    assert mutated["reasons"] == ["TASK_ADMISSION_GENERATION_MISMATCH"]
+
+    with pytest.raises(NativeEvidenceMismatch):
+        acquire_task_admission(
+            repo=repo,
+            task_id="S2E-LW2",
+            owner="E1",
+            task_contract=deepcopy(contract),
+            external_evidence_verifier=_strict_external_verifier(
+                contract["claim_payloads"]
+            ),
+        )
+    _assert_no_admission_or_lease(repo)
 
 
 def test_lw2_task_admission_revalidates_current_head_before_store_mutation(
@@ -1614,6 +1603,52 @@ def test_lw2_task_admission_recaptures_generation_inside_store_lock(
     assert FileTaskAdmissionStore(identity.common_dir).read()["admissions"] == {}
     assert FileTaskAdmissionStore(identity.common_dir).state_path.exists() is False
     assert FileWriterLeaseStore(identity.common_dir).read()["leases"] == {}
+
+
+def test_lw2_admission_rejects_transient_stale_progress_baseline(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+    real_lw2_contract: tuple[Path, dict[str, object]],
+) -> None:
+    source, contract = real_lw2_contract
+    repo = _clone_evidence_repo(source, tmp_path)
+    governed = repo / LW2_WRITABLE_PATH
+    original = governed.read_bytes()
+    original_progress = task_admission_module.progress_snapshot
+
+    def transient_progress(**kwargs: object) -> dict:
+        governed.write_bytes(original + b"\n# transient dirty baseline\n")
+        try:
+            return original_progress(**kwargs)
+        finally:
+            governed.write_bytes(original)
+
+    monkeypatch.setattr(
+        task_admission_module,
+        "validate_lw2_readmission_eligibility",
+        lambda **_kwargs: None,
+    )
+    monkeypatch.setattr(
+        task_admission_module, "progress_snapshot", transient_progress
+    )
+    with pytest.raises(ValueError, match="does not match accepted tree"):
+        acquire_task_admission(
+            repo=repo,
+            task_id="S2E-LW2",
+            owner="E1",
+            task_contract=deepcopy(contract),
+            external_evidence_verifier=_strict_external_verifier(
+                contract["claim_payloads"]
+            ),
+        )
+
+    identity = inspect_worktree(repo)
+    admission_store = FileTaskAdmissionStore(identity.common_dir)
+    lease_store = FileWriterLeaseStore(identity.common_dir)
+    assert admission_store.read()["admissions"] == {}
+    assert admission_store.state_path.exists() is False
+    assert lease_store.read()["leases"] == {}
+    assert lease_store.state_path.exists() is False
 
 
 def test_lw2_task_admission_preserves_unavailable_locked_recapture(

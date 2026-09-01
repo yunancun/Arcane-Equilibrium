@@ -234,6 +234,12 @@ def _public_github_ref_api_url(repository_url: str, ref: str) -> str | None:
     )
 
 
+def validate_public_github_repository_ref(repository_url: str, ref: str) -> bool:
+    """Purely validate one credential-free exact public GitHub URL/ref pair."""
+
+    return _public_github_ref_api_url(repository_url, ref) is not None
+
+
 def _public_github_remote_head(
     root: Path, repository_url: str, ref: str
 ) -> str | None:
@@ -376,6 +382,262 @@ def native_origin_urls(root: Path) -> tuple[list[str], list[str]]:
     fetch_urls = values("remote.origin.url")
     push_urls = values("remote.origin.pushurl")
     return fetch_urls, push_urls or list(fetch_urls)
+
+
+def _native_publication_git_bytes(root: Path, *arguments: str) -> bytes:
+    """Return exact config-isolated Git bytes used by publication evidence."""
+
+    try:
+        return subprocess.run(
+            native_git_command(root, *arguments),
+            check=True,
+            capture_output=True,
+            env=native_git_environment(),
+            stdin=subprocess.DEVNULL,
+            timeout=20,
+        ).stdout
+    except (
+        OSError,
+        subprocess.CalledProcessError,
+        subprocess.TimeoutExpired,
+    ) as error:
+        raise NativeEvidenceUnavailable(
+            "native publication Git evidence is unavailable"
+        ) from error
+
+
+def native_commit_identity(root: Path, commit: str) -> tuple[str, list[str]]:
+    """Read one commit's unprojected tree and ordered raw parents."""
+
+    if HEAD_RE.fullmatch(commit) is None:
+        raise NativeEvidenceMismatch("native commit identity is invalid")
+    header = _native_publication_git_bytes(
+        root, "cat-file", "commit", commit
+    ).split(b"\n\n", 1)[0]
+    tree: str | None = None
+    parents: list[str] = []
+    try:
+        for line in header.splitlines():
+            if line.startswith(b"tree "):
+                if tree is not None:
+                    raise NativeEvidenceMismatch(
+                        "native commit tree is ambiguous"
+                    )
+                tree = line.removeprefix(b"tree ").decode("ascii")
+            elif line.startswith(b"parent "):
+                parents.append(line.removeprefix(b"parent ").decode("ascii"))
+    except UnicodeDecodeError as error:
+        raise NativeEvidenceMismatch(
+            "native commit headers are invalid"
+        ) from error
+    if (
+        tree is None
+        or HEAD_RE.fullmatch(tree) is None
+        or any(HEAD_RE.fullmatch(parent) is None for parent in parents)
+    ):
+        raise NativeEvidenceMismatch("native commit headers are invalid")
+    return tree, parents
+
+
+def capture_native_head_tree(root: Path) -> dict[str, str]:
+    """Capture one stable, unprojected native HEAD/tree identity."""
+
+    try:
+        first = _native_publication_git_bytes(
+            root, "rev-parse", "--verify", "HEAD"
+        ).decode("ascii", errors="strict").strip()
+        tree, _ = native_commit_identity(root, first)
+        final = _native_publication_git_bytes(
+            root, "rev-parse", "--verify", "HEAD"
+        ).decode("ascii", errors="strict").strip()
+    except UnicodeDecodeError as error:
+        raise NativeEvidenceMismatch(
+            "native HEAD identity is invalid"
+        ) from error
+    if HEAD_RE.fullmatch(first) is None or final != first:
+        raise NativeEvidenceMismatch("native HEAD changed during capture")
+    return {
+        "schema_version": "task_admission_accepted_base_v1",
+        "head": first,
+        "tree": tree,
+    }
+
+
+def _native_is_ancestor(root: Path, ancestor: str, descendant: str) -> bool:
+    pending = [descendant]
+    seen: set[str] = set()
+    while pending:
+        current = pending.pop()
+        if current == ancestor:
+            return True
+        if current in seen:
+            continue
+        if len(seen) >= 100_000:
+            raise NativeEvidenceUnavailable("native publication graph is too large")
+        seen.add(current)
+        _, parents = native_commit_identity(root, current)
+        pending.extend(parent for parent in parents if parent not in seen)
+    return False
+
+
+def capture_native_linear_commit_range(
+    root: Path,
+    accepted_head: str,
+    expected_head: str,
+) -> tuple[list[dict[str, Any]], list[dict[str, str]], list[str]]:
+    """Capture every commit/path/patch in one native linear publication range."""
+
+    if HEAD_RE.fullmatch(accepted_head) is None or HEAD_RE.fullmatch(expected_head) is None:
+        return [], [], ["NATIVE_COMMIT_RANGE_UNAVAILABLE"]
+    try:
+        if not _native_is_ancestor(root, accepted_head, expected_head):
+            return [], [], ["NATIVE_COMMIT_RANGE_BASE_NOT_ANCESTOR"]
+        reverse_records: list[tuple[dict[str, Any], dict[str, str]]] = []
+        current = expected_head
+        seen: set[str] = set()
+        while current != accepted_head:
+            if current in seen or len(seen) >= 100_000:
+                return [], [], ["NATIVE_COMMIT_RANGE_UNAVAILABLE"]
+            seen.add(current)
+            tree, parents = native_commit_identity(root, current)
+            if len(parents) != 1:
+                return [], [], [
+                    "NATIVE_COMMIT_RANGE_NONLINEAR_HISTORY"
+                    if parents else "NATIVE_COMMIT_RANGE_BASE_NOT_ANCESTOR"
+                ]
+            parent = parents[0]
+            parent_tree, _ = native_commit_identity(root, parent)
+            raw_paths = _native_publication_git_bytes(
+                root,
+                "diff-tree", "-r", "--no-commit-id", "--no-renames",
+                "--no-ext-diff", "--no-textconv", "--name-only", "-z",
+                parent_tree, tree, "--",
+            )
+            paths = sorted({
+                raw.decode("utf-8", errors="strict")
+                for raw in raw_paths.split(b"\0") if raw
+            })
+            patch = _native_publication_git_bytes(
+                root,
+                "diff-tree", "-r", "--no-commit-id", "--no-renames",
+                "--no-ext-diff", "--no-textconv", "--binary", "--full-index",
+                "-p", parent_tree, tree, "--",
+            )
+            reverse_records.append(({
+                "commit": current,
+                "parent": parent,
+                "tree": tree,
+                "paths": paths,
+            }, {
+                "commit": current,
+                "binary_patch_digest": "sha256:" + hashlib.sha256(patch).hexdigest(),
+            }))
+            current = parent
+    except (NativeEvidenceMismatch, NativeEvidenceUnavailable, UnicodeDecodeError):
+        return [], [], ["NATIVE_COMMIT_RANGE_UNAVAILABLE"]
+    if not reverse_records:
+        return [], [], ["NATIVE_COMMIT_RANGE_EMPTY"]
+    reverse_records.reverse()
+    return (
+        [record for record, _ in reverse_records],
+        [patch for _, patch in reverse_records],
+        [],
+    )
+
+
+def capture_native_task_source_manifest(
+    root: Path,
+    *,
+    accepted_head: str,
+    accepted_tree: str,
+    scope: list[str],
+) -> list[dict[str, Any]]:
+    """Derive the task-owned progress manifest from one exact native tree."""
+
+    object_tree, _ = native_commit_identity(root, accepted_head)
+    if object_tree != accepted_tree:
+        raise NativeEvidenceMismatch("accepted task baseline tree is unavailable")
+    records: list[dict[str, Any]] = []
+    seen: set[str] = set()
+    total_bytes = 0
+
+    def tree_entries(relative: str, *, recursive: bool) -> list[tuple[str, str, str, str]]:
+        arguments = ["ls-tree", "-z", "--full-tree"]
+        if recursive:
+            arguments.append("-r")
+        raw_entries = _native_publication_git_bytes(
+            root, "--literal-pathspecs", *arguments, accepted_head, "--", relative
+        ).split(b"\0")
+        parsed: list[tuple[str, str, str, str]] = []
+        try:
+            for raw in raw_entries:
+                if not raw:
+                    continue
+                metadata, raw_path = raw.split(b"\t", 1)
+                fields = metadata.split(b" ")
+                if len(fields) != 3:
+                    raise ValueError("invalid native tree metadata")
+                mode, object_type, oid = (
+                    field.decode("ascii", errors="strict") for field in fields
+                )
+                path = raw_path.decode("utf-8", errors="strict")
+                parsed.append((mode, object_type, oid, path))
+        except (UnicodeDecodeError, ValueError) as error:
+            raise NativeEvidenceMismatch(
+                "accepted task baseline tree entry is invalid"
+            ) from error
+        return parsed
+
+    def append_file(mode: str, object_type: str, oid: str, relative: str) -> None:
+        nonlocal total_bytes
+        if relative in seen:
+            return
+        if object_type != "blob" or mode not in {"100644", "100755"}:
+            raise NativeEvidenceMismatch(
+                "accepted task baseline contains a non-regular file"
+            )
+        if HEAD_RE.fullmatch(oid) is None:
+            raise NativeEvidenceMismatch("accepted task baseline blob is invalid")
+        content = _native_publication_git_bytes(root, "cat-file", "blob", oid)
+        seen.add(relative)
+        total_bytes += len(content)
+        if len(seen) > 4096 or total_bytes > 64 * 1024 * 1024:
+            raise NativeEvidenceMismatch("accepted task baseline exceeds capture limits")
+        records.append({
+            "path": relative,
+            "kind": "file",
+            "size": len(content),
+            "content_sha256": hashlib.sha256(content).hexdigest(),
+        })
+
+    if not isinstance(scope, list) or any(not isinstance(item, str) for item in scope):
+        raise NativeEvidenceMismatch("accepted task baseline scope is invalid")
+    for relative in scope:
+        path = PurePosixPath(relative)
+        if (
+            not relative
+            or relative != path.as_posix()
+            or relative.startswith(("/", "~"))
+            or ".." in path.parts
+            or path.parts[0].casefold() == ".git"
+        ):
+            raise NativeEvidenceMismatch("accepted task baseline scope is unsafe")
+        exact = tree_entries(relative, recursive=False)
+        if not exact:
+            records.append({"path": relative, "kind": "absent"})
+            continue
+        if len(exact) != 1 or exact[0][3] != relative:
+            raise NativeEvidenceMismatch("accepted task baseline path is ambiguous")
+        mode, object_type, oid, observed_path = exact[0]
+        if object_type == "tree" and mode == "040000":
+            records.append({"path": relative, "kind": "directory"})
+            for child_mode, child_type, child_oid, child_path in tree_entries(
+                relative, recursive=True
+            ):
+                append_file(child_mode, child_type, child_oid, child_path)
+        else:
+            append_file(mode, object_type, oid, observed_path)
+    return sorted(records, key=lambda record: (record["path"], record["kind"]))
 
 
 def _protected_filesystem_snapshot(
