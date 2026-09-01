@@ -293,19 +293,19 @@ def test_remote_evidence_roots_reject_sibling_prefixes() -> None:
 
 def test_ci_runs_the_cheap_development_agent_governance_gate() -> None:
     source = (ROOT / ".github/workflows/ci.yml").read_text(encoding="utf-8")
-    marker = "\n  development-agent-governance:\n"
-    assert marker in source
-    job = source.split(marker, 1)[1]
-    next_job = re.search(r"\n  [a-z0-9][a-z0-9-]*:\n", job)
-    if next_job:
-        job = job[: next_job.start()]
-
-    for required in (
-        "runs-on: ubuntu-latest",
-        "timeout-minutes: 45",
-        "python3 helper_scripts/maintenance_scripts/agent_governance.py validate",
-        "python3 helper_scripts/maintenance_scripts/agent_governance.py render --check",
-        "tests/structure/test_development_agent_governance.py",
-        "tests/structure/test_agent_governance_*.py",
-    ):
-        assert required in job
+    def _job(name: str) -> str:
+        match = re.search(rf"\n  {re.escape(name)}:\n(.*?)(?=\n  [a-z0-9][a-z0-9-]*:\n|\Z)", source, re.S)
+        assert match is not None
+        return match.group(1)
+    worker, aggregate = (_job(name) for name in ("development-agent-governance-shard", "development-agent-governance"))
+    worker_required = (
+        "name: development-agent governance shard ${{ matrix.shard }} of 8", "runs-on: ubuntu-latest", "timeout-minutes: 45", "fail-fast: false", "shard: [0, 1, 2, 3, 4, 5, 6, 7]", "agent_governance.py validate", "agent_governance.py render --check", "-p helper_scripts.ci.select_pytest_shard", "--governance-shard-index ${{ matrix.shard }}", "--governance-shard-count 8", "--governance-shard-minimum 4621",
+        "tests/structure/test_development_agent_governance.py", "tests/structure/test_agent_governance_*.py", "tests/structure/test_codex_memory_policy.py", "tests/structure/test_role_memory_compaction.py", "tests/structure/test_s2_4_w0_admission.py",
+        "tests/structure/test_aiml_s1_closure_target_host_run.py", "tests/structure/test_target_host_effect_adapter.py", "tests/structure/test_target_host_apply_orchestrator.py", "tests/structure/test_terminal_receipt_external_sink.py", "if: matrix.shard == 0",
+    )
+    aggregate_required = (
+        "name: development-agent governance (cheap static gate)", "needs: [changes, development-agent-governance-shard]", "if: always()", "timeout-minutes: 2", "GOVERNANCE_SELECTED: ${{ needs.changes.outputs.governance }}", "SHARD_RESULT: ${{ needs.development-agent-governance-shard.result }}", "set -euo pipefail", '"$GOVERNANCE_SELECTED" == "true" && "$SHARD_RESULT" == "success"', '"$GOVERNANCE_SELECTED" == "false" && "$SHARD_RESULT" == "skipped"',
+    )
+    for section, required in ((worker, worker_required), (aggregate, aggregate_required)):
+        assert all(token in section for token in required)
+    assert aggregate.count("exit 0") == 2 and aggregate.count("exit 1") == 1 and all(token not in worker + aggregate for token in ("continue-on-error", "|| true", " -k ", "--ignore", "--deselect", "--maxfail", " -x", "xdist"))
