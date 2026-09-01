@@ -93,6 +93,7 @@ def test_lw2_publication_status_static_surface_is_read_only() -> None:
 
 def test_lw2_publication_status_uses_only_native_git_graph_reads() -> None:
     source = WRITER_LEASE_PATH.read_text(encoding="utf-8")
+    capture_source = CAPTURE_PATH.read_text(encoding="utf-8")
     tree = ast.parse(source)
     functions = {node.name: node for node in tree.body if isinstance(node, ast.FunctionDef)}
     git_bytes_source = ast.get_source_segment(source, functions["_git_bytes"])
@@ -105,7 +106,7 @@ def test_lw2_publication_status_uses_only_native_git_graph_reads() -> None:
     assert native_env_source is not None and "native_git_environment" in native_env_source
     assert publication_source is not None and '"merge-base"' not in publication_source
     assert '"rev-list"' not in publication_source and "native_graph=True" in publication_source
-    assert '"cat-file"' in source
+    assert '"cat-file"' in capture_source
     assert action_source is not None and 'native_graph=action == "publication-status"' in action_source
     calls: dict[str, list[int]] = {}
     for node in ast.walk(boundary):
@@ -125,7 +126,6 @@ def test_lw2_publication_status_uses_only_native_git_graph_reads() -> None:
     pure_after_clock = {"_active_lease", "_timestamp", "any", "append", "fromkeys", "get", "isinstance", "len", "list"}
     assert all(name in pure_after_clock for name, lines in calls.items()
                if any(line > clock_line for line in lines))
-    capture_source = CAPTURE_PATH.read_text(encoding="utf-8")
     assert 'TRUSTED_GIT_EXECUTABLE = "/usr/bin/git"' in capture_source
     assert "TRUSTED_GIT_EXECUTABLE," in capture_source
     assert '"--no-replace-objects"' in capture_source

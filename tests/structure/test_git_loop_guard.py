@@ -21,6 +21,7 @@ ROOT = Path(__file__).resolve().parents[2]
 HELPERS = ROOT / "helper_scripts" / "maintenance_scripts"
 if str(HELPERS) not in sys.path:
     sys.path.insert(0, str(HELPERS))
+import agent_governance_capture as governance_capture  # noqa: E402
 from agent_governance_task_control import (  # noqa: E402
     FileWriterLeaseStore,
     acquire_writer_lease,
@@ -662,12 +663,36 @@ def test_checkpoint_rename_cannot_hide_protected_source_from_ordinary_scope(
     assert "LW2_PROTECTED_PATH_REQUIRES_LW2_ADMISSION" in packet["reasons"]
 
 
-def test_publish_and_post_push_bind_remote_branch_head(tmp_path: Path) -> None:
-    repo, _, _, lease = _fixture(tmp_path)
+def test_publish_and_post_push_bind_remote_branch_head(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    repo, origin, _, lease = _fixture(tmp_path)
     _write(repo / "owned.txt", "feature\n")
     _git(repo, "add", "owned.txt")
     _git(repo, "commit", "-q", "-m", "feature")
     head = _git(repo, "rev-parse", "HEAD")
+    public_origin = "https://github.com/example/guard-fixture.git"
+
+    def fixture_remote_head(
+        _repo: Path, repository_url: str, ref: str,
+    ) -> str | None:
+        assert repository_url == public_origin
+        completed = subprocess.run(
+            ["git", "-C", str(origin), "show-ref", "--verify", "--hash", ref],
+            check=False,
+            capture_output=True,
+            text=True,
+        )
+        return completed.stdout.strip() if completed.returncode == 0 else None
+
+    monkeypatch.setattr(
+        governance_capture,
+        "native_origin_urls",
+        lambda _repo: ([public_origin], [public_origin]),
+    )
+    monkeypatch.setattr(
+        governance_capture, "native_remote_head", fixture_remote_head
+    )
 
     publish = guard.evaluate(
         repo,

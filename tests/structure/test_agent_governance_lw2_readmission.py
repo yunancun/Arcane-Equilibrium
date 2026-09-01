@@ -2950,6 +2950,23 @@ def test_publication_status_passes_only_when_both_trusted_times_are_unexpired(
         admission_id=admission["admission_id"],
         now=lease_start,
     )
+    ordinary_path = str(contract["dirty_scope"][0])
+    ordinary_source = repo / ordinary_path
+    ordinary_source.write_text(
+        ordinary_source.read_text(encoding="utf-8")
+        + "\n# strictly unexpired publication\n",
+        encoding="utf-8",
+    )
+    subprocess.run(
+        ["git", "add", "--", ordinary_path], cwd=repo, check=True
+    )
+    subprocess.run(
+        ["git", "commit", "-q", "-m", "strictly unexpired publication"],
+        cwd=repo,
+        check=True,
+    )
+    feature_head = _git_value(repo, "HEAD")
+    feature_tree = _git_value(repo, "HEAD^{tree}")
     expires_at = datetime.fromisoformat(
         acquired["lease"]["expires_at"].replace("Z", "+00:00")
     )
@@ -2983,7 +3000,22 @@ def test_publication_status_passes_only_when_both_trusted_times_are_unexpired(
         "dirty_scope": list(contract["dirty_scope"]),
         "lw2_selected": False,
     }
-    assert "publication_status" not in publication
+    assert publication["publication_status"]["schema_version"] == (
+        "ordinary_writer_publication_status_v1"
+    )
+    assert publication["publication_status"]["accepted_base"] == (
+        admission["admission"]["accepted_base"]
+    )
+    assert publication["publication_status"]["feature"] == {
+        "head": feature_head,
+        "tree": feature_tree,
+    }
+    assert publication["publication_status"]["ordered_commits"] == [
+        feature_head
+    ]
+    assert publication["publication_status"]["touched_paths"] == [
+        ordinary_path
+    ]
     assert observed_times == expected_times
 
 
@@ -3790,6 +3822,11 @@ def test_lw2_drift_requires_release_readmit_and_fresh_lease_before_checkpoint(
         admission_id=first_admission["admission_id"],
     )["status"] == "PASS"
 
+    subprocess.run(
+        ["git", "restore", "--worktree", "--", LW2_WRITABLE_PATH],
+        cwd=repo,
+        check=True,
+    )
     subprocess.run(["git", "switch", "-q", "main"], cwd=repo, check=True)
     fresh_claim_inputs, fresh_claim_payloads = _real_claims(repo)
     fresh_routed = route_task(
@@ -3811,6 +3848,10 @@ def test_lw2_drift_requires_release_readmit_and_fresh_lease_before_checkpoint(
     )
     subprocess.run(
         ["git", "switch", "-q", "agent/lw2-readmit"], cwd=repo, check=True
+    )
+    governed_source.write_text(
+        governed_source.read_text(encoding="utf-8") + "\n# readmit lifecycle\n",
+        encoding="utf-8",
     )
     subprocess.run(
         ["git", "add", "--", LW2_WRITABLE_PATH], cwd=repo, check=True
@@ -3841,6 +3882,11 @@ def test_lw2_drift_requires_release_readmit_and_fresh_lease_before_checkpoint(
     assert out_of_scope["status"] == "FAIL"
     assert out_of_scope["reasons"] == ["DIRTY_PATH_OUTSIDE_ADMITTED_SCOPE"]
     outside.unlink()
+    subprocess.run(
+        ["git", "restore", "--worktree", "--", LW2_WRITABLE_PATH],
+        cwd=repo,
+        check=True,
+    )
     fresh_lease = filesystem_writer_lease_action(
         action="acquire",
         repo=repo,
@@ -3863,7 +3909,41 @@ def test_lw2_drift_requires_release_readmit_and_fresh_lease_before_checkpoint(
         allow_paths=[LW2_WRITABLE_PATH],
     )
     assert checkpoint["status"] == "PASS"
-    assert checkpoint["state"]["dirty_paths"] == [LW2_WRITABLE_PATH]
+    assert checkpoint["state"]["dirty_paths"] == []
+
+    governed_source.write_text(
+        governed_source.read_text(encoding="utf-8") + "\n# readmit lifecycle\n",
+        encoding="utf-8",
+    )
+    subprocess.run(
+        ["git", "add", "--", LW2_WRITABLE_PATH], cwd=repo, check=True
+    )
+    subprocess.run(
+        ["git", "commit", "-q", "-m", "readmitted LW2 feature"],
+        cwd=repo,
+        check=True,
+    )
+    feature_head = _git_value(repo, "HEAD")
+    publication = filesystem_writer_lease_action(
+        action="publication-status",
+        repo=repo,
+        task_id="S2E-LW2",
+        owner="E1",
+        lease_id=fresh_lease["lease"]["lease_id"],
+        admission_id=fresh_admission["admission_id"],
+    )
+    assert publication["status"] == "PASS"
+    assert publication["reasons"] == []
+    assert publication["publication_status"]["schema_version"] == (
+        "lw2_writer_publication_status_v1"
+    )
+    assert publication["publication_status"]["feature"]["head"] == feature_head
+    assert publication["publication_status"]["ordered_commits"] == [
+        feature_head
+    ]
+    assert publication["publication_status"]["touched_paths"] == [
+        LW2_WRITABLE_PATH
+    ]
 
 
 def test_lw2_admission_cannot_hide_rename_source_from_protected_scope(
@@ -3919,7 +3999,7 @@ def test_lw2_admission_cannot_hide_rename_source_from_protected_scope(
     contract = task_contract_projection(routed["task_facts"])
     with pytest.raises(
         NativeEvidenceMismatch,
-        match="protected allowed addition is not visible as untracked",
+        match="LW2 protected filesystem scope differs from native HEAD",
     ):
         acquire_task_admission(
             repo=repo,
