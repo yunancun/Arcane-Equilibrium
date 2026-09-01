@@ -85,7 +85,7 @@ def test_ci_workflow_classifies_paths_before_expensive_jobs() -> None:
     assert "helper_scripts/ci/classify_ci_changes.py" in classifier
 
     expected_gate = {
-        "development-agent-governance": "governance",
+        "development-agent-governance-shard": "governance",
         "alr-fit-verifier": "alr_fit_verifier",
         "rust-check-linux": "rust",
         "rust-check-macos": "rust",
@@ -108,11 +108,42 @@ def test_ci_workflow_classifies_paths_before_expensive_jobs() -> None:
     assert set(expected_gate.values()) == set(GATES)
 
 
-def test_development_agent_governance_budget_covers_the_current_suite() -> None:
-    governance = _job("development-agent-governance")
+def test_development_agent_governance_suite_is_sharded_without_filtering() -> None:
+    governance = _job("development-agent-governance-shard")
     assert "timeout-minutes: 45" in governance
+    assert "fail-fast: false" in governance
+    assert "shard: [0, 1, 2, 3, 4, 5, 6, 7]" in governance
+    assert "name: development-agent governance shard ${{ matrix.shard }} of 8" in governance
+    assert "-p helper_scripts.ci.select_pytest_shard" in governance
+    assert "--governance-shard-index ${{ matrix.shard }}" in governance
+    assert "--governance-shard-count 8" in governance
+    assert "--governance-shard-minimum 4621" in governance
     assert "tests/structure/test_codex_memory_policy.py" in governance
     assert "tests/structure/test_role_memory_compaction.py" in governance
+    for forbidden in (" -k ", "--ignore", "--deselect", "--maxfail", " -x", "xdist"):
+        assert forbidden not in governance
+
+
+def test_development_agent_governance_keeps_legacy_fail_closed_aggregate() -> None:
+    aggregate = _job("development-agent-governance")
+    assert "name: development-agent governance (cheap static gate)" in aggregate
+    assert "needs: [changes, development-agent-governance-shard]" in aggregate
+    assert "if: always()" in aggregate
+    assert "GOVERNANCE_SELECTED: ${{ needs.changes.outputs.governance }}" in aggregate
+    assert "SHARD_RESULT: ${{ needs.development-agent-governance-shard.result }}" in aggregate
+    assert '"$GOVERNANCE_SELECTED" == "true" && "$SHARD_RESULT" == "success"' in aggregate
+    assert '"$GOVERNANCE_SELECTED" == "false" && "$SHARD_RESULT" == "skipped"' in aggregate
+    assert "exit 1" in aggregate
+
+
+def test_v158_v159_contracts_run_once_on_shard_zero() -> None:
+    governance = _job("development-agent-governance-shard")
+    contract_step = _workflow_step(
+        "\n" + governance, "Run V158/V159 qualified challenger source contracts"
+    )
+    assert "if: matrix.shard == 0" in contract_step
+    assert "tests/migrations/test_v158_alr_qualified_challenger_training.py" in contract_step
+    assert "tests/migrations/test_v159_alr_durable_fit_attestation.py" in contract_step
 
 
 def test_ci_workflow_keeps_cheap_guards_unconditional() -> None:
@@ -263,5 +294,6 @@ def test_ci_workflow_runs_git_policy_tests_in_unconditional_cheap_gate() -> None
         "tests/structure/test_public_repo_security_policy.py",
         "tests/ci/test_classify_ci_changes.py",
         "tests/ci/test_github_ci_workflow_static.py",
+        "tests/ci/test_select_pytest_shard.py",
     ):
         assert path in policy
