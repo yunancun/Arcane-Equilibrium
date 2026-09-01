@@ -612,17 +612,12 @@ def test_protected_generation_fails_closed_on_ignored_filesystem_members(
 
 
 def _protected_member(repo: Path, relative: str = "protected/member.py") -> Path:
-    member = repo / relative
-    member.parent.mkdir(parents=True, exist_ok=True)
+    member = repo / relative; member.parent.mkdir(parents=True, exist_ok=True)
     member.write_text("bound\n", encoding="utf-8")
-    _git(repo, "add", relative)
-    _git(repo, "commit", "-qm", f"protected {relative}")
+    _git(repo, "add", relative); _git(repo, "commit", "-qm", f"protected {relative}")
     return member
-
 def _set_protected_policy(monkeypatch, *, paths=("tracked.txt",), prefixes=()):
-    policy = {"protected_scope_paths": list(paths), "protected_scope_prefixes": list(prefixes)}
-    monkeypatch.setattr(lw2_readmission_module, "lw2_readmission_policy", lambda *_a, **_k: policy)
-
+    monkeypatch.setattr(lw2_readmission_module, "lw2_readmission_policy", lambda *_a, **_k: {"protected_scope_paths": list(paths), "protected_scope_prefixes": list(prefixes)})
 def test_protected_filesystem_capture_has_typed_mismatch_and_unavailable_errors(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
     repo = _repo(tmp_path)
@@ -644,7 +639,6 @@ def test_protected_filesystem_capture_has_typed_mismatch_and_unavailable_errors(
     monkeypatch.setattr(capture_module.os, "scandir", unavailable)
     with pytest.raises(NativeEvidenceUnavailable):
         capture_native_protected_snapshot(repo)
-
 @pytest.mark.parametrize("unsafe_member", ["symlink-parent", "replaced-parent", "fifo"])
 def test_protected_capture_fails_closed_on_unsafe_parent_and_member_types(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch, unsafe_member: str) -> None:
@@ -679,33 +673,39 @@ def test_protected_capture_fails_closed_on_unsafe_parent_and_member_types(
     _set_protected_policy(monkeypatch, **policy)
     with pytest.raises(NativeEvidenceMismatch):
         capture_native_protected_snapshot(repo)
-
 @pytest.mark.parametrize(("surface", "mutation"), [(surface, mutation)
-    for surface in ("recursive", "prefix") for mutation in ("add", "remove", "rename")])
+    for surface in ("recursive", "prefix", "nested", "prefix-global")
+    for mutation in ("add", "remove", "rename")])
 def test_protected_capture_revalidates_directory_membership(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch, surface: str, mutation: str) -> None:
     repo = _repo(tmp_path)
-    if surface == "recursive":
-        member = _protected_member(repo)
-        prefix, rescan = "protected/", 3
-    else:
-        member = _protected_member(repo, "protected-member.py")
-        prefix, rescan = "protected-", 2
+    relative, prefixes, rescan = {
+        "recursive": ("protected/member.py", ("protected/",), 3),
+        "nested": ("protected/nested/member.py", ("protected/",), 5),
+        "prefix": ("protected-member.py", ("protected-",), 2),
+        "prefix-global": ("protected-a-member.py", ("protected-a", "protected-z"), 3),
+    }[surface]
+    member = _protected_member(repo, relative)
+    if surface == "prefix-global": _protected_member(repo, "protected-z-member.py")
+    (repo / ".gitignore").write_text("*.ignored\n", encoding="utf-8")
+    _git(repo, "add", ".gitignore"); _git(repo, "commit", "-qm", "ignore race members")
     parent = member.parent
-    _set_protected_policy(monkeypatch, prefixes=(prefix,))
+    _set_protected_policy(monkeypatch, prefixes=prefixes)
     native_scandir = capture_module.os.scandir
     calls = 0
     def racing_scandir(path):
         nonlocal calls
         calls += 1
         if calls == rescan:
+            nested = surface in {"recursive", "nested"}
+            stem = "" if nested else "protected-a-" if surface == "prefix-global" else "protected-"
             if mutation == "add":
-                added = parent / ("added.py" if surface == "recursive" else "protected-added.py")
+                added = parent / f"{stem}added.ignored"
                 added.write_text("raced\n", encoding="utf-8")
             elif mutation == "remove":
                 member.unlink()
             else:
-                renamed = parent / ("renamed.py" if surface == "recursive" else "protected-renamed.py")
+                renamed = parent / f"{stem}renamed.py"
                 member.rename(renamed)
         return native_scandir(path)
     monkeypatch.setattr(capture_module.os, "scandir", racing_scandir)

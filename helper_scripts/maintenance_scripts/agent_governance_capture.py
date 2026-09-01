@@ -390,6 +390,8 @@ def _protected_filesystem_snapshot(
     root = repo.resolve(strict=True)
     records: dict[str, dict[str, str]] = {}
     directory_identities: dict[str, tuple[int, int, int, int]] = {}
+    directory_memberships: dict[str, list[str]] = {}
+    prefix_memberships: dict[tuple[tuple[str, ...], str], list[str]] = {}
     root_descriptor: int | None = None
 
     def mode_text(metadata: os.stat_result) -> str:
@@ -547,6 +549,10 @@ def _protected_filesystem_snapshot(
                     "mode": mode_text(opened),
                 }
                 children = scan_names(descriptor)
+                if directory_memberships.setdefault(relative, children) != children:
+                    raise NativeEvidenceMismatch(
+                        "LW2 protected filesystem directory membership changed"
+                    )
                 if directory_identity(os.fstat(descriptor)) != directory_identity(opened):
                     raise NativeEvidenceMismatch(
                         "LW2 protected filesystem directory changed during scan"
@@ -637,6 +643,11 @@ def _protected_filesystem_snapshot(
             parent = directory_for_parts(parent_parts)
             try:
                 matches = scan_names(parent, name_prefix)
+                prefix_key = (parent_parts, name_prefix)
+                if prefix_memberships.setdefault(prefix_key, matches) != matches:
+                    raise NativeEvidenceMismatch(
+                        "LW2 protected filesystem prefix membership changed"
+                    )
                 if not matches:
                     raise NativeEvidenceMismatch(
                         "LW2 protected inventory prefix is empty"
@@ -653,7 +664,21 @@ def _protected_filesystem_snapshot(
                     )
             finally:
                 os.close(parent)
-        for relative, expected in list(directory_identities.items()):
+        for (parent_parts, name_prefix), expected in sorted(
+            prefix_memberships.items()
+        ):
+            descriptor = directory_for_parts(parent_parts, record=False)
+            try:
+                if scan_names(descriptor, name_prefix) != expected:
+                    raise NativeEvidenceMismatch(
+                        "LW2 protected filesystem prefix membership changed"
+                    )
+            finally:
+                os.close(descriptor)
+        identities = sorted(
+            directory_identities.items(), key=lambda item: (item[0].count("/"), item[0])
+        )
+        for relative, expected in identities:
             descriptor = directory_for_parts(
                 relative_parts(relative), record=False
             )
@@ -661,6 +686,11 @@ def _protected_filesystem_snapshot(
                 if directory_identity(os.fstat(descriptor)) != expected:
                     raise NativeEvidenceMismatch(
                         "LW2 protected filesystem parent was replaced"
+                    )
+                membership = directory_memberships.get(relative)
+                if membership is not None and scan_names(descriptor) != membership:
+                    raise NativeEvidenceMismatch(
+                        "LW2 protected filesystem directory membership changed"
                     )
             finally:
                 os.close(descriptor)
