@@ -151,6 +151,7 @@ from agent_governance_workflow_receipts import (  # noqa: E402
 )
 from agent_governance_workflow_budget import execution_admitted_caps  # noqa: E402
 from agent_governance_task_control import (  # noqa: E402
+    WRITER_LEASE_ACTIONS,
     filesystem_writer_lease_action,
     is_dispatchable,
     next_action_may_be_null,
@@ -329,7 +330,7 @@ def _build_parser() -> argparse.ArgumentParser:
     )
     writer_lease.add_argument(
         "--lease-action",
-        choices=("acquire", "status", "publication-status", "renew", "release"),
+        choices=WRITER_LEASE_ACTIONS,
         required=True,
     )
     writer_lease.add_argument("--repo", type=Path, default=Path("."))
@@ -338,6 +339,11 @@ def _build_parser() -> argparse.ArgumentParser:
     writer_lease.add_argument("--lease-id")
     writer_lease.add_argument("--admission-id")
     writer_lease.add_argument("--ttl-seconds", type=int, default=7200)
+    writer_lease.add_argument(
+        "--publication-phase", choices=("publish", "post-push")
+    )
+    writer_lease.add_argument("--publication-expected-branch")
+    writer_lease.add_argument("--publication-expected-head")
     context = subparsers.add_parser("context", help="compile a lossless adaptive context plan")
     context.add_argument("--role", required=True)
     context.add_argument(
@@ -663,6 +669,9 @@ def main(
                 lease_id=args.lease_id,
                 admission_id=args.admission_id,
                 ttl_seconds=args.ttl_seconds,
+                publication_phase=args.publication_phase,
+                publication_expected_branch=args.publication_expected_branch,
+                publication_expected_head=args.publication_expected_head,
             )
         except (OSError, TypeError, ValueError) as error:
             print(json.dumps({"status": "FAIL", "error": str(error)}, ensure_ascii=False))

@@ -53,7 +53,13 @@
       "requires_linked_feature_worktree": true,
       "default_ttl_seconds": 7200,
       "min_ttl_seconds": 60,
-      "max_ttl_seconds": 86400
+      "max_ttl_seconds": 86400,
+      "actions": ["acquire", "status", "publication-status", "renew", "release"],
+      "publication_status": {
+        "read_only": true,
+        "renews_lease": false,
+        "persists_state": false
+      }
     }
   },
   "interfaces": {

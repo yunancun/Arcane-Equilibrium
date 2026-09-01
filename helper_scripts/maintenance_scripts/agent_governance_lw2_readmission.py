@@ -313,7 +313,11 @@ def validate_lw2_contract_binding(
     registry: dict[str, Any] | None = None,
     repo: Path | None = None,
 ) -> None:
-    """Require the exact canonical contract whenever any LW2 signal selects."""
+    """Validate canonical LW2 contract/path shape without observing repository state.
+
+    ``repo`` remains accepted for public-call compatibility.  Native protected
+    generation capture is the sole repository-state authority.
+    """
 
     if not isinstance(contract, dict):
         raise ValueError("LW2 selected contract requires an object")
@@ -340,10 +344,6 @@ def validate_lw2_contract_binding(
         )
     ):
         errors.append("nonempty protected-only dirty_scope")
-    elif repo is not None and not set(dirty_scope).issubset(
-        lw2_protected_inventory(repo, registry=registry)
-    ):
-        errors.append("dirty_scope contained in current protected inventory")
     if not isinstance(contract.get("claim_inputs"), dict) or set(
         contract["claim_inputs"]
     ) != set(policy["claim_keys"]):

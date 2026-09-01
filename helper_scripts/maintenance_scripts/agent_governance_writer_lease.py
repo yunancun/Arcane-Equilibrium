@@ -1,12 +1,7 @@
-"""Exclusive linked-worktree writer leases for agent governance.
-
-This internal Adapter owns lease persistence and Git worktree identity.  It has
-no continuation or scheduling authority.
-"""
+"""Exclusive linked-worktree writer leases; no scheduling authority."""
 
 from __future__ import annotations
 
-import base64
 import fcntl
 import hashlib
 import json
@@ -20,7 +15,6 @@ from dataclasses import dataclass
 from datetime import datetime, timedelta, timezone
 from pathlib import Path
 from typing import Any, Callable, Protocol
-
 
 WRITER_LEASE_SCHEMA_VERSION = "writer_leases_v1"
 WRITER_LEASE_BINDING_SCHEMA_VERSION = "writer_lease_admission_bindings_v1"
@@ -302,9 +296,15 @@ class WorktreeIdentity:
 
 
 def _native_git_environment() -> dict[str, str]:
-    environment = os.environ.copy()
-    environment.pop("GIT_REPLACE_REF_BASE", None)
-    return environment
+    from agent_governance_capture import native_git_environment
+
+    return native_git_environment()
+
+
+def _native_git_command(repo: Path, *args: str) -> list[str]:
+    from agent_governance_capture import native_git_command
+
+    return native_git_command(repo, *args)
 
 
 def _git_text(
@@ -314,16 +314,11 @@ def _git_text(
 ) -> str | None:
     try:
         result = subprocess.run(
-            [
-                "git",
-                *(["--no-replace-objects"] if native_graph else []),
-                "-C",
-                str(repo),
-                *args,
-            ],
+            _native_git_command(repo, *args),
             check=False,
             capture_output=True,
-            env=_native_git_environment() if native_graph else None,
+            env=_native_git_environment(),
+            stdin=subprocess.DEVNULL,
             text=True,
             timeout=20,
         )
@@ -395,16 +390,11 @@ def _capture_dirty_paths(
     def nul_paths(*args: str) -> list[str]:
         try:
             completed = subprocess.run(
-                [
-                    "git",
-                    *(["--no-replace-objects"] if native_graph else []),
-                    "-C",
-                    str(repo),
-                    *args,
-                ],
+                _native_git_command(repo, *args),
                 check=True,
                 capture_output=True,
-                env=_native_git_environment() if native_graph else None,
+                env=_native_git_environment(),
+                stdin=subprocess.DEVNULL,
                 timeout=20,
             )
             return [
@@ -421,12 +411,16 @@ def _capture_dirty_paths(
             raise ValueError("writer dirty path state is unavailable") from error
 
     tracked = nul_paths(
-        "diff", "--no-renames", "--name-only", "-z", "HEAD", "--"
+        "diff", "--no-ext-diff", "--no-textconv", "--no-renames",
+        "--name-only", "-z", "HEAD", "--"
     )
     untracked = nul_paths(
         "ls-files", "--others", "--exclude-standard", "-z", "--"
     )
-    staged = nul_paths("diff", "--cached", "--name-only", "-z", "--")
+    staged = nul_paths(
+        "diff", "--no-ext-diff", "--no-textconv", "--cached",
+        "--name-only", "-z", "--"
+    )
     return sorted(set(tracked + untracked)), sorted(set(staged))
 
 
@@ -435,10 +429,11 @@ def _git_bytes(repo: Path, *args: str) -> bytes:
 
     try:
         completed = subprocess.run(
-            ["git", "--no-replace-objects", "-C", str(repo), *args],
+            _native_git_command(repo, *args),
             check=True,
             capture_output=True,
             env=_native_git_environment(),
+            stdin=subprocess.DEVNULL,
             timeout=20,
         )
     except (OSError, subprocess.CalledProcessError, subprocess.TimeoutExpired) as error:
@@ -448,6 +443,176 @@ def _git_bytes(repo: Path, *args: str) -> bytes:
 
 def _sha256_bytes(value: bytes) -> str:
     return "sha256:" + hashlib.sha256(value).hexdigest()
+
+
+def _origin_urls(repo: Path) -> tuple[list[str], list[str]]:
+    from agent_governance_capture import native_origin_urls
+    return native_origin_urls(repo)
+
+
+def _canonical_remote_head(repo: Path, repository_url: str, ref: str) -> str | None:
+    from agent_governance_capture import native_remote_head
+    return native_remote_head(repo, repository_url, ref)
+
+
+def _publication_boundary(
+    *,
+    repo: Path,
+    identity: WorktreeIdentity,
+    lease: dict[str, str],
+    record: dict[str, Any],
+    selected: bool,
+    publication_status: dict[str, Any] | None,
+    publication_native_snapshot: dict[str, Any] | None,
+    phase: str | None,
+    expected_branch: str | None,
+    expected_head: str | None,
+) -> tuple[dict[str, Any], list[str], datetime]:
+    """Finish publication while admission then writer locks remain held.
+
+    The trusted clock is deliberately the final I/O boundary.  Its return is
+    followed only by pure validation and result construction.
+    """
+
+    from agent_governance_lw2_readmission import LW2_DESTINATION_REF, LW2_REPOSITORY_URL
+    from agent_governance_capture import (
+        NativeEvidenceMismatch,
+        NativeEvidenceUnavailable,
+        capture_native_protected_snapshot,
+    )
+
+    final_phase = phase
+    source_sha = expected_head
+    branch = expected_branch
+    reasons: list[str] = []
+
+    try:
+        fetch_urls, push_urls = _origin_urls(repo)
+    except ValueError:
+        fetch_urls, push_urls = [], []
+        reasons.append("FINAL_ORIGIN_URL_UNAVAILABLE")
+    repository_url = LW2_REPOSITORY_URL if selected else (
+        fetch_urls[0] if len(fetch_urls) == 1 else ""
+    )
+    if len(fetch_urls) != 1 or len(push_urls) != 1 or fetch_urls != push_urls:
+        reasons.append("FINAL_ORIGIN_URL_MISMATCH")
+    if selected and (fetch_urls != [LW2_REPOSITORY_URL] or push_urls != [LW2_REPOSITORY_URL]):
+        reasons.append("LW2_PUBLICATION_FINAL_ORIGIN_URL_DRIFT")
+
+    local_main = _git_text(
+        repo, "rev-parse", "refs/remotes/origin/main", native_graph=True
+    )
+    canonical_main = (
+        _canonical_remote_head(repo, repository_url, LW2_DESTINATION_REF)
+        if repository_url
+        else None
+    )
+    canonical_branch = (
+        _canonical_remote_head(repo, repository_url, f"refs/heads/{branch}")
+        if repository_url and final_phase == "post-push" and branch
+        else None
+    )
+
+    try:
+        final_identity = inspect_worktree(repo, native_graph=True)
+        dirty_paths, staged_paths = _capture_dirty_paths(repo, native_graph=True)
+    except ValueError:
+        final_identity = None
+        dirty_paths, staged_paths = [], []
+        reasons.append("PUBLICATION_FINAL_FEATURE_UNAVAILABLE")
+    if final_identity is not None and (
+        final_identity.worktree != identity.worktree
+        or final_identity.common_dir != identity.common_dir
+        or final_identity.branch != branch
+        or final_identity.head != source_sha
+        or final_identity.dirty
+        or dirty_paths
+        or staged_paths
+    ):
+        reasons.append("PUBLICATION_FINAL_FEATURE_DRIFT")
+
+    if selected:
+        final_native_snapshot = None
+        try:
+            final_native_snapshot = capture_native_protected_snapshot(
+                repo, allowed_worktree_differences=record["task_contract"]["dirty_scope"]
+            )
+        except NativeEvidenceUnavailable:
+            reasons.append("LW2_PUBLICATION_FINAL_GENERATION_UNAVAILABLE")
+        except (NativeEvidenceMismatch, ValueError):
+            reasons.append("LW2_PUBLICATION_FINAL_GENERATION_MISMATCH")
+        feature = publication_status.get("feature") if isinstance(publication_status, dict) else None
+        if (
+            not isinstance(feature, dict)
+            or feature.get("head") != source_sha
+            or publication_native_snapshot is None
+            or final_native_snapshot != publication_native_snapshot
+        ):
+            reasons.append("LW2_PUBLICATION_FINAL_GENERATION_MISMATCH")
+
+    try:
+        post_generation_identity = inspect_worktree(repo, native_graph=True)
+        post_generation_dirty, post_generation_staged = _capture_dirty_paths(
+            repo, native_graph=True
+        )
+    except ValueError:
+        post_generation_identity = None
+        post_generation_dirty, post_generation_staged = [], []
+        reasons.append("PUBLICATION_FINAL_FEATURE_UNAVAILABLE")
+    if post_generation_identity is not None and (
+        post_generation_identity.worktree != identity.worktree
+        or post_generation_identity.common_dir != identity.common_dir
+        or post_generation_identity.branch != branch
+        or post_generation_identity.head != source_sha
+        or post_generation_identity.dirty
+        or post_generation_dirty
+        or post_generation_staged
+    ):
+        reasons.append("PUBLICATION_FINAL_FEATURE_DRIFT")
+
+    accepted_base = (
+        publication_status.get("accepted_base")
+        if isinstance(publication_status, dict)
+        else None
+    )
+    accepted_head = (
+        accepted_base.get("head") if isinstance(accepted_base, dict) else None
+    )
+    if local_main is None:
+        reasons.append("FINAL_LOCAL_ORIGIN_MAIN_UNAVAILABLE")
+    if canonical_main is None:
+        reasons.append("FINAL_TRUE_ORIGIN_MAIN_UNAVAILABLE")
+    expected_main_heads = [local_main]
+    if selected:
+        expected_main_heads.append(accepted_head)
+    if canonical_main is not None and any(
+        item is None or canonical_main != item for item in expected_main_heads
+    ):
+        reasons.append("FINAL_TRUE_ORIGIN_MAIN_DRIFT")
+    if final_phase == "post-push" and canonical_branch != source_sha:
+        reasons.append("REMOTE_BRANCH_HEAD_MISMATCH")
+
+    final_time = _utc_now()
+    # Pure in-memory checks only below this line.
+    if record.get("state") != "ACTIVE":
+        reasons.append("TASK_ADMISSION_TERMINAL")
+    if not _active_lease(lease, final_time):
+        reasons.append("WRITER_LEASE_EXPIRED")
+    boundary = {
+        "schema_version": "writer_publication_boundary_v1",
+        "phase": final_phase,
+        "publication_source_sha": source_sha,
+        "push_refspec": (
+            f"{source_sha}:refs/heads/{branch}"
+            if isinstance(source_sha, str) and isinstance(branch, str)
+            else None
+        ),
+        "local_origin_main": local_main,
+        "true_origin_main": canonical_main,
+        "true_remote_branch_head": canonical_branch,
+        "observed_at": _timestamp(final_time),
+    }
+    return boundary, list(dict.fromkeys(reasons)), final_time
 
 
 def _native_commit(repo: Path, commit: str) -> tuple[str, list[str]]:
@@ -571,143 +736,16 @@ def _capture_native_graph_safety(
     return native_graph, False
 
 
-def _native_protected_inventory(repo: Path) -> list[str]:
-    from agent_governance_lw2_readmission import lw2_readmission_policy
-
-    policy = lw2_readmission_policy()
-    try:
-        tracked = {
-            raw.decode("utf-8")
-            for raw in _git_bytes(repo, "ls-files", "--cached", "-z").split(b"\0")
-            if raw
-        }
-        candidates = {
-            raw.decode("utf-8")
-            for raw in _git_bytes(
-                repo,
-                "ls-files",
-                "--cached",
-                "--others",
-                "--exclude-standard",
-                "-z",
-            ).split(b"\0")
-            if raw
-        }
-    except UnicodeDecodeError as error:
-        raise ValueError("LW2 protected inventory is unavailable") from error
-    exact_paths = set(policy["protected_scope_paths"])
-    if not exact_paths.issubset(tracked):
-        raise ValueError("LW2 protected inventory is incomplete")
-    inventory = set(exact_paths)
-    for prefix in policy["protected_scope_prefixes"]:
-        matches = {path for path in candidates if path.startswith(prefix)}
-        if not matches:
-            raise ValueError("LW2 protected inventory prefix is empty")
-        inventory.update(matches)
-    for relative in inventory:
-        target = repo / relative
-        if target.is_symlink() or not target.is_file():
-            raise ValueError("LW2 protected inventory contains a non-regular file")
-    return sorted(inventory)
-
-
-def _byte_capture(value: bytes) -> dict[str, Any]:
-    return {
-        "encoding": "base64",
-        "content": base64.b64encode(value).decode("ascii"),
-        "bytes": len(value),
-        "digest": _sha256_bytes(value),
-    }
-
-
 def _capture_lw2_publication_generation(
     repo: Path,
     task_contract: dict[str, Any],
     *,
     canonical_claim_digest: Callable[[Any], str],
-) -> dict[str, Any]:
-    """Capture the exact current feature generation using only native Git reads."""
-
-    scope = _native_protected_inventory(repo)
-    dirty_scope = task_contract.get("dirty_scope")
-    if not isinstance(dirty_scope, list) or not set(dirty_scope).issubset(scope):
-        raise ValueError("LW2 publication dirty scope is outside protected inventory")
-
-    def git_generation() -> tuple[str, bytes, list[str], list[str]]:
-        head = _git_bytes(repo, "rev-parse", "HEAD").decode("ascii").strip()
-        tracked = _git_bytes(
-            repo, "diff", "--no-ext-diff", "--binary", "HEAD", "--", *scope
-        )
-        tracked_paths = sorted(
-            raw.decode("utf-8")
-            for raw in _git_bytes(
-                repo,
-                "diff",
-                "--no-ext-diff",
-                "--name-only",
-                "-z",
-                "HEAD",
-                "--",
-                *scope,
-            ).split(b"\0")
-            if raw
-        )
-        untracked_paths = sorted(
-            raw.decode("utf-8")
-            for raw in _git_bytes(
-                repo,
-                "ls-files",
-                "--others",
-                "--exclude-standard",
-                "-z",
-                "--",
-                *scope,
-            ).split(b"\0")
-            if raw
-        )
-        if not re.fullmatch(r"[0-9a-f]{40}", head):
-            raise ValueError("LW2 publication feature HEAD is invalid")
-        return head, tracked, tracked_paths, untracked_paths
-
-    try:
-        first = git_generation()
-    except UnicodeDecodeError as error:
-        raise ValueError("LW2 publication feature generation is unavailable") from error
-    source_head, tracked, tracked_paths, untracked_paths = first
-    if not set(tracked_paths + untracked_paths).issubset(scope):
-        raise ValueError("LW2 publication generation escaped protected inventory")
-    untracked: list[dict[str, Any]] = []
-    for relative in untracked_paths:
-        candidate = repo / relative
-        if candidate.is_symlink() or not candidate.is_file():
-            raise ValueError("LW2 publication untracked path is not a regular file")
-        untracked.append({"path": relative, **_byte_capture(candidate.read_bytes())})
-    repeated = git_generation()
-    if repeated != first or any(
-        (repo / item["path"]).read_bytes()
-        != base64.b64decode(item["content"])
-        for item in untracked
-    ):
-        raise ValueError("LW2 publication generation changed during capture")
-    changed_paths = sorted(set(tracked_paths) | set(untracked_paths))
-    generation_fields = {
-        "scope": scope,
-        "source_head": source_head,
-        "tracked_diff": _byte_capture(tracked),
-        "tracked_paths": tracked_paths,
-        "untracked": untracked,
-        "changed_paths": changed_paths,
-        "change_manifest_digest": canonical_claim_digest(changed_paths),
-        "untracked_manifest_digest": canonical_claim_digest(untracked),
-    }
-    source_tree, _ = _native_commit(repo, source_head)
-    return {
-        "schema_version": "task_admission_repository_generation_v1",
-        "source_head": source_head,
-        "source_tree": source_tree,
-        "scope": scope,
-        "repository_generation_digest": canonical_claim_digest(generation_fields),
-    }
+) -> tuple[dict[str, Any], dict[str, Any]]:
+    """Reuse the admission producer for the exact current feature generation."""
+    del canonical_claim_digest
+    from agent_governance_task_admission import capture_task_admission_generation_evidence
+    return capture_task_admission_generation_evidence(repo, task_contract)
 
 
 def _lw2_publication_status(
@@ -716,10 +754,14 @@ def _lw2_publication_status(
     identity: WorktreeIdentity,
     record: dict[str, Any],
     canonical_claim_digest: Callable[[Any], str],
-) -> tuple[dict[str, Any] | None, list[str]]:
+) -> tuple[dict[str, Any] | None, list[str], dict[str, Any] | None]:
     """Recapture a read-only, admission-bound LW2 publication transition."""
 
-    from agent_governance_capture import PLATFORM_OR_EXTERNAL_ATTESTED
+    from agent_governance_capture import (
+        NativeEvidenceMismatch,
+        NativeEvidenceUnavailable,
+        PLATFORM_OR_EXTERNAL_ATTESTED,
+    )
     from agent_governance_lw2_readmission import (
         LW2_DESTINATION_REF,
         LW2_REPOSITORY_URL,
@@ -736,7 +778,7 @@ def _lw2_publication_status(
         canonical_claim_digest=canonical_claim_digest,
     )
     if graph_projection_present:
-        return None, ["LW2_PUBLICATION_GRAPH_PROJECTION_PRESENT"]
+        return None, ["LW2_PUBLICATION_GRAPH_PROJECTION_PRESENT"], None
     assert native_graph is not None
 
     claim_inputs = task_contract.get("claim_inputs")
@@ -812,52 +854,32 @@ def _lw2_publication_status(
         "refs/remotes/origin/main",
         native_graph=True,
     )
-    origin_url = _git_text(
-        repo, "remote", "get-url", "origin", native_graph=True
-    )
+    try:
+        origin_fetch_urls, origin_push_urls = _origin_urls(repo)
+    except ValueError:
+        origin_fetch_urls, origin_push_urls = [], []
     try:
         accepted_object_tree, _ = _native_commit(repo, accepted_head)
     except ValueError:
         accepted_object_tree = None
     if accepted_object_tree != accepted_tree:
         reasons.append("LW2_PUBLICATION_ACCEPTED_BASE_OBJECT_MISMATCH")
-    if origin_url != LW2_REPOSITORY_URL:
-        reasons.append("LW2_PUBLICATION_ORIGIN_REMOTE_MISMATCH")
+    if origin_fetch_urls != [LW2_REPOSITORY_URL]:
+        reasons.append("LW2_PUBLICATION_ORIGIN_FETCH_URL_MISMATCH")
+    if origin_push_urls != [LW2_REPOSITORY_URL]:
+        reasons.append("LW2_PUBLICATION_ORIGIN_PUSH_URL_MISMATCH")
     if origin_main != accepted_head:
         reasons.append("LW2_PUBLICATION_ORIGIN_MAIN_DRIFT")
     if staged_paths:
         reasons.append("LW2_PUBLICATION_STAGED_CHANGES")
     if identity.dirty or dirty_paths:
         reasons.append("LW2_PUBLICATION_DIRTY_WORKTREE")
-    try:
-        current_inventory = _native_protected_inventory(repo)
-        if current_inventory != accepted["scope"]:
-            reasons.append("LW2_PUBLICATION_PROTECTED_INVENTORY_DRIFT")
-    except ValueError:
-        reasons.append("LW2_PUBLICATION_PROTECTED_INVENTORY_DRIFT")
-    try:
-        feature_generation = _capture_lw2_publication_generation(
-            repo,
-            task_contract,
-            canonical_claim_digest=canonical_claim_digest,
-        )
-    except ValueError:
-        feature_generation = None
-        reasons.append("LW2_PUBLICATION_FEATURE_GENERATION_UNAVAILABLE")
-
     feature_head = identity.head or ""
     try:
         feature_tree, _ = _native_commit(repo, feature_head)
     except ValueError:
         feature_tree = ""
         reasons.append("LW2_PUBLICATION_COMMIT_EVIDENCE_UNAVAILABLE")
-    if feature_generation is not None:
-        if (
-            feature_generation["source_head"],
-            feature_generation["source_tree"],
-        ) != (feature_head, feature_tree):
-            reasons.append("LW2_PUBLICATION_FEATURE_IDENTITY_DRIFT")
-
     commit_path_records: list[dict[str, Any]] = []
     patch_records: list[dict[str, str]] = []
     try:
@@ -890,6 +912,7 @@ def _lw2_publication_status(
             raw_paths = _git_bytes(
                 repo,
                 "diff-tree", "-r", "--no-commit-id", "--no-renames",
+                "--no-ext-diff", "--no-textconv",
                 "--name-only", "-z", parent_tree, tree, "--",
             )
             paths = sorted({
@@ -930,15 +953,6 @@ def _lw2_publication_status(
     if not set(touched_paths).issubset(task_contract["dirty_scope"]):
         reasons.append("LW2_PUBLICATION_COMMITTED_PATH_OUTSIDE_ADMITTED_SCOPE")
 
-    try:
-        final_generation = _capture_lw2_publication_generation(
-            repo,
-            task_contract,
-            canonical_claim_digest=canonical_claim_digest,
-        )
-    except ValueError:
-        final_generation = None
-        reasons.append("LW2_PUBLICATION_FINAL_RECAPTURE_UNAVAILABLE")
     final_native_graph, final_graph_projection_present = (
         _capture_native_graph_safety(
             repo=repo,
@@ -947,25 +961,46 @@ def _lw2_publication_status(
         )
     )
     if final_graph_projection_present or final_native_graph != native_graph:
-        return None, ["LW2_PUBLICATION_GRAPH_PROJECTION_PRESENT"]
+        return None, ["LW2_PUBLICATION_GRAPH_PROJECTION_PRESENT"], None
     try:
         final_identity = inspect_worktree(repo, native_graph=True)
         final_tree, _ = _native_commit(repo, final_identity.head or "")
-        final_origin_main = _git_text(
-            repo,
-            "rev-parse",
-            "refs/remotes/origin/main",
-            native_graph=True,
-        )
-        final_origin_url = _git_text(
-            repo, "remote", "get-url", "origin", native_graph=True
-        )
+    except ValueError:
+        final_identity = None
+        final_tree = None
+        reasons.append("LW2_PUBLICATION_FINAL_RECAPTURE_UNAVAILABLE")
+    final_origin_main = _git_text(
+        repo,
+        "rev-parse",
+        "refs/remotes/origin/main",
+        native_graph=True,
+    )
+    try:
+        final_origin_fetch_urls, final_origin_push_urls = _origin_urls(repo)
+    except ValueError:
+        final_origin_fetch_urls, final_origin_push_urls = [], []
+        reasons.append("LW2_PUBLICATION_FINAL_RECAPTURE_UNAVAILABLE")
+    try:
         final_dirty_paths, final_staged_paths = _capture_dirty_paths(
             repo, native_graph=True
         )
     except ValueError:
-        final_identity = None
+        final_dirty_paths, final_staged_paths = [], []
         reasons.append("LW2_PUBLICATION_FINAL_RECAPTURE_UNAVAILABLE")
+    try:
+        final_generation, final_native_snapshot = _capture_lw2_publication_generation(
+            repo,
+            task_contract,
+            canonical_claim_digest=canonical_claim_digest,
+        )
+    except NativeEvidenceUnavailable:
+        final_generation = None
+        final_native_snapshot = None
+        reasons.append("LW2_PUBLICATION_FINAL_RECAPTURE_UNAVAILABLE")
+    except (NativeEvidenceMismatch, ValueError):
+        final_generation = None
+        final_native_snapshot = None
+        reasons.append("LW2_PUBLICATION_FEATURE_GENERATION_MISMATCH")
     if final_identity is not None and (
         final_identity.worktree != identity.worktree
         or final_identity.common_dir != identity.common_dir
@@ -973,26 +1008,29 @@ def _lw2_publication_status(
         or final_identity.head != feature_head
         or final_tree != feature_tree
         or final_origin_main != origin_main
-        or final_origin_url != origin_url
         or final_identity.dirty != identity.dirty
         or final_dirty_paths != dirty_paths
         or final_staged_paths != staged_paths
     ):
         reasons.append("LW2_PUBLICATION_FINAL_RECAPTURE_DRIFT")
     if (
-        feature_generation is not None
-        and final_generation is not None
-        and (
-            final_generation["source_tree"] != feature_tree
-            or final_generation != feature_generation
-        )
+        final_origin_fetch_urls != origin_fetch_urls
+        or final_origin_push_urls != origin_push_urls
     ):
-        reasons.append("LW2_PUBLICATION_FINAL_RECAPTURE_DRIFT")
+        reasons.append("LW2_PUBLICATION_FINAL_ORIGIN_URL_DRIFT")
+    if final_generation is not None:
+        if final_generation["scope"] != accepted["scope"]:
+            reasons.append("LW2_PUBLICATION_PROTECTED_INVENTORY_DRIFT")
+        if (
+            final_generation["source_head"],
+            final_generation["source_tree"],
+        ) != (feature_head, feature_tree):
+            reasons.append("LW2_PUBLICATION_FEATURE_IDENTITY_DRIFT")
     if reasons:
-        return None, list(dict.fromkeys(reasons))
+        return None, list(dict.fromkeys(reasons)), final_native_snapshot
 
     assert isinstance(publication, dict)
-    assert feature_generation is not None
+    assert final_generation is not None
     return {
         "schema_version": "lw2_writer_publication_status_v1",
         "accepted_base": {
@@ -1004,7 +1042,7 @@ def _lw2_publication_status(
         "feature": {
             "head": feature_head,
             "tree": feature_tree,
-            "generation_digest": canonical_claim_digest(feature_generation),
+            "generation_digest": canonical_claim_digest(final_generation),
         },
         "ordered_commits": [
             item["commit"] for item in commit_path_records
@@ -1017,7 +1055,7 @@ def _lw2_publication_status(
             "native_graph_digest": canonical_claim_digest(native_graph),
             "patch_records": patch_records,
         }),
-    }, []
+    }, [], final_native_snapshot
 
 
 def _lease_result(
@@ -1471,12 +1509,24 @@ def filesystem_writer_lease_action(
     admission_id: str | None = None,
     ttl_seconds: int = DEFAULT_LEASE_TTL_SECONDS,
     now: datetime | None = None,
+    publication_phase: str | None = None,
+    publication_expected_branch: str | None = None,
+    publication_expected_head: str | None = None,
 ) -> dict[str, Any]:
     """Run one explicit production writer-lease action."""
 
-    identity = inspect_worktree(
-        repo, native_graph=action == "publication-status"
-    )
+    identity = inspect_worktree(repo, native_graph=action == "publication-status")
+    if action == "publication-status":
+        from agent_governance_capture import publication_input_reasons
+        input_reasons = publication_input_reasons(
+            publication_phase, publication_expected_branch,
+            publication_expected_head,
+        )
+        if input_reasons:
+            return _lease_result(
+                action, status="FAIL", reasons=input_reasons,
+                identity=identity, lease=None,
+            )
     store = FileWriterLeaseStore(identity.common_dir)
     from agent_governance_lw2_readmission import (  # local: avoid cycle
         canonical_claim_digest,
@@ -1486,6 +1536,10 @@ def filesystem_writer_lease_action(
     from agent_governance_task_admission import (  # local: avoid cycle
         FileTaskAdmissionStore,
         capture_task_admission_generation,
+    )
+    from agent_governance_capture import (
+        NativeEvidenceMismatch,
+        NativeEvidenceUnavailable,
     )
 
     admission_store = FileTaskAdmissionStore(identity.common_dir)
@@ -1681,9 +1735,6 @@ def filesystem_writer_lease_action(
                         dirty_paths, staged_paths = _capture_dirty_paths(
                             Path(identity.worktree)
                         )
-                        current_generation = capture_task_admission_generation(
-                            Path(identity.worktree), record["task_contract"]
-                        )
                     except ValueError:
                         result = _lease_result(
                             action, status="FAIL",
@@ -1704,6 +1755,24 @@ def filesystem_writer_lease_action(
                         result = _lease_result(
                             action, status="FAIL",
                             reasons=["DIRTY_PATH_OUTSIDE_ADMITTED_SCOPE"],
+                            identity=locked_identity, lease=None,
+                        )
+                        return lease_state, binding_state, result, False
+                    try:
+                        current_generation = capture_task_admission_generation(
+                            Path(identity.worktree), record["task_contract"]
+                        )
+                    except NativeEvidenceUnavailable:
+                        result = _lease_result(
+                            action, status="FAIL",
+                            reasons=["TASK_ADMISSION_GENERATION_UNAVAILABLE"],
+                            identity=locked_identity, lease=None,
+                        )
+                        return lease_state, binding_state, result, False
+                    except (NativeEvidenceMismatch, ValueError):
+                        result = _lease_result(
+                            action, status="FAIL",
+                            reasons=["TASK_ADMISSION_GENERATION_MISMATCH"],
                             identity=locked_identity, lease=None,
                         )
                         return lease_state, binding_state, result, False
@@ -1787,9 +1856,24 @@ def filesystem_writer_lease_action(
                     )
                     return lease_state, binding_state, result, False
                 if action != "publication-status":
-                    current_generation = capture_task_admission_generation(
-                        Path(identity.worktree), record["task_contract"]
-                    )
+                    try:
+                        current_generation = capture_task_admission_generation(
+                            Path(identity.worktree), record["task_contract"]
+                        )
+                    except NativeEvidenceUnavailable:
+                        result = _lease_result(
+                            action, status="FAIL",
+                            reasons=["TASK_ADMISSION_GENERATION_UNAVAILABLE"],
+                            identity=locked_identity, lease=None,
+                        )
+                        return lease_state, binding_state, result, False
+                    except (NativeEvidenceMismatch, ValueError):
+                        result = _lease_result(
+                            action, status="FAIL",
+                            reasons=["TASK_ADMISSION_GENERATION_MISMATCH"],
+                            identity=locked_identity, lease=None,
+                        )
+                        return lease_state, binding_state, result, False
                     if current_generation != record.get("accepted_generation"):
                         result = _lease_result(
                             action, status="FAIL",
@@ -1847,31 +1931,47 @@ def filesystem_writer_lease_action(
                     "lw2_selected": selected,
                 }
                 publication_status = None
+                publication_native_snapshot = None
+                publication_boundary = None
                 publication_reasons: list[str] = []
                 if action == "publication-status" and selected:
                     assert lease is not None
-                    publication_status, publication_reasons = (
+                    publication_status, publication_reasons, publication_native_snapshot = (
                         _lw2_publication_status(
-                            repo=Path(identity.worktree),
-                            identity=locked_identity,
-                            record=record,
-                            canonical_claim_digest=canonical_claim_digest,
+                            repo=Path(identity.worktree), identity=locked_identity,
+                            record=record, canonical_claim_digest=canonical_claim_digest,
                         )
                     )
                 if action == "publication-status":
                     assert lease is not None
-                    publication_final_time = _utc_now()
-                    if not _active_lease(lease, publication_final_time):
-                        result["status"] = "FAIL"
-                        result["reasons"] = ["WRITER_LEASE_EXPIRED"]
-                        return lease_state, binding_state, result, False
                     if publication_reasons:
                         result["status"] = "FAIL"
                         result["reasons"] = publication_reasons
                         return lease_state, binding_state, result, False
+                    publication_boundary, publication_reasons, _ = (
+                        _publication_boundary(
+                            repo=Path(identity.worktree),
+                            identity=locked_identity,
+                            lease=lease,
+                            record=record,
+                            selected=selected,
+                            publication_status=publication_status,
+                            publication_native_snapshot=publication_native_snapshot,
+                            phase=publication_phase,
+                            expected_branch=publication_expected_branch,
+                            expected_head=publication_expected_head,
+                        )
+                    )
+                    if publication_reasons:
+                        result["status"] = "FAIL"
+                        result["reasons"] = publication_reasons
+                        result["publication_boundary"] = publication_boundary
+                        return lease_state, binding_state, result, False
                 result["admission_scope"] = admission_scope
                 if publication_status is not None:
                     result["publication_status"] = publication_status
+                if publication_boundary is not None:
+                    result["publication_boundary"] = publication_boundary
                 return lease_state, binding_state, result, False
             if result["status"] != "PASS":
                 return lease_state, binding_state, result, False

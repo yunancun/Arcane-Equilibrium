@@ -23,6 +23,7 @@ from agent_governance_lw2_readmission import (  # noqa: E402
     canonical_claim_digest,
     lw2_contract_selected,
     lw2_protected_inventory,
+    validate_lw2_contract_binding,
     validate_lw2_readmission_eligibility,
 )
 from agent_governance_command_capture_v2 import (  # noqa: E402
@@ -58,11 +59,16 @@ from agent_governance_task_admission import (  # noqa: E402
     continue_admitted_task,
     release_task_admission,
 )
+from agent_governance_capture import (  # noqa: E402
+    NativeEvidenceMismatch,
+    NativeEvidenceUnavailable,
+)
 from agent_governance import main as governance_main  # noqa: E402
+import agent_governance_task_admission as task_admission_module  # noqa: E402
 from agent_governance_writer_lease import (  # noqa: E402
     FileWriterLeaseStore,
     acquire_writer_lease,
-    filesystem_writer_lease_action,
+    filesystem_writer_lease_action as _filesystem_writer_lease_action,
     inspect_worktree,
     release_writer_lease,
     renew_writer_lease,
@@ -99,6 +105,44 @@ LW2_WRITABLE_PATH = (
     "helper_scripts/maintenance_scripts/"
     "agent_governance_s2e_launch_receipts.py"
 )
+
+
+def filesystem_writer_lease_action(**arguments):
+    """Supply explicit publication coordinates in public-interface tests."""
+
+    if arguments.get("action") == "publication-status":
+        identity = inspect_worktree(arguments["repo"])
+        arguments.setdefault("publication_phase", "publish")
+        arguments.setdefault("publication_expected_branch", identity.branch)
+        arguments.setdefault("publication_expected_head", identity.head)
+    return _filesystem_writer_lease_action(**arguments)
+
+
+@pytest.fixture(autouse=True)
+def _offline_publication_remote(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Keep publication regressions source-only and network-free."""
+
+    def observed_head(repo: Path, repository_url: str, ref: str) -> str | None:
+        if repository_url != LW2_REPOSITORY_URL:
+            return None
+        remote_ref = (
+            "refs/remotes/origin/main"
+            if ref == LW2_DESTINATION_REF
+            else ref.replace("refs/heads/", "refs/remotes/origin/", 1)
+        )
+        completed = subprocess.run(
+            ["git", "--no-replace-objects", "-C", str(repo), "rev-parse", remote_ref],
+            check=False,
+            capture_output=True,
+            text=True,
+        )
+        return completed.stdout.strip() if completed.returncode == 0 else None
+
+    monkeypatch.setattr(
+        writer_lease_module, "_canonical_remote_head", observed_head
+    )
 
 
 class _StrictExternalVerifier:
@@ -1020,7 +1064,7 @@ def test_lw2_route_rejects_caller_narrowing_to_unprotected_dirty_scope(
         )
 
 
-def test_lw2_route_rejects_missing_protected_inventory_member(
+def test_lw2_route_keeps_current_inventory_out_of_contract_shape_authority(
     real_lw2_evidence: tuple[Path, dict[str, str], dict[str, object]],
 ) -> None:
     repo, claim_inputs, claim_payloads = real_lw2_evidence
@@ -1032,12 +1076,19 @@ def test_lw2_route_rejects_missing_protected_inventory_member(
     facts["scope"] = [missing]
     facts["dirty_scope"] = [missing]
 
-    with pytest.raises(ValueError, match="current protected inventory"):
-        route_task(
-            facts,
-            repo=repo,
-            external_evidence_verifier=_strict_external_verifier(claim_payloads),
-        )
+    routed = route_task(
+        facts,
+        repo=repo,
+        external_evidence_verifier=_strict_external_verifier(claim_payloads),
+    )
+    contract = task_contract_projection(routed["task_facts"])
+
+    assert contract["dirty_scope"] == [missing]
+    validate_lw2_contract_binding(
+        contract,
+        task_id="S2E-LW2",
+        repo=repo,
+    )
 
 
 @pytest.mark.parametrize(
@@ -1369,6 +1420,103 @@ def _assert_no_admission_or_lease(repo: Path) -> None:
     assert lease_store.state_path.exists() is False
 
 
+@pytest.mark.parametrize(
+    "deleted",
+    [
+        (
+            "helper_scripts/maintenance_scripts/"
+            "agent_governance_s2e_launch_receipts.py"
+        ),
+        (
+            "helper_scripts/maintenance_scripts/"
+            "agent_governance_s2_5_attestation.py"
+        ),
+    ],
+    ids=["exact", "prefix"],
+)
+def test_lw2_public_admission_and_writer_lifecycle_accept_owned_tracked_deletion(
+    tmp_path: Path,
+    real_lw2_contract: tuple[Path, dict[str, object]],
+    deleted: str,
+) -> None:
+    source, _ = real_lw2_contract
+    repo = _linked_main_evidence_repo(source, tmp_path)
+    original = (repo / deleted).read_bytes()
+    (repo / deleted).unlink()
+    claim_inputs, claim_payloads = _real_claims(repo)
+    routed = route_task(
+        _route_facts(
+            repo,
+            claim_inputs,
+            claim_payloads,
+            dirty_scope=[deleted],
+        ),
+        repo=repo,
+        external_evidence_verifier=_strict_external_verifier(claim_payloads),
+    )
+    owned_contract = task_contract_projection(routed["task_facts"])
+
+    admission = acquire_task_admission(
+        repo=repo,
+        task_id="S2E-LW2",
+        owner="E1",
+        task_contract=owned_contract,
+        external_evidence_verifier=_strict_external_verifier(
+            owned_contract["claim_payloads"]
+        ),
+    )
+
+    assert admission["status"] == "PASS"
+    assert deleted in admission["admission"]["accepted_generation"]["scope"]
+    subprocess.run(
+        ["git", "switch", "-q", "-c", f"agent/lw2-{deleted.rsplit('/', 1)[-1]}"],
+        cwd=repo,
+        check=True,
+    )
+    acquired = filesystem_writer_lease_action(
+        action="acquire",
+        repo=repo,
+        task_id="S2E-LW2",
+        owner="E1",
+        admission_id=admission["admission_id"],
+    )
+    assert acquired["status"] == "PASS"
+    lease_id = acquired["lease"]["lease_id"]
+    for action in ("status", "renew"):
+        current = filesystem_writer_lease_action(
+            action=action,
+            repo=repo,
+            task_id="S2E-LW2",
+            owner="E1",
+            lease_id=lease_id,
+            admission_id=admission["admission_id"],
+        )
+        assert current["status"] == "PASS"
+
+    (repo / deleted).write_bytes(original)
+    restored = filesystem_writer_lease_action(
+        action="status",
+        repo=repo,
+        task_id="S2E-LW2",
+        owner="E1",
+        lease_id=lease_id,
+        admission_id=admission["admission_id"],
+    )
+    assert restored["status"] == "FAIL"
+    assert restored["reasons"] == ["TASK_ADMISSION_GENERATION_MISMATCH"]
+    (repo / deleted).write_bytes(original + b"\n# mutation after admission\n")
+    mutated = filesystem_writer_lease_action(
+        action="renew",
+        repo=repo,
+        task_id="S2E-LW2",
+        owner="E1",
+        lease_id=lease_id,
+        admission_id=admission["admission_id"],
+    )
+    assert mutated["status"] == "FAIL"
+    assert mutated["reasons"] == ["TASK_ADMISSION_GENERATION_MISMATCH"]
+
+
 def test_lw2_task_admission_revalidates_current_head_before_store_mutation(
     tmp_path: Path,
     real_lw2_contract: tuple[Path, dict[str, object]],
@@ -1467,6 +1615,51 @@ def test_lw2_task_admission_recaptures_generation_inside_store_lock(
     assert FileWriterLeaseStore(identity.common_dir).read()["leases"] == {}
 
 
+def test_lw2_task_admission_preserves_unavailable_locked_recapture(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+    real_lw2_contract: tuple[Path, dict[str, object]],
+) -> None:
+    source, contract = real_lw2_contract
+    repo = _clone_evidence_repo(source, tmp_path)
+    native_capture = task_admission_module.capture_task_admission_generation
+    capture_count = 0
+
+    def unavailable_after_initial_capture(*args, **kwargs):
+        nonlocal capture_count
+        capture_count += 1
+        if capture_count == 1:
+            return native_capture(*args, **kwargs)
+        raise NativeEvidenceUnavailable("injected locked native recapture")
+
+    monkeypatch.setattr(
+        task_admission_module,
+        "capture_task_admission_generation",
+        unavailable_after_initial_capture,
+    )
+    with pytest.raises(
+        NativeEvidenceUnavailable,
+        match=(
+            "LW2 repository generation unavailable after replay before "
+            "admission store"
+        ),
+    ):
+        acquire_task_admission(
+            repo=repo,
+            task_id="S2E-LW2",
+            owner="E1",
+            task_contract=deepcopy(contract),
+            external_evidence_verifier=_strict_external_verifier(
+                contract["claim_payloads"]
+            ),
+        )
+
+    assert capture_count == 2
+    store = FileTaskAdmissionStore(inspect_worktree(repo).common_dir)
+    assert store.read()["admissions"] == {}
+    assert store.state_path.exists() is False
+
+
 def test_lw2_route_cli_returns_typed_failure_without_a_dag(
     capsys: pytest.CaptureFixture[str],
     real_lw2_evidence: tuple[Path, dict[str, str], dict[str, object]],
@@ -1557,6 +1750,74 @@ def test_lw2_continuation_revalidates_generation_before_advancing(
 
     assert continued["status"] == "FAIL"
     assert continued["reasons"] == ["TASK_ADMISSION_GENERATION_MISMATCH"]
+    record = next(iter(
+        FileTaskAdmissionStore(inspect_worktree(repo).common_dir)
+        .read()["admissions"].values()
+    ))
+    assert record["state"] == "ACTIVE"
+    assert record["last_snapshot"]["round"] == 0
+
+
+@pytest.mark.parametrize(
+    ("error_type", "expected_reason"),
+    [
+        (NativeEvidenceUnavailable, "TASK_ADMISSION_GENERATION_UNAVAILABLE"),
+        (NativeEvidenceMismatch, "TASK_ADMISSION_GENERATION_MISMATCH"),
+    ],
+    ids=["unavailable", "mismatch"],
+)
+def test_lw2_continuation_preserves_native_generation_failure_taxonomy(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+    capsys: pytest.CaptureFixture[str],
+    real_lw2_contract: tuple[Path, dict[str, object]],
+    error_type: type[ValueError],
+    expected_reason: str,
+) -> None:
+    source, contract = real_lw2_contract
+    repo = _clone_evidence_repo(source, tmp_path)
+    admission = acquire_task_admission(
+        repo=repo,
+        task_id="S2E-LW2",
+        owner="E1",
+        task_contract=deepcopy(contract),
+        external_evidence_verifier=_strict_external_verifier(
+            contract["claim_payloads"]
+        ),
+    )
+
+    def fail_generation(*_args, **_kwargs):
+        raise error_type("injected native generation observation")
+
+    monkeypatch.setattr(
+        task_admission_module,
+        "capture_task_admission_generation",
+        fail_generation,
+    )
+    direct = continue_admitted_task(
+        repo=repo,
+        task_id="S2E-LW2",
+        owner="E1",
+        admission_id=admission["admission_id"],
+        work_status="ACTIVE",
+    )
+    assert direct["status"] == "FAIL"
+    assert direct["reasons"] == [expected_reason]
+
+    exit_code = governance_main([
+        "continuation",
+        json.dumps({
+            "repo": str(repo),
+            "task_id": "S2E-LW2",
+            "owner": "E1",
+            "admission_id": admission["admission_id"],
+            "work_status": "ACTIVE",
+        }),
+    ])
+    cli = json.loads(capsys.readouterr().out)
+    assert exit_code == 2
+    assert cli["status"] == "FAIL"
+    assert cli["reasons"] == [expected_reason]
     record = next(iter(
         FileTaskAdmissionStore(inspect_worktree(repo).common_dir)
         .read()["admissions"].values()
@@ -1922,6 +2183,12 @@ def test_lw2_publication_status_authorizes_only_the_admitted_clean_feature_commi
     assert publication["publication_status"]["feature"]["head"] == _git_value(
         repo, "HEAD"
     )
+    assert publication["publication_boundary"]["publication_source_sha"] == (
+        _git_value(repo, "HEAD")
+    )
+    assert publication["publication_boundary"]["push_refspec"] == (
+        f"{_git_value(repo, 'HEAD')}:refs/heads/agent/lw2-publication"
+    )
     assert publication["publication_status"]["ordered_commits"] == [
         _git_value(repo, "HEAD")
     ]
@@ -1986,6 +2253,419 @@ def test_lw2_publication_status_authorizes_only_the_admitted_clean_feature_commi
     }
 
 
+@pytest.mark.parametrize("authority_race", ["admission-terminalize", "lease-release"])
+def test_publication_final_observation_holds_both_authority_locks(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+    real_lw2_contract: tuple[Path, dict[str, object]],
+    authority_race: str,
+) -> None:
+    source, contract = real_lw2_contract
+    repo, admission, acquired = _admitted_lw2_publication_feature(
+        source=source,
+        contract=contract,
+        tmp_path=tmp_path,
+        branch=f"agent/lw2-publication-{authority_race}",
+        marker=f"admitted {authority_race} boundary",
+    )
+    identity = inspect_worktree(repo)
+    lock_path = (
+        FileTaskAdmissionStore(identity.common_dir).lock_path
+        if authority_race == "admission-terminalize"
+        else FileWriterLeaseStore(identity.common_dir).lock_path
+    )
+    base = _git_value(repo, "refs/remotes/origin/main")
+    feature = _git_value(repo, "HEAD")
+    observed_locked = False
+
+    def locked_remote_head(_repo: Path, _url: str, ref: str) -> str | None:
+        nonlocal observed_locked
+        probe = subprocess.run(
+            [
+                sys.executable,
+                "-c",
+                (
+                    "import fcntl,sys; f=open(sys.argv[1], 'a+'); "
+                    "\ntry: fcntl.flock(f.fileno(), fcntl.LOCK_EX|fcntl.LOCK_NB)"
+                    "\nexcept BlockingIOError: raise SystemExit(73)"
+                    "\nraise SystemExit(0)"
+                ),
+                str(lock_path),
+            ],
+            check=False,
+        )
+        assert probe.returncode == 73
+        observed_locked = True
+        return base if ref == LW2_DESTINATION_REF else feature
+
+    monkeypatch.setattr(
+        writer_lease_module, "_canonical_remote_head", locked_remote_head
+    )
+    publication = filesystem_writer_lease_action(
+        action="publication-status",
+        repo=repo,
+        task_id="S2E-LW2",
+        owner="E1",
+        lease_id=acquired["lease"]["lease_id"],
+        admission_id=admission["admission_id"],
+        publication_phase="publish",
+        publication_expected_branch=identity.branch,
+        publication_expected_head=feature,
+    )
+
+    assert publication["status"] == "PASS"
+    assert observed_locked is True
+
+
+@pytest.mark.parametrize("feature_race", ["head", "worktree"])
+def test_publication_finalization_rejects_feature_mutation_after_status_capture(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+    real_lw2_contract: tuple[Path, dict[str, object]],
+    feature_race: str,
+) -> None:
+    source, contract = real_lw2_contract
+    repo, admission, acquired = _admitted_lw2_publication_feature(
+        source=source,
+        contract=contract,
+        tmp_path=tmp_path,
+        branch=f"agent/lw2-publication-final-{feature_race}-race",
+        marker=f"admitted final {feature_race} race",
+    )
+    expected_head = _git_value(repo, "HEAD")
+    base = _git_value(repo, "refs/remotes/origin/main")
+    mutated = False
+
+    def racing_remote_head(_repo: Path, _url: str, ref: str) -> str | None:
+        nonlocal mutated
+        if not mutated:
+            mutated = True
+            if feature_race == "head":
+                subprocess.run(
+                    ["git", "commit", "-q", "--allow-empty", "-m", "race head"],
+                    cwd=repo,
+                    check=True,
+                )
+            else:
+                governed = repo / LW2_WRITABLE_PATH
+                governed.write_text(
+                    governed.read_text(encoding="utf-8") + "\n# race bytes\n",
+                    encoding="utf-8",
+                )
+        return base if ref == LW2_DESTINATION_REF else expected_head
+
+    monkeypatch.setattr(
+        writer_lease_module, "_canonical_remote_head", racing_remote_head
+    )
+    publication = filesystem_writer_lease_action(
+        action="publication-status",
+        repo=repo,
+        task_id="S2E-LW2",
+        owner="E1",
+        lease_id=acquired["lease"]["lease_id"],
+        admission_id=admission["admission_id"],
+        publication_phase="publish",
+        publication_expected_branch=inspect_worktree(repo).branch,
+        publication_expected_head=expected_head,
+    )
+
+    assert publication["status"] == "FAIL"
+    assert "PUBLICATION_FINAL_FEATURE_DRIFT" in publication["reasons"]
+    assert "publication_status" not in publication
+
+
+def test_lw2_publication_status_rejects_origin_pushurl_redirection(
+    tmp_path: Path,
+    real_lw2_contract: tuple[Path, dict[str, object]],
+) -> None:
+    source, contract = real_lw2_contract
+    repo, admission, acquired = _admitted_lw2_publication_feature(
+        source=source,
+        contract=contract,
+        tmp_path=tmp_path,
+        branch="agent/lw2-publication-pushurl",
+        marker="admitted pushurl feature",
+    )
+    subprocess.run(
+        [
+            "git", "config", "--add", "remote.origin.pushurl",
+            "https://example.invalid/redirect.git",
+        ],
+        cwd=repo,
+        check=True,
+    )
+
+    publication = filesystem_writer_lease_action(
+        action="publication-status",
+        repo=repo,
+        task_id="S2E-LW2",
+        owner="E1",
+        lease_id=acquired["lease"]["lease_id"],
+        admission_id=admission["admission_id"],
+    )
+
+    assert publication["status"] == "FAIL"
+    assert publication["reasons"] == [
+        "LW2_PUBLICATION_ORIGIN_PUSH_URL_MISMATCH"
+    ]
+
+
+@pytest.mark.parametrize(
+    ("config_key", "expected_reason"),
+    [
+        ("remote.origin.url", "LW2_PUBLICATION_ORIGIN_FETCH_URL_MISMATCH"),
+        ("remote.origin.pushurl", "LW2_PUBLICATION_ORIGIN_PUSH_URL_MISMATCH"),
+    ],
+)
+def test_lw2_publication_status_rejects_duplicate_origin_urls(
+    tmp_path: Path,
+    real_lw2_contract: tuple[Path, dict[str, object]],
+    config_key: str,
+    expected_reason: str,
+) -> None:
+    source, contract = real_lw2_contract
+    repo, admission, acquired = _admitted_lw2_publication_feature(
+        source=source,
+        contract=contract,
+        tmp_path=tmp_path,
+        branch=f"agent/lw2-publication-{config_key.rsplit('.', 1)[-1]}",
+        marker=f"admitted duplicate {config_key} feature",
+    )
+    for _ in range(2 if config_key.endswith("pushurl") else 1):
+        subprocess.run(
+            ["git", "config", "--add", config_key, LW2_REPOSITORY_URL],
+            cwd=repo,
+            check=True,
+        )
+
+    publication = filesystem_writer_lease_action(
+        action="publication-status",
+        repo=repo,
+        task_id="S2E-LW2",
+        owner="E1",
+        lease_id=acquired["lease"]["lease_id"],
+        admission_id=admission["admission_id"],
+    )
+
+    assert publication["status"] == "FAIL"
+    assert expected_reason in publication["reasons"]
+
+
+def test_lw2_publication_status_rejects_final_origin_url_race(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+    real_lw2_contract: tuple[Path, dict[str, object]],
+) -> None:
+    source, contract = real_lw2_contract
+    repo, admission, acquired = _admitted_lw2_publication_feature(
+        source=source,
+        contract=contract,
+        tmp_path=tmp_path,
+        branch="agent/lw2-publication-url-race",
+        marker="admitted URL race feature",
+    )
+    original = writer_lease_module._origin_urls
+    calls = 0
+
+    def change_after_initial(repository: Path) -> tuple[list[str], list[str]]:
+        nonlocal calls
+        urls = original(repository)
+        calls += 1
+        if calls == 1:
+            subprocess.run(
+                [
+                    "git", "config", "remote.origin.pushurl",
+                    "https://example.invalid/raced.git",
+                ],
+                cwd=repository,
+                check=True,
+            )
+        return urls
+
+    monkeypatch.setattr(writer_lease_module, "_origin_urls", change_after_initial)
+    publication = filesystem_writer_lease_action(
+        action="publication-status",
+        repo=repo,
+        task_id="S2E-LW2",
+        owner="E1",
+        lease_id=acquired["lease"]["lease_id"],
+        admission_id=admission["admission_id"],
+    )
+
+    assert publication["status"] == "FAIL"
+    assert publication["reasons"] == [
+        "LW2_PUBLICATION_FINAL_ORIGIN_URL_DRIFT"
+    ]
+
+
+def test_lw2_publication_status_rejects_final_local_main_race(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+    real_lw2_contract: tuple[Path, dict[str, object]],
+) -> None:
+    source, contract = real_lw2_contract
+    repo, admission, acquired = _admitted_lw2_publication_feature(
+        source=source,
+        contract=contract,
+        tmp_path=tmp_path,
+        branch="agent/lw2-publication-local-main-race",
+        marker="admitted local main race feature",
+    )
+    feature_head = _git_output(repo, "rev-parse", "HEAD")
+    original = writer_lease_module._capture_native_graph_safety
+    calls = 0
+
+    def change_before_final_local_main(**kwargs):
+        nonlocal calls
+        graph = original(**kwargs)
+        calls += 1
+        if calls == 2:
+            subprocess.run(
+                [
+                    "git", "update-ref", "refs/remotes/origin/main",
+                    feature_head,
+                ],
+                cwd=repo,
+                check=True,
+            )
+        return graph
+
+    monkeypatch.setattr(
+        writer_lease_module,
+        "_capture_native_graph_safety",
+        change_before_final_local_main,
+    )
+    publication = filesystem_writer_lease_action(
+        action="publication-status",
+        repo=repo,
+        task_id="S2E-LW2",
+        owner="E1",
+        lease_id=acquired["lease"]["lease_id"],
+        admission_id=admission["admission_id"],
+    )
+
+    assert publication["status"] == "FAIL"
+    assert publication["reasons"] == [
+        "LW2_PUBLICATION_FINAL_RECAPTURE_DRIFT"
+    ]
+
+
+def test_lw2_admission_and_publication_never_execute_configured_textconv(
+    tmp_path: Path,
+    real_lw2_contract: tuple[Path, dict[str, object]],
+) -> None:
+    source, contract = real_lw2_contract
+    repo = _linked_main_evidence_repo(source, tmp_path)
+    sentinel = tmp_path / "writer-textconv-executed"
+    attributes = Path(_git_output(repo, "rev-parse", "--git-path", "info/attributes"))
+    if not attributes.is_absolute():
+        attributes = repo / attributes
+    attributes.parent.mkdir(parents=True, exist_ok=True)
+    attributes.write_text(
+        f"{LW2_WRITABLE_PATH} diff=sentinel\n", encoding="utf-8"
+    )
+    subprocess.run(
+        ["git", "config", "diff.sentinel.textconv", f"touch {sentinel}"],
+        cwd=repo,
+        check=True,
+    )
+    admission = acquire_task_admission(
+        repo=repo,
+        task_id="S2E-LW2",
+        owner="E1",
+        task_contract=deepcopy(contract),
+        external_evidence_verifier=_strict_external_verifier(
+            contract["claim_payloads"]
+        ),
+    )
+    assert not sentinel.exists()
+    subprocess.run(
+        ["git", "switch", "-q", "-c", "agent/lw2-publication-textconv"],
+        cwd=repo,
+        check=True,
+    )
+    acquired = filesystem_writer_lease_action(
+        action="acquire",
+        repo=repo,
+        task_id="S2E-LW2",
+        owner="E1",
+        admission_id=admission["admission_id"],
+    )
+    governed_source = repo / LW2_WRITABLE_PATH
+    governed_source.write_text(
+        governed_source.read_text(encoding="utf-8")
+        + "\n# admitted textconv feature\n",
+        encoding="utf-8",
+    )
+    subprocess.run(
+        ["git", "add", "--", LW2_WRITABLE_PATH], cwd=repo, check=True
+    )
+    subprocess.run(
+        ["git", "commit", "-q", "-m", "admitted textconv feature"],
+        cwd=repo,
+        check=True,
+    )
+    governed_source.write_text(
+        governed_source.read_text(encoding="utf-8") + "\n# dirty evidence\n",
+        encoding="utf-8",
+    )
+
+    publication = filesystem_writer_lease_action(
+        action="publication-status",
+        repo=repo,
+        task_id="S2E-LW2",
+        owner="E1",
+        lease_id=acquired["lease"]["lease_id"],
+        admission_id=admission["admission_id"],
+    )
+
+    assert publication["status"] == "FAIL"
+    assert not sentinel.exists()
+
+
+@pytest.mark.parametrize("index_flag", ["--assume-unchanged", "--skip-worktree"])
+def test_lw2_publication_status_rejects_hidden_protected_bytes(
+    tmp_path: Path,
+    real_lw2_contract: tuple[Path, dict[str, object]],
+    index_flag: str,
+) -> None:
+    source, contract = real_lw2_contract
+    repo, admission, acquired = _admitted_lw2_publication_feature(
+        source=source,
+        contract=contract,
+        tmp_path=tmp_path,
+        branch=f"agent/lw2-publication-{index_flag.removeprefix('--')}",
+        marker=f"admitted {index_flag} feature",
+    )
+    subprocess.run(
+        ["git", "update-index", index_flag, "--", LW2_WRITABLE_PATH],
+        cwd=repo,
+        check=True,
+    )
+    governed_source = repo / LW2_WRITABLE_PATH
+    governed_source.write_text(
+        governed_source.read_text(encoding="utf-8")
+        + "\n# hidden protected mutation\n",
+        encoding="utf-8",
+    )
+    assert _git_output(repo, "status", "--porcelain=v1") == ""
+
+    publication = filesystem_writer_lease_action(
+        action="publication-status",
+        repo=repo,
+        task_id="S2E-LW2",
+        owner="E1",
+        lease_id=acquired["lease"]["lease_id"],
+        admission_id=admission["admission_id"],
+    )
+
+    assert publication["status"] == "FAIL"
+    assert "LW2_PUBLICATION_FEATURE_GENERATION_MISMATCH" in publication[
+        "reasons"
+    ]
+    assert not any("UNAVAILABLE" in reason for reason in publication["reasons"])
+
+
 def test_lw2_publication_status_final_recapture_rejects_generation_capture_race(
     tmp_path: Path,
     monkeypatch: pytest.MonkeyPatch,
@@ -2045,7 +2725,15 @@ def test_lw2_publication_status_final_recapture_rejects_generation_capture_race(
             canonical_claim_digest=canonical_claim_digest,
         )
         calls += 1
-        if calls == 2:
+        if calls == 1:
+            subprocess.run(
+                [
+                    "git", "update-index", "--assume-unchanged", "--",
+                    LW2_WRITABLE_PATH,
+                ],
+                cwd=repository,
+                check=True,
+            )
             governed_source.write_text(
                 governed_source.read_text(encoding="utf-8")
                 + "\n# raced after generation capture\n",
@@ -2068,7 +2756,10 @@ def test_lw2_publication_status_final_recapture_rejects_generation_capture_race(
     )
 
     assert publication["status"] == "FAIL"
-    assert publication["reasons"] == ["LW2_PUBLICATION_FINAL_RECAPTURE_DRIFT"]
+    assert publication["reasons"] == [
+        "LW2_PUBLICATION_FINAL_GENERATION_MISMATCH"
+    ]
+    assert calls == 1
 
 
 def test_lw2_publication_status_rejects_expiry_during_evidence_evaluation(
@@ -2560,7 +3251,7 @@ def test_git_loop_guard_uses_publication_status_only_for_publish_phases(
     monkeypatch.setattr(
         git_guard,
         "_true_remote_head",
-        lambda _repo, ref: base_head
+        lambda _repo, ref, remote="origin": base_head
         if ref == "refs/heads/main"
         else feature_head,
     )
@@ -2658,12 +3349,16 @@ def test_git_loop_guard_uses_publication_status_only_for_publish_phases(
 @pytest.mark.parametrize(
     ("mutation", "expected_reasons"),
     [
-        ("tracked", ["LW2_PUBLICATION_DIRTY_WORKTREE"]),
+        (
+            "tracked",
+            ["LW2_PUBLICATION_DIRTY_WORKTREE"],
+        ),
         (
             "staged",
             [
                 "LW2_PUBLICATION_STAGED_CHANGES",
                 "LW2_PUBLICATION_DIRTY_WORKTREE",
+                "LW2_PUBLICATION_FEATURE_GENERATION_MISMATCH",
             ],
         ),
         ("untracked", ["LW2_PUBLICATION_DIRTY_WORKTREE"]),
@@ -2713,19 +3408,25 @@ def test_lw2_publication_status_rejects_any_uncommitted_feature_bytes(
 
 
 @pytest.mark.parametrize(
-    ("topology", "required_reason"),
+    ("topology", "required_reasons"),
     [
-        ("origin-remote", "LW2_PUBLICATION_ORIGIN_REMOTE_MISMATCH"),
-        ("origin-drift", "LW2_PUBLICATION_ORIGIN_MAIN_DRIFT"),
-        ("sibling", "LW2_PUBLICATION_BASE_NOT_ANCESTOR"),
-        ("merge", "LW2_PUBLICATION_NONLINEAR_HISTORY"),
+        (
+            "origin-remote",
+            [
+                "LW2_PUBLICATION_ORIGIN_FETCH_URL_MISMATCH",
+                "LW2_PUBLICATION_ORIGIN_PUSH_URL_MISMATCH",
+            ],
+        ),
+        ("origin-drift", ["LW2_PUBLICATION_ORIGIN_MAIN_DRIFT"]),
+        ("sibling", ["LW2_PUBLICATION_BASE_NOT_ANCESTOR"]),
+        ("merge", ["LW2_PUBLICATION_NONLINEAR_HISTORY"]),
     ],
 )
 def test_lw2_publication_status_rejects_base_or_linear_history_drift(
     tmp_path: Path,
     real_lw2_contract: tuple[Path, dict[str, object]],
     topology: str,
-    required_reason: str,
+    required_reasons: list[str],
 ) -> None:
     source, contract = real_lw2_contract
     branch = f"agent/lw2-publication-{topology}"
@@ -2803,7 +3504,7 @@ def test_lw2_publication_status_rejects_base_or_linear_history_drift(
     )
 
     assert publication["status"] == "FAIL"
-    assert required_reason in publication["reasons"]
+    assert set(required_reasons).issubset(publication["reasons"])
 
 
 @pytest.mark.parametrize("escape", ["commit", "commit-then-revert", "rename"])
@@ -2866,9 +3567,10 @@ def test_lw2_publication_status_checks_every_commit_path_without_renames(
         in publication["reasons"]
     )
     if escape == "rename":
-        assert "LW2_PUBLICATION_PROTECTED_INVENTORY_DRIFT" in publication[
+        assert "LW2_PUBLICATION_FEATURE_GENERATION_MISMATCH" in publication[
             "reasons"
         ]
+        assert not any("UNAVAILABLE" in reason for reason in publication["reasons"])
 
 
 def test_lw2_publication_status_requires_exact_unexpired_fencing_tuple(
@@ -3129,7 +3831,7 @@ def test_lw2_drift_requires_release_readmit_and_fresh_lease_before_checkpoint(
     assert checkpoint["state"]["dirty_paths"] == [LW2_WRITABLE_PATH]
 
 
-def test_lw2_dirty_acquire_cannot_hide_rename_source_from_admitted_scope(
+def test_lw2_admission_cannot_hide_rename_source_from_protected_scope(
     tmp_path: Path,
     real_lw2_contract: tuple[Path, dict[str, object]],
 ) -> None:
@@ -3180,31 +3882,19 @@ def test_lw2_dirty_acquire_cannot_hide_rename_source_from_admitted_scope(
         external_evidence_verifier=_strict_external_verifier(claim_payloads),
     )
     contract = task_contract_projection(routed["task_facts"])
-    admission = acquire_task_admission(
-        repo=repo,
-        task_id="S2E-LW2",
-        owner="E1",
-        task_contract=contract,
-        external_evidence_verifier=_strict_external_verifier(
-            contract["claim_payloads"]
-        ),
-    )
-    subprocess.run(
-        ["git", "switch", "-q", "-c", "agent/lw2-rename"],
-        cwd=repo,
-        check=True,
-    )
-
-    acquired = filesystem_writer_lease_action(
-        action="acquire",
-        repo=repo,
-        task_id="S2E-LW2",
-        owner="E1",
-        admission_id=admission["admission_id"],
-    )
-
-    assert acquired["status"] == "FAIL"
-    assert acquired["reasons"] == ["DIRTY_PATH_OUTSIDE_ADMITTED_SCOPE"]
+    with pytest.raises(
+        NativeEvidenceMismatch,
+        match="protected allowed addition is not visible as untracked",
+    ):
+        acquire_task_admission(
+            repo=repo,
+            task_id="S2E-LW2",
+            owner="E1",
+            task_contract=contract,
+            external_evidence_verifier=_strict_external_verifier(
+                contract["claim_payloads"]
+            ),
+        )
 
 
 def test_lw2_lease_recaptures_generation_inside_lease_store_lock(

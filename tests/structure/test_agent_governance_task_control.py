@@ -742,6 +742,21 @@ def test_publication_status_cli_preserves_ordinary_status_semantics(
     capsys: pytest.CaptureFixture[str],
 ) -> None:
     repo = _init_linked_repo(tmp_path)
+    canonical = tmp_path / "repo"
+    subprocess.run(
+        ["git", "-C", str(repo), "remote", "add", "origin", str(canonical)],
+        check=True,
+    )
+    subprocess.run(
+        [
+            "git", "-C", str(repo), "update-ref", "refs/remotes/origin/main",
+            subprocess.run(
+                ["git", "-C", str(repo), "rev-parse", "HEAD"],
+                check=True, capture_output=True, text=True,
+            ).stdout.strip(),
+        ],
+        check=True,
+    )
     admission = acquire_task_admission(
         repo=repo,
         task_id="ordinary-task",
@@ -756,7 +771,13 @@ def test_publication_status_cli_preserves_ordinary_status_semantics(
         admission_id=admission["admission_id"],
     )
     lease_id = acquired["lease"]["lease_id"]
-    store = FileWriterLeaseStore(inspect_worktree(repo).common_dir)
+    identity = inspect_worktree(repo)
+    store = FileWriterLeaseStore(identity.common_dir)
+    publication_identity = [
+        "--publication-phase", "publish",
+        "--publication-expected-branch", identity.branch,
+        "--publication-expected-head", identity.head,
+    ]
     persisted_before = (
         store.state_path.read_bytes(),
         store.binding_path.read_bytes(),
@@ -778,6 +799,7 @@ def test_publication_status_cli_preserves_ordinary_status_semantics(
                 "--repo", str(repo), "--task-id", "ordinary-task",
                 "--owner", "owner", "--lease-id", lease_id,
                 "--admission-id", admission["admission_id"],
+                *publication_identity,
             ],
         ),
         (
@@ -787,6 +809,7 @@ def test_publication_status_cli_preserves_ordinary_status_semantics(
                 "--repo", str(repo), "--task-id", "ordinary-task",
                 "--owner", "owner", "--lease-id", lease_id,
                 "--admission-id", admission["admission_id"],
+                *publication_identity,
             ],
         ),
     )

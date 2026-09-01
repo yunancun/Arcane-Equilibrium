@@ -17,7 +17,13 @@ from copy import deepcopy
 from pathlib import Path
 from typing import Any, Callable
 
-from agent_governance_capture import capture_repository, repository_generation_digest
+from agent_governance_capture import (
+    NativeEvidenceMismatch,
+    NativeEvidenceUnavailable,
+    capture_native_protected_snapshot,
+    capture_repository,
+    repository_generation_digest,
+)
 from agent_governance_task_control import (
     _adjudicate_continuation,
     compile_task_execution_policy,
@@ -30,7 +36,7 @@ from agent_governance_lw2_readmission import (
     LW2_ADMISSION_PROFILE,
     capture_current_repository_identity,
     lw2_contract_selected,
-    lw2_protected_inventory,
+    lw2_protected_path,
     validate_lw2_protected_inventory_scope,
     validate_lw2_contract_binding,
     validate_lw2_readmission_eligibility,
@@ -187,23 +193,61 @@ def capture_task_admission_generation(
 ) -> dict[str, Any]:
     """Capture exact HEAD/tree plus task-owned repository generation."""
 
+    generation, _ = capture_task_admission_generation_evidence(
+        repo, task_contract
+    )
+    return generation
+
+
+def capture_task_admission_generation_evidence(
+    repo: Path,
+    task_contract: dict[str, Any],
+) -> tuple[dict[str, Any], dict[str, Any]]:
+    """Return the generation and its final native protected snapshot."""
+
     dirty_scope = task_contract.get("dirty_scope")
     if not isinstance(dirty_scope, list) or not dirty_scope:
         raise ValueError("LW2 task admission generation requires dirty_scope")
-    scope = list(lw2_protected_inventory(repo))
-    if not set(dirty_scope).issubset(scope):
+    if any(not lw2_protected_path(path) for path in dirty_scope):
         raise ValueError("LW2 task admission dirty_scope is outside protected inventory")
+    initial_snapshot = capture_native_protected_snapshot(
+        repo, allowed_worktree_differences=dirty_scope
+    )
+    initial_protected = set(initial_snapshot["filesystem_scope"])
+    # The accepted inventory includes task-owned paths that do not exist in the
+    # baseline tree yet.  The native snapshot remains the authority for every
+    # tracked baseline entry, while the broad protected selectors below ensure
+    # that a later untracked/additional path under a protected prefix also
+    # changes the generation instead of falling outside an enumerated snapshot.
+    scope = sorted(
+        set(initial_snapshot["scope"])
+        | set(dirty_scope)
+        | initial_protected
+    )
+    validate_lw2_protected_inventory_scope(scope)
     repository = capture_repository(scope, root=repo)
     source_head, source_tree = capture_current_repository_identity(repo)
-    if repository["source_head"] != source_head:
-        raise ValueError("LW2 repository generation HEAD changed during capture")
+    final_snapshot = capture_native_protected_snapshot(
+        repo, allowed_worktree_differences=dirty_scope
+    )
+    final_protected = set(final_snapshot["filesystem_scope"])
+    if (
+        repository["source_head"] != source_head
+        or final_protected != initial_protected
+        or final_snapshot != initial_snapshot
+    ):
+        raise NativeEvidenceMismatch(
+            "LW2 repository generation changed during capture"
+        )
     return {
         "schema_version": "task_admission_repository_generation_v1",
         "source_head": source_head,
         "source_tree": source_tree,
         "scope": list(scope),
-        "repository_generation_digest": repository_generation_digest(repository),
-    }
+        "repository_generation_digest": repository_generation_digest(
+            repository, native_protected_snapshot=final_snapshot
+        ),
+    }, final_snapshot
 
 
 def _validate_state(state: Any) -> None:
@@ -371,9 +415,21 @@ def acquire_task_admission(
 
     def mutation(state: dict[str, Any]) -> dict[str, Any]:
         if accepted_generation is not None:
-            locked_generation = capture_task_admission_generation(
-                Path(identity.worktree), task_contract
-            )
+            try:
+                locked_generation = capture_task_admission_generation(
+                    Path(identity.worktree), task_contract
+                )
+            except NativeEvidenceUnavailable as error:
+                raise NativeEvidenceUnavailable(
+                    "TASK_ADMISSION_GENERATION_UNAVAILABLE: LW2 repository "
+                    "generation unavailable after replay before "
+                    "admission store"
+                ) from error
+            except (NativeEvidenceMismatch, ValueError) as error:
+                raise ValueError(
+                    "LW2 repository generation changed after replay before "
+                    "admission store"
+                ) from error
             if locked_generation != accepted_generation:
                 raise ValueError(
                     "LW2 repository generation changed after replay before admission store"
@@ -448,9 +504,16 @@ def continue_admitted_task(
         if lw2_contract_selected(
             record["task_contract"], task_id=record["task_id"]
         ):
-            current_generation = capture_task_admission_generation(
-                Path(identity.worktree), record["task_contract"]
-            )
+            try:
+                current_generation = capture_task_admission_generation(
+                    Path(identity.worktree), record["task_contract"]
+                )
+            except NativeEvidenceUnavailable:
+                result["reasons"] = ["TASK_ADMISSION_GENERATION_UNAVAILABLE"]
+                return state
+            except (NativeEvidenceMismatch, ValueError):
+                result["reasons"] = ["TASK_ADMISSION_GENERATION_MISMATCH"]
+                return state
             if current_generation != record.get("accepted_generation"):
                 result["reasons"] = ["TASK_ADMISSION_GENERATION_MISMATCH"]
                 return state

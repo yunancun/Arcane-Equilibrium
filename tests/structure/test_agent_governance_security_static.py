@@ -17,6 +17,12 @@ WRITER_LEASE_PATH = (
     / "maintenance_scripts"
     / "agent_governance_writer_lease.py"
 )
+CAPTURE_PATH = (
+    ROOT / "helper_scripts" / "maintenance_scripts" / "agent_governance_capture.py"
+)
+GUARD_PATH = (
+    ROOT / "helper_scripts" / "maintenance_scripts" / "git_loop_guard.py"
+)
 
 
 def _load_governance():
@@ -104,10 +110,10 @@ def test_lw2_publication_status_uses_only_native_git_graph_reads() -> None:
         source, functions["filesystem_writer_lease_action"]
     )
     assert git_bytes_source is not None
-    assert '"--no-replace-objects"' in git_bytes_source
+    assert "_native_git_command(repo, *args)" in git_bytes_source
     assert "env=_native_git_environment()" in git_bytes_source
     assert native_env_source is not None
-    assert '.pop("GIT_REPLACE_REF_BASE", None)' in native_env_source
+    assert "native_git_environment" in native_env_source
     assert publication_source is not None
     assert '"merge-base"' not in publication_source
     assert '"rev-list"' not in publication_source
@@ -115,6 +121,40 @@ def test_lw2_publication_status_uses_only_native_git_graph_reads() -> None:
     assert "native_graph=True" in publication_source
     assert action_source is not None
     assert 'native_graph=action == "publication-status"' in action_source
+
+    capture_source = CAPTURE_PATH.read_text(encoding="utf-8")
+    assert 'TRUSTED_GIT_EXECUTABLE = "/usr/bin/git"' in capture_source
+    assert "TRUSTED_GIT_EXECUTABLE," in capture_source
+    assert '"--no-replace-objects"' in capture_source
+    assert '"core.fsmonitor=false"' in capture_source
+    assert '"core.hooksPath=/dev/null"' in capture_source
+    for required in (
+        "GIT_CONFIG_GLOBAL", "GIT_CONFIG_NOSYSTEM", "GIT_ATTR_NOSYSTEM",
+        "GIT_CONFIG_COUNT", "GIT_CONFIG_PARAMETERS", "GIT_REPLACE_REF_BASE",
+        "GIT_OPTIONAL_LOCKS", "GIT_TERMINAL_PROMPT", "LC_ALL",
+    ):
+        assert required in capture_source
+
+
+def test_authority_diff_argv_disables_ext_diff_and_textconv_everywhere() -> None:
+    for path in (CAPTURE_PATH, WRITER_LEASE_PATH, GUARD_PATH):
+        tree = ast.parse(path.read_text(encoding="utf-8"))
+        checked = 0
+        for node in ast.walk(tree):
+            if not isinstance(node, ast.Call):
+                continue
+            literals = [
+                argument.value
+                for argument in node.args
+                if isinstance(argument, ast.Constant)
+                and isinstance(argument.value, str)
+            ]
+            if not ({"diff", "diff-tree"} & set(literals)):
+                continue
+            checked += 1
+            assert "--no-ext-diff" in literals, (path, node.lineno, literals)
+            assert "--no-textconv" in literals, (path, node.lineno, literals)
+        assert checked, path
 
 
 def test_read_only_command_preflight_rejects_every_ascii_control_character() -> None:

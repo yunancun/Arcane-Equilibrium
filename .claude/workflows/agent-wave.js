@@ -122,7 +122,7 @@ function resolveAdmissionNowMs(value) {
 // The AsyncFunction loader has no module-import seam, so codegen copies this
 // block verbatim after replacing the Registry-owned authority-profile token.
 const CONTEXT_ADMISSION_V1 = Object.freeze({
-  registryDigest: "sha256:0d81fe85117cf12aaa7ab117ac294af88bd1470be818e57b878b5353497ab2d9",
+  registryDigest: "sha256:9ce2dbd2bca32268cac32b6941537c9e305458f97ea5fe6590cada78dad300ff",
   artifactFields: Object.freeze(['schema_version', 'artifact_digest', 'task_contract_digest', 'budget_authority_digest', 'budget_authority_canonical', 'canonical_plan', 'shared_task_context_digest', 'shared_task_context_canonical', 'role_context_delta_digest', 'role_context_delta_canonical', 'semantic_input_tokens']),
   planFields: Object.freeze(['schema_version', 'registry_schema_version', 'registry_digest', 'role', 'role_permission', 'execution_dag_binding', 'task_contract', 'task_contract_digest', 'mandatory_content', 'omitted_mandatory', 'baseline_errors', 'selected_packs', 'shared_packs', 'role_packs', 'sources', 'unresolved_sources', 'blocking_sources', 'evidence_debt', 'required_for_verdict', 'acquisition_plan', 'budget']),
   dagBindingFields: Object.freeze(['schema_version', 'dag_digest', 'node_count', 'edge_count', 'nodes']),

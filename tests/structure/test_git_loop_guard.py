@@ -2,9 +2,13 @@ from __future__ import annotations
 
 import ast
 import importlib.util
+import shlex
 import subprocess
 import sys
+from datetime import datetime, timedelta, timezone
 from pathlib import Path
+
+import pytest
 
 
 SCRIPT = (
@@ -20,6 +24,7 @@ if str(HELPERS) not in sys.path:
 from agent_governance_task_control import (  # noqa: E402
     FileWriterLeaseStore,
     acquire_writer_lease,
+    filesystem_writer_lease_action,
     inspect_worktree,
 )
 from agent_governance_context import capture_repository_baseline  # noqa: E402
@@ -128,6 +133,310 @@ def _fixture(
         "writer_admission_id": admission["admission_id"],
     }
     return feature, origin, repo, lease
+
+
+def test_canonical_remote_probe_ignores_repo_redirects_and_git_helper_env(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    repo = tmp_path / "repo"
+    attacker = tmp_path / "attacker.git"
+    subprocess.run(["git", "init", "-q", "-b", "main", str(repo)], check=True)
+    subprocess.run(["git", "init", "-q", "--bare", str(attacker)], check=True)
+    _git(repo, "config", "user.email", "attacker@example.invalid")
+    _git(repo, "config", "user.name", "Attacker")
+    _write(repo / "attacker.txt", "attacker\n")
+    _git(repo, "add", "attacker.txt")
+    _git(repo, "commit", "-q", "-m", "attacker")
+    attacker_head = _git(repo, "rev-parse", "HEAD")
+    _git(repo, "push", "-q", str(attacker), "HEAD:refs/heads/main")
+    canonical = "https://github.com/yunancun/Arcane-Equilibrium.git"
+    _git(repo, "config", f"url.file://{attacker}/.insteadOf", canonical)
+    redirected = subprocess.run(
+        ["git", "-C", str(repo), "ls-remote", canonical, "refs/heads/main"],
+        check=True,
+        capture_output=True,
+        text=True,
+    )
+    assert redirected.stdout.split()[0] == attacker_head
+
+    hostile_helper = tmp_path / "hostile-git-core"
+    hostile_helper.mkdir()
+    sentinel = tmp_path / "helper-executed"
+    monkeypatch.setenv("GIT_EXEC_PATH", str(hostile_helper))
+    monkeypatch.setenv("GIT_SSH_COMMAND", f"touch {sentinel}")
+    monkeypatch.setenv("GIT_PROXY_COMMAND", f"touch {sentinel}")
+    observed: list[tuple[list[str], dict[str, str], Path | None]] = []
+
+    def no_network_run(command, **kwargs):
+        environment = kwargs.get("env", {})
+        cwd = Path(kwargs["cwd"]) if kwargs.get("cwd") is not None else None
+        observed.append((list(command), dict(environment), cwd))
+        projected = (
+            "-C" in command
+            or any(
+                key in environment
+                for key in ("GIT_EXEC_PATH", "GIT_SSH_COMMAND", "GIT_PROXY_COMMAND")
+            )
+        )
+        return subprocess.CompletedProcess(
+            command,
+            0 if projected else 128,
+            stdout=(f"{attacker_head}\trefs/heads/main\n".encode() if projected else b""),
+            stderr=b"network disabled by regression harness",
+        )
+
+    monkeypatch.setattr(guard.subprocess, "run", no_network_run)
+    assert guard._true_remote_head(repo, "refs/heads/main", canonical) is None
+    assert len(observed) == 1
+    command, environment, cwd = observed[0]
+    assert "-C" not in command
+    assert cwd is not None
+    assert repo.resolve() not in (cwd, *cwd.parents)
+    assert not {
+        "GIT_EXEC_PATH", "GIT_SSH", "GIT_SSH_COMMAND", "GIT_PROXY_COMMAND",
+        "GIT_ASKPASS", "SSH_ASKPASS",
+    }.intersection(environment)
+    assert not sentinel.exists()
+
+
+def test_guard_authority_git_ignores_hostile_path_environment_and_fsmonitor(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    repo, _, _, lease = _fixture(tmp_path)
+    head = _git(repo, "rev-parse", "HEAD")
+    hostile_bin = tmp_path / "hostile-bin"
+    hostile_bin.mkdir()
+    path_sentinel = tmp_path / "path-git-executed"
+    fsmonitor_sentinel = tmp_path / "fsmonitor-executed"
+    inherited_environment = tmp_path / "ambient-environment-observed"
+    hostile_git = hostile_bin / "git"
+    hostile_git.write_text(
+        "#!/bin/sh\n"
+        f"touch {shlex.quote(str(path_sentinel))}\n"
+        'exec /usr/bin/git "$@"\n',
+        encoding="utf-8",
+    )
+    hostile_git.chmod(0o755)
+    fsmonitor = tmp_path / "fsmonitor"
+    fsmonitor.write_text(
+        "#!/bin/sh\n"
+        f"touch {shlex.quote(str(fsmonitor_sentinel))}\n"
+        "if [ -n \"$HTTPS_PROXY$SSL_CERT_FILE$GIT_SSL_CAINFO"
+        "$GIT_CREDENTIAL_HELPER$GIT_ASKPASS\" ]; then\n"
+        f"  touch {shlex.quote(str(inherited_environment))}\n"
+        "fi\n"
+        "exit 0\n",
+        encoding="utf-8",
+    )
+    fsmonitor.chmod(0o755)
+    _git(repo, "config", "core.fsmonitor", str(fsmonitor))
+
+    monkeypatch.setenv("PATH", f"{hostile_bin}:/usr/bin:/bin")
+    monkeypatch.setenv("HTTP_PROXY", "http://127.0.0.1:1")
+    monkeypatch.setenv("HTTPS_PROXY", "http://127.0.0.1:1")
+    monkeypatch.setenv("ALL_PROXY", "socks5://127.0.0.1:1")
+    monkeypatch.setenv("NO_PROXY", "*")
+    monkeypatch.setenv("SSL_CERT_FILE", str(tmp_path / "hostile-cert.pem"))
+    monkeypatch.setenv("CURL_CA_BUNDLE", str(tmp_path / "hostile-ca.pem"))
+    monkeypatch.setenv("GIT_SSL_CAINFO", str(tmp_path / "hostile-git-ca.pem"))
+    monkeypatch.setenv("GIT_SSL_CERT", str(tmp_path / "hostile-git-cert.pem"))
+    monkeypatch.setenv("GIT_SSL_KEY", str(tmp_path / "hostile-git-key.pem"))
+    monkeypatch.setenv("GIT_CREDENTIAL_HELPER", str(tmp_path / "credential"))
+    monkeypatch.setenv("GIT_ASKPASS", str(tmp_path / "askpass"))
+
+    packet = guard.evaluate(
+        repo,
+        phase="start",
+        expected_branch="agent/test-loop",
+        expected_head=head,
+        **lease,
+    )
+
+    assert packet["status"] == "PASS"
+    assert not path_sentinel.exists()
+    assert not fsmonitor_sentinel.exists()
+    assert not inherited_environment.exists()
+    assert guard.native_git_environment() == {
+        "GIT_ATTR_NOSYSTEM": "1",
+        "GIT_CONFIG_GLOBAL": "/dev/null",
+        "GIT_CONFIG_NOSYSTEM": "1",
+        "GIT_NO_REPLACE_OBJECTS": "1",
+        "GIT_OPTIONAL_LOCKS": "0",
+        "GIT_PAGER": "cat",
+        "GIT_TERMINAL_PROMPT": "0",
+        "LANG": "C",
+        "LC_ALL": "C",
+        "PAGER": "cat",
+        "PATH": "/usr/bin:/bin",
+    }
+
+
+def test_canonical_remote_probe_accepts_exactly_one_expected_ref(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    expected_ref = "refs/heads/main"
+    expected_head = "a" * 40
+    other_head = "b" * 40
+    outputs = iter((
+        f"{expected_head}\trefs/heads/other\n".encode(),
+        (
+            f"{expected_head}\t{expected_ref}\n"
+            f"{other_head}\trefs/heads/other\n"
+        ).encode(),
+        f"{expected_head}\t{expected_ref}\textra\n".encode(),
+        f"{expected_head}\t{expected_ref}\n".encode(),
+    ))
+
+    def no_network_run(command, **kwargs):
+        return subprocess.CompletedProcess(
+            command, 0, stdout=next(outputs), stderr=b"network disabled"
+        )
+
+    monkeypatch.setattr(guard.subprocess, "run", no_network_run)
+    results = [
+        guard.native_remote_head(
+            tmp_path, "https://example.invalid/repository.git", expected_ref
+        )
+        for _ in range(4)
+    ]
+
+    assert results == [None, None, None, expected_head]
+
+
+@pytest.mark.parametrize("phase", ["publish", "post-push"])
+def test_publish_remote_authority_is_observed_only_inside_publication_boundary(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+    phase: str,
+) -> None:
+    repo, origin, _, lease = _fixture(tmp_path)
+    _write(repo / "owned.txt", "feature\n")
+    _git(repo, "add", "owned.txt")
+    _git(repo, "commit", "-q", "-m", "feature")
+    head = _git(repo, "rev-parse", "HEAD")
+    base = _git(repo, "rev-parse", "refs/remotes/origin/main")
+    if phase == "post-push":
+        _git(repo, "push", "-q", "-u", "origin", "agent/test-loop")
+    helper_sentinel = tmp_path / f"pre-boundary-{phase}-helper-executed"
+    remote_helper = tmp_path / "remote-helper"
+    remote_helper.write_text(
+        "#!/bin/sh\n"
+        f"touch {shlex.quote(str(helper_sentinel))}\n"
+        "exit 1\n",
+        encoding="utf-8",
+    )
+    remote_helper.chmod(0o755)
+    _git(repo, "config", "protocol.ext.allow", "always")
+    _git(
+        repo,
+        "config",
+        f"url.ext::{remote_helper}.insteadOf",
+        str(origin),
+    )
+    boundary_calls: list[dict[str, object]] = []
+
+    def publication_status(**kwargs):
+        boundary_calls.append(kwargs)
+        return {
+            "status": "PASS",
+            "reasons": [],
+            "admission_scope": {"lw2_selected": False, "dirty_scope": ["owned.txt"]},
+            "lease": {
+                "task_id": lease["writer_task_id"],
+                "owner": lease["writer_owner"],
+                "expires_at": "2035-01-01T00:00:00+00:00",
+            },
+            "publication_boundary": {
+                "publication_source_sha": head,
+                "push_refspec": f"{head}:refs/heads/agent/test-loop",
+                "local_origin_main": base,
+                "true_origin_main": base,
+                "true_remote_branch_head": head if phase == "post-push" else None,
+                "observed_at": "2030-01-01T00:00:00+00:00",
+            },
+        }
+
+    monkeypatch.setattr(
+        guard, "filesystem_writer_lease_action", publication_status
+    )
+    packet = guard.evaluate(
+        repo,
+        phase=phase,
+        expected_branch="agent/test-loop",
+        expected_head=head,
+        **lease,
+    )
+
+    assert packet["status"] == "PASS"
+    assert packet["state"]["true_origin_main"] == base
+    if phase == "post-push":
+        assert packet["state"]["true_remote_branch_head"] == head
+    assert len(boundary_calls) == 1
+    assert not helper_sentinel.exists()
+
+
+def test_direct_publication_status_requires_explicit_phase_branch_and_sha(
+    tmp_path: Path,
+) -> None:
+    repo, _, _, lease = _fixture(tmp_path)
+    head = _git(repo, "rev-parse", "HEAD")
+    base = {
+        "action": "publication-status",
+        "repo": repo,
+        "task_id": lease["writer_task_id"],
+        "owner": lease["writer_owner"],
+        "lease_id": lease["writer_lease_id"],
+        "admission_id": lease["writer_admission_id"],
+        "publication_phase": "publish",
+        "publication_expected_branch": "agent/test-loop",
+        "publication_expected_head": head,
+    }
+    required = {
+        "publication_phase": "PUBLICATION_PHASE_REQUIRED",
+        "publication_expected_branch": "PUBLICATION_BRANCH_REQUIRED",
+        "publication_expected_head": "PUBLICATION_SOURCE_SHA_REQUIRED",
+    }
+
+    for field, reason in required.items():
+        arguments = dict(base)
+        arguments.pop(field)
+        result = filesystem_writer_lease_action(**arguments)
+        assert result["status"] == "FAIL"
+        assert result["reasons"] == [reason]
+        assert "publication_boundary" not in result
+
+
+def test_main_sync_remote_authority_ignores_local_redirect_and_protocol_helper(
+    tmp_path: Path,
+) -> None:
+    _, origin, repo, _ = _fixture(tmp_path)
+    head = _git(repo, "rev-parse", "HEAD")
+    sentinel = tmp_path / "main-sync-helper-executed"
+    remote_helper = tmp_path / "main-sync-helper"
+    remote_helper.write_text(
+        "#!/bin/sh\n"
+        f"touch {shlex.quote(str(sentinel))}\n"
+        "exit 1\n",
+        encoding="utf-8",
+    )
+    remote_helper.chmod(0o755)
+    _git(repo, "config", "protocol.ext.allow", "always")
+    _git(
+        repo,
+        "config",
+        f"url.ext::{remote_helper}.insteadOf",
+        str(origin),
+    )
+
+    packet = guard.evaluate(
+        repo,
+        phase="main-sync",
+        expected_origin_head=head,
+    )
+
+    assert packet["status"] == "PASS"
+    assert packet["state"]["true_origin_main"] == head
+    assert not sentinel.exists()
 
 
 def test_start_requires_exact_clean_feature_head(tmp_path: Path) -> None:
@@ -246,6 +555,30 @@ def test_checkpoint_passes_exact_unstaged_allowlist(tmp_path: Path) -> None:
         **lease,
     )
     assert "PREEXISTING_STAGED_CHANGES" in staged["reasons"]
+
+
+def test_checkpoint_never_executes_configured_textconv(tmp_path: Path) -> None:
+    repo, _, _, lease = _fixture(tmp_path)
+    head = _git(repo, "rev-parse", "HEAD")
+    sentinel = tmp_path / "guard-textconv-executed"
+    attributes = Path(_git(repo, "rev-parse", "--git-path", "info/attributes"))
+    if not attributes.is_absolute():
+        attributes = repo / attributes
+    _write(attributes, "owned.txt diff=sentinel\n")
+    _git(repo, "config", "diff.sentinel.textconv", f"touch {sentinel}")
+    _write(repo / "owned.txt", "bounded change\n")
+
+    packet = guard.evaluate(
+        repo,
+        phase="checkpoint",
+        expected_branch="agent/test-loop",
+        expected_head=head,
+        allow_paths=["owned.txt"],
+        **lease,
+    )
+
+    assert packet["status"] == "PASS"
+    assert not sentinel.exists()
 
 
 def test_checkpoint_caller_allowlist_cannot_widen_admitted_dirty_scope(
@@ -375,6 +708,141 @@ def test_publish_and_post_push_bind_remote_branch_head(tmp_path: Path) -> None:
     )
     assert after_push["status"] == "PASS"
     assert after_push["state"]["true_remote_branch_head"] == head
+
+
+@pytest.mark.parametrize("phase", ["publish", "post-push"])
+def test_publish_has_no_io_after_publication_status_finalization(
+    tmp_path: Path, monkeypatch, phase: str,
+) -> None:
+    repo, _, _, lease = _fixture(tmp_path)
+    _write(repo / "owned.txt", "feature\n")
+    _git(repo, "add", "owned.txt")
+    _git(repo, "commit", "-q", "-m", "feature")
+    head = _git(repo, "rev-parse", "HEAD")
+    base = _git(repo, "rev-parse", "refs/remotes/origin/main")
+    advanced = "f" * 40
+    calls: list[str] = []
+    boundary_complete = False
+    final_clock = datetime(2030, 1, 1, tzinfo=timezone.utc)
+    native_git = guard._git
+
+    def git_before_boundary(*args, **kwargs):
+        assert not boundary_complete
+        return native_git(*args, **kwargs)
+
+    def live_main(_repo: Path, ref: str, remote: str = "origin") -> str:
+        calls.append(f"remote:{remote}:{ref}")
+        return head if ref != "refs/heads/main" else base
+
+    def publication_status(**kwargs):
+        nonlocal boundary_complete
+        calls.append("publication-status")
+        assert kwargs["publication_phase"] == phase
+        assert kwargs["publication_expected_branch"] == "agent/test-loop"
+        assert kwargs["publication_expected_head"] == head
+        boundary_complete = True
+        return {
+            "status": "FAIL",
+            "reasons": ["FINAL_TRUE_ORIGIN_MAIN_DRIFT"],
+            "lease": {
+                "task_id": lease["writer_task_id"],
+                "owner": lease["writer_owner"],
+                "expires_at": (
+                    final_clock + timedelta(hours=1)
+                ).isoformat(),
+            },
+            "admission_scope": {"lw2_selected": True, "dirty_scope": ["owned.txt"]},
+            "publication_status": {
+                "accepted_base": {"head": base},
+            },
+            "publication_boundary": {
+                "publication_source_sha": head,
+                "push_refspec": f"{head}:refs/heads/agent/test-loop",
+                "local_origin_main": base,
+                "true_origin_main": advanced,
+                "observed_at": final_clock.isoformat(),
+            },
+        }
+
+    monkeypatch.setattr(guard, "_git", git_before_boundary)
+    monkeypatch.setattr(guard, "_true_remote_head", live_main)
+    monkeypatch.setattr(
+        guard, "filesystem_writer_lease_action", publication_status
+    )
+    monkeypatch.setattr(guard, "_utc_now", lambda: pytest.fail("clock after boundary"))
+
+    packet = guard.evaluate(
+        repo,
+        phase=phase,
+        expected_branch="agent/test-loop",
+        expected_head=head,
+        **lease,
+    )
+
+    assert packet["status"] == "FAIL"
+    assert packet["state"]["true_origin_main"] == advanced
+    assert packet["state"]["publication_boundary"]["true_origin_main"] == advanced
+    assert "FINAL_TRUE_ORIGIN_MAIN_DRIFT" in packet["reasons"]
+    assert calls == ["publication-status"]
+
+
+def test_publish_rejects_lease_expiring_exactly_at_final_clock(
+    tmp_path: Path, monkeypatch,
+) -> None:
+    repo, _, _, lease = _fixture(tmp_path)
+    _write(repo / "owned.txt", "feature\n")
+    _git(repo, "add", "owned.txt")
+    _git(repo, "commit", "-q", "-m", "feature")
+    head = _git(repo, "rev-parse", "HEAD")
+    base = _git(repo, "rev-parse", "refs/remotes/origin/main")
+    final_clock = datetime(2030, 1, 1, tzinfo=timezone.utc)
+
+    monkeypatch.setattr(
+        guard,
+        "_true_remote_head",
+        lambda _repo, ref, remote="origin": head
+        if ref != "refs/heads/main"
+        else base,
+    )
+    monkeypatch.setattr(
+        guard,
+        "filesystem_writer_lease_action",
+        lambda **_kwargs: {
+            "status": "FAIL",
+            "reasons": ["WRITER_LEASE_EXPIRED"],
+            "lease": {
+                "task_id": lease["writer_task_id"],
+                "owner": lease["writer_owner"],
+                "expires_at": final_clock.isoformat(),
+            },
+            "admission_scope": {
+                "lw2_selected": True,
+                "dirty_scope": ["owned.txt"],
+            },
+            "publication_status": {"accepted_base": {"head": base}},
+            "publication_boundary": {
+                "publication_source_sha": head,
+                "push_refspec": f"{head}:refs/heads/agent/test-loop",
+                "local_origin_main": base,
+                "true_origin_main": base,
+                "observed_at": final_clock.isoformat(),
+            },
+        },
+    )
+    monkeypatch.setattr(
+        guard, "_utc_now", lambda: pytest.fail("guard clock is outside seam")
+    )
+
+    packet = guard.evaluate(
+        repo,
+        phase="publish",
+        expected_branch="agent/test-loop",
+        expected_head=head,
+        **lease,
+    )
+
+    assert packet["status"] == "FAIL"
+    assert packet["reasons"] == ["WRITER_LEASE_EXPIRED"]
 
 
 def test_main_sync_is_exact_head_and_fast_forward_only(tmp_path: Path) -> None:
