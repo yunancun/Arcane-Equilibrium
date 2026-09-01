@@ -128,13 +128,26 @@ owner and unblock condition. Do not manufacture executable work to satisfy a
 schema.
 
 Every writable task uses one exclusive writer lease in one attached, non-main
-linked worktree. Acquire/renew/release it through `agent_governance.py
-writer-lease`; `git_loop_guard.py` only validates the existing task/owner/fencing
-token and never acquires, steals, or repairs a lease. A second writer uses a
-different linked worktree. Read-only query/review paths do not acquire a writer
-lease. Low-risk, low-uncertainty, effect-free `task_shape=query` routes only
-`PM triage -> PM closure`; hard authority/runtime/private-effect facts cannot use
-that narrow path.
+linked worktree. The exact public `agent_governance.py writer-lease` actions are
+`acquire`, `status`, `publication-status`, `renew`, and `release`.
+`publication-status` is a read-only, nonrenewing, nonpersisting publication
+authority check: the caller must name the explicit `publish|post-push` phase,
+expected feature branch, and exact expected 40-hex SHA. The task-admission lock
+and then the writer lock remain held while it verifies the exact ACTIVE
+admission/lease is unexpired at trusted entry and final times. For LW2 it
+performs one full admitted-generation capture plus the lightweight final native
+snapshot. The final boundary requires one canonical `origin` fetch URL and one
+identical push URL, derives only the exact
+`<expected-sha>:refs/heads/<expected-branch>` refspec, checks the final live
+remote (`main`, and the feature ref for `post-push`), and finally reads the
+trusted clock. PASS neither repairs/renews state nor authorizes more edits,
+runtime, service, deployment, broker, order, funds, trading, or activation.
+`git_loop_guard.py` only validates this existing task/owner/fencing authority and
+never acquires, steals, or repairs a lease. A second writer uses a different
+linked worktree. Read-only query/review paths do not acquire a writer lease.
+Low-risk, low-uncertainty, effect-free `task_shape=query` routes only
+`PM triage -> PM closure`; hard authority/runtime/private-effect facts cannot
+use that narrow path.
 
 ## Permission and effects
 

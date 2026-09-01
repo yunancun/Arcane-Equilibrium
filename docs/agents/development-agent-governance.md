@@ -433,11 +433,37 @@ Canonical snapshot producer 由 persisted normalized task contract 的 `dirty_sc
 task-owned artifact 落入 admitted scope。
 
 每個 writable task 只持有一個 attached non-main linked-worktree lease，帶 task/owner、
-branch、TTL 與 random fencing token。Acquire 要求 clean worktree；renew/release 在同一
-atomic lock 內重驗 owner/token/expiry；collision fail closed。刪除此 slice 會讓 finite/
-loop、no-delta、queue selection、terminal next action 與 writer exclusivity 再散落到
-routing/Closure/workflows/Git/docs，通過 deletion test，具有足夠 Depth、Leverage 與
-Locality；因此保留一個 Module 內的 Interface/Seam/Adapter，而非增加 shallow daemon。
+branch、TTL 與 random fencing token。公開 `agent_governance.py writer-lease` action 集合逐字
+固定為 `acquire`、`status`、`publication-status`、`renew`、`release`。Acquire 要求 clean
+worktree；renew/release 在同一 atomic lock 內重驗 owner/token/expiry；collision fail closed。
+
+`publication-status` 是 publish-only 的 read-only、nonrenewing、nonpersisting authority
+transition；它不改 admission/lease store，也不修補 accepted generation。直接呼叫必須明示
+`--publication-phase publish|post-push`、expected non-main feature branch 與 exact lowercase
+40-hex expected SHA；只有 `git_loop_guard.py` 的 `publish`／`post-push` phase 使用它，普通
+`status`／`renew` 與 `start`／`checkpoint` 不得替代。Implementation 依序持有 task-admission
+lock 再持有 writer lock，直到整個 publication boundary 完成；期間要求 exact ACTIVE
+admission 與其 exact bound ACTIVE writer lease 在可信 entry time 與 final time 都未過期。
+
+LW2 publication status 先把 externally attested published-main accepted base 綁到 clean、
+strictly linear、只觸 admitted path 的 native feature range，拒絕 replace/graft projection、
+staged/uncommitted bytes、origin/main 或 feature generation drift；同一鎖區只做一次完整
+task-admission generation capture，再用 lightweight final native protected snapshot 對賬，
+而不是重跑第二次完整 generation producer。Final boundary 必須觀察 canonical singleton
+remote：恰一個 `origin` fetch URL、恰一個 push URL，兩者逐字相同（LW2 再固定為既定
+repository/destination）；唯一 publication refspec 是
+`<expected-sha>:refs/heads/<expected-branch>`。它最後 live 查 remote `main`；`post-push` 再
+要求 live feature ref exact 等於 expected SHA，然後以 trusted clock 作最後 I/O boundary，
+其後只允許 pure in-memory adjudication。任何 URL/ref/HEAD/generation/expiry race 都 fail
+closed。
+
+PASS 只證該次 immutable publication boundary 可用；不 renew、不 persist、不授權後續
+edit/start/checkpoint，也不建立或啟動 LW2 task/DAG/lease/runtime/service/deploy/PG/broker/
+order/funds/trading effect。Merge 後須 exact release feature lease 與 admission，並只可從新
+published main generation 重新 admission。刪除此 slice 會讓 finite/loop、no-delta、queue
+selection、terminal next action 與 writer exclusivity 再散落到 routing/Closure/workflows/
+Git/docs，通過 deletion test，具有足夠 Depth、Leverage 與 Locality；因此保留一個 Module
+內的 Interface/Seam/Adapter，而非增加 shallow daemon。
 
 低風險、低不確定性、無 effect/runtime/E2E/hard surface 的 `task_shape=query` 只走
 PM triage/closure，且永遠 finite。任何 authority/security/broker/private-effect fact 都

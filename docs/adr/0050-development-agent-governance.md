@@ -134,10 +134,24 @@ task-owned artifact 提供；
 
 Queue 的 ACTIVE/WAITING/CLOSED lane 與 role work status 分離；只有 exact ACTIVE 可被
 selector 消費，IN_PROGRESS 已被 claim，不能重派。WAITING/DEFERRED 要有 named delta 並
-重新 admission，CLOSED 永不 replay。每個
-writable task 另需 Git common-dir atomic store 中一個 attached non-main linked-worktree
-lease，帶 random fencing token/owner/task/branch/TTL；Git guard 僅唯讀驗證，不能 acquire、
-steal 或自動修復。不同 writer 必須使用不同 linked worktree。
+重新 admission，CLOSED 永不 replay。每個 writable task 另需 Git common-dir atomic store
+中一個 attached non-main linked-worktree lease，帶 random fencing token/owner/task/branch/
+TTL；不同 writer 必須使用不同 linked worktree。
+
+Writer-lease 的 public immutable action set 是 `acquire`、`status`、
+`publication-status`、`renew`、`release`。其中 `publication-status` 只能作 read-only、
+nonrenewing、nonpersisting 的 `publish|post-push` authority transition，且必須明示 expected
+feature branch 與 exact expected 40-hex SHA。Task-admission lock 再 writer lock 持有到 final
+boundary；authority 綁 exact ACTIVE admission/lease、trusted entry/final expiry、一次完整
+admitted-generation capture 與 lightweight final native snapshot、canonical singleton 且
+fetch/push 相同的 remote URL、唯一
+`<expected-sha>:refs/heads/<expected-branch>` refspec、final live remote `main`，以及
+`post-push` 的 exact live feature ref。LW2 另要求 externally attested published-main base、
+clean strictly-linear admitted native feature range 與無 graph projection。任何 drift/race 都
+fail closed；PASS 不修補 accepted generation、不授權後續 edit 或 readmission，也不授予
+LW2 activation、runtime、service、deploy、PG、broker、order、funds 或 trading effect。
+Git guard 僅唯讀消費既有 authority，不能 acquire、steal 或自動修復；merge 後只可先 exact
+release，再從新 published main generation 重新 admission。
 
 每次 saved-workflow call 都產 canonical `workflow_call_record_v1`，綁 task/context/node/role/
 schema/result/retry、exact native identity/class/permission、DAG requires/topological wave 與
