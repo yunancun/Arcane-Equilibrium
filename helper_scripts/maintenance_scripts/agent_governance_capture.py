@@ -18,6 +18,7 @@ import subprocess
 from datetime import datetime
 from pathlib import Path, PurePosixPath
 from typing import Any
+from urllib.parse import quote
 
 from agent_governance_command_replay import (
     command_argv,
@@ -34,6 +35,7 @@ from agent_governance_workflow_receipts import (
 
 REPO_ROOT = Path(__file__).resolve().parents[2]
 TRUSTED_GIT_EXECUTABLE = "/usr/bin/git"
+TRUSTED_CURL_EXECUTABLE = "/usr/bin/curl"
 LOCAL_REPRODUCIBLE = "LOCAL_REPRODUCIBLE"
 ORCHESTRATOR_BOUND = "ORCHESTRATOR_BOUND"
 PLATFORM_OR_EXTERNAL_ATTESTED = "PLATFORM_OR_EXTERNAL_ATTESTED"
@@ -122,6 +124,14 @@ _AMBIENT_GIT_ENVIRONMENT = {
     "GIT_WORK_TREE",
 }
 _NUMBERED_GIT_CONFIG_ENVIRONMENT = re.compile(r"GIT_CONFIG_(?:KEY|VALUE)_\d+")
+_PUBLIC_GITHUB_REPOSITORY_RE = re.compile(
+    r"^https://github\.com/"
+    r"([A-Za-z0-9][A-Za-z0-9_.-]{0,99})/"
+    r"([A-Za-z0-9][A-Za-z0-9_.-]{0,99})\.git$"
+)
+_PUBLIC_GITHUB_BRANCH_REF_RE = re.compile(
+    r"^refs/heads/[A-Za-z0-9][A-Za-z0-9._/-]{0,254}$"
+)
 
 
 class NativeEvidenceUnavailable(ValueError):
@@ -202,8 +212,89 @@ def native_remote_git_cwd(root: Path) -> Path:
     return Path(root.resolve().anchor)
 
 
+def _public_github_ref_api_url(repository_url: str, ref: str) -> str | None:
+    """Map one exact public GitHub origin/ref to its unauthenticated API URL."""
+
+    match = _PUBLIC_GITHUB_REPOSITORY_RE.fullmatch(repository_url)
+    if match is None or _PUBLIC_GITHUB_BRANCH_REF_RE.fullmatch(ref) is None:
+        return None
+    branch = ref.removeprefix("refs/")
+    if (
+        ".." in branch
+        or "@{" in branch
+        or "//" in branch
+        or "/." in branch
+        or branch.endswith(("/", ".", ".lock"))
+    ):
+        return None
+    owner, repository = match.groups()
+    return (
+        f"https://api.github.com/repos/{owner}/{repository}/git/ref/"
+        f"{quote(branch, safe='/')}"
+    )
+
+
+def _public_github_remote_head(
+    root: Path, repository_url: str, ref: str
+) -> str | None:
+    """Read one public GitHub branch ref without credentials or ambient config."""
+
+    api_url = _public_github_ref_api_url(repository_url, ref)
+    if api_url is None:
+        return None
+    command = [
+        TRUSTED_CURL_EXECUTABLE,
+        "--disable",
+        "--fail",
+        "--silent",
+        "--show-error",
+        "--proto",
+        "=https",
+        "--tlsv1.2",
+        "--connect-timeout",
+        "10",
+        "--max-time",
+        "20",
+        "--header",
+        "Accept: application/vnd.github+json",
+        "--header",
+        "X-GitHub-Api-Version: 2022-11-28",
+        api_url,
+    ]
+    try:
+        completed = subprocess.run(
+            command,
+            check=False,
+            capture_output=True,
+            cwd=native_remote_git_cwd(root),
+            env=native_git_environment(),
+            stdin=subprocess.DEVNULL,
+            timeout=25,
+        )
+    except (OSError, subprocess.TimeoutExpired):
+        return None
+    if completed.returncode != 0 or len(completed.stdout) > 4096:
+        return None
+    try:
+        payload = json.loads(completed.stdout.decode("utf-8", errors="strict"))
+    except (UnicodeDecodeError, json.JSONDecodeError):
+        return None
+    if not isinstance(payload, dict):
+        return None
+    remote_object = payload.get("object")
+    if (
+        payload.get("ref") != ref
+        or not isinstance(remote_object, dict)
+        or remote_object.get("type") != "commit"
+        or not isinstance(remote_object.get("sha"), str)
+        or HEAD_RE.fullmatch(remote_object["sha"]) is None
+    ):
+        return None
+    return remote_object["sha"]
+
+
 def native_remote_head(root: Path, repository_url: str, ref: str) -> str | None:
-    """Query an exact URL without repository discovery or helper projection."""
+    """Query an exact URL, with a bounded public-GitHub read-only fallback."""
 
     command = native_remote_git_command(
         "ls-remote", "--exit-code", repository_url, ref
@@ -219,7 +310,7 @@ def native_remote_head(root: Path, repository_url: str, ref: str) -> str | None:
             timeout=20,
         )
     except (OSError, subprocess.TimeoutExpired):
-        return None
+        return _public_github_remote_head(root, repository_url, ref)
     if completed.returncode != 0:
         return None
     try:

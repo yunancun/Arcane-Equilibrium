@@ -71,6 +71,187 @@ def _repo(tmp_path: Path) -> Path:
     return repo
 
 
+def _completed(
+    argv: list[str], *, returncode: int = 0, stdout: bytes = b"", stderr: bytes = b""
+) -> subprocess.CompletedProcess[bytes]:
+    return subprocess.CompletedProcess(argv, returncode, stdout=stdout, stderr=stderr)
+
+
+def test_native_remote_head_keeps_git_primary_and_never_calls_rest_on_success(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    expected = "a" * 40
+    calls: list[list[str]] = []
+
+    def run(argv: list[str], **_kwargs: object) -> subprocess.CompletedProcess[bytes]:
+        calls.append(argv)
+        return _completed(argv, stdout=f"{expected}\trefs/heads/main\n".encode())
+
+    monkeypatch.setattr(capture_module.subprocess, "run", run)
+
+    assert capture_module.native_remote_head(
+        tmp_path,
+        "https://github.com/yunancun/Arcane-Equilibrium.git",
+        "refs/heads/main",
+    ) == expected
+    assert len(calls) == 1
+    assert "ls-remote" in calls[0]
+
+
+def test_native_remote_head_uses_bounded_public_github_rest_fallback(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    expected = "b" * 40
+    calls: list[list[str]] = []
+
+    def run(argv: list[str], **_kwargs: object) -> subprocess.CompletedProcess[bytes]:
+        calls.append(argv)
+        if len(calls) == 1:
+            raise subprocess.TimeoutExpired(argv, timeout=20)
+        payload = {
+            "ref": "refs/heads/feature/nested",
+            "object": {"type": "commit", "sha": expected},
+        }
+        return _completed(argv, stdout=json.dumps(payload).encode())
+
+    monkeypatch.setattr(capture_module.subprocess, "run", run)
+
+    assert capture_module.native_remote_head(
+        tmp_path,
+        "https://github.com/yunancun/Arcane-Equilibrium.git",
+        "refs/heads/feature/nested",
+    ) == expected
+    assert len(calls) == 2
+    assert calls[1][0] == "/usr/bin/curl"
+    assert calls[1][1] == "--disable"
+    assert all("authorization" not in item.lower() for item in calls[1])
+    assert calls[1][-1] == (
+        "https://api.github.com/repos/yunancun/Arcane-Equilibrium/"
+        "git/ref/heads/feature/nested"
+    )
+
+
+def test_native_remote_head_does_not_replace_a_definitive_git_failure(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    calls: list[list[str]] = []
+
+    def run(argv: list[str], **_kwargs: object) -> subprocess.CompletedProcess[bytes]:
+        calls.append(argv)
+        return _completed(argv, returncode=2, stderr=b"ref absent")
+
+    monkeypatch.setattr(capture_module.subprocess, "run", run)
+
+    assert capture_module.native_remote_head(
+        tmp_path,
+        "https://github.com/yunancun/Arcane-Equilibrium.git",
+        "refs/heads/main",
+    ) is None
+    assert len(calls) == 1
+
+
+@pytest.mark.parametrize(
+    ("returncode", "stdout"),
+    [
+        (22, b'{"message":"rate limited"}'),
+        (0, b"{"),
+        (0, b"[]"),
+        (0, b"x" * 4097),
+    ],
+)
+def test_native_remote_head_rest_fallback_rejects_http_json_and_size_failures(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+    returncode: int,
+    stdout: bytes,
+) -> None:
+    calls: list[list[str]] = []
+
+    def run(argv: list[str], **_kwargs: object) -> subprocess.CompletedProcess[bytes]:
+        calls.append(argv)
+        if len(calls) == 1:
+            raise subprocess.TimeoutExpired(argv, timeout=20)
+        return _completed(argv, returncode=returncode, stdout=stdout)
+
+    monkeypatch.setattr(capture_module.subprocess, "run", run)
+
+    assert capture_module.native_remote_head(
+        tmp_path,
+        "https://github.com/yunancun/Arcane-Equilibrium.git",
+        "refs/heads/main",
+    ) is None
+    assert len(calls) == 2
+
+
+@pytest.mark.parametrize(
+    ("repository_url", "payload"),
+    [
+        (
+            "https://example.invalid/yunancun/Arcane-Equilibrium.git",
+            {
+                "ref": "refs/heads/main",
+                "object": {"type": "commit", "sha": "c" * 40},
+            },
+        ),
+        (
+            "https://github.com/yunancun/Arcane-Equilibrium.git?token=secret",
+            {
+                "ref": "refs/heads/main",
+                "object": {"type": "commit", "sha": "c" * 40},
+            },
+        ),
+        (
+            "https://github.com/yunancun/Arcane-Equilibrium.git",
+            {
+                "ref": "refs/heads/other",
+                "object": {"type": "commit", "sha": "c" * 40},
+            },
+        ),
+        (
+            "https://github.com/yunancun/Arcane-Equilibrium.git",
+            {
+                "ref": "refs/heads/main",
+                "object": {"type": "tag", "sha": "c" * 40},
+            },
+        ),
+        (
+            "https://github.com/yunancun/Arcane-Equilibrium.git",
+            {
+                "ref": "refs/heads/main",
+                "object": {"type": "commit", "sha": "C" * 40},
+            },
+        ),
+    ],
+)
+def test_native_remote_head_rest_fallback_rejects_untrusted_or_malformed_evidence(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+    repository_url: str,
+    payload: dict[str, object],
+) -> None:
+    calls: list[list[str]] = []
+
+    def run(argv: list[str], **_kwargs: object) -> subprocess.CompletedProcess[bytes]:
+        calls.append(argv)
+        if len(calls) == 1:
+            if repository_url == (
+                "https://github.com/yunancun/Arcane-Equilibrium.git"
+            ):
+                raise subprocess.TimeoutExpired(argv, timeout=20)
+            return _completed(argv, returncode=2, stderr=b"unavailable")
+        return _completed(argv, stdout=json.dumps(payload).encode())
+
+    monkeypatch.setattr(capture_module.subprocess, "run", run)
+
+    assert capture_module.native_remote_head(
+        tmp_path, repository_url, "refs/heads/main"
+    ) is None
+    expected_calls = 2 if repository_url == (
+        "https://github.com/yunancun/Arcane-Equilibrium.git"
+    ) else 1
+    assert len(calls) == expected_calls
+
+
 def _external_capture() -> dict:
     excerpt = "Official policy text captured at the cited selector."
     record = {

@@ -116,6 +116,15 @@ committed paths, and generation before returning PASS. `git_loop_guard.py` uses
 `publication-status` for only the `publish` and `post-push` guard phases;
 post-push remains an immediate exact-remote-head verification gate.
 
+The live-ref producer keeps config-isolated native `git ls-remote` primary. If
+that transport is unavailable, only an exact public
+`https://github.com/<owner>/<repo>.git` origin may use the pinned,
+config-disabled, unauthenticated GitHub REST `git/ref` read. The response must
+bind the exact requested ref, commit type, and lowercase 40-hex SHA. The
+fallback carries no credential, private-repository, or ref-mutation authority;
+any URL, HTTP, process, timeout, JSON, ref, type, or SHA anomaly remains
+fail-closed as remote-head unavailable.
+
 A `publication-status` PASS does not repair or advance the accepted generation
 and does not authorize further edits, start/checkpoint, generic status/renew,
 or admission/lease mutation. After merge, release the exact feature lease and

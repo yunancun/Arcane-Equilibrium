@@ -140,8 +140,15 @@ snapshot. The final boundary requires one canonical `origin` fetch URL and one
 identical push URL, derives only the exact
 `<expected-sha>:refs/heads/<expected-branch>` refspec, checks the final live
 remote (`main`, and the feature ref for `post-push`), and finally reads the
-trusted clock. PASS neither repairs/renews state nor authorizes more edits,
-runtime, service, deployment, broker, order, funds, trading, or activation.
+trusted clock. Native config-isolated `git ls-remote` remains the primary live
+ref read. Only when that transport is unavailable, an exact public
+`https://github.com/<owner>/<repo>.git` URL may use the pinned, config-disabled,
+unauthenticated GitHub REST `git/ref` read; it must return the exact requested
+ref, commit type, and lowercase 40-hex SHA. This fallback adds no credential,
+private-repository, or ref-mutation authority, and every URL/HTTP/JSON/ref/SHA
+anomaly remains unavailable. PASS neither repairs/renews state nor authorizes
+more edits, runtime, service, deployment, broker, order, funds, trading, or
+activation.
 `git_loop_guard.py` only validates this existing task/owner/fencing authority and
 never acquires, steals, or repairs a lease. A second writer uses a different
 linked worktree. Read-only query/review paths do not acquire a writer lease.

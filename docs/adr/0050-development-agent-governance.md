@@ -148,7 +148,12 @@ fetch/push 相同的 remote URL、唯一
 `<expected-sha>:refs/heads/<expected-branch>` refspec、final live remote `main`，以及
 `post-push` 的 exact live feature ref。LW2 另要求 externally attested published-main base、
 clean strictly-linear admitted native feature range 與無 graph projection。任何 drift/race 都
-fail closed；PASS 不修補 accepted generation、不授權後續 edit 或 readmission，也不授予
+fail closed。Live ref read 以 config-isolated native `git ls-remote` 為 primary；只有 transport
+unavailable 且 origin 是 exact public `https://github.com/<owner>/<repo>.git` 時，才可用 pinned、
+config-disabled、unauthenticated GitHub REST `git/ref` read，並逐字綁 expected ref、commit type
+與 lowercase 40-hex SHA。此 fallback 不帶 credential、private-repository 或 ref-mutation
+authority，任一 URL/HTTP/process/timeout/JSON/ref/type/SHA 異常仍視為 unavailable。PASS 不修補
+accepted generation、不授權後續 edit 或 readmission，也不授予
 LW2 activation、runtime、service、deploy、PG、broker、order、funds 或 trading effect。
 Git guard 僅唯讀消費既有 authority，不能 acquire、steal 或自動修復；merge 後只可先 exact
 release，再從新 published main generation 重新 admission。

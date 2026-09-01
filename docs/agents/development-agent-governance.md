@@ -455,7 +455,11 @@ repository/destination）；唯一 publication refspec 是
 `<expected-sha>:refs/heads/<expected-branch>`。它最後 live 查 remote `main`；`post-push` 再
 要求 live feature ref exact 等於 expected SHA，然後以 trusted clock 作最後 I/O boundary，
 其後只允許 pure in-memory adjudication。任何 URL/ref/HEAD/generation/expiry race 都 fail
-closed。
+closed。Live ref producer 永遠先用 config-isolated native `git ls-remote`；只有該 transport
+unavailable 且 origin 是 exact public `https://github.com/<owner>/<repo>.git`，才可使用 pinned、
+config-disabled、unauthenticated GitHub REST `git/ref` read。回應必須逐字符合 requested ref、
+commit type 與 lowercase 40-hex SHA；它不取得 credential、private-repository 或 ref-mutation
+authority，任何 URL/HTTP/process/timeout/JSON/ref/type/SHA 異常仍為 remote-head unavailable。
 
 PASS 只證該次 immutable publication boundary 可用；不 renew、不 persist、不授權後續
 edit/start/checkpoint，也不建立或啟動 LW2 task/DAG/lease/runtime/service/deploy/PG/broker/
