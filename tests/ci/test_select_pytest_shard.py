@@ -2,10 +2,16 @@ from __future__ import annotations
 
 from itertools import combinations
 import json
+from pathlib import Path
+import sys
 
 import pytest
 
-from helper_scripts.ci.select_pytest_shard import select_nodeids
+REPO_ROOT = Path(__file__).resolve().parents[2]
+if str(REPO_ROOT) not in sys.path:
+    sys.path.append(str(REPO_ROOT))
+
+from helper_scripts.ci.select_pytest_shard import select_nodeids  # noqa: E402
 
 
 def _nodeids(count: int) -> list[str]:

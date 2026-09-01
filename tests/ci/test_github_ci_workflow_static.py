@@ -2,8 +2,13 @@ from __future__ import annotations
 
 from pathlib import Path
 import re
+import sys
 
-from helper_scripts.ci.classify_ci_changes import GATES
+REPO_ROOT = Path(__file__).resolve().parents[2]
+if str(REPO_ROOT) not in sys.path:
+    sys.path.append(str(REPO_ROOT))
+
+from helper_scripts.ci.classify_ci_changes import GATES  # noqa: E402
 
 
 WORKFLOW = (
