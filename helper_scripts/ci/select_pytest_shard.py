@@ -4,9 +4,16 @@ from __future__ import annotations
 
 from dataclasses import dataclass
 import hashlib
+import json
+from pathlib import Path
+import re
 from typing import Iterable
 
 import pytest
+
+
+EVIDENCE_SCHEMA = "governance_pytest_shard_evidence_v1"
+SOURCE_SHA_PATTERN = re.compile(r"[0-9a-f]{40}\Z")
 
 
 @dataclass(frozen=True)
@@ -98,6 +105,64 @@ def pytest_addoption(parser: pytest.Parser) -> None:
     group.addoption("--governance-shard-index", type=int, default=None)
     group.addoption("--governance-shard-count", type=int, default=None)
     group.addoption("--governance-shard-minimum", type=int, default=None)
+    group.addoption("--governance-shard-evidence-path", default=None)
+    group.addoption("--governance-shard-source-sha", default=None)
+
+
+def _evidence_binding(config: pytest.Config) -> tuple[Path, str] | None:
+    evidence_path = config.getoption("governance_shard_evidence_path")
+    source_sha = config.getoption("governance_shard_source_sha")
+    if evidence_path is None and source_sha is None:
+        return None
+    if not isinstance(evidence_path, str) or not evidence_path:
+        raise pytest.UsageError(
+            "governance shard evidence path and source SHA are required together"
+        )
+    if not isinstance(source_sha, str) or SOURCE_SHA_PATTERN.fullmatch(source_sha) is None:
+        raise pytest.UsageError(
+            "governance shard evidence source SHA must be 40 lowercase hex characters"
+        )
+    return Path(evidence_path), source_sha
+
+
+def _write_evidence(
+    path: Path,
+    *,
+    source_sha: str,
+    shard_index: int,
+    shard_count: int,
+    minimum_count: int,
+    selection: ShardSelection,
+) -> None:
+    evidence = {
+        "schema_version": EVIDENCE_SCHEMA,
+        "source_sha": source_sha,
+        "shard_index": shard_index,
+        "shard_count": shard_count,
+        "minimum_count": minimum_count,
+        "full_count": selection.full_count,
+        "selected_count": selection.selected_count,
+        "full_manifest_sha256": selection.full_manifest_sha256,
+        "selected_manifest_sha256": selection.selected_manifest_sha256,
+        "selected_nodeids": list(selection.selected_nodeids),
+    }
+    serialized = json.dumps(
+        evidence,
+        ensure_ascii=False,
+        sort_keys=True,
+        separators=(",", ":"),
+    ) + "\n"
+    try:
+        with path.open("x", encoding="utf-8", newline="\n") as evidence_file:
+            evidence_file.write(serialized)
+    except FileExistsError as exc:
+        raise pytest.UsageError(
+            f"governance shard evidence path already exists: {path}"
+        ) from exc
+    except OSError as exc:
+        raise pytest.UsageError(
+            f"governance shard evidence could not be created: {path}: {exc}"
+        ) from exc
 
 
 def pytest_collection_modifyitems(
@@ -108,7 +173,12 @@ def pytest_collection_modifyitems(
         "shard_count": config.getoption("governance_shard_count"),
         "minimum_count": config.getoption("governance_shard_minimum"),
     }
+    evidence_binding = _evidence_binding(config)
     if all(value is None for value in values.values()):
+        if evidence_binding is not None:
+            raise pytest.UsageError(
+                "all governance shard options are required with shard evidence"
+            )
         return
     if any(value is None for value in values.values()):
         raise pytest.UsageError("all governance shard options are required together")
@@ -122,6 +192,17 @@ def pytest_collection_modifyitems(
         )
     except ValueError as exc:
         raise pytest.UsageError(f"governance shard selection rejected: {exc}") from exc
+
+    if evidence_binding is not None:
+        evidence_path, source_sha = evidence_binding
+        _write_evidence(
+            evidence_path,
+            source_sha=source_sha,
+            shard_index=values["shard_index"],
+            shard_count=values["shard_count"],
+            minimum_count=values["minimum_count"],
+            selection=selection,
+        )
 
     selected = set(selection.selected_nodeids)
     items[:] = [item for item in items if item.nodeid in selected]

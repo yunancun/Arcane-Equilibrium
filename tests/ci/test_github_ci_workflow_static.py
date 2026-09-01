@@ -118,6 +118,16 @@ def test_development_agent_governance_suite_is_sharded_without_filtering() -> No
     assert "--governance-shard-index ${{ matrix.shard }}" in governance
     assert "--governance-shard-count 8" in governance
     assert "--governance-shard-minimum 4548" in governance
+    assert "--governance-shard-source-sha ${{ github.sha }}" in governance
+    assert '"${{ runner.temp }}/governance-pytest-shard-${{ matrix.shard }}.json"' in governance
+    assert "uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02" in governance
+    assert "name: governance-pytest-shard-${{ matrix.shard }}" in governance
+    assert "if-no-files-found: error" in governance
+    assert "retention-days: 1" in governance
+    assert "overwrite: false" in governance
+    upload = _workflow_step("\n" + governance, "Upload exact governance shard evidence")
+    assert "if: always()" in upload
+    assert "path: ${{ runner.temp }}/governance-pytest-shard-${{ matrix.shard }}.json" in upload
     assert "tests/structure/test_codex_memory_policy.py" in governance
     assert "tests/structure/test_role_memory_compaction.py" in governance
     for forbidden in (" -k ", "--ignore", "--deselect", "--maxfail", " -x", "xdist"):
@@ -133,7 +143,34 @@ def test_development_agent_governance_keeps_legacy_fail_closed_aggregate() -> No
     assert "SHARD_RESULT: ${{ needs.development-agent-governance-shard.result }}" in aggregate
     assert '"$GOVERNANCE_SELECTED" == "true" && "$SHARD_RESULT" == "success"' in aggregate
     assert '"$GOVERNANCE_SELECTED" == "false" && "$SHARD_RESULT" == "skipped"' in aggregate
+    assert "actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5" in aggregate
+    assert "actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093" in aggregate
+    assert "pattern: governance-pytest-shard-*" in aggregate
+    assert "merge-multiple: false" in aggregate
+    assert "helper_scripts/ci/verify_pytest_shards.py" in aggregate
+    assert "--expected-source-sha ${{ github.sha }}" in aggregate
+    assert "--expected-shard-count 8" in aggregate
+    assert "--expected-minimum-count 4548" in aggregate
+    artifact_guard = (
+        "if: needs.changes.outputs.governance == 'true' && "
+        "needs.development-agent-governance-shard.result == 'success'"
+    )
+    for step_name in (
+        "Check out exact governance source",
+        "Download preserved governance shard evidence",
+        "Verify exhaustive governance shard evidence",
+    ):
+        assert artifact_guard in _workflow_step("\n" + aggregate, step_name)
+    assert "ref: ${{ github.sha }}" in aggregate
+    assert "path: ${{ runner.temp }}/governance-pytest-shards" in aggregate
+    for forbidden in ("github-token:", "repository:", "run-id:"):
+        assert forbidden not in aggregate
     assert "exit 1" in aggregate
+
+
+def test_shard_verifier_tests_are_unconditional_and_self_triggering() -> None:
+    policy = _job("git-workflow-policy")
+    assert "tests/ci/test_verify_pytest_shards.py" in policy
 
 
 def test_v158_v159_contracts_run_once_on_shard_zero() -> None:

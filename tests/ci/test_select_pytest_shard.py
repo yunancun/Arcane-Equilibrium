@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 from itertools import combinations
+import json
 
 import pytest
 
@@ -93,3 +94,98 @@ def test_boolean_integer_inputs_fail_closed(field: str) -> None:
 
     with pytest.raises(ValueError, match="integer"):
         select_nodeids(_nodeids(1), **arguments)
+
+
+class _PluginManager:
+    def get_plugin(self, name: str):
+        assert name == "terminalreporter"
+        return None
+
+
+class _Config:
+    pluginmanager = _PluginManager()
+
+    def __init__(self, **values: object) -> None:
+        self._values = values
+
+    def getoption(self, name: str):
+        return self._values[name]
+
+
+class _Item:
+    def __init__(self, nodeid: str) -> None:
+        self.nodeid = nodeid
+
+
+def test_collection_writes_exact_deterministic_evidence_before_filtering(tmp_path) -> None:
+    from helper_scripts.ci.select_pytest_shard import pytest_collection_modifyitems
+
+    evidence = tmp_path / "governance-pytest-shard-1.json"
+    items = [_Item(nodeid) for nodeid in reversed(_nodeids(5))]
+    config = _Config(
+        governance_shard_index=1,
+        governance_shard_count=2,
+        governance_shard_minimum=5,
+        governance_shard_evidence_path=str(evidence),
+        governance_shard_source_sha="a" * 40,
+    )
+
+    pytest_collection_modifyitems(config, items)
+
+    payload = json.loads(evidence.read_text(encoding="utf-8"))
+    assert list(payload) == sorted(payload)
+    assert payload == {
+        "full_count": 5,
+        "full_manifest_sha256": select_nodeids(
+            _nodeids(5), shard_index=1, shard_count=2, minimum_count=5
+        ).full_manifest_sha256,
+        "minimum_count": 5,
+        "schema_version": "governance_pytest_shard_evidence_v1",
+        "selected_count": 2,
+        "selected_manifest_sha256": select_nodeids(
+            _nodeids(5), shard_index=1, shard_count=2, minimum_count=5
+        ).selected_manifest_sha256,
+        "selected_nodeids": [_nodeids(5)[1], _nodeids(5)[3]],
+        "shard_count": 2,
+        "shard_index": 1,
+        "source_sha": "a" * 40,
+    }
+    assert {item.nodeid for item in items} == set(payload["selected_nodeids"])
+    assert evidence.read_bytes().endswith(b"\n")
+
+    with pytest.raises(pytest.UsageError, match="already exists"):
+        pytest_collection_modifyitems(config, [_Item(nodeid) for nodeid in _nodeids(5)])
+
+
+@pytest.mark.parametrize(
+    ("path", "source_sha"),
+    [("evidence.json", None), (None, "a" * 40), ("evidence.json", "A" * 40)],
+)
+def test_collection_evidence_options_are_all_or_none_and_sha_bound(
+    path: str | None, source_sha: str | None
+) -> None:
+    from helper_scripts.ci.select_pytest_shard import pytest_collection_modifyitems
+
+    config = _Config(
+        governance_shard_index=0,
+        governance_shard_count=1,
+        governance_shard_minimum=1,
+        governance_shard_evidence_path=path,
+        governance_shard_source_sha=source_sha,
+    )
+    with pytest.raises(pytest.UsageError, match="evidence"):
+        pytest_collection_modifyitems(config, [_Item(_nodeids(1)[0])])
+
+
+def test_evidence_options_cannot_run_without_shard_options() -> None:
+    from helper_scripts.ci.select_pytest_shard import pytest_collection_modifyitems
+
+    config = _Config(
+        governance_shard_index=None,
+        governance_shard_count=None,
+        governance_shard_minimum=None,
+        governance_shard_evidence_path="evidence.json",
+        governance_shard_source_sha="a" * 40,
+    )
+    with pytest.raises(pytest.UsageError, match="shard options"):
+        pytest_collection_modifyitems(config, [_Item(_nodeids(1)[0])])
