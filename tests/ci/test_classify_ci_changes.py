@@ -2,8 +2,13 @@ from __future__ import annotations
 
 import subprocess
 import sys
+from pathlib import Path
 
-from helper_scripts.ci.classify_ci_changes import GATES, classify_paths
+REPO_ROOT = Path(__file__).resolve().parents[2]
+if str(REPO_ROOT) not in sys.path:
+    sys.path.append(str(REPO_ROOT))
+
+from helper_scripts.ci.classify_ci_changes import GATES, classify_paths  # noqa: E402
 
 
 def test_alr_strict_default_checkpoint_keeps_expensive_gates_off() -> None:
@@ -27,6 +32,20 @@ def test_ci_control_plane_change_forces_every_gate() -> None:
         "helper_scripts/ci/classify_ci_changes.py",
     ):
         assert all(classify_paths([path]).values())
+
+
+def test_governance_shard_selector_and_contract_test_trigger_governance() -> None:
+    for path in (
+        "helper_scripts/ci/select_pytest_shard.py",
+        "helper_scripts/ci/verify_pytest_shards.py",
+        "tests/ci/test_select_pytest_shard.py",
+        "tests/ci/test_verify_pytest_shards.py",
+    ):
+        result = classify_paths([path])
+        assert result["governance"] is True, path
+        assert all(
+            enabled is False for gate, enabled in result.items()
+            if gate != "governance"), path
 
 
 def test_categories_are_narrow_but_cover_their_own_contracts() -> None:
@@ -139,11 +158,8 @@ def test_governance_gate_covers_direct_policy_and_adapter_inputs() -> None:
     ):
         result = classify_paths([path])
         assert result["governance"] is True
-        assert all(
-            enabled is False
-            for gate, enabled in result.items()
-            if gate != "governance"
-        )
+        assert all(enabled is False for gate, enabled in result.items()
+                   if gate != "governance")
 
 
 def test_cli_writes_nul_safe_github_outputs(tmp_path) -> None:

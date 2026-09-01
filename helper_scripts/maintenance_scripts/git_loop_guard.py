@@ -14,13 +14,24 @@ import json
 import os
 import subprocess
 from collections.abc import Iterable
+from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any
 
+from agent_governance_capture import (
+    native_git_command,
+    native_git_environment,
+    native_origin_urls,
+    native_remote_head,
+)
 from agent_governance_task_control import (
-    FileWriterLeaseStore,
+    filesystem_writer_lease_action,
     inspect_worktree,
-    validate_writer_lease,
+)
+from agent_governance_lw2_readmission import (
+    LW2_REPOSITORY_URL,
+    lw2_contract_selected,
+    lw2_protected_path,
 )
 
 
@@ -39,12 +50,14 @@ DEFAULT_MAX_UNTRACKED_BYTES = 2_000_000
 
 
 def _git(repo: Path, *args: str, timeout: int = 20) -> subprocess.CompletedProcess[bytes]:
-    command = ["git", "-C", str(repo), *args]
+    command = native_git_command(repo, *args)
     try:
         return subprocess.run(
             command,
             check=False,
             capture_output=True,
+            env=native_git_environment(),
+            stdin=subprocess.DEVNULL,
             timeout=timeout,
         )
     except (OSError, subprocess.TimeoutExpired) as exc:
@@ -70,12 +83,20 @@ def _nul_paths(repo: Path, *args: str) -> list[str] | None:
     return [os.fsdecode(item) for item in proc.stdout.split(b"\0") if item]
 
 
-def _true_remote_head(repo: Path, ref: str) -> str | None:
-    proc = _git(repo, "ls-remote", "origin", ref)
-    if proc.returncode != 0:
+def _true_remote_head(
+    repo: Path, ref: str, remote: str = "origin"
+) -> str | None:
+    if remote == "origin":
+        try:
+            fetch_urls, push_urls = native_origin_urls(repo)
+        except ValueError:
+            return None
+        if len(fetch_urls) != 1 or fetch_urls != push_urls:
+            return None
+        remote = fetch_urls[0]
+    if not remote:
         return None
-    fields = proc.stdout.decode("utf-8", errors="replace").split()
-    return fields[0] if fields else None
+    return native_remote_head(repo, remote, ref)
 
 
 def _is_ancestor(repo: Path, ancestor: str, descendant: str) -> bool | None:
@@ -87,8 +108,28 @@ def _is_ancestor(repo: Path, ancestor: str, descendant: str) -> bool | None:
     return None
 
 
+def _utc_now() -> datetime:
+    """Trusted final publication clock, kept injectable for boundary tests."""
+
+    return datetime.now(timezone.utc)
+
+
+def _lease_active_at(lease: Any, now: datetime) -> bool:
+    if not isinstance(lease, dict):
+        return False
+    try:
+        expiry = datetime.fromisoformat(
+            str(lease["expires_at"]).replace("Z", "+00:00")
+        )
+    except (KeyError, TypeError, ValueError):
+        return False
+    return expiry.tzinfo is not None and expiry > now
+
+
 def _diff_lines(repo: Path) -> tuple[int, bool, bool]:
-    proc = _git(repo, "diff", "--numstat", "HEAD")
+    proc = _git(
+        repo, "diff", "--no-ext-diff", "--no-textconv", "--numstat", "HEAD"
+    )
     if proc.returncode != 0:
         return 0, False, True
     total = 0
@@ -136,12 +177,20 @@ def _allowed(path: str, allow_paths: Iterable[str]) -> bool:
 
 
 def inspect_repository(repo: Path) -> dict[str, Any]:
+    """Inspect only local repository state; remote authority is phase-owned."""
+
     repo = repo.resolve()
     branch = _text(repo, "symbolic-ref", "--quiet", "--short", "HEAD")
     head = _text(repo, "rev-parse", "HEAD")
     upstream = _text(repo, "rev-parse", "--abbrev-ref", "--symbolic-full-name", "@{u}")
-    tracked = _nul_paths(repo, "diff", "--name-only", "-z", "HEAD", "--")
-    staged = _nul_paths(repo, "diff", "--cached", "--name-only", "-z", "--")
+    tracked = _nul_paths(
+        repo, "diff", "--no-ext-diff", "--no-textconv", "--no-renames",
+        "--name-only", "-z", "HEAD", "--"
+    )
+    staged = _nul_paths(
+        repo, "diff", "--no-ext-diff", "--no-textconv", "--cached",
+        "--name-only", "-z", "--"
+    )
     untracked = _nul_paths(
         repo, "ls-files", "--others", "--exclude-standard", "-z", "--"
     )
@@ -171,7 +220,7 @@ def inspect_repository(repo: Path) -> dict[str, Any]:
         "untracked_unreadable": unreadable_untracked,
         "inspection_failures": inspection_failures,
         "local_origin_main": _text(repo, "rev-parse", "origin/main"),
-        "true_origin_main": _true_remote_head(repo, "refs/heads/main"),
+        "true_origin_main": None,
     }
 
 
@@ -185,6 +234,7 @@ def evaluate(
     writer_task_id: str | None = None,
     writer_lease_id: str | None = None,
     writer_owner: str | None = None,
+    writer_admission_id: str | None = None,
     allow_paths: Iterable[str] = (),
     max_dirty_files: int = DEFAULT_MAX_DIRTY_FILES,
     max_diff_lines: int = DEFAULT_MAX_DIFF_LINES,
@@ -199,6 +249,8 @@ def evaluate(
     dirty = state["dirty_paths"]
     true_main = state["true_origin_main"]
     local_main = state["local_origin_main"]
+    admission_scope: dict[str, Any] | None = None
+    publication_authority_pending = False
 
     if branch is None:
         reasons.append("DETACHED_HEAD")
@@ -227,31 +279,44 @@ def evaluate(
             reasons.append("UPSTREAM_MISMATCH")
         if not writer_task_id or not writer_owner or not writer_lease_id:
             reasons.append("WRITER_LEASE_REQUIRED")
-        else:
+        if not writer_admission_id:
+            reasons.append("WRITER_ADMISSION_ID_REQUIRED")
+        if (
+            writer_task_id
+            and writer_owner
+            and writer_lease_id
+            and writer_admission_id
+        ):
             try:
                 identity = inspect_worktree(repo)
                 if not identity.linked:
                     reasons.append("LINKED_WORKTREE_REQUIRED")
-                lease_result = validate_writer_lease(
-                    FileWriterLeaseStore(identity.common_dir),
-                    identity,
-                    task_id=writer_task_id,
-                    lease_id=writer_lease_id,
-                    owner=writer_owner,
-                )
-                if lease_result["status"] != "PASS":
-                    reasons.extend(lease_result["reasons"])
-                lease = lease_result.get("lease")
-                state["writer_lease"] = (
-                    {
-                        "status": lease_result["status"],
-                        "task_id": lease.get("task_id"),
-                        "owner": lease.get("owner"),
-                        "expires_at": lease.get("expires_at"),
-                    }
-                    if lease
-                    else {"status": lease_result["status"]}
-                )
+                if phase in {"publish", "post-push"}:
+                    publication_authority_pending = True
+                else:
+                    lease_result = filesystem_writer_lease_action(
+                        action="status",
+                        repo=repo,
+                        task_id=writer_task_id,
+                        lease_id=writer_lease_id,
+                        owner=writer_owner,
+                        admission_id=writer_admission_id,
+                    )
+                    if lease_result["status"] != "PASS":
+                        reasons.extend(lease_result["reasons"])
+                    else:
+                        admission_scope = lease_result.get("admission_scope")
+                    lease = lease_result.get("lease")
+                    state["writer_lease"] = (
+                        {
+                            "status": lease_result["status"],
+                            "task_id": lease.get("task_id"),
+                            "owner": lease.get("owner"),
+                            "expires_at": lease.get("expires_at"),
+                        }
+                        if lease
+                        else {"status": lease_result["status"]}
+                    )
             except (OSError, ValueError):
                 reasons.append("WRITER_LEASE_STATE_INVALID")
 
@@ -259,6 +324,21 @@ def evaluate(
         reasons.append("DIRTY_WORKTREE")
 
     if phase == "checkpoint":
+        admitted_paths = (
+            admission_scope.get("dirty_scope")
+            if isinstance(admission_scope, dict)
+            else None
+        )
+        if not isinstance(admitted_paths, list):
+            reasons.append("WRITER_ADMISSION_SCOPE_UNAVAILABLE")
+        elif any(not _allowed(path, admitted_paths) for path in dirty):
+            reasons.append("DIRTY_PATH_OUTSIDE_ADMITTED_SCOPE")
+        if (
+            isinstance(admission_scope, dict)
+            and admission_scope.get("lw2_selected") is False
+            and any(lw2_protected_path(path) for path in dirty)
+        ):
+            reasons.append("LW2_PROTECTED_PATH_REQUIRES_LW2_ADMISSION")
         allow = tuple(allow_paths)
         if not allow:
             reasons.append("ALLOWLIST_REQUIRED")
@@ -278,27 +358,23 @@ def evaluate(
         if state["untracked_bytes"] > max_untracked_bytes:
             reasons.append("UNTRACKED_BYTE_BUDGET_EXCEEDED")
 
-    if phase in {"publish", "post-push", "main-sync", "main-post-sync"}:
+    if phase in {"main-sync", "main-post-sync"}:
+        true_main = _true_remote_head(repo.resolve(), "refs/heads/main")
+        state["true_origin_main"] = true_main
         if true_main is None:
             reasons.append("TRUE_ORIGIN_MAIN_UNAVAILABLE")
         if local_main != true_main:
             reasons.append("REMOTE_TRACKING_STALE")
 
     if phase in {"publish", "post-push"}:
-        if true_main and head:
-            ancestor = _is_ancestor(repo.resolve(), true_main, head)
+        if local_main and head:
+            ancestor = _is_ancestor(repo.resolve(), local_main, head)
             if ancestor is not True:
                 reasons.append(
                     "ORIGIN_MAIN_NOT_ANCESTOR"
                     if ancestor is False
                     else "ORIGIN_MAIN_TOPOLOGY_UNAVAILABLE"
                 )
-        if phase == "post-push" and branch and head:
-            remote_branch = _true_remote_head(repo.resolve(), f"refs/heads/{branch}")
-            state["true_remote_branch_head"] = remote_branch
-            if remote_branch != head:
-                reasons.append("REMOTE_BRANCH_HEAD_MISMATCH")
-
     if phase in {"main-sync", "main-post-sync"}:
         if branch != "main":
             reasons.append("MAIN_WORKTREE_REQUIRED")
@@ -316,6 +392,48 @@ def evaluate(
                 )
         if phase == "main-post-sync" and head != true_main:
             reasons.append("LOCAL_MAIN_NOT_SYNCED")
+
+    if phase in {"publish", "post-push"} and publication_authority_pending:
+        try:
+            lease_result = filesystem_writer_lease_action(
+                action="publication-status",
+                repo=repo,
+                task_id=writer_task_id or "",
+                lease_id=writer_lease_id,
+                owner=writer_owner or "",
+                admission_id=writer_admission_id,
+                publication_phase=phase,
+                publication_expected_branch=expected_branch,
+                publication_expected_head=expected_head,
+            )
+            reasons.extend(lease_result.get("reasons", []))
+            admission_scope = lease_result.get("admission_scope")
+            publication_status = lease_result.get("publication_status")
+            if publication_status is not None:
+                state["writer_publication_status"] = publication_status
+            publication_boundary = lease_result.get("publication_boundary")
+            if publication_boundary is not None:
+                state["publication_boundary"] = publication_boundary
+                final_true_main = publication_boundary.get("true_origin_main")
+                state["true_origin_main"] = final_true_main
+                state["true_remote_branch_head"] = publication_boundary.get(
+                    "true_remote_branch_head"
+                )
+            elif lease_result.get("status") == "PASS":
+                reasons.append("PUBLICATION_BOUNDARY_UNAVAILABLE")
+            lease = lease_result.get("lease")
+            state["writer_lease"] = (
+                {
+                    "status": lease_result["status"],
+                    "task_id": lease.get("task_id"),
+                    "owner": lease.get("owner"),
+                    "expires_at": lease.get("expires_at"),
+                }
+                if lease
+                else {"status": lease_result["status"]}
+            )
+        except (OSError, ValueError):
+            reasons.append("WRITER_LEASE_STATE_INVALID")
 
     return {
         "schema_version": SCHEMA_VERSION,
@@ -343,6 +461,7 @@ def _parse_args(argv: list[str] | None = None) -> argparse.Namespace:
     parser.add_argument("--writer-task-id")
     parser.add_argument("--writer-lease-id")
     parser.add_argument("--writer-owner")
+    parser.add_argument("--writer-admission-id")
     parser.add_argument("--allow-path", action="append", default=[])
     parser.add_argument("--max-dirty-files", type=int, default=DEFAULT_MAX_DIRTY_FILES)
     parser.add_argument("--max-diff-lines", type=int, default=DEFAULT_MAX_DIFF_LINES)
@@ -380,6 +499,7 @@ def main(argv: list[str] | None = None) -> int:
         writer_task_id=args.writer_task_id,
         writer_lease_id=args.writer_lease_id,
         writer_owner=args.writer_owner,
+        writer_admission_id=args.writer_admission_id,
         allow_paths=args.allow_path,
         max_dirty_files=args.max_dirty_files,
         max_diff_lines=args.max_diff_lines,

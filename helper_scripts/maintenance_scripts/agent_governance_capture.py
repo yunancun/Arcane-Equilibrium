@@ -8,13 +8,17 @@ it never upgrades a record into platform or external authenticity.
 from __future__ import annotations
 
 import base64
+import errno
 import hashlib
 import json
+import os
 import re
+import stat
 import subprocess
 from datetime import datetime
-from pathlib import Path
+from pathlib import Path, PurePosixPath
 from typing import Any
+from urllib.parse import quote
 
 from agent_governance_command_replay import (
     command_argv,
@@ -30,6 +34,8 @@ from agent_governance_workflow_receipts import (
 
 
 REPO_ROOT = Path(__file__).resolve().parents[2]
+TRUSTED_GIT_EXECUTABLE = "/usr/bin/git"
+TRUSTED_CURL_EXECUTABLE = "/usr/bin/curl"
 LOCAL_REPRODUCIBLE = "LOCAL_REPRODUCIBLE"
 ORCHESTRATOR_BOUND = "ORCHESTRATOR_BOUND"
 PLATFORM_OR_EXTERNAL_ATTESTED = "PLATFORM_OR_EXTERNAL_ATTESTED"
@@ -93,6 +99,1097 @@ SENSITIVE_PARTS = {
     ".git", ".ssh", ".aws", ".gnupg", ".netrc", ".env", "credentials",
     "credentials.json", "id_rsa", "id_ed25519",
 }
+_AMBIENT_GIT_ENVIRONMENT = {
+    "GIT_ALTERNATE_OBJECT_DIRECTORIES",
+    "GIT_CEILING_DIRECTORIES",
+    "GIT_COMMON_DIR",
+    "GIT_CONFIG_COUNT",
+    "GIT_CONFIG_PARAMETERS",
+    "GIT_DIR",
+    "GIT_DISCOVERY_ACROSS_FILESYSTEM",
+    "GIT_EXEC_PATH",
+    "GIT_EXTERNAL_DIFF",
+    "GIT_GRAFT_FILE",
+    "GIT_PROXY_COMMAND",
+    "GIT_SSH",
+    "GIT_SSH_COMMAND",
+    "GIT_ASKPASS",
+    "SSH_ASKPASS",
+    "GIT_PROTOCOL_FROM_USER",
+    "GIT_ALLOW_PROTOCOL",
+    "GIT_INDEX_FILE",
+    "GIT_NAMESPACE",
+    "GIT_OBJECT_DIRECTORY",
+    "GIT_REPLACE_REF_BASE",
+    "GIT_WORK_TREE",
+}
+_NUMBERED_GIT_CONFIG_ENVIRONMENT = re.compile(r"GIT_CONFIG_(?:KEY|VALUE)_\d+")
+_PUBLIC_GITHUB_REPOSITORY_RE = re.compile(
+    r"^https://github\.com/"
+    r"([A-Za-z0-9][A-Za-z0-9_.-]{0,99})/"
+    r"([A-Za-z0-9][A-Za-z0-9_.-]{0,99})\.git$"
+)
+_PUBLIC_GITHUB_BRANCH_REF_RE = re.compile(
+    r"^refs/heads/[A-Za-z0-9][A-Za-z0-9._/-]{0,254}$"
+)
+
+
+class NativeEvidenceUnavailable(ValueError):
+    """Authority evidence could not be observed at all."""
+
+
+class NativeEvidenceMismatch(ValueError):
+    """Authority evidence was observed and deterministically disagreed."""
+
+
+def native_git_environment() -> dict[str, str]:
+    """Return the minimal environment for authority-bearing Git reads."""
+
+    return {
+        "GIT_ATTR_NOSYSTEM": "1",
+        "GIT_CONFIG_GLOBAL": os.devnull,
+        "GIT_CONFIG_NOSYSTEM": "1",
+        "GIT_NO_REPLACE_OBJECTS": "1",
+        "GIT_OPTIONAL_LOCKS": "0",
+        "GIT_PAGER": "cat",
+        "GIT_TERMINAL_PROMPT": "0",
+        "LANG": "C",
+        "LC_ALL": "C",
+        "PAGER": "cat",
+        "PATH": "/usr/bin:/bin",
+    }
+
+
+def publication_input_reasons(
+    phase: str | None, branch: str | None, source_sha: str | None
+) -> list[str]:
+    """Validate caller-bound publication identity without ambient fallback."""
+
+    reasons: list[str] = []
+    if phase is None:
+        reasons.append("PUBLICATION_PHASE_REQUIRED")
+    elif phase not in {"publish", "post-push"}:
+        reasons.append("PUBLICATION_PHASE_INVALID")
+    if branch is None:
+        reasons.append("PUBLICATION_BRANCH_REQUIRED")
+    elif not branch or branch == "main":
+        reasons.append("PUBLICATION_BRANCH_INVALID")
+    if source_sha is None:
+        reasons.append("PUBLICATION_SOURCE_SHA_REQUIRED")
+    elif not HEAD_RE.fullmatch(source_sha):
+        reasons.append("PUBLICATION_SOURCE_SHA_INVALID")
+    return reasons
+
+
+def _native_git_prefix() -> list[str]:
+    return [
+        TRUSTED_GIT_EXECUTABLE,
+        "--no-replace-objects",
+        "-c", "core.fsmonitor=false",
+        "-c", "core.hooksPath=/dev/null",
+        "-c", "credential.helper=",
+        "-c", "protocol.allow=never",
+        "-c", "protocol.file.allow=always",
+        "-c", "protocol.https.allow=always",
+    ]
+
+
+def native_git_command(root: Path, *arguments: str) -> list[str]:
+    return [
+        *_native_git_prefix(), "-C", str(root), *arguments,
+    ]
+
+
+def native_remote_git_command(*arguments: str) -> list[str]:
+    """Build a Git command that cannot discover repository-local config."""
+
+    return [*_native_git_prefix(), *arguments]
+
+
+def native_remote_git_cwd(root: Path) -> Path:
+    """Return a stable directory outside ``root`` and every parent repository."""
+
+    return Path(root.resolve().anchor)
+
+
+def _public_github_ref_api_url(repository_url: str, ref: str) -> str | None:
+    """Map one exact public GitHub origin/ref to its unauthenticated API URL."""
+
+    match = _PUBLIC_GITHUB_REPOSITORY_RE.fullmatch(repository_url)
+    if match is None or _PUBLIC_GITHUB_BRANCH_REF_RE.fullmatch(ref) is None:
+        return None
+    branch = ref.removeprefix("refs/")
+    if (
+        ".." in branch
+        or "@{" in branch
+        or "//" in branch
+        or "/." in branch
+        or branch.endswith(("/", ".", ".lock"))
+    ):
+        return None
+    owner, repository = match.groups()
+    return (
+        f"https://api.github.com/repos/{owner}/{repository}/git/ref/"
+        f"{quote(branch, safe='/')}"
+    )
+
+
+def validate_public_github_repository_ref(repository_url: str, ref: str) -> bool:
+    """Purely validate one credential-free exact public GitHub URL/ref pair."""
+
+    return _public_github_ref_api_url(repository_url, ref) is not None
+
+
+def _public_github_remote_head(
+    root: Path, repository_url: str, ref: str
+) -> str | None:
+    """Read one public GitHub branch ref without credentials or ambient config."""
+
+    api_url = _public_github_ref_api_url(repository_url, ref)
+    if api_url is None:
+        return None
+    command = [
+        TRUSTED_CURL_EXECUTABLE,
+        "--disable",
+        "--fail",
+        "--silent",
+        "--show-error",
+        "--proto",
+        "=https",
+        "--tlsv1.2",
+        "--connect-timeout",
+        "10",
+        "--max-time",
+        "20",
+        "--header",
+        "Accept: application/vnd.github+json",
+        "--header",
+        "X-GitHub-Api-Version: 2022-11-28",
+        api_url,
+    ]
+    try:
+        completed = subprocess.run(
+            command,
+            check=False,
+            capture_output=True,
+            cwd=native_remote_git_cwd(root),
+            env=native_git_environment(),
+            stdin=subprocess.DEVNULL,
+            timeout=25,
+        )
+    except (OSError, subprocess.TimeoutExpired):
+        return None
+    if completed.returncode != 0 or len(completed.stdout) > 4096:
+        return None
+    try:
+        payload = json.loads(completed.stdout.decode("utf-8", errors="strict"))
+    except (UnicodeDecodeError, json.JSONDecodeError):
+        return None
+    if not isinstance(payload, dict):
+        return None
+    remote_object = payload.get("object")
+    if (
+        payload.get("ref") != ref
+        or not isinstance(remote_object, dict)
+        or remote_object.get("type") != "commit"
+        or not isinstance(remote_object.get("sha"), str)
+        or HEAD_RE.fullmatch(remote_object["sha"]) is None
+    ):
+        return None
+    return remote_object["sha"]
+
+
+def native_remote_head(root: Path, repository_url: str, ref: str) -> str | None:
+    """Query an exact URL, with a bounded public-GitHub read-only fallback."""
+
+    command = native_remote_git_command(
+        "ls-remote", "--exit-code", repository_url, ref
+    )
+    try:
+        completed = subprocess.run(
+            command,
+            check=False,
+            capture_output=True,
+            cwd=native_remote_git_cwd(root),
+            env=native_git_environment(),
+            stdin=subprocess.DEVNULL,
+            timeout=20,
+        )
+    except (OSError, subprocess.TimeoutExpired):
+        return _public_github_remote_head(root, repository_url, ref)
+    if completed.returncode != 0:
+        return None
+    try:
+        decoded = completed.stdout.decode("utf-8", errors="strict")
+    except UnicodeDecodeError:
+        return None
+    lines = decoded.splitlines()
+    if len(lines) != 1 or decoded != f"{lines[0]}\n":
+        return None
+    fields = lines[0].split("\t")
+    if (
+        len(fields) != 2
+        or fields[1] != ref
+        or not HEAD_RE.fullmatch(fields[0])
+    ):
+        return None
+    return fields[0]
+
+
+def native_origin_urls(root: Path) -> tuple[list[str], list[str]]:
+    """Read unprojected local origin URLs without includes or ``insteadOf``."""
+
+    def values(key: str) -> list[str]:
+        try:
+            completed = subprocess.run(
+                native_git_command(root, "config", "--local", "--no-includes",
+                                   "--null", "--get-all", key),
+                check=False,
+                capture_output=True,
+                env=native_git_environment(),
+                stdin=subprocess.DEVNULL,
+                timeout=20,
+            )
+            decoded = completed.stdout.decode("utf-8", errors="strict")
+        except (
+            OSError,
+            UnicodeDecodeError,
+            subprocess.TimeoutExpired,
+        ) as error:
+            raise NativeEvidenceUnavailable(
+                "publication origin URL evidence is unavailable"
+            ) from error
+        if completed.returncode == 1 and not decoded:
+            return []
+        if completed.returncode != 0:
+            raise NativeEvidenceUnavailable(
+                "publication origin URL evidence is unavailable"
+            )
+        items = decoded.split("\0")
+        if (
+            len(items) < 2
+            or items[-1] != ""
+            or any(
+                not item
+                or item != item.strip()
+                or any(ord(character) < 32 for character in item)
+                for item in items[:-1]
+            )
+        ):
+            raise NativeEvidenceMismatch("publication origin URL is invalid")
+        return items[:-1]
+
+    fetch_urls = values("remote.origin.url")
+    push_urls = values("remote.origin.pushurl")
+    return fetch_urls, push_urls or list(fetch_urls)
+
+
+def _native_publication_git_bytes(root: Path, *arguments: str) -> bytes:
+    """Return exact config-isolated Git bytes used by publication evidence."""
+
+    try:
+        return subprocess.run(
+            native_git_command(root, *arguments),
+            check=True,
+            capture_output=True,
+            env=native_git_environment(),
+            stdin=subprocess.DEVNULL,
+            timeout=20,
+        ).stdout
+    except (
+        OSError,
+        subprocess.CalledProcessError,
+        subprocess.TimeoutExpired,
+    ) as error:
+        raise NativeEvidenceUnavailable(
+            "native publication Git evidence is unavailable"
+        ) from error
+
+
+def native_commit_identity(root: Path, commit: str) -> tuple[str, list[str]]:
+    """Read one commit's unprojected tree and ordered raw parents."""
+
+    if HEAD_RE.fullmatch(commit) is None:
+        raise NativeEvidenceMismatch("native commit identity is invalid")
+    header = _native_publication_git_bytes(
+        root, "cat-file", "commit", commit
+    ).split(b"\n\n", 1)[0]
+    tree: str | None = None
+    parents: list[str] = []
+    try:
+        for line in header.splitlines():
+            if line.startswith(b"tree "):
+                if tree is not None:
+                    raise NativeEvidenceMismatch(
+                        "native commit tree is ambiguous"
+                    )
+                tree = line.removeprefix(b"tree ").decode("ascii")
+            elif line.startswith(b"parent "):
+                parents.append(line.removeprefix(b"parent ").decode("ascii"))
+    except UnicodeDecodeError as error:
+        raise NativeEvidenceMismatch(
+            "native commit headers are invalid"
+        ) from error
+    if (
+        tree is None
+        or HEAD_RE.fullmatch(tree) is None
+        or any(HEAD_RE.fullmatch(parent) is None for parent in parents)
+    ):
+        raise NativeEvidenceMismatch("native commit headers are invalid")
+    return tree, parents
+
+
+def capture_native_head_tree(root: Path) -> dict[str, str]:
+    """Capture one stable, unprojected native HEAD/tree identity."""
+
+    try:
+        first = _native_publication_git_bytes(
+            root, "rev-parse", "--verify", "HEAD"
+        ).decode("ascii", errors="strict").strip()
+        tree, _ = native_commit_identity(root, first)
+        final = _native_publication_git_bytes(
+            root, "rev-parse", "--verify", "HEAD"
+        ).decode("ascii", errors="strict").strip()
+    except UnicodeDecodeError as error:
+        raise NativeEvidenceMismatch(
+            "native HEAD identity is invalid"
+        ) from error
+    if HEAD_RE.fullmatch(first) is None or final != first:
+        raise NativeEvidenceMismatch("native HEAD changed during capture")
+    return {
+        "schema_version": "task_admission_accepted_base_v1",
+        "head": first,
+        "tree": tree,
+    }
+
+
+def _native_is_ancestor(root: Path, ancestor: str, descendant: str) -> bool:
+    pending = [descendant]
+    seen: set[str] = set()
+    while pending:
+        current = pending.pop()
+        if current == ancestor:
+            return True
+        if current in seen:
+            continue
+        if len(seen) >= 100_000:
+            raise NativeEvidenceUnavailable("native publication graph is too large")
+        seen.add(current)
+        _, parents = native_commit_identity(root, current)
+        pending.extend(parent for parent in parents if parent not in seen)
+    return False
+
+
+def capture_native_linear_commit_range(
+    root: Path,
+    accepted_head: str,
+    expected_head: str,
+) -> tuple[list[dict[str, Any]], list[dict[str, str]], list[str]]:
+    """Capture every commit/path/patch in one native linear publication range."""
+
+    if HEAD_RE.fullmatch(accepted_head) is None or HEAD_RE.fullmatch(expected_head) is None:
+        return [], [], ["NATIVE_COMMIT_RANGE_UNAVAILABLE"]
+    try:
+        if not _native_is_ancestor(root, accepted_head, expected_head):
+            return [], [], ["NATIVE_COMMIT_RANGE_BASE_NOT_ANCESTOR"]
+        reverse_records: list[tuple[dict[str, Any], dict[str, str]]] = []
+        current = expected_head
+        seen: set[str] = set()
+        while current != accepted_head:
+            if current in seen or len(seen) >= 100_000:
+                return [], [], ["NATIVE_COMMIT_RANGE_UNAVAILABLE"]
+            seen.add(current)
+            tree, parents = native_commit_identity(root, current)
+            if len(parents) != 1:
+                return [], [], [
+                    "NATIVE_COMMIT_RANGE_NONLINEAR_HISTORY"
+                    if parents else "NATIVE_COMMIT_RANGE_BASE_NOT_ANCESTOR"
+                ]
+            parent = parents[0]
+            parent_tree, _ = native_commit_identity(root, parent)
+            raw_paths = _native_publication_git_bytes(
+                root,
+                "diff-tree", "-r", "--no-commit-id", "--no-renames",
+                "--no-ext-diff", "--no-textconv", "--name-only", "-z",
+                parent_tree, tree, "--",
+            )
+            paths = sorted({
+                raw.decode("utf-8", errors="strict")
+                for raw in raw_paths.split(b"\0") if raw
+            })
+            patch = _native_publication_git_bytes(
+                root,
+                "diff-tree", "-r", "--no-commit-id", "--no-renames",
+                "--no-ext-diff", "--no-textconv", "--binary", "--full-index",
+                "-p", parent_tree, tree, "--",
+            )
+            reverse_records.append(({
+                "commit": current,
+                "parent": parent,
+                "tree": tree,
+                "paths": paths,
+            }, {
+                "commit": current,
+                "binary_patch_digest": "sha256:" + hashlib.sha256(patch).hexdigest(),
+            }))
+            current = parent
+    except (NativeEvidenceMismatch, NativeEvidenceUnavailable, UnicodeDecodeError):
+        return [], [], ["NATIVE_COMMIT_RANGE_UNAVAILABLE"]
+    if not reverse_records:
+        return [], [], ["NATIVE_COMMIT_RANGE_EMPTY"]
+    reverse_records.reverse()
+    return (
+        [record for record, _ in reverse_records],
+        [patch for _, patch in reverse_records],
+        [],
+    )
+
+
+def capture_native_task_source_manifest(
+    root: Path,
+    *,
+    accepted_head: str,
+    accepted_tree: str,
+    scope: list[str],
+) -> list[dict[str, Any]]:
+    """Derive the task-owned progress manifest from one exact native tree."""
+
+    object_tree, _ = native_commit_identity(root, accepted_head)
+    if object_tree != accepted_tree:
+        raise NativeEvidenceMismatch("accepted task baseline tree is unavailable")
+    records: list[dict[str, Any]] = []
+    seen: set[str] = set()
+    total_bytes = 0
+
+    def tree_entries(relative: str, *, recursive: bool) -> list[tuple[str, str, str, str]]:
+        arguments = ["ls-tree", "-z", "--full-tree"]
+        if recursive:
+            arguments.append("-r")
+        raw_entries = _native_publication_git_bytes(
+            root, "--literal-pathspecs", *arguments, accepted_head, "--", relative
+        ).split(b"\0")
+        parsed: list[tuple[str, str, str, str]] = []
+        try:
+            for raw in raw_entries:
+                if not raw:
+                    continue
+                metadata, raw_path = raw.split(b"\t", 1)
+                fields = metadata.split(b" ")
+                if len(fields) != 3:
+                    raise ValueError("invalid native tree metadata")
+                mode, object_type, oid = (
+                    field.decode("ascii", errors="strict") for field in fields
+                )
+                path = raw_path.decode("utf-8", errors="strict")
+                parsed.append((mode, object_type, oid, path))
+        except (UnicodeDecodeError, ValueError) as error:
+            raise NativeEvidenceMismatch(
+                "accepted task baseline tree entry is invalid"
+            ) from error
+        return parsed
+
+    def append_file(mode: str, object_type: str, oid: str, relative: str) -> None:
+        nonlocal total_bytes
+        if relative in seen:
+            return
+        if object_type != "blob" or mode not in {"100644", "100755"}:
+            raise NativeEvidenceMismatch(
+                "accepted task baseline contains a non-regular file"
+            )
+        if HEAD_RE.fullmatch(oid) is None:
+            raise NativeEvidenceMismatch("accepted task baseline blob is invalid")
+        content = _native_publication_git_bytes(root, "cat-file", "blob", oid)
+        seen.add(relative)
+        total_bytes += len(content)
+        if len(seen) > 4096 or total_bytes > 64 * 1024 * 1024:
+            raise NativeEvidenceMismatch("accepted task baseline exceeds capture limits")
+        records.append({
+            "path": relative,
+            "kind": "file",
+            "size": len(content),
+            "content_sha256": hashlib.sha256(content).hexdigest(),
+        })
+
+    if not isinstance(scope, list) or any(not isinstance(item, str) for item in scope):
+        raise NativeEvidenceMismatch("accepted task baseline scope is invalid")
+    for relative in scope:
+        path = PurePosixPath(relative)
+        if (
+            not relative
+            or relative != path.as_posix()
+            or relative.startswith(("/", "~"))
+            or ".." in path.parts
+            or path.parts[0].casefold() == ".git"
+        ):
+            raise NativeEvidenceMismatch("accepted task baseline scope is unsafe")
+        exact = tree_entries(relative, recursive=False)
+        if not exact:
+            records.append({"path": relative, "kind": "absent"})
+            continue
+        if len(exact) != 1 or exact[0][3] != relative:
+            raise NativeEvidenceMismatch("accepted task baseline path is ambiguous")
+        mode, object_type, oid, observed_path = exact[0]
+        if object_type == "tree" and mode == "040000":
+            records.append({"path": relative, "kind": "directory"})
+            for child_mode, child_type, child_oid, child_path in tree_entries(
+                relative, recursive=True
+            ):
+                append_file(child_mode, child_type, child_oid, child_path)
+        else:
+            append_file(mode, object_type, oid, observed_path)
+    return sorted(records, key=lambda record: (record["path"], record["kind"]))
+
+
+def _protected_filesystem_snapshot(
+    repo: Path,
+    *,
+    exact_paths: set[str],
+    prefixes: list[str] | tuple[str, ...],
+    allowed_missing_exact_paths: set[str] | frozenset[str] = frozenset(),
+) -> tuple[list[str], list[dict[str, str]]]:
+    """Enumerate protected members through stable, no-follow descriptors."""
+
+    root = repo.resolve(strict=True)
+    records: dict[str, dict[str, str]] = {}
+    directory_identities: dict[str, tuple[int, int, int, int]] = {}
+    directory_memberships: dict[str, list[str]] = {}
+    prefix_memberships: dict[tuple[tuple[str, ...], str], list[str]] = {}
+    root_descriptor: int | None = None
+
+    def mode_text(metadata: os.stat_result) -> str:
+        return f"{stat.S_IFMT(metadata.st_mode):06o}:{stat.S_IMODE(metadata.st_mode):04o}"
+
+    def directory_identity(metadata: os.stat_result) -> tuple[int, int, int, int]:
+        return (
+            metadata.st_dev,
+            metadata.st_ino,
+            stat.S_IFMT(metadata.st_mode),
+            stat.S_IMODE(metadata.st_mode),
+        )
+
+    def stable_file_identity(metadata: os.stat_result) -> tuple[int, ...]:
+        return (
+            metadata.st_dev,
+            metadata.st_ino,
+            stat.S_IFMT(metadata.st_mode),
+            stat.S_IMODE(metadata.st_mode),
+            metadata.st_size,
+            metadata.st_mtime_ns,
+            metadata.st_ctime_ns,
+        )
+
+    def deterministic_os_error(error: OSError, label: str) -> None:
+        if error.errno in {
+            errno.ENOENT, errno.ENOTDIR, errno.ELOOP, errno.EISDIR,
+        }:
+            raise NativeEvidenceMismatch(label) from error
+        raise NativeEvidenceUnavailable(
+            "LW2 protected filesystem evidence is unavailable"
+        ) from error
+
+    def safe_component(value: str | bytes) -> str:
+        if isinstance(value, bytes):
+            try:
+                name = value.decode("utf-8", errors="strict")
+            except UnicodeDecodeError as error:
+                raise NativeEvidenceMismatch(
+                    "LW2 protected filesystem member name is not UTF-8"
+                ) from error
+        else:
+            name = value
+            try:
+                name.encode("utf-8", errors="strict")
+            except UnicodeEncodeError as error:
+                raise NativeEvidenceMismatch(
+                    "LW2 protected filesystem member name is not UTF-8"
+                ) from error
+        if not name or name in {".", ".."} or "/" in name or "\0" in name:
+            raise NativeEvidenceMismatch(
+                "LW2 protected filesystem member name is invalid"
+            )
+        return name
+
+    def relative_parts(relative: str) -> tuple[str, ...]:
+        path = PurePosixPath(relative)
+        parts = tuple(safe_component(part) for part in path.parts)
+        if path.is_absolute() or not parts or relative != "/".join(parts):
+            raise NativeEvidenceMismatch(
+                "LW2 protected filesystem path is invalid"
+            )
+        return parts
+
+    def scan_names(descriptor: int, prefix: str | None = None) -> list[str]:
+        with os.scandir(descriptor) as iterator:
+            names = [safe_component(entry.name) for entry in iterator]
+        return sorted(name for name in names if prefix is None or name.startswith(prefix))
+
+    def open_directory_at(parent: int, name: str, relative: str) -> int:
+        try:
+            descriptor = os.open(
+                name,
+                os.O_RDONLY | os.O_DIRECTORY | getattr(os, "O_NOFOLLOW", 0),
+                dir_fd=parent,
+            )
+        except OSError as error:
+            deterministic_os_error(
+                error, "LW2 protected filesystem parent changed type"
+            )
+            raise AssertionError("unreachable")
+        metadata = os.fstat(descriptor)
+        if not stat.S_ISDIR(metadata.st_mode):
+            os.close(descriptor)
+            raise NativeEvidenceMismatch(
+                "LW2 protected filesystem parent changed type"
+            )
+        identity = directory_identity(metadata)
+        previous = directory_identities.setdefault(relative, identity)
+        if previous != identity:
+            os.close(descriptor)
+            raise NativeEvidenceMismatch(
+                "LW2 protected filesystem parent was replaced"
+            )
+        return descriptor
+
+    def directory_for_parts(
+        parts: tuple[str, ...], *, record: bool = True
+    ) -> int:
+        assert root_descriptor is not None
+        current = os.dup(root_descriptor)
+        traversed: list[str] = []
+        try:
+            for name in parts:
+                traversed.append(name)
+                relative = "/".join(traversed)
+                next_descriptor = open_directory_at(current, name, relative)
+                os.close(current)
+                current = next_descriptor
+            if not record:
+                return current
+            return current
+        except Exception:
+            os.close(current)
+            raise
+
+    def visit_at(
+        parent: int,
+        name: str,
+        relative: str,
+        *,
+        directory_allowed: bool,
+    ) -> None:
+        descriptor: int | None = None
+        try:
+            metadata = os.stat(
+                name, dir_fd=parent, follow_symlinks=False
+            )
+        except OSError as error:
+            if error.errno == errno.ENOENT and relative in allowed_missing_exact_paths:
+                return
+            deterministic_os_error(
+                error, "LW2 protected filesystem member is missing"
+            )
+            raise AssertionError("unreachable")
+        try:
+            if stat.S_ISLNK(metadata.st_mode):
+                raise NativeEvidenceMismatch(
+                    "LW2 protected filesystem contains a symlink"
+                )
+            if stat.S_ISDIR(metadata.st_mode):
+                if not directory_allowed:
+                    raise NativeEvidenceMismatch(
+                        "LW2 protected exact path is not a regular file"
+                    )
+                descriptor = open_directory_at(parent, name, relative)
+                opened = os.fstat(descriptor)
+                if directory_identity(opened) != directory_identity(metadata):
+                    raise NativeEvidenceMismatch(
+                        "LW2 protected filesystem directory was replaced"
+                    )
+                records[relative] = {
+                    "path": relative,
+                    "type": "directory",
+                    "mode": mode_text(opened),
+                }
+                children = scan_names(descriptor)
+                if directory_memberships.setdefault(relative, children) != children:
+                    raise NativeEvidenceMismatch(
+                        "LW2 protected filesystem directory membership changed"
+                    )
+                if directory_identity(os.fstat(descriptor)) != directory_identity(opened):
+                    raise NativeEvidenceMismatch(
+                        "LW2 protected filesystem directory changed during scan"
+                    )
+                for child in children:
+                    visit_at(
+                        descriptor,
+                        child,
+                        f"{relative}/{child}",
+                        directory_allowed=True,
+                    )
+                if directory_identity(os.fstat(descriptor)) != directory_identity(opened):
+                    raise NativeEvidenceMismatch(
+                        "LW2 protected filesystem directory changed during capture"
+                    )
+                if scan_names(descriptor) != children:
+                    raise NativeEvidenceMismatch(
+                        "LW2 protected filesystem directory membership changed"
+                    )
+                return
+            if not stat.S_ISREG(metadata.st_mode):
+                raise NativeEvidenceMismatch(
+                    "LW2 protected filesystem contains a non-regular member"
+                )
+            descriptor = os.open(
+                name,
+                os.O_RDONLY | getattr(os, "O_NOFOLLOW", 0),
+                dir_fd=parent,
+            )
+            opened = os.fstat(descriptor)
+            if (
+                not stat.S_ISREG(opened.st_mode)
+                or stable_file_identity(opened) != stable_file_identity(metadata)
+            ):
+                raise NativeEvidenceMismatch(
+                    "LW2 protected filesystem member was replaced"
+                )
+            with os.fdopen(descriptor, "rb", closefd=True) as handle:
+                descriptor = None
+                content = handle.read()
+                final_metadata = os.fstat(handle.fileno())
+            if stable_file_identity(final_metadata) != stable_file_identity(opened):
+                raise NativeEvidenceMismatch(
+                    "LW2 protected filesystem member changed during capture"
+                )
+            records[relative] = {
+                "path": relative,
+                "type": "regular",
+                "mode": mode_text(opened),
+                "byte_digest": _digest_bytes(content),
+            }
+        except NativeEvidenceMismatch:
+            raise
+        except OSError as error:
+            deterministic_os_error(
+                error, "LW2 protected filesystem member is missing"
+            )
+        finally:
+            if descriptor is not None:
+                os.close(descriptor)
+
+    def visit_path(relative: str, *, directory_allowed: bool) -> None:
+        parts = relative_parts(relative)
+        parent = directory_for_parts(parts[:-1])
+        try:
+            visit_at(
+                parent, parts[-1], relative, directory_allowed=directory_allowed
+            )
+        finally:
+            os.close(parent)
+
+    try:
+        root_descriptor = os.open(
+            root,
+            os.O_RDONLY | os.O_DIRECTORY | getattr(os, "O_NOFOLLOW", 0),
+        )
+        if not stat.S_ISDIR(os.fstat(root_descriptor).st_mode):
+            raise NativeEvidenceMismatch(
+                "LW2 protected filesystem root is not a directory"
+            )
+        for relative in sorted(exact_paths):
+            visit_path(relative, directory_allowed=False)
+        for prefix in sorted(set(prefixes)):
+            normalized = prefix.rstrip("/")
+            parts = relative_parts(normalized)
+            parent_parts, name_prefix = parts[:-1], parts[-1]
+            parent_relative = "/".join(parent_parts)
+            parent = directory_for_parts(parent_parts)
+            try:
+                matches = scan_names(parent, name_prefix)
+                prefix_key = (parent_parts, name_prefix)
+                if prefix_memberships.setdefault(prefix_key, matches) != matches:
+                    raise NativeEvidenceMismatch(
+                        "LW2 protected filesystem prefix membership changed"
+                    )
+                if not matches:
+                    raise NativeEvidenceMismatch(
+                        "LW2 protected inventory prefix is empty"
+                    )
+                for name in matches:
+                    relative = (
+                        name if not parent_relative
+                        else f"{parent_relative}/{name}"
+                    )
+                    visit_at(parent, name, relative, directory_allowed=True)
+                if scan_names(parent, name_prefix) != matches:
+                    raise NativeEvidenceMismatch(
+                        "LW2 protected filesystem prefix membership changed"
+                    )
+            finally:
+                os.close(parent)
+        for (parent_parts, name_prefix), expected in sorted(
+            prefix_memberships.items()
+        ):
+            descriptor = directory_for_parts(parent_parts, record=False)
+            try:
+                if scan_names(descriptor, name_prefix) != expected:
+                    raise NativeEvidenceMismatch(
+                        "LW2 protected filesystem prefix membership changed"
+                    )
+            finally:
+                os.close(descriptor)
+        identities = sorted(
+            directory_identities.items(), key=lambda item: (item[0].count("/"), item[0])
+        )
+        for relative, expected in identities:
+            descriptor = directory_for_parts(
+                relative_parts(relative), record=False
+            )
+            try:
+                if directory_identity(os.fstat(descriptor)) != expected:
+                    raise NativeEvidenceMismatch(
+                        "LW2 protected filesystem parent was replaced"
+                    )
+                membership = directory_memberships.get(relative)
+                if membership is not None and scan_names(descriptor) != membership:
+                    raise NativeEvidenceMismatch(
+                        "LW2 protected filesystem directory membership changed"
+                    )
+            finally:
+                os.close(descriptor)
+    except NativeEvidenceMismatch:
+        raise
+    except OSError as error:
+        deterministic_os_error(
+            error, "LW2 protected filesystem root is unavailable"
+        )
+    finally:
+        if root_descriptor is not None:
+            os.close(root_descriptor)
+    ordered = [records[path] for path in sorted(records)]
+    regular_scope = [
+        record["path"] for record in ordered if record["type"] == "regular"
+    ]
+    return regular_scope, ordered
+
+
+def capture_native_protected_snapshot(
+    repo: Path,
+    *,
+    allowed_worktree_differences: list[str] | tuple[str, ...] = (),
+) -> dict[str, Any]:
+    """Bind protected native HEAD/index/worktree bytes and index flags.
+
+    Admission recapture may bind an explicitly task-owned dirty path while the
+    publication fence calls this with the default empty allowlist.  In both
+    modes exceptional index flags remain forbidden and the exact worktree byte
+    digest remains part of the snapshot.
+    """
+
+    from agent_governance_lw2_readmission import lw2_readmission_policy
+
+    def git_bytes(*arguments: str) -> bytes:
+        try:
+            return _git(repo, *arguments)
+        except (OSError, subprocess.CalledProcessError) as error:
+            raise NativeEvidenceUnavailable(
+                "LW2 protected Git evidence is unavailable"
+            ) from error
+
+    policy = lw2_readmission_policy()
+    try:
+        tree_entries: dict[str, tuple[str, str, str]] = {}
+        for raw in git_bytes(
+            "ls-tree", "-rz", "--full-tree", "HEAD"
+        ).split(b"\0"):
+            if not raw:
+                continue
+            metadata, raw_path = raw.split(b"\t", 1)
+            fields = metadata.split(b" ")
+            if len(fields) != 3:
+                raise NativeEvidenceMismatch(
+                    "LW2 protected HEAD entry is invalid"
+                )
+            mode, object_type, oid = (
+                field.decode("ascii", errors="strict") for field in fields
+            )
+            path = raw_path.decode("utf-8", errors="strict")
+            if path in tree_entries:
+                raise NativeEvidenceMismatch(
+                    "LW2 protected HEAD entry is duplicated"
+                )
+            tree_entries[path] = (mode, object_type, oid)
+    except NativeEvidenceUnavailable:
+        raise
+    except (UnicodeDecodeError, ValueError) as error:
+        raise NativeEvidenceMismatch(
+            "LW2 protected inventory is invalid"
+        ) from error
+    exact_paths = set(policy["protected_scope_paths"])
+    if not exact_paths.issubset(tree_entries):
+        raise NativeEvidenceMismatch("LW2 protected inventory is incomplete")
+    inventory = set(exact_paths)
+    for prefix in policy["protected_scope_prefixes"]:
+        matches = {path for path in tree_entries if path.startswith(prefix)}
+        if not matches:
+            raise NativeEvidenceMismatch(
+                "LW2 protected inventory prefix is empty"
+            )
+        inventory.update(matches)
+    scope = sorted(inventory)
+    allowed = set(allowed_worktree_differences)
+    filesystem_scope, filesystem_entries = _protected_filesystem_snapshot(
+        repo,
+        exact_paths=exact_paths,
+        prefixes=policy["protected_scope_prefixes"],
+        allowed_missing_exact_paths=allowed & exact_paths,
+    )
+    head_scope = set(scope)
+    observed_scope = set(filesystem_scope)
+    if (head_scope ^ observed_scope) - allowed:
+        raise NativeEvidenceMismatch(
+            "LW2 protected filesystem scope differs from native HEAD"
+        )
+    added_scope = observed_scope - head_scope
+    if added_scope:
+        try:
+            native_untracked = {
+                raw.decode("utf-8", errors="strict")
+                for raw in git_bytes(
+                    "ls-files", "--others", "--exclude-standard", "-z", "--"
+                ).split(b"\0")
+                if raw
+            }
+        except UnicodeDecodeError as error:
+            raise NativeEvidenceMismatch(
+                "LW2 native untracked evidence is invalid"
+            ) from error
+        if not added_scope.issubset(native_untracked):
+            raise NativeEvidenceMismatch(
+                "LW2 protected allowed addition is not visible as untracked"
+            )
+    index_scope = sorted(head_scope | observed_scope)
+
+    def index_records(*arguments: str) -> list[bytes]:
+        return [
+            raw for raw in git_bytes("ls-files", *arguments, "--", *index_scope)
+            .split(b"\0") if raw
+        ]
+
+    stage_by_path: dict[str, tuple[str, str, str]] = {}
+    flags_by_path: dict[str, str] = {}
+    try:
+        for raw in index_records("--stage", "-z"):
+            metadata, raw_path = raw.split(b"\t", 1)
+            fields = metadata.split(b" ")
+            if len(fields) != 3:
+                raise NativeEvidenceMismatch(
+                    "LW2 protected index stage entry is invalid"
+                )
+            mode, oid, stage = (
+                field.decode("ascii", errors="strict") for field in fields
+            )
+            path = raw_path.decode("utf-8", errors="strict")
+            if path in stage_by_path:
+                raise NativeEvidenceMismatch(
+                    "LW2 protected index stage entry is duplicated"
+                )
+            stage_by_path[path] = (mode, oid, stage)
+        for raw in index_records("-v", "-z"):
+            if len(raw) < 3 or raw[1:2] != b" ":
+                raise NativeEvidenceMismatch(
+                    "LW2 protected index flag entry is invalid"
+                )
+            tag = raw[:1].decode("ascii", errors="strict")
+            path = raw[2:].decode("utf-8", errors="strict")
+            if path in flags_by_path:
+                raise NativeEvidenceMismatch(
+                    "LW2 protected index flag entry is duplicated"
+                )
+            flags_by_path[path] = tag
+    except NativeEvidenceUnavailable:
+        raise
+    except (UnicodeDecodeError, ValueError) as error:
+        raise NativeEvidenceMismatch("LW2 protected index is invalid") from error
+    if set(stage_by_path) != set(scope) or set(flags_by_path) != set(scope):
+        raise NativeEvidenceMismatch(
+            "LW2 protected index scope differs from native HEAD"
+        )
+    if any(path not in scope for path in allowed if path in tree_entries):
+        raise NativeEvidenceMismatch(
+            "LW2 protected worktree difference allowlist is invalid"
+        )
+    filesystem_by_path = {
+        item["path"]: item
+        for item in filesystem_entries
+        if item["type"] == "regular"
+    }
+    entries: list[dict[str, str]] = []
+    for relative in scope:
+        mode, object_type, oid = tree_entries[relative]
+        if (
+            object_type != "blob"
+            or mode not in {"100644", "100755"}
+            or not HEAD_RE.fullmatch(oid)
+        ):
+            raise NativeEvidenceMismatch(
+                "LW2 protected HEAD entry is not a regular blob"
+            )
+        if stage_by_path[relative] != (mode, oid, "0"):
+            raise NativeEvidenceMismatch(
+                "LW2 protected index differs from native HEAD"
+            )
+        if flags_by_path[relative] != "H":
+            raise NativeEvidenceMismatch(
+                "LW2 protected index contains exceptional flags"
+            )
+        head_bytes = git_bytes("cat-file", "blob", oid)
+        if relative not in filesystem_by_path:
+            if relative not in allowed:
+                raise NativeEvidenceMismatch(
+                    "LW2 protected worktree entry is missing"
+                )
+            entries.append({
+                "path": relative,
+                "mode": mode,
+                "oid": oid,
+                "byte_digest": _digest_bytes(head_bytes),
+                "worktree_state": "deleted",
+            })
+            continue
+        worktree = filesystem_by_path[relative]
+        worktree_mode = str(worktree["mode"]).split(":", 1)[-1]
+        if bool(int(worktree_mode, 8) & stat.S_IXUSR) != (mode == "100755"):
+            raise NativeEvidenceMismatch(
+                "LW2 protected worktree executable mode differs from HEAD"
+            )
+        worktree_digest = worktree["byte_digest"]
+        if worktree_digest != _digest_bytes(head_bytes) and relative not in allowed:
+            raise NativeEvidenceMismatch(
+                "LW2 protected worktree bytes differ from native HEAD"
+            )
+        entries.append({
+            "path": relative,
+            "mode": mode,
+            "oid": oid,
+            "byte_digest": worktree_digest,
+            "worktree_state": "present",
+        })
+    for relative in sorted(observed_scope - head_scope):
+        worktree = filesystem_by_path[relative]
+        entries.append({
+            "path": relative,
+            "mode": worktree["mode"],
+            "oid": "ABSENT",
+            "byte_digest": worktree["byte_digest"],
+            "worktree_state": "added",
+        })
+    entries.sort(key=lambda item: item["path"])
+    return {
+        "scope": scope,
+        "entries": entries,
+        "filesystem_scope": filesystem_scope,
+        "filesystem_entries": filesystem_entries,
+    }
 
 
 def _canonical_bytes(value: Any) -> bytes:
@@ -111,21 +1208,24 @@ def _record_digest(record: dict[str, Any]) -> str:
     )
 
 
-def repository_generation_digest(record: dict[str, Any]) -> str:
+def repository_generation_digest(
+    record: dict[str, Any],
+    *,
+    native_protected_snapshot: dict[str, Any] | None = None,
+) -> str:
     """Hash only Git/content generation fields, excluding observation time."""
 
-    return _digest_bytes(
-        _canonical_bytes(
-            {
-                field: record.get(field)
-                for field in (
-                    "scope", "source_head", "tracked_diff", "tracked_paths",
-                    "untracked", "changed_paths", "change_manifest_digest",
-                    "untracked_manifest_digest",
-                )
-            }
+    generation = {
+        field: record.get(field)
+        for field in (
+            "scope", "source_head", "tracked_diff", "tracked_paths",
+            "untracked", "changed_paths", "change_manifest_digest",
+            "untracked_manifest_digest",
         )
-    )
+    }
+    if native_protected_snapshot is not None:
+        generation["native_protected_snapshot"] = native_protected_snapshot
+    return _digest_bytes(_canonical_bytes(generation))
 
 
 def _now() -> str:
@@ -156,7 +1256,11 @@ def _interval_errors(record: dict[str, Any], prefix: str) -> list[str]:
 
 def _git(root: Path, *arguments: str) -> bytes:
     return subprocess.run(
-        ["git", *arguments], cwd=root, check=True, capture_output=True,
+        native_git_command(root, *arguments),
+        check=True,
+        capture_output=True,
+        env=native_git_environment(),
+        stdin=subprocess.DEVNULL,
     ).stdout
 
 
@@ -235,12 +1339,21 @@ def _git_generation(
 ) -> tuple[str, bytes, list[str], list[str]]:
     try:
         head = _git(repository, "rev-parse", "HEAD").decode("ascii").strip().lower()
-        tracked = _git(repository, "diff", "--no-ext-diff", "--binary", "HEAD", "--", *paths)
+        tracked = _git(
+            repository,
+            "diff",
+            "--no-ext-diff",
+            "--no-textconv",
+            "--binary",
+            "HEAD",
+            "--",
+            *paths,
+        )
         tracked_names = sorted(
             item.decode("utf-8", errors="strict")
             for item in _git(
-                repository, "diff", "--no-ext-diff", "--name-only", "-z",
-                "HEAD", "--", *paths,
+                repository, "diff", "--no-ext-diff", "--no-textconv",
+                "--name-only", "-z", "HEAD", "--", *paths,
             ).split(b"\0")
             if item
         )

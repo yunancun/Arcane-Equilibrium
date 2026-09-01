@@ -120,6 +120,14 @@ progress digest closes the run as `BLOCKED_NO_DELTA`, with
 ordinary finite task stops the current admission and requires explicit
 re-admission; it never silently creates a loop.
 
+An ordinary task admission starts only from a clean repository and persists the
+exact config-isolated native `HEAD` and tree as `task_admission_accepted_base_v1`.
+While holding the admission-store lock it rechecks that clean identity before
+and after progress capture, and the baseline task-source manifest must exactly
+match a raw tree/blob manifest re-derived from that immutable accepted tree.
+Legacy ordinary records without `accepted_base` remain readable only for exact
+cleanup; they cannot be used to acquire or renew authority or to publish.
+
 Queue state is separate from role work status. Only the physical `ACTIVE` lane
 is dispatchable. `WAITING`/`DEFERRED` requires a named new delta and PM
 re-admission before returning to ACTIVE; `CLOSED` is never selected. A completed
@@ -128,13 +136,44 @@ owner and unblock condition. Do not manufacture executable work to satisfy a
 schema.
 
 Every writable task uses one exclusive writer lease in one attached, non-main
-linked worktree. Acquire/renew/release it through `agent_governance.py
-writer-lease`; `git_loop_guard.py` only validates the existing task/owner/fencing
-token and never acquires, steals, or repairs a lease. A second writer uses a
-different linked worktree. Read-only query/review paths do not acquire a writer
-lease. Low-risk, low-uncertainty, effect-free `task_shape=query` routes only
-`PM triage -> PM closure`; hard authority/runtime/private-effect facts cannot use
-that narrow path.
+linked worktree. The exact public `agent_governance.py writer-lease` actions are
+`acquire`, `status`, `publication-status`, `renew`, and `release`.
+`publication-status` is a read-only, nonrenewing, nonpersisting publication
+authority check: the caller must name the explicit `publish|post-push` phase,
+expected feature branch, and exact expected 40-hex SHA. The task-admission lock
+and then the writer lock remain held while it verifies the exact ACTIVE
+admission/lease is unexpired at trusted entry and final times. For LW2 it
+performs one full admitted-generation capture plus the lightweight final native
+snapshot. For an ordinary task it also requires a nonempty, strictly linear
+native `accepted_base`-to-feature commit range with replace projection, rename
+detection, external diff, and text conversion disabled. Every commit is
+inspected, its binary patch is bound, and every touched path must be inside the
+admitted `dirty_scope`; an intermediate revert, both sides of a rename, or one
+mixed-scope commit therefore cannot disappear from the decision.
+
+Before any remote-head producer callback, the final boundary purely validates
+exactly one canonical `origin` fetch URL and one identical push URL as a
+credential-free exact public `https://github.com/<owner>/<repo>.git` repository,
+and validates the exact `refs/heads/main` and, for `post-push`, feature ref.
+A private, credentialed, malformed, or local-filesystem origin causes zero
+remote producer callbacks and fails closed. The boundary derives only the exact
+`<expected-sha>:refs/heads/<expected-branch>` refspec, checks the final live
+remote (`main`, and the feature ref for `post-push`), and finally reads the
+trusted clock. Native config-isolated `git ls-remote` remains the primary live
+ref read. Only when that transport is unavailable, an exact public
+`https://github.com/<owner>/<repo>.git` URL may use the pinned, config-disabled,
+unauthenticated GitHub REST `git/ref` read; it must return the exact requested
+ref, commit type, and lowercase 40-hex SHA. This fallback adds no credential,
+private-repository, or ref-mutation authority, and every URL/HTTP/JSON/ref/SHA
+anomaly remains unavailable. PASS neither repairs/renews state nor authorizes
+more edits, runtime, service, deployment, broker, order, funds, trading, or
+activation.
+`git_loop_guard.py` only validates this existing task/owner/fencing authority and
+never acquires, steals, or repairs a lease. A second writer uses a different
+linked worktree. Read-only query/review paths do not acquire a writer lease.
+Low-risk, low-uncertainty, effect-free `task_shape=query` routes only
+`PM triage -> PM closure`; hard authority/runtime/private-effect facts cannot
+use that narrow path.
 
 ## Permission and effects
 
@@ -241,11 +280,23 @@ for work-only write nodes. OPS/QA/effect Adapter claims require their direct
 runtime/outcome/receipt evidence classes, not a generic source digest. A unit
 test cannot prove E2E behavior, source capture cannot prove runtime state, and a
 repository snapshot cannot prove mutation. Repo mutation needs exactly one
-task/role/node/scope-bound record per admitted writer in canonical writer order.
-Writer scopes are non-empty/disjoint. Every record binds its node-owned mutation
-and exact task-wide generation; serialized writers form G0 -> G1 -> ... -> Gn,
-with adjacent after/before generation digests equal. Gn and every owned after-
-state must be current; one mixed record cannot satisfy two writer nodes.
+task/role/node/effective-scope-bound record per admitted writer in canonical
+writer order. The digest-bound `repository_writer_scope_contract_v1` constrains
+that effective scope; it never overrides raw dispatch authority. A literal path
+from a raw canonical or adaptive scope may transfer only to a later, transitively
+serialized adaptive writer with the same dispatched role and permission. The
+resulting effective scopes remain non-empty/disjoint and their exact union is the
+task `dirty_scope`.
+
+The change chain has two fail-closed modes. A clean committed chain binds the
+admitted baseline, pairs clean task-wide and writer-owned endpoints, requires
+adjacent head and generation equality, and proves a nonempty config-isolated
+native strictly-linear commit range for each writer with every commit path inside
+that writer's effective scope. Only the final writer `owned_after` and final
+task-wide generation must be current. A same-HEAD dirty chain instead keeps every
+writer `owned_after` current. Mixing committed and dirty modes, or using one
+record for two writers, fails closed. Neither mode grants LW2, runtime, service,
+broker, order, funds, or trading effects.
 
 Actual token/cache/tool/time consumption may be claimed only from
 `PLATFORM_OR_EXTERNAL_ATTESTED` telemetry. An orchestrator wave ledger may report

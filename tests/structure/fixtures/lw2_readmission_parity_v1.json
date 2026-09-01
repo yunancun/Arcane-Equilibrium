@@ -1,0 +1,83 @@
+{
+  "schema_version": "lw2_readmission_parity_v1",
+  "cases": [
+    {
+      "id": "ordinary",
+      "task_id": null,
+      "contract": {"objective": "ordinary source change", "direct_interfaces": [], "claim_inputs": {}, "scope": ["src/ordinary.py"]},
+      "selected": false
+    },
+    {
+      "id": "objective_text_is_not_a_signal",
+      "task_id": null,
+      "contract": {"objective": "implement S2E-LW2 now", "direct_interfaces": [], "claim_inputs": {}, "scope": ["src/ordinary.py"]},
+      "selected": false
+    },
+    {
+      "id": "canonical_external_task_id",
+      "task_id": "S2E-LW2",
+      "contract": {},
+      "selected": true
+    },
+    {
+      "id": "alias_external_task_id",
+      "task_id": "S2E:LW2",
+      "contract": {},
+      "selected": true
+    },
+    {
+      "id": "alias_work_item_id",
+      "task_id": null,
+      "contract": {"work_item_id": "S2E_LW2"},
+      "selected": true
+    },
+    {
+      "id": "lane_alias",
+      "task_id": null,
+      "contract": {"lane_id": "S2E.2b-2B"},
+      "selected": true
+    },
+    {
+      "id": "program_lane_alias",
+      "task_id": null,
+      "contract": {"lane_id": "P0-AIML-LONG-LIVED-RUNTIME-REPAIR"},
+      "selected": true
+    },
+    {
+      "id": "direct_interface",
+      "task_id": null,
+      "contract": {"direct_interfaces": ["S2E_2B_2B_HOST_RUNNER_CHECKPOINT_READY"]},
+      "selected": true
+    },
+    {
+      "id": "claim_key",
+      "task_id": null,
+      "contract": {"claim_inputs": {"lw2_independent_review": "sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"}},
+      "selected": true
+    },
+    {
+      "id": "claim_payload_key_only",
+      "task_id": null,
+      "contract": {"claim_payloads": {"lw2_combined_main_identity": {"schema_version": "caller_fabricated_v1"}}},
+      "selected": true
+    },
+    {
+      "id": "admission_profile",
+      "task_id": null,
+      "contract": {"admission_profile": "aiml_s2e_lw2_readmission_v1"},
+      "selected": true
+    },
+    {
+      "id": "protected_prefix",
+      "task_id": null,
+      "contract": {"dirty_scope": ["helper_scripts/maintenance_scripts/agent_governance_s2_5_runner.py"]},
+      "selected": true
+    },
+    {
+      "id": "protected_exact_path",
+      "task_id": null,
+      "contract": {"verification_scope": ["program_code/ml_training/schemas/aiml_gate_receipts/s2e_launch_wave_receipt_v1.schema.json"]},
+      "selected": true
+    }
+  ]
+}

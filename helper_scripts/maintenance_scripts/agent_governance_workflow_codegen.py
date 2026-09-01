@@ -199,6 +199,7 @@ def render_context_admission_block(
                 "predecessor_digests": AIML_PROGRAM_ADOPTION_PREDECESSOR_DIGESTS,
                 "surfaces": sorted(AIML_PROGRAM_ADOPTION_SURFACES),
             },
+            "lw2_readmission": registry["lw2_readmission_policy"],
             "p0b_phases": {
                 phase: {
                     "selector_digest": p0b_effect_selection_digest(phase),

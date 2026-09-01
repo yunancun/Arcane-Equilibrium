@@ -42,6 +42,18 @@ AUTOMATIC_WAKEUP_MODES = ("operator_loop",)
 SAME_PROGRESS_TERMINAL = "BLOCKED_NO_DELTA"
 MAX_TASK_SOURCE_FILES = 4096
 MAX_TASK_SOURCE_BYTES = 64 * 1024 * 1024
+WRITER_LEASE_ACTIONS = (
+    "acquire", "status", "publication-status", "renew", "release",
+)
+PUBLICATION_STATUS_AUTHORITY = {
+    "read_only": True,
+    "renews_lease": False,
+    "persists_state": False,
+}
+COMPILED_WRITER_LEASE_POLICY_FIELDS = (
+    "scope", "requires_linked_feature_worktree", "default_ttl_seconds",
+    "min_ttl_seconds", "max_ttl_seconds",
+)
 
 EXPECTED_TASK_EXECUTION_CONTROL = {
     "schema_version": TASK_EXECUTION_SCHEMA_VERSION,
@@ -63,6 +75,8 @@ EXPECTED_TASK_EXECUTION_CONTROL = {
         "default_ttl_seconds": DEFAULT_LEASE_TTL_SECONDS,
         "min_ttl_seconds": MIN_LEASE_TTL_SECONDS,
         "max_ttl_seconds": MAX_LEASE_TTL_SECONDS,
+        "actions": list(WRITER_LEASE_ACTIONS),
+        "publication_status": dict(PUBLICATION_STATUS_AUTHORITY),
     },
 }
 
@@ -168,7 +182,10 @@ def compile_task_execution_policy(task_contract: dict[str, Any]) -> dict[str, An
         "continuation_mode": continuation_mode,
         "automatic_wakeup_admitted": continuation_mode in AUTOMATIC_WAKEUP_MODES,
         "same_progress_terminal": SAME_PROGRESS_TERMINAL,
-        "writer_lease": dict(EXPECTED_TASK_EXECUTION_CONTROL["writer_lease"]),
+        "writer_lease": {
+            field: EXPECTED_TASK_EXECUTION_CONTROL["writer_lease"][field]
+            for field in COMPILED_WRITER_LEASE_POLICY_FIELDS
+        },
         "task_prompt_digest": prompt_digest,
         "operator_loop_request_digest": expected_request_digest,
         "task_contract_digest": task_contract_digest(task_contract),
@@ -489,12 +506,20 @@ def _parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(description=__doc__)
     subparsers = parser.add_subparsers(dest="action", required=True)
     lease = subparsers.add_parser("writer-lease")
-    lease.add_argument("--action", choices=("acquire", "status", "renew", "release"), required=True)
+    lease.add_argument(
+        "--action",
+        choices=WRITER_LEASE_ACTIONS,
+        required=True,
+    )
     lease.add_argument("--repo", type=Path, default=Path("."))
     lease.add_argument("--task-id", required=True)
     lease.add_argument("--owner", required=True)
     lease.add_argument("--lease-id")
+    lease.add_argument("--admission-id")
     lease.add_argument("--ttl-seconds", type=int, default=DEFAULT_LEASE_TTL_SECONDS)
+    lease.add_argument("--publication-phase", choices=("publish", "post-push"))
+    lease.add_argument("--publication-expected-branch")
+    lease.add_argument("--publication-expected-head")
     return parser
 
 
@@ -502,7 +527,11 @@ def main(argv: list[str] | None = None) -> int:
     args = _parser().parse_args(argv)
     packet = filesystem_writer_lease_action(
         action=args.action, repo=args.repo, task_id=args.task_id,
-        owner=args.owner, lease_id=args.lease_id, ttl_seconds=args.ttl_seconds,
+        owner=args.owner, lease_id=args.lease_id,
+        admission_id=args.admission_id, ttl_seconds=args.ttl_seconds,
+        publication_phase=args.publication_phase,
+        publication_expected_branch=args.publication_expected_branch,
+        publication_expected_head=args.publication_expected_head,
     )
     print(json.dumps(packet, ensure_ascii=False, indent=2, sort_keys=True))
     return 0 if packet.get("status", "PASS") == "PASS" else 3

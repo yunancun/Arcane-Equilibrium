@@ -149,7 +149,6 @@ def collect_capture_evidence(
             record_errors = validate_repository_change_record(
                 artifact,
                 expected_task_contract_digest=expected_task_contract_digest,
-                expected_source_head=expected_source_head,
                 require_after_current=False,
             )
             if not set(artifact.get("scope", [])).issubset(set(expected_scope)):

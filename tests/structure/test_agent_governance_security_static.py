@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import ast
 import importlib.util
 import re
 from copy import deepcopy
@@ -10,6 +11,18 @@ ROOT = Path(__file__).resolve().parents[2]
 MODULE_PATH = (
     ROOT / "helper_scripts" / "maintenance_scripts" / "agent_governance.py"
 )
+WRITER_LEASE_PATH = (
+    ROOT
+    / "helper_scripts"
+    / "maintenance_scripts"
+    / "agent_governance_writer_lease.py"
+)
+CAPTURE_PATH = (
+    ROOT / "helper_scripts" / "maintenance_scripts" / "agent_governance_capture.py"
+)
+GUARD_PATH = (
+    ROOT / "helper_scripts" / "maintenance_scripts" / "git_loop_guard.py"
+)
 
 
 def _load_governance():
@@ -18,6 +31,130 @@ def _load_governance():
     module = importlib.util.module_from_spec(spec)
     spec.loader.exec_module(module)
     return module
+
+
+def test_lw2_publication_status_static_surface_is_read_only() -> None:
+    tree = ast.parse(WRITER_LEASE_PATH.read_text(encoding="utf-8"))
+    publication = next(
+        node
+        for node in tree.body
+        if isinstance(node, ast.FunctionDef)
+        and node.name == "_lw2_publication_status"
+    )
+    forbidden_git_mutations = {
+        "add", "branch", "checkout", "clean", "commit", "fetch", "merge",
+        "pull", "push", "rebase", "reset", "restore", "switch", "tag",
+        "update-ref", "worktree",
+    }
+    git_commands: set[str] = set()
+    for node in ast.walk(publication):
+        if (
+            isinstance(node, ast.Call)
+            and isinstance(node.func, ast.Name)
+            and node.func.id in {"_git_bytes", "_git_text"}
+            and len(node.args) >= 2
+            and isinstance(node.args[1], ast.Constant)
+            and isinstance(node.args[1].value, str)
+        ):
+            git_commands.add(node.args[1].value)
+        if (
+            isinstance(node, ast.Call)
+            and isinstance(node.func, ast.Attribute)
+            and node.func.attr == "run"
+            and node.args
+            and isinstance(node.args[0], ast.List)
+        ):
+            git_commands.update(
+                element.value
+                for element in node.args[0].elts
+                if isinstance(element, ast.Constant)
+                and isinstance(element.value, str)
+            )
+    assert git_commands.isdisjoint(forbidden_git_mutations)
+    assert not any(
+        isinstance(node, ast.Call)
+        and isinstance(node.func, ast.Attribute)
+        and node.func.attr
+        in {"transact", "update", "write", "write_bytes", "write_text"}
+        for node in ast.walk(publication)
+    )
+    for node in ast.walk(publication):
+        targets: list[ast.expr] = []
+        if isinstance(node, (ast.Assign, ast.AnnAssign, ast.AugAssign)):
+            raw_targets = node.targets if isinstance(node, ast.Assign) else [node.target]
+            targets.extend(raw_targets)
+        assert not any(
+            isinstance(target, ast.Subscript)
+            and isinstance(target.value, ast.Name)
+            and target.value.id in {"record", "lease", "accepted", "task_contract"}
+            for target in targets
+        )
+
+
+def test_lw2_publication_status_uses_only_native_git_graph_reads() -> None:
+    source = WRITER_LEASE_PATH.read_text(encoding="utf-8")
+    capture_source = CAPTURE_PATH.read_text(encoding="utf-8")
+    tree = ast.parse(source)
+    functions = {node.name: node for node in tree.body if isinstance(node, ast.FunctionDef)}
+    git_bytes_source = ast.get_source_segment(source, functions["_git_bytes"])
+    native_env_source = ast.get_source_segment(source, functions["_native_git_environment"])
+    publication_source = ast.get_source_segment(source, functions["_lw2_publication_status"])
+    boundary = functions["_publication_boundary"]
+    action_source = ast.get_source_segment(source, functions["filesystem_writer_lease_action"])
+    assert git_bytes_source is not None and "_native_git_command(repo, *args)" in git_bytes_source
+    assert "env=_native_git_environment()" in git_bytes_source
+    assert native_env_source is not None and "native_git_environment" in native_env_source
+    assert publication_source is not None and '"merge-base"' not in publication_source
+    assert '"rev-list"' not in publication_source and "native_graph=True" in publication_source
+    assert '"cat-file"' in capture_source
+    assert action_source is not None and 'native_graph=action == "publication-status"' in action_source
+    calls: dict[str, list[int]] = {}
+    for node in ast.walk(boundary):
+        if isinstance(node, ast.Call):
+            name = node.func.id if isinstance(node.func, ast.Name) else getattr(node.func, "attr", "")
+            calls.setdefault(name, []).append(node.lineno)
+    identity_lines = sorted(calls["inspect_worktree"])
+    dirty_lines = sorted(calls["_capture_dirty_paths"])
+    snapshot_line, origin_line, local_main_line, clock_line = (
+        calls[name][0] for name in (
+            "capture_native_protected_snapshot", "_origin_urls", "_git_text", "_utc_now")
+    )
+    remote_lines = sorted(calls["_canonical_remote_head"])
+    assert identity_lines[0] < dirty_lines[0] < snapshot_line < identity_lines[-1]
+    assert identity_lines[-1] < dirty_lines[-1] < origin_line < local_main_line
+    assert local_main_line < remote_lines[0] < remote_lines[-1] < clock_line
+    pure_after_clock = {"_active_lease", "_timestamp", "any", "append", "fromkeys", "get", "isinstance", "len", "list"}
+    assert all(name in pure_after_clock for name, lines in calls.items()
+               if any(line > clock_line for line in lines))
+    assert 'TRUSTED_GIT_EXECUTABLE = "/usr/bin/git"' in capture_source
+    assert "TRUSTED_GIT_EXECUTABLE," in capture_source
+    assert '"--no-replace-objects"' in capture_source
+    assert '"core.fsmonitor=false"' in capture_source
+    assert '"core.hooksPath=/dev/null"' in capture_source
+    for required in ("GIT_CONFIG_GLOBAL", "GIT_CONFIG_NOSYSTEM", "GIT_ATTR_NOSYSTEM",
+                     "GIT_CONFIG_COUNT", "GIT_CONFIG_PARAMETERS", "GIT_REPLACE_REF_BASE",
+                     "GIT_OPTIONAL_LOCKS", "GIT_TERMINAL_PROMPT", "LC_ALL"):
+        assert required in capture_source
+
+def test_authority_diff_argv_disables_ext_diff_and_textconv_everywhere() -> None:
+    for path in (CAPTURE_PATH, WRITER_LEASE_PATH, GUARD_PATH):
+        tree = ast.parse(path.read_text(encoding="utf-8"))
+        checked = 0
+        for node in ast.walk(tree):
+            if not isinstance(node, ast.Call):
+                continue
+            literals = [
+                argument.value
+                for argument in node.args
+                if isinstance(argument, ast.Constant)
+                and isinstance(argument.value, str)
+            ]
+            if not ({"diff", "diff-tree"} & set(literals)):
+                continue
+            checked += 1
+            assert "--no-ext-diff" in literals, (path, node.lineno, literals)
+            assert "--no-textconv" in literals, (path, node.lineno, literals)
+        assert checked, path
 
 
 def test_read_only_command_preflight_rejects_every_ascii_control_character() -> None:
@@ -156,19 +293,19 @@ def test_remote_evidence_roots_reject_sibling_prefixes() -> None:
 
 def test_ci_runs_the_cheap_development_agent_governance_gate() -> None:
     source = (ROOT / ".github/workflows/ci.yml").read_text(encoding="utf-8")
-    marker = "\n  development-agent-governance:\n"
-    assert marker in source
-    job = source.split(marker, 1)[1]
-    next_job = re.search(r"\n  [a-z0-9][a-z0-9-]*:\n", job)
-    if next_job:
-        job = job[: next_job.start()]
-
-    for required in (
-        "runs-on: ubuntu-latest",
-        "timeout-minutes: 30",
-        "python3 helper_scripts/maintenance_scripts/agent_governance.py validate",
-        "python3 helper_scripts/maintenance_scripts/agent_governance.py render --check",
-        "tests/structure/test_development_agent_governance.py",
-        "tests/structure/test_agent_governance_*.py",
-    ):
-        assert required in job
+    def _job(name: str) -> str:
+        match = re.search(rf"\n  {re.escape(name)}:\n(.*?)(?=\n  [a-z0-9][a-z0-9-]*:\n|\Z)", source, re.S)
+        assert match is not None
+        return match.group(1)
+    worker, aggregate = (_job(name) for name in ("development-agent-governance-shard", "development-agent-governance"))
+    worker_required = (
+        "name: development-agent governance shard ${{ matrix.shard }} of 8", "runs-on: ubuntu-latest", "timeout-minutes: 45", "fail-fast: false", "shard: [0, 1, 2, 3, 4, 5, 6, 7]", "agent_governance.py validate", "agent_governance.py render --check", "-p helper_scripts.ci.select_pytest_shard", "--governance-shard-index ${{ matrix.shard }}", "--governance-shard-count 8", "--governance-shard-minimum 4548",
+        "tests/structure/test_development_agent_governance.py", "tests/structure/test_agent_governance_*.py", "tests/structure/test_codex_memory_policy.py", "tests/structure/test_role_memory_compaction.py", "tests/structure/test_s2_4_w0_admission.py",
+        "tests/structure/test_aiml_s1_closure_target_host_run.py", "tests/structure/test_target_host_effect_adapter.py", "tests/structure/test_target_host_apply_orchestrator.py", "tests/structure/test_terminal_receipt_external_sink.py", "--governance-shard-source-sha ${{ github.sha }}", "actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02", "if: matrix.shard == 0",
+    )
+    aggregate_required = (
+        "name: development-agent governance (cheap static gate)", "needs: [changes, development-agent-governance-shard]", "if: always()", "timeout-minutes: 2", "GOVERNANCE_SELECTED: ${{ needs.changes.outputs.governance }}", "SHARD_RESULT: ${{ needs.development-agent-governance-shard.result }}", "actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093", "verify_pytest_shards.py", "set -euo pipefail", '"$GOVERNANCE_SELECTED" == "true" && "$SHARD_RESULT" == "success"', '"$GOVERNANCE_SELECTED" == "false" && "$SHARD_RESULT" == "skipped"',
+    )
+    for section, required in ((worker, worker_required), (aggregate, aggregate_required)):
+        assert all(token in section for token in required)
+    assert aggregate.count("exit 0") == 2 and aggregate.count("exit 1") == 1 and all(token not in worker + aggregate for token in ("continue-on-error", "|| true", " -k ", "--ignore", "--deselect", "--maxfail", " -x", "xdist"))

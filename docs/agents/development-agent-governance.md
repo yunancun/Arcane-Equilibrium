@@ -115,9 +115,11 @@ Context 不是一段可任意重寫的 prompt。Compiler 先把 exact `task_prom
 shape/surfaces/risk、必填 `low|medium|high|unknown` uncertainty、runtime/E2E claim、
 `side_effect_class`、objective/scope/acceptance/hard stops、三欄 source baseline、
 `dirty_scope`、可選 `verification_scope`、direct interfaces、previous failure、
-可選 `history_refs` 與 verdict-relevant `claim_inputs` 正規化成
-`task_contract`。`claim_inputs` 是 name→canonical digest map；任何會影響結論的 prior/
-evidence 都必須在 admission 時綁定，不能藏在 free-form prompt 內替換。其 canonical
+可選 `history_refs`、verdict-relevant `claim_inputs`、typed `claim_payloads` 與可選
+`admission_profile` 正規化成 `task_contract`。`claim_inputs` 是 name→canonical digest
+map；每份 `claim_payloads` 都必須 canonical-hash 回同名 digest。任何會影響結論的 prior/
+evidence 都必須在 admission 時綁定，不能藏在 free-form prompt、task ID、filename、TODO
+label 或 summary 內推導 profile 或替換。其 canonical
 SHA-256 以 `task_contract_digest` 同時綁在 plan、artifact、每個 `role_fragment_v1` 與最終
 closure。Closure 在 `adjudicated_at` 重新驗 artifact exact fields、canonical bytes、source
 bytes/digest、producer、capture-kind TTL、baseline 與 compiler-derived budget authority；
@@ -129,11 +131,18 @@ verifier `path_scope` 為空時採用，並先於 `dirty_scope` fallback。它�
 writer ownership、mutation authority 或 ACL，也不能取代 writer `dirty_scope` 或 whole-repo
 generation checks。
 
-`active_state` 不再投影整個 `TODO.md`：compiler 只讀 exact
-`S2E 當前 ACTIVE 派發` 表，選唯一 ACTIVE row 與 direct dependency rows，最多
-8 KiB，並對投影 bytes 計 digest。`history_refs` 每項綁 allowlisted safe path、exact H2
-heading 與 digest，單段 16 KiB、總量 32 KiB；glob、whole-file、symlink、traversal、
-未選 section 均拒絕。因而無關 TODO/history 變更不再破壞 shared Context/cache key。
+`active_state` 不再投影整個 `TODO.md`：Registry 的 current S2E selector 使用
+`todo_dispatch_projection`，只讀 exact `S2E 當前派發投影` section。單一 ACTIVE row
+仍只投影該 row 與 direct dependencies、最多 8 KiB；零 ACTIVE 則必須有唯一且逐欄 exact
+的 `S2E-DISPATCH-PROJECTION` marker，產生 typed JSON content：
+`projection_state=EMPTY`、`active_rows=[]`、`active_count=0`、
+`dispatchable=false`、`next_action=null`。Capture 仍具 content digest/bytes/provenance、
+`source_bytes` 與由完整 TODO 真實計算的 `full_file_token_estimate`。missing/renamed heading、
+malformed marker、EMPTY+ACTIVE、其他 section 補數或多個 ACTIVE 全部 fail closed，且沒有
+full-file fallback；legacy `todo_active_rows` callers 仍要求 exactly-one ACTIVE。
+`history_refs` 每項綁 allowlisted safe path、exact H2 heading 與 digest，單段 16 KiB、總量
+32 KiB；glob、whole-file、symlink、traversal、未選 section 均拒絕。因而無關
+TODO/history 變更不再破壞 shared Context/cache key。
 
 Budget 分開管理 single-call planned lower bound、exact prompt bytes、workflow planned
 lower bound、unique nodes、call attempts 與 retry：
@@ -217,7 +226,9 @@ Task-facts seam 是 typed、fail-closed：exact `task_prompt`、`task_shape`、`
 scope、acceptance、hard stops、baseline、`dirty_scope`、可選 `verification_scope`、
 direct interfaces、previous failure、可選 `history_refs` 與可選
 `evidence_state` 供 Context Interface 使用；verdict-relevant prior/evidence 另由
-`claim_inputs` 以 canonical digest 固定。`continuation_mode` 缺省只正規化為
+`claim_inputs` 以 canonical digest 固定；optional `claim_payloads` 必須逐一 canonical-hash
+回同名 digest，optional `admission_profile` 只接受 compiler 已知 profile。
+`continuation_mode` 缺省只正規化為
 `finite`；只有 exact Operator request 第一控制行精確等於 `/loop` 才可用
 `operator_loop`，並將 marker 綁入原始 admitted task contract digest。
 `side_effect_class` 必須明示為 `none`、repo/test/
@@ -231,6 +242,17 @@ runtime-effect/incident-RCA 等 operational surface 才觸發 OPS，避免 sourc
 runtime code change 機械式增加 review。沒有 intervening effect 的 read-only/source lane
 只產一個 `ops_observation`；只有 admitted effect 才保留 separated preflight →
 effect Adapter → postcheck。
+
+`aiml_s2e_lw2_readmission_v1` 是最窄的 future-LW2 executable guard，不由 prompt、
+task ID、filename 或 TODO wording 推斷；profile 一旦明示，task admission 另與 canonical
+`S2E-LW2` task ID 交叉綁定。它要求 exactly three current-head claim pairs：combined-main
+raw 40-hex head/tree identity、同 head/tree 的 governed read-only focused/unreachability
+`command_capture_v2` PASS、以及 distinct reviewer（reviewer != writer）對該 capture digest
+作出的同-head governed read-only PASS review。Route 先以實際 repository HEAD/tree 驗證
+bundle 才可建 DAG；persisted task admission 再以實際 worktree HEAD/tree 與 admission owner
+驗證才可寫 store，故 missing/stale/mismatch、digest/payload substitution、self-review 或
+writer/owner mismatch 都在 DAG/lease/source write 前 fail closed。該 guard 只回 eligibility，
+不建立 LW2 task、DAG、lease、source write、Context artifact 或 receipt。
 
 `public_web_read` 僅是 read-only evidence acquisition：必須實際開啟 public URL，保留
 citation/capture provenance；平台是否提供 WebSearch/WebFetch 是另一個 availability fact，
@@ -410,12 +432,62 @@ Canonical snapshot producer 由 persisted normalized task contract 的 `dirty_sc
 有效 delta/authority。External-only delta 必須由獨立 validated Adapter 或 reviewed
 task-owned artifact 落入 admitted scope。
 
+普通 task admission 只接受 clean repository，並以 config-isolated native Git 持久化 exact
+`HEAD`/tree 為 `task_admission_accepted_base_v1`。在 task-admission store lock 內，producer
+先重驗 clean identity，產生 progress snapshot 後再重驗一次；baseline 的 `source_head` 與
+`task_source_manifest` 必須逐字等於從 immutable accepted tree 以 raw tree/blob 重新導出的
+manifest，故短暫 dirty 後還原也不能留下 stale baseline。缺少 `accepted_base` 的 legacy
+ordinary record 只保留 exact release/cleanup 相容性，不能作 acquire、renew 或 publication
+authority。
+
 每個 writable task 只持有一個 attached non-main linked-worktree lease，帶 task/owner、
-branch、TTL 與 random fencing token。Acquire 要求 clean worktree；renew/release 在同一
-atomic lock 內重驗 owner/token/expiry；collision fail closed。刪除此 slice 會讓 finite/
-loop、no-delta、queue selection、terminal next action 與 writer exclusivity 再散落到
-routing/Closure/workflows/Git/docs，通過 deletion test，具有足夠 Depth、Leverage 與
-Locality；因此保留一個 Module 內的 Interface/Seam/Adapter，而非增加 shallow daemon。
+branch、TTL 與 random fencing token。公開 `agent_governance.py writer-lease` action 集合逐字
+固定為 `acquire`、`status`、`publication-status`、`renew`、`release`。Acquire 要求 clean
+worktree；renew/release 在同一 atomic lock 內重驗 owner/token/expiry；collision fail closed。
+
+`publication-status` 是 publish-only 的 read-only、nonrenewing、nonpersisting authority
+transition；它不改 admission/lease store，也不修補 accepted generation。直接呼叫必須明示
+`--publication-phase publish|post-push`、expected non-main feature branch 與 exact lowercase
+40-hex expected SHA；只有 `git_loop_guard.py` 的 `publish`／`post-push` phase 使用它，普通
+`status`／`renew` 與 `start`／`checkpoint` 不得替代。Implementation 依序持有 task-admission
+lock 再持有 writer lock，直到整個 publication boundary 完成；期間要求 exact ACTIVE
+admission 與其 exact bound ACTIVE writer lease 在可信 entry time 與 final time 都未過期。
+
+普通 task publication 也必須從 persisted `accepted_base` 到 expected feature SHA 取得
+nonempty、strictly linear 的 native commit range。所有 object/parent/tree/path/patch evidence
+均以 config-isolated `--no-replace-objects` Git 讀取，且關閉 rename detection、external diff
+與 textconv；每一個 commit 的每一個 touched path 都必須屬於 admitted `dirty_scope`。因此
+中途修改後 revert、rename 的 source/destination，以及單一 mixed-scope commit 都會被逐
+commit 捕獲，不能由 final tree diff 隱藏。
+
+LW2 publication status 先把 externally attested published-main accepted base 綁到 clean、
+strictly linear、只觸 admitted path 的 native feature range，拒絕 replace/graft projection、
+staged/uncommitted bytes、origin/main 或 feature generation drift；同一鎖區只做一次完整
+task-admission generation capture，再用 lightweight final native protected snapshot 對賬，
+而不是重跑第二次完整 generation producer。
+
+任何 remote-head producer callback 前，Final boundary 先 pure-validate canonical singleton
+remote：恰一個 `origin` fetch URL、恰一個 push URL，兩者逐字相同，且必須是無 credential
+的 exact public `https://github.com/<owner>/<repo>.git` repository；同時驗 exact
+`refs/heads/main`，`post-push` 再驗 exact feature ref（LW2 另固定既定
+repository/destination）。Private、credentialed、malformed 或 local-filesystem origin
+都在此 fence 直接 fail closed 並產生零次 remote producer callback。唯一 publication refspec 是
+`<expected-sha>:refs/heads/<expected-branch>`。它最後 live 查 remote `main`；`post-push` 再
+要求 live feature ref exact 等於 expected SHA，然後以 trusted clock 作最後 I/O boundary，
+其後只允許 pure in-memory adjudication。任何 URL/ref/HEAD/generation/expiry race 都 fail
+closed。Live ref producer 永遠先用 config-isolated native `git ls-remote`；只有該 transport
+unavailable 且 origin 是 exact public `https://github.com/<owner>/<repo>.git`，才可使用 pinned、
+config-disabled、unauthenticated GitHub REST `git/ref` read。回應必須逐字符合 requested ref、
+commit type 與 lowercase 40-hex SHA；它不取得 credential、private-repository 或 ref-mutation
+authority，任何 URL/HTTP/process/timeout/JSON/ref/type/SHA 異常仍為 remote-head unavailable。
+
+PASS 只證該次 immutable publication boundary 可用；不 renew、不 persist、不授權後續
+edit/start/checkpoint，也不建立或啟動 LW2 task/DAG/lease/runtime/service/deploy/PG/broker/
+order/funds/trading effect。Merge 後須 exact release feature lease 與 admission，並只可從新
+published main generation 重新 admission。刪除此 slice 會讓 finite/loop、no-delta、queue
+selection、terminal next action 與 writer exclusivity 再散落到 routing/Closure/workflows/
+Git/docs，通過 deletion test，具有足夠 Depth、Leverage 與 Locality；因此保留一個 Module
+內的 Interface/Seam/Adapter，而非增加 shallow daemon。
 
 低風險、低不確定性、無 effect/runtime/E2E/hard surface 的 `task_shape=query` 只走
 PM triage/closure，且永遠 finite。任何 authority/security/broker/private-effect fact 都
@@ -533,10 +605,20 @@ Generic source/runtime/data digest 不再能自證 PASS。每個 fragment 先以
 record 驗 task/context/node/role/result binding，再依上表驗 evidence class/trust tier。
 Acceptance PASS 至少引用 closure 重驗的 direct capture，並由同一 refs 的 independent
 call-bound FACT verifier 支持。Repo mutation 必須由每個 admitted writer 恰好一個
-task/role/node/scope-bound `repository_change_record_v1` 依 canonical writer order 組成；
-node-owned scopes 必須 non-empty/disjoint、writer transitively serialized；每份 receipt
-同時綁 owned mutation 與 task-wide generation，形成 exact G0 -> G1 -> ... -> Gn，且
-Gn/owned after current。單一 mixed record、snapshot 或 legacy summary 不證明 mutation。
+task/role/node/effective-scope-bound `repository_change_record_v1` 依 canonical writer order
+組成。Digest-bound `repository_writer_scope_contract_v1` 是 effective-scope constraint，不能
+覆寫 raw dispatch authority；raw canonical/adaptive scope 的 identical literal path 只可轉交
+給較後、transitively serialized、且 dispatched role 與 permission 相同的 adaptive writer。
+轉交後所有 effective scopes 仍須 non-empty/disjoint，且 exact union 等於 task
+`dirty_scope`。
+
+Clean committed chain 綁 admitted baseline，task-wide/owned before-after endpoints 必須成對
+clean，相鄰 writers 的 head/generation exact 相接。每個 writer 另須一段 nonempty、
+config-isolated native strictly-linear commit range，且其中每一 commit path 只能屬於該
+writer effective scope；只有 final writer `owned_after` 與 final task-wide generation 要求
+current。Same-HEAD dirty chain 則要求每個 writer `owned_after` 都維持 current。Committed/
+dirty mixed mode、單一 mixed record、snapshot 或 legacy summary 均 fail closed，且兩種模式
+都不建立或授予 LW2/runtime/service/deploy/PG/broker/order/funds/trading effect。
 
 Closure 只接受 deterministic required node 或明確 admitted node 的 fragment。任何
 admitted verification FAIL/CONDITIONAL/UNVERIFIED/缺席都阻止 global PASS；因此

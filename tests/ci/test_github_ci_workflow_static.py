@@ -2,8 +2,13 @@ from __future__ import annotations
 
 from pathlib import Path
 import re
+import sys
 
-from helper_scripts.ci.classify_ci_changes import GATES
+REPO_ROOT = Path(__file__).resolve().parents[2]
+if str(REPO_ROOT) not in sys.path:
+    sys.path.append(str(REPO_ROOT))
+
+from helper_scripts.ci.classify_ci_changes import GATES  # noqa: E402
 
 
 WORKFLOW = (
@@ -85,7 +90,7 @@ def test_ci_workflow_classifies_paths_before_expensive_jobs() -> None:
     assert "helper_scripts/ci/classify_ci_changes.py" in classifier
 
     expected_gate = {
-        "development-agent-governance": "governance",
+        "development-agent-governance-shard": "governance",
         "alr-fit-verifier": "alr_fit_verifier",
         "rust-check-linux": "rust",
         "rust-check-macos": "rust",
@@ -108,11 +113,79 @@ def test_ci_workflow_classifies_paths_before_expensive_jobs() -> None:
     assert set(expected_gate.values()) == set(GATES)
 
 
-def test_development_agent_governance_budget_covers_the_current_suite() -> None:
-    governance = _job("development-agent-governance")
-    assert "timeout-minutes: 30" in governance
+def test_development_agent_governance_suite_is_sharded_without_filtering() -> None:
+    governance = _job("development-agent-governance-shard")
+    assert "timeout-minutes: 45" in governance
+    assert "fail-fast: false" in governance
+    assert "shard: [0, 1, 2, 3, 4, 5, 6, 7]" in governance
+    assert "name: development-agent governance shard ${{ matrix.shard }} of 8" in governance
+    assert "-p helper_scripts.ci.select_pytest_shard" in governance
+    assert "--governance-shard-index ${{ matrix.shard }}" in governance
+    assert "--governance-shard-count 8" in governance
+    assert "--governance-shard-minimum 4548" in governance
+    assert "--governance-shard-source-sha ${{ github.sha }}" in governance
+    assert '"${{ runner.temp }}/governance-pytest-shard-${{ matrix.shard }}.json"' in governance
+    assert "uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02" in governance
+    assert "name: governance-pytest-shard-${{ matrix.shard }}" in governance
+    assert "if-no-files-found: error" in governance
+    assert "retention-days: 1" in governance
+    assert "overwrite: false" in governance
+    upload = _workflow_step("\n" + governance, "Upload exact governance shard evidence")
+    assert "if: always()" in upload
+    assert "path: ${{ runner.temp }}/governance-pytest-shard-${{ matrix.shard }}.json" in upload
     assert "tests/structure/test_codex_memory_policy.py" in governance
     assert "tests/structure/test_role_memory_compaction.py" in governance
+    for forbidden in (" -k ", "--ignore", "--deselect", "--maxfail", " -x", "xdist"):
+        assert forbidden not in governance
+
+
+def test_development_agent_governance_keeps_legacy_fail_closed_aggregate() -> None:
+    aggregate = _job("development-agent-governance")
+    assert "name: development-agent governance (cheap static gate)" in aggregate
+    assert "needs: [changes, development-agent-governance-shard]" in aggregate
+    assert "if: always()" in aggregate
+    assert "GOVERNANCE_SELECTED: ${{ needs.changes.outputs.governance }}" in aggregate
+    assert "SHARD_RESULT: ${{ needs.development-agent-governance-shard.result }}" in aggregate
+    assert '"$GOVERNANCE_SELECTED" == "true" && "$SHARD_RESULT" == "success"' in aggregate
+    assert '"$GOVERNANCE_SELECTED" == "false" && "$SHARD_RESULT" == "skipped"' in aggregate
+    assert "actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5" in aggregate
+    assert "actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093" in aggregate
+    assert "pattern: governance-pytest-shard-*" in aggregate
+    assert "merge-multiple: false" in aggregate
+    assert "helper_scripts/ci/verify_pytest_shards.py" in aggregate
+    assert "--expected-source-sha ${{ github.sha }}" in aggregate
+    assert "--expected-shard-count 8" in aggregate
+    assert "--expected-minimum-count 4548" in aggregate
+    artifact_guard = (
+        "if: needs.changes.outputs.governance == 'true' && "
+        "needs.development-agent-governance-shard.result == 'success'"
+    )
+    for step_name in (
+        "Check out exact governance source",
+        "Download preserved governance shard evidence",
+        "Verify exhaustive governance shard evidence",
+    ):
+        assert artifact_guard in _workflow_step("\n" + aggregate, step_name)
+    assert "ref: ${{ github.sha }}" in aggregate
+    assert "path: ${{ runner.temp }}/governance-pytest-shards" in aggregate
+    for forbidden in ("github-token:", "repository:", "run-id:"):
+        assert forbidden not in aggregate
+    assert "exit 1" in aggregate
+
+
+def test_shard_verifier_tests_are_unconditional_and_self_triggering() -> None:
+    policy = _job("git-workflow-policy")
+    assert "tests/ci/test_verify_pytest_shards.py" in policy
+
+
+def test_v158_v159_contracts_run_once_on_shard_zero() -> None:
+    governance = _job("development-agent-governance-shard")
+    contract_step = _workflow_step(
+        "\n" + governance, "Run V158/V159 qualified challenger source contracts"
+    )
+    assert "if: matrix.shard == 0" in contract_step
+    assert "tests/migrations/test_v158_alr_qualified_challenger_training.py" in contract_step
+    assert "tests/migrations/test_v159_alr_durable_fit_attestation.py" in contract_step
 
 
 def test_ci_workflow_keeps_cheap_guards_unconditional() -> None:
@@ -263,5 +336,6 @@ def test_ci_workflow_runs_git_policy_tests_in_unconditional_cheap_gate() -> None
         "tests/structure/test_public_repo_security_policy.py",
         "tests/ci/test_classify_ci_changes.py",
         "tests/ci/test_github_ci_workflow_static.py",
+        "tests/ci/test_select_pytest_shard.py",
     ):
         assert path in policy

@@ -124,18 +124,24 @@ jobs:
             tests/structure/test_public_repo_security_policy.py \
             tests/ci/test_classify_ci_changes.py \
             tests/ci/test_github_ci_workflow_static.py \
-            tests/ci/test_ci_workflow_ibkr_job_static.py
+            tests/ci/test_ci_workflow_ibkr_job_static.py \
+            tests/ci/test_select_pytest_shard.py \
+            tests/ci/test_verify_pytest_shards.py
 
   # Development-agent governance and the V158/V159 migration source contracts use
   # stdlib + focused pytest only. Keep them on the Linux 1x runner so static
   # authority/Registry/view/permission drift fails before merge without
   # consuming a Rust build or macOS 10x minute.
-  development-agent-governance:
-    name: development-agent governance (cheap static gate)
+  development-agent-governance-shard:
+    name: development-agent governance shard ${{ matrix.shard }} of 8
     needs: changes
     if: needs.changes.outputs.governance == 'true'
     runs-on: ubuntu-latest
-    timeout-minutes: 30
+    timeout-minutes: 45
+    strategy:
+      fail-fast: false
+      matrix:
+        shard: [0, 1, 2, 3, 4, 5, 6, 7]
     steps:
       - uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5 # v4
         with:
@@ -160,6 +166,12 @@ jobs:
           # they must be listed explicitly — otherwise their closure-binding /
           # process-isolation / operator-signing / WORM-retention coverage never runs.
           python3 -m pytest -q \
+            -p helper_scripts.ci.select_pytest_shard \
+            --governance-shard-index ${{ matrix.shard }} \
+            --governance-shard-count 8 \
+            --governance-shard-minimum 4548 \
+            --governance-shard-source-sha ${{ github.sha }} \
+            --governance-shard-evidence-path "${{ runner.temp }}/governance-pytest-shard-${{ matrix.shard }}.json" \
             tests/structure/test_development_agent_governance.py \
             tests/structure/test_agent_governance_*.py \
             tests/structure/test_codex_memory_policy.py \
@@ -169,11 +181,66 @@ jobs:
             tests/structure/test_target_host_effect_adapter.py \
             tests/structure/test_target_host_apply_orchestrator.py \
             tests/structure/test_terminal_receipt_external_sink.py
+      - name: Upload exact governance shard evidence
+        if: always()
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
+        with:
+          name: governance-pytest-shard-${{ matrix.shard }}
+          path: ${{ runner.temp }}/governance-pytest-shard-${{ matrix.shard }}.json
+          if-no-files-found: error
+          retention-days: 1
+          overwrite: false
       - name: Run V158/V159 qualified challenger source contracts
+        if: matrix.shard == 0
         run: |
           python3 -m pytest -q \
             tests/migrations/test_v158_alr_qualified_challenger_training.py \
             tests/migrations/test_v159_alr_durable_fit_attestation.py
+
+  # Keep the long-lived required-check context stable while making it cover the
+  # complete matrix. Unknown, cancelled, or inconsistent classifier states fail.
+  development-agent-governance:
+    name: development-agent governance (cheap static gate)
+    needs: [changes, development-agent-governance-shard]
+    if: always()
+    runs-on: ubuntu-latest
+    timeout-minutes: 2
+    steps:
+      - name: Check out exact governance source
+        if: needs.changes.outputs.governance == 'true' && needs.development-agent-governance-shard.result == 'success'
+        uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5 # v4
+        with:
+          ref: ${{ github.sha }}
+      - name: Download preserved governance shard evidence
+        if: needs.changes.outputs.governance == 'true' && needs.development-agent-governance-shard.result == 'success'
+        uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093 # v4
+        with:
+          pattern: governance-pytest-shard-*
+          path: ${{ runner.temp }}/governance-pytest-shards
+          merge-multiple: false
+      - name: Verify exhaustive governance shard evidence
+        if: needs.changes.outputs.governance == 'true' && needs.development-agent-governance-shard.result == 'success'
+        run: >-
+          python3 helper_scripts/ci/verify_pytest_shards.py
+          --artifacts-root "${{ runner.temp }}/governance-pytest-shards"
+          --expected-source-sha ${{ github.sha }}
+          --expected-shard-count 8
+          --expected-minimum-count 4548
+      - name: Require the expected governance shard result
+        env:
+          GOVERNANCE_SELECTED: ${{ needs.changes.outputs.governance }}
+          SHARD_RESULT: ${{ needs.development-agent-governance-shard.result }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          if [[ "$GOVERNANCE_SELECTED" == "true" && "$SHARD_RESULT" == "success" ]]; then
+            exit 0
+          fi
+          if [[ "$GOVERNANCE_SELECTED" == "false" && "$SHARD_RESULT" == "skipped" ]]; then
+            exit 0
+          fi
+          echo "unexpected governance selection/result: selected=$GOVERNANCE_SELECTED result=$SHARD_RESULT" >&2
+          exit 1
 
   alr-fit-verifier:
     name: isolated ALR fit verifier (locked online + clean offline)

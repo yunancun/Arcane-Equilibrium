@@ -132,12 +132,45 @@ noise 都不算 progress。External-only delta 必須由獨立 validated domain 
 task-owned artifact 提供；
 相同 digest 結案為 `BLOCKED_NO_DELTA`，不得 PASS、wakeup 或 executable next action。
 
+普通 task admission 只可從 clean repository 開始，並持久化 config-isolated native exact
+`HEAD`/tree `accepted_base`。Admission-store lock 內在 progress capture 前後都重驗該 clean
+identity，且 baseline task-source manifest 必須等於從 immutable accepted tree 以 raw
+tree/blob 導出的 manifest。缺少 `accepted_base` 的 legacy ordinary record 只可 exact
+release/cleanup，不可 acquire、renew 或 publication。
+
 Queue 的 ACTIVE/WAITING/CLOSED lane 與 role work status 分離；只有 exact ACTIVE 可被
 selector 消費，IN_PROGRESS 已被 claim，不能重派。WAITING/DEFERRED 要有 named delta 並
-重新 admission，CLOSED 永不 replay。每個
-writable task 另需 Git common-dir atomic store 中一個 attached non-main linked-worktree
-lease，帶 random fencing token/owner/task/branch/TTL；Git guard 僅唯讀驗證，不能 acquire、
-steal 或自動修復。不同 writer 必須使用不同 linked worktree。
+重新 admission，CLOSED 永不 replay。每個 writable task 另需 Git common-dir atomic store
+中一個 attached non-main linked-worktree lease，帶 random fencing token/owner/task/branch/
+TTL；不同 writer 必須使用不同 linked worktree。
+
+Writer-lease 的 public immutable action set 是 `acquire`、`status`、
+`publication-status`、`renew`、`release`。其中 `publication-status` 只能作 read-only、
+nonrenewing、nonpersisting 的 `publish|post-push` authority transition，且必須明示 expected
+feature branch 與 exact expected 40-hex SHA。Task-admission lock 再 writer lock 持有到 final
+boundary；authority 綁 exact ACTIVE admission/lease、trusted entry/final expiry、一次完整
+admitted-generation capture 與 lightweight final native snapshot、canonical singleton 且
+fetch/push 相同的 remote URL、唯一
+`<expected-sha>:refs/heads/<expected-branch>` refspec、final live remote `main`，以及
+`post-push` 的 exact live feature ref。普通 publication 另要求 nonempty、strictly linear
+的 native `accepted_base`→feature commit range，以 config-isolated `--no-replace-objects`
+讀 object/parent/tree/path/binary patch 並關閉 rename detection、external diff、textconv；
+每一 commit 的每一 touched path 都必須在 `dirty_scope`，故 intermediate revert、rename pair
+與 mixed-scope commit 均不能被 final diff 隱藏。LW2 另要求 externally attested published-main base、
+clean strictly-linear admitted native feature range 與無 graph projection。任何 drift/race 都
+fail closed。任何 remote-head producer callback 前，必須 pure-validate 恰一個 origin fetch
+URL 與一個逐字相同的 push URL，且是無 credential 的 exact public
+`https://github.com/<owner>/<repo>.git`，並驗 exact `refs/heads/main` 與 `post-push` feature ref；
+private、credentialed、malformed 或 local-filesystem origin 都產生零 callback 並 fail closed。
+Live ref read 以 config-isolated native `git ls-remote` 為 primary；只有 transport
+unavailable 且 origin 是 exact public `https://github.com/<owner>/<repo>.git` 時，才可用 pinned、
+config-disabled、unauthenticated GitHub REST `git/ref` read，並逐字綁 expected ref、commit type
+與 lowercase 40-hex SHA。此 fallback 不帶 credential、private-repository 或 ref-mutation
+authority，任一 URL/HTTP/process/timeout/JSON/ref/type/SHA 異常仍視為 unavailable。PASS 不修補
+accepted generation、不授權後續 edit 或 readmission，也不授予
+LW2 activation、runtime、service、deploy、PG、broker、order、funds 或 trading effect。
+Git guard 僅唯讀消費既有 authority，不能 acquire、steal 或自動修復；merge 後只可先 exact
+release，再從新 published main generation 重新 admission。
 
 每次 saved-workflow call 都產 canonical `workflow_call_record_v1`，綁 task/context/node/role/
 schema/result/retry、exact native identity/class/permission、DAG requires/topological wave 與
@@ -180,10 +213,19 @@ NEEDS_CONTEXT 仍需 owner/action。`BLOCKED_NO_DELTA` 只存在於 packet-level
 
 Route 與 adaptive admission 在 spawn 前綁 `role + native_agent + node_class + permission`；
 PA/E4 writer 與 read-only verifier 是不同 native TOML identity。多 writer repo mutation 以
-canonical writer order 證明；每個 node-owned scope non-empty/disjoint，shared-worktree
-writer transitively serialized。Receipt 同時捕獲 owned mutation 與 task-wide generation，
-相鄰 writer exact G0 -> G1 -> ... -> Gn，且 Gn/owned after current。單一 mixed-role
-record 不得替代兩個 writer receipts。
+canonical writer order 證明。Digest-bound `repository_writer_scope_contract_v1` 只約束
+effective scope，絕不是 raw dispatch authority override。Raw canonical/adaptive scope 的
+identical literal path 只可轉交給較後、transitively serialized、且 dispatched role 與
+permission 相同的 adaptive writer；所得 effective scopes 必須 non-empty/disjoint，exact
+union 仍等於 task `dirty_scope`。
+
+Clean committed chain 綁 admitted baseline，成對重驗 clean task-wide/owned endpoints、
+相鄰 writer 的 head 與 generation，並為每個 writer 取得 nonempty、config-isolated native
+strictly-linear commit range；每一 commit path 都只能落在該 writer effective scope。此模式
+只要求 final writer `owned_after` 與 final task-wide generation current。Same-HEAD dirty chain
+則保留每個 writer `owned_after` current；混合 committed/dirty mode 一律 fail closed，單一
+mixed-role record 也不得替代兩份 writer receipts。兩種證明都不授予 LW2、runtime、service、
+broker、order、funds 或 trading effect。
 
 Evidence assurance 分三層：`LOCAL_REPRODUCIBLE` repo/command capture、
 `ORCHESTRATOR_BOUND` controller provenance、`PLATFORM_OR_EXTERNAL_ATTESTED` runtime/

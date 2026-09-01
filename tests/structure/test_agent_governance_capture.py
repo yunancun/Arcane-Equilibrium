@@ -8,6 +8,8 @@ from datetime import datetime, timedelta, timezone
 import hashlib
 import inspect
 import json
+import os
+import stat
 import subprocess
 import sys
 from pathlib import Path
@@ -22,16 +24,23 @@ if str(HELPERS) not in sys.path:
 
 from agent_governance_capture import (  # noqa: E402
     LOCAL_REPRODUCIBLE,
+    NativeEvidenceMismatch,
+    NativeEvidenceUnavailable,
     ORCHESTRATOR_BOUND,
     PLATFORM_OR_EXTERNAL_ATTESTED,
     build_controller_workflow_call_record,
     build_unsigned_telemetry_record,
     capture_command,
+    capture_native_protected_snapshot,
     capture_repository,
     validate_command_capture,
     validate_repository_capture,
     validate_telemetry_record,
     validate_workflow_call_record,
+)
+import agent_governance_capture as capture_module  # noqa: E402
+from agent_governance_task_admission import (  # noqa: E402
+    capture_task_admission_generation,
 )
 from agent_governance_workflow_receipts import canonical_digest  # noqa: E402
 from agent_governance_execution_policy import requested_execution_binding  # noqa: E402
@@ -41,6 +50,7 @@ from agent_governance_capture_binding import collect_capture_evidence  # noqa: E
 from agent_governance_external_evidence import (  # noqa: E402
     validate_external_evidence_capture,
 )
+import agent_governance_lw2_readmission as lw2_readmission_module  # noqa: E402
 
 
 def _git(repo: Path, *args: str) -> str:
@@ -59,6 +69,229 @@ def _repo(tmp_path: Path) -> Path:
     _git(repo, "add", "tracked.txt")
     _git(repo, "commit", "-qm", "fixture")
     return repo
+
+
+def _completed(
+    argv: list[str], *, returncode: int = 0, stdout: bytes = b"", stderr: bytes = b""
+) -> subprocess.CompletedProcess[bytes]:
+    return subprocess.CompletedProcess(argv, returncode, stdout=stdout, stderr=stderr)
+
+
+def test_native_remote_head_keeps_git_primary_and_never_calls_rest_on_success(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    expected = "a" * 40
+    calls: list[list[str]] = []
+
+    def run(argv: list[str], **_kwargs: object) -> subprocess.CompletedProcess[bytes]:
+        calls.append(argv)
+        return _completed(argv, stdout=f"{expected}\trefs/heads/main\n".encode())
+
+    monkeypatch.setattr(capture_module.subprocess, "run", run)
+
+    assert capture_module.native_remote_head(
+        tmp_path,
+        "https://github.com/yunancun/Arcane-Equilibrium.git",
+        "refs/heads/main",
+    ) == expected
+    assert len(calls) == 1
+    assert "ls-remote" in calls[0]
+
+
+@pytest.mark.parametrize(
+    ("repository_url", "ref", "expected"),
+    [
+        (
+            "https://github.com/yunancun/Arcane-Equilibrium.git",
+            "refs/heads/main",
+            True,
+        ),
+        (
+            "https://token@github.com/yunancun/Arcane-Equilibrium.git",
+            "refs/heads/main",
+            False,
+        ),
+        (
+            "https://github.com/yunancun/Arcane-Equilibrium.git?token=x",
+            "refs/heads/main",
+            False,
+        ),
+        (
+            "https://github.com/yunancun/Arcane-Equilibrium.git",
+            "refs/heads/../main",
+            False,
+        ),
+    ],
+)
+def test_public_github_repository_ref_validation_is_exact_and_pure(
+    monkeypatch: pytest.MonkeyPatch,
+    repository_url: str,
+    ref: str,
+    expected: bool,
+) -> None:
+    monkeypatch.setattr(
+        capture_module.subprocess,
+        "run",
+        lambda *_args, **_kwargs: pytest.fail("pure validation ran transport"),
+    )
+
+    assert capture_module.validate_public_github_repository_ref(
+        repository_url, ref
+    ) is expected
+
+
+def test_native_remote_head_uses_bounded_public_github_rest_fallback(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    expected = "b" * 40
+    calls: list[list[str]] = []
+
+    def run(argv: list[str], **_kwargs: object) -> subprocess.CompletedProcess[bytes]:
+        calls.append(argv)
+        if len(calls) == 1:
+            raise subprocess.TimeoutExpired(argv, timeout=20)
+        payload = {
+            "ref": "refs/heads/feature/nested",
+            "object": {"type": "commit", "sha": expected},
+        }
+        return _completed(argv, stdout=json.dumps(payload).encode())
+
+    monkeypatch.setattr(capture_module.subprocess, "run", run)
+
+    assert capture_module.native_remote_head(
+        tmp_path,
+        "https://github.com/yunancun/Arcane-Equilibrium.git",
+        "refs/heads/feature/nested",
+    ) == expected
+    assert len(calls) == 2
+    assert calls[1][0] == "/usr/bin/curl"
+    assert calls[1][1] == "--disable"
+    assert all("authorization" not in item.lower() for item in calls[1])
+    assert calls[1][-1] == (
+        "https://api.github.com/repos/yunancun/Arcane-Equilibrium/"
+        "git/ref/heads/feature/nested"
+    )
+
+
+def test_native_remote_head_does_not_replace_a_definitive_git_failure(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    calls: list[list[str]] = []
+
+    def run(argv: list[str], **_kwargs: object) -> subprocess.CompletedProcess[bytes]:
+        calls.append(argv)
+        return _completed(argv, returncode=2, stderr=b"ref absent")
+
+    monkeypatch.setattr(capture_module.subprocess, "run", run)
+
+    assert capture_module.native_remote_head(
+        tmp_path,
+        "https://github.com/yunancun/Arcane-Equilibrium.git",
+        "refs/heads/main",
+    ) is None
+    assert len(calls) == 1
+
+
+@pytest.mark.parametrize(
+    ("returncode", "stdout"),
+    [
+        (22, b'{"message":"rate limited"}'),
+        (0, b"{"),
+        (0, b"[]"),
+        (0, b"x" * 4097),
+    ],
+)
+def test_native_remote_head_rest_fallback_rejects_http_json_and_size_failures(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+    returncode: int,
+    stdout: bytes,
+) -> None:
+    calls: list[list[str]] = []
+
+    def run(argv: list[str], **_kwargs: object) -> subprocess.CompletedProcess[bytes]:
+        calls.append(argv)
+        if len(calls) == 1:
+            raise subprocess.TimeoutExpired(argv, timeout=20)
+        return _completed(argv, returncode=returncode, stdout=stdout)
+
+    monkeypatch.setattr(capture_module.subprocess, "run", run)
+
+    assert capture_module.native_remote_head(
+        tmp_path,
+        "https://github.com/yunancun/Arcane-Equilibrium.git",
+        "refs/heads/main",
+    ) is None
+    assert len(calls) == 2
+
+
+@pytest.mark.parametrize(
+    ("repository_url", "payload"),
+    [
+        (
+            "https://example.invalid/yunancun/Arcane-Equilibrium.git",
+            {
+                "ref": "refs/heads/main",
+                "object": {"type": "commit", "sha": "c" * 40},
+            },
+        ),
+        (
+            "https://github.com/yunancun/Arcane-Equilibrium.git?token=secret",
+            {
+                "ref": "refs/heads/main",
+                "object": {"type": "commit", "sha": "c" * 40},
+            },
+        ),
+        (
+            "https://github.com/yunancun/Arcane-Equilibrium.git",
+            {
+                "ref": "refs/heads/other",
+                "object": {"type": "commit", "sha": "c" * 40},
+            },
+        ),
+        (
+            "https://github.com/yunancun/Arcane-Equilibrium.git",
+            {
+                "ref": "refs/heads/main",
+                "object": {"type": "tag", "sha": "c" * 40},
+            },
+        ),
+        (
+            "https://github.com/yunancun/Arcane-Equilibrium.git",
+            {
+                "ref": "refs/heads/main",
+                "object": {"type": "commit", "sha": "C" * 40},
+            },
+        ),
+    ],
+)
+def test_native_remote_head_rest_fallback_rejects_untrusted_or_malformed_evidence(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+    repository_url: str,
+    payload: dict[str, object],
+) -> None:
+    calls: list[list[str]] = []
+
+    def run(argv: list[str], **_kwargs: object) -> subprocess.CompletedProcess[bytes]:
+        calls.append(argv)
+        if len(calls) == 1:
+            if repository_url == (
+                "https://github.com/yunancun/Arcane-Equilibrium.git"
+            ):
+                raise subprocess.TimeoutExpired(argv, timeout=20)
+            return _completed(argv, returncode=2, stderr=b"unavailable")
+        return _completed(argv, stdout=json.dumps(payload).encode())
+
+    monkeypatch.setattr(capture_module.subprocess, "run", run)
+
+    assert capture_module.native_remote_head(
+        tmp_path, repository_url, "refs/heads/main"
+    ) is None
+    expected_calls = 2 if repository_url == (
+        "https://github.com/yunancun/Arcane-Equilibrium.git"
+    ) else 1
+    assert len(calls) == expected_calls
 
 
 def _external_capture() -> dict:
@@ -178,6 +411,393 @@ def test_repository_capture_contains_exact_scoped_git_generation(tmp_path: Path)
     assert validate_repository_capture(
         capture, expected_scope=["tracked.txt", "untracked.bin"]
     ) == []
+
+
+def test_repository_capture_never_executes_configured_textconv(
+    tmp_path: Path,
+) -> None:
+    repo = _repo(tmp_path)
+    sentinel = tmp_path / "textconv-executed"
+    (repo / ".gitattributes").write_text(
+        "tracked.txt diff=sentinel\n", encoding="utf-8"
+    )
+    _git(repo, "add", ".gitattributes")
+    _git(repo, "commit", "-qm", "bind textconv attributes")
+    _git(repo, "config", "diff.sentinel.textconv", f"touch {sentinel}")
+    (repo / "tracked.txt").write_text("after\n", encoding="utf-8")
+
+    capture = capture_repository(["tracked.txt"], root=repo)
+
+    assert capture["changed_paths"] == ["tracked.txt"]
+    assert not sentinel.exists()
+
+
+@pytest.mark.parametrize(
+    "mutation",
+    ["worktree-mode", "index-mode", "head-symlink", "head-gitlink"],
+)
+def test_native_protected_snapshot_rejects_non_native_file_projection(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+    mutation: str,
+) -> None:
+    repo = _repo(tmp_path)
+    monkeypatch.setattr(
+        lw2_readmission_module,
+        "lw2_readmission_policy",
+        lambda *_args, **_kwargs: {
+            "protected_scope_paths": ["tracked.txt"],
+            "protected_scope_prefixes": [],
+        },
+    )
+    assert capture_native_protected_snapshot(repo)["scope"] == ["tracked.txt"]
+    target = repo / "tracked.txt"
+    if mutation == "worktree-mode":
+        target.chmod(target.stat().st_mode | stat.S_IXUSR)
+    elif mutation == "index-mode":
+        _git(repo, "update-index", "--chmod=+x", "--", "tracked.txt")
+    elif mutation == "head-symlink":
+        target.unlink()
+        target.symlink_to("elsewhere")
+        _git(repo, "add", "tracked.txt")
+        _git(repo, "commit", "-qm", "protected symlink")
+    else:
+        commit = _git(repo, "rev-parse", "HEAD")
+        _git(
+            repo,
+            "update-index",
+            "--add",
+            "--cacheinfo",
+            f"160000,{commit},tracked.txt",
+        )
+        _git(repo, "commit", "-qm", "protected gitlink")
+
+    with pytest.raises(NativeEvidenceMismatch):
+        capture_native_protected_snapshot(repo)
+
+
+def test_task_admission_generation_binds_owned_baseline_absent_protected_file(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    repo = _repo(tmp_path)
+    protected = repo / "protected"
+    protected.mkdir()
+    (protected / "baseline.py").write_text("baseline\n", encoding="utf-8")
+    _git(repo, "add", "protected/baseline.py")
+    _git(repo, "commit", "-qm", "protected baseline")
+    monkeypatch.setattr(
+        lw2_readmission_module,
+        "lw2_readmission_policy",
+        lambda *_args, **_kwargs: {
+            "protected_scope_paths": ["tracked.txt"],
+            "protected_scope_prefixes": ["protected/"],
+        },
+    )
+    owned = protected / "admitted.py"
+    owned.write_text("owned bytes\n", encoding="utf-8")
+    contract = {"dirty_scope": ["protected/admitted.py"]}
+
+    generation = capture_task_admission_generation(repo, contract)
+    snapshot = capture_native_protected_snapshot(
+        repo, allowed_worktree_differences=contract["dirty_scope"]
+    )
+
+    assert "protected/admitted.py" in generation["scope"]
+    added = next(
+        item for item in snapshot["filesystem_entries"]
+        if item["path"] == "protected/admitted.py"
+    )
+    assert added["mode"] == "100000:0644"
+    assert added["byte_digest"] == (
+        "sha256:" + hashlib.sha256(b"owned bytes\n").hexdigest()
+    )
+    added_entry = next(
+        item for item in snapshot["entries"]
+        if item["path"] == "protected/admitted.py"
+    )
+    assert added_entry["worktree_state"] == "added"
+    assert added_entry["byte_digest"] == added["byte_digest"]
+    with pytest.raises(NativeEvidenceMismatch):
+        capture_native_protected_snapshot(repo)
+    (protected / "unowned.py").write_text("sibling\n", encoding="utf-8")
+    with pytest.raises(NativeEvidenceMismatch):
+        capture_native_protected_snapshot(
+            repo, allowed_worktree_differences=contract["dirty_scope"]
+        )
+
+
+def test_task_admission_generation_rejects_owned_ignored_baseline_absent_file(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    repo = _repo(tmp_path)
+    protected = repo / "protected"
+    protected.mkdir()
+    (protected / "baseline.py").write_text("baseline\n", encoding="utf-8")
+    (repo / ".gitignore").write_text(
+        "protected/owned-ignored.py\n", encoding="utf-8"
+    )
+    _git(repo, "add", ".gitignore", "protected/baseline.py")
+    _git(repo, "commit", "-qm", "protected baseline and ignore rule")
+    monkeypatch.setattr(
+        lw2_readmission_module,
+        "lw2_readmission_policy",
+        lambda *_args, **_kwargs: {
+            "protected_scope_paths": ["tracked.txt"],
+            "protected_scope_prefixes": ["protected/"],
+        },
+    )
+    ignored = protected / "owned-ignored.py"
+    ignored.write_text("ignored but explicitly owned\n", encoding="utf-8")
+
+    with pytest.raises(
+        NativeEvidenceMismatch,
+        match="allowed addition is not visible as untracked",
+    ):
+        capture_task_admission_generation(
+            repo, {"dirty_scope": ["protected/owned-ignored.py"]}
+        )
+
+
+def test_task_admission_generation_binds_owned_tracked_deletion(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    repo = _repo(tmp_path)
+    protected = repo / "protected"
+    protected.mkdir()
+    baseline = protected / "baseline.py"
+    deleted = protected / "deleted.py"
+    baseline.write_text("baseline\n", encoding="utf-8")
+    deleted.write_text("deleted bytes\n", encoding="utf-8")
+    _git(repo, "add", "protected/baseline.py", "protected/deleted.py")
+    _git(repo, "commit", "-qm", "protected deletion baseline")
+    monkeypatch.setattr(
+        lw2_readmission_module,
+        "lw2_readmission_policy",
+        lambda *_args, **_kwargs: {
+            "protected_scope_paths": ["tracked.txt"],
+            "protected_scope_prefixes": ["protected/"],
+        },
+    )
+    deleted.unlink()
+    contract = {"dirty_scope": ["protected/deleted.py"]}
+
+    generation = capture_task_admission_generation(repo, contract)
+    snapshot = capture_native_protected_snapshot(
+        repo, allowed_worktree_differences=contract["dirty_scope"]
+    )
+
+    assert "protected/deleted.py" in generation["scope"]
+    deleted_entry = next(
+        item for item in snapshot["entries"]
+        if item["path"] == "protected/deleted.py"
+    )
+    assert deleted_entry["mode"] == "100644"
+    assert deleted_entry["worktree_state"] == "deleted"
+    with pytest.raises(NativeEvidenceMismatch):
+        capture_native_protected_snapshot(repo)
+    deleted.write_text("deleted bytes\n", encoding="utf-8")
+    (repo / "tracked.txt").unlink()
+    with pytest.raises(NativeEvidenceMismatch):
+        capture_native_protected_snapshot(repo)
+
+
+@pytest.mark.parametrize("ignore_source", ["info-exclude", "tracked-ignore"])
+@pytest.mark.parametrize("mutation", ["add", "mutate", "remove"])
+def test_protected_generation_fails_closed_on_ignored_filesystem_members(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+    ignore_source: str,
+    mutation: str,
+) -> None:
+    repo = _repo(tmp_path)
+    protected = repo / "protected"
+    protected.mkdir()
+    (protected / "baseline.py").write_text("baseline\n", encoding="utf-8")
+    _git(repo, "add", "protected/baseline.py")
+    if ignore_source == "tracked-ignore":
+        (repo / ".gitignore").write_text(
+            "protected/ignored.py\n", encoding="utf-8"
+        )
+        _git(repo, "add", ".gitignore")
+    _git(repo, "commit", "-qm", "protected baseline")
+    if ignore_source == "info-exclude":
+        exclude = Path(_git(repo, "rev-parse", "--git-path", "info/exclude"))
+        if not exclude.is_absolute():
+            exclude = repo / exclude
+        exclude.write_text("protected/ignored.py\n", encoding="utf-8")
+    monkeypatch.setattr(
+        lw2_readmission_module,
+        "lw2_readmission_policy",
+        lambda *_args, **_kwargs: {
+            "protected_scope_paths": ["tracked.txt"],
+            "protected_scope_prefixes": ["protected/"],
+        },
+    )
+    contract = {"dirty_scope": ["tracked.txt"]}
+    ignored = protected / "ignored.py"
+    baseline = capture_task_admission_generation(repo, contract)
+    ignored.write_text("before\n", encoding="utf-8")
+    with pytest.raises(NativeEvidenceMismatch):
+        capture_task_admission_generation(repo, contract)
+    if mutation in {"add", "mutate"}:
+        ignored.write_text("after\n", encoding="utf-8")
+    else:
+        ignored.unlink()
+    if mutation == "remove":
+        assert capture_task_admission_generation(repo, contract) == baseline
+    else:
+        with pytest.raises(NativeEvidenceMismatch):
+            capture_task_admission_generation(repo, contract)
+
+
+def _protected_member(repo: Path, relative: str = "protected/member.py") -> Path:
+    member = repo / relative; member.parent.mkdir(parents=True, exist_ok=True)
+    member.write_text("bound\n", encoding="utf-8")
+    _git(repo, "add", relative); _git(repo, "commit", "-qm", f"protected {relative}")
+    return member
+def _set_protected_policy(monkeypatch, *, paths=("tracked.txt",), prefixes=()):
+    monkeypatch.setattr(lw2_readmission_module, "lw2_readmission_policy", lambda *_a, **_k: {"protected_scope_paths": list(paths), "protected_scope_prefixes": list(prefixes)})
+def test_protected_filesystem_capture_has_typed_mismatch_and_unavailable_errors(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    repo = _repo(tmp_path)
+    protected = _protected_member(repo).parent
+    _set_protected_policy(monkeypatch, prefixes=("protected/",))
+    projected = protected / "projected.py"
+    projected.symlink_to(tmp_path / "outside.py")
+    with pytest.raises(NativeEvidenceMismatch):
+        capture_native_protected_snapshot(repo)
+    projected.unlink()
+    native_scandir = capture_module.os.scandir
+    scan_count = 0
+    def unavailable(path):
+        nonlocal scan_count
+        scan_count += 1
+        if scan_count == 2:
+            raise PermissionError("deliberately unavailable")
+        return native_scandir(path)
+    monkeypatch.setattr(capture_module.os, "scandir", unavailable)
+    with pytest.raises(NativeEvidenceUnavailable):
+        capture_native_protected_snapshot(repo)
+@pytest.mark.parametrize("unsafe_member", ["symlink-parent", "replaced-parent", "fifo"])
+def test_protected_capture_fails_closed_on_unsafe_parent_and_member_types(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, unsafe_member: str) -> None:
+    repo = _repo(tmp_path)
+    member = _protected_member(repo)
+    protected = member.parent
+    policy = {"paths": ("protected/member.py",), "prefixes": ()}
+    if unsafe_member == "symlink-parent":
+        outside = tmp_path / "outside"
+        protected.rename(outside)
+        protected.symlink_to(outside, target_is_directory=True)
+    elif unsafe_member == "replaced-parent":
+        outside = tmp_path / "outside"
+        outside.mkdir()
+        (outside / "member.py").write_text("bound\n", encoding="utf-8")
+        moved = repo / "protected-before-race"
+        native_scandir = capture_module.os.scandir
+        raced = False
+        def racing_scandir(path):
+            nonlocal raced
+            iterator = native_scandir(path)
+            if not raced and (isinstance(path, int) or Path(path) == protected):
+                raced = True
+                protected.rename(moved)
+                protected.symlink_to(outside, target_is_directory=True)
+            return iterator
+        monkeypatch.setattr(capture_module.os, "scandir", racing_scandir)
+        policy = {"paths": ("tracked.txt",), "prefixes": ("protected/member",)}
+    elif unsafe_member == "fifo":
+        member.unlink()
+        os.mkfifo(member)
+    _set_protected_policy(monkeypatch, **policy)
+    with pytest.raises(NativeEvidenceMismatch):
+        capture_native_protected_snapshot(repo)
+@pytest.mark.parametrize(("surface", "mutation"), [(surface, mutation)
+    for surface in ("recursive", "prefix", "nested", "prefix-global")
+    for mutation in ("add", "remove", "rename")])
+def test_protected_capture_revalidates_directory_membership(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, surface: str, mutation: str) -> None:
+    repo = _repo(tmp_path)
+    relative, prefixes, rescan = {
+        "recursive": ("protected/member.py", ("protected/",), 3),
+        "nested": ("protected/nested/member.py", ("protected/",), 5),
+        "prefix": ("protected-member.py", ("protected-",), 2),
+        "prefix-global": ("protected-a-member.py", ("protected-a", "protected-z"), 3),
+    }[surface]
+    member = _protected_member(repo, relative)
+    if surface == "prefix-global": _protected_member(repo, "protected-z-member.py")
+    (repo / ".gitignore").write_text("*.ignored\n", encoding="utf-8")
+    _git(repo, "add", ".gitignore"); _git(repo, "commit", "-qm", "ignore race members")
+    parent = member.parent
+    _set_protected_policy(monkeypatch, prefixes=prefixes)
+    native_scandir = capture_module.os.scandir
+    calls = 0
+    def racing_scandir(path):
+        nonlocal calls
+        calls += 1
+        if calls == rescan:
+            nested = surface in {"recursive", "nested"}
+            stem = "" if nested else "protected-a-" if surface == "prefix-global" else "protected-"
+            if mutation == "add":
+                added = parent / f"{stem}added.ignored"
+                added.write_text("raced\n", encoding="utf-8")
+            elif mutation == "remove":
+                member.unlink()
+            else:
+                renamed = parent / f"{stem}renamed.py"
+                member.rename(renamed)
+        return native_scandir(path)
+    monkeypatch.setattr(capture_module.os, "scandir", racing_scandir)
+    with pytest.raises(NativeEvidenceMismatch):
+        capture_native_protected_snapshot(repo)
+
+def test_protected_capture_rejects_non_utf8_filesystem_members(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    repo = _repo(tmp_path)
+    protected = repo / "protected"
+    protected.mkdir()
+    (protected / "member.py").write_text("bound\n", encoding="utf-8")
+    _git(repo, "add", "protected/member.py")
+    _git(repo, "commit", "-qm", "protected member")
+    monkeypatch.setattr(
+        lw2_readmission_module,
+        "lw2_readmission_policy",
+        lambda *_args, **_kwargs: {
+            "protected_scope_paths": ["tracked.txt"],
+            "protected_scope_prefixes": ["protected/"],
+        },
+    )
+    native_scandir = capture_module.os.scandir
+    scan_count = 0
+
+    class NonUtf8Entry:
+        name = "invalid-\udcff"
+
+    class InjectedScandir:
+        def __init__(self, iterator):
+            self.iterator = iterator
+
+        def __enter__(self):
+            self.iterator.__enter__()
+            return iter([*self.iterator, NonUtf8Entry()])
+
+        def __exit__(self, *args):
+            return self.iterator.__exit__(*args)
+
+    def non_utf8_scandir(path):
+        nonlocal scan_count
+        scan_count += 1
+        iterator = native_scandir(path)
+        return InjectedScandir(iterator) if scan_count == 2 else iterator
+
+    monkeypatch.setattr(capture_module.os, "scandir", non_utf8_scandir)
+    with pytest.raises(NativeEvidenceMismatch, match="not UTF-8"):
+        capture_native_protected_snapshot(repo)
 
 
 def test_repository_capture_fails_closed_on_paths_tampering_and_staleness(

@@ -94,15 +94,36 @@ def validate_dispatch_projection(
     if dispatch.get("dag_digest") != execution_dag_digest(projection):
         errors.append("dispatch dag_digest does not match delegated execution projection")
 
+    claim_payloads = task_contract.get("claim_payloads", {})
+    if not isinstance(claim_payloads, dict):
+        errors.append("task contract claim_payloads must be an object")
+        claim_payloads = {}
+    scope_contract = claim_payloads.get("repository_writer_scope_contract")
+    adaptive_writer_node_ids = {
+        node.get("node_id") for node in admitted_nodes
+        if isinstance(node, dict) and node.get("node_class") == "work"
+    }
     writer_scopes, writer_errors = writer_scope_contracts(
         [*expected_required_nodes, *admitted_nodes],
         expected_dirty_scope=sorted(task_contract.get("dirty_scope", [])),
+        scope_contract=scope_contract,
+        adaptive_writer_node_ids=adaptive_writer_node_ids,
     )
     errors.extend(writer_errors)
+    roles_by_node = {
+        node.get("node_id"): node.get("role")
+        for node in [*expected_required_nodes, *admitted_nodes]
+        if isinstance(node, dict) and isinstance(node.get("role"), str)
+    }
+    writer_roles = {
+        node_id: roles_by_node[node_id]
+        for node_id in writer_scopes if node_id in roles_by_node
+    }
     return {
         "admitted_nodes": admitted_nodes,
         "admitted_by_node": admitted_by_node,
         "projection": projection,
         "writer_scopes": writer_scopes,
+        "writer_roles": writer_roles,
         "errors": errors,
     }

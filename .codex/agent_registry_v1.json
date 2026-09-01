@@ -7,6 +7,33 @@
     "not_a_sandbox": true,
     "platform_tools_may_be_broader": true
   },
+  "lw2_readmission_policy": {
+    "schema_version": "lw2_readmission_policy_v1",
+    "work_item_id": "S2E-LW2",
+    "lane_id": "S2E.2b-2",
+    "task_id_aliases": ["S2E.LW2", "S2E:LW2", "S2E_LW2"],
+    "lane_id_aliases": ["P0-AIML-LONG-LIVED-RUNTIME-REPAIR", "S2E.2b-2B"],
+    "direct_interface": "S2E-LW2",
+    "direct_interface_signals": [
+      "S2E-LW2",
+      "S2E_2B_2B_HOST_RUNNER_CHECKPOINT_READY"
+    ],
+    "protected_scope_prefixes": [
+      "helper_scripts/maintenance_scripts/agent_governance_s2_5_",
+      "program_code/ml_training/aiml_gate_receipt_s2e_"
+    ],
+    "protected_scope_paths": [
+      "helper_scripts/maintenance_scripts/agent_governance_s2_5.py",
+      "helper_scripts/maintenance_scripts/agent_governance_s2e_launch_receipts.py",
+      "program_code/ml_training/schemas/aiml_gate_receipts/s2e_launch_wave_receipt_v1.schema.json"
+    ],
+    "admission_profile": "aiml_s2e_lw2_readmission_v1",
+    "claim_keys": [
+      "lw2_combined_main_identity",
+      "lw2_combined_main_unreachability_capture",
+      "lw2_independent_review"
+    ]
+  },
   "task_execution_control": {
     "schema_version": "task_execution_control_v1",
     "default_continuation_mode": "finite",
@@ -26,7 +53,13 @@
       "requires_linked_feature_worktree": true,
       "default_ttl_seconds": 7200,
       "min_ttl_seconds": 60,
-      "max_ttl_seconds": 86400
+      "max_ttl_seconds": 86400,
+      "actions": ["acquire", "status", "publication-status", "renew", "release"],
+      "publication_status": {
+        "read_only": true,
+        "renews_lease": false,
+        "persists_state": false
+      }
     }
   },
   "interfaces": {
@@ -353,7 +386,7 @@
   },
   "context_packs": {
     "core": ["AGENTS.md", "CLAUDE.md#Product Boundary", "CLAUDE.md#Root Principles", "CLAUDE.md#Hard Boundaries"],
-    "active_state": [{"source": "TODO.md#S2E 當前 ACTIVE 派發", "kind": "todo_active_rows", "heading": "S2E 當前 ACTIVE 派發", "id_column": "ID", "status_column": "Lane／狀態", "dependency_column": "依賴", "dependency_depth": 1, "required_when": {"surfaces_any": ["operations", "runtime", "deploy", "service", "cron", "pg", "full_audit", "profit_diagnosis", "incident_rca"], "claims_any": ["runtime_claim", "end_to_end_claim"], "uncertainty_any": ["high", "unknown"]}}],
+    "active_state": [{"source": "TODO.md#S2E 當前派發投影", "kind": "todo_dispatch_projection", "heading": "S2E 當前派發投影", "id_column": "ID", "status_column": "Lane／狀態", "dependency_column": "依賴", "dependency_depth": 1, "required_when": {"surfaces_any": ["operations", "runtime", "deploy", "service", "cron", "pg", "full_audit", "profit_diagnosis", "incident_rca"], "claims_any": ["runtime_claim", "end_to_end_claim"], "uncertainty_any": ["high", "unknown"]}}],
     "architecture": [
       {"source": "CONTEXT.md", "kind": "repository_inventory", "paths": ["CONTEXT.md"], "min_matches": 1},
       {"source": "relevant docs/adr/*", "kind": "repository_inventory", "paths": ["docs/adr/*.md"], "min_matches": 1}

@@ -18,6 +18,11 @@ MAX_FILE_LINES = 2_000
 
 
 ROOT = Path(__file__).resolve().parents[2]
+LEGACY_OVERSIZED_TEST_EXCEPTIONS = {
+    ROOT / "tests/structure/test_agent_governance_lw2_readmission.py": (
+        "split requires a separately admitted destination path"
+    ),
+}
 MODULE_PATH = (
     ROOT / "helper_scripts" / "maintenance_scripts" / "agent_governance.py"
 )
@@ -271,6 +276,12 @@ def test_registry_is_single_valid_interface_and_views_are_current(tmp_path: Path
     assert implementation_files
     for path in implementation_files:
         assert len(path.read_text(encoding="utf-8").splitlines()) <= MAX_FILE_LINES, path
+    assert set(LEGACY_OVERSIZED_TEST_EXCEPTIONS) == {
+        ROOT / "tests/structure/test_agent_governance_lw2_readmission.py"
+    }
+    for path, reason in LEGACY_OVERSIZED_TEST_EXCEPTIONS.items():
+        assert len(path.read_text(encoding="utf-8").splitlines()) > MAX_FILE_LINES
+        assert reason == "split requires a separately admitted destination path"
 
     adapters = registry["effect_adapters"]
     assert adapters["deploy_adapter_v1"]["implementation_paths"] == [
@@ -311,6 +322,64 @@ def test_registry_is_single_valid_interface_and_views_are_current(tmp_path: Path
     assert axis_literal
     workflow_axes = re.findall(r"'([^']+)'", axis_literal.group(1))
     assert workflow_axes == full_audit_contract["axes"]
+
+
+def test_registry_projects_the_exact_publication_status_authority() -> None:
+    governance = _load_module()
+    registry = governance.load_registry()
+    writer_lease = registry["task_execution_control"]["writer_lease"]
+    expected_actions = [
+        "acquire", "status", "publication-status", "renew", "release",
+    ]
+
+    assert writer_lease["actions"] == expected_actions
+    assert writer_lease["publication_status"] == {
+        "read_only": True,
+        "renews_lease": False,
+        "persists_state": False,
+    }
+
+    facade_writer = next(
+        action
+        for action in governance._build_parser()._actions
+        if action.dest == "action"
+    ).choices["writer-lease"]
+    facade_choices = next(
+        action for action in facade_writer._actions
+        if action.dest == "lease_action"
+    ).choices
+
+    from agent_governance_task_control import _parser as task_control_parser
+
+    task_writer = next(
+        action
+        for action in task_control_parser()._actions
+        if action.dest == "action"
+    ).choices["writer-lease"]
+    task_choices = next(
+        action for action in task_writer._actions if action.dest == "action"
+    ).choices
+    assert list(facade_choices) == expected_actions
+    assert list(task_choices) == expected_actions
+    publication_args = [
+        "--lease-action", "publication-status",
+        "--task-id", "task",
+        "--owner", "E1",
+        "--publication-phase", "publish",
+        "--publication-expected-branch", "agent/task",
+        "--publication-expected-head", "a" * 40,
+    ]
+    facade_publication = facade_writer.parse_args(publication_args)
+    assert facade_publication.publication_phase == "publish"
+    assert facade_publication.publication_expected_branch == "agent/task"
+    assert facade_publication.publication_expected_head == "a" * 40
+    task_publication = task_writer.parse_args([
+        "--action" if item == "--lease-action" else item
+        for item in publication_args
+    ])
+    assert task_publication.publication_phase == "publish"
+    assert task_publication.publication_expected_branch == "agent/task"
+    assert task_publication.publication_expected_head == "a" * 40
 
 
 def test_subagent_model_routing_and_project_concurrency_are_explicit() -> None:
@@ -1447,10 +1516,11 @@ async function execute(input, nullFirst = false) {
   const retry = await execute(JSON.parse(JSON.stringify(baseArgs)), true);
   const retryDigest = retry.ok ? Object.values(retry.result.context_artifact_digests)[0] : null;
   console.log(JSON.stringify({
-    valid: {
-      ok: valid.ok, calls: valid.calls,
-      raw_path_forwarded: valid.options.some(option => Object.prototype.hasOwnProperty.call(option, 'contextPath')),
-    },
+        valid: {
+          ok: valid.ok, calls: valid.calls,
+          raw_path_forwarded: valid.options.some(option => Object.prototype.hasOwnProperty.call(option, 'contextPath')),
+          error: valid.error,
+        },
     mutation: { ok: mutation.ok, calls: mutation.calls, error: mutation.error },
     path_substitution: { ok: pathSubstitution.ok, calls: pathSubstitution.calls, error: pathSubstitution.error },
     retry: {
@@ -1475,7 +1545,11 @@ async function execute(input, nullFirst = false) {
     )
     assert completed.returncode == 0, completed.stderr
     result = json.loads(completed.stdout)
-    assert result["valid"] == {"ok": True, "calls": 1, "raw_path_forwarded": False}
+    assert result["valid"] == {
+        "ok": True,
+        "calls": 1,
+        "raw_path_forwarded": False,
+    }, result
     assert result["mutation"]["ok"] is False and result["mutation"]["calls"] == 0
     assert "digest does not match" in result["mutation"]["error"]
     assert result["path_substitution"]["ok"] is False
