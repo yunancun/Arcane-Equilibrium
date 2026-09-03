@@ -340,23 +340,125 @@ def test_registry_metric_catalog_is_closed_versioned_and_preserves_v1_axes() -> 
         "definition"
     ].lower()
     assert catalog["metrics"]["orchestration_load"]["definition"] == (
-        "calls + waits + retries + compactions + duplicate_exec_count + "
-        "duplicate_wait_agent_count"
+        "Derived penalty score: 1*calls + 1*waits + 2*retries + "
+        "2*compactions. duplicate_exec_count and duplicate_wait_agent_count "
+        "remain diagnostics and are not added. This is partial telemetry: "
+        "exec, spawn, message, and followup action coverage is unavailable."
     )
+    assert catalog["metrics"]["orchestration_load"]["unit"] == "points"
+    assert policy["primary_kpis"] == [
+        "elapsed_time_ms",
+        "input_tokens",
+        "orchestration_load",
+    ]
     assert policy["efficiency_improvement"]["axes"] == [
         "elapsed_time_ms",
         "input_tokens",
-        "output_tokens",
-        "cache_read_tokens",
-        "calls",
-        "waits",
-        "retries",
-        "compactions",
+        "orchestration_load",
     ]
     assert governance.registry_efficiency_evaluation_policy_errors(registry) == []
     assert policy["policy_digest"] == governance.efficiency_evaluation_policy_digest(
         policy
     )
+
+
+def test_diagnostic_worsening_cannot_replace_the_three_primary_kpi_decision() -> None:
+    module = _load_module()
+    fixture, attestation_index = _measured_with_attestation_index(module)
+    bounded = _profile(fixture, "bounded_role")
+    bounded["metrics"]["output_tokens"] = 999999999
+    bounded["metrics"]["cache_read_tokens"] = 999999999
+    attestation = attestation_index["records"][bounded["evidence_ref"]]
+    attestation["metrics_payload_digest"] = _canonical_digest(bounded["metrics"])
+    attestation.pop("record_digest")
+    attestation["record_digest"] = _canonical_digest(attestation)
+    bounded["evidence_digest"] = attestation["record_digest"]
+    _resign(module, fixture)
+    attestation_index.pop("record_digest")
+    attestation_index["record_digest"] = _canonical_digest(attestation_index)
+
+    class ExactVerifier:
+        def verify_efficiency_attestation_index(self, **_binding) -> bool:
+            return True
+
+    result = module.evaluate_multi_agent_efficiency(
+        fixture,
+        attestation_index=attestation_index,
+        attestation_verifier=ExactVerifier(),
+    )
+    comparison = result["comparisons"]["bounded_role"]
+    assert set(comparison["efficiency_improvement"]["checks"]) == {
+        "elapsed_time_ms",
+        "input_tokens",
+        "orchestration_load",
+    }
+    assert comparison["efficiency_improvement"]["status"] == "PASS"
+    assert comparison["efficiency_improvement"]["checks"]["orchestration_load"] == {
+        "status": "IMPROVED",
+        "baseline": 124,
+        "candidate": 16,
+        "ratio": 0.129032,
+    }
+    assert "output_tokens" not in comparison["efficiency_ratios"]
+    assert "cache_read_tokens" not in comparison["efficiency_ratios"]
+
+
+@pytest.mark.parametrize(
+    ("missing_metric", "unavailable_kpi"),
+    (("elapsed_time_ms", "elapsed_time_ms"), ("input_tokens", "input_tokens"), ("calls", "orchestration_load")),
+)
+def test_evaluator_candidate_cannot_pass_with_a_missing_primary_kpi(
+    missing_metric: str,
+    unavailable_kpi: str,
+) -> None:
+    module = _load_module()
+    fixture = _fixture()
+    bounded = _profile(fixture, "bounded_role")
+    fixture["evidence_kind"] = "mixed"
+    bounded.update(
+        measurement_status="partial",
+        evidence_ref=f"partial:missing-{missing_metric}",
+        evidence_digest="sha256:" + "8" * 64,
+        unavailable_reason=f"{missing_metric} telemetry unavailable",
+    )
+    bounded["metrics"][missing_metric] = None
+    _resign(module, fixture)
+
+    result = module.evaluate_multi_agent_efficiency(fixture)
+    comparison = result["comparisons"]["bounded_role"]
+    assert comparison["efficiency_improvement"]["status"] == "UNAVAILABLE"
+    assert comparison["efficiency_improvement"]["checks"][unavailable_kpi]["status"] == "UNAVAILABLE"
+    assert comparison["efficiency_claim_allowed"] is False
+
+
+def test_orchestration_load_is_derived_and_duplicate_counters_are_diagnostic() -> None:
+    module = _load_module()
+    manifest, corpus, registry = _platform_manifest(module)
+    candidate = manifest["candidate_profile_records"][0]
+    candidate["runs"][0]["metrics"]["orchestration_load"]["value"] = 999
+    _resign_manifest(module, manifest)
+    errors = module.validate_multi_agent_efficiency_baseline_manifest(
+        manifest,
+        corpus=corpus,
+        registry=registry,
+        manifest_verifier=_ExactManifestVerifier(),
+    )
+    assert any("orchestration_load" in error and "penalty" in error for error in errors)
+
+    manifest, corpus, registry = _platform_manifest(module)
+    for record in manifest["current_profile_records"] + manifest["candidate_profile_records"]:
+        record["metrics"]["duplicate_exec_count"]["value"] = 500
+        record["metrics"]["duplicate_wait_agent_count"]["value"] = 700
+        for run in record["runs"]:
+            run["metrics"]["duplicate_exec_count"]["value"] = 500
+            run["metrics"]["duplicate_wait_agent_count"]["value"] = 700
+    _resign_manifest(module, manifest)
+    assert module.validate_multi_agent_efficiency_baseline_manifest(
+        manifest,
+        corpus=corpus,
+        registry=registry,
+        manifest_verifier=_ExactManifestVerifier(),
+    ) == []
 
 
 def test_corpus_rejects_digest_drift_case_substitution_and_averaged_targets() -> None:
@@ -774,14 +876,10 @@ def test_registry_owns_and_validates_the_exact_quality_policy() -> None:
         "axes": [
             "elapsed_time_ms",
             "input_tokens",
-            "output_tokens",
-            "cache_read_tokens",
-            "calls",
-            "waits",
-            "retries",
-            "compactions",
+            "orchestration_load",
         ],
     }
+    assert policy["primary_kpis"] == policy["efficiency_improvement"]["axes"]
     assert governance.registry_efficiency_evaluation_policy_errors(registry) == []
     assert policy["policy_digest"] == governance.efficiency_evaluation_policy_digest(
         policy
@@ -852,7 +950,7 @@ def test_registry_policy_rejects_relaxed_pareto_authority_after_resigning(
     if mutation == "predicate":
         improvement["predicate"] = "any_axis_strictly_better_v1"
     elif mutation == "axes_remove":
-        improvement["axes"].remove("output_tokens")
+        improvement["axes"].remove("orchestration_load")
     elif mutation == "axes_reorder":
         improvement["axes"] = list(reversed(improvement["axes"]))
     else:
@@ -867,7 +965,7 @@ def test_registry_policy_rejects_relaxed_pareto_authority_after_resigning(
     )
 
 
-def test_governance_doc_names_every_registry_threshold_and_pareto_axis() -> None:
+def test_governance_doc_names_every_registry_threshold_and_pareto_predicate() -> None:
     import agent_governance as governance
 
     policy = governance.load_registry()["efficiency_evaluation_policy"]
@@ -877,8 +975,6 @@ def test_governance_doc_names_every_registry_threshold_and_pareto_axis() -> None
         assert f"`{threshold}=" in documented
     improvement = policy["efficiency_improvement"]
     assert f"`{improvement['predicate']}`" in documented
-    for axis in improvement["axes"]:
-        assert f"`{axis}`" in documented
 
 
 def test_profiles_must_bind_the_same_workload_and_baseline() -> None:
@@ -992,7 +1088,7 @@ def test_efficiency_claim_requires_at_least_one_strict_improvement() -> None:
     fixture, attestation_index = _measured_with_attestation_index(module)
     current = _profile(fixture, "current")
     bounded = _profile(fixture, "bounded_role")
-    for metric in module.EFFICIENCY_METRICS:
+    for metric in ("elapsed_time_ms", "input_tokens", "calls", "waits", "retries", "compactions"):
         bounded["metrics"][metric] = current["metrics"][metric]
     attestation = attestation_index["records"][bounded["evidence_ref"]]
     attestation["call_record_digests"] = sorted(
@@ -1031,7 +1127,7 @@ def test_synthetic_benchmark_candidate_also_requires_pareto_improvement() -> Non
     fixture = _fixture()
     current = _profile(fixture, "current")
     bounded = _profile(fixture, "bounded_role")
-    for metric in module.EFFICIENCY_METRICS:
+    for metric in ("elapsed_time_ms", "input_tokens", "calls", "waits", "retries", "compactions"):
         bounded["metrics"][metric] = current["metrics"][metric]
     _resign(module, fixture)
 
@@ -1049,8 +1145,8 @@ def test_efficiency_claim_rejects_any_worse_efficiency_axis() -> None:
     fixture, attestation_index = _measured_with_attestation_index(module)
     current = _profile(fixture, "current")
     bounded = _profile(fixture, "bounded_role")
-    bounded["metrics"]["output_tokens"] = (
-        current["metrics"]["output_tokens"] + 1
+    bounded["metrics"]["elapsed_time_ms"] = (
+        current["metrics"]["elapsed_time_ms"] + 1
     )
     attestation = attestation_index["records"][bounded["evidence_ref"]]
     attestation["metrics_payload_digest"] = _canonical_digest(bounded["metrics"])
@@ -1074,7 +1170,7 @@ def test_efficiency_claim_rejects_any_worse_efficiency_axis() -> None:
 
     assert comparison["efficiency_improvement"]["status"] == "FAIL"
     assert comparison["efficiency_improvement"]["worse_axes"] == [
-        "output_tokens"
+        "elapsed_time_ms"
     ]
     assert comparison["efficiency_improvement"]["strictly_improved_axes"]
     assert comparison["efficiency_claim_allowed"] is False

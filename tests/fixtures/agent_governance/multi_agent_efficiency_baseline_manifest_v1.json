@@ -8,11 +8,11 @@
   },
   "policy_binding": {
     "policy_id": "gpt56_multi_agent_quality_noninferiority_v1",
-    "policy_digest": "sha256:f3d1b86e34d3060d3b49c737fcb2de93863c4abdedf69dbd62012897487142c5"
+    "policy_digest": "sha256:4a34349dbe2ef6e28da0167c3ba4a54d983cd6bada056716e4eafdf83cfa0068"
   },
   "registry_binding": {
     "schema_version": "agent_registry_v1",
-    "registry_digest": "sha256:66f5b425fbd06bc48ea59eb73238433afa8b17864cf3020c3e95c707e195fd8e"
+    "registry_digest": "sha256:0ab769848bb7490b9be067ae601b76b8e557d068bf0c481aca00b835e8ca8b23"
   },
   "source_generation": {
     "head_sha": "b411435a0063ddcfacfa390cc199b62e05966645",
@@ -60,9 +60,9 @@
         "permission_sentinel_match": {"value": null, "unavailable_reason": "No observed permission receipt exists for this case."},
         "depth_sentinel_match": {"value": null, "unavailable_reason": "No observed route receipt exists for this case."},
         "full_audit_sentinel_match": {"value": null, "unavailable_reason": "No observed full-audit receipt exists for this case."},
-        "orchestration_load": {"value": null, "unavailable_reason": "Its exact action-counter inputs are unavailable."}
+        "orchestration_load": {"value": null, "unavailable_reason": "Available base counters are unavailable; exec, spawn, message, and followup telemetry are also unavailable."}
       },
-      "record_digest": "sha256:a1ebed521507e3c67ba56f878aaa49fe0eabe99bac2bf24c767bcc03df15f466"
+      "record_digest": "sha256:0151fd9e6c1d333e6f704d1cec5ba073a7a01ec004732b680cb2d7763969823c"
     },
     {
       "case_id": "q1-one-file-e1-e2-e4-source-change-v1",
@@ -104,9 +104,9 @@
         "permission_sentinel_match": {"value": null, "unavailable_reason": "No observed permission receipt exists for this case."},
         "depth_sentinel_match": {"value": null, "unavailable_reason": "No observed route receipt exists for this case."},
         "full_audit_sentinel_match": {"value": null, "unavailable_reason": "No observed full-audit receipt exists for this case."},
-        "orchestration_load": {"value": null, "unavailable_reason": "Its exact action-counter inputs are unavailable."}
+        "orchestration_load": {"value": null, "unavailable_reason": "Available base counters are unavailable; exec, spawn, message, and followup telemetry are also unavailable."}
       },
-      "record_digest": "sha256:fb35a531526bf4cd6cfab4b781a8cdb4046717a9afd3e37449ce91316a68d9b7"
+      "record_digest": "sha256:2ab9232927833b855885c2877ffbd2ada97731f7297ec9703fd5344b52078e5a"
     },
     {
       "case_id": "quality-independent-gold-oracle-v1",
@@ -148,9 +148,9 @@
         "permission_sentinel_match": {"value": null, "unavailable_reason": "No observed permission receipt exists for this case."},
         "depth_sentinel_match": {"value": null, "unavailable_reason": "No observed route receipt exists for this case."},
         "full_audit_sentinel_match": {"value": null, "unavailable_reason": "No observed full-audit receipt exists for this case."},
-        "orchestration_load": {"value": null, "unavailable_reason": "Its exact action-counter inputs are unavailable."}
+        "orchestration_load": {"value": null, "unavailable_reason": "Available base counters are unavailable; exec, spawn, message, and followup telemetry are also unavailable."}
       },
-      "record_digest": "sha256:cda9e5800321a37b0eb7c4ff986aa6e29c52860b834e293b20ce2fd16725c28b"
+      "record_digest": "sha256:5440a3051762bbcc43fca8cefa20c84996c4891013a8fbf97a629f43521a07ea"
     },
     {
       "case_id": "safety-full-audit-fixed-graph-v1",
@@ -192,9 +192,9 @@
         "permission_sentinel_match": {"value": null, "unavailable_reason": "No observed permission receipt exists for this case."},
         "depth_sentinel_match": {"value": null, "unavailable_reason": "No observed route receipt exists for this case."},
         "full_audit_sentinel_match": {"value": null, "unavailable_reason": "No observed full-audit receipt exists for this case."},
-        "orchestration_load": {"value": null, "unavailable_reason": "Its exact action-counter inputs are unavailable."}
+        "orchestration_load": {"value": null, "unavailable_reason": "Available base counters are unavailable; exec, spawn, message, and followup telemetry are also unavailable."}
       },
-      "record_digest": "sha256:c2854703d04bccff0b01a4fd472a8a2247f7d41a0464cdd07af305263e24a2b0"
+      "record_digest": "sha256:0cb8c142b0e72292b41df401892116e0c3a6ff93dab8684777192e3b7058ce88"
     }
   ],
   "candidate_profile_records": [],
@@ -205,9 +205,9 @@
       "observation": null,
       "provenance_ref": null,
       "provenance_digest": null,
-      "unavailable_reason": "Historical high-level observations are not included because no deterministic exact provenance binding is available in this source-only unit."
+      "unavailable_reason": "Historical high-level observations are not included because no deterministic exact provenance binding is available in this source-only unit; exec, spawn, message, and followup action telemetry also remains unavailable for later coverage work."
     }
   ],
   "adoption_status": "PENDING_CANDIDATE_RUNS",
-  "manifest_digest": "sha256:b5fb5a4da1f8d522030c7bb91dba04e55afcc227fc4224b3e8d2cbc8a405b00b"
+  "manifest_digest": "sha256:b3039203d8c5b002ec2bb826b12f2a3d53aed92d219e730afbeb23611a3826e2"
 }

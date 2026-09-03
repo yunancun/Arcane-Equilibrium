@@ -101,13 +101,9 @@ METRIC_FIELDS = {
 EFFICIENCY_METRICS = (
     "elapsed_time_ms",
     "input_tokens",
-    "output_tokens",
-    "cache_read_tokens",
-    "calls",
-    "waits",
-    "retries",
-    "compactions",
+    "orchestration_load",
 )
+ORCHESTRATION_LOAD_WEIGHTS = {"calls": 1, "waits": 1, "retries": 2, "compactions": 2}
 QUALITY_METRICS = (
     "closure_quality_score",
     "required_coverage_ratio",
@@ -135,6 +131,7 @@ POLICY_FIELDS = {
     "schema_version",
     "policy_id",
     "thresholds",
+    "primary_kpis",
     "efficiency_improvement",
     "synthetic_measured_claim_allowed",
     "metric_catalog",
@@ -227,7 +224,7 @@ MISSING_VALUE_BEHAVIOR = "null_with_explicit_reason_never_zero_v1"
 BASELINE_METRIC_IDS = {"closure_quality_score", "required_coverage_ratio", "elapsed_time_ms", "input_tokens", "output_tokens", "cache_read_tokens", "calls", "waits", "retries", "compactions", "reopen_count", "rework_count", "false_closure_count", "p0_p1_recall_ratio", "decision_changing_findings", "time_to_first_valid_result_ms", "wait_duration_ms", "max_single_turn_input_tokens", "duplicate_exec_count", "duplicate_wait_agent_count", "missed_p0_p1_count", "expected_terminal_match", "expected_coverage_match", "route_sentinel_match", "permission_sentinel_match", "depth_sentinel_match", "full_audit_sentinel_match", "orchestration_load"}
 BOOLEAN_BASELINE_METRICS = {"expected_terminal_match", "expected_coverage_match", "route_sentinel_match", "permission_sentinel_match", "depth_sentinel_match", "full_audit_sentinel_match"}
 RATIO_BASELINE_METRICS = {"closure_quality_score", "required_coverage_ratio", "p0_p1_recall_ratio"}
-EXPECTED_METRIC_CATALOG_DIGEST = "sha256:91c4490dbe8f7e33b1e34914f3fff55f6c69f8ce53ff4097e3e5c7db7e581b96"
+EXPECTED_METRIC_CATALOG_DIGEST = "sha256:d4a24d037aedc0b35f5ef51887f77adfc4abf1e27aa2723d72d95e48823ca43a"
 EXPECTED_POLICY_UNSIGNED = {
     "schema_version": "efficiency_evaluation_policy_v1",
     "policy_id": "gpt56_multi_agent_quality_noninferiority_v1",
@@ -240,6 +237,7 @@ EXPECTED_POLICY_UNSIGNED = {
         "minimum_p0_p1_recall_ratio": 1.0,
         "minimum_decision_changing_findings_retention_ratio": 1.0,
     },
+    "primary_kpis": list(EFFICIENCY_METRICS),
     "efficiency_improvement": {
         "predicate": "all_axes_non_worse_and_one_strictly_better_v1",
         "axes": list(EFFICIENCY_METRICS),
@@ -671,27 +669,25 @@ def _metric_value_errors(
         and input_tokens < cache_read_tokens
     ):
         errors.append(f"{label} input_tokens must include cache_read_tokens")
-    action_metric_ids = (
-        "calls",
-        "waits",
-        "retries",
-        "compactions",
-        "duplicate_exec_count",
-        "duplicate_wait_agent_count",
-    )
-    action_values = [metric_value(item) for item in action_metric_ids]
+    action_values = {
+        metric_id: metric_value(metric_id) for metric_id in ORCHESTRATION_LOAD_WEIGHTS
+    }
     orchestration_load = metric_value("orchestration_load")
     if all(
         isinstance(value, (int, float)) and not isinstance(value, bool)
-        for value in action_values
+        for value in action_values.values()
     ):
-        if orchestration_load != sum(action_values):
+        expected_load = sum(
+            action_values[metric_id] * weight
+            for metric_id, weight in ORCHESTRATION_LOAD_WEIGHTS.items()
+        )
+        if orchestration_load != expected_load:
             errors.append(
-                f"{label} orchestration_load differs from its exact action-counter formula"
+                f"{label} orchestration_load differs from its weighted penalty formula"
             )
     elif orchestration_load is not None:
         errors.append(
-            f"{label} orchestration_load must be null when any exact action counter is missing"
+            f"{label} orchestration_load must be null when any base penalty counter is missing"
         )
     return errors
 
@@ -1586,6 +1582,13 @@ def _ratio(candidate: Any, baseline: Any) -> float | None:
     return round(candidate / baseline, 6)
 
 
+def _primary_efficiency_metrics(metrics: dict[str, Any]) -> dict[str, Any]:
+    values = [metrics.get(metric_id) for metric_id in ORCHESTRATION_LOAD_WEIGHTS]
+    derived = {metric_id: metrics.get(metric_id) for metric_id in EFFICIENCY_METRICS}
+    derived["orchestration_load"] = None if any(value is None for value in values) else sum(metrics[metric_id] * weight for metric_id, weight in ORCHESTRATION_LOAD_WEIGHTS.items())
+    return derived
+
+
 def _quality_noninferiority(
     baseline_metrics: dict[str, Any],
     candidate_metrics: dict[str, Any],
@@ -1849,22 +1852,24 @@ def evaluate_multi_agent_efficiency(
         measurement_status = "partial"
 
     comparisons: dict[str, Any] = {}
+    baseline_efficiency = _primary_efficiency_metrics(baseline["metrics"])
     for name in ("single_agent", "bounded_role"):
         candidate = profiles[name]
+        candidate_efficiency = _primary_efficiency_metrics(candidate["metrics"])
         quality = _quality_noninferiority(
             baseline["metrics"],
             candidate["metrics"],
             quality_policy["thresholds"],
         )
         improvement = _efficiency_improvement(
-            baseline["metrics"],
-            candidate["metrics"],
+            baseline_efficiency,
+            candidate_efficiency,
             quality_policy["efficiency_improvement"],
         )
         ratios = {
             metric: _ratio(
-                candidate["metrics"].get(metric),
-                baseline["metrics"].get(metric),
+                candidate_efficiency.get(metric),
+                baseline_efficiency.get(metric),
             )
             for metric in EFFICIENCY_METRICS
         }

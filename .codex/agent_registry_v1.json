@@ -210,17 +210,17 @@
       "minimum_p0_p1_recall_ratio": 1.0,
       "minimum_decision_changing_findings_retention_ratio": 1.0
     },
+    "primary_kpis": [
+      "elapsed_time_ms",
+      "input_tokens",
+      "orchestration_load"
+    ],
     "efficiency_improvement": {
       "predicate": "all_axes_non_worse_and_one_strictly_better_v1",
       "axes": [
         "elapsed_time_ms",
         "input_tokens",
-        "output_tokens",
-        "cache_read_tokens",
-        "calls",
-        "waits",
-        "retries",
-        "compactions"
+        "orchestration_load"
       ]
     },
     "metric_catalog": {
@@ -253,11 +253,11 @@
         "permission_sentinel_match": {"definition": "Whether the expected permission decision was retained.", "unit": "boolean", "grain": "run", "direction": "must_be_true", "aggregation": "boolean_per_run", "clock_boundary": null, "source_kind": "permission_receipt", "minimum_trust_tier": "LOCAL_REPRODUCIBLE", "missing_value_behavior": "null_with_explicit_reason_never_zero_v1"},
         "depth_sentinel_match": {"definition": "Whether the expected bounded or full-audit depth was retained.", "unit": "boolean", "grain": "run", "direction": "must_be_true", "aggregation": "boolean_per_run", "clock_boundary": null, "source_kind": "route_receipt", "minimum_trust_tier": "LOCAL_REPRODUCIBLE", "missing_value_behavior": "null_with_explicit_reason_never_zero_v1"},
         "full_audit_sentinel_match": {"definition": "Whether every exact full-audit hard edge in the safety sentinel remains present.", "unit": "boolean", "grain": "run", "direction": "must_be_true", "aggregation": "boolean_per_run", "clock_boundary": null, "source_kind": "route_receipt", "minimum_trust_tier": "LOCAL_REPRODUCIBLE", "missing_value_behavior": "null_with_explicit_reason_never_zero_v1"},
-        "orchestration_load": {"definition": "calls + waits + retries + compactions + duplicate_exec_count + duplicate_wait_agent_count", "unit": "actions", "grain": "run", "direction": "minimize", "aggregation": "derived_sum_per_run", "clock_boundary": null, "source_kind": "derived_exact_action_counters", "minimum_trust_tier": "PLATFORM_OR_EXTERNAL_ATTESTED", "missing_value_behavior": "null_with_explicit_reason_never_zero_v1"}
+        "orchestration_load": {"definition": "Derived penalty score: 1*calls + 1*waits + 2*retries + 2*compactions. duplicate_exec_count and duplicate_wait_agent_count remain diagnostics and are not added. This is partial telemetry: exec, spawn, message, and followup action coverage is unavailable.", "unit": "points", "grain": "run", "direction": "minimize", "aggregation": "derived_weighted_penalty_per_run", "clock_boundary": null, "source_kind": "derived_available_base_counters", "minimum_trust_tier": "PLATFORM_OR_EXTERNAL_ATTESTED", "missing_value_behavior": "null_with_explicit_reason_never_zero_v1"}
       }
     },
     "synthetic_measured_claim_allowed": false,
-    "policy_digest": "sha256:f3d1b86e34d3060d3b49c737fcb2de93863c4abdedf69dbd62012897487142c5"
+    "policy_digest": "sha256:4a34349dbe2ef6e28da0167c3ba4a54d983cd6bada056716e4eafdf83cfa0068"
   },
   "liveness_policy": {
     "schema_version": "agent_liveness_policy_v1",

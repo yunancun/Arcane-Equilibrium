@@ -2,7 +2,7 @@
   "$schema": "https://json-schema.org/draft/2020-12/schema",
   "$id": "https://arcane-equilibrium.local/schemas/multi_agent_efficiency_baseline_manifest_v1.schema.json",
   "title": "multi_agent_efficiency_baseline_manifest_v1",
-  "description": "Corpus-, policy-, Registry-, and source-generation-bound current-profile baseline records. Provisional local exports are diagnostic only; unavailable values remain null with reasons.",
+  "description": "Corpus-, policy-, Registry-, and source-generation-bound current-profile baseline records. Provisional local exports are diagnostic only; unavailable values remain null with reasons. orchestration_load is a weighted penalty in points derived from available calls, waits, retries, and compactions; exec, spawn, message, and followup telemetry remains a declared limitation.",
   "type": "object",
   "additionalProperties": false,
   "required": [
