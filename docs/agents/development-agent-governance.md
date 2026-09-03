@@ -789,6 +789,25 @@ single execution；未來只能由 host-attested verifier 取代，不能由 pac
 
 ## 6. Consumption truth contract
 
+#### W0 multi-agent efficiency baseline contract
+
+Registry owns the closed metric catalog and the four immutable baseline cases;
+callers cannot add metrics, substitute cases, or average runs. The exact primary
+KPIs are `elapsed_time_ms`, `input_tokens`, and `orchestration_load`. Every
+qualified current and candidate-B run records their raw per-run values. Typed
+observed facts derive the required sentinels, and both current and B must qualify
+before an efficiency conclusion. `orchestration_load` is weighted penalty points,
+not a complete action count: `calls + waits + 2*retries + 2*compactions`.
+`duplicate_exec`, `duplicate_wait`, output, and cache values remain diagnostics.
+Exec/spawn/message/followup coverage is currently unavailable/deferred and can
+never be used to infer actual savings. `UNAVAILABLE` is `null` plus a reason,
+never a zero or an inferred value. `PROVISIONAL_LOCAL_HOST_EXPORT` is useful
+local evidence but can never support measured or adoption claims. Cached input
+is included in the catalog; tokens are not dollar cost. The existing evaluator is
+the sole evaluator. Measured efficiency/adoption additionally requires the
+out-of-band manifest verifier; no packet-local digest or local export substitutes
+for it.
+
 每個 fragment 與 closure 的 usage 只能是 `measured`、`partial` 或 `unavailable`：
 
 - actual `measured/partial` 只接受 `PLATFORM_OR_EXTERNAL_ATTESTED` platform telemetry/

@@ -15,6 +15,8 @@ Recommended layout:
 - `schemas/closure_packet_v1.schema.json` - one machine-checkable task closure contract
 - `schemas/closure_quality_followup_v1.schema.json` - immutable closure-digest follow-up state; unknown telemetry stays scheduled/unavailable
 - `schemas/closure_quality_attestation_v1.schema.json` - external/platform durable-closure observation payload; schema alone does not confer trust
+- `schemas/multi_agent_efficiency_baseline_corpus_v1.schema.json` - Registry-owned immutable four-case corpus for the three-KPI workflow-efficiency evaluation
+- `schemas/multi_agent_efficiency_baseline_manifest_v1.schema.json` - hash-bound corpus and partial-telemetry evidence manifest; not measured usage or adoption proof
 - `MEMORY.md` - compact stable operating memory; deep history is archived/on demand
 - `WORKLOG.md` - rolling notes for recent Codex work
 - `DISPATCH_LEDGER.md` - durable record of meaningful PM-first dispatch chains
