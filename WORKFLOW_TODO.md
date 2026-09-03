@@ -2,8 +2,8 @@
 
 ## 文件狀態與邊界
 
-- **文件狀態：**可執行路線圖；W0 final source checkpoint 為 `c90408613d6ce436abae619437a0bdc4acf4787f`。
-- **正典位置：**repo 為 `srv/`（本 worktree 即其 linked worktree），分支為 `agent/workflow-optimization-w0-20260903`。
+- **文件狀態：**可執行路線圖；W0 final source checkpoint 為 `c90408613d6ce436abae619437a0bdc4acf4787f`；W1 final source checkpoint 為 `86ae98c5bcbb50f5d897811327c8c118b0ff166f`。
+- **正典位置：**repo 為 `srv/`（本 worktree 即其 linked worktree）；本 W1 checkpoint branch 為 `agent/workflow-optimization-w1-20260904`。
 - **證據邊界：**本文件只規劃來源碼、設定、文件與本機可重現驗證；不授權 runtime、PG、服務、broker、下單、交易或獲利宣稱。來源、runtime、交易與獲利證據須分列。
 - **更新協議：**root 每次只處理一個 `ACTIVE` 項目；完成後以受綁定的 before/apply/post 證據更新本文件，將下一個已解除依賴者轉為 `READY` 或 `ACTIVE`。任何 scope、權限、DAG、Registry 或 Context 漂移均停止並重新入場；不可藉由文件狀態自行延續工作。
 
@@ -58,11 +58,11 @@
 - AI-E 初檢發現兩個 P1；bounded repair 後 AI-E PASS、E2 PASS，focused direct 為 `58 passed`。
 - Final exact-head E4：source checkpoint `c90408613d6ce436abae619437a0bdc4acf4787f`；Context `sha256:6a1b7444b46e253edde3f7e3be3d35d6543a0a973dc4761cf0a1cfd3d5124b71`；task `sha256:931dc6a16de8d6d7613191afe0c6ce827f236f9ea051785b7319a4318255a9d0`；`65 passed / 30 deselected / 0 failed or denied`。captures：efficiency `sha256:9c0c954f97b017bd4e6f6138e2cae592577fb99d1e6b31f7f24fe3b8e8541ef5`、registry subset `sha256:521510588f9e5e24425b9866b57b27d41c723f4f6eb21220cc291e8b5b9a120b`、validate `sha256:2ad6e2f28f23fafee9ba04348a0248cfcac6b0b466887baa8d9ed881111e8b95`、render `sha256:0756a626dc236cd75050233d122252edbe6f3de68f4ed797c8275f4ba5088227`、diff `sha256:7908a19fe343a87a7f3810a2160c32775b463ade550bf792dce0c3b6f824f02b`；generations unchanged。
 - 歷史 initial-checkpoint E2 已關閉四個 P1，frozen diff capture `sha256:b1c32646aca3c4c01ab9d82ab2d23b99856cf6ac181dd3403b7f102e8526f724`；`9f9d277bf2ce2037c74597f065d41312f1ed53bc` 的 E4 Context `sha256:09746b23f55a4dc3e96af4d2a97577e8540b619bcbc07978ed4fc1249a8d624d` 曾得 `60 passed / 30 deselected / 0 fail or denied`。這些是有效歷史證據，但已被 final-source verdict superseded；原始 pre-checkpoint reviewer Context 不可用的限制仍保留。
-- **殘餘：**checked-in baseline 為 `UNAVAILABLE/PENDING_CANDIDATE_RUNS`。無 production host verifier、full action coverage、platform-attested usage、actual savings、adoption、runtime、deployment、trading 或 profit evidence。W1 為唯一 ACTIVE，負責建立 execution-surface truth。
+- **殘餘：**checked-in baseline 為 `UNAVAILABLE/PENDING_CANDIDATE_RUNS`。無 production host verifier、full action coverage、platform-attested usage、actual savings、adoption、runtime、deployment、trading 或 profit evidence。W7 為唯一 ACTIVE，僅處理既有 source-generation drift。
 
 ### W1｜執行面真相探針與 workspace 設定優先序
 
-- **類型：**AFK／來源設定診斷；**狀態：**ACTIVE；**阻擋於：**無（W0 DONE）。
+- **類型：**AFK／來源設定診斷；**狀態：**DONE；**阻擋於：**無（W0 DONE）。
 - **成果：**建立可重現、來源限定的 execution-surface truth probe，列出 workspace、巢狀設定與實際選取設定的優先序及差異。
 - **擁有介面／Adapter：**candidate `execution-surface probe`、`config-precedence report`。
 - **驗收：**輸出可審閱的設定來源鏈與不一致分類；不得把觀察到的 nested/runtime mismatch 提升為因果結論。
@@ -70,9 +70,16 @@
 - **回退或停止：**若無法取得來源可驗證的選取訊號，停在 `UNVERIFIED` 並記錄缺口。
 - **明確非目標：**不改 runtime 設定、不重啟服務、不接觸遠端。
 
+#### W1 evidence ledger
+
+- source checkpoints：initial probe `9c34aa4b28e30e495146cdb880ae889d3ea59b4f`；authenticity/path repair final `86ae98c5bcbb50f5d897811327c8c118b0ff166f`。admission `51e52ad9c349f21aa81a4d37e79dbfa0`；Context `sha256:1de49888093ee1808669cf363d8f01840a13319994b6eca45bc5106cbaa63698`；task `sha256:ec618559cfd5f84ffe7c763257a78f68c8146280799b9cf57025e77f5f990760`。
+- 初始 E2 為 FAIL（2×P1）；final E2 PASS（P0/P1/P2=`0`、`24 passed`、capture `sha256:d6108aae9973524b35a4aac984f50a9a400a1e96d9366007b7b3dcaa2aed5be0`）。E4 PASS：combined `84 passed`（`sha256:4ed4015154a4408f5018bf026cab6089aab46519a04d53f0ef4499e244975e7e`）；probe `24 passed`（`sha256:71c9c8b074d56b33109f4aa1fa2f0c52b1a9deb0eebebef18440aa0fa91f24e8`）；validate/render/diff captures 綁於 W1 Context。E4 standalone `py_compile` 為 `SKIPPED/DENIED`，syntax/import 由已執行 pytest 重用；E1 另有 `py_compile` PASS。
+- source-verifiable selected signal 不可得，依 stop rule 以 `UNVERIFIED`／`COMPLETE_WITH_UNVERIFIED` 關閉；沒有取得實際 selected config。allowlisted declaration envelope 是 caller-provided replay snapshot，完整性已綁但 public CLI 不證明 provenance/authenticity 或 actual file state。
+- 實作、信任邊界與未涵蓋範圍見 `docs/agents/2026-09-04--execution-surface-truth-probe.md`。無 full suite、Rust、Linux、remote、runtime、broker、效率／節省／採用／交易／獲利結論。
+
 ### W2｜host admission、no-delta、depth 與 wait 強制
 
-- **類型：**AFK／治理強化；**狀態：**BLOCKED；**阻擋於：**W1 DONE。
+- **類型：**AFK／治理強化；**狀態：**READY；**阻擋於：**無（W1 DONE）。
 - **成果：**將 admission、無來源增量終止、巢狀深度與 wait 上限轉為 host 可拒絕的檢查點。
 - **擁有介面／Adapter：**candidate `host admission guard`、`no-delta receipt`、`depth/wait limiter`。
 - **驗收：**相同 task-owned source digest 終止為 `BLOCKED_NO_DELTA`，無 wakeup／重試；超限有可讀拒絕原因。
@@ -82,7 +89,7 @@
 
 ### W3｜Context micro-pack 投影與去重
 
-- **類型：**AFK／Context 效率；**狀態：**BLOCKED；**阻擋於：**W1 DONE。
+- **類型：**AFK／Context 效率；**狀態：**READY；**阻擋於：**無（W1 DONE）。
 - **成果：**為角色與任務生成最小、可溯源的 micro-pack，去除重複共同內容但保持 Context 綁定與可重建性。
 - **擁有介面／Adapter：**candidate `context micro-pack projector`、`shared-content deduper`。
 - **驗收：**同一任務的必要事實無損，重複 payload 可量測下降，且不可用摘要取代必需的精確 task/DAG/Context bytes。
@@ -122,13 +129,15 @@
 
 ### W7｜宣告式跨 runtime policy 生成與 canonical helpers
 
-- **類型：**AFK／政策一致性；**狀態：**BLOCKED；**阻擋於：**W1 DONE。
+- **類型：**AFK／政策一致性；**狀態：**ACTIVE；**阻擋於：**無（W1 DONE）；**優先原因：**已確認三份 saved workflow 嵌入過期 Registry digest，是目前最高影響且符合條件的 downstream source delta。
 - **成果：**由單一宣告式政策投影跨 runtime 設定與 canonical helpers，降低巢狀配置漂移。
 - **擁有介面／Adapter：**candidate `policy generator`、`canonical helper projection`。
 - **驗收：**生成物可追到唯一來源，跨 runtime 差異可檢出且無法靜默通過。
 - **驗證：**golden projection、drift fixture 與 source-only replay。
 - **回退或停止：**若無法無損投影，保留既有設定並輸出差異報告。
 - **明確非目標：**不直接套用 runtime 政策、不改服務或權限。
+
+> 已確認的既有 source-generation drift：current Registry `sha256:0ab769848bb7490b9be067ae601b76b8e557d068bf0c481aca00b835e8ca8b23`，`.claude/workflows/agent-wave.js`、`openclaw-full-audit.js`、`profit-diagnosis.js` 仍嵌入 `sha256:9ce2dbd2bca32268cac32b6941537c9e305458f97ea5fe6590cada78dad300ff`；focused codegen `1 failed, 6 passed`（capture `sha256:1537dd292937ba41eb2beaca68978ca4a22bf73a65c65362b5b78d07bb679b7b`）。這不是 W1 config mismatch 或因果結論，未在 W1 修復；W7 僅作 source projection，無 runtime effect。
 
 ### W8｜治理 locality：延遲載入 S2 adapter 與 context_store 量測
 

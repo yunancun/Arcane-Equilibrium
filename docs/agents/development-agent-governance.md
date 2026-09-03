@@ -13,6 +13,23 @@ Public CLI 保持單一；command permission 與 deploy intent 是同 Module 的
 Implementation/Effect Adapter 檔，讓 reviewer 可按 Interface 局部讀取，避免巨型檔
 token annuity。它們不形成第二套 Registry 或 authority。
 
+### Execution-surface truth probe
+
+`agent_governance.py execution-surface-probe @request.json` 是 source-only、deterministic
+的設定優先序與 instruction-source 報告介面，schema 為
+`execution_surface_truth_probe_v1`。公開 CLI 的 `@path` 只接受不超過 64 KiB、嚴格
+UTF-8／嚴格 JSON、repo-relative regular file；absolute path、traversal、symlink、非 regular
+file、重複鍵、non-finite number 與過深／畸形輸入一律拒絕，且錯誤不回顯呼叫者值。
+
+它只輸出 caller-provided allowlisted declaration envelope replay snapshot 的候選、來源雜湊、
+差異分類與未知選取；SHA-256 是完整性檢查，不證明 snapshot 的 provenance/authenticity、實際
+檔案狀態、host 選取或因果。公開 JSON/CLI 沒有 verifier，host config、prompt 選取、cwd 與
+surface-profile 的 caller input 因而是 `CALLER_CLAIMED`，實際選取仍為 `UNVERIFIED`，結果只能
+是 `COMPLETE_WITH_UNVERIFIED`。唯有 embedding host 對 profile ID、profile digest 與完整 source
+envelope 注入 exact verifier，才可升為 `HOST_VERIFIED`、`HOST_OBSERVED` 與 `COMPLETE`；Registry
+declaration、digest 或本機診斷皆不可替代該 verifier。此介面不授權 runtime config、
+service、remote、PG、broker、order、funds、trading 或效率／節省／採用結論。
+
 ## 1. 目標函數
 
 治理目標不是「最少 token」，而是：

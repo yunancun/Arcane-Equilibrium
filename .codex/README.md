@@ -17,6 +17,7 @@ Recommended layout:
 - `schemas/closure_quality_attestation_v1.schema.json` - external/platform durable-closure observation payload; schema alone does not confer trust
 - `schemas/multi_agent_efficiency_baseline_corpus_v1.schema.json` - Registry-owned immutable four-case corpus for the three-KPI workflow-efficiency evaluation
 - `schemas/multi_agent_efficiency_baseline_manifest_v1.schema.json` - hash-bound corpus and partial-telemetry evidence manifest; not measured usage or adoption proof
+- `schemas/execution_surface_truth_probe_v1.schema.json` - `execution-surface-probe` 的公開來源限定報告契約；公開 CLI 只安全讀取不超過 64 KiB、嚴格 UTF-8／JSON 的 repo-local request file
 - `MEMORY.md` - compact stable operating memory; deep history is archived/on demand
 - `WORKLOG.md` - rolling notes for recent Codex work
 - `DISPATCH_LEDGER.md` - durable record of meaningful PM-first dispatch chains
@@ -38,6 +39,7 @@ Ground rules:
 - Every saved workflow preserves canonical call-manifest/wave receipts; orchestrator ledgers exact-cover every captured wave, repo writes need before/after change records, and EXECUTED/REUSED checks need trusted-local-replayable command captures; absent a host verifier, Closure intentionally re-executes before strong PASS
 - Serialized event-ledger digests are offline integrity only: post-hoc wave reconstruction is deterministic structural assembly and never mints a controller; the separate internal pre-action seam uses a process-lifetime single-issue, non-serializable, live-Registry-bound controller with a locked monotonic head plus policy/surface authority derived from one Registry snapshot, canonical-detaches each full ledger/event once under that lock, never uses caller-owned mutable mappings for cap/coverage decisions, exposes no public caller-named mint, and gives persisted or caller-resealed ledgers no resume authority
 - Repository authority values equal the exact pinned Context-byte identity projection; interpreted semantics use typed claim evidence rather than reusing a source digest
+- `execution-surface-probe` 只呈現 caller-provided、allowlisted declaration envelope replay snapshot 的候選值與差異分類；它可綁完整性，卻不證明 snapshot 的 provenance/authenticity、實際檔案狀態或選取。公開 CLI 沒有 verifier，呼叫者填入的 host config、prompt 選取、cwd 與 surface-profile 皆是 `CALLER_CLAIMED`，實際選取維持 `UNVERIFIED`，報告為 `COMPLETE_WITH_UNVERIFIED`。只有 embedding host 對 profile ID、profile digest 與完整 source envelope 注入 exact verifier，才可輸出 `HOST_VERIFIED`／`HOST_OBSERVED`／`COMPLETE`。
 - A Registry effect seam or runtime path is not executable authority: deploy apply and development-agent broker/private contact stay fail closed until their trusted Adapter contracts are complete
 - Direct `psql` stays disabled until a local-socket/read-only-identity Adapter removes ambient `psqlrc` and `PG*` routing
 - Do not store credentials, tokens, raw secrets, or volatile runtime state here
