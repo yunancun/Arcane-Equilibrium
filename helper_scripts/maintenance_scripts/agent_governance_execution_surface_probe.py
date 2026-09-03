@@ -4,10 +4,12 @@ from __future__ import annotations
 
 import hashlib
 import json
+import os
 import re
+import stat
 from copy import deepcopy
 from pathlib import Path
-from typing import Any
+from typing import Any, Callable
 
 from agent_governance_schema import schema_subset_errors
 
@@ -21,6 +23,22 @@ _TYPED_CONFIG_KEYS = {
 }
 _DIGEST_RE = re.compile(r"^sha256:[0-9a-f]{64}$")
 REPO_ROOT = Path(__file__).resolve().parents[2]
+EXECUTION_SURFACE_PROBE_MAX_REQUEST_BYTES = 64 * 1024
+ExecutionSurfaceHostVerifier = Callable[[str, str, dict[str, Any]], bool]
+
+
+class ExecutionSurfaceProbeInputError(ValueError):
+    """Typed, secret-safe rejection from the probe-specific request loader."""
+
+    def __init__(self, error_code: str, message: str) -> None:
+        super().__init__(message)
+        self.error_code = error_code
+
+
+def _probe_input_error(error_code: str, message: str) -> None:
+    raise ExecutionSurfaceProbeInputError(error_code, message)
+
+
 EXECUTION_SURFACE_PROBE_POLICY = {
     "schema_version": "execution_surface_probe_policy_v1",
     "report_schema_path": (
@@ -84,6 +102,173 @@ def _canonical_bytes(value: Any) -> bytes:
 
 def _digest(value: Any) -> str:
     return "sha256:" + hashlib.sha256(_canonical_bytes(value)).hexdigest()
+
+
+def _reject_duplicate_json_object(pairs: list[tuple[str, Any]]) -> dict[str, Any]:
+    value: dict[str, Any] = {}
+    for key, item in pairs:
+        if key in value:
+            _probe_input_error("PROBE_INPUT_JSON", "probe request JSON is invalid")
+        value[key] = item
+    return value
+
+
+def _reject_nonfinite_json(_value: str) -> None:
+    _probe_input_error("PROBE_INPUT_JSON", "probe request JSON is invalid")
+
+
+def load_execution_surface_probe_request(
+    reference: str,
+    *,
+    cwd: Path | None = None,
+    root: Path = REPO_ROOT,
+) -> dict[str, Any]:
+    """Load one bounded, repository-contained request without following symlinks."""
+
+    if not isinstance(reference, str) or not reference.startswith("@"):
+        _probe_input_error(
+            "PROBE_PATH_REFERENCE",
+            "probe request must use a repository-relative @path",
+        )
+    relative = Path(reference[1:])
+    if relative.is_absolute():
+        _probe_input_error(
+            "PROBE_PATH_ABSOLUTE",
+            "absolute probe request paths are not allowed",
+        )
+    if not relative.parts or any(part == ".." for part in relative.parts):
+        _probe_input_error(
+            "PROBE_PATH_TRAVERSAL",
+            "probe request path traversal is not allowed",
+        )
+
+    repository_root = root.resolve(strict=True)
+    working_directory = (Path.cwd() if cwd is None else cwd).resolve(strict=True)
+    try:
+        working_directory.relative_to(repository_root)
+    except ValueError:
+        _probe_input_error(
+            "PROBE_PATH_OUTSIDE_REPOSITORY",
+            "probe request working directory is outside the repository",
+        )
+    candidate = working_directory.joinpath(*relative.parts)
+    current = working_directory
+    target_stat: os.stat_result | None = None
+    for part in relative.parts:
+        current = current / part
+        try:
+            target_stat = os.lstat(current)
+        except FileNotFoundError:
+            _probe_input_error(
+                "PROBE_PATH_MISSING",
+                "probe request path does not exist",
+            )
+        except OSError:
+            _probe_input_error(
+                "PROBE_INPUT_IO",
+                "probe request path cannot be inspected safely",
+            )
+        if stat.S_ISLNK(target_stat.st_mode):
+            _probe_input_error(
+                "PROBE_PATH_SYMLINK",
+                "probe request path must not contain a symlink",
+            )
+    if target_stat is None or not stat.S_ISREG(target_stat.st_mode):
+        _probe_input_error(
+            "PROBE_PATH_NOT_REGULAR",
+            "probe request path must be a regular file",
+        )
+    try:
+        candidate.resolve(strict=True).relative_to(repository_root)
+    except ValueError:
+        _probe_input_error(
+            "PROBE_PATH_OUTSIDE_REPOSITORY",
+            "probe request path is outside the repository",
+        )
+    if target_stat.st_size > EXECUTION_SURFACE_PROBE_MAX_REQUEST_BYTES:
+        _probe_input_error(
+            "PROBE_INPUT_TOO_LARGE",
+            "probe request exceeds the byte limit",
+        )
+
+    descriptor: int | None = None
+    try:
+        flags = os.O_RDONLY | getattr(os, "O_NOFOLLOW", 0)
+        descriptor = os.open(candidate, flags)
+        opened_stat = os.fstat(descriptor)
+        if (
+            not stat.S_ISREG(opened_stat.st_mode)
+            or opened_stat.st_dev != target_stat.st_dev
+            or opened_stat.st_ino != target_stat.st_ino
+        ):
+            _probe_input_error(
+                "PROBE_INPUT_CHANGED",
+                "probe request changed during bounded loading",
+            )
+        chunks: list[bytes] = []
+        remaining = EXECUTION_SURFACE_PROBE_MAX_REQUEST_BYTES + 1
+        while remaining:
+            chunk = os.read(descriptor, remaining)
+            if not chunk:
+                break
+            chunks.append(chunk)
+            remaining -= len(chunk)
+        payload = b"".join(chunks)
+    except ExecutionSurfaceProbeInputError:
+        raise
+    except OSError:
+        _probe_input_error(
+            "PROBE_INPUT_IO",
+            "probe request cannot be read safely",
+        )
+    finally:
+        if descriptor is not None:
+            os.close(descriptor)
+    if len(payload) > EXECUTION_SURFACE_PROBE_MAX_REQUEST_BYTES:
+        _probe_input_error(
+            "PROBE_INPUT_TOO_LARGE",
+            "probe request exceeds the byte limit",
+        )
+    try:
+        decoded = payload.decode("utf-8", errors="strict")
+    except UnicodeDecodeError:
+        _probe_input_error(
+            "PROBE_INPUT_ENCODING",
+            "probe request must use strict UTF-8 encoding",
+        )
+    try:
+        parsed = json.loads(
+            decoded,
+            object_pairs_hook=_reject_duplicate_json_object,
+            parse_constant=_reject_nonfinite_json,
+        )
+    except ExecutionSurfaceProbeInputError:
+        raise
+    except (json.JSONDecodeError, RecursionError, TypeError, ValueError):
+        _probe_input_error("PROBE_INPUT_JSON", "probe request JSON is invalid")
+    if not isinstance(parsed, dict):
+        _probe_input_error("PROBE_INPUT_JSON", "probe request JSON is invalid")
+    return parsed
+
+
+def _host_source_authenticity(
+    source: dict[str, Any],
+    *,
+    surface_profile_id: str,
+    surface_profile_sha256: str,
+    host_verifier: ExecutionSurfaceHostVerifier | None,
+) -> str:
+    if host_verifier is None:
+        return "CALLER_CLAIMED"
+    try:
+        verified = host_verifier(
+            surface_profile_id,
+            surface_profile_sha256,
+            deepcopy(source),
+        )
+    except Exception:
+        verified = False
+    return "HOST_VERIFIED" if verified is True else "CALLER_CLAIMED"
 
 
 def _validated_source(source: Any, policy: dict[str, Any]) -> dict[str, Any]:
@@ -264,6 +449,8 @@ def _validate_prompt_input_payload(
 def build_execution_surface_truth_report(
     request: Any,
     registry: dict[str, Any],
+    *,
+    host_verifier: ExecutionSurfaceHostVerifier | None = None,
 ) -> dict[str, Any]:
     """Build one replayable report without treating declarations as selections."""
 
@@ -279,6 +466,7 @@ def build_execution_surface_truth_report(
     profiles = registry.get("execution_policy", {}).get("surface_profiles", {})
     if surface_profile_id not in profiles:
         raise ValueError("execution-surface profile is not Registry declared")
+    surface_profile_sha256 = _digest(profiles[surface_profile_id])
     policy = execution_surface_probe_policy()
     raw_sources = request.get("sources")
     if not isinstance(raw_sources, list) or not raw_sources:
@@ -309,6 +497,29 @@ def build_execution_surface_truth_report(
         raise ValueError("execution-surface probe accepts one prompt-input source")
     if not declarations and not host_sources:
         raise ValueError("execution-surface probe requires allowlisted config evidence")
+    source_authenticity = {
+        source["source_id"]: (
+            "DECLARATION_SNAPSHOT"
+            if source["source_kind"] == "config_declaration_v1"
+            else _host_source_authenticity(
+                source,
+                surface_profile_id=surface_profile_id,
+                surface_profile_sha256=surface_profile_sha256,
+                host_verifier=host_verifier,
+            )
+        )
+        for source in sources
+    }
+    verified_host_sources = [
+        source
+        for source in host_sources
+        if source_authenticity[source["source_id"]] == "HOST_VERIFIED"
+    ]
+    verified_prompt_sources = [
+        source
+        for source in prompt_sources
+        if source_authenticity[source["source_id"]] == "HOST_VERIFIED"
+    ]
     candidates: dict[str, list[dict[str, Any]]] = {}
     for source in declarations:
         for item in source["payload"]["values"]:
@@ -323,7 +534,7 @@ def build_execution_surface_truth_report(
             )
     selected_values = {
         item["key"]: item
-        for source in host_sources
+        for source in verified_host_sources
         for item in source["payload"]["selected_values"]
     }
     key_reports = []
@@ -371,15 +582,15 @@ def build_execution_surface_truth_report(
     instruction_selection = (
         {
             "status": "HOST_OBSERVED",
-            "cwd_class": prompt_sources[0]["payload"]["cwd_class"],
+            "cwd_class": verified_prompt_sources[0]["payload"]["cwd_class"],
             "sources": sorted(
-                prompt_sources[0]["payload"]["instruction_sources"],
+                verified_prompt_sources[0]["payload"]["instruction_sources"],
                 key=lambda item: item["instruction_id"],
             ),
             "evidence_source_id": "prompt_input",
             "causal_attribution": policy["causal_attribution"],
         }
-        if prompt_sources
+        if verified_prompt_sources
         else {
             "status": policy["missing_selection_status"],
             "cwd_class": None,
@@ -400,8 +611,19 @@ def build_execution_surface_truth_report(
             "COMPLETE_WITH_UNVERIFIED" if has_unverified else "COMPLETE"
         ),
         "surface_profile_id": surface_profile_id,
-        "surface_profile_sha256": _digest(profiles[surface_profile_id]),
+        "surface_profile_sha256": surface_profile_sha256,
         "policy_sha256": _digest(policy),
+        "authenticity": {
+            "host_verifier": (
+                "AVAILABLE" if host_verifier is not None else "UNAVAILABLE"
+            ),
+            "profile_selection": (
+                "HOST_VERIFIED"
+                if verified_host_sources or verified_prompt_sources
+                else "CALLER_CLAIMED"
+            ),
+            "sha256_scope": "INTEGRITY_ONLY",
+        },
         "source_manifest": [
             {
                 "source_id": source["source_id"],
@@ -409,13 +631,14 @@ def build_execution_surface_truth_report(
                 "evidence_payload": source["payload"],
                 "payload_sha256": source["payload_sha256"],
                 "source_sha256": source["source_sha256"],
+                "authenticity_status": source_authenticity[source["source_id"]],
             }
             for source in sorted(sources, key=lambda item: item["source_id"])
         ],
         "config_precedence": {
             "observed_layer_order": (
-                host_sources[0]["payload"]["ordered_layer_source_ids"]
-                if host_sources
+                verified_host_sources[0]["payload"]["ordered_layer_source_ids"]
+                if verified_host_sources
                 else []
             ),
             "keys": key_reports,
@@ -425,6 +648,7 @@ def build_execution_surface_truth_report(
             "declaration_is_selection": False,
             "mismatch_establishes_causality": False,
             "missing_host_evidence_preserved_as_unverified": True,
+            "sha256_establishes_authenticity": False,
         },
     }
     report["report_digest"] = _digest(report)
@@ -442,6 +666,7 @@ def validate_execution_surface_truth_report(
     registry: dict[str, Any],
     *,
     root: Path = REPO_ROOT,
+    host_verifier: ExecutionSurfaceHostVerifier | None = None,
 ) -> list[str]:
     """Recheck schema plus every policy, payload, source, and report binding."""
 
@@ -456,6 +681,15 @@ def validate_execution_surface_truth_report(
     except (KeyError, OSError, TypeError, ValueError, json.JSONDecodeError) as error:
         return [f"execution-surface report schema is unavailable: {error}"]
     errors = schema_subset_errors(report, schema, schema)
+    authenticity = report.get("authenticity")
+    if (
+        isinstance(authenticity, dict)
+        and authenticity.get("profile_selection") == "HOST_VERIFIED"
+        and host_verifier is None
+    ):
+        errors.append(
+            "host-verified execution-surface report requires an out-of-band verifier"
+        )
     if report.get("policy_sha256") != _digest(policy):
         errors.append("execution-surface policy digest is invalid")
     profile_id = report.get("surface_profile_id")
@@ -503,6 +737,7 @@ def validate_execution_surface_truth_report(
                     "sources": replay_sources,
                 },
                 registry,
+                host_verifier=host_verifier,
             )
         except (KeyError, TypeError, ValueError) as error:
             errors.append(f"execution-surface source replay is invalid: {error}")

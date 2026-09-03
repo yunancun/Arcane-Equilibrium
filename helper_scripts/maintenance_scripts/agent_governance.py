@@ -101,9 +101,13 @@ from agent_governance_execution_policy import (  # noqa: E402
     validate_execution_event_ledger,
 )
 from agent_governance_execution_surface_probe import (  # noqa: E402
+    EXECUTION_SURFACE_PROBE_MAX_REQUEST_BYTES,
+    ExecutionSurfaceHostVerifier,
+    ExecutionSurfaceProbeInputError,
     build_execution_surface_truth_report,
     execution_surface_probe_policy,
     execution_surface_truth_report_digest,
+    load_execution_surface_probe_request,
     validate_execution_surface_truth_report,
 )
 from agent_governance_efficiency_evaluation import (  # noqa: E402
@@ -380,7 +384,10 @@ def _build_parser() -> argparse.ArgumentParser:
     )
     surface_probe = subparsers.add_parser(
         "execution-surface-probe",
-        help="emit a source-limited execution-surface truth report",
+        help=(
+            "emit a source-limited report; public caller observations remain "
+            "UNVERIFIED"
+        ),
     )
     surface_probe.add_argument(
         "request",
@@ -766,16 +773,28 @@ def main(
         return 0
     if args.action == "execution-surface-probe":
         try:
-            if not args.request.startswith("@"):
-                raise ValueError("execution-surface probe request must use @path")
             report = build_execution_surface_truth_report(
-                _json_arg(args.request), registry
+                load_execution_surface_probe_request(args.request), registry
             )
             report_errors = validate_execution_surface_truth_report(
                 report, registry
             )
             if report_errors:
                 raise RuntimeError("; ".join(report_errors))
+        except ExecutionSurfaceProbeInputError as error:
+            print(
+                json.dumps(
+                    {
+                        "schema_version": "execution_surface_truth_probe_error_v1",
+                        "status": "FAIL",
+                        "error_code": error.error_code,
+                        "error": str(error),
+                    },
+                    ensure_ascii=False,
+                    sort_keys=True,
+                )
+            )
+            return 2
         except (
             OSError,
             RuntimeError,

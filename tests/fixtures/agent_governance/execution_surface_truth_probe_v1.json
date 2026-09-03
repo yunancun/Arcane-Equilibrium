@@ -1,8 +1,14 @@
 {
+  "authenticity": {
+    "host_verifier": "UNAVAILABLE",
+    "profile_selection": "CALLER_CLAIMED",
+    "sha256_scope": "INTEGRITY_ONLY"
+  },
   "causal_limits": {
     "declaration_is_selection": false,
     "mismatch_establishes_causality": false,
-    "missing_host_evidence_preserved_as_unverified": true
+    "missing_host_evidence_preserved_as_unverified": true,
+    "sha256_establishes_authenticity": false
   },
   "config_precedence": {
     "keys": [
@@ -107,11 +113,12 @@
     "status": "UNVERIFIED"
   },
   "policy_sha256": "sha256:13a5ff430e14d52be74fa4cad9da316090d300652a5eabf731b8f71bbe8ce127",
-  "report_digest": "sha256:92eb36fcb856886dec3a691fcb424a008f9056db263cb76fd30a596238a88f11",
+  "report_digest": "sha256:e8e6965e4e6c2c808d2ba5cc7a13f8642f3928e7ab9b463590c84f11f8cfd06a",
   "report_status": "COMPLETE_WITH_UNVERIFIED",
   "schema_version": "execution_surface_truth_probe_v1",
   "source_manifest": [
     {
+      "authenticity_status": "DECLARATION_SNAPSHOT",
       "evidence_payload": {
         "values": [
           {

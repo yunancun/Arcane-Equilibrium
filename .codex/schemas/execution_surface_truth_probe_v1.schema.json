@@ -10,6 +10,7 @@
     "surface_profile_id",
     "surface_profile_sha256",
     "policy_sha256",
+    "authenticity",
     "source_manifest",
     "config_precedence",
     "instruction_selection",
@@ -28,6 +29,16 @@
     },
     "surface_profile_sha256": {"$ref": "#/$defs/digest"},
     "policy_sha256": {"$ref": "#/$defs/digest"},
+    "authenticity": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["host_verifier", "profile_selection", "sha256_scope"],
+      "properties": {
+        "host_verifier": {"enum": ["AVAILABLE", "UNAVAILABLE"]},
+        "profile_selection": {"enum": ["CALLER_CLAIMED", "HOST_VERIFIED"]},
+        "sha256_scope": {"const": "INTEGRITY_ONLY"}
+      }
+    },
     "source_manifest": {
       "type": "array",
       "minItems": 1,
@@ -60,12 +71,14 @@
       "required": [
         "declaration_is_selection",
         "mismatch_establishes_causality",
-        "missing_host_evidence_preserved_as_unverified"
+        "missing_host_evidence_preserved_as_unverified",
+        "sha256_establishes_authenticity"
       ],
       "properties": {
         "declaration_is_selection": {"const": false},
         "mismatch_establishes_causality": {"const": false},
-        "missing_host_evidence_preserved_as_unverified": {"const": true}
+        "missing_host_evidence_preserved_as_unverified": {"const": true},
+        "sha256_establishes_authenticity": {"const": false}
       }
     },
     "report_digest": {"$ref": "#/$defs/digest"}
@@ -142,7 +155,8 @@
         "source_kind",
         "evidence_payload",
         "payload_sha256",
-        "source_sha256"
+        "source_sha256",
+        "authenticity_status"
       ],
       "properties": {
         "source_id": {
@@ -162,7 +176,14 @@
         },
         "evidence_payload": {"$ref": "#/$defs/evidence_payload"},
         "payload_sha256": {"$ref": "#/$defs/digest"},
-        "source_sha256": {"$ref": "#/$defs/digest"}
+        "source_sha256": {"$ref": "#/$defs/digest"},
+        "authenticity_status": {
+          "enum": [
+            "DECLARATION_SNAPSHOT",
+            "CALLER_CLAIMED",
+            "HOST_VERIFIED"
+          ]
+        }
       }
     },
     "evidence_payload": {
