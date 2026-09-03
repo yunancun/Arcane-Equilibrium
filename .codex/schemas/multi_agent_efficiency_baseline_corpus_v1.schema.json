@@ -1,0 +1,181 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://arcane-equilibrium.local/schemas/multi_agent_efficiency_baseline_corpus_v1.schema.json",
+  "title": "multi_agent_efficiency_baseline_corpus_v1",
+  "description": "Immutable four-case workload corpus for the sole multi_agent_efficiency_evaluation_v1 comparison evaluator.",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "schema_version",
+    "corpus_id",
+    "created_at",
+    "description",
+    "cases",
+    "run_protocol",
+    "allowed_treatment_fields",
+    "corpus_digest"
+  ],
+  "properties": {
+    "schema_version": {"const": "multi_agent_efficiency_baseline_corpus_v1"},
+    "corpus_id": {"type": "string", "minLength": 1},
+    "created_at": {"type": "string", "format": "date-time"},
+    "description": {"type": "string", "minLength": 1},
+    "cases": {
+      "type": "array",
+      "minItems": 4,
+      "maxItems": 4,
+      "items": {"$ref": "#/$defs/case"}
+    },
+    "run_protocol": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "arms",
+        "assignment",
+        "q0_q1_repeats_per_arm",
+        "sentinel_min_repeats_per_arm",
+        "qualification",
+        "failure_aggregation",
+        "elapsed_time_evaluation"
+      ],
+      "properties": {
+        "arms": {
+          "type": "array",
+          "prefixItems": [{"const": "A_CURRENT"}, {"const": "B_CANDIDATE"}],
+          "minItems": 2,
+          "maxItems": 2
+        },
+        "assignment": {"const": "interleaved_ab_v1"},
+        "q0_q1_repeats_per_arm": {"const": 3},
+        "sentinel_min_repeats_per_arm": {"type": "integer", "minimum": 1},
+        "qualification": {"const": "all_runs_individually_qualified_v1"},
+        "failure_aggregation": {"const": "no_failure_averaging_v1"},
+        "elapsed_time_evaluation": {"const": "each_qualified_run_lte_case_target_v1"}
+      }
+    },
+    "allowed_treatment_fields": {
+      "type": "array",
+      "prefixItems": [
+        {"const": "context_loading_strategy"},
+        {"const": "dispatch_strategy"},
+        {"const": "wait_strategy"}
+      ],
+      "minItems": 3,
+      "maxItems": 3,
+      "uniqueItems": true
+    },
+    "corpus_digest": {"$ref": "#/$defs/digest"}
+  },
+  "$defs": {
+    "digest": {"type": "string", "pattern": "^sha256:[0-9a-f]{64}$"},
+    "case": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "case_id",
+        "case_class",
+        "sanitized_task_facts",
+        "replay",
+        "expected",
+        "case_digest"
+      ],
+      "properties": {
+        "case_id": {"type": "string", "minLength": 1},
+        "case_class": {
+          "enum": [
+            "q0_governance_query",
+            "q1_low_risk_source_change",
+            "quality_sentinel",
+            "safety_full_audit_sentinel"
+          ]
+        },
+        "sanitized_task_facts": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": [
+            "sanitized",
+            "task_shape",
+            "surfaces",
+            "risk",
+            "uncertainty",
+            "side_effect_class",
+            "objective",
+            "dirty_scope",
+            "acceptance",
+            "hard_stops",
+            "runtime_claim",
+            "end_to_end_claim",
+            "continuation_mode"
+          ],
+          "properties": {
+            "sanitized": {"const": true},
+            "task_shape": {"type": "string", "minLength": 1},
+            "surfaces": {"type": "array", "items": {"type": "string", "minLength": 1}, "uniqueItems": true},
+            "risk": {"enum": ["low", "medium", "high", "unknown"]},
+            "uncertainty": {"enum": ["low", "medium", "high", "unknown"]},
+            "side_effect_class": {"type": "string", "minLength": 1},
+            "objective": {"type": "string", "minLength": 1},
+            "dirty_scope": {"type": "array", "items": {"type": "string", "minLength": 1}, "uniqueItems": true},
+            "acceptance": {"type": "array", "items": {"type": "string", "minLength": 1}, "minItems": 1, "uniqueItems": true},
+            "hard_stops": {"type": "array", "items": {"type": "string", "minLength": 1}, "minItems": 1, "uniqueItems": true},
+            "runtime_claim": {"type": "boolean"},
+            "end_to_end_claim": {"type": "boolean"},
+            "continuation_mode": {"const": "finite"}
+          }
+        },
+        "replay": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": ["provenance_kind", "replay_ref", "replay_digest"],
+          "properties": {
+            "provenance_kind": {"const": "sanitized_repository_fixture"},
+            "replay_ref": {"type": "string", "minLength": 1},
+            "replay_digest": {"$ref": "#/$defs/digest"}
+          }
+        },
+        "expected": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": [
+            "route_nodes",
+            "required_edges",
+            "terminal",
+            "quality_oracle",
+            "safety_oracle",
+            "elapsed_time_target_ms",
+            "elapsed_time_rule"
+          ],
+          "properties": {
+            "route_nodes": {"type": "array", "items": {"type": "string", "minLength": 1}, "minItems": 2, "uniqueItems": true},
+            "required_edges": {"type": "array", "items": {"type": "string", "minLength": 1}, "uniqueItems": true},
+            "terminal": {"type": "string", "minLength": 1},
+            "quality_oracle": {
+              "type": ["object", "null"],
+              "additionalProperties": false,
+              "required": ["oracle_independence", "gold_p0_ids", "gold_p1_ids", "decision_changing_finding_ids"],
+              "properties": {
+                "oracle_independence": {"const": "independent_gold_v1"},
+                "gold_p0_ids": {"type": "array", "items": {"type": "string", "minLength": 1}, "uniqueItems": true},
+                "gold_p1_ids": {"type": "array", "items": {"type": "string", "minLength": 1}, "uniqueItems": true},
+                "decision_changing_finding_ids": {"type": "array", "items": {"type": "string", "minLength": 1}, "uniqueItems": true}
+              }
+            },
+            "safety_oracle": {
+              "type": ["object", "null"],
+              "additionalProperties": false,
+              "required": ["expected_permission_decision", "expected_depth", "full_audit_required"],
+              "properties": {
+                "expected_permission_decision": {"type": "string", "minLength": 1},
+                "expected_depth": {"type": "string", "minLength": 1},
+                "full_audit_required": {"type": "boolean"}
+              }
+            },
+            "elapsed_time_target_ms": {"type": ["integer", "null"], "minimum": 0},
+            "elapsed_time_rule": {"enum": ["every_qualified_run_lte_v1", "sentinel_not_time_gated_v1"]}
+          }
+        },
+        "case_digest": {"$ref": "#/$defs/digest"}
+      }
+    }
+  }
+}

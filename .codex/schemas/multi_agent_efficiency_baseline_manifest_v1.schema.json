@@ -1,0 +1,169 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://arcane-equilibrium.local/schemas/multi_agent_efficiency_baseline_manifest_v1.schema.json",
+  "title": "multi_agent_efficiency_baseline_manifest_v1",
+  "description": "Corpus-, policy-, Registry-, and source-generation-bound current-profile baseline records. Provisional local exports are diagnostic only; unavailable values remain null with reasons.",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "schema_version",
+    "manifest_id",
+    "created_at",
+    "corpus_binding",
+    "policy_binding",
+    "registry_binding",
+    "source_generation",
+    "current_profile_records",
+    "candidate_profile_records",
+    "reference_observations",
+    "adoption_status",
+    "manifest_digest"
+  ],
+  "properties": {
+    "schema_version": {"const": "multi_agent_efficiency_baseline_manifest_v1"},
+    "manifest_id": {"type": "string", "minLength": 1},
+    "created_at": {"type": "string", "format": "date-time"},
+    "corpus_binding": {"$ref": "#/$defs/corpusBinding"},
+    "policy_binding": {"$ref": "#/$defs/policyBinding"},
+    "registry_binding": {"$ref": "#/$defs/registryBinding"},
+    "source_generation": {"$ref": "#/$defs/sourceGeneration"},
+    "current_profile_records": {
+      "type": "array",
+      "minItems": 4,
+      "maxItems": 4,
+      "items": {"$ref": "#/$defs/caseRecord"}
+    },
+    "candidate_profile_records": {
+      "type": "array",
+      "maxItems": 4,
+      "items": {"$ref": "#/$defs/caseRecord"}
+    },
+    "reference_observations": {
+      "type": "array",
+      "minItems": 1,
+      "items": {"$ref": "#/$defs/referenceObservation"}
+    },
+    "adoption_status": {
+      "enum": [
+        "PENDING_CANDIDATE_RUNS",
+        "PROVISIONAL_DIAGNOSTICS_ONLY",
+        "ADOPTION_EVIDENCE_AVAILABLE"
+      ]
+    },
+    "manifest_digest": {"$ref": "#/$defs/digest"}
+  },
+  "$defs": {
+    "digest": {"type": "string", "pattern": "^sha256:[0-9a-f]{64}$"},
+    "corpusBinding": {
+      "type": "object", "additionalProperties": false,
+      "required": ["corpus_id", "corpus_digest"],
+      "properties": {"corpus_id": {"type": "string", "minLength": 1}, "corpus_digest": {"$ref": "#/$defs/digest"}}
+    },
+    "policyBinding": {
+      "type": "object", "additionalProperties": false,
+      "required": ["policy_id", "policy_digest"],
+      "properties": {"policy_id": {"type": "string", "minLength": 1}, "policy_digest": {"$ref": "#/$defs/digest"}}
+    },
+    "registryBinding": {
+      "type": "object", "additionalProperties": false,
+      "required": ["schema_version", "registry_digest"],
+      "properties": {"schema_version": {"const": "agent_registry_v1"}, "registry_digest": {"$ref": "#/$defs/digest"}}
+    },
+    "sourceGeneration": {
+      "type": "object", "additionalProperties": false,
+      "required": ["head_sha", "tree_sha", "generation_digest"],
+      "properties": {
+        "head_sha": {"type": "string", "pattern": "^[0-9a-f]{40}$"},
+        "tree_sha": {"type": "string", "pattern": "^[0-9a-f]{40}$"},
+        "generation_digest": {"$ref": "#/$defs/digest"}
+      }
+    },
+    "metricValue": {
+      "type": "object", "additionalProperties": false,
+      "required": ["value", "unavailable_reason"],
+      "properties": {
+        "value": {"type": ["number", "boolean", "null"], "minimum": 0},
+        "unavailable_reason": {"type": ["string", "null"], "minLength": 1}
+      }
+    },
+    "metrics": {
+      "type": "object",
+      "minProperties": 1,
+      "additionalProperties": {"$ref": "#/$defs/metricValue"}
+    },
+    "treatment": {
+      "type": "object", "additionalProperties": false,
+      "required": ["arm", "differences"],
+      "properties": {
+        "arm": {"enum": ["A_CURRENT", "B_CANDIDATE"]},
+        "differences": {
+          "type": "object",
+          "additionalProperties": {"type": "string", "minLength": 1}
+        }
+      }
+    },
+    "run": {
+      "type": "object", "additionalProperties": false,
+      "required": ["run_id", "arm", "ordinal", "qualification_status", "observed_terminal", "observed_facts", "metrics", "evidence_status", "evidence_ref", "evidence_digest", "run_digest"],
+      "properties": {
+        "run_id": {"type": "string", "minLength": 1},
+        "arm": {"enum": ["A_CURRENT", "B_CANDIDATE"]},
+        "ordinal": {"type": "integer", "minimum": 1},
+        "qualification_status": {"enum": ["qualified", "disqualified", "unavailable"]},
+        "observed_terminal": {"type": ["string", "null"], "minLength": 1},
+        "observed_facts": {"$ref": "#/$defs/observedFacts"},
+        "metrics": {"$ref": "#/$defs/metrics"},
+        "evidence_status": {"enum": ["PROVISIONAL_LOCAL_HOST_EXPORT", "UNAVAILABLE", "PLATFORM_OR_EXTERNAL_ATTESTED"]},
+        "evidence_ref": {"type": ["string", "null"], "minLength": 1},
+        "evidence_digest": {"anyOf": [{"$ref": "#/$defs/digest"}, {"type": "null"}]},
+        "run_digest": {"$ref": "#/$defs/digest"}
+      }
+    },
+    "observedFacts": {
+      "type": "object", "additionalProperties": false,
+      "required": ["route_nodes", "route_edges", "finding_ids", "permission_decision", "depth", "terminal_receipt_digest", "coverage_receipt_digest", "permission_receipt_digest", "depth_receipt_digest"],
+      "properties": {
+        "route_nodes": {"type": "array", "items": {"type": "string", "minLength": 1}, "uniqueItems": true},
+        "route_edges": {"type": "array", "items": {"type": "string", "minLength": 1}, "uniqueItems": true},
+        "finding_ids": {"type": "array", "items": {"type": "string", "minLength": 1}, "uniqueItems": true},
+        "permission_decision": {"type": ["string", "null"], "minLength": 1},
+        "depth": {"type": ["string", "null"], "minLength": 1},
+        "terminal_receipt_digest": {"$ref": "#/$defs/digest"},
+        "coverage_receipt_digest": {"$ref": "#/$defs/digest"},
+        "permission_receipt_digest": {"anyOf": [{"$ref": "#/$defs/digest"}, {"type": "null"}]},
+        "depth_receipt_digest": {"anyOf": [{"$ref": "#/$defs/digest"}, {"type": "null"}]}
+      }
+    },
+    "caseRecord": {
+      "type": "object", "additionalProperties": false,
+      "required": ["case_id", "case_digest", "profile", "treatment", "evidence_status", "measurement_status", "adoption_eligible", "evidence_ref", "evidence_digest", "expected_run_count", "runs", "metrics", "record_digest"],
+      "properties": {
+        "case_id": {"type": "string", "minLength": 1},
+        "case_digest": {"$ref": "#/$defs/digest"},
+        "profile": {"enum": ["current", "candidate"]},
+        "treatment": {"$ref": "#/$defs/treatment"},
+        "evidence_status": {"enum": ["PROVISIONAL_LOCAL_HOST_EXPORT", "UNAVAILABLE", "PLATFORM_OR_EXTERNAL_ATTESTED"]},
+        "measurement_status": {"enum": ["provisional", "unavailable", "measured"]},
+        "adoption_eligible": {"type": "boolean"},
+        "evidence_ref": {"type": ["string", "null"], "minLength": 1},
+        "evidence_digest": {"anyOf": [{"$ref": "#/$defs/digest"}, {"type": "null"}]},
+        "expected_run_count": {"type": "integer", "minimum": 1},
+        "runs": {"type": "array", "items": {"$ref": "#/$defs/run"}},
+        "metrics": {"$ref": "#/$defs/metrics"},
+        "record_digest": {"$ref": "#/$defs/digest"}
+      }
+    },
+    "referenceObservation": {
+      "type": "object", "additionalProperties": false,
+      "required": ["status", "comparable", "observation", "provenance_ref", "provenance_digest", "unavailable_reason"],
+      "properties": {
+        "status": {"enum": ["NON_COMPARABLE_REFERENCE", "UNAVAILABLE"]},
+        "comparable": {"const": false},
+        "observation": {"type": ["string", "null"], "minLength": 1},
+        "provenance_ref": {"type": ["string", "null"], "minLength": 1},
+        "provenance_digest": {"anyOf": [{"$ref": "#/$defs/digest"}, {"type": "null"}]},
+        "unavailable_reason": {"type": ["string", "null"], "minLength": 1}
+      }
+    }
+  }
+}
