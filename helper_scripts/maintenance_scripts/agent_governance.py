@@ -100,6 +100,12 @@ from agent_governance_execution_policy import (  # noqa: E402
     surface_profile_binding,
     validate_execution_event_ledger,
 )
+from agent_governance_execution_surface_probe import (  # noqa: E402
+    build_execution_surface_truth_report,
+    execution_surface_probe_policy,
+    execution_surface_truth_report_digest,
+    validate_execution_surface_truth_report,
+)
 from agent_governance_efficiency_evaluation import (  # noqa: E402
     EfficiencyAttestationVerifier,
     efficiency_attestation_index_digest,
@@ -209,6 +215,8 @@ __all__ = [
     "default_history_binding",
     "execution_dag_digest",
     "execution_policy_digest",
+    "execution_surface_probe_policy",
+    "execution_surface_truth_report_digest",
     "execution_admitted_caps",
     "ExecutionAdmissionController",
     "EfficiencyAttestationVerifier",
@@ -271,9 +279,11 @@ __all__ = [
     "validate_workflow_call_record",
     "validate_workflow_wave_record",
     "validate_execution_event_ledger",
+    "validate_execution_surface_truth_report",
     "validate_efficiency_attestation_index",
     "validate_multi_agent_efficiency_evaluation",
     "verification_fragment_truth_errors",
+    "build_execution_surface_truth_report",
 ]
 
 
@@ -367,6 +377,14 @@ def _build_parser() -> argparse.ArgumentParser:
             "typed attestation-index JSON object or @path; this CLI has no "
             "trusted-host verifier and remains EXTERNAL_LIMIT"
         ),
+    )
+    surface_probe = subparsers.add_parser(
+        "execution-surface-probe",
+        help="emit a source-limited execution-surface truth report",
+    )
+    surface_probe.add_argument(
+        "request",
+        help="@path to execution_surface_probe_request_v1 JSON",
     )
     closure = subparsers.add_parser("closure", help="validate closure_packet_v1 JSON")
     closure.add_argument("packet", help="JSON object or @path-to-JSON")
@@ -745,6 +763,40 @@ def main(
             )
             return 2
         print(json.dumps(result, ensure_ascii=False, sort_keys=True))
+        return 0
+    if args.action == "execution-surface-probe":
+        try:
+            if not args.request.startswith("@"):
+                raise ValueError("execution-surface probe request must use @path")
+            report = build_execution_surface_truth_report(
+                _json_arg(args.request), registry
+            )
+            report_errors = validate_execution_surface_truth_report(
+                report, registry
+            )
+            if report_errors:
+                raise RuntimeError("; ".join(report_errors))
+        except (
+            OSError,
+            RuntimeError,
+            json.JSONDecodeError,
+            TypeError,
+            ValueError,
+        ) as error:
+            print(
+                json.dumps(
+                    {
+                        "schema_version": "execution_surface_truth_probe_error_v1",
+                        "status": "FAIL",
+                        "error_code": "SOURCE_POLICY_VIOLATION",
+                        "error": str(error),
+                    },
+                    ensure_ascii=False,
+                    sort_keys=True,
+                )
+            )
+            return 2
+        print(json.dumps(report, ensure_ascii=False, sort_keys=True))
         return 0
     if args.action == "closure":
         try:
