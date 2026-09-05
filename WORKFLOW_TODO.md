@@ -3,8 +3,8 @@
 ## 地位、邊界與目前真相
 
 這是人工閱讀的來源限定總帳，不是可派發佇列；物理 queue 只在根目錄
-[`TODO.md`](TODO.md)。`W1-local-collector` 已為 `CLOSED_LOCAL_COLLECTOR_SOURCE_ONLY`，workflow
-lane 沒有 dispatchable row。它只處理 bounded local declaration intake，不能推論 effective/host-selected
+[`TODO.md`](TODO.md)。`W1-local-collector` 已為 `CLOSED_LOCAL_COLLECTOR_SOURCE_ONLY`；唯一 workflow
+dispatchable row 是 `W3-context-micro-pack` 的 source-only intake，不能推論 effective/host-selected
 configuration、完整 W1、模型／政策採用、runtime、服務、PG、broker、下單、交易或獲利宣稱，也不授權
 自動續跑或下一項。`W5-entry-source-binding` 仍是窄義
 `CLOSED_ENTRY_SOURCE_BINDING_SOURCE_ONLY` checkpoint。
@@ -151,7 +151,7 @@ W2/W3/W5/W10 source slices。
 | 總帳工作 | 狀態／依賴 | 與 GPT-6 候選的對齊與有限出口 |
 |---|---|---|
 | W2 host admission、no-delta、depth/wait | DEFERRED_UNSTARTED；owner=PM | 本次先處理 W5 是排程選擇，不是技術硬依賴；仍由 PM fresh-admit。同 task-owned digest 必須 `BLOCKED_NO_DELTA` 且無 wakeup/retry；超限可讀拒絕。|
-| W3 Context micro-pack/去重 | DEFERRED_UNSTARTED；owner=PM | PM fresh-admit exact Context seam；W1 residual evidence 只是需保留的 input，不是 blanket blocker。必要事實、精確 task/DAG/Context bytes、claim input/source pointer 無損且可 replay；`WF6-01` 是 selector 子切片，`WF6-04` 是 exact core/doc loading。不得 full-TODO fallback。|
+| W3 Context micro-pack/去重 | ACTIVE intake；owner=PM | **planned, not implemented**：typed `current_workflow_state`／`current_s2e_state` selection、bounded exact core/docs sections 與 Python/saved-workflow parity；保留 required facts/policy/claims/DAG/provenance，無 full-TODO fallback。`WF6-01` 是 selector 子切片；W3-owned `WF6-04` exact loading 不含 W9 bootstrap。|
 | W4 low-risk assurance lanes | DEFERRED_TECHNICAL_DEPENDENCY；owner=PM | 依賴：W2/W3 完成的可驗證 source seam；保留 conditional R4；E2/E4、硬 owner、權限事實不可為省 token 移除。`WF6-07` 的 routing 實驗只可在固定模型下比較，不能預先改寫本項。|
 | W5 entry/source binding | CLOSED_ENTRY_SOURCE_BINDING_SOURCE_ONLY；owner=PM | 未提交 subject 現於 pytest/provider 執行前拒絕、clean exact head 可驗證，且 fixed committed-tree security 保留。E2 PASS；E4 `120/0/0/0`，詳見上方。僅本地 source checkpoint，非完整 W5、非 main adopted、無下一項。|
 | W5 capture reuse/host verifier residual | DEFERRED_TECHNICAL_DEPENDENCY；owner=PM | 依賴：W5 entry 已驗證及完整 source/diff/command/toolchain/environment 簽章與 TTL；合格才可 `REUSED`，否則 `EXECUTED`；production host verifier 未認證前兩者仍 trusted replay。`WF6-03` 只重用 inventory。|
@@ -175,8 +175,9 @@ source-overhead cleanup。
 
 ## 目前物理 queue 與下一步
 
-physical queue 沒有 workflow ACTIVE；W1 local collector 與 W5 entry 均已收口，但 W5 不是全 W5。
-沒有自動後續工作。roadmap 仍為 advisory：PM 可 fresh-admit W3 自己的 exact Context seam；W9 仍依賴 W3，
+physical queue 唯一 workflow ACTIVE 是 `W3-context-micro-pack` intake；W1 local collector 與 W5 entry
+均已收口，但 W5 不是全 W5。W3 仍是 planned, not implemented，沒有自動後續工作；roadmap 仍為 advisory：
+W9 仍依賴 W3 scoped completion，
 並可獨立評估 `W8`，再到 `W2/W4/W5 reuse`、
 `W6/W10 decisions`、最後 `W11 integration/adoption`。這只是規劃次序，沒有任何 auto-run
 權限；未變的 hard policy 只能經明確批准 amendment 改變。每個後續 source unit 都需 literal

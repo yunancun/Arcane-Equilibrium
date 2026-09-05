@@ -22,7 +22,11 @@ AI/ML queue，沒有 runtime、provider usage、模型採用或節省結論。
 
 ### ACTIVE（dispatchable）
 
-本 workflow lane 現為零個 `ACTIVE` row；不自動派發下一項。
+唯一 `ACTIVE` row 是 `W3-context-micro-pack` source-only intake；非 W3 completion、模型變更或節省宣稱。
+
+| ID | State / named unblock | finite scope |
+|---|---|---|
+| W3-context-micro-pack | `ACTIVE`：`workflow-w3-plan-20260906` intake | **planned, not implemented**：typed `current_workflow_state`／`current_s2e_state` selection、bounded exact core/docs sections 和 Python/saved-workflow parity；保留 required facts/policy/claims/DAG/provenance，無 full-`TODO.md` fallback。`WF6-01` 是 selector 子切片；W3-owned `WF6-04` exact loading 不含 W9 bootstrap 或模型變更。 |
 
 ### WAITING / DEFERRED（non-dispatchable）
 
@@ -30,7 +34,6 @@ AI/ML queue，沒有 runtime、provider usage、模型採用或節省結論。
 |---|---|---|
 | W1 host-selected evidence | `WAITING_EXTERNAL_EVIDENCE`：production selected-config 尚未 exposed | owner=PM；取得非 caller 控制的 selected-config/host evidence 後 fresh-admit；不阻擋 W2/W3/W5/W10 的 source slices。 |
 | W2 host admission | `DEFERRED_UNSTARTED`：本次先處理 W5 的排程選擇，不是技術硬依賴；仍由 PM fresh-admit | 同 task-owned digest 的 no-delta 規則仍適用；roadmap 次序不是自動執行權。 |
-| W3 Context micro-pack | `DEFERRED_UNSTARTED`：PM fresh-admit 一個 exact Context seam | W1 selected-config evidence 是 input/residual，不是 W3 的 blanket blocker。 |
 | W8 locality/lazy S2 | `DEFERRED_UNSTARTED`：PM fresh-admit 可比較的 retain/isolate/delete measurement | measurement/independent parts 可獨立於 W3/W9；lazy S2 implementation 仍依賴 W3/W7，不自動提升或刪除必要 Context。 |
 | W9 bootstrap profile | `DEFERRED_TECHNICAL_DEPENDENCY`：W3 exact Context seam 完成 | 高風險/runtime/權限入口仍必須載入 normative source。 |
 | W4 assurance、W5 reuse/host verifier、W6 snapshot | `DEFERRED_TECHNICAL_DEPENDENCY`：分別需 W2/W3、W5 entry 後可驗證的 reuse signature/TTL 或 host verifier、及 W4/W5 的 immutable-snapshot evidence | W5 entry 已是 historical closed source-only checkpoint；reuse/production host verifier 不在本 W1 slice。 |
