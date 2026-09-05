@@ -5,6 +5,16 @@
 
 ---
 
+## 2026-09-06：W5 entry/source binding source-only checkpoint
+
+- Governed pytest 現在會在 pytest/provider 執行前拒絕 dirty admitted subject，並保留
+  committed-tree isolation；trusted replay 綁 caller-provided subject scope。E2 解決兩項 finding；
+  E4 exact committed-head 為 `120 passed / 0 failed / 0 skipped / 0 errors`。
+- 結論僅為 `CLOSED_ENTRY_SOURCE_BINDING_SOURCE_ONLY`，不是完整 W5、main adoption、runtime 或
+  measured usage/cost/savings。
+
+---
+
 ## 2026-09-05：workflow optimization master ledger reconciliation
 
 - 把本地 W0/W1 source checkpoints 與原 GPT-6 planning handoff 對齊為

@@ -354,6 +354,18 @@ channel 的 `RESULT_ONLY`；重算 self-digest 不能替換 command output 語�
 有效 command capture；後者仍需保留原 execution/signature/TTL assessment，不能只改
 status label。
 
+對 governed pytest，public producer 的 subject scope 是 task `dirty_scope` 與 derived
+verification `path_scope` 的 union；raw HEAD、index 與 worktree 必須在 pytest/provider 執行前
+逐項等於 committed subject。record 的 public `path_scope` 與 private committed-tree isolation
+保持不變。trusted pytest replay 另必須由 caller 提供 trusted `expected_subject_scope`：closure
+caller 提供該 union；既有 LW2 evidence caller 提供其固定兩個 test paths。`reexecute=False`
+只作 structural validation，不是完整 replay proof。plain `pytest` 不受支援，應使用 canonical
+`capture-command` entry；其 exact `GOVERNED_PYTEST_PREFIX` 與
+`GOVERNED_PYTEST_REQUIRED_ARGS` 以
+`helper_scripts/maintenance_scripts/agent_governance_pytest_provider.py` 為唯一 source pointer。
+不得任意 normalize argv、建立 `-p` 例外，或新增 CLI/schema/permission。核准的順序是先建立
+local checkpoint、再以 fresh Context 做 exact-head verification。
+
 ### Task Execution Control Implementation
 
 Task Execution Control 是 Dispatch 與 Closure 共用的內部 Implementation，不是第五套

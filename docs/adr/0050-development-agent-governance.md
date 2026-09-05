@@ -235,6 +235,17 @@ repo mutation 必須由每個 admitted writer 各產一份 task/role/node/scope-
 `repository_change_record_v1`，並以 ordered chain 重驗 exact before/after captures；單一
 snapshot/source-change summary 不證 causality。
 
+governed pytest 的 public producer subject scope 固定為 task `dirty_scope` 加 derived
+verification `path_scope` 的 union；raw HEAD、index、worktree 都必須在 pytest/provider 執行前
+匹配 committed subject。這不改變 public record `path_scope` 或 private committed-tree
+isolation。trusted pytest replay 必須收到 caller-trusted `expected_subject_scope`：closure caller
+供應該 union，既有 LW2 evidence caller 只供應其固定二個 test paths。`reexecute=False` 是
+structural validation，不能冒充完整 replay proof。plain `pytest` 一律導向 canonical
+`capture-command`；exact `GOVERNED_PYTEST_PREFIX` / `GOVERNED_PYTEST_REQUIRED_ARGS` 指向
+`helper_scripts/maintenance_scripts/agent_governance_pytest_provider.py`，不複製 bootstrap。
+不得 arbitrary argv normalization、`-p` exception 或新 CLI/schema/permission；operator-approved
+checkpoint-before-exact-head-verification 順序仍須保留。
+
 #### 2026-07-21 amendment: AIML S0.3 trusted-host finalization
 
 Program adoption 是上述 Closure Interface 的高權限特化，不新增第五個 public Interface。

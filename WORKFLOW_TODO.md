@@ -3,15 +3,18 @@
 ## 地位、邊界與目前真相
 
 這是人工閱讀的來源限定總帳，不是可派發佇列；物理 queue 只在根目錄
-[`TODO.md`](TODO.md)。目前唯一 dispatchable workflow slice 是由使用者啟動、PM 擁有的
-`W5-entry-source-binding`；它只處理 entry/source binding，不能推論完整 W5、模型／政策採用、
-runtime、服務、PG、broker、下單、交易或獲利宣稱，也不授權自動續跑。
+[`TODO.md`](TODO.md)。目前沒有 dispatchable workflow slice。`W5-entry-source-binding` 已作為
+窄義 `CLOSED_ENTRY_SOURCE_BINDING_SOURCE_ONLY` checkpoint 收口；它只處理 entry/source binding，
+不能推論完整 W5、模型／政策採用、runtime、服務、PG、broker、下單、交易或獲利宣稱，也不授權
+自動續跑或下一項。
 
 W0/W1 是本地來源 checkpoint，尚未併入 `main` 或採用：W0 final
 `c90408613d6ce436abae619437a0bdc4acf4787f`，W1 final
 `86ae98c5bcbb50f5d897811327c8c118b0ff166f`。`5a3666805187603c71318abe5b6dcd2c7b071457`
 已是 committed ledger baseline；`e134c772e48aef74de2f585239e16a89b9816681` 是使用者核准的
-W7 intermediate source checkpoint。使用者已批准本次本地文件 checkpoint；提交身份以 Git 紀錄為準。
+W7 intermediate source checkpoint。W5 source checkpoint
+`60bc55673f170a06ee4b93a2080c060160707566` 僅在本地，尚未併入 `main` 或採用；提交身份以 Git
+紀錄為準。
 下列歷史測試結果不是本次重跑或效能改善。
 W0 initial source checkpoint 是 `9f9d277bf2ce2037c74597f065d41312f1ed53bc`；W1 initial probe
 checkpoint 是 `9c34aa4b28e30e495146cdb880ae889d3ea59b4f`；W0 final E4 task digest 為
@@ -58,16 +61,20 @@ config 仍是 `UNVERIFIED`／`COMPLETE_WITH_UNVERIFIED`。W1 final E2 `24 passed
   不構成 runtime、effective config、session/performance、usage、模型採用或交易結論，也不授權 push、merge
   或下一單元。提交前驗證與 committed-tree-only capture 的差異僅為 W5 現場觀察／待評估，未新增任務或修改政策。
 
-## 當前 W5 窄入口與來源綁定（本次啟動）
+## W5 窄入口與來源綁定（已收口，source-only）
 
-這是 master 對 physical queue 的人類說明，不是另一個 dispatch authority。唯一 ACTIVE row
-以 [`TODO.md`](TODO.md) 為準，owner=PM。W5 本次只處理「entry/source binding」：未提交的
-驗證 subject 不得靜默改測舊 committed HEAD；同時保留 fixed committed-tree 的安全語義。
-順序為先取得本次 local checkpoints 的明確批准 → docs checkpoint → 實作／待驗證 subject checkpoint
-→ exact-head verification；這不產生自動 commit 權限。未取得該批准時停止，不將未提交 bytes
-假稱為已驗證 head；也不把此文件 checkpoint 假稱為 W5 source implementation。驗收是入口在未提交
-subject 時於測試前拒絕、clean exact head 可正常驗證；目前僅入場文件，尚未實作，非完整 W5。capture reuse、environment/toolchain signature、TTL、trusted replay 與
-production host verifier 全部是 W5 residual，不在此 ACTIVE slice。
+這是 master 對 physical queue 的人類說明，不是另一個 dispatch authority。W5 本次只處理
+「entry/source binding」：未提交的驗證 subject 不得靜默改測舊 committed HEAD，同時保留 fixed
+committed-tree 的安全語義。已依核准順序完成 docs checkpoint、實作／待驗證 subject checkpoint
+及 exact-head verification；不產生 commit、push、merge、main sync 或下一項權限。
+
+E2 已解決兩項真實 finding（dirty subject 的 trusted replay、LW2 缺少 trusted replay scope）；
+E4 在 committed `60bc55673f170a06ee4b93a2080c060160707566` 執行，為 `120 passed / 0 failed /
+0 skipped / 0 errors`，capture
+`sha256:ae95998b8b0e92b17c3f17949f3011cfe68ce63b1df211fc7138df57f01eca43`，Context
+`sha256:366be528a93eddb5e4904b183e301956ed8ae037324a71f44ec4d76a0ee2a78f`。這只關閉
+`CLOSED_ENTRY_SOURCE_BINDING_SOURCE_ONLY`，不是完整 W5。capture reuse、toolchain/environment
+signature、TTL、production host verifier 仍是 W5 residual；W7 broad generator residual 亦保持 open。
 
 W1 residual 分為兩件事：local collector 是 `DEFERRED_UNSTARTED` 的 source collection，
 可由 PM fresh-admit；真正未 exposed 的 host-selected evidence 才是
@@ -126,7 +133,7 @@ W2/W3/W5/W10 source slices。
 | W2 host admission、no-delta、depth/wait | DEFERRED_UNSTARTED；owner=PM | 本次先處理 W5 是排程選擇，不是技術硬依賴；仍由 PM fresh-admit。同 task-owned digest 必須 `BLOCKED_NO_DELTA` 且無 wakeup/retry；超限可讀拒絕。|
 | W3 Context micro-pack/去重 | DEFERRED_UNSTARTED；owner=PM | PM fresh-admit exact Context seam；W1 residual evidence 只是需保留的 input，不是 blanket blocker。必要事實、精確 task/DAG/Context bytes、claim input/source pointer 無損且可 replay；`WF6-01` 是 selector 子切片，`WF6-04` 是 exact core/doc loading。不得 full-TODO fallback。|
 | W4 low-risk assurance lanes | DEFERRED_TECHNICAL_DEPENDENCY；owner=PM | 依賴：W2/W3 完成的可驗證 source seam；保留 conditional R4；E2/E4、硬 owner、權限事實不可為省 token 移除。`WF6-07` 的 routing 實驗只可在固定模型下比較，不能預先改寫本項。|
-| W5 entry/source binding | ACTIVE；owner=PM | 本次唯一 scope：把未提交 subject 綁到 checkpoint 後的 exact verification head，且不削弱 fixed committed-tree security；先取得本次 local checkpoints 的明確批准，再 docs checkpoint → 實作／待驗證 subject checkpoint → exact-head verification，不產生自動 commit 權限。驗收：入口在未提交 subject 時於測試前拒絕、clean exact head 可正常驗證；目前僅入場文件，尚未實作，非完整 W5。|
+| W5 entry/source binding | CLOSED_ENTRY_SOURCE_BINDING_SOURCE_ONLY；owner=PM | 未提交 subject 現於 pytest/provider 執行前拒絕、clean exact head 可驗證，且 fixed committed-tree security 保留。E2 PASS；E4 `120/0/0/0`，詳見上方。僅本地 source checkpoint，非完整 W5、非 main adopted、無下一項。|
 | W5 capture reuse/host verifier residual | DEFERRED_TECHNICAL_DEPENDENCY；owner=PM | 依賴：W5 entry 已驗證及完整 source/diff/command/toolchain/environment 簽章與 TTL；合格才可 `REUSED`，否則 `EXECUTED`；production host verifier 未認證前兩者仍 trusted replay。`WF6-03` 只重用 inventory。|
 | W6 immutable snapshot 平行化 | DEFERRED_TECHNICAL_DEPENDENCY；owner=PM | 依賴：W4、W5 reuse evidence 與 HITL；保留 snapshot-only deterministic E2/test fan-out、writer 串行與 ADR 0050/0052 的 HITL；不可由 A/B 繞過。|
 | W7 三份 generated workflow drift | CLOSED_NARROW_SOURCE_CHECKPOINT；owner=PM | `e134…` 以既有 generator 校正三份 Registry block；E2 同 bytes 審查 PASS、E4 committed-head 測試 PASS，詳見上方 W7 evidence。無 runtime/adoption/performance claim；original broad generator redesign residual 仍待 PM gap-list assessment，不自動 re-design。|
@@ -148,8 +155,8 @@ source-overhead cleanup。
 
 ## 目前物理 queue 與下一步
 
-physical queue 的唯一 ACTIVE 是 `W5 entry/source binding`，不是全 W5。後續建議順序為
-`W5 entry → W1 residual → W3/W9`，並可獨立評估 `W8`，再到 `W2/W4/W5 reuse`、
+physical queue 沒有 workflow ACTIVE row。W5 entry 已收口，不是全 W5。後續 roadmap 仍為
+`W1 local residual → W3/W9`，並可獨立評估 `W8`，再到 `W2/W4/W5 reuse`、
 `W6/W10 decisions`、最後 `W11 integration/adoption`。這只是規劃次序，沒有任何 auto-run
 權限；未變的 hard policy 只能經明確批准 amendment 改變。每個後續 source unit 都需 literal
 scope、重新編譯 Context、按風險產生 E1→E2→E4 與必要 owner；無 commit、push、merge 或 main

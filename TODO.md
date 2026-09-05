@@ -22,9 +22,7 @@ AI/ML queue，沒有 runtime、provider usage、模型採用或節省結論。
 
 ### ACTIVE（dispatchable）
 
-| ID | State / owner | finite scope / acceptance / next action |
-|---|---|---|
-| W5-entry-source-binding | `ACTIVE`；PM | 僅建立並修正 W5 的 entry/source binding，令未提交 subject 不會靜默以舊 committed HEAD 測試；固定 committed-tree security 不變。先取得本次 local checkpoints 的明確批准，再 docs checkpoint → 實作／待驗證 subject checkpoint → exact-head verification；不產生自動 commit 權限。驗收：入口在未提交 subject 時於測試前拒絕、clean exact head 可正常驗證；目前僅入場文件，尚未實作，非完整 W5。 |
+本 workflow lane 目前無 ACTIVE row；不得由本次 source-only closure 自動建立下一項。
 
 ### WAITING / DEFERRED（non-dispatchable）
 
@@ -44,6 +42,7 @@ AI/ML queue，沒有 runtime、provider usage、模型採用或節省結論。
 
 | ID | State | pointer |
 |---|---|---|
+| W5-entry-source-binding | `CLOSED_ENTRY_SOURCE_BINDING_SOURCE_ONLY` | local source checkpoint `60bc55673f170a06ee4b93a2080c060160707566`: E2 resolved two findings; E4 exact committed-head `120 passed / 0 failed / 0 skipped / 0 errors`, capture `sha256:ae95998b8b0e92b17c3f17949f3011cfe68ce63b1df211fc7138df57f01eca43`. Not full W5, main adoption, runtime, usage/cost/savings, or automatic successor. |
 | W0、W1 | `CLOSED_SOURCE_CHECKPOINT_NOT_MAIN_ADOPTED` | historical result/limitations in `WORKFLOW_TODO.md`; not current performance proof. |
 | W7 | `CLOSED_NARROW_SOURCE_CHECKPOINT` | `e134…` source-only generated Registry-block repair; E2 same-byte review / E4 committed-head tests PASS in `WORKFLOW_TODO.md`; no automatic successor. |
 
