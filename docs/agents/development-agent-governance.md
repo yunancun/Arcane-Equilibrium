@@ -315,7 +315,7 @@ Hard edges：
 - Bybit surface → `BB`；IBKR/TWS/stock_etf_cash → `IB`；不可互代。
 - quant/ML semantic change → `QC`/`MIT`。
 - end-to-end claim → `QA`。
-- docs-only write → `TW` → `R4`；test-only write → `E4` → independent `E2`。
+- docs-only write → `TW` → `R4`；唯有 PM 分類為 surfaces exactly `docs`/`comments`、low/low、finite `docs_write`、`runtime_claim=false`／`end_to_end_claim=false`、單一 literal lowercase-ASCII safe 未保護 `docs/*.md` path 且 `dirty_scope` 完全相等時，才可省略 R4，並記錄 skip reason、PM residual 與 drift-reopen owner。受保護清單由既有 routing helper 正本持有；default/protected/multiple/uncertain 仍經 R4。真實 link/reference/index/structural/current-state 改動必須標示其 surface，不得冒充 editorial。test-only write → `E4` → independent `E2`。
 - functional/performance/GUI-visible claim → `FA`/`E5`/`A3`，不再讓這些能力永遠 dormant。
 
 PA、FA、E5、A3、R4、AI-E 等其他 node 由 risk、uncertainty、surface、expected

@@ -84,6 +84,15 @@ operations、venue adapter、quant/ML semantics、E2E acceptance 是 hard facts 
 其他 node 依 expected decision gain 與 residual risk advisory 加入。Unknown risk fail-safe
 升 full-audit envelope。任何 skip 記 reason/residual risk/owner。
 
+2026-09-06 W4 amendment：一般 docs write 仍為 `TW → R4`。PM 僅可對 surfaces exactly
+`docs`/`comments`、low/low、finite `docs_write`、`runtime_claim=false`／
+`end_to_end_claim=false`、單一 literal
+lowercase-ASCII safe 未保護 `docs/*.md` path（等於 `dirty_scope`）分類為 editorial，省略
+R4；既有 routing helper 是 protected-list 正本，並記 skip reason、PM residual 與
+scope/class/surface drift reopen。default/protected/multiple/uncertain 或真實
+link/reference/index/structural/current-state surface 保留 R4 與全部 hard edges；native
+permissions 不變。
+
 ### Context and consumption
 
 Universal preload 退役。Context Interface 保留 exact task prompt、user objective/scope/

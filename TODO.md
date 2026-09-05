@@ -22,12 +22,7 @@ AI/ML queue，沒有 runtime、provider usage、模型採用或節省結論。
 
 ### ACTIVE（dispatchable）
 
-`W4 low-risk assurance lanes` 為唯一 `ACTIVE` row：僅實作 conditional R4 於狹義 low-risk editorial docs，
-保留 source E2→E4 與硬 owner；目前尚無實作或驗證結論。
-
-| ID | State / finite scope |
-|---|---|
-| W4 low-risk assurance lanes | `ACTIVE`；conditional R4 僅限狹義 low-risk editorial docs，保留 source E2→E4 與硬 owner；尚未實作或驗證。 |
+本 workflow lane 為 canonical `EMPTY`；W4 已以 source-only conditional assurance 收口，沒有自動下一項。
 
 ### WAITING / DEFERRED（non-dispatchable）
 
@@ -44,6 +39,7 @@ AI/ML queue，沒有 runtime、provider usage、模型採用或節省結論。
 
 | ID | State | pointer |
 |---|---|---|
+| W4 low-risk assurance lanes | `CLOSED_CONDITIONAL_ASSURANCE_SOURCE_ONLY` | Conditional R4 source capability is locally reproducible only; exact evidence, residual PM classification, and limits are in `WORKFLOW_TODO.md`. Not full assurance, host/adoption/main, or measured time/token/cost outcome. |
 | W2-local existing controls | `CLOSED_LOCAL_SOURCE_ONLY` | Existing control validation at `1de695218e8fbf11a317a40396ad1713e940b930`: E2 `102/0/0/0` in 26.29s, capture `sha256:7992b78f83698d9821d31422b19d2a9638bf09c99887513f71216c2d49e05965`; see `WORKFLOW_TODO.md` for scope and limits. Not W2-host or full W2. |
 | W3-context-micro-pack | `CLOSED_CONTEXT_MICRO_PACK_SOURCE_ONLY` | `1f87d68f9a0b8535e8fb46cba52858fa57fbb3d9`: `WF6-01` selector + W3-owned `WF6-04` exact loading only. E2 PASS; E4 exact-head `206 passed / 0 failed / 1 skipped / 0 errors` in 30.69s, capture `sha256:428920484ee8db4296d1c5e1d198cf660e18507866201cebf86688159d276fcd`; Darwin/Linux argv-cap difference is the expected skip. Codegen parity is covered by that suite; direct E4 CLI check was denied by allowlist. Context docs `42909→31870` bytes (`-25.7%`), planned `10933→8177`; core `25266` bytes / `6522` planned unchanged. No actual usage/time/cost savings, main/remote/adoption/runtime/model change, or automatic successor. |
 | W1-local-collector | `CLOSED_LOCAL_COLLECTOR_SOURCE_ONLY` | committed source `b92417b7afed1de6a1913279af6e5743fb085b34`: E2 standards/spec PASS after four repairs; E4 exact committed-head `46 passed / 0 failed / 0 skipped / 0 errors` (22 collector + 24 existing-probe), local-reproducible capture `sha256:f0c0083999b1b4262b004884b19f34f7b9c1728daa0fe41090cebcd3ee07f14d`. Local observation collected five repo declarations; explicitly supplied global `config.toml` was `no_data`, selection/instructions remain `UNVERIFIED`, profile `CALLER_CLAIMED`. Not host attestation, settings adoption, runtime, or automatic successor. |

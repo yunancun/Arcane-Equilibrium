@@ -1,5 +1,14 @@
 # CLAUDE_CHANGELOG.md — 開發歷史歸檔
 
+## 2026-09-06 W4 conditional editorial assurance (source-only)
+
+Conditional R4 is source-verified only for the narrowly classified editorial-docs path;
+canonical evidence, residual classification ownership, and limits are in `WORKFLOW_TODO.md`.
+W2 fixture E4-writer used Sol/high instead of Registry Sol/low; W4 AI-E initial boot read
+bypassed capture, while substantive source inspection was captured. No settings mutation;
+this is not a standard-routing efficiency sample. KnowledgePilot stayed blocked by the
+unowned `未命名.base` deletion, with no Vault edit or sync.
+
 ## 2026-09-06 W2-local closure / W4 local successor gate
 
 `W2-local existing control validation` is `CLOSED_LOCAL_SOURCE_ONLY`; its canonical

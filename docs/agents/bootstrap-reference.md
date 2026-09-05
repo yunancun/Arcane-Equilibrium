@@ -42,6 +42,16 @@ reason, plus sorted predecessor `requires`, node-owned `path_scope`, and whether
 its result binds a top-level role fragment or a typed nested payload. Once
 admitted it is mandatory; PM cannot omit it, rewrite its edge, or hide dissent.
 
+### Conditional editorial-docs review
+
+Docs writes normally route `TW → R4`. Only PM may classify a task with surfaces exactly
+`docs`/`comments`, low/low, finite `docs_write`, `runtime_claim=false` and
+`end_to_end_claim=false`, and one literal lowercase-ASCII safe,
+unprotected `docs/*.md` path equal to `dirty_scope` as editorial; then R4 may be
+skipped with reason, PM residual, and reopen on scope/class/surface drift. The
+routing helper owns protected paths. Link/reference/index/structural/current-state
+edits name their true surfaces and retain R4; TW and R4 native permissions do not change.
+
 `verification_scope` is an optional canonical, sorted/unique list of literal,
 safe repository-relative paths. A read-only verifier command capture uses it
 only when routed node `path_scope` is empty, and before falling back to
