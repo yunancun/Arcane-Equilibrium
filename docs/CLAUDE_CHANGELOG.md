@@ -1,5 +1,13 @@
 # CLAUDE_CHANGELOG.md — 開發歷史歸檔
 
+## 2026-09-06 W9 bootstrap profile (source-only, review pending)
+
+Slimmed agent hot-path documents and relocated conditional governance detail to
+`docs/agents/bootstrap-reference.md`; corrected the documented W3 workflow-state
+selector to TODO physical queue; the independent docs pack selects seven
+`docs/README.md` sections. This is not
+runtime, model, Registry, generated-view, provider-usage, cost, or adoption evidence.
+
 > 從 CLAUDE.md / TODO.md 遷出的 Wave/Sprint/Batch + TODO version-increment 歷史敘事。新 session 不需要讀此文件，僅供回顧歷史時查閱。
 > 最後更新：2026-09-05（workflow optimization master-ledger reconciliation；AIML queue unchanged）
 

@@ -1234,6 +1234,7 @@
 | 文件 | 内容 |
 |------|------|
 | `agents/context-loading.md` | Agent context source-of-truth map and loading route |
+| `agents/bootstrap-reference.md` | Conditional development-agent bootstrap reference, reached by exact router heading pointers before governed action; not universal/compiler preload. |
 | `agents/development-agent-governance.md` | Development-agent Registry/Context/Dispatch/Closure、execution policy 與 consumption 正本 |
 | `agents/2026-07-30--gpt56-multi-agent-efficiency-remediation.md` | GPT-5.6 multi-agent efficiency remediation ledger |
 | `agents/role-profile-memory-standard.md` | Agent role profile / bounded hot memory / reversible archive / host-memory policy |

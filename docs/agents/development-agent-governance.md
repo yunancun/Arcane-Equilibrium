@@ -13,6 +13,10 @@ Public CLI 保持單一；command permission 與 deploy intent 是同 Module 的
 Implementation/Effect Adapter 檔，讓 reviewer 可按 Interface 局部讀取，避免巨型檔
 token annuity。它們不形成第二套 Registry 或 authority。
 
+W9 bootstrap keeps the entry/router short: each governed predicate points to one
+exact conditional heading in `docs/agents/bootstrap-reference.md` before action.
+That reference is manual reading, not a compiler-selected universal pack.
+
 ### Execution-surface truth probe
 
 `agent_governance.py execution-surface-probe @request.json` 是 source-only、deterministic
@@ -167,12 +171,14 @@ full-file fallback；legacy `todo_active_rows` callers 仍要求 exactly-one ACT
 32 KiB；glob、whole-file、symlink、traversal、未選 section 均拒絕。因而無關
 TODO/history 變更不再破壞 shared Context/cache key。
 
-Workflow current state 只能由 task 的 `current_workflow_state` 或
-`current_s2e_state` 明示 surface 選擇；compiler 不從 prompt 字詞猜測。每個選入 typed
+Workflow current state 只能由 task 的 `current_workflow_state` 明示 surface 選擇：它只選取
+`TODO.md` 的 exact H2 `## Workflow optimization physical queue（source-only）`，不是
+`WORKFLOW_TODO.md`，亦沒有 `workflow_state` pack。獨立的 docs pack 選取
+`docs/README.md` 的七個 exact sections（含 Document Index rules）。`current_s2e_state` 保留既有 S2E
+projection（含 EMPTY/direct-dependencies rules）；compiler 不從 prompt 字詞猜測。每個選入 typed
 `markdown_section` 必須是 balanced fences 外的 unique full ATX heading，且不超過 16 KiB；缺失、重複或
-malformed selector 一律 fail closed，沒有 full-file fallback。前者選 bounded workflow core/docs（含
-Document Index rules 的七 sections、不 preload bulk directory history，並保留 exact core `AGENTS.md`/policy
-bytes），後者保留既有 S2E dispatch projection；stable conceptual query 不帶 state surface。每個 role（含
+malformed selector 一律 fail closed，沒有 full-file fallback；不 preload bulk directory history，並保留 exact core
+`AGENTS.md`/policy bytes。stable conceptual query 不帶 state surface。每個 role（含
 low-uncertainty routing）取正確 bounded surface，既有 runtime/high-risk triggers 不變。Registry-derived
 kind/name/selector 在 Python 與 saved workflow exact parity 檢查；semantic payload 不重複 `source_kind`，因 full plan 已綁定。相同 task inputs 下，
 不相關資料只不得改變 selected semantic content/digest/planned estimate，artifact provenance/freshness

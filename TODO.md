@@ -22,7 +22,9 @@ AI/ML queue，沒有 runtime、provider usage、模型採用或節省結論。
 
 ### ACTIVE（dispatchable）
 
-本 workflow lane 現為零個 `ACTIVE` row；W3 已為 local source-only closure，沒有自動下一項。
+| ID | State / owner path | admitted finite scope and acceptance |
+|---|---|---|
+| W9 bootstrap profile | `ACTIVE`；human master PM → PA → TW(native `TW`, docs_writer, work) → R4 → AI-E；reviews pending | source-only exact docs scope under W9 admission `de790b3be60f681259943db36f6a021a`, exclusive lease `8385344841fdf3c2c02ad9da484af480`; slim entry/context plus canonical conditional reference, correct W3 state routing, preserve hard-boundary CLAUDE sections; acceptance is PA/R4/AI-E review with no generated/Registry/code change. No next W. |
 
 ### WAITING / DEFERRED（non-dispatchable）
 
@@ -31,10 +33,9 @@ AI/ML queue，沒有 runtime、provider usage、模型採用或節省結論。
 | W1 host-selected evidence | `WAITING_EXTERNAL_EVIDENCE`：production selected-config 尚未 exposed | owner=PM；取得非 caller 控制的 selected-config/host evidence 後 fresh-admit；不阻擋 W2/W3/W5/W10 的 source slices。 |
 | W2 host admission | `DEFERRED_UNSTARTED`：本次先處理 W5 的排程選擇，不是技術硬依賴；仍由 PM fresh-admit | 同 task-owned digest 的 no-delta 規則仍適用；roadmap 次序不是自動執行權。 |
 | W8 locality/lazy S2 | `DEFERRED_UNSTARTED`：PM fresh-admit 可比較的 retain/isolate/delete measurement | measurement/independent parts 可獨立於 W3/W9；W3/W7 source seams 已 closed，但 lazy/locality measurement 尚未完成，不自動提升或刪除必要 Context。 |
-| W9 bootstrap profile | `DEFERRED_UNSTARTED`：W3 exact Context seam 已在 local branch 完成，待 PM fresh-admit | 高風險/runtime/權限入口仍必須載入 normative source；不自動執行。 |
 | W4 assurance、W5 reuse/host verifier、W6 snapshot | `DEFERRED_TECHNICAL_DEPENDENCY`：分別需 W2/W3、W5 entry 後可驗證的 reuse signature/TTL 或 host verifier、及 W4/W5 的 immutable-snapshot evidence | W5 entry 已是 historical closed source-only checkpoint；reuse/production host verifier 不在本 W1 slice。 |
 | W10 KnowledgePilot、W11 adoption、WF6-02/05/06/07 | `DEFERRED_OPERATOR_POLICY_OR_EVIDENCE`：需 explicit policy amendment、HITL、external/provider evidence 或 qualified comparable run | 不自動提升；W11 dependency narrowing 只是 proposal，尚未生效。 |
-| WF6-01/03/04 | `WF6-01` 與 W3-owned `WF6-04` exact loading 已 closed source-only；`WF6-03`、W9-owned `WF6-04` 仍 deferred | 缺 provider attestation 時 WF6-03 保持 `WAITING_EXTERNAL_LIMIT`；不假稱 usage 或節省。 |
+| WF6-01/03/04 | `WF6-01` 與 W3-owned `WF6-04` exact loading 已 closed source-only；`WF6-03` 保持 waiting，W9-owned `WF6-04` 為 current W9 ACTIVE/PENDING_REVIEW source-only work | 缺 provider attestation 時 WF6-03 保持 `WAITING_EXTERNAL_LIMIT`；不假稱 usage 或節省。 |
 
 ### CLOSED（non-dispatchable）
 

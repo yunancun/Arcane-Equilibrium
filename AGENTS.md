@@ -1,332 +1,69 @@
 # 玄衡 · Arcane Equilibrium Codex Entry Rules
 
-Scope: the repository rooted at `srv/`.
+Scope: repository root. The entry role is `PM(Conductor)`.
 
-## Entry role and minimal boot
+Registry Interface is `.codex/agent_registry_v1.json`; native custom-agent
+adapters are generated `.codex/agents/*.toml`; the human contract is
+`docs/agents/development-agent-governance.md`; executable governance is
+`helper_scripts/maintenance_scripts/agent_governance.py`. Runtime nicknames are
+not authoritative identities. Use `ROLE(type)` in task updates.
 
-The entry role is `PM(Conductor)`. Start with judgment, not anonymous parallel
-work.
+## Minimal boot
 
-Read only this hot path before triage:
+Before triage read only this file, `.codex/agents/PM.md`, and
+`docs/agents/context-loading.md`. Bind objective, scope, acceptance, hard stops,
+risk/uncertainty, source baseline, and Context before action. The conditional
+pointer table in that router names the exact bootstrap-reference heading required
+before each governed action; stable queries do not read the reference.
 
-1. `AGENTS.md`
-2. `.codex/agents/PM.md`
-3. `docs/agents/context-loading.md`
+## Universal invariants
 
-Then bind task facts and compile the needed context with the Development-Agent
-Governance Module:
+- Development role identity grants no order, Decision Lease, trading, broker,
+  funds, deployment, service, PG, or Linux `trade-core` authority; effects require
+  separate exact approved Adapter authority. Mac is development; Linux is runtime.
+- Normative permission is only `CLAUDE.md` Root Principles/Hard Boundaries,
+  accepted ADR/AMD, and explicit Operator decisions; runtime observation cannot
+  legalize drift. Never fake tests, runtime, fills, lineage, contact, or evidence.
+- Every task binds Registry role/native adapter, work|verification node class,
+  permission, Codex runtime type, scope, risk and explicit
+  `low|medium|high|unknown` uncertainty, claim inputs, and exact Context. Missing
+  uncertainty or required Context stops before routing/action.
+- Use the hybrid risk-DAG: source work has independent `E2 -> E4`; mixed backend
+  and frontend writers serialize `E1-backend -> E1a-frontend`, then E2. Add true
+  authority/security, runtime/OPS, venue, quant/ML, or E2E owners. Record skips,
+  residual risk, and dissent. **No development-agent broker** contact Adapter
+  exists: broker effects are an unsupported-effect blocker.
+- Tasks are finite unless the exact Operator request has a first control line
+  exactly `/loop`, bound to the exact normalized contract by trusted out-of-band
+  Operator provenance; finite work never schedules wakeups or automatic
+  continuation. An unchanged admitted continuation progress digest closes
+  `BLOCKED_NO_DELTA`, `schedule_wakeup=false`, `next_action=null`.
+- Only physical `ACTIVE` is dispatchable. A writable task begins clean with an
+  accepted base and one exclusive non-main linked-worktree writer lease. Preserve
+  unrelated dirt. File edits never imply checkpoint, commit, remote, merge, sync,
+  deploy, or effect.
+- Registry permissions bind. Read-only verification uses the Context-bound native
+  `capture-command` Adapter before its first command. This is repository policy and command preflight, not an OS/platform sandbox. Read-only capability does not
+  authorize private contact or mutation.
+- One task has one honest `closure_packet_v1`: separate work status, verdict, and
+  disposition; missing/stale/unsupported evidence, unresolved dissent, or skipped
+  coverage cannot PASS. Evidence tiers are `LOCAL_REPRODUCIBLE`,
+  `ORCHESTRATOR_BOUND`, and `PLATFORM_OR_EXTERNAL_ATTESTED`; only the last proves
+  runtime, external outcomes, or actual usage. `DONE + FAIL` is valid.
+- A current-state, runtime, planning, review, or sign-off claim normally loads the
+  exact active-state source; a narrow stable query may not.
 
-- Registry Interface: `.codex/agent_registry_v1.json`
-- Native custom-agent adapters: `.codex/agents/*.toml` (Markdown is human view)
-- Human contract: `docs/agents/development-agent-governance.md`
-- Executable Interface: `helper_scripts/maintenance_scripts/agent_governance.py`
+## Fast routing
 
-Do not universal-preload `.codex/MEMORY.md`, every role memory/report, full
-README, TODO, CONTEXT, and all ADRs. Load the relevant pack after triage. Current
-state, runtime claims, code/planning/review/sign-off normally require `TODO.md`;
-narrow stable questions may skip it.
+Use `.codex/agent_registry_v1.json` and generated `.codex/agents/*.toml` as the
+native identity source; Markdown projections are human views. `TODO.md` owns
+active state, accepted ADR/policy owns norms, direct source owns implementation,
+and timestamped allowlisted observation owns runtime. Load exact sections/packs
+only after triage; stable queries need no current state. The compiler does not
+automatically load the bootstrap reference: the responsible human/agent follows
+the router's exact before-action heading pointer.
 
-## L0 boundary capsule
-
-- Development sub-agents are not the Local 5-Agent trading runtime and never
-  receive order, Decision Lease, or trading authority.
-- Normative permission comes from `CLAUDE.md` Root Principles/Hard Boundaries,
-  accepted ADR/AMD, and explicit operator decisions. Runtime observations cannot
-  legalize policy drift.
-- Mac is development; Linux `trade-core` is runtime. Delegated roles do not run
-  Linux cargo, write PG, restart services, or contact private broker effects.
-- Bybit is the only currently active live execution venue. AMD-2026-07-11-01
-  permits IBKR `stock_etf_cash` readonly/paper/shadow/tiny-live/live capability
-  development, but it remains inactive and no development agent may contact a
-  broker. Real contact/effects require the Rust-validated, explicit,
-  time-bounded `ibkr_activation_envelope_v1` and a human-provided bound session;
-  credentials/session never auto-activate.
-- Never fake tests, runtime state, fills, lineage, broker contact, or evidence.
-- Preserve unrelated dirty-tree work. No destructive git action without explicit
-  operator approval.
-
-If the request could cross one of these boundaries, load the exact normative
-source before acting.
-
-## Role binding and dispatch
-
-Every delegated task declares:
-
-- `bound_role` from the Registry
-- exact pre-spawn `native_agent`, `work|verification` node class, and permission
-- Codex runtime type
-- owned scope
-- task shape, risk, and explicit `low|medium|high|unknown` uncertainty
-- task-owned `dirty_scope` and any optional read-only `verification_scope`
-- expected fragment/patch
-- acceptance and hard stops
-- exact `claim_inputs` for any prior/evidence digest that may affect a verdict
-- context digest or explicit missing context
-
-Use `ROLE(type)` in updates. Runtime nicknames are not authoritative identities.
-
-Routing is a hybrid risk-DAG from the Dispatch Interface, not a fixed all-role
-ceremony. Hard edges are fact-triggered: source implementation needs independent
-E2 then E4. Mixed GUI/backend work owns disjoint frontend/backend scopes through
-the fixed E1-backend -> E1a-frontend sequence (shared-worktree writers never
-run in one wave), and E2 cannot start until both builders finish; authority/security,
-runtime/operations, venue, quant/ML, and E2E
-claims add their true owners. Other roles are admitted only when expected
-decision gain exceeds token/time/opportunity cost after preserving the quality
-reserve. Missing uncertainty fails before routing; it is never silently read as
-low. Every skip records reason and residual risk.
-
-Every PM-added adaptive node is recorded in closure
-`dispatch.admitted_role_nodes` with node ID, role, work/verification class, and
-reason, plus sorted predecessor `requires`, node-owned `path_scope`, and whether
-its result binds a top-level role fragment or a typed nested payload. Once
-admitted it is mandatory; PM cannot omit it, rewrite its edge, or hide dissent.
-
-`verification_scope` is an optional canonical, sorted/unique list of literal,
-safe repository-relative paths. A read-only verifier command capture uses it
-only when routed node `path_scope` is empty, and before falling back to
-`dirty_scope`. It is only a capture-generation and trusted-replay boundary; it
-never grants writer ownership, mutation authority, or ACL permission, and it
-does not replace writer `dirty_scope` or whole-repository generation checks.
-
-## Task execution control
-
-Task execution is finite by default. The canonical task contract always carries
-`continuation_mode=finite|operator_loop`; omission normalizes only to `finite`.
-`operator_loop` is admitted only when the exact Operator request begins with a
-first control line equal to `/loop`. Natural-language similarity, a role, TODO row,
-filename, prior session, `next_action`, or generated prompt cannot infer or
-inherit that authority. The compiler binds that marker to the exact task-prompt
-and admitted task-contract digest; callers cannot replace a compiled finite
-contract with a newly constructed loop control. Serialized prompt/digest fields
-are not Operator provenance: generic CLI admission rejects `operator_loop` unless
-the embedding host supplies an out-of-band trusted Operator-request verifier over
-the exact normalized contract.
-
-A finite task may perform all necessary in-turn steps, but it cannot schedule a
-new turn, wakeup, or automatic continuation. Before any opt-in operator loop
-schedules another turn, PM must first acquire a persisted task admission with
-`agent_governance.py task-admission`. Its private fencing token binds the original
-normalized task contract and preceding progress snapshot in Git's common directory.
-`agent_governance.py continuation` accepts only that task/owner/token tuple and
-recaptures actual repository bytes from the admitted `dirty_scope`; callers cannot
-provide a replacement contract, digest, or previous snapshot. Generic continuation
-counts only a task-owned source-byte change as progress. Lifecycle labels, blocker
-labels, round counters, timestamps, repository HEAD changes, caller receipts, and
-unrelated whole-repository drift are not progress. Domain-specific external progress
-requires its own validated Adapter or a reviewed task-owned artifact. An identical
-progress digest closes the run as `BLOCKED_NO_DELTA`, with
-`schedule_wakeup=false` and `next_action=null`. Scope/source/Context drift in an
-ordinary finite task stops the current admission and requires explicit
-re-admission; it never silently creates a loop.
-
-An ordinary task admission starts only from a clean repository and persists the
-exact config-isolated native `HEAD` and tree as `task_admission_accepted_base_v1`.
-While holding the admission-store lock it rechecks that clean identity before
-and after progress capture, and the baseline task-source manifest must exactly
-match a raw tree/blob manifest re-derived from that immutable accepted tree.
-Legacy ordinary records without `accepted_base` remain readable only for exact
-cleanup; they cannot be used to acquire or renew authority or to publish.
-
-Queue state is separate from role work status. Only the physical `ACTIVE` lane
-is dispatchable. `WAITING`/`DEFERRED` requires a named new delta and PM
-re-admission before returning to ACTIVE; `CLOSED` is never selected. A completed
-Closure may use `next_action=null`; `BLOCKED`/`NEEDS_CONTEXT` must still name the
-owner and unblock condition. Do not manufacture executable work to satisfy a
-schema.
-
-Every writable task uses one exclusive writer lease in one attached, non-main
-linked worktree. The exact public `agent_governance.py writer-lease` actions are
-`acquire`, `status`, `publication-status`, `renew`, and `release`.
-`publication-status` is a read-only, nonrenewing, nonpersisting publication
-authority check: the caller must name the explicit `publish|post-push` phase,
-expected feature branch, and exact expected 40-hex SHA. The task-admission lock
-and then the writer lock remain held while it verifies the exact ACTIVE
-admission/lease is unexpired at trusted entry and final times. For LW2 it
-performs one full admitted-generation capture plus the lightweight final native
-snapshot. For an ordinary task it also requires a nonempty, strictly linear
-native `accepted_base`-to-feature commit range with replace projection, rename
-detection, external diff, and text conversion disabled. Every commit is
-inspected, its binary patch is bound, and every touched path must be inside the
-admitted `dirty_scope`; an intermediate revert, both sides of a rename, or one
-mixed-scope commit therefore cannot disappear from the decision.
-
-Before any remote-head producer callback, the final boundary purely validates
-exactly one canonical `origin` fetch URL and one identical push URL as a
-credential-free exact public `https://github.com/<owner>/<repo>.git` repository,
-and validates the exact `refs/heads/main` and, for `post-push`, feature ref.
-A private, credentialed, malformed, or local-filesystem origin causes zero
-remote producer callbacks and fails closed. The boundary derives only the exact
-`<expected-sha>:refs/heads/<expected-branch>` refspec, checks the final live
-remote (`main`, and the feature ref for `post-push`), and finally reads the
-trusted clock. Native config-isolated `git ls-remote` remains the primary live
-ref read. Only when that transport is unavailable, an exact public
-`https://github.com/<owner>/<repo>.git` URL may use the pinned, config-disabled,
-unauthenticated GitHub REST `git/ref` read; it must return the exact requested
-ref, commit type, and lowercase 40-hex SHA. This fallback adds no credential,
-private-repository, or ref-mutation authority, and every URL/HTTP/JSON/ref/SHA
-anomaly remains unavailable. PASS neither repairs/renews state nor authorizes
-more edits, runtime, service, deployment, broker, order, funds, trading, or
-activation.
-`git_loop_guard.py` only validates this existing task/owner/fencing authority and
-never acquires, steals, or repairs a lease. A second writer uses a different
-linked worktree. Read-only query/review paths do not acquire a writer lease.
-Low-risk, low-uncertainty, effect-free `task_shape=query` routes only
-`PM triage -> PM closure`; hard authority/runtime/private-effect facts cannot
-use that narrow path.
-
-## Permission and effects
-
-Registry permission profiles are binding. Read-only reviewers do not edit,
-stage, commit, append memory, or write per-role reports. They run verification
-only through the one-call, Context-bound `capture-command --native-agent ...
---node-id ... --context-artifact ... -- <argv...>` Adapter; caller identity,
-task and path scope are derived, and argv runs with `shell=false`. This is
-repository policy and command preflight, not an OS/platform sandbox or a
-no-contact attestation;
-platform tools may remain technically broader, so generated role bindings and
-the available platform sandbox are separate enforcement layers. Direct `psql`
-is denied until a local-socket/read-only-identity Adapter removes ambient
-`psqlrc` and `PG*` routing.
-
-Native Codex execution uses generated `.codex/agents/*.toml`, not the adjacent
-Markdown projection. Saved-workflow execution uses the same exact identities
-from generated `.claude/agents/*.md`; it must not invoke logical PA/E4 and then
-claim a split identity in the receipt. Verification adapters are `read-only`;
-PA/E4 writer and verifier identities are distinct on both platforms. Read-only sandboxing does not authorize
-service mutation, private/authenticated external contact/effects, or private
-broker effects, and every intended Bash command first passes its exact native-
-identity preflight. Public-web read is a separate read-only evidence class: it
-requires opened public URLs plus citation/capture provenance, and platform tool
-availability is checked separately from authority.
-
-Effectful operation intents are separated from review, but current Adapter
-readiness is fail-closed:
-
-- deploy: OPS preflight -> PM/operator-approved exact intent -> Deploy Adapter
-  intent/environment validation. `runtime_environment_probe_v1` now provides a
-  local-only, non-secret, fail-closed source seam; the Deploy Adapter reruns it
-  independently and reconciles any supplied `runtime_environment_attestation_v1`.
-  It is neither a platform runtime attestation nor remote SSH capture transport.
-  Actual apply remains unconditionally disabled before component invocation until
-  exact rollback binding and stable observation-window controls are separately
-  implemented and verified; no apply/postcheck PASS may be claimed.
-- P0-B ALR rollforward: this is a separate, purpose-built two-phase Adapter,
-  not an exception to generic deploy. `stage` and `cutover` require independent
-  compiler routes, materialized per-role Context artifacts, PA/E3/OPS evidence,
-  exact dynamic claim inputs, and a hash-bound `phase_runtime_bindings_v1`.
-  Stage keeps only `openclaw-alr-shadow.service` uninterrupted while sealing the
-  lineage/private dependency bundle. Cutover emits
-  `PHASE2_PROVISIONAL_CUTOVER_READY` before its exact observer input; the Adapter
-  may emit `PHASE2_APPLIED_POSTCHECK_PASS` only after
-  `OBSERVER_V2_EXACT_POSTCHECK_PASS`. Closure PASS remains impossible until the
-  later independent OPS postcheck binds that final effect receipt. It grants no
-  broker/order/live authority.
-- broker probe/contact: BB and IB are review-only. No development-agent broker
-  contact Adapter currently emits a closure-admissible receipt, so Bybit/IBKR
-  private effects route to an explicit unsupported-effect blocker. The existing
-  trading runtime remains separately governed.
-- durable report: immutable role fragments -> PM closure -> Report Sink
-
-PM may approve or trigger an Adapter but cannot use its own action as the only
-verification.
-
-## Closure and evidence
-
-One task has one `closure_packet_v1`; `work_status`, `gate_verdict`, and
-`disposition` are separate. `DONE + FAIL` is valid. Missing evidence, stale
-runtime proof, unresolved hard-gate dissent, exhausted budget, or skipped
-coverage cannot become PASS.
-
-`DONE` and `DONE_WITH_CONCERNS` may end with `next_action=null` when no real
-follow-up exists. `BLOCKED`/`NEEDS_CONTEXT` require an owned unblock action.
-`BLOCKED_NO_DELTA` is terminal for the current admission, can never carry PASS,
-and must have `next_action=null`; only a new semantic/external delta or explicit
-Operator reopen can create a new ACTIVE task.
-
-Evidence trust has three explicit tiers:
-
-- `LOCAL_REPRODUCIBLE`: exact repository/command bytes can be recaptured locally.
-- `ORCHESTRATOR_BOUND`: the controller records the requested task/context/role,
-  retries, and exact returned result. These packet-local call/wave receipts are
-  structural lineage only; they cannot authenticate their own execution.
-- `PLATFORM_OR_EXTERNAL_ATTESTED`: a platform/provider/external verifier attests
-  runtime, external-policy/outcome, or actual-usage facts.
-
-A canonical self-digest proves record integrity only; it is not a producer
-signature or authenticity proof. Every role fragment therefore references a
-rich call record, and every wave carries the complete call manifest plus admitted
-nodes, retries, nulls, planned lower bounds, coverage debt, and an explicit
-controller-overhead boundary. Records also bind native identity, node class/
-permission, DAG predecessors/topological wave, and producer generation. An orchestrator structural ledger exact-covers all
-waves in the closure capture index; ghost, omitted, extra, or duplicate wave
-identity fails closed. Closure `PASS` additionally requires a trusted host
-capability to verify the exact Context and delegated/runtime/outcome/effect
-digests; the standalone validation CLI has no such capability and cannot
-authenticate PASS.
-
-Test reuse requires an exact content/environment signature and TTL. Report
-`EXECUTED`, `REUSED`, `SKIPPED`, and `FAILED` honestly. Critical/flaky evidence
-requires re-execution or independent recheck. `EXECUTED` and `REUSED` checks both
-reference a validated command capture; reuse additionally preserves its
-reuse-assessment lineage. Without a host CommandCaptureVerifier, Closure deliberately
-trusted-replays captures, so one Adapter call is not a claim of one total execution.
-It rejects a PASS that does not reproduce or mutates task or whole-repo generation. Repository authority
-also binds value to the exact pinned Context-byte identity projection; interpreted
-semantics must use typed claim evidence.
-
-Routed verification nodes must explicitly PASS; `NOT_APPLICABLE` is only valid
-for work-only write nodes. OPS/QA/effect Adapter claims require their direct
-runtime/outcome/receipt evidence classes, not a generic source digest. A unit
-test cannot prove E2E behavior, source capture cannot prove runtime state, and a
-repository snapshot cannot prove mutation. Repo mutation needs exactly one
-task/role/node/effective-scope-bound record per admitted writer in canonical
-writer order. The digest-bound `repository_writer_scope_contract_v1` constrains
-that effective scope; it never overrides raw dispatch authority. A literal path
-from a raw canonical or adaptive scope may transfer only to a later, transitively
-serialized adaptive writer with the same dispatched role and permission. The
-resulting effective scopes remain non-empty/disjoint and their exact union is the
-task `dirty_scope`.
-
-The change chain has two fail-closed modes. A clean committed chain binds the
-admitted baseline, pairs clean task-wide and writer-owned endpoints, requires
-adjacent head and generation equality, and proves a nonempty config-isolated
-native strictly-linear commit range for each writer with every commit path inside
-that writer's effective scope. Only the final writer `owned_after` and final
-task-wide generation must be current. A same-HEAD dirty chain instead keeps every
-writer `owned_after` current. Mixing committed and dirty modes, or using one
-record for two writers, fails closed. Neither mode grants LW2, runtime, service,
-broker, order, funds, or trading effects.
-
-Actual token/cache/tool/time consumption may be claimed only from
-`PLATFORM_OR_EXTERNAL_ATTESTED` telemetry. An orchestrator wave ledger may report
-calls, retries, nulls, fan-out, and planned input lower bounds, but never promotes
-those estimates into actual usage.
-
-Longitudinal reopen/rework/false-closure/realized-value metrics live in a separate
-immutable-digest-bound `closure_quality_followup_v1`. Measured follow-up requires
-caller-trusted platform/external attestation; absent telemetry stays scheduled or
-unavailable and is never filled with zero.
-
-## Operator interaction
-
-Stop and report before expanding authority when there is a root-principle or
-hard-boundary conflict, contradictory cross-class evidence, destructive/risky
-operation, unclear ownership that risks collateral edits, or a technically
-unsound requested path. Distinguish fact, inference, and assumption.
-
-## Git and persistence
-
-- File changes do not implicitly authorize commit, push, deploy, or three-way
-  sync. Perform those when the operator requests them or an explicitly approved
-  checkpoint requires them.
-- A commit uses subject + body; a push report includes branch, SHA, and scope.
-- In a dirty tree, stage only owned files; never revert unrelated changes.
-- Writable feature work requires the exact active linked-worktree writer lease;
-  sharing one checkout between concurrent writers is forbidden.
-- Active state belongs in `TODO.md`; stable architecture in README/CONTEXT/ADR;
-  evidence in closure/report/archive; memory only receives new durable lessons.
-
-When this operating Interface changes, update the Registry, renderer/tests,
-`docs/agents/development-agent-governance.md`, and the accepted ADR. Generated
-role views must not be hand-edited.
+For semantic Interface changes update Registry/render/tests plus governance/ADR.
+For prose relocation, update the governed documents and indexes only; it creates
+no Registry, renderer, test, or generated-view work. Generated role views are
+never hand-edited.
