@@ -28,14 +28,15 @@ AI/ML queue，沒有 runtime、provider usage、模型採用或節省結論。
 
 | ID | State / named unblock | finite scope |
 |---|---|---|
-| W7 | `WAITING_USER_START`：使用者另行點名、乾淨 checkpoint fresh admission | 只校正三份 saved workflow 的 Registry block generation drift；不做廣泛 generator redesign。 |
-| W2–W6、W8–W11、WF6-01–WF6-07 | `DEFERRED`：依總帳的依賴、HITL 或可比較 evidence | 不自動提升；模型／routing A/B 不阻擋普通 source-overhead cleanup。 |
+| W2、W3 | `DEFERRED`：使用者明確啟動、乾淨 checkpoint fresh admission，並符合總帳依賴／HITL／可比較 evidence | 僅為未來候選；不自動提升，模型／routing A/B 不阻擋普通 source-overhead cleanup。 |
+| W4–W6、W8–W11、WF6-01–WF6-07 | `DEFERRED`：依總帳的依賴、HITL 或可比較 evidence | 不自動提升；模型／routing A/B 不阻擋普通 source-overhead cleanup。 |
 
 ### CLOSED（non-dispatchable）
 
 | ID | State | pointer |
 |---|---|---|
 | W0、W1 | `CLOSED_SOURCE_CHECKPOINT_NOT_MAIN_ADOPTED` | historical result/limitations in `WORKFLOW_TODO.md`; not current performance proof. |
+| W7 | `CLOSED_NARROW_SOURCE_CHECKPOINT` | `e134…` source-only generated Registry-block repair; E2 same-byte review / E4 committed-head tests PASS in `WORKFLOW_TODO.md`; no automatic successor. |
 
 ---
 

@@ -9,9 +9,10 @@ runtime、服務、PG、broker、下單、交易或獲利宣稱。
 
 W0/W1 是本地來源 checkpoint，尚未併入 `main` 或採用：W0 final
 `c90408613d6ce436abae619437a0bdc4acf4787f`，W1 final
-`86ae98c5bcbb50f5d897811327c8c118b0ff166f`。`23f76fe5efe2b28943c36a4696887b00e05273f0`
-只是本次對齊承接基線；本總帳及 companion docs 尚未提交，是本機文件 candidate，
-不是 current reviewed source checkpoint。下列歷史測試結果不是本次重跑或效能改善。
+`86ae98c5bcbb50f5d897811327c8c118b0ff166f`。`5a3666805187603c71318abe5b6dcd2c7b071457`
+已是 committed ledger baseline；`e134c772e48aef74de2f585239e16a89b9816681` 是使用者核准的
+W7 intermediate source checkpoint。使用者已批准本次本地文件 checkpoint；提交身份以 Git 紀錄為準。
+下列歷史測試結果不是本次重跑或效能改善。
 W0 initial source checkpoint 是 `9f9d277bf2ce2037c74597f065d41312f1ed53bc`；W1 initial probe
 checkpoint 是 `9c34aa4b28e30e495146cdb880ae889d3ea59b4f`；W0 final E4 task digest 為
 `931dc6a16de8d6d7613191afe0c6ce827f236f9ea051785b7319a4318255a9d0`，Registry 為
@@ -43,6 +44,19 @@ config 仍是 `UNVERIFIED`／`COMPLETE_WITH_UNVERIFIED`。W1 final E2 `24 passed
 |---|---|---|
 | W0 基線與成功閘門 | CLOSED / source checkpoint | 固定 KPI、Q0/Q1 與品質 gate；不構成實際節省或採用。|
 | W1 execution-surface truth probe | CLOSED / source checkpoint | 可重播來源快照與 fail-closed truth class；真實 selected config 未證實。|
+
+### W7 narrow source checkpoint（current, source-only）
+
+- `e134c772e48aef74de2f585239e16a89b9816681`：既有不變 generator 將三份 generated workflow 的
+  Registry digest 由 `sha256:9ce2dbd2bca32268cac32b6941537c9e305458f97ea5fe6590cada78dad300ff`
+  校正為 `sha256:0ab769848bb7490b9be067ae601b76b8e557d068bf0c481aca00b835e8ca8b23`；只有
+  `agent-wave.js`、`openclaw-full-audit.js`、`profit-diagnosis.js` 各一行 generated block 改動。
+- E1 完成生成、E2 獨立審查提交前同一份 source bytes PASS；E1 source record
+  `sha256:b87cf06ba475ffe92ed1895737d7d01cc85a8b13c03ae9cd537504e395732ca0`；E4 `8 passed / 0 failed /
+  0 skipped` 在已提交 `e134…` 上，capture `sha256:4ce8d1c76b37bef355c4ddb0ab51434eabbbff178eb5a9a139e0a072ce9641ea`，Context
+  `sha256:547baf43d6933168f0a1dd7ab9347395bdc375e4c217a3f81ba6137564bbb025`。這只關閉來源一致性；
+  不構成 runtime、effective config、session/performance、usage、模型採用或交易結論，也不授權 push、merge
+  或下一單元。提交前驗證與 committed-tree-only capture 的差異僅為 W5 現場觀察／待評估，未新增任務或修改政策。
 
 ### Historical W0 evidence ledger（未重跑）
 
@@ -94,7 +108,7 @@ config 仍是 `UNVERIFIED`／`COMPLETE_WITH_UNVERIFIED`。W1 final E2 `24 passed
 | W4 low-risk assurance lanes | DEFERRED，需 W2/W3 | 保留 conditional R4；E2/E4、硬 owner、權限事實不可為省 token 移除。`WF6-07` 的 routing 實驗只可在固定模型下比較，不能預先改寫本項。|
 | W5 capture reuse/host verifier | DEFERRED | 完整精確 source/diff/command/toolchain/environment 簽章與 TTL 合格才可 `REUSED`；缺少、無效或過期 reuse receipt 則 `EXECUTED`。host verifier 未認證前，兩者仍須 trusted replay。`WF6-03` 只重用 inventory。|
 | W6 immutable snapshot 平行化 | DEFERRED，需 W4/W5 與 HITL | 保留 snapshot-only deterministic E2/test fan-out、writer 串行與 ADR 0050/0052 的 HITL；不可由 A/B 繞過。|
-| W7 三份 generated workflow drift | WAITING_USER_START | 窄修 `.claude/workflows/agent-wave.js`、`openclaw-full-audit.js`、`profit-diagnosis.js` 的 Registry block 一致性。歷史 codegen 為 `1 failed, 6 passed`：嵌入 digest `9ce2…300ff` 與 current Registry `0ab7…8b23` 不同。廣泛 generator redesign 延後。|
+| W7 三份 generated workflow drift | CLOSED_NARROW_SOURCE_CHECKPOINT | `e134…` 以既有 generator 校正三份 Registry block；E2 同 bytes 審查 PASS、E4 committed-head 測試 PASS，詳見上方 W7 evidence。無 runtime/adoption/performance claim；廣泛 generator redesign 仍 DEFERRED。|
 | W8 locality/lazy S2 + context_store | DEFERRED，需 W3/W7 | 先量測 retain/isolate/delete 與正確性，再決定 lazy/locality；不刪必要 Context。|
 | W9 bootstrap profile | DEFERRED，需 W3 | 窄任務最小熱路徑；高風險/runtime/權限入口仍載入必要 normative source，缺 Context 即 `NEEDS_CONTEXT`。|
 | W10 KnowledgePilot off critical path | DEFERRED，HITL | 保留 delta-gated、單一 Vault writer；需使用者批准政策修訂才可解耦。|
@@ -113,9 +127,9 @@ source-overhead cleanup。
 
 ## 目前物理 queue 與下一步
 
-`TODO.md` 的 workflow lane 保持 `ACTIVE` empty。唯一近期候選是 W7，但狀態為
-`WAITING_USER_START`：使用者在新 session 明確點名 W7，並從乾淨 checkpoint fresh-admit
-後才可處理。完成 W7 不自動啟動 W2/W3 或任何 WF6 項。所有後續 source unit 均需
+`TODO.md` 的 workflow lane 保持 `ACTIVE` empty；W7 已為
+`CLOSED_NARROW_SOURCE_CHECKPOINT`。僅 W2/W3 是未來候選，仍須使用者明確啟動、從乾淨 checkpoint
+fresh-admit 後才可處理。完成 W7 不自動啟動 W2/W3 或任何 WF6 項。所有後續 source unit 均需
 literal scope、重新編譯 Context、按風險產生 E1→E2→E4 與必要 owner；無 commit、push、
 merge 或 main sync 授權。
 
