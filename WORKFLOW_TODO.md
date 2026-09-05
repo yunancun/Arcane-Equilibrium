@@ -153,7 +153,7 @@ W2/W3/W5/W10 source slices。
 | W2-local existing control validation | CLOSED_LOCAL_SOURCE_ONLY；owner=PM | `1de695218e8fbf11a317a40396ad1713e940b930`：E2 PASS，`102 passed / 0 failed / 0 skipped / 0 errors`（26.29s，capture `sha256:7992b78f83698d9821d31422b19d2a9638bf09c99887513f71216c2d49e05965`）；AI-E PASS 僅 fixture（capture `sha256:124ae3f330ed4f54f5b93d1c4d86135d4eca0f6e78017e49a554c83800b36820`）。26k prompt fixture drift 已修（W9 後低於 cap），dynamic compiler boundary 保持 `final=false`／0 calls，production caps/source 不變。這僅驗證 existing local controls，不是 host/full W2；depth/wait 只為 structural ledger validation，`boundedParallel` source 已檢視但未由 selected 102 作 rolling-pool dynamic test，且沒有 actual usage/cost/time、host adoption、main/remote/runtime effect。|
 | W2-host integration、no-delta、depth/wait | WAITING_EXTERNAL_HOST_INTEGRATION；owner=PM | 必須有實際 host preaction 的 spawn/wait/cancel/deadline integration，及非 caller 控制的證據；不得以 wrapper 替代。現有 depth/wait 只屬 structural ledger，非 native host enforcement；host unavailable。同 task-owned digest 必須 `BLOCKED_NO_DELTA` 且無 wakeup/retry；完成後仍 fresh-admit，超限可讀拒絕。|
 | W3 Context micro-pack/去重 | CLOSED_CONTEXT_MICRO_PACK_SOURCE_ONLY；owner=PM | `1f87d68f9a0b8535e8fb46cba52858fa57fbb3d9`：`WF6-01` selector + W3-owned `WF6-04` exact loading；E2 PASS，E4 exact-head `206/0/1/0`（30.69s，capture `sha256:428920484ee8db4296d1c5e1d198cf660e18507866201cebf86688159d276fcd`）。Python/saved workflow parity 在 suite 內覆蓋；沒有 actual usage/time/cost savings、main/remote/adoption/runtime/model change。|
-| W4 low-risk assurance lanes | WAITING_FRESH_ADMISSION；owner=PM | W2-local validated 與 W3 closed 已滿足；operator 已批准此 sequence，仍須 successor fresh-admit，不依賴 W2-host。保留 conditional R4；E2/E4、硬 owner、權限事實不可為省 token 移除。`WF6-07` 的 routing 實驗只可在固定模型下比較，不能預先改寫本項。|
+| W4 low-risk assurance lanes | ACTIVE；owner=PM | 已按 operator-approved sequence fresh-admit；僅實作 conditional R4 於狹義 low-risk editorial docs。保留 source E2→E4、硬 owner與權限事實；目前尚無實作或驗證結論，不依賴 W2-host。`WF6-07` 的 routing 實驗只可在固定模型下比較，不能預先改寫本項。|
 | W5 entry/source binding | CLOSED_ENTRY_SOURCE_BINDING_SOURCE_ONLY；owner=PM | 未提交 subject 現於 pytest/provider 執行前拒絕、clean exact head 可驗證，且 fixed committed-tree security 保留。E2 PASS；E4 `120/0/0/0`，詳見上方。僅本地 source checkpoint，非完整 W5、非 main adopted、無下一項。|
 | W5 capture reuse/host verifier residual | DEFERRED_TECHNICAL_DEPENDENCY；owner=PM | 依賴：W5 entry 已驗證及完整 source/diff/command/toolchain/environment 簽章與 TTL；合格才可 `REUSED`，否則 `EXECUTED`；production host verifier 未認證前兩者仍 trusted replay。`WF6-03` 只重用 inventory。|
 | W6 immutable snapshot 平行化 | DEFERRED_TECHNICAL_DEPENDENCY；owner=PM | 依賴：W4、W5 reuse evidence 與 HITL；保留 snapshot-only deterministic E2/test fan-out、writer 串行與 ADR 0050/0052 的 HITL；不可由 A/B 繞過。|
@@ -184,9 +184,9 @@ difference 是預期 skip。same-case docs `42909→31870` bytes（-25.7%）、p
 
 ## 目前物理 queue 與下一步
 
-physical queue has zero workflow ACTIVE; W1 local collector、W2-local existing controls、W3、W5 entry 與 W9 bootstrap 均已 source-only 收口，但 W2-local 不是 host/full W2，W5 不是全 W5。
+physical queue has one workflow ACTIVE: W4 low-risk assurance lanes; W1 local collector、W2-local existing controls、W3、W5 entry 與 W9 bootstrap 均已 source-only 收口，但 W2-local 不是 host/full W2，W5 不是全 W5。
 W3 只關閉 `WF6-01` 與 W3-owned `WF6-04` exact loading；W9 closes only W9-owned `WF6-04` bootstrap
-work after PM→PA→TW→R4→AI-E source-only review, with no automatic successor. W2-host 保持 external waiting；下一 local admission 為 operator-approved sequence 的 W4 fresh-admit；roadmap 仍為 advisory：
+work after PM→PA→TW→R4→AI-E source-only review, with no automatic successor. W2-host 保持 external waiting；W4 是 operator-approved sequence 的唯一 ACTIVE source unit，尚無實作或驗證結論；roadmap 仍為 advisory：
 並可獨立評估 `W8`，再到 `W5 reuse`、
 `W6/W10 decisions`、最後 `W11 integration/adoption`。這只是規劃次序，沒有任何 auto-run
 權限；未變的 hard policy 只能經明確批准 amendment 改變。每個後續 source unit 都需 literal

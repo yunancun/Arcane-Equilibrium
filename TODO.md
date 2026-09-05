@@ -22,7 +22,12 @@ AI/ML queue，沒有 runtime、provider usage、模型採用或節省結論。
 
 ### ACTIVE（dispatchable）
 
-本 workflow lane 現為零個 `ACTIVE` row；W2-local 已 source-only 收口，W4 仍須 fresh-admit，沒有自動下一項。
+`W4 low-risk assurance lanes` 為唯一 `ACTIVE` row：僅實作 conditional R4 於狹義 low-risk editorial docs，
+保留 source E2→E4 與硬 owner；目前尚無實作或驗證結論。
+
+| ID | State / finite scope |
+|---|---|
+| W4 low-risk assurance lanes | `ACTIVE`；conditional R4 僅限狹義 low-risk editorial docs，保留 source E2→E4 與硬 owner；尚未實作或驗證。 |
 
 ### WAITING / DEFERRED（non-dispatchable）
 
@@ -31,7 +36,6 @@ AI/ML queue，沒有 runtime、provider usage、模型採用或節省結論。
 | W1 host-selected evidence | `WAITING_EXTERNAL_EVIDENCE`：production selected-config 尚未 exposed | owner=PM；取得非 caller 控制的 selected-config/host evidence 後 fresh-admit；不阻擋 W2/W3/W5/W10 的 source slices。 |
 | W2-host integration | `WAITING_EXTERNAL_HOST_INTEGRATION`：owner=PM；必須有實際 host preaction 的 spawn/wait/cancel/deadline integration，及非 caller 控制的證據 | 不得以 wrapper 替代；完成後仍須 fresh-admit，roadmap 次序不是自動執行權。 |
 | W8 locality/lazy S2 | `DEFERRED_UNSTARTED`：PM fresh-admit 可比較的 retain/isolate/delete measurement | measurement/independent parts 可獨立於 W3/W9；W3/W7 source seams 已 closed，但 lazy/locality measurement 尚未完成，不自動提升或刪除必要 Context。 |
-| W4 assurance | `WAITING_FRESH_ADMISSION`：W2-local validated 與 W3 closed 已滿足；operator 已批准此 sequence，仍需 successor fresh-admit | 不依賴 W2-host；不自動提升。 |
 | W5 reuse/host verifier、W6 snapshot | `DEFERRED_TECHNICAL_DEPENDENCY`：分別需 W5 entry 後可驗證的 reuse signature/TTL 或 host verifier、及 W4/W5 的 immutable-snapshot evidence | W5 entry 已是 historical closed source-only checkpoint；reuse/production host verifier 不在本 W1 slice。 |
 | W10 KnowledgePilot、W11 adoption、WF6-02/05/06/07 | `DEFERRED_OPERATOR_POLICY_OR_EVIDENCE`：需 explicit policy amendment、HITL、external/provider evidence 或 qualified comparable run | 不自動提升；W11 dependency narrowing 只是 proposal，尚未生效。 |
 | WF6-01/03/04 | `WF6-01`、W3-owned `WF6-04` 與 W9-owned `WF6-04` 均 closed source-only；`WF6-03` 保持 waiting | 缺 provider attestation 時 WF6-03 保持 `WAITING_EXTERNAL_LIMIT`；不假稱 usage 或節省。 |
