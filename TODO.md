@@ -14,6 +14,31 @@
 
 ---
 
+## Workflow optimization physical queue（source-only）
+
+完整交叉帳、W0/W1 歷史 checkpoint 與 GPT-6 候選邊界見
+[`WORKFLOW_TODO.md`](WORKFLOW_TODO.md)；它不是 dispatch authority。本 lane 不影響下方
+AI/ML queue，沒有 runtime、provider usage、模型採用或節省結論。
+
+### ACTIVE（dispatchable）
+
+*（empty；沒有 workflow item 已 admission。）*
+
+### WAITING / DEFERRED（non-dispatchable）
+
+| ID | State / named unblock | finite scope |
+|---|---|---|
+| W7 | `WAITING_USER_START`：使用者另行點名、乾淨 checkpoint fresh admission | 只校正三份 saved workflow 的 Registry block generation drift；不做廣泛 generator redesign。 |
+| W2–W6、W8–W11、WF6-01–WF6-07 | `DEFERRED`：依總帳的依賴、HITL 或可比較 evidence | 不自動提升；模型／routing A/B 不阻擋普通 source-overhead cleanup。 |
+
+### CLOSED（non-dispatchable）
+
+| ID | State | pointer |
+|---|---|---|
+| W0、W1 | `CLOSED_SOURCE_CHECKPOINT_NOT_MAIN_ADOPTED` | historical result/limitations in `WORKFLOW_TODO.md`; not current performance proof. |
+
+---
+
 ## AI/ML 一分鐘派發看板
 
 本節只負責回答四件事：**現在做哪個 Sprint、包含哪些 Session、哪些可並行、何時停止**。G1、G2 與 UID validation/publication 均已 source 收口；當前 AIML **沒有 `ACTIVE` source row**。S0 已關閉，S1=`S1_CLOSED`；S2 七個窄義 source seams 均 landed，但 effect-execution readiness 尚未完成。九個拆分包維持 **5/9**：`S2E.0`、`S2E.1`、`S2E.2a`、`S2E.2b-1`、`S2E.3`；`S2E.2b-2`／`S2E-LW2` 的 successor label 是 `LW2_RE_ADMISSION_READY`，physical queue 仍為 `WAITING`、`dispatchable=false`。G2 landed、UID formal close/merge 與 exact-M1 combined proof 只保留為歷史證據；新的 executable admission gate 要求 PM **另開 fresh admission** 時提供三項 canonical-digest-bound、same-current-head claim inputs/payloads，才可在 route 建 DAG 前通過，且 task admission 會在 store/lease 前再驗一次。這不會自動建立 task/DAG/lease/source write/artifact/receipt 或把 row 移至 ACTIVE。16 項 external prerequisites 仍完整阻擋 receipt/effect。不得自動解鎖或撰寫 LW2、重開 WP1-WP5 或五個已完成包，也不得把 source/CI 當 runtime。詳細 scope 以本 TODO 的 WAITING row、S2E 表與 `PROGRESS.md` current generation 為準；三者衝突時停止，由 PM 綁定 current generation。

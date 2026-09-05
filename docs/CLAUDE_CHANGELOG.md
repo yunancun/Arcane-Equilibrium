@@ -1,7 +1,23 @@
 # CLAUDE_CHANGELOG.md — 開發歷史歸檔
 
 > 從 CLAUDE.md / TODO.md 遷出的 Wave/Sprint/Batch + TODO version-increment 歷史敘事。新 session 不需要讀此文件，僅供回顧歷史時查閱。
-> 最後更新：2026-08-14（TODO v880 LW2 readmission authority closure candidate）
+> 最後更新：2026-09-05（workflow optimization master-ledger reconciliation；AIML queue unchanged）
+
+---
+
+## 2026-09-05：workflow optimization master ledger reconciliation
+
+- 把本地 W0/W1 source checkpoints 與原 GPT-6 planning handoff 對齊為
+  `WORKFLOW_TODO.md` 總帳；W0/W1 保持 historical source checkpoint，未併入 main 或採用。
+  Q0/Q1、P0/P1 和 reopen/rework/false-closure gates 不變；actual usage、savings、runtime 與
+  selected config 仍未證實。
+- 根 `TODO.md` 只新增短 workflow physical queue：`ACTIVE` empty，W7 為
+  `WAITING_USER_START` 的窄三檔 generation drift，其他 W2–W11/WF6 候選均 deferred。
+  不改下方任何 AIML queue bytes，也不自動續跑或採用模型／政策。
+- 新增 GPT-6 背景文件，保留 priced economics、external telemetry、compatibility、fallback 與
+  fixed-variable A/B 的限制；原 handoff 的舊 startup/order 已 superseded，後續單元一律要
+  使用者點名與乾淨 checkpoint fresh admission。本次無 source/config/runtime/service/PG/broker
+  變更，無 commit、push、merge 或 sync。
 
 ---
 
