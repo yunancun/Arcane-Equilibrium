@@ -158,7 +158,7 @@ W2/W3/W5/W10 source slices。
 | W6 immutable snapshot 平行化 | DEFERRED_TECHNICAL_DEPENDENCY；owner=PM | 依賴：W4、W5 reuse evidence 與 HITL；保留 snapshot-only deterministic E2/test fan-out、writer 串行與 ADR 0050/0052 的 HITL；不可由 A/B 繞過。|
 | W7 三份 generated workflow drift | CLOSED_NARROW_SOURCE_CHECKPOINT；owner=PM | `e134…` 以既有 generator 校正三份 Registry block；E2 同 bytes 審查 PASS、E4 committed-head 測試 PASS，詳見上方 W7 evidence。無 runtime/adoption/performance claim；original broad generator redesign residual 仍待 PM gap-list assessment，不自動 re-design。|
 | W8 locality/lazy S2 + context_store | DEFERRED_UNSTARTED；owner=PM | W3/W7 source seams 已 closed；仍須 fresh-admit measurement/independent parts 量測 retain/isolate/delete 與正確性，再決定 lazy/locality；不刪必要 Context。|
-| W9 bootstrap profile | ACTIVE/PENDING_REVIEW；human master=PM；PA→TW→R4→AI-E | admitted source-only docs lane: slim hot path plus manual conditional bootstrap reference; high-risk/runtime/permission still reads its normative source before action, missing Context is `NEEDS_CONTEXT`; no next W. |
+| W9 bootstrap profile | CLOSED_BOOTSTRAP_SOURCE_ONLY；human master=PM；PA→TW→R4→AI-E | reviewed source `bf6839c505d0083f9e1e5717b770347c597e69cf`; PA/R4/AI-E source-only PASS. Startup-only comparable bytes `37987→10494` (-72.4%); stable core `25266→9841`, planned `6509→2653`; docs `31870→16445`, planned `8172→4316`. Conditional manual illustrations: `15355` formal closure, `24939` delegated docs write+closure, `21138` readonly review+closure, `23981` runtime-claim review+closure; measurement capture `sha256:3bbd75d48e9a8f6388c1b6437a8f8b49c13b41a80af9ca904a0634637349dba0`. These exclude compiler artifact/other role adapters/evidence/code/tools/host telemetry: not actual tokens/cache/time/cost/quality outcomes. Residual: manual pointer compliance and no qualified host E2E run. No automatic next W; W2/W4 remain next admission work. |
 | W10 KnowledgePilot off critical path | DEFERRED_OPERATOR_POLICY_DECISION；owner=Operator/PM | 依賴：明確批准的政策 amendment；保留 delta-gated、單一 Vault writer，未批准不得解耦。|
 | W11 canary/adoption closure | DEFERRED_EXTERNAL_EVIDENCE_AND_OPERATOR_DECISION；owner=PM/Operator | 依賴：可比較的 qualified measurement/adoption evidence 與明確政策決策；原「W2…W10 全依賴」的移除只是 proposal，尚未生效。|
 | WF6-02 priced economics | DEFERRED_EXTERNAL_EVIDENCE；owner=PM | 依賴：provider-attested price/usage、cache accounting、failed/reopened cohort 與 follow-up window；品質 gate 仍是 hard gate，不假稱 efficiency。|
@@ -183,10 +183,10 @@ difference 是預期 skip。same-case docs `42909→31870` bytes（-25.7%）、p
 
 ## 目前物理 queue 與下一步
 
-physical queue has only W9 workflow ACTIVE/PENDING_REVIEW; W1 local collector、W3 與 W5 entry 均已收口，但 W5 不是全 W5。
-W3 只關閉 `WF6-01` 與 W3-owned `WF6-04` exact loading；W9 bootstrap 已在 source-only PM admission
-下 ACTIVE，human master 為 PM，review path `PA→TW→R4→AI-E` pending，沒有自動後續工作。roadmap 仍為 advisory：
-並可獨立評估 `W8`，再到 `W2/W4/W5 reuse`、
+physical queue has zero workflow ACTIVE; W1 local collector、W3、W5 entry 與 W9 bootstrap 均已 source-only 收口，但 W5 不是全 W5。
+W3 只關閉 `WF6-01` 與 W3-owned `WF6-04` exact loading；W9 closes only W9-owned `WF6-04` bootstrap
+work after PM→PA→TW→R4→AI-E source-only review, with no automatic successor. 下一 admission work 為 `W2/W4`；roadmap 仍為 advisory：
+並可獨立評估 `W8`，再到 `W5 reuse`、
 `W6/W10 decisions`、最後 `W11 integration/adoption`。這只是規劃次序，沒有任何 auto-run
 權限；未變的 hard policy 只能經明確批准 amendment 改變。每個後續 source unit 都需 literal
 scope、重新編譯 Context、按風險產生 E1→E2→E4 與必要 owner；無 commit、push、merge 或 main

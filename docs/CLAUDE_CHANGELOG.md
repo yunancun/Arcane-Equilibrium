@@ -1,12 +1,18 @@
 # CLAUDE_CHANGELOG.md — 開發歷史歸檔
 
-## 2026-09-06 W9 bootstrap profile (source-only, review pending)
+## 2026-09-06 W9 bootstrap profile (CLOSED_BOOTSTRAP_SOURCE_ONLY)
 
 Slimmed agent hot-path documents and relocated conditional governance detail to
 `docs/agents/bootstrap-reference.md`; corrected the documented W3 workflow-state
 selector to TODO physical queue; the independent docs pack selects seven
-`docs/README.md` sections. This is not
-runtime, model, Registry, generated-view, provider-usage, cost, or adoption evidence.
+`docs/README.md` sections. Reviewed source `bf6839c505d0083f9e1e5717b770347c597e69cf`;
+PA/R4/AI-E source-only PASS and PM diagnostics (`2` existing document-contract tests
+passed in `0.12s`; `render --check` PASS, updated `[]`) are not E4, full-repository, or
+exact-head test claims. Writer change=`sha256:375c18b03afb4790b691409387d04d6f0f4b0e66653fd984e9715de66b06c3de`;
+R4 capture=`sha256:a5ac6d4cc6fde23d1dd0a5075587edd01fce434f17366f5a8e07c016f3489e19`.
+This is not runtime, model, Registry, generated-view, provider-usage, cost, adoption,
+main, remote, or actual-efficiency evidence; manual pointer compliance and qualified
+host E2E remain residuals. No automatic next W.
 
 > 從 CLAUDE.md / TODO.md 遷出的 Wave/Sprint/Batch + TODO version-increment 歷史敘事。新 session 不需要讀此文件，僅供回顧歷史時查閱。
 > 最後更新：2026-09-05（workflow optimization master-ledger reconciliation；AIML queue unchanged）
@@ -21,7 +27,7 @@ runtime, model, Registry, generated-view, provider-usage, cost, or adoption evid
   argv-cap difference is the expected skip; direct E4 CLI check was allowlist-denied.
 - Same-case docs changed `42909→31870` bytes and planned context `10933→8177`; core remained
   `25266` bytes / `6522` planned. This is not actual usage/time/cost savings, main/remote/adoption,
-  runtime, model change, or W9 bootstrap closure; W9 remains PM fresh-admission work.
+  runtime, model change, or W9 bootstrap closure; W3 alone did not close W9.
 
 ---
 

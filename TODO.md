@@ -22,9 +22,7 @@ AI/ML queue，沒有 runtime、provider usage、模型採用或節省結論。
 
 ### ACTIVE（dispatchable）
 
-| ID | State / owner path | admitted finite scope and acceptance |
-|---|---|---|
-| W9 bootstrap profile | `ACTIVE`；human master PM → PA → TW(native `TW`, docs_writer, work) → R4 → AI-E；reviews pending | source-only exact docs scope under W9 admission `de790b3be60f681259943db36f6a021a`, exclusive lease `8385344841fdf3c2c02ad9da484af480`; slim entry/context plus canonical conditional reference, correct W3 state routing, preserve hard-boundary CLAUDE sections; acceptance is PA/R4/AI-E review with no generated/Registry/code change. No next W. |
+本 workflow lane 現為零個 `ACTIVE` row；W9 已 source-only closed，沒有自動下一項。
 
 ### WAITING / DEFERRED（non-dispatchable）
 
@@ -35,7 +33,7 @@ AI/ML queue，沒有 runtime、provider usage、模型採用或節省結論。
 | W8 locality/lazy S2 | `DEFERRED_UNSTARTED`：PM fresh-admit 可比較的 retain/isolate/delete measurement | measurement/independent parts 可獨立於 W3/W9；W3/W7 source seams 已 closed，但 lazy/locality measurement 尚未完成，不自動提升或刪除必要 Context。 |
 | W4 assurance、W5 reuse/host verifier、W6 snapshot | `DEFERRED_TECHNICAL_DEPENDENCY`：分別需 W2/W3、W5 entry 後可驗證的 reuse signature/TTL 或 host verifier、及 W4/W5 的 immutable-snapshot evidence | W5 entry 已是 historical closed source-only checkpoint；reuse/production host verifier 不在本 W1 slice。 |
 | W10 KnowledgePilot、W11 adoption、WF6-02/05/06/07 | `DEFERRED_OPERATOR_POLICY_OR_EVIDENCE`：需 explicit policy amendment、HITL、external/provider evidence 或 qualified comparable run | 不自動提升；W11 dependency narrowing 只是 proposal，尚未生效。 |
-| WF6-01/03/04 | `WF6-01` 與 W3-owned `WF6-04` exact loading 已 closed source-only；`WF6-03` 保持 waiting，W9-owned `WF6-04` 為 current W9 ACTIVE/PENDING_REVIEW source-only work | 缺 provider attestation 時 WF6-03 保持 `WAITING_EXTERNAL_LIMIT`；不假稱 usage 或節省。 |
+| WF6-01/03/04 | `WF6-01`、W3-owned `WF6-04` 與 W9-owned `WF6-04` 均 closed source-only；`WF6-03` 保持 waiting | 缺 provider attestation 時 WF6-03 保持 `WAITING_EXTERNAL_LIMIT`；不假稱 usage 或節省。 |
 
 ### CLOSED（non-dispatchable）
 
@@ -46,6 +44,7 @@ AI/ML queue，沒有 runtime、provider usage、模型採用或節省結論。
 | W5-entry-source-binding | `CLOSED_ENTRY_SOURCE_BINDING_SOURCE_ONLY` | local source checkpoint `60bc55673f170a06ee4b93a2080c060160707566`: E2 resolved two findings; E4 exact committed-head `120 passed / 0 failed / 0 skipped / 0 errors`, capture `sha256:ae95998b8b0e92b17c3f17949f3011cfe68ce63b1df211fc7138df57f01eca43`. Not full W5, main adoption, runtime, usage/cost/savings, or automatic successor. |
 | W0、W1 | `CLOSED_SOURCE_CHECKPOINT_NOT_MAIN_ADOPTED` | historical result/limitations in `WORKFLOW_TODO.md`; not current performance proof. |
 | W7 | `CLOSED_NARROW_SOURCE_CHECKPOINT` | `e134…` source-only generated Registry-block repair; E2 same-byte review / E4 committed-head tests PASS in `WORKFLOW_TODO.md`; no automatic successor. |
+| W9-bootstrap-profile | `CLOSED_BOOTSTRAP_SOURCE_ONLY` | reviewed source `bf6839c505d0083f9e1e5717b770347c597e69cf`; PA/R4/AI-E source-only PASS, writer change `sha256:375c18b03afb4790b691409387d04d6f0f4b0e66653fd984e9715de66b06c3de`, R4 capture `sha256:a5ac6d4cc6fde23d1dd0a5075587edd01fce434f17366f5a8e07c016f3489e19`. No automatic next W, host adoption, main/remote, Registry/model/runtime change, or actual efficiency claim. |
 
 ---
 
