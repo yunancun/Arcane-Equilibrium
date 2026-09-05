@@ -420,8 +420,16 @@
     }
   },
   "context_packs": {
-    "core": ["AGENTS.md", "CLAUDE.md#Product Boundary", "CLAUDE.md#Root Principles", "CLAUDE.md#Hard Boundaries"],
-    "active_state": [{"source": "TODO.md#S2E 當前派發投影", "kind": "todo_dispatch_projection", "heading": "S2E 當前派發投影", "id_column": "ID", "status_column": "Lane／狀態", "dependency_column": "依賴", "dependency_depth": 1, "required_when": {"surfaces_any": ["operations", "runtime", "deploy", "service", "cron", "pg", "full_audit", "profit_diagnosis", "incident_rca"], "claims_any": ["runtime_claim", "end_to_end_claim"], "uncertainty_any": ["high", "unknown"]}}],
+    "core": [
+      "AGENTS.md",
+      {"source": "CLAUDE.md#一、Product Boundary", "kind": "markdown_section", "heading": "## 一、Product Boundary"},
+      {"source": "CLAUDE.md#二、Root Principles", "kind": "markdown_section", "heading": "## 二、Root Principles"},
+      {"source": "CLAUDE.md#四、Hard Boundaries", "kind": "markdown_section", "heading": "## 四、Hard Boundaries"}
+    ],
+    "active_state": [
+      {"source": "TODO.md#Workflow optimization physical queue（source-only）", "kind": "markdown_section", "heading": "## Workflow optimization physical queue（source-only）", "required_when": {"surfaces_any": ["current_workflow_state"]}},
+      {"source": "TODO.md#S2E 當前派發投影", "kind": "todo_dispatch_projection", "heading": "S2E 當前派發投影", "id_column": "ID", "status_column": "Lane／狀態", "dependency_column": "依賴", "dependency_depth": 1, "required_when": {"surfaces_any": ["current_s2e_state", "operations", "runtime", "deploy", "service", "cron", "pg", "full_audit", "profit_diagnosis", "incident_rca"], "claims_any": ["runtime_claim", "end_to_end_claim"], "uncertainty_any": ["high", "unknown"]}}
+    ],
     "architecture": [
       {"source": "CONTEXT.md", "kind": "repository_inventory", "paths": ["CONTEXT.md"], "min_matches": 1},
       {"source": "relevant docs/adr/*", "kind": "repository_inventory", "paths": ["docs/adr/*.md"], "min_matches": 1}
@@ -456,7 +464,13 @@
       {"source": "screenshots or browser trace when available", "kind": "repository_inventory", "paths": ["docs/**/*.png", "docs/**/*.webp", "tests/fixtures/**/*screenshot*"], "min_matches": 0}
     ],
     "docs": [
-      "docs/README.md",
+      {"source": "docs/README.md#当前入口速查", "kind": "markdown_section", "heading": "## 当前入口速查"},
+      {"source": "docs/README.md#Multi-Agent 接手路径", "kind": "markdown_section", "heading": "## Multi-Agent 接手路径"},
+      {"source": "docs/README.md#强制规则 (Mandatory Rules)", "kind": "markdown_section", "heading": "## 强制规则 (Mandatory Rules)"},
+      {"source": "docs/README.md#文件命名规范 (File Naming Convention)", "kind": "markdown_section", "heading": "## 文件命名规范 (File Naming Convention)"},
+      {"source": "docs/README.md#日志分类说明 (Log Categories)", "kind": "markdown_section", "heading": "## 日志分类说明 (Log Categories)"},
+      {"source": "docs/README.md#日志书写原则 (Writing Principles)", "kind": "markdown_section", "heading": "## 日志书写原则 (Writing Principles)"},
+      {"source": "docs/README.md#文档索引 (Document Index)", "kind": "markdown_section", "heading": "## 文档索引 (Document Index)"},
       {"source": "relevant docs/_indexes/*", "kind": "repository_inventory", "paths": ["docs/_indexes/*.md"], "min_matches": 1}
     ],
     "history_on_demand": [
