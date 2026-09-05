@@ -5,6 +5,18 @@
 
 ---
 
+## 2026-09-06：W3 Context micro-pack source-only closure
+
+- `1f87d68f9a0b8535e8fb46cba52858fa57fbb3d9` closes only `WF6-01` selector and W3-owned
+  `WF6-04` exact loading: E2 PASS; E4 exact-head `206/0/1/0` in 30.69s, capture
+  `sha256:428920484ee8db4296d1c5e1d198cf660e18507866201cebf86688159d276fcd`. The Darwin/Linux
+  argv-cap difference is the expected skip; direct E4 CLI check was allowlist-denied.
+- Same-case docs changed `42909→31870` bytes and planned context `10933→8177`; core remained
+  `25266` bytes / `6522` planned. This is not actual usage/time/cost savings, main/remote/adoption,
+  runtime, model change, or W9 bootstrap closure; W9 remains PM fresh-admission work.
+
+---
+
 ## 2026-09-06：W1 local collector source-only closure
 
 - `W1-local-collector` 收口為 `CLOSED_LOCAL_COLLECTOR_SOURCE_ONLY`：E2 standards/spec PASS（四項修復）；

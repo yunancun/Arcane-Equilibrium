@@ -91,6 +91,14 @@ acceptance/hard stops、必填 uncertainty、baseline/direct interfaces/previous
 virtual evidence 必須是 source/observed-at typed、byte-backed artifact，caller digest 只是
 assertion。Saved workflow 不再信任 raw contextPath，而是直接驗證 Python-canonical context
 bytes 並消費同一份 inline artifact，retry 不 reopen path，也不做跨語言 canonicalization。
+Current-state loading requires the explicit `current_workflow_state` or
+`current_s2e_state` surface: Python and saved workflow exact-check Registry-derived
+kind/name/selector and select only unique full ATX Markdown sections outside balanced
+fences (≤16 KiB). Missing/duplicate/malformed selection fails closed without whole-file
+fallback; prompt words never infer a surface. Workflow selection retains its bounded
+core/docs (including Document Index rules, excluding bulk directory history), while S2E
+retains its existing projection; stable conceptual queries carry neither. The semantic
+payload need not repeat `source_kind`, because the full plan binds it.
 Budget 使用 elastic target/reserve + reviewed band，並分開 exact prompt-byte、UTF8/4 planned
 lower-bound、workflow、unique-node、attempt、retry authority；到 cap 才拆分或升級，不截
 mandatory context。Planned lower bound 不冒充 actual provider tokens。Full Audit 可合理使用

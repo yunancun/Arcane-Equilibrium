@@ -3,8 +3,8 @@
 ## 地位、邊界與目前真相
 
 這是人工閱讀的來源限定總帳，不是可派發佇列；物理 queue 只在根目錄
-[`TODO.md`](TODO.md)。`W1-local-collector` 已為 `CLOSED_LOCAL_COLLECTOR_SOURCE_ONLY`；唯一 workflow
-dispatchable row 是 `W3-context-micro-pack` 的 source-only intake，不能推論 effective/host-selected
+[`TODO.md`](TODO.md)。`W1-local-collector` 已為 `CLOSED_LOCAL_COLLECTOR_SOURCE_ONLY`；W3 亦已為
+`CLOSED_CONTEXT_MICRO_PACK_SOURCE_ONLY`，workflow lane 沒有 dispatchable row，不能推論 effective/host-selected
 configuration、完整 W1、模型／政策採用、runtime、服務、PG、broker、下單、交易或獲利宣稱，也不授權
 自動續跑或下一項。`W5-entry-source-binding` 仍是窄義
 `CLOSED_ENTRY_SOURCE_BINDING_SOURCE_ONLY` checkpoint。
@@ -151,14 +151,14 @@ W2/W3/W5/W10 source slices。
 | 總帳工作 | 狀態／依賴 | 與 GPT-6 候選的對齊與有限出口 |
 |---|---|---|
 | W2 host admission、no-delta、depth/wait | DEFERRED_UNSTARTED；owner=PM | 本次先處理 W5 是排程選擇，不是技術硬依賴；仍由 PM fresh-admit。同 task-owned digest 必須 `BLOCKED_NO_DELTA` 且無 wakeup/retry；超限可讀拒絕。|
-| W3 Context micro-pack/去重 | ACTIVE intake；owner=PM | **planned, not implemented**：typed `current_workflow_state`／`current_s2e_state` selection、bounded exact core/docs sections 與 Python/saved-workflow parity；保留 required facts/policy/claims/DAG/provenance，無 full-TODO fallback。`WF6-01` 是 selector 子切片；W3-owned `WF6-04` exact loading 不含 W9 bootstrap。|
+| W3 Context micro-pack/去重 | CLOSED_CONTEXT_MICRO_PACK_SOURCE_ONLY；owner=PM | `1f87d68f9a0b8535e8fb46cba52858fa57fbb3d9`：`WF6-01` selector + W3-owned `WF6-04` exact loading；E2 PASS，E4 exact-head `206/0/1/0`（30.69s，capture `sha256:428920484ee8db4296d1c5e1d198cf660e18507866201cebf86688159d276fcd`）。Python/saved workflow parity 在 suite 內覆蓋；沒有 actual usage/time/cost savings、main/remote/adoption/runtime/model change。|
 | W4 low-risk assurance lanes | DEFERRED_TECHNICAL_DEPENDENCY；owner=PM | 依賴：W2/W3 完成的可驗證 source seam；保留 conditional R4；E2/E4、硬 owner、權限事實不可為省 token 移除。`WF6-07` 的 routing 實驗只可在固定模型下比較，不能預先改寫本項。|
 | W5 entry/source binding | CLOSED_ENTRY_SOURCE_BINDING_SOURCE_ONLY；owner=PM | 未提交 subject 現於 pytest/provider 執行前拒絕、clean exact head 可驗證，且 fixed committed-tree security 保留。E2 PASS；E4 `120/0/0/0`，詳見上方。僅本地 source checkpoint，非完整 W5、非 main adopted、無下一項。|
 | W5 capture reuse/host verifier residual | DEFERRED_TECHNICAL_DEPENDENCY；owner=PM | 依賴：W5 entry 已驗證及完整 source/diff/command/toolchain/environment 簽章與 TTL；合格才可 `REUSED`，否則 `EXECUTED`；production host verifier 未認證前兩者仍 trusted replay。`WF6-03` 只重用 inventory。|
 | W6 immutable snapshot 平行化 | DEFERRED_TECHNICAL_DEPENDENCY；owner=PM | 依賴：W4、W5 reuse evidence 與 HITL；保留 snapshot-only deterministic E2/test fan-out、writer 串行與 ADR 0050/0052 的 HITL；不可由 A/B 繞過。|
 | W7 三份 generated workflow drift | CLOSED_NARROW_SOURCE_CHECKPOINT；owner=PM | `e134…` 以既有 generator 校正三份 Registry block；E2 同 bytes 審查 PASS、E4 committed-head 測試 PASS，詳見上方 W7 evidence。無 runtime/adoption/performance claim；original broad generator redesign residual 仍待 PM gap-list assessment，不自動 re-design。|
-| W8 locality/lazy S2 + context_store | DEFERRED_UNSTARTED；owner=PM | measurement/independent parts 可獨立於 W3/W9 開始量測 retain/isolate/delete 與正確性；lazy S2 implementation 仍依賴 W3/W7，再決定 lazy/locality；不刪必要 Context。|
-| W9 bootstrap profile | DEFERRED_TECHNICAL_DEPENDENCY；owner=PM | 依賴：W3 exact Context seam；窄任務最小熱路徑，高風險/runtime/權限入口仍載入必要 normative source，缺 Context 即 `NEEDS_CONTEXT`。|
+| W8 locality/lazy S2 + context_store | DEFERRED_UNSTARTED；owner=PM | W3/W7 source seams 已 closed；仍須 fresh-admit measurement/independent parts 量測 retain/isolate/delete 與正確性，再決定 lazy/locality；不刪必要 Context。|
+| W9 bootstrap profile | DEFERRED_UNSTARTED；owner=PM | W3 exact Context seam 已在 local branch 完成，仍待 PM fresh-admit；窄任務最小熱路徑，高風險/runtime/權限入口仍載入必要 normative source，缺 Context 即 `NEEDS_CONTEXT`。|
 | W10 KnowledgePilot off critical path | DEFERRED_OPERATOR_POLICY_DECISION；owner=Operator/PM | 依賴：明確批准的政策 amendment；保留 delta-gated、單一 Vault writer，未批准不得解耦。|
 | W11 canary/adoption closure | DEFERRED_EXTERNAL_EVIDENCE_AND_OPERATOR_DECISION；owner=PM/Operator | 依賴：可比較的 qualified measurement/adoption evidence 與明確政策決策；原「W2…W10 全依賴」的移除只是 proposal，尚未生效。|
 | WF6-02 priced economics | DEFERRED_EXTERNAL_EVIDENCE；owner=PM | 依賴：provider-attested price/usage、cache accounting、failed/reopened cohort 與 follow-up window；品質 gate 仍是 hard gate，不假稱 efficiency。|
@@ -173,11 +173,19 @@ comparison`。`WF6-03` 不另列為獨立調查：它是一次性 read-only evid
 attestation 時以 `WAITING_EXTERNAL_LIMIT` 停止。模型 A/B 或 routing A/B 都不阻擋普通
 source-overhead cleanup。
 
+W3 evidence：E2 PASS；E4 exact-head `206 passed / 0 failed / 1 skipped / 0 errors` in 30.69s on
+`1f87d68f9a0b8535e8fb46cba52858fa57fbb3d9`（capture
+`sha256:428920484ee8db4296d1c5e1d198cf660e18507866201cebf86688159d276fcd`）；Darwin/Linux argv-cap
+difference 是預期 skip。same-case docs `42909→31870` bytes（-25.7%）、planned `10933→8177`，core
+`25266` bytes／`6522` planned 不變。direct E4 CLI check 為 allowlist denied；suite codegen parity 不是
+獨立 CLI PASS。known unrelated global line cap 2060 與 `command_capture_v2` file hash 是 explicit residual，
+不是 W3 regression 或 full-repo PASS。
+
 ## 目前物理 queue 與下一步
 
-physical queue 唯一 workflow ACTIVE 是 `W3-context-micro-pack` intake；W1 local collector 與 W5 entry
-均已收口，但 W5 不是全 W5。W3 仍是 planned, not implemented，沒有自動後續工作；roadmap 仍為 advisory：
-W9 仍依賴 W3 scoped completion，
+physical queue 沒有 workflow ACTIVE；W1 local collector、W3 與 W5 entry 均已收口，但 W5 不是全 W5。
+W3 只關閉 `WF6-01` 與 W3-owned `WF6-04` exact loading；W9 bootstrap 仍為 `DEFERRED_UNSTARTED`，須 PM
+fresh-admit，沒有自動後續工作。roadmap 仍為 advisory：
 並可獨立評估 `W8`，再到 `W2/W4/W5 reuse`、
 `W6/W10 decisions`、最後 `W11 integration/adoption`。這只是規劃次序，沒有任何 auto-run
 權限；未變的 hard policy 只能經明確批准 amendment 改變。每個後續 source unit 都需 literal

@@ -115,6 +115,20 @@ The Registry defines packs; the compiler selects and deduplicates pointers:
   content digest/bytes/provenance, source bytes, and a real
   `full_file_token_estimate` from complete `TODO.md` bytes. Legacy
   `todo_active_rows` callers retain exactly-one ACTIVE semantics.
+- `workflow_state`: only an explicit `current_workflow_state` or
+  `current_s2e_state` task surface selects its bounded, typed `markdown_section`
+  payloads. A section is one unique full ATX heading outside balanced fences and
+  at most 16 KiB; missing, duplicate, malformed, or unselected sections fail closed,
+  never to whole-file fallback. `current_s2e_state` retains the existing S2E
+  projection; `current_workflow_state` selects the bounded workflow core/docs
+  set (seven sections, including Document Index rules), while bulk directory
+  history is not preloaded and core `AGENTS.md`/policy bytes remain exact. The
+  compiler never infers either surface from prompt words: stable conceptual
+  queries carry no state surface; current-state questions must name one. Every
+  role, including low-uncertainty routing, receives the matching bounded surface;
+  existing runtime/high-risk triggers remain intact. Registry-derived
+  kind/name/selector identities are exact-checked in Python and saved workflow;
+  the semantic payload need not repeat `source_kind` because the full plan binds it.
 - `architecture`: CONTEXT + relevant ADR
 - `source_change`: diff, direct interfaces/callers, focused acceptance tests
 - `runtime`: active evidence + sub-agent hygiene
@@ -126,8 +140,9 @@ The Registry defines packs; the compiler selects and deduplicates pointers:
   empty refs mean the pack is inactive
 
 Role memory is historical judgment support, not an automatic startup dependency.
-Unrelated TODO rows and unselected history must not change Context bytes, digest,
-or planned tokens.
+With identical task inputs, unrelated TODO rows and unselected history must not
+change selected semantic content, its digest, or planned estimates; artifact
+provenance and freshness remain independently bound.
 
 ## Elastic budget
 

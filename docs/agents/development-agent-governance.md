@@ -167,6 +167,17 @@ full-file fallback；legacy `todo_active_rows` callers 仍要求 exactly-one ACT
 32 KiB；glob、whole-file、symlink、traversal、未選 section 均拒絕。因而無關
 TODO/history 變更不再破壞 shared Context/cache key。
 
+Workflow current state 只能由 task 的 `current_workflow_state` 或
+`current_s2e_state` 明示 surface 選擇；compiler 不從 prompt 字詞猜測。每個選入 typed
+`markdown_section` 必須是 balanced fences 外的 unique full ATX heading，且不超過 16 KiB；缺失、重複或
+malformed selector 一律 fail closed，沒有 full-file fallback。前者選 bounded workflow core/docs（含
+Document Index rules 的七 sections、不 preload bulk directory history，並保留 exact core `AGENTS.md`/policy
+bytes），後者保留既有 S2E dispatch projection；stable conceptual query 不帶 state surface。每個 role（含
+low-uncertainty routing）取正確 bounded surface，既有 runtime/high-risk triggers 不變。Registry-derived
+kind/name/selector 在 Python 與 saved workflow exact parity 檢查；semantic payload 不重複 `source_kind`，因 full plan 已綁定。相同 task inputs 下，
+不相關資料只不得改變 selected semantic content/digest/planned estimate，artifact provenance/freshness
+仍獨立綁定。
+
 Budget 分開管理 single-call planned lower bound、exact prompt bytes、workflow planned
 lower bound、unique nodes、call attempts 與 retry：
 
