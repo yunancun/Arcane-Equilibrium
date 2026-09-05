@@ -1,15 +1,14 @@
 # CLAUDE_CHANGELOG.md — 開發歷史歸檔
 
-## 2026-09-06 W2 split intake / W4 local successor gate
+## 2026-09-06 W2-local closure / W4 local successor gate
 
-`W2-local existing control validation` is the sole physical ACTIVE workflow row and is
-limited to existing local controls pending independent validation. `W2-host integration`
-is `WAITING_EXTERNAL_HOST_INTEGRATION` for PM: it requires real host preaction
-spawn/wait/cancel/deadline integration and non-caller-controlled evidence; a wrapper is
-not a substitute. W4 is `WAITING_LOCAL_VALIDATION`: it needs W2-local validated and W3
-closed, then an explicitly operator-approved successor fresh-admit; it does not depend on
-W2-host. This intake records no test result, runtime, usage, cost, adoption, or automatic
-successor claim.
+`W2-local existing control validation` is `CLOSED_LOCAL_SOURCE_ONLY`; its canonical
+evidence and limits are in `WORKFLOW_TODO.md`. `W2-host integration` remains
+`WAITING_EXTERNAL_HOST_INTEGRATION` for PM and cannot be replaced by a wrapper. Physical
+workflow ACTIVE is zero. W4 is `WAITING_FRESH_ADMISSION`: W2-local and W3 prerequisites
+are satisfied, the operator-approved sequence is recorded, but its successor still needs
+fresh admission and does not depend on W2-host. No runtime, usage, cost, adoption, or
+automatic successor claim is made.
 
 ## 2026-09-06 W9 bootstrap profile (CLOSED_BOOTSTRAP_SOURCE_ONLY)
 
