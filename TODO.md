@@ -22,9 +22,7 @@ AI/ML queue，沒有 runtime、provider usage、模型採用或節省結論。
 
 ### ACTIVE（dispatchable）
 
-| ID | State / owner | finite scope / acceptance / next action |
-|---|---|---|
-| W1-local-collector | `ACTIVE`；PM | 僅收集 repo `.codex/config.toml` 與明確 supplied global `config.toml` 的五個既有 allowlisted agent fields，透過既有 execution-surface probe request/truth report 輸出 logical source status 與 integrity metadata。missing/rejected/no-data 必須明示；actual selection 維持 `UNVERIFIED`。單一 canonical `agent_governance.py` CLI 的 mutually exclusive `collect-local` mode，不改 Registry/permissions/schema/settings，也不推論 host-selected config；本 intake 尚未實作或收口。 |
+本 workflow lane 現為零個 `ACTIVE` row；不自動派發下一項。
 
 ### WAITING / DEFERRED（non-dispatchable）
 
@@ -43,6 +41,7 @@ AI/ML queue，沒有 runtime、provider usage、模型採用或節省結論。
 
 | ID | State | pointer |
 |---|---|---|
+| W1-local-collector | `CLOSED_LOCAL_COLLECTOR_SOURCE_ONLY` | committed source `b92417b7afed1de6a1913279af6e5743fb085b34`: E2 standards/spec PASS after four repairs; E4 exact committed-head `46 passed / 0 failed / 0 skipped / 0 errors` (22 collector + 24 existing-probe), local-reproducible capture `sha256:f0c0083999b1b4262b004884b19f34f7b9c1728daa0fe41090cebcd3ee07f14d`. Local observation collected five repo declarations; explicitly supplied global `config.toml` was `no_data`, selection/instructions remain `UNVERIFIED`, profile `CALLER_CLAIMED`. Not host attestation, settings adoption, runtime, or automatic successor. |
 | W5-entry-source-binding | `CLOSED_ENTRY_SOURCE_BINDING_SOURCE_ONLY` | local source checkpoint `60bc55673f170a06ee4b93a2080c060160707566`: E2 resolved two findings; E4 exact committed-head `120 passed / 0 failed / 0 skipped / 0 errors`, capture `sha256:ae95998b8b0e92b17c3f17949f3011cfe68ce63b1df211fc7138df57f01eca43`. Not full W5, main adoption, runtime, usage/cost/savings, or automatic successor. |
 | W0、W1 | `CLOSED_SOURCE_CHECKPOINT_NOT_MAIN_ADOPTED` | historical result/limitations in `WORKFLOW_TODO.md`; not current performance proof. |
 | W7 | `CLOSED_NARROW_SOURCE_CHECKPOINT` | `e134…` source-only generated Registry-block repair; E2 same-byte review / E4 committed-head tests PASS in `WORKFLOW_TODO.md`; no automatic successor. |

@@ -5,6 +5,15 @@
 
 ---
 
+## 2026-09-06：W1 local collector source-only closure
+
+- `W1-local-collector` 收口為 `CLOSED_LOCAL_COLLECTOR_SOURCE_ONLY`：E2 standards/spec PASS（四項修復）；
+  E4 committed-head `46/0/0/0`，僅 `LOCAL_REPRODUCIBLE`。
+- local report 的五個 repo fields 不改變 selected/instructions=`UNVERIFIED`、profile=`CALLER_CLAIMED`；
+  explicit global config 為 `no_data`。host evidence 保持 waiting，沒有 settings adoption、runtime 或自動 next task。
+
+---
+
 ## 2026-09-06：W5 entry/source binding source-only checkpoint
 
 - Governed pytest 現在會在 pytest/provider 執行前拒絕 dirty admitted subject，並保留

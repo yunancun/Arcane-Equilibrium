@@ -32,6 +32,10 @@ trading Agent，也不授予任何 order/Decision Lease authority。
 Context、Dispatch、Closure。機器正本為 `.codex/agent_registry_v1.json`，可執行工具為
 `helper_scripts/maintenance_scripts/agent_governance.py`。
 
+`execution-surface-probe --collect-local` 是既有工具的一個 bounded local collection mode，
+不新增 public Interface、Registry/schema policy 或 host-selection authority；其 source-only contract
+指向 `docs/agents/2026-09-04--execution-surface-truth-probe.md`。
+
 2026-07-20 在同一 Module 內加入 `Task Execution Control` Implementation，供 Dispatch
 與 Closure 共用；它不是第五個 public Interface 或常駐 daemon。此 slice 集中 finite/
 explicit-loop continuation、semantic no-delta fuse、queue selection 與 exclusive writer

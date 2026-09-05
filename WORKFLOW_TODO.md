@@ -3,8 +3,8 @@
 ## 地位、邊界與目前真相
 
 這是人工閱讀的來源限定總帳，不是可派發佇列；物理 queue 只在根目錄
-[`TODO.md`](TODO.md)。目前唯一 dispatchable workflow slice 是由使用者啟動、PM 擁有的
-`W1-local-collector`。它只處理 bounded local declaration intake，不能推論 effective/host-selected
+[`TODO.md`](TODO.md)。`W1-local-collector` 已為 `CLOSED_LOCAL_COLLECTOR_SOURCE_ONLY`，workflow
+lane 沒有 dispatchable row。它只處理 bounded local declaration intake，不能推論 effective/host-selected
 configuration、完整 W1、模型／政策採用、runtime、服務、PG、broker、下單、交易或獲利宣稱，也不授權
 自動續跑或下一項。`W5-entry-source-binding` 仍是窄義
 `CLOSED_ENTRY_SOURCE_BINDING_SOURCE_ONLY` checkpoint。
@@ -48,6 +48,7 @@ config 仍是 `UNVERIFIED`／`COMPLETE_WITH_UNVERIFIED`。W1 final E2 `24 passed
 |---|---|---|
 | W0 基線與成功閘門 | CLOSED / source checkpoint | 固定 KPI、Q0/Q1 與品質 gate；不構成實際節省或採用。|
 | W1 execution-surface truth probe | CLOSED / source checkpoint | 可重播來源快照與 fail-closed truth class；真實 selected config 未證實。|
+| W1 local collector | CLOSED_LOCAL_COLLECTOR_SOURCE_ONLY | committed `b92417b7afed1de6a1913279af6e5743fb085b34`: E2 standards/spec PASS（4 repairs）；E4 exact-head `46/0/0/0`（22 collector + 24 existing probe），capture `sha256:f0c0083999b1b4262b004884b19f34f7b9c1728daa0fe41090cebcd3ee07f14d`，僅 `LOCAL_REPRODUCIBLE`。 |
 
 ### W7 narrow source checkpoint（current, source-only）
 
@@ -77,19 +78,27 @@ E4 在 committed `60bc55673f170a06ee4b93a2080c060160707566` 執行，為 `120 pa
 `CLOSED_ENTRY_SOURCE_BINDING_SOURCE_ONLY`，不是完整 W5。capture reuse、toolchain/environment
 signature、TTL、production host verifier 仍是 W5 residual；W7 broad generator residual 亦保持 open。
 
-## 當前 W1 local declaration intake（本次啟動）
+## W1 local declaration intake（已收口，source-only）
 
-`W1-local-collector` 是唯一 ACTIVE workflow row，僅為已核准但尚未實作的有限 intake：讀取 repo
+`W1-local-collector` 已收口為 `CLOSED_LOCAL_COLLECTOR_SOURCE_ONLY`：它讀取 repo
 `.codex/config.toml` 和明確 supplied global `config.toml`，只取五個既有 allowlisted agent fields，
 寫入既有 execution-surface probe request/truth report 的 logical source status 與 integrity metadata。
 missing、rejected 或 no-data 必須保持 explicit；raw digest 只證 snapshot integrity，actual selection
 仍為 `UNVERIFIED`。維持單一 canonical `agent_governance.py` CLI（mutually exclusive
 `collect-local` mode），不另建 CLI/schema/Registry/permission，也不寫 settings 或推論 host-selected
-configuration。本 intake 的有限 checkpoint 已批准，仍須 E1 → E2 → exact-head E4 → final TW/R4；不產生
-自動 commit、push、merge、runtime 或下一項權限。
+configuration。E2 standards/spec 已在四項 batched repairs 後 PASS；E4 在 committed
+`b92417b7afed1de6a1913279af6e5743fb085b34` 為 `46 passed / 0 failed / 0 skipped / 0 errors`
+（22 collector、24 existing probe），capture
+`sha256:f0c0083999b1b4262b004884b19f34f7b9c1728daa0fe41090cebcd3ee07f14d`，Context
+`sha256:10d76af99625c9768f21edba44450c1d777bdceee4eb1aeb7c234ebf7931c5fc`；信任限於
+`LOCAL_REPRODUCIBLE`，沒有 host attestation。2026-09-05T19:07:21Z 的 PM local observation
+收集到五個 repo allowlisted fields；明確 supplied global config 為 `no_data`，collection digest
+`sha256:5b2e839cbfe9c4b4b40dae2135f6ca30abba5df39389960471d4c62d25e6122d`、legacy replay
+`EXACT_REPORT_MATCH`，結果 `COMPLETE_WITH_UNVERIFIED`；selected/instructions 仍
+`UNVERIFIED`、profile=`CALLER_CLAIMED`。不產生自動 commit、push、merge、runtime 或下一項權限。
 
-W1 residual 現分為兩件事：local collector 已 ACTIVE；真正未 exposed 的 host-selected evidence 仍為
-`WAITING_EXTERNAL_EVIDENCE`。兩者不得再合併成凍結整個 W1 的等待，也都不 blanket 阻擋
+W1 residual 現只剩真正未 exposed 的 host-selected evidence，仍為
+`WAITING_EXTERNAL_EVIDENCE`；不得把 fixture 的 `global=collected` 投影成 host fact。它不 blanket 阻擋
 W2/W3/W5/W10 source slices。
 
 歷史 `23f76…` 曾把 W2/W3/W5/W10 標成 READY；後來的 DEFERRED 是 queue aggregation，
@@ -166,9 +175,9 @@ source-overhead cleanup。
 
 ## 目前物理 queue 與下一步
 
-physical queue 的唯一 workflow ACTIVE 是 `W1-local-collector`；W5 entry 已收口，不是全 W5。
-本次只做 W1 local intake，沒有自動後續工作。roadmap 仍為 advisory：W1 local residual 後才可考慮
-`W3/W9`，並可獨立評估 `W8`，再到 `W2/W4/W5 reuse`、
+physical queue 沒有 workflow ACTIVE；W1 local collector 與 W5 entry 均已收口，但 W5 不是全 W5。
+沒有自動後續工作。roadmap 仍為 advisory：PM 可 fresh-admit W3 自己的 exact Context seam；W9 仍依賴 W3，
+並可獨立評估 `W8`，再到 `W2/W4/W5 reuse`、
 `W6/W10 decisions`、最後 `W11 integration/adoption`。這只是規劃次序，沒有任何 auto-run
 權限；未變的 hard policy 只能經明確批准 amendment 改變。每個後續 source unit 都需 literal
 scope、重新編譯 Context、按風險產生 E1→E2→E4 與必要 owner；無 commit、push、merge 或 main

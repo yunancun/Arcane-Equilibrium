@@ -30,6 +30,12 @@ envelope 注入 exact verifier，才可升為 `HOST_VERIFIED`、`HOST_OBSERVED` 
 declaration、digest 或本機診斷皆不可替代該 verifier。此介面不授權 runtime config、
 service、remote、PG、broker、order、funds、trading 或效率／節省／採用結論。
 
+同一介面的 `--collect-local --surface-profile-id <id> [--global-config /explicit/path/config.toml]`
+是 bounded local declaration collector，不是新 Registry/schema policy：只讀固定 repo config 與明確
+supplied optional global `config.toml`，並以 logical status/report pointer 投影結果。它不 ambient-read、
+不把 local collection 變成 host-selected truth；完整輸入限制與 source-only closure 見
+[`2026-09-04--execution-surface-truth-probe.md`](2026-09-04--execution-surface-truth-probe.md)。
+
 ## 1. 目標函數
 
 治理目標不是「最少 token」，而是：
