@@ -22,14 +22,23 @@ AI/ML queue，沒有 runtime、provider usage、模型採用或節省結論。
 
 ### ACTIVE（dispatchable）
 
-*（empty；沒有 workflow item 已 admission。）*
+| ID | State / owner | finite scope / acceptance / next action |
+|---|---|---|
+| W5-entry-source-binding | `ACTIVE`；PM | 僅建立並修正 W5 的 entry/source binding，令未提交 subject 不會靜默以舊 committed HEAD 測試；固定 committed-tree security 不變。先取得本次 local checkpoints 的明確批准，再 docs checkpoint → 實作／待驗證 subject checkpoint → exact-head verification；不產生自動 commit 權限。驗收：入口在未提交 subject 時於測試前拒絕、clean exact head 可正常驗證；目前僅入場文件，尚未實作，非完整 W5。 |
 
 ### WAITING / DEFERRED（non-dispatchable）
 
 | ID | State / named unblock | finite scope |
 |---|---|---|
-| W2、W3 | `DEFERRED`：使用者明確啟動、乾淨 checkpoint fresh admission，並符合總帳依賴／HITL／可比較 evidence | 僅為未來候選；不自動提升，模型／routing A/B 不阻擋普通 source-overhead cleanup。 |
-| W4–W6、W8–W11、WF6-01–WF6-07 | `DEFERRED`：依總帳的依賴、HITL 或可比較 evidence | 不自動提升；模型／routing A/B 不阻擋普通 source-overhead cleanup。 |
+| W1 local collector | `DEFERRED_UNSTARTED`：PM fresh-admit 可重播的 local declaration/source collection | 不把 local collection 與 host-selected evidence 混為同一 blocker。 |
+| W1 host-selected evidence | `WAITING_EXTERNAL_EVIDENCE`：production selected-config 尚未 exposed | owner=PM；取得非 caller 控制的 selected-config/host evidence 後 fresh-admit；不阻擋 W2/W3/W5/W10 的 source slices。 |
+| W2 host admission | `DEFERRED_UNSTARTED`：本次先處理 W5 的排程選擇，不是技術硬依賴；仍由 PM fresh-admit | 同 task-owned digest 的 no-delta 規則仍適用；roadmap 次序不是自動執行權。 |
+| W3 Context micro-pack | `DEFERRED_UNSTARTED`：PM fresh-admit 一個 exact Context seam | W1 selected-config evidence 是 input/residual，不是 W3 的 blanket blocker。 |
+| W8 locality/lazy S2 | `DEFERRED_UNSTARTED`：PM fresh-admit 可比較的 retain/isolate/delete measurement | measurement/independent parts 可獨立於 W3/W9；lazy S2 implementation 仍依賴 W3/W7，不自動提升或刪除必要 Context。 |
+| W9 bootstrap profile | `DEFERRED_TECHNICAL_DEPENDENCY`：W3 exact Context seam 完成 | 高風險/runtime/權限入口仍必須載入 normative source。 |
+| W4 assurance、W5 reuse/host verifier、W6 snapshot | `DEFERRED_TECHNICAL_DEPENDENCY`：分別需 W2/W3、W5 entry 後可驗證的 reuse signature/TTL 或 host verifier、及 W4/W5 的 immutable-snapshot evidence | W5 ACTIVE 僅是 entry/source-binding；reuse/production host verifier 不在此 slice。 |
+| W10 KnowledgePilot、W11 adoption、WF6-02/05/06/07 | `DEFERRED_OPERATOR_POLICY_OR_EVIDENCE`：需 explicit policy amendment、HITL、external/provider evidence 或 qualified comparable run | 不自動提升；W11 dependency narrowing 只是 proposal，尚未生效。 |
+| WF6-01/03/04 | `DEFERRED_UNSTARTED`：分別隨 W3、W1/W5 inventory、W3/W9 exact Context work | 缺 provider attestation 時 WF6-03 保持 `WAITING_EXTERNAL_LIMIT`；不假稱 usage 或節省。 |
 
 ### CLOSED（non-dispatchable）
 
