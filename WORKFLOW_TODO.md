@@ -3,10 +3,11 @@
 ## 地位、邊界與目前真相
 
 這是人工閱讀的來源限定總帳，不是可派發佇列；物理 queue 只在根目錄
-[`TODO.md`](TODO.md)。目前沒有 dispatchable workflow slice。`W5-entry-source-binding` 已作為
-窄義 `CLOSED_ENTRY_SOURCE_BINDING_SOURCE_ONLY` checkpoint 收口；它只處理 entry/source binding，
-不能推論完整 W5、模型／政策採用、runtime、服務、PG、broker、下單、交易或獲利宣稱，也不授權
-自動續跑或下一項。
+[`TODO.md`](TODO.md)。目前唯一 dispatchable workflow slice 是由使用者啟動、PM 擁有的
+`W1-local-collector`。它只處理 bounded local declaration intake，不能推論 effective/host-selected
+configuration、完整 W1、模型／政策採用、runtime、服務、PG、broker、下單、交易或獲利宣稱，也不授權
+自動續跑或下一項。`W5-entry-source-binding` 仍是窄義
+`CLOSED_ENTRY_SOURCE_BINDING_SOURCE_ONLY` checkpoint。
 
 W0/W1 是本地來源 checkpoint，尚未併入 `main` 或採用：W0 final
 `c90408613d6ce436abae619437a0bdc4acf4787f`，W1 final
@@ -76,8 +77,18 @@ E4 在 committed `60bc55673f170a06ee4b93a2080c060160707566` 執行，為 `120 pa
 `CLOSED_ENTRY_SOURCE_BINDING_SOURCE_ONLY`，不是完整 W5。capture reuse、toolchain/environment
 signature、TTL、production host verifier 仍是 W5 residual；W7 broad generator residual 亦保持 open。
 
-W1 residual 分為兩件事：local collector 是 `DEFERRED_UNSTARTED` 的 source collection，
-可由 PM fresh-admit；真正未 exposed 的 host-selected evidence 才是
+## 當前 W1 local declaration intake（本次啟動）
+
+`W1-local-collector` 是唯一 ACTIVE workflow row，僅為已核准但尚未實作的有限 intake：讀取 repo
+`.codex/config.toml` 和明確 supplied global `config.toml`，只取五個既有 allowlisted agent fields，
+寫入既有 execution-surface probe request/truth report 的 logical source status 與 integrity metadata。
+missing、rejected 或 no-data 必須保持 explicit；raw digest 只證 snapshot integrity，actual selection
+仍為 `UNVERIFIED`。維持單一 canonical `agent_governance.py` CLI（mutually exclusive
+`collect-local` mode），不另建 CLI/schema/Registry/permission，也不寫 settings 或推論 host-selected
+configuration。本 intake 的有限 checkpoint 已批准，仍須 E1 → E2 → exact-head E4 → final TW/R4；不產生
+自動 commit、push、merge、runtime 或下一項權限。
+
+W1 residual 現分為兩件事：local collector 已 ACTIVE；真正未 exposed 的 host-selected evidence 仍為
 `WAITING_EXTERNAL_EVIDENCE`。兩者不得再合併成凍結整個 W1 的等待，也都不 blanket 阻擋
 W2/W3/W5/W10 source slices。
 
@@ -155,8 +166,9 @@ source-overhead cleanup。
 
 ## 目前物理 queue 與下一步
 
-physical queue 沒有 workflow ACTIVE row。W5 entry 已收口，不是全 W5。後續 roadmap 仍為
-`W1 local residual → W3/W9`，並可獨立評估 `W8`，再到 `W2/W4/W5 reuse`、
+physical queue 的唯一 workflow ACTIVE 是 `W1-local-collector`；W5 entry 已收口，不是全 W5。
+本次只做 W1 local intake，沒有自動後續工作。roadmap 仍為 advisory：W1 local residual 後才可考慮
+`W3/W9`，並可獨立評估 `W8`，再到 `W2/W4/W5 reuse`、
 `W6/W10 decisions`、最後 `W11 integration/adoption`。這只是規劃次序，沒有任何 auto-run
 權限；未變的 hard policy 只能經明確批准 amendment 改變。每個後續 source unit 都需 literal
 scope、重新編譯 Context、按風險產生 E1→E2→E4 與必要 owner；無 commit、push、merge 或 main
