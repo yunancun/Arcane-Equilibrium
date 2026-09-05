@@ -65,7 +65,7 @@
   "interfaces": {
     "registry": "load_registry() + render_views(registry) -> generated adapters",
     "context": "compile_context(role, task_facts) -> locally recaptured Registry-selected/derived bytes + immutable task/budget authority; self-hash alone is never provenance",
-    "dispatch": "route_task(task_facts) -> hybrid_execution_dag_v1 + digest + deterministic required nodes + finite-default task execution policy",
+    "dispatch": "route_task(task_facts) -> hybrid_execution_dag_v1 + digest + deterministic required nodes + finite-default task execution policy; explicit low/low single-file editorial docs+comments may record an R4 semantic-classification skip while protected or ambiguous docs retain R4",
     "task_execution": "persist prompt-bound contract/control/preceding snapshot behind a task-admission fencing token + recapture task-owned source bytes + exclusive linked-worktree writer lease -> deterministic continuation or terminal no-delta closure",
     "external_evidence": "validate_external_evidence_capture(external_evidence_capture_v1, host verifier) -> typed public-policy/outcome capture; absent out-of-band verifier remains evidence debt",
     "closure": "validate_closure(packet with admitted_role_nodes, trusted-host verifier capability) + project_closure(packet) -> validated closure view; PASS delegated/runtime/outcome/effect/context evidence requires exact out-of-band host attestation",

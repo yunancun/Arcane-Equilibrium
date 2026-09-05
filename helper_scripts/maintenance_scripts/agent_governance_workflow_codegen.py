@@ -25,6 +25,10 @@ from agent_governance_vocabulary import KNOWN_SURFACES
 from agent_governance_routing import (
     BROKER_SURFACES,
     DOC_SURFACES,
+    EDITORIAL_DOC_ASSURANCE_PROTECTED_TOKEN_PAIRS,
+    EDITORIAL_DOC_ASSURANCE_PROTECTED_TOKENS,
+    EDITORIAL_DOC_ASSURANCE_SHAPES,
+    EDITORIAL_DOC_ASSURANCE_SURFACES,
     NARROW_QUERY_SURFACES,
     OPERATION_SURFACES,
     P0B_CLAIM_KEYS_BY_PHASE,
@@ -192,6 +196,17 @@ def render_context_admission_block(
             "source_review_surfaces": sorted(SOURCE_REVIEW_SURFACES),
             "operation_surfaces": sorted(OPERATION_SURFACES),
             "doc_surfaces": sorted(DOC_SURFACES),
+            "editorial_doc_assurance": {
+                "protected_token_pairs": [
+                    list(pair)
+                    for pair in EDITORIAL_DOC_ASSURANCE_PROTECTED_TOKEN_PAIRS
+                ],
+                "protected_tokens": sorted(
+                    EDITORIAL_DOC_ASSURANCE_PROTECTED_TOKENS
+                ),
+                "shapes": sorted(EDITORIAL_DOC_ASSURANCE_SHAPES),
+                "surfaces": sorted(EDITORIAL_DOC_ASSURANCE_SURFACES),
+            },
             "broker_surfaces": sorted(BROKER_SURFACES),
             "narrow_query_surfaces": sorted(NARROW_QUERY_SURFACES),
             "side_effect_classes": sorted(SIDE_EFFECT_CLASSES),

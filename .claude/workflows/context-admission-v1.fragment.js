@@ -524,6 +524,29 @@ const canonicalRouteCallNodesV1 = (surface, contract) => {
   }
   let predecessor = []
   const narrowQuery = shape === 'query'
+  const editorialPolicy = policy.editorial_doc_assurance
+  const editorialPath = (
+    Array.isArray(contract.scope) && contract.scope.length === 1 &&
+    contract.dirty_scope.length === 1 &&
+    contract.scope[0] === contract.dirty_scope[0]
+  ) ? contract.scope[0] : null
+  const editorialTokens = new Set(
+    typeof editorialPath === 'string' ? (editorialPath.match(/[a-z0-9]+/g) || []) : [],
+  )
+  const editorialDocAssurance = (
+    editorialPolicy.shapes.includes(shape) &&
+    surfaces.length === editorialPolicy.surfaces.length &&
+    editorialPolicy.surfaces.every(item => surfaceSet.has(item)) &&
+    contract.risk === 'low' && contract.uncertainty === 'low' &&
+    effect === 'docs_write' && contract.continuation_mode === 'finite' &&
+    contract.runtime_claim === false && contract.end_to_end_claim === false &&
+    typeof editorialPath === 'string' &&
+    /^docs\/[a-z0-9][a-z0-9._/-]*\.md$/.test(editorialPath) &&
+    !editorialPolicy.protected_tokens.some(token => editorialTokens.has(token)) &&
+    !editorialPolicy.protected_token_pairs.some(pair => (
+      pair.every(token => editorialTokens.has(token))
+    ))
+  )
   const designNeeded = !narrowQuery && (
     ['design', 'planning', 'analysis', 'research', 'audit'].includes(shape) ||
     effect === 'deploy' ||
@@ -540,8 +563,12 @@ const canonicalRouteCallNodesV1 = (surface, contract) => {
     // program-adoption reviewer fanout.
   } else if (['docs', 'documentation'].includes(shape)) {
     add('docs_update', 'TW', predecessor, 'work')
-    add('docs_review', 'R4', ['docs_update'])
-    predecessor = ['docs_review']
+    if (editorialDocAssurance) {
+      predecessor = ['docs_update']
+    } else {
+      add('docs_review', 'R4', ['docs_update'])
+      predecessor = ['docs_review']
+    }
   } else if (shape === 'test') {
     add('test_implementation', 'E4', predecessor, 'work')
     add('test_adversarial_review', 'E2', ['test_implementation'])

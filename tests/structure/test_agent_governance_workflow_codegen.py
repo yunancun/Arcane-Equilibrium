@@ -392,6 +392,27 @@ def test_generated_generic_route_core_matches_python_corpus(
             "scope": ["docs/guide.md"], "dirty_scope": ["docs/guide.md"],
         },
         {
+            **base, "task_shape": "docs", "surfaces": ["comments", "docs"],
+            "scope": ["docs/guides/release-notes.md"],
+            "dirty_scope": ["docs/guides/release-notes.md"],
+        },
+        {
+            **base, "task_shape": "documentation",
+            "surfaces": ["comments", "docs"],
+            "scope": ["docs/guides/current-notes-for-state.md"],
+            "dirty_scope": ["docs/guides/current-notes-for-state.md"],
+        },
+        {
+            **base, "task_shape": "docs", "surfaces": ["comments", "docs"],
+            "scope": ["docs/guides/Policy-notes.md"],
+            "dirty_scope": ["docs/guides/Policy-notes.md"],
+        },
+        {
+            **base, "task_shape": "docs", "surfaces": ["comments", "docs"],
+            "scope": ["doc/guides/release-notes.md"],
+            "dirty_scope": ["doc/guides/release-notes.md"],
+        },
+        {
             **base, "task_shape": "test", "surfaces": ["python"],
             "scope": ["tests/test_route.py"],
             "dirty_scope": ["tests/test_route.py"],
