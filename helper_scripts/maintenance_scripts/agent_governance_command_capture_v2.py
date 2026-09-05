@@ -41,6 +41,10 @@ from agent_governance_pytest_provider import (
     GOVERNED_PYTEST_PROVIDER_WHEEL_PREFIX,
     GOVERNED_PYTEST_REQUIRED_ARGS,
 )
+from agent_governance_pytest_subject_binding import (
+    pytest_subject_scope,
+    require_committed_pytest_subject,
+)
 from agent_governance_registry import native_agent_contract
 from agent_governance_workflow_receipts import canonical_digest
 
@@ -1395,7 +1399,8 @@ def capture_governed_command(
     ):
         raise PermissionError(
             "pytest capture requires the no-site governed bootstrap and "
-            "--noconftest"
+            "--noconftest through `python3 helper_scripts/maintenance_scripts/"
+            "agent_governance.py capture-command ... -- <governed pytest argv>`"
         )
     pytest_target_errors = _pytest_collection_target_errors(command_argv_value)
     if pytest_target_errors:
@@ -1413,6 +1418,24 @@ def capture_governed_command(
     )
     whole_before = _generation_summary(["."], repository)
     repository_before = _generation_summary(path_scope, repository)
+    if _is_governed_pytest_argv(command_argv_value):
+        try:
+            subject_scope = pytest_subject_scope(
+                task_contract, path_scope, root=repository,
+            )
+            require_committed_pytest_subject(
+                repository,
+                source_head=whole_before["source_head"],
+                scope=subject_scope,
+            )
+        except (OSError, ValueError) as error:
+            raise PermissionError(
+                "governed pytest requires admitted subject bytes to match the "
+                "committed checkpoint before execution; create the approved "
+                "local committed checkpoint, compile a fresh Context artifact, "
+                "and retry the canonical agent_governance.py capture-command "
+                f"entry: {error}"
+            ) from None
     provider_repository = Path(__file__).resolve().parents[2]
     provider_source_head = (
         whole_before["source_head"]
@@ -1819,6 +1842,7 @@ def validate_governed_command_capture(
     expected_task_contract_digest: str | None = None,
     expected_execution_task: dict[str, Any] | None = None,
     expected_path_scope: list[str] | None = None,
+    expected_subject_scope: list[str] | None = None,
     expected_source_head: str | None = None,
     root: Path = REPO_ROOT,
     reexecute: bool = False,
@@ -1949,12 +1973,54 @@ def validate_governed_command_capture(
     if record.get("record_digest") != _self_digest(record):
         errors.append("governed command capture self-digest is invalid")
     if reexecute and not errors:
-        errors.extend(_replay_errors(record, root=Path(root)))
+        errors.extend(_replay_errors(
+            record,
+            root=Path(root),
+            expected_subject_scope=expected_subject_scope,
+        ))
     return errors
 
 
-def _replay_errors(record: dict[str, Any], *, root: Path) -> list[str]:
+def _replay_errors(
+    record: dict[str, Any],
+    *,
+    root: Path,
+    expected_subject_scope: list[str] | None,
+) -> list[str]:
     path_scope = record["path_scope"]
+    if _is_governed_pytest_argv(record["argv"]):
+        if expected_subject_scope is None:
+            return [
+                "governed pytest trusted replay requires admitted pytest "
+                "subject scope"
+            ]
+        try:
+            subject_scope = pytest_subject_scope(
+                {"dirty_scope": expected_subject_scope}, [], root=root,
+            )
+        except (OSError, ValueError) as error:
+            return [
+                "governed pytest trusted replay admitted pytest subject scope "
+                f"is invalid: {error}"
+            ]
+        if subject_scope != expected_subject_scope or not set(path_scope).issubset(
+            subject_scope
+        ):
+            return [
+                "governed pytest trusted replay admitted pytest subject scope "
+                "is not the canonical verification-inclusive union"
+            ]
+        try:
+            require_committed_pytest_subject(
+                root,
+                source_head=record["whole_repository_before"]["source_head"],
+                scope=subject_scope,
+            )
+        except (OSError, ValueError) as error:
+            return [
+                "governed pytest trusted replay admitted pytest subject differs "
+                f"from committed checkpoint: {error}"
+            ]
     current_task = _generation_summary(path_scope, root)
     current_whole = _generation_summary(["."], root)
     if current_task["generation_digest"] != record["repository_after"]["generation_digest"]:

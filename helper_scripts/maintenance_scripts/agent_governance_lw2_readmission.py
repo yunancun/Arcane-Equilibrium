@@ -586,6 +586,7 @@ def validate_lw2_readmission_eligibility(
         "expected_task_contract_digest": capture["task_contract_digest"],
         "expected_execution_task": expected_execution_task,
         "expected_path_scope": list(LW2_CAPTURE_PATH_SCOPE),
+        "expected_subject_scope": list(LW2_CAPTURE_PATH_SCOPE),
         "expected_source_head": head,
         "root": Path(repo),
     }
