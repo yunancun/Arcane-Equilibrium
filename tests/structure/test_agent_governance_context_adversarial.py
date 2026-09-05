@@ -2797,7 +2797,8 @@ async function execute(input, nullFirst = false) {
     )
     assert result["omitted_route"]["ok"] is False
     assert result["omitted_route"]["calls"] == 0
-    assert "execution DAG omits or substitutes canonical routed calls" in (
+    # 新 Registry source guard 會在 DAG 檢查前拒絕同一份重簽、改面但漏 source 的 artifact。
+    assert "semantic Context projection/digests are invalid" in (
         result["omitted_route"]["error"]
     )
     assert result["loop"]["ok"] is True and result["loop"]["calls"] == 1
