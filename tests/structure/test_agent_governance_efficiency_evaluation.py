@@ -23,6 +23,24 @@ FIXTURE_PATH = (
     ROOT
     / "tests/fixtures/agent_governance/multi_agent_efficiency_evaluation_v1.json"
 )
+CORPUS_SCHEMA_PATH = (
+    ROOT
+    / ".codex/schemas/multi_agent_efficiency_baseline_corpus_v1.schema.json"
+)
+CORPUS_FIXTURE_PATH = (
+    ROOT
+    / "tests/fixtures/agent_governance/"
+    "multi_agent_efficiency_baseline_corpus_v1.json"
+)
+MANIFEST_SCHEMA_PATH = (
+    ROOT
+    / ".codex/schemas/multi_agent_efficiency_baseline_manifest_v1.schema.json"
+)
+MANIFEST_FIXTURE_PATH = (
+    ROOT
+    / "tests/fixtures/agent_governance/"
+    "multi_agent_efficiency_baseline_manifest_v1.json"
+)
 
 if str(HELPERS) not in sys.path:
     sys.path.insert(0, str(HELPERS))
@@ -43,7 +61,19 @@ def _fixture() -> dict:
     return json.loads(FIXTURE_PATH.read_text(encoding="utf-8"))
 
 
+def _corpus_fixture() -> dict:
+    return json.loads(CORPUS_FIXTURE_PATH.read_text(encoding="utf-8"))
+
+
+def _manifest_fixture() -> dict:
+    return json.loads(MANIFEST_FIXTURE_PATH.read_text(encoding="utf-8"))
+
+
 def _resign(module, record: dict) -> None:
+    if record.get("evidence_kind") != "synthetic_fixture":
+        record["quality_noninferiority_policy"]["policy_digest"] = (
+            module._registry_efficiency_evaluation_policy()["policy_digest"]
+        )
     record["record_digest"] = module.multi_agent_efficiency_evaluation_digest(
         record
     )
@@ -62,6 +92,650 @@ def _canonical_digest(value: dict) -> str:
         allow_nan=False,
     ).encode("utf-8")
     return "sha256:" + hashlib.sha256(payload).hexdigest()
+
+
+def _resign_corpus(module, corpus: dict) -> None:
+    for case in corpus["cases"]:
+        case["case_digest"] = module.multi_agent_efficiency_baseline_case_digest(
+            case
+        )
+    corpus["corpus_digest"] = (
+        module.multi_agent_efficiency_baseline_corpus_digest(corpus)
+    )
+
+
+def _resign_manifest(module, manifest: dict) -> None:
+    for record in (
+        manifest["current_profile_records"]
+        + manifest["candidate_profile_records"]
+    ):
+        for run in record["runs"]:
+            run["run_digest"] = module.multi_agent_efficiency_baseline_run_digest(
+                run
+            )
+        record["record_digest"] = (
+            module.multi_agent_efficiency_baseline_case_record_digest(record)
+        )
+    manifest["manifest_digest"] = (
+        module.multi_agent_efficiency_baseline_manifest_digest(manifest)
+    )
+
+
+def _platform_manifest(module) -> tuple[dict, dict, dict]:
+    import agent_governance as governance
+
+    corpus = _corpus_fixture()
+    registry = governance.load_registry()
+    manifest = _manifest_fixture()
+    candidates = []
+    for current in manifest["current_profile_records"]:
+        case = next(
+            item for item in corpus["cases"] if item["case_id"] == current["case_id"]
+        )
+        quality = case["expected"]["quality_oracle"] or {}
+        safety = case["expected"]["safety_oracle"] or {}
+        finding_ids = quality.get("gold_p0_ids", []) + quality.get("gold_p1_ids", [])
+        decision_ids = quality.get("decision_changing_finding_ids", [])
+        values = {
+            metric_id: {"value": 0, "unavailable_reason": None}
+            for metric_id in current["metrics"]
+        }
+        values.update(
+            closure_quality_score={"value": 1.0, "unavailable_reason": None},
+            required_coverage_ratio={"value": 1.0, "unavailable_reason": None},
+            elapsed_time_ms={"value": 1000, "unavailable_reason": None},
+            input_tokens={"value": 100, "unavailable_reason": None},
+            output_tokens={"value": 10, "unavailable_reason": None},
+            cache_read_tokens={"value": 20, "unavailable_reason": None},
+            calls={"value": 1, "unavailable_reason": None},
+            p0_p1_recall_ratio={"value": 1.0, "unavailable_reason": None},
+            decision_changing_findings={
+                "value": len(decision_ids),
+                "unavailable_reason": None,
+            },
+            expected_terminal_match={"value": True, "unavailable_reason": None},
+            expected_coverage_match={"value": True, "unavailable_reason": None},
+            route_sentinel_match={"value": True, "unavailable_reason": None},
+            permission_sentinel_match={"value": True, "unavailable_reason": None},
+            depth_sentinel_match={"value": True, "unavailable_reason": None},
+            full_audit_sentinel_match={"value": True, "unavailable_reason": None},
+            orchestration_load={"value": 1, "unavailable_reason": None},
+        )
+        for record in (current, deepcopy(current)):
+            profile = "current" if record is current else "candidate"
+            arm = "A_CURRENT" if profile == "current" else "B_CANDIDATE"
+            record.update(
+                profile=profile,
+                treatment={"arm": arm, "differences": {}},
+                evidence_status="PLATFORM_OR_EXTERNAL_ATTESTED",
+                measurement_status="measured",
+                adoption_eligible=True,
+                evidence_ref=f"platform-attestation:{profile}:{record['case_id']}",
+            )
+            record["metrics"] = deepcopy(values)
+            record["runs"] = []
+            for ordinal in range(1, record["expected_run_count"] + 1):
+                observed_facts = {
+                    "route_nodes": deepcopy(case["expected"]["route_nodes"]),
+                    "route_edges": deepcopy(case["expected"]["required_edges"]),
+                    "finding_ids": deepcopy(finding_ids),
+                    "permission_decision": safety.get("expected_permission_decision"),
+                    "depth": safety.get("expected_depth"),
+                    "terminal_receipt_digest": "sha256:" + "a" * 64,
+                    "coverage_receipt_digest": "sha256:" + "b" * 64,
+                    "permission_receipt_digest": (
+                        "sha256:" + "c" * 64 if safety else None
+                    ),
+                    "depth_receipt_digest": (
+                        "sha256:" + "d" * 64 if safety else None
+                    ),
+                }
+                run = {
+                    "run_id": f"{profile}:{record['case_id']}:{ordinal}",
+                    "arm": arm,
+                    "ordinal": ordinal,
+                    "qualification_status": "qualified",
+                    "observed_terminal": case["expected"]["terminal"],
+                    "observed_facts": observed_facts,
+                    "metrics": deepcopy(values),
+                    "evidence_status": "PLATFORM_OR_EXTERNAL_ATTESTED",
+                    "evidence_ref": f"platform-run:{profile}:{record['case_id']}:{ordinal}",
+                    "evidence_digest": _canonical_digest(observed_facts),
+                }
+                run["run_digest"] = module.multi_agent_efficiency_baseline_run_digest(
+                    run
+                )
+                record["runs"].append(run)
+            record["evidence_digest"] = _canonical_digest(
+                {"run_digests": [run["run_digest"] for run in record["runs"]]}
+            )
+            record["record_digest"] = (
+                module.multi_agent_efficiency_baseline_case_record_digest(record)
+            )
+        candidates.append(record)
+    manifest["candidate_profile_records"] = candidates
+    manifest["adoption_status"] = "ADOPTION_EVIDENCE_AVAILABLE"
+    _resign_manifest(module, manifest)
+    return manifest, corpus, registry
+
+
+class _ExactManifestVerifier:
+    def __init__(self) -> None:
+        self.binding: dict | None = None
+
+    def verify_efficiency_baseline_manifest(self, **binding) -> bool:
+        self.binding = binding
+        return True
+
+
+def test_baseline_corpus_and_manifest_are_canonical_registry_bound_inputs() -> None:
+    import agent_governance as governance
+
+    module = _load_module()
+    corpus = _corpus_fixture()
+    manifest = _manifest_fixture()
+    registry = governance.load_registry()
+
+    assert json.loads(CORPUS_SCHEMA_PATH.read_text(encoding="utf-8"))["title"] == (
+        "multi_agent_efficiency_baseline_corpus_v1"
+    )
+    assert json.loads(MANIFEST_SCHEMA_PATH.read_text(encoding="utf-8"))["title"] == (
+        "multi_agent_efficiency_baseline_manifest_v1"
+    )
+    assert registry["efficiency_baseline_corpus_schema_path"] == (
+        ".codex/schemas/multi_agent_efficiency_baseline_corpus_v1.schema.json"
+    )
+    assert registry["efficiency_baseline_manifest_schema_path"] == (
+        ".codex/schemas/multi_agent_efficiency_baseline_manifest_v1.schema.json"
+    )
+    assert module.validate_multi_agent_efficiency_baseline_corpus(corpus) == []
+    assert (
+        module.validate_multi_agent_efficiency_baseline_manifest(
+            manifest,
+            corpus=corpus,
+            registry=registry,
+        )
+        == []
+    )
+    assert [case["case_class"] for case in corpus["cases"]] == [
+        "q0_governance_query",
+        "q1_low_risk_source_change",
+        "quality_sentinel",
+        "safety_full_audit_sentinel",
+    ]
+    assert corpus["run_protocol"] == {
+        "arms": ["A_CURRENT", "B_CANDIDATE"],
+        "assignment": "interleaved_ab_v1",
+        "q0_q1_repeats_per_arm": 3,
+        "sentinel_min_repeats_per_arm": 1,
+        "qualification": "all_runs_individually_qualified_v1",
+        "failure_aggregation": "no_failure_averaging_v1",
+        "elapsed_time_evaluation": "each_qualified_run_lte_case_target_v1",
+    }
+    q0, q1 = corpus["cases"][:2]
+    assert q0["expected"]["elapsed_time_target_ms"] == 300000
+    assert q1["expected"]["elapsed_time_target_ms"] == 900000
+    assert all(
+        record["evidence_status"] == "UNAVAILABLE"
+        and record["measurement_status"] == "unavailable"
+        and record["adoption_eligible"] is False
+        and record["runs"] == []
+        and all(
+            metric["value"] is None and metric["unavailable_reason"]
+            for metric in record["metrics"].values()
+        )
+        for record in manifest["current_profile_records"]
+    )
+    assert manifest["candidate_profile_records"] == []
+    assert manifest["adoption_status"] == "PENDING_CANDIDATE_RUNS"
+
+
+def test_registry_metric_catalog_is_closed_versioned_and_preserves_v1_axes() -> None:
+    import agent_governance as governance
+
+    registry = governance.load_registry()
+    policy = registry["efficiency_evaluation_policy"]
+    catalog = policy["metric_catalog"]
+
+    assert catalog["schema_version"] == "multi_agent_efficiency_metric_catalog_v1"
+    assert set(catalog["metrics"]) >= {
+        "elapsed_time_ms",
+        "input_tokens",
+        "cache_read_tokens",
+        "time_to_first_valid_result_ms",
+        "wait_duration_ms",
+        "waits",
+        "max_single_turn_input_tokens",
+        "compactions",
+        "duplicate_exec_count",
+        "duplicate_wait_agent_count",
+        "expected_terminal_match",
+        "expected_coverage_match",
+        "missed_p0_p1_count",
+        "full_audit_sentinel_match",
+        "orchestration_load",
+    }
+    required_definition_fields = {
+        "definition",
+        "unit",
+        "grain",
+        "direction",
+        "aggregation",
+        "clock_boundary",
+        "source_kind",
+        "minimum_trust_tier",
+        "missing_value_behavior",
+    }
+    assert all(
+        set(definition) == required_definition_fields
+        for definition in catalog["metrics"].values()
+    )
+    assert catalog["metrics"]["elapsed_time_ms"]["clock_boundary"] == (
+        "host_task_receipt_or_admission_start_to_verified_terminal_receipt_v1"
+    )
+    assert "cached input" in catalog["metrics"]["input_tokens"][
+        "definition"
+    ].lower()
+    assert "no dollar" in catalog["metrics"]["input_tokens"][
+        "definition"
+    ].lower()
+    assert catalog["metrics"]["orchestration_load"]["definition"] == (
+        "Derived penalty score: 1*calls + 1*waits + 2*retries + "
+        "2*compactions. duplicate_exec_count and duplicate_wait_agent_count "
+        "remain diagnostics and are not added. This is partial telemetry: "
+        "exec, spawn, message, and followup action coverage is unavailable."
+    )
+    assert catalog["metrics"]["orchestration_load"]["unit"] == "points"
+    assert policy["primary_kpis"] == [
+        "elapsed_time_ms",
+        "input_tokens",
+        "orchestration_load",
+    ]
+    assert policy["efficiency_improvement"]["axes"] == [
+        "elapsed_time_ms",
+        "input_tokens",
+        "orchestration_load",
+    ]
+    assert governance.registry_efficiency_evaluation_policy_errors(registry) == []
+    assert policy["policy_digest"] == governance.efficiency_evaluation_policy_digest(
+        policy
+    )
+
+
+def test_diagnostic_worsening_cannot_replace_the_three_primary_kpi_decision() -> None:
+    module = _load_module()
+    fixture, attestation_index = _measured_with_attestation_index(module)
+    bounded = _profile(fixture, "bounded_role")
+    bounded["metrics"]["output_tokens"] = 999999999
+    bounded["metrics"]["cache_read_tokens"] = 999999999
+    attestation = attestation_index["records"][bounded["evidence_ref"]]
+    attestation["metrics_payload_digest"] = _canonical_digest(bounded["metrics"])
+    attestation.pop("record_digest")
+    attestation["record_digest"] = _canonical_digest(attestation)
+    bounded["evidence_digest"] = attestation["record_digest"]
+    _resign(module, fixture)
+    attestation_index.pop("record_digest")
+    attestation_index["record_digest"] = _canonical_digest(attestation_index)
+
+    class ExactVerifier:
+        def verify_efficiency_attestation_index(self, **_binding) -> bool:
+            return True
+
+    result = module.evaluate_multi_agent_efficiency(
+        fixture,
+        attestation_index=attestation_index,
+        attestation_verifier=ExactVerifier(),
+    )
+    comparison = result["comparisons"]["bounded_role"]
+    assert set(comparison["efficiency_improvement"]["checks"]) == {
+        "elapsed_time_ms",
+        "input_tokens",
+        "orchestration_load",
+    }
+    assert comparison["efficiency_improvement"]["status"] == "PASS"
+    assert comparison["efficiency_improvement"]["checks"]["orchestration_load"] == {
+        "status": "IMPROVED",
+        "baseline": 124,
+        "candidate": 16,
+        "ratio": 0.129032,
+    }
+    assert "output_tokens" not in comparison["efficiency_ratios"]
+    assert "cache_read_tokens" not in comparison["efficiency_ratios"]
+
+
+@pytest.mark.parametrize(
+    ("missing_metric", "unavailable_kpi"),
+    (("elapsed_time_ms", "elapsed_time_ms"), ("input_tokens", "input_tokens"), ("calls", "orchestration_load")),
+)
+def test_evaluator_candidate_cannot_pass_with_a_missing_primary_kpi(
+    missing_metric: str,
+    unavailable_kpi: str,
+) -> None:
+    module = _load_module()
+    fixture = _fixture()
+    bounded = _profile(fixture, "bounded_role")
+    fixture["evidence_kind"] = "mixed"
+    bounded.update(
+        measurement_status="partial",
+        evidence_ref=f"partial:missing-{missing_metric}",
+        evidence_digest="sha256:" + "8" * 64,
+        unavailable_reason=f"{missing_metric} telemetry unavailable",
+    )
+    bounded["metrics"][missing_metric] = None
+    _resign(module, fixture)
+
+    result = module.evaluate_multi_agent_efficiency(fixture)
+    comparison = result["comparisons"]["bounded_role"]
+    assert comparison["efficiency_improvement"]["status"] == "UNAVAILABLE"
+    assert comparison["efficiency_improvement"]["checks"][unavailable_kpi]["status"] == "UNAVAILABLE"
+    assert comparison["efficiency_claim_allowed"] is False
+
+
+def test_orchestration_load_is_derived_and_duplicate_counters_are_diagnostic() -> None:
+    module = _load_module()
+    manifest, corpus, registry = _platform_manifest(module)
+    candidate = manifest["candidate_profile_records"][0]
+    candidate["runs"][0]["metrics"]["orchestration_load"]["value"] = 999
+    _resign_manifest(module, manifest)
+    errors = module.validate_multi_agent_efficiency_baseline_manifest(
+        manifest,
+        corpus=corpus,
+        registry=registry,
+        manifest_verifier=_ExactManifestVerifier(),
+    )
+    assert any("orchestration_load" in error and "penalty" in error for error in errors)
+
+    manifest, corpus, registry = _platform_manifest(module)
+    for record in manifest["current_profile_records"] + manifest["candidate_profile_records"]:
+        record["metrics"]["duplicate_exec_count"]["value"] = 500
+        record["metrics"]["duplicate_wait_agent_count"]["value"] = 700
+        for run in record["runs"]:
+            run["metrics"]["duplicate_exec_count"]["value"] = 500
+            run["metrics"]["duplicate_wait_agent_count"]["value"] = 700
+    _resign_manifest(module, manifest)
+    assert module.validate_multi_agent_efficiency_baseline_manifest(
+        manifest,
+        corpus=corpus,
+        registry=registry,
+        manifest_verifier=_ExactManifestVerifier(),
+    ) == []
+
+
+def test_corpus_rejects_digest_drift_case_substitution_and_averaged_targets() -> None:
+    module = _load_module()
+    corpus = _corpus_fixture()
+
+    digest_drift = deepcopy(corpus)
+    digest_drift["description"] += " changed"
+    assert any(
+        "corpus_digest differs" in error
+        for error in module.validate_multi_agent_efficiency_baseline_corpus(
+            digest_drift
+        )
+    )
+
+    substituted = deepcopy(corpus)
+    substituted["cases"][0]["case_class"] = "quality_sentinel"
+    _resign_corpus(module, substituted)
+    assert any(
+        "exactly one" in error or "ordered immutable cases" in error
+        for error in module.validate_multi_agent_efficiency_baseline_corpus(
+            substituted
+        )
+    )
+
+    averaged = deepcopy(corpus)
+    averaged["run_protocol"]["elapsed_time_evaluation"] = "median_lte_target"
+    averaged["cases"][0]["expected"]["elapsed_time_target_ms"] = 300001
+    _resign_corpus(module, averaged)
+    errors = module.validate_multi_agent_efficiency_baseline_corpus(averaged)
+    assert any("every qualified run" in error for error in errors)
+    assert any("Q0" in error and "300000" in error for error in errors)
+
+    resigned_content_change = deepcopy(corpus)
+    resigned_content_change["cases"][0]["sanitized_task_facts"]["objective"] += (
+        " substituted"
+    )
+    resigned_content_change["cases"][0]["replay"]["replay_digest"] = (
+        _canonical_digest(
+            resigned_content_change["cases"][0]["sanitized_task_facts"]
+        )
+    )
+    _resign_corpus(module, resigned_content_change)
+    assert any(
+        "immutable case authority" in error
+        for error in module.validate_multi_agent_efficiency_baseline_corpus(
+            resigned_content_change
+        )
+    )
+
+
+def test_corpus_rejects_removed_full_audit_hard_edge() -> None:
+    module = _load_module()
+    corpus = _corpus_fixture()
+    safety = next(
+        case
+        for case in corpus["cases"]
+        if case["case_class"] == "safety_full_audit_sentinel"
+    )
+    safety["expected"]["required_edges"].remove("pm_triage->full_audit")
+    _resign_corpus(module, corpus)
+
+    assert any(
+        "full-audit hard edge" in error
+        for error in module.validate_multi_agent_efficiency_baseline_corpus(corpus)
+    )
+
+
+def test_manifest_rejects_binding_drift_case_substitution_and_unknown_as_zero() -> None:
+    import agent_governance as governance
+
+    module = _load_module()
+    corpus = _corpus_fixture()
+    registry = governance.load_registry()
+    manifest = _manifest_fixture()
+
+    manifest["corpus_binding"]["corpus_digest"] = "sha256:" + "1" * 64
+    manifest["policy_binding"]["policy_digest"] = "sha256:" + "2" * 64
+    manifest["registry_binding"]["registry_digest"] = "sha256:" + "3" * 64
+    record = manifest["current_profile_records"][0]
+    record["case_digest"] = manifest["current_profile_records"][1]["case_digest"]
+    metric = record["metrics"]["elapsed_time_ms"]
+    metric["value"] = 0
+    metric["unavailable_reason"] = None
+    _resign_manifest(module, manifest)
+
+    errors = module.validate_multi_agent_efficiency_baseline_manifest(
+        manifest,
+        corpus=corpus,
+        registry=registry,
+    )
+    assert any("corpus binding" in error for error in errors)
+    assert any("policy binding" in error for error in errors)
+    assert any("Registry binding" in error for error in errors)
+    assert any("case substitution" in error for error in errors)
+    assert any("unknown-as-zero" in error for error in errors)
+
+
+def test_manifest_rejects_unauthorized_treatment_and_provisional_promotion() -> None:
+    import agent_governance as governance
+
+    module = _load_module()
+    corpus = _corpus_fixture()
+    registry = governance.load_registry()
+    manifest = _manifest_fixture()
+    candidate = deepcopy(manifest["current_profile_records"][0])
+    candidate.update(
+        profile="candidate",
+        evidence_status="PROVISIONAL_LOCAL_HOST_EXPORT",
+        measurement_status="measured",
+        adoption_eligible=True,
+        evidence_ref="local-host-export:unattested",
+        evidence_digest="sha256:" + "4" * 64,
+        treatment={"arm": "B_CANDIDATE", "differences": {"model": "cheaper"}},
+    )
+    candidate["metrics"]["elapsed_time_ms"] = {
+        "value": 100,
+        "unavailable_reason": None,
+    }
+    manifest["candidate_profile_records"] = [candidate]
+    _resign_manifest(module, manifest)
+
+    errors = module.validate_multi_agent_efficiency_baseline_manifest(
+        manifest,
+        corpus=corpus,
+        registry=registry,
+    )
+    assert any("unauthorized treatment difference" in error for error in errors)
+    assert any("provisional" in error and "measured" in error for error in errors)
+    assert any("provisional" in error and "adoption" in error for error in errors)
+
+
+def test_manifest_platform_claim_requires_exact_out_of_band_verification() -> None:
+    module = _load_module()
+    manifest, corpus, registry = _platform_manifest(module)
+
+    assert any(
+        "out-of-band" in error
+        for error in module.validate_multi_agent_efficiency_baseline_manifest(
+            manifest,
+            corpus=corpus,
+            registry=registry,
+        )
+    )
+    verifier = _ExactManifestVerifier()
+    assert (
+        module.validate_multi_agent_efficiency_baseline_manifest(
+            manifest,
+            corpus=corpus,
+            registry=registry,
+            manifest_verifier=verifier,
+        )
+        == []
+    )
+    assert verifier.binding["manifest_digest"] == manifest["manifest_digest"]
+    assert verifier.binding["corpus_digest"] == corpus["corpus_digest"]
+    assert verifier.binding["policy_digest"] == registry[
+        "efficiency_evaluation_policy"
+    ]["policy_digest"]
+    assert verifier.binding["registry_digest"] == manifest["registry_binding"][
+        "registry_digest"
+    ]
+    assert verifier.binding["source_generation_digest"] == manifest[
+        "source_generation"
+    ]["generation_digest"]
+    assert len(verifier.binding["run_ids"]) == 16
+
+
+def test_manifest_derives_sentinel_metrics_from_observed_receipts() -> None:
+    module = _load_module()
+    manifest, corpus, registry = _platform_manifest(module)
+    quality = next(
+        record
+        for record in manifest["candidate_profile_records"]
+        if record["case_id"] == "quality-independent-gold-oracle-v1"
+    )
+    quality["runs"][0]["observed_facts"]["finding_ids"] = []
+    _resign_manifest(module, manifest)
+
+    errors = module.validate_multi_agent_efficiency_baseline_manifest(
+        manifest,
+        corpus=corpus,
+        registry=registry,
+        manifest_verifier=_ExactManifestVerifier(),
+    )
+    assert any("derived" in error and "missed_p0_p1_count" in error for error in errors)
+    assert any("derived" in error and "p0_p1_recall_ratio" in error for error in errors)
+
+    manifest, corpus, registry = _platform_manifest(module)
+    safety = next(
+        record
+        for record in manifest["candidate_profile_records"]
+        if record["case_id"] == "safety-full-audit-fixed-graph-v1"
+    )
+    safety["runs"][0]["observed_facts"]["route_edges"].remove(
+        "pm_triage->full_audit"
+    )
+    _resign_manifest(module, manifest)
+    errors = module.validate_multi_agent_efficiency_baseline_manifest(
+        manifest,
+        corpus=corpus,
+        registry=registry,
+        manifest_verifier=_ExactManifestVerifier(),
+    )
+    assert any(
+        "derived" in error and "full_audit_sentinel_match" in error
+        for error in errors
+    )
+
+
+@pytest.mark.parametrize("attack", ("disqualified", "over_target"))
+def test_manifest_adoption_qualifies_both_current_and_candidate_arms(
+    attack: str,
+) -> None:
+    module = _load_module()
+    manifest, corpus, registry = _platform_manifest(module)
+    current_q0 = next(
+        record
+        for record in manifest["current_profile_records"]
+        if record["case_id"] == "q0-pm-only-read-only-governance-query-v1"
+    )
+    if attack == "disqualified":
+        current_q0["runs"][0]["qualification_status"] = "disqualified"
+    else:
+        current_q0["runs"][0]["metrics"]["elapsed_time_ms"]["value"] = 300001
+    _resign_manifest(module, manifest)
+
+    errors = module.validate_multi_agent_efficiency_baseline_manifest(
+        manifest,
+        corpus=corpus,
+        registry=registry,
+        manifest_verifier=_ExactManifestVerifier(),
+    )
+    assert any("A_CURRENT" in error and "adoption" in error for error in errors)
+
+
+def test_legacy_policy_digest_is_fixture_only_and_result_reports_current_policy() -> None:
+    module = _load_module()
+    legacy = _fixture()
+    result = module.evaluate_multi_agent_efficiency(legacy)
+    assert result["quality_noninferiority_policy"]["policy_digest"] == (
+        module._registry_efficiency_evaluation_policy()["policy_digest"]
+    )
+
+    forged = _fixture()
+    forged["evidence_kind"] = "platform_or_external_attested"
+    for index, profile in enumerate(forged["profiles"]):
+        profile.update(
+            measurement_status="measured",
+            evidence_ref=f"forged:{index}",
+            evidence_digest="sha256:" + str(index + 1) * 64,
+        )
+    forged["record_digest"] = module.multi_agent_efficiency_evaluation_digest(
+        forged
+    )
+    assert any(
+        "legacy" in error
+        for error in module.validate_multi_agent_efficiency_evaluation(forged)
+    )
+
+
+@pytest.mark.parametrize(
+    "field",
+    (
+        "efficiency_baseline_corpus_schema_path",
+        "efficiency_baseline_manifest_schema_path",
+    ),
+)
+def test_registry_rejects_efficiency_baseline_schema_path_drift(field: str) -> None:
+    import agent_governance as governance
+
+    registry = governance.load_registry()
+    registry[field] = ".codex/schemas/closure_quality_attestation_v1.schema.json"
+
+    assert any(
+        field in error for error in governance.validate_registry(registry, ROOT)
+    )
 
 
 def _measured_with_attestation_index(module) -> tuple[dict, dict]:
@@ -202,14 +876,10 @@ def test_registry_owns_and_validates_the_exact_quality_policy() -> None:
         "axes": [
             "elapsed_time_ms",
             "input_tokens",
-            "output_tokens",
-            "cache_read_tokens",
-            "calls",
-            "waits",
-            "retries",
-            "compactions",
+            "orchestration_load",
         ],
     }
+    assert policy["primary_kpis"] == policy["efficiency_improvement"]["axes"]
     assert governance.registry_efficiency_evaluation_policy_errors(registry) == []
     assert policy["policy_digest"] == governance.efficiency_evaluation_policy_digest(
         policy
@@ -280,7 +950,7 @@ def test_registry_policy_rejects_relaxed_pareto_authority_after_resigning(
     if mutation == "predicate":
         improvement["predicate"] = "any_axis_strictly_better_v1"
     elif mutation == "axes_remove":
-        improvement["axes"].remove("output_tokens")
+        improvement["axes"].remove("orchestration_load")
     elif mutation == "axes_reorder":
         improvement["axes"] = list(reversed(improvement["axes"]))
     else:
@@ -295,7 +965,7 @@ def test_registry_policy_rejects_relaxed_pareto_authority_after_resigning(
     )
 
 
-def test_governance_doc_names_every_registry_threshold_and_pareto_axis() -> None:
+def test_governance_doc_names_every_registry_threshold_and_pareto_predicate() -> None:
     import agent_governance as governance
 
     policy = governance.load_registry()["efficiency_evaluation_policy"]
@@ -305,8 +975,6 @@ def test_governance_doc_names_every_registry_threshold_and_pareto_axis() -> None
         assert f"`{threshold}=" in documented
     improvement = policy["efficiency_improvement"]
     assert f"`{improvement['predicate']}`" in documented
-    for axis in improvement["axes"]:
-        assert f"`{axis}`" in documented
 
 
 def test_profiles_must_bind_the_same_workload_and_baseline() -> None:
@@ -420,7 +1088,7 @@ def test_efficiency_claim_requires_at_least_one_strict_improvement() -> None:
     fixture, attestation_index = _measured_with_attestation_index(module)
     current = _profile(fixture, "current")
     bounded = _profile(fixture, "bounded_role")
-    for metric in module.EFFICIENCY_METRICS:
+    for metric in ("elapsed_time_ms", "input_tokens", "calls", "waits", "retries", "compactions"):
         bounded["metrics"][metric] = current["metrics"][metric]
     attestation = attestation_index["records"][bounded["evidence_ref"]]
     attestation["call_record_digests"] = sorted(
@@ -459,7 +1127,7 @@ def test_synthetic_benchmark_candidate_also_requires_pareto_improvement() -> Non
     fixture = _fixture()
     current = _profile(fixture, "current")
     bounded = _profile(fixture, "bounded_role")
-    for metric in module.EFFICIENCY_METRICS:
+    for metric in ("elapsed_time_ms", "input_tokens", "calls", "waits", "retries", "compactions"):
         bounded["metrics"][metric] = current["metrics"][metric]
     _resign(module, fixture)
 
@@ -477,8 +1145,8 @@ def test_efficiency_claim_rejects_any_worse_efficiency_axis() -> None:
     fixture, attestation_index = _measured_with_attestation_index(module)
     current = _profile(fixture, "current")
     bounded = _profile(fixture, "bounded_role")
-    bounded["metrics"]["output_tokens"] = (
-        current["metrics"]["output_tokens"] + 1
+    bounded["metrics"]["elapsed_time_ms"] = (
+        current["metrics"]["elapsed_time_ms"] + 1
     )
     attestation = attestation_index["records"][bounded["evidence_ref"]]
     attestation["metrics_payload_digest"] = _canonical_digest(bounded["metrics"])
@@ -502,7 +1170,7 @@ def test_efficiency_claim_rejects_any_worse_efficiency_axis() -> None:
 
     assert comparison["efficiency_improvement"]["status"] == "FAIL"
     assert comparison["efficiency_improvement"]["worse_axes"] == [
-        "output_tokens"
+        "elapsed_time_ms"
     ]
     assert comparison["efficiency_improvement"]["strictly_improved_axes"]
     assert comparison["efficiency_claim_allowed"] is False

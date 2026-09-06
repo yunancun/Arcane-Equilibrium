@@ -2596,22 +2596,39 @@ def test_agent_wave_enforces_bundle_freshness_estimate_floor_and_budget_authorit
     wrong_loop_digest_args["tasks"][0][
         "contextArtifact"
     ] = wrong_loop_digest_artifact
-    near_cap_artifact = None
-    near_cap_prompt = None
-    for prompt_bytes in range(26_000, 15_000, -500):
-        candidate_prompt = "x" * prompt_bytes
-        candidate_plan = compile_context(
+    def compile_near_cap_prompt(prompt_bytes: int) -> dict:
+        return compile_context(
             "E2",
-            {**facts, "task_prompt": candidate_prompt},
+            {**facts, "task_prompt": "x" * prompt_bytes},
             registry,
             ROOT,
             execution_dag=execution_dag,
         )
+
+    lower_prompt_bytes = 1
+    upper_prompt_bytes = authority["max_prompt_utf8_bytes_per_call"]
+    while lower_prompt_bytes < upper_prompt_bytes:
+        candidate_prompt_bytes = (
+            lower_prompt_bytes + upper_prompt_bytes + 1
+        ) // 2
+        candidate_plan = compile_near_cap_prompt(candidate_prompt_bytes)
         if candidate_plan["budget"]["call_allowed"]:
-            near_cap_artifact = materialize_context_artifact(candidate_plan, registry)
-            near_cap_prompt = candidate_prompt
-            break
-    assert near_cap_artifact is not None and near_cap_prompt is not None
+            lower_prompt_bytes = candidate_prompt_bytes
+        else:
+            upper_prompt_bytes = candidate_prompt_bytes - 1
+
+    near_cap_prompt = "x" * lower_prompt_bytes
+    near_cap_plan = compile_near_cap_prompt(lower_prompt_bytes)
+    rejected_boundary_plan = compile_near_cap_prompt(lower_prompt_bytes + 1)
+    assert near_cap_plan["budget"]["call_allowed"] is True
+    assert rejected_boundary_plan["budget"]["call_allowed"] is False
+    assert near_cap_plan["budget"]["compiler_estimated_input_tokens"] < (
+        authority["max_context_tokens_per_call"]
+    )
+    assert rejected_boundary_plan["budget"][
+        "compiler_estimated_input_tokens"
+    ] >= authority["max_context_tokens_per_call"]
+    near_cap_artifact = materialize_context_artifact(near_cap_plan, registry)
     near_cap_args = deepcopy(wave_args)
     near_cap_args["tasks"][0]["prompt"] = near_cap_prompt
     near_cap_args["tasks"][0]["contextArtifact"] = near_cap_artifact
@@ -2797,7 +2814,8 @@ async function execute(input, nullFirst = false) {
     )
     assert result["omitted_route"]["ok"] is False
     assert result["omitted_route"]["calls"] == 0
-    assert "execution DAG omits or substitutes canonical routed calls" in (
+    # 新 Registry source guard 會在 DAG 檢查前拒絕同一份重簽、改面但漏 source 的 artifact。
+    assert "semantic Context projection/digests are invalid" in (
         result["omitted_route"]["error"]
     )
     assert result["loop"]["ok"] is True and result["loop"]["calls"] == 1

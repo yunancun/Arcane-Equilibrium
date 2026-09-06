@@ -1,0 +1,154 @@
+{
+  "authenticity": {
+    "host_verifier": "UNAVAILABLE",
+    "profile_selection": "CALLER_CLAIMED",
+    "sha256_scope": "INTEGRITY_ONLY"
+  },
+  "causal_limits": {
+    "declaration_is_selection": false,
+    "mismatch_establishes_causality": false,
+    "missing_host_evidence_preserved_as_unverified": true,
+    "sha256_establishes_authenticity": false
+  },
+  "config_precedence": {
+    "keys": [
+      {
+        "causal_attribution": "NOT_INFERRED",
+        "declared_candidates": [
+          {
+            "precedence_rank": 20,
+            "source_id": "repository_config",
+            "value": "gpt-5.6-terra"
+          }
+        ],
+        "key": "agents.default_subagent_model",
+        "mismatch_classification": "SELECTION_UNVERIFIED",
+        "selected": {
+          "evidence_source_id": null,
+          "origin_source_id": null,
+          "status": "UNVERIFIED",
+          "value": null
+        }
+      },
+      {
+        "causal_attribution": "NOT_INFERRED",
+        "declared_candidates": [
+          {
+            "precedence_rank": 20,
+            "source_id": "repository_config",
+            "value": "medium"
+          }
+        ],
+        "key": "agents.default_subagent_reasoning_effort",
+        "mismatch_classification": "SELECTION_UNVERIFIED",
+        "selected": {
+          "evidence_source_id": null,
+          "origin_source_id": null,
+          "status": "UNVERIFIED",
+          "value": null
+        }
+      },
+      {
+        "causal_attribution": "NOT_INFERRED",
+        "declared_candidates": [
+          {
+            "precedence_rank": 20,
+            "source_id": "repository_config",
+            "value": true
+          }
+        ],
+        "key": "agents.enabled",
+        "mismatch_classification": "SELECTION_UNVERIFIED",
+        "selected": {
+          "evidence_source_id": null,
+          "origin_source_id": null,
+          "status": "UNVERIFIED",
+          "value": null
+        }
+      },
+      {
+        "causal_attribution": "NOT_INFERRED",
+        "declared_candidates": [
+          {
+            "precedence_rank": 20,
+            "source_id": "repository_config",
+            "value": false
+          }
+        ],
+        "key": "agents.interrupt_message",
+        "mismatch_classification": "SELECTION_UNVERIFIED",
+        "selected": {
+          "evidence_source_id": null,
+          "origin_source_id": null,
+          "status": "UNVERIFIED",
+          "value": null
+        }
+      },
+      {
+        "causal_attribution": "NOT_INFERRED",
+        "declared_candidates": [
+          {
+            "precedence_rank": 20,
+            "source_id": "repository_config",
+            "value": 3
+          }
+        ],
+        "key": "agents.max_concurrent_threads_per_session",
+        "mismatch_classification": "SELECTION_UNVERIFIED",
+        "selected": {
+          "evidence_source_id": null,
+          "origin_source_id": null,
+          "status": "UNVERIFIED",
+          "value": null
+        }
+      }
+    ],
+    "observed_layer_order": []
+  },
+  "instruction_selection": {
+    "causal_attribution": "NOT_INFERRED",
+    "cwd_class": null,
+    "evidence_source_id": null,
+    "sources": [],
+    "status": "UNVERIFIED"
+  },
+  "policy_sha256": "sha256:13a5ff430e14d52be74fa4cad9da316090d300652a5eabf731b8f71bbe8ce127",
+  "report_digest": "sha256:e8e6965e4e6c2c808d2ba5cc7a13f8642f3928e7ab9b463590c84f11f8cfd06a",
+  "report_status": "COMPLETE_WITH_UNVERIFIED",
+  "schema_version": "execution_surface_truth_probe_v1",
+  "source_manifest": [
+    {
+      "authenticity_status": "DECLARATION_SNAPSHOT",
+      "evidence_payload": {
+        "values": [
+          {
+            "key": "agents.enabled",
+            "value": true
+          },
+          {
+            "key": "agents.max_concurrent_threads_per_session",
+            "value": 3
+          },
+          {
+            "key": "agents.default_subagent_model",
+            "value": "gpt-5.6-terra"
+          },
+          {
+            "key": "agents.default_subagent_reasoning_effort",
+            "value": "medium"
+          },
+          {
+            "key": "agents.interrupt_message",
+            "value": false
+          }
+        ]
+      },
+      "payload_sha256": "sha256:95d0f7c7141efffccc2a96e80d16953db3b48143b6d9c6bf7ed602e0b38d44e7",
+      "source_id": "repository_config",
+      "source_kind": "config_declaration_v1",
+      "source_sha256": "sha256:382b5197a5045cb2794f3472338da6c38ddb1cc6887318060e98842c37089467"
+    }
+  ],
+  "surface_profile_id": "codex_native_collaboration_v1",
+  "surface_profile_sha256": "sha256:0f9103acfb9de1b57d2db54c47b3eade0ee11aa6968f9a776e861cf13e71ae6d"
+}

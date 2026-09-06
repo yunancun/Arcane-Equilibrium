@@ -13,6 +13,33 @@ Public CLI 保持單一；command permission 與 deploy intent 是同 Module 的
 Implementation/Effect Adapter 檔，讓 reviewer 可按 Interface 局部讀取，避免巨型檔
 token annuity。它們不形成第二套 Registry 或 authority。
 
+W9 bootstrap keeps the entry/router short: each governed predicate points to one
+exact conditional heading in `docs/agents/bootstrap-reference.md` before action.
+That reference is manual reading, not a compiler-selected universal pack.
+
+### Execution-surface truth probe
+
+`agent_governance.py execution-surface-probe @request.json` 是 source-only、deterministic
+的設定優先序與 instruction-source 報告介面，schema 為
+`execution_surface_truth_probe_v1`。公開 CLI 的 `@path` 只接受不超過 64 KiB、嚴格
+UTF-8／嚴格 JSON、repo-relative regular file；absolute path、traversal、symlink、非 regular
+file、重複鍵、non-finite number 與過深／畸形輸入一律拒絕，且錯誤不回顯呼叫者值。
+
+它只輸出 caller-provided allowlisted declaration envelope replay snapshot 的候選、來源雜湊、
+差異分類與未知選取；SHA-256 是完整性檢查，不證明 snapshot 的 provenance/authenticity、實際
+檔案狀態、host 選取或因果。公開 JSON/CLI 沒有 verifier，host config、prompt 選取、cwd 與
+surface-profile 的 caller input 因而是 `CALLER_CLAIMED`，實際選取仍為 `UNVERIFIED`，結果只能
+是 `COMPLETE_WITH_UNVERIFIED`。唯有 embedding host 對 profile ID、profile digest 與完整 source
+envelope 注入 exact verifier，才可升為 `HOST_VERIFIED`、`HOST_OBSERVED` 與 `COMPLETE`；Registry
+declaration、digest 或本機診斷皆不可替代該 verifier。此介面不授權 runtime config、
+service、remote、PG、broker、order、funds、trading 或效率／節省／採用結論。
+
+同一介面的 `--collect-local --surface-profile-id <id> [--global-config /explicit/path/config.toml]`
+是 bounded local declaration collector，不是新 Registry/schema policy：只讀固定 repo config 與明確
+supplied optional global `config.toml`，並以 logical status/report pointer 投影結果。它不 ambient-read、
+不把 local collection 變成 host-selected truth；完整輸入限制與 source-only closure 見
+[`2026-09-04--execution-surface-truth-probe.md`](2026-09-04--execution-surface-truth-probe.md)。
+
 ## 1. 目標函數
 
 治理目標不是「最少 token」，而是：
@@ -143,6 +170,19 @@ full-file fallback；legacy `todo_active_rows` callers 仍要求 exactly-one ACT
 `history_refs` 每項綁 allowlisted safe path、exact H2 heading 與 digest，單段 16 KiB、總量
 32 KiB；glob、whole-file、symlink、traversal、未選 section 均拒絕。因而無關
 TODO/history 變更不再破壞 shared Context/cache key。
+
+Workflow current state 只能由 task 的 `current_workflow_state` 明示 surface 選擇：它只選取
+`TODO.md` 的 exact H2 `## Workflow optimization physical queue（source-only）`，不是
+`WORKFLOW_TODO.md`，亦沒有 `workflow_state` pack。獨立的 docs pack 選取
+`docs/README.md` 的七個 exact sections（含 Document Index rules）。`current_s2e_state` 保留既有 S2E
+projection（含 EMPTY/direct-dependencies rules）；compiler 不從 prompt 字詞猜測。每個選入 typed
+`markdown_section` 必須是 balanced fences 外的 unique full ATX heading，且不超過 16 KiB；缺失、重複或
+malformed selector 一律 fail closed，沒有 full-file fallback；不 preload bulk directory history，並保留 exact core
+`AGENTS.md`/policy bytes。stable conceptual query 不帶 state surface。每個 role（含
+low-uncertainty routing）取正確 bounded surface，既有 runtime/high-risk triggers 不變。Registry-derived
+kind/name/selector 在 Python 與 saved workflow exact parity 檢查；semantic payload 不重複 `source_kind`，因 full plan 已綁定。相同 task inputs 下，
+不相關資料只不得改變 selected semantic content/digest/planned estimate，artifact provenance/freshness
+仍獨立綁定。
 
 Budget 分開管理 single-call planned lower bound、exact prompt bytes、workflow planned
 lower bound、unique nodes、call attempts 與 retry：
@@ -275,7 +315,7 @@ Hard edges：
 - Bybit surface → `BB`；IBKR/TWS/stock_etf_cash → `IB`；不可互代。
 - quant/ML semantic change → `QC`/`MIT`。
 - end-to-end claim → `QA`。
-- docs-only write → `TW` → `R4`；test-only write → `E4` → independent `E2`。
+- docs-only write → `TW` → `R4`；唯有 PM 分類為 surfaces exactly `docs`/`comments`、low/low、finite `docs_write`、`runtime_claim=false`／`end_to_end_claim=false`、單一 literal lowercase-ASCII safe 未保護 `docs/*.md` path 且 `dirty_scope` 完全相等時，才可省略 R4，並記錄 skip reason、PM residual 與 drift-reopen owner。受保護清單由既有 routing helper 正本持有；default/protected/multiple/uncertain 仍經 R4。真實 link/reference/index/structural/current-state 改動必須標示其 surface，不得冒充 editorial。test-only write → `E4` → independent `E2`。
 - functional/performance/GUI-visible claim → `FA`/`E5`/`A3`，不再讓這些能力永遠 dormant。
 
 PA、FA、E5、A3、R4、AI-E 等其他 node 由 risk、uncertainty、surface、expected
@@ -336,6 +376,18 @@ capture + replay，不能宣稱 one total execution。`effect_enforcement=reposi
 channel 的 `RESULT_ONLY`；重算 self-digest 不能替換 command output 語義。`EXECUTED` 與 `REUSED` check 都必須指向
 有效 command capture；後者仍需保留原 execution/signature/TTL assessment，不能只改
 status label。
+
+對 governed pytest，public producer 的 subject scope 是 task `dirty_scope` 與 derived
+verification `path_scope` 的 union；raw HEAD、index 與 worktree 必須在 pytest/provider 執行前
+逐項等於 committed subject。record 的 public `path_scope` 與 private committed-tree isolation
+保持不變。trusted pytest replay 另必須由 caller 提供 trusted `expected_subject_scope`：closure
+caller 提供該 union；既有 LW2 evidence caller 提供其固定兩個 test paths。`reexecute=False`
+只作 structural validation，不是完整 replay proof。plain `pytest` 不受支援，應使用 canonical
+`capture-command` entry；其 exact `GOVERNED_PYTEST_PREFIX` 與
+`GOVERNED_PYTEST_REQUIRED_ARGS` 以
+`helper_scripts/maintenance_scripts/agent_governance_pytest_provider.py` 為唯一 source pointer。
+不得任意 normalize argv、建立 `-p` 例外，或新增 CLI/schema/permission。核准的順序是先建立
+local checkpoint、再以 fresh Context 做 exact-head verification。
 
 ### Task Execution Control Implementation
 
@@ -788,6 +840,25 @@ CommandCaptureVerifier，Closure 對 capture 做 trusted re-execution，故非 c
 single execution；未來只能由 host-attested verifier 取代，不能由 packet self-report 跳過。
 
 ## 6. Consumption truth contract
+
+#### W0 multi-agent efficiency baseline contract
+
+Registry owns the closed metric catalog and the four immutable baseline cases;
+callers cannot add metrics, substitute cases, or average runs. The exact primary
+KPIs are `elapsed_time_ms`, `input_tokens`, and `orchestration_load`. Every
+qualified current and candidate-B run records their raw per-run values. Typed
+observed facts derive the required sentinels, and both current and B must qualify
+before an efficiency conclusion. `orchestration_load` is weighted penalty points,
+not a complete action count: `calls + waits + 2*retries + 2*compactions`.
+`duplicate_exec`, `duplicate_wait`, output, and cache values remain diagnostics.
+Exec/spawn/message/followup coverage is currently unavailable/deferred and can
+never be used to infer actual savings. `UNAVAILABLE` is `null` plus a reason,
+never a zero or an inferred value. `PROVISIONAL_LOCAL_HOST_EXPORT` is useful
+local evidence but can never support measured or adoption claims. Cached input
+is included in the catalog; tokens are not dollar cost. The existing evaluator is
+the sole evaluator. Measured efficiency/adoption additionally requires the
+out-of-band manifest verifier; no packet-local digest or local export substitutes
+for it.
 
 每個 fragment 與 closure 的 usage 只能是 `measured`、`partial` 或 `unavailable`：
 

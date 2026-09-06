@@ -149,6 +149,8 @@ def validate_registry(registry: dict[str, Any], root: Path = REPO_ROOT) -> list[
         "closure_quality_followup_schema_path",
         "closure_quality_attestation_schema_path",
         "efficiency_evaluation_attestation_schema_path",
+        "efficiency_baseline_corpus_schema_path",
+        "efficiency_baseline_manifest_schema_path",
         "permission_enforcement",
         "task_execution_control",
         "execution_policy",
@@ -216,6 +218,20 @@ def validate_registry(registry: dict[str, Any], root: Path = REPO_ROOT) -> list[
         errors.append(
             "efficiency_evaluation_attestation_schema_path is invalid"
         )
+    efficiency_baseline_schemas = {
+        "efficiency_baseline_corpus_schema_path": (
+            ".codex/schemas/"
+            "multi_agent_efficiency_baseline_corpus_v1.schema.json"
+        ),
+        "efficiency_baseline_manifest_schema_path": (
+            ".codex/schemas/"
+            "multi_agent_efficiency_baseline_manifest_v1.schema.json"
+        ),
+    }
+    for field, expected_path in efficiency_baseline_schemas.items():
+        actual_path = registry.get(field)
+        if actual_path != expected_path or not (root / str(actual_path)).is_file():
+            errors.append(f"{field} is invalid")
     if registry["permission_enforcement"] != {
         "scope": "repository_policy_and_command_preflight",
         "not_a_sandbox": True,

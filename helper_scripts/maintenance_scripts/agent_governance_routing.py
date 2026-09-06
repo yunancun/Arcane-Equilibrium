@@ -56,6 +56,24 @@ TASK_FACT_FIELDS = {
 SOURCE_REVIEW_SURFACES = {"python", "rust", "gui", "ml_data", "implementation", "runtime"}
 OPERATION_SURFACES = {"deploy", "service", "cron", "pg", "operations", "runtime_effect", "incident_rca"}
 DOC_SURFACES = {"docs", "governance", "index", "registry", "routing", "closure", "comments"}
+EDITORIAL_DOC_ASSURANCE_SHAPES = {"docs", "documentation"}
+EDITORIAL_DOC_ASSURANCE_SURFACES = {"comments", "docs"}
+EDITORIAL_DOC_ASSURANCE_PROTECTED_TOKENS = {
+    "governance", "agent", "agents", "adr", "adrs", "decision", "decisions",
+    "security", "currentstate", "index", "readme", "claude", "architecture",
+    "runbook", "runbooks", "reference", "references", "registry", "routing",
+    "policy", "policies", "schema", "schemas", "contract", "contracts", "api",
+    "spec", "protocol", "todo",
+}
+EDITORIAL_DOC_ASSURANCE_PROTECTED_TOKEN_PAIRS = (("current", "state"),)
+EDITORIAL_DOC_ASSURANCE_SKIP_REASON = (
+    "explicit low-risk editorial docs classification does not require the "
+    "documentation integrity reviewer"
+)
+EDITORIAL_DOC_ASSURANCE_RESIDUAL_RISK = (
+    "typed facts cannot prove prose semantics under innocuous filenames; "
+    "reopen on scope, classification, or surface drift"
+)
 SIDE_EFFECT_CLASSES = {
     "none", "repo_write", "local_test", "docs_write", "deploy", "broker_probe",
     "broker_private_effect", "public_web_read", "private_external_contact",
@@ -319,6 +337,7 @@ ROUTED_WORK_NODES = {
 }
 NARROW_QUERY_SURFACES = {
     "docs", "governance", "index", "registry", "routing", "closure", "comments",
+    "current_workflow_state", "current_s2e_state",
 }
 TASK_CONTRACT_FIELDS = (
     "task_shape", "surfaces", "risk", "runtime_claim", "end_to_end_claim",
@@ -447,6 +466,40 @@ def _documentation_path(path: str) -> bool:
             "agents.md", "claude.md", "readme", "readme.md", "todo.md",
         }
     )
+
+
+def _editorial_doc_assurance_eligible(facts: dict[str, Any]) -> bool:
+    """Recognize the closed, low-risk editorial path that may omit R4."""
+
+    scope = facts.get("scope")
+    dirty_scope = facts.get("dirty_scope")
+    if not (
+        facts["task_shape"] in EDITORIAL_DOC_ASSURANCE_SHAPES
+        and set(facts["surfaces"]) == EDITORIAL_DOC_ASSURANCE_SURFACES
+        and len(facts["surfaces"]) == len(EDITORIAL_DOC_ASSURANCE_SURFACES)
+        and facts["risk"] == "low"
+        and facts["uncertainty"] == "low"
+        and facts["side_effect_class"] == "docs_write"
+        and facts["continuation_mode"] == "finite"
+        and facts["runtime_claim"] is False
+        and facts["end_to_end_claim"] is False
+        and isinstance(scope, list)
+        and len(scope) == 1
+        and isinstance(dirty_scope, list)
+        and scope == dirty_scope
+    ):
+        return False
+    path = scope[0]
+    if not (
+        path.isascii()
+        and path == _portable_ascii_lower(path)
+        and re.fullmatch(r"docs/[a-z0-9][a-z0-9._/-]*\.md", path)
+    ):
+        return False
+    tokens = set(re.findall(r"[a-z0-9]+", path))
+    if tokens & EDITORIAL_DOC_ASSURANCE_PROTECTED_TOKENS:
+        return False
+    return not any(set(pair).issubset(tokens) for pair in EDITORIAL_DOC_ASSURANCE_PROTECTED_TOKEN_PAIRS)
 
 
 def _frontend_path(path: str) -> bool:
@@ -1037,6 +1090,7 @@ def route_task(
     unknown_risk = risk not in {"low", "medium", "high", "critical"}
     unknown_uncertainty = uncertainty == "unknown"
     narrow_query = shape == "query"
+    editorial_doc_assurance = _editorial_doc_assurance_eligible(facts)
     nodes: list[dict[str, Any]] = []
 
     def add(
@@ -1075,8 +1129,11 @@ def route_task(
         pass
     elif docs_change:
         add("docs_update", role="TW", requires=[predecessor], reason="task-owned documentation projection")
-        add("docs_review", role="R4", requires=["docs_update"], reason="documentation/index integrity hard edge")
-        predecessor = "docs_review"
+        if editorial_doc_assurance:
+            predecessor = "docs_update"
+        else:
+            add("docs_review", role="R4", requires=["docs_update"], reason="documentation/index integrity hard edge")
+            predecessor = "docs_review"
     elif test_change:
         add("test_implementation", role="E4", requires=[predecessor], reason="test-only implementation owner")
         add("test_adversarial_review", role="E2", requires=["test_implementation"], reason="tests must prove behavior rather than ceremony")
@@ -1273,15 +1330,22 @@ def route_task(
 
     roles = [node["role"] for node in nodes if node["kind"] == "role"]
     possible = {"PA", "FA", "CC", "E1", "E1a", "E2", "E3", "E4", "E5", "QA", "QC", "MIT", "AI-E", "BB", "IB", "OPS", "A3", "R4", "TW"}
-    skipped = [
-        {
-            "role": role,
-            "reason": "task facts did not trigger this capability preset",
-            "residual_risk": "coverage debt: risk, uncertainty, or surface facts are incomplete" if unknown_risk or unknown_uncertainty else "bounded by declared task facts; reopen on evidence or surface drift",
-            "owner": "PM",
-        }
-        for role in sorted(possible - set(roles))
-    ]
+    skipped = []
+    for role in sorted(possible - set(roles)):
+        if role == "R4" and editorial_doc_assurance:
+            skipped.append({
+                "role": role,
+                "reason": EDITORIAL_DOC_ASSURANCE_SKIP_REASON,
+                "residual_risk": EDITORIAL_DOC_ASSURANCE_RESIDUAL_RISK,
+                "owner": "PM",
+            })
+        else:
+            skipped.append({
+                "role": role,
+                "reason": "task facts did not trigger this capability preset",
+                "residual_risk": "coverage debt: risk, uncertainty, or surface facts are incomplete" if unknown_risk or unknown_uncertainty else "bounded by declared task facts; reopen on evidence or surface drift",
+                "owner": "PM",
+            })
     required_role_nodes = _required_role_projection(nodes, facts)
     base_envelope = (
         "profit_diagnosis"

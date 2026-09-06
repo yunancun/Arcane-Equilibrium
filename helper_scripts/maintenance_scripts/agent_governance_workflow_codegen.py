@@ -15,7 +15,7 @@ from agent_governance_registry import (
     native_agent_binding,
     registry_digest,
 )
-from agent_governance_context_specs import trusted_derived_kinds
+from agent_governance_context_specs import source_identity, trusted_derived_kinds
 from agent_governance_execution_policy import (
     compile_execution_budget_policy,
     default_history_binding,
@@ -25,6 +25,10 @@ from agent_governance_vocabulary import KNOWN_SURFACES
 from agent_governance_routing import (
     BROKER_SURFACES,
     DOC_SURFACES,
+    EDITORIAL_DOC_ASSURANCE_PROTECTED_TOKEN_PAIRS,
+    EDITORIAL_DOC_ASSURANCE_PROTECTED_TOKENS,
+    EDITORIAL_DOC_ASSURANCE_SHAPES,
+    EDITORIAL_DOC_ASSURANCE_SURFACES,
     NARROW_QUERY_SURFACES,
     OPERATION_SURFACES,
     P0B_CLAIM_KEYS_BY_PHASE,
@@ -64,6 +68,8 @@ DAG_ROLE_BINDINGS_TOKEN = "__DAG_ROLE_BINDINGS__"
 KNOWN_SURFACES_TOKEN = "__KNOWN_SURFACES__"
 CONTROLLER_PERMISSION_TOKEN = "__CONTROLLER_PERMISSION__"
 ROUTE_POLICY_TOKEN = "__GENERIC_ROUTE_POLICY__"
+CONTEXT_PACK_SOURCES_TOKEN = "__CONTEXT_PACK_SOURCE_REQUIREMENTS__"
+ROLE_CONTEXT_PACKS_TOKEN = "__ROLE_CONTEXT_PACKS__"
 SHADOW_RE = re.compile(
     r"\b(?:AUTHORITY_PROFILES|CONTEXT_(?:ARTIFACT|PLAN|BUDGET)_FIELDS|"
     r"TASK_CONTRACT_FIELDS|MANDATORY_CONTEXT_FIELDS)\b|"
@@ -122,6 +128,8 @@ def render_context_admission_block(
         KNOWN_SURFACES_TOKEN,
         CONTROLLER_PERMISSION_TOKEN,
         ROUTE_POLICY_TOKEN,
+        CONTEXT_PACK_SOURCES_TOKEN,
+        ROLE_CONTEXT_PACKS_TOKEN,
     )
     if any(template.count(token) != 1 for token in tokens):
         raise ValueError("Context admission template tokens must each occur once")
@@ -188,6 +196,17 @@ def render_context_admission_block(
             "source_review_surfaces": sorted(SOURCE_REVIEW_SURFACES),
             "operation_surfaces": sorted(OPERATION_SURFACES),
             "doc_surfaces": sorted(DOC_SURFACES),
+            "editorial_doc_assurance": {
+                "protected_token_pairs": [
+                    list(pair)
+                    for pair in EDITORIAL_DOC_ASSURANCE_PROTECTED_TOKEN_PAIRS
+                ],
+                "protected_tokens": sorted(
+                    EDITORIAL_DOC_ASSURANCE_PROTECTED_TOKENS
+                ),
+                "shapes": sorted(EDITORIAL_DOC_ASSURANCE_SHAPES),
+                "surfaces": sorted(EDITORIAL_DOC_ASSURANCE_SURFACES),
+            },
             "broker_surfaces": sorted(BROKER_SURFACES),
             "narrow_query_surfaces": sorted(NARROW_QUERY_SURFACES),
             "side_effect_classes": sorted(SIDE_EFFECT_CLASSES),
@@ -223,6 +242,38 @@ def render_context_admission_block(
         separators=(",", ":"),
         allow_nan=False,
     )
+    context_pack_sources = json.dumps(
+        {
+            pack: [
+                {
+                    "source_kind": source_identity(spec)[0],
+                    "source": source_identity(spec)[1],
+                    "selector": source_identity(spec)[2],
+                    **(
+                        {"required_when": spec["required_when"]}
+                        if isinstance(spec, dict) and "required_when" in spec
+                        else {}
+                    ),
+                }
+                for spec in registry["context_packs"][pack]
+            ]
+            for pack in sorted(registry["context_packs"])
+        },
+        ensure_ascii=False,
+        sort_keys=True,
+        separators=(",", ":"),
+        allow_nan=False,
+    )
+    role_context_packs = json.dumps(
+        {
+            role: registry["roles"][role]["context_packs"]
+            for role in sorted(registry["roles"])
+        },
+        ensure_ascii=False,
+        sort_keys=True,
+        separators=(",", ":"),
+        allow_nan=False,
+    )
     rendered = (
         template.replace(TOKEN, profiles)
         .replace(TRUSTED_KINDS_TOKEN, trusted_kinds)
@@ -237,6 +288,8 @@ def render_context_admission_block(
         .replace(KNOWN_SURFACES_TOKEN, admitted_known_surfaces)
         .replace(CONTROLLER_PERMISSION_TOKEN, admitted_controller_permission)
         .replace(ROUTE_POLICY_TOKEN, admitted_route_policy)
+        .replace(CONTEXT_PACK_SOURCES_TOKEN, context_pack_sources)
+        .replace(ROLE_CONTEXT_PACKS_TOKEN, role_context_packs)
     )
     return f"{BEGIN}\n{rendered}\n{END}"
 

@@ -19,6 +19,7 @@ HISTORY_PATH_RE = re.compile(
 MAX_HISTORY_REFS = 4
 MAX_HISTORY_SECTION_BYTES = 16 * 1024
 MAX_HISTORY_TOTAL_BYTES = 32 * 1024
+MAX_MARKDOWN_SECTION_BYTES = 16 * 1024
 
 
 def _digest(data: bytes) -> str:
@@ -33,26 +34,56 @@ def _markdown_lines(data: bytes) -> list[str]:
 
 
 def exact_markdown_section(data: bytes, heading: str) -> bytes:
-    """Return one exact Markdown heading section, including its heading line."""
+    """Return one exact, bounded and fence-aware ATX Markdown section."""
 
-    if not isinstance(heading, str) or not HISTORY_HEADING_RE.fullmatch(heading):
-        raise ValueError("history_refs heading must be an exact Markdown H2")
+    if not isinstance(heading, str):
+        raise ValueError("selected Markdown heading must be one exact ATX heading")
+    heading_match = HEADING_RE.fullmatch(heading)
+    if heading_match is None:
+        raise ValueError("selected Markdown heading must be one exact ATX heading")
     lines = _markdown_lines(data)
-    matches = [
-        index for index, line in enumerate(lines)
-        if line.rstrip("\r\n") == heading
-    ]
+    matches: list[int] = []
+    fence_character: str | None = None
+    fence_length = 0
+    headings: list[tuple[int, int]] = []
+    for index, line in enumerate(lines):
+        value = line.rstrip("\r\n")
+        fence = re.match(r"^[ \t]{0,3}(`{3,}|~{3,})(.*)$", value)
+        if fence_character is not None:
+            if (
+                fence is not None
+                and fence.group(1)[0] == fence_character
+                and len(fence.group(1)) >= fence_length
+                and not fence.group(2).strip()
+            ):
+                fence_character = None
+                fence_length = 0
+            continue
+        if fence is not None:
+            fence_character = fence.group(1)[0]
+            fence_length = len(fence.group(1))
+            continue
+        candidate = HEADING_RE.fullmatch(value)
+        if candidate is not None:
+            headings.append((index, len(candidate.group(1))))
+            if value == heading:
+                matches.append(index)
+    # 為什麼 fail-closed：未閉合 fence 會令後續 heading 的文字／代碼身分含糊。
+    if fence_character is not None:
+        raise ValueError("selected Markdown structure must have balanced fences")
     if len(matches) != 1:
-        raise ValueError("history_refs heading must match exactly one section")
+        raise ValueError("selected Markdown heading must match exactly one section")
     start = matches[0]
-    level = 2
+    level = len(heading_match.group(1))
     end = len(lines)
-    for index in range(start + 1, len(lines)):
-        candidate = HEADING_RE.match(lines[index].rstrip("\r\n"))
-        if candidate and len(candidate.group(1)) <= level:
+    for index, candidate_level in headings:
+        if index > start and candidate_level <= level:
             end = index
             break
-    return "".join(lines[start:end]).encode("utf-8")
+    selected = "".join(lines[start:end]).encode("utf-8")
+    if len(selected) > MAX_MARKDOWN_SECTION_BYTES:
+        raise ValueError("selected Markdown section exceeds 16KiB")
+    return selected
 
 
 def _safe_history_path(value: Any) -> str:

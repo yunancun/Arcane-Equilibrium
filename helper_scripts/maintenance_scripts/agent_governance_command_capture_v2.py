@@ -41,6 +41,12 @@ from agent_governance_pytest_provider import (
     GOVERNED_PYTEST_PROVIDER_WHEEL_PREFIX,
     GOVERNED_PYTEST_REQUIRED_ARGS,
 )
+from agent_governance_pytest_subject_binding import (
+    _is_governed_pytest_argv,
+    _pytest_collection_target_errors,
+    require_capture_pytest_subject,
+    trusted_replay_pytest_subject_errors,
+)
 from agent_governance_registry import native_agent_contract
 from agent_governance_workflow_receipts import canonical_digest
 
@@ -317,29 +323,6 @@ def _is_pytest_argv(argv: list[str]) -> bool:
         or argv[:3] in (["python", "-m", "pytest"], ["python3", "-m", "pytest"])
         or (argv and argv[0].lower() == "pytest")
     )
-
-
-def _is_governed_pytest_argv(argv: list[str]) -> bool:
-    required_end = 4 + len(GOVERNED_PYTEST_REQUIRED_ARGS)
-    return (
-        tuple(argv[:4]) == GOVERNED_PYTEST_PREFIX
-        and tuple(argv[4:required_end]) == GOVERNED_PYTEST_REQUIRED_ARGS
-    )
-
-
-def _pytest_collection_target_errors(argv: list[str]) -> list[str]:
-    if not _is_governed_pytest_argv(argv):
-        return []
-    required_end = 4 + len(GOVERNED_PYTEST_REQUIRED_ARGS)
-    for argument in argv[required_end:]:
-        if argument.startswith("-"):
-            continue
-        target = argument.split("::", 1)[0]
-        if PurePosixPath(target).is_absolute():
-            return [
-                "governed pytest absolute pytest collection target is forbidden"
-            ]
-    return []
 
 
 def _raw_file_digest(path: Path) -> str:
@@ -1395,7 +1378,8 @@ def capture_governed_command(
     ):
         raise PermissionError(
             "pytest capture requires the no-site governed bootstrap and "
-            "--noconftest"
+            "--noconftest through `python3 helper_scripts/maintenance_scripts/"
+            "agent_governance.py capture-command ... -- <governed pytest argv>`"
         )
     pytest_target_errors = _pytest_collection_target_errors(command_argv_value)
     if pytest_target_errors:
@@ -1413,6 +1397,13 @@ def capture_governed_command(
     )
     whole_before = _generation_summary(["."], repository)
     repository_before = _generation_summary(path_scope, repository)
+    require_capture_pytest_subject(
+        command_argv_value,
+        repository=repository,
+        task_contract=task_contract,
+        path_scope=path_scope,
+        source_head=whole_before["source_head"],
+    )
     provider_repository = Path(__file__).resolve().parents[2]
     provider_source_head = (
         whole_before["source_head"]
@@ -1819,6 +1810,7 @@ def validate_governed_command_capture(
     expected_task_contract_digest: str | None = None,
     expected_execution_task: dict[str, Any] | None = None,
     expected_path_scope: list[str] | None = None,
+    expected_subject_scope: list[str] | None = None,
     expected_source_head: str | None = None,
     root: Path = REPO_ROOT,
     reexecute: bool = False,
@@ -1949,12 +1941,26 @@ def validate_governed_command_capture(
     if record.get("record_digest") != _self_digest(record):
         errors.append("governed command capture self-digest is invalid")
     if reexecute and not errors:
-        errors.extend(_replay_errors(record, root=Path(root)))
+        errors.extend(_replay_errors(
+            record,
+            root=Path(root),
+            expected_subject_scope=expected_subject_scope,
+        ))
     return errors
 
 
-def _replay_errors(record: dict[str, Any], *, root: Path) -> list[str]:
+def _replay_errors(
+    record: dict[str, Any],
+    *,
+    root: Path,
+    expected_subject_scope: list[str] | None,
+) -> list[str]:
     path_scope = record["path_scope"]
+    subject_errors = trusted_replay_pytest_subject_errors(
+        record, root=root, expected_subject_scope=expected_subject_scope,
+    )
+    if subject_errors:
+        return subject_errors
     current_task = _generation_summary(path_scope, root)
     current_whole = _generation_summary(["."], root)
     if current_task["generation_digest"] != record["repository_after"]["generation_digest"]:

@@ -1,7 +1,87 @@
 # CLAUDE_CHANGELOG.md — 開發歷史歸檔
 
+## 2026-09-06 W4 conditional editorial assurance (source-only)
+
+Conditional R4 is source-verified only for the narrowly classified editorial-docs path;
+canonical evidence, residual classification ownership, and limits are in `WORKFLOW_TODO.md`.
+W2 fixture E4-writer used Sol/high instead of Registry Sol/low; W4 AI-E initial boot read
+bypassed capture, while substantive source inspection was captured. No settings mutation;
+this is not a standard-routing efficiency sample. KnowledgePilot stayed blocked by the
+unowned `未命名.base` deletion, with no Vault edit or sync.
+
+## 2026-09-06 W2-local closure / W4 local successor gate
+
+`W2-local existing control validation` is `CLOSED_LOCAL_SOURCE_ONLY`; its canonical
+evidence and limits are in `WORKFLOW_TODO.md`. `W2-host integration` remains
+`WAITING_EXTERNAL_HOST_INTEGRATION` for PM and cannot be replaced by a wrapper. Physical
+workflow ACTIVE is zero. W4 is `WAITING_FRESH_ADMISSION`: W2-local and W3 prerequisites
+are satisfied, the operator-approved sequence is recorded, but its successor still needs
+fresh admission and does not depend on W2-host. No runtime, usage, cost, adoption, or
+automatic successor claim is made.
+
+## 2026-09-06 W9 bootstrap profile (CLOSED_BOOTSTRAP_SOURCE_ONLY)
+
+Slimmed agent hot-path documents and relocated conditional governance detail to
+`docs/agents/bootstrap-reference.md`; corrected the documented W3 workflow-state
+selector to TODO physical queue; the independent docs pack selects seven
+`docs/README.md` sections. Reviewed source `bf6839c505d0083f9e1e5717b770347c597e69cf`;
+PA/R4/AI-E source-only PASS and PM diagnostics (`2` existing document-contract tests
+passed in `0.12s`; `render --check` PASS, updated `[]`) are not E4, full-repository, or
+exact-head test claims. Writer change=`sha256:375c18b03afb4790b691409387d04d6f0f4b0e66653fd984e9715de66b06c3de`;
+R4 capture=`sha256:a5ac6d4cc6fde23d1dd0a5075587edd01fce434f17366f5a8e07c016f3489e19`.
+This is not runtime, model, Registry, generated-view, provider-usage, cost, adoption,
+main, remote, or actual-efficiency evidence; manual pointer compliance and qualified
+host E2E remain residuals. No automatic next W.
+
 > 從 CLAUDE.md / TODO.md 遷出的 Wave/Sprint/Batch + TODO version-increment 歷史敘事。新 session 不需要讀此文件，僅供回顧歷史時查閱。
-> 最後更新：2026-08-14（TODO v880 LW2 readmission authority closure candidate）
+> 最後更新：2026-09-05（workflow optimization master-ledger reconciliation；AIML queue unchanged）
+
+---
+
+## 2026-09-06：W3 Context micro-pack source-only closure
+
+- `1f87d68f9a0b8535e8fb46cba52858fa57fbb3d9` closes only `WF6-01` selector and W3-owned
+  `WF6-04` exact loading: E2 PASS; E4 exact-head `206/0/1/0` in 30.69s, capture
+  `sha256:428920484ee8db4296d1c5e1d198cf660e18507866201cebf86688159d276fcd`. The Darwin/Linux
+  argv-cap difference is the expected skip; direct E4 CLI check was allowlist-denied.
+- Same-case docs changed `42909→31870` bytes and planned context `10933→8177`; core remained
+  `25266` bytes / `6522` planned. This is not actual usage/time/cost savings, main/remote/adoption,
+  runtime, model change, or W9 bootstrap closure; W3 alone did not close W9.
+
+---
+
+## 2026-09-06：W1 local collector source-only closure
+
+- `W1-local-collector` 收口為 `CLOSED_LOCAL_COLLECTOR_SOURCE_ONLY`：E2 standards/spec PASS（四項修復）；
+  E4 committed-head `46/0/0/0`，僅 `LOCAL_REPRODUCIBLE`。
+- local report 的五個 repo fields 不改變 selected/instructions=`UNVERIFIED`、profile=`CALLER_CLAIMED`；
+  explicit global config 為 `no_data`。host evidence 保持 waiting，沒有 settings adoption、runtime 或自動 next task。
+
+---
+
+## 2026-09-06：W5 entry/source binding source-only checkpoint
+
+- Governed pytest 現在會在 pytest/provider 執行前拒絕 dirty admitted subject，並保留
+  committed-tree isolation；trusted replay 綁 caller-provided subject scope。E2 解決兩項 finding；
+  E4 exact committed-head 為 `120 passed / 0 failed / 0 skipped / 0 errors`。
+- 結論僅為 `CLOSED_ENTRY_SOURCE_BINDING_SOURCE_ONLY`，不是完整 W5、main adoption、runtime 或
+  measured usage/cost/savings。
+
+---
+
+## 2026-09-05：workflow optimization master ledger reconciliation
+
+- 把本地 W0/W1 source checkpoints 與原 GPT-6 planning handoff 對齊為
+  `WORKFLOW_TODO.md` 總帳；W0/W1 保持 historical source checkpoint，未併入 main 或採用。
+  Q0/Q1、P0/P1 和 reopen/rework/false-closure gates 不變；actual usage、savings、runtime 與
+  selected config 仍未證實。
+- 根 `TODO.md` 只新增短 workflow physical queue：`ACTIVE` empty，W7 為
+  `WAITING_USER_START` 的窄三檔 generation drift，其他 W2–W11/WF6 候選均 deferred。
+  不改下方任何 AIML queue bytes，也不自動續跑或採用模型／政策。
+- 新增 GPT-6 背景文件，保留 priced economics、external telemetry、compatibility、fallback 與
+  fixed-variable A/B 的限制；原 handoff 的舊 startup/order 已 superseded，後續單元一律要
+  使用者點名與乾淨 checkpoint fresh admission。本次無 source/config/runtime/service/PG/broker
+  變更，無 commit、push、merge 或 sync。
 
 ---
 

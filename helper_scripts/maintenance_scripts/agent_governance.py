@@ -100,6 +100,20 @@ from agent_governance_execution_policy import (  # noqa: E402
     surface_profile_binding,
     validate_execution_event_ledger,
 )
+from agent_governance_execution_surface_probe import (  # noqa: E402
+    EXECUTION_SURFACE_PROBE_MAX_REQUEST_BYTES,
+    ExecutionSurfaceHostVerifier,
+    ExecutionSurfaceProbeInputError,
+    build_execution_surface_truth_report,
+    execution_surface_probe_policy,
+    execution_surface_truth_report_digest,
+    load_execution_surface_probe_request,
+    validate_execution_surface_truth_report,
+)
+from agent_governance_execution_surface_local_collector import (  # noqa: E402
+    ExecutionSurfaceLocalCollectionError,
+    collect_local_execution_surface,
+)
 from agent_governance_efficiency_evaluation import (  # noqa: E402
     EfficiencyAttestationVerifier,
     efficiency_attestation_index_digest,
@@ -209,6 +223,9 @@ __all__ = [
     "default_history_binding",
     "execution_dag_digest",
     "execution_policy_digest",
+    "execution_surface_probe_policy",
+    "collect_local_execution_surface",
+    "execution_surface_truth_report_digest",
     "execution_admitted_caps",
     "ExecutionAdmissionController",
     "EfficiencyAttestationVerifier",
@@ -271,9 +288,11 @@ __all__ = [
     "validate_workflow_call_record",
     "validate_workflow_wave_record",
     "validate_execution_event_ledger",
+    "validate_execution_surface_truth_report",
     "validate_efficiency_attestation_index",
     "validate_multi_agent_efficiency_evaluation",
     "verification_fragment_truth_errors",
+    "build_execution_surface_truth_report",
 ]
 
 
@@ -367,6 +386,33 @@ def _build_parser() -> argparse.ArgumentParser:
             "typed attestation-index JSON object or @path; this CLI has no "
             "trusted-host verifier and remains EXTERNAL_LIMIT"
         ),
+    )
+    surface_probe = subparsers.add_parser(
+        "execution-surface-probe",
+        help=(
+            "emit a source-limited report; public caller observations remain "
+            "UNVERIFIED"
+        ),
+    )
+    surface_probe_mode = surface_probe.add_mutually_exclusive_group(required=True)
+    surface_probe_mode.add_argument(
+        "request",
+        nargs="?",
+        help="@path to execution_surface_probe_request_v1 JSON",
+    )
+    surface_probe_mode.add_argument(
+        "--collect-local",
+        action="store_true",
+        help="collect the fixed repository config and optional explicit global config",
+    )
+    surface_probe.add_argument(
+        "--surface-profile-id",
+        help="explicit Registry surface profile required by --collect-local",
+    )
+    surface_probe.add_argument(
+        "--global-config",
+        type=Path,
+        help="explicit global config.toml path; ambient home and env are never scanned",
     )
     closure = subparsers.add_parser("closure", help="validate closure_packet_v1 JSON")
     closure.add_argument("packet", help="JSON object or @path-to-JSON")
@@ -745,6 +791,103 @@ def main(
             )
             return 2
         print(json.dumps(result, ensure_ascii=False, sort_keys=True))
+        return 0
+    if args.action == "execution-surface-probe":
+        if args.collect_local:
+            if args.surface_profile_id is None:
+                print(
+                    json.dumps(
+                        {
+                            "schema_version": "execution_surface_local_collection_error_v1",
+                            "status": "FAIL",
+                            "error_code": "LOCAL_ARGUMENTS",
+                            "error": "collect-local requires an explicit surface profile",
+                        },
+                        ensure_ascii=False,
+                        sort_keys=True,
+                    )
+                )
+                return 2
+            try:
+                collection = collect_local_execution_surface(
+                    args.surface_profile_id,
+                    registry,
+                    global_config=args.global_config,
+                )
+            except ExecutionSurfaceLocalCollectionError as error:
+                print(
+                    json.dumps(
+                        {
+                            "schema_version": "execution_surface_local_collection_error_v1",
+                            "status": "FAIL",
+                            "error_code": error.error_code,
+                            "error": str(error),
+                        },
+                        ensure_ascii=False,
+                        sort_keys=True,
+                    )
+                )
+                return 2
+            print(json.dumps(collection, ensure_ascii=False, sort_keys=True))
+            return 0
+        if args.surface_profile_id is not None or args.global_config is not None:
+            print(
+                json.dumps(
+                    {
+                        "schema_version": "execution_surface_truth_probe_error_v1",
+                        "status": "FAIL",
+                        "error_code": "PROBE_ARGUMENTS",
+                        "error": "local collection options require collect-local mode",
+                    },
+                    ensure_ascii=False,
+                    sort_keys=True,
+                )
+            )
+            return 2
+        try:
+            report = build_execution_surface_truth_report(
+                load_execution_surface_probe_request(args.request), registry
+            )
+            report_errors = validate_execution_surface_truth_report(
+                report, registry
+            )
+            if report_errors:
+                raise RuntimeError("; ".join(report_errors))
+        except ExecutionSurfaceProbeInputError as error:
+            print(
+                json.dumps(
+                    {
+                        "schema_version": "execution_surface_truth_probe_error_v1",
+                        "status": "FAIL",
+                        "error_code": error.error_code,
+                        "error": str(error),
+                    },
+                    ensure_ascii=False,
+                    sort_keys=True,
+                )
+            )
+            return 2
+        except (
+            OSError,
+            RuntimeError,
+            json.JSONDecodeError,
+            TypeError,
+            ValueError,
+        ) as error:
+            print(
+                json.dumps(
+                    {
+                        "schema_version": "execution_surface_truth_probe_error_v1",
+                        "status": "FAIL",
+                        "error_code": "SOURCE_POLICY_VIOLATION",
+                        "error": str(error),
+                    },
+                    ensure_ascii=False,
+                    sort_keys=True,
+                )
+            )
+            return 2
+        print(json.dumps(report, ensure_ascii=False, sort_keys=True))
         return 0
     if args.action == "closure":
         try:

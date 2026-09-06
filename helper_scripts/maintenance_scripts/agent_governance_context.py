@@ -18,6 +18,7 @@ from agent_governance_external_evidence import (
 
 from agent_governance_registry import REPO_ROOT
 from agent_governance_context_refs import (
+    exact_markdown_section,
     project_history_refs,
     project_todo_active_rows,
     project_todo_dispatch_projection,
@@ -555,6 +556,67 @@ def _todo_active_rows_record(
     }
 
 
+def _markdown_section_record(
+    spec: dict[str, Any], *, root: Path, evidence_state: dict[str, Any],
+    actual_baseline: dict[str, str] | None,
+) -> dict[str, Any]:
+    """Capture one exact Registry-declared Markdown section."""
+
+    source = source_name(spec)
+    raw_path, separator, _ = source.partition("#")
+    heading = spec.get("heading")
+    base = {"source": source, "selector": heading}
+    if not separator or not raw_path or evidence_state.get(source) is not None:
+        return {
+            **base,
+            "status": "markdown_section_invalid",
+            "digest": None,
+            "planned_tokens": 32,
+            "artifact_error": (
+                "markdown_section requires a unique path#logical-heading identity "
+                "and rejects caller overrides"
+            ),
+        }
+    local_file, local_error = _safe_artifact(raw_path, root)
+    if local_file is None:
+        return {
+            **base,
+            "status": "markdown_section_invalid",
+            "digest": None,
+            "planned_tokens": 32,
+            "artifact_error": local_error,
+        }
+    data = local_file.read_bytes()
+    try:
+        selected = exact_markdown_section(data, heading)
+    except ValueError as error:
+        return {
+            **base,
+            "status": "markdown_section_invalid",
+            "digest": _sha256_bytes(data),
+            "planned_tokens": 32,
+            "artifact_error": str(error),
+        }
+    observed_at, expires_at = _capture_times("source_snapshot")
+    return {
+        **base,
+        "status": "pinned",
+        "capture_kind": "source_snapshot",
+        "producer": "repository_bytes_v1",
+        "baseline": actual_baseline,
+        "observed_at": observed_at,
+        "expires_at": expires_at,
+        "content_encoding": "utf-8",
+        "content": selected.decode("utf-8"),
+        "digest": _sha256_bytes(data),
+        "content_digest": _sha256_bytes(selected),
+        "bytes": len(selected),
+        "source_bytes": len(data),
+        "full_file_token_estimate": max(1, (len(data) + 3) // 4),
+        "planned_tokens": max(1, (len(selected) + 3) // 4),
+    }
+
+
 def _todo_dispatch_projection_diagnostic(
     *, base: dict[str, Any], status: str, error: str,
     actual_baseline: dict[str, str] | None, source_data: bytes | None,
@@ -771,6 +833,13 @@ def _source_provenance_record(
 ) -> dict[str, Any]:
     source = source_name(source_spec)
     spec_kind = source_spec.get("kind") if isinstance(source_spec, dict) else None
+    if spec_kind == "markdown_section":
+        return _markdown_section_record(
+            source_spec,
+            root=root,
+            evidence_state=evidence_state,
+            actual_baseline=actual_baseline,
+        )
     if spec_kind == "todo_active_rows":
         return _todo_active_rows_record(
             source_spec,

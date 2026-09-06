@@ -1,0 +1,430 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "execution_surface_truth_probe_v1.schema.json",
+  "title": "Source-limited execution-surface truth report",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "schema_version",
+    "report_status",
+    "surface_profile_id",
+    "surface_profile_sha256",
+    "policy_sha256",
+    "authenticity",
+    "source_manifest",
+    "config_precedence",
+    "instruction_selection",
+    "causal_limits",
+    "report_digest"
+  ],
+  "properties": {
+    "schema_version": {"const": "execution_surface_truth_probe_v1"},
+    "report_status": {"enum": ["COMPLETE", "COMPLETE_WITH_UNVERIFIED"]},
+    "surface_profile_id": {
+      "enum": [
+        "claude_saved_workflow_v1",
+        "codex_native_collaboration_v1",
+        "generic_host_v1"
+      ]
+    },
+    "surface_profile_sha256": {"$ref": "#/$defs/digest"},
+    "policy_sha256": {"$ref": "#/$defs/digest"},
+    "authenticity": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["host_verifier", "profile_selection", "sha256_scope"],
+      "properties": {
+        "host_verifier": {"enum": ["AVAILABLE", "UNAVAILABLE"]},
+        "profile_selection": {"enum": ["CALLER_CLAIMED", "HOST_VERIFIED"]},
+        "sha256_scope": {"const": "INTEGRITY_ONLY"}
+      }
+    },
+    "source_manifest": {
+      "type": "array",
+      "minItems": 1,
+      "maxItems": 4,
+      "items": {"$ref": "#/$defs/source_binding"}
+    },
+    "config_precedence": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["observed_layer_order", "keys"],
+      "properties": {
+        "observed_layer_order": {
+          "type": "array",
+          "maxItems": 2,
+          "uniqueItems": true,
+          "items": {"enum": ["global_config", "repository_config"]}
+        },
+        "keys": {
+          "type": "array",
+          "minItems": 1,
+          "maxItems": 5,
+          "items": {"$ref": "#/$defs/config_key_report"}
+        }
+      }
+    },
+    "instruction_selection": {"$ref": "#/$defs/instruction_selection"},
+    "causal_limits": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "declaration_is_selection",
+        "mismatch_establishes_causality",
+        "missing_host_evidence_preserved_as_unverified",
+        "sha256_establishes_authenticity"
+      ],
+      "properties": {
+        "declaration_is_selection": {"const": false},
+        "mismatch_establishes_causality": {"const": false},
+        "missing_host_evidence_preserved_as_unverified": {"const": true},
+        "sha256_establishes_authenticity": {"const": false}
+      }
+    },
+    "report_digest": {"$ref": "#/$defs/digest"}
+  },
+  "$defs": {
+    "digest": {
+      "type": "string",
+      "pattern": "^sha256:[0-9a-f]{64}$"
+    },
+    "safe_value": {
+      "type": ["boolean", "integer", "string", "null"]
+    },
+    "typed_config_contract": {
+      "allOf": [
+        {
+          "if": {
+            "properties": {
+              "key": {"enum": ["agents.enabled", "agents.interrupt_message"]}
+            },
+            "required": ["key"]
+          },
+          "then": {"properties": {"value": {"type": "boolean"}}}
+        },
+        {
+          "if": {
+            "properties": {
+              "key": {"const": "agents.max_concurrent_threads_per_session"}
+            },
+            "required": ["key"]
+          },
+          "then": {
+            "properties": {
+              "value": {"type": "integer", "minimum": 1, "maximum": 16}
+            }
+          }
+        },
+        {
+          "if": {
+            "properties": {
+              "key": {"const": "agents.default_subagent_model"}
+            },
+            "required": ["key"]
+          },
+          "then": {
+            "properties": {
+              "value": {
+                "enum": ["gpt-5.6-luna", "gpt-5.6-sol", "gpt-5.6-terra"]
+              }
+            }
+          }
+        },
+        {
+          "if": {
+            "properties": {
+              "key": {"const": "agents.default_subagent_reasoning_effort"}
+            },
+            "required": ["key"]
+          },
+          "then": {
+            "properties": {
+              "value": {
+                "enum": ["high", "low", "max", "medium", "ultra", "xhigh"]
+              }
+            }
+          }
+        }
+      ]
+    },
+    "source_binding": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "source_id",
+        "source_kind",
+        "evidence_payload",
+        "payload_sha256",
+        "source_sha256",
+        "authenticity_status"
+      ],
+      "properties": {
+        "source_id": {
+          "enum": [
+            "global_config",
+            "repository_config",
+            "host_config_read",
+            "prompt_input"
+          ]
+        },
+        "source_kind": {
+          "enum": [
+            "config_declaration_v1",
+            "host_config_read_observation_v1",
+            "prompt_input_observation_v1"
+          ]
+        },
+        "evidence_payload": {"$ref": "#/$defs/evidence_payload"},
+        "payload_sha256": {"$ref": "#/$defs/digest"},
+        "source_sha256": {"$ref": "#/$defs/digest"},
+        "authenticity_status": {
+          "enum": [
+            "DECLARATION_SNAPSHOT",
+            "CALLER_CLAIMED",
+            "HOST_VERIFIED"
+          ]
+        }
+      }
+    },
+    "evidence_payload": {
+      "oneOf": [
+        {"$ref": "#/$defs/config_declaration_payload"},
+        {"$ref": "#/$defs/host_config_read_payload"},
+        {"$ref": "#/$defs/prompt_input_payload"}
+      ]
+    },
+    "config_value": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["key", "value"],
+      "properties": {
+        "key": {
+          "enum": [
+            "agents.default_subagent_model",
+            "agents.default_subagent_reasoning_effort",
+            "agents.enabled",
+            "agents.interrupt_message",
+            "agents.max_concurrent_threads_per_session"
+          ]
+        },
+        "value": {"$ref": "#/$defs/safe_value"}
+      },
+      "allOf": [{"$ref": "#/$defs/typed_config_contract"}]
+    },
+    "config_declaration_payload": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["values"],
+      "properties": {
+        "values": {
+          "type": "array",
+          "minItems": 1,
+          "maxItems": 5,
+          "items": {"$ref": "#/$defs/config_value"}
+        }
+      }
+    },
+    "observed_config_value": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["key", "value", "origin_source_id"],
+      "properties": {
+        "key": {
+          "enum": [
+            "agents.default_subagent_model",
+            "agents.default_subagent_reasoning_effort",
+            "agents.enabled",
+            "agents.interrupt_message",
+            "agents.max_concurrent_threads_per_session"
+          ]
+        },
+        "value": {"$ref": "#/$defs/safe_value"},
+        "origin_source_id": {"enum": ["global_config", "repository_config"]}
+      },
+      "allOf": [{"$ref": "#/$defs/typed_config_contract"}]
+    },
+    "host_config_read_payload": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["ordered_layer_source_ids", "selected_values"],
+      "properties": {
+        "ordered_layer_source_ids": {
+          "type": "array",
+          "minItems": 1,
+          "maxItems": 2,
+          "uniqueItems": true,
+          "items": {"enum": ["global_config", "repository_config"]}
+        },
+        "selected_values": {
+          "type": "array",
+          "minItems": 1,
+          "maxItems": 5,
+          "items": {"$ref": "#/$defs/observed_config_value"}
+        }
+      }
+    },
+    "prompt_input_payload": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["cwd_class", "instruction_sources"],
+      "properties": {
+        "cwd_class": {
+          "enum": ["workspace_root", "canonical_repo", "linked_worktree"]
+        },
+        "instruction_sources": {
+          "type": "array",
+          "minItems": 3,
+          "maxItems": 3,
+          "items": {"$ref": "#/$defs/instruction_source"}
+        }
+      }
+    },
+    "declared_candidate": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["source_id", "precedence_rank", "value"],
+      "properties": {
+        "source_id": {"enum": ["global_config", "repository_config"]},
+        "precedence_rank": {"enum": [10, 20]},
+        "value": {"$ref": "#/$defs/safe_value"}
+      }
+    },
+    "selected_value": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "status",
+        "value",
+        "origin_source_id",
+        "evidence_source_id"
+      ],
+      "properties": {
+        "status": {"enum": ["HOST_OBSERVED", "UNVERIFIED"]},
+        "value": {"$ref": "#/$defs/safe_value"},
+        "origin_source_id": {
+          "type": ["string", "null"],
+          "enum": ["global_config", "repository_config", null]
+        },
+        "evidence_source_id": {
+          "type": ["string", "null"],
+          "enum": ["host_config_read", null]
+        }
+      },
+      "allOf": [
+        {
+          "if": {
+            "properties": {"status": {"const": "UNVERIFIED"}},
+            "required": ["status"]
+          },
+          "then": {
+            "properties": {
+              "value": {"type": "null"},
+              "origin_source_id": {"type": "null"},
+              "evidence_source_id": {"type": "null"}
+            }
+          }
+        }
+      ]
+    },
+    "config_key_report": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "key",
+        "declared_candidates",
+        "selected",
+        "mismatch_classification",
+        "causal_attribution"
+      ],
+      "properties": {
+        "key": {
+          "enum": [
+            "agents.default_subagent_model",
+            "agents.default_subagent_reasoning_effort",
+            "agents.enabled",
+            "agents.interrupt_message",
+            "agents.max_concurrent_threads_per_session"
+          ]
+        },
+        "declared_candidates": {
+          "type": "array",
+          "maxItems": 2,
+          "items": {"$ref": "#/$defs/declared_candidate"}
+        },
+        "selected": {"$ref": "#/$defs/selected_value"},
+        "mismatch_classification": {
+          "enum": [
+            "SELECTION_UNVERIFIED",
+            "MATCHES_HIGHEST_PRECEDENCE_DECLARATION",
+            "DIFFERS_FROM_HIGHEST_PRECEDENCE_DECLARATION",
+            "ORIGIN_DIFFERS_FROM_HIGHEST_PRECEDENCE_DECLARATION",
+            "OBSERVED_VALUE_NOT_DECLARED"
+          ]
+        },
+        "causal_attribution": {"const": "NOT_INFERRED"}
+      }
+    },
+    "instruction_source": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["instruction_id", "selection", "content_sha256"],
+      "properties": {
+        "instruction_id": {
+          "enum": [
+            "canonical_repo_agents",
+            "knowledgepilot_auto_rule",
+            "workspace_entry_shim"
+          ]
+        },
+        "selection": {"enum": ["SELECTED", "NOT_SELECTED"]},
+        "content_sha256": {
+          "type": ["string", "null"],
+          "pattern": "^sha256:[0-9a-f]{64}$"
+        }
+      }
+    },
+    "instruction_selection": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "status",
+        "cwd_class",
+        "sources",
+        "evidence_source_id",
+        "causal_attribution"
+      ],
+      "properties": {
+        "status": {"enum": ["HOST_OBSERVED", "UNVERIFIED"]},
+        "cwd_class": {
+          "type": ["string", "null"],
+          "enum": ["workspace_root", "canonical_repo", "linked_worktree", null]
+        },
+        "sources": {
+          "type": "array",
+          "maxItems": 3,
+          "items": {"$ref": "#/$defs/instruction_source"}
+        },
+        "evidence_source_id": {
+          "type": ["string", "null"],
+          "enum": ["prompt_input", null]
+        },
+        "causal_attribution": {"const": "NOT_INFERRED"}
+      },
+      "allOf": [
+        {
+          "if": {
+            "properties": {"status": {"const": "UNVERIFIED"}},
+            "required": ["status"]
+          },
+          "then": {
+            "properties": {
+              "cwd_class": {"type": "null"},
+              "sources": {"maxItems": 0},
+              "evidence_source_id": {"type": "null"}
+            }
+          }
+        }
+      ]
+    }
+  }
+}

@@ -11,6 +11,8 @@ const CONTEXT_ADMISSION_V1 = Object.freeze({
   knownSurfaces: Object.freeze(__KNOWN_SURFACES__),
   controllerPermission: __CONTROLLER_PERMISSION__,
   routePolicy: Object.freeze(__GENERIC_ROUTE_POLICY__),
+  contextPackSources: Object.freeze(__CONTEXT_PACK_SOURCE_REQUIREMENTS__),
+  roleContextPacks: Object.freeze(__ROLE_CONTEXT_PACKS__),
   contractFields: Object.freeze(['task_shape', 'surfaces', 'risk', 'runtime_claim', 'end_to_end_claim', 'uncertainty', 'side_effect_class', 'objective', 'scope', 'acceptance_criteria', 'hard_stops', 'baseline', 'dirty_scope', 'verification_scope', 'direct_interfaces', 'previous_failure', 'focus', 'claim_inputs', 'claim_payloads', 'admission_profile', 'work_item_id', 'lane_id', 'task_prompt', 'task_prompt_digest', 'continuation_mode', 'operator_loop_request_digest', 'history_refs']),
   mandatoryFields: Object.freeze(['objective', 'scope', 'acceptance_criteria', 'hard_stops', 'baseline', 'direct_interfaces', 'previous_failure', 'task_prompt', 'task_prompt_digest']),
   budgetFields: Object.freeze(['envelope', 'target_context_tokens', 'quality_reserve_context_tokens', 'accounting_basis', 'max_context_tokens_per_call', 'max_prompt_utf8_bytes_per_call', 'estimated_tokens', 'compiler_estimated_input_tokens', 'action', 'review_required', 'review_rationale', 'mandatory_truncated', 'quality_reserve_reasons', 'authority', 'authority_canonical', 'authority_digest', 'call_allowed', 'claim_pass_eligible', 'pass_allowed']),
@@ -522,6 +524,29 @@ const canonicalRouteCallNodesV1 = (surface, contract) => {
   }
   let predecessor = []
   const narrowQuery = shape === 'query'
+  const editorialPolicy = policy.editorial_doc_assurance
+  const editorialPath = (
+    Array.isArray(contract.scope) && contract.scope.length === 1 &&
+    contract.dirty_scope.length === 1 &&
+    contract.scope[0] === contract.dirty_scope[0]
+  ) ? contract.scope[0] : null
+  const editorialTokens = new Set(
+    typeof editorialPath === 'string' ? (editorialPath.match(/[a-z0-9]+/g) || []) : [],
+  )
+  const editorialDocAssurance = (
+    editorialPolicy.shapes.includes(shape) &&
+    surfaces.length === editorialPolicy.surfaces.length &&
+    editorialPolicy.surfaces.every(item => surfaceSet.has(item)) &&
+    contract.risk === 'low' && contract.uncertainty === 'low' &&
+    effect === 'docs_write' && contract.continuation_mode === 'finite' &&
+    contract.runtime_claim === false && contract.end_to_end_claim === false &&
+    typeof editorialPath === 'string' &&
+    /^docs\/[a-z0-9][a-z0-9._/-]*\.md$/.test(editorialPath) &&
+    !editorialPolicy.protected_tokens.some(token => editorialTokens.has(token)) &&
+    !editorialPolicy.protected_token_pairs.some(pair => (
+      pair.every(token => editorialTokens.has(token))
+    ))
+  )
   const designNeeded = !narrowQuery && (
     ['design', 'planning', 'analysis', 'research', 'audit'].includes(shape) ||
     effect === 'deploy' ||
@@ -538,8 +563,12 @@ const canonicalRouteCallNodesV1 = (surface, contract) => {
     // program-adoption reviewer fanout.
   } else if (['docs', 'documentation'].includes(shape)) {
     add('docs_update', 'TW', predecessor, 'work')
-    add('docs_review', 'R4', ['docs_update'])
-    predecessor = ['docs_review']
+    if (editorialDocAssurance) {
+      predecessor = ['docs_update']
+    } else {
+      add('docs_review', 'R4', ['docs_update'])
+      predecessor = ['docs_review']
+    }
   } else if (shape === 'test') {
     add('test_implementation', 'E4', predecessor, 'work')
     add('test_adversarial_review', 'E2', ['test_implementation'])
@@ -778,8 +807,82 @@ async function specializedWorkflowSplitDetailsV1(surface, binding, fixedNodes) {
   return { surface, extra_node_ids: extraNodeIds }
 }
 const semanticSourceV1 = source => Object.fromEntries((source.requirement_class === 'verdict_evidence' ? ['source', 'selector', 'requirement_class', 'status', 'capture_kind', 'content_encoding', 'content', 'content_digest', 'producer', 'observed_at', 'expires_at', 'digest', 'attestation_error'] : ['source', 'selector', 'requirement_class', 'status', 'capture_kind', 'content_encoding', 'content', 'content_digest']).map(field => [field, source[field]]))
+const contextSourceConditionActiveV1 = (condition, contract) => {
+  if (!condition) return true
+  const surfaces = new Set(contract.surfaces)
+  return (
+    (condition.surfaces_any || []).some(surface => surfaces.has(surface)) ||
+    (condition.claims_any || []).some(flag => contract[flag] === true) ||
+    (condition.uncertainty_any || []).includes(contract.uncertainty)
+  )
+}
+const expectedContextPacksV1 = contract => {
+  const rolePacks = CONTEXT_ADMISSION_V1.roleContextPacks[contract.__logical_role]
+  if (!Array.isArray(rolePacks)) return null
+  const surfaces = new Set(contract.surfaces)
+  const conditional = [
+    [[...surfaces].some(item => ['operations', 'runtime', 'deploy', 'service', 'cron', 'pg', 'full_audit', 'profit_diagnosis', 'incident_rca', 'current_workflow_state', 'current_s2e_state'].includes(item)) || contract.runtime_claim || contract.end_to_end_claim || ['high', 'unknown'].includes(contract.uncertainty), 'active_state'],
+    [[...surfaces].some(item => ['python', 'rust', 'gui', 'ml_data', 'implementation'].includes(item)), 'source_change'],
+    [[...surfaces].some(item => ['runtime', 'deploy', 'service', 'cron', 'pg', 'operations'].includes(item)) || contract.runtime_claim || contract.end_to_end_claim, 'runtime'],
+    [[...surfaces].some(item => ['public_web_read', 'private_external_contact'].includes(item)), 'external_policy'],
+    [surfaces.has('bybit'), 'broker_bybit'],
+    [[...surfaces].some(item => ['ibkr', 'tws', 'stock_etf_cash', 'broker_session'].includes(item)), 'broker_ibkr'],
+    [[...surfaces].some(item => ['ml', 'ml_data', 'data', 'schema'].includes(item)), 'ml_data'],
+    [surfaces.has('gui'), 'gui_visual'],
+    [[...surfaces].some(item => ['docs', 'governance'].includes(item)), 'docs'],
+    [[...surfaces].some(item => ['architecture', 'authority', 'cross_interface'].includes(item)), 'architecture'],
+    [Array.isArray(contract.history_refs) && contract.history_refs.length > 0, 'history_on_demand'],
+  ]
+  const shared = rolePacks.filter(pack => ['core', 'active_state'].includes(pack))
+  conditional.forEach(([active, pack]) => {
+    if (active && !shared.includes(pack)) shared.push(pack)
+  })
+  const role = rolePacks.filter(pack => !shared.includes(pack))
+  return {shared, role, selected: [...shared, ...role]}
+}
+const requiredContextSourceIdentitiesV1 = (role, contract) => {
+  const selection = expectedContextPacksV1({...contract, __logical_role: role})
+  if (!selection) return null
+  const seen = new Set()
+  const identities = []
+  for (const [contextScope, packs] of [['shared', selection.shared], ['role', selection.role]]) {
+    packs.forEach(pack => {
+      const requirements = CONTEXT_ADMISSION_V1.contextPackSources[pack]
+      if (!Array.isArray(requirements)) return
+      requirements.forEach(requirement => {
+        if (!contextSourceConditionActiveV1(requirement.required_when, contract)) return
+        const sourceIdentity = {
+          source_kind: requirement.source_kind,
+          source: requirement.source,
+          selector: requirement.selector,
+        }
+        const key = canonicalJson(sourceIdentity)
+        if (!seen.has(key)) {
+          seen.add(key)
+          identities.push({...sourceIdentity, context_scope: contextScope})
+        }
+      })
+    })
+  }
+  return {...selection, identities}
+}
 async function validateSemanticContextV1(artifact, plan) {
   if (![artifact.shared_task_context_canonical, artifact.role_context_delta_canonical].every(value => typeof value === 'string') || !Number.isInteger(artifact.semantic_input_tokens) || artifact.semantic_input_tokens <= 0) return false
+  const requiredSources = requiredContextSourceIdentitiesV1(plan.role, plan.task_contract)
+  const suppliedIdentities = Array.isArray(plan.sources) ? plan.sources.map(source => ({
+    source_kind: source.source_kind,
+    source: source.source,
+    selector: source.selector,
+    context_scope: source.context_scope,
+  })) : null
+  // 為什麼 fail-closed：selected_packs 與 digest 都可被攻擊者重簽，必要來源須由 Registry/task 重算。
+  if (
+    !requiredSources || !suppliedIdentities ||
+    canonicalJson(plan.shared_packs) !== canonicalJson(requiredSources.shared) ||
+    canonicalJson(plan.role_packs) !== canonicalJson(requiredSources.role) ||
+    canonicalJson(plan.selected_packs) !== canonicalJson(requiredSources.selected) ||
+    canonicalJson(suppliedIdentities) !== canonicalJson(requiredSources.identities)
+  ) return false
   const sharedSources = plan.sources.filter(source => source.context_scope === 'shared').map(semanticSourceV1)
   const roleSources = plan.sources.filter(source => source.context_scope === 'role').map(semanticSourceV1)
   const semanticContract = Object.fromEntries(Object.entries(plan.task_contract).filter(([field]) => field !== 'baseline'))

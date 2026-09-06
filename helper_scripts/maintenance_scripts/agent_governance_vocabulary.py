@@ -16,6 +16,7 @@ KNOWN_SURFACES = frozenset({
     "python", "quant", "registry", "risk", "risk_model", "routing", "runtime",
     "runtime_effect", "rust", "schema", "secret", "security", "service",
     "simplification", "spec", "stock_etf_cash", "strategy", "tws", "ux", "visual",
+    "current_workflow_state", "current_s2e_state",
 })
 
 CLAIM_FLAGS = frozenset({"runtime_claim", "end_to_end_claim"})

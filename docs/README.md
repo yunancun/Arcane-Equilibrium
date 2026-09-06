@@ -52,6 +52,7 @@ This directory holds all engineering documents, logs, handoff records, and decis
 | `agents/role-profile-memory-standard.md` | 角色 profile / memory 標準（active state 讀 TODO，項目定位讀 README）|
 | `agents/development-agent-governance.md` | Development-Agent Governance Module：Registry/Context/Dispatch/Closure、OPS/IB、consumption 與 effect Adapter 正本 |
 | `agents/todo-maintenance.md` | TODO.md 維護標準（編輯 TODO 前必讀）|
+| `agents/2026-09-05--gpt6-workflow-remediation-plan.md` | GPT-6 workflow 候選的背景與限制；目前總帳／queue 見 repo-root `WORKFLOW_TODO.md`／`TODO.md` |
 | `agents/sub-agent-hygiene-sop.md` | 後台 sub-agent 防殺 / 活性偵測 SOP |
 | `agents/profit-first-fast-demo-promotion-loop.md` | profit-first 快速 Demo 晉升迴圈 |
 | `agents/context-loading.md` | 各 context class 位置與 PG 連線 / dry-run 範例 |

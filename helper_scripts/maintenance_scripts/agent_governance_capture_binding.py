@@ -206,6 +206,7 @@ def collect_capture_evidence(
                         )
                     },
                     expected_path_scope=path_scope,
+                    expected_subject_scope=sorted(set(expected_scope) | set(path_scope)),
                     expected_source_head=expected_source_head,
                     reexecute=True,
                 )

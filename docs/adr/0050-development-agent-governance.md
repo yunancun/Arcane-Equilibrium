@@ -32,6 +32,10 @@ trading Agent，也不授予任何 order/Decision Lease authority。
 Context、Dispatch、Closure。機器正本為 `.codex/agent_registry_v1.json`，可執行工具為
 `helper_scripts/maintenance_scripts/agent_governance.py`。
 
+`execution-surface-probe --collect-local` 是既有工具的一個 bounded local collection mode，
+不新增 public Interface、Registry/schema policy 或 host-selection authority；其 source-only contract
+指向 `docs/agents/2026-09-04--execution-surface-truth-probe.md`。
+
 2026-07-20 在同一 Module 內加入 `Task Execution Control` Implementation，供 Dispatch
 與 Closure 共用；它不是第五個 public Interface 或常駐 daemon。此 slice 集中 finite/
 explicit-loop continuation、semantic no-delta fuse、queue selection 與 exclusive writer
@@ -80,6 +84,15 @@ operations、venue adapter、quant/ML semantics、E2E acceptance 是 hard facts 
 其他 node 依 expected decision gain 與 residual risk advisory 加入。Unknown risk fail-safe
 升 full-audit envelope。任何 skip 記 reason/residual risk/owner。
 
+2026-09-06 W4 amendment：一般 docs write 仍為 `TW → R4`。PM 僅可對 surfaces exactly
+`docs`/`comments`、low/low、finite `docs_write`、`runtime_claim=false`／
+`end_to_end_claim=false`、單一 literal
+lowercase-ASCII safe 未保護 `docs/*.md` path（等於 `dirty_scope`）分類為 editorial，省略
+R4；既有 routing helper 是 protected-list 正本，並記 skip reason、PM residual 與
+scope/class/surface drift reopen。default/protected/multiple/uncertain 或真實
+link/reference/index/structural/current-state surface 保留 R4 與全部 hard edges；native
+permissions 不變。
+
 ### Context and consumption
 
 Universal preload 退役。Context Interface 保留 exact task prompt、user objective/scope/
@@ -87,6 +100,21 @@ acceptance/hard stops、必填 uncertainty、baseline/direct interfaces/previous
 virtual evidence 必須是 source/observed-at typed、byte-backed artifact，caller digest 只是
 assertion。Saved workflow 不再信任 raw contextPath，而是直接驗證 Python-canonical context
 bytes 並消費同一份 inline artifact，retry 不 reopen path，也不做跨語言 canonicalization。
+The W9 bootstrap keeps entry documents short by routing each governed predicate to
+one exact conditional heading in `docs/agents/bootstrap-reference.md` before action;
+that reference is manual reading, not compiler-selected universal Context.
+Current-state loading requires an explicit surface: `current_workflow_state` selects
+only `TODO.md` exact H2 `## Workflow optimization physical queue（source-only）`, never
+`WORKFLOW_TODO.md` and never a `workflow_state` pack. The independent docs pack selects
+seven exact `docs/README.md` sections including Document Index rules; `current_s2e_state` retains its
+existing S2E projection including EMPTY/direct-dependencies rules. Python and saved workflow exact-check Registry-derived
+kind/name/selector and select only unique full ATX Markdown sections outside balanced
+fences (≤16 KiB). Missing/duplicate/malformed selection fails closed without whole-file
+fallback; prompt words never infer a surface. The independent docs pack retains its
+seven bounded `docs/README.md` sections (including Document Index rules, excluding bulk
+directory history), while S2E retains its existing projection; stable conceptual queries
+carry neither. The semantic
+payload need not repeat `source_kind`, because the full plan binds it.
 Budget 使用 elastic target/reserve + reviewed band，並分開 exact prompt-byte、UTF8/4 planned
 lower-bound、workflow、unique-node、attempt、retry authority；到 cap 才拆分或升級，不截
 mandatory context。Planned lower bound 不冒充 actual provider tokens。Full Audit 可合理使用
@@ -234,6 +262,17 @@ external/outcome/actual-usage capture。Acceptance 不接受 generic/self-author
 repo mutation 必須由每個 admitted writer 各產一份 task/role/node/scope-bound
 `repository_change_record_v1`，並以 ordered chain 重驗 exact before/after captures；單一
 snapshot/source-change summary 不證 causality。
+
+governed pytest 的 public producer subject scope 固定為 task `dirty_scope` 加 derived
+verification `path_scope` 的 union；raw HEAD、index、worktree 都必須在 pytest/provider 執行前
+匹配 committed subject。這不改變 public record `path_scope` 或 private committed-tree
+isolation。trusted pytest replay 必須收到 caller-trusted `expected_subject_scope`：closure caller
+供應該 union，既有 LW2 evidence caller 只供應其固定二個 test paths。`reexecute=False` 是
+structural validation，不能冒充完整 replay proof。plain `pytest` 一律導向 canonical
+`capture-command`；exact `GOVERNED_PYTEST_PREFIX` / `GOVERNED_PYTEST_REQUIRED_ARGS` 指向
+`helper_scripts/maintenance_scripts/agent_governance_pytest_provider.py`，不複製 bootstrap。
+不得 arbitrary argv normalization、`-p` exception 或新 CLI/schema/permission；operator-approved
+checkpoint-before-exact-head-verification 順序仍須保留。
 
 #### 2026-07-21 amendment: AIML S0.3 trusted-host finalization
 

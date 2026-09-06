@@ -195,8 +195,9 @@ instead of expecting long architecture prose in memory.
 
 Unless the operator explicitly overrides this:
 
-1. Think before coding: state assumptions, ask on uncertainty, list plausible
-   interpretations when ambiguous, and push back when there is a simpler path.
+1. Think before coding: state assumptions, proceed with settled work, and ask only
+   on material scope/authority, irreversible action, or true preference uncertainty;
+   list plausible interpretations when ambiguous and push back when there is a simpler path.
 2. Simplicity first: least code, no speculative implementation, no extra
    features, no one-off abstraction.
 3. Surgical changes: only necessary edits, no opportunistic adjacent cleanup,

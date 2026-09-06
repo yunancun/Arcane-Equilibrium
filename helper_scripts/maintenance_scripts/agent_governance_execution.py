@@ -16,7 +16,11 @@ from agent_governance_context import (
     capture_repository_baseline,
 )
 from agent_governance_context_validation import validate_context_artifact
-from agent_governance_context_specs import activated_source_specs, source_name
+from agent_governance_context_specs import (
+    activated_source_specs,
+    source_identity,
+    source_name,
+)
 from agent_governance_context_projection import materialize_semantic_context
 from agent_governance_execution_dag import (
     _compiler_derived_zero_call_context_execution_dag_binding,
@@ -153,6 +157,7 @@ def compile_context(
             surfaces & {
                 "operations", "runtime", "deploy", "service", "cron", "pg",
                 "full_audit", "profit_diagnosis", "incident_rca",
+                "current_workflow_state", "current_s2e_state",
             }
             or facts.get("runtime_claim", False)
             or facts.get("end_to_end_claim", False)
@@ -187,10 +192,10 @@ def compile_context(
     ]
     selected_packs = [*shared_packs, *role_packs]
     shared_specs = activated_source_specs(registry, shared_packs, facts)
-    shared_names = {source_name(spec) for spec in shared_specs}
+    shared_identities = {source_identity(spec) for spec in shared_specs}
     role_specs = [
         spec for spec in activated_source_specs(registry, role_packs, facts)
-        if source_name(spec) not in shared_names
+        if source_identity(spec) not in shared_identities
     ]
     source_specs = [*shared_specs, *role_specs]
     sources = [source_name(spec) for spec in source_specs]
@@ -213,6 +218,11 @@ def compile_context(
             record = _source_provenance(
                 spec, root, evidence_state, facts, actual_baseline,
                 external_evidence_verifier,
+            )
+            record["source_kind"] = (
+                spec.get("kind", "repository_source")
+                if isinstance(spec, dict)
+                else "repository_source"
             )
             record["context_scope"] = context_scope
             provenance.append(record)
