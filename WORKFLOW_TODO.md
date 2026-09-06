@@ -4,7 +4,9 @@
 
 這是人工閱讀的來源限定總帳，不是可派發佇列；物理 queue 只在根目錄
 [`TODO.md`](TODO.md)。`W1-local-collector` 已為 `CLOSED_LOCAL_COLLECTOR_SOURCE_ONLY`；W3 亦已為
-`CLOSED_CONTEXT_MICRO_PACK_SOURCE_ONLY`；W4 亦為 `CLOSED_CONDITIONAL_ASSURANCE_SOURCE_ONLY`，workflow lane 沒有 dispatchable row，不能推論 effective/host-selected
+`CLOSED_CONTEXT_MICRO_PACK_SOURCE_ONLY`；W4 亦為 `CLOSED_CONDITIONAL_ASSURANCE_SOURCE_ONLY`。目前唯一 physical
+`ACTIVE` 是 `W2-HOST-INTEGRATION-20260907`：使用者只授權最小真實 host validation，隨後一次 candidate
+integration impact assessment；這不是完整 W2、成功或採用結論，且沒有自動下一項。其餘 workflow lane 不能推論 effective/host-selected
 configuration、完整 W1、模型／政策採用、runtime、服務、PG、broker、下單、交易或獲利宣稱，也不授權
 自動續跑或下一項。`W5-entry-source-binding` 仍是窄義
 `CLOSED_ENTRY_SOURCE_BINDING_SOURCE_ONLY` checkpoint。
