@@ -12,7 +12,7 @@
   },
   "registry_binding": {
     "schema_version": "agent_registry_v1",
-    "registry_digest": "sha256:0ab769848bb7490b9be067ae601b76b8e557d068bf0c481aca00b835e8ca8b23"
+    "registry_digest": "sha256:d7071bee82abec2072fc070e2c97697a0d81d317ea4fbba3bfd8ae950d3c8b7f"
   },
   "source_generation": {
     "head_sha": "b411435a0063ddcfacfa390cc199b62e05966645",
@@ -209,5 +209,5 @@
     }
   ],
   "adoption_status": "PENDING_CANDIDATE_RUNS",
-  "manifest_digest": "sha256:b3039203d8c5b002ec2bb826b12f2a3d53aed92d219e730afbeb23611a3826e2"
+  "manifest_digest": "sha256:a4d5af1d3f2a60fc4fcf1b88209edf0ae0472c9d8f18fea801a0df09af90b972"
 }
