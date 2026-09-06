@@ -9,9 +9,37 @@ import subprocess
 from pathlib import Path, PurePosixPath
 from typing import Any
 
+from agent_governance_pytest_provider import (
+    GOVERNED_PYTEST_PREFIX,
+    GOVERNED_PYTEST_REQUIRED_ARGS,
+)
+
 
 GIT_SEARCH_PATH = ("/usr/bin", "/bin", "/usr/local/bin", "/opt/homebrew/bin")
 ALLOWED_MODES = {"100644", "100755", "120000"}
+
+
+def _is_governed_pytest_argv(argv: list[str]) -> bool:
+    required_end = 4 + len(GOVERNED_PYTEST_REQUIRED_ARGS)
+    return (
+        tuple(argv[:4]) == GOVERNED_PYTEST_PREFIX
+        and tuple(argv[4:required_end]) == GOVERNED_PYTEST_REQUIRED_ARGS
+    )
+
+
+def _pytest_collection_target_errors(argv: list[str]) -> list[str]:
+    if not _is_governed_pytest_argv(argv):
+        return []
+    required_end = 4 + len(GOVERNED_PYTEST_REQUIRED_ARGS)
+    for argument in argv[required_end:]:
+        if argument.startswith("-"):
+            continue
+        target = argument.split("::", 1)[0]
+        if PurePosixPath(target).is_absolute():
+            return [
+                "governed pytest absolute pytest collection target is forbidden"
+            ]
+    return []
 
 
 def _git_executable() -> str:
@@ -303,3 +331,77 @@ def require_committed_pytest_subject(
             raise ValueError(
                 f"pytest subject worktree differs from committed checkpoint: {path}"
             )
+
+
+def require_capture_pytest_subject(
+    argv: list[str],
+    *,
+    repository: Path,
+    task_contract: dict[str, Any],
+    path_scope: list[str],
+    source_head: str,
+) -> None:
+    """Fail closed before governed pytest can execute uncommitted subject bytes."""
+
+    if not _is_governed_pytest_argv(argv):
+        return
+    try:
+        subject_scope = pytest_subject_scope(
+            task_contract, path_scope, root=repository,
+        )
+        require_committed_pytest_subject(
+            repository, source_head=source_head, scope=subject_scope,
+        )
+    except (OSError, ValueError) as error:
+        raise PermissionError(
+            "governed pytest requires admitted subject bytes to match the "
+            "committed checkpoint before execution; create the approved "
+            "local committed checkpoint, compile a fresh Context artifact, "
+            "and retry the canonical agent_governance.py capture-command "
+            f"entry: {error}"
+        ) from None
+
+
+def trusted_replay_pytest_subject_errors(
+    record: dict[str, Any],
+    *,
+    root: Path,
+    expected_subject_scope: list[str] | None,
+) -> list[str]:
+    """Validate the caller-bound pytest subject before trusted replay."""
+
+    if not _is_governed_pytest_argv(record["argv"]):
+        return []
+    if expected_subject_scope is None:
+        return [
+            "governed pytest trusted replay requires admitted pytest "
+            "subject scope"
+        ]
+    try:
+        subject_scope = pytest_subject_scope(
+            {"dirty_scope": expected_subject_scope}, [], root=root,
+        )
+    except (OSError, ValueError) as error:
+        return [
+            "governed pytest trusted replay admitted pytest subject scope "
+            f"is invalid: {error}"
+        ]
+    if subject_scope != expected_subject_scope or not set(record["path_scope"]).issubset(
+        subject_scope
+    ):
+        return [
+            "governed pytest trusted replay admitted pytest subject scope "
+            "is not the canonical verification-inclusive union"
+        ]
+    try:
+        require_committed_pytest_subject(
+            root,
+            source_head=record["whole_repository_before"]["source_head"],
+            scope=subject_scope,
+        )
+    except (OSError, ValueError) as error:
+        return [
+            "governed pytest trusted replay admitted pytest subject differs "
+            f"from committed checkpoint: {error}"
+        ]
+    return []
