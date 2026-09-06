@@ -22,14 +22,15 @@ AI/ML queue，沒有 runtime、provider usage、模型採用或節省結論。
 
 ### ACTIVE（dispatchable）
 
-`W2-HOST-INTEGRATION-20260907` 為唯一 canonical `ACTIVE`：使用者只授權一次最小真實 host validation，
-其後一次 candidate integration impact assessment；這不是完整 W2 實作、成功或採用結論，且沒有自動下一項。
+**EMPTY**。`W2-HOST-INTEGRATION-20260907` 的有限 host validation 與 candidate integration-impact
+assessment 已記錄為 source-only conditional adoption verdict；不產生自動下一項。
 
 ### WAITING / DEFERRED（non-dispatchable）
 
 | ID | State / named unblock | finite scope |
 |---|---|---|
 | W1 host-selected evidence | `WAITING_EXTERNAL_EVIDENCE`：production selected-config 尚未 exposed | owner=PM；取得非 caller 控制的 selected-config/host evidence 後 fresh-admit；不阻擋 W2/W3/W5/W10 的 source slices。 |
+| W2-host daily-workflow integration | `WAITING_OPERATOR_APPROVED_HOST_INTEGRATION`：本次 isolated App Server 只證控制原語，未證桌面日常路徑 | owner=PM/Operator；先明確批准 current desktop hook/controller integration，或另行批准受控 App Server client trial；該單元須證 exact hook trust、pre-action quota/race/wave-depth/wait、cancel/descendant 與 non-caller verifier。這不依賴 W3/W4/W8。 |
 | W8 locality/lazy S2 | `DEFERRED_UNSTARTED`：PM fresh-admit 可比較的 retain/isolate/delete measurement | measurement/independent parts 可獨立於 W3/W9；W3/W7 source seams 已 closed，但 lazy/locality measurement 尚未完成，不自動提升或刪除必要 Context。 |
 | W5 reuse/host verifier、W6 snapshot | `DEFERRED_TECHNICAL_DEPENDENCY`：分別需 W5 entry 後可驗證的 reuse signature/TTL 或 host verifier、及 W4/W5 的 immutable-snapshot evidence | W5 entry 已是 historical closed source-only checkpoint；reuse/production host verifier 不在本 W1 slice。 |
 | W10 KnowledgePilot、W11 adoption、WF6-02/05/06/07 | `DEFERRED_OPERATOR_POLICY_OR_EVIDENCE`：需 explicit policy amendment、HITL、external/provider evidence 或 qualified comparable run | 不自動提升；W11 dependency narrowing 只是 proposal，尚未生效。 |
@@ -41,6 +42,7 @@ AI/ML queue，沒有 runtime、provider usage、模型採用或節省結論。
 |---|---|---|
 | W4 low-risk assurance lanes | `CLOSED_CONDITIONAL_ASSURANCE_SOURCE_ONLY` | Conditional R4 source capability is locally reproducible only; exact evidence, residual PM classification, and limits are in `WORKFLOW_TODO.md`. Not full assurance, host/adoption/main, or measured time/token/cost outcome. |
 | W2-local existing controls | `CLOSED_LOCAL_SOURCE_ONLY` | Existing control validation at `1de695218e8fbf11a317a40396ad1713e940b930`: E2 `102/0/0/0` in 26.29s, capture `sha256:7992b78f83698d9821d31422b19d2a9638bf09c99887513f71216c2d49e05965`; see `WORKFLOW_TODO.md` for scope and limits. Not W2-host or full W2. |
+| W2-host finite validation / candidate impact | `CLOSED_SOURCE_ONLY_CONDITIONAL_ADOPTION` | exact head `19126b63459a1ff424896b203a3c234ad43c911f`: isolated Codex 0.153.4 App Server proves command deadline/owned-PID termination and pending-turn interrupt only; it does not adopt the daily desktop host or make Registry enforcement true. Integration repairs INT-01 (`a138…`, 2060→2000 line cap) and INT-02 (fixture hash at `19126…`) are independently PASS; replacement impact captures exit 0 with 412 collected and no failures/errors, but the receipt truncation leaves passed/skipped split unavailable. Initial 15-file union timed out with three failures and is retained, not PASS. Full CI, authenticated closure, actual savings, main/remote/adoption/runtime remain unproved; see `WORKFLOW_TODO.md`. |
 | W3-context-micro-pack | `CLOSED_CONTEXT_MICRO_PACK_SOURCE_ONLY` | `1f87d68f9a0b8535e8fb46cba52858fa57fbb3d9`: `WF6-01` selector + W3-owned `WF6-04` exact loading only. E2 PASS; E4 exact-head `206 passed / 0 failed / 1 skipped / 0 errors` in 30.69s, capture `sha256:428920484ee8db4296d1c5e1d198cf660e18507866201cebf86688159d276fcd`; Darwin/Linux argv-cap difference is the expected skip. Codegen parity is covered by that suite; direct E4 CLI check was denied by allowlist. Context docs `42909→31870` bytes (`-25.7%`), planned `10933→8177`; core `25266` bytes / `6522` planned unchanged. No actual usage/time/cost savings, main/remote/adoption/runtime/model change, or automatic successor. |
 | W1-local-collector | `CLOSED_LOCAL_COLLECTOR_SOURCE_ONLY` | committed source `b92417b7afed1de6a1913279af6e5743fb085b34`: E2 standards/spec PASS after four repairs; E4 exact committed-head `46 passed / 0 failed / 0 skipped / 0 errors` (22 collector + 24 existing-probe), local-reproducible capture `sha256:f0c0083999b1b4262b004884b19f34f7b9c1728daa0fe41090cebcd3ee07f14d`. Local observation collected five repo declarations; explicitly supplied global `config.toml` was `no_data`, selection/instructions remain `UNVERIFIED`, profile `CALLER_CLAIMED`. Not host attestation, settings adoption, runtime, or automatic successor. |
 | W5-entry-source-binding | `CLOSED_ENTRY_SOURCE_BINDING_SOURCE_ONLY` | local source checkpoint `60bc55673f170a06ee4b93a2080c060160707566`: E2 resolved two findings; E4 exact committed-head `120 passed / 0 failed / 0 skipped / 0 errors`, capture `sha256:ae95998b8b0e92b17c3f17949f3011cfe68ce63b1df211fc7138df57f01eca43`. Not full W5, main adoption, runtime, usage/cost/savings, or automatic successor. |

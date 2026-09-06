@@ -4,12 +4,14 @@
 
 這是人工閱讀的來源限定總帳，不是可派發佇列；物理 queue 只在根目錄
 [`TODO.md`](TODO.md)。`W1-local-collector` 已為 `CLOSED_LOCAL_COLLECTOR_SOURCE_ONLY`；W3 亦已為
-`CLOSED_CONTEXT_MICRO_PACK_SOURCE_ONLY`；W4 亦為 `CLOSED_CONDITIONAL_ASSURANCE_SOURCE_ONLY`。目前唯一 physical
-`ACTIVE` 是 `W2-HOST-INTEGRATION-20260907`：使用者只授權最小真實 host validation，隨後一次 candidate
+`CLOSED_CONTEXT_MICRO_PACK_SOURCE_ONLY`；W4 亦為 `CLOSED_CONDITIONAL_ASSURANCE_SOURCE_ONLY`。先前唯一 physical
+`ACTIVE` 的 `W2-HOST-INTEGRATION-20260907` 已完成一次最小真實 host validation 與 candidate
 integration impact assessment；這不是完整 W2、成功或採用結論，且沒有自動下一項。其餘 workflow lane 不能推論 effective/host-selected
 configuration、完整 W1、模型／政策採用、runtime、服務、PG、broker、下單、交易或獲利宣稱，也不授權
 自動續跑或下一項。`W5-entry-source-binding` 仍是窄義
-`CLOSED_ENTRY_SOURCE_BINDING_SOURCE_ONLY` checkpoint。
+`CLOSED_ENTRY_SOURCE_BINDING_SOURCE_ONLY` checkpoint。workflow physical queue 現為 **EMPTY**：
+`W2-HOST-INTEGRATION-20260907` 已完成有限驗證與 source-only conditional adoption 判定，並沒有採用
+日常 desktop host、main/remote 或 runtime。
 
 W0/W1 是本地來源 checkpoint，尚未併入 `main` 或採用：W0 final
 `c90408613d6ce436abae619437a0bdc4acf4787f`，W1 final
@@ -43,6 +45,45 @@ usage、actual savings、full action coverage 或採用成效。其 final E4 是
 可重播 caller-provided declaration snapshot，但沒有 production host verifier；實際 selected
 config 仍是 `UNVERIFIED`／`COMPLETE_WITH_UNVERIFIED`。W1 final E2 `24 passed`、E4 combined
 `84 passed` 同樣僅為歷史 source verification。
+
+## W2-host finite validation and integration impact（2026-09-07）
+
+**判定：`CLOSED_SOURCE_ONLY_CONDITIONAL_ADOPTION`。** isolated Codex 0.153.4 stdio App Server
+的真實 probe 證 command/exec echo exit 0、`timeoutMs=400` 的 sleep exit 124、owned terminate 後
+原請求 exit 137 且 owned PID 消失，及 pending ephemeral turn 的
+`turn/completed.status=interrupted`；canonical `srv` 與 candidate cwd 的新 server 均為 `hooks/list=[]`。這些是控制原語
+與隔離 observation，該 turn 25 秒內未觀察到模型工具啟動，亦不是日常 desktop call-path、全後代清理、配額競態或
+Registry enforced 的證明。daily W2-host 因此保持 waiting，精確 unblock 是 Operator 批准 current desktop
+hook/controller integration，或 separately approved controlled App Server client trial，並以 exact hook trust、
+pre-action quota/race/wave-depth/wait、cancel/descendant 與 non-caller verifier 證明；不依賴 W3/W4/W8。
+
+candidate `8bdf3a9db4c1d90b5cc5c00955581c6735644d3b` 相對 main/remote
+`b411435a0063ddcfacfa390cc199b62e05966645` 的 50-path scope 只含 governance/Context/capture/workflow/docs/tests，
+不含 trading/runtime/dependencies/active host settings。INT-01 at
+`a138de2701f574fe851dd68e4b9724d12ef2e0a8` 將既有兩模組抽取、line cap `2060→2000`，public behavior
+preserved 且 independent Standards PASS、Spec review 為 0 retained blockers；INT-02 at `19126b63459a1ff424896b203a3c234ad43c911f` 僅 refresh
+fixture hash，保留 historical baseline `UNAVAILABLE`，independent E2 PASS。W3 的舊 `2060` residual 已由
+INT-01 修正；歷史結果保留、不重寫。
+
+初始 15-file union 在 600s timeout 的 65% 時有三 failures，故不是 PASS；broad LW2 被排除並以 direct
+clean-LW2 trusted replay seam 替代。最小 3-test repro 在同 fixture binding 下 0.36s、3 failures；其後
+successful efficiency capture 的三項測試均 green。E4 三個 full capture 都 exit 0：14 full test files 分成
+三個 impact groups（efficiency 58、Context/capture/generated/collector/docs 225、execution controls 129），共
+collected 412、無 failures/errors（records
+`sha256:a788d08ad6c06f6dbcd85a2d38063d88493a985c9e1f810c34ee63b1b7a0a058`,
+`sha256:0250079e2570180447c1a8bbb80018cf6185041db3f2c54c69ed8e59258c08c1`,
+`sha256:6cc25c4692e4e13821811b26103701f251cae5056b356b8b64da5b58005a04a5`）。verbose stdout 只保存首
+4096 bytes，passed/skipped exact split `UNAVAILABLE`；這不是 full CI、authenticated closure PASS 或實際節省。
+
+probe harness 的初始 sandbox 與 buffered-reader attempts 都是不完整結果，未計 PASS；改正後的 bounded probe
+取得上述 terminal observation 才被接受。
+
+三個 exit-0 replacement captures 只支持 **conditional source-only adoptability**；仍須明確 Operator 將
+source adoption 與完整 W11 分開批准，本次不修訂/關閉 W11。發布仍需 fresh whole-50-path admission、explicit push/PR/
+exact-head merge/Mac ff-sync approval 與 current-head CI review；缺的 trusted host proof 不可補寫。rollback
+現時是 **不採用、main 不變**；若日後 merge，使用實際 merge SHA 建新的 revert PR，不 reset/force。推薦下一
+prompt 僅處理 source-only publication approval；host integration 是另一有限單元。KnowledgePilot/Vault 本次不
+sync：unowned `未命名.base` deletion 仍須保留並由 owner 處理。
 
 ## 已完成 checkpoint
 
@@ -153,7 +194,7 @@ W2/W3/W5/W10 source slices。
 | 總帳工作 | 狀態／依賴 | 與 GPT-6 候選的對齊與有限出口 |
 |---|---|---|
 | W2-local existing control validation | CLOSED_LOCAL_SOURCE_ONLY；owner=PM | `1de695218e8fbf11a317a40396ad1713e940b930`：E2 PASS，`102 passed / 0 failed / 0 skipped / 0 errors`（26.29s，capture `sha256:7992b78f83698d9821d31422b19d2a9638bf09c99887513f71216c2d49e05965`）；AI-E PASS 僅 fixture（capture `sha256:124ae3f330ed4f54f5b93d1c4d86135d4eca0f6e78017e49a554c83800b36820`）。26k prompt fixture drift 已修（W9 後低於 cap），dynamic compiler boundary 保持 `final=false`／0 calls，production caps/source 不變。這僅驗證 existing local controls，不是 host/full W2；depth/wait 只為 structural ledger validation，`boundedParallel` source 已檢視但未由 selected 102 作 rolling-pool dynamic test，且沒有 actual usage/cost/time、host adoption、main/remote/runtime effect。|
-| W2-host integration、no-delta、depth/wait | WAITING_EXTERNAL_HOST_INTEGRATION；owner=PM | 必須有實際 host preaction 的 spawn/wait/cancel/deadline integration，及非 caller 控制的證據；不得以 wrapper 替代。現有 depth/wait 只屬 structural ledger，非 native host enforcement；host unavailable。同 task-owned digest 必須 `BLOCKED_NO_DELTA` 且無 wakeup/retry；完成後仍 fresh-admit，超限可讀拒絕。|
+| W2-host integration、no-delta、depth/wait | WAITING_OPERATOR_APPROVED_HOST_INTEGRATION；owner=PM/Operator | isolated probe 已證 App Server primitive，日常 host 未採用。先批准 current desktop hook/controller integration，或 separately approved controlled App Server client trial；須由 non-caller verifier 證 exact hook trust、preaction spawn/wait/cancel/deadline、quota/race/wave-depth、descendant cleanup 與 no-delta 無 wakeup/retry。不得以 wrapper 替代；不依賴 W3/W4/W8。|
 | W3 Context micro-pack/去重 | CLOSED_CONTEXT_MICRO_PACK_SOURCE_ONLY；owner=PM | `1f87d68f9a0b8535e8fb46cba52858fa57fbb3d9`：`WF6-01` selector + W3-owned `WF6-04` exact loading；E2 PASS，E4 exact-head `206/0/1/0`（30.69s，capture `sha256:428920484ee8db4296d1c5e1d198cf660e18507866201cebf86688159d276fcd`）。Python/saved workflow parity 在 suite 內覆蓋；沒有 actual usage/time/cost savings、main/remote/adoption/runtime/model change。|
 | W4 low-risk assurance lanes | CLOSED_CONDITIONAL_ASSURANCE_SOURCE_ONLY；owner=PM | source `4818a65d0052020b74eb3c7edfba12b5331deb7f`：eligible exact single safe editorial `docs/*.md` task drops only R4; source E2 PASS (`sha256:9b13996d8acfd49c5a3893459c564322fb7f7e05f3bea452ab84b74ef4c372b1`), E4 `41/0/0/0` in 3.19s (`sha256:9b7993954ccc737763c915950359abe486a7c193f66bfe78e92d47b26400d88e`), CC PASS (`sha256:56ebb50eb6761dd12a186556062ab051d8d0bbea1c2fda28ee46d5c5b8041b25`) and AI-E PASS (`sha256:8bafba7874568a8b0d53d1e9e96fc716d80d9afd0791ea6e92dabea4b0cf619b`). Protected/default/multiple/uncertain or true link/reference/index/structural/current-state surfaces retain R4 and all hard owners. PM owns semantic classification; scope/class/surface drift reopens. LOCAL_REPRODUCIBLE only: not full assurance, standard-efficiency sample, authenticated closure, time/token/cost, host/adoption/main/runtime claim; W2-host remains non-W4-dependent waiting.|
 | W5 entry/source binding | CLOSED_ENTRY_SOURCE_BINDING_SOURCE_ONLY；owner=PM | 未提交 subject 現於 pytest/provider 執行前拒絕、clean exact head 可驗證，且 fixed committed-tree security 保留。E2 PASS；E4 `120/0/0/0`，詳見上方。僅本地 source checkpoint，非完整 W5、非 main adopted、無下一項。|
