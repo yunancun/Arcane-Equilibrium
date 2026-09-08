@@ -1,12 +1,13 @@
-# Native Codex subagent concurrency stays intentionally shallow: bounded
-# parallelism captures read-heavy speedups without recursive fan-out or
-# write-heavy coordination debt. Role-specific sandbox overrides live in the
-# generated custom-agent TOML adapters under `.codex/agents/`.
+# Native automatic delegation is contained until a scope-bound execution
+# entry is independently verified. Keep role adapters and saved workflows;
+# agents must not re-enable this flag as an implementation prerequisite.
+# The desktop workspace root also needs its minimal local .codex projection.
 [features]
 memories = true
+multi_agent = false
 
 [agents]
-enabled = true
+enabled = false
 max_concurrent_threads_per_session = 3
 default_subagent_model = "gpt-5.6-terra"
 default_subagent_reasoning_effort = "medium"

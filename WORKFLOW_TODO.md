@@ -2,6 +2,14 @@
 
 此檔是來源限定的狀態索引；根 `TODO.md` 是唯一 physical dispatch authority。歷史完整總帳可由 Git `d5d4ef145:WORKFLOW_TODO.md` 讀取；不在此複製 PR190/security 敘事。
 
+## 當前控制狀態
+
+`WF-RC-02 = NATIVE_AUTO_DELEGATION_DISABLED`：先停用本地未受控 native 自動派工，保留框架程式。canonical `.codex/config.toml` 與桌面 workspace root 的最小本地投影均須關閉 `features.multi_agent` / `agents.enabled`；新載入入口適用，既有執行中 task 不宣稱已被 retroactive 改寫。代理不得自行重開或改用另一入口。
+
+完整 native scope enforcement **尚未關閉**：WF-RC-01 只保護固定 paired IDs；省略 IDs、換 pair、移除 surface 的三項 CLI 實測仍可 admission。Registry native surface 仍 `reported_only` / `mandatory_role_eligible=false`，不能把設定或角色文字當成執行控制證據。重新啟用前，必須先有 Operator 明確要求，並證明實際派工入口強制綁定父交付、固定子節點／路徑、禁止遞迴、有限呼叫／等待／時限、缺綁定零派工。此項 `WAITING_EXPLICIT_REENABLE_AND_ENTRY_PROOF`，不自動成為其他任務的前置工作。
+
+本交付不再新增自動派工或修復 prompt；根 TODO 保持零 ACTIVE。PM 與 subagent 發現超出原目標／驗收的問題只記錄 exact delta，不得自行更名、重開或整合。
+
 ## 當前本地修復
 
 | 項目 | 狀態 | 可證事實與限制 |

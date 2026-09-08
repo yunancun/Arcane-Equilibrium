@@ -444,3 +444,8 @@ ssh trade-core 'crontab -l | awk '\''NF && substr($1,1,1)!="#" {count++} END {pr
 ## Local workflow completion（physical queue）
 
 `WF-RC-01` source `217efeba0c8c73b3cb7e7937440236aaad925131` is `LOCAL_CLI_VERIFIED`; physical queue has zero `ACTIVE` and no automatic next task. E2 exact recheck PASS `sha256:60ca2652ec9ea061d7ee8224019255d3b494a6b62df8867c6c3b979e16ab1fa7`; E4 exact source run `61 passed`, 45.81s, exit 0, `sha256:ab66390f32fdd89c790f762bb6542b6a3906e74ed2bf1bb48a2889f9dc41219a`. This evidence establishes only local source/CLI regression, not host, runtime, remote, or realized-efficiency effects. See `WORKFLOW_TODO.md`; PR190, host, and measurement remain independent WAITING branches.
+
+
+### Native workflow containment
+
+`WF-RC-02 = NATIVE_AUTO_DELEGATION_DISABLED`：本地專案設定停用未受控 native 自動派工；完整 native 交付綁定仍 `WAITING_EXPLICIT_REENABLE_AND_ENTRY_PROOF`。參見 `WORKFLOW_TODO.md` 與 `AGENTS.md` 的 containment contract。無自動 successor，physical queue 零 ACTIVE；不以 containment 宣稱完整 framework enforcement 或 mandatory-role closure。

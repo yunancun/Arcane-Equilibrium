@@ -324,3 +324,7 @@ or secret authority.
 - Add a second external orchestrator beside ADR-0050.
 - Claim deadlines, cancellation, or actual token caps from fields the host
   cannot enforce or attest.
+
+### Local containment of an unbound native dispatch entry
+
+When native delegation does not enforce the admitted delivery/node/scope binding, keep local automatic delegation disabled (`features.multi_agent=false`, `agents.enabled=false`). A project-local containment default preserves framework source but is not a new host capability. Missing bindings must never be worked around by naming a role, choosing another task/ID/surface, or rewriting acceptance. The `AGENTS.md` containment contract defines the finite child result and explicit Operator boundary for any future re-enable; no existing mandatory verification gate is waived.

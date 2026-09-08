@@ -2,6 +2,32 @@
 
 Scope: the repository rooted at `srv/`.
 
+## Native dispatch containment
+
+Native automatic subagent dispatch is disabled by the project config
+(`features.multi_agent=false`, `agents.enabled=false`). A visible collaboration
+Tool, a role name, or a generated TOML file is not permission to bypass this
+containment through another CLI, skill, task, or workflow. Keep authorized work
+with the current conductor; do not spawn or revive children while containment
+is active. This does not turn missing independent verification into PASS.
+
+For one user delivery, PM freezes the objective, acceptance, owned paths, and
+stop conditions before work. Necessary implementation choices within that
+boundary remain autonomous. A new subsystem, outcome, acceptance condition, or
+prerequisite outside it is a separate proposed delta, never automatically
+integrated. A fresh task/admission, changed IDs, or a renamed surface does not
+constitute user authorization. Only an explicit new Operator instruction can
+expand that boundary or request re-enabling delegation.
+
+Re-enabling requires demonstrated enforcement at the actual dispatch entry:
+one controller-owned delivery identity, a frozen child-node/owned-path list,
+no child recursion or self-admission, finite call/wait/deadline limits, and
+rejection before a call on missing/changed bindings. Each child must return one
+assigned result or a precise blocker; discoveries outside its assignment return
+to PM as observations, not new tasks. Until that proof exists, the framework is
+preserved but native automatic delegation remains off. Do not add re-enable
+work to an unrelated delivery or claim full framework closure from containment.
+
 ## Entry role and minimal boot
 
 The entry role is `PM(Conductor)`. Start with judgment, not anonymous parallel

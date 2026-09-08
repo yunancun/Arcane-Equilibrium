@@ -3,6 +3,16 @@
 Last updated: 2026-08-01
 Registry: `.codex/agent_registry_v1.json`
 
+## Current native containment
+
+Follow `AGENTS.md` → `Native dispatch containment` before any dispatch. Native
+automatic delegation is off. No child may create children, revive another
+agent, re-admit itself, change its delivery identity, or convert an observation
+into a new task. A task capsule is authority for its assigned result only;
+additional source reading does not expand implementation scope. Return one
+result or exact blocker and stop. A new admission is bookkeeping, not Operator
+authorization to expand the original delivery.
+
 ## Dispatch record
 
 Every sub-agent is bound before spawn:

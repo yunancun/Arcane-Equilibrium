@@ -1092,3 +1092,7 @@ current generation 重驗。
   本節全部條款約束。審計證據正本：
   `docs/CCAgentWorkSpace/PM/workspace/reports/2026-08-02--pr164_ratification_audit.md`
   （5 lane summary/findings/覆核 verdict/復算錨全文）。
+
+### Native automatic delegation containment
+
+The local project defaults to `features.multi_agent=false` and `agents.enabled=false`. The desktop workspace root requires the same minimal local config projection because child project configuration is not a workspace-root entry. Follow `AGENTS.md` → `Native dispatch containment`: no alternative tool/CLI/skill dispatch or agent-initiated re-enable. Existing saved workflow and role source remain available for a separately admitted, verified entry; their presence is not permission to bypass containment. The current native collaboration profile remains `reported_only` / `mandatory_role_eligible=false`. This containment does not authenticate mandatory role execution or complete universal delivery binding.
