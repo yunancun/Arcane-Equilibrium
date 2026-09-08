@@ -426,6 +426,8 @@ item 可被派工，IN_PROGRESS 已被 claim；WAITING/DEFERRED/CLOSED 必須先
 Operator reopen 形成新的 ACTIVE
 admission。
 
+Local `agent_workflow` 以 paired stable `work_item_id`/`lane_id` 識別同一 user delivery；跨 task/worktree/process 必須重用，rename 不會補充 scope 或 repair authority。common-dir journal 凍結 original objective、acceptance、hard stops 與 literal roots（後續 scope 只能縮小），release 保留 history；map-key mismatch 為 `DELIVERY_STATE_AMBIGUOUS`。legacy unbound/profile-compatible callers 保持相容，但不取得 aggregate claim。Repo-bound review 保留 original contract、完整 initial reviewer set/prefix，一個 authorized repair 與一個 exact recheck；early subset、新 packet、第三輪或 comment-only bytes 不能 reset。明示 loop 的同一 non-null blocker 即使 bytes 改變仍為 `BLOCKED_NO_DELTA`；E4 regression 與 R4 docs gate 分開。
+
 Canonical snapshot producer 由 persisted normalized task contract 的 `dirty_scope` 讀取
 實際 repository bytes；continuation 從 store 取回原始 control/digest/preceding snapshot。
 任意 caller-supplied contract、previous snapshot、digest、receipt 或新編 loop control 都不是

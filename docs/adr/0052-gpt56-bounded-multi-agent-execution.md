@@ -101,6 +101,10 @@ exact source thread, boundary turn, and task-admitted exception digest. Missing
 history, `all`, implicit parent inheritance, and recursion beyond one child
 level are rejected.
 
+### 1a. Local delivery history is bounded across process changes
+
+Existing `agent_workflow` contracts use paired stable `work_item_id`/`lane_id` for one user delivery across task, worktree, and process changes. The journal freezes admitted objective, acceptance, hard stops, and literal roots; later scope narrows only and release retains history. A map-key mismatch is `DELIVERY_STATE_AMBIGUOUS`. Repo-bound review keeps the original contract and complete initial reviewer prefix, permits one authorized repair and one exact recheck, then stops. In an explicit loop, a repeated non-null blocker is `BLOCKED_NO_DELTA` despite comment-byte churn. Legacy unbound callers remain compatible but make no aggregate claim; this is neither host enforcement nor efficiency evidence.
+
 ### 2. Surface capability is explicit
 
 `execution_surface_profile_v1` distinguishes Codex native collaboration,

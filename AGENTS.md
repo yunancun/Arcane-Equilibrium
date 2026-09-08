@@ -128,6 +128,14 @@ match a raw tree/blob manifest re-derived from that immutable accepted tree.
 Legacy ordinary records without `accepted_base` remain readable only for exact
 cleanup; they cannot be used to acquire or renew authority or to publish.
 
+Local `agent_workflow` work uses a paired stable `work_item_id`/`lane_id` for
+one user delivery. The same delivery reuses that pair across task, worktree,
+and process changes; rename cannot refill scope or repair authority. Its journal
+freezes objective, acceptance, hard stops, and literal roots (later scope only
+narrows), retains release history, and fails `DELIVERY_STATE_AMBIGUOUS` on a
+map-key mismatch. A deliberate new pair is an explicit limitation, not proof of
+semantic progress or host binding.
+
 Queue state is separate from role work status. Only the physical `ACTIVE` lane
 is dispatchable. `WAITING`/`DEFERRED` requires a named new delta and PM
 re-admission before returning to ACTIVE; `CLOSED` is never selected. A completed
