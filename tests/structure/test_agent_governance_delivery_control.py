@@ -207,6 +207,40 @@ def test_release_does_not_reset_same_delivery_across_processes_and_worktrees(
     assert restarted["reasons"] == ["DELIVERY_REPAIR_NOT_AUTHORIZED"]
 
 
+def test_relocated_delivery_record_cannot_reset_same_key_budget(
+    tmp_path: Path,
+) -> None:
+    first, second = _linked_worktrees(tmp_path)
+    _, admitted = _admission_cli(
+        first, "acquire", task_id="relocation-task-one", contract=_contract(first)
+    )
+    _, released = _admission_cli(
+        first,
+        "release",
+        task_id="relocation-task-one",
+        admission_id=admitted["admission_id"],
+    )
+    assert released["status"] == "PASS"
+    store = FileTaskAdmissionStore(inspect_worktree(first).common_dir)
+    journal = store.read_delivery_journal()
+    original_key, record = journal["deliveries"].popitem()
+    relocated_key = "f" * 64 if original_key != "f" * 64 else "e" * 64
+    journal["deliveries"][relocated_key] = record
+    store.delivery_path.write_text(
+        json.dumps(journal, sort_keys=True) + "\n", encoding="utf-8"
+    )
+
+    retry_code, retry = _admission_cli(
+        second,
+        "acquire",
+        task_id="relocation-task-two",
+        contract=_contract(second),
+    )
+
+    assert retry_code == 2
+    assert retry == {"status": "FAIL", "error": "DELIVERY_STATE_AMBIGUOUS"}
+
+
 def test_review_replay_cannot_refill_one_cross_worktree_repair(
     tmp_path: Path,
 ) -> None:

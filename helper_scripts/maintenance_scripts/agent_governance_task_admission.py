@@ -398,6 +398,13 @@ def _validate_state(state: Any) -> None:
         _validate_record(record, worktree=worktree)
 
 
+def _delivery_key_digest(work_item_id: str, lane_id: str) -> str:
+    encoded = json.dumps(
+        [work_item_id, lane_id], ensure_ascii=False, separators=(",", ":")
+    ).encode("utf-8")
+    return hashlib.sha256(encoded).hexdigest()
+
+
 def workflow_delivery_key(task_contract: dict[str, Any]) -> str | None:
     """Return the explicit ordinary local-workflow key, if this contract has one."""
 
@@ -419,10 +426,7 @@ def workflow_delivery_key(task_contract: dict[str, Any]) -> str | None:
         and lane_id is not None
     ):
         return None
-    encoded = json.dumps(
-        [work_item_id, lane_id], ensure_ascii=False, separators=(",", ":")
-    ).encode("utf-8")
-    return hashlib.sha256(encoded).hexdigest()
+    return _delivery_key_digest(work_item_id, lane_id)
 
 
 def _delivery_envelope(task_contract: dict[str, Any]) -> dict[str, Any]:
@@ -552,6 +556,10 @@ def _validate_delivery_journal(journal: Any) -> None:
             )
         ):
             raise ValueError("workflow delivery key is invalid")
+        if _delivery_key_digest(
+            delivery_key["work_item_id"], delivery_key["lane_id"]
+        ) != key:
+            raise ValueError("workflow delivery map key does not match embedded key")
         envelope = record["frozen_envelope"]
         envelope_fields = {
             "objective", "scope", "acceptance_criteria", "hard_stops",
