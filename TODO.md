@@ -448,4 +448,13 @@ ssh trade-core 'crontab -l | awk '\''NF && substr($1,1,1)!="#" {count++} END {pr
 
 ### Native workflow containment
 
-`WF-RC-02 = NATIVE_AUTO_DELEGATION_DISABLED`：本地專案設定停用未受控 native 自動派工；完整 native 交付綁定仍 `WAITING_EXPLICIT_REENABLE_AND_ENTRY_PROOF`。參見 `WORKFLOW_TODO.md` 與 `AGENTS.md` 的 containment contract。無自動 successor，physical queue 零 ACTIVE；不以 containment 宣稱完整 framework enforcement 或 mandatory-role closure。
+`WF-RC-02 = NATIVE_AUTO_DELEGATION_DISABLED`：本地專案設定停用未受控 native 自動派工；Operator 已要求保留有限 peer review；完整 native 交付綁定仍 `WAITING_ENTRY_PROOF`。參見 `WORKFLOW_TODO.md` 與 `AGENTS.md` 的 containment contract。無自動 successor，physical queue 零 ACTIVE；不以 containment 宣稱完整 framework enforcement 或 mandatory-role closure。
+
+### Minimal peer-review repair
+
+`WF-PR-01 = LOCAL_SOURCE_REPAIR`：相同 generation 的完全相同 finding 僅產生
+一項 action，保留原始 reviewer packets；同 ID 分歧拒絕合併。純 workflow 標籤
+不再自動加入 AI 成本審查，E2／E4 與實際觸發的專業審查保留。每個交付固定
+問題與名單，一次合併修復、一次原項複核。來源與驗證收口記錄見 `WORKFLOW_TODO.md`。
+本項完成後零 ACTIVE、無自動 successor；通用 native containment 與未證 host
+capability 不宣称完成，也不變成本地修補的新前置工程。

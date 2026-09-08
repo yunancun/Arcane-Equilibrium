@@ -932,6 +932,17 @@ severity 不參與 blocker 裁定。每個 reviewer 只允許一次 initial revi
 blocker ID 的 exact recheck；task contract 不變，每輪綁定完整 frozen repository
 generation。新 finding、第三輪或 generation drift 都停止而不自動擴張 task。
 
+PM 在派工前固定每個 reviewer 的問題；E2 審邏輯與範圍，E4 執行行為驗證，
+避免重跑同一審查或測試。相同 generation、相同 ID 的完整 finding body 必須
+一致，才能在 decision ID 清單去重；原始 reviewer packets 全數保留。任何欄位
+分歧都拒絕合併，由 PM 保留分歧並一次裁定，不因此開新一輪探索。修復後的新
+generation 可更新原 finding 的 evidence，不能新增 blocker ID 或補充輪次。
+純 `agent_workflow`／`multi_agent` 標籤不再自動觸發 AI-E；`ai`、`llm`、
+`model_routing`、`consumption`、`full_audit` 仍保留其審查。Registry 角色、
+budget 與輸出 schema 不變。Operator 要求的有限 peer review 可使用現有可用入口；
+native 自動派工開關仍停用，角色強制綁定未證時只能報 advisory，不把缺 host
+proof 轉成本地交付的新前置工程。
+
 ## 8. Profit-diagnosis controller
 
 `profit_diagnosis` 不是自由 fan-out brainstorming。`profit_diagnosis_control_v1` 綁 closure

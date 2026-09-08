@@ -8,8 +8,9 @@ Native automatic subagent dispatch is disabled by the project config
 (`features.multi_agent=false`, `agents.enabled=false`). A visible collaboration
 Tool, a role name, or a generated TOML file is not permission to bypass this
 containment through another CLI, skill, task, or workflow. Keep authorized work
-with the current conductor; do not spawn or revive children while containment
-is active. This does not turn missing independent verification into PASS.
+with the current conductor; do not spawn or revive children autonomously while containment
+is active. Explicitly requested peer review follows the bounded exception below.
+This does not turn missing independent verification into PASS.
 
 For one user delivery, PM freezes the objective, acceptance, owned paths, and
 stop conditions before work. Necessary implementation choices within that
@@ -27,6 +28,32 @@ assigned result or a precise blocker; discoveries outside its assignment return
 to PM as observations, not new tasks. Until that proof exists, the framework is
 preserved but native automatic delegation remains off. Do not add re-enable
 work to an unrelated delivery or claim full framework closure from containment.
+
+## Bounded peer review for an Operator-requested delivery
+
+Preserve complementary review: one implementation owner, E2 for correctness and
+boundaries, and E4 for behavioral verification. PM fixes the reviewers, each
+question, owned paths, acceptance and stop conditions before the first call.
+Source/docs changes also retain their applicable documentation review. Generic
+`agent_workflow` or `multi_agent` labels alone do not summon AI economics review;
+explicit AI, model-routing, consumption or full-audit facts still do.
+
+An explicit Operator request for peer review authorizes a finite PM-arranged
+review on an already available surface, including this repair. It does not
+re-enable generic native dispatch or authorize another transport/account/host
+project. Native collaboration remains advisory where role enforcement is
+unattested. Missing host proof limits the reported claim; it is not an automatic
+prerequisite for completing a local source fix.
+
+Collect one batch against the frozen source. Reviewers return findings only;
+PM performs the single integration. Reuse supplied test evidence and let E4 own
+execution; E2 does not duplicate the test run. Keep all original packets, merge
+only identical finding bodies on the same generation, and reject a conflicting
+shared ID for explicit PM arbitration without another discovery round. Then
+repair once and recheck only original blockers once. Unresolved blockers stop.
+No replacement reviewer, recursive child, new acceptance condition, automatic
+successor, or reset by changing task IDs. Optional and pre-existing findings
+remain observations until the Operator requests their separate outcome.
 
 ## Entry role and minimal boot
 

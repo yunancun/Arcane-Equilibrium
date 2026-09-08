@@ -2,13 +2,35 @@
 
 此檔是來源限定的狀態索引；根 `TODO.md` 是唯一 physical dispatch authority。歷史完整總帳可由 Git `d5d4ef145:WORKFLOW_TODO.md` 讀取；不在此複製 PR190/security 敘事。
 
+## 最小修復與最快完成路徑
+
+`WF-PR-01 = LOCAL_SOURCE_REPAIR`：只修改既有 review control 與 routing，
+不重建 framework。修補前公開回歸重現 11 項失敗；修補後的 exact source 與
+獨立驗證結果見本節收口記錄。這是本地來源修復，不宣稱 native host 已恢復。
+
+1. 一位實作 owner；E2 審邏輯／範圍，E4 驗證行為。事先固定各自問題，
+   docs 的直接審查保留，其他專業角色只按實際任務事實加入。
+2. 同 generation 的相同 finding 完整一致才去重，保留所有 reviewer 原文；
+   同 ID 分歧明確拒絕合併。全部意見集中一次修復，原 blocker 最多一次複核。
+3. 舊帳、範圍外建議、host 與成本量測只保留為觀察或 WAITING；不自動升為
+   prerequisite，也不另開 prompt。達成當次驗收就停止，未解 blocker 明確交還。
+
+根因校準：原有有界 multiagent 設計仍適用；執行時沒有守住原交付邊界，
+加上跨 reviewer finding 重複與泛用 workflow 標籤自動觸發 AI-E，會放大重工。
+此修復消除後兩個可重現缺陷，並明定前者的 PM 收口責任。它不證明所有歷史
+loop 都有同一原因，也不把文檔規則誤稱為平台攔截器。
+
+Operator 已要求保留有限 peer review，可在現有可用入口安排；這與重新打開
+native 通用自動派工分開。替代 CLI 試跑未成功（Codex 90 秒 timeout；Claude
+回傳認證拒絕），已停止，不自動發起帳戶／環境修復或再試。
+
 ## 當前控制狀態
 
 `WF-RC-02 = NATIVE_AUTO_DELEGATION_DISABLED`：先停用本地未受控 native 自動派工，保留框架程式。canonical `.codex/config.toml` 與桌面 workspace root 的最小本地投影均須關閉 `features.multi_agent` / `agents.enabled`；新載入入口適用，既有執行中 task 不宣稱已被 retroactive 改寫。代理不得自行重開或改用另一入口。
 
-完整 native scope enforcement **尚未關閉**：WF-RC-01 只保護固定 paired IDs；省略 IDs、換 pair、移除 surface 的三項 CLI 實測仍可 admission。Registry native surface 仍 `reported_only` / `mandatory_role_eligible=false`，不能把設定或角色文字當成執行控制證據。重新啟用前，必須先有 Operator 明確要求，並證明實際派工入口強制綁定父交付、固定子節點／路徑、禁止遞迴、有限呼叫／等待／時限、缺綁定零派工。此項 `WAITING_EXPLICIT_REENABLE_AND_ENTRY_PROOF`，不自動成為其他任務的前置工作。
+完整 native scope enforcement **尚未關閉**：WF-RC-01 只保護固定 paired IDs；省略 IDs、換 pair、移除 surface 的三項 CLI 實測仍可 admission。Registry native surface 仍 `reported_only` / `mandatory_role_eligible=false`，不能把設定或角色文字當成執行控制證據。重新啟用前，必須先有 Operator 明確要求，並證明實際派工入口強制綁定父交付、固定子節點／路徑、禁止遞迴、有限呼叫／等待／時限、缺綁定零派工。Operator 已明確要求保留 bounded peer review；通用 native 重新啟用仍為 `WAITING_ENTRY_PROOF`，不自動成為其他任務的前置工作。
 
-本交付不再新增自動派工或修復 prompt；根 TODO 保持零 ACTIVE。PM 與 subagent 發現超出原目標／驗收的問題只記錄 exact delta，不得自行更名、重開或整合。
+本交付完成後不新增自動派工或修復 prompt；根 TODO 保持零 ACTIVE。PM 與 subagent 發現超出原目標／驗收的問題只記錄 exact delta，不得自行更名、重開或整合。
 
 ## 當前本地修復
 

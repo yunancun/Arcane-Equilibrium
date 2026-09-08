@@ -6,12 +6,21 @@ Registry: `.codex/agent_registry_v1.json`
 ## Current native containment
 
 Follow `AGENTS.md` → `Native dispatch containment` before any dispatch. Native
-automatic delegation is off. No child may create children, revive another
+automatic delegation is off; the explicit, finite peer-review exception is
+defined there and never grants generic re-enable authority. No child may create children, revive another
 agent, re-admit itself, change its delivery identity, or convert an observation
 into a new task. A task capsule is authority for its assigned result only;
 additional source reading does not expand implementation scope. Return one
 result or exact blocker and stop. A new admission is bookkeeping, not Operator
 authorization to expand the original delivery.
+
+A reviewer answers its one preassigned question and returns one finding batch.
+It cannot implement its own recommendations, ask another reviewer to repeat the
+review, establish a new prerequisite, or choose a successor. E2 checks logic;
+E4 executes the agreed behavioral checks. Both use the same frozen source and
+share evidence references without presenting reused evidence as a new run.
+Only PM integrates findings. One repair batch and one original-blocker recheck
+are the maximum; a missing result or unchanged blocker ends the current attempt.
 
 ## Dispatch record
 

@@ -105,6 +105,23 @@ level are rejected.
 
 Existing `agent_workflow` contracts use paired stable `work_item_id`/`lane_id` for one user delivery across task, worktree, and process changes. The journal freezes admitted objective, acceptance, hard stops, and literal roots; later scope narrows only and release retains history. A map-key mismatch is `DELIVERY_STATE_AMBIGUOUS`. Repo-bound review keeps the original contract and complete initial reviewer prefix, permits one authorized repair and one exact recheck, then stops. In an explicit loop, a repeated non-null blocker is `BLOCKED_NO_DELTA` despite comment-byte churn. Legacy unbound callers remain compatible but make no aggregate claim; this is neither host enforcement nor efficiency evidence.
 
+### 1b. Complementary review does not create new work
+
+Operator calibration 2026-09-09: retain one implementation owner, E2 logic review,
+and E4 behavioral verification with distinct preassigned questions. Collect one
+batch, integrate once, and recheck only original blockers once. Preserve original
+reviewer packets; identical same-generation finding IDs produce one action, while
+conflicting bodies under one ID are rejected for explicit arbitration. A repaired
+generation can update evidence. Findings do not admit successors or prerequisites.
+Generic `agent_workflow`/`multi_agent` labels no longer trigger economics review;
+explicit AI, model-routing, consumption and full-audit facts still do. This changes
+routing conditions, not Registry roles, schemas or budget authority.
+
+An Operator-requested finite peer review may use an already available surface
+without reopening generic automatic delegation. Current native role binding stays
+advisory. Missing host/transport capability limits a claim and is not a new local
+repair dependency. No new framework or host adapter is required by this decision.
+
 ### 2. Surface capability is explicit
 
 `execution_surface_profile_v1` distinguishes Codex native collaboration,
