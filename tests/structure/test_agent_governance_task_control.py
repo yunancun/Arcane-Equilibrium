@@ -326,14 +326,16 @@ def test_progress_snapshot_captures_owned_bytes_and_rejects_digest_only_delta(
     )
     control = compile_task_execution_policy(contract)
 
-    def capture(round_number: int) -> dict:
+    def capture(
+        round_number: int, blocker_code: str = "WAITING_FOR_EVIDENCE"
+    ) -> dict:
         return progress_snapshot(
             round_number=round_number,
             work_status="ACTIVE",
             repo=repo,
             task_contract=contract,
             admitted_task_contract_digest=control["task_contract_digest"],
-            blocker_code="WAITING_FOR_EVIDENCE",
+            blocker_code=blocker_code,
         )
 
     previous = capture(1)
@@ -353,7 +355,7 @@ def test_progress_snapshot_captures_owned_bytes_and_rejects_digest_only_delta(
         raise AssertionError("digest-only progress delta was admitted")
 
     owned.write_text("two\n", encoding="utf-8")
-    changed = capture(2)
+    changed = capture(2, blocker_code="NEW_EVIDENCE")
     assert changed["task_source_digest"] != previous["task_source_digest"]
     assert _adjudicate(
         repo=repo,

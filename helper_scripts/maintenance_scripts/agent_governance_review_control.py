@@ -6,11 +6,18 @@ import hashlib
 import json
 import re
 import subprocess
+from copy import deepcopy
 from pathlib import Path, PurePosixPath
 from typing import Any
 
 from agent_governance_context import capture_repository_baseline
 from agent_governance_routing import _normalize_task_facts, task_contract_projection
+from agent_governance_task_admission import (
+    FileTaskAdmissionStore,
+    find_delivery_for_contract,
+    workflow_delivery_key,
+)
+from agent_governance_writer_lease import inspect_worktree
 
 
 BLOCKING_CLASSIFICATIONS = frozenset({"in_scope_blocker", "regression_blocker"})
@@ -137,6 +144,98 @@ def _finding_errors(
         if classification == "pre_existing" and introduced is not False:
             errors.append(f"{label} pre_existing finding cannot be current-diff introduced")
     return errors
+
+
+def _initial_review_prefix(control: dict[str, Any]) -> list[dict[str, Any]]:
+    return [
+        {
+            "node_id": reviewer["node_id"],
+            "initial_round": reviewer["rounds"][0],
+        }
+        for reviewer in control["reviewers"]
+    ]
+
+
+def _persist_delivery_review(
+    *,
+    repo: Path,
+    task_contract: dict[str, Any],
+    task_digest: str,
+    control: dict[str, Any],
+    decision: dict[str, Any],
+) -> dict[str, Any]:
+    """Retain one initial review and one exact recheck for a delivery."""
+
+    if workflow_delivery_key(task_contract) is None:
+        return decision
+    store = FileTaskAdmissionStore(inspect_worktree(repo).common_dir)
+    control_digest = _canonical_digest(control)
+    result: dict[str, Any] = {}
+
+    def mutation(journal: dict[str, Any]) -> dict[str, Any]:
+        match = find_delivery_for_contract(journal, task_digest)
+        if match is None:
+            raise ValueError("review control contract was not admitted in delivery history")
+        _, delivery = match
+        review = delivery["review"]
+        if review is None:
+            if any(len(reviewer["rounds"]) != 1 for reviewer in control["reviewers"]):
+                raise ValueError("delivery review requires an initial packet first")
+            review = {
+                "schema_version": "workflow_delivery_review_v1",
+                "reviewer_set": sorted(
+                    reviewer["node_id"] for reviewer in control["reviewers"]
+                ),
+                "initial_prefix": _initial_review_prefix(control),
+                "initial_control_digest": control_digest,
+                "initial_decision": deepcopy(decision),
+                "recheck_control_digest": None,
+                "recheck_decision": None,
+            }
+            delivery["review"] = review
+            if decision["blocking_finding_ids"]:
+                budget = delivery["repair_budget"]
+                if budget["consumed"] == 0:
+                    budget["authorized"] = True
+            result["decision"] = decision
+            return journal
+        expected_fields = {
+            "schema_version", "reviewer_set", "initial_prefix",
+            "initial_control_digest", "initial_decision",
+            "recheck_control_digest", "recheck_decision",
+        }
+        if (
+            not isinstance(review, dict)
+            or set(review) != expected_fields
+            or review["schema_version"] != "workflow_delivery_review_v1"
+        ):
+            raise ValueError("DELIVERY_STATE_AMBIGUOUS")
+        if control_digest == review["initial_control_digest"]:
+            result["decision"] = deepcopy(review["initial_decision"])
+            return journal
+        if control_digest == review["recheck_control_digest"]:
+            result["decision"] = deepcopy(review["recheck_decision"])
+            return journal
+        reviewer_set = sorted(
+            reviewer["node_id"] for reviewer in control["reviewers"]
+        )
+        if reviewer_set != review["reviewer_set"]:
+            raise ValueError("delivery review reviewer set cannot be reset")
+        if _initial_review_prefix(control) != review["initial_prefix"]:
+            raise ValueError("delivery review initial round prefix cannot be reset")
+        if any(len(reviewer["rounds"]) != 2 for reviewer in control["reviewers"]):
+            raise ValueError("delivery review permits only the preserved exact recheck")
+        if review["recheck_control_digest"] is not None:
+            raise ValueError("delivery review exact recheck is already consumed")
+        if delivery["repair_budget"] != {"authorized": False, "consumed": 1}:
+            raise ValueError("delivery review exact recheck requires its admitted repair")
+        review["recheck_control_digest"] = control_digest
+        review["recheck_decision"] = deepcopy(decision)
+        result["decision"] = decision
+        return journal
+
+    store.update_delivery_journal(mutation)
+    return result["decision"]
 
 
 def adjudicate_review_control(
@@ -329,7 +428,7 @@ def adjudicate_review_control(
     else:
         action = "CLOSE_REVIEW"
         recheck_allowed = False
-    return {
+    decision = {
         "schema_version": "review_control_decision_v1",
         "task_contract_digest": task_digest,
         "review_control_digest": _canonical_digest(control),
@@ -340,6 +439,15 @@ def adjudicate_review_control(
         "recheck_allowed": recheck_allowed,
         "scope_expansion_allowed": False,
     }
+    if repo is not None:
+        return _persist_delivery_review(
+            repo=repo,
+            task_contract=normalized,
+            task_digest=task_digest,
+            control=control,
+            decision=decision,
+        )
+    return decision
 
 
 def verification_fragment_truth_errors(
