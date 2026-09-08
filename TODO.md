@@ -452,9 +452,10 @@ ssh trade-core 'crontab -l | awk '\''NF && substr($1,1,1)!="#" {count++} END {pr
 
 ### Minimal peer-review repair
 
-`WF-PR-01 = LOCAL_SOURCE_REPAIR`：相同 generation 的完全相同 finding 僅產生
+`WF-PR-01 = LOCAL_SOURCE_REPAIR_CLOSED`：相同 generation 的完全相同 finding 僅產生
 一項 action，保留原始 reviewer packets；同 ID 分歧拒絕合併。純 workflow 標籤
 不再自動加入 AI 成本審查，E2／E4 與實際觸發的專業審查保留。每個交付固定
 問題與名單，一次合併修復、一次原項複核。來源與驗證收口記錄見 `WORKFLOW_TODO.md`。
-本項完成後零 ACTIVE、無自動 successor；通用 native containment 與未證 host
+E2／R4 審查通過；E4 在固定版本實跑 27 項驗收測試全數通過。
+本項已完成，零 ACTIVE、無自動 successor；通用 native containment 與未證 host
 capability 不宣称完成，也不變成本地修補的新前置工程。

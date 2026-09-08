@@ -4,7 +4,7 @@
 
 ## 最小修復與最快完成路徑
 
-`WF-PR-01 = LOCAL_SOURCE_REPAIR`：只修改既有 review control 與 routing，
+`WF-PR-01 = LOCAL_SOURCE_REPAIR_CLOSED`：只修改既有 review control 與 routing，
 不重建 framework。修補前公開回歸重現 11 項失敗；修補後的 exact source 與
 獨立驗證結果見本節收口記錄。這是本地來源修復，不宣稱 native host 已恢復。
 
@@ -23,6 +23,24 @@ loop 都有同一原因，也不把文檔規則誤稱為平台攔截器。
 Operator 已要求保留有限 peer review，可在現有可用入口安排；這與重新打開
 native 通用自動派工分開。替代 CLI 試跑未成功（Codex 90 秒 timeout；Claude
 回傳認證拒絕），已停止，不自動發起帳戶／環境修復或再試。
+
+### WF-PR-01 收口記錄
+
+Source `bf72d7095b2c2ac31782693ce31da22eb89b60c8`：僅兩個既有程式檔的
+20 行新增／5 行刪改，加兩個測試檔；其後是直接規則與 TODO 校準。
+E2 source review PASS，capture `sha256:a619dbae39167d346090fb2b06c2ac30741c2fa1f2c4cd0c7c6d6b0c6a645187`。
+E4 在 `5fe62aa9cccabf91ec269549974062e7e3486a10` 獨立實跑兩個驗收測試檔：
+`27 passed in 0.45s`、exit 0；capture
+`sha256:2f52457085bd99e49e672e66d766d61e773014c355f88b04811d309e88fb6526`，
+前後 generation 相同。PM 較早擴及既有 delivery/task-control 的相關回歸為
+77 passed；不把重疊測試相加或當成另一獨立實跑。R4 docs review PASS，capture
+`sha256:721f1e5b2d86263a37a2f8dcd652b36edf3342f1e53207b6dcecfbbffe921a5f`。
+
+公開 CLI route 實測為 `PM → E1 → E2 → E4 → PM`，automatic wakeup=false。
+E4 曾有一次 optional provider-file read 被指令 allowlist 拒絕，未執行測試；
+使用 PM 已確認的既有 provider 參數後才執行上述唯一測試 capture，未放寬 scope
+或重設 Context。後續僅更新本收口記錄；受測程式／測試 bytes 不變。
+本項不需要新 prompt，無自動 successor；generic native host enforcement 仍未證。
 
 ## 當前控制狀態
 
