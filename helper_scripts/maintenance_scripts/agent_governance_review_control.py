@@ -301,6 +301,7 @@ def adjudicate_review_control(
     blocking: list[str] = []
     followups: list[str] = []
     seen_nodes: set[str] = set()
+    finding_bodies: dict[tuple[str, str], str] = {}
     blocker_recheck_exhausted = False
     for reviewer_index, reviewer in enumerate(reviewers):
         label = f"reviewers[{reviewer_index}]"
@@ -343,12 +344,13 @@ def adjudicate_review_control(
                 finding_label = (
                     f"{label}.rounds[{round_index}].findings[{finding_index}]"
                 )
-                errors.extend(_finding_errors(
+                finding_errors = _finding_errors(
                     finding,
                     acceptance=acceptance,
                     dirty_scope=dirty_scope,
                     label=finding_label,
-                ))
+                )
+                errors.extend(finding_errors)
                 if not isinstance(finding, dict) or not isinstance(
                     finding.get("id"), str
                 ):
@@ -356,6 +358,19 @@ def adjudicate_review_control(
                 if finding["id"] in round_ids:
                     errors.append(f"{finding_label} id is duplicate within reviewer")
                 round_ids.add(finding["id"])
+                if not finding_errors:
+                    # Rechecks may update evidence. Compare peers only within
+                    # the same source generation, retaining original packets.
+                    key = (_canonical_digest(
+                        review_round["reviewed_generation"]
+                    ), finding["id"])
+                    body = _canonical_digest(finding)
+                    if key in finding_bodies and finding_bodies[key] != body:
+                        errors.append(
+                            f"{finding_label} conflicting finding id across reviewers: "
+                            f"{finding['id']}"
+                        )
+                    finding_bodies[key] = body
         if errors and any(error.startswith(f"{label}.rounds") for error in errors):
             continue
         if (
@@ -417,8 +432,8 @@ def adjudicate_review_control(
     if errors:
         raise ValueError("; ".join(errors))
 
-    blocking = sorted(blocking)
-    followups = sorted(followups)
+    blocking = sorted(set(blocking))
+    followups = sorted(set(followups))
     if blocking and blocker_recheck_exhausted:
         action = "STOP_UNRESOLVED_BLOCKERS"
         recheck_allowed = False
