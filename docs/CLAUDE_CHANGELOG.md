@@ -1,9 +1,16 @@
 # CLAUDE_CHANGELOG.md — 開發歷史歸檔
 
 > 從 CLAUDE.md / TODO.md 遷出的 Wave/Sprint/Batch + TODO version-increment 歷史敘事。新 session 不需要讀此文件，僅供回顧歷史時查閱。
-> 最後更新：2026-08-14（TODO v880 LW2 readmission authority closure candidate）
+> 最後更新：2026-09-09（TODO v881 freshness 校準）
 
 ---
+
+## TODO v881 增量：主 TODO／workflow 全項 freshness 校準（2026-09-09）
+
+- 46 個主 row 保留穩定 ID／驗收，分列 ACTIVE（空）、WAITING／DEFERRED、CLOSED；已完成項移除舊自動 successor，原 carry 完整留存 [v880 快照](archive/2026-09-09--todo-v880-pre-freshness-audit.md)。
+- 更正 PR189 merged／PR88 closed unmerged、過期 runtime／cap 觀察、L2 解析及 blocked predecessor 已修、GUI 殘缺與 Move23 跨 session 授權指示。
+- Sonnet 5 官方取消預定漲價：expiry row 關閉，YAML 僅註解變更。W0–W11／WF6／本地 workflow 修補逐項核對；W3 選定方向與 WAITING 不變，無 candidate 整合／host proof／成本 A/B。
+- 逐項證據、命令與未驗界線见 [audit](references/2026-09-09--todo-workflow-freshness-audit.md)。S2E EMPTY、W5 receipt marker、5/9／0/6／0/9 與 16 prerequisites 保留。
 
 ## TODO v880 增量：LW2 readmission source-authority closure candidate（2026-08-14）
 

@@ -1,14 +1,14 @@
 # AI Provider Pricing Table — USD per million tokens
 # AI Provider 定價表 — 每百萬 tokens 美元
 #
-# Last updated: 2026-07-10
-# 最後更新：2026-07-10
+# Last updated: 2026-09-09 (Sonnet 5 comments only; other prices not re-audited)
+# 最後更新：2026-09-09（只校準 Sonnet 5 註解；其餘價格未重審）
 #
 # Source: official pricing pages (anthropic.com, openai.com)
 # 來源：官方定價頁
 # anthropic 條目於 2026-06-14 對齊 anthropic.com pricing：
 #   opus-4.8 $5/$25、sonnet-4.6 $3/$15、haiku-4.5 $1/$5（per MTok）。
-# 2026-07-10 新增 claude-sonnet-5（intro 價，窗口至 2026-08-31，詳該條目注釋）。
+# 2026-07-10 新增 claude-sonnet-5；2026-09-09 官方確認原 intro 價轉為標準價。
 # 退役型號保留為 active:false（fail-closed 拒呼叫），不刪除，
 # 符合 pricing.rs Test 5 retired 慣例 + 啟動 active_count()>=5 sanity check。
 #
@@ -26,9 +26,9 @@ anthropic:
     input_per_mtok: 5.00
     output_per_mtok: 25.00
     active: true
-  # claude-sonnet-5 intro 定價（2026-07-10 查核 platform.claude.com/docs pricing 官方頁）：
-  # $2/$10 per MTok 為 intro 窗口價，至 2026-08-31 止；2026-09-01 起官方標準價 $3/$15。
-  # TODO(2026-09-01 到期)：intro 窗口結束後須改 input 3.00 / output 15.00，否則低估成本。
+  # claude-sonnet-5：2026-09-09 查核 https://platform.claude.com/docs/en/about-claude/pricing
+  # $2/$10 per MTok 已成標準價；官方取消原訂 2026-09-01 的 $3/$15 調升。
+  # 保留現有數值；只有新的官方定價 delta 才另行更新，不依過期日期自動改價。
   # 注意：sonnet-5 用新 tokenizer，同文本 tokens 約 +30%；記帳以 API 回報 usage 為準。
   claude-sonnet-5:
     input_per_mtok: 2.00
