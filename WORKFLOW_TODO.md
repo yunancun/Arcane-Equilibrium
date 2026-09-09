@@ -110,6 +110,16 @@ WF-RC-01 source `217efeba0c8c73b3cb7e7937440236aaad925131`；原 E4 `61 passed /
 | WF6-06／07 | 固定 DAG 的模型比較／固定模型的可選 routing 比較；保留品質與費用邊界，缺資料不啟動空跑 |
 | PR190 | 獨立 WAITING，不是 W3／WF-RC／WF-PR 的前置 |
 
+## 2026-09-09 其餘 TODO freshness 複驗
+
+本次僅維護總帳。上方 W3 已選定的交付方向、固定 pair／範圍／驗收保持有效，沒有在本次執行整合或啟動其他待辦。
+
+對 W0–W11、WF6-01–07、WF-RC-01/02、WF-PR-01、W3 integration 與 PR190 逐項核對。W0/W1/W2/W3/W4/W5/W7/W9 的 10 個歷史 checkpoint 均可在 Git 解析、位於 PR190 head 的祖先鏈，均不是本次 canonical main 的 ancestor；精確 SHA 與逐項殘餘見 [freshness audit](docs/references/2026-09-09--todo-workflow-freshness-audit.md)。這是 ancestry 結論，不單憑它判斷是否已有等價 cherry-pick。W3/W9 等候選不得標為 daily-main adopted。
+
+PR190 本次讀取為 OPEN／unmerged，head `3a0e0debfd6088d199dff1e193f6bb5e6cf603d3`；CI run `34054578577` failure、5 個 unresolved review threads。其他本地分支的修補不等於該 PR head 已修；保留獨立 WAITING，不阻塞 W3。W6 的 W4／W5 候選可重用性不等於 canonical 採用或 host proof；原 HITL／review 前置保留。WF6-06 仍需可比真實 baseline 與明確的付費 trial 範圍；WF6-07 可選，無資料不空跑。
+
+主 TODO 已完成的 BLOCKED predecessor source 修補與 WF-RC-02 的 native 入口驗證是不同層級：前者本次本地回歸 PASS，後者維持 WAITING_ENTRY_PROOF。全量效率／成本／日常自動派工完成度仍未證。
+
 ## 本次文件交付的驗證界線
 
 本輪已做 Git／candidate bytes 核對、main 與 W3 公開 compiler 行為對照、patch 靜態套用檢查，以及本文件的 scope／links／queue／保存條件檢查。沒有執行候選程式整合、GPT‑6 A/B 或 host 派工。

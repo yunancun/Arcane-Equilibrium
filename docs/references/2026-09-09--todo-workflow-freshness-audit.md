@@ -140,6 +140,6 @@ python3 -m pytest -q -p no:cacheprovider --import-mode=importlib tests/structure
 
 ## 文件驗證与停止條件
 
-收尾以現有 TODO projector、W5 marker binding tests、ID／acceptance conservation、YAML parsed-value equality、diff whitespace 與 scoped path 檢查為準；不因純文件改動重跑整個 Rust／AI/ML suite。實際結果於交付記錄補入。
+收尾以現有 TODO projector、W5 marker binding tests、ID／acceptance conservation、YAML parsed-value equality、diff whitespace 與 scoped path 檢查為準；不因純文件改動重跑整個 Rust／AI/ML suite。結果：exact EMPTY projection＋W5 binding 8 passed（7.49s）；另兩組 source regressions 31＋1 passed。46 IDs／46 acceptance cells 全等、v880 archive byte-equal、W5 markers byte-equal、YAML parsed values 全等、e887 的 W3 queue／範圍／驗收保留、8 owned paths scope check PASS、git diff --check PASS。原 46 rows 中 14 項 status 改正，另清理已完成列過期 successor；未宣稱全 repo 或獨立角色 PASS。
 
 本次沒有 remote push、Linux sync、deploy/restart、PG query/write、broker/order/funds effect、role-memory promotion 或自動 wakeup。全局 memory 依使用者明確要求只寫一份 ad-hoc update note；Wiki 是 derived_advisory，完成驗證後單 writer local commit／no-embed sync。

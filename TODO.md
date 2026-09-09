@@ -308,7 +308,7 @@ Agent 接到 Sprint 命令後，對每個 READY Session 依序執行下列 Wave�
 
 ## §0 影響派發的當前事實
 
-2026-09-09 current evidence：本地 main `aa0a90cda1b7024bfd86aca9d0c0ab016d0b9048`，GitHub main `b411435a0063ddcfacfa390cc199b62e05966645`，本地 ahead 8；PR189 已 merged，因此撤銷舊 publication-pending 指示。PR190 仍 OPEN、未 merge（head `3a0e0debfd6088d199dff1e193f6bb5e6cf603d3`），PR88 CLOSED、未 merge。Linux SSH timeout，本次沒有取得 service／PG／training／serving／profit 新證據；不是主機離線判定。下表 7–8 月觀察一律是歷史，不能作 current runtime 或 effect authority。
+2026-09-09 current evidence：本次初始 main `aa0a90cda1b7024bfd86aca9d0c0ab016d0b9048`，GitHub main `b411435a0063ddcfacfa390cc199b62e05966645`，初始本地 ahead 8；審核期間 main 前進到 `e887a9c9ee592968ec61859eeff758b741e4291c`（ahead 9，僅兩份 workflow 文件），本次合併保留該 W3 交付規格。PR189 已 merged，因此撤銷舊 publication-pending 指示。PR190 仍 OPEN、未 merge（head `3a0e0debfd6088d199dff1e193f6bb5e6cf603d3`），PR88 CLOSED、未 merge。Linux SSH timeout，本次沒有取得 service／PG／training／serving／profit 新證據；不是主機離線判定。下表 7–8 月觀察一律是歷史，不能作 current runtime 或 effect authority。
 
 LW2 source correction 已隨 PR189 落地，但 production 仍欠真正非 caller 控制的 `ExternalEvidenceVerifier`。UID closed；LW2 physical WAITING、dispatchable=false；W0／LW1 receipts absent、16 項 external prerequisites 完整保留。不得因 source publication 已完成而解鎖 runtime。
 
