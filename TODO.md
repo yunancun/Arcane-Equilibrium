@@ -456,6 +456,16 @@ ssh trade-core 'crontab -l | awk '\''NF && substr($1,1,1)!="#" {count++} END {pr
 **維護契約**：V2 的執行排程與狀態投影由 `docs/agents/ai-ml-landing-delivery-protocol.md` 與 `docs/execution_plan/ai_ml_landing/PROGRESS.md` 管理；它們不授予 normative/effect authority。權限仍只來自 accepted ADR/AMD、明確 Operator 決定與治理 Adapter。`docs/agents/profit-first-autonomy-loop.md` 與舊 WP4 queue 只作歷史輸入，不再是 active AI/ML 派發。根 TODO 的 program umbrellas 仍是 P0 長效修復與 P1 端到端落地；G1/G2 是 P0 內的治理修復／排程校準，不是第三個 program。
 **自檢**：S0=`PROGRAM_ADOPTED`，S1=`S1_CLOSED`；G0=`SOURCE_COMPLETE_RUNTIME_INDETERMINATE`，G2=`DONE_SOURCE_LANDED`，UID=`UID_VALIDATION_PUBLICATION_CLOSED`。AIML source queue 有 **零個 ACTIVE row**。S2 七個 narrow source seams 已 landed，但這只證 source contracts；九個 S2E 拆分包維持 5/9，production effect=0/6、authority=0/9，S2 未關閉。唯一未關閉 package row=`S2E.2b-2`／successor label=`LW2_RE_ADMISSION_READY`，但 physical queue=`WAITING`、`dispatchable=false`；目前無 LW2 task contract、routed DAG、writer lease、source write、materialized Context artifact 或 receipt。16 項 external prerequisites 完整保留，W0/LW1 receipts absent。正式 V2 units/roots 與 legacy ALR/cron 現況未複驗；歷史觀察不得冒充 current V2 runtime。不得重派 G2/UID、不得在本投影任務撰寫 LW2。LW1→S2E.5 完成後仍須 fresh authority 與真實 runtime receipts。整個 AIML terminal final sync 仍在 S8.4，S8.5T/S8.5NC 證實 runtime，S8.6/S8.NC 才寫唯一 terminal WORM receipt。
 
+## Workflow optimization physical queue（source-only）
+
+2026-09-09 交付校準：沿用既有 W3 候選，優先交付日常 Context 正確讀取開發工作狀態的實際功能。完整範圍、驗收及候選 SHA 見 `WORKFLOW_TODO.md`「下一個真實開發交付」。這是用戶新指示選定的整合工作，不重開下面已完成的 WF-RC-01／WF-PR-01。
+
+| ID | 狀態 | Owner | 可交付結果 | 准入／停止條件 |
+|---|---|---|---|---|
+| `W3-CURRENT-STATE-INTEGRATION` | `WAITING` | PM／E1；E2／E4；R4 文件 | 承接 `4b31399df`＋`1f87d68f9`，讓目前 source 接受 `current_workflow_state` 並載入本節；保留既有交付控制 | 下一執行者核對 current source／candidate fingerprint，按總帳固定範圍 fresh-admit 後才轉 ACTIVE；不再確認已選方向。review 入口缺失須如實留下未驗 verdict，不另修 CLI／帳戶／host。 |
+
+目前 `active_count=0`、`dispatchable=false`；W3 為唯一選定的下一交付，候選 code 尚未整合。這次更新不建立自動排程、wakeup 或 successor。W2-host、PR190、W4、完整 W5、W6／W8／W10／W11 及 GPT-6／成本 A/B 均不作此 W3 交付的前置。既有 native containment 保留；AIML／S2E physical state 仍由原本相應段落決定。
+
 ## Local workflow completion（physical queue）
 
 2026-09-09 再校準（來源基準 `8f82b3182448b14730057096cc391698314eb3a8`）：

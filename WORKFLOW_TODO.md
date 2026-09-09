@@ -1,123 +1,117 @@
-# 工作流優化總帳（校準版）
+# 開發代理工作流交付總帳
 
-此檔是來源限定的狀態索引；根 `TODO.md` 是唯一 physical dispatch authority。歷史完整總帳可由 Git `d5d4ef145:WORKFLOW_TODO.md` 讀取；不在此複製 PR190/security 敘事。
+本總帳沿用 W0–W11、WF6 與 WF-RC／WF-PR 的既有成果。目標是：使用者提出開發需求後，Codex／Claude Code 能完成實作、互補審查、行為驗證及交付，減少重工與人工糾偏。對象是 PM／PA／E1–E5／CC 等開發代理。
 
-## 當前進度（2026-09-09 本地再核對）
+根 `TODO.md` 是唯一 physical dispatch authority；本檔保存採用決策、交付規格與證據。歷史完整總帳見 Git `d5d4ef145:WORKFLOW_TODO.md`；歷史 checkpoint 不提供當前執行權。
 
-本次文檔校準前的本地 main 為 `8f82b3182448b14730057096cc391698314eb3a8`，
-工作目錄乾淨；它已包含以下本地修補。受測的四個程式／測試檔與 E4 執行版本
-`5fe62aa9cccabf91ec269549974062e7e3486a10` 一致。本輪沿用原始驗證記錄，
-僅重新核對來源、設定和狀態，沒有新增測試執行。
+## 當前決策（2026-09-09 交付校準）
 
-| 範圍 | 當前進度 | 可用程度／剩餘條件 |
+核對基準：clean canonical main `aa0a90cda1b7024bfd86aca9d0c0ab016d0b9048`。本次用戶要求沿用總帳、核對並承接既有候選、令下一步能真實交付。本輪完成候選核對及採用決策；候選程式尚未整合，不能標為 main-adopted。
+
+| 工作 | 當前判定 | 下一動作 |
 |---|---|---|
-| WF-RC-01 同一交付控制 | `LOCAL_CLI_VERIFIED` | 固定 pair 內的 scope、history、repair/recheck 限制已驗證；省略／更換 pair 或移除 surface 的入口限制仍未解決。 |
-| WF-PR-01 互補審查修補 | `LOCAL_SOURCE_REPAIR_CLOSED` | finding 去重／分歧拒絕與精簡路由已落地；E2、R4 通過，E4 原始實跑 27 項全過。 |
-| WF-RC-02 停用措施 | `NATIVE_AUTO_DELEGATION_DISABLED` | workspace 與 canonical 設定均為 multi_agent=false、agents.enabled=false；有限 PM 安排的 peer review 保留，native 角色綁定仍屬 advisory。 |
-| 原生派工完整防失控 | `WAITING_ENTRY_PROOF` | 真正入口尚未證明父交付綁定、固定子節點／路徑、禁止遞迴、有限呼叫／等待與缺綁定零派工。 |
-| 遠端落地／效率成效 | `UNVERIFIED` | 本地修補不等於遠端同步、日常 host 採用或實際成本／速度改善；未取得新的對應證據。 |
+| WF-RC-01、WF-PR-01 | 既有本地修補已完成；保留 scope／review history、finding 去重及互補 E2／E4 | 沿用，僅在新整合可能影響時執行相關回歸 |
+| W3／WF6-01／W3-owned WF6-04 | 已核對候選；選為唯一優先整合交付 | 按下節凍結規格整合，直接解決 current workflow Context 缺失 |
+| WF-RC-02／W2-host | 原生通用自動派工維持停用；完整入口控制未證 | 不作 W3 source delivery 前置，不自行開啟或換 transport |
+| W9／W7 | 有可重用的精簡方案／生成器方法；尚非日常已採用 | W3 用當前生成器保持 parity；W9 整體精簡留待獨立需要 |
+| WF6-05／06／07、W0／W11 成效 | 模型候選、真實效率／成本比較尚未完成 | 交付可用後再比較；不阻塞本次 source 功能 |
+| 工作流 physical queue | 狀態以根 TODO 的 `Workflow optimization physical queue（source-only）` 為準 | 只允許 W3 這個指定交付在 fresh admission 後成為 ACTIVE |
 
-**上一單元判定**：最小本地修補已完成；整體 native framework enforcement 尚未完成。
-**偏移校準**：保留互補 peer review 的原設計；去除泛用 workflow 觸發的額外
-成本審查，並將 local closure、停用措施、入口能力與效率成效分開報告。
-**下一 prompt 決策**：WF-RC-01／WF-PR-01 不重開；工作流程式 queue 為零 ACTIVE，
-這表示本地交付已收口，不表示全部歷史計劃完成。一般功能交付沿用固定範圍的
-PM／實作／E2／E4 流程。若 Operator 下一步要求恢復通用 native 自動派工，
-才由 PM 針對 `WAITING_ENTRY_PROOF` 凍結一個獨立單元；完成條件是上述真正入口
-的正反例證據，不以新增文檔、角色名稱或 source tests 替代。此處不啟動該單元。
+**上一單元判定**：WF-RC-01／WF-PR-01 保留已完成；通用 native enforcement 未完成。
+**偏移校準**：source checkpoint、日常採用與效率成效分別判定；取消把「完成全部歷史優化」當作本次 W3 交付的隱含前置。
+**功能性可用度**：已有可重用 source 與有限 peer-review 規則；日常完整自動派工尚未驗收。
+**下一 prompt 決策**：直接承接 W3 整合；技術准入讀當前 source，不重新做全框架盤點或再次確認已選方向。
 
-本機追蹤的 origin/main 為 `b411435a0063ddcfacfa390cc199b62e05966645`；本次未向
-遠端重新核驗，不能把這個快取 ref 當成遠端最新狀態。先前修補的 admission／
-writer lease 已釋放；本次僅是新的文檔校準，不補充既有 repair budget。
+## 候選核對與採用決策
 
-## 受控交付方式與修補證據
+以下 SHA 均已由本地 Git 核實存在。各候選 checkpoint 不是目前 main 的 ancestor；這項檢查本身不排除 cherry-pick，所以另核對改動與現行功能。W3 的行為差異已用公開 compiler 重新觀察，其他歷史測試數不當作本輪實跑。
 
-`WF-PR-01 = LOCAL_SOURCE_REPAIR_CLOSED`：只修改既有 review control 與 routing，
-不重建 framework。修補前公開回歸重現 11 項失敗；修補後的 exact source 與
-獨立驗證結果見本節收口記錄。這是本地來源修復，不宣稱 native host 已恢復。
-
-1. 一位實作 owner；E2 審邏輯／範圍，E4 驗證行為。事先固定各自問題，
-   docs 的直接審查保留，其他專業角色只按實際任務事實加入。
-2. 同 generation 的相同 finding 完整一致才去重，保留所有 reviewer 原文；
-   同 ID 分歧明確拒絕合併。全部意見集中一次修復，原 blocker 最多一次複核。
-3. 舊帳、範圍外建議、host 與成本量測只保留為觀察或 WAITING；不自動升為
-   prerequisite，也不另開 prompt。達成當次驗收就停止，未解 blocker 明確交還。
-
-根因校準：原有有界 multiagent 設計仍適用；執行時沒有守住原交付邊界，
-加上跨 reviewer finding 重複與泛用 workflow 標籤自動觸發 AI-E，會放大重工。
-此修復消除後兩個可重現缺陷，並明定前者的 PM 收口責任。它不證明所有歷史
-loop 都有同一原因，也不把文檔規則誤稱為平台攔截器。
-
-Operator 已要求保留有限 peer review，可在現有可用入口安排；這與重新打開
-native 通用自動派工分開。替代 CLI 試跑未成功（Codex 90 秒 timeout；Claude
-回傳認證拒絕），已停止，不自動發起帳戶／環境修復或再試。
-
-### WF-PR-01 收口記錄
-
-Source `bf72d7095b2c2ac31782693ce31da22eb89b60c8`：僅兩個既有程式檔的
-20 行新增／5 行刪改，加兩個測試檔；其後是直接規則與 TODO 校準。
-E2 source review PASS，capture `sha256:a619dbae39167d346090fb2b06c2ac30741c2fa1f2c4cd0c7c6d6b0c6a645187`。
-E4 在 `5fe62aa9cccabf91ec269549974062e7e3486a10` 獨立實跑兩個驗收測試檔：
-`27 passed in 0.45s`、exit 0；capture
-`sha256:2f52457085bd99e49e672e66d766d61e773014c355f88b04811d309e88fb6526`，
-前後 generation 相同。PM 較早擴及既有 delivery/task-control 的相關回歸為
-77 passed；不把重疊測試相加或當成另一獨立實跑。R4 docs review PASS，capture
-`sha256:721f1e5b2d86263a37a2f8dcd652b36edf3342f1e53207b6dcecfbbffe921a5f`。
-
-公開 CLI route 實測為 `PM → E1 → E2 → E4 → PM`，automatic wakeup=false。
-E4 曾有一次 optional provider-file read 被指令 allowlist 拒絕，未執行測試；
-使用 PM 已確認的既有 provider 參數後才執行上述唯一測試 capture，未放寬 scope
-或重設 Context。後續僅更新本收口記錄；受測程式／測試 bytes 不變。
-本項不需要新 prompt，無自動 successor；generic native host enforcement 仍未證。
-
-## 當前控制狀態
-
-`WF-RC-02 = NATIVE_AUTO_DELEGATION_DISABLED`：先停用本地未受控 native 自動派工，保留框架程式。canonical `.codex/config.toml` 與桌面 workspace root 的最小本地投影均須關閉 `features.multi_agent` / `agents.enabled`；新載入入口適用，既有執行中 task 不宣稱已被 retroactive 改寫。代理不得自行重開或改用另一入口。
-
-完整 native scope enforcement **尚未完成**：WF-RC-01 只保護固定 paired IDs；省略 IDs、換 pair、移除 surface 的三項 CLI 實測仍可 admission。Registry native surface 仍 `reported_only` / `mandatory_role_eligible=false`，不能把設定或角色文字當成執行控制證據。重新啟用前，必須先有 Operator 明確要求，並證明實際派工入口強制綁定父交付、固定子節點／路徑、禁止遞迴、有限呼叫／等待／時限、缺綁定零派工。Operator 已明確要求保留 bounded peer review；通用 native 重新啟用仍為 `WAITING_ENTRY_PROOF`，不自動成為其他任務的前置工作。
-
-本交付完成後不新增自動派工或修復 prompt；根 TODO 保持零 ACTIVE。PM 與 subagent 發現超出原目標／驗收的問題只記錄 exact delta，不得自行更名、重開或整合。
-
-## 當前本地修復
-
-| 項目 | 狀態 | 可證事實與限制 |
+| 既有成果 | 已核對的來源 | 本次採用決策與限制 |
 |---|---|---|
-| WF-RC-01 local delivery guard | `LOCAL_CLI_VERIFIED`，source `217efeba0c8c73b3cb7e7937440236aaad925131` | E2 initial map-key P1 `WF-RC-KEY-001` 已修，exact recheck PASS `sha256:60ca2652ec9ea061d7ee8224019255d3b494a6b62df8867c6c3b979e16ab1fa7`；E4 independent exact run `61 passed / 0 failed`、45.81s、exit 0，`sha256:ab66390f32fdd89c790f762bb6542b6a3906e74ed2bf1bb48a2889f9dc41219a`。PM public CLI 以 separate processes/two worktrees 證 first PASS、release、second `DELIVERY_REPAIR_NOT_AUTHORIZED`。該 evidence 不建立 host、runtime、remote 或效率 effects。 |
+| W3 Context | 實作 `4b31399dfbd739a60b93dc29d8a8fbd9dfb195de`；修正後受測 `1f87d68f9a0b8535e8fb46cba52858fa57fbb3d9`；候選 worktree `workflow-w3-context-20260906` 的 head `aee17bc01cfdf2331e6c0949d616c1a9903eaec2` | **承接既有兩個 code/test delta**，重用 micro-pack 測試。實作／測試 bytes 未被其後 docs commits 改動。現行 main 拒絕 typed surface；候選可選出正確 workflow section。新工作只做相容整合，不能重寫相同功能或 merge 整條祖先鏈。 |
+| W9 啟動精簡 | `bf6839c505d0083f9e1e5717b770347c597e69cf`；現存 candidate head `a5db6c0454f4177e6eec38a9b1078b9b7981106e` | 採用「熱路徑＋條件指針」方法作後續參考；不整檔覆蓋目前 AGENTS／context router，以免丟失後來的 containment、交付與審查修補。不是 W3 前置。 |
+| W7 generated drift | `e134c772e48aef74de2f585239e16a89b9816681` | 沿用 generator／parity 驗證方法；依當前 Registry 重新生成必要區塊，不搬舊 digest 或另造 generator。 |
+| W1 collector | `b92417b7afed1de6a1913279af6e5743fb085b34` | 保留現成 collector 作日後需要的候選；不以新 telemetry 工程阻塞 W3。 |
+| W2 local／host | local `1de695218e8fbf11a317a40396ad1713e940b930`；host worktree head `3a0e0debfd6088d199dff1e193f6bb5e6cf603d3` | 重用既有 control／隔離 App Server probe 結論，不重跑相同調查；daily desktop enforcement 仍缺證據，不以 wrapper、配置文字或孤立 primitive 宣稱完成。 |
+| W0 economics | `c90408613d6ce436abae619437a0bdc4acf4787f` | 採用 elapsed／重工／重開／人工糾偏的交付評估方向；actual usage／金額成本仍需真實資料。本輪不修改 evaluator。 |
+| W4／W5 | `4818a65d0052020b74eb3c7edfba12b5331deb7f`／`60bc55673f170a06ee4b93a2080c060160707566` | 保存已有成果，不重做。W4 涉及審查政策；W5 涉及捕獲／replay 路徑；都不是 W3 typed state 功能的自動前置。 |
 
-修復只使用既有 `agent_workflow` paired `work_item_id`/`lane_id`：同一 user delivery 跨 task/worktree/process 重用；journal 凍結 objective、acceptance、hard stops 和 roots，scope 只能縮小，release 保留 history。repo-bound review 保留原 contract/完整 initial reviewers，僅一 repair 加一 exact recheck；同 non-null blocker 的 comment-byte churn 在 explicit loop 停為 `BLOCKED_NO_DELTA`。legacy/unbound compatibility 不得到 aggregate claim；map-key mismatch 為 `DELIVERY_STATE_AMBIGUOUS`。
+W3 精確重用方式：從 `git show 4b31399df` 與 `git show 1f87d68f9` 取該次 delta；不要用 `main..candidate` 整包搬入，因其祖先還帶有 W0／W1／W5／舊總帳。保持目前 main 的 WF-RC／WF-PR 行為，以當前 Registry 合併欄位並重新生成衍生區塊。本輪 `git apply --check` 證第一個 delta 只有三份 generated workflow（agent-wave、openclaw-full-audit、profit-diagnosis）不能直接套用，第二個 test delta 可套用；三份衝突應透過當前 generator 解決，不覆蓋舊 Registry 區塊。這是靜態套用檢查，非已完成整合／測試。
 
-根因是 per-task/packet budget reset 與 byte-churn 被誤作 progress（public RED 已示範）；PM 曾錯把無關 PR190 當 prerequisite，已撤回且未改其 source。歷史 amplification 只是具體資料的 inference，不證明所有 loops 相同。
+## 下一個真實開發交付：W3 current-state integration
 
-兩個操作界線：`artifact_digest` 雜湊 canonical plan，不是 outer pretty JSON；用 native validator。verification preflight `DENIED` 等於零次測試執行，應留存 denial 並改用既有 code-owned provider/allowed argv；它與真正 test failure 分開，不能重設 task、Context 或 budget。兩次 E4 preflight denial 因此不是測試證據；較早 E2 lost-handle 亦不可作 PASS。全 repo writer-lease 2031>2000 是 pre-existing debt，不是本回歸或 global-green claim。
+**交付結果**：日常 canonical source 的 Context compiler 接受 `current_workflow_state`，正確讀取根 TODO 的開發工作狀態；穩定查詢保留最小 Context，AIML／runtime 狀態按各自真實觸發條件載入。這是可執行功能修補，不是再交一份 survey、packet 或更新完成標籤。
 
-## 歷史 checkpoint 與未完成依賴
+沿用 W3；本次整合的固定 `work_item_id=W3-CURRENT-STATE-INTEGRATION`、`lane_id=workflow-w3-delivery` 在該交付內不更換。候選核對已完成；開始時只驗 current source／candidate fingerprint 與乾淨工作區，然後建立該交付的 fresh task contract、Context 和 exclusive writer lease。若身份未變，不再重新審計 W0–W11。
 
-以下保留原有 checkpoint／依賴狀態，本輪未重新驗證 W0–W11、WF6 或外部條件，
-不把歷史 source-only closed 升為當前可用。它們沒有因這次校準而成為 ACTIVE、
-新 prerequisite 或自動 successor。缺少共同驗收分母，因此不計算整體完成百分比。
+### 固定範圍與執行
 
-| 項目 | 狀態／出口 |
+一位 implementation owner；PM 整合，E2 查正確性與範圍，E4 執行行為驗證，直接文件由 R4 審查。使用已授權、可用的有限 peer-review 入口。不能為找 reviewer 啟動另一個 CLI／帳戶／host 修復；若入口缺失，保留可 review 的實作與本地驗證，明確記錄缺少的獨立 verdict，不能冒充 PASS 或繼續派替代者。
+
+沿用 W3 既有 16 個 code/test 路徑，以及六份直接文件，共 22 個候選路徑；准入時以此清單凍結，再只縮小：
+- `.codex/agent_registry_v1.json`
+- `.claude/workflows/agent-wave.js`、`.claude/workflows/context-admission-v1.fragment.js`、`.claude/workflows/openclaw-full-audit.js`、`.claude/workflows/profit-diagnosis.js`（僅 generator 管理的對應區塊）
+- `helper_scripts/maintenance_scripts/agent_governance_context.py`、`agent_governance_context_refs.py`、`agent_governance_context_specs.py`、`agent_governance_context_validation.py`、`agent_governance_execution.py`、`agent_governance_routing.py`、`agent_governance_vocabulary.py`、`agent_governance_workflow_codegen.py`（後七項沿用同一目錄）
+- `tests/structure/test_agent_governance_context_micro_pack.py`、`test_agent_governance_context_adversarial.py`、`test_agent_governance_workflow_codegen.py`（後兩項沿用同一目錄）
+- `TODO.md`、`WORKFLOW_TODO.md`、`docs/agents/context-loading.md`、`docs/agents/development-agent-governance.md`、`docs/adr/0050-development-agent-governance.md`、`docs/CLAUDE_CHANGELOG.md`
+
+這是 task 總範圍，checkpoint 仍遵守既有 file／line cap；如需分批，只在同一 task／pair／lease 的範圍內分本地 checkpoint，中間 checkpoint 不叫完成，也不補充 review／repair 預算。新 subsystem、額外 adapter 或名單外路徑不能自動加入。
+
+Bootstrapping：main 尚未支援新 surface 前，實作任務使用現有 `agent_workflow`／`python` 等真實 facts，先人工讀取本檔與根 TODO 的有界 workflow section；不要把未知 surface 填入 pre-change admission 再為此造新准入框架。新 surface 是修補後的 acceptance input。
+
+### 完成條件
+
+1. 在整合後的實際 source 執行公開 `agent_governance.py context`／compiler，low／medium uncertainty 的 workflow-only task 可選出 exact `TODO.md#Workflow optimization physical queue（source-only）`，內容與根 TODO 當前 section 一致。失效／缺漏／重複 heading 應明確拒絕；穩定查詢不額外載入 current state。
+2. 沒有 AIML／runtime 觸發的 workflow-only task，不誤帶 S2E 狀態；有真實相關 facts 時保留原觸發。原 S2E EMPTY／WAITING 及其他 TODO 內容不改變。
+3. 重用 W3 的 section／required-source／tamper 測試；未選段的改動不改 selected content／content digest。完整來源 provenance 仍如實反映來源變化，不要求偽造不變的 artifact digest。
+4. Python 與 saved-workflow 的 Context inventory／identity／generator parity 同步；沿用當前生成器。WF-PR 的最短路由與 finding 去重、WF-RC 的既有交付控制保持有效。
+5. E2 與 E4 問題互補。E4 只跑 W3 直接測試、受影響的 context／codegen 檢查與必要的既有 peer-review routing 回歸；沿用無關、未變的證據，不跑全框架／全 repo 大審计。先收一批 findings，再一次集中修復，原 blocker 最多一次 exact recheck。
+6. 最終交付包含可 review 的 source diff、上述公開行為的真實 command result、驗證結果與使用入口。只有整合到日常使用的 source 並重跑相應公開命令，才可標 `DAILY_SOURCE_ADOPTED`；僅 feature checkpoint 則標 `SOURCE_READY_NOT_ADOPTED`，並具名剩餘採用步驟。remote publication 依既有授權與發布 gate，不把本地檔案等同遠端已落地。
+
+上述六份文件覆蓋 W3 原有直接文件與現行 Interface 維護要求；不新增文件／索引頁。若確認 22 個候選路徑不足以合法整合，停止在精確路徑／規則差異，保留已完成 patch，不能改做另一個大單元。
+
+### 收斂與後續
+
+每一步都應改變當前可驗收行為或解決原 blocker。相同 source／failure／外部條件下重複調查、重印 receipt、換 task ID、重述相同結論，都不算進展。相同 blocker 且沒有語義 delta，或一次修復／複核後仍未解決，就返回精確 owner／unblock condition 並停止；不自動 wakeup、重開、建立 successor。
+
+W3 驗收不等待 W2-host、PR190、W4、完整 W5、W6、W8、W10、W11 或 GPT‑6／成本 A/B。這是本次 W3 邊界的明確採用決策，不宣稱這些工作整體被取消或其獨立政策已修改。
+
+W3 完成後先用一項獨立的小型開發需求檢查完整交付體驗；由使用者指定需求，PM 凍結驗收。只量記已發生的完成時間、重開、重工及人工糾偏。只有實際瓶頸指向啟動載入或 native 入口時，才分別承接 W9／W2；GPT‑6 模型比較保留在功能可用之後。這些均不自動啟動。
+
+### 下一次執行提示
+
+> 執行既有 Workflow TODO 的 W3-CURRENT-STATE-INTEGRATION。先讀 canonical AGENTS、PM、context router，再讀本檔「下一個真實開發交付」與根 TODO workflow section。核對當前 main／候選 fingerprints，承接 4b31399df＋1f87d68f9 的既有 delta，不重寫、不 merge 整條候選祖先鏈。依本節固定範圍 fresh-admit，交付 current_workflow_state 的實際功能與驗證；保留 WF-RC／WF-PR 和 native containment。既定範圍內自主完成，一批審查、一次集中修復、一次原 blocker 複核；缺 peer-review 入口時保留實作並如實報未驗，不另修帳戶／host。完成、無 delta 或限額耗盡即停止，無自動 successor。收尾回報上一單元判定、關鍵證據、偏移、功能性可用度、下一 prompt 決策。
+
+## 保留的本地修補與原始驗證
+
+WF-PR-01 source `bf72d7095b2c2ac31782693ce31da22eb89b60c8`；E4 受測 `5fe62aa9cccabf91ec269549974062e7e3486a10`，原始 `27 passed in 0.45s`、exit 0。E2 capture `sha256:a619dbae39167d346090fb2b06c2ac30741c2fa1f2c4cd0c7c6d6b0c6a645187`；E4 capture `sha256:2f52457085bd99e49e672e66d766d61e773014c355f88b04811d309e88fb6526`；R4 capture `sha256:721f1e5b2d86263a37a2f8dcd652b36edf3342f1e53207b6dcecfbbffe921a5f`。本輪四個受測程式／測試檔與原 E4 版本相同；沒有重跑這 27 項，也不把 PM 較早 77 項重疊回歸相加。
+
+WF-RC-01 source `217efeba0c8c73b3cb7e7937440236aaad925131`；原 E4 `61 passed / 0 failed`、45.81s、exit 0，capture `sha256:ab66390f32fdd89c790f762bb6542b6a3906e74ed2bf1bb48a2889f9dc41219a`。E2 exact recheck `sha256:60ca2652ec9ea061d7ee8224019255d3b494a6b62df8867c6c3b979e16ab1fa7`。僅固定 paired IDs 的本地 source／CLI 保證；省略／換 pair／移除 surface 與 native enforcement 限制保留。
+
+完整原始 review、preflight denial、PR190 偏移及其撤回記錄保留在 Git `aa0a90cda:WORKFLOW_TODO.md`。本次不重設其 repair budget。歷史驗證是歷史驗證，不構成本輪獨立審查或實際效率改善。
+
+## 其餘既有工作：保持原 ID，按需要承接
+
+| 原項目 | 殘餘／啟動條件 |
 |---|---|
-| W0 baseline/economics | `UNAVAILABLE/PENDING_CANDIDATE_RUNS`；需 provider-attested usage、comparable runs，不能由 cache 推成本。 |
-| W1 local collector / host selection | source-only closed；selected host evidence 仍 `WAITING_EXTERNAL_EVIDENCE`。 |
-| W2 local / host integration | local controls closed source-only；daily host `WAITING_OPERATOR_APPROVED_HOST_INTEGRATION`。 |
-| W3 Context micro-pack | closed source-only；無 usage/time/cost/adoption claim。 |
-| W4 assurance | conditional source-only；不自動開 W6。 |
-| W5 reuse | entry closed source-only；只有 exact source/command/toolchain/environment signature 與 TTL 合格才可 `REUSED`，否則 `EXECUTED`；兩者都須 validated command capture。production trusted host verifier 未具備時，兩者均維持 trusted replay。 |
-| W6 snapshot | W4 已滿足；仍需 W5 reuse evidence 與 HITL。 |
-| W8 locality | 需 fresh retain/isolate/delete measurement 與 correctness。 |
-| W10 KnowledgePilot | 需 explicit policy amendment；single Vault writer 與 delta-gated 保留。 |
-| W11 adoption | 需 qualified comparable adoption evidence 與 policy；移除 all-W2…W10 dependency 的舊 proposal 未採用，非 current fix gate。 |
-| W7 broad generator residual | generated drift closed narrow/source-only；broad generator redesign 仍待 PM gap-list assessment。 |
-| W9 bootstrap residual | closed source-only；manual-pointer compliance 與 qualified host E2E 仍未證。 |
-| WF6-01 / WF6-04 | 分別由 W3 selector 與 W3/W9 exact Context scoped work 關閉，僅 historical source boundary。 |
-| WF6-02 | provider-attested price/usage/cache、failed/reopened cohort 與 follow-up。 |
-| WF6-03 | 對應 W1/W5 inventory，非獨立 survey；缺 provider 為 `EXTERNAL_LIMIT`。 |
-| WF6-05 | 需 W3/W9、Registry/generated parity、compatibility 與 rollback。 |
-| WF6-06 | 需 02/03/05、fixed DAG/corpus qualified baseline、cost/call cap 與 authorized paid run。 |
-| WF6-07 | optional fixed-model routing comparison。 |
-| PR190 / host / measurement | 獨立 WAITING；不是 WF-RC-01 prerequisite。 |
+| W0／WF6-02 | 真實可比 runs、usage／price 與 failed／reopened cohort；資料不足即 unavailable，非零成本 |
+| W1／WF6-03 | 已有 collector／surface inventory；只補具名缺失的 selected-host evidence，不重做 survey |
+| W2 | local control 可重用；daily host integration 需明確對應入口與可信 pre-action／cancel／depth／wait 證據 |
+| W3／WF6-01／04 | 本次已選為下一 source integration，依上節驗收 |
+| W4 | narrow editorial assurance 的條件式候選；政策採用與獨立 review 要求另行判定 |
+| W5 | source subject binding 已有候選；完整 reuse 仍需 exact source／command／toolchain／environment／TTL 與可信 verifier |
+| W6 | snapshot 平行化需 W5 reuse 與原有 HITL，不影響 W3 |
+| W7 | narrow generated drift 有候選；只在有真實缺口時評估 broad generator，W3 沿用既有 generator |
+| W8 | locality／lazy loading 須先證實瓶頸及 retain／isolate／delete 的正確性 |
+| W9 | 啟動精簡候選保留；若採用，須保留目前 containment／peer-review 與 delivery 規則 |
+| W10 | KnowledgePilot 更新政策不變；仍 delta-gated、single Vault writer |
+| W11 | 完整 adoption／效能結論仍須可比證據及相應政策；不把其舊 all-W2…W10 依賴套到本次 W3 source 交付 |
+| WF6-05 | GPT‑6 candidate 透過 Registry／generated parity、compatibility 與 rollback；不靜默改 default |
+| WF6-06／07 | 固定 DAG 的模型比較／固定模型的可選 routing 比較；保留品質與費用邊界，缺資料不啟動空跑 |
+| PR190 | 獨立 WAITING，不是 W3／WF-RC／WF-PR 的前置 |
 
-## 收口規則
+## 本次文件交付的驗證界線
 
-當前工作流程式 physical queue 為零 ACTIVE，WF-RC-01／WF-PR-01 不需要另一個 repair prompt。任何新問題先比對 frozen acceptance；超出 scope、需要另一 subsystem/adapter 或外部 authority 時停止，形成 exact delta 後才可 fresh-admit。source completion、PM adoption、host integration 與實際效率是四個不同結論。
+本輪已做 Git／candidate bytes 核對、main 與 W3 公開 compiler 行為對照、patch 靜態套用檢查，以及本文件的 scope／links／queue／保存條件檢查。沒有執行候選程式整合、GPT‑6 A/B 或 host 派工。
+
+目前 conductor 沒有可用的原生 subagent 工具；依 containment 不改用其他 CLI／task 建立 reviewer。本文件為 PM 完成的交付校準；獨立 R4 verdict `UNAVAILABLE`，不聲稱獨立審查 PASS，也不為取得該標籤擴出新工程。
