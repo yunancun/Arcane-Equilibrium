@@ -5,6 +5,16 @@
 
 ---
 
+## W3 本批選段隔離修補（2026-09-09）
+
+- Operator A／1 授權本次有限 CLI 審查與指定暫存寫權；repository 仍唯讀，永久設定未改。
+  初審 a657ea1：R4 PASS、E2 UNVERIFIED、E4 FAIL；原始結果保留，沒有冒充獨立通過。
+- 集中修正已結束 section 被後方未閉合 fence 拒絕；新增 backtick／tilde 尾段案例，
+  保留選段內未閉合 fence 拒絕。修前 2 FAIL／1 PASS，修後 micro-pack 17 PASS。
+- pytest 入口採既有受控 bootstrap，collection preflight PASS；不改 capture policy。
+  本 checkpoint 尚待原角色一次 exact recheck 及既有發布／日常採用 gate，
+  狀態 SOURCE_READY_NOT_ADOPTED。詳細證據及單次限制見 WORKFLOW_TODO 對應節。
+
 ## W3 fixture blocker 修復完成（2026-09-09）
 
 - Operator 明確授權本次繞過舊修復次數限額；同一 W3 pair 在乾淨 linked worktree

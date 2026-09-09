@@ -68,10 +68,9 @@ def exact_markdown_section(data: bytes, heading: str) -> bytes:
             headings.append((index, len(candidate.group(1))))
             if value == heading:
                 matches.append(index)
-    # 為什麼 fail-closed：未閉合 fence 會令後續 heading 的文字／代碼身分含糊。
-    if fence_character is not None:
-        raise ValueError("selected Markdown structure must have balanced fences")
     if len(matches) != 1:
+        if fence_character is not None:
+            raise ValueError("selected Markdown structure must have balanced fences")
         raise ValueError("selected Markdown heading must match exactly one section")
     start = matches[0]
     level = len(heading_match.group(1))
@@ -80,6 +79,9 @@ def exact_markdown_section(data: bytes, heading: str) -> bytes:
         if index > start and candidate_level <= level:
             end = index
             break
+    # 未閉合 fence 若仍在選段內便拒絕；選段已結束後的 fence 不影響其邊界。
+    if fence_character is not None and end == len(lines):
+        raise ValueError("selected Markdown structure must have balanced fences")
     selected = "".join(lines[start:end]).encode("utf-8")
     if len(selected) > MAX_MARKDOWN_SECTION_BYTES:
         raise ValueError("selected Markdown section exceeds 16KiB")

@@ -462,9 +462,9 @@ ssh trade-core 'crontab -l | awk '\''NF && substr($1,1,1)!="#" {count++} END {pr
 
 | ID | 狀態 | Owner | 可交付結果 | 准入／停止條件 |
 |---|---|---|---|---|
-| `W3-CURRENT-STATE-INTEGRATION` | `WAITING` | PM／E1；E2／E4；R4 文件 | 已整合 `current_workflow_state`，兩個 materializer fixture blocker 已修復，207 passed／1 平台 skip | 本次 Operator 明確單次豁免已用於同一 pair 的續作；本地修補完成，`SOURCE_READY_NOT_ADOPTED`。獨立 E2／E4／R4 verdict unavailable，等待既有可用入口與日常採用，不自動派生新工作。 |
+| `W3-CURRENT-STATE-INTEGRATION` | `WAITING` | PM／E1；E2／E4；R4 文件 | 已整合 `current_workflow_state` 並修復 fixture；本批選段尾部隔離修補定點 17 PASS | Operator A／1 授權本次有限 CLI 審查及一次修復／複核；本 checkpoint 為 `SOURCE_READY_NOT_ADOPTED`。初審 R4 PASS、E2 UNVERIFIED、E4 FAIL；原問題已集中修補，剩餘 exact recheck、既有發布 gate 與 canonical 採用，不自動派生新工作。 |
 
-目前 `active_count=0`、`dispatchable=false`；W3 本地 source 修補／聚焦驗證完成，兩個原 blocker 已解除；narrow Context 上限與通用治理政策未修改。整體獨立 verdict 仍 `UNVERIFIED`，feature 狀態為 `SOURCE_READY_NOT_ADOPTED`；具名剩餘採用步驟見 `WORKFLOW_TODO.md`。這次更新不建立自動排程、wakeup 或 successor。W2-host、PR190、W4、完整 W5、W6／W8／W10／W11 及 GPT-6／成本 A/B 均不作此 W3 交付的前置。既有 native containment 保留；AIML／S2E physical state 仍由原本相應段落決定。
+目前 `active_count=0`、`dispatchable=false`；W3 兩個 fixture blocker 已解除；本批另修後方未閉合 fence 誤傷已結束選段。narrow Context 上限與通用治理政策未修改。本 checkpoint 尚待原問題 exact recheck，feature 狀態為 `SOURCE_READY_NOT_ADOPTED`；具名剩餘採用步驟見 `WORKFLOW_TODO.md`。這次更新不建立自動排程、wakeup 或 successor。W2-host、PR190、W4、完整 W5、W6／W8／W10／W11 及 GPT-6／成本 A/B 均不作此 W3 交付的前置。既有 native containment 保留；AIML／S2E physical state 仍由原本相應段落決定。
 
 ## Local workflow completion（physical queue）
 

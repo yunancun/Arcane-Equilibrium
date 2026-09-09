@@ -74,8 +74,10 @@ uncertainty and no direct interfaces; a medium-uncertainty read uses `review`
 with its real direct interface.
 
 Registry `markdown_section` sources bind an exact ATX heading, preserve its
-section bytes and ignore headings inside balanced fences. Missing, duplicate,
-unbalanced or over-16-KiB selections fail closed. Selected `content_digest`
+section bytes and ignore headings inside fences. Missing, duplicate,
+over-16-KiB selections or unclosed fences obscuring or inside the selected
+section fail closed. An unclosed fence after a terminating peer/higher heading
+does not invalidate the already-ended section. Selected `content_digest`
 tracks selected bytes; full-file digest and baseline still track the whole
 source. Unselected edits cannot be reported as an unchanged full artifact.
 Python and generated saved-workflow admission recompute required source

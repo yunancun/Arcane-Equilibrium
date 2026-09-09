@@ -11,7 +11,7 @@
 | 工作 | 當前判定 | 下一動作 |
 |---|---|---|
 | WF-RC-01、WF-PR-01 | 既有本地修補已完成；保留 scope／review history、finding 去重及互補 E2／E4 | 沿用，僅在新整合可能影響時執行相關回歸 |
-| W3／WF6-01／W3-owned WF6-04 | 同一交付依 Operator 單次豁免完成兩個 fixture 修補；207 passed／1 平台 skip | `SOURCE_READY_NOT_ADOPTED`；待獨立 review 與日常採用，不再重派已修 blocker |
+| W3／WF6-01／W3-owned WF6-04 | fixture 修補已完成；本批選段隔離修補定點 17 PASS | `SOURCE_READY_NOT_ADOPTED`；初審結果及唯一 exact recheck 邊界見下節，採用仍需既有 gate |
 | WF-RC-02／W2-host | 原生通用自動派工維持停用；完整入口控制未證 | 不作 W3 source delivery 前置，不自行開啟或換 transport |
 | W9／W7 | 有可重用的精簡方案／生成器方法；尚非日常已採用 | W3 用當前生成器保持 parity；W9 整體精簡留待獨立需要 |
 | WF6-05／06／07、W0／W11 成效 | 模型候選、真實效率／成本比較尚未完成 | 交付可用後再比較；不阻塞本次 source 功能 |
@@ -20,7 +20,7 @@
 **上一單元判定**：WF-RC-01／WF-PR-01 保留已完成；通用 native enforcement 未完成。
 **偏移校準**：source checkpoint、日常採用與效率成效分別判定；取消把「完成全部歷史優化」當作本次 W3 交付的隱含前置。
 **功能性可用度**：已有可重用 source 與有限 peer-review 規則；日常完整自動派工尚未驗收。
-**下一 prompt 決策**：W3 整合與兩個 fixture blocker 的本地修補已完成；剩餘僅獨立 verdict 與日常採用，不自動開 W9／host／成本比較。
+**下一 prompt 決策**：W3 整合、fixture 與本批選段隔離修補已完成；剩餘為原問題 exact recheck 與日常採用，不自動開 W9／host／成本比較。
 
 ## 候選核對與採用決策
 
@@ -81,6 +81,28 @@ W3 完成後先用一項獨立的小型開發需求檢查完整交付體驗；�
 ### 下一次執行提示
 
 > 執行既有 Workflow TODO 的 W3-CURRENT-STATE-INTEGRATION。先讀 canonical AGENTS、PM、context router，再讀本檔「下一個真實開發交付」與根 TODO workflow section。核對當前 main／候選 fingerprints，承接 4b31399df＋1f87d68f9 的既有 delta，不重寫、不 merge 整條候選祖先鏈。依本節固定範圍 fresh-admit，交付 current_workflow_state 的實際功能與驗證；保留 WF-RC／WF-PR 和 native containment。既定範圍內自主完成，一批審查、一次集中修復、一次原 blocker 複核；缺 peer-review 入口時保留實作並如實報未驗，不另修帳戶／host。完成、無 delta 或限額耗盡即停止，無自動 successor。收尾回報上一單元判定、關鍵證據、偏移、功能性可用度、下一 prompt 決策。
+
+## W3 有限審查修補 checkpoint（2026-09-09）
+
+本節記錄提交時的證據，覆蓋下節「獨立入口 unavailable」的舊狀態。Operator 先選 A
+授權既有本地 CLI 的一批 E2／E4／R4 審查、一次集中修復及一次原問題複核，再選 1
+授權 repository 唯讀、指定隔離暫存可寫的本次 sandbox 修正。設定只經呼叫參數傳入，
+沒有永久修改 containment、Registry budget、role adapter 或 capture policy。
+
+- 初審固定 `a657ea1ab39246584f112d8ce7b3382243666b56`：R4 PASS；E2 完成來源檢查並
+  指出選段反例，但期限到期，唯一結果恢復仍為 UNVERIFIED；E4 因 supplied pytest
+  launcher 不符既有 bootstrap 而 FAIL，亦記錄同一選段隔離缺口。原始 packets 全保留。
+- PM 將 E2 原事件觀察與實際反例歸為原 blocker，沒有把恢復結果改寫成 PASS。修補只
+  令已由 peer／higher heading 結束的選段不再受後方未閉合 fence 影響；選段內／前方
+  遮蔽 heading 的未閉合 fence 仍拒絕。新增 public compiler/materializer 回歸先得
+  2 FAIL／1 PASS，修後整份 micro-pack 17 PASS；這是 implementation owner 的定點證據。
+- E4 改用既有 `GOVERNED_PYTEST_PREFIX`／required args；受控 collection preflight PASS。
+  獨立八份 suite、五種公開 Context case 及原 blocker exact recheck 留給原角色，
+  不能把 preflight 或先前 207 PASS／1 skip 冒充本批獨立執行。
+- 本 checkpoint 為 `SOURCE_READY_NOT_ADOPTED`；後續只有本批原問題一次複核及既有
+  publication／canonical adoption gate。原始證據與判定存於
+  `/private/tmp/w3-review-resume-20260909/`；未收到 final exact-head verdict 與日常 source
+  公開命令結果前，不宣稱 DAILY_SOURCE_ADOPTED。沒有 native host attestation 或 runtime 效果。
 
 ## W3 單次授權修復結果（2026-09-09，source-only）
 

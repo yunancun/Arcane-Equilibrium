@@ -120,6 +120,7 @@ def test_compile_materialize_validate_selects_one_exact_fence_aware_section(
         ("# Policy\n\n## Exact extra\nwrong\n", "match exactly one"),
         ("# Policy\n\n## Exact\none\n\n## Exact\ntwo\n", "match exactly one"),
         ("# Policy\n\n```\n## Exact\n", "balanced"),
+        ("# Policy\n\n## Exact\n```\nunfinished selection\n", "balanced"),
         ("# Policy\n\n## Exact\n" + "x" * 16_385, "16KiB"),
     ],
 )
@@ -327,8 +328,17 @@ def test_python_validation_rejects_resigned_omission_of_required_state_source() 
     )
 
 
+@pytest.mark.parametrize(
+    "unrelated_text",
+    [
+        "changed ambient text that must not enter Context\n",
+        "```markdown\nunclosed unrelated fence\n",
+        "~~~markdown\n## Workflow optimization physical queue（source-only）\n",
+    ],
+    ids=["plain-tail", "unclosed-backtick-tail", "unclosed-tilde-impostor-tail"],
+)
 def test_unrelated_todo_section_does_not_change_selected_semantic_context(
-    tmp_path: Path,
+    tmp_path: Path, unrelated_text: str,
 ) -> None:
     repo = tmp_path / "repo"
     repo.mkdir()
@@ -360,7 +370,7 @@ def test_unrelated_todo_section_does_not_change_selected_semantic_context(
     (repo / "TODO.md").write_text(
         "# TODO\n\n"
         f"{heading}\n\n### ACTIVE\nrequired physical row\n\n"
-        "## Unrelated\nchanged ambient text that must not enter Context\n",
+        f"## Unrelated\n{unrelated_text}",
         encoding="utf-8",
     )
     after_facts = {**facts, "baseline": capture_repository_baseline(repo)}
