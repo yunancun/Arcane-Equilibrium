@@ -2,7 +2,35 @@
 
 此檔是來源限定的狀態索引；根 `TODO.md` 是唯一 physical dispatch authority。歷史完整總帳可由 Git `d5d4ef145:WORKFLOW_TODO.md` 讀取；不在此複製 PR190/security 敘事。
 
-## 最小修復與最快完成路徑
+## 當前進度（2026-09-09 本地再核對）
+
+本次文檔校準前的本地 main 為 `8f82b3182448b14730057096cc391698314eb3a8`，
+工作目錄乾淨；它已包含以下本地修補。受測的四個程式／測試檔與 E4 執行版本
+`5fe62aa9cccabf91ec269549974062e7e3486a10` 一致。本輪沿用原始驗證記錄，
+僅重新核對來源、設定和狀態，沒有新增測試執行。
+
+| 範圍 | 當前進度 | 可用程度／剩餘條件 |
+|---|---|---|
+| WF-RC-01 同一交付控制 | `LOCAL_CLI_VERIFIED` | 固定 pair 內的 scope、history、repair/recheck 限制已驗證；省略／更換 pair 或移除 surface 的入口限制仍未解決。 |
+| WF-PR-01 互補審查修補 | `LOCAL_SOURCE_REPAIR_CLOSED` | finding 去重／分歧拒絕與精簡路由已落地；E2、R4 通過，E4 原始實跑 27 項全過。 |
+| WF-RC-02 停用措施 | `NATIVE_AUTO_DELEGATION_DISABLED` | workspace 與 canonical 設定均為 multi_agent=false、agents.enabled=false；有限 PM 安排的 peer review 保留，native 角色綁定仍屬 advisory。 |
+| 原生派工完整防失控 | `WAITING_ENTRY_PROOF` | 真正入口尚未證明父交付綁定、固定子節點／路徑、禁止遞迴、有限呼叫／等待與缺綁定零派工。 |
+| 遠端落地／效率成效 | `UNVERIFIED` | 本地修補不等於遠端同步、日常 host 採用或實際成本／速度改善；未取得新的對應證據。 |
+
+**上一單元判定**：最小本地修補已完成；整體 native framework enforcement 尚未完成。
+**偏移校準**：保留互補 peer review 的原設計；去除泛用 workflow 觸發的額外
+成本審查，並將 local closure、停用措施、入口能力與效率成效分開報告。
+**下一 prompt 決策**：WF-RC-01／WF-PR-01 不重開；工作流程式 queue 為零 ACTIVE，
+這表示本地交付已收口，不表示全部歷史計劃完成。一般功能交付沿用固定範圍的
+PM／實作／E2／E4 流程。若 Operator 下一步要求恢復通用 native 自動派工，
+才由 PM 針對 `WAITING_ENTRY_PROOF` 凍結一個獨立單元；完成條件是上述真正入口
+的正反例證據，不以新增文檔、角色名稱或 source tests 替代。此處不啟動該單元。
+
+本機追蹤的 origin/main 為 `b411435a0063ddcfacfa390cc199b62e05966645`；本次未向
+遠端重新核驗，不能把這個快取 ref 當成遠端最新狀態。先前修補的 admission／
+writer lease 已釋放；本次僅是新的文檔校準，不補充既有 repair budget。
+
+## 受控交付方式與修補證據
 
 `WF-PR-01 = LOCAL_SOURCE_REPAIR_CLOSED`：只修改既有 review control 與 routing，
 不重建 framework。修補前公開回歸重現 11 項失敗；修補後的 exact source 與
@@ -46,7 +74,7 @@ E4 曾有一次 optional provider-file read 被指令 allowlist 拒絕，未執�
 
 `WF-RC-02 = NATIVE_AUTO_DELEGATION_DISABLED`：先停用本地未受控 native 自動派工，保留框架程式。canonical `.codex/config.toml` 與桌面 workspace root 的最小本地投影均須關閉 `features.multi_agent` / `agents.enabled`；新載入入口適用，既有執行中 task 不宣稱已被 retroactive 改寫。代理不得自行重開或改用另一入口。
 
-完整 native scope enforcement **尚未關閉**：WF-RC-01 只保護固定 paired IDs；省略 IDs、換 pair、移除 surface 的三項 CLI 實測仍可 admission。Registry native surface 仍 `reported_only` / `mandatory_role_eligible=false`，不能把設定或角色文字當成執行控制證據。重新啟用前，必須先有 Operator 明確要求，並證明實際派工入口強制綁定父交付、固定子節點／路徑、禁止遞迴、有限呼叫／等待／時限、缺綁定零派工。Operator 已明確要求保留 bounded peer review；通用 native 重新啟用仍為 `WAITING_ENTRY_PROOF`，不自動成為其他任務的前置工作。
+完整 native scope enforcement **尚未完成**：WF-RC-01 只保護固定 paired IDs；省略 IDs、換 pair、移除 surface 的三項 CLI 實測仍可 admission。Registry native surface 仍 `reported_only` / `mandatory_role_eligible=false`，不能把設定或角色文字當成執行控制證據。重新啟用前，必須先有 Operator 明確要求，並證明實際派工入口強制綁定父交付、固定子節點／路徑、禁止遞迴、有限呼叫／等待／時限、缺綁定零派工。Operator 已明確要求保留 bounded peer review；通用 native 重新啟用仍為 `WAITING_ENTRY_PROOF`，不自動成為其他任務的前置工作。
 
 本交付完成後不新增自動派工或修復 prompt；根 TODO 保持零 ACTIVE。PM 與 subagent 發現超出原目標／驗收的問題只記錄 exact delta，不得自行更名、重開或整合。
 
@@ -63,6 +91,10 @@ E4 曾有一次 optional provider-file read 被指令 allowlist 拒絕，未執�
 兩個操作界線：`artifact_digest` 雜湊 canonical plan，不是 outer pretty JSON；用 native validator。verification preflight `DENIED` 等於零次測試執行，應留存 denial 並改用既有 code-owned provider/allowed argv；它與真正 test failure 分開，不能重設 task、Context 或 budget。兩次 E4 preflight denial 因此不是測試證據；較早 E2 lost-handle 亦不可作 PASS。全 repo writer-lease 2031>2000 是 pre-existing debt，不是本回歸或 global-green claim。
 
 ## 歷史 checkpoint 與未完成依賴
+
+以下保留原有 checkpoint／依賴狀態，本輪未重新驗證 W0–W11、WF6 或外部條件，
+不把歷史 source-only closed 升為當前可用。它們沒有因這次校準而成為 ACTIVE、
+新 prerequisite 或自動 successor。缺少共同驗收分母，因此不計算整體完成百分比。
 
 | 項目 | 狀態／出口 |
 |---|---|
@@ -88,4 +120,4 @@ E4 曾有一次 optional provider-file read 被指令 allowlist 拒絕，未執�
 
 ## 收口規則
 
-當前 physical queue 為零 ACTIVE，WF-RC-01 不需要另一個 repair prompt。任何新問題先比對 frozen acceptance；超出 scope、需要另一 subsystem/adapter 或外部 authority 時停止，形成 exact delta 後才可 fresh-admit。source completion、PM adoption、host integration 與實際效率是四個不同結論。
+當前工作流程式 physical queue 為零 ACTIVE，WF-RC-01／WF-PR-01 不需要另一個 repair prompt。任何新問題先比對 frozen acceptance；超出 scope、需要另一 subsystem/adapter 或外部 authority 時停止，形成 exact delta 後才可 fresh-admit。source completion、PM adoption、host integration 與實際效率是四個不同結論。

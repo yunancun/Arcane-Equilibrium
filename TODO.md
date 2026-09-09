@@ -443,6 +443,12 @@ ssh trade-core 'crontab -l | awk '\''NF && substr($1,1,1)!="#" {count++} END {pr
 
 ## Local workflow completion（physical queue）
 
+2026-09-09 再校準（來源基準 `8f82b3182448b14730057096cc391698314eb3a8`）：
+WF-RC-01／WF-PR-01 本地修補已收口；WF-RC-02 停用措施仍生效；完整 native
+入口為 `WAITING_ENTRY_PROOF`，效率成效未證。工作流程式 queue 零 ACTIVE，
+本次文檔校準不重開修補、不啟動 host／歷史優化項目。完整狀態與下一步條件見
+`WORKFLOW_TODO.md` 的「當前進度」；既有測試數沿用原記錄，本輪未重跑。
+
 `WF-RC-01` source `217efeba0c8c73b3cb7e7937440236aaad925131` is `LOCAL_CLI_VERIFIED`; physical queue has zero `ACTIVE` and no automatic next task. E2 exact recheck PASS `sha256:60ca2652ec9ea061d7ee8224019255d3b494a6b62df8867c6c3b979e16ab1fa7`; E4 exact source run `61 passed`, 45.81s, exit 0, `sha256:ab66390f32fdd89c790f762bb6542b6a3906e74ed2bf1bb48a2889f9dc41219a`. This evidence establishes only local source/CLI regression, not host, runtime, remote, or realized-efficiency effects. See `WORKFLOW_TODO.md`; PR190, host, and measurement remain independent WAITING branches.
 
 
