@@ -1,7 +1,7 @@
 # 玄衡 TODO - 活躍派發佇列
 
 **版本** v881 | **校準日期** 2026-09-09 | **source 觀察基線** `aa0a90cda1b7024bfd86aca9d0c0ab016d0b9048`（本地 main；非 runtime receipt）。
-**當前狀態**：AIML／workflow 均零 ACTIVE；W3 保持唯一已選定的下一個 workflow source integration、等待 fresh admission。S2E=5/9、effect=0/6、authority=0/9，LW2 WAITING。
+**當前狀態**：AIML 零 ACTIVE；workflow 僅 W3-CURRENT-STATE-INTEGRATION 已 fresh-admit 為 ACTIVE（隔離 worktree，本地整合中）。S2E=5/9、effect=0/6、authority=0/9，LW2 WAITING。
 **證據與歷史**：當前 source／PR／runtime 限制見 §0；完整逐項 [audit](docs/references/2026-09-09--todo-workflow-freshness-audit.md)、[v880 快照](docs/archive/2026-09-09--todo-v880-pre-freshness-audit.md)、[版本日誌](docs/CLAUDE_CHANGELOG.md)。
 
 <details>
@@ -462,9 +462,9 @@ ssh trade-core 'crontab -l | awk '\''NF && substr($1,1,1)!="#" {count++} END {pr
 
 | ID | 狀態 | Owner | 可交付結果 | 准入／停止條件 |
 |---|---|---|---|---|
-| `W3-CURRENT-STATE-INTEGRATION` | `WAITING` | PM／E1；E2／E4；R4 文件 | 承接 `4b31399df`＋`1f87d68f9`，讓目前 source 接受 `current_workflow_state` 並載入本節；保留既有交付控制 | 下一執行者核對 current source／candidate fingerprint，按總帳固定範圍 fresh-admit 後才轉 ACTIVE；不再確認已選方向。review 入口缺失須如實留下未驗 verdict，不另修 CLI／帳戶／host。 |
+| `W3-CURRENT-STATE-INTEGRATION` | `ACTIVE` | PM／E1；E2／E4；R4 文件 | 承接 `4b31399df`＋`1f87d68f9`，讓目前 source 接受 `current_workflow_state` 並載入本節；保留既有交付控制 | 2026-09-09 已核對 clean base `bf574e210`／candidate `aee17bc01`，固定 pair／22 路徑完成 fresh admission 與 exclusive writer lease；同一 conductor 正在整合。review 入口缺失須如實留下未驗 verdict，不另修 CLI／帳戶／host。 |
 
-目前 `active_count=0`、`dispatchable=false`；W3 為唯一選定的下一交付，候選 code 尚未整合。這次更新不建立自動排程、wakeup 或 successor。W2-host、PR190、W4、完整 W5、W6／W8／W10／W11 及 GPT-6／成本 A/B 均不作此 W3 交付的前置。既有 native containment 保留；AIML／S2E physical state 仍由原本相應段落決定。
+目前 `active_count=1`、`dispatchable=true`，僅限已准入的 W3 與本地 source 整合；獨立 review 入口缺失，不派生其他工作。這次更新不建立自動排程、wakeup 或 successor。W2-host、PR190、W4、完整 W5、W6／W8／W10／W11 及 GPT-6／成本 A/B 均不作此 W3 交付的前置。既有 native containment 保留；AIML／S2E physical state 仍由原本相應段落決定。
 
 ## Local workflow completion（physical queue）
 

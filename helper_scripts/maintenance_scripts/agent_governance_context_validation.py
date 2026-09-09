@@ -309,7 +309,7 @@ def _recaptured_source_projection(source: dict[str, Any]) -> dict[str, Any]:
         "bytes", "source_bytes", "artifact_path", "artifact_bytes",
         "full_file_token_estimate", "planned_tokens",
         "inventory_manifest_token_estimate", "requirement_class",
-        "context_scope",
+        "context_scope", "source_kind",
     }
     projection = {key: source.get(key) for key in fields if key in source}
     if projection.get("status") in {"pinned", "pinned_verified"}:

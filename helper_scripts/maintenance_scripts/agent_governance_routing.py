@@ -319,6 +319,7 @@ ROUTED_WORK_NODES = {
 }
 NARROW_QUERY_SURFACES = {
     "docs", "governance", "index", "registry", "routing", "closure", "comments",
+    "current_workflow_state", "current_s2e_state",
 }
 TASK_CONTRACT_FIELDS = (
     "task_shape", "surfaces", "risk", "runtime_claim", "end_to_end_claim",
