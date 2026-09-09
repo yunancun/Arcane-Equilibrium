@@ -25,6 +25,12 @@ from agent_governance_workflow_codegen import (  # noqa: E402
 )
 import agent_governance_workflow_codegen as codegen  # noqa: E402
 from agent_governance_registry import load_registry  # noqa: E402
+from agent_governance_execution import (  # noqa: E402
+    capture_repository_baseline,
+    compile_context,
+    context_plan_digest,
+    materialize_context_artifact,
+)
 from agent_governance_execution_dag import execution_node_core  # noqa: E402
 from agent_governance_routing import (  # noqa: E402
     P0B_CLAIM_KEYS_BY_PHASE,
@@ -74,6 +80,89 @@ def test_context_codegen_block_is_exact_used_and_standalone_parseable() -> None:
         assert "+// BEGIN GENERATED" not in source
         assert source.count("contextPrefixV1(") >= 1
         assert _async_function_syntax(source).returncode == 0
+
+
+def test_generated_admission_rejects_resigned_missing_required_state_source(
+    tmp_path: Path,
+) -> None:
+    registry = load_registry()
+    facts = {
+        "task_shape": "review",
+        "surfaces": ["current_workflow_state"],
+        "risk": "low",
+        "uncertainty": "low",
+        "side_effect_class": "none",
+        "objective": "read the current physical workflow lane",
+        "scope": ["TODO.md"],
+        "dirty_scope": ["TODO.md"],
+        "acceptance_criteria": ["the mandatory current-state source is present"],
+        "hard_stops": ["no runtime or external effect"],
+        "baseline": capture_repository_baseline(ROOT),
+        "direct_interfaces": ["saved_workflow_context_admission_v1"],
+        "previous_failure": "a re-signed plan omitted a selected source",
+    }
+    plan = compile_context("PM", facts, registry, ROOT)
+    valid = materialize_context_artifact(plan, registry)
+    forged = deepcopy(plan)
+    forged["sources"] = [
+        source for source in forged["sources"]
+        if source["source"] != (
+            "TODO.md#Workflow optimization physical queue（source-only）"
+        )
+    ]
+    forged["selected_packs"].remove("active_state")
+    forged["shared_packs"].remove("active_state")
+    forged["context_digest"] = context_plan_digest(forged)
+    resigned = materialize_context_artifact(forged, registry)
+    wrong_kind_plan = deepcopy(plan)
+    next(
+        source for source in wrong_kind_plan["sources"]
+        if source["source"] == (
+            "TODO.md#Workflow optimization physical queue（source-only）"
+        )
+    )["source_kind"] = "repository_source"
+    wrong_kind_plan["context_digest"] = context_plan_digest(wrong_kind_plan)
+    wrong_kind = materialize_context_artifact(wrong_kind_plan, registry)
+    misclassified_plan = deepcopy(plan)
+    misclassified_plan["sources"][0]["context_scope"] = "role"
+    misclassified_plan["context_digest"] = context_plan_digest(misclassified_plan)
+    misclassified = materialize_context_artifact(misclassified_plan, registry)
+    stable_facts = {
+        **facts,
+        "surfaces": ["comments"],
+        "scope": ["AGENTS.md"],
+        "dirty_scope": ["AGENTS.md"],
+    }
+    stable = materialize_context_artifact(
+        compile_context("PM", stable_facts, registry, ROOT), registry,
+    )
+    script = "\n".join((
+        "const canonicalJson = value => {",
+        "  if (value === null || typeof value === 'boolean' || typeof value === 'string' || typeof value === 'number') return JSON.stringify(value);",
+        "  if (Array.isArray(value)) return `[${value.map(canonicalJson).join(',')}]`;",
+        "  return `{${Object.keys(value).sort(unicodeCodePointCompareV1).map(key => `${JSON.stringify(key)}:${canonicalJson(value[key])}`).join(',')}}`;",
+        "};",
+        "if (!globalThis.crypto) globalThis.crypto = require('node:crypto').webcrypto;",
+        render_context_admission_block(),
+        f"const valid = {json.dumps(valid, ensure_ascii=False)};",
+        f"const resigned = {json.dumps(resigned, ensure_ascii=False)};",
+        f"const wrongKind = {json.dumps(wrong_kind, ensure_ascii=False)};",
+        f"const misclassified = {json.dumps(misclassified, ensure_ascii=False)};",
+        f"const stable = {json.dumps(stable, ensure_ascii=False)};",
+        "const plan = artifact => JSON.parse(artifact.canonical_plan);",
+        "Promise.all([valid, resigned, wrongKind, misclassified, stable].map(artifact =>",
+        "  validateSemanticContextV1(artifact, plan(artifact))",
+        ")).then(result => process.stdout.write(JSON.stringify(result)));",
+    ))
+    script_path = tmp_path / "required-context-sources.js"
+    script_path.write_text(script, encoding="utf-8")
+
+    completed = subprocess.run(
+        ["node", str(script_path)], cwd=ROOT, text=True,
+        capture_output=True, check=False,
+    )
+    assert completed.returncode == 0, completed.stderr
+    assert json.loads(completed.stdout) == [True, False, False, False, True]
 
 
 def test_codegen_guards_have_negative_controls() -> None:

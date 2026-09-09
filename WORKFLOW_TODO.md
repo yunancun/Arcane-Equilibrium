@@ -6,12 +6,12 @@
 
 ## 當前決策（2026-09-09 交付校準）
 
-核對基準：clean canonical main `aa0a90cda1b7024bfd86aca9d0c0ab016d0b9048`。本次用戶要求沿用總帳、核對並承接既有候選、令下一步能真實交付。本輪完成候選核對及採用決策；候選程式尚未整合，不能標為 main-adopted。
+核對基準：clean canonical main `aa0a90cda1b7024bfd86aca9d0c0ab016d0b9048`。本次用戶要求沿用總帳、核對並承接既有候選、令下一步能真實交付。原規劃輪完成候選核對及採用決策；後續已在 feature worktree 完成整合與本地驗證，canonical main 尚未採用。
 
 | 工作 | 當前判定 | 下一動作 |
 |---|---|---|
 | WF-RC-01、WF-PR-01 | 既有本地修補已完成；保留 scope／review history、finding 去重及互補 E2／E4 | 沿用，僅在新整合可能影響時執行相關回歸 |
-| W3／WF6-01／W3-owned WF6-04 | 已核對候選；選為唯一優先整合交付 | 按下節凍結規格整合，直接解決 current workflow Context 缺失 |
+| W3／WF6-01／W3-owned WF6-04 | 同一交付依 Operator 單次豁免完成兩個 fixture 修補；207 passed／1 平台 skip | `SOURCE_READY_NOT_ADOPTED`；待獨立 review 與日常採用，不再重派已修 blocker |
 | WF-RC-02／W2-host | 原生通用自動派工維持停用；完整入口控制未證 | 不作 W3 source delivery 前置，不自行開啟或換 transport |
 | W9／W7 | 有可重用的精簡方案／生成器方法；尚非日常已採用 | W3 用當前生成器保持 parity；W9 整體精簡留待獨立需要 |
 | WF6-05／06／07、W0／W11 成效 | 模型候選、真實效率／成本比較尚未完成 | 交付可用後再比較；不阻塞本次 source 功能 |
@@ -20,7 +20,7 @@
 **上一單元判定**：WF-RC-01／WF-PR-01 保留已完成；通用 native enforcement 未完成。
 **偏移校準**：source checkpoint、日常採用與效率成效分別判定；取消把「完成全部歷史優化」當作本次 W3 交付的隱含前置。
 **功能性可用度**：已有可重用 source 與有限 peer-review 規則；日常完整自動派工尚未驗收。
-**下一 prompt 決策**：直接承接 W3 整合；技術准入讀當前 source，不重新做全框架盤點或再次確認已選方向。
+**下一 prompt 決策**：W3 整合與兩個 fixture blocker 的本地修補已完成；剩餘僅獨立 verdict 與日常採用，不自動開 W9／host／成本比較。
 
 ## 候選核對與採用決策
 
@@ -82,6 +82,83 @@ W3 完成後先用一項獨立的小型開發需求檢查完整交付體驗；�
 
 > 執行既有 Workflow TODO 的 W3-CURRENT-STATE-INTEGRATION。先讀 canonical AGENTS、PM、context router，再讀本檔「下一個真實開發交付」與根 TODO workflow section。核對當前 main／候選 fingerprints，承接 4b31399df＋1f87d68f9 的既有 delta，不重寫、不 merge 整條候選祖先鏈。依本節固定範圍 fresh-admit，交付 current_workflow_state 的實際功能與驗證；保留 WF-RC／WF-PR 和 native containment。既定範圍內自主完成，一批審查、一次集中修復、一次原 blocker 複核；缺 peer-review 入口時保留實作並如實報未驗，不另修帳戶／host。完成、無 delta 或限額耗盡即停止，無自動 successor。收尾回報上一單元判定、關鍵證據、偏移、功能性可用度、下一 prompt 決策。
 
+## W3 單次授權修復結果（2026-09-09，source-only）
+
+**本地交付**：`DONE_WITH_CONCERNS`，`SOURCE_READY_NOT_ADOPTED`。兩個已知 fixture
+blocker 已解除；獨立 E2／E4／R4 verdict 仍 unavailable，整體 gate 為 `UNVERIFIED`。
+下節保存前輪失敗與停止記錄；本節 supersedes 其「尚待修復兩個 blocker」的狀態。
+
+- **本次授權**：Operator 原文「謹本次授權繞過限額，把已發現的問題修復掉」。只用於
+  同一 `W3-CURRENT-STATE-INTEGRATION`／`workflow-w3-delivery` 已知問題的續作。
+  原 frozen envelope／release history 保留；在既有 store lock 下為該 pair 記錄一次性
+  repair allowance，並由 fresh admission 消耗。這是人類授權的本次例外，並非 compiler
+  能自行推導的授權，也沒有永久修改 Registry 預算、治理程式或 native containment。
+- **修補內容**：`materializer_repo` 使用真實臨時 Git repo、一份固定 source 與測試專用
+  Context pack，避免真 repo 文件／索引成長在 DAG 篡改檢查前耗盡 Context。兩個測試
+  先驗正常 artifact 可 compile／materialize／validate，再分別驗重簽後空 DAG 與
+  reviewer substitution 被原有拒絕條件攔下；`narrow` envelope 及 12,000 上限保留。
+- **驗證**：修前原命令 `2 failed in 0.82s`；修後定點 `2 passed in 0.30s`。原有八份
+  聚焦 suite 完整實跑 `207 passed, 1 skipped in 104.96s`，exit 0。唯一 skip 是 macOS
+  不執行 Linux kernel argv-cap 檢查；沒有測試 failure。Registry／generator parity
+  通過；W3 low／medium workflow 選段、stable omission 與 S2E trigger 保留。
+- **範圍／來源**：承接前輪保留 patch，全部仍在原 22 路徑內；本次額外語義變更只有
+  adversarial fixture 與 TODO／總帳／changelog。原 worktree 保留；續作 worktree 為
+  `/Users/ncyu/Projects/TradeBot/.codex-worktrees/workflow-w3-fixture-repair-20260909`。
+  証據命令／原始 log 與單次授權記錄保存在 `/private/tmp/w3-fixture-repair-20260909/`；
+  這些是 conductor 本地證據，不是獨立 role 或 platform attestation。
+- **採用剩餘步驟**：PM 在既有可用入口取得 E2／E4／R4 的有限獨立 review，依既有
+  publication／adoption gate 採用到 canonical source，再於該 source 重跑公開 Context
+  命令。未做到之前不能標 `DAILY_SOURCE_ADOPTED`。不另修 reviewer transport，沒有
+  自動 successor；通用修復限額不因本次例外永久失效。
+
+使用入口與固定 acceptance 沿用上節規格及下節例子；兩個原 fixture 問題已修，不需
+再次為同一 failure 啟動新調查。日常 canonical main 尚未收到本次 feature source。
+
+## 前輪 W3 執行結果（2026-09-09，source-only）
+
+**判定**：`BLOCKED`／`gate_verdict=FAIL`，`SOURCE_PATCH_PRESERVED_NOT_ADOPTED`。
+第一個本地 checkpoint `624f21cb9` 與同一 worktree 的剩餘 diff 保留；canonical
+main 仍為 `bf574e2102fef29e4a865c3e4678025964c7473a`。沒有 daily adoption、push
+或 main sync。上方是本輪已使用的固定規格，不構成自動重開或補充修補預算。
+
+- **准入／範圍**：以 clean main fresh-admit 固定 pair 與 22 個路徑；Context 已
+  materialize、exclusive writer lease 已取得。精確重用兩個候選 delta，三份 workflow
+  由目前 generator 重建；其 generated 區塊外 bytes 與 base 相同。native containment、
+  WF-RC／WF-PR source 邊界保留。
+- **功能證據**：公開 `agent_governance.py context --role PM @task-facts.json`
+  已驗 low／medium workflow 任務選 exact workflow section、內容與當前 TODO 一致；
+  stable query 不選 current state，`current_s2e_state`／runtime facts 保留 S2E trigger。
+  四個非 runtime artifact 的 materialize／validate 均無 error；runtime observation
+  仍是 evidence debt，不作 runtime 效果主張。Registry 與 generator parity PASS。
+- **測試**：直接 micro-pack 首跑 14 PASS。完整聚焦 batch 實跑 `202 passed / 5 failed /
+  1 skipped`（45.33s）；skip 為本機 macOS 不測 Linux kernel argv cap。5 個 failure
+  在 clean main 同樣重現：過時的 economics 路由前提／empty-DAG error expectation。
+  於既定 adversarial 檔一次修補，保留具名 `consumption` 才觸發 AI-E；唯一原 blocker
+  recheck 為 `3 passed / 2 failed`（1.58s）。不得把兩批相加稱為全綠。
+- **停止原因**：`test_materializer_rejects_rehashed_empty_binding_for_routed_call` 與
+  `test_materializer_rejects_rehashed_routed_node_substitution` 的真實 fixture Context
+  planned estimate 分別約 12,594／12,592，超過 narrow 上限 12,000，先以
+  `context plan is not call_allowed and cannot be materialized` 拒絕，未到預期 tamper
+  boundary。這是 planned accounting，不是真實 provider usage。未調高上限、未改
+  AGENTS 或啟動 W9；本輪 repair／recheck 預算已用完，不再修補或重跑。
+- **獨立性**：本平台無可用原生 reviewer 工具，E2／E4／R4 verdict 均
+  `UNAVAILABLE`；上述為 conductor 本地驗證。未啟動替代 CLI／帳戶／host。
+- **owner／unblock**：PM 等待 Operator 明確 reopen 同一 W3 pair，僅處理上述兩個
+  測試 fixture 的可准入 Context，保留 tamper 的負向目的與現行預算邊界；仍須取得
+  可用的獨立 review verdict，才能另行判定 source ready／採用。沒有自動 successor。
+
+本地 review 根目錄：`../.codex-worktrees/workflow-w3-integration-20260909`（相對 workspace
+父層定位；實際絕對路徑 `/Users/ncyu/Projects/TradeBot/.codex-worktrees/workflow-w3-integration-20260909`）。
+驗證命令／原始輸出保存在本機 `/private/tmp/w3-integration-20260909/`；它們是本輪
+local evidence，不是可跨機重用的 trusted captures。完整 patch 可在該 worktree 用
+`git diff bf574e2102fef29e4a865c3e4678025964c7473a --` 審查。
+
+**使用入口**：low uncertainty 的狀態查詢用 `task_shape=query`、
+`surfaces=["current_workflow_state"]`、low risk、無 direct interfaces；medium uncertainty
+用 `task_shape=review` 並綁實際 compiler interface，其他 mandatory task fields 照現行
+Context 契約填入。執行 `python3 helper_scripts/maintenance_scripts/agent_governance.py
+context --role PM @task-facts.json`。日常 canonical source 尚未採用此 surface。
+
 ## 保留的本地修補與原始驗證
 
 WF-PR-01 source `bf72d7095b2c2ac31782693ce31da22eb89b60c8`；E4 受測 `5fe62aa9cccabf91ec269549974062e7e3486a10`，原始 `27 passed in 0.45s`、exit 0。E2 capture `sha256:a619dbae39167d346090fb2b06c2ac30741c2fa1f2c4cd0c7c6d6b0c6a645187`；E4 capture `sha256:2f52457085bd99e49e672e66d766d61e773014c355f88b04811d309e88fb6526`；R4 capture `sha256:721f1e5b2d86263a37a2f8dcd652b36edf3342f1e53207b6dcecfbbffe921a5f`。本輪四個受測程式／測試檔與原 E4 版本相同；沒有重跑這 27 項，也不把 PM 較早 77 項重疊回歸相加。
@@ -120,7 +197,7 @@ PR190 本次讀取為 OPEN／unmerged，head `3a0e0debfd6088d199dff1e193f6bb5e6c
 
 主 TODO 已完成的 BLOCKED predecessor source 修補與 WF-RC-02 的 native 入口驗證是不同層級：前者本次本地回歸 PASS，後者維持 WAITING_ENTRY_PROOF。全量效率／成本／日常自動派工完成度仍未證。
 
-## 本次文件交付的驗證界線
+## 先前文件交付的驗證界線（整合前）
 
 本輪已做 Git／candidate bytes 核對、main 與 W3 公開 compiler 行為對照、patch 靜態套用檢查，以及本文件的 scope／links／queue／保存條件檢查。沒有執行候選程式整合、GPT‑6 A/B 或 host 派工。
 

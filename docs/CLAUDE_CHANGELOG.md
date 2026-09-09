@@ -5,6 +5,36 @@
 
 ---
 
+## W3 fixture blocker 修復完成（2026-09-09）
+
+- Operator 明確授權本次繞過舊修復次數限額；同一 W3 pair 在乾淨 linked worktree
+  fresh-admit，既有 journal 歷史保留，單次 repair allowance 由本次 admission 消耗。
+  沒有永久調整 Registry budget／治理程式或另開 native reviewer transport。
+- 兩個 materializer adversarial 測試改用真實隔離 Git fixture，保留 narrow envelope，
+  加入正常 artifact 的 materialize／validate 正向控制，再驗空 DAG 與 reviewer
+  substitution 原拒絕邊界。真 repo 文件／索引成長不再掩蓋待測的 tamper 行為。
+- 修前 2 failed；定點修後 2 passed。原八份聚焦 suite 為
+  `207 passed, 1 skipped in 104.96s`，exit 0；skip 僅 Linux kernel argv-cap 的平台限制。
+  Registry／generator parity 通過。本地兩個 blocker 已解除，feature 為
+  `SOURCE_READY_NOT_ADOPTED`；E2／E4／R4 獨立 verdict unavailable，日常採用仍待完成。
+  下節前輪失敗記錄保留，本節覆蓋其 blocker 當前狀態。
+
+## W3 current-state integration：本地 patch 保留，驗證未收口（2026-09-09）
+
+- 從 clean `bf574e2102fef29e4a865c3e4678025964c7473a` fresh-admit 固定
+  `W3-CURRENT-STATE-INTEGRATION`／`workflow-w3-delivery`，在專用 linked worktree
+  承接 `4b31399df`＋`1f87d68f9`。第一個 12-file checkpoint `624f21cb9`；
+  三份 generated workflow 由目前 Registry 重建，區塊外 bytes 不變。
+- 公開 Context 命令已驗 workflow low／medium exact selection、stable omission、
+  S2E 與 runtime trigger。Registry／codegen parity PASS。首次聚焦測試
+  `202 passed / 5 failed / 1 skipped`；5 個失敗亦在 clean main 重現。
+  同檔一次相容修補後，原 blocker 唯一複核為 `3 passed / 2 failed`。
+- 剩餘兩個 adversarial fixture 在 materializer 的 `call_allowed` gate 前被阻，
+  planned Context 約 12,594／12,592，超過 narrow 12,000 上限。未放寬上限、
+  未改 AGENTS、未啟動 W9；依既定一次 repair/recheck 限額停止，保留 patch。
+  E2／E4／R4 獨立 verdict unavailable，非全綠／daily adopted／remote landed。
+  詳細 owner、unblock condition 與使用入口見 `WORKFLOW_TODO.md`。
+
 ## TODO v881 增量：主 TODO／workflow 全項 freshness 校準（2026-09-09）
 
 - 46 個主 row 保留穩定 ID／驗收，分列 ACTIVE（空）、WAITING／DEFERRED、CLOSED；已完成項移除舊自動 successor，原 carry 完整留存 [v880 快照](archive/2026-09-09--todo-v880-pre-freshness-audit.md)。

@@ -82,6 +82,18 @@ operations、venue adapter、quant/ML semantics、E2E acceptance 是 hard facts 
 
 ### Context and consumption
 
+2026-09-09 W3 source integration：沿用既有 candidate 的 typed
+`current_workflow_state`／`current_s2e_state`，分別選 workflow exact section／
+S2E dispatch projection。Workflow-only low／medium uncertainty 不載入 S2E；
+stable query 不載入 current state，既有 runtime 與 high／unknown 觸發保留。
+`markdown_section` 以 exact、fence-aware、最多 16 KiB 的段落保留 mandatory
+內容；缺段／重複／失效結構拒絕。Selected-content digest 與全檔 provenance
+分開，未選段改動不能被宣稱為整個 artifact 不變。Python／generated saved
+workflow 都從 Registry/task 重建來源 kind/name/selector 與 shared/role inventory，
+拒絕重新簽 digest 後漏選或改類。此設計沿用四個既有 Interface，不新增控制器、
+派工 transport 或效果權限；本地 patch／驗證及尚未採用的限制以
+`WORKFLOW_TODO.md` 的 W3 本輪結果為準。
+
 Universal preload 退役。Context Interface 保留 exact task prompt、user objective/scope/
 acceptance/hard stops、必填 uncertainty、baseline/direct interfaces/previous failure。Concrete source 由 compiler 讀 bytes；
 virtual evidence 必須是 source/observed-at typed、byte-backed artifact，caller digest 只是

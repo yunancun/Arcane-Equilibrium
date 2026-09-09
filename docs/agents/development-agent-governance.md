@@ -131,6 +131,23 @@ verifier `path_scope` 為空時採用，並先於 `dirty_scope` fallback。它�
 writer ownership、mutation authority 或 ACL，也不能取代 writer `dirty_scope` 或 whole-repo
 generation checks。
 
+W3 current-state integration 將兩類狀態分開：typed surface
+`current_workflow_state` 選 exact
+`TODO.md#Workflow optimization physical queue（source-only）`；
+`current_s2e_state` 選原 S2E projection。Workflow-only low／medium uncertainty
+不隱式帶入 S2E；原 runtime／operations／claims 與 high／unknown uncertainty
+觸發仍有效。穩定 query 不讀 current state；`query` 本身仍限 low risk／low
+uncertainty、無 direct interfaces，中等不確定度的唯讀任務使用真實 `review` facts。
+
+Registry `markdown_section` 使用 exact ATX heading 與 fence-aware section bytes，
+拒絕缺段、重複、未閉合 fence、超過 16 KiB、不安全來源及 caller override。
+Core 的 Product Boundary／Root Principles／Hard Boundaries 與 docs 必要規則
+逐段完整保留。`content_digest` 僅綁所選內容；來源全檔 digest／baseline 仍如實
+變動。Python 與 saved-workflow 從同一 Registry 重算 source kind/name/selector
+及 shared/role inventory，拒絕重新簽 digest 後漏來源、改 kind 或錯置 scope。
+三份 saved workflow 僅透過既有 generator 更新對應區塊；本次採用狀態與驗證
+限制見 `WORKFLOW_TODO.md`，不由 Interface 文件宣告 daily adoption。
+
 `active_state` 不再投影整個 `TODO.md`：Registry 的 current S2E selector 使用
 `todo_dispatch_projection`，只讀 exact `S2E 當前派發投影` section。單一 ACTIVE row
 仍只投影該 row 與 direct dependencies、最多 8 KiB；零 ACTIVE 則必須有唯一且逐欄 exact
