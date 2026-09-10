@@ -123,6 +123,13 @@ def test_compile_materialize_validate_selects_one_exact_fence_aware_section(
         ("# Policy\n\n## Exact\n```\nunfinished selection\n", "balanced"),
         ("# Policy\n\n## Exact\n" + "x" * 16_385, "16KiB"),
     ],
+    ids=[
+        'missing-exact-heading',
+        'duplicate-exact-heading',
+        'unclosed-before-selection',
+        'unclosed-in-selection',
+        'oversize-16kib',
+    ],
 )
 def test_markdown_section_rejects_missing_duplicate_unbalanced_and_oversize(
     tmp_path: Path, document: str, error: str,
