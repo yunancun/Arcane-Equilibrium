@@ -215,8 +215,6 @@ def _persist_delivery_review(
             or review["schema_version"] != "workflow_delivery_review_v1"
         ):
             raise ValueError("DELIVERY_STATE_AMBIGUOUS")
-        if review["initial_decision"].get("task_contract_digest") != task_digest:
-            raise ValueError("delivery review initial task contract cannot be changed")
         if control_digest == review["initial_control_digest"]:
             result["decision"] = deepcopy(review["initial_decision"])
             return journal

@@ -455,7 +455,7 @@ Repo-bound review 保留 original contract、完整 initial reviewer set/prefix�
 authorized repair 與一次原 blocker 複核。只有原 blocker owner 可追加第二輪，且
 必須綁 final generation；沒有 blocker 的 reviewer 保留 journal 已核對的 initial
 packet 及其原 generation。沿用不等於在新 head 重審 PASS。缺可信 initial history、
-改 contract/prefix、遺漏 blocker 複核、新 finding 或第三輪都拒絕，不能重置预算。
+未准入的 contract、改 prefix、遺漏 blocker 複核、新 finding 或第三輪都拒絕，不能重置预算。
 未帶 repo journal 的純 validator／Closure truth check 保持 fresh-generation 規則，
 不能僅凭 caller 提交的舊 packet 證明沿用資格。E4 regression 與 R4 docs gate 分開。
 
