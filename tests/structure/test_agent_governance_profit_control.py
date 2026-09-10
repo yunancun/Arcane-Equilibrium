@@ -1651,33 +1651,16 @@ const parallel = async jobs => Promise.all(jobs.map(job => job()));
         nodes: list[dict],
         contract_updates: dict | None = None,
     ) -> dict:
-        candidate = deepcopy(context_artifact)
-        candidate_plan = json.loads(candidate["canonical_plan"])
-        candidate_plan["task_contract"].update(
-            contract_updates or {"end_to_end_claim": True}
+        spec = importlib.util.spec_from_file_location(
+            "specialized_fixture_support", SUPPORT_PATH
         )
-        candidate_plan["task_contract_digest"] = governance.task_contract_digest(
-            candidate_plan["task_contract"]
+        assert spec is not None and spec.loader is not None
+        support = importlib.util.module_from_spec(spec)
+        spec.loader.exec_module(support)
+        return support._specialized_workflow_adversarial_artifact(
+            context_artifact, nodes,
+            contract_updates or {"end_to_end_claim": True},
         )
-        candidate_plan["execution_dag_binding"] = __import__(
-            "agent_governance_execution_dag"
-        ).compile_context_execution_dag_binding(nodes)
-        candidate.update(
-            __import__(
-                "agent_governance_context_projection"
-            ).materialize_semantic_context(
-                candidate_plan,
-                governance.load_registry(),
-            )
-        )
-        candidate["task_contract_digest"] = candidate_plan[
-            "task_contract_digest"
-        ]
-        candidate["canonical_plan"] = _canonical(candidate_plan)
-        candidate["artifact_digest"] = governance.context_plan_digest(
-            candidate_plan
-        )
-        return candidate
 
     business_acceptance = {
         "node_id": "business_acceptance",

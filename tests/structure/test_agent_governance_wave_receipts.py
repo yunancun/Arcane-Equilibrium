@@ -61,18 +61,24 @@ def _wave_args(
         encoding="utf-8",
     )
     (repo / "CLAUDE.md").write_text(
-        "# Product Boundary\n"
+        "## 一、Product Boundary\n"
         "Wave fixture product boundary.\n\n"
-        "# Root Principles\n"
+        "## 二、Root Principles\n"
         "Wave fixture root principles.\n\n"
-        "# Hard Boundaries\n"
+        "## 四、Hard Boundaries\n"
         "Wave fixture hard boundaries.\n",
         encoding="utf-8",
     )
     (repo / "local.md").write_text("controller-owned wave input\n", encoding="utf-8")
     (repo / "docs" / "_indexes").mkdir(parents=True)
     (repo / "docs" / "README.md").write_text(
-        "wave fixture documentation\n",
+        "## 当前入口速查\nWave fixture entry.\n"
+        "## Multi-Agent 接手路径\nWave fixture handoff.\n"
+        "## 强制规则 (Mandatory Rules)\nWave fixture rules.\n"
+        "## 文件命名规范 (File Naming Convention)\nWave fixture names.\n"
+        "## 日志分类说明 (Log Categories)\nWave fixture log categories.\n"
+        "## 日志书写原则 (Writing Principles)\nWave fixture writing rules.\n"
+        "## 文档索引 (Document Index)\nWave fixture index.\n",
         encoding="utf-8",
     )
     (repo / "docs" / "_indexes" / "wave.md").write_text(
