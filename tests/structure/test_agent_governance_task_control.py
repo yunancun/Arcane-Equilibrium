@@ -355,7 +355,7 @@ def test_progress_snapshot_captures_owned_bytes_and_rejects_digest_only_delta(
         raise AssertionError("digest-only progress delta was admitted")
 
     owned.write_text("two\n", encoding="utf-8")
-    changed = capture(2, blocker_code="NEW_EVIDENCE")
+    changed = capture(2)
     assert changed["task_source_digest"] != previous["task_source_digest"]
     assert _adjudicate(
         repo=repo,
@@ -364,6 +364,14 @@ def test_progress_snapshot_captures_owned_bytes_and_rejects_digest_only_delta(
         previous=previous,
         current=changed,
     )["decision"] == "CONTINUE_OPERATOR_LOOP"
+
+    assert _adjudicate(
+        repo=repo,
+        contract=contract,
+        control=control,
+        previous=changed,
+        current=capture(3, blocker_code="LABEL_ONLY_CHANGE"),
+    )["decision"] == "BLOCKED_NO_DELTA"
 
 
 def test_governance_cli_uses_persisted_admission_and_previous_snapshot(

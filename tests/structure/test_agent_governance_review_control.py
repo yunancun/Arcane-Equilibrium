@@ -368,6 +368,24 @@ def test_resolved_exact_recheck_closes_and_third_round_is_rejected() -> None:
         adjudicate_review_control(TASK_FACTS, control)
 
 
+def test_historical_non_blocker_packet_requires_repository_history() -> None:
+    initial = {**GENERATION, "source_head": "4" * 40}
+    control = _control([
+        _round(1, initial, [_finding("fixed", classification="in_scope_blocker")]),
+        _round(2, GENERATION, []),
+    ])
+    control["reviewers"].append({"node_id": "regression", "rounds": [_round(1, initial, [])]})
+    with pytest.raises(ValueError, match="latest review is stale"):
+        adjudicate_review_control(TASK_FACTS, control)
+
+
+def test_non_blocker_reviewer_cannot_consume_an_exact_recheck() -> None:
+    initial = {**GENERATION, "source_head": "4" * 40}
+    control = _control([_round(1, initial, []), _round(2, GENERATION, [])])
+    with pytest.raises(ValueError, match="original blocker"):
+        adjudicate_review_control(TASK_FACTS, control)
+
+
 def test_dispatch_rules_require_scope_classification_and_bounded_recheck() -> None:
     sources = "\n".join(
         (ROOT / path).read_text(encoding="utf-8")

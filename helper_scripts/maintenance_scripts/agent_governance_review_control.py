@@ -181,6 +181,11 @@ def _persist_delivery_review(
         if review is None:
             if any(len(reviewer["rounds"]) != 1 for reviewer in control["reviewers"]):
                 raise ValueError("delivery review requires an initial packet first")
+            if any(
+                reviewer["rounds"][0]["reviewed_generation"] != control["final_generation"]
+                for reviewer in control["reviewers"]
+            ):
+                raise ValueError("delivery review requires fresh initial packets")
             review = {
                 "schema_version": "workflow_delivery_review_v1",
                 "reviewer_set": sorted(
@@ -210,6 +215,8 @@ def _persist_delivery_review(
             or review["schema_version"] != "workflow_delivery_review_v1"
         ):
             raise ValueError("DELIVERY_STATE_AMBIGUOUS")
+        if review["initial_decision"].get("task_contract_digest") != task_digest:
+            raise ValueError("delivery review initial task contract cannot be changed")
         if control_digest == review["initial_control_digest"]:
             result["decision"] = deepcopy(review["initial_decision"])
             return journal
@@ -223,8 +230,18 @@ def _persist_delivery_review(
             raise ValueError("delivery review reviewer set cannot be reset")
         if _initial_review_prefix(control) != review["initial_prefix"]:
             raise ValueError("delivery review initial round prefix cannot be reset")
-        if any(len(reviewer["rounds"]) != 2 for reviewer in control["reviewers"]):
-            raise ValueError("delivery review permits only the preserved exact recheck")
+        blocker_owners = {
+            item["node_id"] for item in review["initial_prefix"]
+            if any(
+                finding["classification"] in BLOCKING_CLASSIFICATIONS
+                for finding in item["initial_round"]["findings"]
+            )
+        }
+        if not blocker_owners or any(
+            len(reviewer["rounds"]) != (2 if reviewer["node_id"] in blocker_owners else 1)
+            for reviewer in control["reviewers"]
+        ):
+            raise ValueError("delivery review requires only original blocker owners to recheck")
         if review["recheck_control_digest"] is not None:
             raise ValueError("delivery review exact recheck is already consumed")
         if delivery["repair_budget"] != {"authorized": False, "consumed": 1}:
@@ -387,6 +404,8 @@ def adjudicate_review_control(
                 and isinstance(finding.get("id"), str)
             }
             initial_blocker_ids = set(initial_blockers)
+            if not initial_blocker_ids:
+                errors.append(f"{label} exact recheck requires an original blocker")
             recheck_ids = {
                 finding.get("id")
                 for finding in rounds[1]["findings"]
@@ -414,7 +433,20 @@ def adjudicate_review_control(
             errors.append(f"{label} current round is invalid")
             continue
         if current.get("reviewed_generation") != control["final_generation"]:
-            errors.append(f"{label} latest review is stale against final_generation")
+            # A retained initial packet is historical, not a fresh verdict.
+            # Only the repo-bound journal may validate its unchanged prefix,
+            # original contract and the complete blocker-owner recheck below.
+            retained_initial = (
+                repo is not None
+                and workflow_delivery_key(normalized) is not None
+                and len(rounds) == 1
+                and not any(
+                    finding["classification"] in BLOCKING_CLASSIFICATIONS
+                    for finding in current["findings"]
+                )
+            )
+            if not retained_initial:
+                errors.append(f"{label} latest review is stale against final_generation")
         current_blockers = False
         for finding in current["findings"]:
             if not isinstance(finding, dict):

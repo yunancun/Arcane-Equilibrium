@@ -443,7 +443,27 @@ item 可被派工，IN_PROGRESS 已被 claim；WAITING/DEFERRED/CLOSED 必須先
 Operator reopen 形成新的 ACTIVE
 admission。
 
-Local `agent_workflow` 以 paired stable `work_item_id`/`lane_id` 識別同一 user delivery；跨 task/worktree/process 必須重用，rename 不會補充 scope 或 repair authority。common-dir journal 凍結 original objective、acceptance、hard stops 與 literal roots（後續 scope 只能縮小），release 保留 history；map-key mismatch 為 `DELIVERY_STATE_AMBIGUOUS`。legacy unbound/profile-compatible callers 保持相容，但不取得 aggregate claim。Repo-bound review 保留 original contract、完整 initial reviewer set/prefix，一個 authorized repair 與一個 exact recheck；early subset、新 packet、第三輪或 comment-only bytes 不能 reset。明示 loop 的同一 non-null blocker 即使 bytes 改變仍為 `BLOCKED_NO_DELTA`；E4 regression 與 R4 docs gate 分開。
+Local `agent_workflow` 以 paired stable `work_item_id`/`lane_id` 識別同一 user delivery；
+跨 task/worktree/process 必須重用，rename 不會補充 scope 或 repair authority。
+common-dir journal 凍結 original objective、acceptance、hard stops 與 literal roots
+（後續 scope 只能縮小），release 保留 history；map-key mismatch 為
+`DELIVERY_STATE_AMBIGUOUS`。Repair owner 綁第一筆 admission 的 owner；替換回
+`DELIVERY_OWNER_CHANGED`，拒絕前不消耗 repair slot、不改寫 history。既有明示
+Operator amendments 保留原紀錄，不能以重寫過往 owner 取得准入。
+
+Repo-bound review 保留 original contract、完整 initial reviewer set/prefix、一個
+authorized repair 與一次原 blocker 複核。只有原 blocker owner 可追加第二輪，且
+必須綁 final generation；沒有 blocker 的 reviewer 保留 journal 已核對的 initial
+packet 及其原 generation。沿用不等於在新 head 重審 PASS。缺可信 initial history、
+改 contract/prefix、遺漏 blocker 複核、新 finding 或第三輪都拒絕，不能重置预算。
+未帶 repo journal 的純 validator／Closure truth check 保持 fresh-generation 規則，
+不能僅凭 caller 提交的舊 packet 證明沿用資格。E4 regression 與 R4 docs gate 分開。
+
+明示 loop 以 recaptured owned-byte digest 判斷進展，同一 blocker label 不遮蔽
+真實 byte delta；註解也屬 bytes，generic digest 不判斷修改的語義價值。相同 bytes
+即使換 label 仍為 `BLOCKED_NO_DELTA`；任何 byte delta 都不補充 review/repair 次數。
+finite task 不排下一 turn。legacy unbound/profile-compatible callers 保持原邊界，
+不因以上 journal 規則取得 aggregate claim。
 
 Canonical snapshot producer 由 persisted normalized task contract 的 `dirty_scope` 讀取
 實際 repository bytes；continuation 從 store 取回原始 control/digest/preceding snapshot。
@@ -946,8 +966,10 @@ count 作主要績效。
 一般 delegated review 使用 `review_control_v1` 作 scope admission：finding 必須分類為
 `in_scope_blocker`、`regression_blocker`、`out_of_scope_followup` 或 `pre_existing`，
 severity 不參與 blocker 裁定。每個 reviewer 只允許一次 initial review 與一次針對原
-blocker ID 的 exact recheck；task contract 不變，每輪綁定完整 frozen repository
-generation。新 finding、第三輪或 generation drift 都停止而不自動擴張 task。
+blocker ID 的 exact recheck，沒有原 blocker 的 reviewer 不追加複核；task contract
+不變，每輪綁定完整 frozen repository generation。只有 repo-bound journal 可核對
+並沿用未複核的原 initial packet，保留其舊 generation；新 finding、第三輪或複核
+generation drift 都停止而不自動擴張 task。
 
 PM 在派工前固定每個 reviewer 的問題；E2 審邏輯與範圍，E4 執行行為驗證，
 避免重跑同一審查或測試。相同 generation、相同 ID 的完整 finding body 必須

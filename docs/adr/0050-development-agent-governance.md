@@ -143,12 +143,27 @@ lifecycle/blocker status、whole-repo HEAD、round/timestamp、caller receipt �
 noise 都不算 progress。External-only delta 必須由獨立 validated domain Adapter 或 reviewed
 task-owned artifact 提供；
 相同 digest 結案為 `BLOCKED_NO_DELTA`，不得 PASS、wakeup 或 executable next action。
+相同 blocker label 不得遮蔽已改變的 owned-byte digest；註解也是 source bytes，
+generic progress 不宣稱能判斷語義。byte delta 不補充有限 review/repair authority，
+finite task 仍不能排下一 turn。
 
 普通 task admission 只可從 clean repository 開始，並持久化 config-isolated native exact
 `HEAD`/tree `accepted_base`。Admission-store lock 內在 progress capture 前後都重驗該 clean
 identity，且 baseline task-source manifest 必須等於從 immutable accepted tree 以 raw
 tree/blob 導出的 manifest。缺少 `accepted_base` 的 legacy ordinary record 只可 exact
 release/cleanup，不可 acquire、renew 或 publication。
+
+同一 local workflow delivery 的 repair owner 綁原始 admission history 第一筆 owner；
+未授權替換在消耗 slot 或改寫 journal 前回 `DELIVERY_OWNER_CHANGED`，保留既有
+Operator amendment 的歷史。Repo-bound review 只令原 blocker owner 在新 frozen
+generation 複核一次；非 blocker 的原 initial packet 必須與可信 journal prefix 完全
+一致，保留原 generation，不冒充新 head verdict。原 contract/reviewer set/prefix、
+完整 blocker 複核及單次 budget 都不能重置。缺 repo history 的純 validator／Closure
+不接受 caller 自行提出的歷史 packet 作 fresh PASS；這不是新的公開 Interface 或 schema。
+
+Wave 測試的完整 Context/script 經 Node stdin 傳入，避免大型 `node -e` 參數在 Linux
+程序啟動前失敗。跨平台回歸模擬參數上限並執行真正 Node；模擬不作 Linux 修後證明，
+仍須實際 Linux CI 驗證。
 
 Queue 的 ACTIVE/WAITING/CLOSED lane 與 role work status 分離；只有 exact ACTIVE 可被
 selector 消費，IN_PROGRESS 已被 claim，不能重派。WAITING/DEFERRED 要有 named delta 並

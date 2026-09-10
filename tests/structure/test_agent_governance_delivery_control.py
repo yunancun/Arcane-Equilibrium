@@ -114,6 +114,7 @@ def _admission_cli(
     task_id: str,
     contract: dict | None = None,
     admission_id: str | None = None,
+    owner: str = "workflow-test",
 ) -> tuple[int, dict]:
     argv = [
         sys.executable,
@@ -121,7 +122,7 @@ def _admission_cli(
         "task-admission",
         "--repo", str(repo),
         "--task-id", task_id,
-        "--owner", "workflow-test",
+        "--owner", owner,
         "--admission-action", action,
     ]
     if contract is not None:
@@ -574,8 +575,11 @@ def test_interrupted_repair_reserves_budget_before_v1_authority(
     assert exhausted["reasons"] == ["DELIVERY_REPAIR_NOT_AUTHORIZED"]
 
 
-def test_same_declared_loop_blocker_stops_after_comment_only_delta(
-    tmp_path: Path,
+@pytest.mark.parametrize("changed_source", [
+    "value = 3\n", "value = 2\n# changed owned bytes\n",
+])
+def test_same_declared_loop_blocker_respects_owned_byte_delta(
+    tmp_path: Path, changed_source: str,
 ) -> None:
     first, _ = _linked_worktrees(tmp_path)
     contract = _loop_contract(first)
@@ -598,9 +602,9 @@ def test_same_declared_loop_blocker_stops_after_comment_only_delta(
     assert continued["decision"]["decision"] == "CONTINUE_OPERATOR_LOOP"
 
     (first / "subject.py").write_text(
-        "value = 2\n# comment-only churn\n", encoding="utf-8"
+        changed_source, encoding="utf-8"
     )
-    stopped = continue_admitted_task(
+    continued = continue_admitted_task(
         repo=first,
         task_id="loop-task",
         owner="workflow-test",
@@ -608,5 +612,132 @@ def test_same_declared_loop_blocker_stops_after_comment_only_delta(
         work_status="IN_PROGRESS",
         blocker_code="SAME_BLOCKER",
     )
+    assert continued["decision"]["decision"] == "CONTINUE_OPERATOR_LOOP"
+    assert continued["decision"]["schedule_wakeup"] is True
+    stopped = continue_admitted_task(
+        repo=first,
+        task_id="loop-task",
+        owner="workflow-test",
+        admission_id=admitted["admission_id"],
+        work_status="IN_PROGRESS",
+        blocker_code="CHANGED_LABEL_WITHOUT_SOURCE_DELTA",
+    )
     assert stopped["decision"]["decision"] == "BLOCKED_NO_DELTA"
     assert stopped["decision"]["schedule_wakeup"] is False
+
+
+def test_repair_rejects_replacement_owner_without_consuming_authority(
+    tmp_path: Path,
+) -> None:
+    first, second = _linked_worktrees(tmp_path)
+    contract = _contract(first)
+    code, original = _admission_cli(
+        first, "acquire", task_id="original", contract=contract
+    )
+    assert code == 0
+    code, _ = _review_cli(
+        first, contract, _review_control(contract, capture_review_generation(first))
+    )
+    assert code == 0
+    _admission_cli(first, "release", task_id="original", admission_id=original["admission_id"])
+    store = FileTaskAdmissionStore(inspect_worktree(first).common_dir)
+    journal_before, state_before = store.read_delivery_journal(), store.read()
+
+    code, denied = _admission_cli(
+        second, "acquire", task_id="replacement", contract=contract,
+        owner="replacement-owner",
+    )
+    assert code == 2
+    assert denied["reasons"] == ["DELIVERY_OWNER_CHANGED"]
+    assert store.read_delivery_journal() == journal_before
+    assert store.read() == state_before
+    code, repaired = _admission_cli(
+        second, "acquire", task_id="same-owner-repair", contract=contract
+    )
+    assert code == 0
+    _admission_cli(second, "release", task_id="same-owner-repair", admission_id=repaired["admission_id"])
+
+
+def _complementary_recheck(tmp_path: Path) -> tuple[Path, dict, dict]:
+    first, second = _linked_worktrees(tmp_path)
+    contract = _contract(first)
+    _, original = _admission_cli(first, "acquire", task_id="initial", contract=contract)
+    generation = capture_review_generation(first)
+    control = _review_control(contract, generation)
+    followup = dict(control["reviewers"][0]["rounds"][0]["findings"][0])
+    followup.update(id="historical-observation", classification="pre_existing", acceptance_criterion=None)
+    control["reviewers"].append({
+        "node_id": "regression",
+        "rounds": [{"round": 1, "kind": "initial", "reviewed_generation": generation, "findings": [followup]}],
+    })
+    code, initial = _review_cli(first, contract, control)
+    assert code == 0 and initial["action"] == "BATCH_REPAIR_THEN_EXACT_RECHECK"
+    _admission_cli(first, "release", task_id="initial", admission_id=original["admission_id"])
+    code, _ = _admission_cli(second, "acquire", task_id="repair", contract=contract)
+    assert code == 0
+    (second / "subject.py").write_text("value = 2\n", encoding="utf-8")
+    _git(second, "add", "subject.py")
+    _git(second, "commit", "-qm", "repair original blocker")
+    control["final_generation"] = capture_review_generation(second)
+    control["reviewers"][0]["rounds"].append({
+        "round": 2, "kind": "exact_recheck",
+        "reviewed_generation": control["final_generation"], "findings": [],
+    })
+    return second, contract, control
+
+
+def test_only_original_blocker_owner_rechecks_with_preserved_initial_packet(
+    tmp_path: Path,
+) -> None:
+    repo, contract, control = _complementary_recheck(tmp_path)
+    before = json.loads(json.dumps(control))
+    code, decision = _review_cli(repo, contract, control)
+    assert code == 0, decision
+    assert decision["action"] == "CLOSE_REVIEW"
+    assert decision["followup_finding_ids"] == ["historical-observation"]
+    assert control == before
+    code, replay = _review_cli(repo, contract, control)
+    assert code == 0 and replay == decision
+    store = FileTaskAdmissionStore(inspect_worktree(repo).common_dir)
+    review = store.read_delivery_journal()["deliveries"][workflow_delivery_key(contract)]["review"]
+    retained = review["initial_prefix"][1]["initial_round"]
+    assert retained == control["reviewers"][1]["rounds"][0]
+    assert retained["reviewed_generation"] != control["final_generation"]
+
+
+@pytest.mark.parametrize("tamper", [
+    "prefix", "missing-blocker-recheck", "extra-pass-recheck", "stale-recheck",
+    "new-finding", "third-round", "missing-history", "unadmitted-contract",
+])
+def test_complementary_recheck_cannot_bypass_history_or_round_binding(
+    tmp_path: Path, tamper: str,
+) -> None:
+    repo, contract, control = _complementary_recheck(tmp_path)
+    blocker, retained = control["reviewers"]
+    store = FileTaskAdmissionStore(inspect_worktree(repo).common_dir)
+    if tamper == "prefix":
+        retained["rounds"][0]["findings"][0]["summary"] = "rewritten history"
+    elif tamper == "missing-blocker-recheck":
+        blocker["rounds"].pop()
+    elif tamper == "extra-pass-recheck":
+        retained["rounds"].append(dict(blocker["rounds"][1]))
+    elif tamper == "stale-recheck":
+        blocker["rounds"][1]["reviewed_generation"] = blocker["rounds"][0]["reviewed_generation"]
+    elif tamper == "new-finding":
+        finding = dict(blocker["rounds"][0]["findings"][0], id="new-blocker")
+        blocker["rounds"][1]["findings"] = [finding]
+    elif tamper == "third-round":
+        blocker["rounds"].append(dict(blocker["rounds"][1], round=3))
+    elif tamper == "missing-history":
+        def remove_review(journal: dict) -> dict:
+            journal["deliveries"][workflow_delivery_key(contract)]["review"] = None
+            return journal
+        store.update_delivery_journal(remove_review)
+    else:
+        contract["previous_failure"] = "different contract"
+        control["task_contract_digest"] = review_task_contract_digest(contract)
+    before = store.read_delivery_journal()
+    code, denied = _review_cli(repo, contract, control)
+    assert code == 2, denied
+    assert denied["status"] == "FAIL"
+    assert store.read_delivery_journal() == before

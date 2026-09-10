@@ -1,9 +1,26 @@
 # CLAUDE_CHANGELOG.md — 開發歷史歸檔
 
 > 從 CLAUDE.md / TODO.md 遷出的 Wave/Sprint/Batch + TODO version-increment 歷史敘事。新 session 不需要讀此文件，僅供回顧歷史時查閱。
-> 最後更新：2026-09-09（TODO v881 freshness 校準）
+> 最後更新：2026-09-10（W3 有限治理與測試傳輸修補）
 
 ---
+
+## W3 PR191 治理與 Linux 測試傳輸修補（2026-09-10）
+
+- Operator 選十檔 v2：同一 W3 pair 追加三模組、四測試與三份既有直接文件；沿用
+  原始 implementation owner，保留 frozen-envelope amendment 及完整 review history。
+  前一個四檔提交 `2a0d5cb9a5f28250b20fd93c0b08884725312cc4` 的 CI 為
+  4 failed／4598 passed／95 skipped，四個失敗均為 wave 的 Node argv 過長。
+- Generic continuation 改按實際 owned-byte digest 判斷，同 blocker 不遮蔽 byte delta；
+  未變 bytes 的 label/round churn 仍停止，finite 不排下一 turn。
+- Repo-bound review 只接受原 blocker owner 的一次新 head 複核；非 blocker 初審由
+  journal 核對原 packet/generation，不能冒充 fresh verdict。未授權 owner 替換在
+  repair slot 消耗前拒絕，保留同 owner、重播與 pending recovery 邊界。
+- wave 三個 Node 啟動位置改以 stdin 傳入相同完整 script；參數上限模擬仍執行
+  真正 Node 和既有 scheduler/DAG assertions。定點修前 9 failed，修後連同拒絕
+  案例 18 passed；相鄰 task/review/delivery 84 passed，均為 author 本地證據。
+- 本節記錄 source 修補；有限 E2/E4/R4 審查、新 SHA CI 及日常 source 公開驗收
+  各自提供結果。source 提交或跨平台上限模擬均不構成 Linux 採用或 runtime 證明。
 
 ## W3 本批選段隔離修補（2026-09-09）
 

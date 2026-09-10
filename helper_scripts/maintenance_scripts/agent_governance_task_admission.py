@@ -969,6 +969,12 @@ def acquire_task_admission(
                 if envelope_errors:
                     result["delivery_reasons"] = envelope_errors
                     return state, journal, journal
+                if (
+                    delivery_record["admissions"]
+                    and owner != delivery_record["admissions"][0]["owner"]
+                ):
+                    result["delivery_reasons"] = ["DELIVERY_OWNER_CHANGED"]
+                    return state, journal, journal
             proposed_without_id = _delivery_request(
                 admission_id="0" * 32,
                 task_id=task_id,

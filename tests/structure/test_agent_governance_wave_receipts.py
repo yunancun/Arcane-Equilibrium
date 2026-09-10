@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 from copy import deepcopy
+import errno
 import json
 from pathlib import Path
 import subprocess
@@ -42,6 +43,33 @@ def _git(repo: Path, *args: str) -> None:
     subprocess.run(
         ["git", *args], cwd=repo, check=True, capture_output=True, text=True
     )
+
+
+@pytest.mark.parametrize("case", [
+    "test_wave_uses_compiler_bound_standard_authority_for_five_exact_nodes",
+    "test_wave_scheduler_refills_capacity_before_slower_calls_finish",
+    "test_wave_scheduler_stops_dequeue_and_settles_in_flight_calls_on_error",
+])
+def test_large_wave_scripts_survive_a_bounded_process_argument(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, case: str,
+) -> None:
+    # Exercise the real Node process while reproducing the CI argument boundary
+    # on every platform. This models the limit; it is not a Linux attestation.
+    limit = 128 * 1024
+    run = subprocess.run
+    script_sizes = []
+
+    def bounded_run(argv, *args, **kwargs):
+        if argv[0] == "node":
+            script = argv[2] if argv[1] == "-e" else kwargs["input"]
+            script_sizes.append(len(script.encode()))
+            if any(len(arg.encode()) >= limit for arg in argv):
+                raise OSError(errno.E2BIG, "simulated single-argument limit")
+        return run(argv, *args, **kwargs)
+
+    monkeypatch.setattr(subprocess, "run", bounded_run)
+    globals()[case](tmp_path)
+    assert max(script_sizes) > limit
 
 
 def _wave_args(
@@ -310,7 +338,8 @@ async function execute(mode) {
         "__ARGS__", json.dumps(wave_args)
     )
     completed = subprocess.run(
-        ["node", "-e", script],
+        ["node", "-"],
+        input=script,
         cwd=ROOT,
         text=True,
         capture_output=True,
@@ -755,7 +784,8 @@ const agent = async (_prompt, option) => {
         "__ARGS__", json.dumps(wave_args)
     )
     completed = subprocess.run(
-        ["node", "-e", script],
+        ["node", "-"],
+        input=script,
         cwd=ROOT,
         text=True,
         capture_output=True,
@@ -819,7 +849,8 @@ const agent = async (_prompt, option) => {
         "__ARGS__", json.dumps(wave_args)
     )
     completed = subprocess.run(
-        ["node", "-e", script],
+        ["node", "-"],
+        input=script,
         cwd=ROOT,
         text=True,
         capture_output=True,

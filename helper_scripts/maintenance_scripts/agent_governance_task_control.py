@@ -481,14 +481,6 @@ def _adjudicate_continuation(
     elif previous is None:
         decision = "STOP_MISSING_PREVIOUS"
         terminal_status = "NEEDS_CONTEXT"
-    elif (
-        current.get("blocker_code") is not None
-        and current.get("blocker_code") == previous.get("blocker_code")
-    ):
-        # This is only the persisted exact declared blocker code at the guarded
-        # operator-loop boundary.  It is not semantic equivalence of source.
-        decision = SAME_PROGRESS_TERMINAL
-        terminal_status = SAME_PROGRESS_TERMINAL
     elif previous is not None and previous.get("progress_digest") == current_digest:
         decision = SAME_PROGRESS_TERMINAL
         terminal_status = SAME_PROGRESS_TERMINAL
