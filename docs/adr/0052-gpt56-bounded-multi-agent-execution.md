@@ -101,6 +101,27 @@ exact source thread, boundary turn, and task-admitted exception digest. Missing
 history, `all`, implicit parent inheritance, and recursion beyond one child
 level are rejected.
 
+### 1a. Local delivery history is bounded across process changes
+
+Existing `agent_workflow` contracts use paired stable `work_item_id`/`lane_id` for one user delivery across task, worktree, and process changes. The journal freezes admitted objective, acceptance, hard stops, and literal roots; later scope narrows only and release retains history. A map-key mismatch is `DELIVERY_STATE_AMBIGUOUS`. Repo-bound review keeps the original contract and complete initial reviewer prefix, permits one authorized repair and one exact recheck, then stops. In an explicit loop, a repeated non-null blocker is `BLOCKED_NO_DELTA` despite comment-byte churn. Legacy unbound callers remain compatible but make no aggregate claim; this is neither host enforcement nor efficiency evidence.
+
+### 1b. Complementary review does not create new work
+
+Operator calibration 2026-09-09: retain one implementation owner, E2 logic review,
+and E4 behavioral verification with distinct preassigned questions. Collect one
+batch, integrate once, and recheck only original blockers once. Preserve original
+reviewer packets; identical same-generation finding IDs produce one action, while
+conflicting bodies under one ID are rejected for explicit arbitration. A repaired
+generation can update evidence. Findings do not admit successors or prerequisites.
+Generic `agent_workflow`/`multi_agent` labels no longer trigger economics review;
+explicit AI, model-routing, consumption and full-audit facts still do. This changes
+routing conditions, not Registry roles, schemas or budget authority.
+
+An Operator-requested finite peer review may use an already available surface
+without reopening generic automatic delegation. Current native role binding stays
+advisory. Missing host/transport capability limits a claim and is not a new local
+repair dependency. No new framework or host adapter is required by this decision.
+
 ### 2. Surface capability is explicit
 
 `execution_surface_profile_v1` distinguishes Codex native collaboration,
@@ -320,3 +341,7 @@ or secret authority.
 - Add a second external orchestrator beside ADR-0050.
 - Claim deadlines, cancellation, or actual token caps from fields the host
   cannot enforce or attest.
+
+### Local containment of an unbound native dispatch entry
+
+When native delegation does not enforce the admitted delivery/node/scope binding, keep local automatic delegation disabled (`features.multi_agent=false`, `agents.enabled=false`). A project-local containment default preserves framework source but is not a new host capability. Missing bindings must never be worked around by naming a role, choosing another task/ID/surface, or rewriting acceptance. The `AGENTS.md` containment contract defines the finite child result and explicit Operator boundary for any future re-enable; no existing mandatory verification gate is waived.

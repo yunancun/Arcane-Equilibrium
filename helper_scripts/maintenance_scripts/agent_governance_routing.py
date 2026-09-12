@@ -319,6 +319,7 @@ ROUTED_WORK_NODES = {
 }
 NARROW_QUERY_SURFACES = {
     "docs", "governance", "index", "registry", "routing", "closure", "comments",
+    "current_workflow_state", "current_s2e_state",
 }
 TASK_CONTRACT_FIELDS = (
     "task_shape", "surfaces", "risk", "runtime_claim", "end_to_end_claim",
@@ -1116,7 +1117,7 @@ def route_task(
         ("security_gate", "E3", surfaces & {"authority", "live", "risk", "auth", "security", "secret", "ipc", "ffi", "private_external_contact"} or operations_needed or unsupported_effect, "security/effect boundary hard edge"),
         ("quant_review", "QC", surfaces & {"quant", "strategy", "portfolio", "alpha", "profitability", "risk_model"}, "quantitative semantics changed"),
         ("data_ml_review", "MIT", surfaces & {"ml", "ml_data", "data", "schema", "evidence_methodology"}, "data/ML/schema semantics changed"),
-        ("ai_economics_review", "AI-E", surfaces & {"ai", "llm", "agent_workflow", "full_audit", "model_routing", "multi_agent", "consumption"}, "AI or orchestration economics matter"),
+        ("ai_economics_review", "AI-E", surfaces & {"ai", "llm", "full_audit", "model_routing", "consumption"}, "explicit AI, model-routing, consumption, or full-audit surface"),
         ("profit_control", "AI-E", "profit_diagnosis" in surfaces, "profit diagnosis requires the Registry profit-control contract"),
         ("performance_review", "E5", surfaces & {"performance", "simplification", "large_file"}, "performance or maintainability claim"),
         ("ux_review", "A3", surfaces & {"gui", "ux", "accessibility", "visual"}, "operator-visible GUI/UX claim"),

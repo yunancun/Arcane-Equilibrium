@@ -131,6 +131,23 @@ verifier `path_scope` 為空時採用，並先於 `dirty_scope` fallback。它�
 writer ownership、mutation authority 或 ACL，也不能取代 writer `dirty_scope` 或 whole-repo
 generation checks。
 
+W3 current-state integration 將兩類狀態分開：typed surface
+`current_workflow_state` 選 exact
+`TODO.md#Workflow optimization physical queue（source-only）`；
+`current_s2e_state` 選原 S2E projection。Workflow-only low／medium uncertainty
+不隱式帶入 S2E；原 runtime／operations／claims 與 high／unknown uncertainty
+觸發仍有效。穩定 query 不讀 current state；`query` 本身仍限 low risk／low
+uncertainty、無 direct interfaces，中等不確定度的唯讀任務使用真實 `review` facts。
+
+Registry `markdown_section` 使用 exact ATX heading 與 fence-aware section bytes，
+拒絕缺段、重複、未閉合 fence、超過 16 KiB、不安全來源及 caller override。
+Core 的 Product Boundary／Root Principles／Hard Boundaries 與 docs 必要規則
+逐段完整保留。`content_digest` 僅綁所選內容；來源全檔 digest／baseline 仍如實
+變動。Python 與 saved-workflow 從同一 Registry 重算 source kind/name/selector
+及 shared/role inventory，拒絕重新簽 digest 後漏來源、改 kind 或錯置 scope。
+三份 saved workflow 僅透過既有 generator 更新對應區塊；本次採用狀態與驗證
+限制見 `WORKFLOW_TODO.md`，不由 Interface 文件宣告 daily adoption。
+
 `active_state` 不再投影整個 `TODO.md`：Registry 的 current S2E selector 使用
 `todo_dispatch_projection`，只讀 exact `S2E 當前派發投影` section。單一 ACTIVE row
 仍只投影該 row 與 direct dependencies、最多 8 KiB；零 ACTIVE 則必須有唯一且逐欄 exact
@@ -425,6 +442,28 @@ payload、blocker、lifecycle status、whole-repo HEAD、round/timestamp 和 unr
 item 可被派工，IN_PROGRESS 已被 claim；WAITING/DEFERRED/CLOSED 必須先由新 delta 或
 Operator reopen 形成新的 ACTIVE
 admission。
+
+Local `agent_workflow` 以 paired stable `work_item_id`/`lane_id` 識別同一 user delivery；
+跨 task/worktree/process 必須重用，rename 不會補充 scope 或 repair authority。
+common-dir journal 凍結 original objective、acceptance、hard stops 與 literal roots
+（後續 scope 只能縮小），release 保留 history；map-key mismatch 為
+`DELIVERY_STATE_AMBIGUOUS`。Repair owner 綁第一筆 admission 的 owner；替換回
+`DELIVERY_OWNER_CHANGED`，拒絕前不消耗 repair slot、不改寫 history。既有明示
+Operator amendments 保留原紀錄，不能以重寫過往 owner 取得准入。
+
+Repo-bound review 保留 original contract、完整 initial reviewer set/prefix、一個
+authorized repair 與一次原 blocker 複核。只有原 blocker owner 可追加第二輪，且
+必須綁 final generation；沒有 blocker 的 reviewer 保留 journal 已核對的 initial
+packet 及其原 generation。沿用不等於在新 head 重審 PASS。缺可信 initial history、
+未准入的 contract、改 prefix、遺漏 blocker 複核、新 finding 或第三輪都拒絕，不能重置预算。
+未帶 repo journal 的純 validator／Closure truth check 保持 fresh-generation 規則，
+不能僅凭 caller 提交的舊 packet 證明沿用資格。E4 regression 與 R4 docs gate 分開。
+
+明示 loop 以 recaptured owned-byte digest 判斷進展，同一 blocker label 不遮蔽
+真實 byte delta；註解也屬 bytes，generic digest 不判斷修改的語義價值。相同 bytes
+即使換 label 仍為 `BLOCKED_NO_DELTA`；任何 byte delta 都不補充 review/repair 次數。
+finite task 不排下一 turn。legacy unbound/profile-compatible callers 保持原邊界，
+不因以上 journal 規則取得 aggregate claim。
 
 Canonical snapshot producer 由 persisted normalized task contract 的 `dirty_scope` 讀取
 實際 repository bytes；continuation 從 store 取回原始 control/digest/preceding snapshot。
@@ -927,8 +966,21 @@ count 作主要績效。
 一般 delegated review 使用 `review_control_v1` 作 scope admission：finding 必須分類為
 `in_scope_blocker`、`regression_blocker`、`out_of_scope_followup` 或 `pre_existing`，
 severity 不參與 blocker 裁定。每個 reviewer 只允許一次 initial review 與一次針對原
-blocker ID 的 exact recheck；task contract 不變，每輪綁定完整 frozen repository
-generation。新 finding、第三輪或 generation drift 都停止而不自動擴張 task。
+blocker ID 的 exact recheck，沒有原 blocker 的 reviewer 不追加複核；task contract
+不變，每輪綁定完整 frozen repository generation。只有 repo-bound journal 可核對
+並沿用未複核的原 initial packet，保留其舊 generation；新 finding、第三輪或複核
+generation drift 都停止而不自動擴張 task。
+
+PM 在派工前固定每個 reviewer 的問題；E2 審邏輯與範圍，E4 執行行為驗證，
+避免重跑同一審查或測試。相同 generation、相同 ID 的完整 finding body 必須
+一致，才能在 decision ID 清單去重；原始 reviewer packets 全數保留。任何欄位
+分歧都拒絕合併，由 PM 保留分歧並一次裁定，不因此開新一輪探索。修復後的新
+generation 可更新原 finding 的 evidence，不能新增 blocker ID 或補充輪次。
+純 `agent_workflow`／`multi_agent` 標籤不再自動觸發 AI-E；`ai`、`llm`、
+`model_routing`、`consumption`、`full_audit` 仍保留其審查。Registry 角色、
+budget 與輸出 schema 不變。Operator 要求的有限 peer review 可使用現有可用入口；
+native 自動派工開關仍停用，角色強制綁定未證時只能報 advisory，不把缺 host
+proof 轉成本地交付的新前置工程。
 
 ## 8. Profit-diagnosis controller
 
@@ -1090,3 +1142,7 @@ current generation 重驗。
   本節全部條款約束。審計證據正本：
   `docs/CCAgentWorkSpace/PM/workspace/reports/2026-08-02--pr164_ratification_audit.md`
   （5 lane summary/findings/覆核 verdict/復算錨全文）。
+
+### Native automatic delegation containment
+
+The local project defaults to `features.multi_agent=false` and `agents.enabled=false`. The desktop workspace root requires the same minimal local config projection because child project configuration is not a workspace-root entry. Follow `AGENTS.md` → `Native dispatch containment`: no alternative tool/CLI/skill dispatch or agent-initiated re-enable. Existing saved workflow and role source remain available for a separately admitted, verified entry; their presence is not permission to bypass containment. The current native collaboration profile remains `reported_only` / `mandatory_role_eligible=false`. This containment does not authenticate mandatory role execution or complete universal delivery binding.

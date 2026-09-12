@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import re
 from typing import Any
 
 from agent_governance_vocabulary import (
@@ -13,6 +14,7 @@ from agent_governance_vocabulary import (
 
 SOURCE_KINDS = {
     "repository_source",
+    "markdown_section",
     "repository_inventory",
     "evidence_artifact",
     "todo_active_rows",
@@ -32,6 +34,22 @@ DERIVED_SOURCE_KINDS = {
 
 def source_name(value: str | dict[str, Any]) -> str:
     return value if isinstance(value, str) else str(value.get("source", ""))
+
+
+def source_identity(value: str | dict[str, Any]) -> tuple[str, str, str | None]:
+    """Return the Registry source kind/name/selector identity."""
+
+    source = source_name(value)
+    _, separator, fragment = source.partition("#")
+    if isinstance(value, str):
+        selector = fragment or None if separator else None
+        return ("repository_source", source, selector)
+    selector = value.get("heading")
+    return (
+        str(value.get("kind", "repository_source")),
+        source,
+        str(selector) if isinstance(selector, str) else (fragment or None),
+    )
 
 
 def _condition_errors(value: Any) -> list[str]:
@@ -68,6 +86,7 @@ def context_source_spec_errors(value: Any) -> list[str]:
     common = {"source", "kind", "required_when"}
     allowed = {
         "repository_source": common,
+        "markdown_section": common | {"heading"},
         "repository_inventory": common | {"paths", "min_matches"},
         "evidence_artifact": common | {"capture_kind"},
         "todo_active_rows": common | {
@@ -90,6 +109,8 @@ def context_source_spec_errors(value: Any) -> list[str]:
         return [f"Context source kind is invalid: {kind}"]
     errors: list[str] = []
     required = {"source", "kind"}
+    if kind == "markdown_section":
+        required.add("heading")
     if kind == "repository_inventory":
         required |= {"paths", "min_matches"}
     if kind == "evidence_artifact":
@@ -109,6 +130,13 @@ def context_source_spec_errors(value: Any) -> list[str]:
         errors.append("typed Context source name must be non-empty")
     if "required_when" in value:
         errors.extend(_condition_errors(value["required_when"]))
+    if kind == "markdown_section":
+        heading = value.get("heading")
+        if (
+            not isinstance(heading, str)
+            or not re.fullmatch(r"#{1,6} [^\r\n]+", heading)
+        ):
+            errors.append("markdown_section heading must be one exact ATX heading")
     if kind == "repository_inventory":
         paths = value.get("paths")
         if (
@@ -151,13 +179,13 @@ def activated_source_specs(
     registry: dict[str, Any], selected_packs: list[str], facts: dict[str, Any]
 ) -> list[str | dict[str, Any]]:
     selected: list[str | dict[str, Any]] = []
-    names: set[str] = set()
+    identities: set[tuple[str, str, str | None]] = set()
     for pack in selected_packs:
         for spec in registry["context_packs"][pack]:
-            name = source_name(spec)
-            if source_is_active(spec, facts) and name not in names:
+            identity = source_identity(spec)
+            if source_is_active(spec, facts) and identity not in identities:
                 selected.append(spec)
-                names.add(name)
+                identities.add(identity)
     return selected
 
 

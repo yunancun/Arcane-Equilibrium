@@ -5,6 +5,7 @@ from __future__ import annotations
 import json
 import subprocess
 import sys
+from copy import deepcopy
 from pathlib import Path
 
 import pytest
@@ -126,6 +127,94 @@ def test_severity_never_promotes_an_out_of_scope_finding_to_blocker() -> None:
     assert decision["action"] == "BATCH_REPAIR_THEN_EXACT_RECHECK"
     assert decision["recheck_allowed"] is True
     assert decision["scope_expansion_allowed"] is False
+
+
+def test_complementary_reviewers_merge_identical_actions_without_losing_provenance() -> None:
+    findings = [
+        _finding("shared-blocker", classification="in_scope_blocker"),
+        _finding("shared-followup", classification="out_of_scope_followup", criterion=None),
+    ]
+    control = _control([_round(1, GENERATION, findings)])
+    control["reviewers"].append({
+        "node_id": "regression", "rounds": [_round(1, GENERATION, deepcopy(findings))],
+    })
+    original = deepcopy(control)
+
+    decision = adjudicate_review_control(TASK_FACTS, control)
+
+    assert decision["blocking_finding_ids"] == ["shared-blocker"]
+    assert decision["followup_finding_ids"] == ["shared-followup"]
+    assert decision["action"] == "BATCH_REPAIR_THEN_EXACT_RECHECK"
+    assert control == original
+    assert len(control["reviewers"]) == 2
+
+
+@pytest.mark.parametrize("changed", [
+    {"severity": "P2"},
+    {"summary": "a different defect"},
+    {"evidence_refs": ["evidence:different-observation"]},
+    {"introduced_by_current_diff": True},
+    {"paths": ["helper_scripts/maintenance_scripts/review.py"] * 2},
+    {"classification": "out_of_scope_followup", "acceptance_criterion": None},
+])
+def test_shared_finding_id_with_dissent_is_rejected(changed: dict) -> None:
+    finding = _finding("shared-id", classification="in_scope_blocker")
+    control = _control([_round(1, GENERATION, [finding])])
+    control["reviewers"].append({
+        "node_id": "regression",
+        "rounds": [_round(1, GENERATION, [{**finding, **changed}])],
+    })
+
+    with pytest.raises(ValueError, match="conflicting finding id across reviewers"):
+        adjudicate_review_control(TASK_FACTS, control)
+
+
+def test_duplicate_finding_can_change_evidence_on_exact_recheck() -> None:
+    initial = {**GENERATION, "source_head": "2" * 40}
+    finding = _finding("shared-id", classification="in_scope_blocker")
+    rounds = [
+        _round(1, initial, [finding]),
+        _round(2, GENERATION, [{**finding, "evidence_refs": ["evidence:after-repair"]}]),
+    ]
+    control = _control(rounds)
+    control["reviewers"].append({"node_id": "regression", "rounds": deepcopy(rounds)})
+
+    decision = adjudicate_review_control(TASK_FACTS, control)
+
+    assert decision["blocking_finding_ids"] == ["shared-id"]
+    assert decision["action"] == "STOP_UNRESOLVED_BLOCKERS"
+    assert decision["recheck_allowed"] is False
+
+
+def test_resolved_recheck_does_not_hide_conflicting_initial_findings() -> None:
+    initial = {**GENERATION, "source_head": "2" * 40}
+    finding = _finding("shared-id", classification="in_scope_blocker")
+    control = _control([_round(1, initial, [finding]), _round(2, GENERATION, [])])
+    control["reviewers"].append({
+        "node_id": "regression",
+        "rounds": [
+            _round(1, initial, [{**finding, "severity": "P2"}]),
+            _round(2, GENERATION, []),
+        ],
+    })
+
+    with pytest.raises(ValueError, match="conflicting finding id across reviewers"):
+        adjudicate_review_control(TASK_FACTS, control)
+
+
+def test_current_generation_dissent_cannot_hide_behind_different_round_numbers() -> None:
+    initial = {**GENERATION, "source_head": "2" * 40}
+    finding = _finding("shared-id", classification="in_scope_blocker")
+    control = _control([
+        _round(1, initial, [finding]), _round(2, GENERATION, [deepcopy(finding)]),
+    ])
+    control["reviewers"].append({
+        "node_id": "regression",
+        "rounds": [_round(1, GENERATION, [{**finding, "severity": "P2"}])],
+    })
+
+    with pytest.raises(ValueError, match="conflicting finding id across reviewers"):
+        adjudicate_review_control(TASK_FACTS, control)
 
 
 def test_exact_recheck_cannot_introduce_a_new_finding() -> None:
@@ -276,6 +365,24 @@ def test_resolved_exact_recheck_closes_and_third_round_is_rejected() -> None:
     assert adjudicate_review_control(TASK_FACTS, control)["action"] == "CLOSE_REVIEW"
     control["reviewers"][0]["rounds"].append(_round(3, GENERATION, []))
     with pytest.raises(ValueError, match="at most one exact recheck"):
+        adjudicate_review_control(TASK_FACTS, control)
+
+
+def test_historical_non_blocker_packet_requires_repository_history() -> None:
+    initial = {**GENERATION, "source_head": "4" * 40}
+    control = _control([
+        _round(1, initial, [_finding("fixed", classification="in_scope_blocker")]),
+        _round(2, GENERATION, []),
+    ])
+    control["reviewers"].append({"node_id": "regression", "rounds": [_round(1, initial, [])]})
+    with pytest.raises(ValueError, match="latest review is stale"):
+        adjudicate_review_control(TASK_FACTS, control)
+
+
+def test_non_blocker_reviewer_cannot_consume_an_exact_recheck() -> None:
+    initial = {**GENERATION, "source_head": "4" * 40}
+    control = _control([_round(1, initial, []), _round(2, GENERATION, [])])
+    with pytest.raises(ValueError, match="original blocker"):
         adjudicate_review_control(TASK_FACTS, control)
 
 

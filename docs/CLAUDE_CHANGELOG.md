@@ -1,9 +1,73 @@
 # CLAUDE_CHANGELOG.md — 開發歷史歸檔
 
 > 從 CLAUDE.md / TODO.md 遷出的 Wave/Sprint/Batch + TODO version-increment 歷史敘事。新 session 不需要讀此文件，僅供回顧歷史時查閱。
-> 最後更新：2026-08-14（TODO v880 LW2 readmission authority closure candidate）
+> 最後更新：2026-09-10（W3 有限治理與測試傳輸修補）
 
 ---
+
+## W3 PR191 治理與 Linux 測試傳輸修補（2026-09-10）
+
+- Operator 選十檔 v2：同一 W3 pair 追加三模組、四測試與三份既有直接文件；沿用
+  原始 implementation owner，保留 frozen-envelope amendment 及完整 review history。
+  前一個四檔提交 `2a0d5cb9a5f28250b20fd93c0b08884725312cc4` 的 CI 為
+  4 failed／4598 passed／95 skipped，四個失敗均為 wave 的 Node argv 過長。
+- Generic continuation 改按實際 owned-byte digest 判斷，同 blocker 不遮蔽 byte delta；
+  未變 bytes 的 label/round churn 仍停止，finite 不排下一 turn。
+- Repo-bound review 只接受原 blocker owner 的一次新 head 複核；非 blocker 初審由
+  journal 核對原 packet/generation，不能冒充 fresh verdict。未授權 owner 替換在
+  repair slot 消耗前拒絕，保留同 owner、重播與 pending recovery 邊界。
+- wave 三個 Node 啟動位置改以 stdin 傳入相同完整 script；參數上限模擬仍執行
+  真正 Node 和既有 scheduler/DAG assertions。定點修前 9 failed，修後連同拒絕
+  案例 18 passed；相鄰 task/review/delivery 84 passed，均為 author 本地證據。
+- 本節記錄 source 修補；有限 E2/E4/R4 審查、新 SHA CI 及日常 source 公開驗收
+  各自提供結果。source 提交或跨平台上限模擬均不構成 Linux 採用或 runtime 證明。
+
+## W3 本批選段隔離修補（2026-09-09）
+
+- Operator A／1 授權本次有限 CLI 審查與指定暫存寫權；repository 仍唯讀，永久設定未改。
+  初審 a657ea1：R4 PASS、E2 UNVERIFIED、E4 FAIL；原始結果保留，沒有冒充獨立通過。
+- 集中修正已結束 section 被後方未閉合 fence 拒絕；新增 backtick／tilde 尾段案例，
+  保留選段內未閉合 fence 拒絕。修前 2 FAIL／1 PASS，修後 micro-pack 17 PASS。
+- pytest 入口採既有受控 bootstrap，collection preflight PASS；不改 capture policy。
+  本 checkpoint 尚待原角色一次 exact recheck 及既有發布／日常採用 gate，
+  狀態 SOURCE_READY_NOT_ADOPTED。詳細證據及單次限制見 WORKFLOW_TODO 對應節。
+
+## W3 fixture blocker 修復完成（2026-09-09）
+
+- Operator 明確授權本次繞過舊修復次數限額；同一 W3 pair 在乾淨 linked worktree
+  fresh-admit，既有 journal 歷史保留，單次 repair allowance 由本次 admission 消耗。
+  沒有永久調整 Registry budget／治理程式或另開 native reviewer transport。
+- 兩個 materializer adversarial 測試改用真實隔離 Git fixture，保留 narrow envelope，
+  加入正常 artifact 的 materialize／validate 正向控制，再驗空 DAG 與 reviewer
+  substitution 原拒絕邊界。真 repo 文件／索引成長不再掩蓋待測的 tamper 行為。
+- 修前 2 failed；定點修後 2 passed。原八份聚焦 suite 為
+  `207 passed, 1 skipped in 104.96s`，exit 0；skip 僅 Linux kernel argv-cap 的平台限制。
+  Registry／generator parity 通過。本地兩個 blocker 已解除，feature 為
+  `SOURCE_READY_NOT_ADOPTED`；E2／E4／R4 獨立 verdict unavailable，日常採用仍待完成。
+  下節前輪失敗記錄保留，本節覆蓋其 blocker 當前狀態。
+
+## W3 current-state integration：本地 patch 保留，驗證未收口（2026-09-09）
+
+- 從 clean `bf574e2102fef29e4a865c3e4678025964c7473a` fresh-admit 固定
+  `W3-CURRENT-STATE-INTEGRATION`／`workflow-w3-delivery`，在專用 linked worktree
+  承接 `4b31399df`＋`1f87d68f9`。第一個 12-file checkpoint `624f21cb9`；
+  三份 generated workflow 由目前 Registry 重建，區塊外 bytes 不變。
+- 公開 Context 命令已驗 workflow low／medium exact selection、stable omission、
+  S2E 與 runtime trigger。Registry／codegen parity PASS。首次聚焦測試
+  `202 passed / 5 failed / 1 skipped`；5 個失敗亦在 clean main 重現。
+  同檔一次相容修補後，原 blocker 唯一複核為 `3 passed / 2 failed`。
+- 剩餘兩個 adversarial fixture 在 materializer 的 `call_allowed` gate 前被阻，
+  planned Context 約 12,594／12,592，超過 narrow 12,000 上限。未放寬上限、
+  未改 AGENTS、未啟動 W9；依既定一次 repair/recheck 限額停止，保留 patch。
+  E2／E4／R4 獨立 verdict unavailable，非全綠／daily adopted／remote landed。
+  詳細 owner、unblock condition 與使用入口見 `WORKFLOW_TODO.md`。
+
+## TODO v881 增量：主 TODO／workflow 全項 freshness 校準（2026-09-09）
+
+- 46 個主 row 保留穩定 ID／驗收，分列 ACTIVE（空）、WAITING／DEFERRED、CLOSED；已完成項移除舊自動 successor，原 carry 完整留存 [v880 快照](archive/2026-09-09--todo-v880-pre-freshness-audit.md)。
+- 更正 PR189 merged／PR88 closed unmerged、過期 runtime／cap 觀察、L2 解析及 blocked predecessor 已修、GUI 殘缺與 Move23 跨 session 授權指示。
+- Sonnet 5 官方取消預定漲價：expiry row 關閉，YAML 僅註解變更。W0–W11／WF6／本地 workflow 修補逐項核對；W3 選定方向與 WAITING 不變，無 candidate 整合／host proof／成本 A/B。
+- 逐項證據、命令與未驗界線见 [audit](references/2026-09-09--todo-workflow-freshness-audit.md)。S2E EMPTY、W5 receipt marker、5/9／0/6／0/9 與 16 prerequisites 保留。
 
 ## TODO v880 增量：LW2 readmission source-authority closure candidate（2026-08-14）
 

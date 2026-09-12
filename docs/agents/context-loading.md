@@ -64,6 +64,30 @@ memory.
 
 ## Source-of-truth routing
 
+Current-state source selection is explicit: `current_workflow_state` selects only
+`TODO.md#Workflow optimization physical queue（source-only）`; `current_s2e_state`
+selects the existing S2E dispatch projection. Workflow state alone at low or
+medium uncertainty does not load S2E. Existing runtime/operations/claim and
+high/unknown-uncertainty triggers remain intact. A stable query selects neither
+current-state source. The `query` task shape still requires low risk, low
+uncertainty and no direct interfaces; a medium-uncertainty read uses `review`
+with its real direct interface.
+
+Registry `markdown_section` sources bind an exact ATX heading, preserve its
+section bytes and ignore headings inside fences. Missing, duplicate,
+over-16-KiB selections or unclosed fences obscuring or inside the selected
+section fail closed. An unclosed fence after a terminating peer/higher heading
+does not invalidate the already-ended section. Selected `content_digest`
+tracks selected bytes; full-file digest and baseline still track the whole
+source. Unselected edits cannot be reported as an unchanged full artifact.
+Python and generated saved-workflow admission recompute required source
+kind/name/selector and shared/role inventory from the Registry and task facts.
+Re-signing an artifact cannot authorize omitting or reclassifying a source.
+
+Use `agent_governance.py context --role PM @task-facts.json` with the appropriate
+typed surface. W3 integration and validation status live in `WORKFLOW_TODO.md`;
+feature-worktree behavior does not establish daily-source adoption.
+
 | Need | Read | Authority class |
 |---|---|---|
 | Product/hard permission | relevant `CLAUDE.md`, accepted ADR/AMD, operator decision | `normative_policy` |

@@ -326,14 +326,16 @@ def test_progress_snapshot_captures_owned_bytes_and_rejects_digest_only_delta(
     )
     control = compile_task_execution_policy(contract)
 
-    def capture(round_number: int) -> dict:
+    def capture(
+        round_number: int, blocker_code: str = "WAITING_FOR_EVIDENCE"
+    ) -> dict:
         return progress_snapshot(
             round_number=round_number,
             work_status="ACTIVE",
             repo=repo,
             task_contract=contract,
             admitted_task_contract_digest=control["task_contract_digest"],
-            blocker_code="WAITING_FOR_EVIDENCE",
+            blocker_code=blocker_code,
         )
 
     previous = capture(1)
@@ -362,6 +364,14 @@ def test_progress_snapshot_captures_owned_bytes_and_rejects_digest_only_delta(
         previous=previous,
         current=changed,
     )["decision"] == "CONTINUE_OPERATOR_LOOP"
+
+    assert _adjudicate(
+        repo=repo,
+        contract=contract,
+        control=control,
+        previous=changed,
+        current=capture(3, blocker_code="LABEL_ONLY_CHANGE"),
+    )["decision"] == "BLOCKED_NO_DELTA"
 
 
 def test_governance_cli_uses_persisted_admission_and_previous_snapshot(

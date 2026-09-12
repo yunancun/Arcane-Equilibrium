@@ -382,6 +382,99 @@ def test_registry_projects_the_exact_publication_status_authority() -> None:
     assert task_publication.publication_expected_head == "a" * 40
 
 
+def _specialized_workflow_adversarial_artifact(
+    artifact: dict, nodes: list[dict], contract_updates: dict
+) -> dict:
+    """Recapture canonical sources before testing the unmodified JS DAG gate.
+
+    Python normally rejects these deliberately invalid specialized DAGs first.
+    Suppress its DAG decisions only while constructing the adversarial input.
+    Runtime records below are isolated, explicitly synthetic test evidence, not
+    host observations; their verifier accepts only the exact fixture payload.
+    """
+    import tempfile
+    from unittest.mock import patch
+
+    import agent_governance_execution as execution
+    from agent_governance_context_projection import materialize_semantic_context
+
+    governance = _load_module()
+    original_plan = json.loads(artifact["canonical_plan"])
+    facts = {**original_plan["task_contract"], **contract_updates}
+    registry = governance.load_registry()
+    real_provenance = execution._source_provenance
+
+    with tempfile.TemporaryDirectory(prefix="specialized-context-fixture-") as tmp:
+        fixture_root = Path(tmp)
+
+        def provenance(spec, root, evidence, normalized, baseline, verifier=None):
+            if (
+                not isinstance(spec, dict)
+                or spec.get("capture_kind") != "runtime_observation"
+            ):
+                return real_provenance(
+                    spec, root, evidence, normalized, baseline, verifier
+                )
+            source = spec["source"]
+            now = datetime.now(timezone.utc)
+            content = {"fixture_only": True, "logical_source": source}
+            payload = {
+                "schema_version": "context_evidence_artifact_v1",
+                "logical_source": source,
+                "capture_kind": "runtime_observation",
+                "observed_at": (now - timedelta(seconds=1)).isoformat(),
+                "expires_at": (now + timedelta(minutes=10)).isoformat(),
+                "baseline": baseline,
+                "producer": {
+                    "id": "runtime_observation_adapter_v1",
+                    "input_digest": _canonical_digest(content),
+                },
+                "content": content,
+                "content_digest": _canonical_digest(content),
+            }
+            path = fixture_root / (source.replace(" ", "-") + ".json")
+            path.write_text(json.dumps(payload), encoding="utf-8")
+            record = real_provenance(
+                spec, fixture_root, {source: {"artifact_path": path.name}},
+                normalized, baseline, lambda candidate: candidate == payload,
+            )
+            assert record["status"] == "resolved_artifact", record
+            # Serialize the optional semantic field as JSON null, not a missing
+            # JavaScript property, so this fixture reaches the DAG gate.
+            record["attestation_error"] = None
+            return record
+
+        with (
+            patch.object(execution, "_source_provenance", side_effect=provenance),
+            patch.object(
+                execution, "task_execution_projection", return_value=(nodes, [])
+            ),
+            patch.object(
+                execution, "specialized_workflow_split_exception", return_value=None
+            ),
+            # A dual-surface forgery must retain this saved workflow's policy
+            # so a different envelope does not mask the task-route rejection.
+            patch.object(
+                execution, "_select_envelope",
+                return_value=original_plan["budget"]["envelope"],
+            ),
+        ):
+            plan = governance.compile_context(original_plan["role"], facts)
+    plan.pop("context_digest")
+    candidate = {
+        **artifact,
+        **materialize_semantic_context(plan, registry),
+        "task_contract_digest": plan["task_contract_digest"],
+        "canonical_plan": json.dumps(
+            plan, ensure_ascii=False, sort_keys=True, separators=(",", ":")
+        ),
+        "artifact_digest": _canonical_digest(plan),
+        "budget_authority_canonical": plan["budget"]["authority_canonical"],
+        "budget_authority_digest": plan["budget"]["authority_digest"],
+    }
+    return candidate
+
+
 def test_subagent_model_routing_and_project_concurrency_are_explicit() -> None:
     governance = _load_module()
     registry = governance.load_registry()
@@ -416,11 +509,13 @@ def test_subagent_model_routing_and_project_concurrency_are_explicit() -> None:
             "model_reasoning_effort": native["model_reasoning_effort"],
         } == policy["roles"][contract["role_id"]]
 
-    agents = tomllib.loads((ROOT / ".codex/config.toml").read_text(encoding="utf-8"))[
-        "agents"
-    ]
+    config = tomllib.loads(
+        (ROOT / ".codex/config.toml").read_text(encoding="utf-8")
+    )
+    assert config["features"]["multi_agent"] is False
+    agents = config["agents"]
     assert agents == {
-        "enabled": True,
+        "enabled": False,
         "max_concurrent_threads_per_session": 3,
         "default_subagent_model": "gpt-5.6-terra",
         "default_subagent_reasoning_effort": "medium",

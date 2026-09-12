@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 from copy import deepcopy
+import errno
 import json
 from pathlib import Path
 import subprocess
@@ -44,6 +45,33 @@ def _git(repo: Path, *args: str) -> None:
     )
 
 
+@pytest.mark.parametrize("case", [
+    "test_wave_uses_compiler_bound_standard_authority_for_five_exact_nodes",
+    "test_wave_scheduler_refills_capacity_before_slower_calls_finish",
+    "test_wave_scheduler_stops_dequeue_and_settles_in_flight_calls_on_error",
+])
+def test_large_wave_scripts_survive_a_bounded_process_argument(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, case: str,
+) -> None:
+    # Exercise the real Node process while reproducing the CI argument boundary
+    # on every platform. This models the limit; it is not a Linux attestation.
+    limit = 128 * 1024
+    run = subprocess.run
+    script_sizes = []
+
+    def bounded_run(argv, *args, **kwargs):
+        if argv[0] == "node":
+            script = argv[2] if argv[1] == "-e" else kwargs["input"]
+            script_sizes.append(len(script.encode()))
+            if any(len(arg.encode()) >= limit for arg in argv):
+                raise OSError(errno.E2BIG, "simulated single-argument limit")
+        return run(argv, *args, **kwargs)
+
+    monkeypatch.setattr(subprocess, "run", bounded_run)
+    globals()[case](tmp_path)
+    assert max(script_sizes) > limit
+
+
 def _wave_args(
     tmp_path: Path,
     *,
@@ -61,18 +89,24 @@ def _wave_args(
         encoding="utf-8",
     )
     (repo / "CLAUDE.md").write_text(
-        "# Product Boundary\n"
+        "## 一、Product Boundary\n"
         "Wave fixture product boundary.\n\n"
-        "# Root Principles\n"
+        "## 二、Root Principles\n"
         "Wave fixture root principles.\n\n"
-        "# Hard Boundaries\n"
+        "## 四、Hard Boundaries\n"
         "Wave fixture hard boundaries.\n",
         encoding="utf-8",
     )
     (repo / "local.md").write_text("controller-owned wave input\n", encoding="utf-8")
     (repo / "docs" / "_indexes").mkdir(parents=True)
     (repo / "docs" / "README.md").write_text(
-        "wave fixture documentation\n",
+        "## 当前入口速查\nWave fixture entry.\n"
+        "## Multi-Agent 接手路径\nWave fixture handoff.\n"
+        "## 强制规则 (Mandatory Rules)\nWave fixture rules.\n"
+        "## 文件命名规范 (File Naming Convention)\nWave fixture names.\n"
+        "## 日志分类说明 (Log Categories)\nWave fixture log categories.\n"
+        "## 日志书写原则 (Writing Principles)\nWave fixture writing rules.\n"
+        "## 文档索引 (Document Index)\nWave fixture index.\n",
         encoding="utf-8",
     )
     (repo / "docs" / "_indexes" / "wave.md").write_text(
@@ -304,7 +338,8 @@ async function execute(mode) {
         "__ARGS__", json.dumps(wave_args)
     )
     completed = subprocess.run(
-        ["node", "-e", script],
+        ["node", "-"],
+        input=script,
         cwd=ROOT,
         text=True,
         capture_output=True,
@@ -749,7 +784,8 @@ const agent = async (_prompt, option) => {
         "__ARGS__", json.dumps(wave_args)
     )
     completed = subprocess.run(
-        ["node", "-e", script],
+        ["node", "-"],
+        input=script,
         cwd=ROOT,
         text=True,
         capture_output=True,
@@ -813,7 +849,8 @@ const agent = async (_prompt, option) => {
         "__ARGS__", json.dumps(wave_args)
     )
     completed = subprocess.run(
-        ["node", "-e", script],
+        ["node", "-"],
+        input=script,
         cwd=ROOT,
         text=True,
         capture_output=True,

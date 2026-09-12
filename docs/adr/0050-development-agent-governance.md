@@ -82,6 +82,18 @@ operations、venue adapter、quant/ML semantics、E2E acceptance 是 hard facts 
 
 ### Context and consumption
 
+2026-09-09 W3 source integration：沿用既有 candidate 的 typed
+`current_workflow_state`／`current_s2e_state`，分別選 workflow exact section／
+S2E dispatch projection。Workflow-only low／medium uncertainty 不載入 S2E；
+stable query 不載入 current state，既有 runtime 與 high／unknown 觸發保留。
+`markdown_section` 以 exact、fence-aware、最多 16 KiB 的段落保留 mandatory
+內容；缺段／重複／失效結構拒絕。Selected-content digest 與全檔 provenance
+分開，未選段改動不能被宣稱為整個 artifact 不變。Python／generated saved
+workflow 都從 Registry/task 重建來源 kind/name/selector 與 shared/role inventory，
+拒絕重新簽 digest 後漏選或改類。此設計沿用四個既有 Interface，不新增控制器、
+派工 transport 或效果權限；本地 patch／驗證及尚未採用的限制以
+`WORKFLOW_TODO.md` 的 W3 本輪結果為準。
+
 Universal preload 退役。Context Interface 保留 exact task prompt、user objective/scope/
 acceptance/hard stops、必填 uncertainty、baseline/direct interfaces/previous failure。Concrete source 由 compiler 讀 bytes；
 virtual evidence 必須是 source/observed-at typed、byte-backed artifact，caller digest 只是
@@ -131,12 +143,27 @@ lifecycle/blocker status、whole-repo HEAD、round/timestamp、caller receipt �
 noise 都不算 progress。External-only delta 必須由獨立 validated domain Adapter 或 reviewed
 task-owned artifact 提供；
 相同 digest 結案為 `BLOCKED_NO_DELTA`，不得 PASS、wakeup 或 executable next action。
+相同 blocker label 不得遮蔽已改變的 owned-byte digest；註解也是 source bytes，
+generic progress 不宣稱能判斷語義。byte delta 不補充有限 review/repair authority，
+finite task 仍不能排下一 turn。
 
 普通 task admission 只可從 clean repository 開始，並持久化 config-isolated native exact
 `HEAD`/tree `accepted_base`。Admission-store lock 內在 progress capture 前後都重驗該 clean
 identity，且 baseline task-source manifest 必須等於從 immutable accepted tree 以 raw
 tree/blob 導出的 manifest。缺少 `accepted_base` 的 legacy ordinary record 只可 exact
 release/cleanup，不可 acquire、renew 或 publication。
+
+同一 local workflow delivery 的 repair owner 綁原始 admission history 第一筆 owner；
+未授權替換在消耗 slot 或改寫 journal 前回 `DELIVERY_OWNER_CHANGED`，保留既有
+Operator amendment 的歷史。Repo-bound review 只令原 blocker owner 在新 frozen
+generation 複核一次；非 blocker 的原 initial packet 必須與可信 journal prefix 完全
+一致，保留原 generation，不冒充新 head verdict。原 contract/reviewer set/prefix、
+完整 blocker 複核及單次 budget 都不能重置。缺 repo history 的純 validator／Closure
+不接受 caller 自行提出的歷史 packet 作 fresh PASS；這不是新的公開 Interface 或 schema。
+
+Wave 測試的完整 Context/script 經 Node stdin 傳入，避免大型 `node -e` 參數在 Linux
+程序啟動前失敗。跨平台回歸模擬參數上限並執行真正 Node；模擬不作 Linux 修後證明，
+仍須實際 Linux CI 驗證。
 
 Queue 的 ACTIVE/WAITING/CLOSED lane 與 role work status 分離；只有 exact ACTIVE 可被
 selector 消費，IN_PROGRESS 已被 claim，不能重派。WAITING/DEFERRED 要有 named delta 並

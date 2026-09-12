@@ -6,11 +6,18 @@ import hashlib
 import json
 import re
 import subprocess
+from copy import deepcopy
 from pathlib import Path, PurePosixPath
 from typing import Any
 
 from agent_governance_context import capture_repository_baseline
 from agent_governance_routing import _normalize_task_facts, task_contract_projection
+from agent_governance_task_admission import (
+    FileTaskAdmissionStore,
+    find_delivery_for_contract,
+    workflow_delivery_key,
+)
+from agent_governance_writer_lease import inspect_worktree
 
 
 BLOCKING_CLASSIFICATIONS = frozenset({"in_scope_blocker", "regression_blocker"})
@@ -139,6 +146,113 @@ def _finding_errors(
     return errors
 
 
+def _initial_review_prefix(control: dict[str, Any]) -> list[dict[str, Any]]:
+    return [
+        {
+            "node_id": reviewer["node_id"],
+            "initial_round": reviewer["rounds"][0],
+        }
+        for reviewer in control["reviewers"]
+    ]
+
+
+def _persist_delivery_review(
+    *,
+    repo: Path,
+    task_contract: dict[str, Any],
+    task_digest: str,
+    control: dict[str, Any],
+    decision: dict[str, Any],
+) -> dict[str, Any]:
+    """Retain one initial review and one exact recheck for a delivery."""
+
+    if workflow_delivery_key(task_contract) is None:
+        return decision
+    store = FileTaskAdmissionStore(inspect_worktree(repo).common_dir)
+    control_digest = _canonical_digest(control)
+    result: dict[str, Any] = {}
+
+    def mutation(journal: dict[str, Any]) -> dict[str, Any]:
+        match = find_delivery_for_contract(journal, task_digest)
+        if match is None:
+            raise ValueError("review control contract was not admitted in delivery history")
+        _, delivery = match
+        review = delivery["review"]
+        if review is None:
+            if any(len(reviewer["rounds"]) != 1 for reviewer in control["reviewers"]):
+                raise ValueError("delivery review requires an initial packet first")
+            if any(
+                reviewer["rounds"][0]["reviewed_generation"] != control["final_generation"]
+                for reviewer in control["reviewers"]
+            ):
+                raise ValueError("delivery review requires fresh initial packets")
+            review = {
+                "schema_version": "workflow_delivery_review_v1",
+                "reviewer_set": sorted(
+                    reviewer["node_id"] for reviewer in control["reviewers"]
+                ),
+                "initial_prefix": _initial_review_prefix(control),
+                "initial_control_digest": control_digest,
+                "initial_decision": deepcopy(decision),
+                "recheck_control_digest": None,
+                "recheck_decision": None,
+            }
+            delivery["review"] = review
+            if decision["blocking_finding_ids"]:
+                budget = delivery["repair_budget"]
+                if budget["consumed"] == 0:
+                    budget["authorized"] = True
+            result["decision"] = decision
+            return journal
+        expected_fields = {
+            "schema_version", "reviewer_set", "initial_prefix",
+            "initial_control_digest", "initial_decision",
+            "recheck_control_digest", "recheck_decision",
+        }
+        if (
+            not isinstance(review, dict)
+            or set(review) != expected_fields
+            or review["schema_version"] != "workflow_delivery_review_v1"
+        ):
+            raise ValueError("DELIVERY_STATE_AMBIGUOUS")
+        if control_digest == review["initial_control_digest"]:
+            result["decision"] = deepcopy(review["initial_decision"])
+            return journal
+        if control_digest == review["recheck_control_digest"]:
+            result["decision"] = deepcopy(review["recheck_decision"])
+            return journal
+        reviewer_set = sorted(
+            reviewer["node_id"] for reviewer in control["reviewers"]
+        )
+        if reviewer_set != review["reviewer_set"]:
+            raise ValueError("delivery review reviewer set cannot be reset")
+        if _initial_review_prefix(control) != review["initial_prefix"]:
+            raise ValueError("delivery review initial round prefix cannot be reset")
+        blocker_owners = {
+            item["node_id"] for item in review["initial_prefix"]
+            if any(
+                finding["classification"] in BLOCKING_CLASSIFICATIONS
+                for finding in item["initial_round"]["findings"]
+            )
+        }
+        if not blocker_owners or any(
+            len(reviewer["rounds"]) != (2 if reviewer["node_id"] in blocker_owners else 1)
+            for reviewer in control["reviewers"]
+        ):
+            raise ValueError("delivery review requires only original blocker owners to recheck")
+        if review["recheck_control_digest"] is not None:
+            raise ValueError("delivery review exact recheck is already consumed")
+        if delivery["repair_budget"] != {"authorized": False, "consumed": 1}:
+            raise ValueError("delivery review exact recheck requires its admitted repair")
+        review["recheck_control_digest"] = control_digest
+        review["recheck_decision"] = deepcopy(decision)
+        result["decision"] = decision
+        return journal
+
+    store.update_delivery_journal(mutation)
+    return result["decision"]
+
+
 def adjudicate_review_control(
     task_facts: dict[str, Any],
     control: dict[str, Any],
@@ -202,6 +316,7 @@ def adjudicate_review_control(
     blocking: list[str] = []
     followups: list[str] = []
     seen_nodes: set[str] = set()
+    finding_bodies: dict[tuple[str, str], str] = {}
     blocker_recheck_exhausted = False
     for reviewer_index, reviewer in enumerate(reviewers):
         label = f"reviewers[{reviewer_index}]"
@@ -244,12 +359,13 @@ def adjudicate_review_control(
                 finding_label = (
                     f"{label}.rounds[{round_index}].findings[{finding_index}]"
                 )
-                errors.extend(_finding_errors(
+                finding_errors = _finding_errors(
                     finding,
                     acceptance=acceptance,
                     dirty_scope=dirty_scope,
                     label=finding_label,
-                ))
+                )
+                errors.extend(finding_errors)
                 if not isinstance(finding, dict) or not isinstance(
                     finding.get("id"), str
                 ):
@@ -257,6 +373,19 @@ def adjudicate_review_control(
                 if finding["id"] in round_ids:
                     errors.append(f"{finding_label} id is duplicate within reviewer")
                 round_ids.add(finding["id"])
+                if not finding_errors:
+                    # Rechecks may update evidence. Compare peers only within
+                    # the same source generation, retaining original packets.
+                    key = (_canonical_digest(
+                        review_round["reviewed_generation"]
+                    ), finding["id"])
+                    body = _canonical_digest(finding)
+                    if key in finding_bodies and finding_bodies[key] != body:
+                        errors.append(
+                            f"{finding_label} conflicting finding id across reviewers: "
+                            f"{finding['id']}"
+                        )
+                    finding_bodies[key] = body
         if errors and any(error.startswith(f"{label}.rounds") for error in errors):
             continue
         if (
@@ -273,6 +402,8 @@ def adjudicate_review_control(
                 and isinstance(finding.get("id"), str)
             }
             initial_blocker_ids = set(initial_blockers)
+            if not initial_blocker_ids:
+                errors.append(f"{label} exact recheck requires an original blocker")
             recheck_ids = {
                 finding.get("id")
                 for finding in rounds[1]["findings"]
@@ -300,7 +431,20 @@ def adjudicate_review_control(
             errors.append(f"{label} current round is invalid")
             continue
         if current.get("reviewed_generation") != control["final_generation"]:
-            errors.append(f"{label} latest review is stale against final_generation")
+            # A retained initial packet is historical, not a fresh verdict.
+            # Only the repo-bound journal may validate its unchanged prefix,
+            # original contract and the complete blocker-owner recheck below.
+            retained_initial = (
+                repo is not None
+                and workflow_delivery_key(normalized) is not None
+                and len(rounds) == 1
+                and not any(
+                    finding["classification"] in BLOCKING_CLASSIFICATIONS
+                    for finding in current["findings"]
+                )
+            )
+            if not retained_initial:
+                errors.append(f"{label} latest review is stale against final_generation")
         current_blockers = False
         for finding in current["findings"]:
             if not isinstance(finding, dict):
@@ -318,8 +462,8 @@ def adjudicate_review_control(
     if errors:
         raise ValueError("; ".join(errors))
 
-    blocking = sorted(blocking)
-    followups = sorted(followups)
+    blocking = sorted(set(blocking))
+    followups = sorted(set(followups))
     if blocking and blocker_recheck_exhausted:
         action = "STOP_UNRESOLVED_BLOCKERS"
         recheck_allowed = False
@@ -329,7 +473,7 @@ def adjudicate_review_control(
     else:
         action = "CLOSE_REVIEW"
         recheck_allowed = False
-    return {
+    decision = {
         "schema_version": "review_control_decision_v1",
         "task_contract_digest": task_digest,
         "review_control_digest": _canonical_digest(control),
@@ -340,6 +484,15 @@ def adjudicate_review_control(
         "recheck_allowed": recheck_allowed,
         "scope_expansion_allowed": False,
     }
+    if repo is not None:
+        return _persist_delivery_review(
+            repo=repo,
+            task_contract=normalized,
+            task_digest=task_digest,
+            control=control,
+            decision=decision,
+        )
+    return decision
 
 
 def verification_fragment_truth_errors(

@@ -737,7 +737,8 @@ def test_context_compiler_promotes_an_exact_five_node_dag_before_materialization
             for error in malformed_result["errors"]
         )
 
-    with pytest.raises(ValueError, match="omits routed call-producing node"):
+    # 公開空 DAG 在結構檢查即拒絕，不依賴 workflow 標籤是否觸發 reviewer。
+    with pytest.raises(ValueError, match="must contain at least one node"):
         compile_context(
             "E2",
             facts,
@@ -770,22 +771,49 @@ def test_execution_dag_compiler_exposes_no_public_empty_override() -> None:
         compiler([])
 
 
-def test_materializer_rejects_rehashed_empty_binding_for_routed_call() -> None:
+@pytest.fixture
+def materializer_repo(tmp_path: Path) -> tuple[Path, dict]:
+    # DAG 篡改測試只需要一份可准入的 source；避免真 repo 的文件／索引成長
+    # 先耗盡 Context 預算，掩蓋 materializer 原本要驗證的拒絕邊界。
+    repo = tmp_path / "repo"
+    repo.mkdir()
+    _git(repo, "init")
+    _git(repo, "config", "user.email", "context-test@example.invalid")
+    _git(repo, "config", "user.name", "Context Test")
+    (repo / "local.md").write_text("Exact materializer source.\n", encoding="utf-8")
+    _git(repo, "add", ".")
+    _git(repo, "commit", "-m", "materializer baseline")
+    registry = deepcopy(__import__("agent_governance_registry").load_registry())
+    registry["context_packs"]["materializer_test"] = ["local.md"]
+    registry["roles"]["E2"]["context_packs"] = ["materializer_test"]
+    return repo, registry
+
+
+def test_materializer_rejects_rehashed_empty_binding_for_routed_call(
+    materializer_repo: tuple[Path, dict],
+) -> None:
+    repo, registry = materializer_repo
     facts = {
         "task_shape": "review",
-        "surfaces": ["agent_workflow"],
+        # WF-PR 保留具名成本事實觸發；workflow 標籤本身不再召集 AI-E。
+        "surfaces": ["agent_workflow", "consumption"],
         "risk": "low",
         "uncertainty": "low",
         "side_effect_class": "none",
         "objective": "materialize the routed economics review",
-        "scope": ["AGENTS.md"],
+        "scope": ["local.md"],
         "acceptance_criteria": ["materializer retains compiler route authority"],
         "hard_stops": ["no runtime effect"],
-        "baseline": capture_repository_baseline(),
+        "baseline": capture_repository_baseline(repo),
         "direct_interfaces": ["compile_context", "materialize_context_artifact"],
         "previous_failure": "caller rehashed an empty binding after compilation",
     }
-    plan = compile_context("E2", facts)
+    plan = compile_context("E2", facts, registry, repo)
+    assert plan["budget"]["envelope"] == "narrow"
+    assert validate_context_artifact(
+        materialize_context_artifact(plan, registry),
+        expected_task_facts=facts, registry=registry, root=repo,
+    )["errors"] == []
     assert [
         node["node_id"]
         for node in plan["execution_dag_binding"]["nodes"]
@@ -800,13 +828,13 @@ def test_materializer_rejects_rehashed_empty_binding_for_routed_call() -> None:
         ValueError,
         match="execution DAG binding does not authorize the task contract",
     ):
-        materialize_context_artifact(forged)
+        materialize_context_artifact(forged, registry)
 
 
 def test_materializer_rejects_rehashed_routed_node_omission() -> None:
     facts = {
         "task_shape": "review",
-        "surfaces": ["agent_workflow", "hard_boundary"],
+        "surfaces": ["agent_workflow", "consumption", "hard_boundary"],
         "risk": "medium",
         "uncertainty": "low",
         "side_effect_class": "none",
@@ -837,35 +865,43 @@ def test_materializer_rejects_rehashed_routed_node_omission() -> None:
         materialize_context_artifact(forged)
 
 
-def test_materializer_rejects_rehashed_routed_node_substitution() -> None:
+def test_materializer_rejects_rehashed_routed_node_substitution(
+    materializer_repo: tuple[Path, dict],
+) -> None:
+    repo, registry = materializer_repo
     facts = {
         "task_shape": "review",
-        "surfaces": ["agent_workflow"],
+        "surfaces": ["agent_workflow", "consumption"],
         "risk": "low",
         "uncertainty": "low",
         "side_effect_class": "none",
         "objective": "retain the exact routed economics identity",
-        "scope": ["AGENTS.md"],
+        "scope": ["local.md"],
         "acceptance_criteria": ["materializer rejects role substitution"],
         "hard_stops": ["no runtime effect"],
-        "baseline": capture_repository_baseline(),
+        "baseline": capture_repository_baseline(repo),
         "direct_interfaces": ["compile_context", "materialize_context_artifact"],
         "previous_failure": "caller substituted a cheaper role after compilation",
     }
-    plan = compile_context("E2", facts)
+    plan = compile_context("E2", facts, registry, repo)
+    assert plan["budget"]["envelope"] == "narrow"
+    assert validate_context_artifact(
+        materialize_context_artifact(plan, registry),
+        expected_task_facts=facts, registry=registry, root=repo,
+    )["errors"] == []
     substituted = deepcopy(plan["execution_dag_binding"]["nodes"])
     substituted[0].update({"role": "E2", "native_agent": "E2"})
     forged = deepcopy(plan)
     forged["execution_dag_binding"] = __import__(
         "agent_governance_execution_dag"
-    ).compile_context_execution_dag_binding(substituted)
+    ).compile_context_execution_dag_binding(substituted, registry=registry)
     forged["context_digest"] = context_plan_digest(forged)
 
     with pytest.raises(
         ValueError,
         match="substitutes routed call-producing node ai_economics_review",
     ):
-        materialize_context_artifact(forged)
+        materialize_context_artifact(forged, registry)
 
 
 def test_materializer_rejects_rehashed_specialized_surface_dag_mismatch() -> None:
@@ -1516,11 +1552,11 @@ def test_explicit_execution_dag_must_include_exact_routed_call_nodes() -> None:
     registry = __import__("agent_governance_registry").load_registry()
     facts = {
         "task_shape": "review",
-        "surfaces": ["agent_workflow"],
+        "surfaces": ["agent_workflow", "consumption"],
         "risk": "low",
         "uncertainty": "low",
         "side_effect_class": "none",
-        "objective": "bind every routed call before admitting extra reviewers",
+        "objective": "bind the economics review before admitting extra reviewers",
         "scope": ["AGENTS.md"],
         "acceptance_criteria": ["caller DAG cannot erase routed work"],
         "hard_stops": ["no runtime effect"],
@@ -2797,7 +2833,8 @@ async function execute(input, nullFirst = false) {
     )
     assert result["omitted_route"]["ok"] is False
     assert result["omitted_route"]["calls"] == 0
-    assert "execution DAG omits or substitutes canonical routed calls" in (
+    # 新 Registry source guard 會在 DAG 檢查前拒絕同一份重簽、改面但漏 source 的 artifact。
+    assert "semantic Context projection/digests are invalid" in (
         result["omitted_route"]["error"]
     )
     assert result["loop"]["ok"] is True and result["loop"]["calls"] == 1

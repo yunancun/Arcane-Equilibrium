@@ -2004,31 +2004,11 @@ def test_full_audit_rejects_malformed_or_self_signed_context_before_agent_calls(
         nodes: list[dict],
         contract_updates: dict | None = None,
     ) -> dict:
-        candidate = deepcopy(artifact)
-        candidate_plan = json.loads(candidate["canonical_plan"])
-        candidate_plan["task_contract"].update(
-            contract_updates or {"end_to_end_claim": True}
+        support = _load_support()
+        return support._specialized_workflow_adversarial_artifact(
+            artifact, nodes,
+            contract_updates or {"end_to_end_claim": True},
         )
-        candidate_plan["task_contract_digest"] = _digest(
-            candidate_plan["task_contract"]
-        )
-        candidate_plan["execution_dag_binding"] = __import__(
-            "agent_governance_execution_dag"
-        ).compile_context_execution_dag_binding(nodes)
-        candidate.update(
-            __import__(
-                "agent_governance_context_projection"
-            ).materialize_semantic_context(
-                candidate_plan,
-                _governance.load_registry(),
-            )
-        )
-        candidate["task_contract_digest"] = candidate_plan[
-            "task_contract_digest"
-        ]
-        candidate["canonical_plan"] = _canonical(candidate_plan)
-        candidate["artifact_digest"] = _digest(candidate_plan)
-        return candidate
 
     def artifact_with_raw_nodes(nodes: list[dict]) -> dict:
         candidate = deepcopy(artifact)
