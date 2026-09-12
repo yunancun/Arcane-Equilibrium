@@ -458,21 +458,29 @@ ssh trade-core 'crontab -l | awk '\''NF && substr($1,1,1)!="#" {count++} END {pr
 
 ## Workflow optimization physical queue（source-only）
 
-2026-09-09 交付校準：沿用既有 W3 候選，優先交付日常 Context 正確讀取開發工作狀態的實際功能。完整範圍、驗收及候選 SHA 見 `WORKFLOW_TODO.md`「下一個真實開發交付」。這是用戶新指示選定的整合工作，不重開下面已完成的 WF-RC-01／WF-PR-01。
+2026-09-13 校準：W3 已合併並在日常 Mac source 完成公開 Context 驗收。
+核對基準 `1a91eca6032c49bdb349d5c7f2a3cb31278b22a3`，fresh GitHub main 相同。完整完成度、
+證據與下一步安排見 WORKFLOW_TODO.md「當前決策（2026-09-13 整體完成度校準）」。
 
 | ID | 狀態 | Owner | 可交付結果 | 准入／停止條件 |
 |---|---|---|---|---|
-| `W3-CURRENT-STATE-INTEGRATION` | `WAITING` | PM／E1；E2／E4；R4 文件 | 已整合 `current_workflow_state` 並修復 fixture；本批選段尾部隔離修補定點 17 PASS | Operator A／1 授權本次有限 CLI 審查及一次修復／複核；本 checkpoint 為 `SOURCE_READY_NOT_ADOPTED`。初審 R4 PASS、E2 UNVERIFIED、E4 FAIL；原問題已集中修補，剩餘 exact recheck、既有發布 gate 與 canonical 採用，不自動派生新工作。 |
+| `W3-CURRENT-STATE-INTEGRATION` | `DAILY_SOURCE_ADOPTED` | PM／E1；E2／E4；R4 文件 | current_workflow_state 已在 canonical Mac 可用；PR191 merged；CI 八分片＋aggregate PASS；五個公開 Context case 符合預期 | 本次實作／review／Mac 採用已收口，不重派。Linux source sync 仍 INDETERMINATE，待 fresh host 證據；不據此宣稱三端完成或 runtime 效果。 |
 
-目前 `active_count=0`、`dispatchable=false`；W3 兩個 fixture blocker 已解除；本批另修後方未閉合 fence 誤傷已結束選段。narrow Context 上限與通用治理政策未修改。本 checkpoint 尚待原問題 exact recheck，feature 狀態為 `SOURCE_READY_NOT_ADOPTED`；具名剩餘採用步驟見 `WORKFLOW_TODO.md`。這次更新不建立自動排程、wakeup 或 successor。W2-host、PR190、W4、完整 W5、W6／W8／W10／W11 及 GPT-6／成本 A/B 均不作此 W3 交付的前置。既有 native containment 保留；AIML／S2E physical state 仍由原本相應段落決定。
+目前 `active_count=0`、`dispatchable=false`。W3 fixture、選段隔離、delivery controls、
+Linux argv 傳輸與短 pytest ID 的既有修補均已隨 PR191 採用。保留原 E2／E4、
+未變文件的歷史 R4 與所有 failure／amendment 記錄，不重寫舊 verdict。
+Mac/GitHub source 相同；Linux／engine 最近一次資料 unavailable，沒有自動 retry。
+下一個實際小型需求須由使用者指定後 fresh-admit；不重開 WF-RC-01／WF-PR-01，
+也不自動啟動 W2-host、PR190、W4、完整 W5、W6／W8／W10／W11 或模型 A/B。
+既有 native containment 保留；AIML／S2E physical state 仍由原相應段落決定。
 
 ## Local workflow completion（physical queue）
 
-2026-09-09 再校準（來源基準 `8f82b3182448b14730057096cc391698314eb3a8`）：
-WF-RC-01／WF-PR-01 本地修補已收口；WF-RC-02 停用措施仍生效；完整 native
-入口為 `WAITING_ENTRY_PROOF`，效率成效未證。工作流程式 queue 零 ACTIVE，
-本次文檔校準不重開修補、不啟動 host／歷史優化項目。完整狀態與下一步條件見
-`WORKFLOW_TODO.md` 的「當前決策（2026-09-09 交付校準）」；既有測試數沿用原記錄，本輪未重跑。
+2026-09-13 再校準：WF-RC-01／WF-PR-01 本地修補維持已完成；W3 已
+DAILY_SOURCE_ADOPTED。WF-RC-02 停用措施仍生效，完整 native 入口仍
+WAITING_ENTRY_PROOF；效率成效未證。工作流 queue 零 ACTIVE。詳見
+WORKFLOW_TODO.md「當前決策（2026-09-13 整體完成度校準）」；下方原測試
+數字保留歷史標籤，不當成本次重新執行。
 
 `WF-RC-01` source `217efeba0c8c73b3cb7e7937440236aaad925131` is `LOCAL_CLI_VERIFIED`; physical queue has zero `ACTIVE` and no automatic next task. E2 exact recheck PASS `sha256:60ca2652ec9ea061d7ee8224019255d3b494a6b62df8867c6c3b979e16ab1fa7`; E4 exact source run `61 passed`, 45.81s, exit 0, `sha256:ab66390f32fdd89c790f762bb6542b6a3906e74ed2bf1bb48a2889f9dc41219a`. This evidence establishes only local source/CLI regression, not host, runtime, remote, or realized-efficiency effects. See `WORKFLOW_TODO.md`; PR190, host, and measurement remain independent WAITING branches.
 
