@@ -30,7 +30,7 @@ Mac main-sync／ff-only／post-sync PASS；五個公開 Context case 符合預�
 | W0 | evaluator 已有；新 economics 候選與成效未完成 | 真實可比 runs、failed/reopened cohort、attested usage／price；不可把 planned tokens 當節省 |
 | W1 | collector／inventory 候選；未全部採用 | canonical 缺候選 collector；僅在真實試點缺具名欄位時承接，缺 provider 為 EXTERNAL_LIMIT |
 | W2 | local 修補可用；daily host enforcement 未證 | native pre-action／cancel／depth／wait 實際入口證據；不得用 wrapper 或設定文字代替 |
-| W3 | 選定 current-state integration 已 DAILY_SOURCE_ADOPTED | PR191、Mac 五項公開 Context 驗收完成；Linux source sync 仍 WAITING，無新 runtime 證據 |
+| W3 | 選定 current-state integration 已 DAILY_SOURCE_ADOPTED | PR191、Mac 五項公開 Context 驗收完成；Linux source sync 判定 INDETERMINATE，等待 fresh host 證據；無新 runtime 證據 |
 | W4 | narrow editorial assurance 候選未採用 | 另有審查政策決策與驗收才承接；不放寬既有互補 review |
 | W5 | source subject-binding 候選未採用；完整 reuse 未證 | exact source／command／toolchain／environment／TTL 與可信 verifier 仍必須 |
 | W6 | snapshot 平行化未完成 | W5 reuse／原 HITL 前置保留；不先為平行化新增工程 |
