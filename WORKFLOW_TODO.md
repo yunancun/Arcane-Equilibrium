@@ -4,25 +4,92 @@
 
 根 `TODO.md` 是唯一 physical dispatch authority；本檔保存採用決策、交付規格與證據。歷史完整總帳見 Git `d5d4ef145:WORKFLOW_TODO.md`；歷史 checkpoint 不提供當前執行權。
 
-## 當前決策（2026-09-09 交付校準）
+## 當前決策（2026-09-13 整體完成度校準）
 
-核對基準：clean canonical main `aa0a90cda1b7024bfd86aca9d0c0ab016d0b9048`。本次用戶要求沿用總帳、核對並承接既有候選、令下一步能真實交付。原規劃輪完成候選核對及採用決策；後續已在 feature worktree 完成整合與本地驗證，canonical main 尚未採用。
+核對基準：clean canonical main `1a91eca6032c49bdb349d5c7f2a3cb31278b22a3`，fresh GitHub main 相同；PR191
+已按受審 head41ed05fb9 合併。本節取代下方 2026-09-09 的「W3 未採用／待複核」
+與舊執行提示；原驗收、候選 SHA、修補與審查歷史保留。這是狀態校準，不啟動其他工程。
 
-| 工作 | 當前判定 | 下一動作 |
+**整體判定：尚未全部完成。** 已有 WF-RC-01、WF-PR-01 與選定 W3 交付三項
+完成結果；它們有不同範圍，不能以三項除以全部別名計算完成率。W0–W11 與 WF6
+彼此重疊；候選存在、source 已整合、Mac 日常採用、host enforcement、效率成效分層判定。
+
+**上一單元判定**：W3 為 DAILY_SOURCE_ADOPTED，Linux 三端同步仍 INDETERMINATE。
+**關鍵證據**：[PR191](https://github.com/yunancun/Arcane-Equilibrium/pull/191) merged；
+[CI34707782190](https://github.com/yunancun/Arcane-Equilibrium/actions/runs/34707782190)
+attempt1 的八分片與 aggregate PASS。治理摘要4618 passed／0 failed／95 skipped，
+aggregate 獨立驗證4649個唯一nodeid；另362 migration contracts passed。
+Mac main-sync／ff-only／post-sync PASS；五個公開 Context case 符合預期。
+**偏移**：舊 TODO 把已完成 W3 留在 WAITING，舊第81行提示會重派同一實作。
+**功能性可用度**：有人統籌的有限交付有成功案例；通用 native 自動派工及效率改善尚未驗收。
+**下一 prompt 決策**：停止 W3 實作重派；先使兩份狀態文件反映已發生的採用，接著
+以一項使用者指定的小型需求驗收交付體驗。未有瓶頸證據前不自動選 W9／W2／模型比較。
+
+| 原 ID | 校準後完成度 | 剩餘驗收／安排 |
 |---|---|---|
-| WF-RC-01、WF-PR-01 | 既有本地修補已完成；保留 scope／review history、finding 去重及互補 E2／E4 | 沿用，僅在新整合可能影響時執行相關回歸 |
-| W3／WF6-01／W3-owned WF6-04 | fixture 修補已完成；本批選段隔離修補定點 17 PASS | `SOURCE_READY_NOT_ADOPTED`；初審結果及唯一 exact recheck 邊界見下節，採用仍需既有 gate |
-| WF-RC-02／W2-host | 原生通用自動派工維持停用；完整入口控制未證 | 不作 W3 source delivery 前置，不自行開啟或換 transport |
-| W9／W7 | 有可重用的精簡方案／生成器方法；尚非日常已採用 | W3 用當前生成器保持 parity；W9 整體精簡留待獨立需要 |
-| WF6-05／06／07、W0／W11 成效 | 模型候選、真實效率／成本比較尚未完成 | 交付可用後再比較；不阻塞本次 source 功能 |
-| 工作流 physical queue | 狀態以根 TODO 的 `Workflow optimization physical queue（source-only）` 為準 | 只允許 W3 這個指定交付在 fresh admission 後成為 ACTIVE |
+| W0 | evaluator 已有；新 economics 候選與成效未完成 | 真實可比 runs、failed/reopened cohort、attested usage／price；不可把 planned tokens 當節省 |
+| W1 | collector／inventory 候選；未全部採用 | canonical 缺候選 collector；僅在真實試點缺具名欄位時承接，缺 provider 為 EXTERNAL_LIMIT |
+| W2 | local 修補可用；daily host enforcement 未證 | native pre-action／cancel／depth／wait 實際入口證據；不得用 wrapper 或設定文字代替 |
+| W3 | 選定 current-state integration 已 DAILY_SOURCE_ADOPTED | PR191、Mac 五項公開 Context 驗收完成；Linux source sync 判定 INDETERMINATE，等待 fresh host 證據；無新 runtime 證據 |
+| W4 | narrow editorial assurance 候選未採用 | 另有審查政策決策與驗收才承接；不放寬既有互補 review |
+| W5 | source subject-binding 候選未採用；完整 reuse 未證 | exact source／command／toolchain／environment／TTL 與可信 verifier 仍必須 |
+| W6 | snapshot 平行化未完成 | W5 reuse／原 HITL 前置保留；不先為平行化新增工程 |
+| W7 | W3 需要的現行 generator parity 已驗證；完整 W7 未完成 | 只在生成漂移有具名缺口時承接其他候選 |
+| W8 | locality／lazy-loading 未驗收 | 先有 profile 瓶頸與 retain／isolate／delete 正確性證據 |
+| W9 | 啟動精簡候選未 daily-adopted | 試點若證明載入瓶頸才整合；保留現行 containment／peer-review／delivery 規則 |
+| W10 | 現行 KnowledgePilot 流程有執行證據；舊政策改革未採用 | delta-gated、single Vault writer 保留；最近同步兩頁，負面檢索 canary 尚未驗證 |
+| W11 | 有 W3 單一交付成功案例；全量 qualified adoption／效率未證 | 下一階段是一項使用者指定小需求的有限交付試點；一個成功案例不構成比較成效 |
+| WF6-01 | 本次 W3 selector 範圍已採用 | 沿用，不重做 |
+| WF6-02 | 真實成本／重開 cohort 未完成 | 缺值寫 unavailable；不填零成本或推估節省 |
+| WF6-03 | inventory／collector 候選可重用，selected-host evidence 不足 | 只補具名缺漏，不再做整體 survey |
+| WF6-04 | 部分完成：W3-owned 選段已採用 | W9 等其他 section-loading／啟動項未採用，不能整項標 DONE |
+| WF6-05 | model candidate／compatibility／rollback 未驗收 | 不改 default；另有具體需求才承接 |
+| WF6-06 | 固定 DAG／corpus 的模型比較未執行 | 需 WF6-02／03／05、可比 baseline 與明確付費範圍 |
+| WF6-07 | 可選 routing A/B 未執行 | 先有固定模型與資料；不是必做前置 |
+| WF-RC-01 | LOCAL_CLI_VERIFIED，保留已完成 | 原 scope／paired IDs／review history 保留，不提升為 host enforcement |
+| WF-RC-02 | NATIVE_AUTO_DELEGATION_DISABLED；WAITING_ENTRY_PROOF | 停用措施生效不等於完整入口控制完成 |
+| WF-PR-01 | LOCAL_SOURCE_REPAIR_CLOSED，保留已完成 | finding 去重、分歧拒絕及互補審查已在使用 |
+| W3-CURRENT-STATE-INTEGRATION | DAILY_SOURCE_ADOPTED；Mac 交付收口 | 不重派實作／review；三端同步仍未關閉，等待 fresh Linux source 證據 |
+| PR190 | OPEN／unmerged，五個 unresolved threads，CI failure | 獨立 WAITING；不整包採用、不作已完成 W3 的前置 |
 
-**上一單元判定**：WF-RC-01／WF-PR-01 保留已完成；通用 native enforcement 未完成。
-**偏移校準**：source checkpoint、日常採用與效率成效分別判定；取消把「完成全部歷史優化」當作本次 W3 交付的隱含前置。
-**功能性可用度**：已有可重用 source 與有限 peer-review 規則；日常完整自動派工尚未驗收。
-**下一 prompt 決策**：W3 整合、fixture 與本批選段隔離修補已完成；剩餘為原問題 exact recheck 與日常採用，不自動開 W9／host／成本比較。
 
-## 候選核對與採用決策
+Linux／engine 最近一次觀察是上一單元的 SSH timeout 與 four-head INDETERMINATE；
+此輪未重試 SSH，不宣稱主機 down、Linux 已採用或 runtime 健康。Mac 與 GitHub
+source 相同已驗證。相同外部條件下不重複 retry，也不把 Linux 等待變成 Mac 文件／開發前置。
+
+## 下一步任務安排（有限，非自動派發）
+
+1. **狀態回寫採用**：只修改 TODO.md 的 workflow／local-workflow 段與本總帳。
+   保留全部原 ID、W3 六項驗收、原證據及 S2E／交易 queue；將 W3 實作標為已採用，
+   把 Linux source gate 分開保留待驗，替換會重派 W3 的舊入口提示。驗證公開 Context
+   讀到精確新段落；完成需要實際採用文件的 source，不能只把修正稿當 canonical。
+2. **小型真實需求交付試點**：由使用者指定需求，PM 凍結單一 outcome／少量路徑／驗收，
+   使用已採用 W3 與有限互補 review。只記錄實際 elapsed、重開、重工、人工糾偏；
+   缺 token／cache／價格的 platform 證據就記 unavailable。沒有 baseline 時不報節省率。
+3. **按試點證據分流**：載入瓶頸才選 W9；入口控制瓶頸才選 W2；量測缺欄位才選
+   W1／W0；reuse 缺口才選 W5。W4／W6／W7／W8／W10 改革及 WF6-05–07 保留原啟動條件。
+
+第一步不需要重做 W3 source／CI／review；文件變更只做自身必要檢查，發布仍按
+當前 exact-head gates 與相應授權。第二步沒有使用者具體需求前不造 task、不轉 ACTIVE。
+本安排沒有 scheduler、wakeup、generic delegation、runtime／PG／broker／order／funds authority。
+
+### 下一次執行提示（取代舊 W3 提示）
+
+> 先按 WORKFLOW_TODO 的 2026-09-13 校準核對 current head、PR191 及原始採用證據。
+> 若兩份文件已符合本校準，狀態回寫即已關閉，不再修改／重驗相同內容；轉為等待使用者
+> 指定一項小型實際需求。尚未回寫時，本次只完成兩份 TODO 狀態回寫與採用：保留全部 ID、原驗收、歷史 review 與 S2E 段，
+> 關閉已採用 W3 的實作待辦，Linux source sync 另列待驗，移除重派 W3 的有效入口。
+> 使用 linked worktree、fresh task contract／Context／exclusive lease，按真實文件變更
+> facts 路由必要檢查；不重跑無關治理全套，不重做已完成 E2／E4，不整包合併 PR190。
+> 驗證新 workflow section 被公開 context CLI 精確選中、stable 不載入 TODO、S2E 投影
+> bytes 不變、git diff --check 及兩檔 scope。按既有相應授權走發布／採用 gate；缺授權
+> 或證據時留下精確可 review 結果，不宣稱 canonical 已更新。完成後回報上一單元判定／
+> 關鍵證據／偏移／功能性可用度／下一 prompt 決策。後續小型實際需求待使用者指定，
+> 不自動開始 W9、W2-host、模型 A/B、主機修復或交易任務。
+
+## 原候選核對與採用決策（2026-09-09 歷史）
+
+以下是整合前的 dated observation；W3 的當前狀態以上方 2026-09-13 驗收為準。
 
 以下 SHA 均已由本地 Git 核實存在。各候選 checkpoint 不是目前 main 的 ancestor；這項檢查本身不排除 cherry-pick，所以另核對改動與現行功能。W3 的行為差異已用公開 compiler 重新觀察，其他歷史測試數不當作本輪實跑。
 
@@ -38,7 +105,7 @@
 
 W3 精確重用方式：從 `git show 4b31399df` 與 `git show 1f87d68f9` 取該次 delta；不要用 `main..candidate` 整包搬入，因其祖先還帶有 W0／W1／W5／舊總帳。保持目前 main 的 WF-RC／WF-PR 行為，以當前 Registry 合併欄位並重新生成衍生區塊。本輪 `git apply --check` 證第一個 delta 只有三份 generated workflow（agent-wave、openclaw-full-audit、profit-diagnosis）不能直接套用，第二個 test delta 可套用；三份衝突應透過當前 generator 解決，不覆蓋舊 Registry 區塊。這是靜態套用檢查，非已完成整合／測試。
 
-## 下一個真實開發交付：W3 current-state integration
+## 已驗收交付：W3 current-state integration
 
 **交付結果**：日常 canonical source 的 Context compiler 接受 `current_workflow_state`，正確讀取根 TODO 的開發工作狀態；穩定查詢保留最小 Context，AIML／runtime 狀態按各自真實觸發條件載入。這是可執行功能修補，不是再交一份 survey、packet 或更新完成標籤。
 
@@ -78,7 +145,7 @@ W3 驗收不等待 W2-host、PR190、W4、完整 W5、W6、W8、W10、W11 或 GP
 
 W3 完成後先用一項獨立的小型開發需求檢查完整交付體驗；由使用者指定需求，PM 凍結驗收。只量記已發生的完成時間、重開、重工及人工糾偏。只有實際瓶頸指向啟動載入或 native 入口時，才分別承接 W9／W2；GPT‑6 模型比較保留在功能可用之後。這些均不自動啟動。
 
-### 下一次執行提示
+### 原 W3 執行提示（歷史，禁止重派）
 
 > 執行既有 Workflow TODO 的 W3-CURRENT-STATE-INTEGRATION。先讀 canonical AGENTS、PM、context router，再讀本檔「下一個真實開發交付」與根 TODO workflow section。核對當前 main／候選 fingerprints，承接 4b31399df＋1f87d68f9 的既有 delta，不重寫、不 merge 整條候選祖先鏈。依本節固定範圍 fresh-admit，交付 current_workflow_state 的實際功能與驗證；保留 WF-RC／WF-PR 和 native containment。既定範圍內自主完成，一批審查、一次集中修復、一次原 blocker 複核；缺 peer-review 入口時保留實作並如實報未驗，不另修帳戶／host。完成、無 delta 或限額耗盡即停止，無自動 successor。收尾回報上一單元判定、關鍵證據、偏移、功能性可用度、下一 prompt 決策。
 
@@ -196,7 +263,7 @@ WF-RC-01 source `217efeba0c8c73b3cb7e7937440236aaad925131`；原 E4 `61 passed /
 | W0／WF6-02 | 真實可比 runs、usage／price 與 failed／reopened cohort；資料不足即 unavailable，非零成本 |
 | W1／WF6-03 | 已有 collector／surface inventory；只補具名缺失的 selected-host evidence，不重做 survey |
 | W2 | local control 可重用；daily host integration 需明確對應入口與可信 pre-action／cancel／depth／wait 證據 |
-| W3／WF6-01／04 | 本次已選為下一 source integration，依上節驗收 |
+| W3／WF6-01／04 | W3 integration／WF6-01／W3-owned WF6-04 已採用；WF6-04 其他部分仍未完成，見當前矩陣 |
 | W4 | narrow editorial assurance 的條件式候選；政策採用與獨立 review 要求另行判定 |
 | W5 | source subject binding 已有候選；完整 reuse 仍需 exact source／command／toolchain／environment／TTL 與可信 verifier |
 | W6 | snapshot 平行化需 W5 reuse 與原有 HITL，不影響 W3 |
