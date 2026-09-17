@@ -1,6 +1,6 @@
 # Git Publication and Three-Side Sync Contract
 
-Last updated: 2026-08-18
+Last updated: 2026-09-17
 
 This is the canonical Git state machine for finite Codex feature tasks and
 explicitly requested long-running loops. The three
@@ -37,6 +37,63 @@ may explain history but cannot authorize a Git effect.
   checkpoints/publication/sync; it does not authorize a new agent turn. Only an
   exact prompt-bound `/loop` task may schedule another turn only when its persisted
   admission and preceding-snapshot no-delta gate passes.
+
+## Publication preflight before admission
+
+Use `helper_scripts/maintenance_scripts/git_publication_preflight.py` to diagnose
+an ordinary workflow publication or resumption before acquiring writer authority.
+Run it against the preserved, clean linked feature worktree. Supply the reviewed
+branch/head and proposed admission base from the delivery record, plus the same
+stable delivery IDs and owner. Do not replace those IDs to evade release history.
+
+```bash
+python3 helper_scripts/maintenance_scripts/git_publication_preflight.py \
+  --repo "$REVIEWED_WORKTREE" \
+  --expected-branch "$REVIEWED_BRANCH" \
+  --expected-head "$REVIEWED_HEAD" \
+  --admission-base "$PROPOSED_ADMISSION_BASE" \
+  --work-item-id "$WORK_ITEM_ID" --lane-id "$LANE_ID" --owner "$WRITER_OWNER" \
+  --allow-path path/to/owned-file \
+  --allow-path path/to/another-owned-file \
+  --human
+```
+
+Both commit arguments must be pinned full 40-character lowercase SHAs. Repeat
+`--allow-path` for canonical literal repository-relative files; prefixes and globs are not
+accepted. Omit `--human` for `git_publication_preflight_v1` JSON with the published
+main SHA, proposed/active admission base, every commit's touched paths, lifecycle
+state, blockers and next steps. The same config-isolated native Git readers and
+validated admission/journal readers used by the existing workflow supply evidence.
+An unsafe origin causes zero remote-ref callbacks; only the existing canonical
+public GitHub ref reader is used. The CLI never fetches, pushes, edits a journal,
+acquires/renews/releases authority, or schedules continuation.
+
+Exit `0` / `READ_ONLY_READY` means no covered diagnostic failed. It is advisory:
+`publication_authorized=false` always. Exit `3` / `BLOCKED` names the blockers;
+invalid command syntax uses argparse exit `2`. Operator approval, the full task
+contract, writer lease, independent review, CI and final publication authority
+are not proved here. Observed state drift fails closed; a later change still
+requires the original guards to recapture fresh evidence.
+
+- `DELIVERY_REPAIR_NOT_AUTHORIZED`: the delivery was released and lacks available
+  continuation authority. Obtain explicit Operator continuation through the
+  existing admission workflow; preserve the journal and original IDs.
+- `ORDINARY_PUBLICATION_EMPTY_COMMIT_RANGE`: the proposed base equals the reviewed
+  head. If an ACTIVE admission matches, retain it and rerun with its recorded
+  accepted base; if that base differs from published main, stop for owner
+  reconciliation. Do not acquire a second admission. For a new/released delivery,
+  resolve lifecycle blockers first, preserve the reviewed checkout, admit a
+  separate clean publication worktree at verified published main, then
+  fast-forward to the pinned reviewed source and use the original guards.
+- `COMMIT_RANGE_OUT_OF_SCOPE` includes intermediate reverted changes and both
+  sides of renames. Resolve scope with the owner; a clean final diff cannot erase
+  those commits. Nonlinear history also blocks.
+- Remote unavailability/stale tracking requires separately governed reconciliation.
+  An already-published exact head calls for adoption verification, not another
+  publication. A matching active admission is retained, not reacquired.
+
+This diagnostic is for ordinary local workflow deliveries. It does not implement
+LW2 admission, trusted Closure validation, Linux synchronization or runtime effects.
 
 ## Read-only guard
 
