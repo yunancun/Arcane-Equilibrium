@@ -4,7 +4,6 @@ from __future__ import annotations
 
 import argparse
 import json
-import re
 import sys
 from pathlib import Path
 from typing import Any
@@ -16,18 +15,17 @@ from agent_governance_capture import (
     native_remote_head,
     validate_public_github_repository_ref,
 )
-from agent_governance_task_admission import FileTaskAdmissionStore, workflow_delivery_key
+from agent_governance_routing import _safe_verification_path
+from agent_governance_task_admission import (
+    OWNER_RE, FileTaskAdmissionStore, workflow_delivery_key,
+)
 from agent_governance_writer_lease import inspect_worktree
 from git_loop_guard import inspect_repository
 
 
 def _literal_path(value: str) -> bool:
-    return (
-        bool(value)
-        and not any(c in value for c in "\\*?[]\x00\r\n")
-        and all(part not in {"", ".", ".."} for part in value.split("/"))
-        and not value.startswith("-")
-    )
+    # This CLI accepts canonical literal spellings, never prefix/pathspec scope.
+    return _safe_verification_path(value) == value
 
 
 def _lifecycle(
@@ -113,8 +111,8 @@ def inspect_publication(
         reasons.append("INVALID_FEATURE_BRANCH")
     if not allow_paths or not all(_literal_path(p) for p in allow_paths):
         reasons.append("INVALID_LITERAL_SCOPE")
-    if not all(re.fullmatch(r"[A-Za-z0-9][A-Za-z0-9._:-]{0,199}", v)
-               for v in (work_item_id, lane_id, owner)):
+    if (OWNER_RE.fullmatch(owner) is None
+            or not all(v and v == v.strip() for v in (work_item_id, lane_id))):
         reasons.append("INVALID_DELIVERY_IDENTITY")
     if reasons:
         result["next_steps"] = ["Supply pinned full commit IDs, a feature branch, literal file paths and the existing delivery identity."]
@@ -193,6 +191,12 @@ def inspect_publication(
         steps.append("The delivery was released. Obtain explicit Operator continuation through the existing admission workflow; do not reset its journal or rename its IDs.")
     if "SOURCE_ALREADY_PUBLISHED" in reasons:
         steps.append("This exact source is already published. Verify adoption; do not create another publication range.")
+    elif result["lifecycle"] and result["lifecycle"]["state"] == "EXISTING_ADMISSION":
+        accepted = result["lifecycle"]["accepted_base"]
+        if "ADMISSION_BASE_MISMATCH" in reasons and accepted is not None:
+            steps.append(f"Keep the matching ACTIVE admission and rerun with its recorded accepted base {accepted}. If that base differs from published main, stop for owner reconciliation; do not acquire another admission.")
+        elif reasons:
+            steps.append("Preserve the existing admission. Have its owner resolve the listed lifecycle or source blockers before continuing; do not acquire another admission.")
     elif any(r in reasons for r in (
         "ORDINARY_PUBLICATION_EMPTY_COMMIT_RANGE", "ADMISSION_BASE_NOT_PUBLISHED_MAIN",
     )):

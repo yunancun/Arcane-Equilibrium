@@ -71,7 +71,7 @@ def admit(case):
         "work_item_id": case["work_item_id"], "lane_id": case["lane_id"],
     })["task_facts"]
     result = acquire_task_admission(
-        repo=case["repo"], task_id="preflight-test", owner="pytest",
+        repo=case["repo"], task_id="preflight-test", owner=case["owner"],
         task_contract=task_contract_projection(facts),
     )
     assert result["status"] == "PASS", result.get("reasons")
@@ -155,6 +155,38 @@ def test_lifecycle_mismatches_fail_closed(case, mode, reason):
     before = snapshot(case["repo"])
     assert reason in preflight.inspect_publication(**case)["reasons"]
     assert before == snapshot(case["repo"])
+
+
+def test_active_wrong_base_retains_admission_and_names_recorded_base(case):
+    admit(case)
+    base = case["admission_base"]
+    changed(case)
+    case["admission_base"] = case["expected_head"]
+    before = snapshot(case["repo"])
+    result = preflight.inspect_publication(**case)
+    assert {"ADMISSION_BASE_MISMATCH", "ORDINARY_PUBLICATION_EMPTY_COMMIT_RANGE"}.issubset(result["reasons"])
+    advice = " ".join(result["next_steps"])
+    assert "Keep the matching ACTIVE admission" in advice
+    assert base in advice
+    assert "do not acquire another admission" in advice
+    assert "separate" not in advice
+    assert before == snapshot(case["repo"])
+
+
+@pytest.mark.parametrize("owner", ["a" * 128, "dev/user@example.invalid"])
+def test_canonical_owner_and_exact_unicode_delivery_ids_are_accepted(case, owner):
+    case.update(owner=owner, work_item_id="工作 / item @ 1", lane_id="workflow lane/一")
+    admit(case)  # Exercise actual canonical admission, not only a regex comparison.
+    changed(case)
+    result = preflight.inspect_publication(**case)
+    assert result["status"] == "READ_ONLY_READY"
+    assert result["lifecycle"]["state"] == "EXISTING_ADMISSION"
+
+
+def test_canonical_literal_closing_bracket_filename_is_accepted(case):
+    case["expected_head"] = commit(case["repo"], "owned].txt", "literal\n")
+    case["allow_paths"] = ["owned].txt"]
+    assert preflight.inspect_publication(**case)["status"] == "READ_ONLY_READY"
 
 
 @pytest.mark.parametrize("url", [
@@ -243,6 +275,10 @@ def test_nonlinear_range_is_rejected(case):
     ("expected_head", "HEAD"), ("admission_base", "--all"),
     ("expected_branch", "main"), ("allow_paths", ["../outside"]),
     ("allow_paths", ["directory/"]), ("work_item_id", ""),
+    ("allow_paths", [":owned.txt"]), ("allow_paths", ["~owned.txt"]),
+    ("allow_paths", ["!owned.txt"]), ("allow_paths", ["bad\ud800.txt"]),
+    ("owner", "a" * 129), ("owner", "bad owner"),
+    ("work_item_id", " padded"), ("lane_id", "padded "),
 ])
 def test_invalid_input_has_no_remote_callbacks(case, monkeypatch, field, value):
     case[field] = value
