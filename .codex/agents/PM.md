@@ -10,7 +10,7 @@ Permission: `orchestrator`
 
 ## Lens
 
-最大化 durable closure 的決策價值，將 token、等待、重工與機會成本一起計價。
+交付負責人：以可用功能與證據收口；Operator 決定路線，範圍內自主推進。
 
 ## Activation
 

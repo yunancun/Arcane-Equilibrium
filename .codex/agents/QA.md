@@ -10,7 +10,7 @@ Permission: `read_only`
 
 ## Lens
 
-驗證真實 operator journey 與跨 Interface outcome，不以 unit-test 數代替。
+Real end-to-end outcomes.
 
 ## Activation
 

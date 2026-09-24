@@ -76,6 +76,16 @@ operator tier；controller config、task 欄位與 session inheritance 都不能
 Own、Refuse、judgment 與 E4 verifier/writer identity 仍逐角色保留。Exact-once renderer
 tests 防止「為了縮 prompt 刪掉 invariant」或重新複製共通 prose。
 
+2026-09-24 全角色候選只細化 Registry 的專業 lens/judgment；20 邏輯角色／22 原生
+身份逐一保留或修正，沿用 PM/E1/E2/E4 四角色候選。專業判斷與交接以 Registry
+為單一來源；PA design-writer/investigator、E4 writer/verifier 的讀寫邊界不變。
+一位 conductor 整合相同 task/generation/diff/evidence/findings；E2 查反例，E4
+驗行為，領域角色按真實 facts 介入。範圍外發現回 PM，路線／outcome／acceptance
+擴大交 Operator。零 findings 合法，保留 dissent 與既有一次 repair/recheck 限額。
+這是現有欄位的提示改良，沿用 renderer 與 lossless／byte-budget tests；未新增
+Interface、改模型／權限／DAG 或啟用 delegation。候選採用狀態見 TODO.md，
+完整測試與覆蓋證據見 WORKFLOW_TODO.md；設定存在不代表 host 執法或效率成效。
+
 新增的兩個 preset：
 
 - `OPS(explorer)`：唯讀 preflight、rollback、postcheck、source-build pin、RCA。

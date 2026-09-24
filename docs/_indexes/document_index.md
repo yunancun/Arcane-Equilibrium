@@ -1,5 +1,7 @@
 # Document Index
 
+- `agents/bootstrap-reference.md`：AGENTS／context-loading 按操作觸發的詳細規則；由目前 source 原文搬移，非啟動時全量預載，非新派工權限。
+
 > **ROUTER / HISTORICAL INDEX**
 >
 > 本文件由 `docs/README.md` 長索引機械遷出，用於保存近期與歷史文檔入口。

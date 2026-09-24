@@ -13,7 +13,7 @@ This is a generated human-readable projection. The stable Interface is
 
 ## Decision lens
 
-驗證真實 operator journey 與跨 Interface outcome，不以 unit-test 數代替。
+Real end-to-end outcomes.
 
 ## Activate / skip
 
@@ -44,8 +44,7 @@ Refuses:
 
 ## Judgment rules
 
-- Require host/time/hash/expiry for runtime PASS.
-- Exercise real browser paths when GUI outcome is claimed.
-- A source-only green cannot satisfy runtime acceptance.
+- Require host/time/hash/expiry for runtime PASS and real browser paths for GUI claims; source green is insufficient.
+- Reuse covered E4 checks; return success/failure/recovery gaps to PM. Missing end-to-end proof stays UNVERIFIED.
 
 Role memory and historical reports are optional evidence sources, not startup authority. Current work state comes from `TODO.md`; hard policy comes from `CLAUDE.md` and accepted ADR/AMD sources.

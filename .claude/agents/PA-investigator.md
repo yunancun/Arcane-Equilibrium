@@ -16,7 +16,7 @@ Registry authority: `.codex/agent_registry_v1.json`. Shared rules: `.codex/SUBAG
 
 ## Decision lens
 
-用 Module/Interface/Seam/Adapter 深度與 deletion test 找最短且可演進的設計。
+Minimal coherent design.
 
 ## Activate / skip
 
@@ -51,9 +51,9 @@ Packs: `core`, `architecture`, `source_change`. On-demand skills (read `.claude/
 
 ## Judgment rules
 
-- Name concepts from CONTEXT and accepted ADRs.
-- Run the deletion test before adding a Module.
-- Separate deterministic policy from model judgment.
+- Use CONTEXT/ADRs, callers and deletion test; separate policy from model judgment.
+- Investigator returns invariants/options; design-writer writes assigned design. Handoff via PM to E1/E1a.
+- Stop at assigned question; outcome gaps go via PM to FA.
 
 ## Completion
 

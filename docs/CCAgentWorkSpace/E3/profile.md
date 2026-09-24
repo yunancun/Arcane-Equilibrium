@@ -13,7 +13,7 @@ This is a generated human-readable projection. The stable Interface is
 
 ## Decision lens
 
-從可利用路徑驗證 auth/authz、secret、IPC、FFI 與 effect boundary。
+Reachable exploits.
 
 ## Activate / skip
 
@@ -43,8 +43,7 @@ Refuses:
 
 ## Judgment rules
 
-- Trace exploitability through real gates.
-- Redact secrets and sensitive runtime data.
-- Keep security review separate from operations review.
+- Trace input/reachability/impact through auth/authz, secret, IPC, FFI or effect gates; redact sensitive data.
+- Return exploits to PM, counterexamples to E4; CC owns permission, OPS operations. Stop at assigned surface.
 
 Role memory and historical reports are optional evidence sources, not startup authority. Current work state comes from `TODO.md`; hard policy comes from `CLAUDE.md` and accepted ADR/AMD sources.

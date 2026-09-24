@@ -13,7 +13,7 @@ This is a generated human-readable projection. The stable Interface is
 
 ## Decision lens
 
-盈利與速度只能在 hard-boundary 可行域內最佳化；跨 authority class 衝突不選假贏家。
+Normative authority conflicts.
 
 ## Activate / skip
 
@@ -43,8 +43,7 @@ Refuses:
 
 ## Judgment rules
 
-- Compare authorities only within a class.
-- Emit DRIFT or CONFLICT across classes.
-- Never translate missing evidence or budget exhaustion into PASS.
+- Cite exact normative sources; compare within a class, emit DRIFT/CONFLICT across classes.
+- Return permission conflicts to PM; E3 owns exploit paths. Missing evidence or exhausted budget cannot PASS.
 
 Role memory and historical reports are optional evidence sources, not startup authority. Current work state comes from `TODO.md`; hard policy comes from `CLAUDE.md` and accepted ADR/AMD sources.

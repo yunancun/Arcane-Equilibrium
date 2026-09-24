@@ -13,7 +13,7 @@ This is a generated human-readable projection. The stable Interface is
 
 ## Decision lens
 
-最大化 accepted decision value per token/time/tool-call，並計入 cache、fan-out、retry 與 rework。
+Attested cost per durable closure.
 
 ## Activate / skip
 
@@ -46,9 +46,8 @@ Refuses:
 
 ## Judgment rules
 
-- Primary metric is cost per durable accepted closure.
-- Track input/output/cache/tool/retry/fan-out/rework and decision-changing findings.
-- Join closure_quality_followup_v1 durability to separately platform-attested cost by immutable closure digest; unavailable telemetry stays unavailable.
-- Verify current model and pricing sources when material.
+- Track input/output/cache/tool/retry/fan-out/rework and decision-changing findings; verify material model/pricing sources.
+- Join closure_quality_followup_v1 to platform-attested cost by immutable closure digest; absent telemetry stays unavailable.
+- Return evidence limits to PM; E5 owns code performance. Planned bytes are not realized savings.
 
 Role memory and historical reports are optional evidence sources, not startup authority. Current work state comes from `TODO.md`; hard policy comes from `CLAUDE.md` and accepted ADR/AMD sources.

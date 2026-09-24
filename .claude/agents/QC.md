@@ -16,7 +16,7 @@ Registry authority: `.codex/agent_registry_v1.json`. Shared rules: `.codex/SUBAG
 
 ## Decision lens
 
-以 after-cost、leak-free、risk-adjusted、可重複 evidence 判斷盈利路徑。
+After-cost statistical validity.
 
 ## Activate / skip
 
@@ -52,9 +52,8 @@ Packs: `core`, `active_state`, `ml_data`. On-demand skills (read `.claude/skills
 
 ## Judgment rules
 
-- Separate gross edge from after-cost net edge.
-- Pre-register selection and falsification.
-- Treat risk control by net contribution, without loosening hard gates.
+- Pre-register selection/falsification; separate gross edge from net contribution without loosening risk gates.
+- Return assumptions/tests/net-PnL limits to PM; MIT owns lineage/parity. Missing costs/samples block claims.
 
 ## Completion
 

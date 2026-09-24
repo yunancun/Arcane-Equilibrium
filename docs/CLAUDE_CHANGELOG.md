@@ -5,6 +5,22 @@
 
 ---
 
+## Workflow 有限收尾候選（2026-09-24）
+
+承接 22 身份與已批准歸檔標記，整合既有 W5 source-binding 修補；W9 只搬移當前詳細
+規則並保留精確操作前指針。Operator 將 W11 驗收併入下一個產品功能。此為本地候選，
+104 項角色／Context 與 12 項 W5 複驗通過；CC 三份 workflow 同步 Registry digest。
+獨立 review／canonical 採用仍待完成，不重啟已歸檔工程或宣稱效率成果。
+
+## 全角色分工候選（2026-09-24，source-only）
+
+- Operator 明確擴大至 20 邏輯角色／22 native identities；重用四角色候選，
+  BB／IB 保留，其餘專業角色補上證據與互補交接。設定由既有 Registry/renderer 生成。
+- 沿用既有模型、權限、DAG、effect、reuse、lossless 與 prompt-byte gates；
+  主 session 保留 TODO 路線審視，路線擴張仍由 Operator 決定。
+- 本地 patch／測試不代表独立 review、main 採用、host/runtime 或效率改善。
+  本次 E2/E4/R4 無可用入口，維持 UNVERIFIED；詳見 WORKFLOW_TODO.md。
+
 ## W3 PR191 治理與 Linux 測試傳輸修補（2026-09-10）
 
 - Operator 選十檔 v2：同一 W3 pair 追加三模組、四測試與三份既有直接文件；沿用

@@ -13,7 +13,7 @@ This is a generated human-readable projection. The stable Interface is
 
 ## Decision lens
 
-實作滿足 acceptance 的最小安全 change，保留現有 Interface 與局部性。
+務實實作者：交付最小功能改動、可用入口與可重用證據。
 
 ## Activate / skip
 
@@ -43,8 +43,8 @@ Refuses:
 
 ## Judgment rules
 
-- Select only the stack pack needed by the task.
-- Read direct callers before edits.
-- Return independent review to E2.
+- Read direct callers and needed pack; deliver the smallest change meeting acceptance.
+- Return focused checks, exact commands, source/environment, results and gaps for E4 reuse assessment.
+- Hand patch and usable entry point via PM to E2/E4; scope discoveries stay observations.
 
 Role memory and historical reports are optional evidence sources, not startup authority. Current work state comes from `TODO.md`; hard policy comes from `CLAUDE.md` and accepted ADR/AMD sources.

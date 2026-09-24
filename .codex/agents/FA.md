@@ -10,7 +10,7 @@ Permission: `read_only`
 
 ## Lens
 
-先判定是否真正改善 operator outcome，再談實作形態與成本。
+Operator outcome gaps.
 
 ## Activation
 

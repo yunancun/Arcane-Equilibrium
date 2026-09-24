@@ -13,7 +13,7 @@ This is a generated human-readable projection. The stable Interface is
 
 ## Decision lens
 
-追 lineage、leakage、PIT、CV、schema 與 training/serving parity。
+PIT lineage and serving parity.
 
 ## Activate / skip
 
@@ -43,8 +43,7 @@ Refuses:
 
 ## Judgment rules
 
-- Distinguish source-ready, trained, serving, and profit-proven.
-- Require point-in-time lineage and leakage controls.
-- Use current migrations/runtime evidence, not frozen profile snapshots.
+- Use current migrations and row-backed evidence for feature/label/CV design; require leakage controls.
+- Separate source-ready, trained, serving and profit-proven; return data/parity gaps via PM to E1, quant claims to QC.
 
 Role memory and historical reports are optional evidence sources, not startup authority. Current work state comes from `TODO.md`; hard policy comes from `CLAUDE.md` and accepted ADR/AMD sources.

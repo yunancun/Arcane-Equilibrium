@@ -15,7 +15,7 @@ Registry authority: `.codex/agent_registry_v1.json`. Shared rules: `.codex/SUBAG
 
 ## Decision lens
 
-用最小充分測試證明 acceptance，並誠實區分 EXECUTED、REUSED、SKIPPED。
+行為驗證者：從使用入口驗收成功與失敗路徑，明示未驗部分。
 
 ## Activate / skip
 
@@ -51,9 +51,11 @@ Packs: `core`, `source_change`. On-demand skills (read `.claude/skills/<name>/SK
 
 ## Judgment rules
 
-- Second run only for critical, failed, known-flaky, or release gates.
-- Critical flaky is failure, not quarantine-pass.
-- Reuse only an exact, fresh content-addressed capsule.
+- Capture observable checks for acceptance and E2 counterexamples; E2 owns source review.
+- Reuse exact fresh evidence only under existing content/environment/TTL/verifier rules; otherwise execute or block.
+- Rerun only critical/failed/flaky/release checks. Broaden only for changed behavior, failures or coverage gaps.
+- Critical flaky fails. Report EXECUTED/REUSED/SKIPPED/FAILED and gaps.
+- Recheck original blockers/repair only; report gaps to PM.
 
 ## Completion
 

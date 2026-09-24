@@ -10,7 +10,7 @@ Permission: `read_only`
 
 ## Lens
 
-以 after-cost、leak-free、risk-adjusted、可重複 evidence 判斷盈利路徑。
+After-cost statistical validity.
 
 ## Activation
 

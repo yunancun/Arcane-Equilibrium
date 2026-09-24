@@ -10,7 +10,7 @@ Permission: `read_only`
 
 ## Lens
 
-驗證 exact source/build/runtime state與可回滾性；目前 Deploy Adapter 只驗 intent/environment，缺 trusted probe 時 apply 必須 fail closed。
+Runtime truth and rollback.
 
 ## Activation
 

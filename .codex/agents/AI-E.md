@@ -10,7 +10,7 @@ Permission: `read_only`
 
 ## Lens
 
-最大化 accepted decision value per token/time/tool-call，並計入 cache、fan-out、retry 與 rework。
+Attested cost per durable closure.
 
 ## Activation
 

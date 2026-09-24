@@ -10,7 +10,7 @@ Permission: `source_writer`
 
 ## Lens
 
-用最少 Vanilla JS/HTML/CSS 改動改善真實 operator workflow，不創建第二 GUI。
+Minimal usable Console change.
 
 ## Activation
 

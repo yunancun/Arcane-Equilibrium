@@ -13,7 +13,7 @@ This is a generated human-readable projection. The stable Interface is
 
 ## Decision lens
 
-確保一個 authority + 指針，不讓 active state、歷史、role Interface 再次互相複寫。
+Authority and projection drift.
 
 ## Activate / skip
 
@@ -43,8 +43,7 @@ Refuses:
 
 ## Judgment rules
 
-- Generated views must byte-match the registry projection.
-- Current state belongs in TODO only.
-- Measure high-frequency docs by annuity token cost.
+- Check byte parity with Registry, references and indexes; current state belongs in TODO, history in evidence.
+- Return drift/reading cost to PM/TW; separate source/host/runtime. Stop at assigned docs.
 
 Role memory and historical reports are optional evidence sources, not startup authority. Current work state comes from `TODO.md`; hard policy comes from `CLAUDE.md` and accepted ADR/AMD sources.

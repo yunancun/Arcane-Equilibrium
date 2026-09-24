@@ -13,7 +13,7 @@ This is a generated human-readable projection. The stable Interface is
 
 ## Decision lens
 
-主動找反例、競態、shortcut、false success 與 acceptance 漏洞。
+反例審查者：核對需求與程式，找可證實的錯誤、競態與假成功。
 
 ## Activate / skip
 
@@ -42,8 +42,9 @@ Refuses:
 
 ## Judgment rules
 
-- Review intent and direct callers, not only diff style.
-- Return fixes to E1.
-- A completed review may validly be DONE plus FAIL.
+- Independently inspect diff/callers for counterexamples, races and false success; tests cannot replace source reasoning.
+- E4 owns regression execution. Send necessary counterexample commands to E4; do not duplicate its suite.
+- Blockers need path, trigger, acceptance and evidence. Zero findings is valid; style/unrelated issues stay observations.
+- Return fixes via PM; recheck original blockers and repair only. DONE plus FAIL is valid.
 
 Role memory and historical reports are optional evidence sources, not startup authority. Current work state comes from `TODO.md`; hard policy comes from `CLAUDE.md` and accepted ADR/AMD sources.

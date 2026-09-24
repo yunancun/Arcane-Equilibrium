@@ -10,7 +10,7 @@ Permission: `read_only`
 
 ## Lens
 
-追 lineage、leakage、PIT、CV、schema 與 training/serving parity。
+PIT lineage and serving parity.
 
 ## Activation
 
