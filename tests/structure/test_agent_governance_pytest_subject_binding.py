@@ -519,3 +519,38 @@ def test_lw2_clean_trusted_replay_receives_its_evidence_subject_scope(
             claim_payloads
         ),
     ) is True
+
+
+@pytest.mark.parametrize("replace_during_open", [False, True])
+def test_fifo_subject_is_rejected_without_blocking(
+    tmp_path: Path, replace_during_open: bool,
+) -> None:
+    probe = """
+import os, sys
+from pathlib import Path
+sys.path.insert(0, sys.argv[1])
+import agent_governance_pytest_subject_binding as binding
+subject = Path(sys.argv[2])
+if sys.argv[3] == "race":
+    subject.write_text("regular source")
+    native_open = os.open
+    def replace_then_open(path, flags, *args, **kwargs):
+        subject.unlink()
+        os.mkfifo(subject)
+        return native_open(path, flags, *args, **kwargs)
+    binding.os.open = replace_then_open
+else:
+    os.mkfifo(subject)
+try:
+    binding._regular_blob(subject)
+except ValueError as error:
+    assert "not one regular file" in str(error)
+else:
+    raise AssertionError("FIFO subject was accepted")
+"""
+    result = subprocess.run(
+        [sys.executable, "-c", probe, str(IMPLEMENTATION),
+         str(tmp_path / "subject.py"), "race" if replace_during_open else "fifo"],
+        capture_output=True, text=True, timeout=3, check=False,
+    )
+    assert result.returncode == 0, result.stderr

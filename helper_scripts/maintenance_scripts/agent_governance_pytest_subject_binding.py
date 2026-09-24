@@ -216,9 +216,13 @@ def _git_blob_id(payload: bytes) -> str:
 
 
 def _regular_blob(path: Path) -> tuple[os.stat_result, str]:
+    metadata = os.lstat(path)
+    if not stat.S_ISREG(metadata.st_mode) or metadata.st_nlink != 1:
+        raise ValueError("pytest subject is not one regular file")
     descriptor = os.open(
         path,
-        os.O_RDONLY | getattr(os, "O_CLOEXEC", 0) | getattr(os, "O_NOFOLLOW", 0),
+        os.O_RDONLY | os.O_NONBLOCK
+        | getattr(os, "O_CLOEXEC", 0) | getattr(os, "O_NOFOLLOW", 0),
     )
     try:
         before = os.fstat(descriptor)
