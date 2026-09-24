@@ -1,9 +1,16 @@
 # CLAUDE_CHANGELOG.md — 開發歷史歸檔
 
 > 從 CLAUDE.md / TODO.md 遷出的 Wave/Sprint/Batch + TODO version-increment 歷史敘事。新 session 不需要讀此文件，僅供回顧歷史時查閱。
-> 最後更新：2026-09-10（W3 有限治理與測試傳輸修補）
+> 最後更新：2026-09-25（選定 workflow source 交付）
 
 ---
+
+## Workflow 選定 source 交付（2026-09-25）
+
+22 native 身份、W5 committed-subject binding、W9 原文搬移與已批准歸檔納入本次採用；
+合併 main 及 Mac ff-only 同步後生效。Linux 依 Operator 指示跳過；W11 隨下一個真實產品功能驗收。
+固定 E2／E4／R4 結果與所有歷史失敗保留於 workspace `workflow-closeout-adoption-20260925/`；
+獨立審查未通過不得發布。此為 source 範圍收口，不提升 runtime、host 或效率聲稱。
 
 ## Workflow 有限收尾候選（2026-09-24）
 

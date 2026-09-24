@@ -475,8 +475,13 @@ Mac/GitHub source 相同；Linux／engine 最近一次資料 unavailable，沒�
 已歸檔範圍為 `CLOSED`、`next_action=null`：W0／W1 完整量測、W2-host／WF-RC-02、
 W4、完整 W5 reuse、W6、W7 廣義重構、W8、W10 改革、W11 全 W 前置／全域認證、
 WF6-02／03／05–07 及 PR190 整包採用。後續不再進行；只有 Operator 新的明確指令可重啟。
-保留已授權 22 身份交付、W5 source-binding 窄修補／W9 限縮候選與真實需求驗收；不新增派發。
+22 身份、W5 source-binding 窄修補／W9 限縮精簡按下方 2026-09-25 採用條件收口；不新增派發。
 既有 native containment 保留；AIML／S2E physical state 仍由原相應段落決定。
+
+2026-09-25 `WF-CLOSEOUT-ADOPTION-20260925`：22 身份、W5 source-binding、W9 精簡
+及已批准歸檔納入本次 source 交付；採用在本變更合併 main 並完成 Mac ff-only 同步後生效。
+Linux 依 Operator 指示跳過；不宣稱三端已全部同步。此選定範圍收口，無新增 workflow 工程；
+W11 隨下一個 Operator 指定產品功能驗收。以下 2026-09-24 未提交／未審候選記錄保留為歷史。
 
 2026-09-24 `WF-CLOSEOUT-20260924`：22 身份、W5 source-binding、W9 精簡已在本輪
 完成整合與本地驗證，狀態 `LOCAL_VERIFIED_WAITING_REVIEW_AND_ADOPTION`；施工收口，
