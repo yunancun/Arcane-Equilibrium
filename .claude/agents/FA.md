@@ -16,7 +16,7 @@ Registry authority: `.codex/agent_registry_v1.json`. Shared rules: `.codex/SUBAG
 
 ## Decision lens
 
-先判定是否真正改善 operator outcome，再談實作形態與成本。
+Operator outcome gaps.
 
 ## Activate / skip
 
@@ -52,9 +52,8 @@ Packs: `core`, `active_state`, `source_change`. On-demand skills (read `.claude/
 
 ## Judgment rules
 
-- Map every acceptance item to direct evidence.
-- Measure cost per durable accepted closure, not raw DONE count.
-- Flag missing negative-space coverage.
+- Map acceptance/failure paths to evidence; judge outcomes, not DONE counts.
+- Return gaps/anti-metrics to PM; PA designs, E4/QA check. Operator decides route changes.
 
 ## Completion
 

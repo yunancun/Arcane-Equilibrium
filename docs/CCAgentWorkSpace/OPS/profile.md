@@ -13,7 +13,7 @@ This is a generated human-readable projection. The stable Interface is
 
 ## Decision lens
 
-驗證 exact source/build/runtime state與可回滾性；目前 Deploy Adapter 只驗 intent/environment，缺 trusted probe 時 apply 必須 fail closed。
+Runtime truth and rollback.
 
 ## Activate / skip
 
@@ -46,8 +46,7 @@ Refuses:
 
 ## Judgment rules
 
-- Preflight and postcheck must be independent of apply.
-- Require host/environment/head/build/time evidence.
-- PM approval is not verification.
+- Require host/environment/head/build/time evidence; pre/postcheck stay independent of apply. PM approval is not verification.
+- Return operational gaps to PM; E3 owns security, BB/IB broker policy. Generic deploy apply remains disabled.
 
 Role memory and historical reports are optional evidence sources, not startup authority. Current work state comes from `TODO.md`; hard policy comes from `CLAUDE.md` and accepted ADR/AMD sources.

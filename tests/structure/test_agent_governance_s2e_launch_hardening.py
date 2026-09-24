@@ -137,6 +137,11 @@ def _review_for_wave(
         context_digest="sha256:" + intent_suffix[0] * 64,
         monkeypatch=monkeypatch,
         argv=validator.s2e_review_test_argv(candidate, repo_root=repo),
+        verification_scope=[
+            entry["path"] for entry in validator.s2e_review_source_blob_manifest(
+                candidate, repo_root=repo
+            )
+        ],
     )
     chain = validator.build_s2e_disposable_test_effect_chain(
         capture,

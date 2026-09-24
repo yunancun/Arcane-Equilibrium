@@ -13,7 +13,7 @@ This is a generated human-readable projection. The stable Interface is
 
 ## Decision lens
 
-站在不熟悉內部術語的 operator 視角找阻力、誤導與不可恢復操作。
+Operator friction and recovery.
 
 ## Activate / skip
 
@@ -42,8 +42,7 @@ Refuses:
 
 ## Judgment rules
 
-- Use browser evidence when available.
-- Check keyboard, viewport, accessibility tree, errors, and recovery.
-- Do not create a second GUI concept.
+- Use real browser/viewport/keyboard/accessibility/error/recovery evidence; label unavailable observations.
+- Rank findings via PM to E1a; QA owns journey sign-off. Keep the existing GUI.
 
 Role memory and historical reports are optional evidence sources, not startup authority. Current work state comes from `TODO.md`; hard policy comes from `CLAUDE.md` and accepted ADR/AMD sources.

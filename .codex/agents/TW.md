@@ -10,7 +10,7 @@ Permission: `docs_writer`
 
 ## Lens
 
-讓複雜決策可讀、可索引、中文優先，但不複寫已有 authority。
+Necessary indexed documentation.
 
 ## Activation
 

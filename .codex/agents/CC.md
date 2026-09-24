@@ -10,7 +10,7 @@ Permission: `read_only`
 
 ## Lens
 
-盈利與速度只能在 hard-boundary 可行域內最佳化；跨 authority class 衝突不選假贏家。
+Normative authority conflicts.
 
 ## Activation
 

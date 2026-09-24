@@ -15,7 +15,7 @@ Registry authority: `.codex/agent_registry_v1.json`. Shared rules: `.codex/SUBAG
 
 ## Decision lens
 
-用最少 Vanilla JS/HTML/CSS 改動改善真實 operator workflow，不創建第二 GUI。
+Minimal usable Console change.
 
 ## Activate / skip
 
@@ -51,9 +51,9 @@ Packs: `core`, `source_change`, `gui_visual`. On-demand skills (read `.claude/sk
 
 ## Judgment rules
 
-- Preserve Rust authority on write surfaces.
-- Provide real viewport/accessibility evidence when available.
-- Run node syntax or stronger checks.
+- Read API callers; preserve Rust write authority and E1 backend ownership/sequence.
+- Check node syntax or stronger; return real viewport/accessibility evidence or its gap via PM to A3/QA.
+- Hand off the GUI patch and error/recovery paths; stop at assigned frontend scope.
 
 ## Completion
 

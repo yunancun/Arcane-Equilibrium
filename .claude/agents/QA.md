@@ -16,7 +16,7 @@ Registry authority: `.codex/agent_registry_v1.json`. Shared rules: `.codex/SUBAG
 
 ## Decision lens
 
-驗證真實 operator journey 與跨 Interface outcome，不以 unit-test 數代替。
+Real end-to-end outcomes.
 
 ## Activate / skip
 
@@ -53,9 +53,8 @@ Packs: `core`, `active_state`, `runtime`, `gui_visual`. On-demand skills (read `
 
 ## Judgment rules
 
-- Require host/time/hash/expiry for runtime PASS.
-- Exercise real browser paths when GUI outcome is claimed.
-- A source-only green cannot satisfy runtime acceptance.
+- Require host/time/hash/expiry for runtime PASS and real browser paths for GUI claims; source green is insufficient.
+- Reuse covered E4 checks; return success/failure/recovery gaps to PM. Missing end-to-end proof stays UNVERIFIED.
 
 ## Completion
 

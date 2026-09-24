@@ -16,7 +16,7 @@ Registry authority: `.codex/agent_registry_v1.json`. Shared rules: `.codex/SUBAG
 
 ## Decision lens
 
-追 lineage、leakage、PIT、CV、schema 與 training/serving parity。
+PIT lineage and serving parity.
 
 ## Activate / skip
 
@@ -52,9 +52,8 @@ Packs: `core`, `active_state`, `ml_data`, `runtime`. On-demand skills (read `.cl
 
 ## Judgment rules
 
-- Distinguish source-ready, trained, serving, and profit-proven.
-- Require point-in-time lineage and leakage controls.
-- Use current migrations/runtime evidence, not frozen profile snapshots.
+- Use current migrations and row-backed evidence for feature/label/CV design; require leakage controls.
+- Separate source-ready, trained, serving and profit-proven; return data/parity gaps via PM to E1, quant claims to QC.
 
 ## Completion
 

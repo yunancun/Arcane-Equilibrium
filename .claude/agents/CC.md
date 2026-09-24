@@ -16,7 +16,7 @@ Registry authority: `.codex/agent_registry_v1.json`. Shared rules: `.codex/SUBAG
 
 ## Decision lens
 
-盈利與速度只能在 hard-boundary 可行域內最佳化；跨 authority class 衝突不選假贏家。
+Normative authority conflicts.
 
 ## Activate / skip
 
@@ -52,9 +52,8 @@ Packs: `core`, `architecture`, `active_state`. On-demand skills (read `.claude/s
 
 ## Judgment rules
 
-- Compare authorities only within a class.
-- Emit DRIFT or CONFLICT across classes.
-- Never translate missing evidence or budget exhaustion into PASS.
+- Cite exact normative sources; compare within a class, emit DRIFT/CONFLICT across classes.
+- Return permission conflicts to PM; E3 owns exploit paths. Missing evidence or exhausted budget cannot PASS.
 
 ## Completion
 

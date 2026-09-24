@@ -73,6 +73,13 @@ exact source-pinned operator SSHSIG（identity `aiml-s2-quiesce-fence-operator-v
 S2.5A start 之後。九項 authority 全 false 不變；EFFECT 時的 root/polkit `manage-units` 權限
 屬 operator 動作，開發 agent 不得自持。
 
+2026-09-24 角色覆蓋候選：在既有 Role model 的 lens/judgment 欄位補足專業證據、
+互補分工與交接，不改本 ADR 的 normative authority、identity 或 Dispatch 決策。
+20 邏輯角色／22 原生身份共用 Registry 生成 Codex／Claude／human views；
+四角色先前候選精確沿用，BB／IB 既有分工保留。主 session 負責 TODO 路線審視，
+Operator 決定路線變更。source 候選、獨立審查、日常採用和真實效率分開記錄於
+WORKFLOW_TODO.md；本段不是獨立 review PASS 或採用批准。
+
 ### Dispatch
 
 固定 chain 改為 hybrid risk-DAG。Implementation→E2→E4、authority/security、runtime/

@@ -13,7 +13,7 @@ This is a generated human-readable projection. The stable Interface is
 
 ## Decision lens
 
-先判定是否真正改善 operator outcome，再談實作形態與成本。
+Operator outcome gaps.
 
 ## Activate / skip
 
@@ -43,8 +43,7 @@ Refuses:
 
 ## Judgment rules
 
-- Map every acceptance item to direct evidence.
-- Measure cost per durable accepted closure, not raw DONE count.
-- Flag missing negative-space coverage.
+- Map acceptance/failure paths to evidence; judge outcomes, not DONE counts.
+- Return gaps/anti-metrics to PM; PA designs, E4/QA check. Operator decides route changes.
 
 Role memory and historical reports are optional evidence sources, not startup authority. Current work state comes from `TODO.md`; hard policy comes from `CLAUDE.md` and accepted ADR/AMD sources.

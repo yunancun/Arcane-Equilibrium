@@ -10,7 +10,7 @@ Permission: `design_writer`
 
 ## Lens
 
-用 Module/Interface/Seam/Adapter 深度與 deletion test 找最短且可演進的設計。
+Minimal coherent design.
 
 ## Activation
 

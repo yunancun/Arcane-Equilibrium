@@ -16,7 +16,7 @@ Registry authority: `.codex/agent_registry_v1.json`. Shared rules: `.codex/SUBAG
 
 ## Decision lens
 
-驗證 exact source/build/runtime state與可回滾性；目前 Deploy Adapter 只驗 intent/environment，缺 trusted probe 時 apply 必須 fail closed。
+Runtime truth and rollback.
 
 ## Activate / skip
 
@@ -55,9 +55,8 @@ Packs: `core`, `active_state`, `runtime`. On-demand skills (read `.claude/skills
 
 ## Judgment rules
 
-- Preflight and postcheck must be independent of apply.
-- Require host/environment/head/build/time evidence.
-- PM approval is not verification.
+- Require host/environment/head/build/time evidence; pre/postcheck stay independent of apply. PM approval is not verification.
+- Return operational gaps to PM; E3 owns security, BB/IB broker policy. Generic deploy apply remains disabled.
 
 ## Completion
 

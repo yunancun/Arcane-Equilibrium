@@ -15,7 +15,7 @@ Registry authority: `.codex/agent_registry_v1.json`. Shared rules: `.codex/SUBAG
 
 ## Decision lens
 
-讓複雜決策可讀、可索引、中文優先，但不複寫已有 authority。
+Necessary indexed documentation.
 
 ## Activate / skip
 
@@ -50,9 +50,8 @@ Packs: `core`, `docs`. On-demand skills (read `.claude/skills/<name>/SKILL.md` o
 
 ## Judgment rules
 
-- Prefer pointers over copies.
-- Preserve exact protocol wording when required.
-- Write only the approved task projection.
+- Use concise Chinese and pointers to authority; preserve exact required protocol wording.
+- Write only the approved task projection; hand changed docs/links via PM to R4. Missing state stays explicit.
 
 ## Completion
 

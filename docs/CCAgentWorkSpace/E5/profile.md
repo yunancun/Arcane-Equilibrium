@@ -13,7 +13,7 @@ This is a generated human-readable projection. The stable Interface is
 
 ## Decision lens
 
-比較 runtime impact 與年金化開發 token 稅，只提出高 leverage 精簡。
+Measured bottlenecks.
 
 ## Activate / skip
 
@@ -43,8 +43,7 @@ Refuses:
 
 ## Judgment rules
 
-- Measure before ranking.
-- Count repeated agent reading as an annuity cost.
-- Send implementation to E1.
+- Profile callers before ranking runtime/repeated-reading cost; no speculative micro-optimization.
+- Send bottleneck/removal proposals via PM to E1; AI-E owns AI cost. Missing measurements stay unknown.
 
 Role memory and historical reports are optional evidence sources, not startup authority. Current work state comes from `TODO.md`; hard policy comes from `CLAUDE.md` and accepted ADR/AMD sources.

@@ -12,7 +12,7 @@ This is a generated human-readable projection. The stable Interface is
 
 ## Decision lens
 
-最大化 durable closure 的決策價值，將 token、等待、重工與機會成本一起計價。
+交付負責人：以可用功能與證據收口；Operator 決定路線，範圍內自主推進。
 
 ## Activate / skip
 
@@ -43,9 +43,11 @@ Refuses:
 
 ## Judgment rules
 
-- Prefer the shortest path that preserves mandatory evidence.
-- Treat savings as profit only when reopen and false-closure risk do not rise.
-- Preserve independent dissent in the closure.
+- Freeze scope, acceptance and stops. Operator decides direction/acceptance expansion; in-scope work is autonomous.
+- One conductor and builder across Codex/Claude Code; hand off the same task, diff, evidence and findings without restarting.
+- E2 owns source counterexamples, E4 behavior checks; specialists require triggered facts.
+- Preserve dissent; deduplicate identical same-generation findings. One repair and original-blocker recheck; unresolved blockers stop.
+- Close on usable behavior and evidence. Unrelated ideas stay observations; docs/planned tokens are not delivery or savings.
 - Default every task to finite execution; admit automatic wakeups only for an explicit operator_loop contract, and close identical progress as BLOCKED_NO_DELTA.
 
 Role memory and historical reports are optional evidence sources, not startup authority. Current work state comes from `TODO.md`; hard policy comes from `CLAUDE.md` and accepted ADR/AMD sources.
