@@ -468,7 +468,9 @@ def _actual_capture(
     context_digest: str,
     monkeypatch: pytest.MonkeyPatch,
     argv: list[str] | None = None,
+    verification_scope: list[str] | None = None,
 ) -> dict:
+    path_scope = verification_scope or [carrier_path]
     execution_task = {
         "node_id": "carrier_verification",
         "role": "E4",
@@ -476,15 +478,15 @@ def _actual_capture(
         "node_class": "verification",
         "permission": "read_only",
         "requires": [],
-        "path_scope": [carrier_path],
+        "path_scope": path_scope,
     }
     monkeypatch.setattr(
         capture_v2,
         "_bound_execution_task",
         lambda _context, _native, _node, _root: (
             execution_task,
-            {"verification_scope": [carrier_path], "dirty_scope": []},
-            [carrier_path],
+            {"verification_scope": path_scope, "dirty_scope": []},
+            path_scope,
         ),
     )
     record = capture_v2.capture_governed_command(
@@ -1529,6 +1531,11 @@ def _signed_review_bundle(
         context_digest=context_digest,
         monkeypatch=monkeypatch,
         argv=validator.s2e_review_test_argv(candidate, repo_root=repo),
+        verification_scope=[
+            entry["path"] for entry in validator.s2e_review_source_blob_manifest(
+                candidate, repo_root=repo
+            )
+        ],
     )
     disposable_chain = validator.build_s2e_disposable_test_effect_chain(
         review_capture,
@@ -1841,6 +1848,39 @@ def _issued_genesis_authority_case(
         "advanced_floor": advanced_floor,
         "tmp_path": tmp_path,
     }
+
+
+def test_acceptance_review_rejects_dirty_subject_before_pytest_replay(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    case = _issued_genesis_authority_case(tmp_path, monkeypatch)
+    repo = case["repo"]
+    _git(repo, "checkout", "--detach", case["schema_carrier"])
+    authority = case["authority"]
+    candidate = s2e._pending_candidate_from_issued(case["issued"])
+    reviewed_path = repo / case["review_bundle"]["source_blob_manifest"][0]["path"]
+    reviewed_path.write_bytes(reviewed_path.read_bytes() + b"\n# uncommitted change\n")
+
+    def no_replay(*args: Any, **kwargs: Any) -> Any:
+        pytest.fail("dirty reviewed source must be rejected before pytest replay")
+
+    monkeypatch.setattr(capture_v2, "_execute", no_replay)
+    result = validator.issue_s2e_launch_receipt(
+        candidate,
+        acceptance_review_bundle=case["review_bundle"],
+        repo_root=repo,
+        governed_capture_record=authority["review_governed_capture_record"],
+        disposable_test_effect_chains=authority[
+            "review_disposable_test_effect_chains"
+        ],
+        durability_anchor_attestation=case["review_anchor"],
+    )
+    assert result["status"] == "EXTERNAL_VERIFICATION_PENDING"
+    assert result["issued_receipt"] is None
+    assert any(
+        "admitted pytest subject differs from committed checkpoint" in error
+        for error in result["errors"]
+    )
 
 
 _INHERIT_CARRIER_HEAD = object()
@@ -2417,6 +2457,11 @@ def test_verified_review_bundle_issues_ready_genesis_receipt(
         context_digest=review_context_digest,
         monkeypatch=monkeypatch,
         argv=review_argv,
+        verification_scope=[
+            entry["path"] for entry in validator.s2e_review_source_blob_manifest(
+                candidate, repo_root=repo
+            )
+        ],
     )
     disposable_chain = validator.build_s2e_disposable_test_effect_chain(
         capture,

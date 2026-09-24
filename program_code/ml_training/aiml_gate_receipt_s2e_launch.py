@@ -1499,6 +1499,9 @@ def validate_s2e_launch_acceptance_review_bundle(
             "generation_task_contract_digest"
         ),
         expected_source_head=reviewed_head,
+        expected_subject_scope=sorted(
+            entry["path"] for entry in expected_blob_manifest
+        ),
         root=repo_root,
         reexecute=(
             isinstance(reviewed_head, str)
