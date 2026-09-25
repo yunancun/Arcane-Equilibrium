@@ -1,9 +1,16 @@
 # CLAUDE_CHANGELOG.md — 開發歷史歸檔
 
 > 從 CLAUDE.md / TODO.md 遷出的 Wave/Sprint/Batch + TODO version-increment 歷史敘事。新 session 不需要讀此文件，僅供回顧歷史時查閱。
-> 最後更新：2026-09-25（選定 workflow source 交付）
+> 最後更新：2026-09-25（TODO v882／workflow 總帳歸檔）
 
 ---
+
+## TODO v882：Workflow source 採用後歸檔（2026-09-25）
+
+- PR194 已合併至 `6ed901b2e001f728a463a85e82eb37a47d3a6f4d`，Mac ff-only 同步及前後檢查通過；最終 head 的必要8 checks、治理8分片與 aggregate 全通過。Linux 依 Operator 指示跳過。
+- 原 E2／E4／R4 及修補結果保留；最後 AST 相同排版由 Operator 批准沿用功能審查，額外 E2 仍 UNVERIFIED，舊失敗未改寫。
+- W11 的下一個真實產品功能驗收移至主 TODO 的 WAITING row，補明功能、互補驗證、Operator 路線決策與實際重工記錄；零 ACTIVE，歸檔大目標不再投入。
+- 根目錄原 `WORKFLOW_TODO.md` 移入 [已關閉 workflow 總帳](archive/2026-09-25--workflow-todo-closed.md)，保留完整歷史並換算連結；更新直接文件指針、索引及 durable memory。只調整文件位置／狀態，沒有新增 workflow 功能或 runtime／效率聲稱。
 
 ## Workflow 選定 source 交付（2026-09-25）
 
@@ -26,7 +33,7 @@
 - 沿用既有模型、權限、DAG、effect、reuse、lossless 與 prompt-byte gates；
   主 session 保留 TODO 路線審視，路線擴張仍由 Operator 決定。
 - 本地 patch／測試不代表独立 review、main 採用、host/runtime 或效率改善。
-  本次 E2/E4/R4 無可用入口，維持 UNVERIFIED；詳見 WORKFLOW_TODO.md。
+  本次 E2/E4/R4 無可用入口，維持 UNVERIFIED；詳見 [workflow 歸檔](archive/2026-09-25--workflow-todo-closed.md)。
 
 ## W3 PR191 治理與 Linux 測試傳輸修補（2026-09-10）
 
