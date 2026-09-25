@@ -472,11 +472,11 @@ Linux 依 Operator 指示跳過；只有 source 採用，沒有新 runtime／交
 
 | ID | Queue lane | Owner | 驗收與解除等待條件 | Next action |
 |---|---|---|---|---|
-| `W11-REAL-PRODUCT-ACCEPTANCE` | `WAITING` | Operator 選功能；PM 凍結範圍並統籌，E2／E4 互補驗證 | 隨下一個 Operator 指定的真實產品功能一併驗收；PM 核對需求、可觀察功能與交付邊界後才轉 ACTIVE。不是獨立 workflow 工程、示範專案或產品開發前置。 | 等 Operator 指定產品功能；不自動派發。 |
+| `W11-REAL-PRODUCT-ACCEPTANCE` | `WAITING` | Operator 選功能；PM 凍結範圍並統籌，E2／E4 互補驗證 | 隨下一個 Operator 指定的真實產品功能一併驗收；PM 核對需求、可觀察功能與交付邊界，並確認該產品交付的明確 peer-review 授權後才轉 ACTIVE；未涵蓋時先交 Operator 決定。不是獨立 workflow 工程、示範專案或產品開發前置。 | 等 Operator 指定產品功能；不自動派發。 |
 
 W11 在該產品交付內驗收：
 1. 功能可實際使用並符合 Operator 核定的 acceptance；來源、測試、整合及上線／採用狀態分開提供證據。部署效果若未包含在該次授權，不冒稱已上線。
-2. 一位實作者、PM 單一整合；E2 給正確性／邊界反例，E4 驗證行為，其他角色只依真實觸發加入。跨 Codex／CC 沿用同一需求、diff、證據及未解 finding，按現行門檻重用驗證。
+2. 一位實作者、PM 單一整合；E2 給正確性／邊界反例，E4 驗證行為；派發須依該交付明確授權，未授權／未驗保持 UNVERIFIED。其他角色只依真實觸發加入。跨 Codex／CC 沿用同一需求、diff、證據及未解 finding，按現行門檻重用驗證。
 3. 路線、新範圍或 acceptance 變更先交 Operator 決策；範圍內自主完成，保留異議、失敗、修補與重驗結果，不用治理文件數替代功能交付。
 4. 在原產品收尾紀錄中簡記實際耗時、重工／重開及人工糾偏；沒有可靠 token／費用資料即標 unavailable，不要求另建量測平台或聲稱已節省。PM 依實際功能結果關閉本 row；缺項留精確原因。
 
