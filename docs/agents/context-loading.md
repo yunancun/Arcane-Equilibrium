@@ -85,8 +85,9 @@ kind/name/selector and shared/role inventory from the Registry and task facts.
 Re-signing an artifact cannot authorize omitting or reclassifying a source.
 
 Use `agent_governance.py context --role PM @task-facts.json` with the appropriate
-typed surface. W3 integration and validation status live in `WORKFLOW_TODO.md`;
-feature-worktree behavior does not establish daily-source adoption.
+typed surface. Current workflow state and the deferred W11 product acceptance live only in `TODO.md`.
+Read [the closed workflow ledger](../archive/2026-09-25--workflow-todo-closed.md)
+only for historical review/adoption evidence; it is not a dispatch source.
 
 | Need | Read | Authority class |
 |---|---|---|

@@ -1,3 +1,22 @@
+# Workflow TODO 已關閉歸檔（2026-09-25）
+
+本檔由根目錄 `WORKFLOW_TODO.md` 移入，僅供歷史查證；下方舊候選、待審與下一步描述均是當時紀錄。
+**當前工作狀態與 W11 驗收只讀 [主 TODO](../../TODO.md#workflow-optimization-physical-queuesource-only)**。
+
+## 最終採用與歸檔
+
+- [PR194](https://github.com/yunancun/Arcane-Equilibrium/pull/194) 已合併；2026-09-25 Mac 以 ff-only 同步至 `6ed901b2e001f728a463a85e82eb37a47d3a6f4d`，同步前後檢查通過。
+- 22 native 身份（20 邏輯角色）、W5 committed-subject binding 與 W9 啟動精簡已 `DAILY_SOURCE_ADOPTED`。原 E2／E4／R4 審查及後續修補 E2 PASS、E4 23／23 PASS 保留。
+- 最後排版提交 `4560785996fd7fc07fb15924906afce6132682b1` 的完整模組 AST 相同，原失敗測試 author-local 1／1 PASS；Operator 明確批准沿用原功能審查。額外 E2 保持 UNVERIFIED，原失敗與拒絕紀錄未改寫。
+- 該 head 的 [CI36062218415](https://github.com/yunancun/Arcane-Equilibrium/actions/runs/36062218415) attempt1：8 項必要 checks、8 個治理分片與 aggregate 全通過。4712 是 aggregate 核對的唯一 collected nodeid 數，並非 passed 數。
+- 本次已合併 feature branch／worktree 已移除；四個含未提交內容的舊 worktree 保留。Linux 依 Operator 指示跳過；不宣稱三端完成、runtime、交易或實測效率改善。
+- 選定 workflow 工程已收口；已歸檔大目標保持 `CLOSED`、`next_action=null`，後續不再投入。W11 僅隨下一個 Operator 指定的真實產品功能驗收，其有效條件已遷至主 TODO，不另建示範工程。
+- 收尾證據：workspace `workflow-closeout-adoption-20260925/resume-5/REPORT.md` 與 `result.json`；完整原始 review／CI／merge／sync 在同一 workspace 的 `resume-1` 至 `resume-4`。
+
+---
+
+以下為移檔前總帳全文（原位置與 source baseline：`6ed901b2e:WORKFLOW_TODO.md`）；只有 Markdown 連結按新目錄換算，舊判定不再提供派發權。
+
 # 開發代理工作流交付總帳
 
 本總帳沿用 W0–W11、WF6 與 WF-RC／WF-PR 的既有成果。目標是：使用者提出開發需求後，Codex／Claude Code 能完成實作、互補審查、行為驗證及交付，減少重工與人工糾偏。對象是 PM／PA／E1–E5／CC 等開發代理。
@@ -296,7 +315,7 @@ W5 source-binding、W9 限縮精簡、真實產品需求驗收的保留範圍見
 
 本次僅維護總帳。上方 W3 已選定的交付方向、固定 pair／範圍／驗收保持有效，沒有在本次執行整合或啟動其他待辦。
 
-對 W0–W11、WF6-01–07、WF-RC-01/02、WF-PR-01、W3 integration 與 PR190 逐項核對。W0/W1/W2/W3/W4/W5/W7/W9 的 10 個歷史 checkpoint 均可在 Git 解析、位於 PR190 head 的祖先鏈，均不是本次 canonical main 的 ancestor；精確 SHA 與逐項殘餘見 [freshness audit](docs/references/2026-09-09--todo-workflow-freshness-audit.md)。這是 ancestry 結論，不單憑它判斷是否已有等價 cherry-pick。W3/W9 等候選不得標為 daily-main adopted。
+對 W0–W11、WF6-01–07、WF-RC-01/02、WF-PR-01、W3 integration 與 PR190 逐項核對。W0/W1/W2/W3/W4/W5/W7/W9 的 10 個歷史 checkpoint 均可在 Git 解析、位於 PR190 head 的祖先鏈，均不是本次 canonical main 的 ancestor；精確 SHA 與逐項殘餘見 [freshness audit](../../docs/references/2026-09-09--todo-workflow-freshness-audit.md)。這是 ancestry 結論，不單憑它判斷是否已有等價 cherry-pick。W3/W9 等候選不得標為 daily-main adopted。
 
 PR190 本次讀取為 OPEN／unmerged，head `3a0e0debfd6088d199dff1e193f6bb5e6cf603d3`；CI run `34054578577` failure、5 個 unresolved review threads。其他本地分支的修補不等於該 PR head 已修；保留獨立 WAITING，不阻塞 W3。W6 的 W4／W5 候選可重用性不等於 canonical 採用或 host proof；原 HITL／review 前置保留。WF6-06 仍需可比真實 baseline 與明確的付費 trial 範圍；WF6-07 可選，無資料不空跑。
 

@@ -78,7 +78,7 @@ S2.5A start 之後。九項 authority 全 false 不變；EFFECT 時的 root/polk
 20 邏輯角色／22 原生身份共用 Registry 生成 Codex／Claude／human views；
 四角色先前候選精確沿用，BB／IB 既有分工保留。主 session 負責 TODO 路線審視，
 Operator 決定路線變更。source 候選、獨立審查、日常採用和真實效率分開記錄於
-WORKFLOW_TODO.md；本段不是獨立 review PASS 或採用批准。
+[workflow 歸檔](../archive/2026-09-25--workflow-todo-closed.md)；本段不是獨立 review PASS 或採用批准。
 
 ### Dispatch
 
@@ -99,7 +99,7 @@ stable query 不載入 current state，既有 runtime 與 high／unknown 觸發�
 workflow 都從 Registry/task 重建來源 kind/name/selector 與 shared/role inventory，
 拒絕重新簽 digest 後漏選或改類。此設計沿用四個既有 Interface，不新增控制器、
 派工 transport 或效果權限；本地 patch／驗證及尚未採用的限制以
-`WORKFLOW_TODO.md` 的 W3 本輪結果為準。
+[workflow 歸檔](../archive/2026-09-25--workflow-todo-closed.md) 的 W3 本輪結果為準。
 
 Universal preload 退役。Context Interface 保留 exact task prompt、user objective/scope/
 acceptance/hard stops、必填 uncertainty、baseline/direct interfaces/previous failure。Concrete source 由 compiler 讀 bytes；

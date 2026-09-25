@@ -84,7 +84,7 @@ tests 防止「為了縮 prompt 刪掉 invariant」或重新複製共通 prose�
 擴大交 Operator。零 findings 合法，保留 dissent 與既有一次 repair/recheck 限額。
 這是現有欄位的提示改良，沿用 renderer 與 lossless／byte-budget tests；未新增
 Interface、改模型／權限／DAG 或啟用 delegation。候選採用狀態見 TODO.md，
-完整測試與覆蓋證據見 WORKFLOW_TODO.md；設定存在不代表 host 執法或效率成效。
+完整測試與覆蓋證據見 [workflow 歸檔](../archive/2026-09-25--workflow-todo-closed.md)；設定存在不代表 host 執法或效率成效。
 
 新增的兩個 preset：
 
@@ -156,7 +156,7 @@ Core 的 Product Boundary／Root Principles／Hard Boundaries 與 docs 必要規
 變動。Python 與 saved-workflow 從同一 Registry 重算 source kind/name/selector
 及 shared/role inventory，拒絕重新簽 digest 後漏來源、改 kind 或錯置 scope。
 三份 saved workflow 僅透過既有 generator 更新對應區塊；本次採用狀態與驗證
-限制見 `WORKFLOW_TODO.md`，不由 Interface 文件宣告 daily adoption。
+限制見 [workflow 歸檔](../archive/2026-09-25--workflow-todo-closed.md)，不由 Interface 文件宣告 daily adoption。
 
 `active_state` 不再投影整個 `TODO.md`：Registry 的 current S2E selector 使用
 `todo_dispatch_projection`，只讀 exact `S2E 當前派發投影` section。單一 ACTIVE row

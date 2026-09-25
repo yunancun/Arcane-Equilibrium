@@ -1,7 +1,7 @@
 # 玄衡 TODO - 活躍派發佇列
 
-**版本** v881 | **校準日期** 2026-09-09 | **source 觀察基線** `aa0a90cda1b7024bfd86aca9d0c0ab016d0b9048`（本地 main；非 runtime receipt）。
-**當前狀態**：AIML／workflow 均零 ACTIVE；W3 兩個 fixture blocker 已修復，聚焦回歸 207 passed／1 平台 skip；feature source 待獨立審查與日常採用。S2E=5/9、effect=0/6、authority=0/9，LW2 WAITING。
+**版本** v882 | **校準日期** 2026-09-25 | **source 觀察基線** `6ed901b2e001f728a463a85e82eb37a47d3a6f4d`（已合併 PR194／Mac source；runtime 限制見 §0）。
+**當前狀態**：AIML／workflow 均零 ACTIVE；選定 workflow source 已採用、總帳已歸檔；W11 等待下一個 Operator 指定的真實產品功能。S2E=5/9、effect=0/6、authority=0/9，LW2 WAITING。
 **證據與歷史**：當前 source／PR／runtime 限制見 §0；完整逐項 [audit](docs/references/2026-09-09--todo-workflow-freshness-audit.md)、[v880 快照](docs/archive/2026-09-09--todo-v880-pre-freshness-audit.md)、[版本日誌](docs/CLAUDE_CHANGELOG.md)。
 
 <details>
@@ -458,61 +458,43 @@ ssh trade-core 'crontab -l | awk '\''NF && substr($1,1,1)!="#" {count++} END {pr
 
 ## Workflow optimization physical queue（source-only）
 
-2026-09-13 校準：W3 已合併並在日常 Mac source 完成公開 Context 驗收。
-核對基準 `1a91eca6032c49bdb349d5c7f2a3cb31278b22a3`，fresh GitHub main 相同。完整完成度、
-歷史採用證據見 WORKFLOW_TODO.md。2026-09-24 Operator 已決定停止原大目標；
-當前處置見該檔「Operator 歸檔決定（2026-09-24；當前有效）」。
+2026-09-25：選定 workflow source 已由 [PR194](https://github.com/yunancun/Arcane-Equilibrium/pull/194)
+合併，Mac ff-only 同步至 `6ed901b2e001f728a463a85e82eb37a47d3a6f4d`；22 native 身份、
+W5 source-binding、W9 啟動精簡已 `DAILY_SOURCE_ADOPTED`。原功能審查、排版沿用批准、
+CI／merge／sync 與所有歷史失敗見 [已關閉總帳](docs/archive/2026-09-25--workflow-todo-closed.md)。
+Linux 依 Operator 指示跳過；只有 source 採用，沒有新 runtime／交易／實測效率證據。
 
-| ID | 狀態 | Owner | 可交付結果 | 准入／停止條件 |
+### ACTIVE
+
+無。`active_count=0`、`dispatchable=false`；沒有自動 successor。
+
+### WAITING — W11 真實產品功能驗收
+
+| ID | Queue lane | Owner | 驗收與解除等待條件 | Next action |
 |---|---|---|---|---|
-| `W3-CURRENT-STATE-INTEGRATION` | `DAILY_SOURCE_ADOPTED` | PM／E1；E2／E4；R4 文件 | current_workflow_state 已在 canonical Mac 可用；PR191 merged；CI 八分片＋aggregate PASS；五個公開 Context case 符合預期 | 本次實作／review／Mac 採用已收口，不重派。Linux source sync 仍 INDETERMINATE，待 fresh host 證據；不據此宣稱三端完成或 runtime 效果。 |
+| `W11-REAL-PRODUCT-ACCEPTANCE` | `WAITING` | Operator 選功能；PM 凍結範圍並統籌，E2／E4 互補驗證 | 隨下一個 Operator 指定的真實產品功能一併驗收；PM 核對需求、可觀察功能與交付邊界，並確認該產品交付的明確 peer-review 授權後才轉 ACTIVE；未涵蓋時先交 Operator 決定。不是獨立 workflow 工程、示範專案或產品開發前置。 | 等 Operator 指定產品功能；不自動派發。 |
 
-目前 `active_count=0`、`dispatchable=false`。W3 fixture、選段隔離、delivery controls、
-Linux argv 傳輸與短 pytest ID 的既有修補均已隨 PR191 採用。保留原 E2／E4、
-未變文件的歷史 R4 與所有 failure／amendment 記錄，不重寫舊 verdict。
-Mac/GitHub source 相同；Linux／engine 最近一次資料 unavailable，沒有自動 retry。
-下一個實際小型需求須由使用者指定後 fresh-admit；不重開 WF-RC-01／WF-PR-01，
-已歸檔範圍為 `CLOSED`、`next_action=null`：W0／W1 完整量測、W2-host／WF-RC-02、
-W4、完整 W5 reuse、W6、W7 廣義重構、W8、W10 改革、W11 全 W 前置／全域認證、
-WF6-02／03／05–07 及 PR190 整包採用。後續不再進行；只有 Operator 新的明確指令可重啟。
-22 身份、W5 source-binding 窄修補／W9 限縮精簡按下方 2026-09-25 採用條件收口；不新增派發。
+W11 在該產品交付內驗收：
+1. 功能可實際使用並符合 Operator 核定的 acceptance；來源、測試、整合及上線／採用狀態分開提供證據。部署效果若未包含在該次授權，不冒稱已上線。
+2. 一位實作者、PM 單一整合；E2 給正確性／邊界反例，E4 驗證行為；派發須依該交付明確授權，未授權／未驗保持 UNVERIFIED。其他角色只依真實觸發加入。跨 Codex／CC 沿用同一需求、diff、證據及未解 finding，按現行門檻重用驗證。
+3. 路線、新範圍或 acceptance 變更先交 Operator 決策；範圍內自主完成，保留異議、失敗、修補與重驗結果，不用治理文件數替代功能交付。
+4. 在原產品收尾紀錄中簡記實際耗時、重工／重開及人工糾偏；沒有可靠 token／費用資料即標 unavailable，不要求另建量測平台或聲稱已節省。PM 依實際功能結果關閉本 row；缺項留精確原因。
+
+### CLOSED — 已採用與停止投入
+
+| ID／範圍 | 狀態 | Next action |
+|---|---|---|
+| `W3-CURRENT-STATE-INTEGRATION` | `DAILY_SOURCE_ADOPTED`（PR191）；本輪不重派 | `null` |
+| `WF-CLOSEOUT-ADOPTION-20260925` | `DAILY_SOURCE_ADOPTED`（PR194）：22 身份、W5 窄修補、W9 精簡 | `null` |
+| W0／W1 完整量測、W2-host／WF-RC-02、W4、完整 W5 reuse、W6、W7 廣義重構、W8、W10 改革、W11 全 W 前置／全域認證、WF6-02／03／05–07、PR190 整包採用 | `CLOSED`／已歸檔／停止投入；保留既有成果與控制，只有 Operator 新的明確指令可重啟 | `null` |
+
+原總帳已移出根目錄；僅按需查閱歸檔，不從歷史候選、舊 prompt 或模型更新生成施工。
 既有 native containment 保留；AIML／S2E physical state 仍由原相應段落決定。
-
-2026-09-25 `WF-CLOSEOUT-ADOPTION-20260925`：22 身份、W5 source-binding、W9 精簡
-及已批准歸檔納入本次 source 交付；採用在本變更合併 main 並完成 Mac ff-only 同步後生效。
-Linux 依 Operator 指示跳過；不宣稱三端已全部同步。此選定範圍收口，無新增 workflow 工程；
-W11 隨下一個 Operator 指定產品功能驗收。以下 2026-09-24 未提交／未審候選記錄保留為歷史。
-
-2026-09-24 `WF-CLOSEOUT-20260924`：22 身份、W5 source-binding、W9 精簡已在本輪
-完成整合與本地驗證，狀態 `LOCAL_VERIFIED_WAITING_REVIEW_AND_ADOPTION`；施工收口，
-只剩 checkpoint 授權／獨立 review／採用，不是 ACTIVE 或 canonical 已採用。
-原 22 身份 E2 transport timeout/no-verdict 保留；無替代 reviewer 或自動重試。
-Operator 已選 W11 **隨下一個產品功能驗收**；它不再是本輪 workflow source 收尾前置。
-104 項角色／Context 回歸與整理後 12 項 W5 複驗 PASS。9 組 route 一致，security Context
-仍因未提交整合 diff 超出既有預算而拒絕；未放寬。驗證與採用狀態見 WORKFLOW_TODO.md
-「2026-09-24 有限收尾（實作完成，採用待辦）」。
 
 ## Local workflow completion（physical queue）
 
-2026-09-13 再校準：WF-RC-01／WF-PR-01 本地修補維持已完成；W3 已
-DAILY_SOURCE_ADOPTED。2026-09-24 Operator 已將 WF-RC-02 完整 native 入口工程
-歸檔為 CLOSED，取消 WAITING_ENTRY_PROOF 後續施工；停用措施仍生效，效率成效未證。
-工作流 queue 零 ACTIVE。詳見 WORKFLOW_TODO.md「Operator 歸檔決定（2026-09-24；當前有效）」；下方原測試
-數字保留歷史標籤，不當成本次重新執行。
-
-`WF-RC-01` source `217efeba0c8c73b3cb7e7937440236aaad925131` is `LOCAL_CLI_VERIFIED`; physical queue has zero `ACTIVE` and no automatic next task. E2 exact recheck PASS `sha256:60ca2652ec9ea061d7ee8224019255d3b494a6b62df8867c6c3b979e16ab1fa7`; E4 exact source run `61 passed`, 45.81s, exit 0, `sha256:ab66390f32fdd89c790f762bb6542b6a3906e74ed2bf1bb48a2889f9dc41219a`. This evidence establishes only local source/CLI regression, not host, runtime, remote, or realized-efficiency effects. See `WORKFLOW_TODO.md`; the PR190 whole-bundle adoption, host-entry and full measurement projects are CLOSED by the 2026-09-24 Operator decision, with no next action.
-
-
-### Native workflow containment
-
-`WF-RC-02 = NATIVE_AUTO_DELEGATION_DISABLED`：本地專案設定停用未受控 native 自動派工；Operator 已要求保留有限 peer review；完整 native 交付綁定尚未證實，但原入口工程已於 2026-09-24 由 Operator **歸檔／停止投入**（`queue_lane=CLOSED`、`next_action=null`），不再作 WAITING 後續施工。參見 `WORKFLOW_TODO.md` 與 `AGENTS.md` 的 containment contract。無自動 successor，physical queue 零 ACTIVE；不以 containment 宣稱完整 framework enforcement 或 mandatory-role closure。
-
-### Minimal peer-review repair
-
-`WF-PR-01 = LOCAL_SOURCE_REPAIR_CLOSED`：相同 generation 的完全相同 finding 僅產生
-一項 action，保留原始 reviewer packets；同 ID 分歧拒絕合併。純 workflow 標籤
-不再自動加入 AI 成本審查，E2／E4 與實際觸發的專業審查保留。每個交付固定
-問題與名單，一次合併修復、一次原項複核。來源與驗證收口記錄見 `WORKFLOW_TODO.md`。
-E2／R4 審查通過；E4 在固定版本實跑 27 項驗收測試全數通過。
-本項已完成，零 ACTIVE、無自動 successor；通用 native containment 與未證 host
-capability 不宣称完成，也不變成本地修補的新前置工程。
+`WF-RC-01 = LOCAL_CLI_VERIFIED`、`WF-PR-01 = LOCAL_SOURCE_REPAIR_CLOSED` 維持完成，
+`queue_lane=CLOSED`、`next_action=null`。`WF-RC-02 = NATIVE_AUTO_DELEGATION_DISABLED`：
+停用措施仍有效，完整 native 入口工程已歸檔，不再是 WAITING 後續施工。
+原測試／review 證據見 [已關閉總帳](docs/archive/2026-09-25--workflow-todo-closed.md)；
+不把歷史結果當本次重跑，也不宣稱 host enforcement 或實測效率完成。

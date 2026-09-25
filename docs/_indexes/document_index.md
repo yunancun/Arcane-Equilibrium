@@ -1,5 +1,7 @@
 # Document Index
 
+- [已關閉 workflow 總帳](../archive/2026-09-25--workflow-todo-closed.md)：PR194 source 採用、原審查與停止投入決定；有效 W11 驗收只讀根 `TODO.md`。
+
 - `agents/bootstrap-reference.md`：AGENTS／context-loading 按操作觸發的詳細規則；由目前 source 原文搬移，非啟動時全量預載，非新派工權限。
 
 > **ROUTER / HISTORICAL INDEX**

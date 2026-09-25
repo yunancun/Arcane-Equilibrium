@@ -161,6 +161,7 @@ Top-level archive 檔名索引如下；完整歷史語義仍以 `_indexes/docume
 - `2026-07-09--legacy_62finding_audit_bundle/`
 - `2026-07-09--rust_migration_completed/`
 - `2026-07-09--worklogs_2026-04/`
+- `2026-09-25--workflow-todo-closed.md`
 - `README.md`
 
 ---
