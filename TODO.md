@@ -1,7 +1,7 @@
 # 玄衡 TODO - 活躍派發佇列
 
-**版本** v882 | **校準日期** 2026-09-25 | **source 觀察基線** `6ed901b2e001f728a463a85e82eb37a47d3a6f4d`（已合併 PR194／Mac source；runtime 限制見 §0）。
-**當前狀態**：AIML／workflow 均零 ACTIVE；選定 workflow source 已採用、總帳已歸檔；W11 等待下一個 Operator 指定的真實產品功能。S2E=5/9、effect=0/6、authority=0/9，LW2 WAITING。
+**版本** v883 | **校準日期** 2026-09-28 | **source 觀察基線** `45410a4510598c37e4be7937085bf84af23b1434`（已合併 PR195／Mac source；runtime 限制見 §0）。
+**當前狀態**：AIML 零 ACTIVE；workflow 窄模型適配待審查／整合，原總帳仍歸檔；W11 等待下一個 Operator 指定的真實產品功能。S2E=5/9、effect=0/6、authority=0/9，LW2 WAITING。
 **證據與歷史**：當前 source／PR／runtime 限制見 §0；完整逐項 [audit](docs/references/2026-09-09--todo-workflow-freshness-audit.md)、[v880 快照](docs/archive/2026-09-09--todo-v880-pre-freshness-audit.md)、[版本日誌](docs/CLAUDE_CHANGELOG.md)。
 
 <details>
@@ -466,7 +466,11 @@ Linux 依 Operator 指示跳過；只有 source 採用，沒有新 runtime／交
 
 ### ACTIVE
 
-無。`active_count=0`、`dispatchable=false`；沒有自動 successor。
+| ID | Queue lane | Work status | Owner／驗收 | Next action |
+|---|---|---|---|---|
+| `WF-GPT6-CC-ADAPTATION-20260928` | `ACTIVE` | `NEEDS_CONTEXT` | PM／E1／E2／E4／AI-E／TW／R4；僅 Sol 路由、直接投影與 Mac CC 更新，保持原 effort／权限／containment | 完成固定驗證；E2 source 無 findings，但 codegen 命令被白名單拒絕，verdict 仍 UNVERIFIED；不得冒稱已審批或已整合。 |
+
+`active_count=1`；僅此 Operator 指定交付，沒有自動 successor。
 
 ### WAITING — W11 真實產品功能驗收
 

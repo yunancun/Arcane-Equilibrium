@@ -63,13 +63,20 @@ Registry validator、generated view 及 call identity 共同 fail-closed。
 
 Registry 同時持有 exact `model_routing_v1`，renderer 把 model 與 reasoning effort
 明寫進每個 native TOML，controller 再把 requested identity 綁入 call receipt。
-Codex provider 等價映射為 T1 `gpt-5.6-sol/high`、T2
-`gpt-5.6-sol/low`、T3 `gpt-5.6-terra/medium`；config 的
-`gpt-5.6-terra/medium` 只是不具 governed role 的 fallback。`max`/`xhigh` 不可由
+Codex provider 等價映射為 T1 `gpt-6-sol/high`、T2
+`gpt-6-sol/low`、T3 `gpt-5.6-terra/medium`；config 的
+`gpt-5.6-terra/medium` 只是不具 governed role 的 fallback。`max`/`xhigh`/`ultra` 不可由
 parent 繼承，也沒有隱式 critical 例外；若未來需要，必須先成為 Registry 中具名、
 測試覆蓋的 node policy。Claude saved workflow 由
 `saved_workflow_model_policy_v1.role_models/role_efforts` 逐角色 exact-match 同一
 operator tier；controller config、task 欄位與 session inheritance 都不能覆蓋它。
+
+2026-09-28 窄適配：19 個既有 Sol native 身份升至 GPT-6 Sol；A3／R4／TW
+保留 Terra／medium，沒有任務品質證據前不降至 Luna。主 session 的模型／effort
+偏好不覆寫角色綁定；高 reasoning 或新客戶端不授予額外派發權。Mac Claude Code
+更新只驗證客戶端版本，`opus`／`sonnet` 的實際解析仍由 provider／帳戶決定。
+原有互補審查、有限修補、單一整合與 native containment 保留；W11 仍隨真實
+產品功能驗收，不把此模型版本適配當成效率、host 或產品上線證據。
 
 跨角色共通的 authority/context/economy/permission/effect/web/capture/output 規則只存在於
 `native_operating_contract_v1`，由單一 renderer helper 投影；role lens、activation、

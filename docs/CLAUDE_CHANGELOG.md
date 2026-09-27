@@ -1,9 +1,16 @@
 # CLAUDE_CHANGELOG.md — 開發歷史歸檔
 
 > 從 CLAUDE.md / TODO.md 遷出的 Wave/Sprint/Batch + TODO version-increment 歷史敘事。新 session 不需要讀此文件，僅供回顧歷史時查閱。
-> 最後更新：2026-09-25（TODO v882／workflow 總帳歸檔）
+> 最後更新：2026-09-28（TODO v883／窄模型與客戶端適配）
 
 ---
+
+## TODO v883：GPT-6／Claude Code 窄適配（2026-09-28）
+
+- 19 個 Sol native 身份改為 `gpt-6-sol`，保留 high／low；A3／R4／TW 維持 Terra／medium。22 身份的職責、權限與 Claude 模型／effort 未改。
+- Registry、validator、generated bindings 與拒絕錯誤模型／Ultra 覆寫的既有測試同步；主 session 的 GPT-6 Astra／high 偏好不傳入角色。
+- Mac 官方 Claude Code updater 已由 2.1.142 更新至 2.1.283；保留首次直連失敗及既有代理恢復後成功的紀錄。版本更新不等於 provider 模型解析或 runtime 驗收。
+- 固定互補審查與本地結果見 workspace `workflow-gpt6-cc-adaptation-20260928/`。E2 原始 UNVERIFIED 保留；必要審查／整合未完成前不宣稱 main 採用。Linux 跳過，W11 保持 WAITING，不增加示範／量測工程。
 
 ## TODO v882：Workflow source 採用後歸檔（2026-09-25）
 

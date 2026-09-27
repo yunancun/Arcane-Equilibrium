@@ -436,3 +436,12 @@ T2 `opus`/`low`(E4,FA,OPS,E5,QA,AI-E,BB,IB)、T3 `sonnet`/`medium`(TW,R4,A3)。
 tier 為下限契約:任何 caller/saved workflow 不得向下覆蓋 Registry-`opus` 角色；
 Codex 與 saved workflow executable binding 均已逐角色落地並由 validator 強制。本修正案
 取代原文「所有 preset 都使用可用的完整模型智能」表述。
+
+## 2026-09-28 amendment: bounded GPT-6 role adaptation
+
+Operator 要求小範圍適配並同步 Mac／GitHub、跳過 Linux。既有 T1／T2 的
+Codex 路由由 GPT-5.6 Sol 改為 `gpt-6-sol`，各角色 high／low 不變；T3
+保留 `gpt-5.6-terra/medium`，CC 的 opus／sonnet 和 effort tiers 不變。
+Registry、validator、native adapters 與 saved-workflow digest 同步生成；
+拒絕舊 Sol、旗艦替換或 Ultra 繼承。保留 22 身份、權限、DAG 及 native
+containment，不重啟已歸檔入口工程；實測效率仍由下一個真實產品 W11 驗收。
