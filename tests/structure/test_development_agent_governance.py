@@ -41,7 +41,7 @@ CONTEXT_ARTIFACT_FIXTURES = {
     ),
 }
 CODEX_MODEL_BY_ROLE_MODEL = {
-    "opus": "gpt-5.6-sol",
+    "opus": "gpt-6-sol",
     "sonnet": "gpt-5.6-terra",
     "haiku": "gpt-5.6-terra",
 }
@@ -527,8 +527,8 @@ def test_subagent_model_routing_and_project_concurrency_are_explicit() -> None:
     assert 'All native presets set `model_reasoning_effort = "high"`' not in (
         execution_rules
     )
-    assert "`gpt-5.6-sol`/`high`" in execution_rules
-    assert "`gpt-5.6-sol`/`low`" in execution_rules
+    assert "`gpt-6-sol`/`high`" in execution_rules
+    assert "`gpt-6-sol`/`low`" in execution_rules
     assert "`gpt-5.6-terra`/`medium`" in execution_rules
     workspace_readme = (ROOT / ".codex/README.md").read_text(encoding="utf-8")
     assert "max_threads=4" not in workspace_readme
@@ -723,16 +723,21 @@ def test_registry_roles_pin_operator_model_tiering() -> None:
 
 def test_registry_rejects_codex_route_below_operator_role_tier() -> None:
     governance = _load_module()
-    registry = deepcopy(governance.load_registry())
-    registry["model_routing"]["roles"]["E1"] = {
-        "model": "gpt-5.6-terra",
-        "model_reasoning_effort": "medium",
-    }
-
-    assert (
-        "E1: Codex model route differs from operator role tier"
-        in governance.validate_registry(registry, ROOT)
-    )
+    for model, effort in (
+        ("gpt-5.6-terra", "medium"),
+        ("gpt-5.6-sol", "high"),
+        ("gpt-6-astra", "high"),
+        ("gpt-6-sol", "ultra"),
+    ):
+        registry = deepcopy(governance.load_registry())
+        registry["model_routing"]["roles"]["E1"] = {
+            "model": model,
+            "model_reasoning_effort": effort,
+        }
+        assert (
+            "E1: Codex model route differs from operator role tier"
+            in governance.validate_registry(registry, ROOT)
+        )
 
 
 def test_registry_rejects_saved_workflow_role_tier_drift() -> None:

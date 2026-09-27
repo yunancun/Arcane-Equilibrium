@@ -88,10 +88,10 @@
   "model_routing": {
     "schema_version": "model_routing_v1",
     "roles": {
-      "A3": {"model": "gpt-5.6-terra", "model_reasoning_effort": "medium"}, "AI-E": {"model": "gpt-5.6-sol", "model_reasoning_effort": "low"}, "BB": {"model": "gpt-5.6-sol", "model_reasoning_effort": "low"}, "CC": {"model": "gpt-5.6-sol", "model_reasoning_effort": "high"}, "E1": {"model": "gpt-5.6-sol", "model_reasoning_effort": "high"},
-      "E1a": {"model": "gpt-5.6-sol", "model_reasoning_effort": "high"}, "E2": {"model": "gpt-5.6-sol", "model_reasoning_effort": "high"}, "E3": {"model": "gpt-5.6-sol", "model_reasoning_effort": "high"}, "E4": {"model": "gpt-5.6-sol", "model_reasoning_effort": "low"}, "E5": {"model": "gpt-5.6-sol", "model_reasoning_effort": "low"},
-      "FA": {"model": "gpt-5.6-sol", "model_reasoning_effort": "low"}, "IB": {"model": "gpt-5.6-sol", "model_reasoning_effort": "low"}, "MIT": {"model": "gpt-5.6-sol", "model_reasoning_effort": "high"}, "OPS": {"model": "gpt-5.6-sol", "model_reasoning_effort": "low"}, "PA": {"model": "gpt-5.6-sol", "model_reasoning_effort": "high"},
-      "PM": {"model": "gpt-5.6-sol", "model_reasoning_effort": "high"}, "QA": {"model": "gpt-5.6-sol", "model_reasoning_effort": "low"}, "QC": {"model": "gpt-5.6-sol", "model_reasoning_effort": "high"}, "R4": {"model": "gpt-5.6-terra", "model_reasoning_effort": "medium"}, "TW": {"model": "gpt-5.6-terra", "model_reasoning_effort": "medium"}
+      "A3": {"model": "gpt-5.6-terra", "model_reasoning_effort": "medium"}, "AI-E": {"model": "gpt-6-sol", "model_reasoning_effort": "low"}, "BB": {"model": "gpt-6-sol", "model_reasoning_effort": "low"}, "CC": {"model": "gpt-6-sol", "model_reasoning_effort": "high"}, "E1": {"model": "gpt-6-sol", "model_reasoning_effort": "high"},
+      "E1a": {"model": "gpt-6-sol", "model_reasoning_effort": "high"}, "E2": {"model": "gpt-6-sol", "model_reasoning_effort": "high"}, "E3": {"model": "gpt-6-sol", "model_reasoning_effort": "high"}, "E4": {"model": "gpt-6-sol", "model_reasoning_effort": "low"}, "E5": {"model": "gpt-6-sol", "model_reasoning_effort": "low"},
+      "FA": {"model": "gpt-6-sol", "model_reasoning_effort": "low"}, "IB": {"model": "gpt-6-sol", "model_reasoning_effort": "low"}, "MIT": {"model": "gpt-6-sol", "model_reasoning_effort": "high"}, "OPS": {"model": "gpt-6-sol", "model_reasoning_effort": "low"}, "PA": {"model": "gpt-6-sol", "model_reasoning_effort": "high"},
+      "PM": {"model": "gpt-6-sol", "model_reasoning_effort": "high"}, "QA": {"model": "gpt-6-sol", "model_reasoning_effort": "low"}, "QC": {"model": "gpt-6-sol", "model_reasoning_effort": "high"}, "R4": {"model": "gpt-5.6-terra", "model_reasoning_effort": "medium"}, "TW": {"model": "gpt-5.6-terra", "model_reasoning_effort": "medium"}
     }
   },
   "saved_workflow_model_policy": {
