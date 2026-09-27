@@ -10,7 +10,8 @@
 - 19 個 Sol native 身份改為 `gpt-6-sol`，保留 high／low；A3／R4／TW 維持 Terra／medium。22 身份的職責、權限與 Claude 模型／effort 未改。
 - Registry、validator、generated bindings 與拒絕錯誤模型／Ultra 覆寫的既有測試同步；主 session 的 GPT-6 Astra／high 偏好不傳入角色。
 - Mac 官方 Claude Code updater 已由 2.1.142 更新至 2.1.283；保留首次直連失敗及既有代理恢復後成功的紀錄。版本更新不等於 provider 模型解析或 runtime 驗收。
-- 固定互補審查與本地結果見 workspace `workflow-gpt6-cc-adaptation-20260928/`。E2 原始 UNVERIFIED 保留；必要審查／整合未完成前不宣稱 main 採用。Linux 跳過，W11 保持 WAITING，不增加示範／量測工程。
+- 固定互補審查與本地結果見 workspace `workflow-gpt6-cc-adaptation-20260928/`：E4 44 項、R4 補齊文件綁定 1 項，合計 45 項通過；E2／E4／AI-E／R4 均 PASS。E2 原始 UNVERIFIED 保留；Operator 批准僅依既有 E4 證據補結論，無額外 source 掃描或重測。
+- 此選定範圍已驗證收口；source 採用在 PR196 合併 main 並完成 Mac ff-only 同步後生效。Linux 跳過，W11 保持 WAITING，不增加示範／量測工程。
 
 ## TODO v882：Workflow source 採用後歸檔（2026-09-25）
 
