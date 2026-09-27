@@ -445,3 +445,15 @@ Codex 路由由 GPT-5.6 Sol 改為 `gpt-6-sol`，各角色 high／low 不變；T
 Registry、validator、native adapters 與 saved-workflow digest 同步生成；
 拒絕舊 Sol、旗艦替換或 Ultra 繼承。保留 22 身份、權限、DAG 及 native
 containment，不重啟已歸檔入口工程；實測效率仍由下一個真實產品 W11 驗收。
+
+本修正案明確取代 [ADR-0052 §3](0052-gpt56-bounded-multi-agent-execution.md#3-model-choice-is-role-specific-and-never-inherited-accidentally)
+中 T1／T2 的 GPT-5.6 Sol 型號指派，透過具名 `model_routing_v1` 的更新與相應
+validator／拒絕案例採用 GPT-6 Sol；ADR-0052 其餘 effort、禁止繼承、T3 與
+權限／執行限制繼續有效。這是 Operator 核定的版本適配，不是 caller 自選例外。
+
+採用對象為已驗證的 Mac client：Codex `0.158.0-alpha.2.1` 的本機 catalog
+（2026-09-27 UTC）列出 `gpt-6-sol`，且本輪 E2／E4／AI-E 已以該 requested
+model 完成真實 CLI 呼叫。較舊審查環境 `0.144.0-alpha.4` 的 catalog 缺少它，
+不代表此 Mac client 不支援；也不能據 Mac 結果宣稱舊客戶端或其他帳戶已可用。
+其他主機採用前須核對其 catalog；本輪 Linux 跳過。具體版本／審查／測試
+綁定見 [PR196 可攜證據摘要](../CLAUDE_CHANGELOG.md#pr196-portable-evidence)。
