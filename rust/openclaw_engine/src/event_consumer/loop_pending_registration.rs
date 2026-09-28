@@ -3,6 +3,7 @@
 //! 保留現行 §九 2000 行政策空間。
 
 use super::loop_handlers::{dispatch_close_maker_fallback_from_pending, LoopState};
+use super::order_lifecycle::OrderStatus;
 use super::types::{PendingOrder, PendingOrderEvent};
 use crate::order_manager::TimeInForce;
 use crate::strategies::maker_rejection::{CloseMakerFallbackReason, CloseMakerRateLimitScope};
@@ -31,25 +32,34 @@ fn dispatch_failed_close_maker_fallback_decision(
 // Arm D：dispatch task 推送的 pending order 註冊。
 // ─────────────────────────────────────────────────────────────────────────────
 
-/// Arm D handler: receive `PendingOrder` from the dispatch task, insert into
-/// `state.pending_orders`, and emit two trading-msg rows (Order + Working
-/// OrderStateChange) for audit.
-/// Arm D handler：從 dispatch task 收 `PendingOrder`，插入
-/// `state.pending_orders` 並寫出 Order + Working OrderStateChange 兩筆審計列。
+/// 註冊只證明本機已接管；REST ACK 與 WS 確認分別推進狀態。
 pub(super) fn handle_pending_registration(
     reg: Option<PendingOrderEvent>,
     pipeline: &mut TickPipeline,
     state: &mut LoopState,
     order_tx: Option<&tokio::sync::mpsc::Sender<crate::database::TradingMsg>>,
 ) {
+    let (reg, ready) = match reg {
+        Some(PendingOrderEvent::RegisterBeforeSubmit { order, ready }) => {
+            (Some(PendingOrderEvent::Register(order)), Some(ready))
+        }
+        other => (other, None),
+    };
     if let Some(PendingOrderEvent::Register(po)) = reg {
+        if state.pending_orders.contains_key(&po.order_link_id) {
+            // 重複註冊不可覆寫已收到的成交或 venue 證據。
+            if let Some(ready) = ready {
+                let _ = ready.send(());
+            }
+            return;
+        }
+        pipeline.exchange_submission_guard.track(&po.order_link_id);
         tracing::info!(
             order_link_id = %po.order_link_id, symbol = %po.symbol,
             qty = %po.qty, strategy = %po.strategy,
             "pending order registered / 待處理訂單已註冊"
         );
-        // Emit Order row when exchange confirms Working state.
-        // 訂單進入 Working 狀態時寫入 trading.orders。
+        // 送出前先寫入本機登記；此處尚無 venue Working 證據。
         //
         // FIX-G7-09B-INTENT-LIMIT-DROP-1 (2026-04-25):
         //   `PendingOrder.order_type` carries the lowercase `"market"` /
@@ -158,17 +168,78 @@ pub(super) fn handle_pending_registration(
                 crate::database::TradingMsg::OrderStateChange {
                     order_id: po.order_link_id.clone(),
                     ts_ms: po.sent_ts_ms,
-                    from_status: Some("Submitted".into()),
-                    to_status: "Working".into(),
+                    from_status: None,
+                    to_status: "PendingSubmit".into(),
                     filled_qty: None,
                     avg_price: None,
                     reason: None,
                     engine_mode: em,
                 },
-                "order_state_working",
+                "order_state_pending_submit",
             );
         }
         state.pending_orders.insert(po.order_link_id.clone(), po);
+        if let Some(ready) = ready {
+            let _ = ready.send(());
+        }
+    } else if let Some(PendingOrderEvent::SubmissionStarted {
+        order_link_id,
+        ts_ms,
+    }) = reg
+    {
+        update_dispatch_status(
+            &order_link_id,
+            OrderStatus::Submitted,
+            None,
+            ts_ms,
+            pipeline,
+            state,
+            order_tx,
+        );
+    } else if let Some(PendingOrderEvent::SubmissionUnknown {
+        order_link_id,
+        reason,
+        ts_ms,
+    }) = reg
+    {
+        update_dispatch_status(
+            &order_link_id,
+            OrderStatus::Unknown,
+            Some(reason),
+            ts_ms,
+            pipeline,
+            state,
+            order_tx,
+        );
+    } else if let Some(PendingOrderEvent::ConfirmationUnknown {
+        order_link_id,
+        reason,
+        ts_ms,
+    }) = reg
+    {
+        if let Some(po) = state.pending_orders.get_mut(&order_link_id) {
+            if po.progress.status.is_terminal() || po.progress.status == OrderStatus::Unknown {
+                return;
+            }
+            let previous = po.progress.status;
+            po.progress.status = OrderStatus::Unknown;
+            if let Some(tx) = order_tx {
+                let _ = crate::database::try_send_trading_msg(
+                    tx,
+                    crate::database::TradingMsg::OrderStateChange {
+                        order_id: order_link_id,
+                        ts_ms,
+                        from_status: Some(previous.as_str().into()),
+                        to_status: "Unknown".into(),
+                        filled_qty: Some(po.cum_filled_qty),
+                        avg_price: None,
+                        reason: Some(reason),
+                        engine_mode: pipeline.effective_engine_mode().to_string(),
+                    },
+                    "order_confirmation_unknown",
+                );
+            }
+        }
     } else if let Some(PendingOrderEvent::ExchangeOrderIdMapped {
         order_link_id,
         exchange_order_id,
@@ -187,6 +258,15 @@ pub(super) fn handle_pending_registration(
             state
                 .order_id_to_link
                 .insert(exchange_order_id.clone(), order_link_id.clone());
+            update_dispatch_status(
+                &order_link_id,
+                OrderStatus::Acknowledged,
+                None,
+                openclaw_core::now_ms(),
+                pipeline,
+                state,
+                order_tx,
+            );
             tracing::info!(
                 order_link_id = %order_link_id,
                 exchange_order_id = %exchange_order_id,
@@ -239,10 +319,24 @@ pub(super) fn handle_pending_registration(
         ts_ms,
     }) = reg
     {
+        // WS 已證實存在／成交的單，不能再被晚到的 REST 錯誤清除。
+        if (!state.pending_orders.contains_key(&order_link_id)
+            && reason.starts_with("dispatch_structural"))
+            || state.pending_orders.get(&order_link_id).is_some_and(|po| {
+                matches!(
+                    po.progress.status,
+                    OrderStatus::Working | OrderStatus::PartiallyFilled
+                ) || po.progress.status.is_terminal()
+                    || po.cum_filled_qty > 0.0
+            })
+        {
+            return;
+        }
         if is_close {
             pipeline.clear_pending_close(&symbol);
         }
         let removed_po = state.pending_orders.remove(&order_link_id);
+        pipeline.exchange_submission_guard.resolve(&order_link_id);
         state
             .order_id_to_link
             .retain(|_, link| link.as_str() != order_link_id.as_str());
@@ -265,6 +359,7 @@ pub(super) fn handle_pending_registration(
                 .is_some_and(|audit| audit.fallback_reason.is_none())
         {
             let po = PendingOrder {
+                progress: Default::default(),
                 order_link_id: order_link_id.clone(),
                 symbol: symbol.clone(),
                 is_long,
@@ -324,7 +419,9 @@ pub(super) fn handle_pending_registration(
                 crate::database::TradingMsg::OrderStateChange {
                     order_id: order_link_id,
                     ts_ms,
-                    from_status: Some("Working".into()),
+                    from_status: removed_po
+                        .as_ref()
+                        .map(|po| po.progress.status.as_str().into()),
                     to_status: terminal_status,
                     filled_qty: None,
                     avg_price: None,
@@ -346,7 +443,9 @@ pub(super) fn handle_pending_registration(
         // 110017（current position is zero），以交易所 truth 收斂本地漂移倉
         // 為 flat，斷開「每 tick 重發 close → 110017」自持迴圈。
         // 同步移除 pending_orders 追蹤列（若有），避免 sweep 殘留。
-        let removed_pending = state.pending_orders.remove(&order_link_id).is_some();
+        let removed_po = state.pending_orders.remove(&order_link_id);
+        let removed_pending = removed_po.is_some();
+        pipeline.exchange_submission_guard.resolve(&order_link_id);
         state
             .order_id_to_link
             .retain(|_, link| link.as_str() != order_link_id.as_str());
@@ -371,7 +470,9 @@ pub(super) fn handle_pending_registration(
                 crate::database::TradingMsg::OrderStateChange {
                     order_id: order_link_id,
                     ts_ms,
-                    from_status: Some("Working".into()),
+                    from_status: removed_po
+                        .as_ref()
+                        .map(|po| po.progress.status.as_str().into()),
                     to_status: "Cancelled".into(),
                     filled_qty: None,
                     avg_price: None,
@@ -383,5 +484,39 @@ pub(super) fn handle_pending_registration(
                 "exchange_zero_close_converge",
             );
         }
+    }
+}
+
+fn update_dispatch_status(
+    id: &str,
+    next: OrderStatus,
+    reason: Option<String>,
+    ts_ms: u64,
+    pipeline: &TickPipeline,
+    state: &mut LoopState,
+    order_tx: Option<&tokio::sync::mpsc::Sender<crate::database::TradingMsg>>,
+) {
+    let Some(po) = state.pending_orders.get_mut(id) else {
+        return;
+    };
+    let previous = po.progress.status;
+    if !po.progress.dispatch_status(next) {
+        return;
+    }
+    if let Some(tx) = order_tx {
+        let _ = crate::database::try_send_trading_msg(
+            tx,
+            crate::database::TradingMsg::OrderStateChange {
+                order_id: id.into(),
+                ts_ms,
+                from_status: Some(previous.as_str().into()),
+                to_status: next.as_str().into(),
+                filled_qty: Some(po.cum_filled_qty),
+                avg_price: None,
+                reason,
+                engine_mode: pipeline.effective_engine_mode().to_string(),
+            },
+            "order_dispatch_progress",
+        );
     }
 }

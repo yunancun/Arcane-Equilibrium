@@ -54,6 +54,7 @@ fn test_handle_reset_clears_state_and_pending() {
     pending.insert(
         "stale_oc_1".into(),
         super::super::PendingOrder {
+            progress: Default::default(),
             order_link_id: "stale_oc_1".into(),
             symbol: "BTCUSDT".into(),
             is_long: true,

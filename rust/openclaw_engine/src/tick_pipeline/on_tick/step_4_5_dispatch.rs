@@ -734,6 +734,10 @@ impl TickPipeline {
                     // StrategyAction::Open — 完整治理管線（不變）
                     // ═══════════════════════════════════════════════════════════════
                     StrategyAction::Open(intent) => {
+                        if self.exchange_submission_guard.blocks_entry() {
+                            strategy.on_rejection(intent, "exchange_order_unresolved");
+                            continue;
+                        }
                         // FIX-03: fast_track ReduceToHalf/PauseNewEntries blocks new opens.
                         // FIX-03：快速通道暫停開倉時跳過所有新開倉意圖。
                         if ft_pause_new_entries {
@@ -2249,13 +2253,8 @@ impl TickPipeline {
             // process），實際 close direction 由下方 paper_state.get_position(symbol).is_long
             // 決定。傳 is_long=false 是 audit-only placeholder；build_intent 已派生
             // intent_type=OpenShort 對齊 is_long，消除 finding 3 矛盾。
-            let close_intent = build_intent(
-                symbol,
-                false,
-                0.0,
-                0.0,
-                format!("strategy_close:{reason}"),
-            );
+            let close_intent =
+                build_intent(symbol, false, 0.0, 0.0, format!("strategy_close:{reason}"));
             if is_exchange_mode {
                 if self.pending_close_symbols.contains(symbol) {
                     warn!(symbol = %symbol, reason = %reason, "strategy close skipped: pending close exists / 策略平倉跳過：已有待處理平倉");

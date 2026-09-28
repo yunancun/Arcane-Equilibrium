@@ -108,6 +108,7 @@ fn first_order_state_change(
 /// 構造的形狀），呼叫方依情境覆蓋欄位。
 fn baseline_pending_order(order_type: &str, tif: Option<TimeInForce>) -> PendingOrder {
     PendingOrder {
+        progress: Default::default(),
         order_link_id: format!("oc_{}_test", order_type),
         symbol: "BTCUSDT".into(),
         is_long: true,
@@ -146,6 +147,21 @@ fn baseline_pending_order(order_type: &str, tif: Option<TimeInForce>) -> Pending
         intent_id: Some("intent-demo-BTCUSDT-1700000000000".into()),
         decision_lease_id: None,
     }
+}
+
+#[test]
+fn h1_registration_does_not_claim_venue_working() {
+    let mut pipeline = make_test_pipeline();
+    let mut state = make_loop_state();
+    let (tx, mut rx) = mpsc::channel::<TradingMsg>(8);
+    let po = baseline_pending_order("market", None);
+    handle_pending_registration(
+        Some(PendingOrderEvent::Register(po)),
+        &mut pipeline,
+        &mut state,
+        Some(&tx),
+    );
+    assert_eq!(first_order_state_change(&mut rx).1, "PendingSubmit");
 }
 
 fn close_maker_pending_order(link_id: &str) -> PendingOrder {
@@ -315,7 +331,7 @@ fn test_active_bounded_probe_registration_emits_reconstructable_proof_key() {
     handle_pending_registration(
         Some(PendingOrderEvent::Register(generic_po)),
         &mut pipeline,
-        &mut state,
+        &mut make_loop_state(),
         Some(&tx2),
     );
     let (_, _, _, _, generic_details) = first_order_shape(&mut rx2);
@@ -932,7 +948,7 @@ async fn test_close_maker_deactivated_dispatches_ack_lost_market_fallback() {
 }
 
 #[tokio::test]
-async fn test_close_maker_dcp_dispatches_survival_market_fallback_and_terminal_state() {
+async fn test_close_maker_dcp_keeps_unknown_and_dispatches_survival_fallback() {
     let mut pipeline = TickPipeline::with_kind(&["BTCUSDT"], 10_000.0, PipelineKind::Demo);
     let (fallback_tx, mut fallback_rx) =
         tokio::sync::mpsc::unbounded_channel::<OrderDispatchRequest>();
@@ -955,19 +971,19 @@ async fn test_close_maker_dcp_dispatches_survival_market_fallback_and_terminal_s
     )
     .await;
 
-    assert!(state.pending_orders.is_empty());
+    assert!(state.pending_orders.contains_key(link_id));
     assert_close_maker_market_fallback(&mut fallback_rx, "fallback_to_taker_mandatory");
     let (order_id, to_status, reason) = first_order_state_change(&mut rx);
     assert_eq!(order_id, link_id);
-    assert_eq!(to_status, "Cancelled");
+    assert_eq!(to_status, "Unknown");
     assert_eq!(
         reason.as_deref(),
-        Some("dcp_triggered|close_maker_fallback=fallback_to_taker_mandatory")
+        Some("dcp_triggered:await_per_order_confirmation")
     );
 }
 
 #[tokio::test]
-async fn test_close_maker_dcp_without_position_emits_visible_terminal_no_fallback() {
+async fn test_close_maker_dcp_without_position_keeps_unknown_without_fallback() {
     let mut pipeline = TickPipeline::with_kind(&["BTCUSDT"], 10_000.0, PipelineKind::Demo);
     let (fallback_tx, mut fallback_rx) =
         tokio::sync::mpsc::unbounded_channel::<OrderDispatchRequest>();
@@ -989,17 +1005,17 @@ async fn test_close_maker_dcp_without_position_emits_visible_terminal_no_fallbac
     )
     .await;
 
-    assert!(state.pending_orders.is_empty());
+    assert!(state.pending_orders.contains_key(link_id));
     assert!(
         fallback_rx.try_recv().is_err(),
         "DCP must not pretend fallback was sent when local position is already flat"
     );
     let (order_id, to_status, reason) = first_order_state_change(&mut rx);
     assert_eq!(order_id, link_id);
-    assert_eq!(to_status, "Cancelled");
+    assert_eq!(to_status, "Unknown");
     assert_eq!(
         reason.as_deref(),
-        Some("dcp_triggered|close_maker_fallback=not_dispatched")
+        Some("dcp_triggered:await_per_order_confirmation")
     );
 }
 
@@ -1130,6 +1146,8 @@ async fn test_dispatch_response_order_id_mapping_disambiguates_fill_before_order
         &mut state,
         Some(&tx),
     );
+
+    assert_eq!(first_order_state_change(&mut rx).1, "Acknowledged");
 
     let exec = ExecutionUpdate {
         exec_id: "exec-mapped-before-order-update".into(),
@@ -1275,16 +1293,396 @@ async fn test_qty_zero_full_close_fill_before_order_update_matches_pending_order
     .await;
 
     assert!(
-        state.pending_orders.is_empty(),
-        "qty=0 reduce-only full-close fills must match and remove their PendingOrder"
+        state.pending_orders.contains_key("oc_qty_zero_close"),
+        "qty=0 execution alone does not prove the full close is complete"
     );
 
     let (order_id, to_status, reason) = first_order_state_change(&mut rx);
     assert_eq!(order_id, "oc_qty_zero_close");
-    assert_eq!(to_status, "Filled");
+    assert_eq!(to_status, "PartiallyFilled");
     assert_eq!(reason, None);
     assert!(
         rx.try_recv().is_err(),
         "matched qty=0 close fill must not emit an unattributed audit row"
     );
+    let mut update = terminal_order_update("oc_qty_zero_close", "Filled", "");
+    update.cum_exec_qty = "0.01".into();
+    handle_exchange_event(
+        Some(ExchangeEvent::OrderUpdate(update)),
+        &mut pipeline,
+        &mut writer,
+        &mut state,
+        Some(&tx),
+    )
+    .await;
+    assert!(state.pending_orders.is_empty());
+}
+
+// H1：測試實際 event handler／sweep，不以字串搜尋代替行為。
+fn h1_register(
+    pipeline: &mut TickPipeline,
+    state: &mut super::super::loop_handlers::LoopState,
+    po: PendingOrder,
+) {
+    handle_pending_registration(Some(PendingOrderEvent::Register(po)), pipeline, state, None);
+}
+
+fn h1_unknown(
+    pipeline: &mut TickPipeline,
+    state: &mut super::super::loop_handlers::LoopState,
+    id: &str,
+) {
+    handle_pending_registration(
+        Some(PendingOrderEvent::SubmissionUnknown {
+            order_link_id: id.into(),
+            reason: "dispatch_transient_exhausted".into(),
+            ts_ms: 1_700_000_001_000,
+        }),
+        pipeline,
+        state,
+        None,
+    );
+}
+
+fn h1_ack(
+    pipeline: &mut TickPipeline,
+    state: &mut super::super::loop_handlers::LoopState,
+    id: &str,
+) {
+    handle_pending_registration(
+        Some(PendingOrderEvent::ExchangeOrderIdMapped {
+            order_link_id: id.into(),
+            exchange_order_id: format!("bybit-{id}"),
+        }),
+        pipeline,
+        state,
+        None,
+    );
+}
+
+fn h1_exec(id: &str, exec_id: &str, qty: &str, side: &str) -> ExecutionUpdate {
+    ExecutionUpdate {
+        exec_id: exec_id.into(),
+        order_id: format!("bybit-{id}"),
+        order_link_id: id.into(),
+        symbol: "BTCUSDT".into(),
+        side: side.into(),
+        exec_price: "50000".into(),
+        exec_qty: qty.into(),
+        exec_fee: "0.01".into(),
+        exec_type: "Trade".into(),
+        exec_time: "1700000000456".into(),
+        ..Default::default()
+    }
+}
+
+#[tokio::test]
+async fn h1_registration_barrier_precedes_submission() {
+    let mut pipeline = make_test_pipeline();
+    let mut state = make_loop_state();
+    let (ready, mut receiver) = tokio::sync::oneshot::channel();
+    let po = baseline_pending_order("market", None);
+    let id = po.order_link_id.clone();
+    let event = PendingOrderEvent::RegisterBeforeSubmit { order: po, ready };
+    assert!(matches!(
+        receiver.try_recv(),
+        Err(tokio::sync::oneshot::error::TryRecvError::Empty)
+    ));
+    handle_pending_registration(Some(event), &mut pipeline, &mut state, None);
+    receiver.await.expect("registration barrier completes");
+    assert!(state.pending_orders.contains_key(&id));
+    assert!(pipeline.exchange_submission_guard.blocks_entry());
+}
+
+#[tokio::test]
+async fn h1_ack_is_not_working_and_ws_new_confirms() {
+    use super::super::order_lifecycle::OrderStatus;
+    let mut pipeline = make_test_pipeline();
+    let mut state = make_loop_state();
+    let mut writer = super::make_test_writer();
+    let po = baseline_pending_order("market", None);
+    let id = po.order_link_id.clone();
+    h1_register(&mut pipeline, &mut state, po);
+    handle_pending_registration(
+        Some(PendingOrderEvent::SubmissionStarted {
+            order_link_id: id.clone(),
+            ts_ms: 1,
+        }),
+        &mut pipeline,
+        &mut state,
+        None,
+    );
+    assert_eq!(
+        state.pending_orders[&id].progress.status,
+        OrderStatus::Submitted
+    );
+    h1_ack(&mut pipeline, &mut state, &id);
+    assert_eq!(
+        state.pending_orders[&id].progress.status,
+        OrderStatus::Acknowledged
+    );
+    handle_exchange_event(
+        Some(ExchangeEvent::OrderUpdate(terminal_order_update(
+            &id, "New", "",
+        ))),
+        &mut pipeline,
+        &mut writer,
+        &mut state,
+        None,
+    )
+    .await;
+    assert_eq!(
+        state.pending_orders[&id].progress.status,
+        OrderStatus::Working
+    );
+    h1_ack(&mut pipeline, &mut state, &id);
+    h1_unknown(&mut pipeline, &mut state, &id);
+    assert_eq!(
+        state.pending_orders[&id].progress.status,
+        OrderStatus::Working
+    );
+}
+
+#[tokio::test]
+async fn h1_unknown_survives_sweep_and_reject_resolves() {
+    use super::super::order_lifecycle::OrderStatus;
+    let mut pipeline = make_test_pipeline();
+    let mut state = make_loop_state();
+    let mut writer = super::make_test_writer();
+    let po = baseline_pending_order("market", None);
+    let id = po.order_link_id.clone();
+    let sent = po.sent_ts_ms;
+    h1_register(&mut pipeline, &mut state, po);
+    h1_unknown(&mut pipeline, &mut state, &id);
+    for now in [sent + 61_000, sent + 600_000] {
+        super::super::loop_tick::sweep_pending_orders(&mut pipeline, &mut state, None, now);
+        assert_eq!(
+            state.pending_orders[&id].progress.status,
+            OrderStatus::Unknown
+        );
+        assert!(!pipeline
+            .exchange_submission_guard
+            .reserve("next-entry", false));
+    }
+    h1_ack(&mut pipeline, &mut state, &id);
+    assert_eq!(
+        state.pending_orders[&id].progress.status,
+        OrderStatus::Unknown
+    );
+    handle_exchange_event(
+        Some(ExchangeEvent::OrderUpdate(terminal_order_update(
+            &id, "Rejected", "",
+        ))),
+        &mut pipeline,
+        &mut writer,
+        &mut state,
+        None,
+    )
+    .await;
+    assert!(state.pending_orders.is_empty());
+    assert!(pipeline
+        .exchange_submission_guard
+        .reserve("next-entry", false));
+}
+
+#[tokio::test]
+async fn h1_fill_before_ack_cannot_regress_or_resurrect() {
+    let mut pipeline = TickPipeline::with_kind(&["BTCUSDT"], 10_000.0, PipelineKind::Demo);
+    let mut state = make_loop_state();
+    let mut writer = super::make_test_writer();
+    let (tx, mut rx) = mpsc::channel::<TradingMsg>(16);
+    let po = baseline_pending_order("market", None);
+    let id = po.order_link_id.clone();
+    h1_register(&mut pipeline, &mut state, po);
+    handle_exchange_event(
+        Some(ExchangeEvent::Fill(h1_exec(
+            &id,
+            "h1-fill-before-ack",
+            "0.01",
+            "Buy",
+        ))),
+        &mut pipeline,
+        &mut writer,
+        &mut state,
+        Some(&tx),
+    )
+    .await;
+    let (order_id, status, _) = first_order_state_change(&mut rx);
+    assert_eq!(
+        (order_id.as_str(), status.as_str()),
+        (id.as_str(), "Filled")
+    );
+    h1_ack(&mut pipeline, &mut state, &id);
+    h1_unknown(&mut pipeline, &mut state, &id);
+    assert!(state.pending_orders.is_empty());
+    assert!(!pipeline.exchange_submission_guard.blocks_entry());
+    assert!(!state.order_id_to_link.values().any(|link| link == &id));
+    assert!((pipeline.paper_state.get_position("BTCUSDT").unwrap().qty - 0.01).abs() < 1e-10);
+}
+
+#[tokio::test]
+async fn h1_partial_before_ack_and_timeout_keeps_evidence() {
+    use super::super::order_lifecycle::OrderStatus;
+    let mut pipeline = TickPipeline::with_kind(&["BTCUSDT"], 10_000.0, PipelineKind::Demo);
+    let mut state = make_loop_state();
+    let mut writer = super::make_test_writer();
+    let po = baseline_pending_order("market", None);
+    let id = po.order_link_id.clone();
+    h1_register(&mut pipeline, &mut state, po);
+    handle_exchange_event(
+        Some(ExchangeEvent::Fill(h1_exec(
+            &id,
+            "h1-partial",
+            "0.004",
+            "Buy",
+        ))),
+        &mut pipeline,
+        &mut writer,
+        &mut state,
+        None,
+    )
+    .await;
+    h1_ack(&mut pipeline, &mut state, &id);
+    h1_unknown(&mut pipeline, &mut state, &id);
+    assert_eq!(
+        state.pending_orders[&id].progress.status,
+        OrderStatus::PartiallyFilled
+    );
+    assert!((state.pending_orders[&id].cum_filled_qty - 0.004).abs() < 1e-10);
+    super::super::loop_tick::sweep_pending_orders(
+        &mut pipeline,
+        &mut state,
+        None,
+        1_700_001_000_000,
+    );
+    assert_eq!(
+        state.pending_orders[&id].progress.status,
+        OrderStatus::Unknown
+    );
+    assert!(pipeline.exchange_submission_guard.blocks_entry());
+    h1_ack(&mut pipeline, &mut state, &id);
+    assert_eq!(
+        state.pending_orders[&id].progress.status,
+        OrderStatus::Unknown
+    );
+}
+
+#[tokio::test]
+async fn h1_terminal_order_topic_waits_for_execution() {
+    use super::super::order_lifecycle::OrderStatus;
+    for (status, total, slices) in [
+        ("Filled", "0.01", vec!["0.004", "0.006"]),
+        ("Cancelled", "0.004", vec!["0.004"]),
+        ("PartiallyFilledCanceled", "0.004", vec!["0.004"]),
+    ] {
+        let mut pipeline = TickPipeline::with_kind(&["BTCUSDT"], 10_000.0, PipelineKind::Demo);
+        let mut state = make_loop_state();
+        let mut writer = super::make_test_writer();
+        let po = baseline_pending_order("market", None);
+        let id = po.order_link_id.clone();
+        h1_register(&mut pipeline, &mut state, po);
+        let mut update = terminal_order_update(&id, status, "");
+        update.cum_exec_qty = total.into();
+        handle_exchange_event(
+            Some(ExchangeEvent::OrderUpdate(update)),
+            &mut pipeline,
+            &mut writer,
+            &mut state,
+            None,
+        )
+        .await;
+        assert!(state.pending_orders[&id].progress.status.is_terminal());
+        assert!(pipeline.exchange_submission_guard.blocks_entry());
+        h1_ack(&mut pipeline, &mut state, &id);
+        assert_ne!(
+            state.pending_orders[&id].progress.status,
+            OrderStatus::Acknowledged
+        );
+        for (i, qty) in slices.iter().enumerate() {
+            handle_exchange_event(
+                Some(ExchangeEvent::Fill(h1_exec(
+                    &id,
+                    &format!("h1-{status}-{i}"),
+                    qty,
+                    "Buy",
+                ))),
+                &mut pipeline,
+                &mut writer,
+                &mut state,
+                None,
+            )
+            .await;
+            if i + 1 < slices.len() {
+                assert_eq!(
+                    state.pending_orders[&id].progress.status,
+                    OrderStatus::Filled
+                );
+            }
+        }
+        assert!(state.pending_orders.is_empty(), "{status}");
+        assert!(
+            !pipeline.exchange_submission_guard.blocks_entry(),
+            "{status}"
+        );
+        assert!(
+            (pipeline.paper_state.get_position("BTCUSDT").unwrap().qty
+                - total.parse::<f64>().unwrap())
+            .abs()
+                < 1e-10
+        );
+    }
+}
+
+#[test]
+fn h1_cancel_grace_retains_entry_and_emits_no_replacement() {
+    use super::super::order_lifecycle::OrderStatus;
+    let mut pipeline = make_test_pipeline();
+    let mut state = make_loop_state();
+    let (tx, mut rx) = mpsc::unbounded_channel();
+    pipeline.set_shadow_channel(tx);
+    let mut po = baseline_pending_order("limit", Some(TimeInForce::PostOnly));
+    let id = po.order_link_id.clone();
+    po.cancel_requested_ts_ms = Some(po.sent_ts_ms);
+    h1_register(&mut pipeline, &mut state, po);
+    super::super::loop_tick::sweep_pending_orders(
+        &mut pipeline,
+        &mut state,
+        None,
+        1_700_000_100_000,
+    );
+    assert_eq!(
+        state.pending_orders[&id].progress.status,
+        OrderStatus::Unknown
+    );
+    assert!(pipeline.exchange_submission_guard.blocks_entry());
+    assert!(rx.try_recv().is_err());
+}
+
+#[test]
+fn h1_unknown_close_maker_fallback_is_once_and_reduce_only() {
+    let mut pipeline = TickPipeline::with_kind(&["BTCUSDT"], 10_000.0, PipelineKind::Demo);
+    seed_long_position(&mut pipeline);
+    let mut state = make_loop_state();
+    let (tx, mut rx) = mpsc::unbounded_channel();
+    pipeline.set_shadow_channel(tx);
+    let mut po = close_maker_pending_order("h1-close-unknown");
+    po.cancel_requested_ts_ms = Some(po.sent_ts_ms);
+    h1_register(&mut pipeline, &mut state, po);
+    for now in [1_700_000_100_000, 1_700_000_200_000] {
+        super::super::loop_tick::sweep_pending_orders(&mut pipeline, &mut state, None, now);
+    }
+    let fallback = rx.try_recv().expect("one protective close");
+    assert!(fallback.is_close && fallback.is_primary);
+    assert_eq!(fallback.order_type, "market");
+    assert!(!fallback.is_long);
+    assert!(fallback.qty <= 0.1);
+    assert!(rx.try_recv().is_err());
+    assert!(state.pending_orders.contains_key("h1-close-unknown"));
+    assert!(pipeline.exchange_submission_guard.blocks_entry());
+    assert!(pipeline
+        .exchange_submission_guard
+        .reserve("protective-close", true));
+    assert!(!pipeline
+        .exchange_submission_guard
+        .reserve("protective-close", true));
 }

@@ -89,6 +89,25 @@ class TestPortfolioRestingExposureHealthcheck(unittest.TestCase):
         ):
             (risk_dir / name).write_text(toml_content, encoding="utf-8")
 
+    def test_h1_unconfirmed_without_price_is_warn_not_zero_exposure(self) -> None:
+        _write_snapshot(Path(self._tmp_data.name) / "pipeline_snapshot_demo.json", 10000.0, [])
+        for order_status in ("PendingSubmit", "Submitted", "Acknowledged", "Unknown"):
+            with self.subTest(order_status=order_status):
+                cur = _mock_cursor([(True, True)], [[
+                    ("h1-order", "BTCUSDT", "Buy", 0.0, 1, "ma_crossover", order_status),
+                ]])
+                status, msg = check_68_portfolio_resting_exposure(cur)
+                self.assertEqual(status, "WARN")
+                self.assertIn("UNRESOLVED", msg)
+                self.assertIn(f"{order_status}=1", msg)
+                self.assertNotIn("resting=0", msg)
+                sql, params = cur.execute.call_args.args
+                self.assertIn("LEFT JOIN latest_state", sql)
+                self.assertIn("COALESCE(ls.to_status, o.status)", sql)
+                self.assertIn("'Unknown'", sql)
+                self.assertEqual(params[0], "demo")
+                self.assertEqual(params[2], "demo")
+
     def tearDown(self) -> None:
         """還原 env + 清理 tmp dir。"""
         os.environ.clear()

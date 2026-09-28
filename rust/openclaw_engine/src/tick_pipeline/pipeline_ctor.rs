@@ -80,6 +80,7 @@ impl TickPipeline {
             endpoint_env: None,
             exchange_seq: 0,
             pending_close_symbols: std::collections::HashSet::new(),
+            exchange_submission_guard: Default::default(),
             // LG1-T3 (2026-05-11)：ctor 預設改為 shadow_mode=false（hard-block）。
             // 理由（PA tech plan §1.5 risk #1 mitigation）：
             //   - Demo / Live TOML 均已長期 `runtime.h0_shadow_mode = false`，

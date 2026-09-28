@@ -342,7 +342,7 @@ def _resting_notional_from_pg(
     SQL 設計：
       1. 從 ``order_state_changes`` 取每 ``order_id`` 最新 ``to_status``
       2. JOIN ``orders`` 拿 order_id / symbol / side / qty / price / engine_mode
-      3. 過濾 ``to_status='Working'`` AND ``engine_mode=%s``
+      3. 已確認 Working／PartiallyFilled 計算掛單；未確認狀態回報 WARN
       4. notional = qty × price（price 缺時 fallback 0，這 row 不計）
       5. lookback ts 過濾用 ``orders.ts``（避免拉 30d 全表）
     """
@@ -361,7 +361,7 @@ def _resting_notional_from_pg(
 
     try:
         # latest_state per order_id via DISTINCT ON；JOIN orders 拿 symbol/side/qty/price
-        # 過濾 engine_mode + Working + lookback。price 缺 fallback 0（不會加 notional）。
+        # 按 engine 分離狀態；未知單即使沒有 price 也必須顯示未解決。
         cur.execute(
             """
             WITH latest_state AS (
@@ -369,8 +369,13 @@ def _resting_notional_from_pg(
                     order_id,
                     to_status
                 FROM trading.order_state_changes
-                WHERE ts > NOW() - (%s::text || ' hours')::interval
-                ORDER BY order_id, ts DESC
+                WHERE engine_mode = %s AND ts > NOW() - (%s::text || ' hours')::interval
+                ORDER BY order_id, ts DESC, CASE to_status
+                    WHEN 'Filled' THEN 9 WHEN 'Cancelled' THEN 8 WHEN 'Rejected' THEN 8
+                    WHEN 'Deactivated' THEN 8 WHEN 'PartiallyFilledCanceled' THEN 8
+                    WHEN 'Unknown' THEN 7 WHEN 'PartiallyFilled' THEN 6
+                    WHEN 'Working' THEN 5 WHEN 'Acknowledged' THEN 4
+                    WHEN 'Submitted' THEN 3 ELSE 0 END DESC
             )
             SELECT
                 o.order_id,
@@ -378,15 +383,17 @@ def _resting_notional_from_pg(
                 o.side,
                 SUM(o.qty * COALESCE(o.price, 0.0))::FLOAT AS notional_sum,
                 COUNT(*)::INT AS row_count,
-                COALESCE(o.strategy_name, '') AS strategy_name
+                COALESCE(o.strategy_name, '') AS strategy_name,
+                COALESCE(ls.to_status, o.status) AS order_status
             FROM trading.orders o
-            JOIN latest_state ls ON o.order_id = ls.order_id
-            WHERE ls.to_status = 'Working'
+            LEFT JOIN latest_state ls ON o.order_id = ls.order_id
+            WHERE COALESCE(ls.to_status, o.status) IN
+                ('Working', 'PartiallyFilled', 'PendingSubmit', 'Submitted', 'Acknowledged', 'Unknown')
               AND o.engine_mode = %s
               AND o.ts > NOW() - (%s::text || ' hours')::interval
-            GROUP BY o.order_id, o.symbol, o.side, o.strategy_name
+            GROUP BY o.order_id, o.symbol, o.side, o.strategy_name, ls.to_status, o.status
             """,
-            (lookback_hours, engine, lookback_hours),
+            (engine, lookback_hours, engine, lookback_hours),
         )
         rows = cur.fetchall() or []
     except Exception as exc:  # noqa: BLE001
@@ -396,7 +403,11 @@ def _resting_notional_from_pg(
     close_risk_per_symbol: dict[str, dict[str, float]] = {}
     per_symbol_counts: dict[str, int] = {}
     close_risk_counts: dict[str, int] = {}
+    unresolved: dict[str, int] = {}
     for r in rows:
+        if len(r) >= 7 and r[6] in {"PendingSubmit", "Submitted", "Acknowledged", "Unknown"}:
+            unresolved[r[6]] = unresolved.get(r[6], 0) + int(r[4] or 1)
+            continue
         if len(r) >= 6:
             order_id, symbol, side, notional, count, strategy_name = (
                 r[0],
@@ -436,7 +447,10 @@ def _resting_notional_from_pg(
         # 其他 side（例外/未知）忽略，不污染 bucket
         count_map[symbol] = count_map.get(symbol, 0) + int(count or 0)
 
-    return (per_symbol, close_risk_per_symbol, per_symbol_counts, close_risk_counts, "ok")
+    diagnostic = "ok" if not unresolved else "unresolved_orders:" + ",".join(
+        f"{status}={count}" for status, count in sorted(unresolved.items())
+    )
+    return (per_symbol, close_risk_per_symbol, per_symbol_counts, close_risk_counts, diagnostic)
 
 
 # ============================================================
@@ -491,6 +505,11 @@ def check_68_portfolio_resting_exposure(cur) -> tuple[str, str]:
             close_risk_counts,
             resting_diag,
         ) = _resting_notional_from_pg(cur, engine, lookback_hours)
+        if resting_diag.startswith("unresolved_orders:"):
+            # 未知／未確認量不能當成零，也不能宣稱可算完整 resting exposure。
+            engine_verdicts.append("WARN")
+            engine_evidence.append(f"{engine}=UNRESOLVED({resting_diag})")
+            continue
         if resting_diag != "ok" and not resting_per_symbol and not close_risk_working_per_symbol:
             # PG 查詢失敗但 snapshot 還在 → 對該 engine WARN 帶診斷
             engine_verdicts.append("WARN")

@@ -75,6 +75,7 @@ fn test_reset_clears_all_state() {
     pending.insert(
         "order1".to_string(),
         PendingOrder {
+            progress: Default::default(),
             order_link_id: "order1".into(),
             symbol: "BTCUSDT".into(),
             is_long: true,

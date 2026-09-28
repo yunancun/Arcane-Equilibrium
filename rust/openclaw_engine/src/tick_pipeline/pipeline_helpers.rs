@@ -668,7 +668,9 @@ impl TickPipeline {
 
     /// P1-03：取得 cancel-all OrderManager handle（交易所模式有；Paper None）。
     /// loop_handlers 攔截 CancelAllOrders 命令時 clone 此 Arc 出 borrow 後 await。
-    pub fn cancel_all_order_mgr(&self) -> Option<std::sync::Arc<crate::order_manager::OrderManager>> {
+    pub fn cancel_all_order_mgr(
+        &self,
+    ) -> Option<std::sync::Arc<crate::order_manager::OrderManager>> {
         self.cancel_all_order_mgr.clone()
     }
 
@@ -708,6 +710,12 @@ impl TickPipeline {
 
     /// Phase 2a: Set channel for dispatching trading lifecycle events to PG writer.
     /// Phase 2a：設定交易生命週期事件派發通道。
+    pub(crate) fn trading_channel(
+        &self,
+    ) -> Option<tokio::sync::mpsc::Sender<crate::database::TradingMsg>> {
+        self.trading_tx.clone()
+    }
+
     pub fn set_trading_channel(
         &mut self,
         tx: tokio::sync::mpsc::Sender<crate::database::TradingMsg>,

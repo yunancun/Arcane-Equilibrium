@@ -100,6 +100,9 @@ pub(super) fn dispatch_close_maker_fallback_from_pending(
     if !fallback_reason.requires_market_fallback()
         || !po.is_close
         || po.time_in_force != Some(TimeInForce::PostOnly)
+        || po.progress.status == super::order_lifecycle::OrderStatus::Filled
+        || (po.progress.status.is_terminal()
+            && !po.progress.executions_accounted(po.cum_filled_qty))
     {
         return false;
     }
@@ -294,6 +297,7 @@ mod tests {
 
     fn close_maker_pending_for_test() -> PendingOrder {
         PendingOrder {
+            progress: Default::default(),
             order_link_id: "oc_close_maker_original".to_string(),
             symbol: "BTCUSDT".to_string(),
             is_long: false,

@@ -21,6 +21,7 @@ mod loop_handlers;
 mod loop_pending_registration;
 mod loop_pipeline_command;
 mod loop_tick;
+pub(crate) mod order_lifecycle;
 // MUST-FIX-2 Round 2 (2026-05-19/20)：halt-state restore helper 在 sibling
 // crate test（tick_pipeline::tests::halt_ttl）內被呼叫 → pub(crate) 暴露足夠，
 // 不需要 pub。

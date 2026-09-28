@@ -42,14 +42,14 @@ pub(crate) enum PendingSweepAction {
     Keep,
     /// Market legacy: soft warn (elapsed > 5s but ≤ 60s) / Market 軟警告
     LegacySoftWarn,
-    /// Market legacy: hard remove (elapsed > 60s) / Market 硬移除
-    LegacyHardRemove,
+    /// Market 終態確認逾時（>60s）；保留追蹤
+    ConfirmationTimeout,
     /// PostOnly maker: spawn REST cancel + mark in-flight (elapsed ≥ maker_timeout_ms)
     /// PostOnly 掛單超時：派發 REST 取消並標記 cancel in-flight
     MakerTimeoutCancel,
     /// PostOnly maker: cancel was already requested, but no fill/cancel ack
-    /// arrived within the grace window; remove the stale tracker row.
-    /// PostOnly 掛單已請求取消，但 grace 內無成交/取消回報；移除過期 tracker。
+    /// arrived within the grace window; retain the unresolved tracker.
+    /// PostOnly 掛單已請求取消，但 grace 內無成交/取消回報；保留未知 tracker。
     MakerCancelGraceExpired,
 }
 
@@ -79,7 +79,7 @@ pub(crate) fn classify_pending_sweep(po: &PendingOrder, now_ms: u64) -> PendingS
             PendingSweepAction::Keep
         }
     } else if elapsed_ms > 60_000 {
-        PendingSweepAction::LegacyHardRemove
+        PendingSweepAction::ConfirmationTimeout
     } else if elapsed_ms > 5000 {
         PendingSweepAction::LegacySoftWarn
     } else {
@@ -186,7 +186,7 @@ pub(crate) fn close_maker_sweep_fallback_reason(
         }
         PendingSweepAction::Keep
         | PendingSweepAction::LegacySoftWarn
-        | PendingSweepAction::LegacyHardRemove => None,
+        | PendingSweepAction::ConfirmationTimeout => None,
     }
 }
 
@@ -279,6 +279,7 @@ mod tests {
     fn make_market_pending(elapsed_ms_is_zero: bool) -> PendingOrder {
         let _ = elapsed_ms_is_zero;
         PendingOrder {
+            progress: Default::default(),
             order_link_id: "oc_market_1".into(),
             symbol: "BTCUSDT".into(),
             is_long: true,
@@ -314,6 +315,7 @@ mod tests {
 
     fn make_postonly_pending(maker_timeout_ms: Option<u64>) -> PendingOrder {
         PendingOrder {
+            progress: Default::default(),
             order_link_id: "oc_maker_1".into(),
             symbol: "ETHUSDT".into(),
             is_long: false,
@@ -382,11 +384,11 @@ mod tests {
         // 60_001ms: one ms past hard timeout → remove tracker row.
         assert_eq!(
             classify_pending_sweep(&po, 60_001),
-            PendingSweepAction::LegacyHardRemove
+            PendingSweepAction::ConfirmationTimeout
         );
         assert_eq!(
             classify_pending_sweep(&po, 90_000),
-            PendingSweepAction::LegacyHardRemove
+            PendingSweepAction::ConfirmationTimeout
         );
     }
 

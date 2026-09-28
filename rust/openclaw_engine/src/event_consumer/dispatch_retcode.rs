@@ -114,12 +114,8 @@ pub(super) enum DispatchRetryResult<T> {
 /// 因重試在兩種方向都無法救回已消失的倉位/訂單識別。
 pub(super) fn classify_dispatch_error(err: &BybitApiError) -> DispatchOutcome {
     match err {
-        // Network / HTTP / parse — assume transient and worth retry.
-        // order_link_id idempotency guarantees a retry after mid-flight parse
-        // failure on a successful response is dedup-safe (returns same order).
-        //
-        // 網路/HTTP/解析 — 視為暫時性，值得重試。成功響應的傳輸途中解析失敗
-        // 也安全：order_link_id 冪等保證重試會返回同一訂單。
+        // 網路／解析失敗代表結果未知；開倉零重試，僅 reduce-only 沿用有界預算。
+        // orderLinkId 用於識別／對帳，不代表重送必然返回同一成功結果。
         BybitApiError::Transport(_) => DispatchOutcome::Transient,
         BybitApiError::JsonParse(_) => DispatchOutcome::Transient,
 
@@ -151,29 +147,7 @@ fn classify_business_retcode(ret_code: i64, ret_msg: &str) -> DispatchOutcome {
         // Bybit 伺服器維護/過載族 — 暫時性。
         10016 | 10017 | 10018 | 10019 => DispatchOutcome::Transient,
 
-        // InvalidParam — 通常結構性。Bybit 對重複 order_link_id 也可能回
-        // 10001（泛 InvalidParam 帶 retMsg "duplicate"），與 110072（專屬重複碼）
-        // 同類。
-        //
-        // P2-ORDERLINKID-110072 follow-up（2026-06-07，E2/BB flag）：10001+duplicate
-        // 由無條件 NoOp 改為 **Structural**，與 110072 arm 對齊。為什麼：原 NoOp
-        // 把 open 與 close 都當成功，但 open 單次無重試（OPEN_NO_RETRY），撞重複
-        // order_link_id 只可能是 id 撞歷史 = 開倉未成功，絕不可靜默回報成功
-        // （silent-success 風險）。預設 Structural 保護 open path fail-closed；
-        // close retry 的冪等成功 upgrade（首次 attempt 已達 Bybit、response 丟失，
-        // retry 重發同一 id 撞此碼）在 consumption Structural 分支由
-        // close_dup_is_idempotent_success 以 is_close guard 處理（見本檔
-        // DispatchRetryResult::Structural 分支 + close_dup_is_idempotent_success，
-        // 該 helper 同時涵蓋 110072 與 10001+duplicate）。對 close 是同一 observable
-        // 成功結果（lease Consumed），無回歸。
-        //
-        // 歷史背景：E2 審查 2026-04-19 曾把 duplicate 子串匹配從
-        // {"duplicate", "order_link_id"} 收窄為僅 {"duplicate"}，以避免
-        // "invalid order_link_id format"（結構性 client 格式錯）被誤判。follow-up
-        // 後 duplicate 與非-duplicate 的 10001 同歸 Structural，故 classify 層
-        // 不再需要區分子串；duplicate 的偵測下移到 consumption 層的
-        // close_dup_is_idempotent_success（僅該處需要 close+duplicate 的細分以
-        // upgrade 成冪等成功）。retMsg 在此 arm 不再被讀。
+        // InvalidParam 的 duplicate 訊息仍禁止重試；dispatch 另將其保留為未知。
         10001 => DispatchOutcome::Structural,
 
         // 10002 — InvalidRequest / recv_window.
@@ -245,16 +219,7 @@ fn classify_business_retcode(ret_code: i64, ret_msg: &str) -> DispatchOutcome {
         // 槓桿未修改 = 已為目標值。
         110043 => DispatchOutcome::NoOp,
 
-        // 110072 OrderLinkedID is duplicate — Bybit 專屬「重複 orderLinkId」碼。
-        // 預設 Structural（fail-closed）保護 OPEN path：open 單次無重試（OPEN_NO_RETRY），
-        // 撞 110072 只可能是 id 撞歷史 = 開倉未成功，絕不可當成功。
-        // close retry 場景（首次 attempt 已成功但 response 丟失、retry 重發同一 id 撞此碼）
-        // 的冪等成功 upgrade 在 consumption Structural 分支以 is_close guard 處理
-        // （見本檔 DispatchRetryResult::Structural 分支 + close_dup_is_idempotent_success）。
-        // 與 110017 不同：110072 **不**觸發本地倉收斂，只把 lease 釋放為 Consumed。
-        // BB 2026-06-06 APPROVE-WITH-MANDATORY-GUARD：docs/CCAgentWorkSpace/BB/workspace/reports/
-        // 內 110072 報告。語意上與舊 `_ => Structural` 對 110072 相同，顯式化讓
-        // classify test 可錨定 + 可發現。
+        // 重複 orderLinkId 禁止無條件重送；原單結果由 WS／對帳確認。
         110072 => DispatchOutcome::Structural,
 
         // Dust / min qty / exceed max qty — structural.
@@ -295,36 +260,6 @@ pub(super) fn noop_is_exchange_zero_position(err: &BybitApiError) -> bool {
 pub(super) fn noop_is_reduce_only_close(req: &OrderDispatchRequest) -> bool {
     // is_close==true 在 create_req 對應 reduce_only=Some(true)；二者語意綁定。
     req.is_close
-}
-
-/// P2-ORDERLINKID-110072（+ 2026-06-07 follow-up）：判斷此 Structural 結果是否為
-/// 「close 重發撞重複 order_link_id」= 冪等成功（首次 close attempt 已達 Bybit、
-/// response 丟失，retry 重發同一 id 撞此碼）。
-///
-/// 涵蓋兩個 duplicate retCode（皆為「重複 order_link_id」同類）：
-///   - 110072：Bybit 專屬「OrderLinkedID is duplicate」碼。
-///   - 10001 + retMsg contains "duplicate"：泛 InvalidParam 帶 duplicate 訊息。
-///     需顯式比對 retMsg；非-duplicate 的 10001（如 "invalid order_link_id
-///     format"、"qty must be > 0"）為真結構性錯誤，**不**屬冪等成功。
-///
-/// 僅 close intent 成立（req.is_close）；open path 維持 fail-closed——open 單次
-/// 無重試（OPEN_NO_RETRY），撞重複 order_link_id 只可能是 id 撞歷史 = 開倉未成功，
-/// 絕不可當成功（BB 2026-06-06 MANDATORY guard；110072 與 10001+duplicate 同此語意）。
-/// 注意：兩碼皆 **不**觸發本地倉收斂——不加入 noop_is_exchange_zero_position；
-/// 此處只把 lease 釋放為 Consumed（成功），倉位真相由首次成功 attempt 的
-/// WS fill / position update 自然回填。
-pub(super) fn close_dup_is_idempotent_success(
-    req: &OrderDispatchRequest,
-    err: &BybitApiError,
-) -> bool {
-    req.is_close
-        && match err {
-            BybitApiError::Business { ret_code, .. } if *ret_code == 110072 => true,
-            BybitApiError::Business {
-                ret_code, ret_msg, ..
-            } if *ret_code == 10001 => ret_msg.to_ascii_lowercase().contains("duplicate"),
-            _ => false,
-        }
 }
 
 pub(super) fn close_dispatch_timeout_error(timeout_ms: u64) -> BybitApiError {

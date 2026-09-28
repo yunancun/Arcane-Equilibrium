@@ -39,6 +39,7 @@ use super::make_test_writer;
 /// 此單，從而把 `is_close=true` 帶入 apply_fill 鏈。
 fn close_pending_order(symbol: &str, is_long: bool, qty: f64) -> PendingOrder {
     PendingOrder {
+        progress: Default::default(),
         order_link_id: format!("oc_close_{symbol}"),
         symbol: symbol.into(),
         is_long,
@@ -103,9 +104,15 @@ fn close_fill(symbol: &str, exec_id: &str, side: &str, qty: f64, price: f64) -> 
 /// 在 paper_state 開一個 genuine short（execution 流 genuine open，is_close=false）。
 /// 直接用 apply_fill（薄包裝，is_close=false）模擬入場成交已落帳。
 fn seed_short(pipeline: &mut TickPipeline, symbol: &str, qty: f64, entry: f64) {
-    pipeline
-        .paper_state
-        .apply_fill(symbol, false, qty, entry, 0.0, 1_700_000_000_000, "grid_short");
+    pipeline.paper_state.apply_fill(
+        symbol,
+        false,
+        qty,
+        entry,
+        0.0,
+        1_700_000_000_000,
+        "grid_short",
+    );
     assert_eq!(
         pipeline.paper_state.position_count(),
         1,
@@ -363,9 +370,9 @@ async fn g3b_reduce_only_noop_is_mode_agnostic() {
         pipeline.set_endpoint_env(env);
         let label = pipeline.effective_engine_mode();
         // 本地無倉時的 reduce-only 平倉成交（直接驗 PaperState mutating entry）。
-        let pnl = pipeline.paper_state.apply_fill_with_close_semantics(
-            "TONUSDT", true, 437.3, 1.5744, 0.0, 0, "grid", true,
-        );
+        let pnl = pipeline
+            .paper_state
+            .apply_fill_with_close_semantics("TONUSDT", true, 437.3, 1.5744, 0.0, 0, "grid", true);
         assert_eq!(
             pipeline.paper_state.position_count(),
             0,
@@ -411,7 +418,9 @@ async fn g4_partial_close_fills_thread_is_close_each_execution() {
 
     // 第 1 筆：Buy 40 → short 剩 60（reduce-only 減倉）。
     handle_exchange_event(
-        Some(ExchangeEvent::Fill(close_fill(symbol, "exec-p1", "Buy", 40.0, 1.5))),
+        Some(ExchangeEvent::Fill(close_fill(
+            symbol, "exec-p1", "Buy", 40.0, 1.5,
+        ))),
         &mut pipeline,
         &mut writer,
         &mut state,
@@ -433,7 +442,9 @@ async fn g4_partial_close_fills_thread_is_close_each_execution() {
 
     // 第 2 筆：Buy 40 → short 剩 20。
     handle_exchange_event(
-        Some(ExchangeEvent::Fill(close_fill(symbol, "exec-p2", "Buy", 40.0, 1.5))),
+        Some(ExchangeEvent::Fill(close_fill(
+            symbol, "exec-p2", "Buy", 40.0, 1.5,
+        ))),
         &mut pipeline,
         &mut writer,
         &mut state,
@@ -451,7 +462,9 @@ async fn g4_partial_close_fills_thread_is_close_each_execution() {
     // 第 3 筆（尾筆）：Buy 40，但只剩 20 short → 平掉剩 20，overflow=20。
     // ★ is_close=true（reduce-only）→ overflow **不反開**，歸 flat。
     handle_exchange_event(
-        Some(ExchangeEvent::Fill(close_fill(symbol, "exec-p3", "Buy", 40.0, 1.5))),
+        Some(ExchangeEvent::Fill(close_fill(
+            symbol, "exec-p3", "Buy", 40.0, 1.5,
+        ))),
         &mut pipeline,
         &mut writer,
         &mut state,
@@ -502,7 +515,13 @@ async fn g4b_genuine_flip_overflow_opens_reverse_when_not_close() {
     state.pending_orders.insert(link_id.clone(), po);
 
     handle_exchange_event(
-        Some(ExchangeEvent::Fill(close_fill(symbol, "exec-flip", "Buy", 150.0, 1.5))),
+        Some(ExchangeEvent::Fill(close_fill(
+            symbol,
+            "exec-flip",
+            "Buy",
+            150.0,
+            1.5,
+        ))),
         &mut pipeline,
         &mut writer,
         &mut state,

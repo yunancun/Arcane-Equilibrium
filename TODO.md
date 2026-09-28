@@ -502,3 +502,17 @@ E2 原始 UNVERIFIED 記錄保留；Operator 允許僅依既有 E4 證據補結�
 停用措施仍有效，完整 native 入口工程已歸檔，不再是 WAITING 後續施工。
 原測試／review 證據見 [已關閉總帳](docs/archive/2026-09-25--workflow-todo-closed.md)；
 不把歷史結果當本次重跑，也不宣稱 host enforcement 或實測效率完成。
+
+
+## Bybit H1 本機修復候選（2026-09-28）
+
+`H1-ORDER-STATE-TRUTH = SOURCE_FIXED_LOCAL_TESTED_NOT_ADOPTED`。
+Operator 明確指定 H1 後，在 `codex/bybit-h1-order-state` 隔離 worktree 修正
+送出前註冊、REST ACK／WS 狀態、未知結果保留、entry 阻擋及 reduce-only 保護邊界，
+並對齊兩個直接讀取訂單狀態的唯讀健康檢查。
+本機 H1 專項 13、Python 消費者 57、Rust library 4,896 項通過；
+原修復報告與完整 log 保留於 workspace audits/2026-09-28-bybit-h1-repair。
+獨立 E2/E4 未執行；廣域 integration 的 2 個 RRC1、9 個 stress failure 均已在乾淨基準重現。
+本列不是 merge／部署／broker 或 W11 派發權，H2 durable recovery 未啟動；
+本節記錄本機修復階段；source 發佈、合併及採用另以 exact-head PR／同步證據判定，
+`next_action=null`。

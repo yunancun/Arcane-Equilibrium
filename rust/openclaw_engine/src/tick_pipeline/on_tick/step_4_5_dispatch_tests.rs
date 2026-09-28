@@ -1513,3 +1513,38 @@ fn e5_1_gate_false_dormant_declarer_yields_none_despite_injected_slot() {
         "gate=FALSE（無 active LiquidationCascade declare 者）應為 None，實測 observations={seen:?}"
     );
 }
+
+#[test]
+fn h1_unresolved_order_blocks_actual_pipeline_open_and_rolls_back_strategy() {
+    with_soak_flag(None, || {
+        let dir = tempfile::TempDir::new().unwrap();
+        let mut h = soak_harness(crate::tick_pipeline::PipelineKind::Demo, &dir, None);
+        h.pipeline
+            .exchange_submission_guard
+            .track("old-unresolved-order");
+        soak_warm_then_tick(&mut h);
+        assert!(h.order_rx.try_recv().is_err());
+        assert_eq!(h.pipeline.exchange_seq, 0);
+        assert!(h
+            .rejections
+            .lock()
+            .unwrap()
+            .iter()
+            .any(|r| r == "exchange_order_unresolved"));
+        h.pipeline
+            .exchange_submission_guard
+            .resolve("old-unresolved-order");
+        h.rejections.lock().unwrap().clear();
+        let _ = h.pipeline.on_replay_tick(&PriceEvent::new(
+            "ETHUSDT".into(),
+            3_001.0,
+            SOAK_TEST_TS_MS + 60_000,
+        ));
+        assert!(!h
+            .rejections
+            .lock()
+            .unwrap()
+            .iter()
+            .any(|r| r == "exchange_order_unresolved"));
+    });
+}

@@ -120,78 +120,6 @@ fn test_close_maker_fallback_market_preflight_failure_emits_terminal_event() {
 }
 
 #[test]
-fn test_close_dup_is_idempotent_success_close_110072_true() {
-    // close req（is_close=true）+ 110072 → 冪等成功（首次 close attempt 已達
-    // Bybit、response 丟失，retry 重發同一 order_link_id 撞此碼）。
-    let req = close_dispatch_req_for_zero(true, true, 0.0);
-    let err = biz(110072, "OrderLinkedID is duplicate");
-    assert!(
-        close_dup_is_idempotent_success(&req, &err),
-        "close + 110072 應判為冪等成功"
-    );
-}
-
-#[test]
-fn test_close_dup_is_idempotent_success_open_110072_false() {
-    // BB MANDATORY guard 關鍵測試：open req（is_close=false）+ 110072 → false。
-    // open 單次無重試（OPEN_NO_RETRY），撞 110072 只可能是 id 撞歷史 = 開倉
-    // 未成功，絕不可當成功（會掩蓋未開倉的真相）。
-    // 對抗驗證：若 close_dup_is_idempotent_success 拿掉 `req.is_close` guard，
-    // 此測試應 FAIL（open 110072 會被誤判為成功）——證明 is_close guard 是
-    // open path fail-closed 的有效屏障。
-    let req = close_dispatch_req_for_zero(true, false, 0.0); // is_close=false (open)
-    let err = biz(110072, "OrderLinkedID is duplicate");
-    assert!(
-        !close_dup_is_idempotent_success(&req, &err),
-        "open + 110072 絕不可當成功（id 撞歷史 = 開倉未成功）"
-    );
-}
-
-#[test]
-fn test_close_dup_is_idempotent_success_other_retcode_false() {
-    // close req + 其他業務碼（如 110001 或 110009）→ false。僅 110072 觸發此冪等路徑；
-    // 110001 走既有 NoOp；110009 為 stop-order limit Structural，不走冪等 upgrade。
-    let req = close_dispatch_req_for_zero(true, true, 0.0);
-    assert!(
-        !close_dup_is_idempotent_success(&req, &biz(110001, "order not exists")),
-        "close + 110001 不是 110072 冪等成功"
-    );
-    assert!(
-        !close_dup_is_idempotent_success(
-            &req,
-            &biz(
-                110009,
-                "The number of stop orders exceeds the maximum allowable limit"
-            )
-        ),
-        "close + 110009 是 stop-order limit failure，不是 110072 冪等成功"
-    );
-    assert!(
-        !close_dup_is_idempotent_success(&req, &biz(110012, "insufficient available balance")),
-        "close + 110012 不是 110072 冪等成功"
-    );
-}
-
-#[test]
-fn test_close_dup_is_idempotent_success_non_business_error_false() {
-    // close req + 非 Business err（如 NoCredentials / Other client-side fault）
-    // → false。冪等 upgrade 僅認 Bybit Business retCode 110072；非交易所回應的
-    // client 端錯誤（配置/分頁不變式違反）維持 fail-closed。
-    let req = close_dispatch_req_for_zero(true, true, 0.0);
-    assert!(
-        !close_dup_is_idempotent_success(&req, &BybitApiError::NoCredentials),
-        "close + NoCredentials 不是 110072 冪等成功"
-    );
-    assert!(
-        !close_dup_is_idempotent_success(
-            &req,
-            &BybitApiError::Other("pagination cursor stalled".into())
-        ),
-        "close + Other(client-side) 不是 110072 冪等成功"
-    );
-}
-
-#[test]
 fn test_110072_does_not_trigger_local_position_convergence() {
     // BB MANDATORY guard：110072 與 110017 不同，**不**觸發本地倉收斂。
     // 鎖定 noop_is_exchange_zero_position 對 110072 回 false（110072 絕不可
@@ -199,57 +127,6 @@ fn test_110072_does_not_trigger_local_position_convergence() {
     assert!(
         !noop_is_exchange_zero_position(&biz(110072, "OrderLinkedID is duplicate")),
         "110072 must NOT trigger ExchangeZeroClose local convergence (only 110017 converges)"
-    );
-}
-
-// ── 2026-06-07 follow-up（E2/BB flag）：close_dup_is_idempotent_success 擴
-// 涵蓋 10001+duplicate（與 110072 同類「重複 order_link_id」）──
-
-#[test]
-fn test_close_dup_is_idempotent_success_close_10001_duplicate_true() {
-    // close req（is_close=true）+ 10001+"duplicate" → 冪等成功。與 110072 同類：
-    // 首次 close attempt 已達 Bybit、response 丟失，retry 重發同一 id 撞此泛碼。
-    let req = close_dispatch_req_for_zero(true, true, 0.0);
-    let err = biz(10001, "duplicate order_link_id rejected");
-    assert!(
-        close_dup_is_idempotent_success(&req, &err),
-        "close + 10001+duplicate 應判為冪等成功"
-    );
-    // 大小寫不敏感（helper 用 to_ascii_lowercase）：uppercase 變體同樣 true。
-    let err_upper = biz(10001, "Duplicate orderLinkId rejected");
-    assert!(
-        close_dup_is_idempotent_success(&req, &err_upper),
-        "close + 10001+Duplicate（大寫）應判為冪等成功"
-    );
-}
-
-#[test]
-fn test_close_dup_is_idempotent_success_open_10001_duplicate_false() {
-    // **open path fail-closed 關鍵測試**：open req（is_close=false）+ 10001+duplicate
-    // → false。open 單次無重試（OPEN_NO_RETRY），撞重複 order_link_id 只可能是
-    // id 撞歷史 = 開倉未成功，絕不可當成功（這正是 follow-up 收斂的 silent-success
-    // 漏洞）。對抗驗證：若 helper 拿掉 `req.is_close` guard，此測試應 FAIL。
-    let req = close_dispatch_req_for_zero(true, false, 0.0); // is_close=false (open)
-    let err = biz(10001, "duplicate order_link_id rejected");
-    assert!(
-        !close_dup_is_idempotent_success(&req, &err),
-        "open + 10001+duplicate 絕不可當成功（id 撞歷史 = 開倉未成功）"
-    );
-}
-
-#[test]
-fn test_close_dup_is_idempotent_success_close_10001_non_duplicate_false() {
-    // close req + 10001 但 retMsg **不含** "duplicate"（真結構性錯誤，如格式錯/
-    // qty 非法）→ false。verifies helper 對 10001 仍需 retMsg 比對，不把所有
-    // 10001 當冪等成功（否則會掩蓋真正壞掉的 close 請求）。
-    let req = close_dispatch_req_for_zero(true, true, 0.0);
-    assert!(
-        !close_dup_is_idempotent_success(&req, &biz(10001, "invalid order_link_id format")),
-        "close + 10001+非duplicate（格式錯）不是冪等成功"
-    );
-    assert!(
-        !close_dup_is_idempotent_success(&req, &biz(10001, "invalid param: qty must be > 0")),
-        "close + 10001+非duplicate（qty 非法）不是冪等成功"
     );
 }
 
@@ -424,4 +301,72 @@ fn test_send_exchange_zero_close_emits_only_on_qty_zero_full_close() {
         rx1.try_recv().is_err(),
         "qty>0 partial close must NOT converge"
     );
+}
+
+#[tokio::test]
+async fn h1_open_timeout_is_one_attempt_and_emits_only_unknown() {
+    let mut req = close_maker_dispatch_req("market", None, None);
+    req.is_close = false;
+    let (tx, mut rx) = mpsc::unbounded_channel();
+    let mut calls = 0;
+    let result: DispatchRetryResult<()> = run_dispatch_retry(
+        dispatch_retry_delays_for_intent(false),
+        &req.symbol,
+        &req.order_link_id,
+        |_| {
+            calls += 1;
+            std::future::ready(Err(close_dispatch_timeout_error(500)))
+        },
+    )
+    .await;
+    let DispatchRetryResult::TransientExhausted { attempts, .. } = result else {
+        panic!("must stay unresolved");
+    };
+    assert_eq!((calls, attempts), (1, 1));
+    send_submission_unknown(&tx, &req, "dispatch_transient_exhausted".into());
+    assert!(matches!(
+        rx.try_recv(),
+        Ok(PendingOrderEvent::SubmissionUnknown { .. })
+    ));
+    assert!(
+        rx.try_recv().is_err(),
+        "no terminal failure or lease release"
+    );
+}
+
+#[tokio::test]
+async fn h1_close_timeout_has_only_three_attempts() {
+    let mut calls = 0;
+    let result: DispatchRetryResult<()> = run_dispatch_retry(
+        dispatch_retry_delays_for_intent(true),
+        "BTCUSDT",
+        "same-close-id",
+        |_| {
+            calls += 1;
+            std::future::ready(Err(close_dispatch_timeout_error(500)))
+        },
+    )
+    .await;
+    assert!(matches!(
+        result,
+        DispatchRetryResult::TransientExhausted { attempts: 3, .. }
+    ));
+    assert_eq!(calls, 3);
+}
+
+#[test]
+fn h1_duplicate_or_prior_timeout_cannot_be_definitive_rejection() {
+    let duplicate = BybitApiError::Business {
+        ret_code: 110072,
+        ret_msg: "duplicate".into(),
+        response: serde_json::json!({}),
+    };
+    let reject = BybitApiError::Business {
+        ret_code: 10001,
+        ret_msg: "invalid qty".into(),
+        response: serde_json::json!({}),
+    };
+    assert!(submission_may_exist_after_error(&duplicate, 1));
+    assert!(submission_may_exist_after_error(&reject, 2));
+    assert!(!submission_may_exist_after_error(&reject, 1));
 }
