@@ -1,5 +1,132 @@
 // Included beside the pending-registration fixtures; exercises real sweep/WS paths.
 #[tokio::test]
+async fn h1_reconciliation_slow_order_does_not_block_another_order() {
+    use std::sync::Arc;
+    let slow_release = Arc::new(tokio::sync::Notify::new());
+    let (started_tx, mut started_rx) = tokio::sync::mpsc::unbounded_channel();
+    let release = slow_release.clone();
+    let (reconciler, mut rx) = super::super::dcp_reconciliation::DcpReconciler::fixture_with_fetch(
+        Arc::new(move |_, params| {
+            let id = params
+                .iter()
+                .find(|(k, _)| k == "orderLinkId")
+                .unwrap()
+                .1
+                .clone();
+            let release = release.clone();
+            let started = started_tx.clone();
+            Box::pin(async move {
+                started.send(id.clone()).unwrap();
+                if id == "slow" {
+                    release.notified().await;
+                }
+                Ok(
+                    serde_json::json!({"list":[{"orderId":format!("venue-{id}"),"orderLinkId":id,"symbol":"BTCUSDT","side":"Buy","orderStatus":"Cancelled","cumExecQty":"0"}]}),
+                )
+            })
+        }),
+    );
+    let mut slow = baseline_pending_order("market", None);
+    slow.order_link_id = "slow".into();
+    let mut fast = slow.clone();
+    fast.order_link_id = "fast".into();
+    reconciler.schedule(&[slow, fast]);
+    let _ = tokio::time::timeout(std::time::Duration::from_secs(1), started_rx.recv())
+        .await
+        .unwrap();
+    let event = tokio::time::timeout(std::time::Duration::from_secs(1), rx.recv())
+        .await
+        .expect("fast order must reconcile while the first REST read is blocked")
+        .unwrap();
+    assert!(matches!(event, ExchangeEvent::OrderUpdate(o) if o.order_link_id == "fast"));
+    slow_release.notify_one();
+    let event = tokio::time::timeout(std::time::Duration::from_secs(1), rx.recv())
+        .await
+        .unwrap()
+        .unwrap();
+    assert!(matches!(event, ExchangeEvent::OrderUpdate(o) if o.order_link_id == "slow"));
+}
+
+#[tokio::test]
+async fn h1_reconciliation_concurrency_is_bounded_across_schedule_calls() {
+    use std::sync::{
+        atomic::{AtomicUsize, Ordering},
+        Arc,
+    };
+    let release = Arc::new(tokio::sync::Semaphore::new(0));
+    let running = Arc::new(AtomicUsize::new(0));
+    let maximum = Arc::new(AtomicUsize::new(0));
+    let (started_tx, mut started_rx) = tokio::sync::mpsc::unbounded_channel();
+    let gate = release.clone();
+    let active = running.clone();
+    let high = maximum.clone();
+    let (reconciler, mut rx) = super::super::dcp_reconciliation::DcpReconciler::fixture_with_fetch(
+        Arc::new(move |_, params| {
+            let id = params
+                .iter()
+                .find(|(k, _)| k == "orderLinkId")
+                .unwrap()
+                .1
+                .clone();
+            let gate = gate.clone();
+            let active = active.clone();
+            let high = high.clone();
+            let started = started_tx.clone();
+            Box::pin(async move {
+                let n = active.fetch_add(1, Ordering::SeqCst) + 1;
+                high.fetch_max(n, Ordering::SeqCst);
+                started.send(id.clone()).unwrap();
+                gate.acquire().await.unwrap().forget();
+                active.fetch_sub(1, Ordering::SeqCst);
+                Ok(
+                    serde_json::json!({"list":[{"orderId":format!("venue-{id}"),"orderLinkId":id,"symbol":"BTCUSDT","side":"Buy","orderStatus":"Cancelled","cumExecQty":"0"}]}),
+                )
+            })
+        }),
+    );
+    let orders: Vec<_> = (0..8)
+        .map(|i| {
+            let mut po = baseline_pending_order("market", None);
+            po.order_link_id = format!("bounded-{i}");
+            po
+        })
+        .collect();
+    reconciler.schedule(&orders[..4]);
+    reconciler.schedule(&orders); // Repeated IDs must not create duplicate work.
+    for _ in 0..4 {
+        tokio::time::timeout(std::time::Duration::from_secs(1), started_rx.recv())
+            .await
+            .expect("four orders should make progress concurrently")
+            .unwrap();
+    }
+    assert!(
+        tokio::time::timeout(std::time::Duration::from_millis(50), started_rx.recv())
+            .await
+            .is_err(),
+        "multiple schedule calls must share the four-order cap"
+    );
+    assert_eq!(maximum.load(Ordering::SeqCst), 4);
+    release.add_permits(8);
+    let mut completed = std::collections::HashSet::new();
+    for _ in 0..8 {
+        let event = tokio::time::timeout(std::time::Duration::from_secs(1), rx.recv())
+            .await
+            .unwrap()
+            .unwrap();
+        let ExchangeEvent::OrderUpdate(order) = event else {
+            panic!("expected terminal order evidence")
+        };
+        assert!(
+            completed.insert(order.order_link_id),
+            "one completion per order"
+        );
+    }
+    assert_eq!(maximum.load(Ordering::SeqCst), 4);
+    assert_eq!(running.load(Ordering::SeqCst), 0);
+    assert!(reconciler.is_idle());
+}
+
+#[tokio::test]
 async fn h1_fill_carries_registration_identity_despite_venue_clock_skew() {
     let mut pipeline = TickPipeline::with_kind(&["BTCUSDT"], 10_000.0, PipelineKind::Demo);
     let (tx, mut rx) = tokio::sync::mpsc::channel::<TradingMsg>(8);

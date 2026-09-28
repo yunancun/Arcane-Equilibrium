@@ -5,7 +5,9 @@ use crate::bybit_private_ws::{ExecutionUpdate, OrderUpdate};
 use crate::bybit_rest_client::BybitRestClient;
 use serde_json::Value;
 use std::{collections::HashSet, future::Future, pin::Pin, sync::Arc, time::Duration};
-use tokio::sync::mpsc;
+use tokio::sync::{mpsc, Semaphore};
+
+const MAX_CONCURRENT_ORDERS: usize = 4;
 
 type Params = Vec<(String, String)>;
 type Fetch = Arc<
@@ -18,6 +20,7 @@ pub(super) struct DcpReconciler {
     fetch: Fetch,
     tx: mpsc::UnboundedSender<ExchangeEvent>,
     in_flight: Arc<parking_lot::Mutex<HashSet<String>>>,
+    slots: Arc<Semaphore>,
 }
 
 impl DcpReconciler {
@@ -43,6 +46,7 @@ impl DcpReconciler {
             fetch,
             tx,
             in_flight: Default::default(),
+            slots: Arc::new(Semaphore::new(MAX_CONCURRENT_ORDERS)),
         }
     }
 
@@ -55,11 +59,18 @@ impl DcpReconciler {
         if work.is_empty() {
             return;
         }
-        let fetch = self.fetch.clone();
-        let tx = self.tx.clone();
-        let in_flight = self.in_flight.clone();
-        tokio::spawn(async move {
-            for po in work {
+        // A stalled REST read consumes one slot, not the whole pending batch.
+        // The shared semaphore caps work across disconnect/timer schedule calls.
+        for po in work {
+            let fetch = self.fetch.clone();
+            let tx = self.tx.clone();
+            let in_flight = self.in_flight.clone();
+            let slots = self.slots.clone();
+            tokio::spawn(async move {
+                let Ok(_permit) = slots.acquire_owned().await else {
+                    in_flight.lock().remove(&po.order_link_id);
+                    return;
+                };
                 let mut resolved = false;
                 for delay in [0, 250, 1000] {
                     if tx.is_closed() {
@@ -90,8 +101,8 @@ impl DcpReconciler {
                     tracing::error!(order_link_id=%po.order_link_id, "Order reconciliation exhausted; keeping order unresolved");
                 }
                 in_flight.lock().remove(&po.order_link_id);
-            }
-        });
+            });
+        }
     }
 
     #[cfg(test)]
@@ -119,12 +130,20 @@ impl DcpReconciler {
                 .ok_or_else(|| "fixture exhausted".into());
             Box::pin(std::future::ready(response))
         });
+        Self::fixture_with_fetch(fetch)
+    }
+
+    #[cfg(test)]
+    pub(super) fn fixture_with_fetch(
+        fetch: Fetch,
+    ) -> (Self, mpsc::UnboundedReceiver<ExchangeEvent>) {
         let (tx, rx) = mpsc::unbounded_channel();
         (
             Self {
                 fetch,
                 tx,
                 in_flight: Default::default(),
+                slots: Arc::new(Semaphore::new(MAX_CONCURRENT_ORDERS)),
             },
             rx,
         )

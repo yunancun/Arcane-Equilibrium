@@ -542,6 +542,9 @@ entry guard 僅攔風險增加開倉；在 Approved／intent／lineage 寫入前
 非同步 dispatcher 僅可交接一次，避免第二筆排隊開倉被靜默丟棄後殘留本機狀態；
 本機 preflight／channel 失敗釋放提交資格，同 ID 重送不終止原單。
 本輪 H1 專項 35、Rust library 4,918 與 strict library Clippy 通過。
+最後對帳排程修補：不同訂單獨立執行，以跨批次共用 semaphore 限制最多四筆並行，
+慢單不再阻塞整批；每單重試／逾時、冷卻及防重複規則不變。
+兩項並行回歸先 RED 再 GREEN；H1 專項 37、Rust library 4,920、strict Clippy 通過。
 review 4125282489 要求一般重啟後重建未確認訂單與 entry guard，屬原報告 H2，
 依本 session 僅 H1 指示明列為尚未實作的限制；本修復不宣稱重啟後仍有提交阻擋保證。
 追加 scope 的 current-head review、merge 與 Mac/GitHub 同步以 workspace publication artifacts 收口；Linux 依 Operator 指示略過。
