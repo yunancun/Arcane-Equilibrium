@@ -287,6 +287,7 @@ pub(super) async fn handle_exchange_event(
                         // PHANTOM-FILL-FIX-1（PA T2/T3）：透傳這筆成交是否為 reduce-only/平倉。
                         // reduce-only fill 在本地無倉時 no-op（不開幻影倉，§4.3）。
                         po.is_close,
+                        Some(po.sent_ts_ms),
                     );
                     // Commit dedup only after validated execution accounting.
                     po.cum_filled_qty += exec_qty;

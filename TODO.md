@@ -530,9 +530,14 @@ reprice 舊單在 cancel grace 後執行有界對帳（含終態但缺 execution
 WS execution 必填數值／身分驗證後才套用成交並登記 dedup，異常資料不阻斷有效 REST 重播。
 新增測試先重現缺口再通過；H1 專項 30、Rust library 4,913 與 strict library Clippy 通過。
 最後追加 H1 消費者修補：首次 duplicate ID 明確拒單，只有實際先前 transport ambiguity 才保留 Unknown；
-投影按註冊序號與訂單時間區間區分重用 ID，避免歷史 Filled／fills 污染新單。
+狀態投影按註冊序號區分重用 ID，成交持久化 order_registered_ts_ms 並按此精確歸屬，
+避免 venue 時鐘偏差或歷史 Filled／fills 污染新單；歸屬不明的重用 ID 歷史成交不猜配。
 FlashDip pending-cap 恢復與兩個健康檢查共用 public.order_events 投影；隔離 PG 重現後修復，
 Python 60 項與 migration guards 通過；完整 Timescale／compressed-history 契約由本 head CI 驗證。
+最末成交歸屬修補再驗證：H1 專項 31、Rust library 4,914、Python 60 項通過；
+成交時鐘倒序與缺失／畸形 registration metadata 均有回歸覆蓋。
+review 4125282489 要求一般重啟後重建未確認訂單與 entry guard，屬原報告 H2，
+依本 session 僅 H1 指示明列為尚未實作的限制；本修復不宣稱重啟後仍有提交阻擋保證。
 追加 scope 的 current-head review、merge 與 Mac/GitHub 同步以 workspace publication artifacts 收口；Linux 依 Operator 指示略過。
 本節記錄本機修復階段；source 發佈、合併及採用另以 exact-head PR／同步證據判定，
 `next_action=null`。

@@ -682,6 +682,7 @@ impl TickPipeline {
             exchange_exec_id,
             None,
             is_close,
+            None,
         );
     }
 
@@ -716,6 +717,7 @@ impl TickPipeline {
         exchange_exec_id: Option<&str>,
         close_maker_audit: Option<CloseMakerFillAudit>,
         is_close: bool,
+        order_registered_ts_ms: Option<u64>,
     ) {
         // EDGE-P3-1 R2 + V083-FIX-1（2026-05-11）：apply_fill 前先捕獲 was_open
         // 與 existing entry_context_id；close fill 走 helper 拿 well-formed id
@@ -834,7 +836,7 @@ impl TickPipeline {
             } else {
                 (strategy.to_string(), None)
             };
-            let close_maker_details = close_maker_audit.as_ref().map(|audit| {
+            let mut fill_details = close_maker_audit.as_ref().map(|audit| {
                 serde_json::json!({
                     "close_initial_limit_price": audit.initial_limit_price,
                     "close_final_fill_price": fill_price,
@@ -843,6 +845,12 @@ impl TickPipeline {
                     "rate_limit_scope": audit.rate_limit_scope,
                 })
             });
+            // Persist the matched local registration identity separately from
+            // venue execution time, whose clock can precede a reused order ID.
+            if let Some(registered_ts_ms) = order_registered_ts_ms {
+                let details = fill_details.get_or_insert_with(|| serde_json::json!({}));
+                details["order_registered_ts_ms"] = serde_json::json!(registered_ts_ms);
+            }
             let close_maker_attempt = close_maker_audit.is_some();
             let close_maker_fallback_reason = close_maker_audit
                 .as_ref()
@@ -881,7 +889,7 @@ impl TickPipeline {
                     // V094: close-maker audit is present only for actual
                     // maker-first close attempts; market closes keep cold defaults.
                     // V094：僅實際 maker-first close 嘗試帶審計；market close 保持冷預設。
-                    details: close_maker_details,
+                    details: fill_details,
                     close_maker_attempt,
                     close_maker_fallback_reason,
                     // V145：maker adverse-selection markout。loop_exchange.rs 已按

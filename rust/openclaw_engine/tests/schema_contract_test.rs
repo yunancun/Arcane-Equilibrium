@@ -1120,8 +1120,23 @@ async fn contract_h1_reused_id_keeps_order_incarnations_separate() {
             .bind(id).bind(event_hours).bind(4-hours).bind(status).bind(qty as f32).execute(&mut *tx).await.unwrap();
     }
     for (hours, qty, price) in [(3, 1.0, 100.0), (1, 0.25, 200.0)] {
-        sqlx::query("INSERT INTO trading.fills(ts,fill_id,order_id,symbol,side,qty,price,engine_mode) VALUES(NOW()-$1::INT*interval '1 hour'+interval '1 minute',$2,$3,'BTCUSDT','Buy',$4,$5,'demo')")
+        // Both executions have the old venue timestamp; registration identity
+        // must still attribute the second fill to the newest incarnation.
+        sqlx::query("INSERT INTO trading.fills(ts,fill_id,order_id,symbol,side,qty,price,engine_mode,details) VALUES(NOW()-interval '3 hours'+interval '1 minute',$2,$3,'BTCUSDT','Buy',$4,$5,'demo',jsonb_build_object('order_registered_ts_ms',(EXTRACT(EPOCH FROM (NOW()-$1::INT*interval '1 hour'))*1000)::bigint))")
             .bind(hours).bind(format!("{id}-{hours}")).bind(id).bind(qty as f32).bind(price as f32).execute(&mut *tx).await.unwrap();
+    }
+    // Unmarked and malformed historical fills cannot be safely assigned when
+    // an ID is reused. Neither may contaminate either incarnation's average.
+    for (suffix, details) in [
+        ("legacy", serde_json::json!({})),
+        (
+            "invalid",
+            serde_json::json!({"order_registered_ts_ms":"invalid"}),
+        ),
+        ("null", serde_json::json!({"order_registered_ts_ms":null})),
+    ] {
+        sqlx::query("INSERT INTO trading.fills(ts,fill_id,order_id,symbol,side,qty,price,engine_mode,details) VALUES(NOW()-interval '2 hours',$1,$2,'BTCUSDT','Buy',1,999,'demo',$3)")
+            .bind(format!("{id}-{suffix}")).bind(id).bind(details).execute(&mut *tx).await.unwrap();
     }
     let rows: Vec<(String,f64,Option<f64>)> = sqlx::query_as("SELECT status,filled_qty::float8,avg_price::float8 FROM public.order_events WHERE order_id=$1 ORDER BY ts")
         .bind(id).fetch_all(&mut *tx).await.unwrap();

@@ -1,5 +1,48 @@
 // Included beside the pending-registration fixtures; exercises real sweep/WS paths.
 #[tokio::test]
+async fn h1_fill_carries_registration_identity_despite_venue_clock_skew() {
+    let mut pipeline = TickPipeline::with_kind(&["BTCUSDT"], 10_000.0, PipelineKind::Demo);
+    let (tx, mut rx) = tokio::sync::mpsc::channel::<TradingMsg>(8);
+    pipeline.set_trading_channel(tx);
+    let mut state = make_loop_state();
+    let mut po = baseline_pending_order("market", None);
+    po.order_link_id = "h1-clock-skew-fill".into();
+    po.sent_ts_ms = 1_700_000_100_000;
+    po.qty = 0.03;
+    let mut exec = h1_exec(&po.order_link_id, "clock-skew-exec", "0.01", "Buy");
+    exec.exec_time = (po.sent_ts_ms - 60_000).to_string();
+    state
+        .pending_orders
+        .insert(po.order_link_id.clone(), po.clone());
+    let mut writer = super::make_test_writer();
+    handle_exchange_event(
+        Some(ExchangeEvent::Fill(exec)),
+        &mut pipeline,
+        &mut writer,
+        &mut state,
+        None,
+    )
+    .await;
+    let mut observed = false;
+    while let Ok(msg) = rx.try_recv() {
+        if let TradingMsg::Fill { details, ts_ms, .. } = msg {
+            assert_eq!(ts_ms, po.sent_ts_ms - 60_000);
+            assert_eq!(
+                details
+                    .as_ref()
+                    .and_then(|d| d["order_registered_ts_ms"].as_u64()),
+                Some(po.sent_ts_ms)
+            );
+            observed = true;
+        }
+    }
+    assert!(
+        observed,
+        "matched exchange execution must emit a persisted fill"
+    );
+}
+
+#[tokio::test]
 async fn h1_reprice_cancel_does_not_dispatch_an_extra_taker() {
     use crate::instrument_info::{InstrumentInfoCache, SymbolSpec};
     let mut pipeline = TickPipeline::with_kind(&["BTCUSDT"], 10_000.0, PipelineKind::Demo);

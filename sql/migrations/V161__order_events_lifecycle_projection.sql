@@ -114,6 +114,13 @@ LEFT JOIN LATERAL (
            SUM(qty::DOUBLE PRECISION * price) / NULLIF(SUM(qty::DOUBLE PRECISION), 0) AS avg_price
     FROM trading.fills f
     WHERE f.order_id = o.order_id AND f.engine_mode = o.engine_mode
-      AND (bounds.previous_order_ts IS NULL OR f.ts >= o.ts)
-      AND (bounds.next_order_ts IS NULL OR f.ts < bounds.next_order_ts)
+      -- Matched fills carry the local registration timestamp. Venue clocks
+      -- cannot identify an incarnation, even when all events arrived in order.
+      AND (f.details->>'order_registered_ts_ms' =
+              ((EXTRACT(EPOCH FROM o.ts) * 1000)::BIGINT)::TEXT
+          OR (NOT (COALESCE(f.details, '{}'::JSONB) ? 'order_registered_ts_ms')
+              AND start_marker.seq IS NULL
+              AND bounds.previous_order_ts IS NULL AND bounds.next_order_ts IS NULL))
+      -- Unmarked legacy fills are usable only for an unambiguous legacy order.
+      -- Missing or malformed attribution must never guess across reused IDs.
 ) f ON TRUE;
