@@ -27,10 +27,10 @@ VALID_CODEX_TYPES = {"default", "explorer", "worker"}
 # silently increase fan-out cost or lower an admitted role's reasoning floor.
 VALID_MODELS = {"opus", "sonnet", "haiku"}
 VALID_EFFORTS = {"low", "medium", "high"}
-VALID_GPT56_MODELS = {"gpt-5.6-sol", "gpt-5.6-terra"}
+VALID_CODEX_ROLE_MODELS = {"gpt-6-sol", "gpt-5.6-terra"}
 VALID_REASONING_EFFORTS = {"low", "medium", "high"}
 CODEX_MODEL_BY_ROLE_MODEL = {
-    "opus": "gpt-5.6-sol",
+    "opus": "gpt-6-sol",
     "sonnet": "gpt-5.6-terra",
     "haiku": "gpt-5.6-terra",
 }
@@ -281,8 +281,8 @@ def validate_registry(registry: dict[str, Any], root: Path = REPO_ROOT) -> list[
             }:
                 errors.append(f"{role_id}: invalid model route shape")
                 continue
-            if route["model"] not in VALID_GPT56_MODELS:
-                errors.append(f"{role_id}: unsupported GPT-5.6 model route")
+            if route["model"] not in VALID_CODEX_ROLE_MODELS:
+                errors.append(f"{role_id}: unsupported Codex role model route")
             if route["model_reasoning_effort"] not in VALID_REASONING_EFFORTS:
                 errors.append(f"{role_id}: unsupported reasoning effort route")
             expected_codex_model = CODEX_MODEL_BY_ROLE_MODEL.get(

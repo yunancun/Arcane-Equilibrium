@@ -54,8 +54,9 @@ The Registry owns separate, explicit model policies for each execution surface:
   `opus`/`high`, T2 `opus`/`low`, and T3 `sonnet`/`medium` (operator decision
   2026-08-01).
 - Native Codex agents derive an equivalent `model_routing` tier: T1 runs
-  `gpt-5.6-sol`/`high`, T2 runs `gpt-5.6-sol`/`low`, and T3 runs
-  `gpt-5.6-terra`/`medium`.
+  `gpt-6-sol`/`high`, T2 runs `gpt-6-sol`/`low`, and T3 runs
+  `gpt-5.6-terra`/`medium`. The 2026-09-28 narrow adaptation preserves
+  effort and the Terra baseline; it does not establish measured savings.
 - Saved workflows use digest-bound per-role `role_models` and `role_efforts`
   that exact-match the direct Claude tier.
 

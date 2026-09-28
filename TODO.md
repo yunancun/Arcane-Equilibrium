@@ -1,7 +1,7 @@
 # 玄衡 TODO - 活躍派發佇列
 
-**版本** v882 | **校準日期** 2026-09-25 | **source 觀察基線** `6ed901b2e001f728a463a85e82eb37a47d3a6f4d`（已合併 PR194／Mac source；runtime 限制見 §0）。
-**當前狀態**：AIML／workflow 均零 ACTIVE；選定 workflow source 已採用、總帳已歸檔；W11 等待下一個 Operator 指定的真實產品功能。S2E=5/9、effect=0/6、authority=0/9，LW2 WAITING。
+**版本** v883 | **校準日期** 2026-09-28 | **source 觀察基線** `45410a4510598c37e4be7937085bf84af23b1434`（已合併 PR195／Mac source；runtime 限制見 §0）。
+**當前狀態**：AIML／workflow 均零 ACTIVE；workflow 窄模型適配已驗證，採用条件見下方 PR196 紀錄；原總帳仍歸檔，W11 等待下一個 Operator 指定的真實產品功能。S2E=5/9、effect=0/6、authority=0/9，LW2 WAITING。
 **證據與歷史**：當前 source／PR／runtime 限制見 §0；完整逐項 [audit](docs/references/2026-09-09--todo-workflow-freshness-audit.md)、[v880 快照](docs/archive/2026-09-09--todo-v880-pre-freshness-audit.md)、[版本日誌](docs/CLAUDE_CHANGELOG.md)。
 
 <details>
@@ -486,7 +486,11 @@ W11 在該產品交付內驗收：
 |---|---|---|
 | `W3-CURRENT-STATE-INTEGRATION` | `DAILY_SOURCE_ADOPTED`（PR191）；本輪不重派 | `null` |
 | `WF-CLOSEOUT-ADOPTION-20260925` | `DAILY_SOURCE_ADOPTED`（PR194）：22 身份、W5 窄修補、W9 精簡 | `null` |
+| `WF-GPT6-CC-ADAPTATION-20260928` | `DONE_SOURCE_VERIFIED`：19 Sol 身份升至 GPT-6 Sol，原 effort／Terra／CC tiers／containment 不變；45 本地測試及 E2／E4／AI-E／R4 審查通過。source 採用只在 [PR196](https://github.com/yunancun/Arcane-Equilibrium/pull/196) 合併且 Mac ff-only 同步後生效；Linux 跳過。 | `null` |
 | W0／W1 完整量測、W2-host／WF-RC-02、W4、完整 W5 reuse、W6、W7 廣義重構、W8、W10 改革、W11 全 W 前置／全域認證、WF6-02／03／05–07、PR190 整包採用 | `CLOSED`／已歸檔／停止投入；保留既有成果與控制，只有 Operator 新的明確指令可重啟 | `null` |
+
+E2 原始 UNVERIFIED 記錄保留；Operator 允許僅依既有 E4 證據補結論後 PASS，
+沒有額外 source 掃描或測試。Mac CC 已更新至 2.1.283；不據此宣稱效率或 runtime 成果。
 
 原總帳已移出根目錄；僅按需查閱歸檔，不從歷史候選、舊 prompt 或模型更新生成施工。
 既有 native containment 保留；AIML／S2E physical state 仍由原相應段落決定。
