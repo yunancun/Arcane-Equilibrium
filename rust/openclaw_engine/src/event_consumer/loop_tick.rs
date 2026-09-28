@@ -186,8 +186,19 @@ pub(super) fn sweep_pending_orders(
     // 新限價, reprice_count)。只在 PostOnly close maker 仍 Keep（30s-90s 窗、未
     // 達 max_reprices、book 朝對我方向移動）時收集，後續串行 cancel 舊單 + 重發。
     let mut maker_to_reprice: Vec<(String, f64, u32)> = Vec::new();
+    let mut reprice_to_reconcile = Vec::new();
     for (key, po) in state.pending_orders.iter() {
-        if po.progress.status.is_terminal() || po.progress.replacement_order_link_id.is_some() {
+        if po.progress.replacement_order_link_id.is_some() {
+            if !po.progress.reprice_reconciliation_requested
+                && po.cancel_requested_ts_ms.is_some_and(|sent| {
+                    now_ms.saturating_sub(sent) >= pending_sweep::CLOSE_MAKER_CANCEL_ACK_GRACE_MS
+                })
+            {
+                reprice_to_reconcile.push(key.clone());
+            }
+            continue; // Ownership suppresses extra orders, not authoritative reads.
+        }
+        if po.progress.status.is_terminal() {
             continue;
         }
         let elapsed = pending_sweep::pending_elapsed_ms(po, now_ms);
@@ -264,6 +275,17 @@ pub(super) fn sweep_pending_orders(
                 }
             }
         }
+    }
+    if let Some(reconciler) = &state.dcp_reconciler {
+        let pending: Vec<_> = reprice_to_reconcile
+            .iter()
+            .filter_map(|id| {
+                let po = state.pending_orders.get_mut(id)?;
+                po.progress.reprice_reconciliation_requested = true;
+                Some(po.clone())
+            })
+            .collect();
+        reconciler.schedule(&pending);
     }
     // 沿用有界 reduce-only 重掛；取消仍為異步請求，不能宣稱已完成。
     // 新單派發後保留舊 tracker，等待其 cancel／execution 確認。

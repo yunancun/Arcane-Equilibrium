@@ -1,5 +1,5 @@
-//! Bounded, read-only DCP reconciliation. Replays verified executions before the
-//! per-order terminal state through the existing event consumer; no create retry.
+//! Bounded, read-only DCP and reprice predecessor reconciliation. Replays verified
+//! executions before the terminal state through the existing consumer; no create retry.
 use super::types::{ExchangeEvent, PendingOrder};
 use crate::bybit_private_ws::{ExecutionUpdate, OrderUpdate};
 use crate::bybit_rest_client::BybitRestClient;
@@ -79,15 +79,15 @@ impl DcpReconciler {
                             break;
                         }
                         Ok(Err(error)) => {
-                            tracing::warn!(order_link_id=%po.order_link_id, %error, "DCP reconciliation awaiting complete per-order evidence")
+                            tracing::warn!(order_link_id=%po.order_link_id, %error, "Order reconciliation awaiting complete per-order evidence")
                         }
                         Err(_) => {
-                            tracing::warn!(order_link_id=%po.order_link_id, "DCP reconciliation attempt timed out")
+                            tracing::warn!(order_link_id=%po.order_link_id, "Order reconciliation attempt timed out")
                         }
                     }
                 }
                 if !resolved {
-                    tracing::error!(order_link_id=%po.order_link_id, "DCP reconciliation exhausted; keeping order unresolved");
+                    tracing::error!(order_link_id=%po.order_link_id, "Order reconciliation exhausted; keeping order unresolved");
                 }
                 in_flight.lock().remove(&po.order_link_id);
             }
@@ -222,7 +222,7 @@ async fn reconcile(po: &PendingOrder, fetch: &Fetch) -> Result<Vec<ExchangeEvent
             cursor = result
                 .get("nextPageCursor")
                 .and_then(Value::as_str)
-                .unwrap_or_default()
+                .ok_or_else(|| "missing or malformed execution pagination cursor".to_owned())?
                 .to_owned();
             if cursor.is_empty() {
                 break;

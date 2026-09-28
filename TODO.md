@@ -522,6 +522,10 @@ Operator 授權的五項 H1 follow-up 已追加：reprice 前後單平倉旗標�
 以及 DCP 有界唯讀逐單對帳及缺失 execution 補回；不完整證據保留 Unknown。
 追加本機 Rust library 4,906、Python 消費者 59（含隔離 PG 真查詢）通過；
 V161 新增欄位保留歷史壓縮資料，compressed brownfield 契約交由 current-head hosted CI 驗證。
+Operator 再授權的三項 H1 review 缺口已修復：fallback 期間晚到前單成交保留平倉旗標、
+reprice 舊單在 cancel grace 後執行單批有界對帳（含終態但缺 execution），
+以及 execution 分頁必須具有明確字串 cursor；失敗或缺證不清除未確認訂單。
+新增測試先重現缺口再通過；H1 專項 28、Rust library 4,911 與 strict library Clippy 通過。
 追加 scope 的 current-head review、merge 與 Mac/GitHub 同步以 workspace publication artifacts 收口；Linux 依 Operator 指示略過。
 本節記錄本機修復階段；source 發佈、合併及採用另以 exact-head PR／同步證據判定，
 `next_action=null`。

@@ -250,7 +250,8 @@ pub(super) async fn handle_exchange_event(
                     // 使 trading.fills.entry_context_id 與
                     // learning.decision_features.context_id 對齊。
                     let preserve_close_guard = po.is_close
-                        && po.progress.replacement_order_link_id.is_some()
+                        && (po.progress.replacement_order_link_id.is_some()
+                            || state.close_maker_fallback_dispatched.contains(&key))
                         && pipeline.has_pending_close(&po.symbol);
                     pipeline.apply_confirmed_fill_with_close_maker_audit(
                         &exec.symbol,
