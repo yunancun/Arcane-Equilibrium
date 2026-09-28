@@ -771,6 +771,63 @@ async fn h1_execution_cursor_requires_explicit_string() {
 }
 
 #[tokio::test]
+async fn h1_timer_reconciles_aged_nonterminal_orders_without_ticks() {
+    use super::super::order_lifecycle::OrderStatus;
+    for status in [
+        OrderStatus::Submitted,
+        OrderStatus::Acknowledged,
+        OrderStatus::Working,
+        OrderStatus::PartiallyFilled,
+    ] {
+        for maker in [false, true] {
+            let mut pipeline = TickPipeline::with_kind(&["BTCUSDT"], 10_000.0, PipelineKind::Demo);
+            let (tx, mut dispatch_rx) = tokio::sync::mpsc::unbounded_channel();
+            pipeline.set_shadow_channel(tx);
+            let mut state = make_loop_state();
+            let mut po = baseline_pending_order("market", None);
+            po.order_link_id = format!("h1-stalled-feed-{status:?}-{maker}");
+            po.progress.status = status;
+            if maker {
+                po.time_in_force = Some(crate::order_manager::TimeInForce::PostOnly);
+                po.maker_timeout_ms = Some(45_000);
+            }
+            pipeline.exchange_submission_guard.track(&po.order_link_id);
+            state
+                .pending_orders
+                .insert(po.order_link_id.clone(), po.clone());
+            let terminal = serde_json::json!({"list":[{"orderId":"venue", "orderLinkId":po.order_link_id,
+                "symbol":"BTCUSDT", "side":"Buy", "orderStatus":"Cancelled", "cumExecQty":"0"}]});
+            let (reconciler, mut rx) =
+                super::super::dcp_reconciliation::DcpReconciler::fixture(vec![terminal]);
+            state.dcp_reconciler = Some(reconciler);
+            // Call only the production independent-timer callback, never a tick/sweep.
+            let timeout = if maker { 45_000 } else { 60_001 };
+            super::super::loop_tick::schedule_pending_reconciliation(
+                &mut state,
+                po.sent_ts_ms + timeout - 1,
+            );
+            assert!(state.dcp_reconciler.as_ref().unwrap().is_idle());
+            super::super::loop_tick::schedule_pending_reconciliation(
+                &mut state,
+                po.sent_ts_ms + timeout,
+            );
+            let event = tokio::time::timeout(std::time::Duration::from_secs(1), rx.recv())
+                .await
+                .expect("stalled public feed must not stall confirmation")
+                .unwrap();
+            let mut writer = super::make_test_writer();
+            handle_exchange_event(Some(event), &mut pipeline, &mut writer, &mut state, None).await;
+            assert!(state.pending_orders.is_empty());
+            assert!(!pipeline.exchange_submission_guard.blocks_entry());
+            assert!(
+                dispatch_rx.try_recv().is_err(),
+                "timer reads cannot place/cancel orders"
+            );
+        }
+    }
+}
+
+#[tokio::test]
 async fn h1_reprice_terminal_predecessor_recovers_missing_execution() {
     let mut pipeline = TickPipeline::with_kind(&["BTCUSDT"], 10_000.0, PipelineKind::Demo);
     seed_long_position(&mut pipeline);

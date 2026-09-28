@@ -66,6 +66,21 @@ BEGIN
 END
 $grant$;
 
+-- This view now depends on lifecycle history for terminal truth. V075's 60-day
+-- retention predates that dependency; orders/fills remain for 365 days (V006).
+-- Keep 400 days of lifecycle evidence: the extra 35 days covers chunk/job
+-- boundary differences and ordinary source-clock skew. Compressed rows stay
+-- compressed; this only replaces the future retention policy, not old data.
+DO $retention$
+BEGIN
+    IF EXISTS (SELECT 1 FROM pg_extension WHERE extname = 'timescaledb') THEN
+        PERFORM remove_retention_policy('trading.order_state_changes', if_exists => TRUE);
+        PERFORM add_retention_policy('trading.order_state_changes',
+            INTERVAL '400 days', if_not_exists => TRUE);
+    END IF;
+END
+$retention$;
+
 CREATE OR REPLACE VIEW public.order_events AS
 SELECT
     o.ts, o.order_id, o.symbol, o.side, o.order_type,

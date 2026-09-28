@@ -1073,6 +1073,59 @@ async fn contract_h1_migration_preserves_compressed_history() {
 }
 
 #[tokio::test]
+async fn contract_h1_terminal_history_outlives_order_retention() {
+    let Some(pool) = migrated_pool().await else {
+        return;
+    };
+    let mut tx = pool.begin().await.unwrap();
+    let covers_orders: bool = sqlx::query_scalar(
+        "SELECT (s.config->>'drop_after')::interval >= (o.config->>'drop_after')::interval + interval '35 days'
+         FROM timescaledb_information.jobs s, timescaledb_information.jobs o
+         WHERE s.hypertable_schema='trading' AND s.hypertable_name='order_state_changes'
+           AND o.hypertable_schema='trading' AND o.hypertable_name='orders'
+           AND s.proc_name='policy_retention' AND o.proc_name='policy_retention'"
+    ).fetch_one(&mut *tx).await.unwrap();
+    assert!(
+        covers_orders,
+        "lifecycle terminal evidence must outlive retained orders"
+    );
+    // Exercise the configured cutoff against old filled/cancelled/rejected rows.
+    // Actual hypertable chunks and the public view are used; rollback preserves CI fixtures.
+    for (id, status) in [
+        ("h1-retained-filled", "Filled"),
+        ("h1-retained-cancelled", "Cancelled"),
+        ("h1-retained-rejected", "Rejected"),
+    ] {
+        sqlx::query("INSERT INTO trading.orders (ts,order_id,symbol,side,order_type,qty,status,engine_mode)
+            VALUES (NOW()-interval '200 days',$1,'BTCUSDT','Buy','Market',1,'PendingSubmit','demo')")
+            .bind(id).execute(&mut *tx).await.unwrap();
+        sqlx::query(
+            "INSERT INTO trading.order_state_changes (ts,order_id,to_status,filled_qty,engine_mode)
+            VALUES (NOW()-interval '200 days',$1,$2,$3,'demo')",
+        )
+        .bind(id)
+        .bind(status)
+        .bind(if status == "Filled" { 1.0f32 } else { 0.0f32 })
+        .execute(&mut *tx)
+        .await
+        .unwrap();
+    }
+    sqlx::query("SELECT drop_chunks('trading.order_state_changes', older_than => (
+        SELECT (config->>'drop_after')::interval FROM timescaledb_information.jobs
+        WHERE hypertable_schema='trading' AND hypertable_name='order_state_changes' AND proc_name='policy_retention'))")
+        .execute(&mut *tx).await.unwrap();
+    let states: Vec<String> = sqlx::query_scalar(
+        "SELECT status FROM public.order_events
+        WHERE order_id LIKE 'h1-retained-%' ORDER BY order_id",
+    )
+    .fetch_all(&mut *tx)
+    .await
+    .unwrap();
+    assert_eq!(states, vec!["Cancelled", "Filled", "Rejected"]);
+    tx.rollback().await.unwrap();
+}
+
+#[tokio::test]
 async fn contract_h1_migration_rejects_ordinal_drift() {
     let Some(pool) = migrated_pool().await else {
         return;

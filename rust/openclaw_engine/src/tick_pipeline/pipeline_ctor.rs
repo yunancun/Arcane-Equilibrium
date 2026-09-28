@@ -229,8 +229,9 @@ impl TickPipeline {
     /// 所以 test/cold path 不需要特殊分支。
     pub fn set_demo_learning_lane_writer(
         &mut self,
-        writer: crate::demo_learning_lane_writer::DemoLearningLaneWriterHandle,
+        mut writer: crate::demo_learning_lane_writer::DemoLearningLaneWriterHandle,
     ) {
+        writer.bind_submission_guard(self.exchange_submission_guard.clone());
         self.demo_learning_lane_writer = writer;
     }
 

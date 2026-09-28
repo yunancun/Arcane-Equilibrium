@@ -407,6 +407,13 @@ pub(super) fn schedule_pending_reconciliation(state: &mut LoopState, now_ms: u64
                     po.progress.status == super::order_lifecycle::OrderStatus::Unknown
                         || (po.progress.status.is_terminal()
                             && !po.progress.executions_accounted(po.cum_filled_qty))
+                        || (!po.progress.status.is_terminal()
+                            && matches!(
+                                pending_sweep::classify_pending_sweep(po, now_ms),
+                                pending_sweep::PendingSweepAction::ConfirmationTimeout
+                                    | pending_sweep::PendingSweepAction::MakerTimeoutCancel
+                                    | pending_sweep::PendingSweepAction::MakerCancelGraceExpired
+                            ))
                 };
             if !needs_confirmation
                 || po

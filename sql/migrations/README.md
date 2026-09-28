@@ -19,7 +19,7 @@ V{NNN}__{description}.sql
 | `V003__trading_agent_tables.sql` | trading.* + agent.* tables | EXECUTED (2026-04-11, FIX-35) |
 | `V004__learning_features_obs_risk_news_tables.sql` | learning.* + features.* + observability.* + risk.* tables | EXECUTED (2026-04-11, FIX-35) |
 | `V005__indexes_views.sql` | All indexes + scorer_training_features VIEW + legacy rename + Grafana VIEW bridge | EXECUTED (2026-04-11, FIX-35) |
-| `V161__order_events_lifecycle_projection.sql` | H1: incarnation-scoped lifecycle with terminal precedence and insertion ordering; shared pending/readiness projection and registration-keyed execution-weighted fill average; preserves compressed legacy rows and view types | SOURCE CANDIDATE; target DB application not verified |
+| `V161__order_events_lifecycle_projection.sql` | H1: incarnation-scoped lifecycle with terminal precedence and insertion ordering; shared pending/readiness projection and registration-keyed execution-weighted fill average; preserves compressed legacy rows and view types; lifecycle retention 400d covers orders/fills 365d | SOURCE CANDIDATE; target DB application not verified |
 
 ## 執行方式 / Execution
 
