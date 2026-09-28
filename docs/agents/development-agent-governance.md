@@ -1162,4 +1162,12 @@ current generation 重驗。
 
 ### Native automatic delegation containment
 
+Operator decision 2026-09-28 admits the narrow controlled CLI review entry in
+`AGENTS.md#controlled-cli-review` and `.codex/README.md#controlled-cli-review`.
+It uses existing Context/node/native identity and source-read-only roles, with a
+single delivery lock, persistent call caps, exact scratch writes and a hard CLI
+process deadline. PM retains the DAG; no new controller framework or automatic
+successor is added. It is the named exception to the alternative-CLI containment
+below, not an upgrade of the native collaboration execution surface or host proof.
+
 The local project defaults to `features.multi_agent=false` and `agents.enabled=false`. The desktop workspace root requires the same minimal local config projection because child project configuration is not a workspace-root entry. Follow `AGENTS.md` → `Native dispatch containment`: no alternative tool/CLI/skill dispatch or agent-initiated re-enable. Existing saved workflow and role source remain available for a separately admitted, verified entry; their presence is not permission to bypass containment. The current native collaboration profile remains `reported_only` / `mandatory_role_eligible=false`. This containment does not authenticate mandatory role execution or complete universal delivery binding.
