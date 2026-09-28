@@ -144,6 +144,11 @@ def test_delivery_lock_excludes_second_process(tmp_path, monkeypatch):
     (False, "PASS", {"evidence": {"context_artifact_digest": "old-context"}}, False),
     (False, "PASS", {"evidence": {"context_digest": "old-context"}}, False),
     (False, "PASS", {"binding": {"task_contract_digest": None}}, False),
+    (False, "PASS", {"evidence": [{"task_contract_digest": "old"}]}, False),
+    (False, "PASS", {"evidence": [{"binding": {"role": "E4"}}]}, False),
+    (False, "PASS", {"binding": [{"source": {"source_head": "old"}}]}, False),
+    (False, "PASS", {"evidence": [{"task_contract_digest": "contract"}]}, True),
+    (False, "PASS", {"metadata": {"nested": [{"node_id": "other"}]}}, False),
 ])
 def test_result_requires_unchanged_source_and_explicit_verdict(tmp_path, monkeypatch, source_changed, verdict, metadata, valid):
     root = tmp_path / "repo"; root.mkdir()

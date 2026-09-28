@@ -288,12 +288,18 @@ def run(*, root: Path, context: dict, node_id: str, instruction: str,
                     raise ValueError("missing explicit reviewer verdict")
                 # The controller binds bare verdicts to this exact call. Explicit
                 # reviewer identifiers must not contradict that trusted binding.
-                for label, metadata in (("review", verdict), ("evidence", verdict.get("evidence")),
-                                        ("binding", verdict.get("binding"))):
+                pending = [("review", verdict)]
+                while pending:
+                    label, metadata = pending.pop()
                     if isinstance(metadata, dict):
                         for key, expected in response_identity.items():
                             if key in metadata and metadata[key] != expected:
                                 raise ValueError("REVIEW_BINDING_MISMATCH: " + label + "." + key)
+                        pending.extend((label + "." + key, value) for key, value in metadata.items()
+                                       if isinstance(value, (dict, list)))
+                    elif isinstance(metadata, list):
+                        pending.extend((label + "[" + str(index) + "]", value)
+                                       for index, value in enumerate(metadata))
                 result["review"] = verdict
                 result["status"] = verdict["verdict"]
         except (OSError, ValueError, subprocess.SubprocessError) as exc:
