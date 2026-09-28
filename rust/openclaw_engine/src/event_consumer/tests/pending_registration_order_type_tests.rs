@@ -1686,3 +1686,43 @@ fn h1_unknown_close_maker_fallback_is_once_and_reduce_only() {
         .exchange_submission_guard
         .reserve("protective-close", true));
 }
+
+#[tokio::test]
+async fn h1_unknown_confirmation_settles_active_lease() {
+    for terminal in ["Fill", "Rejected", "Cancelled"] {
+        let mut pipeline = make_test_pipeline();
+        pipeline.governance.grant_paper_authorization(None).unwrap();
+        let lease = pipeline
+            .governance
+            .acquire_lease(
+                &format!("h1-lease-{terminal}"),
+                "TRADE_ENTRY",
+                60_000,
+                GovernanceProfile::Production,
+                "h1-test",
+            )
+            .unwrap();
+        let LeaseId::Active(lease_id) = lease else {
+            panic!("active lease required")
+        };
+        let mut state = make_loop_state();
+        let mut writer = super::make_test_writer();
+        let mut po = baseline_pending_order("market", None);
+        po.decision_lease_id = Some(lease_id.clone());
+        let id = po.order_link_id.clone();
+        h1_register(&mut pipeline, &mut state, po);
+        h1_unknown(&mut pipeline, &mut state, &id);
+        assert!(pipeline.governance.get_lease_by_id(&lease_id).is_ok());
+        let event = if terminal == "Fill" {
+            ExchangeEvent::Fill(h1_exec(&id, "h1-confirmation", "0.01", "Buy"))
+        } else {
+            ExchangeEvent::OrderUpdate(terminal_order_update(&id, terminal, ""))
+        };
+        handle_exchange_event(Some(event), &mut pipeline, &mut writer, &mut state, None).await;
+        assert!(
+            pipeline.governance.get_lease_by_id(&lease_id).is_err(),
+            "{terminal} must settle lease"
+        );
+        assert!(!pipeline.exchange_submission_guard.blocks_entry());
+    }
+}

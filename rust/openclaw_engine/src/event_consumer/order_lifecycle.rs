@@ -26,6 +26,10 @@ impl SubmissionGuard {
         self.0.lock().remove(id);
     }
 
+    pub(crate) fn clear(&self) {
+        self.0.lock().clear();
+    }
+
     pub(crate) fn blocks_entry(&self) -> bool {
         !self.0.lock().is_empty()
     }

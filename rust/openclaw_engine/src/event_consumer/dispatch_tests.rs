@@ -147,7 +147,10 @@ fn test_open_retry_budget_unchanged_after_110072_change() {
     // 成功收尾，**不**是 retry（NoOp ≠ retry）。亦由
     // test_dispatch_retry_delays_helper_open_is_empty_close_is_bounded 覆蓋，
     // 此處顯式重申以鎖定 BB OPEN_NO_RETRY 不變量。
-    assert_eq!(dispatch_retry_delays_for_intent(false), OPEN_NO_RETRY.as_slice());
+    assert_eq!(
+        dispatch_retry_delays_for_intent(false),
+        OPEN_NO_RETRY.as_slice()
+    );
     assert!(dispatch_retry_delays_for_intent(false).is_empty());
 }
 
@@ -366,7 +369,74 @@ fn h1_duplicate_or_prior_timeout_cannot_be_definitive_rejection() {
         ret_msg: "invalid qty".into(),
         response: serde_json::json!({}),
     };
-    assert!(submission_may_exist_after_error(&duplicate, 1));
-    assert!(submission_may_exist_after_error(&reject, 2));
-    assert!(!submission_may_exist_after_error(&reject, 1));
+    assert!(submission_may_exist_after_error(&duplicate, false, true));
+    assert!(!submission_may_exist_after_error(&duplicate, false, false));
+    assert!(submission_may_exist_after_error(&reject, true, true));
+    assert!(!submission_may_exist_after_error(&reject, false, false));
+}
+
+#[test]
+fn h1_definitive_rejection_emits_terminal_and_failed_lease() {
+    for (is_close, code) in [(false, 10006), (false, 110072), (true, 110017)] {
+        let mut req = close_dispatch_req_for_zero(true, is_close, 0.01);
+        req.decision_lease_id = Some("h1-rejected-lease".into());
+        let (tx, mut rx) = mpsc::unbounded_channel();
+        send_definitive_dispatch_rejection(&tx, &req, &biz(code, "rejected"), 1);
+        assert!(matches!(
+            rx.try_recv(),
+            Ok(PendingOrderEvent::DispatchFailed { terminal_status, .. })
+                if terminal_status == "Rejected"
+        ));
+        assert!(matches!(
+            rx.try_recv(),
+            Ok(PendingOrderEvent::ReleaseDecisionLease {
+                outcome: LeaseOutcome::Failed,
+                ..
+            })
+        ));
+        assert!(
+            rx.try_recv().is_err(),
+            "definitive refusal must not emit Unknown"
+        );
+    }
+}
+
+#[tokio::test]
+async fn h1_definitive_rate_limit_is_not_submission_ambiguity() {
+    for delays in [&OPEN_NO_RETRY[..], &[0, 0][..]] {
+        let result = run_dispatch_retry::<(), _, _>(delays, "BTCUSDT", "h1-rate", |_| {
+            std::future::ready(Err(BybitApiError::Business {
+                ret_code: 10006,
+                ret_msg: "rate limited".into(),
+                response: serde_json::json!({}),
+            }))
+        })
+        .await;
+        assert!(matches!(
+            result,
+            DispatchRetryResult::TransientExhausted {
+                outcome_unknown: false,
+                ..
+            }
+        ));
+    }
+    let result = run_dispatch_retry::<(), _, _>(&[0], "BTCUSDT", "h1-mixed", |attempt| {
+        std::future::ready(Err(if attempt == 0 {
+            close_dispatch_timeout_error(500)
+        } else {
+            BybitApiError::Business {
+                ret_code: 10006,
+                ret_msg: "rate limited".into(),
+                response: serde_json::json!({}),
+            }
+        }))
+    })
+    .await;
+    assert!(matches!(
+        result,
+        DispatchRetryResult::TransientExhausted {
+            outcome_unknown: true,
+            ..
+        }
+    ));
 }

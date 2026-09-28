@@ -910,3 +910,47 @@ async fn contract_klines_select() {
         "fresh DB unexpectedly returned a kline row"
     );
 }
+
+/// H1: the Grafana bridge must expose lifecycle progress and isolate engine modes.
+#[tokio::test]
+async fn contract_h1_order_events_lifecycle() {
+    let Some(pool) = migrated_pool().await else {
+        eprintln!("SKIP: OPENCLAW_TEST_PG not set");
+        return;
+    };
+    let mut tx = pool.begin().await.expect("transaction");
+    let id = format!("schema-h1-{}", std::process::id());
+    sqlx::query("INSERT INTO trading.orders (ts, order_id, symbol, side, order_type, qty, status, engine_mode) VALUES (NOW(), $1, 'BTCUSDT', 'Buy', 'Market', 1, 'PendingSubmit', 'demo')")
+        .bind(&id).execute(&mut *tx).await.unwrap();
+    let status: String =
+        sqlx::query_scalar("SELECT status FROM public.order_events WHERE order_id=$1")
+            .bind(&id)
+            .fetch_one(&mut *tx)
+            .await
+            .unwrap();
+    assert_eq!(status, "PendingSubmit");
+    for (n, expected) in ["Acknowledged", "Working", "Filled"]
+        .into_iter()
+        .enumerate()
+    {
+        sqlx::query("INSERT INTO trading.order_state_changes (ts, order_id, to_status, filled_qty, engine_mode) VALUES (NOW() + $2::INT * interval '1 second', $1, $3, 1, 'demo')")
+            .bind(&id).bind(n as i32).bind(expected).execute(&mut *tx).await.unwrap();
+        let status: String =
+            sqlx::query_scalar("SELECT status FROM public.order_events WHERE order_id=$1")
+                .bind(&id)
+                .fetch_one(&mut *tx)
+                .await
+                .unwrap();
+        assert_eq!(status, expected);
+    }
+    sqlx::query("INSERT INTO trading.order_state_changes (ts, order_id, to_status, engine_mode) VALUES (NOW() + interval '1 hour', $1, 'Rejected', 'live')")
+        .bind(&id).execute(&mut *tx).await.unwrap();
+    let status: String =
+        sqlx::query_scalar("SELECT status FROM public.order_events WHERE order_id=$1")
+            .bind(&id)
+            .fetch_one(&mut *tx)
+            .await
+            .unwrap();
+    assert_eq!(status, "Filled", "other engine must not replace demo state");
+    tx.rollback().await.unwrap();
+}

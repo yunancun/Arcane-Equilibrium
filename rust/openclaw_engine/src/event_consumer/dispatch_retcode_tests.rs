@@ -266,7 +266,10 @@ fn test_classify_10001_invalid_order_link_id_format_is_structural() {
     // fail-closed，close 冪等 upgrade 下移到 consumption 層）。誠實改斷言為
     // Structural，反映 classify 層 duplicate 與非-duplicate 的 10001 同歸 Structural。
     let e_upper = biz(10001, "DUPLICATE order_link_id");
-    assert_eq!(classify_dispatch_error(&e_upper), DispatchOutcome::Structural);
+    assert_eq!(
+        classify_dispatch_error(&e_upper),
+        DispatchOutcome::Structural
+    );
 }
 
 #[test]
@@ -402,6 +405,7 @@ async fn test_run_dispatch_retry_noop_on_second_attempt_records_attempts_2() {
         DispatchRetryResult::NoOp {
             last_error,
             attempts,
+            ..
         } => {
             assert_eq!(attempts, 2, "NoOp on 2nd attempt must record attempts=2");
             match last_error {
@@ -452,6 +456,7 @@ async fn test_run_dispatch_retry_transient_exhaustion_returns_last_error() {
         DispatchRetryResult::TransientExhausted {
             last_error,
             attempts,
+            ..
         } => {
             assert_eq!(
                 attempts, 4,

@@ -505,12 +505,12 @@ def check_68_portfolio_resting_exposure(cur) -> tuple[str, str]:
             close_risk_counts,
             resting_diag,
         ) = _resting_notional_from_pg(cur, engine, lookback_hours)
-        if resting_diag.startswith("unresolved_orders:"):
+        unresolved = resting_diag.startswith("unresolved_orders:")
+        if unresolved:
             # 未知／未確認量不能當成零，也不能宣稱可算完整 resting exposure。
             engine_verdicts.append("WARN")
             engine_evidence.append(f"{engine}=UNRESOLVED({resting_diag})")
-            continue
-        if resting_diag != "ok" and not resting_per_symbol and not close_risk_working_per_symbol:
+        if not unresolved and resting_diag != "ok" and not resting_per_symbol and not close_risk_working_per_symbol:
             # PG 查詢失敗但 snapshot 還在 → 對該 engine WARN 帶診斷
             engine_verdicts.append("WARN")
             engine_evidence.append(f"{engine}=PG_FAIL({resting_diag})")
@@ -626,6 +626,8 @@ def check_68_portfolio_resting_exposure(cur) -> tuple[str, str]:
                 f",local_lineage_residual_n={local_lineage_residual_count},"
                 f"local_lineage_residual_notional={local_lineage_residual_notional:.0f}"
             )
+        if unresolved:
+            evidence += ",known_exposure_only"
         if violations:
             evidence += f",violations=[{';'.join(violations[:3])}]"
         evidence += ")"

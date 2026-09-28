@@ -19,6 +19,7 @@ V{NNN}__{description}.sql
 | `V003__trading_agent_tables.sql` | trading.* + agent.* tables | EXECUTED (2026-04-11, FIX-35) |
 | `V004__learning_features_obs_risk_news_tables.sql` | learning.* + features.* + observability.* + risk.* tables | EXECUTED (2026-04-11, FIX-35) |
 | `V005__indexes_views.sql` | All indexes + scorer_training_features VIEW + legacy rename + Grafana VIEW bridge | EXECUTED (2026-04-11, FIX-35) |
+| `V161__order_events_lifecycle_projection.sql` | H1: Grafana order_events projects latest lifecycle by order and engine; keeps view column types | SOURCE CANDIDATE; target DB application not verified |
 
 ## 執行方式 / Execution
 

@@ -60,17 +60,61 @@ fn send_decision_lease_release(
     }
 }
 
-fn submission_may_exist_after_error(error: &BybitApiError, attempts: u32) -> bool {
-    attempts > 1
-        || matches!(
-            error,
-            BybitApiError::Business {
-                ret_code: 110072,
-                ..
-            }
-        )
-        || matches!(error, BybitApiError::Business { ret_code: 10001, ret_msg, .. }
-            if ret_msg.to_ascii_lowercase().contains("duplicate"))
+fn submission_may_exist_after_error(
+    error: &BybitApiError,
+    outcome_unknown: bool,
+    is_close: bool,
+) -> bool {
+    outcome_unknown
+        || (is_close
+            && (matches!(
+                error,
+                BybitApiError::Business {
+                    ret_code: 110072,
+                    ..
+                }
+            ) || matches!(error, BybitApiError::Business { ret_code: 10001, ret_msg, .. }
+            if ret_msg.to_ascii_lowercase().contains("duplicate"))))
+}
+
+fn send_definitive_dispatch_rejection(
+    pending_reg_tx: &mpsc::UnboundedSender<PendingOrderEvent>,
+    req: &OrderDispatchRequest,
+    last_error: &BybitApiError,
+    attempts: u32,
+) {
+    if req.is_primary {
+        let reason = format!("dispatch_rejected: attempts={attempts}; error={last_error}");
+        if let Err(e) = pending_reg_tx.send(PendingOrderEvent::DispatchFailed {
+            order_link_id: req.order_link_id.clone(),
+            symbol: req.symbol.clone(),
+            is_long: req.is_long,
+            qty: req.qty,
+            strategy: req.strategy.clone(),
+            context_id: req.context_id.clone(),
+            is_close: req.is_close,
+            order_type: req.order_type.clone(),
+            time_in_force: req.time_in_force,
+            maker_timeout_ms: req.maker_timeout_ms,
+            close_maker_audit: req.close_maker_audit.clone(),
+            terminal_status: "Rejected".to_string(),
+            reason,
+            ts_ms: openclaw_core::now_ms(),
+        }) {
+            warn!(
+                order_link_id = %req.order_link_id,
+                error = %e,
+                "dispatch failure terminal event dropped — pending state may require sweep \
+                 / 派發失敗 terminal event 發送失敗 — pending 狀態可能需 sweep"
+            );
+        }
+        send_decision_lease_release(
+            pending_reg_tx,
+            req,
+            LeaseOutcome::Failed,
+            "exchange_dispatch_rejected",
+        );
+    }
 }
 
 fn send_submission_unknown(
@@ -555,8 +599,9 @@ pub(super) fn spawn_order_dispatch(
                 DispatchRetryResult::NoOp {
                     last_error,
                     attempts,
+                    outcome_unknown,
                 } => {
-                    if attempts > 1 {
+                    if outcome_unknown {
                         send_submission_unknown(
                             &pending_reg_tx,
                             &req,
@@ -579,7 +624,7 @@ pub(super) fn spawn_order_dispatch(
                         ret_code = ret_code_opt,
                         ret_msg = ret_msg_opt.as_deref(),
                         attempts = attempts,
-                        "order dispatch returned no-op; per-order result still needs confirmation / 無操作回應，訂單結果仍待確認"
+                        "order dispatch returned a non-retryable no-op / 派發收到不重試的無操作回應"
                     );
                     // P1-110017-POSITION-DRIFT-CLOSE-LOOP：reduce-only **qty=0 全平
                     // form** 收到 110017（交易所端倉位已 zero）時，請求 event consumer
@@ -589,25 +634,35 @@ pub(super) fn spawn_order_dispatch(
                     // reduce-only close 收到 110017（C-1，倉可能仍在）絕不收斂；
                     // 110001 維持原不收斂行為；110009 非 NoOp（stop-order
                     // limit exceeded，fail-closed）。
-                    send_submission_unknown(
-                        &pending_reg_tx,
-                        &req,
-                        "dispatch_noop_await_confirmation".into(),
-                    );
-                    send_exchange_zero_close(&pending_reg_tx, &req, &last_error);
-                    send_decision_lease_release(
-                        &pending_reg_tx,
-                        &req,
-                        LeaseOutcome::Consumed,
-                        "exchange_dispatch_noop_success",
-                    );
+                    if req.is_primary
+                        && noop_is_reduce_only_close(&req)
+                        && req.qty == 0.0
+                        && noop_is_exchange_zero_position(&last_error)
+                    {
+                        send_exchange_zero_close(&pending_reg_tx, &req, &last_error);
+                        send_decision_lease_release(
+                            &pending_reg_tx,
+                            &req,
+                            LeaseOutcome::Consumed,
+                            "exchange_dispatch_zero_position",
+                        );
+                    } else {
+                        send_definitive_dispatch_rejection(
+                            &pending_reg_tx,
+                            &req,
+                            &last_error,
+                            attempts,
+                        );
+                    }
                 }
                 DispatchRetryResult::Structural {
                     last_error,
                     attempts,
+                    outcome_unknown,
                 } => {
                     // 先前嘗試／重複 ID 不能證明原請求失敗；只阻止再次開倉。
-                    if submission_may_exist_after_error(&last_error, attempts) {
+                    if submission_may_exist_after_error(&last_error, outcome_unknown, req.is_close)
+                    {
                         send_submission_unknown(
                             &pending_reg_tx,
                             &req,
@@ -633,45 +688,28 @@ pub(super) fn spawn_order_dispatch(
                             attempts = attempts,
                             "order dispatch failed (structural, no retry) / 訂單派發失敗（結構性，不重試）"
                         );
-                        if req.is_primary {
-                            let reason =
-                                format!("dispatch_structural: attempts={attempts}; error={last_error}");
-                            if let Err(e) = pending_reg_tx.send(PendingOrderEvent::DispatchFailed {
-                                order_link_id: req.order_link_id.clone(),
-                                symbol: req.symbol.clone(),
-                                is_long: req.is_long,
-                                qty: req.qty,
-                                strategy: req.strategy.clone(),
-                                context_id: req.context_id.clone(),
-                                is_close: req.is_close,
-                                order_type: req.order_type.clone(),
-                                time_in_force: req.time_in_force,
-                                maker_timeout_ms: req.maker_timeout_ms,
-                                close_maker_audit: req.close_maker_audit.clone(),
-                                terminal_status: "Rejected".to_string(),
-                                reason,
-                                ts_ms: openclaw_core::now_ms(),
-                            }) {
-                                warn!(
-                                    order_link_id = %req.order_link_id,
-                                    error = %e,
-                                    "dispatch failure terminal event dropped — pending state may require sweep \
-                                     / 派發失敗 terminal event 發送失敗 — pending 狀態可能需 sweep"
-                                );
-                            }
-                            send_decision_lease_release(
-                                &pending_reg_tx,
-                                &req,
-                                LeaseOutcome::Failed,
-                                "exchange_dispatch_structural_failed",
-                            );
-                        }
+                        send_definitive_dispatch_rejection(
+                            &pending_reg_tx,
+                            &req,
+                            &last_error,
+                            attempts,
+                        );
                     }
                 }
                 DispatchRetryResult::TransientExhausted {
                     last_error,
                     attempts,
+                    outcome_unknown,
                 } => {
+                    if !outcome_unknown {
+                        send_definitive_dispatch_rejection(
+                            &pending_reg_tx,
+                            &req,
+                            &last_error,
+                            attempts,
+                        );
+                        continue;
+                    }
                     let (ret_code_opt, ret_msg_opt): (Option<i64>, Option<String>) =
                         match &last_error {
                             BybitApiError::Business {

@@ -116,6 +116,13 @@ pub(super) fn handle_reset(
     order_id_to_link: &mut HashMap<String, String>,
 ) {
     // P0-ENGINE-HALTSESSION-STUCK-FIX (2026-05-19)：先抓 halt 狀態做 audit。
+    // 不得用 reset 遺失未知 venue 訂單的唯一匹配來源，或繞過 entry guard。
+    if pipeline.pipeline_kind.is_exchange()
+        && (pipeline.exchange_submission_guard.blocks_entry() || !pending_orders.is_empty())
+    {
+        tracing::warn!("reset refused while exchange orders await confirmation");
+        return;
+    }
     // P0-ENGINE-HALTSESSION-STUCK-FIX（2026-05-19）：清 halt + audit forensic。
     let prev_halt_kind = pipeline.halt_kind;
     let prev_halt_set_ts_ms = pipeline.halt_set_ts_ms;
@@ -142,6 +149,7 @@ pub(super) fn handle_reset(
     pipeline.clear_all_pending_close();
     pending_orders.clear();
     order_id_to_link.clear();
+    pipeline.exchange_submission_guard.clear();
     info!(
         balance = format!("{:.2}", new_balance),
         "IPC reset paper state / IPC 重置紙盤狀態"

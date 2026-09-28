@@ -100,7 +100,7 @@ class TestPortfolioRestingExposureHealthcheck(unittest.TestCase):
                 self.assertEqual(status, "WARN")
                 self.assertIn("UNRESOLVED", msg)
                 self.assertIn(f"{order_status}=1", msg)
-                self.assertNotIn("resting=0", msg)
+                self.assertIn("known_exposure_only", msg)
                 sql, params = cur.execute.call_args.args
                 self.assertIn("LEFT JOIN latest_state", sql)
                 self.assertIn("COALESCE(ls.to_status, o.status)", sql)
@@ -531,6 +531,19 @@ class TestPortfolioRestingExposureHealthcheck(unittest.TestCase):
         self.assertEqual(status, "WARN", msg)
         self.assertIn("short_total=5300", msg)
         self.assertIn("80%cap", msg)
+
+
+    def test_h1_unknown_does_not_mask_confirmed_cap_failure(self) -> None:
+        data_dir = Path(self._tmp_data.name)
+        _write_snapshot(data_dir / "pipeline_snapshot_demo.json", balance=10000.0, positions=[])
+        cur = _mock_cursor([(True, True)], [[
+            ("open-known", "BTCUSDT", "Buy", 7000.0, 1, "grid", "Working"),
+            ("open-unknown", "ETHUSDT", "Buy", 0.0, 1, "grid", "Unknown"),
+        ]])
+        status, msg = check_68_portfolio_resting_exposure(cur)
+        self.assertEqual(status, "FAIL", msg)
+        self.assertIn("UNRESOLVED", msg)
+        self.assertIn("long_total=7000", msg)
 
 
 if __name__ == "__main__":

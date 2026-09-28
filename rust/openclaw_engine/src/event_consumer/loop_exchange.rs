@@ -268,6 +268,11 @@ pub(super) async fn handle_exchange_event(
                         po.is_close,
                     );
                     snapshot_writer.force_write(&pipeline.snapshot());
+                    settle_pending_lease(
+                        po,
+                        pipeline,
+                        openclaw_core::governance_core::LeaseOutcome::Consumed,
+                    );
 
                     let fully_filled = if po.progress.status == OrderStatus::Filled {
                         po.progress.executions_accounted(po.cum_filled_qty)
@@ -608,12 +613,20 @@ pub(super) async fn handle_exchange_event(
 
 /// 終態只結束委託；尚未收齊的 execution 必須仍能匹配原 intent。
 fn finish_terminal_pending(id: &str, state: &mut LoopState, pipeline: &mut TickPipeline) {
-    let Some(po) = state.pending_orders.get(id).cloned() else {
+    let Some(mut po) = state.pending_orders.get(id).cloned() else {
         return;
     };
     if !po.progress.executions_accounted(po.cum_filled_qty) {
         return;
     }
+    let outcome = if po.cum_filled_qty > 0.0 {
+        openclaw_core::governance_core::LeaseOutcome::Consumed
+    } else if po.progress.status == OrderStatus::Rejected {
+        openclaw_core::governance_core::LeaseOutcome::Failed
+    } else {
+        openclaw_core::governance_core::LeaseOutcome::Cancelled
+    };
+    settle_pending_lease(&mut po, pipeline, outcome);
     if po.is_close {
         pipeline.clear_pending_close(&po.symbol);
     }
@@ -637,4 +650,17 @@ fn finish_terminal_pending(id: &str, state: &mut LoopState, pipeline: &mut TickP
     state.pending_orders.remove(id);
     state.order_id_to_link.retain(|_, link| link != id);
     pipeline.exchange_submission_guard.resolve(id);
+}
+
+fn settle_pending_lease(
+    po: &mut super::types::PendingOrder,
+    pipeline: &TickPipeline,
+    outcome: openclaw_core::governance_core::LeaseOutcome,
+) {
+    if let Some(id) = po.decision_lease_id.take() {
+        // REST ACK may already have settled it; avoid duplicate release events.
+        if pipeline.governance.get_lease_by_id(&id).is_ok() {
+            pipeline.release_decision_lease(Some(&id), outcome, "venue_confirmation");
+        }
+    }
 }

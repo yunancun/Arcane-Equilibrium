@@ -61,9 +61,8 @@ pub(super) enum DispatchOutcome {
     /// 不重試 — 交易所業務拒單，重試無效。
     /// 包含 min_notional、參數無效、API key、餘額不足等。
     Structural,
-    /// Idempotent success-equivalent — duplicate / already-done / not-found-on-close.
-    /// Treat the retry as successful and move on.
-    /// 等價成功 — 重複 / 已完成 / close 時倉位已不存在。視為成功不再重試。
+    /// No retry; intent-specific handling decides zero-position convergence or rejection.
+    /// 不重試；由 intent 守衛決定零倉收斂或拒單，不能一律視為接受成功。
     NoOp,
 }
 
@@ -80,23 +79,26 @@ pub(super) enum DispatchRetryResult<T> {
     /// Dispatch succeeded (possibly after retries). `attempts=1` if first-try.
     /// 派發成功（可能經重試）。attempts=1 表示首試即成功。
     Ok { value: T, attempts: u32 },
-    /// Duplicate / already-done / not-found-on-close — treat as success.
-    /// 重複/已完成/平倉時已不存在 — 視為成功。
+    /// No-retry result requiring intent-specific terminal handling.
+    /// 不重試結果，須按 intent 判定終態。
     NoOp {
         last_error: BybitApiError,
         attempts: u32,
+        outcome_unknown: bool,
     },
     /// Business rejection not recoverable by retry.
     /// 業務拒單，重試無效。
     Structural {
         last_error: BybitApiError,
         attempts: u32,
+        outcome_unknown: bool,
     },
     /// Transient retries exhausted. `last_error` is the FINAL attempt's error.
     /// 暫時性重試耗盡。last_error 為最終嘗試的錯誤。
     TransientExhausted {
         last_error: BybitApiError,
         attempts: u32,
+        outcome_unknown: bool,
     },
 }
 
@@ -274,6 +276,21 @@ pub(super) fn close_dispatch_timeout_error(timeout_ms: u64) -> BybitApiError {
     }
 }
 
+/// Retryability and submission ambiguity are independent: rate limiting rejects
+/// a request, while a transport/parse/server timeout can hide an accepted order.
+pub(super) fn submission_error_is_unknown(error: &BybitApiError) -> bool {
+    matches!(
+        error,
+        BybitApiError::Transport(_) | BybitApiError::JsonParse(_)
+    ) || matches!(
+        error,
+        BybitApiError::Business {
+            ret_code: 10000 | 10016 | 10019,
+            ..
+        }
+    )
+}
+
 /// Run a dispatch retry loop with the given delay schedule.
 ///
 /// DISPATCH-RETRY-1 (E2 review 2026-04-19): extracted from spawn_order_dispatch
@@ -311,6 +328,7 @@ where
     Fut: std::future::Future<Output = Result<T, BybitApiError>>,
 {
     let mut attempt: u32 = 0;
+    let mut outcome_unknown = false;
     loop {
         debug!(
             symbol = %symbol,
@@ -326,18 +344,21 @@ where
                 };
             }
             Err(e) => {
+                outcome_unknown |= submission_error_is_unknown(&e);
                 let outcome = classify_dispatch_error(&e);
                 match outcome {
                     DispatchOutcome::NoOp => {
                         return DispatchRetryResult::NoOp {
                             last_error: e,
                             attempts: attempt + 1,
+                            outcome_unknown,
                         };
                     }
                     DispatchOutcome::Structural => {
                         return DispatchRetryResult::Structural {
                             last_error: e,
                             attempts: attempt + 1,
+                            outcome_unknown,
                         };
                     }
                     DispatchOutcome::Transient => {
@@ -345,6 +366,7 @@ where
                             return DispatchRetryResult::TransientExhausted {
                                 last_error: e,
                                 attempts: attempt + 1,
+                                outcome_unknown,
                             };
                         }
                         let delay_ms = delays_ms[attempt as usize];
