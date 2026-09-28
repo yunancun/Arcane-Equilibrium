@@ -13,18 +13,13 @@ use super::{
     STOCK_ETF_STORAGE_MIN_RAW_PAYLOAD_HASH_RETENTION_DAYS, STOCK_SHADOW_FILL_MODEL_CONTRACT_ID,
 };
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize, Default)]
 #[serde(rename_all = "snake_case")]
 pub enum StockEtfOrderSide {
+    #[default]
     Unknown,
     Buy,
     Sell,
-}
-
-impl Default for StockEtfOrderSide {
-    fn default() -> Self {
-        Self::Unknown
-    }
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
@@ -126,7 +121,7 @@ impl BrokerAccountPortfolioCashLedgerV1 {
     }
 }
 
-#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, Default)]
 pub struct StockEtfCostModelVersionV1 {
     pub contract_id: String,
     pub source_version: u32,
@@ -138,23 +133,6 @@ pub struct StockEtfCostModelVersionV1 {
     pub fx_drag_model_hash: String,
     pub tax_fee_placeholder_hash: String,
     pub conservative_fill_penalty_bps: u32,
-}
-
-impl Default for StockEtfCostModelVersionV1 {
-    fn default() -> Self {
-        Self {
-            contract_id: String::new(),
-            source_version: 0,
-            version_hash: String::new(),
-            commission_schedule_hash: String::new(),
-            exchange_reg_fee_hash: String::new(),
-            spread_model_hash: String::new(),
-            slippage_model_hash: String::new(),
-            fx_drag_model_hash: String::new(),
-            tax_fee_placeholder_hash: String::new(),
-            conservative_fill_penalty_bps: 0,
-        }
-    }
 }
 
 impl StockEtfCostModelVersionV1 {
@@ -210,7 +188,7 @@ impl StockEtfCostModelVersionV1 {
     }
 }
 
-#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, Default)]
 pub struct StockEtfBenchmarkVersionV1 {
     pub contract_id: String,
     pub source_version: u32,
@@ -222,23 +200,6 @@ pub struct StockEtfBenchmarkVersionV1 {
     pub corporate_action_adjustment_hash: String,
     pub matched_control_rule_hash: String,
     pub version_hash: String,
-}
-
-impl Default for StockEtfBenchmarkVersionV1 {
-    fn default() -> Self {
-        Self {
-            contract_id: String::new(),
-            source_version: 0,
-            benchmark_id: String::new(),
-            data_source_hash: String::new(),
-            construction_version_hash: String::new(),
-            rebalance_rule_hash: String::new(),
-            currency_treatment_hash: String::new(),
-            corporate_action_adjustment_hash: String::new(),
-            matched_control_rule_hash: String::new(),
-            version_hash: String::new(),
-        }
-    }
 }
 
 impl StockEtfBenchmarkVersionV1 {
@@ -402,7 +363,7 @@ impl StockShadowFillModelV1 {
     }
 }
 
-#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, Default)]
 pub struct StockEtfStorageCapacityV1 {
     pub contract_id: String,
     pub source_version: u32,
@@ -415,24 +376,6 @@ pub struct StockEtfStorageCapacityV1 {
     pub archive_path: String,
     pub capacity_plan_hash: String,
     pub capacity_breach_blocks_evidence_clock: bool,
-}
-
-impl Default for StockEtfStorageCapacityV1 {
-    fn default() -> Self {
-        Self {
-            contract_id: String::new(),
-            source_version: 0,
-            universe_size: 0,
-            rows_per_day_estimate: 0,
-            raw_payload_hash_retention_days: 0,
-            compressed_retention_days: 0,
-            index_budget_mb: 0,
-            query_slo_ms: 0,
-            archive_path: String::new(),
-            capacity_plan_hash: String::new(),
-            capacity_breach_blocks_evidence_clock: false,
-        }
-    }
 }
 
 impl StockEtfStorageCapacityV1 {

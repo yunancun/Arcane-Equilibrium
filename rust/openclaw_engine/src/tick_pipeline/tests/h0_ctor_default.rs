@@ -71,87 +71,103 @@ fn test_lg1_t3_with_kind_default_shadow_mode_is_false() {
     );
 }
 
-/// LG1-T3 #4：IPC `patch_risk_config{runtime.h0_shadow_mode=true}` 路徑驗證 —
-/// `H0Gate::set_shadow_mode(true)` 必須能把 ctor `false` default 推翻成 true。
-///
-/// 這條測試是 ctor-default-as-safety-net 契約的核心：runtime IPC（operator
-/// flip / drawdown_revoke / paper TOML reload via patch handler）始終是
-/// shadow_mode SoT，ctor default 只在 IPC 來臨前提供 fail-closed 預設。
-///
-/// 注意：本 sibling 不測 `apply_risk_snapshot` 是否把 `RiskConfig.runtime.
-/// h0_shadow_mode` 推進 `H0GateConfig.shadow_mode`。**E1 在 LG1-T3 IMPL 過程
-/// 發現**：pipeline_config.rs:105-109 H0Gate RMW 路徑刻意 *保留*
-/// shadow_mode（舊注釋稱「shadow_mode fields don't live in RiskConfig」已
-/// 過時，因為 `runtime.h0_shadow_mode` 於 risk_config_advanced.rs:366 確實
-/// 存在）— 實際 TOML→H0Gate 的 wire-in 只走 IPC `patch_risk_config` 的
-/// risk.rs handler（line 313 `pipeline.h0_gate.set_shadow_mode(v)`）。
-/// **E2 reviewer note**：見 sibling test #5 / report §reviewer-note。
+/// Direct setter remains available for explicit in-process transitions.
 #[test]
 fn test_lg1_t3_set_shadow_mode_overrides_ctor_default_to_true() {
     let mut pipeline = TickPipeline::new(&["BTCUSDT"]);
-    assert!(
-        !pipeline.h0_gate.config().shadow_mode,
-        "precondition: ctor default must be false"
-    );
-
+    assert!(!pipeline.h0_gate.config().shadow_mode);
     pipeline.h0_gate.set_shadow_mode(true);
-
-    assert!(
-        pipeline.h0_gate.config().shadow_mode,
-        "LG1-T3 invariant: H0Gate::set_shadow_mode(true) must override ctor \
-         `false` default; this is the path the IPC patch_risk_config handler \
-         (event_consumer/handlers/risk.rs:313) uses for paper TOML / operator \
-         flip / drawdown_revoke"
-    );
+    assert!(pipeline.h0_gate.config().shadow_mode);
 }
 
-/// LG1-T3 #5（ignored / E1 IMPL 期間發現）：`RiskConfig.runtime.h0_shadow_mode`
-/// 透過 `set_risk_store` + `replace` 後，**目前不會** 自動推進
-/// `H0GateConfig.shadow_mode`。本 test 標 `#[ignore]` 記錄此發現，作為
-/// E2 reviewer note 的可執行證據。
-///
-/// **發現脈絡**（PA tech plan §1.5 risk #1 假設 vs runtime 真實狀態）：
-/// - PA 假設「TOML 載入路徑 always 覆蓋 ctor default」
-/// - 實際 wire-in 路徑：
-///   * Startup time：TOML → `RiskConfig` → `ConfigStore` → `set_risk_store`
-///     → `apply_risk_snapshot`（pipeline_config.rs:67–174）
-///     **但** H0Gate RMW（line 105–109）**沒** copy
-///     `snap.runtime.h0_shadow_mode` 進 `h0.shadow_mode`
-///   * Runtime patch：IPC `patch_risk_config{h0_shadow_mode=...}`
-///     → `event_consumer/handlers/risk.rs:313`
-///     → `pipeline.h0_gate.set_shadow_mode(v)`（直接設）
-/// - 結果：startup 階段 ctor default 是真正的 SoT，TOML 值要等到第一次
-///   IPC patch 才會生效。
-///
-/// 後續工作（**不在本 T3 scope**）：
-///   - 修 apply_risk_snapshot 把 `snap.runtime.h0_shadow_mode` 推進
-///     `h0.shadow_mode`（≤ 5 LOC，新 LG-1 子任務 / 後續 wave）
-///   - 同次刪除 line 98 的過時注釋
+/// Former ignored regression: an accepted store version must update H0.
 #[test]
-#[ignore = "LG1-T3 reviewer note：apply_risk_snapshot 目前不會把 RiskConfig.runtime.h0_shadow_mode 推進 H0GateConfig.shadow_mode；修法 ≤5 LOC，留新子任務"]
-fn test_lg1_t3_known_gap_apply_risk_snapshot_does_not_wire_h0_shadow_mode() {
+fn bya_gap_h0_hot_reload_applies_both_directions_and_gate_verdict() {
     use crate::config::{ConfigStore, PatchSource, RiskConfig};
     use std::sync::Arc;
+    for kind in [PipelineKind::Paper, PipelineKind::Demo, PipelineKind::Live] {
+        let mut pipeline = TickPipeline::with_kind(&["BTCUSDT"], 10_000.0, kind);
+        let mut initial = RiskConfig::default();
+        initial.runtime.h0_shadow_mode = false;
+        let store = Arc::new(ConfigStore::new(initial));
+        pipeline.set_risk_store(Arc::clone(&store));
+        // An ineligible symbol gives the same real blocking condition in both modes.
+        pipeline.h0_gate.set_symbol_eligibility("BTCUSDT", false);
+        for (step, enabled) in [true, false].into_iter().enumerate() {
+            store
+                .apply_patch(
+                    PatchSource::Operator,
+                    |cfg| cfg.runtime.h0_shadow_mode = enabled,
+                    RiskConfig::validate,
+                )
+                .unwrap();
+            let now = 1_000 + step as u64;
+            pipeline.on_replay_tick(&super::make_event("BTCUSDT", 50_000.0, now));
+            assert_eq!(pipeline.h0_gate.config().shadow_mode, enabled, "{kind:?}");
+            assert_eq!(
+                pipeline.h0_gate.check("BTCUSDT", "linear", now).allowed,
+                enabled
+            );
+        }
+    }
+}
 
-    let mut pipeline = TickPipeline::new(&["BTCUSDT"]);
-    let initial = RiskConfig::default();
-    let store = Arc::new(ConfigStore::new(initial.clone()));
-    pipeline.set_risk_store(Arc::clone(&store));
-
-    let mut next = initial.clone();
-    next.runtime.h0_shadow_mode = true;
-    next.validate().expect("mutated config must be valid");
-    store
-        .replace(next, PatchSource::Operator)
-        .expect("replace must succeed");
-
-    pipeline.on_tick(&super::make_event("BTCUSDT", 50_000.0, 1_000));
-
-    // 修好 apply_risk_snapshot 後本 assert 會 PASS；目前 fail（保留為已知
-    // gap，標 #[ignore]）。
-    assert!(
-        pipeline.h0_gate.config().shadow_mode,
-        "expected (post-fix): apply_risk_snapshot wires runtime.h0_shadow_mode \
-         into H0GateConfig.shadow_mode"
+#[test]
+fn bya_gap_h0_startup_store_applies_before_first_tick_and_is_engine_local() {
+    use crate::config::{ConfigStore, PatchSource, RiskConfig};
+    use std::sync::Arc;
+    let mut pipelines = Vec::new();
+    let mut stores = Vec::new();
+    for (kind, enabled) in [
+        (PipelineKind::Paper, true),
+        (PipelineKind::Demo, false),
+        (PipelineKind::Live, false),
+    ] {
+        let mut cfg = RiskConfig::default();
+        cfg.runtime.h0_shadow_mode = enabled;
+        let store = Arc::new(ConfigStore::new(cfg));
+        let mut pipeline = TickPipeline::with_kind(&["BTCUSDT"], 10_000.0, kind);
+        pipeline.set_risk_store(Arc::clone(&store));
+        assert_eq!(pipeline.h0_gate.config().shadow_mode, enabled);
+        stores.push(store);
+        pipelines.push(pipeline);
+    }
+    stores[1]
+        .apply_patch(
+            PatchSource::Operator,
+            |cfg| cfg.runtime.h0_shadow_mode = true,
+            RiskConfig::validate,
+        )
+        .unwrap();
+    for pipeline in &mut pipelines {
+        pipeline.on_replay_tick(&super::make_event("BTCUSDT", 50_000.0, 1_000));
+    }
+    assert_eq!(
+        pipelines
+            .iter()
+            .map(|p| p.h0_gate.config().shadow_mode)
+            .collect::<Vec<_>>(),
+        vec![true, true, false]
     );
+    assert!(!stores[2].load().runtime.h0_shadow_mode);
+}
+
+#[test]
+fn bya_gap_h0_missing_config_defaults_to_hard_block_but_explicit_shadow_survives() {
+    use crate::config::RiskConfig;
+    let default = RiskConfig::default();
+    assert!(!default.runtime.h0_shadow_mode);
+    let mut document = serde_json::to_value(&default).unwrap();
+    document["runtime"]
+        .as_object_mut()
+        .unwrap()
+        .remove("h0_shadow_mode");
+    let missing: RiskConfig = serde_json::from_value(document.clone()).unwrap();
+    assert!(!missing.runtime.h0_shadow_mode);
+    document.as_object_mut().unwrap().remove("runtime");
+    let absent_section: RiskConfig = serde_json::from_value(document.clone()).unwrap();
+    assert!(!absent_section.runtime.h0_shadow_mode);
+    document["runtime"] = serde_json::json!({"h0_shadow_mode": true});
+    let explicit: RiskConfig = serde_json::from_value(document).unwrap();
+    assert!(explicit.runtime.h0_shadow_mode);
 }

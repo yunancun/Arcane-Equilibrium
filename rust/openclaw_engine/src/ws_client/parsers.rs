@@ -38,7 +38,10 @@ pub(super) fn parse_trade_item(item: &serde_json::Value, topic: &str) -> Option<
             v.as_u64()
                 .or_else(|| v.as_str().and_then(|s| s.parse().ok()))
         })
-        .unwrap_or_else(now_ms);
+        .filter(|ts| *ts > 0)?;
+    if !price.is_finite() || price <= 0.0 {
+        return None;
+    }
     let volume = item
         .get("v")
         .and_then(|v| v.as_str())
@@ -143,155 +146,6 @@ pub(super) fn parse_kline_item(item: &serde_json::Value, topic: &str) -> Option<
     Some(event)
 }
 
-/// Parse orderbook snapshot — extract best bid/ask into a PriceEvent.
-/// 解析訂單簿快照 — 提取最優買賣價到 PriceEvent。
-///
-/// Bybit orderbook: {"topic":"orderbook.50.BTCUSDT","type":"snapshot","data":{"s":"BTCUSDT","b":[["price","qty"],...],"a":[...],"u":123,"seq":456}}
-///
-/// `msg_type` = 父消息的 `type` 欄位（"snapshot" / "delta"）。recorder-v2 必須靠它
-/// 確定性區分 snapshot（reset+load 全簿）與 delta（upsert / qty==0 刪除），否則
-/// L1BookTracker 無法正確 reset（這是 campaign-8 bad-tick 的根因，故 type 是
-/// load-bearing 而非可有可無）。v1 路徑（bids5/asks5/best-bid/ask）不讀此參數。
-///
-/// `record_l1` = recorder-v2 producer-side gate（呼叫端 dispatch.rs 從進程啟動時
-/// 讀一次的 `OPENCLAW_RECORD_L1_EVENTS` 快照取值，預設 OFF）。為什麼要 gate：
-///   full-depth 解析（parse_all_levels 全 50 檔 + update_id/seq 抽取 + 5 個 ob_*
-///   欄 populate）每條 orderbook.50 訊息都跑在 WS 讀熱路徑。flag-OFF 時消費端
-///   （on_tick_helpers.rs:776 `if self.record_l1_events`）根本不消費這些欄位，做
-///   了純屬白做工——這正是 E2 抓的「二進制非 inert」。flag-OFF 時 SKIP 全簿解析、
-///   5 個 ob_* 欄保持 `PriceEvent::new` 的 None 預設；v1 路徑保持位元級不變。
-pub(super) fn parse_orderbook_snapshot(
-    data: &[serde_json::Value],
-    topic: &str,
-    msg_type: Option<&str>,
-    record_l1: bool,
-) -> Option<PriceEvent> {
-    let symbol = extract_symbol_from_topic(topic)?;
-    // Orderbook data is a single object, not an array of items.
-    // The "data" array in process_message may contain the object directly,
-    // or the snapshot object may be the first element.
-    // 訂單簿數據是單個對象。
-    let obj = data.first()?;
-
-    let bids = obj.get("b").and_then(|v| v.as_array())?;
-    let asks = obj.get("a").and_then(|v| v.as_array())?;
-
-    let best_bid = bids
-        .first()
-        .and_then(|b| b.as_array())
-        .and_then(|arr| arr.first())
-        .and_then(|v| v.as_str())
-        .and_then(|s| s.parse::<f64>().ok())
-        .unwrap_or(0.0);
-
-    let best_ask = asks
-        .first()
-        .and_then(|a| a.as_array())
-        .and_then(|arr| arr.first())
-        .and_then(|v| v.as_str())
-        .and_then(|s| s.parse::<f64>().ok())
-        .unwrap_or(0.0);
-
-    let mid_price = if best_bid > 0.0 && best_ask > 0.0 {
-        (best_bid + best_ask) / 2.0
-    } else {
-        best_bid.max(best_ask)
-    };
-
-    let ts = obj
-        .get("ts")
-        .and_then(|v| {
-            v.as_u64()
-                .or_else(|| v.as_str().and_then(|s| s.parse().ok()))
-        })
-        .unwrap_or_else(now_ms);
-
-    // Extract top-5 levels for the orderbook aggregator (idle writer #1).
-    // 提取前 5 檔深度供 OB 聚合器使用（idle writer #1 修復）。
-    let parse_levels = |arr: &[serde_json::Value]| -> Vec<(f64, f64)> {
-        arr.iter()
-            .take(5)
-            .filter_map(|lvl| {
-                let lvl = lvl.as_array()?;
-                let price = lvl.first()?.as_str()?.parse::<f64>().ok()?;
-                let qty = lvl.get(1)?.as_str()?.parse::<f64>().ok()?;
-                Some((price, qty))
-            })
-            .collect()
-    };
-    let bid_levels = parse_levels(bids);
-    let ask_levels = parse_levels(asks);
-
-    // recorder-v2 producer gate：flag-OFF 時整段 full-depth 解析 SKIP，5 個 ob_* 欄
-    // 保持下方 PriceEvent::new 的 None 預設（二進制 inert）；flag-ON 才抽全簿 + u/seq。
-    // 與 parse_levels 的差異：不 .take(5)、保留 qty==0（刪除標記，tracker 端處理），
-    // 但仍 fail-soft 丟棄不可解析 / 非有限的單檔（不污染本地簿）。
-    let (all_bid_levels, all_ask_levels, update_id, seq) = if record_l1 {
-        // 抽取**全部**變更檔（不截前 5），供 L1BookTracker 重建本地簿。
-        let parse_all_levels = |arr: &[serde_json::Value]| -> Vec<(f64, f64)> {
-            arr.iter()
-                .filter_map(|lvl| {
-                    let lvl = lvl.as_array()?;
-                    let price = lvl.first()?.as_str()?.parse::<f64>().ok()?;
-                    let qty = lvl.get(1)?.as_str()?.parse::<f64>().ok()?;
-                    if !price.is_finite() || !qty.is_finite() {
-                        return None;
-                    }
-                    Some((price, qty))
-                })
-                .collect()
-        };
-        // Bybit `u`（updateId，u==1=服務重啟須 reset）與 `seq`（cross-sequence）。
-        // 字串或數值編碼皆容；缺欄回 None（tracker fail-soft 丟整筆，不寫 colliding 0）。
-        let update_id = obj.get("u").and_then(|v| {
-            v.as_u64()
-                .or_else(|| v.as_str().and_then(|s| s.parse().ok()))
-        });
-        let seq = obj.get("seq").and_then(|v| {
-            v.as_u64()
-                .or_else(|| v.as_str().and_then(|s| s.parse().ok()))
-        });
-        (
-            Some(parse_all_levels(bids)),
-            Some(parse_all_levels(asks)),
-            update_id,
-            seq,
-        )
-    } else {
-        (None, None, None, None)
-    };
-
-    let mut event = PriceEvent::new(symbol, mid_price, ts);
-    event.bid_price = best_bid;
-    event.ask_price = best_ask;
-    event.event_kind = Some(PriceEventKind::Orderbook);
-    // P-02: Populate structured fields directly — avoids serde round-trip in consumers.
-    // P-02：直接填充結構化欄位 — 消費端免 serde 反序列化。
-    event.bids5 = Some(bid_levels.clone());
-    event.asks5 = Some(ask_levels.clone());
-    // recorder-v2：additive 全變更檔 + type/u/seq。flag-OFF 時上方分支給全 None，
-    // event.ob_* 維持 None 預設；非 orderbook 路徑亦恆 None。
-    event.ob_msg_type = if record_l1 {
-        msg_type.map(str::to_string)
-    } else {
-        None
-    };
-    event.ob_changed_bids = all_bid_levels;
-    event.ob_changed_asks = all_ask_levels;
-    event.ob_update_id = update_id;
-    event.ob_seq = seq;
-    // Legacy metadata — kept for backward compat until all consumers migrated.
-    // 舊版 metadata — 保留向後兼容直到所有消費端遷移完畢。
-    event.metadata.insert("type".into(), "orderbook".into());
-    if let Ok(s) = serde_json::to_string(&bid_levels) {
-        event.metadata.insert("bids5".into(), s);
-    }
-    if let Ok(s) = serde_json::to_string(&ask_levels) {
-        event.metadata.insert("asks5".into(), s);
-    }
-    Some(event)
-}
-
 /// Parse ticker snapshot — last price, 24h volume, best bid/ask.
 /// 解析行情快照 — 最新價、24h 成交量、最優買賣價。
 ///
@@ -302,6 +156,9 @@ pub(super) fn parse_ticker_item(item: &serde_json::Value, topic: &str) -> Option
         .get("lastPrice")
         .and_then(|v| v.as_str())
         .and_then(|s| s.parse::<f64>().ok())?;
+    if !last_price.is_finite() || last_price <= 0.0 {
+        return None;
+    }
     let volume = item
         .get("volume24h")
         .and_then(|v| v.as_str())
@@ -322,7 +179,7 @@ pub(super) fn parse_ticker_item(item: &serde_json::Value, topic: &str) -> Option
         .and_then(|v| v.as_str())
         .and_then(|s| s.parse::<u64>().ok())
         .or_else(|| item.get("ts").and_then(|v| v.as_u64()))
-        .unwrap_or_else(now_ms);
+        .unwrap_or(0); // Dispatcher must supply the authoritative envelope ts.
 
     let turnover = item
         .get("turnover24h")

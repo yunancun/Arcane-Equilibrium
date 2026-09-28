@@ -407,3 +407,71 @@ fn test_session12_handle_cost_gate_and_cooldown_via_ipc() {
     assert_eq!(pipeline.boot_cooldown_ms(), 120_000);
     assert_eq!(pipeline.signals_heartbeat_ms(), 30_000);
 }
+
+#[test]
+fn bya_gap_h0_legacy_ipc_updates_store_and_survives_unrelated_reload() {
+    use crate::config::{ConfigStore, PatchSource, RiskConfig};
+    use crate::tick_pipeline::PipelineCommand;
+    use std::sync::Arc;
+    let mut pipeline = make_test_pipeline();
+    let mut writer = make_test_writer();
+    let mut pending = std::collections::HashMap::new();
+    let store = Arc::new(ConfigStore::new(RiskConfig::default()));
+    pipeline.set_risk_store(Arc::clone(&store));
+    for enabled in [true, false] {
+        let (tx, rx) = tokio::sync::oneshot::channel();
+        super::super::handlers::handle_paper_command(
+            PipelineCommand::UpdateRiskConfig {
+                hard_stop_pct: None,
+                trailing_stop_pct: None,
+                trailing_activation_pct: None,
+                time_stop_hours: None,
+                atr_multiplier: None,
+                take_profit_pct: None,
+                max_leverage: None,
+                max_drawdown_pct: None,
+                max_same_direction_positions: None,
+                p1_risk_pct: None,
+                h0_shadow_mode: Some(enabled),
+                dynamic_stop_base_ratio: None,
+                dynamic_stop_cap_ratio: None,
+                trailing_min_rr_ratio: None,
+                cost_gate_min_confidence: None,
+                cost_gate_k_base: None,
+                cost_gate_k_medium: None,
+                cost_gate_k_small: None,
+                adx_trending_threshold: None,
+                boot_cooldown_ms: None,
+                signals_heartbeat_ms: None,
+                exit_missing_edge_fallback_bps: None,
+                exit_min_net_floor_bps: None,
+                exit_min_hold_secs: None,
+                exit_min_peak_atr_norm: None,
+                exit_giveback_base: None,
+                exit_giveback_slope: None,
+                exit_giveback_floor: None,
+                exit_stale_peak_ms: None,
+                response_tx: Some(tx),
+            },
+            &mut pipeline,
+            &mut writer,
+            &mut pending,
+        );
+        assert!(rx.blocking_recv().unwrap().is_ok());
+        assert_eq!(pipeline.h0_gate.config().shadow_mode, enabled);
+        assert_eq!(store.load().runtime.h0_shadow_mode, enabled);
+        store
+            .apply_patch(
+                PatchSource::Operator,
+                |cfg| cfg.limits.open_positions_max += 1,
+                RiskConfig::validate,
+            )
+            .unwrap();
+        pipeline.on_replay_tick(&openclaw_types::PriceEvent::new(
+            "BTCUSDT".into(),
+            50_000.0,
+            1_000,
+        ));
+        assert_eq!(pipeline.h0_gate.config().shadow_mode, enabled);
+    }
+}

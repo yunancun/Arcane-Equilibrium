@@ -36,20 +36,14 @@ pub const IBKR_ACTIVATION_WINDOW_MAX_MS: u64 = 24 * 60 * 60 * 1000;
 /// operation scope 白名單枚舉（**readonly 單值**;W8a 範圍紀律）。
 /// paper/tiny_live/live/shadow 等表外 scope 一律 `UnknownDenied`——不是「未來擴充位」,
 /// 是 fail-closed 分類:W8 全包引入其他 scope 時擴充白名單並吸收本切片。
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize, Default)]
 #[serde(rename_all = "snake_case")]
 pub enum IbkrActivationOperationScopeV1 {
     /// 唯讀接觸（account/positions/market-data 讀面;零 order verb）。
     Readonly,
     /// 契約 default / 白名單外 scope 的 fail-closed 分類（`validate()` 必拒）。
+    #[default]
     UnknownDenied,
-}
-
-impl Default for IbkrActivationOperationScopeV1 {
-    fn default() -> Self {
-        // fail-closed 預設＝未知拒。
-        Self::UnknownDenied
-    }
 }
 
 impl IbkrActivationOperationScopeV1 {

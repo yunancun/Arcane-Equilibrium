@@ -51,7 +51,7 @@ pub const IBKR_ACCOUNT_SUMMARY_WIRE_TAG_WHITELIST: [&str; 9] = [
 
 /// `reqAccountSummary` tag 白名單枚舉（fail-closed:表外一律 `UnknownDenied`）。
 /// wire 字串出典見模組註解;每變體對應一個官方 AccountSummaryTags 慣例 tag。
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize, Default)]
 #[serde(rename_all = "snake_case")]
 pub enum IbkrAccountSummaryTagV1 {
     /// 淨清算價值（"NetLiquidation";符號紀律=**可負**,深度虧損下淨值可為負）。
@@ -76,14 +76,8 @@ pub enum IbkrAccountSummaryTagV1 {
     /// 含貸款權益（"EquityWithLoanValue";符號紀律=**可負**,同 NetLiquidation 保真）。
     EquityWithLoanValue,
     /// 契約 default / 現勘表外 wire tag 的 fail-closed 分類（`validate()` 必拒）。
+    #[default]
     UnknownDenied,
-}
-
-impl Default for IbkrAccountSummaryTagV1 {
-    fn default() -> Self {
-        // fail-closed 預設＝未知拒（須顯式白名單 tag 才可通過校驗）。
-        Self::UnknownDenied
-    }
 }
 
 impl IbkrAccountSummaryTagV1 {

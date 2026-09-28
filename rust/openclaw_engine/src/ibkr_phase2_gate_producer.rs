@@ -415,7 +415,7 @@ fn sealed_artifact_metadata_is_secure(meta: &std::fs::Metadata, expected_euid: u
 
     !meta.file_type().is_symlink()
         && meta.is_file()
-        && meta.uid() as u32 == expected_euid
+        && meta.uid() == expected_euid
         && owner_only_mode_is_exact(meta.permissions().mode(), 0o400)
 }
 
@@ -427,7 +427,7 @@ fn owner_only_dir_metadata_is_secure(meta: &std::fs::Metadata, expected_euid: u3
 
     !meta.file_type().is_symlink()
         && meta.is_dir()
-        && meta.uid() as u32 == expected_euid
+        && meta.uid() == expected_euid
         && owner_only_mode_is_exact(meta.permissions().mode(), 0o700)
 }
 
@@ -950,7 +950,7 @@ pub(crate) fn load_phase2_seal_approval_from_dir(
     if (meta.permissions().mode() & 0o777) != 0o600 {
         return Err(format!("approval file not 0o600: {}", path.display()));
     }
-    if meta.uid() as u32 != euid {
+    if meta.uid() != euid {
         return Err(format!(
             "approval file not owned by euid: {}",
             path.display()
@@ -1345,7 +1345,7 @@ impl Phase2ApplyLock {
             .metadata()
             .map_err(|error| format!("secure phase2 apply-lock stat failed: {error}"))?;
         if !metadata.is_file()
-            || metadata.uid() as u32 != euid
+            || metadata.uid() != euid
             || !owner_only_mode_is_exact(metadata.permissions().mode(), 0o600)
         {
             return Err("secure phase2 apply-lock is not owner-only regular 0600".to_string());

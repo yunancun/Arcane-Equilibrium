@@ -5,15 +5,14 @@
 //!
 //! 本目錄 (`tick_pipeline/on_tick/`) 於 2026-04-21 由單一 2071 行
 //! `on_tick.rs` 拆出，以遵守 §七 2000 行硬上限。外部呼叫不變：
-//! `TickPipeline::on_tick(event)` 維持同一簽名、同一語意、同一位元輸出；
+//! `TickPipeline::on_tick(event)` 維持同一簽名；
 //! `pub(crate)` helpers 透過本 `mod.rs` 的 `pub use` re-export 保持向後相容
 //! （callers 仍可走 `crate::tick_pipeline::on_tick::strip_phys_lock_prefix`
 //! 等路徑訪問）。
 //!
 //! This directory was split from a single 2071-line `on_tick.rs` on
 //! 2026-04-21 to honour §七's 2000-line hard cap. External callers are
-//! unchanged: `TickPipeline::on_tick(event)` keeps the same signature,
-//! semantics, and byte-for-byte output; `pub(crate)` helpers are re-exported
+//! unchanged: `TickPipeline::on_tick(event)` keeps the same signature; `pub(crate)` helpers are re-exported
 //! via `pub use` in this `mod.rs` so callers still reach them as
 //! `crate::tick_pipeline::on_tick::strip_phys_lock_prefix`, etc.
 //!
@@ -95,7 +94,7 @@ pub(crate) use helpers::strip_phys_lock_prefix;
 pub(crate) use helpers_close_tags::build_close_tags_from_legacy;
 
 impl TickPipeline {
-    /// Process a single price event through the full pipeline.
+    /// Runtime entry: freshness is measured against the processing wall clock.
     /// Returns a CanaryRecord when canary_mode is enabled (R07-2).
     /// 通過完整價格事件管線處理單個價格事件。
     /// 灰度模式啟用時返回 CanaryRecord。
@@ -105,13 +104,44 @@ impl TickPipeline {
     /// steps and honours each step's `ControlFlow::Break` as an early return.
     /// 各 step 以 owned return 串接；`ControlFlow::Break` 即早退。
     pub fn on_tick(&mut self, event: &PriceEvent) -> Option<CanaryRecord> {
+        self.on_tick_at(event, openclaw_core::now_ms())
+    }
+
+    /// Explicit deterministic replay entry. Never use this for runtime ingress.
+    pub fn on_replay_tick(&mut self, event: &PriceEvent) -> Option<CanaryRecord> {
+        self.on_tick_at(event, event.ts_ms)
+    }
+
+    /// Process against an independent observation clock (wall clock in runtime,
+    /// explicit logical clock in replay/tests). Never infer freshness from the
+    /// incoming event itself at the live ingress.
+    pub fn on_tick_at(&mut self, event: &PriceEvent, now_ms: u64) -> Option<CanaryRecord> {
+        // Confirmed candles are persistence events, not executable prices.
+        // 分流必須早於 mark、halt TTL、fast-track 與 H0 的任何副作用。
+        if event.event_kind == Some(PriceEventKind::KlineConfirm) {
+            self.on_tick_step_1_2_klines_indicators(event);
+            return None;
+        }
         // Start timing the tick processing / 開始計時 tick 處理
         let tick_start = Instant::now();
+        if let Some(rejected) = self
+            .h0_gate
+            .admit_price_ts(&event.symbol, event.ts_ms, now_ms)
+        {
+            tracing::warn!(symbol = %event.symbol, reason = %rejected.reason, "price timestamp rejected before mutation");
+            return self.maybe_canary_record(
+                event,
+                None,
+                vec![],
+                vec![],
+                tick_start.elapsed().as_micros() as u64,
+            );
+        }
 
         // P0-ENGINE-HALTSESSION-STUCK-FIX (2026-05-19): Option C TTL check at
         // on_tick opening BEFORE step_3 paper_paused early-return. O(1) when
-        // halt_kind=None（絕大多數 tick 走此 path）。採 event.ts_ms 而非
-        // wall-clock 保證 replay 確定性。
+        // halt_kind=None（絕大多數 tick 走此 path）。
+        // now_ms 為 runtime wall clock 或明示 replay clock。
         //
         // 與 step_0 fast_track 互動：fast_track 也可能設 paper_paused，但
         // 不會設 halt_kind → check_and_clear_halt_expired 看到 halt_kind=None
@@ -120,7 +150,7 @@ impl TickPipeline {
         // WS-feed dependency：tick 持續 = TTL auto-clear path correct；WS 全斷
         // 期間 halt remains until WS recovery（spec §3.6 acknowledged）。
         // P0-ENGINE-HALTSESSION-STUCK-FIX（2026-05-19）：on_tick 開頭 TTL check。
-        self.check_and_clear_halt_expired(event.ts_ms);
+        self.check_and_clear_halt_expired(now_ms);
 
         // ── Step 0: fast track (flash-crash / margin-crisis / held-drop). ──
         // ── Step 0：快速通道（閃崩 / 保證金危機 / 持倉跌幅）。──
@@ -131,7 +161,7 @@ impl TickPipeline {
 
         // ── Step 0.5: H0 gate pre-check (shadow mode: observe only). ──
         // ── Step 0.5：H0 門控前置檢查（影子模式：僅觀察）。──
-        let h0_allowed = match self.on_tick_step_0_5_h0_gate(event, tick_start) {
+        let h0_allowed = match self.on_tick_step_0_5_h0_gate(event, tick_start, now_ms) {
             ControlFlow::Break(record) => return record,
             ControlFlow::Continue(flag) => flag,
         };
@@ -139,15 +169,6 @@ impl TickPipeline {
         // ── Step 1+2: kline aggregation + indicators + FeatureSnapshot. ──
         // ── Step 1+2：K 線聚合 + 指標計算 + FeatureSnapshot。──
         let indicators = self.on_tick_step_1_2_klines_indicators(event);
-
-        // R1：KlineConfirm 事件僅作 DB 持久化（已於 step_1_2 完成），它是
-        // 「每根 bar 收盤一次」的權威整根，不是實時 tick，**不得驅動信號 /
-        // 派單 / 風控**（實時交易價由高頻 publicTrade / ticker 提供 = R2 不變）。
-        // 在此早退避免 KlineConfirm 的 last_price=close 觸發 step_3/4/5/6 的
-        // 入場、平倉或風控誤判（一-bar 滯後的 close 進交易路徑 = 假信號）。
-        if event.event_kind == Some(PriceEventKind::KlineConfirm) {
-            return None;
-        }
 
         // ── Step 3: pause gate + boot cooldown + signal evaluation. ──
         // ── Step 3：暫停門控 + 啟動冷卻 + 信號評估與持久化。──

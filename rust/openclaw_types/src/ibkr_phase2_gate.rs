@@ -19,56 +19,36 @@ pub const IBKR_PAPER_GATEWAY_DEFAULT_PORT: u16 = 4002;
 pub const IBKR_LIVE_GATEWAY_PORT: u16 = 4001;
 pub const IBKR_LIVE_TWS_PORT: u16 = 7496;
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize, Default)]
 #[serde(rename_all = "SCREAMING_SNAKE_CASE")]
 pub enum IbkrExternalSurfaceGateStatus {
     Pass,
+    #[default]
     Blocked,
 }
 
-impl Default for IbkrExternalSurfaceGateStatus {
-    fn default() -> Self {
-        Self::Blocked
-    }
-}
-
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize, Default)]
 #[serde(rename_all = "snake_case")]
 pub enum IbkrApiBaseline {
+    #[default]
     IbGatewayTwsApi,
     ClientPortalWebApiDenied,
 }
 
-impl Default for IbkrApiBaseline {
-    fn default() -> Self {
-        Self::IbGatewayTwsApi
-    }
-}
-
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize, Default)]
 #[serde(rename_all = "snake_case")]
 pub enum IbkrHostPolicy {
+    #[default]
     LoopbackOnly,
     NetworkHostDenied,
 }
 
-impl Default for IbkrHostPolicy {
-    fn default() -> Self {
-        Self::LoopbackOnly
-    }
-}
-
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize, Default)]
 #[serde(rename_all = "snake_case")]
 pub enum IbkrPortPolicy {
+    #[default]
     PaperGatewayPortOnly,
     LiveOrTwsPortDenied,
-}
-
-impl Default for IbkrPortPolicy {
-    fn default() -> Self {
-        Self::PaperGatewayPortOnly
-    }
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
@@ -240,36 +220,26 @@ pub struct IbkrExternalSurfaceGateVerdict {
     pub blockers: Vec<IbkrExternalSurfaceGateBlocker>,
 }
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize, Default)]
 #[serde(rename_all = "SCREAMING_SNAKE_CASE")]
 pub enum IbkrSessionAttestationStatus {
     PaperAttested,
     ReadonlyAttested,
+    #[default]
     Blocked,
 }
 
-impl Default for IbkrSessionAttestationStatus {
-    fn default() -> Self {
-        Self::Blocked
-    }
-}
-
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize, Default)]
 #[serde(rename_all = "snake_case")]
 pub enum IbkrGatewayMode {
     Paper,
     ReadOnly,
     LiveDenied,
+    #[default]
     Unknown,
 }
 
-impl Default for IbkrGatewayMode {
-    fn default() -> Self {
-        Self::Unknown
-    }
-}
-
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize, Default)]
 #[serde(rename_all = "snake_case")]
 pub enum IbkrSecretSlotMode {
     ReadOnly,
@@ -277,28 +247,18 @@ pub enum IbkrSecretSlotMode {
     LiveDenied,
     Missing,
     WorldReadable,
+    #[default]
     Unknown,
 }
 
-impl Default for IbkrSecretSlotMode {
-    fn default() -> Self {
-        Self::Unknown
-    }
-}
-
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize, Default)]
 #[serde(rename_all = "snake_case")]
 pub enum IbkrSessionDataTier {
     AccountOnly,
     Delayed,
     RealtimeEntitled,
+    #[default]
     Unknown,
-}
-
-impl Default for IbkrSessionDataTier {
-    fn default() -> Self {
-        Self::Unknown
-    }
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]

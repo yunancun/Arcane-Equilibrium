@@ -212,7 +212,7 @@ fn test_halt_session_uses_per_symbol_price_not_triggering_tick() {
 
     // 觸發 tick 只針對 BTCUSDT，價 50_500。ETH/DOGE 不會收到自己的 tick，
     // 所以在 halt loop 裡只能靠 per-symbol fallback（entry price）存活。
-    let _ = pipeline.on_tick(&super::make_event("BTCUSDT", 50_500.0, 2_000));
+    let _ = pipeline.on_replay_tick(&super::make_event("BTCUSDT", 50_500.0, 2_000));
 
     // 消費所有 Fill 訊息，按 symbol 聚合每筆 close 的 price / entry_context_id。
     let mut close_prices: std::collections::HashMap<String, f64> = std::collections::HashMap::new();

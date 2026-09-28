@@ -193,7 +193,7 @@ fn ensure_ancestor_owner_only(ibkr_base: &Path) -> Result<(), String> {
                 mode
             ));
         }
-        if meta.uid() as u32 != euid {
+        if meta.uid() != euid {
             return Err(format!(
                 "ancestor_dir_not_owned: {} uid={} euid={}",
                 path.display(),
@@ -230,7 +230,7 @@ fn slot_is_owner_only(dir: &Path, dir_meta: &std::fs::Metadata) -> Result<bool, 
     use std::os::unix::fs::{MetadataExt, PermissionsExt};
 
     let euid = unsafe { libc::geteuid() } as u32;
-    let mut ok = (dir_meta.permissions().mode() & 0o777) == 0o700 && dir_meta.uid() as u32 == euid;
+    let mut ok = (dir_meta.permissions().mode() & 0o777) == 0o700 && dir_meta.uid() == euid;
 
     for entry in std::fs::read_dir(dir)
         .map_err(|e| format!("read slot dir {} failed: {e}", dir.display()))?
@@ -246,7 +246,7 @@ fn slot_is_owner_only(dir: &Path, dir_meta: &std::fs::Metadata) -> Result<bool, 
         }
         if ft.is_file() {
             let file_ok =
-                (em.permissions().mode() & 0o777) == 0o600 && em.uid() as u32 == euid;
+                (em.permissions().mode() & 0o777) == 0o600 && em.uid() == euid;
             ok = ok && file_ok;
         }
     }

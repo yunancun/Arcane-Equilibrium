@@ -168,7 +168,7 @@ fn apply_confirmed_fill_preserves_signal_context_id() {
 
     // Seed a latest price so any resolver that wants one is happy.
     // 注入一個最新價，防止任何需要最新價的路徑卡住。
-    let _ = pipeline.on_tick(&super::make_event("BTCUSDT", 100.0, 1_000));
+    let _ = pipeline.on_replay_tick(&super::make_event("BTCUSDT", 100.0, 1_000));
 
     // Apply an open-side confirmed fill with a deliberately earlier
     // signal-time id (ts=1000) and a LATER exec ts_ms (ts=2000). If the
@@ -227,7 +227,7 @@ fn apply_confirmed_fill_preserves_signal_context_id() {
 #[test]
 fn apply_confirmed_fill_falls_back_when_signal_id_empty() {
     let mut pipeline = TickPipeline::with_kind(&["BTCUSDT"], 1_000.0, PipelineKind::Demo);
-    let _ = pipeline.on_tick(&super::make_event("BTCUSDT", 100.0, 1_000));
+    let _ = pipeline.on_replay_tick(&super::make_event("BTCUSDT", 100.0, 1_000));
 
     pipeline.apply_confirmed_fill(
         "BTCUSDT",

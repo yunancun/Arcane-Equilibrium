@@ -9,7 +9,7 @@ use super::{
     StockShadowFillModelV1,
 };
 
-#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, Default)]
 pub struct StockEtfScorecardInputBundleV1 {
     pub cash_ledger: BrokerAccountPortfolioCashLedgerV1,
     pub cost_model: StockEtfCostModelVersionV1,
@@ -35,37 +35,6 @@ pub struct StockEtfScorecardInputBundleV1 {
     pub evidence_clock_started: bool,
     pub secret_content_serialized: bool,
     pub live_or_tiny_live_authorized: bool,
-}
-
-impl Default for StockEtfScorecardInputBundleV1 {
-    fn default() -> Self {
-        Self {
-            cash_ledger: BrokerAccountPortfolioCashLedgerV1::default(),
-            cost_model: StockEtfCostModelVersionV1::default(),
-            benchmark: StockEtfBenchmarkVersionV1::default(),
-            shadow_fill_model: StockShadowFillModelV1::default(),
-            storage_capacity: StockEtfStorageCapacityV1::default(),
-            readonly_probe_result_import_request_contract_id: String::new(),
-            readonly_probe_result_import_request_hash: String::new(),
-            market_data_provenance_contract_hash: String::new(),
-            reference_data_sources_contract_hash: String::new(),
-            risk_policy_contract_hash: String::new(),
-            atomic_fact_input_hash: String::new(),
-            source_commit: String::new(),
-            scorecard_is_derived_only: false,
-            paper_and_shadow_fills_separate: false,
-            live_fill_claimed: false,
-            bybit_live_execution_unchanged: false,
-            ibkr_contact_performed: false,
-            connector_runtime_started: false,
-            broker_fill_import_performed: false,
-            scorecard_writer_started: false,
-            db_apply_performed: false,
-            evidence_clock_started: false,
-            secret_content_serialized: false,
-            live_or_tiny_live_authorized: false,
-        }
-    }
 }
 
 impl StockEtfScorecardInputBundleV1 {

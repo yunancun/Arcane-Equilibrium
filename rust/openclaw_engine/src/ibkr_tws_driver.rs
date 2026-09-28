@@ -143,8 +143,8 @@ async fn send_framed<S: AsyncWrite + Unpin>(
     frame: &[u8],
     timeout: Duration,
 ) -> Result<(), DriverError> {
-    // grant by-value 消費（drop）:單次出站憑證,不可復用（非 Clone/非 Copy;與送出動作綁定）。
-    drop(grant);
+    // grant by-value 消費:單次出站憑證,不可復用（非 Clone/非 Copy;與送出動作綁定）。
+    let _consumed_grant = grant;
     write_all_timed(stream, frame, timeout).await
 }
 
@@ -824,21 +824,18 @@ impl<P: ConnectPermitProvider, F: TransportFactory> SessionDriver<P, F> {
             SnapshotStaleness::NotSubscribed | SnapshotStaleness::DisconnectedStale
         ) {
             if let Some(grant) = self.manager.account_data_grant(now) {
-                match self
+                if let Ok(frame) = self
                     .account_data
                     .begin_account_summary(ACCOUNT_SUMMARY_REQ_ID)
                 {
-                    Ok(frame) => {
-                        if send_framed(stream, grant, &frame, self.timeouts.io)
-                            .await
-                            .is_err()
-                        {
-                            return Err(());
-                        }
+                    if send_framed(stream, grant, &frame, self.timeouts.io)
+                        .await
+                        .is_err()
+                    {
+                        return Err(());
                     }
-                    // staleness 閘下不可達;防禦性 no-op（grant 隨 scope drop）。
-                    Err(_) => {}
                 }
+                // A rejected subscription remains a no-op; no frame is sent.
             }
         }
         // positions(G1:serverVersion 低於下界 → session 級 blocker,本 session 不再重試)。

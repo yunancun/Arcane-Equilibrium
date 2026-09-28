@@ -250,6 +250,34 @@ impl H0Gate {
             .or_insert(ts_ms);
     }
 
+    /// Admit a price timestamp before any mark/trading mutation. Data integrity
+    /// is mandatory even in risk-policy shadow mode. Rejected frames do not
+    /// replace the last accepted timestamp. The clock is supplied by the caller.
+    pub fn admit_price_ts(
+        &mut self,
+        symbol: &str,
+        ts_ms: u64,
+        now_ms: u64,
+    ) -> Option<H0CheckResult> {
+        let start = Instant::now();
+        let reason = if now_ms.saturating_sub(ts_ms) >= self.config.max_data_age_ms {
+            Some(format!("data_stale_{symbol}"))
+        } else if ts_ms.saturating_sub(now_ms) > self.config.max_data_age_ms {
+            Some(format!("data_future_{symbol}"))
+        } else if self.price_ts.get(symbol).is_some_and(|last| ts_ms < *last) {
+            Some(format!("data_out_of_order_{symbol}"))
+        } else {
+            None
+        };
+        if let Some(reason) = reason {
+            self.stats.total_checks += 1;
+            self.stats.blocked_freshness += 1;
+            return Some(self.finalize_blocked(reason, "freshness", start));
+        }
+        self.update_price_ts(symbol, ts_ms);
+        None
+    }
+
     /// Set system operating mode.
     /// 設置系統操作模式。
     ///
@@ -267,11 +295,11 @@ impl H0Gate {
     /// ARCH-RC1 1C-2-F (E-Merge-2): Replace the full H0GateConfig at runtime.
     /// Used by TickPipeline::apply_risk_snapshot to hot-reload the risk-level
     /// fields (max_open_positions / max_total_exposure_pct / allowed_categories)
-    /// from RiskConfig.limits while the caller preserves health fields +
-    /// shadow_mode via read-modify-write.
+    /// from RiskConfig.limits while the caller preserves health fields via
+    /// read-modify-write and synchronizes shadow mode through its audited setter.
     /// ARCH-RC1 1C-2-F (E-Merge-2)：運行時整體替換 H0GateConfig。
     /// 供 TickPipeline::apply_risk_snapshot 熱重載風控層欄位，呼叫端透過
-    /// read-modify-write 保留健康欄位與 shadow_mode。
+    /// read-modify-write 保留健康欄位，shadow mode 另經審計 setter 同步。
     pub fn update_config(&mut self, config: H0GateConfig) {
         self.config = config;
     }
@@ -385,6 +413,9 @@ impl H0Gate {
         match self.price_ts.get(symbol) {
             None => Some(format!("no_data_{symbol}")),
             Some(last_ts) => {
+                if last_ts.saturating_sub(now_ms) > self.config.max_data_age_ms {
+                    return Some(format!("data_future_{symbol}"));
+                }
                 let age_ms = now_ms.saturating_sub(*last_ts);
                 if age_ms >= self.config.max_data_age_ms {
                     Some(format!("data_stale_{symbol}_{age_ms}ms"))

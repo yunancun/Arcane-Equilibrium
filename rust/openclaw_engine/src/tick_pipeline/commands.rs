@@ -2152,7 +2152,7 @@ impl TickPipeline {
         // 確保 canary_mode 開啟，使 on_tick() 產生記錄。
         let was_canary = self.canary_mode;
         self.canary_mode = true;
-        let record = self.on_tick(event);
+        let record = self.on_replay_tick(event);
         self.canary_mode = was_canary;
         record
     }

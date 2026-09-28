@@ -194,8 +194,8 @@ pub(crate) fn send_order_framed(
     permit: OrderEffectPermit,
     frame: OrderFrame,
 ) -> WireBytes {
-    // grant / permit by-value 消費（drop）:各為單次出站憑證,不可復用（非 Clone/非 Copy）。
-    drop(grant);
+    // grant / permit by-value 消費:各為單次出站憑證,不可復用（非 Clone/非 Copy）。
+    let _consumed_grant = grant;
     let OrderEffectPermit { _seal: () } = permit;
     // 唯一 OrderFrame → bytes 提取點:order bytes 只能經此 gated 位點流出,且立即封回 sealed WireBytes。
     WireBytes::seal(frame.into_bytes())

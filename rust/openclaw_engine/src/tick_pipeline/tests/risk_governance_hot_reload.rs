@@ -12,9 +12,9 @@ fn test_pnl3_boot_cooldown_stamps_first_tick() {
     // PNL-3：首個 tick 記錄 boot_ts_ms；後續 tick 沿用。
     let mut pipeline = TickPipeline::new(&["BTCUSDT"]);
     assert!(pipeline.boot_ts_ms.is_none());
-    pipeline.on_tick(&super::make_event("BTCUSDT", 50_000.0, 1_000_000));
+    pipeline.on_replay_tick(&super::make_event("BTCUSDT", 50_000.0, 1_000_000));
     assert_eq!(pipeline.boot_ts_ms, Some(1_000_000));
-    pipeline.on_tick(&super::make_event("BTCUSDT", 50_001.0, 1_010_000));
+    pipeline.on_replay_tick(&super::make_event("BTCUSDT", 50_001.0, 1_010_000));
     assert_eq!(pipeline.boot_ts_ms, Some(1_000_000));
 }
 
@@ -299,7 +299,7 @@ fn test_arch_rc1_hot_reload_e2e_propagates_to_all_5_consumers() {
     // of on_tick and must apply_risk_snapshot to all 5 consumers.
     // 打一個 tick — sync_risk_config_if_changed 會在 on_tick 頂部執行
     // 並把新快照推到 5 個下游。
-    pipeline.on_tick(&super::make_event("BTCUSDT", 50_000.0, 1_000));
+    pipeline.on_replay_tick(&super::make_event("BTCUSDT", 50_000.0, 1_000));
 
     // 1) intent_processor's owned RiskConfig (Gate 0 / cost-edge / dynamic_stop)
     assert_eq!(

@@ -120,9 +120,11 @@ def test_sadf_003_demo_live_strategy_param_load_fail_closed() -> None:
 def test_oe_006_close_retry_budget_has_real_timeout_guard() -> None:
     """Close retry path must include explicit per-attempt timeout budget guard."""
     dispatch = _read("rust/openclaw_engine/src/event_consumer/dispatch.rs")
-    assert "pub(super) const CLOSE_ATTEMPT_TIMEOUT_MS: u64 = 500;" in dispatch
+    retcode = _read("rust/openclaw_engine/src/event_consumer/dispatch_retcode.rs")
+    assert "pub(super) const CLOSE_ATTEMPT_TIMEOUT_MS: u64 = 500;" in retcode
     assert "tokio::time::timeout" in dispatch
-    assert "close dispatch timed out" in dispatch
-    # 測試函數從 dispatch.rs 移至 dispatch_tests.rs
-    dispatch_tests = _read("rust/openclaw_engine/src/event_consumer/dispatch_tests.rs")
+    assert "Duration::from_millis(CLOSE_ATTEMPT_TIMEOUT_MS)" in dispatch
+    assert "close_dispatch_timeout_error(CLOSE_ATTEMPT_TIMEOUT_MS)" in dispatch
+    assert "close dispatch timed out" in retcode
+    dispatch_tests = _read("rust/openclaw_engine/src/event_consumer/dispatch_retcode_tests.rs")
     assert "test_close_attempt_timeout_constant_is_500ms" in dispatch_tests

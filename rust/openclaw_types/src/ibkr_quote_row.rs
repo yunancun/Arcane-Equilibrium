@@ -71,7 +71,7 @@ pub enum IbkrTickEntitlementV1 {
 /// L1 quote tickType 白名單枚舉（realtime 六 + delayed 六;表外/缺席=`UnknownDenied` 拒）。
 /// wire id 出典:IB `TickType`（realtime BID_SIZE=0/BID=1/ASK=2/ASK_SIZE=3/LAST=4/
 /// LAST_SIZE=5;delayed DELAYED_BID=66..DELAYED_LAST_SIZE=71,IB 現勘 2026-07-17）。
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize, Default)]
 #[serde(rename_all = "snake_case")]
 pub enum IbkrTickTypeV1 {
     // ---- realtime（1-5,0）----
@@ -89,13 +89,8 @@ pub enum IbkrTickTypeV1 {
     DelayedAskSize,
     DelayedLastSize,
     /// 契約 default / 白名單外 wire id 的 fail-closed 分類（`validate()` 必拒）。
+    #[default]
     UnknownDenied,
-}
-
-impl Default for IbkrTickTypeV1 {
-    fn default() -> Self {
-        Self::UnknownDenied
-    }
 }
 
 impl IbkrTickTypeV1 {
@@ -298,20 +293,18 @@ impl IbkrQuoteRowV1 {
         }
         // 值型別依 tickType 走 price/size 校驗（UnknownDenied 已計 blocker,此處跳過值判）。
         match self.tick_type.value_kind() {
-            Some(IbkrTickValueKind::Price) => {
-                if !is_positive_decimal_string(&self.value_decimal) {
+            Some(IbkrTickValueKind::Price)
+                if !is_positive_decimal_string(&self.value_decimal) => {
                     blockers.push(B::PriceValueInvalid);
                 }
-            }
-            Some(IbkrTickValueKind::Size) => {
+            Some(IbkrTickValueKind::Size)
                 // size 非負整數（0=無掛單合法;禁小數/負/空）。
-                if !is_nonnegative_decimal_string(&self.value_decimal)
-                    || self.value_decimal.contains('.')
-                {
+                if (!is_nonnegative_decimal_string(&self.value_decimal)
+                    || self.value_decimal.contains('.'))
+                => {
                     blockers.push(B::SizeValueInvalid);
                 }
-            }
-            None => {}
+            Some(IbkrTickValueKind::Price | IbkrTickValueKind::Size) | None => {}
         }
         // **delayed provenance 強制（QC 紅線）**:entitlement 必與 tickType 的 entitlement 一致。
         if let Some(expected) = self.tick_type.entitlement() {

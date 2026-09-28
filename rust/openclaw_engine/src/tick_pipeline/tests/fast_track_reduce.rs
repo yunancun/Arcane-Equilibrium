@@ -17,11 +17,11 @@ fn test_zero_price_tick_no_panic() {
     // First feed some normal ticks to populate klines
     for i in 0..50 {
         let e = super::make_event("BTCUSDT", 50000.0, 1_000_000 + i * 60_000);
-        pipeline.on_tick(&e);
+        pipeline.on_replay_tick(&e);
     }
     // Now feed a zero-price tick — must not panic
     let zero_event = super::make_event("BTCUSDT", 0.0, 1_000_000 + 50 * 60_000);
-    let _result = pipeline.on_tick(&zero_event);
+    let _result = pipeline.on_replay_tick(&zero_event);
     // Balance should be unchanged (no fills at price 0)
     assert!(
         pipeline.paper_state.balance() > 0.0,
@@ -40,7 +40,7 @@ fn test_zero_price_tick_with_position_no_nan() {
         .apply_fill("BTCUSDT", true, 0.01, 50000.0, 2.75, 100_000, "test");
     // Feed zero-price tick
     let zero_event = super::make_event("BTCUSDT", 0.0, 200_000);
-    let _result = pipeline.on_tick(&zero_event);
+    let _result = pipeline.on_replay_tick(&zero_event);
     // Balance must still be finite
     let bal = pipeline.paper_state.balance();
     assert!(

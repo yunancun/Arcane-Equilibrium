@@ -54,15 +54,18 @@ risk_router = APIRouter(
 # 模組級 RiskViewClient 單例（懶初始化）
 _RISK_VIEW_CLIENT: RiskViewClient | None = None
 _IPC_CLIENT: EngineIPCClient | None = None
+_ENGINE_RISK_VIEWS: dict[str, RiskViewClient] = {}
 
 
-async def _get_risk_view_client() -> RiskViewClient:
+async def _get_risk_view_client(engine: str = "paper") -> RiskViewClient:
     """
     Lazy-init RiskViewClient + underlying EngineIPCClient on first call.
     The IPC client is reused across requests (it has its own lock + reconnect).
     第一次呼叫時建立 RiskViewClient + EngineIPCClient；後續 request 重用同一 instance。
     """
     global _RISK_VIEW_CLIENT, _IPC_CLIENT
+    if engine not in ("paper", "demo", "live"):
+        raise ValueError("invalid risk engine")
     if _RISK_VIEW_CLIENT is None:
         _IPC_CLIENT = EngineIPCClient()
         try:
@@ -70,16 +73,48 @@ async def _get_risk_view_client() -> RiskViewClient:
         except Exception as e:
             logger.warning("RiskViewClient IPC connect failed: %s", e)
         _RISK_VIEW_CLIENT = RiskViewClient(_IPC_CLIENT)
-    return _RISK_VIEW_CLIENT
+    if engine == "paper":
+        return _RISK_VIEW_CLIENT
+    if engine not in _ENGINE_RISK_VIEWS:
+        _ENGINE_RISK_VIEWS[engine] = RiskViewClient(_IPC_CLIENT, engine=engine)
+    return _ENGINE_RISK_VIEWS[engine]
 
 
 def _risk_response(data: Any) -> dict[str, Any]:
+    engine = data.get("engine", "paper") if isinstance(data, dict) else "paper"
+    if engine not in ("paper", "demo", "live"):
+        raise ValueError("invalid response engine")
     return {
         "ok": True,
         "data": data,
-        "is_simulated": True,
-        "data_category": "paper_risk_control",
+        "is_simulated": engine != "live",
+        "data_category": f"{engine}_risk_control",
     }
+
+
+def _require_supported_fields(updates: dict[str, Any], engine: str, *, category: bool = False) -> None:
+    from .risk_view_client import _GLOBAL_TO_RUST, _CATEGORY_TO_RUST
+    supported = set(_CATEGORY_TO_RUST if category else _GLOBAL_TO_RUST)
+    # BudgetConfig is process-global; never describe that write as demo/live isolated.
+    if not category and engine == "paper":
+        supported.add("max_cost_edge_ratio")
+    unsupported = sorted(set(updates) - supported)
+    if unsupported:
+        raise HTTPException(status_code=422, detail={"error": "unsupported_risk_fields", "engine": engine, "fields": unsupported})
+
+
+async def _refresh_risk_config(client: RiskViewClient) -> dict[str, Any]:
+    value = await client.refresh_config()
+    if not client.config_available:
+        raise _ipc_failure("ipc_get_risk_config_failed")
+    return value
+
+
+async def _refresh_risk_runtime(client: RiskViewClient) -> dict[str, Any]:
+    value = await client.refresh_runtime_status()
+    if not client.runtime_available:
+        raise _ipc_failure("ipc_get_risk_runtime_status_failed")
+    return value
 
 
 def _ipc_failure(
@@ -281,7 +316,7 @@ async def get_risk_config(
     """Get full RiskConfig snapshot from Rust authority. / 從 Rust 權威獲取完整 RiskConfig 快照。"""
     from .risk_view_client import _GLOBAL_TO_RUST
     client = await _get_risk_view_client()
-    raw = await client.refresh_config()
+    raw = await _refresh_risk_config(client)
     config = dict(raw)  # don't mutate cache
 
     # Build GUI-compatible flat global_config from Rust nested structure.
@@ -356,15 +391,16 @@ async def update_global_config(
     # PHASE 0 AUTH-1：engine=="live" 強制 5-gate（demo/paper no-op）。
     engine = body.engine
     _require_live_gates_if_live(actor, engine)
-    client = await _get_risk_view_client()
+    client = await _get_risk_view_client() if engine == "paper" else await _get_risk_view_client(engine)
     # engine 是路由欄非 RiskConfig 欄位，從 updates 排除（避免污染 patch / 空判）。
     updates = {k: v for k, v in body.model_dump(exclude_none=True).items() if k != "engine"}
+    _require_supported_fields(updates, engine, category=False)
     if not updates:
-        await client.refresh_config()
-        return _risk_response({"message": "no_updates", "config": client.config})
+        await _refresh_risk_config(client)
+        return _risk_response({"engine": engine, "message": "no_updates", "config": client.config})
     if engine == "live":
         # 5-gate 已過 → 走 direct-ipc + Phase-0 token（鏡像 update_per_engine_global_config）。
-        # 非 live 維持既有 client.update_global_config（不傳 engine、寫 paper、零 token）。
+        # paper/demo use an engine-bound client for both write and readback.
         patch = _build_global_patch(updates)
         if not patch:
             return _risk_response({"engine": "live", "message": "no_mappable_fields"})
@@ -380,7 +416,7 @@ async def update_global_config(
             "ipc_patch_risk_config_failed",
             log_detail=str(e),
         ) from e
-    return _risk_response({"message": "updated", "config": client.config, "version": client.config_version})
+    return _risk_response({"engine": engine, "message": "updated", "config": client.config, "version": client.config_version})
 
 
 @risk_router.get("/config/category/{category}")
@@ -390,7 +426,7 @@ async def get_category_config(
 ):
     """Get P0 category-override config from cached Rust snapshot."""
     client = await _get_risk_view_client()
-    await client.refresh_config()
+    await _refresh_risk_config(client)
     cfg = client.get_category_config(category)
     if not cfg:
         return _risk_response({"category": category, "config": None, "message": "using_global_defaults"})
@@ -408,11 +444,13 @@ async def update_category_config(
     # PHASE 0 AUTH-1：engine=="live" 強制 5-gate（demo/paper no-op）。
     engine = body.engine
     _require_live_gates_if_live(actor, engine)
-    client = await _get_risk_view_client()
+    client = await _get_risk_view_client() if engine == "paper" else await _get_risk_view_client(engine)
     updates = {k: v for k, v in body.model_dump(exclude_none=True).items() if k != "engine"}
+    _require_supported_fields(updates, engine, category=True)
     if not updates:
-        await client.refresh_config()
+        await _refresh_risk_config(client)
         return _risk_response({
+            "engine": engine,
             "message": "no_updates",
             "config": client.get_category_config(category),
         })
@@ -437,6 +475,7 @@ async def update_category_config(
             log_detail=str(e),
         ) from e
     return _risk_response({
+        "engine": engine,
         "message": "updated",
         "category": category,
         "config": client.get_category_config(category),
@@ -456,7 +495,7 @@ async def get_risk_status(
     ★ Schema 與 Python 時代 rm.get_status() 刻意不同。GUI Risk tab 同 commit 改綁定。
     """
     client = await _get_risk_view_client()
-    runtime = await client.refresh_runtime_status()
+    runtime = await _refresh_risk_runtime(client)
     # Append optional state-reader fields for richer dashboard
     # 3E-ARCH: explicit engine="paper" for paper-engine drawdown / balance fields.
     # 附加 state-reader 欄位給 dashboard 用。3E-ARCH：明確指定 paper 引擎。
@@ -521,14 +560,15 @@ async def agent_adjust(
             status_code=403,
             detail={"error": "agent_source_live_write_forbidden"},
         )
-    client = await _get_risk_view_client()
+    engine = body.engine
+    client = await _get_risk_view_client() if engine == "paper" else await _get_risk_view_client(engine)
     updates = {
         k: v for k, v in body.model_dump().items()
         if k in body.model_fields_set and k != "engine"
     }
     if not updates:
-        await client.refresh_config()
-        return _risk_response({"message": "no_updates", "agent_params": client.get_agent_params()})
+        await _refresh_risk_config(client)
+        return _risk_response({"engine": engine, "message": "no_updates", "agent_params": client.get_agent_params()})
     try:
         await client.agent_adjust(updates)
     except Exception as e:
@@ -537,6 +577,7 @@ async def agent_adjust(
             log_detail=str(e),
         ) from e
     return _risk_response({
+        "engine": engine,
         "message": "adjusted",
         "agent_params": client.get_agent_params(),
         "version": client.config_version,

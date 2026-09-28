@@ -774,12 +774,12 @@ fn soak_warm_then_tick(h: &mut SoakDispatchHarness) {
         let price = 3_000.0 + (i % 7) as f64;
         let _ = h
             .pipeline
-            .on_tick(&PriceEvent::new("ETHUSDT".to_string(), price, ts));
+            .on_replay_tick(&PriceEvent::new("ETHUSDT".to_string(), price, ts));
     }
     let _ = drain_trading_msgs(&mut h.trading_rx);
     h.emit.store(true, std::sync::atomic::Ordering::Relaxed);
     let event = PriceEvent::new("ETHUSDT".to_string(), 3_000.0, SOAK_TEST_TS_MS);
-    let _ = h.pipeline.on_tick(&event);
+    let _ = h.pipeline.on_replay_tick(&event);
 }
 
 /// §1.5 矩陣①:envelope Active → 無 OrderDispatchRequest + lease 無洩漏 +
@@ -790,11 +790,7 @@ fn soak_withhold_active_envelope_blocks_dispatch_with_clean_audit_shape() {
     with_soak_flag(Some("1"), || {
         let dir = tempfile::TempDir::new().unwrap();
         let plan = soak_plan_json_expiring_at(&rfc3339_relative_to_now(3_600_000));
-        let mut h = soak_harness(
-            crate::tick_pipeline::PipelineKind::Demo,
-            &dir,
-            Some(&plan),
-        );
+        let mut h = soak_harness(crate::tick_pipeline::PipelineKind::Demo, &dir, Some(&plan));
         soak_warm_then_tick(&mut h);
 
         assert!(
@@ -858,8 +854,9 @@ fn soak_withhold_active_envelope_blocks_dispatch_with_clean_audit_shape() {
         }
         assert_eq!(rejected_verdicts, 1, "必寫恰一筆 typed rejected verdict");
         assert!(
-            msgs.iter()
-                .any(|m| matches!(m, crate::database::TradingMsg::Intent { qty, .. } if *qty == 0.0)),
+            msgs.iter().any(
+                |m| matches!(m, crate::database::TradingMsg::Intent { qty, .. } if *qty == 0.0)
+            ),
             "必寫 qty=0 intent 行"
         );
     });
@@ -871,11 +868,7 @@ fn soak_withhold_expired_envelope_allows_dispatch() {
     with_soak_flag(Some("1"), || {
         let dir = tempfile::TempDir::new().unwrap();
         let plan = soak_plan_json_expiring_at(&rfc3339_relative_to_now(-3_600_000));
-        let mut h = soak_harness(
-            crate::tick_pipeline::PipelineKind::Demo,
-            &dir,
-            Some(&plan),
-        );
+        let mut h = soak_harness(crate::tick_pipeline::PipelineKind::Demo, &dir, Some(&plan));
         soak_warm_then_tick(&mut h);
 
         let req = h
@@ -919,11 +912,7 @@ fn soak_flag_off_never_withholds_even_with_active_envelope() {
     with_soak_flag(None, || {
         let dir = tempfile::TempDir::new().unwrap();
         let plan = soak_plan_json_expiring_at(&rfc3339_relative_to_now(3_600_000));
-        let mut h = soak_harness(
-            crate::tick_pipeline::PipelineKind::Demo,
-            &dir,
-            Some(&plan),
-        );
+        let mut h = soak_harness(crate::tick_pipeline::PipelineKind::Demo, &dir, Some(&plan));
         soak_warm_then_tick(&mut h);
 
         assert!(
@@ -941,11 +930,7 @@ fn soak_paper_kind_never_withheld_with_flag_and_active_envelope() {
     with_soak_flag(Some("1"), || {
         let dir = tempfile::TempDir::new().unwrap();
         let plan = soak_plan_json_expiring_at(&rfc3339_relative_to_now(3_600_000));
-        let mut h = soak_harness(
-            crate::tick_pipeline::PipelineKind::Paper,
-            &dir,
-            Some(&plan),
-        );
+        let mut h = soak_harness(crate::tick_pipeline::PipelineKind::Paper, &dir, Some(&plan));
         soak_warm_then_tick(&mut h);
 
         assert_eq!(
@@ -967,11 +952,7 @@ fn soak_cost_gate_reject_feeds_probe_writer_channel_while_armed() {
     with_soak_flag(Some("1"), || {
         let dir = tempfile::TempDir::new().unwrap();
         let plan = soak_plan_json_expiring_at(&rfc3339_relative_to_now(3_600_000));
-        let mut h = soak_harness(
-            crate::tick_pipeline::PipelineKind::Demo,
-            &dir,
-            Some(&plan),
-        );
+        let mut h = soak_harness(crate::tick_pipeline::PipelineKind::Demo, &dir, Some(&plan));
         // 注入負 edge estimate → exchange gate cost_gate(JS-demo)拒絕。
         let json = format!(
             r#"{{"{SOAK_TEST_STRATEGY}::ETHUSDT": {{"shrunk_bps": -5.0, "win_rate": 0.4, "n": 50, "std_bps": 2.0}}}}"#
@@ -1157,11 +1138,7 @@ fn soak_withhold_with_router_gate_on_leaves_no_live_lease() {
     with_soak_flag(Some("1"), || {
         let dir = tempfile::TempDir::new().unwrap();
         let plan = soak_plan_json_expiring_at(&rfc3339_relative_to_now(3_600_000));
-        let mut h = soak_harness(
-            crate::tick_pipeline::PipelineKind::Demo,
-            &dir,
-            Some(&plan),
-        );
+        let mut h = soak_harness(crate::tick_pipeline::PipelineKind::Demo, &dir, Some(&plan));
         h.pipeline.governance.set_router_gate_enabled_for_test(true);
         let (ltx, lrx) = std::sync::mpsc::channel();
         h.pipeline.governance.set_lease_transition_tx(ltx);
@@ -1235,9 +1212,7 @@ fn withhold_failed_release_revokes_active_lease_without_leak() {
     );
     let states = governance.lease.lock().snapshot_states();
     assert!(
-        states
-            .iter()
-            .all(|(_, s)| format!("{s}") == "REVOKED"),
+        states.iter().all(|(_, s)| format!("{s}") == "REVOKED"),
         "Failed 釋放 = revoke(非 consume),got {states:?}"
     );
     let transitions: Vec<_> = lrx.try_iter().collect();
@@ -1439,9 +1414,9 @@ fn warm_then_drive(pipeline: &mut crate::tick_pipeline::TickPipeline) {
     for i in 0..41u64 {
         let ts = LIQ_SEAM_TS_MS - (41 - i) * 60_000;
         let price = 3_000.0 + (i % 7) as f64;
-        let _ = pipeline.on_tick(&PriceEvent::new("ETHUSDT".to_string(), price, ts));
+        let _ = pipeline.on_replay_tick(&PriceEvent::new("ETHUSDT".to_string(), price, ts));
     }
-    let _ = pipeline.on_tick(&PriceEvent::new(
+    let _ = pipeline.on_replay_tick(&PriceEvent::new(
         "ETHUSDT".to_string(),
         3_010.0,
         LIQ_SEAM_TS_MS,
@@ -1475,7 +1450,8 @@ fn e5_1_gate_true_active_declarer_sees_injected_liquidation_panel() {
         "gate=TRUE 應把注入 slot panel 深拷貝進 surface.liquidation_pulse，實測 observations={seen:?}"
     );
     assert!(
-        seen.iter().all(|o| o.as_deref() == Some(LIQ_SEAM_PANEL_MARKER)),
+        seen.iter()
+            .all(|o| o.as_deref() == Some(LIQ_SEAM_PANEL_MARKER)),
         "gate=TRUE 全程應為 Some(marker)，出現非預期值 observations={seen:?}"
     );
 }
@@ -1511,7 +1487,9 @@ fn e5_1_gate_false_dormant_declarer_yields_none_despite_injected_slot() {
             panic!("inactive 策略的 on_tick 不應被呼叫");
         }
     }
-    pipeline.orchestrator.register(Box::new(InactiveLiqDeclarer));
+    pipeline
+        .orchestrator
+        .register(Box::new(InactiveLiqDeclarer));
 
     let observations = std::sync::Arc::new(std::sync::Mutex::new(Vec::new()));
     pipeline

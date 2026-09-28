@@ -423,20 +423,15 @@ impl StockEtfDailyDqManifestV1 {
     }
 }
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize, Default)]
 #[serde(rename_all = "SCREAMING_SNAKE_CASE")]
 pub enum StockEtfEvidenceClockStatus {
+    #[default]
     NotStarted,
     PassDay,
     QuarantinedDay,
     Blocked,
     WindowComplete,
-}
-
-impl Default for StockEtfEvidenceClockStatus {
-    fn default() -> Self {
-        Self::NotStarted
-    }
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]

@@ -197,25 +197,13 @@ impl StockEtfPhase0AuthorityV1 {
     }
 }
 
-#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, Default)]
 pub struct StockEtfPhase0ApiBaselineV1 {
     pub selected: String,
     pub host_policy: String,
     pub paper_port_default_candidate: u16,
     pub live_ports_denied: bool,
     pub ibkr_call_performed: bool,
-}
-
-impl Default for StockEtfPhase0ApiBaselineV1 {
-    fn default() -> Self {
-        Self {
-            selected: String::new(),
-            host_policy: String::new(),
-            paper_port_default_candidate: 0,
-            live_ports_denied: false,
-            ibkr_call_performed: false,
-        }
-    }
 }
 
 impl StockEtfPhase0ApiBaselineV1 {

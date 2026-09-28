@@ -27,24 +27,19 @@ pub const IBKR_CONNECTION_HEALTH_REPORT_CONTRACT_ID: &str = "ibkr_connection_hea
 /// W4 connection-health 報告的頂層狀態（枚舉;W4 唯一可產值＝
 /// `ExternalVerificationPending`——inactive 引擎下對 FSM 的誠實計算,非 fake-success。
 /// `Degraded` 保留給 IPC unavailable / 契約漂移的降級路徑（W4 emitter 不主動產））。
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize, Default)]
 #[serde(rename_all = "snake_case")]
 pub enum IbkrConnectionHealthReportStatus {
     /// 外部驗證前置未滿足（inactive 引擎的誠實 health 形態;W4 唯一 emit 值）。
+    #[default]
     ExternalVerificationPending,
     /// 降級（保留;normalizer 側 IPC unavailable 時可標,emitter 不主動產）。
     Degraded,
 }
 
-impl Default for IbkrConnectionHealthReportStatus {
-    fn default() -> Self {
-        Self::ExternalVerificationPending
-    }
-}
-
 /// disconnected 態的停機原因投影（engine `HaltReason` → 契約枚舉;W4 恆 `EnvelopeRequired`）。
 /// `NotHalted` = 非 disconnected 態（W4 結構性不可達,W5+ 才會出現）。
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize, Default)]
 #[serde(rename_all = "snake_case")]
 pub enum IbkrConnectionHealthHaltReasonV1 {
     /// 非 disconnected 態（無停機原因）。
@@ -52,6 +47,7 @@ pub enum IbkrConnectionHealthHaltReasonV1 {
     /// 初始未連線。
     Initial,
     /// permit 被拒（envelope 前置未滿足;production W8 前恆此路;INV-1）。
+    #[default]
     EnvelopeRequired,
     /// session 級致命（不自動重試）。
     SessionFatal,
@@ -63,29 +59,17 @@ pub enum IbkrConnectionHealthHaltReasonV1 {
     Halted,
 }
 
-impl Default for IbkrConnectionHealthHaltReasonV1 {
-    fn default() -> Self {
-        // fail-closed 預設＝envelope_required（假定未活化,不假定已連）。
-        Self::EnvelopeRequired
-    }
-}
-
 /// entitlement 狀態（W6 才真派生;W4 佔位恆 `Pending`）。
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize, Default)]
 #[serde(rename_all = "snake_case")]
 pub enum IbkrConnectionHealthEntitlementStateV1 {
     /// 待決（W4 佔位;entitlement 邏輯 W6）。
+    #[default]
     Pending,
     /// 已授（W6+;W4 結構性不可達）。
     Granted,
     /// 被拒（W6+;W4 結構性不可達）。
     Denied,
-}
-
-impl Default for IbkrConnectionHealthEntitlementStateV1 {
-    fn default() -> Self {
-        Self::Pending
-    }
 }
 
 /// W4 connection-health 報告契約（四束 + 負空間安全束）。**Rust 為 authority**：Python

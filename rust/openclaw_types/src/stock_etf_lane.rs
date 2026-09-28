@@ -9,9 +9,10 @@ use std::{fmt, str::FromStr};
 
 pub const STOCK_ETF_ASSET_LANE_TAXONOMY_CONTRACT_ID: &str = "asset_lane_taxonomy_v1";
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize, Default)]
 #[serde(rename_all = "snake_case")]
 pub enum AssetLane {
+    #[default]
     CryptoPerp,
     StockEtfCash,
     CfdMarginReserved,
@@ -24,12 +25,6 @@ impl AssetLane {
             Self::StockEtfCash => "stock_etf_cash",
             Self::CfdMarginReserved => "cfd_margin_reserved",
         }
-    }
-}
-
-impl Default for AssetLane {
-    fn default() -> Self {
-        Self::CryptoPerp
     }
 }
 

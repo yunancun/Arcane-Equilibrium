@@ -32,7 +32,7 @@ use crate::stock_etf_lane::{AssetLane, Broker};
 pub const IBKR_EXECUTIONS_ROW_CONTRACT_ID: &str = "ibkr_executions_row_v1";
 
 /// 成交方向白名單枚舉（wire `"BOT"`/`"SLD"`;表外 fail-closed 拒）。
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize, Default)]
 #[serde(rename_all = "snake_case")]
 pub enum IbkrExecutionSideV1 {
     /// 買入（wire `"BOT"`）。
@@ -41,14 +41,8 @@ pub enum IbkrExecutionSideV1 {
     /// 成交行誠實承載方向本身）。
     Sold,
     /// 契約 default / 白名單外 side 的 fail-closed 分類（`validate()` 必拒）。
+    #[default]
     UnknownDenied,
-}
-
-impl Default for IbkrExecutionSideV1 {
-    fn default() -> Self {
-        // fail-closed 預設＝未知拒。
-        Self::UnknownDenied
-    }
 }
 
 impl IbkrExecutionSideV1 {

@@ -6,13 +6,11 @@
 //!   `data` into a slice, then routes by topic prefix to the parsers in
 //!   `super::parsers`. Returns `ProcessOutcome` so the caller can distinguish
 //!   normal continuation, channel-closed exit, and G9-02 force reconnect.
-//!   Hot path: byte-identical with the original `WsClient::process_message`
-//!   inline body.
+//!   Orderbook state is reconstructed before emitting a usable quote.
 //! MODULE_NOTE (中): `process_message` 是逐訊息分派器；解析單行 JSON、過濾控
 //!   制幀（op / success）、把 `data` 統一為 slice，再依 topic 前綴路由到
 //!   `super::parsers` 的對應 parser。回傳 `ProcessOutcome` 讓呼叫端可區分
-//!   正常繼續、通道關閉退出、G9-02 強制重連三態。熱路徑：與原本
-//!   `WsClient::process_message` 內嵌實作字節級相同。
+//!   正常繼續、通道關閉退出、強制重連三態；訂單簿重建後才輸出報價。
 
 use crate::ws_unknown_handler_guard::ShouldReconnect;
 use openclaw_types::PriceEvent;
@@ -20,7 +18,7 @@ use tracing::{debug, warn};
 
 use super::parsers::{
     now_ms, parse_adl_notice_item, parse_kline_item, parse_liquidation_item,
-    parse_orderbook_snapshot, parse_price_limit_item, parse_ticker_item, parse_trade_item,
+    parse_price_limit_item, parse_ticker_item, parse_trade_item,
 };
 use super::WsClient;
 
@@ -59,7 +57,7 @@ impl WsClient {
     ///   - `Exit`：事件通道已關閉，run loop 應退出。
     ///   - `ForceReconnect`：G9-02 未知 handler 守衛達閾值且已 arm → 呼叫端
     ///     break 內層迴圈，進入既有 reconnect 路徑，重訂閱 cached subscriptions。
-    pub(super) async fn process_message(&self, text: &str) -> ProcessOutcome {
+    pub(super) async fn process_message(&mut self, text: &str) -> ProcessOutcome {
         // Try to extract price data from various Bybit message formats.
         // 嘗試從各種 Bybit 消息格式中提取價格數據。
         let parsed: serde_json::Value = match serde_json::from_str(text) {
@@ -86,13 +84,11 @@ impl WsClient {
             None => return ProcessOutcome::Continue,
         };
 
-        // Normalize to array: if data is a single object, wrap it / 統一為數組
-        let data_vec: Vec<serde_json::Value>;
+        // Borrow object/array data; no per-frame JSON clone.
         let data: &[serde_json::Value] = if let Some(arr) = raw_data.as_array() {
             arr
         } else if raw_data.is_object() {
-            data_vec = vec![raw_data.clone()];
-            &data_vec
+            std::slice::from_ref(raw_data)
         } else {
             return ProcessOutcome::Continue;
         };
@@ -107,19 +103,23 @@ impl WsClient {
                 .filter_map(|item| parse_kline_item(item, topic))
                 .collect()
         } else if topic.starts_with("orderbook.") {
-            // recorder-v2：把父消息的 `type`（snapshot/delta）穿進 parser，
-            // L1BookTracker 才能確定性地辨 reset vs upsert（campaign-8 bad-tick 根因）。
-            let ob_type = parsed.get("type").and_then(|t| t.as_str());
-            // recorder-v2 producer gate：flag-OFF（預設）時 parser SKIP full-depth
-            // 解析、ob_* 欄維持 None（二進制 inert）。`l1_recording_enabled()` 是
-            // 進程級 OnceLock 快照，不在熱路徑逐訊息查 env（見 super::mod.rs）。
-            let record_l1 = super::l1_recording_enabled();
-            parse_orderbook_snapshot(data, topic, ob_type, record_l1)
-                .into_iter()
-                .collect()
+            let book = self.orderbooks.entry(topic.to_owned()).or_default();
+            match book.apply(&parsed, topic, super::l1_recording_enabled()) {
+                Ok(event) => event.into_iter().collect(),
+                Err(reason) => {
+                    self.orderbooks.remove(topic);
+                    warn!(topic, reason, "invalid orderbook; resubscribe for snapshot");
+                    return ProcessOutcome::ForceReconnect;
+                }
+            }
         } else if topic.starts_with("tickers.") {
             data.iter()
-                .filter_map(|item| parse_ticker_item(item, topic))
+                .filter_map(|item| {
+                    let ts = parsed.get("ts")?.as_u64().filter(|ts| *ts > 0)?;
+                    let mut event = parse_ticker_item(item, topic)?;
+                    event.ts_ms = ts;
+                    Some(event)
+                })
                 .collect()
         } else if topic.starts_with("allLiquidation.") || topic.starts_with("liquidation.") {
             data.iter()

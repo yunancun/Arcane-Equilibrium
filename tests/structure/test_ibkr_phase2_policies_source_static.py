@@ -1,5 +1,7 @@
 from pathlib import Path
 
+from rust_default_contract import assert_derived_default_fields
+
 
 ROOT = Path(__file__).resolve().parents[2]
 PHASE2_POLICIES = ROOT / "rust/openclaw_types/src/ibkr_phase2_policies.rs"
@@ -215,9 +217,14 @@ def test_ibkr_phase2_policy_source_templates_keep_fail_closed_authority_posture(
         assert required in python_template
 
     for type_name in REQUIRED_TEMPLATE_TYPES:
-        default = _default_block(source, type_name)
-        assert "source_version: 0" in default
-        assert "policy_present: false" in default
+        if f"impl Default for {type_name}" in source:
+            default = _default_block(source, type_name)
+            assert "source_version: 0" in default
+            assert "policy_present: false" in default
+        else:
+            assert_derived_default_fields(source, type_name, {
+                "source_version": "u32", "policy_present": "bool",
+            })
 
 
 def test_ibkr_phase2_policy_source_keeps_validator_blocker_order() -> None:

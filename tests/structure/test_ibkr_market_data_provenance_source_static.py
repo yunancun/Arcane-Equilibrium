@@ -1,5 +1,7 @@
 from pathlib import Path
 
+from rust_default_contract import assert_contract_token
+
 
 ROOT = Path(__file__).resolve().parents[2]
 PROVENANCE = ROOT / "rust/openclaw_types/src/ibkr_market_data_provenance.rs"
@@ -100,13 +102,13 @@ def test_provenance_source_stays_below_governance_cap() -> None:
 def test_provenance_keeps_contract_id() -> None:
     source = _source()
     for token in REQUIRED_CONTRACT_TOKENS:
-        assert token in source, f"missing contract token {token!r}"
+        assert_contract_token(source, token)
 
 
 def test_provenance_keeps_types_and_pure_functions() -> None:
     source = _source()
     for token in REQUIRED_TYPE_TOKENS:
-        assert token in source, f"missing type token {token!r}"
+        assert_contract_token(source, token)
 
 
 def test_provenance_keeps_entitlement_three_states() -> None:
@@ -124,7 +126,7 @@ def test_provenance_keeps_blocker_taxonomy() -> None:
 def test_provenance_keeps_fail_closed_semantics() -> None:
     source = _source()
     for token in REQUIRED_SEMANTIC_TOKENS:
-        assert token in source, f"missing semantic token {token!r}"
+        assert_contract_token(source, token)
 
 
 def test_provenance_computes_no_hash_in_types_crate() -> None:
