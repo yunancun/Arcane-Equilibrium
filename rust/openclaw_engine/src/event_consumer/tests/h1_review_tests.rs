@@ -488,12 +488,12 @@ async fn h1_reprice_lost_cancel_ack_reconciles_after_grace() {
 }
 
 #[tokio::test]
-async fn h1_reprice_failed_reconciliation_does_not_repeat_batches() {
+async fn h1_reprice_nonterminal_reconciliation_retries_after_cooldown() {
     let mut pipeline = TickPipeline::with_kind(&["BTCUSDT"], 10_000.0, PipelineKind::Demo);
     let (tx, mut dispatch_rx) = tokio::sync::mpsc::unbounded_channel::<OrderDispatchRequest>();
     pipeline.set_shadow_channel(tx);
     let mut state = make_loop_state();
-    let mut po = close_maker_pending_order("h1-reprice-failed-read");
+    let mut po = close_maker_pending_order("h1-reprice-retry");
     po.progress.status = super::super::order_lifecycle::OrderStatus::Unknown;
     po.progress.replacement_order_link_id = Some("successor".into());
     po.cancel_requested_ts_ms = Some(po.sent_ts_ms);
@@ -501,14 +501,20 @@ async fn h1_reprice_failed_reconciliation_does_not_repeat_batches() {
     state
         .pending_orders
         .insert(po.order_link_id.clone(), po.clone());
-    let (reconciler, mut rx) = super::super::dcp_reconciliation::DcpReconciler::fixture(vec![]);
+    let active = serde_json::json!({"list":[{"orderId":"venue", "orderLinkId":po.order_link_id,
+        "symbol":"BTCUSDT", "side":"Sell", "orderStatus":"New", "cumExecQty":"0"}]});
+    let mut terminal = active.clone();
+    terminal["list"][0]["orderStatus"] = "Cancelled".into();
+    let (reconciler, mut rx) = super::super::dcp_reconciliation::DcpReconciler::fixture(vec![
+        active.clone(),
+        active.clone(),
+        active,
+        terminal,
+    ]);
     state.dcp_reconciler = Some(reconciler);
     let now = po.sent_ts_ms + 60_000;
     super::super::loop_tick::sweep_pending_orders(&mut pipeline, &mut state, None, now);
-    assert!(
-        !state.dcp_reconciler.as_ref().unwrap().is_idle(),
-        "one bounded batch must start"
-    );
+    assert!(!state.dcp_reconciler.as_ref().unwrap().is_idle());
     tokio::time::timeout(std::time::Duration::from_secs(3), async {
         while !state.dcp_reconciler.as_ref().unwrap().is_idle() {
             tokio::time::sleep(std::time::Duration::from_millis(25)).await;
@@ -516,7 +522,9 @@ async fn h1_reprice_failed_reconciliation_does_not_repeat_batches() {
     })
     .await
     .unwrap();
-    for elapsed in [60_000, 120_000, 180_000] {
+    assert!(rx.try_recv().is_err());
+    assert!(pipeline.exchange_submission_guard.blocks_entry());
+    for elapsed in [1, 1000, 29_999] {
         super::super::loop_tick::sweep_pending_orders(
             &mut pipeline,
             &mut state,
@@ -525,16 +533,23 @@ async fn h1_reprice_failed_reconciliation_does_not_repeat_batches() {
         );
         assert!(
             state.dcp_reconciler.as_ref().unwrap().is_idle(),
-            "sweeps cannot restart an exhausted batch"
+            "no retry before cooldown"
         );
     }
-    assert!(rx.try_recv().is_err());
-    assert!(dispatch_rx.try_recv().is_err());
-    assert_eq!(
-        state.pending_orders[&po.order_link_id].progress.status,
-        super::super::order_lifecycle::OrderStatus::Unknown
+    // The standalone timer callback also retries without a public price tick.
+    super::super::loop_tick::schedule_pending_reconciliation(&mut state, now + 30_000);
+    let event = tokio::time::timeout(std::time::Duration::from_secs(1), rx.recv())
+        .await
+        .expect("nonterminal read must not permanently disable reconciliation")
+        .unwrap();
+    let mut writer = super::make_test_writer();
+    handle_exchange_event(Some(event), &mut pipeline, &mut writer, &mut state, None).await;
+    assert!(state.pending_orders.is_empty());
+    assert!(!pipeline.exchange_submission_guard.blocks_entry());
+    assert!(
+        dispatch_rx.try_recv().is_err(),
+        "read retries cannot create orders"
     );
-    assert!(pipeline.exchange_submission_guard.blocks_entry());
 }
 
 #[tokio::test]
@@ -613,4 +628,106 @@ async fn h1_reprice_terminal_predecessor_recovers_missing_execution() {
         "completed successor guard cannot be resurrected"
     );
     assert_eq!(pipeline.stats.total_fills, 1);
+}
+
+#[tokio::test]
+async fn h1_invalid_ws_execution_does_not_poison_rest_replay() {
+    for (field, value) in [
+        ("qty", ""),
+        ("qty", "NaN"),
+        ("qty", "-1"),
+        ("price", ""),
+        ("price", "0"),
+        ("price", "inf"),
+        ("time", ""),
+        ("time", "bad"),
+        ("time", "0"),
+    ] {
+        let mut pipeline = TickPipeline::with_kind(&["BTCUSDT"], 10_000.0, PipelineKind::Demo);
+        let mut state = make_loop_state();
+        let mut po = baseline_pending_order("market", None);
+        po.order_link_id = "h1-malformed-ws".into();
+        po.qty = 0.03;
+        pipeline.exchange_submission_guard.track(&po.order_link_id);
+        state
+            .pending_orders
+            .insert(po.order_link_id.clone(), po.clone());
+        let mut bad = h1_exec(&po.order_link_id, "recoverable", "0.01", "Buy");
+        match field {
+            "qty" => bad.exec_qty = value.into(),
+            "price" => bad.exec_price = value.into(),
+            "time" => bad.exec_time = value.into(),
+            _ => unreachable!(),
+        }
+        let mut writer = super::make_test_writer();
+        handle_exchange_event(
+            Some(ExchangeEvent::Fill(bad)),
+            &mut pipeline,
+            &mut writer,
+            &mut state,
+            None,
+        )
+        .await;
+        let observed = state.pending_orders[&po.order_link_id].clone();
+        assert!(
+            observed.progress.applied_execution_ids.is_empty(),
+            "{field}={value} must not poison persistent dedup"
+        );
+        assert!(!state.seen_exec_set.contains("recoverable"));
+        assert_eq!(observed.cum_filled_qty, 0.0);
+        assert_eq!(pipeline.stats.total_fills, 0);
+        let order = serde_json::json!({"list":[{"orderId":"venue", "orderLinkId":po.order_link_id, "symbol":"BTCUSDT", "side":"Buy", "orderStatus":"Cancelled", "cumExecQty":"0.01"}]});
+        let page = serde_json::json!({"list":[{"execId":"recoverable", "orderId":"venue", "orderLinkId":po.order_link_id, "symbol":"BTCUSDT", "side":"Buy", "execQty":"0.01", "execPrice":"50000", "execTime":"1700000000100", "execType":"Trade"}], "nextPageCursor":""});
+        let (reconciler, _) =
+            super::super::dcp_reconciliation::DcpReconciler::fixture(vec![order, page]);
+        let events = reconciler.reconcile_fixture(&observed).await.unwrap();
+        assert_eq!(
+            events.len(),
+            2,
+            "valid REST execution must remain replayable"
+        );
+        for event in events {
+            handle_exchange_event(Some(event), &mut pipeline, &mut writer, &mut state, None).await;
+        }
+        assert_eq!(pipeline.stats.total_fills, 1);
+        assert!(!pipeline.exchange_submission_guard.blocks_entry());
+        assert!(state.pending_orders.is_empty());
+    }
+}
+
+#[tokio::test]
+async fn h1_ordinary_disconnect_reconciles_without_dcp() {
+    let mut pipeline = TickPipeline::with_kind(&["BTCUSDT"], 10_000.0, PipelineKind::Demo);
+    let (tx, mut dispatch_rx) = tokio::sync::mpsc::unbounded_channel::<OrderDispatchRequest>();
+    pipeline.set_shadow_channel(tx);
+    let mut state = make_loop_state();
+    let mut po = baseline_pending_order("market", None);
+    po.order_link_id = "h1-disconnect".into();
+    po.progress.status = super::super::order_lifecycle::OrderStatus::Working;
+    pipeline.exchange_submission_guard.track(&po.order_link_id);
+    state
+        .pending_orders
+        .insert(po.order_link_id.clone(), po.clone());
+    let order = serde_json::json!({"list":[{"orderId":"venue", "orderLinkId":po.order_link_id, "symbol":"BTCUSDT", "side":"Buy", "orderStatus":"Cancelled", "cumExecQty":"0"}]});
+    let (reconciler, mut rx) =
+        super::super::dcp_reconciliation::DcpReconciler::fixture(vec![order]);
+    state.dcp_reconciler = Some(reconciler);
+    let mut writer = super::make_test_writer();
+    handle_exchange_event(
+        Some(ExchangeEvent::Disconnected),
+        &mut pipeline,
+        &mut writer,
+        &mut state,
+        None,
+    )
+    .await;
+    assert!(pipeline.exchange_submission_guard.blocks_entry());
+    let event = tokio::time::timeout(std::time::Duration::from_secs(1), rx.recv())
+        .await
+        .expect("ordinary disconnect must schedule authoritative reads")
+        .unwrap();
+    handle_exchange_event(Some(event), &mut pipeline, &mut writer, &mut state, None).await;
+    assert!(state.pending_orders.is_empty());
+    assert!(!pipeline.exchange_submission_guard.blocks_entry());
+    assert!(dispatch_rx.try_recv().is_err());
 }

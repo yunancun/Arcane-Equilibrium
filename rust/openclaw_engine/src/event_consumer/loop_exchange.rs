@@ -57,19 +57,8 @@ pub(super) async fn handle_exchange_event(
                 tracing::warn!(exec_id = %exec.exec_id, "duplicate fill skipped / 重複成交已跳過");
                 return;
             }
-            state.seen_exec_set.insert(exec.exec_id.clone());
-            state.seen_exec_order.push_back(exec.exec_id.clone());
-            if state.seen_exec_order.len() > LoopState::MAX_SEEN_EXEC_IDS {
-                if let Some(old) = state.seen_exec_order.pop_front() {
-                    state.seen_exec_set.remove(&old);
-                }
-            }
-
-            let exec_qty: f64 = exec.exec_qty.parse().unwrap_or(0.0);
-            let exec_price: f64 = exec.exec_price.parse().unwrap_or(0.0);
-            let exec_ts: u64 = exec.exec_time.parse().unwrap_or(0);
-
             if is_funding_execution(&exec) {
+                remember_execution(state, &exec.exec_id);
                 let emitted = apply_and_emit_funding_settlement(pipeline, &exec, order_tx).await;
                 snapshot_writer.force_write(&pipeline.snapshot());
                 tracing::info!(
@@ -79,6 +68,28 @@ pub(super) async fn handle_exchange_event(
                     ledger_emitted = emitted,
                     "funding settlement applied / 資金費結算已套用"
                 );
+                return;
+            }
+
+            let valid_positive = |value: &str| {
+                value
+                    .parse::<f64>()
+                    .ok()
+                    .filter(|v| v.is_finite() && *v > 0.0)
+            };
+            let (Some(exec_qty), Some(exec_price), Some(exec_ts)) = (
+                valid_positive(&exec.exec_qty),
+                valid_positive(&exec.exec_price),
+                exec.exec_time.parse::<u64>().ok().filter(|t| *t > 0),
+            ) else {
+                tracing::error!(exec_id=%exec.exec_id, "Invalid execution values; awaiting valid WS/REST evidence");
+                return;
+            };
+            if exec.exec_id.is_empty()
+                || exec.symbol.is_empty()
+                || !matches!(exec.side.as_str(), "Buy" | "Sell")
+            {
+                tracing::error!(exec_id=%exec.exec_id, "Invalid execution identity; retaining pending tracker");
                 return;
             }
 
@@ -212,14 +223,13 @@ pub(super) async fn handle_exchange_event(
 
             if let Some(key) = matched_key {
                 if let Some(po) = state.pending_orders.get_mut(&key) {
-                    if !po
-                        .progress
-                        .applied_execution_ids
-                        .insert(exec.exec_id.clone())
-                    {
+                    if po.progress.applied_execution_ids.contains(&exec.exec_id) {
                         return;
                     }
-                    po.cum_filled_qty += exec_qty;
+                    if po.symbol != exec.symbol || po.is_long != (exec.side == "Buy") {
+                        tracing::error!(exec_id=%exec.exec_id, "Execution does not match pending order identity");
+                        return;
+                    }
                     let liquidity_role = fill_liquidity_role(exec.is_maker, matched_tif);
                     // V145：同一純函數 adverse_slippage_bps 按 liquidity_role 互斥
                     // 分流到兩個正交 column —— taker 寫 slippage_bps（穿越 spread 的
@@ -278,6 +288,11 @@ pub(super) async fn handle_exchange_event(
                         // reduce-only fill 在本地無倉時 no-op（不開幻影倉，§4.3）。
                         po.is_close,
                     );
+                    // Commit dedup only after validated execution accounting.
+                    po.cum_filled_qty += exec_qty;
+                    po.progress
+                        .applied_execution_ids
+                        .insert(exec.exec_id.clone());
                     if preserve_close_guard {
                         pipeline.retain_pending_close(&po.symbol);
                     }
@@ -421,6 +436,7 @@ pub(super) async fn handle_exchange_event(
                     if emitted { "已落" } else { "已跳過（paper/test）" }
                 );
             }
+            remember_execution(state, &exec.exec_id);
         }
         Some(ExchangeEvent::OrderUpdate(order)) => {
             let id = &order.order_link_id;
@@ -586,47 +602,61 @@ pub(super) async fn handle_exchange_event(
                 }
             }
         }
-        Some(ExchangeEvent::DcpTriggered) => {
-            let pending: Vec<_> = state.pending_orders.values().cloned().collect();
-            if let Some(reconciler) = &state.dcp_reconciler {
-                reconciler.schedule(&pending);
-            } else {
-                tracing::error!("DCP reconciliation unavailable; retaining unknown trackers");
-            }
+        Some(event @ (ExchangeEvent::DcpTriggered | ExchangeEvent::Disconnected)) => {
+            let is_dcp = matches!(event, ExchangeEvent::DcpTriggered);
+            let now_ms = openclaw_core::now_ms();
+            let pending: Vec<_> = state
+                .pending_orders
+                .values_mut()
+                .map(|po| {
+                    // Repeated disconnect/DCP signals cannot bypass the cooldown.
+                    po.progress.reconciliation_retry_after_ms.get_or_insert(0);
+                    po.clone()
+                })
+                .collect();
             for po in &pending {
                 super::loop_pending_registration::handle_pending_registration(
                     Some(super::types::PendingOrderEvent::ConfirmationUnknown {
                         order_link_id: po.order_link_id.clone(),
-                        reason: "dcp_triggered:await_per_order_confirmation".into(),
-                        ts_ms: openclaw_core::now_ms(),
+                        reason: if is_dcp {
+                            "dcp_triggered:await_per_order_confirmation"
+                        } else {
+                            "ws_disconnected:await_per_order_confirmation"
+                        }
+                        .into(),
+                        ts_ms: now_ms,
                     }),
                     pipeline,
                     state,
                     order_tx,
                 );
-                dispatch_close_maker_fallback_from_pending(
-                    state,
-                    pipeline,
-                    po,
-                    CloseMakerFallbackReason::FallbackToTakerMandatory,
-                    None,
-                    "dcp_triggered",
-                );
+                if is_dcp {
+                    dispatch_close_maker_fallback_from_pending(
+                        state,
+                        pipeline,
+                        po,
+                        CloseMakerFallbackReason::FallbackToTakerMandatory,
+                        None,
+                        "dcp_triggered",
+                    );
+                }
             }
-        }
-        Some(ExchangeEvent::Disconnected) => {
-            // Private WS disconnected — pending orders may be in unknown state
-            if !state.pending_orders.is_empty() {
-                tracing::warn!(
-                    pending = state.pending_orders.len(),
-                    "private WS disconnected with {} pending orders — reconcile on reconnect \
-                    / 私有 WS 斷連，{} 個待處理訂單 — 重連後對賬",
-                    state.pending_orders.len(),
-                    state.pending_orders.len(),
-                );
+            super::loop_tick::schedule_pending_reconciliation(state, now_ms);
+            if !pending.is_empty() && state.dcp_reconciler.is_none() {
+                tracing::error!("Order reconciliation unavailable; retaining unresolved trackers");
             }
         }
         None => {} // channel closed
+    }
+}
+
+fn remember_execution(state: &mut LoopState, exec_id: &str) {
+    state.seen_exec_set.insert(exec_id.to_owned());
+    state.seen_exec_order.push_back(exec_id.to_owned());
+    if state.seen_exec_order.len() > LoopState::MAX_SEEN_EXEC_IDS {
+        if let Some(old) = state.seen_exec_order.pop_front() {
+            state.seen_exec_set.remove(&old);
+        }
     }
 }
 

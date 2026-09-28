@@ -107,6 +107,10 @@ pub async fn run_event_consumer(deps: EventConsumerDeps) {
     let mut pending_reg_rx = pending_reg_rx_slot;
     let pending_timeout = std::time::Duration::from_secs(5);
 
+    // Confirmation retries must continue even when public price ticks stop.
+    let mut confirmation_interval = tokio::time::interval(std::time::Duration::from_secs(30));
+    confirmation_interval.set_missed_tick_behavior(tokio::time::MissedTickBehavior::Delay);
+
     // AMD-2026-05-02-01 Track H E-1 retrofit (HIGH-2 ExpiryGuardian sweep):
     // Periodic Decision Lease & Authorization expiry sweeper — invokes the
     // existing `GovernanceCore::check_expiry()` SM transition path every 60s
@@ -236,6 +240,10 @@ pub async fn run_event_consumer(deps: EventConsumerDeps) {
                 if flow.is_break() {
                     break;
                 }
+            }
+
+            _ = confirmation_interval.tick() => {
+                loop_tick::schedule_pending_reconciliation(&mut state, openclaw_core::now_ms());
             }
 
             // ── AMD-2026-05-02-01 Track H E-1 retrofit Arm: lease & auth sweep ──

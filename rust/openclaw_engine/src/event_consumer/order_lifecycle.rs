@@ -93,8 +93,8 @@ pub struct OrderProgress {
     /// A queued reprice successor owns close protection; this predecessor only
     /// retains fill attribution until its own terminal confirmation arrives.
     pub replacement_order_link_id: Option<String>,
-    /// One bounded read-only reconciliation after reprice cancel grace expires.
-    pub reprice_reconciliation_requested: bool,
+    /// Earliest next bounded read-only confirmation batch; retained across failures.
+    pub reconciliation_retry_after_ms: Option<u64>,
     /// Keep per-order replay dedup until terminal cleanup, independent of the global FIFO.
     pub applied_execution_ids: HashSet<String>,
 }

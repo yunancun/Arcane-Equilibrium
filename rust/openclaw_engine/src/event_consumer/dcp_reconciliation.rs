@@ -1,4 +1,4 @@
-//! Bounded, read-only DCP and reprice predecessor reconciliation. Replays verified
+//! Bounded, read-only unresolved-order reconciliation. Replays verified
 //! executions before the terminal state through the existing consumer; no create retry.
 use super::types::{ExchangeEvent, PendingOrder};
 use crate::bybit_private_ws::{ExecutionUpdate, OrderUpdate};
@@ -171,7 +171,7 @@ async fn reconcile(po: &PendingOrder, fetch: &Fetch) -> Result<Vec<ExchangeEvent
         order.order_status.as_str(),
         "Filled" | "Cancelled" | "Rejected" | "Deactivated" | "PartiallyFilledCanceled"
     ) {
-        return Err("DCP cancellation not yet terminal".into());
+        return Err("Order confirmation not yet terminal".into());
     }
     let expected = nonnegative(&order.cum_exec_qty)?;
     if order.order_status == "Filled" && expected == 0.0 {
@@ -210,7 +210,7 @@ async fn reconcile(po: &PendingOrder, fetch: &Fetch) -> Result<Vec<ExchangeEvent
                 }
                 if nonnegative(&exec.exec_qty)? == 0.0
                     || nonnegative(&exec.exec_price)? == 0.0
-                    || exec.exec_time.parse::<u64>().is_err()
+                    || exec.exec_time.parse::<u64>().map_or(true, |t| t == 0)
                 {
                     return Err("invalid execution values".into());
                 }
