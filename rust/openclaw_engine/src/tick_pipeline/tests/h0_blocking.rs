@@ -44,18 +44,20 @@ fn pipeline_in_hard_block_mode(symbol: &str) -> TickPipeline {
 }
 
 /// 觸發 H0 hard-block 的便利 helper：把 risk envelope kill switch 翻起來。
-/// step_0_5_h0_gate 在 tick 開頭呼 `update_price_ts` → freshness 必 fresh；
+/// 這些回放 fixtures 明示 event clock；runtime on_tick 以 wall clock 驗證 freshness；
 /// health 預設健康；eligibility category="linear" pass。最乾淨觸發 H0 hard-block
 /// 的場景 = `kill_switch_active=true`（risk envelope sub-check 拒）。
 /// 這也對齊 production 真實 H0 block 場景：governance cascade 拉高 kill switch。
 fn trigger_kill_switch(pipeline: &mut TickPipeline, now_ms: u64) {
-    pipeline.h0_gate.update_risk(openclaw_types::H0GateRiskSnapshot {
-        open_position_count: 0,
-        total_exposure_pct: 0.0,
-        cooldown_until_ts_ms: 0,
-        kill_switch_active: true, // ← H0 risk_envelope 必拒
-        snapshot_ts_ms: now_ms - 500,
-    });
+    pipeline
+        .h0_gate
+        .update_risk(openclaw_types::H0GateRiskSnapshot {
+            open_position_count: 0,
+            total_exposure_pct: 0.0,
+            cooldown_until_ts_ms: 0,
+            kill_switch_active: true, // ← H0 risk_envelope 必拒
+            snapshot_ts_ms: now_ms - 500,
+        });
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
@@ -84,7 +86,7 @@ fn test_h0_hard_block_zero_lease_consumption() {
     );
 
     let event = super::make_event("BTCUSDT", 50_000.0, now_ms);
-    let _ = pipeline.on_tick(&event);
+    let _ = pipeline.on_replay_tick(&event);
 
     // 不變式：H0 hard-block 後 lease store 仍 = 0。
     assert_eq!(
@@ -97,7 +99,10 @@ fn test_h0_hard_block_zero_lease_consumption() {
     // 證明 H0 確實 hard-block 了：stats counter 必 +1（blocked_envelope）。
     let (total, allowed, blocked) = gate_summary(&pipeline);
     assert_eq!(total, 1, "H0 必 check 過 1 次 / H0 must have run once");
-    assert_eq!(allowed, 0, "hard-block 模式下不能 allow / hard-block must not allow");
+    assert_eq!(
+        allowed, 0,
+        "hard-block 模式下不能 allow / hard-block must not allow"
+    );
     assert_eq!(blocked, 1, "必 +1 blocked / must increment blocked");
     assert_eq!(
         pipeline.h0_gate.get_stats().blocked_envelope,
@@ -119,7 +124,7 @@ fn test_h0_hard_block_intent_not_dispatched() {
     trigger_kill_switch(&mut pipeline, now_ms);
 
     let event = super::make_event("BTCUSDT", 50_000.0, now_ms);
-    let _ = pipeline.on_tick(&event);
+    let _ = pipeline.on_replay_tick(&event);
 
     assert_eq!(
         pipeline.recent_intents.len(),
@@ -145,7 +150,8 @@ fn test_h0_hard_block_intent_not_dispatched() {
 
     // 強驗證：H0 確實命中 risk_envelope，不是漏 trigger。
     assert_eq!(
-        pipeline.h0_gate.get_stats().blocked_envelope, 1,
+        pipeline.h0_gate.get_stats().blocked_envelope,
+        1,
         "必 +1 blocked_envelope / blocked_envelope must increment"
     );
 }
@@ -174,7 +180,7 @@ fn test_h0_shadow_mode_does_not_hard_block() {
     trigger_kill_switch(&mut pipeline, now_ms);
 
     let event = super::make_event("BTCUSDT", 50_000.0, now_ms);
-    let _ = pipeline.on_tick(&event);
+    let _ = pipeline.on_replay_tick(&event);
 
     let stats = pipeline.h0_gate.get_stats();
     // shadow 模式下：total_allowed +1（即使 would-block 仍 allow），
@@ -212,20 +218,24 @@ fn test_h0_check_p99_latency_under_1ms() {
     // 5 sub-check 完整路徑而非短路 freshness）。
     let now_ms = 1_700_000_000_000u64;
     pipeline.h0_gate.set_shadow_mode(false);
-    pipeline.h0_gate.update_health(openclaw_types::H0GateHealthSnapshot {
-        cpu_pct: 30.0,
-        memory_available_mb: 4096,
-        db_latency_ms: 5.0,
-        network_loss_pct: 0.1,
-        snapshot_ts_ms: now_ms - 1_000,
-    });
-    pipeline.h0_gate.update_risk(openclaw_types::H0GateRiskSnapshot {
-        open_position_count: 0,
-        total_exposure_pct: 0.0,
-        cooldown_until_ts_ms: 0,
-        kill_switch_active: false,
-        snapshot_ts_ms: now_ms - 500,
-    });
+    pipeline
+        .h0_gate
+        .update_health(openclaw_types::H0GateHealthSnapshot {
+            cpu_pct: 30.0,
+            memory_available_mb: 4096,
+            db_latency_ms: 5.0,
+            network_loss_pct: 0.1,
+            snapshot_ts_ms: now_ms - 1_000,
+        });
+    pipeline
+        .h0_gate
+        .update_risk(openclaw_types::H0GateRiskSnapshot {
+            open_position_count: 0,
+            total_exposure_pct: 0.0,
+            cooldown_until_ts_ms: 0,
+            kill_switch_active: false,
+            snapshot_ts_ms: now_ms - 500,
+        });
     pipeline.h0_gate.update_price_ts("BTCUSDT", now_ms - 100);
 
     const N: usize = 10_000;
@@ -238,7 +248,10 @@ fn test_h0_check_p99_latency_under_1ms() {
         let result = pipeline.h0_gate.check("BTCUSDT", "linear", ts);
         let elapsed = start.elapsed().as_micros();
         latencies_us.push(elapsed);
-        assert!(result.allowed, "10k iter 必全 allow / 10k iter must all allow");
+        assert!(
+            result.allowed,
+            "10k iter 必全 allow / 10k iter must all allow"
+        );
     }
 
     // 算 p99：sort asc → idx 9900。
@@ -293,19 +306,22 @@ fn test_h0_shadow_to_hardblock_race_safe() {
     // shadow_would_block，hard 階段必 record blocked。
     trigger_kill_switch(&mut pipeline, now_ms);
 
-    let _ = pipeline.on_tick(&super::make_event("BTCUSDT", 50_000.0, now_ms));
+    let _ = pipeline.on_replay_tick(&super::make_event("BTCUSDT", 50_000.0, now_ms));
 
     let stats_pre = pipeline.h0_gate.get_stats().clone();
     assert_eq!(stats_pre.total_allowed, 1, "shadow phase: must allow");
     assert_eq!(stats_pre.total_blocked(), 0, "shadow phase: 0 hard-block");
-    assert_eq!(stats_pre.shadow_would_block, 1, "shadow phase: would_block +1");
+    assert_eq!(
+        stats_pre.shadow_would_block, 1,
+        "shadow phase: would_block +1"
+    );
 
     // 第二階段：IPC patch flip → shadow=false（demo TOML 載入語意）。
     pipeline.h0_gate.set_shadow_mode(false);
     assert!(!pipeline.h0_gate.config().shadow_mode);
 
     // 再送一個同 symbol tick → 必 hard-block。
-    let _ = pipeline.on_tick(&super::make_event("BTCUSDT", 50_001.0, now_ms + 1));
+    let _ = pipeline.on_replay_tick(&super::make_event("BTCUSDT", 50_001.0, now_ms + 1));
 
     let stats_post = pipeline.h0_gate.get_stats();
     assert_eq!(stats_post.total_checks, 2, "post flip: total_checks=2");
@@ -346,7 +362,7 @@ fn test_h0_hard_block_emits_canary_record_with_no_intents() {
     trigger_kill_switch(&mut pipeline, now_ms);
 
     let event = super::make_event("BTCUSDT", 50_000.0, now_ms);
-    let record = pipeline.on_tick(&event);
+    let record = pipeline.on_replay_tick(&event);
 
     // canary record 必存在。
     assert!(
@@ -371,4 +387,49 @@ fn test_h0_hard_block_emits_canary_record_with_no_intents() {
     assert_eq!(pipeline.governance.lease.lock().len(), 0);
     assert_eq!(pipeline.recent_intents.len(), 0);
     assert_eq!(pipeline.recent_fills.len(), 0);
+}
+
+#[test]
+fn bya_h0_future_timestamp_is_not_fresh() {
+    let mut pipeline = TickPipeline::new(&["BTCUSDT"]);
+    pipeline.h0_gate.set_shadow_mode(false);
+    pipeline
+        .h0_gate
+        .update_price_ts("BTCUSDT", 1_700_000_060_000);
+    let result = pipeline
+        .h0_gate
+        .check("BTCUSDT", "linear", 1_700_000_000_000);
+    assert!(!result.allowed);
+    assert_eq!(pipeline.h0_gate.get_stats().blocked_freshness, 1);
+}
+
+#[test]
+fn bya_independent_clock_rejects_stale_future_and_reordered_prices_before_mutation() {
+    let now = 1_700_000_000_000;
+    let mut pipeline = TickPipeline::new(&["BTCUSDT"]);
+    pipeline.paper_state.set_latest_price("BTCUSDT", 100.0);
+    pipeline.latest_prices.insert("BTCUSDT".into(), 100.0);
+    pipeline.h0_gate.set_shadow_mode(true); // data integrity is not a risk shadow toggle
+    pipeline.h0_gate.update_price_ts("BTCUSDT", now - 10);
+    for ts in [now - 60_000, now + 60_000, now - 20] {
+        pipeline.on_tick_at(&super::make_event("BTCUSDT", 1.0, ts), now);
+        assert_eq!(pipeline.latest_prices["BTCUSDT"], 100.0);
+        assert_eq!(pipeline.paper_state.latest_price("BTCUSDT"), Some(100.0));
+    }
+    assert_eq!(pipeline.h0_gate.get_stats().blocked_freshness, 3);
+    assert_eq!(pipeline.stats.total_ticks, 0);
+    pipeline.on_tick_at(&super::make_event("BTCUSDT", 101.0, now), now);
+    assert_eq!(pipeline.latest_prices["BTCUSDT"], 101.0);
+    assert_eq!(pipeline.stats.total_ticks, 1);
+}
+
+#[test]
+fn bya_default_runtime_entry_uses_wall_clock_and_replay_is_explicit() {
+    let mut pipeline = TickPipeline::new(&["BTCUSDT"]);
+    let historical = super::make_event("BTCUSDT", 100.0, 1_700_000_000_000);
+    pipeline.on_tick(&historical);
+    assert_eq!(pipeline.h0_gate.get_stats().blocked_freshness, 1);
+    assert_eq!(pipeline.stats.total_ticks, 0);
+    pipeline.on_replay_tick(&historical);
+    assert_eq!(pipeline.stats.total_ticks, 1);
 }

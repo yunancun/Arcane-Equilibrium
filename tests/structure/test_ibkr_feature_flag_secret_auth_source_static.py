@@ -1,5 +1,7 @@
 from pathlib import Path
 
+from rust_default_contract import assert_contract_token, assert_derived_default_fields
+
 
 ROOT = Path(__file__).resolve().parents[2]
 FEATURE_FLAG_SECRET_AUTH = ROOT / "rust/openclaw_types/src/ibkr_feature_flag_secret_auth.rs"
@@ -165,13 +167,6 @@ def _authorization_envelope_paper_fixture_block(source: str) -> str:
     )[0]
 
 
-def _matrix_default_block(source: str) -> str:
-    return source.split("impl Default for FeatureFlagSecretAuthMatrixV1", 1)[1].split(
-        "impl FeatureFlagSecretAuthMatrixV1",
-        1,
-    )[0]
-
-
 def test_ibkr_feature_flag_secret_auth_source_stays_below_governance_cap() -> None:
     assert len(_source().splitlines()) <= MAX_LINES
 
@@ -180,23 +175,14 @@ def test_ibkr_feature_flag_secret_auth_source_keeps_auth_matrix_contract() -> No
     source = _source()
 
     for token in REQUIRED_IMPORT_TOKENS | REQUIRED_TYPE_TOKENS:
-        assert token in source
+        assert_contract_token(source, token)
     for field in REQUIRED_MATRIX_FIELDS | REQUIRED_ENVELOPE_FIELDS:
         assert field in source
     for blocker in REQUIRED_BLOCKERS:
         assert f"Blocker::{blocker}" in source or blocker in source
 
-    assert "contract_id: String::new()" in source
-    assert "source_version: 0" in source
     assert "environment: BrokerEnvironment::ReadOnly" in source
     assert "permission_scope: AuthorityScope::Denied" in source
-    assert "flags: StockEtfFeatureFlags::default()" in source
-    assert "secret_slot_contract: IbkrSecretSlotContractV1::default()" in source
-    assert "phase2_gate_artifact: IbkrPhase2GateArtifactV1::default()" in source
-    assert "session_attestation: IbkrSessionAttestationV1::default()" in source
-    assert "authorization_envelope: StockEtfAuthorizationEnvelopeV1::default()" in source
-    assert "gui_lane_state_override_denied: false" in source
-    assert "server_rust_matrix_authoritative: false" in source
     assert "allowed: blockers.is_empty()" in source
     assert "AuthorityScope::Denied" in source
 
@@ -205,7 +191,6 @@ def test_ibkr_feature_flag_secret_auth_source_keeps_default_and_paper_fixture_po
     source = _source()
     envelope_default = _authorization_envelope_default_block(source)
     envelope_fixture = _authorization_envelope_paper_fixture_block(source)
-    matrix_default = _matrix_default_block(source)
 
     for required in (
         "asset_lane: AssetLane::StockEtfCash",
@@ -230,18 +215,19 @@ def test_ibkr_feature_flag_secret_auth_source_keeps_default_and_paper_fixture_po
     ):
         assert required in envelope_fixture
 
-    for required in (
-        "contract_id: String::new()",
-        "source_version: 0",
-        "flags: StockEtfFeatureFlags::default()",
-        "secret_slot_contract: IbkrSecretSlotContractV1::default()",
-        "phase2_gate_artifact: IbkrPhase2GateArtifactV1::default()",
-        "session_attestation: IbkrSessionAttestationV1::default()",
-        "authorization_envelope: StockEtfAuthorizationEnvelopeV1::default()",
-        "gui_lane_state_override_denied: false",
-        "server_rust_matrix_authoritative: false",
-    ):
-        assert required in matrix_default
+    # Derived defaults retain empty identity, absent proofs and false readiness;
+    # ibkr_feature_flag_secret_auth_acceptance verifies that contact is denied.
+    assert_derived_default_fields(source, "FeatureFlagSecretAuthMatrixV1", {
+        "contract_id": "String",
+        "source_version": "u32",
+        "flags": "StockEtfFeatureFlags",
+        "secret_slot_contract": "IbkrSecretSlotContractV1",  # gitleaks:allow -- public Rust type name
+        "phase2_gate_artifact": "IbkrPhase2GateArtifactV1",
+        "session_attestation": "IbkrSessionAttestationV1",
+        "authorization_envelope": "StockEtfAuthorizationEnvelopeV1",
+        "gui_lane_state_override_denied": "bool",
+        "server_rust_matrix_authoritative": "bool",
+    })
 
 
 def test_ibkr_feature_flag_secret_auth_source_keeps_policy_secret_artifact_session_chain() -> None:

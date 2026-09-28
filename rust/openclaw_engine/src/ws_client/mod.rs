@@ -28,7 +28,7 @@
 use crate::config::ConfigManager;
 use crate::ws_unknown_handler_guard::UnknownHandlerGuard;
 use openclaw_types::PriceEvent;
-use std::collections::HashSet;
+use std::collections::{HashMap, HashSet};
 use std::sync::atomic::{AtomicU32, Ordering};
 use std::sync::Arc;
 use tokio::sync::mpsc;
@@ -36,6 +36,7 @@ use tokio_util::sync::CancellationToken;
 
 mod connection;
 mod dispatch;
+mod orderbook;
 mod parsers;
 mod run_loop;
 pub mod stats;
@@ -45,18 +46,8 @@ mod tests;
 
 use std::sync::OnceLock;
 
-/// recorder-v2 producer-side gate：WS 讀熱路徑是否需要做 full-depth L1 解析。
-///
-/// 為什麼是 process-global one-shot（OnceLock）而非 per-message `env::var`：
-///   `parse_orderbook_snapshot` 跑在 WS 讀迴圈熱路徑（run_loop.rs:212，每條
-///   orderbook.50 訊息一次）。逐訊息查 `std::env::var` 本身就是熱路徑性能 bug
-///   （每次配置查找 + 字串配置），故只在進程啟動時讀一次並快取。對齊消費端
-///   `OPENCLAW_RECORD_L1_EVENTS`（pipeline_ctor.rs:120 在建構時讀同一 env）的
-///   gate 語意——兩端必須同源同預設，否則 producer 解析了 consumer 不消費的全簿。
-///
-/// 不變量：flag-OFF（預設）時 producer 完全 inert——不做 full-50-level 解析、不抽
-///   update_id/seq、5 個 ob_* 欄保持 `PriceEvent::new` 的 None 預設；只走 v1 路徑
-///   （bids5/asks5 top-5 + best-bid/ask + mid + metadata），與舊行為位元級相同。
+/// Cache the recorder payload flag once. Trading always reconstructs depth;
+/// this flag controls only the additional raw-change payload for recording.
 fn l1_recording_enabled() -> bool {
     static FLAG: OnceLock<bool> = OnceLock::new();
     *FLAG.get_or_init(|| {
@@ -104,6 +95,7 @@ pub struct WsClient {
     /// P-06: HashSet for O(1) dedup; Vec reconstituted for batch send.
     /// P-06：HashSet 去重 O(1)；批次發送時轉 Vec。
     pub(super) subscriptions: HashSet<String>,
+    orderbooks: HashMap<String, orderbook::Orderbook>,
     /// Optional channel for runtime topic additions/removals (from ScannerRunner) / 運行時主題增減的可選通道
     pub(super) topic_change_rx: Option<mpsc::UnboundedReceiver<WsTopicChange>>,
     /// G9-02: unknown-topic guard with force-reconnect trigger (DEFAULT-OFF
@@ -152,6 +144,7 @@ impl WsClient {
             event_tx,
             cancel,
             subscriptions: HashSet::new(),
+            orderbooks: HashMap::new(),
             topic_change_rx: None,
             // G9-02: env-gate snapshot taken at construction time; flip the
             // env var requires `--rebuild` or restart for effect (acceptable

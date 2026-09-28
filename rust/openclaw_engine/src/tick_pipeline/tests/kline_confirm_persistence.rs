@@ -63,9 +63,12 @@ async fn test_kline_confirm_persists_full_ohlcv() {
         BASE_TS,
         BASE_TS + 60_000,
     );
-    let out = p.on_tick(&ev);
+    let out = p.on_replay_tick(&ev);
     // KlineConfirm 早退：不產生信號/CanaryRecord。
-    assert!(out.is_none(), "KlineConfirm must early-return (not drive signals)");
+    assert!(
+        out.is_none(),
+        "KlineConfirm must early-return (not drive signals)"
+    );
 
     let msg = rx.try_recv().expect("expected a KlineClose message");
     match msg {
@@ -84,7 +87,10 @@ async fn test_kline_confirm_persists_full_ohlcv() {
             assert!((bar.volume - 100.5).abs() < 1e-6);
             assert!((bar.turnover - 6_512_345.0).abs() < 1e-3);
             // range 非退化（修復前 tick-synth 會給 ~0）。
-            assert!(bar.high - bar.low > 600.0, "wick range must be real, not dead");
+            assert!(
+                bar.high - bar.low > 600.0,
+                "wick range must be real, not dead"
+            );
             assert_eq!(bar.open_time_ms, BASE_TS);
             assert_eq!(bar.close_time_ms, BASE_TS + 60_000);
             assert!(bar.is_closed);
@@ -114,7 +120,7 @@ async fn test_kline_confirm_240_maps_to_4h() {
         BASE_TS,
         BASE_TS + 14_400_000,
     );
-    p.on_tick(&ev);
+    p.on_replay_tick(&ev);
 
     let msg = rx.try_recv().expect("expected a KlineClose message");
     if let MarketDataMsg::KlineClose { timeframe, bar, .. } = msg {
@@ -146,7 +152,7 @@ async fn test_kline_confirm_unknown_interval_fail_closed() {
         BASE_TS + 60_000,
     );
     ev.kline_interval = Some("999".to_string());
-    p.on_tick(&ev);
+    p.on_replay_tick(&ev);
 
     assert!(
         rx.try_recv().is_err(),
@@ -166,12 +172,12 @@ async fn test_tick_synth_no_longer_emits_kline_close() {
     let mut t1 = PriceEvent::new("BTCUSDT".into(), 50_000.0, BASE_TS + 1_000);
     t1.event_kind = Some(PriceEventKind::Trade);
     t1.volume_24h = 0.5;
-    p.on_tick(&t1);
+    p.on_replay_tick(&t1);
 
     let mut t2 = PriceEvent::new("BTCUSDT".into(), 50_100.0, BASE_TS + 61_000);
     t2.event_kind = Some(PriceEventKind::Trade);
     t2.volume_24h = 0.1;
-    p.on_tick(&t2);
+    p.on_replay_tick(&t2);
 
     // 記憶體 buffer 仍有收盤 bar（R2：indicator 源不變）。
     let buffered = p
@@ -179,11 +185,49 @@ async fn test_tick_synth_no_longer_emits_kline_close() {
         .get_buffer("BTCUSDT", "1m")
         .map(|b| b.len())
         .unwrap_or(0);
-    assert!(buffered >= 1, "tick-synth aggregator still feeds in-memory buffer (R2)");
+    assert!(
+        buffered >= 1,
+        "tick-synth aggregator still feeds in-memory buffer (R2)"
+    );
 
     // 但 market writer channel 必須空（tick-synth 不再落盤）。
     assert!(
         rx.try_recv().is_err(),
         "tick-synth must NOT emit KlineClose to DB writer anymore (single-source = WS confirmed)"
     );
+}
+
+/// BYA-03: even a disabled H0 cannot make a historical candle drive stops.
+#[tokio::test]
+async fn bya_confirmed_candle_preserves_position_and_mark_when_h0_blocks() {
+    let mut p = TickPipeline::new(&["BTCUSDT"]);
+    p.paper_state
+        .apply_fill("BTCUSDT", true, 1.0, 100.0, 0.0, BASE_TS, "test");
+    p.paper_state.set_latest_price("BTCUSDT", 100.0);
+    p.latest_prices.insert("BTCUSDT".to_string(), 100.0);
+    p.h0_gate.set_system_mode("disabled");
+    let (tx, mut rx) = tokio::sync::mpsc::channel::<MarketDataMsg>(8);
+    p.set_market_data_channel(tx);
+    let event = kline_confirm(
+        "BTCUSDT",
+        "1",
+        100.0,
+        101.0,
+        80.0,
+        90.0,
+        1.0,
+        95.0,
+        BASE_TS,
+        BASE_TS + 60_000,
+    );
+    let before_positions = p.paper_state.position_count();
+    p.on_replay_tick(&event);
+    assert_eq!(p.paper_state.latest_price("BTCUSDT"), Some(100.0));
+    assert_eq!(p.latest_prices.get("BTCUSDT"), Some(&100.0));
+    assert_eq!(p.paper_state.position_count(), before_positions);
+    assert!(matches!(
+        rx.try_recv(),
+        Ok(MarketDataMsg::KlineClose { .. })
+    ));
+    assert_eq!(p.h0_gate.get_stats().total_checks, 0);
 }

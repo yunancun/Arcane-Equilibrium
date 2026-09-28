@@ -1,11 +1,12 @@
 """
-Combinatorial Purged Cross-Validation (CPCV) with strategy-specific embargo.
-組合清洗交叉驗證 + 策略特定 embargo。
+Grouped purged cross-validation with strategy-specific embargo (legacy CPCV API).
+按時間群組清洗的交叉驗證 + 策略特定 embargo（保留 CPCV API 名称）。
 
-MODULE_NOTE (EN): Implements 4-fold CPCV with temporal purging and per-strategy
+MODULE_NOTE (EN): Implements single-held-fold purged CV (not multi-test-fold combinatorial paths),
+  with per-strategy
   embargo periods. Power guard flags low-power results as reference-only.
   Used by Optuna TPE (Phase 3b) to validate parameter configurations.
-MODULE_NOTE (中): 實現 4 折 CPCV，含時間清洗和每策略 embargo 期。
+MODULE_NOTE (中): 實現 4 折、每次保留一折的分組清洗驗證，含每策略 embargo；並非多測試折組合路徑。
   Power guard 標記低功率結果為僅供參考。用於 Optuna TPE 驗證參數配置。
 """
 
@@ -73,7 +74,7 @@ class CPCVResult:
     mean_sharpe: float
     std_sharpe: float
     power_estimate: float
-    passed: bool  # True only if power >= threshold AND mean_sharpe > 0
+    passed: bool  # All folds evaluable, sufficient group-power proxy, finite positive mean
     n_folds: int
     embargo_hours: int
     strategy_type: str
@@ -121,6 +122,42 @@ def get_embargo_hours(strategy_type: str, config: Optional[CPCVConfig] = None) -
     return max(embargo_map.values())
 
 
+def validated_timestamps(timestamps: np.ndarray, n_samples: Optional[int] = None) -> np.ndarray:
+    """Validate one ordered time axis; normalize a uniform ms axis to seconds.
+
+    同時刻樣本是不可拆分的保守群組；缺失、混合單位與倒序不能降級成無清洗驗證。
+    """
+    ts = np.asarray(timestamps, dtype=np.float64)
+    if ts.ndim != 1 or (n_samples is not None and len(ts) != n_samples):
+        raise ValueError("timestamps must be a one-dimensional axis matching samples")
+    if not np.all(np.isfinite(ts)) or np.any(ts < 0):
+        raise ValueError("timestamps must be finite and nonnegative")
+    if len(ts) and np.any(ts > 1e12):
+        if not np.all(ts > 1e12):
+            raise ValueError("timestamps must use a single time unit")
+        ts = ts / 1000.0
+    if np.any(np.diff(ts) < 0):
+        raise ValueError("timestamps must be sorted")
+    return ts
+
+
+def unique_sample_indices(X: np.ndarray, y: np.ndarray, ts: np.ndarray) -> np.ndarray:
+    """Collapse exact timestamp/feature/label replicas without inventing event IDs.
+
+    Different observations at the same time stay together as one split/power
+    group. Without canonical IDs, identical observations conservatively get one
+    weight. This does not estimate dependence between different time groups.
+    """
+    if X.ndim != 2 or y.ndim != 1 or len(X) != len(y) or len(ts) != len(y):
+        raise ValueError("features, labels and timestamps must have matching shapes")
+    if not np.all(np.isfinite(X)) or not np.all(np.isfinite(y)):
+        raise ValueError("features and labels must be finite")
+    if len(ts) < 2 or np.all(np.diff(ts) != 0):
+        return np.arange(len(ts))
+    _, indices = np.unique(np.column_stack((ts, X, y)), axis=0, return_index=True)
+    return np.sort(indices)
+
+
 def generate_folds(
     timestamps: np.ndarray,
     strategy_type: str,
@@ -147,22 +184,24 @@ def generate_folds(
     if config is None:
         config = CPCVConfig()
 
-    n = len(timestamps)
-    if n == 0:
+    ts = validated_timestamps(timestamps)
+    n = len(ts)
+    if config.n_folds < 2 or config.min_samples_per_fold < 1:
+        raise ValueError("CPCV requires at least two folds and a positive sample floor")
+    unique_ts = np.unique(ts)
+    if len(unique_ts) < config.n_folds:
         return []
-
-    ts = timestamps.astype(np.float64).copy()
-
-    # Auto-detect milliseconds → convert to seconds / 自動偵測毫秒 → 轉秒
-    if ts[0] > 1e12:
-        ts = ts / 1000.0
 
     embargo_hours = get_embargo_hours(strategy_type, config)
     embargo_sec = embargo_hours * 3600.0
     purge_sec = config.label_window_hours * 3600.0
 
-    # Split into n_folds equal temporal blocks by index / 按索引分成 n_folds 等分
-    fold_boundaries = np.array_split(np.arange(n), config.n_folds)
+    # A timestamp group must never straddle train/test, even when row counts
+    # differ. 按不同時刻群分折，不能由列數切開同一事件時刻。
+    fold_boundaries = [
+        np.flatnonzero((ts >= block[0]) & (ts <= block[-1]))
+        for block in np.array_split(unique_ts, config.n_folds)
+    ]
 
     # Pre-compute all fold time ranges / 預計算所有折疊時間範圍
     fold_start_times = np.array([ts[block[0]] for block in fold_boundaries])
@@ -261,13 +300,21 @@ def validate_cpcv(
     if config is None:
         config = CPCVConfig()
 
+    ts = validated_timestamps(timestamps, len(y))
+    indices = unique_sample_indices(X, y, ts)
+    X, y, ts = X[indices], y[indices], ts[indices]
     embargo_hours = get_embargo_hours(strategy_type, config)
-    folds = generate_folds(timestamps, strategy_type, config)
+    folds = generate_folds(ts, strategy_type, config)
 
     fold_metrics: List[Dict[str, Any]] = []
     sharpe_values: List[float] = []
 
     for fold_idx, (train_idx, test_idx) in enumerate(folds):
+        # Repeated rows cannot satisfy either train or evaluation floors.
+        if min(len(np.unique(ts[train_idx])), len(np.unique(ts[test_idx]))) < config.min_samples_per_fold:
+            fold_metrics.append({"fold": fold_idx, "n_train": len(train_idx),
+                                 "n_test": len(test_idx), "status": "insufficient_time_groups"})
+            continue
         X_train, y_train = X[train_idx], y[train_idx]
         X_test, y_test = X[test_idx], y[test_idx]
 
@@ -282,11 +329,15 @@ def validate_cpcv(
     mean_sharpe = float(np.mean(sharpe_values)) if sharpe_values else 0.0
     std_sharpe = float(np.std(sharpe_values)) if sharpe_values else 0.0
 
-    power = estimate_power(len(y), config.n_folds)
+    # A heuristic under independent-time-group assumptions,
+    # not a claim of measured statistical independence. Never count replicas.
+    power = estimate_power(len(np.unique(ts)), config.n_folds)
 
     # Pass only if sufficient power AND positive mean Sharpe
     # 只有功效足夠且平均 Sharpe 為正才通過
-    passed = (power >= config.power_threshold) and (mean_sharpe > 0)
+    passed = (len(sharpe_values) == config.n_folds
+              and all(np.isfinite(sharpe_values))
+              and power >= config.power_threshold and mean_sharpe > 0)
 
     if power < config.power_threshold:
         logger.warning(

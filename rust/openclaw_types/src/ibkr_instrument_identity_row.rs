@@ -64,7 +64,7 @@ pub fn is_whitelisted_primary_exchange(raw: &str) -> bool {
 
 /// contractDetails `stockType` 白名單枚舉（sv≥152 欄;fail-closed:表外/缺席一律
 /// `UnknownDenied`——lane 的 ETF/普通股判別是承載義務）。
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize, Default)]
 #[serde(rename_all = "snake_case")]
 pub enum IbkrStockTypeV1 {
     /// ETF（wire `"ETF"`）。
@@ -72,14 +72,8 @@ pub enum IbkrStockTypeV1 {
     /// 普通股（wire `"COMMON"`）。
     CommonStock,
     /// 契約 default / 表外 wire 值 / sv<152 缺席 的 fail-closed 分類（`validate()` 必拒）。
+    #[default]
     UnknownDenied,
-}
-
-impl Default for IbkrStockTypeV1 {
-    fn default() -> Self {
-        // fail-closed 預設＝未知拒。
-        Self::UnknownDenied
-    }
 }
 
 impl IbkrStockTypeV1 {

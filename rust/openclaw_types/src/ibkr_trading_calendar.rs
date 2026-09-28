@@ -41,20 +41,14 @@ pub const IBKR_TRADING_CALENDAR_CONTRACT_ID: &str = "ibkr_trading_calendar_v1";
 pub const CALENDAR_TZ_UNKNOWN_DENIED_SENTINEL: &str = "UNKNOWN_DENIED";
 
 /// 解析目標:liquidHours(RTH)或 tradingHours(全時段)。v1 姿態聚焦 RTH,同解析器複用。
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize, Default)]
 #[serde(rename_all = "snake_case")]
 pub enum IbkrCalendarHoursKindV1 {
     /// liquidHours = 常規交易時段(RTH)。
+    #[default]
     Rth,
     /// tradingHours = 全時段(含盤前盤後)。
     Trading,
-}
-
-impl Default for IbkrCalendarHoursKindV1 {
-    fn default() -> Self {
-        // 預設 RTH(v1 主目標);非 fail-closed 判別欄,故不設 unknown。
-        Self::Rth
-    }
 }
 
 impl IbkrCalendarHoursKindV1 {

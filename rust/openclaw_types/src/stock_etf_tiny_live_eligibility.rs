@@ -16,19 +16,14 @@ pub const STOCK_ETF_TINY_LIVE_AMD_PATH: &str = STOCK_ETF_RELEASE_AMD_PATH;
 pub const STOCK_ETF_TINY_LIVE_SPEC_PATH: &str = STOCK_ETF_RELEASE_SPEC_PATH;
 pub const STOCK_ETF_TINY_LIVE_ADR_ELIGIBILITY_CONTRACT_ID: &str = "tiny_live_adr_eligibility_v1";
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize, Default)]
 #[serde(rename_all = "snake_case")]
 pub enum TinyLiveAdrEligibilityDecision {
+    #[default]
     NotEligible,
     AdrDiscussionOnly,
     TinyLiveAuthorized,
     LiveAuthorized,
-}
-
-impl Default for TinyLiveAdrEligibilityDecision {
-    fn default() -> Self {
-        Self::NotEligible
-    }
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]

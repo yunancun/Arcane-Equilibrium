@@ -42,7 +42,7 @@ async fn test_fanout_lag_detection() {
 fn test_canary_mode_off_returns_none() {
     let mut pipeline = TickPipeline::new(&["BTCUSDT"]);
     assert!(!pipeline.canary_mode);
-    let record = pipeline.on_tick(&super::make_event("BTCUSDT", 50000.0, 1000));
+    let record = pipeline.on_replay_tick(&super::make_event("BTCUSDT", 50000.0, 1000));
     assert!(record.is_none());
 }
 
@@ -50,7 +50,7 @@ fn test_canary_mode_off_returns_none() {
 fn test_canary_mode_on_returns_record() {
     let mut pipeline = TickPipeline::new(&["BTCUSDT"]);
     pipeline.canary_mode = true;
-    let record = pipeline.on_tick(&super::make_event("BTCUSDT", 50000.0, 1000));
+    let record = pipeline.on_replay_tick(&super::make_event("BTCUSDT", 50000.0, 1000));
     assert!(record.is_some());
     let r = record.unwrap();
     assert_eq!(r.schema_version, "1.0.0");
@@ -66,7 +66,7 @@ fn test_canary_record_serializable() {
     let mut pipeline = TickPipeline::new(&["BTCUSDT"]);
     pipeline.canary_mode = true;
     let record = pipeline
-        .on_tick(&super::make_event("BTCUSDT", 50000.0, 1000))
+        .on_replay_tick(&super::make_event("BTCUSDT", 50000.0, 1000))
         .unwrap();
     let json = serde_json::to_string(&record).unwrap();
     assert!(json.contains("\"schema_version\":\"1.0.0\""));

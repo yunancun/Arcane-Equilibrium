@@ -1,5 +1,7 @@
 from pathlib import Path
 
+from rust_default_contract import assert_contract_token
+
 
 ROOT = Path(__file__).resolve().parents[2]
 # 直接引用來源檔字面 rel 路徑（滿足 rust-source-coverage 守衛 + 本治理測試自身實質斷言）。
@@ -101,13 +103,13 @@ def test_quote_row_source_stays_below_governance_cap() -> None:
 def test_quote_row_keeps_contract_id() -> None:
     source = _source()
     for token in REQUIRED_CONTRACT_TOKENS:
-        assert token in source, f"missing contract token {token!r}"
+        assert_contract_token(source, token)
 
 
 def test_quote_row_keeps_types_and_pure_functions() -> None:
     source = _source()
     for token in REQUIRED_TYPE_TOKENS:
-        assert token in source, f"missing type token {token!r}"
+        assert_contract_token(source, token)
 
 
 def test_quote_row_keeps_blocker_taxonomy() -> None:
@@ -119,7 +121,7 @@ def test_quote_row_keeps_blocker_taxonomy() -> None:
 def test_quote_row_keeps_pairing_and_provenance_semantics() -> None:
     source = _source()
     for token in REQUIRED_SEMANTIC_TOKENS:
-        assert token in source, f"missing semantic token {token!r}"
+        assert_contract_token(source, token)
 
 
 def test_quote_row_has_no_runtime_secret_socket_or_clock_tokens() -> None:

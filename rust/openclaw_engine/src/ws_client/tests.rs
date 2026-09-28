@@ -10,11 +10,11 @@
 use super::connection::WsState;
 use super::parsers::{
     extract_kline_interval_from_topic, extract_symbol_from_topic, parse_adl_notice_item,
-    parse_kline_item, parse_liquidation_item, parse_orderbook_snapshot, parse_price_limit_item,
-    parse_ticker_item, parse_trade_item,
+    parse_kline_item, parse_liquidation_item, parse_price_limit_item, parse_ticker_item,
+    parse_trade_item,
 };
-use openclaw_types::PriceEventKind;
 use super::run_loop::{BACKOFF_POLICY, SUBSCRIBE_BATCH_SIZE};
+use openclaw_types::PriceEventKind;
 use std::time::Duration;
 
 #[test]
@@ -200,8 +200,14 @@ fn test_parse_orderbook_snapshot() {
         "ts": 1700000000000_u64
     })];
     // record_l1=true → 走 recorder-v2 ON 路徑（full-depth 解析 + ob_* 欄 populate）。
-    let event =
-        parse_orderbook_snapshot(&data, "orderbook.50.BTCUSDT", Some("snapshot"), true).unwrap();
+    let event = super::orderbook::Orderbook::default()
+        .apply(
+            &serde_json::json!({"type":"snapshot", "ts":data[0]["ts"], "data":data[0]}),
+            "orderbook.50.BTCUSDT",
+            true,
+        )
+        .unwrap()
+        .unwrap();
     assert_eq!(event.symbol, "BTCUSDT");
     assert!((event.bid_price - 65000.0).abs() < f64::EPSILON);
     assert!((event.ask_price - 65001.0).abs() < f64::EPSILON);
@@ -216,8 +222,8 @@ fn test_parse_orderbook_snapshot() {
 }
 
 /// recorder-v2 producer-side gate 的 inertness 保證：record_l1=false 時 parser
-/// 完全不做 full-depth 解析——5 個 ob_* 欄保持 None；但 v1 路徑（best-bid/ask、
-/// mid、bids5/asks5、metadata）必須與 flag-ON 時位元級相同（二進制 inert）。
+/// 仍重建交易簿，5 個錄製用 ob_* 欄保持 None；best-bid/ask、
+/// mid、bids5/asks5、metadata 必須與 flag-ON 時相同。
 #[test]
 fn test_parse_orderbook_snapshot_record_l1_off_is_inert() {
     let data = vec![serde_json::json!({
@@ -233,8 +239,14 @@ fn test_parse_orderbook_snapshot_record_l1_off_is_inert() {
         "ts": 1700000000000_u64
     })];
     // record_l1=false → recorder-v2 ON 路徑全部 SKIP。
-    let event =
-        parse_orderbook_snapshot(&data, "orderbook.50.BTCUSDT", Some("snapshot"), false).unwrap();
+    let event = super::orderbook::Orderbook::default()
+        .apply(
+            &serde_json::json!({"type":"snapshot", "ts":data[0]["ts"], "data":data[0]}),
+            "orderbook.50.BTCUSDT",
+            false,
+        )
+        .unwrap()
+        .unwrap();
     // recorder-v2 的 5 個 ob_* 欄全 None（PriceEvent::new 預設，未被 populate）。
     assert_eq!(event.ob_msg_type, None);
     assert_eq!(event.ob_changed_bids, None);
@@ -253,10 +265,20 @@ fn test_parse_orderbook_snapshot_record_l1_off_is_inert() {
 }
 
 /// recorder-v2：delta-shaped 消息（含 qty=0 刪除、亂序、部分變更、字串編碼 u/seq）。
-/// 驗 parse_orderbook_snapshot 完整保留全部變更檔（不截前 5、不丟 qty==0），
-/// 並正確穿過 type="delta" 與 u/seq；BBO 解析交由 L1BookTracker（此處只驗 parser 抽取）。
+/// 驗簿重建後錄製 payload 仍完整保留全部變更檔（不截前 5、不丟 qty==0），
+/// 並正確穿過 type="delta" 與 u/seq；交易 BBO 來自已重建的簿。
 #[test]
 fn test_parse_orderbook_delta_keeps_full_levels_and_meta() {
+    let mut book = super::orderbook::Orderbook::default();
+    book.apply(
+        &serde_json::json!({"type":"snapshot", "ts":1700000000000_u64,
+        "data":{"s":"BTCUSDT", "u":100, "seq":5000,
+                "b":[["65000","1"]], "a":[["65001","1"],["65003","1"]]}}),
+        "orderbook.50.BTCUSDT",
+        true,
+    )
+    .unwrap();
+
     let data = vec![serde_json::json!({
         "s": "BTCUSDT",
         // delta：亂序、含 qty=0 刪除、> 5 檔（驗不被 take(5) 截斷）。
@@ -270,8 +292,14 @@ fn test_parse_orderbook_delta_keeps_full_levels_and_meta() {
         "ts": 1700000000050_u64
     })];
     // record_l1=true → 驗 full-depth 解析保留全部變更檔（不截前 5）。
-    let event =
-        parse_orderbook_snapshot(&data, "orderbook.50.BTCUSDT", Some("delta"), true).unwrap();
+    let event = book
+        .apply(
+            &serde_json::json!({"type":"delta", "ts":data[0]["ts"], "data":data[0]}),
+            "orderbook.50.BTCUSDT",
+            true,
+        )
+        .unwrap()
+        .unwrap();
     assert_eq!(event.ob_msg_type.as_deref(), Some("delta"));
     assert_eq!(event.ob_update_id, Some(200)); // 字串編碼 u 也能解析
     assert_eq!(event.ob_seq, Some(5100));
@@ -279,10 +307,14 @@ fn test_parse_orderbook_delta_keeps_full_levels_and_meta() {
     let cb = event.ob_changed_bids.as_ref().unwrap();
     assert_eq!(cb.len(), 7, "full changed bid levels preserved, not top-5");
     // qty==0 的刪除標記原樣保留（tracker 端才據此 remove）。
-    assert!(cb.iter().any(|(p, q)| (*p - 65000.0).abs() < 1e-9 && *q == 0.0));
+    assert!(cb
+        .iter()
+        .any(|(p, q)| (*p - 65000.0).abs() < 1e-9 && *q == 0.0));
     let ca = event.ob_changed_asks.as_ref().unwrap();
     assert_eq!(ca.len(), 1);
-    assert!(ca.iter().any(|(p, q)| (*p - 65003.0).abs() < 1e-9 && *q == 0.0));
+    assert!(ca
+        .iter()
+        .any(|(p, q)| (*p - 65003.0).abs() < 1e-9 && *q == 0.0));
     // v1 的 bids5/asks5 仍只取前 5（向後相容）。
     assert_eq!(event.bids5.as_ref().unwrap().len(), 5);
 }
@@ -745,4 +777,114 @@ fn test_extract_symbol_multi_segment() {
     assert_eq!(extract_symbol_from_topic("kline.1."), None);
     // Single segment (no dot) → just the string itself
     assert_eq!(extract_symbol_from_topic("BTCUSDT"), Some("BTCUSDT".into()));
+}
+
+/// BYA-01: the public message-to-event boundary must emit a reconstructed BBO.
+#[tokio::test]
+async fn bya_orderbook_delta_preserves_unchanged_best_levels_and_exchange_time() {
+    use std::sync::Arc;
+    use tokio_util::sync::CancellationToken;
+    let config =
+        Arc::new(crate::config::ConfigManager::load(Some("/tmp/bya-absent-config.toml")).unwrap());
+    let (tx, mut rx) = tokio::sync::mpsc::channel(8);
+    let mut client = super::WsClient::new(config, tx, CancellationToken::new());
+    let snapshot = serde_json::json!({"topic":"orderbook.50.BTCUSDT", "type":"snapshot",
+        "ts":1700000000000u64,"data":{"s":"BTCUSDT","u":10,"seq":10,
+        "b":[["100","1"],["99","1"]],"a":[["101","1"],["102","1"]]}});
+    client.process_message(&snapshot.to_string()).await;
+    assert_eq!(rx.try_recv().unwrap().ts_ms, 1700000000000);
+    let delta = serde_json::json!({"topic":"orderbook.50.BTCUSDT", "type":"delta",
+        "ts":1700000000020u64,"data":{"s":"BTCUSDT","u":12,"seq":14,
+        "b":[["99","2"]],"a":[]}});
+    client.process_message(&delta.to_string()).await;
+    let ev = rx.try_recv().unwrap();
+    assert_eq!(
+        (ev.bid_price, ev.ask_price, ev.last_price),
+        (100.0, 101.0, 100.5)
+    );
+    assert_eq!(ev.ts_ms, 1700000000020);
+    let deletion = serde_json::json!({"topic":"orderbook.50.BTCUSDT", "type":"delta",
+        "ts":1700000000040u64,"data":{"s":"BTCUSDT","u":13,"seq":15,
+        "b":[["100","0"]],"a":[]}});
+    client.process_message(&deletion.to_string()).await;
+    let ev = rx.try_recv().unwrap();
+    assert_eq!((ev.bid_price, ev.ask_price), (99.0, 101.0));
+}
+
+#[tokio::test]
+async fn bya_orderbook_invalid_frames_require_resnapshot_and_never_emit_quotes() {
+    use super::dispatch::ProcessOutcome;
+    use std::sync::Arc;
+    let config =
+        Arc::new(crate::config::ConfigManager::load(Some("/tmp/bya-absent-config.toml")).unwrap());
+    let (tx, mut rx) = tokio::sync::mpsc::channel(8);
+    let mut client = super::WsClient::new(config, tx, tokio_util::sync::CancellationToken::new());
+    let snapshot = serde_json::json!({"topic":"orderbook.50.BTCUSDT", "type":"snapshot", "ts":1700000000000_u64,
+       "data":{"s":"BTCUSDT","b":[["100","1"],["99","1"]],"a":[["101","1"]],"u":10,"seq":10}});
+    let mut delta = snapshot.clone();
+    delta["type"] = "delta".into();
+    assert_eq!(
+        client.process_message(&delta.to_string()).await,
+        ProcessOutcome::ForceReconnect
+    );
+    assert!(rx.try_recv().is_err());
+    assert_eq!(
+        client.process_message(&snapshot.to_string()).await,
+        ProcessOutcome::Continue
+    );
+    rx.try_recv().unwrap();
+    // Duplicate does not refresh the book's timestamp or emit a usable tick.
+    assert_eq!(
+        client.process_message(&delta.to_string()).await,
+        ProcessOutcome::Continue
+    );
+    assert!(rx.try_recv().is_err());
+    for bad in [
+        serde_json::json!([["102", "1"]]),
+        serde_json::json!([["NaN", "1"]]),
+        serde_json::json!([["100", "-1"]]),
+    ] {
+        client.process_message(&snapshot.to_string()).await;
+        rx.try_recv().unwrap();
+        let mut invalid = delta.clone();
+        invalid["data"]["u"] = 11.into();
+        invalid["data"]["seq"] = 11.into();
+        invalid["data"]["b"] = bad;
+        assert_eq!(
+            client.process_message(&invalid.to_string()).await,
+            ProcessOutcome::ForceReconnect
+        );
+        assert!(rx.try_recv().is_err());
+        assert!(client.orderbooks.is_empty());
+    }
+    let mut missing_time = snapshot.clone();
+    missing_time.as_object_mut().unwrap().remove("ts");
+    assert_eq!(
+        client.process_message(&missing_time.to_string()).await,
+        ProcessOutcome::ForceReconnect
+    );
+    assert!(rx.try_recv().is_err());
+    // Restart snapshot (u=1) replaces all prior state and remains usable.
+    let mut reset = snapshot.clone();
+    reset["data"]["u"] = 1.into();
+    reset["data"]["seq"] = 1.into();
+    client.process_message(&reset.to_string()).await;
+    assert_eq!(rx.try_recv().unwrap().bid_price, 100.0);
+}
+
+#[tokio::test]
+async fn bya_ticker_keeps_exchange_time_and_missing_time_does_not_become_fresh() {
+    use std::sync::Arc;
+    let config =
+        Arc::new(crate::config::ConfigManager::load(Some("/tmp/bya-absent-config.toml")).unwrap());
+    let (tx, mut rx) = tokio::sync::mpsc::channel(8);
+    let mut client = super::WsClient::new(config, tx, tokio_util::sync::CancellationToken::new());
+    let mut ticker = serde_json::json!({"topic":"tickers.BTCUSDT", "ts":1700000000000_u64,
+        "data":{"lastPrice":"100", "bid1Price":"99", "ask1Price":"101"}});
+    client.process_message(&ticker.to_string()).await;
+    assert_eq!(rx.try_recv().unwrap().ts_ms, 1700000000000);
+    ticker.as_object_mut().unwrap().remove("ts");
+    client.process_message(&ticker.to_string()).await;
+    assert!(rx.try_recv().is_err());
+    assert!(parse_trade_item(&serde_json::json!({"p":"100"}), "publicTrade.BTCUSDT").is_none());
 }

@@ -1,5 +1,7 @@
 from pathlib import Path
 
+from rust_default_contract import assert_contract_token, assert_derived_default_fields
+
 
 ROOT = Path(__file__).resolve().parents[2]
 SCORECARD_INPUTS = ROOT / "rust/openclaw_types/src/stock_etf_scorecard_inputs.rs"
@@ -176,7 +178,7 @@ def test_stock_etf_scorecard_inputs_parent_keeps_contracts_and_blockers() -> Non
     source = _parent()
 
     for token in REQUIRED_CONTRACT_TOKENS:
-        assert token in source
+        assert_contract_token(source, token)
     for blocker in REQUIRED_BLOCKERS:
         assert blocker in source
 
@@ -191,7 +193,7 @@ def test_stock_etf_scorecard_inputs_components_keep_atomic_fact_validators() -> 
     source = _components()
 
     for token in REQUIRED_COMPONENT_TYPES:
-        assert token in source
+        assert_contract_token(source, token)
 
     assert "asset_lane: AssetLane::CryptoPerp" in source
     assert "broker: Broker::Bybit" in source
@@ -243,7 +245,7 @@ def test_stock_etf_scorecard_inputs_bundle_keeps_derived_only_boundary() -> None
     source = _bundle()
 
     for token in REQUIRED_BUNDLE_TOKENS:
-        assert token in source
+        assert_contract_token(source, token)
 
     assert "cash_ledger: BrokerAccountPortfolioCashLedgerV1::accepted_fixture()" in source
     assert "cost_model: StockEtfCostModelVersionV1::accepted_fixture()" in source
@@ -282,9 +284,11 @@ def test_stock_etf_scorecard_inputs_bundle_excludes_writer_live_and_authority_cr
     ):
         assert forbidden_true not in source
 
-    assert "scorecard_is_derived_only: false" in source
-    assert "paper_and_shadow_fills_separate: false" in source
-    assert "bybit_live_execution_unchanged: false" in source
+    assert_derived_default_fields(source, "StockEtfScorecardInputBundleV1", {
+        "scorecard_is_derived_only": "bool",
+        "paper_and_shadow_fills_separate": "bool",
+        "bybit_live_execution_unchanged": "bool",
+    })
 
 
 def test_stock_etf_scorecard_inputs_bundle_keeps_cross_contract_and_side_effect_gates() -> None:

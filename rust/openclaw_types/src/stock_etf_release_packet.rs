@@ -34,23 +34,12 @@ impl StockEtfReleaseManifestHashV1 {
     }
 }
 
-#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, Default)]
 pub struct StockEtfPgMigrationEvidenceV1 {
     pub migrations_declared: bool,
     pub migration_manifest_hash: String,
     pub pg_dry_run_log_hash: String,
     pub pg_double_apply_log_hash: String,
-}
-
-impl Default for StockEtfPgMigrationEvidenceV1 {
-    fn default() -> Self {
-        Self {
-            migrations_declared: false,
-            migration_manifest_hash: String::new(),
-            pg_dry_run_log_hash: String::new(),
-            pg_double_apply_log_hash: String::new(),
-        }
-    }
 }
 
 impl StockEtfPgMigrationEvidenceV1 {
@@ -85,7 +74,7 @@ impl StockEtfPgMigrationEvidenceV1 {
     }
 }
 
-#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, Default)]
 pub struct StockEtfKillDisableCleanupProofV1 {
     pub stock_etf_lane_enabled_false: bool,
     pub ibkr_readonly_enabled_false: bool,
@@ -97,23 +86,6 @@ pub struct StockEtfKillDisableCleanupProofV1 {
     pub evidence_archive_forward_only: bool,
     pub destructive_db_cleanup_requested: bool,
     pub proof_hash: String,
-}
-
-impl Default for StockEtfKillDisableCleanupProofV1 {
-    fn default() -> Self {
-        Self {
-            stock_etf_lane_enabled_false: false,
-            ibkr_readonly_enabled_false: false,
-            ibkr_paper_enabled_false: false,
-            stock_etf_shadow_only_true: false,
-            collector_stopped: false,
-            gui_stock_views_disabled_or_hidden: false,
-            live_secret_absence_proven: false,
-            evidence_archive_forward_only: false,
-            destructive_db_cleanup_requested: false,
-            proof_hash: String::new(),
-        }
-    }
 }
 
 impl StockEtfKillDisableCleanupProofV1 {

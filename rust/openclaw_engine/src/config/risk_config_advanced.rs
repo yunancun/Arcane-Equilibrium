@@ -16,7 +16,6 @@
 //!   `risk_config.rs` 以 `#[path]` 加 `pub use advanced::*` 重新導出以保持
 //!   公共 API 不變。
 
-use super::default_true;
 use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
 
@@ -362,7 +361,9 @@ pub struct RuntimeKnobs {
     pub boot_cooldown_ms: u64,
     #[serde(default = "default_signals_heartbeat_ms")]
     pub signals_heartbeat_ms: u64,
-    #[serde(default = "default_true")]
+    // Missing configuration must retain the constructor's hard-block protection.
+    // Shadow observation requires an explicit operator-configured true.
+    #[serde(default)]
     pub h0_shadow_mode: bool,
     // AMD-2026-05-15-02 §3 Phase 1b 收盤掛 maker 的 runtime 啟動層；cold-default
     // false 與 AMD §3 「Rust struct cold-boot default = false」對齊。TOML 缺欄位
@@ -386,7 +387,7 @@ impl Default for RuntimeKnobs {
         Self {
             boot_cooldown_ms: default_boot_cooldown_ms(),
             signals_heartbeat_ms: default_signals_heartbeat_ms(),
-            h0_shadow_mode: default_true(),
+            h0_shadow_mode: false,
             // AMD-2026-05-15-02 §3 cold-boot default = false（fail-safe），
             // 與 tick_pipeline::pipeline_ctor.rs ctor 預設值對齊。
             use_maker_close: false,

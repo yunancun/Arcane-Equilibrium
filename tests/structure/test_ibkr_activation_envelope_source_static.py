@@ -1,6 +1,8 @@
 import re
 from pathlib import Path
 
+from rust_default_contract import assert_contract_token
+
 
 ROOT = Path(__file__).resolve().parents[2]
 # 直接引用的來源檔字面 rel 路徑（同時滿足 rust-source-coverage 守衛的「測試源文字
@@ -174,13 +176,13 @@ def test_ibkr_activation_envelope_source_stays_below_governance_cap() -> None:
 def test_ibkr_activation_envelope_keeps_contract_id_and_window_cap() -> None:
     source = _source()
     for token in REQUIRED_CONTRACT_TOKENS:
-        assert token in source, f"missing contract token {token!r}"
+        assert_contract_token(source, token)
 
 
 def test_ibkr_activation_envelope_keeps_types_and_pure_functions() -> None:
     source = _source()
     for token in REQUIRED_TYPE_TOKENS:
-        assert token in source, f"missing type token {token!r}"
+        assert_contract_token(source, token)
 
 
 def test_ibkr_activation_envelope_keeps_closed_blocker_taxonomy() -> None:
@@ -192,7 +194,7 @@ def test_ibkr_activation_envelope_keeps_closed_blocker_taxonomy() -> None:
 def test_ibkr_activation_envelope_keeps_fail_closed_semantics() -> None:
     source = _source()
     for token in REQUIRED_SEMANTIC_TOKENS:
-        assert token in source, f"missing semantic token {token!r}"
+        assert_contract_token(source, token)
 
 
 def test_ibkr_activation_envelope_has_no_runtime_secret_socket_or_clock_tokens() -> None:
@@ -212,7 +214,7 @@ def test_ibkr_activation_envelope_check_stays_below_governance_cap() -> None:
 def test_ibkr_activation_envelope_check_keeps_verdict_and_ledger_surface() -> None:
     source = _check_source()
     for token in REQUIRED_CHECK_TOKENS:
-        assert token in source, f"missing check token {token!r}"
+        assert_contract_token(source, token)
 
 
 def test_ibkr_activation_envelope_check_denies_before_consuming_nonce() -> None:

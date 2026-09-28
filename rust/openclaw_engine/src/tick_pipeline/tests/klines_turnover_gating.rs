@@ -51,9 +51,9 @@ fn test_trade_event_contributes_volume_and_turnover() {
     let mut p = TickPipeline::new(&["BTCUSDT"]);
 
     // 第一分鐘：單筆 Trade，price=50_000, qty=0.5 → turnover 應為 25_000.0。
-    p.on_tick(&trade_event("BTCUSDT", 50_000.0, 0.5, BASE_TS + 1_000));
+    p.on_replay_tick(&trade_event("BTCUSDT", 50_000.0, 0.5, BASE_TS + 1_000));
     // 下一分鐘的 Trade 觸發前一根 1m bar 收盤。
-    p.on_tick(&trade_event("BTCUSDT", 50_100.0, 0.1, BASE_TS + 61_000));
+    p.on_replay_tick(&trade_event("BTCUSDT", 50_100.0, 0.1, BASE_TS + 61_000));
 
     let bar = last_closed_bar(&p, "BTCUSDT", "1m").expect("expected one closed 1m bar");
     assert!(bar.is_closed, "bar should be closed");
@@ -81,10 +81,25 @@ fn test_ticker_event_does_not_contribute_volume_or_turnover() {
     let mut p = TickPipeline::new(&["BTCUSDT"]);
 
     // 第一分鐘：兩筆 Ticker，volume_24h=1_000_000（24h 累計量，絕不能進 per-bar）。
-    p.on_tick(&ticker_event("BTCUSDT", 50_000.0, 1_000_000.0, BASE_TS + 1_000));
-    p.on_tick(&ticker_event("BTCUSDT", 50_200.0, 1_000_000.0, BASE_TS + 30_000));
+    p.on_replay_tick(&ticker_event(
+        "BTCUSDT",
+        50_000.0,
+        1_000_000.0,
+        BASE_TS + 1_000,
+    ));
+    p.on_replay_tick(&ticker_event(
+        "BTCUSDT",
+        50_200.0,
+        1_000_000.0,
+        BASE_TS + 30_000,
+    ));
     // 下一分鐘 Ticker 觸發前一根 1m bar 收盤。
-    p.on_tick(&ticker_event("BTCUSDT", 50_100.0, 1_000_000.0, BASE_TS + 61_000));
+    p.on_replay_tick(&ticker_event(
+        "BTCUSDT",
+        50_100.0,
+        1_000_000.0,
+        BASE_TS + 61_000,
+    ));
 
     let bar = last_closed_bar(&p, "BTCUSDT", "1m").expect("expected one closed 1m bar");
     assert!(bar.is_closed);
@@ -100,8 +115,14 @@ fn test_ticker_event_does_not_contribute_volume_or_turnover() {
         bar.turnover
     );
     // 但價仍驅動 OHLC：open=首筆、high=50_200、close=末筆同分鐘價(50_200)
-    assert!((bar.open - 50_000.0).abs() < 1e-9, "OHLC open should still track price");
-    assert!((bar.high - 50_200.0).abs() < 1e-9, "OHLC high should still track price");
+    assert!(
+        (bar.open - 50_000.0).abs() < 1e-9,
+        "OHLC open should still track price"
+    );
+    assert!(
+        (bar.high - 50_200.0).abs() < 1e-9,
+        "OHLC high should still track price"
+    );
 }
 
 /// 混合：同一分鐘內 Trade + Ticker → 只有 Trade 部分計入 volume/turnover，
@@ -112,11 +133,11 @@ fn test_mixed_events_only_trades_accumulate() {
 
     // 第一分鐘：Trade(0.2 @ 100) + Ticker(24h=999_999) + Trade(0.3 @ 110)。
     // 預期 volume = 0.2 + 0.3 = 0.5；turnover = 100*0.2 + 110*0.3 = 20 + 33 = 53。
-    p.on_tick(&trade_event("BTCUSDT", 100.0, 0.2, BASE_TS + 1_000));
-    p.on_tick(&ticker_event("BTCUSDT", 105.0, 999_999.0, BASE_TS + 2_000));
-    p.on_tick(&trade_event("BTCUSDT", 110.0, 0.3, BASE_TS + 3_000));
+    p.on_replay_tick(&trade_event("BTCUSDT", 100.0, 0.2, BASE_TS + 1_000));
+    p.on_replay_tick(&ticker_event("BTCUSDT", 105.0, 999_999.0, BASE_TS + 2_000));
+    p.on_replay_tick(&trade_event("BTCUSDT", 110.0, 0.3, BASE_TS + 3_000));
     // 下一分鐘 tick 觸發收盤。
-    p.on_tick(&trade_event("BTCUSDT", 108.0, 0.1, BASE_TS + 61_000));
+    p.on_replay_tick(&trade_event("BTCUSDT", 108.0, 0.1, BASE_TS + 61_000));
 
     let bar = last_closed_bar(&p, "BTCUSDT", "1m").expect("expected one closed 1m bar");
     assert!(bar.is_closed);
@@ -143,14 +164,25 @@ fn test_untyped_event_does_not_contribute() {
 
     let mut e1 = super::make_event("BTCUSDT", 200.0, BASE_TS + 1_000);
     e1.volume_24h = 500_000.0; // 即便帶量也不該進 per-bar
-    assert!(e1.event_kind.is_none(), "make_event should produce untyped event");
-    p.on_tick(&e1);
+    assert!(
+        e1.event_kind.is_none(),
+        "make_event should produce untyped event"
+    );
+    p.on_replay_tick(&e1);
 
     let mut e2 = super::make_event("BTCUSDT", 201.0, BASE_TS + 61_000);
     e2.volume_24h = 500_000.0;
-    p.on_tick(&e2);
+    p.on_replay_tick(&e2);
 
     let bar = last_closed_bar(&p, "BTCUSDT", "1m").expect("expected one closed 1m bar");
-    assert!(bar.volume.abs() < 1e-12, "untyped event must NOT contribute volume; got {}", bar.volume);
-    assert!(bar.turnover.abs() < 1e-12, "untyped event must NOT contribute turnover; got {}", bar.turnover);
+    assert!(
+        bar.volume.abs() < 1e-12,
+        "untyped event must NOT contribute volume; got {}",
+        bar.volume
+    );
+    assert!(
+        bar.turnover.abs() < 1e-12,
+        "untyped event must NOT contribute turnover; got {}",
+        bar.turnover
+    );
 }

@@ -179,13 +179,18 @@ def _remap_category_to_rust(flat: dict[str, Any]) -> dict[str, Any]:
 class RiskViewClient:
     """Thin IPC view of the Rust-authoritative RiskConfig + runtime state."""
 
-    def __init__(self, ipc_client: "EngineIPCClient | None") -> None:
+    def __init__(self, ipc_client: "EngineIPCClient | None", *, engine: str = "paper") -> None:
+        if engine not in ("paper", "demo", "live"):
+            raise ValueError("invalid risk engine")
+        self._engine = engine
         self._ipc = ipc_client
         # Cached full config from last successful get_risk_config call.
         # Start empty — any read before first refresh returns {} and logs WARN.
         # 快取最近一次 get_risk_config 成功的完整 config；refresh 前讀取回傳 {}。
         self._cached_config: dict[str, Any] = {}
         self._cached_version: int = 0
+        self.config_available = False
+        self.runtime_available = False
         # Cached runtime status (governor_tier / consecutive_losses_by_symbol / ...)
         # 快取最近一次 get_risk_runtime_status 的結果
         self._cached_runtime: dict[str, Any] = {}
@@ -197,25 +202,30 @@ class RiskViewClient:
 
     async def refresh_config(self) -> dict[str, Any]:
         """Pull authoritative RiskConfig snapshot from Rust into local cache."""
+        self.config_available = False
         if self._ipc is None:
             return self._cached_config
         try:
-            resp = await self._ipc.call("get_risk_config")
-            if isinstance(resp, dict):
-                self._cached_config = resp.get("config", {}) or {}
-                self._cached_version = int(resp.get("version", 0))
+            resp = await self._ipc.call("get_risk_config", params={"engine": self._engine})
+            if isinstance(resp, dict) and isinstance(resp.get("config"), dict):
+                version = int(resp["version"])
+                self._cached_config = resp["config"]
+                self._cached_version = version
+                self.config_available = True
         except Exception as e:
             logger.warning("refresh_config failed: %s", e)
         return self._cached_config
 
     async def refresh_runtime_status(self) -> dict[str, Any]:
         """Pull Rust-native risk runtime status into local cache."""
+        self.runtime_available = False
         if self._ipc is None:
             return self._cached_runtime
         try:
-            resp = await self._ipc.call("get_risk_runtime_status")
-            if isinstance(resp, dict):
+            resp = await self._ipc.call("get_risk_runtime_status", params={"engine": self._engine})
+            if isinstance(resp, dict) and resp:
                 self._cached_runtime = resp
+                self.runtime_available = True
         except Exception as e:
             logger.warning("refresh_runtime_status failed: %s", e)
         return self._cached_runtime
@@ -361,10 +371,17 @@ class RiskViewClient:
         if self._ipc is None:
             logger.warning("patch_risk_config skipped — no IPC client configured")
             raise RuntimeError("patch_risk_config: no IPC client configured")
+        if self._engine == "live":
+            raise RuntimeError("live risk writes require the authorized token-bound route")
+        # Observe this engine's actual version before writing: an empty client
+        # cache (version=0) is not evidence that a later positive version advanced.
+        await self.refresh_config()
+        if not self.config_available:
+            raise RuntimeError("patch_risk_config: authoritative pre-write read unavailable")
         prev_version = self._cached_version
         resp = await self._ipc.call(
             "patch_risk_config",
-            params={"patch": patch, "source": source},
+            params={"patch": patch, "source": source, "engine": self._engine},
         )
         # On success refresh our local cache so the next sync read sees new values
         # 成功後刷新本地快取，下一次 sync read 能看到新值
@@ -374,7 +391,7 @@ class RiskViewClient:
         # rather than letting the GUI show "Saved!" while displaying stale values.
         # 寫後驗證：patch 成功後 ConfigStore version 必須前進；否則 Rust 靜默丟棄了
         # patch，回報錯誤而非讓 GUI 顯示「已保存」但實際是舊值。
-        if self._cached_version <= prev_version:
+        if not self.config_available or self._cached_version <= prev_version:
             logger.error(
                 "patch_risk_config returned but version did not advance "
                 "(prev=%d cur=%d source=%s patch_keys=%s) — treating as silent failure",

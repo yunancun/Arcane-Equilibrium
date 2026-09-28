@@ -1,5 +1,7 @@
 from pathlib import Path
 
+from rust_default_contract import assert_contract_token, assert_derived_default_fields
+
 
 ROOT = Path(__file__).resolve().parents[2]
 PHASE3_PARENT = ROOT / "rust/openclaw_types/src/stock_etf_phase3_evidence.rs"
@@ -331,7 +333,7 @@ def test_stock_etf_phase3_evidence_market_data_child_keeps_contract_surface() ->
     child = _market_data()
 
     for token in MARKET_DATA_SURFACE_TOKENS | MARKET_DATA_FIELDS | FROZEN_INPUT_FIELDS:
-        assert token in child
+        assert_contract_token(child, token)
     assert "StockEtfAdjustmentMarker::Unknown" in child
     assert "StockEtfAdjustmentMarker::Adjusted" in child
     assert "StockEtfPhase3Verdict::new(blockers)" in child
@@ -693,10 +695,6 @@ def test_stock_etf_frozen_inputs_fixture_excludes_missing_readiness_crosswire() 
         "pub fn validate(&self)",
         1,
     )[0]
-    default_impl = child.split("impl Default for StockEtfFrozenEvidenceInputsV1", 1)[1].split(
-        "impl StockEtfFrozenEvidenceInputsV1",
-        1,
-    )[0]
 
     for forbidden in (
         'universe_hash: String::new()',
@@ -711,18 +709,18 @@ def test_stock_etf_frozen_inputs_fixture_excludes_missing_readiness_crosswire() 
     ):
         assert forbidden not in fixture
 
-    for fail_closed in (
-        'universe_hash: String::new()',
-        'benchmark_hash: String::new()',
-        'cost_model_hash: String::new()',
-        'strategy_hypothesis_hash: String::new()',
-        'reference_data_sources_contract_hash: String::new()',
-        "corporate_action_fx_fee_asof_ms: 0",
-        'paper_shadow_divergence_threshold_hash: String::new()',
-        "gui_evidence_view_available: false",
-        "daily_scorecard_regeneration_passed: false",
-    ):
-        assert fail_closed in default_impl
+    # Empty strings, zero timestamp and false readiness flags remain fail-closed.
+    assert_derived_default_fields(child, "StockEtfFrozenEvidenceInputsV1", {
+        "universe_hash": "String",
+        "benchmark_hash": "String",
+        "cost_model_hash": "String",
+        "strategy_hypothesis_hash": "String",
+        "reference_data_sources_contract_hash": "String",
+        "corporate_action_fx_fee_asof_ms": "u64",
+        "paper_shadow_divergence_threshold_hash": "String",
+        "gui_evidence_view_available": "bool",
+        "daily_scorecard_regeneration_passed": "bool",
+    })
 
 
 def test_stock_etf_phase3_sources_keep_default_exact_blocker_order() -> None:

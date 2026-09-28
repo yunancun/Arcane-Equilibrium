@@ -3,10 +3,10 @@ LightGBM Scorer Trainer — train signal quality scorer with CPCV + embargo.
 LightGBM 評分器訓練器 — 使用 CPCV + embargo 訓練信號質量評分器。
 
 MODULE_NOTE (EN): Trains a LightGBM regression model to predict ATR-normalized PnL.
-  Uses Combinatorial Purged Cross-Validation (CPCV) with per-strategy embargo periods.
-  Outputs: model.pkl + metrics.json. Calibration done separately.
+  Uses grouped purged folds with per-strategy embargo periods and a sealed tail holdout.
+  Outputs: scorer_lgb.txt and a TrainingResult. Calibration done separately.
 MODULE_NOTE (中): 訓練 LightGBM 回歸模型預測 ATR 歸一化 PnL。
-  使用組合清洗交叉驗證 + 每策略 embargo 期。
+  使用按時間群組清洗的交叉驗證與每策略 embargo，尾端測試集保持封存。
 """
 
 from __future__ import annotations
@@ -89,7 +89,7 @@ class TrainingResult:
     # 為什麼是持久欄位而非僅 log warning：下游消費者（_run_legacy_scorer_pipeline /
     # metrics.json 讀者 / 晉升器）必須有一個可據以「拒絕晉升」的 reference；
     # log warning 會消失、無法被 honor，正是 Item 5 要修的缺口。
-    status: str = "ok"
+    status: str = "reference_only"
 
 
 def _lgb_params(cfg: ScorerConfig) -> dict:
@@ -182,8 +182,8 @@ def train_scorer(
         labels: (n_samples,) ATR-normalized PnL
         feature_names: list of feature column names
         config: training configuration
-        timestamps: (n_samples,) epoch-ms timestamps. When provided enables CPCV
-            validation. Falls back to 80/20 split when None (legacy path).
+        timestamps: Required ordered time axis matching samples. Missing or
+            malformed timestamps fail closed; no unvalidated legacy fallback.
         strategy_type: trending/reversion/arb/grid — selects embargo period.
         dsn: PostgreSQL DSN threaded into validate_cpcv → _persist_cpcv_result
             (Item 6). None → env 解析。由 run_training_pipeline 以 config.dsn 傳入，
@@ -191,6 +191,21 @@ def train_scorer(
     """
     cfg = config or ScorerConfig()
     result = TrainingResult(n_samples=len(labels), n_features=len(feature_names))
+    result.metrics["ship_eligible"] = 0.0
+    from program_code.ml_training.cpcv_validator import validated_timestamps, unique_sample_indices
+    try:
+        if timestamps is None:
+            raise ValueError("timestamps are required for scorer validation")
+        timestamps = validated_timestamps(timestamps, len(labels))
+        if features.ndim != 2 or len(features) != len(labels) or features.shape[1] != len(feature_names):
+            raise ValueError("features, labels and feature names must have matching shapes")
+        unique_idx = unique_sample_indices(features, labels, timestamps)
+        features, labels, timestamps = features[unique_idx], labels[unique_idx], timestamps[unique_idx]
+        result.metrics["distinct_samples"] = float(len(labels))
+        result.metrics["timestamp_groups"] = float(len(np.unique(timestamps)))
+    except (TypeError, ValueError) as exc:
+        result.error = str(exc)
+        return result
 
     try:
         import lightgbm as lgb
@@ -199,105 +214,99 @@ def train_scorer(
         logger.error("lightgbm not available — install via: pip install lightgbm")
         return result
 
-    if len(labels) < cfg.min_child_samples * cfg.n_folds:
-        result.error = f"insufficient samples: {len(labels)} < {cfg.min_child_samples * cfg.n_folds}"
+    if len(np.unique(timestamps)) < cfg.min_child_samples * cfg.n_folds:
+        result.error = f"insufficient time groups: {len(np.unique(timestamps))} < {cfg.min_child_samples * cfg.n_folds}"
         logger.warning(result.error)
         return result
 
     try:
-        if timestamps is not None and len(timestamps) == len(labels):
-            # P1-4: CPCV-validated training path / CPCV 驗證訓練路徑
-            from program_code.ml_training.cpcv_validator import CPCVConfig, validate_cpcv
+        # P1-4: CPCV-validated training path / CPCV 驗證訓練路徑
+        from program_code.ml_training.cpcv_validator import CPCVConfig, validate_cpcv
 
-            def _lgb_fold_model(
-                X_tr: np.ndarray, y_tr: np.ndarray,
-                X_te: np.ndarray, y_te: np.ndarray,
-            ) -> dict:
-                train_data = lgb.Dataset(X_tr, label=y_tr, feature_name=feature_names)
-                valid_data = lgb.Dataset(X_te, label=y_te, reference=train_data)
-                fold_model = lgb.train(
-                    _lgb_params(cfg),
-                    train_data,
-                    num_boost_round=cfg.n_estimators,
-                    valid_sets=[valid_data],
-                    callbacks=[lgb.early_stopping(50, verbose=False)],
-                )
-                preds = fold_model.predict(X_te)
-                rmse = float(np.sqrt(np.mean((preds - y_te) ** 2)))
-                # Sharpe proxy from prediction-weighted returns
-                std = float(np.std(preds)) or 1.0
-                sharpe = float(np.mean(preds * y_te)) / std * np.sqrt(252)
-                return {"sharpe": sharpe, "rmse": rmse}
+        def _lgb_fold_model(
+            X_tr: np.ndarray, y_tr: np.ndarray,
+            X_te: np.ndarray, y_te: np.ndarray,
+        ) -> dict:
+            train_data = lgb.Dataset(X_tr, label=y_tr, feature_name=feature_names)
+            # Fixed, predeclared iterations: the scored fold must not select
+            # best_iteration. 評估標籤不得透過 early stopping 參與選模。
+            fold_model = lgb.train(
+                _lgb_params(cfg),
+                train_data,
+                num_boost_round=cfg.n_estimators,
+            )
+            preds = fold_model.predict(X_te)
+            rmse = float(np.sqrt(np.mean((preds - y_te) ** 2)))
+            # Sharpe proxy from prediction-weighted returns
+            std = float(np.std(preds)) or 1.0
+            sharpe = float(np.mean(preds * y_te)) / std * np.sqrt(252)
+            return {"sharpe": sharpe, "rmse": rmse}
 
-            cpcv_cfg = CPCVConfig(
-                n_folds=cfg.n_folds,
-                embargo_map={
-                    "trending": cfg.embargo_hours_trend,
-                    "reversion": cfg.embargo_hours_revert,
-                    "arb": cfg.embargo_hours_arb,
-                    "grid": cfg.embargo_hours_grid,
-                },
-                power_threshold=cfg.power_threshold,
+        cpcv_cfg = CPCVConfig(
+            n_folds=cfg.n_folds,
+            embargo_map={
+                "trending": cfg.embargo_hours_trend,
+                "reversion": cfg.embargo_hours_revert,
+                "arb": cfg.embargo_hours_arb,
+                "grid": cfg.embargo_hours_grid,
+            },
+            power_threshold=cfg.power_threshold,
+        )
+        # Item 5：對「最終 holdout」施加 purge + embargo，使 reported metrics.json
+        # 的 rmse/correlation 來自一個已清洗的分割。原註解宣稱「final fit leak-free
+        # since CV used purged folds」是誤導 —— CV 折疊確有清洗，但這裡的 80/20 最終
+        # 分割沒有，訓練尾段的前視標籤會滲入 holdout 頭部。
+        holdout_times = np.unique(timestamps)
+        split_idx = int(np.searchsorted(timestamps, holdout_times[int(len(holdout_times) * 0.8)]))
+        embargo_h = get_embargo_hours(cfg, strategy_type)
+        label_window_h = cpcv_cfg.label_window_hours
+        train_idx = _tail_holdout_train_indices(
+            timestamps, split_idx, embargo_h, label_window_h,
+        )
+        if len(train_idx) == 0:
+            # 為什麼 fail-closed：purge 後無任何訓練樣本，無法產出可信模型/holdout 指標。
+            result.error = (
+                f"purge+embargo removed all training rows "
+                f"(split_idx={split_idx}, embargo_h={embargo_h})"
             )
-            cpcv_result = validate_cpcv(
-                features, labels, timestamps, strategy_type, _lgb_fold_model, cpcv_cfg,
-                dsn=dsn,
-            )
-            # Item 5：對「最終 holdout」施加 purge + embargo，使 reported metrics.json
-            # 的 rmse/correlation 來自一個已清洗的分割。原註解宣稱「final fit leak-free
-            # since CV used purged folds」是誤導 —— CV 折疊確有清洗，但這裡的 80/20 最終
-            # 分割沒有，訓練尾段的前視標籤會滲入 holdout 頭部。
-            split_idx = int(len(labels) * 0.8)
-            embargo_h = get_embargo_hours(cfg, strategy_type)
-            label_window_h = cpcv_cfg.label_window_hours
-            train_idx = _tail_holdout_train_indices(
-                timestamps, split_idx, embargo_h, label_window_h,
-            )
-            if len(train_idx) == 0:
-                # 為什麼 fail-closed：purge 後無任何訓練樣本，無法產出可信模型/holdout 指標。
-                result.error = (
-                    f"purge+embargo removed all training rows "
-                    f"(split_idx={split_idx}, embargo_h={embargo_h})"
-                )
-                logger.warning(result.error)
-                return result
-            X_train, y_train = features[train_idx], labels[train_idx]
-            X_test, y_test = features[split_idx:], labels[split_idx:]
+            logger.warning(result.error)
+            return result
+        X_train, y_train = features[train_idx], labels[train_idx]
+        X_test, y_test = features[split_idx:], labels[split_idx:]
 
-            # 狀態封頂：CPCV 未通過、或 purge 後訓練樣本低於最小葉節點門檻 → reference_only。
-            # 這是 Item 5 的核心：讓 cpcv_result.passed=False 真正 CAP 住模型狀態。
-            result.status = _derive_model_status(
-                cpcv_result.passed, len(train_idx), cfg.min_child_samples,
-            )
-            if result.status != "ok":
-                logger.warning(
-                    "Scorer capped to %s (cpcv_passed=%s, power=%.3f, mean_sharpe=%.3f, "
-                    "n_train_after_purge=%d) — downstream must not promote/ship",
-                    result.status, cpcv_result.passed, cpcv_result.power_estimate,
-                    cpcv_result.mean_sharpe, len(train_idx),
-                )
-            result.metrics["cpcv_mean_sharpe"] = cpcv_result.mean_sharpe
-            result.metrics["cpcv_std_sharpe"] = cpcv_result.std_sharpe
-            result.metrics["cpcv_power"] = cpcv_result.power_estimate
-            result.metrics["cpcv_passed"] = 1.0 if cpcv_result.passed else 0.0
-            # 分割 provenance：holdout 清洗量 + 使用的 embargo 小時（寫入 metrics.json 供審計）。
-            result.metrics["holdout_purged_rows"] = float(split_idx - len(train_idx))
-            result.metrics["holdout_embargo_hours"] = float(embargo_h)
-        else:
-            # Legacy path: simple train/test split / 傳統路徑：簡單分割
-            split_idx = int(len(labels) * 0.8)
-            X_train, X_test = features[:split_idx], features[split_idx:]
-            y_train, y_test = labels[:split_idx], labels[split_idx:]
+        # The outer holdout is sealed before CV. CPCV may qualify the
+        # development partition only; no outer labels enter a fit or gate.
+        # 外層測試先封存，CPCV 與資格判定只使用已 purge 的開發樣本。
+        cpcv_result = validate_cpcv(
+            X_train, y_train, np.asarray(timestamps)[train_idx], strategy_type,
+            _lgb_fold_model, cpcv_cfg, dsn=dsn,
+        )
 
+        # 狀態封頂：CPCV 未通過、或 purge 後訓練樣本低於最小葉節點門檻 → reference_only。
+        # 這是 Item 5 的核心：讓 cpcv_result.passed=False 真正 CAP 住模型狀態。
+        result.status = _derive_model_status(
+            cpcv_result.passed, len(train_idx), cfg.min_child_samples,
+        )
+        if result.status != "ok":
+            logger.warning(
+                "Scorer capped to %s (cpcv_passed=%s, power=%.3f, mean_sharpe=%.3f, "
+                "n_train_after_purge=%d) — downstream must not promote/ship",
+                result.status, cpcv_result.passed, cpcv_result.power_estimate,
+                cpcv_result.mean_sharpe, len(train_idx),
+            )
+        result.metrics["cpcv_mean_sharpe"] = cpcv_result.mean_sharpe
+        result.metrics["cpcv_std_sharpe"] = cpcv_result.std_sharpe
+        result.metrics["cpcv_power"] = cpcv_result.power_estimate
+        result.metrics["cpcv_passed"] = 1.0 if cpcv_result.passed else 0.0
+        # 分割 provenance：holdout 清洗量 + 使用的 embargo 小時（寫入 metrics.json 供審計）。
+        result.metrics["holdout_purged_rows"] = float(split_idx - len(train_idx))
+        result.metrics["holdout_embargo_hours"] = float(embargo_h)
         train_data = lgb.Dataset(X_train, label=y_train, feature_name=feature_names)
-        valid_data = lgb.Dataset(X_test, label=y_test, reference=train_data)
 
         model = lgb.train(
             _lgb_params(cfg),
             train_data,
             num_boost_round=cfg.n_estimators,
-            valid_sets=[valid_data],
-            callbacks=[lgb.early_stopping(50, verbose=False)],
         )
 
         # Save model / 保存模型
@@ -319,7 +328,9 @@ def train_scorer(
         # 保留到 metrics.json，否則下游看不到「reference_only」的機器可據旗標
         # （原本 `result.metrics = {...}` 會把 cpcv_passed 等鍵整個蓋掉）。
         result.metrics.update(
-            {"rmse": rmse, "correlation": corr, "best_iteration": model.best_iteration}
+            {"rmse": rmse, "correlation": corr, "best_iteration": model.best_iteration,
+             "fixed_boost_rounds": float(cfg.n_estimators),
+             "outer_holdout_samples": float(len(y_test))}
         )
         # ship_eligible = 下游晉升器唯一需要 honor 的布林旗標（1.0=可晉升，0.0=僅供參考）。
         # status!="ok"（CPCV 未通過 / purge 後樣本不足）→ 0.0，確保封頂被下游 honor。

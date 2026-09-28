@@ -39,7 +39,7 @@ fn test_demo_pipeline_emits_feature_snapshot_when_channel_wired() {
     // 價格微幅波動避免指標全平退化。
     for i in 0..40u64 {
         let price = 50_000.0 + (i as f64) * 10.0;
-        p.on_tick(&trade_event("BTCUSDT", price, 0.5, BASE_TS + i * 60_000));
+        p.on_replay_tick(&trade_event("BTCUSDT", price, 0.5, BASE_TS + i * 60_000));
     }
 
     let mut snaps: Vec<FeatureSnapshot> = Vec::new();
@@ -69,7 +69,7 @@ fn test_demo_pipeline_without_channel_is_failsoft_noop() {
     let mut p = TickPipeline::with_kind(&["BTCUSDT"], 10_000.0, PipelineKind::Demo);
     for i in 0..40u64 {
         let price = 50_000.0 + (i as f64) * 10.0;
-        p.on_tick(&trade_event("BTCUSDT", price, 0.5, BASE_TS + i * 60_000));
+        p.on_replay_tick(&trade_event("BTCUSDT", price, 0.5, BASE_TS + i * 60_000));
     }
     // 無 channel 可斷言接收；走到這裡未 panic 即為 fail-soft 成立。
 }

@@ -311,11 +311,28 @@ pub(super) fn handle_update_risk_config(
     }
     // RRC-1-A3: H0 Gate shadow mode toggle / H0 門控影子模式切換
     if let Some(v) = h0_shadow_mode {
-        pipeline.h0_gate.set_shadow_mode(v);
-        info!(
-            shadow_mode = v,
-            "H0 gate shadow mode updated / H0 門控影子模式已更新"
-        );
+        // Persist the legacy command into the same validated store used by
+        // startup/hot reload; otherwise an unrelated version bump reverts it.
+        let applied = match pipeline.risk_store() {
+            Some(store) => store
+                .apply_patch(
+                    crate::config::PatchSource::Operator,
+                    |cfg| cfg.runtime.h0_shadow_mode = v,
+                    crate::config::RiskConfig::validate,
+                )
+                .map(|_| ()),
+            None => Ok(()), // Preserve the explicit in-process/unwired setter.
+        };
+        match applied {
+            Ok(()) => {
+                pipeline.h0_gate.set_shadow_mode(v);
+                info!(
+                    shadow_mode = v,
+                    "H0 gate shadow mode updated / H0 門控影子模式已更新"
+                );
+            }
+            Err(error) => apply_errors.push(format!("H0 shadow mode patch rejected: {error}")),
+        }
     }
     // PNL-7: agent-tunable dynamic-stop knobs (validated in patch fn)
     // PNL-7：Agent 可調的動態止損參數

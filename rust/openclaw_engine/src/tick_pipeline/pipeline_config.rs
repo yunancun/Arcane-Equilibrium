@@ -95,18 +95,19 @@ impl TickPipeline {
         self.intent_processor.update_guardian_config(gc);
 
         // 3. ARCH-RC1 1C-2-F E-Merge-2: hot-reload H0Gate risk-level fields
-        //    from RiskConfig.limits (RMW preserves health + shadow_mode fields
-        //    that don't live in RiskConfig). Previously the H0GateConfig was
+        //    from RiskConfig.limits (RMW preserves health fields). Previously the H0GateConfig was
         //    only seeded at tick_pipeline construction from defaults and never
         //    updated — so an operator raising open_positions_max in RiskConfig
         //    would still hit the old cap at the H0 gate.
         //    ARCH-RC1 1C-2-F E-Merge-2：H0Gate 的風控層欄位從 RiskConfig.limits
-        //    熱重載（RMW 保留健康欄位與 shadow_mode）。
+        //    熱重載（RMW 保留健康欄位）；shadow mode 由 runtime 設定同步。
         let mut h0 = self.h0_gate.config().clone();
         h0.max_open_positions = snap.limits.open_positions_max;
         h0.max_total_exposure_pct = snap.limits.total_exposure_max_pct;
         h0.allowed_categories = snap.limits.allowed_categories.clone();
         self.h0_gate.update_config(h0);
+        // Use the audited setter so startup/reload transitions remain observable.
+        self.h0_gate.set_shadow_mode(snap.runtime.h0_shadow_mode);
 
         // AMD-2026-05-15-02 §3 Phase 1b runtime 啟動層：把 TOML
         // `runtime.use_maker_close` 透過 `set_use_maker_close_runtime` 路由

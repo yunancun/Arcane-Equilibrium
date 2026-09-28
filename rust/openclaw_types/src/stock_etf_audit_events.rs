@@ -14,9 +14,10 @@ use crate::stock_etf_lane::{
 
 pub const STOCK_ETF_ASSET_LANE_EVENTS_CONTRACT_ID: &str = "audit.asset_lane_events_v1";
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize, Default)]
 #[serde(rename_all = "snake_case")]
 pub enum StockEtfAssetLaneEventKind {
+    #[default]
     Unknown,
     GateCheck,
     ReadinessStatus,
@@ -28,12 +29,6 @@ pub enum StockEtfAssetLaneEventKind {
     ReleasePacketRef,
     TinyLiveEligibilityRef,
     KillDisableCleanupRef,
-}
-
-impl Default for StockEtfAssetLaneEventKind {
-    fn default() -> Self {
-        Self::Unknown
-    }
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]

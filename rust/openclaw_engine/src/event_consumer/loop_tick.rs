@@ -79,7 +79,7 @@ pub(super) fn handle_tick_event(
         wall_ms.store(now_ms, std::sync::atomic::Ordering::Relaxed);
     }
     let prev_fills = pipeline.stats.total_fills;
-    let canary_record = pipeline.on_tick(&ev);
+    let canary_record = pipeline.on_tick_at(&ev, openclaw_core::now_ms());
     super::sm_halt_incident::observe_and_dispatch(pipeline, &mut state.sm_halt_incident, "tick");
 
     // ENGINE-HEAL-FIX-PHASE1 R1: Hand the record to the dedicated
@@ -228,8 +228,7 @@ pub(super) fn handle_tick_event(
                         // 平空倉=BUY→is_long=true），但 reprice 計價要的是**真實持倉方向**。
                         // 經 *_for_pending 單一收口做 `!po.is_long` 轉換（sweep 與 e2e
                         // 方向測試共用同一條，使「把方向寫反」的 mutation 必被測試抓到）。
-                        let new_inside_limit =
-                            pipeline.compute_close_reprice_limit_for_pending(po);
+                        let new_inside_limit = pipeline.compute_close_reprice_limit_for_pending(po);
                         if let Some(new_limit) = pending_sweep::close_maker_reprice_decision(
                             po,
                             now_ms,
@@ -271,8 +270,12 @@ pub(super) fn handle_tick_event(
             }
             // DIRECTION FIX（2026-06-17 E2/E4 RETURN HIGH）：經 *_for_pending 單一收口
             // 做 po.is_long（訂單側）→ 真實持倉方向（`!po.is_long`）轉換，再派發。
-            let dispatched =
-                pipeline.dispatch_close_maker_reprice_for_pending(&po, *new_limit, *reprice_count, now_ms);
+            let dispatched = pipeline.dispatch_close_maker_reprice_for_pending(
+                &po,
+                *new_limit,
+                *reprice_count,
+                now_ms,
+            );
             if dispatched.is_some() {
                 // 重掛已派發 → 移除舊 tracker（新單已 Register）。
                 legacy_to_remove.push(link_id.clone());

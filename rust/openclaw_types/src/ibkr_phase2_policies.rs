@@ -34,7 +34,7 @@ impl<B> IbkrPolicyVerdict<B> {
     }
 }
 
-#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, Default)]
 pub struct IbkrRedactionPolicyV1 {
     pub contract_id: String,
     pub source_version: u32,
@@ -48,25 +48,6 @@ pub struct IbkrRedactionPolicyV1 {
     pub token_in_logs_allowed: bool,
     pub raw_payload_in_logs_allowed: bool,
     pub stack_trace_in_reports_allowed: bool,
-}
-
-impl Default for IbkrRedactionPolicyV1 {
-    fn default() -> Self {
-        Self {
-            contract_id: String::new(),
-            source_version: 0,
-            policy_present: false,
-            raw_payload_hash_required: false,
-            redacted_summary_hash_required: false,
-            account_id_in_logs_allowed: false,
-            secret_in_logs_allowed: false,
-            local_path_in_logs_allowed: false,
-            cookie_in_logs_allowed: false,
-            token_in_logs_allowed: false,
-            raw_payload_in_logs_allowed: false,
-            stack_trace_in_reports_allowed: false,
-        }
-    }
 }
 
 impl IbkrRedactionPolicyV1 {
@@ -149,19 +130,14 @@ pub enum IbkrRedactionPolicyBlocker {
     StackTraceReportLeakAllowed,
 }
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize, Default)]
 #[serde(rename_all = "snake_case")]
 pub enum IbkrRateLimitScope {
     GlobalAndPerAction,
     GlobalOnly,
     None,
+    #[default]
     Unknown,
-}
-
-impl Default for IbkrRateLimitScope {
-    fn default() -> Self {
-        Self::Unknown
-    }
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
@@ -272,7 +248,7 @@ pub enum IbkrRateLimitPolicyBlocker {
     PaperOrderWriteBudgetMissing,
 }
 
-#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, Default)]
 pub struct IbkrAuditEventPolicyV1 {
     pub contract_id: String,
     pub source_version: u32,
@@ -289,28 +265,6 @@ pub struct IbkrAuditEventPolicyV1 {
     pub redacted_summary_hash_required: bool,
     pub account_fingerprint_hash_only: bool,
     pub raw_payload_storage_allowed: bool,
-}
-
-impl Default for IbkrAuditEventPolicyV1 {
-    fn default() -> Self {
-        Self {
-            contract_id: String::new(),
-            source_version: 0,
-            policy_present: false,
-            append_only_required: false,
-            asset_lane_required: false,
-            broker_required: false,
-            environment_required: false,
-            operation_required: false,
-            allowed_required: false,
-            denial_reason_required: false,
-            source_artifact_hash_required: false,
-            raw_artifact_hash_required: false,
-            redacted_summary_hash_required: false,
-            account_fingerprint_hash_only: false,
-            raw_payload_storage_allowed: false,
-        }
-    }
 }
 
 impl IbkrAuditEventPolicyV1 {
@@ -408,7 +362,7 @@ pub enum IbkrAuditEventPolicyBlocker {
     RawPayloadStorageAllowed,
 }
 
-#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, Default)]
 pub struct IbkrPaperAttestationPolicyV1 {
     pub contract_id: String,
     pub source_version: u32,
@@ -428,31 +382,6 @@ pub struct IbkrPaperAttestationPolicyV1 {
     pub live_account_fingerprint_denied: bool,
     pub margin_short_options_cfd_denied: bool,
     pub max_paper_notional_required: bool,
-}
-
-impl Default for IbkrPaperAttestationPolicyV1 {
-    fn default() -> Self {
-        Self {
-            contract_id: String::new(),
-            source_version: 0,
-            policy_present: false,
-            external_surface_gate_required: false,
-            session_attestation_required: false,
-            rust_lane_scoped_ipc_required: false,
-            scoped_authorization_required: false,
-            decision_lease_required: false,
-            guardian_required: false,
-            risk_config_hash_required: false,
-            instrument_identity_hash_required: false,
-            idempotency_key_required: false,
-            lifecycle_event_log_required: false,
-            reconciliation_required_before_terminal: false,
-            paper_environment_only: false,
-            live_account_fingerprint_denied: false,
-            margin_short_options_cfd_denied: false,
-            max_paper_notional_required: false,
-        }
-    }
 }
 
 impl IbkrPaperAttestationPolicyV1 {
@@ -565,7 +494,7 @@ pub enum IbkrPaperAttestationPolicyBlocker {
     MaxPaperNotionalMissing,
 }
 
-#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, Default)]
 pub struct IbkrPythonWriteGuardPolicyV1 {
     pub contract_id: String,
     pub source_version: u32,
@@ -577,23 +506,6 @@ pub struct IbkrPythonWriteGuardPolicyV1 {
     pub python_live_secret_access_denied: bool,
     pub gui_cannot_override_authority: bool,
     pub bybit_paths_unmodified: bool,
-}
-
-impl Default for IbkrPythonWriteGuardPolicyV1 {
-    fn default() -> Self {
-        Self {
-            contract_id: String::new(),
-            source_version: 0,
-            policy_present: false,
-            python_broker_write_authority_denied: false,
-            python_can_read_display_import: false,
-            python_can_call_rust_lane_ipc: false,
-            python_ibkr_order_methods_denied: false,
-            python_live_secret_access_denied: false,
-            gui_cannot_override_authority: false,
-            bybit_paths_unmodified: false,
-        }
-    }
 }
 
 impl IbkrPythonWriteGuardPolicyV1 {
@@ -675,25 +587,13 @@ pub struct IbkrPhase2GatePrerequisiteFlags {
     pub python_no_write_guard_present: bool,
 }
 
-#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, Default)]
 pub struct IbkrPhase2PolicyBundleV1 {
     pub redaction: IbkrRedactionPolicyV1,
     pub rate_limit: IbkrRateLimitPolicyV1,
     pub audit_event: IbkrAuditEventPolicyV1,
     pub paper_attestation: IbkrPaperAttestationPolicyV1,
     pub python_write_guard: IbkrPythonWriteGuardPolicyV1,
-}
-
-impl Default for IbkrPhase2PolicyBundleV1 {
-    fn default() -> Self {
-        Self {
-            redaction: IbkrRedactionPolicyV1::default(),
-            rate_limit: IbkrRateLimitPolicyV1::default(),
-            audit_event: IbkrAuditEventPolicyV1::default(),
-            paper_attestation: IbkrPaperAttestationPolicyV1::default(),
-            python_write_guard: IbkrPythonWriteGuardPolicyV1::default(),
-        }
-    }
 }
 
 impl IbkrPhase2PolicyBundleV1 {

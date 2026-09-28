@@ -1,5 +1,7 @@
 from pathlib import Path
 
+from rust_default_contract import assert_contract_token
+
 
 ROOT = Path(__file__).resolve().parents[2]
 # 直接引用的來源檔字面 rel 路徑（同時滿足 rust-source-coverage 守衛的「測試源文字含該檔
@@ -115,7 +117,7 @@ def test_calendar_source_stays_below_governance_cap() -> None:
 def test_calendar_keeps_contract_and_types() -> None:
     source = _text(CALENDAR)
     for token in REQUIRED_CONTRACT_TOKENS | REQUIRED_TYPE_TOKENS:
-        assert token in source, f"missing token {token!r}"
+        assert_contract_token(source, token)
 
 
 def test_calendar_keeps_blocker_taxonomy() -> None:
@@ -127,7 +129,7 @@ def test_calendar_keeps_blocker_taxonomy() -> None:
 def test_calendar_keeps_fail_closed_semantics() -> None:
     source = _text(CALENDAR)
     for token in REQUIRED_SEMANTIC_TOKENS:
-        assert token in source, f"missing semantic token {token!r}"
+        assert_contract_token(source, token)
 
 
 def test_calendar_types_crate_has_no_hash_tz_or_io_dependency() -> None:
@@ -144,7 +146,7 @@ def test_calendar_types_crate_has_no_hash_tz_or_io_dependency() -> None:
 def test_parser_does_real_dst_and_hash_work() -> None:
     source = _text(PARSER)
     for token in REQUIRED_PARSER_TOKENS:
-        assert token in source, f"parser missing token {token!r}"
+        assert_contract_token(source, token)
 
 
 def test_parser_has_no_socket_order_or_io_surface() -> None:

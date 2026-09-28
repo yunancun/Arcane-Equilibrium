@@ -1,5 +1,7 @@
 from pathlib import Path
 
+from rust_default_contract import assert_contract_token, assert_derived_default_fields
+
 
 ROOT = Path(__file__).resolve().parents[2]
 RELEASE_PACKET = ROOT / "rust/openclaw_types/src/stock_etf_release_packet.rs"
@@ -193,7 +195,7 @@ def test_stock_etf_release_packet_source_keeps_contract_surface() -> None:
     source = _source()
 
     for token in REQUIRED_TYPE_TOKENS:
-        assert token in source
+        assert_contract_token(source, token)
     for blocker in REQUIRED_BLOCKERS:
         assert f"Blocker::{blocker}" in source or blocker in source
 
@@ -212,7 +214,7 @@ def test_stock_etf_release_packet_source_keeps_manifest_migration_and_kill_proof
 
     assert "pub fn fixture(label: &str, fill: char) -> Self" in source
     assert "!self.label.trim().is_empty() && is_sha256_hex(&self.sha256)" in source
-    assert "migrations_declared: false" in source
+    assert_derived_default_fields(source, "StockEtfPgMigrationEvidenceV1", {"migrations_declared": "bool"})
     assert "pub fn no_migration_fixture() -> Self" in source
     assert "pub fn migration_fixture() -> Self" in source
     assert "if self.migrations_declared" in source

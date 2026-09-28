@@ -33,12 +33,13 @@ impl TickPipeline {
         &mut self,
         event: &PriceEvent,
         tick_start: Instant,
+        now_ms: u64,
     ) -> ControlFlow<Option<CanaryRecord>, bool> {
         let sym = &event.symbol;
 
         // Step 0.5: H0 Gate pre-check (shadow mode: observe only) / H0 門控前置檢查
-        self.h0_gate.update_price_ts(sym, event.ts_ms);
-        let h0_result = self.h0_gate.check(sym, "linear", event.ts_ms);
+        // Timestamp was admitted before fast-track; use the independent clock.
+        let h0_result = self.h0_gate.check(sym, "linear", now_ms);
         let h0_allowed = h0_result.allowed;
         if !h0_result.allowed {
             // Hard block: stops only / 硬阻斷：僅處理止損

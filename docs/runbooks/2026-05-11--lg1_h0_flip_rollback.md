@@ -56,7 +56,7 @@ H0 是 §五 [架構總覽] 中 5-Agent runtime 的 **第一道防線**；任何
 **關鍵說明**：
 - **ctor default `false` 是 fail-closed safety net**：engine 啟動瞬間（首次 TOML 載入 / IPC 接管前）H0 直接 hard-block，不留 shadow 觀察窗。
 - **TOML / IPC 是 SoT**：first tick 後 ctor default 被 runtime 值覆蓋（透過 `patch_risk_config` IPC path → `H0Gate::set_shadow_mode` → audit log）。
-- ⚠️ **重要**：見 §10 reviewer note 中描述的 hot-reload gap — 目前 `apply_risk_snapshot` 不會自動把 `RiskConfig.runtime.h0_shadow_mode` 推進 `H0GateConfig.shadow_mode`。TOML 首次載入要等到 startup wire-in 或第一次 IPC patch 才推到 H0Gate；此 gap 由 LG-1 後續子任務修。
+- **2026-09-28 source 修正（候選，尚未部署）**：`set_risk_store` 首次載入立即同步 H0；之後 ConfigStore 升版在下一個有效價格 tick 同步。缺 runtime section／缺欄位均預設 hard-block；明確的 `true` 才啟用 shadow。舊 IPC setter 亦先寫回同一 validated store，詳 §10。目標 runtime 是否採用須另驗。
 
 ---
 
@@ -208,7 +208,7 @@ bash helper_scripts/restart_all.sh
 | **誤 block 全部 tick**（block rate ~100%） | health snapshot 卡死 / freshness 配置誤 / system_mode = read_only | Rollback（§5）+ 立查 `system_mode` + `health_snapshot_max_age_ms`；防範 = LG1-T1 unit test 預先 cover |
 | **shadow 一直開不掉**（IPC patch 不生效） | event_consumer handler 失效 / IPC handler 沒接 `h0_shadow_mode` field | 檢查 IPC server log + restart engine（如 IPC race）；確認 risk_routes.py:120 + risk.rs:313 wire-in |
 | **shadow_mode default vs TOML race**（啟動瞬窗）| 已由 LG1-T3 修：ctor default `false`（fail-closed）| **不會發生**；如真發生表示 LG1-T3 commit 被 revert，retest `test_lg1_t3_new_default_shadow_mode_is_false` |
-| **Hot-reload 漏跟 TOML**（§10 reviewer note 已知 gap） | apply_risk_snapshot 不推 `runtime.h0_shadow_mode` 進 H0Gate | 用 IPC patch 取代靜態 TOML reload；後續 LG-1 子任務修 ≤5 LOC |
+| **Hot-reload 與設定不一致** | 舊 binary 未含 §10 source 修正，或尚未收到有效 tick | 核對 binary source／ConfigStore version／H0 snapshot；不要把 source 測試當 runtime 生效證據 |
 | **Audit row 未寫入** | event_consumer audit writer 故障 / SEC-02 audit log 失效 | 立刻 `tail` engine.log + V014 risk_config_audit；確認 patch_risk_config 寫了 source='operator' + h0_shadow_mode 欄位 |
 
 每個 fail-mode 都必寫 `learning.governance_audit_log` row（如健康）+ dashboard 顯示。
@@ -265,28 +265,18 @@ bash helper_scripts/restart_all.sh
 
 ---
 
-## 10. E2 reviewer note — 已知 hot-reload gap（LG1-T3 IMPL 期間發現）
+## 10. H0 hot-reload gap：歷史原因與2026-09-28本地修正
 
-**發現脈絡**：PA tech plan §1.5 risk #1 mitigation 假設「TOML 載入路徑 always 覆蓋 ctor default」。E1 在 LG1-T3 IMPL 期間實測，**發現此假設不完全成立**：
+2026-05-11 的 E2 reviewer note 指出：`apply_risk_snapshot` 沒有複製 `runtime.h0_shadow_mode`，因此 TOML／ConfigStore 與 H0 派生狀態不一致；當時以 ignored regression 留下證據。此歷史 finding 由2026-09-28本地候選修正處理，**尚未合併／部署，也不是獨立 reviewer PASS**。
 
-- **Startup 路徑**：TOML → `RiskConfig` → `ConfigStore` → `set_risk_store` → `apply_risk_snapshot`（`pipeline_config.rs:67–174`）
-  - H0Gate RMW 區塊（行 105–109）**沒** 把 `snap.runtime.h0_shadow_mode` 推進 `h0.shadow_mode`
-  - 注釋（行 98）寫「shadow_mode fields don't live in RiskConfig」**已過時** —— `RiskConfig.runtime.h0_shadow_mode` 確實存在於 `risk_config_advanced.rs:366`
-- **Runtime 路徑**（IPC patch）：`patch_risk_config{h0_shadow_mode=...}` → `event_consumer/handlers/risk.rs:313` → `pipeline.h0_gate.set_shadow_mode(v)`（直接設）✅ 工作正常
+目前 source 契約：
 
-**結果**：startup 階段 ctor default 是真正的 SoT；TOML `h0_shadow_mode` 值要等到第一次 IPC patch 才能生效。LG1-T3 改 ctor default `false` 已治本（fail-closed safety net），但 TOML→H0Gate hot-reload 仍有 ≤5 LOC 漏失。
+1. `set_risk_store` 立即套用 startup snapshot；ConfigStore 升版後，在下一個有效價格 tick 同步。H0 用 `set_shadow_mode` 套用模式，以保留 transition audit log；原有健康／時效欄位不被重置。
+2. `RiskConfig::default()`、缺 runtime section、缺 `h0_shadow_mode` 欄位均為 `false`，保留 ctor hard-block。顯式設定 `true` 才進 shadow；未改 paper/demo/live 現有 TOML 或 live gate。
+3. Legacy `update_risk_config` 的 H0 修改先經 `ConfigStore.apply_patch`＋validate，成功才改 H0；失敗回錯誤且保留舊狀態。無 store 的本地 setter 保留相容行為。後續 unrelated config reload 不會回退已接受的 H0 選擇。
+4. 原 ignored case 已納入 ordinary regression：[`h0_ctor_default.rs`](../../rust/openclaw_engine/src/tick_pipeline/tests/h0_ctor_default.rs) 的 `bya_gap_h0_*` 覆蓋 startup、雙向切換、真 gate verdict、缺欄位與三引擎隔離；[`handlers_paper_cmd_tests.rs`](../../rust/openclaw_engine/src/event_consumer/tests/handlers_paper_cmd_tests.rs) 覆蓋 legacy IPC 與再熱更新。
 
-**證據**：[`tick_pipeline/tests/h0_ctor_default.rs::test_lg1_t3_known_gap_apply_risk_snapshot_does_not_wire_h0_shadow_mode`](../../rust/openclaw_engine/src/tick_pipeline/tests/h0_ctor_default.rs) 標 `#[ignore]` 留作可執行證據。修好後此 test 變 PASS，再移除 `#[ignore]`。
-
-**後續工作**（不在 T3 scope，留新子任務 / 後續 LG-1 wave）：
-1. `pipeline_config.rs::apply_risk_snapshot` H0Gate RMW 區塊加：
-   ```rust
-   h0.shadow_mode = snap.runtime.h0_shadow_mode;
-   ```
-2. 同次刪除行 98 過時注釋。
-3. 移除 sibling test 的 `#[ignore]` attribute。
-
-PM 派發提示：可與 LG-2 RiskConfig `[pricing]` section（T4）合併 wave，因兩者都動 risk.rs / pipeline_config.rs。
+版本化設定是 reload 的權威來源；直接改 `H0Gate` 只屬 in-process 操作，不另建立持久真值。Linux 本輪 offline，相關 runtime 驗證依 Operator 指示跳過。沒有從本地 fixture 推定配置已在目標機生效。
 
 ---
 

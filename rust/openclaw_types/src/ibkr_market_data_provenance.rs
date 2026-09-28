@@ -42,7 +42,7 @@ pub const IBKR_CALENDAR_HASH_UNBOUND_SENTINEL: &str = "calendar_unbound";
 
 /// market-data entitlement 三態（+ fail-closed 未知）。錯誤碼 FSM（354/10167/10197…）的
 /// 收斂終態:`None`=halt、`Delayed`=降級檔、`Entitled`=realtime。
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize, Default)]
 #[serde(rename_all = "snake_case")]
 pub enum IbkrMarketDataEntitlementStateV1 {
     /// realtime live 訂閱權限。
@@ -52,13 +52,8 @@ pub enum IbkrMarketDataEntitlementStateV1 {
     /// 無權限（354/10186/10190 halt;不重試,fail-closed）。
     None,
     /// 契約 default / 未定 的 fail-closed 分類（`validate()` 必拒）。
+    #[default]
     UnknownDenied,
-}
-
-impl Default for IbkrMarketDataEntitlementStateV1 {
-    fn default() -> Self {
-        Self::UnknownDenied
-    }
 }
 
 impl IbkrMarketDataEntitlementStateV1 {
@@ -75,19 +70,14 @@ impl IbkrMarketDataEntitlementStateV1 {
 
 /// price adjustment marker（L1 realtime/delayed tick 恆 `Raw`=未調整;split/div 調整歸歷史面,
 /// 本 lane 不承）。`UnknownDenied`=fail-closed 預設。
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize, Default)]
 #[serde(rename_all = "snake_case")]
 pub enum IbkrPriceAdjustmentV1 {
     /// 未調整原始 tick（L1 lane 唯一合法值）。
     Raw,
     /// 契約 default / 未定 的 fail-closed 分類（`validate()` 必拒——lane 不承調整序列)。
+    #[default]
     UnknownDenied,
-}
-
-impl Default for IbkrPriceAdjustmentV1 {
-    fn default() -> Self {
-        Self::UnknownDenied
-    }
 }
 
 impl IbkrPriceAdjustmentV1 {

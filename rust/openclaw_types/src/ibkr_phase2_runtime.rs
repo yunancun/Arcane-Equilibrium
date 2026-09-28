@@ -15,20 +15,15 @@ use crate::stock_etf_lane::BrokerEnvironment;
 pub const IBKR_SECRET_SLOT_CONTRACT_ID: &str = "ibkr_secret_slot_contract_v1";
 pub const IBKR_API_SESSION_TOPOLOGY_CONTRACT_ID: &str = "ibkr_api_session_topology_v1";
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize, Default)]
 #[serde(rename_all = "snake_case")]
 pub enum IbkrSecretSlotPosture {
     Missing,
     PresentHashed,
     LiveAbsentOrEmpty,
     LivePresentDenied,
+    #[default]
     Unknown,
-}
-
-impl Default for IbkrSecretSlotPosture {
-    fn default() -> Self {
-        Self::Unknown
-    }
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
@@ -165,19 +160,14 @@ pub enum IbkrSecretSlotContractBlocker {
     LiveSecretAbsentOrEmptyNotProven,
 }
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize, Default)]
 #[serde(rename_all = "snake_case")]
 pub enum IbkrGatewayProcessMode {
     PaperGateway,
     ReadOnlyGateway,
     LiveDenied,
+    #[default]
     Unknown,
-}
-
-impl Default for IbkrGatewayProcessMode {
-    fn default() -> Self {
-        Self::Unknown
-    }
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]

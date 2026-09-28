@@ -25,7 +25,13 @@ class FakeIPCClient:
         self.calls.append((method, params))
         if method in self.raise_on:
             raise RuntimeError(f"simulated failure for {method}")
-        return self.responses.get(method, {})
+        response = self.responses.get(method, {})
+        # A configured patch response describes the post-write version. Before
+        # that RPC, expose the previous version of this in-memory authority.
+        if method == "get_risk_config" and self.responses.get("patch_risk_config", {}).get("version", 0) > 0:
+            if not any(name == "patch_risk_config" for name, _ in self.calls):
+                return {**response, "version": response.get("version", 1) - 1}
+        return response
 
 
 @pytest.fixture
@@ -136,6 +142,7 @@ def test_update_global_config_calls_patch_with_operator(client, fake_ipc):
     assert patch_call[1] == {
         "patch": {"limits": {"leverage_max": 4.0}},
         "source": "operator",
+        "engine": "paper",
     }
     # post-write refresh
     assert "get_risk_config" in methods
@@ -183,12 +190,14 @@ def test_update_global_config_treats_p1_risk_as_gui_percent(
             }
         },
         "source": "operator",
+        "engine": "paper",
     }
 
 
 def test_update_category_config_wraps_patch(client, fake_ipc):
     """1C-3-C: category overrides also remap flat → Rust CategoryOverride field names."""
     fake_ipc.responses["get_risk_config"] = {"config": {}, "version": 1}
+    fake_ipc.responses["patch_risk_config"] = {"version": 1}
     _run(client.update_category_config("linear", {"max_leverage": 2.5}))
     patch_call = next(c for c in fake_ipc.calls if c[0] == "patch_risk_config")
     # max_leverage remaps to leverage_max under overrides.linear
@@ -199,6 +208,7 @@ def test_update_category_config_wraps_patch(client, fake_ipc):
 def test_agent_adjust_uses_agent_source(client, fake_ipc):
     """1C-3-C: agent fields remap to Rust agent section keys."""
     fake_ipc.responses["get_risk_config"] = {"config": {}, "version": 1}
+    fake_ipc.responses["patch_risk_config"] = {"version": 1}
     _run(client.agent_adjust({"position_size_multiplier": 0.5}))
     patch_call = next(c for c in fake_ipc.calls if c[0] == "patch_risk_config")
     # position_size_multiplier → agent.size_multiplier

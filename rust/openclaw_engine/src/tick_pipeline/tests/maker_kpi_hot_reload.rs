@@ -106,7 +106,7 @@ fn test_maker_kpi_hot_reload_picks_up_replace_on_next_tick() {
     // Drive a single tick — `sync_maker_kpi_config_if_changed` runs at the top
     // of on_tick and must mirror the new snapshot into both consumers.
     // 打一個 tick — sync 應將新快照同步至 pipeline + IntentProcessor。
-    pipeline.on_tick(&super::make_event("BTCUSDT", 50_000.0, 1_000));
+    pipeline.on_replay_tick(&super::make_event("BTCUSDT", 50_000.0, 1_000));
 
     assert!(
         (pipeline.maker_kpi_config.funding_drag_threshold - 0.0013).abs() < 1e-12,
@@ -146,7 +146,7 @@ fn test_maker_kpi_unwired_falls_back_to_default_every_tick() {
     // No `set_maker_kpi_store` — sync is a no-op. Drive a tick, then assert
     // the owned snapshot is still `MakerKpiConfig::default()`.
     // 未接 store：sync no-op，tick 之後仍為 default。
-    pipeline.on_tick(&super::make_event("BTCUSDT", 50_000.0, 1_000));
+    pipeline.on_replay_tick(&super::make_event("BTCUSDT", 50_000.0, 1_000));
     assert_eq!(
         pipeline.maker_kpi_config.funding_drag_threshold,
         MakerKpiConfig::default().funding_drag_threshold
@@ -183,7 +183,7 @@ fn test_maker_kpi_version_bump_only_applies_once_per_version() {
     store.replace(next, PatchSource::Operator).unwrap();
 
     // Tick 1 → pulls patch.
-    pipeline.on_tick(&super::make_event("BTCUSDT", 50_000.0, 1_000));
+    pipeline.on_replay_tick(&super::make_event("BTCUSDT", 50_000.0, 1_000));
     assert!((pipeline.maker_kpi_config.funding_drag_threshold - 0.0011).abs() < 1e-12);
 
     // Poison the owned snapshot with a sentinel value.
@@ -192,7 +192,7 @@ fn test_maker_kpi_version_bump_only_applies_once_per_version() {
 
     // Tick 2 — no replace since, so version matches → sync must be a no-op.
     // 無 replace，版本號未變 → sync 為 no-op，sentinel 保留。
-    pipeline.on_tick(&super::make_event("BTCUSDT", 50_100.0, 2_000));
+    pipeline.on_replay_tick(&super::make_event("BTCUSDT", 50_100.0, 2_000));
     assert!(
         (pipeline.maker_kpi_config.funding_drag_threshold - 0.0042).abs() < 1e-12,
         "sync must not re-apply when the store version is unchanged"
@@ -568,7 +568,7 @@ fn test_maker_kpi_replace_without_tick_leaves_snapshot_stale_until_next_tick() {
     // Next on_tick runs `sync_maker_kpi_config_if_changed` at top-of-tick and
     // picks up the new version.
     // 下一個 on_tick 執行 sync，拾取新版本。
-    pipeline.on_tick(&super::make_event("BTCUSDT", 50_000.0, 1_000));
+    pipeline.on_replay_tick(&super::make_event("BTCUSDT", 50_000.0, 1_000));
     assert!(
         (pipeline.maker_kpi_config.funding_drag_threshold - 0.0033).abs() < 1e-12,
         "on_tick after replace must mirror the new value"
@@ -653,7 +653,7 @@ fn test_maker_kpi_hot_reload_router_to_sweep_e2e() {
 
     // Tick #1: price == limit, guard armed → expect FundingDragSkip.
     // tick #1：price == limit + guard 啟用 → 期望 FundingDragSkip。
-    pipeline.on_tick(&super::make_event("BTCUSDT", limit_price, 1_000));
+    pipeline.on_replay_tick(&super::make_event("BTCUSDT", limit_price, 1_000));
     let skips_after_tick1 = pipeline
         .paper_state
         .maker_stats()
@@ -688,7 +688,7 @@ fn test_maker_kpi_hot_reload_router_to_sweep_e2e() {
     // must stay at skips_after_tick1 — guard did NOT fire.
     // tick #2：price 仍等於 limit，guard 關閉。分類 FillPartial + heads → Fill。
     // funding_drag_skips 不應再增，證明 sweep 讀的是 hot-reloaded snapshot。
-    pipeline.on_tick(&super::make_event("BTCUSDT", limit_price, 2_000));
+    pipeline.on_replay_tick(&super::make_event("BTCUSDT", limit_price, 2_000));
     let skips_after_tick2 = pipeline
         .paper_state
         .maker_stats()

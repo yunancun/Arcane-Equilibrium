@@ -1,5 +1,7 @@
 from pathlib import Path
 
+from rust_default_contract import assert_contract_token
+
 
 ROOT = Path(__file__).resolve().parents[2]
 # 直接引用的來源檔字面 rel 路徑（同時滿足 rust-source-coverage 守衛的「測試源文字
@@ -133,13 +135,13 @@ def test_ibkr_tws_session_state_source_stays_below_governance_cap() -> None:
 def test_ibkr_tws_session_state_keeps_surveyed_constants_and_pins() -> None:
     source = _source()
     for token in REQUIRED_CONSTANT_TOKENS:
-        assert token in source, f"missing constant token {token!r}"
+        assert_contract_token(source, token)
 
 
 def test_ibkr_tws_session_state_keeps_error_class_and_fsm_types() -> None:
     source = _source()
     for token in REQUIRED_TYPE_TOKENS:
-        assert token in source, f"missing type token {token!r}"
+        assert_contract_token(source, token)
 
 
 def test_ibkr_tws_session_state_keeps_error_class_variants() -> None:
@@ -157,7 +159,7 @@ def test_ibkr_tws_session_state_keeps_fsm_state_and_event_variants() -> None:
 def test_ibkr_tws_session_state_keeps_table_driven_and_fail_closed_semantics() -> None:
     source = _source()
     for token in REQUIRED_SEMANTIC_TOKENS:
-        assert token in source, f"missing semantic token {token!r}"
+        assert_contract_token(source, token)
 
 
 def test_ibkr_tws_session_state_has_no_runtime_secret_socket_or_clock_tokens() -> None:

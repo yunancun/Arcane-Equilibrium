@@ -7,18 +7,13 @@ use super::{
     StockEtfPhase3Blocker, StockEtfPhase3Verdict, STOCK_MARKET_DATA_PROVENANCE_CONTRACT_ID,
 };
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize, Default)]
 #[serde(rename_all = "snake_case")]
 pub enum StockEtfAdjustmentMarker {
     Adjusted,
     Unadjusted,
+    #[default]
     Unknown,
-}
-
-impl Default for StockEtfAdjustmentMarker {
-    fn default() -> Self {
-        Self::Unknown
-    }
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
@@ -173,7 +168,7 @@ impl StockMarketDataProvenanceV1 {
     }
 }
 
-#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, Default)]
 pub struct StockEtfFrozenEvidenceInputsV1 {
     pub universe_hash: String,
     pub benchmark_hash: String,
@@ -184,22 +179,6 @@ pub struct StockEtfFrozenEvidenceInputsV1 {
     pub paper_shadow_divergence_threshold_hash: String,
     pub gui_evidence_view_available: bool,
     pub daily_scorecard_regeneration_passed: bool,
-}
-
-impl Default for StockEtfFrozenEvidenceInputsV1 {
-    fn default() -> Self {
-        Self {
-            universe_hash: String::new(),
-            benchmark_hash: String::new(),
-            cost_model_hash: String::new(),
-            strategy_hypothesis_hash: String::new(),
-            reference_data_sources_contract_hash: String::new(),
-            corporate_action_fx_fee_asof_ms: 0,
-            paper_shadow_divergence_threshold_hash: String::new(),
-            gui_evidence_view_available: false,
-            daily_scorecard_regeneration_passed: false,
-        }
-    }
 }
 
 impl StockEtfFrozenEvidenceInputsV1 {

@@ -124,7 +124,7 @@ pub const PINNED_MIN_SERVER_VERSION: i32 = 100;
 
 /// TWS wire 錯誤三元組的分類族。W4 health IPC 直接消費;S2 FSM 依此決定轉移
 /// （transient→Backoff、session-fatal→Disconnected、entitlement=per-request 不進 FSM…)。
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize, Default)]
 #[serde(rename_all = "snake_case")]
 pub enum IbkrTwsErrorClassV1 {
     /// farm/connectivity 斷復類:進 Backoff 可重試（1100/1101/1102/2103/2105/2110)。
@@ -142,13 +142,8 @@ pub enum IbkrTwsErrorClassV1 {
     Info,
     /// 契約 default/未初始化,亦=現勘表外 code 的**原始**分類（`classify` 回此)。actionable
     /// 裁決請用 `conservative`(現勘表外 code<2100→SessionFatal、≥2100→Info,絕不回 Unknown)。
+    #[default]
     Unknown,
-}
-
-impl Default for IbkrTwsErrorClassV1 {
-    fn default() -> Self {
-        Self::Unknown
-    }
 }
 
 impl IbkrTwsErrorClassV1 {
@@ -200,10 +195,11 @@ impl IbkrTwsErrorClassV1 {
 // ===========================================================================
 
 /// TWS session FSM 狀態骨架（設計 §1.1;S1 unit-variant 骨架,payload 由 S2 補)。
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize, Default)]
 #[serde(rename_all = "snake_case")]
 pub enum IbkrTwsSessionStateV1 {
     /// 未連線（S2 補 halt_reason)。初始態。
+    #[default]
     Disconnected,
     /// transport 建立中。
     Connecting,
@@ -215,12 +211,6 @@ pub enum IbkrTwsSessionStateV1 {
     Degraded,
     /// 退避中（S2 補 attempt_n/next_delay)。
     Backoff,
-}
-
-impl Default for IbkrTwsSessionStateV1 {
-    fn default() -> Self {
-        Self::Disconnected
-    }
 }
 
 /// TWS session typed 事件骨架（設計 §1.2/§7;W4 IPC 消費面;S1 不接線)。
@@ -261,7 +251,10 @@ mod tests {
     #[test]
     fn classify_maps_every_surveyed_code() {
         // pacing。
-        assert_eq!(IbkrTwsErrorClassV1::classify(100), IbkrTwsErrorClassV1::Pacing);
+        assert_eq!(
+            IbkrTwsErrorClassV1::classify(100),
+            IbkrTwsErrorClassV1::Pacing
+        );
         // session-fatal 家族。
         for c in [326i64, 502, 503, 504, 1300] {
             assert_eq!(
@@ -352,10 +345,7 @@ mod tests {
 
     #[test]
     fn error_class_default_is_unknown() {
-        assert_eq!(
-            IbkrTwsErrorClassV1::default(),
-            IbkrTwsErrorClassV1::Unknown
-        );
+        assert_eq!(IbkrTwsErrorClassV1::default(), IbkrTwsErrorClassV1::Unknown);
     }
 
     #[test]

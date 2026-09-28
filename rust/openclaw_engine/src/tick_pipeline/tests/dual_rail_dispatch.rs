@@ -445,7 +445,7 @@ fn test_use_maker_close_hot_reload_within_one_tick() {
 
     // Phase 2：1 個 on_tick → sync_risk_config_if_changed → apply_risk_snapshot
     // → set_use_maker_close_runtime(true) → 欄位 flip true。
-    demo.on_tick(&super::make_event("BTCUSDT", 50_000.0, 1_000));
+    demo.on_replay_tick(&super::make_event("BTCUSDT", 50_000.0, 1_000));
 
     assert!(
         demo.use_maker_close(),
@@ -552,7 +552,10 @@ fn test_close_maker_reprice_direction_through_real_chain() {
     ));
     let req = rx.try_recv().expect("OrderDispatchRequest must be sent");
     // 真實鏈不變式：平多倉 close 派發為 SELL（is_long=false），掛 best_ask（passive）。
-    assert!(!req.is_long, "long-position close must dispatch as SELL (is_long=false)");
+    assert!(
+        !req.is_long,
+        "long-position close must dispatch as SELL (is_long=false)"
+    );
     assert_eq!(req.time_in_force, Some(TimeInForce::PostOnly));
     let initial_limit = req.limit_price.expect("close-maker limit price");
     assert!(
@@ -650,7 +653,10 @@ fn test_close_maker_reprice_direction_through_real_chain() {
         "strategy_close:grid_close_short",
     ));
     let req2 = rx2.try_recv().expect("OrderDispatchRequest must be sent");
-    assert!(req2.is_long, "short-position close must dispatch as BUY (is_long=true)");
+    assert!(
+        req2.is_long,
+        "short-position close must dispatch as BUY (is_long=true)"
+    );
     let initial_limit2 = req2.limit_price.expect("close-maker limit price");
     assert!(
         (initial_limit2 - 2_999.9).abs() < 1e-9,
@@ -755,14 +761,7 @@ fn test_stop_and_urgent_exits_always_route_taker_even_with_maker_close_enabled()
         // Tight, healthy book — a maker price WOULD be computable here, so the
         // only thing keeping this taker is the reason-based positive whitelist.
         let event = make_bbo_event("BTCUSDT", 50_000.0, 49_999.9, 50_000.1, 1_700_000_060_000);
-        assert!(pipeline.execute_position_close(
-            "BTCUSDT",
-            true,
-            0.1,
-            &event,
-            true,
-            tag,
-        ));
+        assert!(pipeline.execute_position_close("BTCUSDT", true, 0.1, &event, true, tag,));
 
         let req = rx.try_recv().expect("OrderDispatchRequest must be sent");
         assert_eq!(
@@ -934,7 +933,7 @@ fn test_ipc_close_symbol_dispatch_strategy_has_risk_close_prefix() {
 
     // Seed a latest price so the orphan-hint close path has a non-zero mark.
     // 注入最新價格，孤兒 hint 平倉路徑才有非零 mark price。
-    let _ = pipeline.on_tick(&super::make_event("BTCUSDT", 50_000.0, 1_700_000_000_000));
+    let _ = pipeline.on_replay_tick(&super::make_event("BTCUSDT", 50_000.0, 1_700_000_000_000));
 
     // paper_state has no position for BTCUSDT — rely on caller hints to
     // trigger the orphan-close dispatch branch (commands.rs line ~660).
@@ -1306,9 +1305,15 @@ fn test_exchange_close_success_enqueues_before_local_flatten() {
 fn test_converge_exchange_zero_close_removes_drift_position_and_breaks_loop() {
     let mut pipeline = TickPipeline::with_kind(&["TRXUSDT"], 10_000.0, PipelineKind::Demo);
     // 種一個本地殘倉（模擬 grid_close 後未被清除的漂移倉）。
-    pipeline
-        .paper_state
-        .apply_fill("TRXUSDT", true, 2907.0, 0.34204, 0.0, 1_000, "grid_close_short");
+    pipeline.paper_state.apply_fill(
+        "TRXUSDT",
+        true,
+        2907.0,
+        0.34204,
+        0.0,
+        1_000,
+        "grid_close_short",
+    );
     pipeline.paper_state.set_latest_price("TRXUSDT", 0.34);
     // 模擬已派發 reduce-only close（pending_close 標記，正是迴圈自洽佐證）。
     pipeline.pending_close_symbols.insert("TRXUSDT".to_string());
@@ -1358,9 +1363,15 @@ fn test_converge_exchange_zero_close_removes_drift_position_and_breaks_loop() {
 #[test]
 fn test_without_convergence_drift_position_and_loop_persist() {
     let mut pipeline = TickPipeline::with_kind(&["TRXUSDT"], 10_000.0, PipelineKind::Demo);
-    pipeline
-        .paper_state
-        .apply_fill("TRXUSDT", true, 2907.0, 0.34204, 0.0, 1_000, "grid_close_short");
+    pipeline.paper_state.apply_fill(
+        "TRXUSDT",
+        true,
+        2907.0,
+        0.34204,
+        0.0,
+        1_000,
+        "grid_close_short",
+    );
     pipeline.paper_state.set_latest_price("TRXUSDT", 0.34);
     pipeline.pending_close_symbols.insert("TRXUSDT".to_string());
 

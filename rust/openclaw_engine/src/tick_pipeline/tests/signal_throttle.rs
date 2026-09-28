@@ -22,7 +22,7 @@ fn test_position_snapshot_emitted_every_1000_ticks() {
     // Pump exactly 1000 ticks. total_ticks becomes 1000 -> snapshot.
     // 打 1000 tick，total_ticks 達到 1000 觸發快照。
     for i in 0..1000 {
-        pipeline.on_tick(&super::make_event("BTCUSDT", 50_000.0, (i + 1) * 60_000));
+        pipeline.on_replay_tick(&super::make_event("BTCUSDT", 50_000.0, (i + 1) * 60_000));
     }
     // Drain channel; expect at least one PositionSnapshot for BTCUSDT.
     // 抽取通道；至少應有一條 BTCUSDT 的 PositionSnapshot。
@@ -63,7 +63,7 @@ fn test_position_snapshot_noop_without_channel() {
         .paper_state
         .apply_fill("BTCUSDT", false, 0.2, 50_000.0, 0.0, 0, "test");
     for i in 0..1000 {
-        pipeline.on_tick(&super::make_event("BTCUSDT", 49_000.0, (i + 1) * 60_000));
+        pipeline.on_replay_tick(&super::make_event("BTCUSDT", 49_000.0, (i + 1) * 60_000));
     }
     assert_eq!(pipeline.stats.total_ticks, 1000);
 }

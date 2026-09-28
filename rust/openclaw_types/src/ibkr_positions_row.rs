@@ -23,20 +23,14 @@ use crate::stock_etf_lane::{AssetLane, Broker};
 pub const IBKR_POSITIONS_ROW_CONTRACT_ID: &str = "ibkr_positions_row_v1";
 
 /// secType 白名單枚舉（本 lane 只 STK/ETF 範疇;wire 上兩者皆 `"STK"`,見模組註解）。
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize, Default)]
 #[serde(rename_all = "snake_case")]
 pub enum IbkrSecTypeV1 {
     /// 股票/ETF（wire `"STK"`;IBKR 慣例 ETF 亦為 STK）。
     Stk,
     /// 契約 default / 白名單外 secType 的 fail-closed 分類（`validate()` 必拒）。
+    #[default]
     UnknownDenied,
-}
-
-impl Default for IbkrSecTypeV1 {
-    fn default() -> Self {
-        // fail-closed 預設＝未知拒。
-        Self::UnknownDenied
-    }
 }
 
 impl IbkrSecTypeV1 {

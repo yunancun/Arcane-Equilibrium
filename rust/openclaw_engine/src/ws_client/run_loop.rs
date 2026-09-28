@@ -90,6 +90,7 @@ impl WsClient {
 
             match connect_result {
                 Ok((ws_stream, _response)) => {
+                    self.orderbooks.clear(); // Never carry deltas across connections.
                     attempt = 0;
                     log_state(WsState::Connected, 0);
 
@@ -186,6 +187,7 @@ impl WsClient {
                                             // 對齊 counter 同步（per `feedback_no_dead_params`）。
                                             let before_len = self.subscriptions.len();
                                             self.subscriptions.retain(|t| !topics.contains(t));
+                                            self.orderbooks.retain(|t, _| !topics.contains(t));
                                             let removed = before_len.saturating_sub(self.subscriptions.len()) as u32;
                                             if removed > 0 {
                                                 if let Some(ref c) = self.subscriptions_counter {

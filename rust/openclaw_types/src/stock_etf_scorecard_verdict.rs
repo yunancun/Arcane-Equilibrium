@@ -12,21 +12,16 @@ use crate::stock_etf_lane::{AssetLane, Broker, BrokerEnvironment};
 
 pub const STOCK_ETF_SCORECARD_VERDICT_CONTRACT_ID: &str = "stock_etf_scorecard_verdict_v1";
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize, Default)]
 #[serde(rename_all = "snake_case")]
 pub enum StockEtfScorecardVerdictLabel {
     EngineeringReady,
     ResearchPromising,
     ProfitabilityFeasible,
+    #[default]
     InsufficientEvidence,
     ExecutionModelInvalid,
     Kill,
-}
-
-impl Default for StockEtfScorecardVerdictLabel {
-    fn default() -> Self {
-        Self::InsufficientEvidence
-    }
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]

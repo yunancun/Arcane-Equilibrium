@@ -57,7 +57,7 @@ impl StockEtfAuthorizationEnvelopeV1 {
     }
 }
 
-#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, Default)]
 pub struct FeatureFlagSecretAuthMatrixV1 {
     pub contract_id: String,
     pub source_version: u32,
@@ -68,22 +68,6 @@ pub struct FeatureFlagSecretAuthMatrixV1 {
     pub authorization_envelope: StockEtfAuthorizationEnvelopeV1,
     pub gui_lane_state_override_denied: bool,
     pub server_rust_matrix_authoritative: bool,
-}
-
-impl Default for FeatureFlagSecretAuthMatrixV1 {
-    fn default() -> Self {
-        Self {
-            contract_id: String::new(),
-            source_version: 0,
-            flags: StockEtfFeatureFlags::default(),
-            secret_slot_contract: IbkrSecretSlotContractV1::default(),
-            phase2_gate_artifact: IbkrPhase2GateArtifactV1::default(),
-            session_attestation: IbkrSessionAttestationV1::default(),
-            authorization_envelope: StockEtfAuthorizationEnvelopeV1::default(),
-            gui_lane_state_override_denied: false,
-            server_rust_matrix_authoritative: false,
-        }
-    }
 }
 
 impl FeatureFlagSecretAuthMatrixV1 {
