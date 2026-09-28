@@ -1548,3 +1548,107 @@ fn h1_unresolved_order_blocks_actual_pipeline_open_and_rolls_back_strategy() {
             .any(|r| r == "exchange_order_unresolved"));
     });
 }
+
+#[test]
+fn h1_unresolved_order_allows_opposite_side_reduction() {
+    with_soak_flag(None, || {
+        let dir = tempfile::TempDir::new().unwrap();
+        let mut h = soak_harness(crate::tick_pipeline::PipelineKind::Demo, &dir, None);
+        h.pipeline
+            .exchange_submission_guard
+            .track("other-unresolved");
+        soak_warm_then_tick(&mut h);
+        h.rejections.lock().unwrap().clear();
+        h.pipeline.paper_state.apply_fill(
+            "ETHUSDT",
+            false,
+            0.1,
+            3_000.0,
+            0.0,
+            SOAK_TEST_TS_MS,
+            SOAK_TEST_STRATEGY,
+        );
+        let _ = h.pipeline.on_replay_tick(&PriceEvent::new(
+            "ETHUSDT".into(),
+            3_000.0,
+            SOAK_TEST_TS_MS + 1,
+        ));
+        let req = h
+            .order_rx
+            .try_recv()
+            .expect("opposite-side Open must reach reduce-only dispatch");
+        assert!(req.is_close && req.is_long);
+        assert_eq!(req.strategy, SOAK_TEST_STRATEGY);
+        assert_eq!(req.stop_loss, None);
+        assert!(!h
+            .rejections
+            .lock()
+            .unwrap()
+            .iter()
+            .any(|r| r == "exchange_order_unresolved"));
+        assert_eq!(
+            h.pipeline
+                .paper_state
+                .positions_mirror()
+                .read()
+                .get("ETHUSDT"),
+            Some(&false)
+        );
+    });
+}
+
+#[test]
+fn h1_queued_open_blocks_next_intent_before_approved_side_effects() {
+    with_soak_flag(None, || {
+        let dir = tempfile::TempDir::new().unwrap();
+        let mut h = soak_harness(crate::tick_pipeline::PipelineKind::Demo, &dir, None);
+        soak_warm_then_tick(&mut h);
+        let req = h.order_rx.try_recv().expect("first open was queued");
+        // The asynchronous dispatcher has not run: admission must already be held.
+        assert!(h
+            .pipeline
+            .exchange_submission_guard
+            .contains(&req.order_link_id));
+        let intents = h.pipeline.stats.total_intents;
+        let seq = h.pipeline.exchange_seq;
+        let _ = drain_trading_msgs(&mut h.trading_rx);
+        let _ = h.pipeline.on_replay_tick(&PriceEvent::new(
+            "ETHUSDT".into(),
+            3_001.0,
+            SOAK_TEST_TS_MS + 60_000,
+        ));
+        assert!(h.order_rx.try_recv().is_err());
+        assert_eq!(h.pipeline.stats.total_intents, intents);
+        assert_eq!(h.pipeline.exchange_seq, seq);
+        assert!(h
+            .rejections
+            .lock()
+            .unwrap()
+            .iter()
+            .any(|r| r == "exchange_order_unresolved"));
+        assert!(!drain_trading_msgs(&mut h.trading_rx)
+            .iter()
+            .any(|m| matches!(m, crate::database::TradingMsg::Intent { .. })));
+    });
+}
+
+#[test]
+fn h1_failed_queue_send_releases_submission_admission() {
+    with_soak_flag(None, || {
+        let dir = tempfile::TempDir::new().unwrap();
+        let mut h = soak_harness(crate::tick_pipeline::PipelineKind::Demo, &dir, None);
+        h.order_rx.close();
+        soak_warm_then_tick(&mut h);
+        assert_eq!(
+            h.pipeline.exchange_seq, 1,
+            "approved open reached the closed queue"
+        );
+        assert!(!h.pipeline.exchange_submission_guard.blocks_entry());
+        assert!(!h
+            .pipeline
+            .paper_state
+            .positions_mirror()
+            .read()
+            .contains_key("ETHUSDT"));
+    });
+}

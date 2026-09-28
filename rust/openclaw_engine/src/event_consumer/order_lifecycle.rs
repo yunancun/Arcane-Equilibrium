@@ -1,25 +1,48 @@
 //! H1：本機送出進度與 venue 證據分流；不提供跨重啟恢復。
 
-use std::collections::HashSet;
+use std::collections::{HashMap, HashSet};
 use std::sync::Arc;
 
 /// dispatch 與 pipeline 共用的未結案集合；鎖內同時檢查及保留，避免排隊開倉穿透。
 /// 任何未結案單均禁止新增開倉；reduce-only 平倉仍可進入原有受控路徑。
 #[derive(Clone, Debug, Default)]
-pub(crate) struct SubmissionGuard(Arc<parking_lot::Mutex<HashSet<String>>>);
+pub(crate) struct SubmissionGuard(Arc<parking_lot::Mutex<HashMap<String, SubmissionPhase>>>);
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+enum SubmissionPhase {
+    Queued,
+    Claimed,
+}
 
 impl SubmissionGuard {
     pub(crate) fn reserve(&self, id: &str, is_close: bool) -> bool {
         let mut pending = self.0.lock();
-        if pending.contains(id) || (!is_close && !pending.is_empty()) {
+        // The producer reserved before persistence; exactly one dispatcher may
+        // claim that queued request. An already-dispatched ID remains a duplicate.
+        if pending.get(id) == Some(&SubmissionPhase::Queued) {
+            pending.insert(id.to_owned(), SubmissionPhase::Claimed);
+            return true;
+        }
+        if pending.contains_key(id) || (!is_close && !pending.is_empty()) {
             return false;
         }
-        pending.insert(id.to_owned());
+        pending.insert(id.to_owned(), SubmissionPhase::Claimed);
+        true
+    }
+
+    pub(crate) fn reserve_queued(&self, id: &str, is_close: bool) -> bool {
+        let mut pending = self.0.lock();
+        if pending.contains_key(id) || (!is_close && !pending.is_empty()) {
+            return false;
+        }
+        pending.insert(id.to_owned(), SubmissionPhase::Queued);
         true
     }
 
     pub(crate) fn track(&self, id: &str) {
-        self.0.lock().insert(id.to_owned());
+        self.0
+            .lock()
+            .insert(id.to_owned(), SubmissionPhase::Claimed);
     }
 
     pub(crate) fn resolve(&self, id: &str) {
@@ -35,7 +58,7 @@ impl SubmissionGuard {
     }
 
     pub(crate) fn contains(&self, id: &str) -> bool {
-        self.0.lock().contains(id)
+        self.0.lock().contains_key(id)
     }
 }
 
@@ -127,5 +150,33 @@ impl OrderProgress {
             && self
                 .venue_filled_qty
                 .is_some_and(|expected| filled + 1e-10 >= expected)
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::SubmissionGuard;
+
+    #[test]
+    fn h1_queued_admission_transfers_once_and_retains_reduce_only_access() {
+        let guard = SubmissionGuard::default();
+        assert!(guard.reserve_queued("entry", false));
+        assert!(!guard.reserve_queued("second-entry", false));
+        assert!(guard.reserve_queued("protection", true));
+        let dispatcher = guard.clone();
+        assert!(dispatcher.reserve("entry", false));
+        assert!(
+            !dispatcher.reserve("entry", false),
+            "duplicate cannot claim a second submission"
+        );
+        assert!(!dispatcher.reserve("unreserved-entry", false));
+        dispatcher.resolve("entry");
+        assert!(
+            guard.blocks_entry(),
+            "queued protection is still unresolved"
+        );
+        assert!(dispatcher.reserve("protection", true));
+        dispatcher.resolve("protection");
+        assert!(!guard.blocks_entry());
     }
 }

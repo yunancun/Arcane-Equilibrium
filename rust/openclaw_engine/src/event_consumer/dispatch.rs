@@ -285,13 +285,25 @@ pub(super) fn spawn_order_dispatch(
     let submission_guard = pipeline.exchange_submission_guard.clone();
     tokio::spawn(async move {
         while let Some(req) = shadow_rx.recv().await {
-            // 同 ID 的本機重送連 preflight failure 都不可終止原來的在途單。
-            if req.is_primary && submission_guard.contains(&req.order_link_id) {
-                warn!(order_link_id = %req.order_link_id, "duplicate local dispatch suppressed");
+            // Claim producer admission before preflight; duplicate dispatched IDs
+            // cannot terminate the original request even on a local failure.
+            if req.is_primary && !submission_guard.reserve(&req.order_link_id, req.is_close) {
+                // A duplicate must not terminate or release the original request.
+                if !submission_guard.contains(&req.order_link_id) {
+                    send_decision_lease_release(
+                        &pending_reg_tx,
+                        &req,
+                        LeaseOutcome::Failed,
+                        "exchange_order_unresolved",
+                    );
+                }
                 continue;
             }
             let is_qty_zero_full_close = req.is_close && req.qty == 0.0;
             if req.qty < 0.0 || (req.qty == 0.0 && !is_qty_zero_full_close) {
+                if req.is_primary {
+                    submission_guard.resolve(&req.order_link_id);
+                }
                 warn!(symbol = %req.symbol, "order dispatch skipped: qty=0");
                 send_close_maker_dispatch_failed(
                     &pending_reg_tx,
@@ -322,6 +334,9 @@ pub(super) fn spawn_order_dispatch(
                     if spec.min_notional > 0.0 && req.price > 0.0 {
                         let est_notional = req.qty * req.price;
                         if est_notional < spec.min_notional {
+                            if req.is_primary {
+                                submission_guard.resolve(&req.order_link_id);
+                            }
                             warn!(
                                 symbol = %req.symbol,
                                 qty = req.qty,
@@ -352,18 +367,6 @@ pub(super) fn spawn_order_dispatch(
             }
             // EXT-1: Register pending order BEFORE placing (for exchange mode)
             if req.is_primary {
-                if !submission_guard.reserve(&req.order_link_id, req.is_close) {
-                    // 同 ID 已在途時，拒絕這次本機重送不可終態化原單。
-                    if !submission_guard.contains(&req.order_link_id) {
-                        send_decision_lease_release(
-                            &pending_reg_tx,
-                            &req,
-                            LeaseOutcome::Failed,
-                            "exchange_order_unresolved",
-                        );
-                    }
-                    continue;
-                }
                 let (ready_tx, ready_rx) = tokio::sync::oneshot::channel();
                 let now_ms = openclaw_core::now_ms();
                 let close_maker_audit = close_maker_audit_for_dispatch_req(&req);

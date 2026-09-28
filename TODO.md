@@ -537,6 +537,11 @@ Python 60 項與 migration guards 通過；完整 Timescale／compressed-history
 最末成交歸屬修補再驗證：H1 專項 31、Rust library 4,914、Python 60 項通過；
 成交時鐘倒序與缺失／畸形 registration metadata 均有回歸覆蓋；
 PostOnly 部分成交的剩餘掛單計時另存，不再改寫註冊時間，連續兩筆成交保留同一歸屬。
+追加 entry／dispatch admission 複核修補：先辨識既有持倉的反向減倉意圖，
+entry guard 僅攔風險增加開倉；在 Approved／intent／lineage 寫入前原子保留 queued 提交資格，
+非同步 dispatcher 僅可交接一次，避免第二筆排隊開倉被靜默丟棄後殘留本機狀態；
+本機 preflight／channel 失敗釋放提交資格，同 ID 重送不終止原單。
+本輪 H1 專項 35、Rust library 4,918 與 strict library Clippy 通過。
 review 4125282489 要求一般重啟後重建未確認訂單與 entry guard，屬原報告 H2，
 依本 session 僅 H1 指示明列為尚未實作的限制；本修復不宣稱重啟後仍有提交阻擋保證。
 追加 scope 的 current-head review、merge 與 Mac/GitHub 同步以 workspace publication artifacts 收口；Linux 依 Operator 指示略過。

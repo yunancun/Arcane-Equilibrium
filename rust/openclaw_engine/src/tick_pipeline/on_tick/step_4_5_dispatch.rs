@@ -734,7 +734,17 @@ impl TickPipeline {
                     // StrategyAction::Open — 完整治理管線（不變）
                     // ═══════════════════════════════════════════════════════════════
                     StrategyAction::Open(intent) => {
-                        if self.exchange_submission_guard.blocks_entry() {
+                        // Opposite-side strategy Opens are sent reduce-only below.
+                        // Classify them before applying the entry-only guard.
+                        let is_reducing_order = self
+                            .paper_state
+                            .get_position(&intent.symbol)
+                            .map(|p| p.is_long != intent.is_long)
+                            .unwrap_or(false);
+                        if is_exchange_mode
+                            && !is_reducing_order
+                            && self.exchange_submission_guard.blocks_entry()
+                        {
                             strategy.on_rejection(intent, "exchange_order_unresolved");
                             continue;
                         }
@@ -1140,6 +1150,23 @@ impl TickPipeline {
                                     continue;
                                 }
 
+                                // Reserve before Approved/intent/lineage persistence.
+                                // Async dispatch claims this reservation exactly once.
+                                if self.order_dispatch_tx.is_some()
+                                    && !self
+                                        .exchange_submission_guard
+                                        .reserve_queued(&order_link_id, is_reducing_order)
+                                {
+                                    strategy.on_rejection(intent, "exchange_order_unresolved");
+                                    release_decision_lease_for_governance(
+                                        &self.governance,
+                                        gate.lease_id.as_deref(),
+                                        LeaseOutcome::Failed,
+                                        "exchange_order_unresolved",
+                                    );
+                                    continue;
+                                }
+
                                 if let Some(ref vi) = gate.verdict_info {
                                     persist_verdict(
                                         &self.trading_tx,
@@ -1248,11 +1275,6 @@ impl TickPipeline {
 
                                 // Dispatch to exchange / 派發到交易所
                                 // I-08 雙軌止損：compute broker-side SL from stop config
-                                let is_reducing_order = self
-                                    .paper_state
-                                    .get_position(&intent.symbol)
-                                    .map(|p| p.is_long != intent.is_long)
-                                    .unwrap_or(false);
                                 let sl_pct = self.paper_state.stop_config_pct();
                                 let broker_sl = if !is_reducing_order && sl_pct > 0.0 {
                                     Some(if intent.is_long {
@@ -1370,6 +1392,8 @@ impl TickPipeline {
                                             }
                                         }
                                         Err(e) => {
+                                            self.exchange_submission_guard
+                                                .resolve(&order_link_id_for_log);
                                             warn!(
                                                 symbol = %intent.symbol,
                                                 order_link_id = %order_link_id_for_log,
