@@ -1110,6 +1110,10 @@ impl TickPipeline {
                 // MAKER-CLOSE-REPRICE-1：初始 close maker dispatch，reprice 計數從 0 起。
                 reprice_count: 0,
             };
+            let close_id = request.order_link_id.clone();
+            if is_primary && !self.exchange_submission_guard.reserve_queued(&close_id, true) {
+                return false;
+            }
             match tx.send(request) {
                 Ok(()) => {
                     if is_primary {
@@ -1118,6 +1122,9 @@ impl TickPipeline {
                     true
                 }
                 Err(e) => {
+                    if is_primary {
+                        self.exchange_submission_guard.resolve(&close_id);
+                    }
                     tracing::error!(
                         symbol,
                         trigger_tag,
@@ -1266,6 +1273,9 @@ impl TickPipeline {
             reprice_count: 0,
         };
 
+        if !self.exchange_submission_guard.reserve_queued(&order_link_id, true) {
+            return false;
+        }
         match tx.send(request) {
             Ok(()) => {
                 self.pending_close_symbols.insert(symbol.to_string());
@@ -1281,6 +1291,7 @@ impl TickPipeline {
                 true
             }
             Err(e) => {
+                self.exchange_submission_guard.resolve(&order_link_id);
                 tracing::error!(
                     original_order_link_id,
                     symbol,
@@ -1449,6 +1460,9 @@ impl TickPipeline {
             // 累計重掛次數 +1，使下一輪 sweep 對新單繼續計數至 max_reprices 硬上限。
             reprice_count: reprice_count.saturating_add(1),
         };
+        if !self.exchange_submission_guard.reserve_queued(&new_order_link_id, true) {
+            return None;
+        }
         match tx.send(request) {
             Ok(()) => {
                 self.pending_close_symbols.insert(symbol.to_string());
@@ -1465,6 +1479,7 @@ impl TickPipeline {
                 Some(new_order_link_id)
             }
             Err(e) => {
+                self.exchange_submission_guard.resolve(&new_order_link_id);
                 tracing::warn!(
                     original_order_link_id,
                     symbol,

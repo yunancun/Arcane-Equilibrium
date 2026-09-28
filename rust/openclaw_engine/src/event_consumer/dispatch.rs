@@ -301,7 +301,9 @@ pub(super) fn spawn_order_dispatch(
             }
             let is_qty_zero_full_close = req.is_close && req.qty == 0.0;
             if req.qty < 0.0 || (req.qty == 0.0 && !is_qty_zero_full_close) {
-                if req.is_primary {
+                if req.is_primary
+                    && !(req.is_close && close_maker_audit_for_dispatch_req(&req).is_some())
+                {
                     submission_guard.resolve(&req.order_link_id);
                 }
                 warn!(symbol = %req.symbol, "order dispatch skipped: qty=0");
@@ -334,7 +336,9 @@ pub(super) fn spawn_order_dispatch(
                     if spec.min_notional > 0.0 && req.price > 0.0 {
                         let est_notional = req.qty * req.price;
                         if est_notional < spec.min_notional {
-                            if req.is_primary {
+                            if req.is_primary
+                                && !(req.is_close && close_maker_audit_for_dispatch_req(&req).is_some())
+                            {
                                 submission_guard.resolve(&req.order_link_id);
                             }
                             warn!(

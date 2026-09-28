@@ -107,8 +107,9 @@ pub async fn run_event_consumer(deps: EventConsumerDeps) {
     let mut pending_reg_rx = pending_reg_rx_slot;
     let pending_timeout = std::time::Duration::from_secs(5);
 
-    // Confirmation retries must continue even when public price ticks stop.
-    let mut confirmation_interval = tokio::time::interval(std::time::Duration::from_secs(30));
+    // Keep maker deadlines on the same 5s maintenance cadence without price
+    // ticks; per-order read reconciliation retains its independent 30s cooldown.
+    let mut confirmation_interval = tokio::time::interval(pending_timeout);
     confirmation_interval.set_missed_tick_behavior(tokio::time::MissedTickBehavior::Delay);
 
     // AMD-2026-05-02-01 Track H E-1 retrofit (HIGH-2 ExpiryGuardian sweep):
@@ -243,7 +244,10 @@ pub async fn run_event_consumer(deps: EventConsumerDeps) {
             }
 
             _ = confirmation_interval.tick() => {
-                loop_tick::schedule_pending_reconciliation(&mut state, openclaw_core::now_ms());
+                loop_tick::handle_confirmation_interval(
+                    &mut pipeline, &mut state, openclaw_core::now_ms(),
+                    &|symbol, id| loop_tick::dispatch_maker_cancel(shared_client.as_ref(), symbol, id),
+                );
             }
 
             // ── AMD-2026-05-02-01 Track H E-1 retrofit Arm: lease & auth sweep ──

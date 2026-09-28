@@ -337,7 +337,6 @@ pub(super) fn handle_pending_registration(
             pipeline.clear_pending_close(&symbol);
         }
         let removed_po = state.pending_orders.remove(&order_link_id);
-        pipeline.exchange_submission_guard.resolve(&order_link_id);
         state
             .order_id_to_link
             .retain(|_, link| link.as_str() != order_link_id.as_str());
@@ -404,6 +403,9 @@ pub(super) fn handle_pending_registration(
                 "dispatch_failed_unregistered",
             );
         }
+        // The fallback producer has reserved its queued ID before the old
+        // guard is released; asynchronous producers cannot slip an open between.
+        pipeline.exchange_submission_guard.resolve(&order_link_id);
         tracing::warn!(
             order_link_id = %order_link_id,
             symbol = %symbol,

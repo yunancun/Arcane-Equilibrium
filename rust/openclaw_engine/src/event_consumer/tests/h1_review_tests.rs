@@ -1,4 +1,161 @@
 // Included beside the pending-registration fixtures; exercises real sweep/WS paths.
+#[test]
+fn h1_no_tick_timer_cancels_makers_and_bounds_protective_fallback() {
+    for close in [false, true] {
+        let mut pipeline = TickPipeline::with_kind(&["BTCUSDT"], 10_000.0, PipelineKind::Demo);
+        let (tx, mut rx) = tokio::sync::mpsc::unbounded_channel();
+        pipeline.set_shadow_channel(tx);
+        if close {
+            seed_long_position(&mut pipeline);
+        }
+        let mut state = make_loop_state();
+        let mut po = close_maker_pending_order("h1-no-tick-maker");
+        po.is_close = close;
+        po.progress.status = super::super::order_lifecycle::OrderStatus::Working;
+        pipeline.exchange_submission_guard.track(&po.order_link_id);
+        state
+            .pending_orders
+            .insert(po.order_link_id.clone(), po.clone());
+        let cancellations = std::cell::RefCell::new(Vec::new());
+        // Explicit local callback: no Bybit client or network is constructed.
+        let cancel = |symbol: String, id: String| {
+            cancellations.borrow_mut().push((symbol, id));
+            true
+        };
+        let deadline = po.sent_ts_ms + po.maker_timeout_ms.unwrap();
+        super::super::loop_tick::handle_confirmation_interval(
+            &mut pipeline,
+            &mut state,
+            deadline - 1,
+            &cancel,
+        );
+        assert!(cancellations.borrow().is_empty());
+        super::super::loop_tick::handle_confirmation_interval(
+            &mut pipeline,
+            &mut state,
+            deadline,
+            &cancel,
+        );
+        assert_eq!(
+            *cancellations.borrow(),
+            vec![(po.symbol.clone(), po.order_link_id.clone())]
+        );
+        assert_eq!(
+            state.pending_orders[&po.order_link_id].cancel_requested_ts_ms,
+            Some(deadline)
+        );
+        for now in [deadline + 1, deadline + 1999] {
+            super::super::loop_tick::handle_confirmation_interval(
+                &mut pipeline,
+                &mut state,
+                now,
+                &cancel,
+            );
+        }
+        assert!(
+            rx.try_recv().is_err(),
+            "cancel grace precedes protection fallback"
+        );
+        for now in [deadline + 2000, deadline + 5000, deadline + 60_001] {
+            super::super::loop_tick::handle_confirmation_interval(
+                &mut pipeline,
+                &mut state,
+                now,
+                &cancel,
+            );
+        }
+        assert_eq!(
+            cancellations.borrow().len(),
+            1,
+            "timer never duplicates in-flight cancel"
+        );
+        assert!(
+            state.pending_orders.contains_key(&po.order_link_id),
+            "cancel request is not terminal evidence"
+        );
+        assert!(pipeline.exchange_submission_guard.blocks_entry());
+        if close {
+            let fallback = rx.try_recv().unwrap();
+            assert!(fallback.is_close);
+            assert_eq!(fallback.order_type, "market");
+            assert!(pipeline
+                .exchange_submission_guard
+                .contains(&fallback.order_link_id));
+        }
+        assert!(
+            rx.try_recv().is_err(),
+            "one close fallback, no opening or reprice orders"
+        );
+    }
+}
+
+#[test]
+fn h1_close_fallback_reserves_submission_before_predecessor_release() {
+    for fail_send in [false, true] {
+        let mut pipeline = TickPipeline::with_kind(&["BTCUSDT"], 10_000.0, PipelineKind::Demo);
+        let (tx, mut rx) = tokio::sync::mpsc::unbounded_channel();
+        if fail_send {
+            rx.close();
+        }
+        pipeline.set_shadow_channel(tx);
+        seed_long_position(&mut pipeline);
+        let mut state = make_loop_state();
+        let po = close_maker_pending_order("h1-failed-maker");
+        pipeline.exchange_submission_guard.track(&po.order_link_id);
+        state
+            .pending_orders
+            .insert(po.order_link_id.clone(), po.clone());
+        handle_pending_registration(
+            Some(PendingOrderEvent::DispatchFailed {
+                order_link_id: po.order_link_id.clone(),
+                symbol: po.symbol.clone(),
+                is_long: po.is_long,
+                qty: po.qty,
+                strategy: po.strategy.clone(),
+                context_id: po.context_id.clone(),
+                is_close: true,
+                order_type: po.order_type.clone(),
+                time_in_force: po.time_in_force,
+                maker_timeout_ms: po.maker_timeout_ms,
+                close_maker_audit: po.close_maker_audit.clone(),
+                terminal_status: "Rejected".into(),
+                reason: "dispatch_rejected: explicit venue refusal".into(),
+                ts_ms: po.sent_ts_ms + 1,
+            }),
+            &mut pipeline,
+            &mut state,
+            None,
+        );
+        assert!(!pipeline
+            .exchange_submission_guard
+            .contains(&po.order_link_id));
+        if fail_send {
+            assert!(
+                !pipeline.exchange_submission_guard.blocks_entry(),
+                "failed fallback enqueue releases its reservation"
+            );
+        } else {
+            let fallback = rx.try_recv().unwrap();
+            assert!(fallback.is_close);
+            assert!(pipeline
+                .exchange_submission_guard
+                .contains(&fallback.order_link_id));
+            assert!(
+                !pipeline
+                    .exchange_submission_guard
+                    .reserve_queued("new-risk-open", false),
+                "no opening window before asynchronous fallback dispatch"
+            );
+            assert!(pipeline
+                .exchange_submission_guard
+                .reserve(&fallback.order_link_id, true));
+            assert!(!pipeline
+                .exchange_submission_guard
+                .reserve(&fallback.order_link_id, true));
+        }
+    }
+}
+
 #[tokio::test]
 async fn h1_reconciliation_slow_order_does_not_block_another_order() {
     use std::sync::Arc;

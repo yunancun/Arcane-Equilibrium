@@ -179,6 +179,44 @@ pub(super) fn sweep_pending_orders(
     shared_client: Option<&Arc<crate::bybit_rest_client::BybitRestClient>>,
     now_ms: u64,
 ) {
+    sweep_pending_orders_with_cancel(pipeline, state, now_ms, true, &|symbol, id| {
+        dispatch_maker_cancel(shared_client, symbol, id)
+    });
+}
+
+/// The independent timer runs deadline cancellation and bounded protection even
+/// when public ticks stop. Quote-based repricing remains on the price-tick path.
+pub(super) fn handle_confirmation_interval(
+    pipeline: &mut TickPipeline,
+    state: &mut LoopState,
+    now_ms: u64,
+    cancel_maker: &dyn Fn(String, String) -> bool,
+) {
+    sweep_pending_orders_with_cancel(pipeline, state, now_ms, false, cancel_maker);
+}
+
+pub(super) fn dispatch_maker_cancel(
+    shared_client: Option<&Arc<crate::bybit_rest_client::BybitRestClient>>,
+    symbol: String,
+    order_link_id: String,
+) -> bool {
+    let Some(client) = shared_client else {
+        return false;
+    };
+    let client = client.clone();
+    tokio::spawn(async move {
+        pending_sweep::cancel_resting_maker_order(client, symbol, order_link_id).await;
+    });
+    true
+}
+
+fn sweep_pending_orders_with_cancel(
+    pipeline: &mut TickPipeline,
+    state: &mut LoopState,
+    now_ms: u64,
+    allow_reprice: bool,
+    cancel_maker: &dyn Fn(String, String) -> bool,
+) {
     let mut maker_to_cancel: Vec<(String, String, u64, u64)> = Vec::new();
     let mut maker_grace_fallback: Vec<String> = Vec::new();
     let mut awaiting_confirmation: Vec<String> = Vec::new();
@@ -240,7 +278,8 @@ pub(super) fn sweep_pending_orders(
                 // 判定「未達 max_reprices、在 [reprice_after, timeout) 窗、cancel
                 // 未在途、新限價嚴格優於原掛價」才放行。stops/urgent 走 market
                 // （tif=None）結構上到不了此分支（A.4 互斥證明）。
-                if po.is_close
+                if allow_reprice
+                    && po.is_close
                     && po.progress.status == super::order_lifecycle::OrderStatus::Working
                     && po.time_in_force == Some(TimeInForce::PostOnly)
                     && po.cancel_requested_ts_ms.is_none()
@@ -275,14 +314,7 @@ pub(super) fn sweep_pending_orders(
             continue;
         }
         // 先 cancel 舊掛單（非阻塞 REST，fail-soft）。
-        if let Some(client) = shared_client {
-            let c = client.clone();
-            let sym = po.symbol.clone();
-            let lid = po.order_link_id.clone();
-            tokio::spawn(async move {
-                pending_sweep::cancel_resting_maker_order(c, sym, lid).await;
-            });
-        }
+        cancel_maker(po.symbol.clone(), po.order_link_id.clone());
         // DIRECTION FIX（2026-06-17 E2/E4 RETURN HIGH）：經 *_for_pending 單一收口
         // 做 po.is_long（訂單側）→ 真實持倉方向（`!po.is_long`）轉換，再派發。
         let dispatched = pipeline.dispatch_close_maker_reprice_for_pending(
@@ -326,13 +358,7 @@ pub(super) fn sweep_pending_orders(
             reason = "maker_timeout_cancel",
             "PostOnly maker timed out — cancelling via orderLinkId / PostOnly 掛單超時 — 以 orderLinkId 取消"
         );
-        if let Some(client) = shared_client {
-            let c = client.clone();
-            let sym = symbol.clone();
-            let lid = link_id.clone();
-            tokio::spawn(async move {
-                pending_sweep::cancel_resting_maker_order(c, sym, lid).await;
-            });
+        if cancel_maker(symbol.clone(), link_id.clone()) {
             maker_cancel_dispatched.push(link_id.clone());
         } else {
             tracing::error!(

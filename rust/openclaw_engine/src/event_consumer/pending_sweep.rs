@@ -21,10 +21,10 @@ use tracing::{info, warn};
 pub(crate) const PARTIAL_FILL_REMAINDER_GRACE_MS: u64 = 5_000;
 /// Keep a maker pending row after dispatching cancel so racing fills that
 /// arrive before the WS cancel ack can still match order context. If neither
-/// fill nor cancel ack arrives inside this window, drop the tracker row to
-/// avoid unbounded stale state.
+/// fill nor cancel ack arrives inside this window, retain Unknown until
+/// authoritative reconciliation supplies terminal evidence.
 /// 派發 maker cancel 後保留 pending row，讓 cancel ack 前 race 到的成交仍能匹配；
-/// 若 grace 內無成交/取消回報，才丟棄 tracker，避免狀態無界累積。
+/// 若 grace 內無成交/取消回報，維持 Unknown 並等待有界唯讀對帳。
 pub(crate) const MAKER_CANCEL_ACK_GRACE_MS: u64 = 60_000;
 /// Close maker orders carry exposure-reduction intent, so after a cancel
 /// request we wait only a short grace before the future dispatcher must market
@@ -217,8 +217,8 @@ pub(crate) fn tighten_postonly_entry_after_partial(po: &mut PendingOrder, exec_t
 /// EDGE-P2-3 Phase 1B-3.2: Non-blocking REST cancel for a timed-out PostOnly
 /// resting maker order. Uses client-minted `orderLinkId` (idempotent across
 /// restart + WS lag). Fail-soft: any API error is logged and swallowed — the
-/// tracker row has already been removed by the caller, so a racing fill after
-/// a failed cancel lands in the position reconciler's normal recovery path.
+/// tracker row remains available for racing fills and independent confirmation;
+/// a cancel request or failure is never treated as terminal evidence.
 ///
 /// 1B-5 FUP-3: routes through the shared `cancel_by_link_id_raw` helper in
 /// `order_manager` so the Bybit endpoint / body / success-log fields stay
@@ -228,7 +228,7 @@ pub(crate) fn tighten_postonly_entry_after_partial(po: &mut PendingOrder, exec_t
 ///
 /// EDGE-P2-3 Phase 1B-3.2：非阻塞 REST 取消超時的 PostOnly 掛單。
 /// 使用客戶端 orderLinkId（跨重啟/WS 延遲冪等）。fail-soft：API 失敗僅記 log 不回退；
-/// 調用端已移除 tracker，若取消失敗後 race 到成交，走對帳器常規恢復路徑。
+/// 調用端保留 tracker 以匹配晚到成交；取消請求或失敗不等同終態。
 ///
 /// 1B-5 FUP-3：改走 `order_manager::cancel_by_link_id_raw` 共用輔助，
 /// 使 endpoint / body / 成功日誌欄位與 `OrderManager::cancel_order_by_link_id`

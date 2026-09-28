@@ -553,3 +553,5 @@ review 4125282489 要求一般重啟後重建未確認訂單與 entry guard，�
 
 H1 追加修補（同 PR #199）：bounded probe 共用送單保留在 durable admission 前取得，阻擋時落拒絕紀錄，持久化或 enqueue 失敗釋放；獨立 timer 直接選取逾時非終態做唯讀對帳；V161 lifecycle retention 改為 400 天以覆蓋訂單 365 天保留期。current-head 驗證／merge 證據以本輪 publication report 為準。
 本輪 H1 專項 39、Rust library 4,921、Python 60、strict Clippy、schema target 編譯，以及隔離 PG 行為／migration guards 通過；完整 retention／Timescale 契約待 current-head CI。
+最後 maker 保護修補：5 秒獨立 timer 沿用 deadline cancel 與單次保護性 fallback，行情停滯時照常維護；quote-based reprice 留在行情路徑。所有 primary close／reprice／fallback 在入隊前保留共用送單資格，前單失敗事件待 fallback 完成保留後才釋放前單；enqueue 失敗則清理其保留。兩項回歸先 RED 再 GREEN。
+本輪 H1 專項 41、Rust library 4,923、strict Clippy 及 schema target 編譯通過；SQL／Python 消費者未變，前輪 Python 60／PG 證據以相同雜湊復用。
