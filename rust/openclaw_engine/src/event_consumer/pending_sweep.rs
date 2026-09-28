@@ -237,7 +237,7 @@ pub(super) async fn cancel_resting_maker_order(
     client: std::sync::Arc<crate::bybit_rest_client::BybitRestClient>,
     symbol: String,
     order_link_id: String,
-) {
+) -> bool {
     match crate::order_manager::cancel_by_link_id_raw(
         &client,
         crate::order_manager::OrderCategory::Linear,
@@ -251,8 +251,9 @@ pub(super) async fn cancel_resting_maker_order(
                 symbol = %symbol,
                 order_link_id = %order_link_id,
                 reason = "maker_timeout_cancel",
-                "PostOnly maker cancel acknowledged / PostOnly 掛單取消已確認"
+                "PostOnly maker cancel request acknowledged / PostOnly 取消請求已接收，仍待終態"
             );
+            true
         }
         Err(err) => {
             // Common benign cases: 110001 order not exists (already filled/cancelled).
@@ -262,8 +263,9 @@ pub(super) async fn cancel_resting_maker_order(
                 order_link_id = %order_link_id,
                 error = %err,
                 reason = "maker_timeout_cancel_failed",
-                "PostOnly maker cancel REST failed — likely already filled/cancelled / PostOnly 取消失敗，很可能已成交或取消"
+                "PostOnly maker cancel REST failed — retain tracker for retry and confirmation / PostOnly 取消失敗，保留追蹤並重試確認"
             );
+            false
         }
     }
 }

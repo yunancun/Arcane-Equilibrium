@@ -34,6 +34,8 @@ pub(super) struct LoopState {
     /// EXT-1 pending order tracking / EXT-1 待處理訂單追蹤
     pub pending_orders: HashMap<String, PendingOrder>,
     pub dcp_reconciler: Option<super::dcp_reconciliation::DcpReconciler>,
+    pub maker_cancel_outcome_tx:
+        Option<tokio::sync::mpsc::UnboundedSender<super::loop_tick::MakerCancelOutcome>>,
     /// P0-1 order_id → order_link_id mapping (used for fill matching)
     /// P0-1 order_id → order_link_id 映射（成交匹配用）
     pub order_id_to_link: HashMap<String, String>,
@@ -72,6 +74,7 @@ impl LoopState {
         Self {
             pending_orders: HashMap::new(),
             dcp_reconciler: None,
+            maker_cancel_outcome_tx: None,
             order_id_to_link: HashMap::new(),
             seen_exec_set: std::collections::HashSet::new(),
             seen_exec_order: std::collections::VecDeque::new(),

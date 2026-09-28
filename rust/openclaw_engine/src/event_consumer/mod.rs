@@ -100,6 +100,8 @@ pub async fn run_event_consumer(deps: EventConsumerDeps) {
     state.dcp_reconciler = shared_client.as_ref().map(|client| {
         dcp_reconciliation::DcpReconciler::new(client.clone(), reconciliation_tx.clone())
     });
+    let (maker_cancel_tx, mut maker_cancel_rx) = tokio::sync::mpsc::unbounded_channel();
+    state.maker_cancel_outcome_tx = Some(maker_cancel_tx.clone());
     let status_interval = std::time::Duration::from_secs(STATUS_INTERVAL_SECS);
     let start_time = Instant::now();
 
@@ -243,10 +245,16 @@ pub async fn run_event_consumer(deps: EventConsumerDeps) {
                 }
             }
 
+            Some(outcome) = maker_cancel_rx.recv() => {
+                loop_tick::handle_maker_cancel_outcome(&mut state, outcome, openclaw_core::now_ms());
+            }
+
             _ = confirmation_interval.tick() => {
                 loop_tick::handle_confirmation_interval(
                     &mut pipeline, &mut state, openclaw_core::now_ms(),
-                    &|symbol, id| loop_tick::dispatch_maker_cancel(shared_client.as_ref(), symbol, id),
+                    &|po, now_ms| loop_tick::dispatch_maker_cancel(
+                        shared_client.as_ref(), Some(&maker_cancel_tx), po, now_ms,
+                    ),
                 );
             }
 

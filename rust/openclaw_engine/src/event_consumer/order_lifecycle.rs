@@ -120,6 +120,9 @@ pub struct OrderProgress {
     pub reconciliation_retry_after_ms: Option<u64>,
     /// Partial-entry grace has its own clock; registration identity is immutable.
     pub maker_remainder_started_ts_ms: Option<u64>,
+    /// One in-flight cancel attempt per incarnation; ACK never proves terminal.
+    pub maker_cancel_attempt_ts_ms: Option<u64>,
+    pub maker_cancel_retry_after_ms: Option<u64>,
     /// Keep per-order replay dedup until terminal cleanup, independent of the global FIFO.
     pub applied_execution_ids: HashSet<String>,
 }

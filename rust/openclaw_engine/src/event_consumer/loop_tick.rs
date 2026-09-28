@@ -179,8 +179,9 @@ pub(super) fn sweep_pending_orders(
     shared_client: Option<&Arc<crate::bybit_rest_client::BybitRestClient>>,
     now_ms: u64,
 ) {
-    sweep_pending_orders_with_cancel(pipeline, state, now_ms, true, &|symbol, id| {
-        dispatch_maker_cancel(shared_client, symbol, id)
+    let outcomes = state.maker_cancel_outcome_tx.clone();
+    sweep_pending_orders_with_cancel(pipeline, state, now_ms, true, &|po, attempt_ms| {
+        dispatch_maker_cancel(shared_client, outcomes.as_ref(), po, attempt_ms)
     });
 }
 
@@ -190,24 +191,101 @@ pub(super) fn handle_confirmation_interval(
     pipeline: &mut TickPipeline,
     state: &mut LoopState,
     now_ms: u64,
-    cancel_maker: &dyn Fn(String, String) -> bool,
+    cancel_maker: &dyn Fn(&super::types::PendingOrder, u64) -> bool,
 ) {
     sweep_pending_orders_with_cancel(pipeline, state, now_ms, false, cancel_maker);
 }
 
+#[derive(Debug)]
+pub(super) struct MakerCancelOutcome {
+    pub order_link_id: String,
+    pub registered_ts_ms: u64,
+    pub attempt_ts_ms: u64,
+    pub acknowledged: bool,
+}
+
 pub(super) fn dispatch_maker_cancel(
     shared_client: Option<&Arc<crate::bybit_rest_client::BybitRestClient>>,
-    symbol: String,
-    order_link_id: String,
+    outcomes: Option<&tokio::sync::mpsc::UnboundedSender<MakerCancelOutcome>>,
+    po: &super::types::PendingOrder,
+    attempt_ts_ms: u64,
 ) -> bool {
-    let Some(client) = shared_client else {
+    let (Some(client), Some(outcomes)) = (shared_client, outcomes) else {
         return false;
     };
     let client = client.clone();
+    let outcomes = outcomes.clone();
+    let symbol = po.symbol.clone();
+    let order_link_id = po.order_link_id.clone();
+    let registered_ts_ms = po.sent_ts_ms;
     tokio::spawn(async move {
-        pending_sweep::cancel_resting_maker_order(client, symbol, order_link_id).await;
+        // Include transport/rate-limiter waiting in the deadline. Completion is
+        // returned to the single state owner even on timeout; no overlapping retry.
+        let cancel =
+            pending_sweep::cancel_resting_maker_order(client, symbol, order_link_id.clone());
+        deliver_maker_cancel_outcome(
+            cancel,
+            outcomes,
+            MakerCancelOutcome {
+                order_link_id,
+                registered_ts_ms,
+                attempt_ts_ms,
+                acknowledged: false,
+            },
+            std::time::Duration::from_secs(15),
+        )
+        .await;
     });
     true
+}
+
+pub(super) async fn deliver_maker_cancel_outcome(
+    cancel: impl std::future::Future<Output = bool>,
+    outcomes: tokio::sync::mpsc::UnboundedSender<MakerCancelOutcome>,
+    mut result: MakerCancelOutcome,
+    deadline: std::time::Duration,
+) {
+    result.acknowledged = tokio::time::timeout(deadline, cancel)
+        .await
+        .unwrap_or(false);
+    let _ = outcomes.send(result);
+}
+
+pub(super) fn handle_maker_cancel_outcome(
+    state: &mut LoopState,
+    result: MakerCancelOutcome,
+    now_ms: u64,
+) {
+    let Some(po) = state.pending_orders.get_mut(&result.order_link_id) else {
+        return;
+    };
+    if po.sent_ts_ms != result.registered_ts_ms
+        || po.progress.maker_cancel_attempt_ts_ms != Some(result.attempt_ts_ms)
+        || po.progress.status.is_terminal()
+    {
+        return;
+    }
+    po.progress.maker_cancel_attempt_ts_ms = None;
+    // A successful REST response is still only an ACK. Retry the same idempotent
+    // cancellation after cooldown if authoritative evidence has not closed it.
+    po.progress.maker_cancel_retry_after_ms = Some(now_ms.saturating_add(30_000));
+    po.progress
+        .reconciliation_retry_after_ms
+        .get_or_insert(now_ms);
+    if !result.acknowledged {
+        tracing::warn!(order_link_id = %result.order_link_id,
+            "maker cancel failed/timed out; retry after cooldown while retaining attribution");
+    }
+}
+
+fn mark_maker_cancel_attempt(state: &mut LoopState, id: &str, now_ms: u64) {
+    if let Some(po) = state.pending_orders.get_mut(id) {
+        // Preserve the first cancel's grace anchor across failures/retries so
+        // protective close fallback cannot be postponed by repeated REST errors.
+        po.cancel_requested_ts_ms.get_or_insert(now_ms);
+        po.progress.maker_cancel_attempt_ts_ms = Some(now_ms);
+        po.progress.maker_cancel_retry_after_ms = None;
+    }
 }
 
 fn sweep_pending_orders_with_cancel(
@@ -215,7 +293,7 @@ fn sweep_pending_orders_with_cancel(
     state: &mut LoopState,
     now_ms: u64,
     allow_reprice: bool,
-    cancel_maker: &dyn Fn(String, String) -> bool,
+    cancel_maker: &dyn Fn(&super::types::PendingOrder, u64) -> bool,
 ) {
     let mut maker_to_cancel: Vec<(String, String, u64, u64)> = Vec::new();
     let mut maker_grace_fallback: Vec<String> = Vec::new();
@@ -225,14 +303,34 @@ fn sweep_pending_orders_with_cancel(
     // 達 max_reprices、book 朝對我方向移動）時收集，後續串行 cancel 舊單 + 重發。
     let mut maker_to_reprice: Vec<(String, f64, u32)> = Vec::new();
     for (key, po) in state.pending_orders.iter() {
-        if po.progress.status.is_terminal() || po.progress.replacement_order_link_id.is_some() {
+        if po.progress.status.is_terminal() {
             continue;
         }
         let elapsed = pending_sweep::pending_elapsed_ms(po, now_ms);
+        let retry_cancel = po.progress.maker_cancel_attempt_ts_ms.is_none()
+            && po
+                .progress
+                .maker_cancel_retry_after_ms
+                .is_some_and(|next| now_ms >= next);
+        if retry_cancel {
+            maker_to_cancel.push((
+                key.clone(),
+                po.symbol.clone(),
+                elapsed,
+                po.maker_timeout_ms.unwrap_or(45_000),
+            ));
+        }
+        // Reprice predecessors may still need their failed cancel retried, but
+        // must never generate another replacement or protective fallback.
+        if po.progress.replacement_order_link_id.is_some() {
+            continue;
+        }
         match classify_pending_sweep(po, now_ms) {
             PendingSweepAction::MakerTimeoutCancel => {
                 let deadline_ms = po.maker_timeout_ms.unwrap_or(45_000);
-                maker_to_cancel.push((key.clone(), po.symbol.clone(), elapsed, deadline_ms));
+                if !retry_cancel && po.progress.maker_cancel_attempt_ts_ms.is_none() {
+                    maker_to_cancel.push((key.clone(), po.symbol.clone(), elapsed, deadline_ms));
+                }
             }
             PendingSweepAction::MakerCancelGraceExpired => {
                 let grace_ms = if po.is_close {
@@ -314,7 +412,9 @@ fn sweep_pending_orders_with_cancel(
             continue;
         }
         // 先 cancel 舊掛單（非阻塞 REST，fail-soft）。
-        cancel_maker(po.symbol.clone(), po.order_link_id.clone());
+        if cancel_maker(&po, now_ms) {
+            mark_maker_cancel_attempt(state, link_id, now_ms);
+        }
         // DIRECTION FIX（2026-06-17 E2/E4 RETURN HIGH）：經 *_for_pending 單一收口
         // 做 po.is_long（訂單側）→ 真實持倉方向（`!po.is_long`）轉換，再派發。
         let dispatched = pipeline.dispatch_close_maker_reprice_for_pending(
@@ -358,7 +458,11 @@ fn sweep_pending_orders_with_cancel(
             reason = "maker_timeout_cancel",
             "PostOnly maker timed out — cancelling via orderLinkId / PostOnly 掛單超時 — 以 orderLinkId 取消"
         );
-        if cancel_maker(symbol.clone(), link_id.clone()) {
+        let po = state
+            .pending_orders
+            .get(link_id)
+            .expect("sweep candidate remains tracked");
+        if cancel_maker(po, now_ms) {
             maker_cancel_dispatched.push(link_id.clone());
         } else {
             tracing::error!(
@@ -385,9 +489,7 @@ fn sweep_pending_orders_with_cancel(
     // tracker so racing fills before the WS cancel ack still match context.
     // 標記剛派發 cancel 的 maker 訂單；保留 tracker 讓 ack 前 race 成交仍能匹配。
     for link_id in &maker_cancel_dispatched {
-        if let Some(po) = state.pending_orders.get_mut(link_id) {
-            po.cancel_requested_ts_ms = Some(now_ms);
-        }
+        mark_maker_cancel_attempt(state, link_id, now_ms);
     }
     // Retain legacy Market and maker cancel-grace rows until confirmation.
     // Market／cancel grace 逾時只記未知，仍保留 execution 匹配。

@@ -1,4 +1,151 @@
 // Included beside the pending-registration fixtures; exercises real sweep/WS paths.
+#[tokio::test]
+async fn h1_cancel_timeout_returns_failure_to_state_owner() {
+    use super::super::loop_tick::{deliver_maker_cancel_outcome, MakerCancelOutcome};
+    let (tx, mut rx) = tokio::sync::mpsc::unbounded_channel();
+    deliver_maker_cancel_outcome(
+        std::future::pending(),
+        tx,
+        MakerCancelOutcome {
+            order_link_id: "stalled-cancel".into(),
+            registered_ts_ms: 100,
+            attempt_ts_ms: 200,
+            acknowledged: true,
+        },
+        std::time::Duration::from_millis(10),
+    )
+    .await;
+    let result = rx.recv().await.unwrap();
+    assert!(!result.acknowledged);
+    assert_eq!((result.registered_ts_ms, result.attempt_ts_ms), (100, 200));
+}
+
+#[test]
+fn h1_cancel_failures_retry_after_cooldown_without_losing_grace_or_attribution() {
+    use super::super::loop_tick::{
+        handle_confirmation_interval, handle_maker_cancel_outcome, MakerCancelOutcome,
+    };
+    for (close, replacement) in [(false, false), (true, false), (true, true)] {
+        let mut pipeline = TickPipeline::with_kind(&["BTCUSDT"], 10_000.0, PipelineKind::Demo);
+        let (tx, mut rx) = tokio::sync::mpsc::unbounded_channel();
+        pipeline.set_shadow_channel(tx);
+        if close {
+            seed_long_position(&mut pipeline);
+        }
+        let mut state = make_loop_state();
+        let mut po = close_maker_pending_order("h1-retry-cancel");
+        po.is_close = close;
+        po.progress.status = super::super::order_lifecycle::OrderStatus::Working;
+        pipeline.exchange_submission_guard.track(&po.order_link_id);
+        state
+            .pending_orders
+            .insert(po.order_link_id.clone(), po.clone());
+        let requests = std::cell::RefCell::new(Vec::new());
+        let cancel = |order: &super::super::types::PendingOrder, now| {
+            requests
+                .borrow_mut()
+                .push((order.order_link_id.clone(), now));
+            true
+        };
+        let first = po.sent_ts_ms + po.maker_timeout_ms.unwrap();
+        handle_confirmation_interval(&mut pipeline, &mut state, first, &cancel);
+        if replacement {
+            state
+                .pending_orders
+                .get_mut(&po.order_link_id)
+                .unwrap()
+                .progress
+                .replacement_order_link_id = Some("successor".into());
+        }
+        let result = |registered_ts_ms, attempt_ts_ms, acknowledged| MakerCancelOutcome {
+            order_link_id: po.order_link_id.clone(),
+            registered_ts_ms,
+            attempt_ts_ms,
+            acknowledged,
+        };
+        handle_maker_cancel_outcome(
+            &mut state,
+            result(po.sent_ts_ms, first, false),
+            first + 1000,
+        );
+        for now in [first + 2000, first + 30_999] {
+            handle_confirmation_interval(&mut pipeline, &mut state, now, &cancel);
+        }
+        assert_eq!(
+            requests.borrow().len(),
+            1,
+            "no cancel retry inside cooldown"
+        );
+        handle_confirmation_interval(&mut pipeline, &mut state, first + 31_000, &cancel);
+        assert_eq!(
+            requests.borrow().len(),
+            2,
+            "REST failure cannot leave a stale order uncancellable"
+        );
+        assert_eq!(
+            state.pending_orders[&po.order_link_id].cancel_requested_ts_ms,
+            Some(first)
+        );
+        // Delayed outcomes from the previous attempt/incarnation cannot unlock an active request.
+        handle_maker_cancel_outcome(
+            &mut state,
+            result(po.sent_ts_ms, first, true),
+            first + 40_000,
+        );
+        handle_maker_cancel_outcome(
+            &mut state,
+            result(po.sent_ts_ms - 1, first + 31_000, false),
+            first + 40_000,
+        );
+        handle_confirmation_interval(&mut pipeline, &mut state, first + 70_000, &cancel);
+        assert_eq!(
+            requests.borrow().len(),
+            2,
+            "in-flight cancel remains unique"
+        );
+        handle_maker_cancel_outcome(
+            &mut state,
+            result(po.sent_ts_ms, first + 31_000, true),
+            first + 70_001,
+        );
+        assert!(
+            pipeline.exchange_submission_guard.blocks_entry(),
+            "cancel ACK is not terminal"
+        );
+        handle_confirmation_interval(&mut pipeline, &mut state, first + 100_001, &cancel);
+        assert_eq!(
+            requests.borrow().len(),
+            3,
+            "unconfirmed ACK still permits idempotent retry"
+        );
+        assert!(state.pending_orders.contains_key(&po.order_link_id));
+        if close && !replacement {
+            assert!(rx.try_recv().unwrap().is_close);
+        }
+        assert!(
+            rx.try_recv().is_err(),
+            "retry cannot create extra fallback/reprice/open orders"
+        );
+        state
+            .pending_orders
+            .get_mut(&po.order_link_id)
+            .unwrap()
+            .progress
+            .status = super::super::order_lifecycle::OrderStatus::Cancelled;
+        handle_maker_cancel_outcome(
+            &mut state,
+            result(po.sent_ts_ms, first + 100_001, false),
+            first + 100_002,
+        );
+        handle_confirmation_interval(&mut pipeline, &mut state, first + 200_000, &cancel);
+        assert_eq!(
+            requests.borrow().len(),
+            3,
+            "terminal evidence stops cancellations"
+        );
+    }
+}
+
 #[test]
 fn h1_no_tick_timer_cancels_makers_and_bounds_protective_fallback() {
     for close in [false, true] {
@@ -18,8 +165,10 @@ fn h1_no_tick_timer_cancels_makers_and_bounds_protective_fallback() {
             .insert(po.order_link_id.clone(), po.clone());
         let cancellations = std::cell::RefCell::new(Vec::new());
         // Explicit local callback: no Bybit client or network is constructed.
-        let cancel = |symbol: String, id: String| {
-            cancellations.borrow_mut().push((symbol, id));
+        let cancel = |po: &super::super::types::PendingOrder, _: u64| {
+            cancellations
+                .borrow_mut()
+                .push((po.symbol.clone(), po.order_link_id.clone()));
             true
         };
         let deadline = po.sent_ts_ms + po.maker_timeout_ms.unwrap();

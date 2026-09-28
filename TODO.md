@@ -555,3 +555,5 @@ H1 追加修補（同 PR #199）：bounded probe 共用送單保留在 durable a
 本輪 H1 專項 39、Rust library 4,921、Python 60、strict Clippy、schema target 編譯，以及隔離 PG 行為／migration guards 通過；完整 retention／Timescale 契約待 current-head CI。
 最後 maker 保護修補：5 秒獨立 timer 沿用 deadline cancel 與單次保護性 fallback，行情停滯時照常維護；quote-based reprice 留在行情路徑。所有 primary close／reprice／fallback 在入隊前保留共用送單資格，前單失敗事件待 fallback 完成保留後才釋放前單；enqueue 失敗則清理其保留。兩項回歸先 RED 再 GREEN。
 本輪 H1 專項 41、Rust library 4,923、strict Clippy 及 schema target 編譯通過；SQL／Python 消費者未變，前輪 Python 60／PG 證據以相同雜湊復用。
+取消結果修補：REST cancel 結果／15 秒逾時回傳單一 state owner，以註冊時間和 attempt 時間拒絕過期結果；同單不重疊，完成後未獲終態則冷卻 30 秒再取消同一 ID。保持首次 cancel grace，不因重試延後單次保護性 fallback；重掛前單同樣可重試取消，ACK 不視為終態。
+本輪 H1 專項 43、Rust library 4,925、strict Clippy 及 schema target 編譯通過；SQL／Python 消費者未變，前輪 Python 60／PG 證據以相同雜湊復用。
