@@ -357,22 +357,41 @@ async fn h1_close_timeout_has_only_three_attempts() {
     assert_eq!(calls, 3);
 }
 
-#[test]
-fn h1_duplicate_or_prior_timeout_cannot_be_definitive_rejection() {
-    let duplicate = BybitApiError::Business {
-        ret_code: 110072,
-        ret_msg: "duplicate".into(),
-        response: serde_json::json!({}),
-    };
-    let reject = BybitApiError::Business {
-        ret_code: 10001,
-        ret_msg: "invalid qty".into(),
-        response: serde_json::json!({}),
-    };
-    assert!(submission_may_exist_after_error(&duplicate, false, true));
-    assert!(!submission_may_exist_after_error(&duplicate, false, false));
-    assert!(submission_may_exist_after_error(&reject, true, true));
-    assert!(!submission_may_exist_after_error(&reject, false, false));
+#[tokio::test]
+async fn h1_duplicate_requires_prior_transport_ambiguity() {
+    for (code, message) in [(110072, "duplicate"), (10001, "duplicate orderLinkId")] {
+        for prior_unknown in [false, true] {
+            let mut calls = 0;
+            let result =
+                run_dispatch_retry::<(), _, _>(&[0, 0], "BTCUSDT", "duplicate-close", |_| {
+                    calls += 1;
+                    std::future::ready(Err(if prior_unknown && calls == 1 {
+                        close_dispatch_timeout_error(500)
+                    } else {
+                        biz(code, message)
+                    }))
+                })
+                .await;
+            let DispatchRetryResult::Structural {
+                outcome_unknown,
+                attempts,
+                last_error,
+            } = result
+            else {
+                panic!("duplicate must be structural");
+            };
+            assert_eq!(outcome_unknown, prior_unknown);
+            assert_eq!(attempts, if prior_unknown { 2 } else { 1 });
+            if !outcome_unknown {
+                let req = close_dispatch_req_for_zero(true, true, 0.01);
+                let (tx, mut rx) = mpsc::unbounded_channel();
+                send_definitive_dispatch_rejection(&tx, &req, &last_error, attempts);
+                assert!(
+                    matches!(rx.try_recv(), Ok(PendingOrderEvent::DispatchFailed { terminal_status, .. }) if terminal_status == "Rejected")
+                );
+            }
+        }
+    }
 }
 
 #[test]

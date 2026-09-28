@@ -857,10 +857,9 @@ class TestH1OrderLifecycleReadContract(unittest.TestCase):
         context, _ = _query_trading_pipeline_gap_context(cur)
         self.assertEqual(context["working_maker_orders_1h"], 1)
         sql = cur.execute.call_args.args[0]
-        self.assertIn("LEFT JOIN LATERAL", sql)
-        self.assertIn("COALESCE(ls.to_status, o.status)", sql)
-        self.assertIn("osc.engine_mode = o.engine_mode", sql)
-        self.assertIn("osc.lifecycle_seq DESC NULLS LAST, osc.ts DESC", sql)
+        self.assertIn("JOIN public.order_events", sql)
+        self.assertIn("e.status", sql)
+        self.assertIn("e.ts = o.ts", sql)
         # 未確認 ACK／Unknown 不可當成 maker 已掛入市場的證據。
         self.assertNotIn("'acknowledged'", sql)
         self.assertNotIn("'unknown'", sql)

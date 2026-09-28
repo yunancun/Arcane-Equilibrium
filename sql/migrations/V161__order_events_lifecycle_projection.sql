@@ -77,9 +77,33 @@ SELECT
     o.details AS raw_json
 FROM trading.orders o
 LEFT JOIN LATERAL (
+    SELECT MAX(other.ts) FILTER (WHERE other.ts < o.ts) AS previous_order_ts,
+           MIN(other.ts) FILTER (WHERE other.ts > o.ts) AS next_order_ts
+    FROM trading.orders other
+    WHERE other.order_id = o.order_id AND other.engine_mode = o.engine_mode
+) bounds ON TRUE
+-- Registration emits PendingSubmit at the exact order timestamp. Its ordinal
+-- partitions new lifecycle events without comparing local and venue clocks.
+LEFT JOIN LATERAL (
+    SELECT MIN(lifecycle_seq) AS seq FROM trading.order_state_changes
+    WHERE order_id = o.order_id AND engine_mode = o.engine_mode
+      AND ts = o.ts AND to_status = 'PendingSubmit'
+) start_marker ON TRUE
+LEFT JOIN LATERAL (
+    SELECT MIN(lifecycle_seq) AS seq FROM trading.order_state_changes
+    WHERE order_id = o.order_id AND engine_mode = o.engine_mode
+      AND ts = bounds.next_order_ts AND to_status = 'PendingSubmit'
+) end_marker ON TRUE
+LEFT JOIN LATERAL (
     SELECT to_status, MAX(filled_qty) OVER () AS filled_qty
     FROM trading.order_state_changes osc
     WHERE osc.order_id = o.order_id AND osc.engine_mode = o.engine_mode
+      AND CASE WHEN start_marker.seq IS NOT NULL AND osc.lifecycle_seq IS NOT NULL
+          THEN osc.lifecycle_seq >= start_marker.seq
+          ELSE bounds.previous_order_ts IS NULL OR osc.ts >= o.ts END
+      AND CASE WHEN end_marker.seq IS NOT NULL AND osc.lifecycle_seq IS NOT NULL
+          THEN osc.lifecycle_seq < end_marker.seq
+          ELSE bounds.next_order_ts IS NULL OR osc.ts < bounds.next_order_ts END
     ORDER BY CASE WHEN osc.to_status = 'Filled' THEN 2
         WHEN osc.to_status IN ('Cancelled', 'Rejected', 'Deactivated', 'PartiallyFilledCanceled') THEN 1
         ELSE 0 END DESC, osc.lifecycle_seq DESC NULLS LAST, osc.ts DESC
@@ -90,4 +114,6 @@ LEFT JOIN LATERAL (
            SUM(qty::DOUBLE PRECISION * price) / NULLIF(SUM(qty::DOUBLE PRECISION), 0) AS avg_price
     FROM trading.fills f
     WHERE f.order_id = o.order_id AND f.engine_mode = o.engine_mode
+      AND (bounds.previous_order_ts IS NULL OR f.ts >= o.ts)
+      AND (bounds.next_order_ts IS NULL OR f.ts < bounds.next_order_ts)
 ) f ON TRUE;

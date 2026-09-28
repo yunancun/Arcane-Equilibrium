@@ -102,11 +102,11 @@ class TestPortfolioRestingExposureHealthcheck(unittest.TestCase):
                 self.assertIn(f"{order_status}=1", msg)
                 self.assertIn("known_exposure_only", msg)
                 sql, params = cur.execute.call_args.args
-                self.assertIn("LEFT JOIN latest_state", sql)
-                self.assertIn("COALESCE(ls.to_status, o.status)", sql)
+                self.assertIn("JOIN public.order_events", sql)
+                self.assertIn("e.status", sql)
                 self.assertIn("'Unknown'", sql)
                 self.assertEqual(params[0], "demo")
-                self.assertEqual(params[2], "demo")
+                self.assertEqual(len(params), 2)
 
     def tearDown(self) -> None:
         """還原 env + 清理 tmp dir。"""
@@ -551,6 +551,24 @@ class TestPortfolioRestingExposureHealthcheck(unittest.TestCase):
     "requires explicitly acknowledged disposable PostgreSQL",
 )
 class H1RestingPostgresContract(unittest.TestCase):
+    def test_reused_id_does_not_hide_new_resting_exposure(self):
+        import psycopg2
+        from helper_scripts.db.passive_wait_healthcheck.checks_portfolio_resting_exposure import _resting_notional_from_pg
+        conn = psycopg2.connect(os.environ["OPENCLAW_TEST_PG"])
+        try:
+            cur = conn.cursor()
+            order_id = f"h1-reused-health-{os.getpid()}"
+            for hours, status, qty in [(2, "Filled", 10), (1, "PartiallyFilled", 9)]:
+                cur.execute("INSERT INTO trading.orders (ts,order_id,symbol,side,order_type,qty,price,status,engine_mode) VALUES (NOW()-%s*interval '1 hour',%s,'H1REUSEUSDT','Buy','Limit',10,100,'PendingSubmit','demo')", (hours, order_id))
+                cur.execute("INSERT INTO trading.order_state_changes (ts,order_id,to_status,filled_qty,engine_mode) VALUES (NOW()-%s*interval '1 hour',%s,'PendingSubmit',0,'demo')", (hours,order_id))
+                cur.execute("INSERT INTO trading.order_state_changes (ts,order_id,to_status,filled_qty,engine_mode) VALUES (NOW()-%s*interval '1 hour'+interval '1 second',%s,%s,%s,'demo')", (hours,order_id,status,qty))
+            resting, _, _, _, diag = _resting_notional_from_pg(cur,"demo",24)
+            self.assertEqual(resting["H1REUSEUSDT"]["long"],100.0)
+            self.assertNotIn("unresolved",diag)
+        finally:
+            conn.rollback()
+            conn.close()
+
     def test_causal_partial_resting_query_against_postgres(self):
         import psycopg2
         from helper_scripts.db.passive_wait_healthcheck.checks_portfolio_resting_exposure import _resting_notional_from_pg

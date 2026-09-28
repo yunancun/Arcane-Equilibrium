@@ -360,37 +360,27 @@ def _resting_notional_from_pg(
         return ({}, {}, {}, {}, "trading.orders 或 order_state_changes 缺（pre-V003 deploy）")
 
     try:
-        # latest_state per order_id via DISTINCT ON；JOIN orders 拿 symbol/side/qty/price
+        # Reuse the incarnation-scoped lifecycle projection; orders supply engine/strategy.
         # 按 engine 分離狀態；未知單即使沒有 price 也必須顯示未解決。
         cur.execute(
             """
-            WITH latest_state AS (
-                SELECT DISTINCT ON (order_id)
-                    order_id,
-                    to_status, MAX(filled_qty) OVER (PARTITION BY order_id) AS filled_qty
-                FROM trading.order_state_changes
-                WHERE engine_mode = %s AND ts > NOW() - (%s::text || ' hours')::interval
-                ORDER BY order_id, CASE WHEN to_status = 'Filled' THEN 2
-                    WHEN to_status IN ('Cancelled', 'Rejected', 'Deactivated', 'PartiallyFilledCanceled') THEN 1
-                    ELSE 0 END DESC, lifecycle_seq DESC NULLS LAST, ts DESC
-            )
             SELECT
                 o.order_id,
                 o.symbol,
                 o.side,
-                SUM(GREATEST(o.qty - COALESCE(ls.filled_qty, 0.0), 0.0) * COALESCE(o.price, 0.0))::FLOAT AS notional_sum,
+                SUM(GREATEST(o.qty - COALESCE(e.filled_qty, 0.0), 0.0) * COALESCE(o.price, 0.0))::FLOAT AS notional_sum,
                 COUNT(*)::INT AS row_count,
                 COALESCE(o.strategy_name, '') AS strategy_name,
-                COALESCE(ls.to_status, o.status) AS order_status
+                e.status AS order_status
             FROM trading.orders o
-            LEFT JOIN latest_state ls ON o.order_id = ls.order_id
-            WHERE COALESCE(ls.to_status, o.status) IN
+            JOIN public.order_events e ON e.order_id = o.order_id AND e.ts = o.ts
+            WHERE e.status IN
                 ('Working', 'PartiallyFilled', 'PendingSubmit', 'Submitted', 'Acknowledged', 'Unknown')
               AND o.engine_mode = %s
               AND o.ts > NOW() - (%s::text || ' hours')::interval
-            GROUP BY o.order_id, o.symbol, o.side, o.strategy_name, ls.to_status, o.status
+            GROUP BY o.order_id, o.symbol, o.side, o.strategy_name, e.status
             """,
-            (engine, lookback_hours, engine, lookback_hours),
+            (engine, lookback_hours),
         )
         rows = cur.fetchall() or []
     except Exception as exc:  # noqa: BLE001

@@ -1097,3 +1097,85 @@ async fn contract_h1_migration_rejects_ordinal_drift() {
         tx.rollback().await.unwrap();
     }
 }
+
+#[tokio::test]
+async fn contract_h1_reused_id_keeps_order_incarnations_separate() {
+    let Some(pool) = migrated_pool().await else {
+        return;
+    };
+    let mut tx = pool.begin().await.unwrap();
+    let id = "schema-h1-reused-id";
+    for (hours, status, qty) in [
+        (3, "Filled", 1.0),
+        (2, "Rejected", 0.0),
+        (1, "PartiallyFilled", 0.25),
+    ] {
+        sqlx::query("INSERT INTO trading.orders(ts,order_id,symbol,side,order_type,qty,price,status,engine_mode) VALUES(NOW()-$2::INT*interval '1 hour',$1,'BTCUSDT','Buy','Limit',1,200,'PendingSubmit','demo')")
+            .bind(id).bind(hours).execute(&mut *tx).await.unwrap();
+        sqlx::query("INSERT INTO trading.order_state_changes(ts,order_id,to_status,filled_qty,engine_mode) VALUES(NOW()-$2::INT*interval '1 hour',$1,'PendingSubmit',0,'demo')")
+            .bind(id).bind(hours).execute(&mut *tx).await.unwrap();
+        // The newest incarnation's venue clock precedes both newer registrations.
+        let event_hours = if hours == 1 { 3 } else { hours };
+        sqlx::query("INSERT INTO trading.order_state_changes(ts,order_id,to_status,filled_qty,engine_mode) VALUES(NOW()-$2::INT*interval '1 hour'+$3::INT*interval '1 minute',$1,$4,$5,'demo')")
+            .bind(id).bind(event_hours).bind(4-hours).bind(status).bind(qty as f32).execute(&mut *tx).await.unwrap();
+    }
+    for (hours, qty, price) in [(3, 1.0, 100.0), (1, 0.25, 200.0)] {
+        sqlx::query("INSERT INTO trading.fills(ts,fill_id,order_id,symbol,side,qty,price,engine_mode) VALUES(NOW()-$1::INT*interval '1 hour'+interval '1 minute',$2,$3,'BTCUSDT','Buy',$4,$5,'demo')")
+            .bind(hours).bind(format!("{id}-{hours}")).bind(id).bind(qty as f32).bind(price as f32).execute(&mut *tx).await.unwrap();
+    }
+    let rows: Vec<(String,f64,Option<f64>)> = sqlx::query_as("SELECT status,filled_qty::float8,avg_price::float8 FROM public.order_events WHERE order_id=$1 ORDER BY ts")
+        .bind(id).fetch_all(&mut *tx).await.unwrap();
+    assert_eq!(
+        rows,
+        vec![
+            ("Filled".into(), 1.0, Some(100.0)),
+            ("Rejected".into(), 0.0, None),
+            ("PartiallyFilled".into(), 0.25, Some(200.0))
+        ]
+    );
+    // Legacy/new rows without a registration marker still have timestamp bounds.
+    sqlx::query("INSERT INTO trading.orders(ts,order_id,symbol,side,order_type,qty,status,engine_mode) VALUES(NOW()-interval '2 hours','h1-legacy-reused','BTCUSDT','Buy','Market',1,'Working','demo'),(NOW(),'h1-legacy-reused','BTCUSDT','Buy','Market',1,'PendingSubmit','demo')").execute(&mut *tx).await.unwrap();
+    sqlx::query("INSERT INTO trading.order_state_changes(ts,order_id,to_status,filled_qty,engine_mode) VALUES(NOW()-interval '1 hour','h1-legacy-reused','Filled',1,'demo')").execute(&mut *tx).await.unwrap();
+    let statuses: Vec<String> = sqlx::query_scalar(
+        "SELECT status FROM public.order_events WHERE order_id='h1-legacy-reused' ORDER BY ts",
+    )
+    .fetch_all(&mut *tx)
+    .await
+    .unwrap();
+    assert_eq!(statuses, vec!["Filled", "PendingSubmit"]);
+    tx.rollback().await.unwrap();
+}
+
+#[tokio::test]
+async fn contract_h1_flashdip_restores_projected_pending_cap() {
+    let Some(pool) = migrated_pool().await else {
+        return;
+    };
+    let mut tx = pool.begin().await.unwrap();
+    for (symbol, status) in [
+        ("H1WORKUSDT", "Working"),
+        ("H1PARTIALUSDT", "PartiallyFilled"),
+        ("H1UNKNOWNUSDT", "Unknown"),
+        ("H1ACKUSDT", "Acknowledged"),
+        ("H1DONEUSDT", "Filled"),
+        ("H1REJECTUSDT", "Rejected"),
+    ] {
+        sqlx::query("INSERT INTO trading.orders(ts,order_id,symbol,side,order_type,qty,price,status,engine_mode,strategy_name) VALUES(NOW(),$1,$1,'Buy','Limit',1,100,'PendingSubmit','demo','flash_dip_buy')")
+            .bind(symbol).execute(&mut *tx).await.unwrap();
+        sqlx::query("INSERT INTO trading.order_state_changes(ts,order_id,to_status,filled_qty,engine_mode) VALUES(NOW()+interval '1 second',$1,$2,0,'demo')")
+            .bind(symbol).bind(status).execute(&mut *tx).await.unwrap();
+    }
+    // Execute the exact SQL included by the production bootstrap reader.
+    let mut rows: Vec<String> =
+        sqlx::query_scalar(include_str!("../src/event_consumer/flash_dip_pending.sql"))
+            .bind(0.0_f64)
+            .fetch_all(&mut *tx)
+            .await
+            .unwrap();
+    rows.sort();
+    assert_eq!(
+        rows,
+        vec!["H1ACKUSDT", "H1PARTIALUSDT", "H1UNKNOWNUSDT", "H1WORKUSDT"]
+    );
+    tx.rollback().await.unwrap();
+}

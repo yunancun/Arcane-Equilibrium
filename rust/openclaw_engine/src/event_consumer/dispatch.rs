@@ -60,23 +60,6 @@ fn send_decision_lease_release(
     }
 }
 
-fn submission_may_exist_after_error(
-    error: &BybitApiError,
-    outcome_unknown: bool,
-    is_close: bool,
-) -> bool {
-    outcome_unknown
-        || (is_close
-            && (matches!(
-                error,
-                BybitApiError::Business {
-                    ret_code: 110072,
-                    ..
-                }
-            ) || matches!(error, BybitApiError::Business { ret_code: 10001, ret_msg, .. }
-            if ret_msg.to_ascii_lowercase().contains("duplicate"))))
-}
-
 fn send_definitive_dispatch_rejection(
     pending_reg_tx: &mpsc::UnboundedSender<PendingOrderEvent>,
     req: &OrderDispatchRequest,
@@ -660,9 +643,9 @@ pub(super) fn spawn_order_dispatch(
                     attempts,
                     outcome_unknown,
                 } => {
-                    // 先前嘗試／重複 ID 不能證明原請求失敗；只阻止再次開倉。
-                    if submission_may_exist_after_error(&last_error, outcome_unknown, req.is_close)
-                    {
+                    // Only an actual uncertain earlier attempt can survive a definitive refusal.
+                    // A first-attempt duplicate may identify an older order, not this intent.
+                    if outcome_unknown {
                         send_submission_unknown(
                             &pending_reg_tx,
                             &req,
