@@ -308,16 +308,23 @@ def execute(argv: list[str], prompt: str, output: Path, root: Path, deadline: fl
         try:
             with (output / "stderr.log").open("rb") as scan:
                 tail = b""
-                while process.poll() is None:
+                while True:
                     if time.monotonic() - started >= deadline:
                         reason = "DEADLINE"
                     else:
-                        chunk = tail + scan.read(16384)
+                        data = scan.read(16384)
+                        chunk = tail + data
                         if b"stream disconnected - retrying sampling request" in chunk:
                             reason = "TRANSPORT_FAILURE_NO_RETRY"
                         tail = chunk[-64:]
                     if reason:
                         break
+                    if process.poll() is not None:
+                        # Drain unread stderr in bounded chunks before accepting a
+                        # fast successful exit; the original deadline still applies.
+                        if not data:
+                            break
+                        continue
                     try:
                         observe_descendants(process, known)
                     except (OSError, ValueError, subprocess.SubprocessError) as exc:

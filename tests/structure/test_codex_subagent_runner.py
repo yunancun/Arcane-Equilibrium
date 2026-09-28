@@ -411,7 +411,8 @@ def test_script_index_registers_both_entries():
 
 @pytest.mark.parametrize("case,expected", [("normal", "PASS"), ("monitor_failure", "PASS"),
     ("residual", "UNVERIFIED"), ("review_fail", "FAIL"), ("timeout", "UNVERIFIED"),
-    ("transport", "UNVERIFIED")])
+    ("transport", "UNVERIFIED"), ("fast_transport", "UNVERIFIED"),
+    ("buried_transport", "UNVERIFIED"), ("split_transport", "UNVERIFIED")])
 def test_review_and_cleanup_have_separate_successor_decisions(tmp_path, monkeypatch, case, expected):
     root = tmp_path / "repo"; root.mkdir()
     b = binding(); b.update(paths=["owned.py"], role={}, contract={}, baseline={"source_head": "head"})
@@ -441,14 +442,17 @@ def test_review_and_cleanup_have_separate_successor_decisions(tmp_path, monkeypa
         if case == "residual":
             code += "; import subprocess,sys,time; p=subprocess.Popen([sys.executable,'-c','import time; time.sleep(10)'],start_new_session=True); Path(" + repr(str(spawned)) + ").write_text(str(p.pid)); time.sleep(.35)"
         if case == "timeout": code += "; import time; time.sleep(10)"
-        if case == "transport": code += "; import sys,time; sys.stderr.write('stream disconnected - retrying sampling request\\n'); sys.stderr.flush(); time.sleep(10)"
+        if "transport" in case:
+            prefix = "x" * {"buried_transport": 50000, "split_transport": 16365}.get(case, 0)
+            code += "; import sys,time; sys.stderr.write(" + repr(prefix + 'stream disconnected - retrying sampling request\n') + "); sys.stderr.flush()"
+            if case == "transport": code += "; time.sleep(10)"
         return [sys.executable, "-c", code]
     monkeypatch.setattr(runner, "command", command)
     try:
         result = runner.run(root=root, context=context, node_id="review", instruction="Review",
                             output=tmp_path / "output", binary=sys.executable, deadline=1)
         assert result["status"] == expected
-        if case not in {"timeout", "transport"}:
+        if case != "timeout" and "transport" not in case:
             assert result["review"]["verdict"] == ("FAIL" if case == "review_fail" else "PASS")
         if case == "monitor_failure":
             assert result["cleanup_status"] == "UNVERIFIED"
@@ -460,7 +464,7 @@ def test_review_and_cleanup_have_separate_successor_decisions(tmp_path, monkeypa
         if case in {"normal", "review_fail"}:
             assert result["cleanup_status"] == "OBSERVED_CLEAR"
             assert result["cleanup_error"] is None
-        if case in {"timeout", "transport"}:
+        if case == "timeout" or "transport" in case:
             assert result["stop_reason"] == ("DEADLINE" if case == "timeout" else "TRANSPORT_FAILURE_NO_RETRY")
         with runner.delivery_lock(root, b) as state_path:
             state = json.loads(state_path.read_text())
