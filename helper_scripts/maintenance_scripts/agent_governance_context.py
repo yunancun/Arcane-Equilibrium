@@ -70,8 +70,10 @@ def _select_envelope(task_facts: dict[str, Any]) -> str:
 
 
 def _git_bytes(root: Path, *args: str) -> bytes:
+    from agent_governance_capture import native_git_command, native_git_environment
     return subprocess.run(
-        ["git", *args], cwd=root, check=True, capture_output=True
+        native_git_command(root, *args), cwd=root, check=True, capture_output=True,
+        env=native_git_environment(), timeout=15,
     ).stdout
 
 
@@ -215,13 +217,15 @@ def _scan_interface_matches(root: Path, interfaces: list[str]) -> list[dict[str,
     # Let Git search its indexed + untracked, non-ignored source inventory in C.
     # This preserves the complete caller inventory while avoiding a Python
     # open/read/Unicode pass over every repository file on every Context compile.
-    command = ["git", "grep", "--untracked", "-n", "-I", "-F"]
+    from agent_governance_capture import native_git_command, native_git_environment
+    command = native_git_command(root, "grep", "--untracked", "-n", "-I", "-F")
     for interface in interfaces:
         command.extend(("-e", interface))
     command.append("--")
     try:
         completed = subprocess.run(
-            command, cwd=root, check=False, capture_output=True
+            command, cwd=root, check=False, capture_output=True,
+            env=native_git_environment(), timeout=15,
         )
     except OSError:
         return []

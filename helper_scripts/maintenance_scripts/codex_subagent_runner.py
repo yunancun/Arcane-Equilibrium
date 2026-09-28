@@ -20,9 +20,11 @@ try:
 except ModuleNotFoundError:
     import tomli as tomllib
 
-from agent_governance_command_capture_v2 import _bound_execution_task
+from agent_governance_command_capture_v2 import _bound_execution_task, _fresh_committed_tree
+from agent_governance_capture import native_git_command, native_git_environment
 from agent_governance_context import capture_repository_baseline
 from agent_governance_registry import load_registry, render_views
+from agent_governance_task_admission import FileTaskAdmissionStore, find_delivery_for_contract
 
 
 CHILD_MARKER = "TRADEBOT_CLI_REVIEW_CHILD"
@@ -38,10 +40,37 @@ def write_json(path: Path, value) -> None:
 
 
 def git(root: Path, *args: str) -> str:
-    return subprocess.check_output(["git", *args], cwd=root, text=True).strip()
+    return subprocess.check_output(native_git_command(root, *args), cwd=root,
+                                   env=native_git_environment(), timeout=15,
+                                   stdin=subprocess.DEVNULL, text=True).strip()
 
 
-def bind(root: Path, context: dict, node_id: str) -> dict:
+def frozen_contract(contract: dict) -> dict:
+    return {k: v for k, v in contract.items() if k != "baseline"}
+
+
+def admitted_delivery(root: Path, contract: dict, authority: dict | None) -> dict:
+    """從既有 admission 與 journal 導出 delivery；Context 不能自行另起額度。"""
+    if not authority or set(authority) != {"task_id", "owner", "admission_id"}:
+        raise PermissionError("CONTROLLER_ADMISSION_REQUIRED")
+    common = Path(git(root, "rev-parse", "--path-format=absolute", "--git-common-dir"))
+    store = FileTaskAdmissionStore(common)
+    record = store.read()["admissions"].get(str(root.resolve()))
+    if (not record or record["state"] != "ACTIVE"
+            or any(record[key] != value for key, value in authority.items())):
+        raise PermissionError("CONTROLLER_ADMISSION_MISMATCH")
+    found = find_delivery_for_contract(store.read_delivery_journal(), record["task_contract_digest"])
+    if found is None:
+        raise PermissionError("CONTROLLER_DELIVERY_NOT_RETAINED")
+    key, retained = found
+    if frozen_contract(record["task_contract"]) != frozen_contract(contract):
+        raise PermissionError("CONTROLLER_CONTRACT_MISMATCH")
+    if retained["delivery_key"] != {name: contract[name] for name in ("work_item_id", "lane_id")}:
+        raise PermissionError("CONTROLLER_DELIVERY_MISMATCH")
+    return {"key": key, "identity": retained["delivery_key"], "authority": dict(authority)}
+
+
+def bind(root: Path, context: dict, node_id: str, authority: dict | None = None) -> dict:
     """Use the existing Context verifier and exact native-node permission binding."""
     if os.environ.get(CHILD_MARKER):
         raise PermissionError("CHILD_REENTRY_DENIED")
@@ -66,10 +95,11 @@ def bind(root: Path, context: dict, node_id: str) -> dict:
         subprocess.check_output(["ps", "-axo", "pid=,ppid="], timeout=2, stderr=subprocess.PIPE)
     except (OSError, subprocess.SubprocessError) as exc:
         raise PermissionError("CONTROLLER_PROCESS_MONITOR_UNAVAILABLE") from exc
-    frozen = {k: v for k, v in contract.items() if k not in {"baseline", "previous_failure"}}
+    delivery = admitted_delivery(root, contract, authority)
+    frozen = frozen_contract(contract)
     return {"task": task, "contract": contract, "paths": paths, "role": role,
             "policy": json.loads(context["budget_authority_canonical"]),
-            "delivery": [contract["work_item_id"], contract["lane_id"]],
+            "delivery": delivery,
             "frozen_contract": digest(frozen), "dag": plan["execution_dag_binding"],
             "baseline": capture_repository_baseline(root)}
 
@@ -80,7 +110,12 @@ def delivery_lock(root: Path, binding: dict):
     common = Path(git(root, "rev-parse", "--git-common-dir"))
     if not common.is_absolute():
         common = root / common
-    directory = common.resolve() / "codex-cli-reviews" / digest(binding["delivery"])
+    delivery = binding["delivery"]
+    if not isinstance(delivery, dict) or not isinstance(delivery.get("key"), str):
+        raise PermissionError("CONTROLLER_ADMISSION_REQUIRED")
+    if delivery["key"] != digest([delivery["identity"][k] for k in ("work_item_id", "lane_id")]):
+        raise PermissionError("CONTROLLER_DELIVERY_MISMATCH")
+    directory = common.resolve() / "codex-cli-reviews" / delivery["key"]
     directory.mkdir(parents=True, exist_ok=True)
     fd = os.open(directory / "lock", os.O_CREAT | os.O_RDWR | os.O_NOFOLLOW, 0o600)
     with os.fdopen(fd, "w") as lock:
@@ -89,6 +124,24 @@ def delivery_lock(root: Path, binding: dict):
         except BlockingIOError as exc:
             raise PermissionError("DELIVERY_BUSY: one active review per delivery") from exc
         yield directory / "state.json"
+
+
+def retained_packet(attempt: dict) -> dict:
+    """以持久摘要重驗 result；路徑與 PASS 字串本身不是證據。"""
+    try:
+        path = Path(attempt["output"]) / "result.json"
+        if path.is_symlink() or not path.is_file() or path.stat().st_size > 4 * 1024 * 1024:
+            raise ValueError("unsafe or missing packet")
+        packet = json.loads(path.read_text())
+        if (digest(packet) != attempt["result_digest"]
+                or packet["attempt_id"] != attempt["id"]
+                or packet["status"] != attempt["status"]
+                or packet["node"]["node_id"] != attempt["node_id"]
+                or packet["source_generation"] != attempt["source_generation"]):
+            raise ValueError("retained packet binding differs")
+        return packet
+    except (OSError, ValueError, KeyError, TypeError) as exc:
+        raise PermissionError("REVIEW_PACKET_UNAVAILABLE_OR_CHANGED") from exc
 
 
 def reserve(state: dict | None, binding: dict, controller: str,
@@ -116,6 +169,9 @@ def reserve(state: dict | None, binding: dict, controller: str,
                 or (prior[-1]["status"] == "PASS"
                     and prior[-1].get("source_generation") == generation)):
             raise PermissionError("NODE_SPENT: no automatic duplicate, retry or resume")
+        if prior[0]["instruction_digest"] != digest(instruction):
+            raise PermissionError("RECHECK_QUESTION_CHANGED")
+        retained_packet(prior[-1])
     elif recheck_of is not None:
         raise PermissionError("recheck must name the original failed attempt")
     # Work is owned by PM/CC at the clean checkpoint. Review predecessors
@@ -127,10 +183,14 @@ def reserve(state: dict | None, binding: dict, controller: str,
             if (not results or results[-1]["status"] != "PASS"
                     or results[-1].get("source_generation") != generation):
                 raise PermissionError("REVIEW_PREDECESSOR_NOT_PASS: " + required)
+            retained_packet(results[-1])
     attempt = {"node_id": node, "number": len(prior) + 1,
                "source_generation": generation,
                "instruction_digest": digest(instruction), "status": "RUNNING"}
     attempt["id"] = digest([frozen, attempt, len(attempts)])
+    if prior:
+        attempt["recheck_of"] = prior[-1]["id"]
+        attempt["original_result_digest"] = prior[-1]["result_digest"]
     attempts.append(attempt)
     return state, attempt
 
@@ -161,34 +221,53 @@ def command(binary: str, root: Path, output: Path, role: dict) -> list[str]:
     return argv
 
 
-def stop_group(process: subprocess.Popen) -> str | None:
+def process_snapshot() -> dict[int, tuple[int, str]]:
+    rows = subprocess.check_output(["/bin/ps", "-axo", "pid=,ppid=,lstart="],
+                                   text=True, timeout=2, stderr=subprocess.PIPE).splitlines()
+    return {int(pid): (int(parent), born) for pid, parent, born in
+            (row.split(maxsplit=2) for row in rows)}
+
+
+def observe_descendants(process: subprocess.Popen, known: dict[int, str]) -> None:
+    current = process_snapshot()
+    owned = {pid for pid, born in known.items() if pid in current and current[pid][1] == born}
+    if process.poll() is None and process.pid in current:
+        owned.add(process.pid)
+    while True:
+        children = {pid for pid, (parent, _) in current.items() if parent in owned} - owned
+        if not children:
+            break
+        owned.update(children)
+    known.update({pid: current[pid][1] for pid in owned})
+
+
+def stop_group(process: subprocess.Popen, known: dict[int, str] | None = None) -> str | None:
     # CLI tools may start a fresh session. Freeze the leader before finding its
     # descendants, so killing only the original process group cannot strand them.
     cleanup_error = None
+    known = {} if known is None else known
+    alive = process.poll() is None
     try:
-        os.killpg(process.pid, signal.SIGSTOP)
+        if alive:
+            os.killpg(process.pid, signal.SIGSTOP)
     except ProcessLookupError:
         pass
     try:
-        rows = subprocess.check_output(["ps", "-axo", "pid=,ppid="], text=True,
-                                       timeout=2).splitlines()
-        parents = {int(pid): int(parent) for pid, parent in (row.split() for row in rows)}
-        owned = {process.pid}
-        while True:
-            children = {pid for pid, parent in parents.items() if parent in owned} - owned
-            if not children:
-                break
-            owned.update(children)
-        for pid in owned - {process.pid}:
+        observe_descendants(process, known)
+        current = process_snapshot()
+        for pid, born in known.items():
+            if pid == process.pid or pid not in current or current[pid][1] != born:
+                continue
             try:
                 os.kill(pid, signal.SIGKILL)
             except ProcessLookupError:
                 pass
-    except (OSError, subprocess.SubprocessError) as exc:
+    except (OSError, ValueError, subprocess.SubprocessError) as exc:
         cleanup_error = "DESCENDANT_CLEANUP_UNVERIFIED: " + str(exc)
     finally:
         try:
-            os.killpg(process.pid, signal.SIGKILL)
+            if alive:
+                os.killpg(process.pid, signal.SIGKILL)
         except ProcessLookupError:
             pass
         process.wait(timeout=3)
@@ -201,6 +280,7 @@ def execute(argv: list[str], prompt: str, output: Path, root: Path, deadline: fl
     started = time.monotonic()
     reason = None
     cleanup_error = None
+    known: dict[int, str] = {}
     # A file avoids blocking on a child that never drains a large stdin pipe.
     (output / "input.txt").write_text(prompt)
     with (output / "input.txt").open() as input_file, (output / "events.jsonl").open("w") as log, (output / "stderr.log").open("w") as err:
@@ -218,20 +298,27 @@ def execute(argv: list[str], prompt: str, output: Path, root: Path, deadline: fl
                             reason = "TRANSPORT_FAILURE_NO_RETRY"
                         tail = chunk[-64:]
                     if reason:
-                        cleanup_error = stop_group(process)
                         break
+                    try:
+                        observe_descendants(process, known)
+                    except (OSError, ValueError, subprocess.SubprocessError) as exc:
+                        cleanup_error = "DESCENDANT_CLEANUP_UNVERIFIED: " + str(exc)
                     time.sleep(0.1)
-        except BaseException:
-            stop_group(process)
-            raise
+        finally:
+            cleanup_error = stop_group(process, known) or cleanup_error
+            # 父程序離開後，ps 無法證明瞬間 fork/setsid 的後代已不存在。
+            # 仍清理已觀察到的 PID，但不得把抽樣觀察升格為完整生命週期證明。
+            if reason is None:
+                cleanup_error = cleanup_error or "DESCENDANT_CLEANUP_UNVERIFIED: normal exit can orphan unobserved descendants"
     return {"exit_code": process.returncode, "stop_reason": reason, "cleanup_error": cleanup_error,
             "elapsed_seconds": round(time.monotonic() - started, 3)}
 
 
 def run(*, root: Path, context: dict, node_id: str, instruction: str,
-        output: Path, binary: str, deadline: int = 180, recheck_of: str | None = None) -> dict:
+        output: Path, binary: str, deadline: int = 180, recheck_of: str | None = None,
+        authority: dict | None = None) -> dict:
     root = root.resolve(strict=True)
-    binding = bind(root, context, node_id)
+    binding = bind(root, context, node_id, authority)
     policy = binding["policy"]
     if type(deadline) is not int or not 1 <= deadline <= min(300, policy["max_call_duration_ms"] // 1000):
         raise ValueError("deadline must be 1..300 seconds and within the Context budget")
@@ -270,16 +357,38 @@ def run(*, root: Path, context: dict, node_id: str, instruction: str,
         write_json(state_path, state)  # Spend the attempt before any model process starts.
         write_json(output / "context.json", context)
         (output / "prompt.txt").write_text(prompt)
-        argv = command(str(executable), root, output, binding["role"])
-        write_json(output / "argv.json", argv)
+        if recheck_of:
+            prior = next(a for a in state["attempts"] if a["id"] == recheck_of)
+            packet = retained_packet(prior)
+            prompt += "\nOriginal retained review to recheck, without replacing its question: " + json.dumps(
+                {"status": packet["status"], "findings": packet.get("review", {}).get("findings", []),
+                 "error": packet.get("error"), "stop_reason": packet.get("stop_reason")}, ensure_ascii=False)
+            if len(prompt.encode()) > policy["max_prompt_utf8_bytes_per_call"]:
+                raise ValueError("original blockers exceed the frozen prompt budget")
+            (output / "prompt.txt").write_text(prompt)
         result = {"status": "UNVERIFIED", "attempt_id": attempt["id"],
                   "node": binding["task"], "path_scope": binding["paths"],
                   "source_head": binding["baseline"]["source_head"],
+                  "source_generation": attempt["source_generation"],
+                  "controller_delivery": {key: binding["delivery"][key] for key in ("key", "identity")},
                   "context_digest": context["artifact_digest"], "deadline_seconds": deadline,
                   "history": "none", "automatic_retries": 0}
         try:
             remaining = policy["max_wall_clock_ms"] / 1000 - (time.time() - state["started_at"])
-            result.update(execute(argv, prompt, output, root, min(deadline, max(0, remaining))))
+            with _fresh_committed_tree(root, binding["baseline"]["source_head"], parent=output) as (review_root, materialization):
+                result["source_materialization"] = materialization
+                _bound_execution_task(context, binding["task"]["native_agent"], node_id, review_root)
+                if admitted_delivery(root, binding["contract"], authority) != binding["delivery"]:
+                    raise PermissionError("CONTROLLER_DELIVERY_CHANGED_BEFORE_CALL")
+                argv = command(str(executable), review_root, output, binding["role"])
+                write_json(output / "argv.json", argv)
+                snapshot_prompt = prompt + "\nReview only the committed snapshot at " + str(review_root) + "; use relative source paths and this working directory for capture-command."
+                if len(snapshot_prompt.encode()) > policy["max_prompt_utf8_bytes_per_call"]:
+                    raise ValueError("snapshot prompt exceeds frozen budget")
+                remaining = policy["max_wall_clock_ms"] / 1000 - (time.time() - state["started_at"])
+                if remaining <= 0:
+                    raise PermissionError("DELIVERY_DEADLINE_BEFORE_MODEL_CALL")
+                result.update(execute(argv, snapshot_prompt, output, review_root, min(deadline, max(0, remaining))))
             if capture_repository_baseline(root) != binding["baseline"]:
                 result["error"] = "SOURCE_CHANGED_DURING_REVIEW"
             elif result["exit_code"] == 0 and result["stop_reason"] is None:
@@ -301,13 +410,17 @@ def run(*, root: Path, context: dict, node_id: str, instruction: str,
                         pending.extend((label + "[" + str(index) + "]", value)
                                        for index, value in enumerate(metadata))
                 result["review"] = verdict
-                result["status"] = verdict["verdict"]
+                if result["cleanup_error"]:
+                    result["error"] = result["cleanup_error"]
+                else:
+                    result["status"] = verdict["verdict"]
         except (OSError, ValueError, subprocess.SubprocessError) as exc:
             result["error"] = str(exc)
         finally:
             attempt["status"] = result["status"]
             attempt["output"] = str(output)
             write_json(output / "result.json", result)
+            attempt["result_digest"] = digest(result)
             write_json(state_path, state)
         return result
 
@@ -322,13 +435,18 @@ def main() -> int:
     parser.add_argument("--codex", default=shutil.which("codex"))
     parser.add_argument("--deadline", type=int, default=180)
     parser.add_argument("--recheck-of")
+    parser.add_argument("--controller-task", required=True)
+    parser.add_argument("--controller-owner", required=True)
+    parser.add_argument("--controller-admission", required=True)
     args = parser.parse_args()
     try:
         if not args.codex:
             raise ValueError("Codex CLI is unavailable; pass the installed --codex path")
         result = run(root=args.root, context=json.loads(args.context.read_text()), node_id=args.node,
                      instruction=args.instruction.read_text(), output=args.output, binary=args.codex,
-                     deadline=args.deadline, recheck_of=args.recheck_of)
+                     deadline=args.deadline, recheck_of=args.recheck_of,
+                     authority={"task_id": args.controller_task, "owner": args.controller_owner,
+                                "admission_id": args.controller_admission})
     except (OSError, ValueError, KeyError, TypeError, PermissionError) as exc:
         print(json.dumps({"status": "DENIED", "error": str(exc)}))
         return 2

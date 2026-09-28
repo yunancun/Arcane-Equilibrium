@@ -451,6 +451,13 @@ by this alternative; see `.codex/README.md#controlled-cli-review` for operationa
 limits. This bounded local entry does not restore archived workflow objectives or
 claim runtime, whole-role-roster, platform-attested efficiency or Linux adoption.
 
+The subsequent Operator-approved PR198 priority repair reuses the existing
+admission journal and committed-tree materializer, freezes the recheck question,
+and binds retained predecessor packets. It does not introduce an isolation service.
+Normal process exit still lacks proof that unobserved detached descendants ended;
+the runner therefore keeps UNVERIFIED and blocks successors. Permanent adoption
+remains blocked, irrespective of a raw reviewer PASS or local test count.
+
 ### Model routing
 
 Operator 要求小範圍適配並同步 Mac／GitHub、跳過 Linux。既有 T1／T2 的
