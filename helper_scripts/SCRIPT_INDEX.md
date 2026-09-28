@@ -7,7 +7,7 @@
 
 | Script | Purpose |
 |---|---|
-| `maintenance_scripts/codex_subagent_runner.py` | 綁定既有 admission／delivery／Context 的有限唯讀審查候選；凍結題目、重驗前置證據、使用獨立 committed source，並清理已觀察程序。正常退出仍無法證明所有脫離後代消失，結果維持 UNVERIFIED；不可據此宣稱永久啟用已通過。 |
+| `maintenance_scripts/codex_subagent_runner.py` | 綁定既有 admission／delivery／Context 的有限唯讀審查候選；凍結題目、重驗前置證據、使用獨立 committed source，並清理已觀察程序。review.verdict 與 cleanup_status 分開：清理觀察不確定本身不否決有效審查；已觀察程序清理後仍存活才阻止後續。僅涵蓋已觀察程序，不宣稱完整隔離或 main 已採用。 |
 | `maintenance_scripts/codex_subagent_guard.py` | 原生子代理 hook 的範圍與遞迴拒絕檢查。保留原生自動派發關閉；此腳本本身不構成安裝、信任或平台隔離證明。 |
 
 ## 2026-07-30 S2E-LW1 B1 recovery anchor
