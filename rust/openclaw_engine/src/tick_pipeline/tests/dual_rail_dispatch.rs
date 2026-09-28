@@ -565,6 +565,7 @@ fn test_close_maker_reprice_direction_through_real_chain() {
 
     // register：鏡射 dispatch.rs:707 Register（is_long: req.is_long = 訂單側）。
     let po = PendingOrder {
+        progress: Default::default(),
         order_link_id: req.order_link_id.clone(),
         symbol: req.symbol.clone(),
         is_long: req.is_long, // ← 訂單側（SELL=false），非持倉方向

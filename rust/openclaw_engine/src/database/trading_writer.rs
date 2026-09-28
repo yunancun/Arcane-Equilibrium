@@ -860,7 +860,8 @@ async fn flush_orders(pool: &DbPool, buf: &mut Vec<TradingMsg>) {
                     b.push_bind("linear"); // Bybit USDT perp default / USDT 永續默認
                                            // DEPRECATED is_paper derived from engine_mode (Grafana compat)
                     b.push_bind(engine_mode != "live");
-                    b.push_bind("Working"); // order enters this table when exchange confirms
+                    // Order 由送出前註冊產生；venue 狀態另記 order_state_changes。
+                    b.push_bind("PendingSubmit");
                     b.push_bind(engine_mode.as_str());
                     // P2-ORDERS-INTENT-ID-WRITER-GAP-1：Option<&str> → SQL TEXT NULL
                     b.push_bind(intent_id.as_deref());

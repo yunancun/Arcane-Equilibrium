@@ -16,9 +16,9 @@ mod cross_engine_tests;
 mod earn_ipc_tests;
 // SM Option-2 收斂 step (i)（2026-06-02）：治理 lease + 唯讀投影 handler round-trip
 // + fail-closed 測試。
-mod governance_ipc_tests;
 mod exit_config_ipc_tests;
 mod funding_settlement_tests;
+mod governance_ipc_tests;
 mod governor_override_tests;
 mod handlers_paper_cmd_tests;
 // FIX-G7-09B-INTENT-LIMIT-DROP-1 (2026-04-25): pin trading.orders.order_type
@@ -103,6 +103,7 @@ fn test_update_strategy_params_json_roundtrip() {
 fn test_pending_order_clone_preserves_state() {
     // PendingOrder must be cloneable for matching path (fill arrives before order update)
     let po = super::PendingOrder {
+        progress: Default::default(),
         order_link_id: "oc_1".into(),
         symbol: "BTCUSDT".into(),
         is_long: true,

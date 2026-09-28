@@ -5,6 +5,7 @@ use super::funding_settlement::{apply_and_emit_funding_settlement, is_funding_ex
 use super::loop_handlers::{
     dispatch_close_maker_fallback_from_pending, pending_order_accepts_fill, LoopState,
 };
+use super::order_lifecycle::OrderStatus;
 use super::pending_sweep;
 use super::types::ExchangeEvent;
 use super::unattributed_emit::try_emit_unattributed_fill;
@@ -34,65 +35,13 @@ fn close_maker_terminal_fallback_reason(
     }
 }
 
-fn emit_terminal_order_state_change(
-    order_tx: Option<&tokio::sync::mpsc::Sender<crate::database::TradingMsg>>,
-    pipeline: &TickPipeline,
-    po: &super::types::PendingOrder,
-    to_status: &str,
-    reason: String,
-    label: &'static str,
-) {
-    if let Some(tx) = order_tx {
-        let em = pipeline.effective_engine_mode().to_string();
-        let _ = crate::database::try_send_trading_msg(
-            tx,
-            crate::database::TradingMsg::OrderStateChange {
-                order_id: po.order_link_id.clone(),
-                ts_ms: openclaw_core::now_ms(),
-                from_status: Some("Working".into()),
-                to_status: to_status.to_string(),
-                filled_qty: None,
-                avg_price: None,
-                reason: Some(reason),
-                engine_mode: em,
-            },
-            label,
-        );
-    }
-}
-
 // ─────────────────────────────────────────────────────────────────────────────
 // Arm C: exchange events (fills / order updates / position / DCP / disconnect).
 // Arm C：交易所事件（成交 / 訂單狀態 / 持倉 / DCP / 斷連）。
 // ─────────────────────────────────────────────────────────────────────────────
 
-/// Arm C handler: dispatch a single `ExchangeEvent` variant:
-///   - `Fill`: dedup by exec_id (P0-2 + FIX-33 O(1) HashSet + VecDeque FIFO),
-///     parse exec fields, estimate missing exec_fee via per-symbol rate
-///     (FIX-19b), match pending order by `order_id → order_link_id` mapping
-///     (P0-1 fallback to symbol+side scan), call `pipeline.apply_confirmed_fill`
-///     with signal-time context_id (FILL-CONTEXT-LINKAGE-1), emit
-///     OrderStateChange Working → Filled/PartiallyFilled, remove fully-filled
-///     tracker rows.
-///   - `OrderUpdate`: populate `order_id_to_link` mapping; on terminal status
-///     (Cancelled/Rejected/Deactivated) classify reject reason (EDGE-P2-3
-///     Phase 1B-2), clear pending_close flag for close orders (P0-4), emit
-///     OrderStateChange with reject category label, remove tracker row.
-///   - `PositionUpdate`: mirror exchange position state into paper_state
-///     (B-1 Phase 2); `side="None"` / empty → flat (size=0).
-///   - `DcpTriggered`: exchange auto-cancelled all orders → terminalize rows,
-///     clear trackers, and dispatch reduce-only market fallback for close-maker
-///     orders when a local position still exists.
-///   - `Disconnected`: private WS down → warn with pending-order count.
-///
-/// Note: original `continue` semantics (line 124 pre-refactor) become early
-/// `return` from this fn; next select! iteration naturally enters the next
-/// arm — behaviourally equivalent.
-/// Arm C handler：分派單個 `ExchangeEvent`。原版 `continue` 語意改為 fn
-/// 內 early `return`，下個 select! 迭代自然進下一 arm，行為等價。
-// F4-RETURN Issue 2 (2026-04-26): async because F4-1 emitter uses send().await
-// for back-pressure. mod.rs Arm C is already async — propagation is just `.await`.
-// F4-RETURN Issue 2（2026-04-26）：async — F4-1 emitter 改 send().await 取背壓。
+/// WS 成交是持倉寫入來源；order topic 推進委託狀態並保留未收齊的 execution。
+/// DCP／斷線不能替代單筆終態確認；reduce-only 保護沿既有有界 fallback。
 pub(super) async fn handle_exchange_event(
     evt: Option<ExchangeEvent>,
     pipeline: &mut TickPipeline,
@@ -108,19 +57,8 @@ pub(super) async fn handle_exchange_event(
                 tracing::warn!(exec_id = %exec.exec_id, "duplicate fill skipped / 重複成交已跳過");
                 return;
             }
-            state.seen_exec_set.insert(exec.exec_id.clone());
-            state.seen_exec_order.push_back(exec.exec_id.clone());
-            if state.seen_exec_order.len() > LoopState::MAX_SEEN_EXEC_IDS {
-                if let Some(old) = state.seen_exec_order.pop_front() {
-                    state.seen_exec_set.remove(&old);
-                }
-            }
-
-            let exec_qty: f64 = exec.exec_qty.parse().unwrap_or(0.0);
-            let exec_price: f64 = exec.exec_price.parse().unwrap_or(0.0);
-            let exec_ts: u64 = exec.exec_time.parse().unwrap_or(0);
-
             if is_funding_execution(&exec) {
+                remember_execution(state, &exec.exec_id);
                 let emitted = apply_and_emit_funding_settlement(pipeline, &exec, order_tx).await;
                 snapshot_writer.force_write(&pipeline.snapshot());
                 tracing::info!(
@@ -133,6 +71,28 @@ pub(super) async fn handle_exchange_event(
                 return;
             }
 
+            let valid_positive = |value: &str| {
+                value
+                    .parse::<f64>()
+                    .ok()
+                    .filter(|v| v.is_finite() && *v > 0.0)
+            };
+            let (Some(exec_qty), Some(exec_price), Some(exec_ts)) = (
+                valid_positive(&exec.exec_qty),
+                valid_positive(&exec.exec_price),
+                exec.exec_time.parse::<u64>().ok().filter(|t| *t > 0),
+            ) else {
+                tracing::error!(exec_id=%exec.exec_id, "Invalid execution values; awaiting valid WS/REST evidence");
+                return;
+            };
+            if exec.exec_id.is_empty()
+                || exec.symbol.is_empty()
+                || !matches!(exec.side.as_str(), "Buy" | "Sell")
+            {
+                tracing::error!(exec_id=%exec.exec_id, "Invalid execution identity; retaining pending tracker");
+                return;
+            }
+
             // P0-1 fix: Match fill via order_id → order_link_id mapping.
             // OrderUpdate populates the mapping, Fill uses it.
             // FIX-FEE-POSTONLY-1 (G7-09): hoisted above fee compute so the
@@ -142,7 +102,14 @@ pub(super) async fn handle_exchange_event(
             // cases, and unresolved (TIF=None) degrades to taker (safe).
             // FIX-FEE-POSTONLY-1：hoist matched_key 至 fee 計算前，以便
             // 依 PendingOrder.time_in_force 分流 maker/taker 費率。
-            let mut matched_key = state
+            let mut matched_key = if !exec.order_link_id.is_empty() {
+                // 明確 orderLinkId 優先，未知 ID 不可落入同 symbol 猜測。
+                state
+                    .pending_orders
+                    .contains_key(&exec.order_link_id)
+                    .then(|| exec.order_link_id.clone())
+            } else {
+                state
                 .order_id_to_link
                 .get(&exec.order_id)
                 .cloned()
@@ -176,7 +143,8 @@ pub(super) async fn handle_exchange_event(
                         }
                         None
                     }
-                });
+                })
+            };
             if let Some(key) = matched_key.as_ref() {
                 if !state.pending_orders.contains_key(key) {
                     state.order_id_to_link.remove(&exec.order_id);
@@ -255,7 +223,13 @@ pub(super) async fn handle_exchange_event(
 
             if let Some(key) = matched_key {
                 if let Some(po) = state.pending_orders.get_mut(&key) {
-                    po.cum_filled_qty += exec_qty;
+                    if po.progress.applied_execution_ids.contains(&exec.exec_id) {
+                        return;
+                    }
+                    if po.symbol != exec.symbol || po.is_long != (exec.side == "Buy") {
+                        tracing::error!(exec_id=%exec.exec_id, "Execution does not match pending order identity");
+                        return;
+                    }
                     let liquidity_role = fill_liquidity_role(exec.is_maker, matched_tif);
                     // V145：同一純函數 adverse_slippage_bps 按 liquidity_role 互斥
                     // 分流到兩個正交 column —— taker 寫 slippage_bps（穿越 spread 的
@@ -285,6 +259,10 @@ pub(super) async fn handle_exchange_event(
                     // 訊號時刻 context_id 傳入 apply_confirmed_fill，
                     // 使 trading.fills.entry_context_id 與
                     // learning.decision_features.context_id 對齊。
+                    let preserve_close_guard = po.is_close
+                        && (po.progress.replacement_order_link_id.is_some()
+                            || state.close_maker_fallback_dispatched.contains(&key))
+                        && pipeline.has_pending_close(&po.symbol);
                     pipeline.apply_confirmed_fill_with_close_maker_audit(
                         &exec.symbol,
                         po.is_long,
@@ -309,25 +287,45 @@ pub(super) async fn handle_exchange_event(
                         // PHANTOM-FILL-FIX-1（PA T2/T3）：透傳這筆成交是否為 reduce-only/平倉。
                         // reduce-only fill 在本地無倉時 no-op（不開幻影倉，§4.3）。
                         po.is_close,
+                        Some(po.sent_ts_ms),
                     );
+                    // Commit dedup only after validated execution accounting.
+                    po.cum_filled_qty += exec_qty;
+                    po.progress
+                        .applied_execution_ids
+                        .insert(exec.exec_id.clone());
+                    if preserve_close_guard {
+                        pipeline.retain_pending_close(&po.symbol);
+                    }
                     snapshot_writer.force_write(&pipeline.snapshot());
+                    settle_pending_lease(
+                        po,
+                        pipeline,
+                        openclaw_core::governance_core::LeaseOutcome::Consumed,
+                    );
 
-                    let fully_filled = po.cum_filled_qty >= po.qty * 0.999;
+                    let fully_filled = if po.progress.status == OrderStatus::Filled {
+                        po.progress.executions_accounted(po.cum_filled_qty)
+                    } else {
+                        po.qty > 0.0 && po.cum_filled_qty + 1e-10 >= po.qty
+                    };
+                    let previous_status = po.progress.status;
+                    if fully_filled {
+                        po.progress.status = OrderStatus::Filled;
+                    } else if !po.progress.status.is_terminal() {
+                        po.progress.status = OrderStatus::PartiallyFilled;
+                    }
                     // Emit order state change: Working → Filled / PartiallyFilled.
                     // 發出訂單狀態轉換：Working → Filled / PartiallyFilled。
                     if let Some(tx) = order_tx {
                         let em = pipeline.effective_engine_mode().to_string();
-                        let to_status = if fully_filled {
-                            "Filled"
-                        } else {
-                            "PartiallyFilled"
-                        };
+                        let to_status = po.progress.status.as_str();
                         let _ = crate::database::try_send_trading_msg(
                             tx,
                             crate::database::TradingMsg::OrderStateChange {
                                 order_id: po.order_link_id.clone(),
                                 ts_ms: exec_ts,
-                                from_status: Some("Working".into()),
+                                from_status: Some(previous_status.as_str().into()),
                                 to_status: to_status.into(),
                                 filled_qty: Some(po.cum_filled_qty),
                                 avg_price: Some(exec_price),
@@ -389,6 +387,7 @@ pub(super) async fn handle_exchange_event(
                             .order_id_to_link
                             .retain(|_, link| link.as_str() != key.as_str());
                         state.pending_orders.remove(&key);
+                        pipeline.exchange_submission_guard.resolve(&key);
                     } else if pending_sweep::tighten_postonly_entry_after_partial(po, exec_ts) {
                         tracing::info!(
                             order_link_id = %key,
@@ -399,6 +398,7 @@ pub(super) async fn handle_exchange_event(
                         );
                     }
                 }
+                finish_terminal_pending(&key, state, pipeline);
             } else {
                 // F4-1 (2026-04-26): unmatched WS fill → audit row instead of
                 // silent drop. Bybit auto-actions (funding / dust / 补单) land
@@ -437,130 +437,79 @@ pub(super) async fn handle_exchange_event(
                     if emitted { "已落" } else { "已跳過（paper/test）" }
                 );
             }
+            remember_execution(state, &exec.exec_id);
         }
         Some(ExchangeEvent::OrderUpdate(order)) => {
-            // P0-1: Build order_id → order_link_id mapping for fill matching
-            if !order.order_link_id.is_empty() && !order.order_id.is_empty() {
-                state
-                    .order_id_to_link
-                    .insert(order.order_id.clone(), order.order_link_id.clone());
-            }
-            // Match by order_link_id directly
-            if !order.order_link_id.is_empty() {
-                if state.pending_orders.get_mut(&order.order_link_id).is_some() {
-                    let status = &order.order_status;
-                    tracing::info!(
-                        order_link_id = %order.order_link_id,
-                        status = %status,
-                        symbol = %order.symbol,
-                        "pending order status update / 待處理訂單狀態更新"
-                    );
-                    if status == "Cancelled" || status == "Rejected" || status == "Deactivated" {
-                        // EDGE-P2-3 Phase 1B-2: classify Bybit's rejectReason
-                        // string (non-empty only on terminal status). Surface
-                        // PostOnly-cross at warn! so it's grep-able; route
-                        // the short category label into DB `reason` so the
-                        // audit log is queryable without parsing free-form
-                        // strings. Strategy callback wiring lands in 1B-3.
-                        // EDGE-P2-3 Phase 1B-2：分類 Bybit rejectReason 字串。
-                        // PostOnly-cross 以 warn! 顯性記錄；短標籤進 DB reason。
-                        let reject_category =
-                            crate::strategies::maker_rejection::classify(&order.reject_reason);
-                        let reject_label = reject_category.label();
-                        if reject_category.is_post_only_cross() {
-                            tracing::warn!(
-                                order_link_id = %order.order_link_id,
-                                symbol = %order.symbol,
-                                status = %status,
-                                reject_reason = %order.reject_reason,
-                                "maker order rejected: PostOnly would have crossed \
-                                 / maker 掛單遭拒：PostOnly 會越過 book"
-                            );
-                        } else if reject_category.is_backpressure() {
-                            tracing::warn!(
-                                order_link_id = %order.order_link_id,
-                                symbol = %order.symbol,
-                                status = %status,
-                                reject_reason = %order.reject_reason,
-                                "maker order rejected: account-level backpressure \
-                                 / maker 掛單遭拒：帳戶級背壓"
-                            );
-                        }
-                        // P0-4: If this was a close order, clear pending_close flag
-                        // P0-4：如果是平倉訂單，清除待處理平倉標記
-                        let terminal_po = state.pending_orders.get(&order.order_link_id).cloned();
-                        if let Some(po) = terminal_po.as_ref() {
-                            if po.is_close {
-                                pipeline.clear_pending_close(&po.symbol);
-                                tracing::warn!(
-                                    order_link_id = %order.order_link_id,
-                                    symbol = %po.symbol,
-                                    "close order {} — clearing pending_close / 平倉訂單{} — 清除待處理平倉",
-                                    status, status,
-                                );
-                                let (fallback_reason, rate_limit_scope) =
-                                    close_maker_terminal_fallback_reason(
-                                        status,
-                                        &reject_category,
-                                        po.cancel_requested_ts_ms.is_some(),
-                                    );
-                                dispatch_close_maker_fallback_from_pending(
-                                    state,
-                                    pipeline,
-                                    po,
-                                    fallback_reason,
-                                    rate_limit_scope,
-                                    "order_update_terminal",
-                                );
-                            }
-                            // Emit order state change: Working → Cancelled/Rejected.
-                            // EDGE-P2-3 Phase 1B-2: append classified reject label
-                            // when Bybit provided a rejectReason; keeps legacy
-                            // `exchange_status:{status}` prefix stable for any
-                            // consumer grepping the reason column.
-                            // 發出訂單狀態轉換：Working → Cancelled/Rejected。
-                            // 1B-2：若 Bybit 附 rejectReason，追加分類短標；保留
-                            // legacy `exchange_status:{status}` 前綴以維持下游相容。
-                            let reason_str = if order.reject_reason.is_empty() {
-                                format!("exchange_status:{}", status)
+            let id = &order.order_link_id;
+            if let Some(po) = state.pending_orders.get_mut(id) {
+                if !order.order_id.is_empty() {
+                    state
+                        .order_id_to_link
+                        .insert(order.order_id.clone(), id.clone());
+                }
+                let next = match order.order_status.as_str() {
+                    "New" | "Untriggered" | "Triggered" if po.cum_filled_qty > 0.0 => {
+                        Some(OrderStatus::PartiallyFilled)
+                    }
+                    "New" | "Untriggered" | "Triggered" => Some(OrderStatus::Working),
+                    "PartiallyFilled" => Some(OrderStatus::PartiallyFilled),
+                    "Filled" => Some(OrderStatus::Filled),
+                    "Cancelled" => Some(OrderStatus::Cancelled),
+                    "PartiallyFilledCanceled" => Some(OrderStatus::PartiallyFilledCanceled),
+                    "Rejected" => Some(OrderStatus::Rejected),
+                    "Deactivated" => Some(OrderStatus::Deactivated),
+                    _ => None,
+                };
+                if let Some(next) = next {
+                    let previous = po.progress.status;
+                    if (!previous.is_terminal() || previous == next)
+                        && !(previous == OrderStatus::PartiallyFilled
+                            && next == OrderStatus::Working)
+                    {
+                        let reported = order.cum_exec_qty.parse::<f64>().ok().filter(|n| {
+                            n.is_finite() && *n >= 0.0 && (next != OrderStatus::Filled || *n > 0.0)
+                        });
+                        po.progress.venue_filled_qty = reported
+                            .map(|qty| qty.max(po.progress.venue_filled_qty.unwrap_or(0.0)))
+                            .or(po.progress.venue_filled_qty);
+                        po.progress.venue_reject_reason = order.reject_reason.clone();
+                        po.progress.status = next;
+                        if previous != next {
+                            let reason = if order.reject_reason.is_empty() {
+                                format!("exchange_status:{}", order.order_status)
                             } else {
                                 format!(
                                     "exchange_status:{}|reject={}|category={}",
-                                    status, order.reject_reason, reject_label,
+                                    order.order_status,
+                                    order.reject_reason,
+                                    crate::strategies::maker_rejection::classify(
+                                        &order.reject_reason
+                                    )
+                                    .label()
                                 )
                             };
                             if let Some(tx) = order_tx {
-                                let em = pipeline.effective_engine_mode().to_string();
                                 let _ = crate::database::try_send_trading_msg(
                                     tx,
                                     crate::database::TradingMsg::OrderStateChange {
-                                        order_id: po.order_link_id.clone(),
+                                        order_id: id.clone(),
                                         ts_ms: openclaw_core::now_ms(),
-                                        from_status: Some("Working".into()),
-                                        to_status: status.to_string(),
-                                        filled_qty: None,
+                                        from_status: Some(previous.as_str().into()),
+                                        to_status: next.as_str().into(),
+                                        filled_qty: po.progress.venue_filled_qty,
                                         avg_price: None,
-                                        reason: Some(reason_str),
-                                        engine_mode: em,
+                                        reason: Some(reason),
+                                        engine_mode: pipeline.effective_engine_mode().to_string(),
                                     },
-                                    "order_state_terminal",
+                                    "order_state_venue",
                                 );
                             }
                         }
-                        tracing::warn!(
-                            order_link_id = %order.order_link_id,
-                            status = %status,
-                            reject_category = %reject_label,
-                            "pending order failed — removing / 待處理訂單失敗，移除"
-                        );
-                        state.order_id_to_link.remove(&order.order_id);
-                        state
-                            .order_id_to_link
-                            .retain(|_, link| link.as_str() != order.order_link_id.as_str());
-                        state.pending_orders.remove(&order.order_link_id);
                     }
                 }
             }
+            // Filled／Cancel 回報先到時保留 tracker，直到 execution 數量已入帳。
+            finish_terminal_pending(id, state, pipeline);
         }
         Some(ExchangeEvent::PositionUpdate(pos)) => {
             // PHANTOM-FILL-FIX-1（2026-06-07，PA Option A T2）：把 WS PositionUpdate
@@ -654,20 +603,36 @@ pub(super) async fn handle_exchange_event(
                 }
             }
         }
-        Some(ExchangeEvent::DcpTriggered) => {
-            // DCP is a global exchange-side cancel. Close-maker orders reduce
-            // exposure, so survival-first handling tries one reduce-only market
-            // fallback when a local open position still exists; every original
-            // order also gets an explicit terminal state before trackers clear.
-            let pending: Vec<_> = state.pending_orders.values().cloned().collect();
-            let count = pending.len();
-            pipeline.clear_all_pending_close();
+        Some(event @ (ExchangeEvent::DcpTriggered | ExchangeEvent::Disconnected)) => {
+            let is_dcp = matches!(event, ExchangeEvent::DcpTriggered);
+            let now_ms = openclaw_core::now_ms();
+            let pending: Vec<_> = state
+                .pending_orders
+                .values_mut()
+                .map(|po| {
+                    // Repeated disconnect/DCP signals cannot bypass the cooldown.
+                    po.progress.reconciliation_retry_after_ms.get_or_insert(0);
+                    po.clone()
+                })
+                .collect();
             for po in &pending {
-                let mut reason = "dcp_triggered".to_string();
-                if po.is_close
-                    && po.time_in_force == Some(crate::order_manager::TimeInForce::PostOnly)
-                {
-                    let fallback_dispatched = dispatch_close_maker_fallback_from_pending(
+                super::loop_pending_registration::handle_pending_registration(
+                    Some(super::types::PendingOrderEvent::ConfirmationUnknown {
+                        order_link_id: po.order_link_id.clone(),
+                        reason: if is_dcp {
+                            "dcp_triggered:await_per_order_confirmation"
+                        } else {
+                            "ws_disconnected:await_per_order_confirmation"
+                        }
+                        .into(),
+                        ts_ms: now_ms,
+                    }),
+                    pipeline,
+                    state,
+                    order_tx,
+                );
+                if is_dcp {
+                    dispatch_close_maker_fallback_from_pending(
                         state,
                         pipeline,
                         po,
@@ -675,47 +640,80 @@ pub(super) async fn handle_exchange_event(
                         None,
                         "dcp_triggered",
                     );
-                    reason = if fallback_dispatched {
-                        "dcp_triggered|close_maker_fallback=fallback_to_taker_mandatory".to_string()
-                    } else {
-                        "dcp_triggered|close_maker_fallback=not_dispatched".to_string()
-                    };
                 }
-                emit_terminal_order_state_change(
-                    order_tx,
-                    pipeline,
-                    po,
-                    "Cancelled",
-                    reason,
-                    "order_state_dcp_cancelled",
-                );
             }
-            if count > 0 {
-                tracing::warn!(
-                    count = count,
-                    "DCP triggered — terminalized and cleared {} pending orders / DCP 觸發，終態化並清除 {} 個待處理訂單",
-                    count,
-                    count,
-                );
-                state.pending_orders.clear();
-                state.order_id_to_link.clear();
-            }
-            tracing::warn!(
-                "DCP triggered — exchange cancelled active orders, close-maker fallbacks attempted where safe"
-            );
-        }
-        Some(ExchangeEvent::Disconnected) => {
-            // Private WS disconnected — pending orders may be in unknown state
-            if !state.pending_orders.is_empty() {
-                tracing::warn!(
-                    pending = state.pending_orders.len(),
-                    "private WS disconnected with {} pending orders — reconcile on reconnect \
-                    / 私有 WS 斷連，{} 個待處理訂單 — 重連後對賬",
-                    state.pending_orders.len(),
-                    state.pending_orders.len(),
-                );
+            super::loop_tick::schedule_pending_reconciliation(state, now_ms);
+            if !pending.is_empty() && state.dcp_reconciler.is_none() {
+                tracing::error!("Order reconciliation unavailable; retaining unresolved trackers");
             }
         }
         None => {} // channel closed
+    }
+}
+
+fn remember_execution(state: &mut LoopState, exec_id: &str) {
+    state.seen_exec_set.insert(exec_id.to_owned());
+    state.seen_exec_order.push_back(exec_id.to_owned());
+    if state.seen_exec_order.len() > LoopState::MAX_SEEN_EXEC_IDS {
+        if let Some(old) = state.seen_exec_order.pop_front() {
+            state.seen_exec_set.remove(&old);
+        }
+    }
+}
+
+/// 終態只結束委託；尚未收齊的 execution 必須仍能匹配原 intent。
+fn finish_terminal_pending(id: &str, state: &mut LoopState, pipeline: &mut TickPipeline) {
+    let Some(mut po) = state.pending_orders.get(id).cloned() else {
+        return;
+    };
+    if !po.progress.executions_accounted(po.cum_filled_qty) {
+        return;
+    }
+    let outcome = if po.cum_filled_qty > 0.0 {
+        openclaw_core::governance_core::LeaseOutcome::Consumed
+    } else if po.progress.status == OrderStatus::Rejected {
+        openclaw_core::governance_core::LeaseOutcome::Failed
+    } else {
+        openclaw_core::governance_core::LeaseOutcome::Cancelled
+    };
+    settle_pending_lease(&mut po, pipeline, outcome);
+    if po.is_close
+        && po.progress.replacement_order_link_id.is_none()
+        && !state.close_maker_fallback_dispatched.contains(id)
+    {
+        pipeline.clear_pending_close(&po.symbol);
+    }
+    if po.progress.status != OrderStatus::Filled {
+        let category =
+            crate::strategies::maker_rejection::classify(&po.progress.venue_reject_reason);
+        let (reason, scope) = close_maker_terminal_fallback_reason(
+            po.progress.status.as_str(),
+            &category,
+            po.cancel_requested_ts_ms.is_some(),
+        );
+        dispatch_close_maker_fallback_from_pending(
+            state,
+            pipeline,
+            &po,
+            reason,
+            scope,
+            "order_terminal",
+        );
+    }
+    state.pending_orders.remove(id);
+    state.order_id_to_link.retain(|_, link| link != id);
+    pipeline.exchange_submission_guard.resolve(id);
+}
+
+fn settle_pending_lease(
+    po: &mut super::types::PendingOrder,
+    pipeline: &TickPipeline,
+    outcome: openclaw_core::governance_core::LeaseOutcome,
+) {
+    if let Some(id) = po.decision_lease_id.take() {
+        // REST ACK may already have settled it; avoid duplicate release events.
+        if pipeline.governance.get_lease_by_id(&id).is_ok() {
+            pipeline.release_decision_lease(Some(&id), outcome, "venue_confirmation");
+        }
     }
 }

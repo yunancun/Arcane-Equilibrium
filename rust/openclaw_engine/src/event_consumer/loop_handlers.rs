@@ -33,6 +33,9 @@ use crate::tick_pipeline::{EngineEvent, PipelineKind, TickPipeline};
 pub(super) struct LoopState {
     /// EXT-1 pending order tracking / EXT-1 待處理訂單追蹤
     pub pending_orders: HashMap<String, PendingOrder>,
+    pub dcp_reconciler: Option<super::dcp_reconciliation::DcpReconciler>,
+    pub maker_cancel_outcome_tx:
+        Option<tokio::sync::mpsc::UnboundedSender<super::loop_tick::MakerCancelOutcome>>,
     /// P0-1 order_id → order_link_id mapping (used for fill matching)
     /// P0-1 order_id → order_link_id 映射（成交匹配用）
     pub order_id_to_link: HashMap<String, String>,
@@ -70,6 +73,8 @@ impl LoopState {
         let now = Instant::now();
         Self {
             pending_orders: HashMap::new(),
+            dcp_reconciler: None,
+            maker_cancel_outcome_tx: None,
             order_id_to_link: HashMap::new(),
             seen_exec_set: std::collections::HashSet::new(),
             seen_exec_order: std::collections::VecDeque::new(),
@@ -97,9 +102,15 @@ pub(super) fn dispatch_close_maker_fallback_from_pending(
     rate_limit_scope: Option<CloseMakerRateLimitScope>,
     source: &str,
 ) -> bool {
+    if po.progress.replacement_order_link_id.is_some() {
+        return false;
+    }
     if !fallback_reason.requires_market_fallback()
         || !po.is_close
         || po.time_in_force != Some(TimeInForce::PostOnly)
+        || po.progress.status == super::order_lifecycle::OrderStatus::Filled
+        || (po.progress.status.is_terminal()
+            && !po.progress.executions_accounted(po.cum_filled_qty))
     {
         return false;
     }
@@ -152,7 +163,7 @@ pub(super) fn dispatch_close_maker_fallback_from_pending(
     } else {
         position.qty
     };
-    pipeline.dispatch_close_maker_market_fallback(
+    let dispatched = pipeline.dispatch_close_maker_market_fallback(
         &po.order_link_id,
         &po.symbol,
         po.is_long,
@@ -162,7 +173,13 @@ pub(super) fn dispatch_close_maker_fallback_from_pending(
         audit,
         fallback_reason,
         rate_limit_scope,
-    )
+    );
+    if !dispatched {
+        state
+            .close_maker_fallback_dispatched
+            .remove(&po.order_link_id);
+    }
+    dispatched
 }
 
 // F4-RETURN Issue 1 (2026-04-26): F4-1 emitter moved to sibling
@@ -294,6 +311,7 @@ mod tests {
 
     fn close_maker_pending_for_test() -> PendingOrder {
         PendingOrder {
+            progress: Default::default(),
             order_link_id: "oc_close_maker_original".to_string(),
             symbol: "BTCUSDT".to_string(),
             is_long: false,

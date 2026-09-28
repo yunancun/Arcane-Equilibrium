@@ -1053,6 +1053,8 @@ pub struct TickPipeline {
     /// EXT-1: Symbols with pending close orders (prevent duplicate stop-close in exchange mode).
     /// EXT-1：有待處理平倉訂單的交易對（防止交易所模式下重複止損平倉）。
     pending_close_symbols: std::collections::HashSet<String>,
+    /// H1：與 dispatch 共用未結案單集合；平倉不受開倉攔截影響。
+    pub(crate) exchange_submission_guard: crate::event_consumer::order_lifecycle::SubmissionGuard,
     /// RRC-1-A1: H0 Gate — pre-strategy health/risk/freshness gate (shadow mode by default).
     /// RRC-1-A1：H0 門控 — 策略前的健康/風控/新鮮度檢查（默認影子模式）。
     pub h0_gate: H0Gate,

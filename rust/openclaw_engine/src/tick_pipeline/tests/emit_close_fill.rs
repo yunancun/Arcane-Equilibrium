@@ -540,7 +540,8 @@ fn apply_confirmed_fill_persists_close_maker_audit_payload() {
             fallback_reason: None,
             rate_limit_scope: None,
         }),
-        true, // PHANTOM-FILL-FIX-1: reduce-only/close fill
+        true,        // PHANTOM-FILL-FIX-1: reduce-only/close fill
+        Some(1_990), // Matched registration identity coexists with the maker audit.
     );
 
     let _open = rx.try_recv().expect("open fill");
@@ -557,6 +558,7 @@ fn apply_confirmed_fill_persists_close_maker_audit_payload() {
             assert_eq!(close_maker_fallback_reason, None);
             assert_eq!(liquidity_role.as_deref(), Some("maker"));
             let details = details.expect("close-maker details");
+            assert_eq!(details["order_registered_ts_ms"], serde_json::json!(1_990));
             assert_eq!(
                 details["close_initial_limit_price"],
                 serde_json::json!(51_000.1)
@@ -627,6 +629,7 @@ fn apply_confirmed_fill_persists_close_maker_fallback_reason() {
             rate_limit_scope: None,
         }),
         true, // PHANTOM-FILL-FIX-1: reduce-only/close fill
+        None, // Legacy caller without a pending registration identity.
     );
 
     let _open = rx.try_recv().expect("open fill");
@@ -708,6 +711,7 @@ fn apply_confirmed_fill_persists_close_maker_rate_limit_scope_detail() {
             rate_limit_scope: Some("per_symbol".into()),
         }),
         true, // PHANTOM-FILL-FIX-1: reduce-only/close fill
+        None, // Legacy caller without a pending registration identity.
     );
 
     let _open = rx.try_recv().expect("open fill");

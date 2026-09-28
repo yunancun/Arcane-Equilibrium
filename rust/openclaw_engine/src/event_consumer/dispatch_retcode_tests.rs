@@ -110,14 +110,7 @@ fn test_classify_ip_rate_limit_is_transient() {
 
 #[test]
 fn test_classify_duplicate_order_link_id_10001_is_structural() {
-    // P2-ORDERLINKID-110072 follow-up（2026-06-07，E2/BB flag）：10001+duplicate
-    // 的 classify 行為由 NoOp **改為 Structural**，與 110072 arm 對齊。
-    // 為什麼改：原無條件 NoOp 把 open 與 close 都當成功；open 撞重複 order_link_id
-    // 只可能是 id 撞歷史 = 開倉未成功，silent-success 是 fail-open 漏洞。
-    // close 的冪等成功 upgrade 下移到 consumption Structural 分支
-    // （close_dup_is_idempotent_success）——對 close 是同一 observable 成功結果。
-    // 大小寫不敏感（classify 用 to_ascii_lowercase）：lowercase 與 uppercase 同歸
-    // Structural（duplicate 偵測本身的 case 處理由 close_dup helper 測試覆蓋）。
+    // 重複 ID 禁止重試；dispatch 將結果保留為未知，而非成功／確定拒絕。
     let lower = biz(10001, "duplicate order_link_id rejected");
     assert_eq!(classify_dispatch_error(&lower), DispatchOutcome::Structural);
     let upper = biz(10001, "Duplicate orderLinkId rejected");
@@ -187,11 +180,7 @@ fn test_classify_110001_noop_110009_structural_no_regression() {
 
 #[test]
 fn test_classify_110072_duplicate_order_link_id_is_structural() {
-    // P2-ORDERLINKID-110072：classify 層維持 Structural（fail-closed）保護
-    // OPEN path——open 撞 110072 = id 撞歷史 = 開倉未成功，絕不可當成功。
-    // close retry 的冪等成功 upgrade 在 consumption Structural 分支以 is_close
-    // guard 處理（見 close_dup_is_idempotent_success），不在 classify 層。
-    // 此測試錨定顯式 110072 arm（防回退到 `_ => Structural` 後失去可發現性）。
+    // 110072 仍屬不重試類；未知結果由 dispatch 單獨處理。
     let e = biz(110072, "OrderLinkedID is duplicate");
     assert_eq!(classify_dispatch_error(&e), DispatchOutcome::Structural);
 }
@@ -277,7 +266,10 @@ fn test_classify_10001_invalid_order_link_id_format_is_structural() {
     // fail-closed，close 冪等 upgrade 下移到 consumption 層）。誠實改斷言為
     // Structural，反映 classify 層 duplicate 與非-duplicate 的 10001 同歸 Structural。
     let e_upper = biz(10001, "DUPLICATE order_link_id");
-    assert_eq!(classify_dispatch_error(&e_upper), DispatchOutcome::Structural);
+    assert_eq!(
+        classify_dispatch_error(&e_upper),
+        DispatchOutcome::Structural
+    );
 }
 
 #[test]
@@ -413,6 +405,7 @@ async fn test_run_dispatch_retry_noop_on_second_attempt_records_attempts_2() {
         DispatchRetryResult::NoOp {
             last_error,
             attempts,
+            ..
         } => {
             assert_eq!(attempts, 2, "NoOp on 2nd attempt must record attempts=2");
             match last_error {
@@ -463,6 +456,7 @@ async fn test_run_dispatch_retry_transient_exhaustion_returns_last_error() {
         DispatchRetryResult::TransientExhausted {
             last_error,
             attempts,
+            ..
         } => {
             assert_eq!(
                 attempts, 4,

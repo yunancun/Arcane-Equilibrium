@@ -34,6 +34,7 @@ use crate::demo_learning_lane_ledger::{
     attempt_id_for_reject_event, build_admission_ledger_record_with_placement,
     build_capture_error_ledger_record, AdmissionLedgerRecord,
 };
+use crate::event_consumer::order_lifecycle::SubmissionGuard;
 use crate::tick_pipeline::OrderDispatchRequest;
 
 const CHANNEL_CAPACITY: usize = 4096;
@@ -59,12 +60,14 @@ pub(crate) struct WriterMsg {
     pub(crate) placement_decision: Option<BoundedProbePlacementDecision>,
     pub(crate) active_order_request: Option<ActiveBoundedProbeOrderRequest>,
     pub(crate) order_dispatch_tx: Option<tokio::sync::mpsc::UnboundedSender<OrderDispatchRequest>>,
+    pub(crate) submission_guard: Option<SubmissionGuard>,
     pub(crate) candidate_evaluation_source_snapshot: Option<CandidateEvaluationSourceSnapshotV1>,
 }
 
 #[derive(Clone)]
 pub struct DemoLearningLaneWriterHandle {
     tx: Option<mpsc::Sender<WriterMsg>>,
+    submission_guard: Option<SubmissionGuard>,
     total_dropped: Arc<AtomicU64>,
     last_warn_ms: Arc<AtomicU64>,
 }
@@ -73,9 +76,14 @@ impl DemoLearningLaneWriterHandle {
     pub fn disabled() -> Self {
         Self {
             tx: None,
+            submission_guard: None,
             total_dropped: Arc::new(AtomicU64::new(0)),
             last_warn_ms: Arc::new(AtomicU64::new(0)),
         }
+    }
+
+    pub(crate) fn bind_submission_guard(&mut self, guard: SubmissionGuard) {
+        self.submission_guard = Some(guard);
     }
 
     pub fn is_enabled(&self) -> bool {
@@ -177,6 +185,7 @@ impl DemoLearningLaneWriterHandle {
                 placement_decision,
                 active_order_request,
                 order_dispatch_tx,
+                submission_guard: self.submission_guard.clone(),
                 candidate_evaluation_source_snapshot,
             };
             match tx.try_send(msg) {
@@ -214,6 +223,7 @@ impl DemoLearningLaneWriterHandle {
         (
             Self {
                 tx: Some(tx),
+                submission_guard: None,
                 total_dropped: Arc::new(AtomicU64::new(0)),
                 last_warn_ms: Arc::new(AtomicU64::new(0)),
             },
@@ -248,6 +258,7 @@ pub fn spawn(data_dir: PathBuf, cancel: CancellationToken) -> DemoLearningLaneWr
     tokio::spawn(run_writer(rx, plan_path, ledger_path, cancel));
     DemoLearningLaneWriterHandle {
         tx: Some(tx),
+        submission_guard: None,
         total_dropped: Arc::new(AtomicU64::new(0)),
         last_warn_ms: Arc::new(AtomicU64::new(0)),
     }
@@ -403,6 +414,7 @@ async fn run_writer(
                     placement_decision,
                     active_order_request,
                     order_dispatch_tx,
+                    submission_guard,
                     candidate_evaluation_source_snapshot,
                 } = msg;
                 let active_order_dispatch_channel_available = order_dispatch_tx.is_some();
@@ -491,7 +503,11 @@ async fn run_writer(
                     (refresh_ok, admission_build)
                 };
                 match admission_build {
-                    Ok(Some(result)) => {
+                    Ok(Some(mut result)) => {
+                        // Reserve before any admitted row reaches the durable ledger.
+                        let mut reservation = reserve_probe_admission(
+                            &mut result, submission_guard.as_ref(), order_dispatch_tx.as_ref(),
+                        );
                         let record = result
                             .record
                             .with_candidate_evaluation_source_snapshot(
@@ -522,6 +538,9 @@ async fn run_writer(
                                         if let Some(ref tx) = order_dispatch_tx {
                                             match dispatch_active_bounded_probe_order_draft(tx, draft) {
                                                 Ok(true) => {
+                                                    if let Some(reservation) = reservation.as_mut() {
+                                                        reservation.transferred = true;
+                                                    }
                                                     info!(
                                                         ledger_path = %ledger_path.display(),
                                                         "bounded Demo probe active order dispatched after admission ledger flush / bounded Demo probe active order 已在 admission ledger flush 後派發"
@@ -721,6 +740,63 @@ fn build_runtime_admission_result(
         ),
         active_order_draft,
     }))
+}
+
+// Own the queued guard until dispatch accepts it. Serialization, write/flush,
+// and channel failures must not leave a process-local submission lock behind.
+struct ProbeAdmissionReservation {
+    guard: SubmissionGuard,
+    order_link_id: String,
+    transferred: bool,
+}
+
+impl Drop for ProbeAdmissionReservation {
+    fn drop(&mut self) {
+        if !self.transferred {
+            self.guard.resolve(&self.order_link_id);
+        }
+    }
+}
+
+fn reserve_probe_admission(
+    result: &mut RuntimeAdmissionBuildResult,
+    guard: Option<&SubmissionGuard>,
+    tx: Option<&mpsc::UnboundedSender<OrderDispatchRequest>>,
+) -> Option<ProbeAdmissionReservation> {
+    let Some(draft) = result.active_order_draft.as_ref() else {
+        if result.record.allowed_to_submit_order {
+            result.record.allowed_to_submit_order = false;
+            result.record.decision = "ORDER_SUBMISSION_BLOCKED".into();
+            result.record.reason = "active_probe_draft_unavailable".into();
+        }
+        return None;
+    };
+    let reason = if tx.is_none_or(|tx| tx.is_closed()) {
+        "order_dispatch_channel_unavailable"
+    } else if !crate::bounded_probe_active_order::active_bounded_probe_effective_notional_within_cap(
+        draft.qty,
+        draft.limit_price,
+        draft.max_demo_notional_usdt_per_order,
+    ) {
+        "active_probe_notional_cap_exceeded"
+    } else {
+        match guard {
+            Some(guard) if guard.reserve_queued(&draft.lineage.order_link_id, false) => {
+                return Some(ProbeAdmissionReservation {
+                    guard: guard.clone(),
+                    order_link_id: draft.lineage.order_link_id.clone(),
+                    transferred: false,
+                });
+            }
+            Some(_) => "unresolved_order_blocks_probe_admission",
+            None => "shared_submission_guard_unbound",
+        }
+    };
+    result.record.allowed_to_submit_order = false;
+    result.record.decision = "ORDER_SUBMISSION_BLOCKED".into();
+    result.record.reason = reason.into();
+    result.active_order_draft = None;
+    None
 }
 
 pub(crate) fn bounded_probe_adapter_enabled_from_value(value: &str) -> bool {
@@ -1570,7 +1646,7 @@ mod tests {
     }
 
     #[test]
-    fn runtime_admission_dispatch_requires_channel_and_emits_candidate_matched_request() {
+    fn h1_probe_admission_requires_shared_reservation_before_durable_record() {
         let tmp = TempDir::new().unwrap();
         let plan_path = tmp.path().join("plan.json");
         std::fs::write(&plan_path, authorized_plan_json("2026-06-21T10:49:45Z")).unwrap();
@@ -1584,8 +1660,7 @@ mod tests {
             bbo_age_ms: 0,
         });
         let plan =
-            DemoLearningLanePlan::from_json_str(&authorized_plan_json("2026-06-21T10:49:45Z"))
-                .unwrap();
+            DemoLearningLanePlan::from_json_str(&authorized_plan_json("2026-06-21T10:49:45Z")).unwrap();
         let admission_decision = evaluate_probe_admission(
             &plan,
             &event,
@@ -1656,14 +1731,73 @@ mod tests {
         .expect("authorized plan and dispatch channel should build an admitted row");
         assert_eq!(with_channel.record.decision, "ADMIT_DEMO_LEARNING_PROBE");
         assert!(with_channel.record.allowed_to_submit_order);
+        let guard = SubmissionGuard::default();
+        let (tx, mut rx) = tokio::sync::mpsc::unbounded_channel();
+        guard.track("unresolved-other-order");
+        let mut blocked = with_channel.clone();
+        assert!(reserve_probe_admission(&mut blocked, Some(&guard), Some(&tx)).is_none());
+        let persisted: serde_json::Value =
+            serde_json::from_str(&blocked.record.to_json_string().unwrap()).unwrap();
+        assert_eq!(persisted["allowed_to_submit_order"], false);
+        assert_eq!(persisted["decision"], "ORDER_SUBMISSION_BLOCKED");
+        assert_eq!(
+            persisted["reason"],
+            "unresolved_order_blocks_probe_admission"
+        );
+        assert!(blocked.active_order_draft.is_none());
+        assert!(rx.try_recv().is_err());
+        assert!(guard.contains("unresolved-other-order"));
+        assert!(!guard.contains(&order_link_id));
+        guard.resolve("unresolved-other-order");
+
+        let mut unbound = with_channel.clone();
+        assert!(reserve_probe_admission(&mut unbound, None, Some(&tx)).is_none());
+        assert!(!unbound.record.allowed_to_submit_order);
+        let mut missing_draft = with_channel.clone();
+        missing_draft.active_order_draft = None;
+        assert!(reserve_probe_admission(&mut missing_draft, Some(&guard), Some(&tx)).is_none());
+        assert!(!missing_draft.record.allowed_to_submit_order);
+        // A failed persistence path drops the reservation without dispatching.
+        let mut write_failed = with_channel.clone();
+        let reservation = reserve_probe_admission(&mut write_failed, Some(&guard), Some(&tx)).unwrap();
+        assert!(guard.blocks_entry());
+        drop(reservation);
+        assert!(!guard.blocks_entry());
+        // A channel that closes after admission must release the queued guard.
+        let (failed_tx, failed_rx) = tokio::sync::mpsc::unbounded_channel();
+        let mut send_failed = with_channel.clone();
+        let reservation =
+            reserve_probe_admission(&mut send_failed, Some(&guard), Some(&failed_tx)).unwrap();
+        drop(failed_rx);
+        assert!(dispatch_active_bounded_probe_order_draft(
+            &failed_tx,
+            send_failed.active_order_draft.take().unwrap()
+        )
+        .is_err());
+        drop(reservation);
+        assert!(!guard.blocks_entry());
+        let mut closed = with_channel.clone();
+        assert!(reserve_probe_admission(&mut closed, Some(&guard), Some(&failed_tx)).is_none());
+        assert!(!closed.record.allowed_to_submit_order);
+
+        let mut with_channel = with_channel;
+        let mut reservation =
+            reserve_probe_admission(&mut with_channel, Some(&guard), Some(&tx)).unwrap();
         let draft = with_channel
             .active_order_draft
             .expect("admitted bounded probe should produce active order draft");
         assert_eq!(draft.lineage.order_link_id, order_link_id);
 
-        let (tx, mut rx) = tokio::sync::mpsc::unbounded_channel();
         assert!(dispatch_active_bounded_probe_order_draft(&tx, draft)
             .expect("dispatch channel should accept admitted draft"));
+        reservation.transferred = true;
+        drop(reservation);
+        assert!(guard.contains(&order_link_id));
+        assert!(
+            guard.reserve(&order_link_id, false),
+            "dispatcher claims producer admission once"
+        );
+        assert!(!guard.reserve(&order_link_id, false));
         let req = rx
             .try_recv()
             .expect("candidate-matched OrderDispatchRequest should be sent");
@@ -1746,6 +1880,7 @@ mod tests {
             placement_decision: None,
             active_order_request: None,
             order_dispatch_tx: None,
+            submission_guard: None,
             candidate_evaluation_source_snapshot: Some(valid_snapshot.clone()),
         })
         .await
@@ -1760,6 +1895,7 @@ mod tests {
             placement_decision: None,
             active_order_request: None,
             order_dispatch_tx: None,
+            submission_guard: None,
             candidate_evaluation_source_snapshot: Some(invalid_snapshot),
         })
         .await
@@ -1827,6 +1963,7 @@ mod tests {
             placement_decision: None,
             active_order_request: None,
             order_dispatch_tx: None,
+            submission_guard: None,
             candidate_evaluation_source_snapshot: Some(valid_snapshot.clone()),
         })
         .await
@@ -1839,6 +1976,7 @@ mod tests {
             placement_decision: None,
             active_order_request: None,
             order_dispatch_tx: None,
+            submission_guard: None,
             candidate_evaluation_source_snapshot: Some(transport_snapshot()),
         })
         .await
@@ -1891,6 +2029,7 @@ mod tests {
             placement_decision: None,
             active_order_request: None,
             order_dispatch_tx: None,
+            submission_guard: None,
             candidate_evaluation_source_snapshot: None,
         }
     }

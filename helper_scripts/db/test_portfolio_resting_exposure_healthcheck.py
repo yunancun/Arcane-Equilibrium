@@ -89,6 +89,25 @@ class TestPortfolioRestingExposureHealthcheck(unittest.TestCase):
         ):
             (risk_dir / name).write_text(toml_content, encoding="utf-8")
 
+    def test_h1_unconfirmed_without_price_is_warn_not_zero_exposure(self) -> None:
+        _write_snapshot(Path(self._tmp_data.name) / "pipeline_snapshot_demo.json", 10000.0, [])
+        for order_status in ("PendingSubmit", "Submitted", "Acknowledged", "Unknown"):
+            with self.subTest(order_status=order_status):
+                cur = _mock_cursor([(True, True)], [[
+                    ("h1-order", "BTCUSDT", "Buy", 0.0, 1, "ma_crossover", order_status),
+                ]])
+                status, msg = check_68_portfolio_resting_exposure(cur)
+                self.assertEqual(status, "WARN")
+                self.assertIn("UNRESOLVED", msg)
+                self.assertIn(f"{order_status}=1", msg)
+                self.assertIn("known_exposure_only", msg)
+                sql, params = cur.execute.call_args.args
+                self.assertIn("JOIN public.order_events", sql)
+                self.assertIn("e.status", sql)
+                self.assertIn("'Unknown'", sql)
+                self.assertEqual(params[0], "demo")
+                self.assertEqual(len(params), 2)
+
     def tearDown(self) -> None:
         """還原 env + 清理 tmp dir。"""
         os.environ.clear()
@@ -512,6 +531,64 @@ class TestPortfolioRestingExposureHealthcheck(unittest.TestCase):
         self.assertEqual(status, "WARN", msg)
         self.assertIn("short_total=5300", msg)
         self.assertIn("80%cap", msg)
+
+
+    def test_h1_unknown_does_not_mask_confirmed_cap_failure(self) -> None:
+        data_dir = Path(self._tmp_data.name)
+        _write_snapshot(data_dir / "pipeline_snapshot_demo.json", balance=10000.0, positions=[])
+        cur = _mock_cursor([(True, True)], [[
+            ("open-known", "BTCUSDT", "Buy", 7000.0, 1, "grid", "Working"),
+            ("open-unknown", "ETHUSDT", "Buy", 0.0, 1, "grid", "Unknown"),
+        ]])
+        status, msg = check_68_portfolio_resting_exposure(cur)
+        self.assertEqual(status, "FAIL", msg)
+        self.assertIn("UNRESOLVED", msg)
+        self.assertIn("long_total=7000", msg)
+
+
+@unittest.skipUnless(
+    os.environ.get("OPENCLAW_TEST_PG") and os.environ.get("OPENCLAW_TEST_PG_DESTRUCTIVE") == "1",
+    "requires explicitly acknowledged disposable PostgreSQL",
+)
+class H1RestingPostgresContract(unittest.TestCase):
+    def test_reused_id_does_not_hide_new_resting_exposure(self):
+        import psycopg2
+        from helper_scripts.db.passive_wait_healthcheck.checks_portfolio_resting_exposure import _resting_notional_from_pg
+        conn = psycopg2.connect(os.environ["OPENCLAW_TEST_PG"])
+        try:
+            cur = conn.cursor()
+            order_id = f"h1-reused-health-{os.getpid()}"
+            for hours, status, qty in [(2, "Filled", 10), (1, "PartiallyFilled", 9)]:
+                cur.execute("INSERT INTO trading.orders (ts,order_id,symbol,side,order_type,qty,price,status,engine_mode) VALUES (NOW()-%s*interval '1 hour',%s,'H1REUSEUSDT','Buy','Limit',10,100,'PendingSubmit','demo')", (hours, order_id))
+                cur.execute("INSERT INTO trading.order_state_changes (ts,order_id,to_status,filled_qty,engine_mode) VALUES (NOW()-%s*interval '1 hour',%s,'PendingSubmit',0,'demo')", (hours,order_id))
+                cur.execute("INSERT INTO trading.order_state_changes (ts,order_id,to_status,filled_qty,engine_mode) VALUES (NOW()-%s*interval '1 hour'+interval '1 second',%s,%s,%s,'demo')", (hours,order_id,status,qty))
+            resting, _, _, _, diag = _resting_notional_from_pg(cur,"demo",24)
+            self.assertEqual(resting["H1REUSEUSDT"]["long"],100.0)
+            self.assertNotIn("unresolved",diag)
+        finally:
+            conn.rollback()
+            conn.close()
+
+    def test_causal_partial_resting_query_against_postgres(self):
+        import psycopg2
+        from helper_scripts.db.passive_wait_healthcheck.checks_portfolio_resting_exposure import _resting_notional_from_pg
+        conn = psycopg2.connect(os.environ["OPENCLAW_TEST_PG"])
+        try:
+            cur = conn.cursor()
+            order_id = f"h1-health-{os.getpid()}"
+            cur.execute("INSERT INTO trading.orders (ts,order_id,symbol,side,order_type,qty,price,status,engine_mode) VALUES (NOW(),%s,'H1TESTUSDT','Buy','Limit',10,100,'PendingSubmit','demo')", (order_id,))
+            for status, qty, delta in [("Acknowledged",0,10),("PartiallyFilled",9,-5)]:
+                cur.execute("INSERT INTO trading.order_state_changes (ts,order_id,to_status,filled_qty,engine_mode) VALUES (NOW()+%s*interval '1 second',%s,%s,%s,'demo')", (delta,order_id,status,qty))
+            resting, _, _, _, diag = _resting_notional_from_pg(cur, "demo", 24)
+            self.assertEqual(resting["H1TESTUSDT"]["long"],100.0)
+            self.assertNotIn("unresolved",diag)
+            cur.execute("INSERT INTO trading.order_state_changes (ts,order_id,to_status,filled_qty,engine_mode) VALUES (NOW()-interval '4 seconds',%s,'Filled',10,'demo')", (order_id,))
+            resting, _, _, _, diag = _resting_notional_from_pg(cur,"demo",24)
+            self.assertNotIn("H1TESTUSDT",resting)
+            self.assertNotIn("unresolved",diag)
+        finally:
+            conn.rollback()
+            conn.close()
 
 
 if __name__ == "__main__":

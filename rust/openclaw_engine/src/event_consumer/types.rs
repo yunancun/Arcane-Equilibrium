@@ -49,6 +49,8 @@ pub enum ExchangeEvent {
 /// EXT-1：交易所模式中追蹤的待處理訂單，等待交易所確認。
 #[derive(Debug, Clone)]
 pub struct PendingOrder {
+    /// 送出／確認進度與等待 execution 的 venue 累計量。
+    pub progress: super::order_lifecycle::OrderProgress,
     /// Client-assigned order link ID / 客戶端分配的訂單連結 ID
     pub order_link_id: String,
     /// Trading symbol / 交易對
@@ -167,9 +169,29 @@ pub struct PendingOrder {
 /// consumer. Registration and terminal dispatch failure share the same channel
 /// so the event loop can keep in-memory pending state and DB lifecycle rows in
 /// one ordered stream.
-#[derive(Debug, Clone)]
+#[derive(Debug)]
 pub enum PendingOrderEvent {
     Register(PendingOrder),
+    /// 先由唯一 event loop 完成註冊，dispatch 才能接觸 venue。
+    RegisterBeforeSubmit {
+        order: PendingOrder,
+        ready: tokio::sync::oneshot::Sender<()>,
+    },
+    SubmissionStarted {
+        order_link_id: String,
+        ts_ms: u64,
+    },
+    SubmissionUnknown {
+        order_link_id: String,
+        reason: String,
+        ts_ms: u64,
+    },
+    /// 等候單筆終態／取消確認逾時；不等同拒絕或撤單成功。
+    ConfirmationUnknown {
+        order_link_id: String,
+        reason: String,
+        ts_ms: u64,
+    },
     /// Exchange order id observed from the successful REST create response.
     /// This closes the fill-before-OrderUpdate race when REST already returned
     /// the Bybit `orderId` but the private WS order topic has not populated

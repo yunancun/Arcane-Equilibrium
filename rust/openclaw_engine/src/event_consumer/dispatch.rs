@@ -25,9 +25,8 @@ use tracing::{error, info, warn};
 // dispatch_retcode.rs，聚焦決策職責並保留現行 §九 2000 行政策空間。
 // pub(super) re-export 保持本檔函數體與 dispatch_tests.rs 的引用路徑逐字不變。
 pub(super) use super::dispatch_retcode::{
-    close_dispatch_timeout_error, close_dup_is_idempotent_success,
-    dispatch_retry_delays_for_intent, noop_is_exchange_zero_position, noop_is_reduce_only_close,
-    run_dispatch_retry, DispatchRetryResult, CLOSE_ATTEMPT_TIMEOUT_MS,
+    close_dispatch_timeout_error, dispatch_retry_delays_for_intent, noop_is_exchange_zero_position,
+    noop_is_reduce_only_close, run_dispatch_retry, DispatchRetryResult, CLOSE_ATTEMPT_TIMEOUT_MS,
 };
 // OPEN_NO_RETRY 僅 dispatch_tests.rs（留守測試）引用 → test-only re-export，
 // 避免非 test build unused-import 警告（鏡像 loop_handlers.rs 對 unattributed_emit
@@ -58,6 +57,60 @@ fn send_decision_lease_release(
             "decision lease release event dropped — ExpiryGuardian may need to sweep \
              / 決策租約釋放事件丟失，可能需由 ExpiryGuardian 清理"
         );
+    }
+}
+
+fn send_definitive_dispatch_rejection(
+    pending_reg_tx: &mpsc::UnboundedSender<PendingOrderEvent>,
+    req: &OrderDispatchRequest,
+    last_error: &BybitApiError,
+    attempts: u32,
+) {
+    if req.is_primary {
+        let reason = format!("dispatch_rejected: attempts={attempts}; error={last_error}");
+        if let Err(e) = pending_reg_tx.send(PendingOrderEvent::DispatchFailed {
+            order_link_id: req.order_link_id.clone(),
+            symbol: req.symbol.clone(),
+            is_long: req.is_long,
+            qty: req.qty,
+            strategy: req.strategy.clone(),
+            context_id: req.context_id.clone(),
+            is_close: req.is_close,
+            order_type: req.order_type.clone(),
+            time_in_force: req.time_in_force,
+            maker_timeout_ms: req.maker_timeout_ms,
+            close_maker_audit: req.close_maker_audit.clone(),
+            terminal_status: "Rejected".to_string(),
+            reason,
+            ts_ms: openclaw_core::now_ms(),
+        }) {
+            warn!(
+                order_link_id = %req.order_link_id,
+                error = %e,
+                "dispatch failure terminal event dropped — pending state may require sweep \
+                 / 派發失敗 terminal event 發送失敗 — pending 狀態可能需 sweep"
+            );
+        }
+        send_decision_lease_release(
+            pending_reg_tx,
+            req,
+            LeaseOutcome::Failed,
+            "exchange_dispatch_rejected",
+        );
+    }
+}
+
+fn send_submission_unknown(
+    tx: &mpsc::UnboundedSender<PendingOrderEvent>,
+    req: &OrderDispatchRequest,
+    reason: String,
+) {
+    if req.is_primary {
+        let _ = tx.send(PendingOrderEvent::SubmissionUnknown {
+            order_link_id: req.order_link_id.clone(),
+            reason,
+            ts_ms: openclaw_core::now_ms(),
+        });
     }
 }
 
@@ -229,10 +282,30 @@ pub(super) fn spawn_order_dispatch(
     let icache_for_check = Arc::clone(icache);
     let (pending_reg_tx, pending_reg_rx) = mpsc::unbounded_channel::<PendingOrderEvent>();
 
+    let submission_guard = pipeline.exchange_submission_guard.clone();
     tokio::spawn(async move {
         while let Some(req) = shadow_rx.recv().await {
+            // Claim producer admission before preflight; duplicate dispatched IDs
+            // cannot terminate the original request even on a local failure.
+            if req.is_primary && !submission_guard.reserve(&req.order_link_id, req.is_close) {
+                // A duplicate must not terminate or release the original request.
+                if !submission_guard.contains(&req.order_link_id) {
+                    send_decision_lease_release(
+                        &pending_reg_tx,
+                        &req,
+                        LeaseOutcome::Failed,
+                        "exchange_order_unresolved",
+                    );
+                }
+                continue;
+            }
             let is_qty_zero_full_close = req.is_close && req.qty == 0.0;
             if req.qty < 0.0 || (req.qty == 0.0 && !is_qty_zero_full_close) {
+                if req.is_primary
+                    && !(req.is_close && close_maker_audit_for_dispatch_req(&req).is_some())
+                {
+                    submission_guard.resolve(&req.order_link_id);
+                }
                 warn!(symbol = %req.symbol, "order dispatch skipped: qty=0");
                 send_close_maker_dispatch_failed(
                     &pending_reg_tx,
@@ -263,6 +336,11 @@ pub(super) fn spawn_order_dispatch(
                     if spec.min_notional > 0.0 && req.price > 0.0 {
                         let est_notional = req.qty * req.price;
                         if est_notional < spec.min_notional {
+                            if req.is_primary
+                                && !(req.is_close && close_maker_audit_for_dispatch_req(&req).is_some())
+                            {
+                                submission_guard.resolve(&req.order_link_id);
+                            }
                             warn!(
                                 symbol = %req.symbol,
                                 qty = req.qty,
@@ -293,58 +371,77 @@ pub(super) fn spawn_order_dispatch(
             }
             // EXT-1: Register pending order BEFORE placing (for exchange mode)
             if req.is_primary {
+                let (ready_tx, ready_rx) = tokio::sync::oneshot::channel();
                 let now_ms = openclaw_core::now_ms();
                 let close_maker_audit = close_maker_audit_for_dispatch_req(&req);
-                let _ = pending_reg_tx.send(PendingOrderEvent::Register(PendingOrder {
-                    order_link_id: req.order_link_id.clone(),
-                    symbol: req.symbol.clone(),
-                    is_long: req.is_long,
-                    qty: req.qty,
-                    strategy: req.strategy.clone(),
-                    sent_ts_ms: now_ms,
-                    signal_ts_ms: req.paper_fill_ts,
-                    cum_filled_qty: 0.0,
-                    is_close: req.is_close,
-                    // FILL-CONTEXT-LINKAGE-1: mirror OrderDispatchRequest.context_id
-                    // so the WS-fill handler can pass it to apply_confirmed_fill.
-                    // FILL-CONTEXT-LINKAGE-1：鏡射 OrderDispatchRequest.context_id，
-                    // WS 成交處理器再傳給 apply_confirmed_fill。
-                    context_id: req.context_id.clone(),
-                    // EDGE-P2-3 Phase 1B-3.1: mirror order_type + time_in_force
-                    // so the sweep can distinguish Market vs resting PostOnly.
-                    // EDGE-P2-3 Phase 1B-3.1：鏡射 order_type + time_in_force，
-                    // 便於逾時清理區分 Market 與掛中 PostOnly。
-                    order_type: req.order_type.clone(),
-                    limit_price: req.limit_price,
-                    time_in_force: req.time_in_force,
-                    // EDGE-P2-3 Phase 1B-3.2: per-order maker sweep timeout.
-                    // EDGE-P2-3 Phase 1B-3.2：每單 maker sweep 逾時。
-                    maker_timeout_ms: req.maker_timeout_ms,
-                    close_maker_audit,
-                    reference_price: req.reference_price,
-                    reference_ts_ms: req.reference_ts_ms,
-                    reference_source: req.reference_source.clone(),
-                    cancel_requested_ts_ms: None,
-                    // MAKER-CLOSE-REPRICE-1：鏡射 OrderDispatchRequest.reprice_count
-                    // （初始 dispatch=0；toward-touch 重掛產生的單帶累計值），
-                    // 使 sweep 對重掛單繼續累計至 CLOSE_MAKER_MAX_REPRICES 硬上限。
-                    reprice_count: req.reprice_count,
-                    // W-C Caveat 2 修復（2026-05-11）：鏡射 OrderDispatchRequest
-                    // 帶來的 4 個 Spine id，loop_exchange.rs 成交確認後讀此
-                    // 4 欄位呼叫 emit_fill_completion_lineage 補寫真實
-                    // ExecutionReport。req.is_primary=false 的 paper shadow
-                    // 路徑全為 None，下游自然 short-circuit。
-                    spine_order_plan_id: req.spine_order_plan_id.clone(),
-                    spine_decision_id: req.spine_decision_id.clone(),
-                    spine_verdict_id: req.spine_verdict_id.clone(),
-                    spine_stub_report_id: req.spine_stub_report_id.clone(),
-                    // P2-ORDERS-INTENT-ID-WRITER-GAP-1（2026-05-19）：鏡射
-                    // OrderDispatchRequest.intent_id 到 PendingOrder，下游
-                    // handle_pending_registration 從 PendingOrder.intent_id 讀
-                    // 寫入 TradingMsg::Order，再進 trading.orders.intent_id。
-                    intent_id: req.intent_id.clone(),
-                    decision_lease_id: req.decision_lease_id.clone(),
-                }));
+                let registered = pending_reg_tx.send(PendingOrderEvent::RegisterBeforeSubmit {
+                    order: PendingOrder {
+                        progress: Default::default(),
+                        order_link_id: req.order_link_id.clone(),
+                        symbol: req.symbol.clone(),
+                        is_long: req.is_long,
+                        qty: req.qty,
+                        strategy: req.strategy.clone(),
+                        sent_ts_ms: now_ms,
+                        signal_ts_ms: req.paper_fill_ts,
+                        cum_filled_qty: 0.0,
+                        is_close: req.is_close,
+                        // FILL-CONTEXT-LINKAGE-1: mirror OrderDispatchRequest.context_id
+                        // so the WS-fill handler can pass it to apply_confirmed_fill.
+                        // FILL-CONTEXT-LINKAGE-1：鏡射 OrderDispatchRequest.context_id，
+                        // WS 成交處理器再傳給 apply_confirmed_fill。
+                        context_id: req.context_id.clone(),
+                        // EDGE-P2-3 Phase 1B-3.1: mirror order_type + time_in_force
+                        // so the sweep can distinguish Market vs resting PostOnly.
+                        // EDGE-P2-3 Phase 1B-3.1：鏡射 order_type + time_in_force，
+                        // 便於逾時清理區分 Market 與掛中 PostOnly。
+                        order_type: req.order_type.clone(),
+                        limit_price: req.limit_price,
+                        time_in_force: req.time_in_force,
+                        // EDGE-P2-3 Phase 1B-3.2: per-order maker sweep timeout.
+                        // EDGE-P2-3 Phase 1B-3.2：每單 maker sweep 逾時。
+                        maker_timeout_ms: req.maker_timeout_ms,
+                        close_maker_audit,
+                        reference_price: req.reference_price,
+                        reference_ts_ms: req.reference_ts_ms,
+                        reference_source: req.reference_source.clone(),
+                        cancel_requested_ts_ms: None,
+                        // MAKER-CLOSE-REPRICE-1：鏡射 OrderDispatchRequest.reprice_count
+                        // （初始 dispatch=0；toward-touch 重掛產生的單帶累計值），
+                        // 使 sweep 對重掛單繼續累計至 CLOSE_MAKER_MAX_REPRICES 硬上限。
+                        reprice_count: req.reprice_count,
+                        // W-C Caveat 2 修復（2026-05-11）：鏡射 OrderDispatchRequest
+                        // 帶來的 4 個 Spine id，loop_exchange.rs 成交確認後讀此
+                        // 4 欄位呼叫 emit_fill_completion_lineage 補寫真實
+                        // ExecutionReport。req.is_primary=false 的 paper shadow
+                        // 路徑全為 None，下游自然 short-circuit。
+                        spine_order_plan_id: req.spine_order_plan_id.clone(),
+                        spine_decision_id: req.spine_decision_id.clone(),
+                        spine_verdict_id: req.spine_verdict_id.clone(),
+                        spine_stub_report_id: req.spine_stub_report_id.clone(),
+                        // P2-ORDERS-INTENT-ID-WRITER-GAP-1（2026-05-19）：鏡射
+                        // OrderDispatchRequest.intent_id 到 PendingOrder，下游
+                        // handle_pending_registration 從 PendingOrder.intent_id 讀
+                        // 寫入 TradingMsg::Order，再進 trading.orders.intent_id。
+                        intent_id: req.intent_id.clone(),
+                        decision_lease_id: req.decision_lease_id.clone(),
+                    },
+                    ready: ready_tx,
+                });
+                if registered.is_err() || ready_rx.await.is_err() {
+                    submission_guard.resolve(&req.order_link_id);
+                    // 未取得本機註冊確認，禁止 place_order。
+                    break;
+                }
+                if pending_reg_tx
+                    .send(PendingOrderEvent::SubmissionStarted {
+                        order_link_id: req.order_link_id.clone(),
+                        ts_ms: openclaw_core::now_ms(),
+                    })
+                    .is_err()
+                {
+                    break;
+                }
             }
             let side = if req.is_long {
                 OrderSide::Buy
@@ -407,8 +504,8 @@ pub(super) fn spawn_order_dispatch(
             // P1-07（cold audit pkg B；operator decision STRICT FAIL-CLOSED）：
             //   - OPEN（create）意圖：單次嘗試（空 delay slice → run_dispatch_retry 在
             //     attempt(0) >= len(0) 時立即回 TransientExhausted，等於 0 重試）。任何
-            //     timeout / parse / transport / nonzero retCode 直接 fail-closed，
-            //     Decision Lease 以非-Consumed（Failed）釋放，不發第二筆 create。
+            //     timeout / parse / transport 保留 Unknown，不以 Failed 釋放
+            //     Decision Lease；確定拒絕才終止，所有開倉均不發第二筆 create。
             //     為什麼：mutating create 回應曖昧（timeout/parse/transport）時絕不可重發
             //     —— order_link_id 冪等是 Bybit 側緩解，不是隱藏重試交易效果的許可
             //     （CLAUDE.md §四）。曖昧 create 由 reconciler / pending tracking 對帳。
@@ -492,7 +589,16 @@ pub(super) fn spawn_order_dispatch(
                 DispatchRetryResult::NoOp {
                     last_error,
                     attempts,
+                    outcome_unknown,
                 } => {
+                    if outcome_unknown {
+                        send_submission_unknown(
+                            &pending_reg_tx,
+                            &req,
+                            "dispatch_retry_prior_outcome_unknown".into(),
+                        );
+                        continue;
+                    }
                     let (ret_code_opt, ret_msg_opt): (Option<i64>, Option<String>) =
                         match &last_error {
                             BybitApiError::Business {
@@ -508,7 +614,7 @@ pub(super) fn spawn_order_dispatch(
                         ret_code = ret_code_opt,
                         ret_msg = ret_msg_opt.as_deref(),
                         attempts = attempts,
-                        "order dispatch noop / 訂單派發等效成功"
+                        "order dispatch returned a non-retryable no-op / 派發收到不重試的無操作回應"
                     );
                     // P1-110017-POSITION-DRIFT-CLOSE-LOOP：reduce-only **qty=0 全平
                     // form** 收到 110017（交易所端倉位已 zero）時，請求 event consumer
@@ -518,52 +624,39 @@ pub(super) fn spawn_order_dispatch(
                     // reduce-only close 收到 110017（C-1，倉可能仍在）絕不收斂；
                     // 110001 維持原不收斂行為；110009 非 NoOp（stop-order
                     // limit exceeded，fail-closed）。
-                    send_exchange_zero_close(&pending_reg_tx, &req, &last_error);
-                    send_decision_lease_release(
-                        &pending_reg_tx,
-                        &req,
-                        LeaseOutcome::Consumed,
-                        "exchange_dispatch_noop_success",
-                    );
-                }
-                DispatchRetryResult::Structural {
-                    last_error,
-                    attempts,
-                } => {
-                    // P2-ORDERLINKID-110072（+ 2026-06-07 follow-up）：close 重發撞
-                    // 重複 order_link_id（110072 專屬碼，或 10001+retMsg "duplicate"
-                    // 泛 InvalidParam）= 冪等成功（首次 close attempt 已達 Bybit、
-                    // response 丟失，retry 重發同一 id 撞此碼）。走成功收尾（**不**發
-                    // DispatchFailed、**不**收斂本地倉），鏡像 Ok/NoOp 成功路徑。
-                    // open path 維持 fail-closed：close_dup_is_idempotent_success 僅
-                    // is_close 成立（open 撞重複 id = id 撞歷史，開倉未成功，落 else
-                    // 失敗路徑）。BB 2026-06-06 APPROVE-WITH-MANDATORY-GUARD；helper
-                    // 同時涵蓋 110072 與 10001+duplicate（見其 docstring）。
-                    // last_error 在本分支僅被借用（match &last_error / Display），
-                    // helper 取 &req,&last_error 在 extract 之前，無 move 衝突。
-                    if close_dup_is_idempotent_success(&req, &last_error) {
-                        let (ret_code_opt, ret_msg_opt): (Option<i64>, Option<String>) =
-                            match &last_error {
-                                BybitApiError::Business {
-                                    ret_code, ret_msg, ..
-                                } => (Some(*ret_code), Some(ret_msg.clone())),
-                                _ => (None, None),
-                            };
-                        info!(
-                            symbol = %req.symbol,
-                            order_link_id = %req.order_link_id,
-                            dispatch_type = dispatch_type,
-                            close = req.is_close,
-                            ret_code = ret_code_opt,
-                            ret_msg = ret_msg_opt.as_deref(),
-                            attempts = attempts,
-                            "close duplicate order_link_id — idempotent success / 平倉重複 order_link_id 等效成功"
-                        );
+                    if req.is_primary
+                        && noop_is_reduce_only_close(&req)
+                        && req.qty == 0.0
+                        && noop_is_exchange_zero_position(&last_error)
+                    {
+                        send_exchange_zero_close(&pending_reg_tx, &req, &last_error);
                         send_decision_lease_release(
                             &pending_reg_tx,
                             &req,
                             LeaseOutcome::Consumed,
-                            "exchange_dispatch_close_duplicate_idempotent",
+                            "exchange_dispatch_zero_position",
+                        );
+                    } else {
+                        send_definitive_dispatch_rejection(
+                            &pending_reg_tx,
+                            &req,
+                            &last_error,
+                            attempts,
+                        );
+                    }
+                }
+                DispatchRetryResult::Structural {
+                    last_error,
+                    attempts,
+                    outcome_unknown,
+                } => {
+                    // Only an actual uncertain earlier attempt can survive a definitive refusal.
+                    // A first-attempt duplicate may identify an older order, not this intent.
+                    if outcome_unknown {
+                        send_submission_unknown(
+                            &pending_reg_tx,
+                            &req,
+                            format!("dispatch_ambiguous: attempts={attempts}; error={last_error}"),
                         );
                     } else {
                         let (ret_code_opt, ret_msg_opt): (Option<i64>, Option<String>) =
@@ -585,45 +678,28 @@ pub(super) fn spawn_order_dispatch(
                             attempts = attempts,
                             "order dispatch failed (structural, no retry) / 訂單派發失敗（結構性，不重試）"
                         );
-                        if req.is_primary {
-                            let reason =
-                                format!("dispatch_structural: attempts={attempts}; error={last_error}");
-                            if let Err(e) = pending_reg_tx.send(PendingOrderEvent::DispatchFailed {
-                                order_link_id: req.order_link_id.clone(),
-                                symbol: req.symbol.clone(),
-                                is_long: req.is_long,
-                                qty: req.qty,
-                                strategy: req.strategy.clone(),
-                                context_id: req.context_id.clone(),
-                                is_close: req.is_close,
-                                order_type: req.order_type.clone(),
-                                time_in_force: req.time_in_force,
-                                maker_timeout_ms: req.maker_timeout_ms,
-                                close_maker_audit: req.close_maker_audit.clone(),
-                                terminal_status: "Rejected".to_string(),
-                                reason,
-                                ts_ms: openclaw_core::now_ms(),
-                            }) {
-                                warn!(
-                                    order_link_id = %req.order_link_id,
-                                    error = %e,
-                                    "dispatch failure terminal event dropped — pending state may require sweep \
-                                     / 派發失敗 terminal event 發送失敗 — pending 狀態可能需 sweep"
-                                );
-                            }
-                            send_decision_lease_release(
-                                &pending_reg_tx,
-                                &req,
-                                LeaseOutcome::Failed,
-                                "exchange_dispatch_structural_failed",
-                            );
-                        }
+                        send_definitive_dispatch_rejection(
+                            &pending_reg_tx,
+                            &req,
+                            &last_error,
+                            attempts,
+                        );
                     }
                 }
                 DispatchRetryResult::TransientExhausted {
                     last_error,
                     attempts,
+                    outcome_unknown,
                 } => {
+                    if !outcome_unknown {
+                        send_definitive_dispatch_rejection(
+                            &pending_reg_tx,
+                            &req,
+                            &last_error,
+                            attempts,
+                        );
+                        continue;
+                    }
                     let (ret_code_opt, ret_msg_opt): (Option<i64>, Option<String>) =
                         match &last_error {
                             BybitApiError::Business {
@@ -641,41 +717,13 @@ pub(super) fn spawn_order_dispatch(
                         ret_msg = ret_msg_opt.as_deref(),
                         error = %last_error,
                         attempts = attempts,
-                        "order dispatch failed (transient retry exhausted) / 訂單派發失敗（暫時性重試耗盡）"
+                        "order submission unresolved (transient exhausted) / 訂單送出結果未知（暫時性重試耗盡）"
                     );
                     if req.is_primary {
                         let reason = format!(
                             "dispatch_transient_exhausted: attempts={attempts}; error={last_error}"
                         );
-                        if let Err(e) = pending_reg_tx.send(PendingOrderEvent::DispatchFailed {
-                            order_link_id: req.order_link_id.clone(),
-                            symbol: req.symbol.clone(),
-                            is_long: req.is_long,
-                            qty: req.qty,
-                            strategy: req.strategy.clone(),
-                            context_id: req.context_id.clone(),
-                            is_close: req.is_close,
-                            order_type: req.order_type.clone(),
-                            time_in_force: req.time_in_force,
-                            maker_timeout_ms: req.maker_timeout_ms,
-                            close_maker_audit: req.close_maker_audit.clone(),
-                            terminal_status: "Failed".to_string(),
-                            reason,
-                            ts_ms: openclaw_core::now_ms(),
-                        }) {
-                            warn!(
-                                order_link_id = %req.order_link_id,
-                                error = %e,
-                                "dispatch failure terminal event dropped — pending state may require sweep \
-                                 / 派發失敗 terminal event 發送失敗 — pending 狀態可能需 sweep"
-                            );
-                        }
-                        send_decision_lease_release(
-                            &pending_reg_tx,
-                            &req,
-                            LeaseOutcome::Failed,
-                            "exchange_dispatch_transient_exhausted",
-                        );
+                        send_submission_unknown(&pending_reg_tx, &req, reason);
                     }
                 }
             }

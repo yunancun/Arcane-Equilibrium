@@ -21,10 +21,10 @@ use tracing::{info, warn};
 pub(crate) const PARTIAL_FILL_REMAINDER_GRACE_MS: u64 = 5_000;
 /// Keep a maker pending row after dispatching cancel so racing fills that
 /// arrive before the WS cancel ack can still match order context. If neither
-/// fill nor cancel ack arrives inside this window, drop the tracker row to
-/// avoid unbounded stale state.
+/// fill nor cancel ack arrives inside this window, retain Unknown until
+/// authoritative reconciliation supplies terminal evidence.
 /// 派發 maker cancel 後保留 pending row，讓 cancel ack 前 race 到的成交仍能匹配；
-/// 若 grace 內無成交/取消回報，才丟棄 tracker，避免狀態無界累積。
+/// 若 grace 內無成交/取消回報，維持 Unknown 並等待有界唯讀對帳。
 pub(crate) const MAKER_CANCEL_ACK_GRACE_MS: u64 = 60_000;
 /// Close maker orders carry exposure-reduction intent, so after a cancel
 /// request we wait only a short grace before the future dispatcher must market
@@ -42,19 +42,23 @@ pub(crate) enum PendingSweepAction {
     Keep,
     /// Market legacy: soft warn (elapsed > 5s but ≤ 60s) / Market 軟警告
     LegacySoftWarn,
-    /// Market legacy: hard remove (elapsed > 60s) / Market 硬移除
-    LegacyHardRemove,
+    /// Market 終態確認逾時（>60s）；保留追蹤
+    ConfirmationTimeout,
     /// PostOnly maker: spawn REST cancel + mark in-flight (elapsed ≥ maker_timeout_ms)
     /// PostOnly 掛單超時：派發 REST 取消並標記 cancel in-flight
     MakerTimeoutCancel,
     /// PostOnly maker: cancel was already requested, but no fill/cancel ack
-    /// arrived within the grace window; remove the stale tracker row.
-    /// PostOnly 掛單已請求取消，但 grace 內無成交/取消回報；移除過期 tracker。
+    /// arrived within the grace window; retain the unresolved tracker.
+    /// PostOnly 掛單已請求取消，但 grace 內無成交/取消回報；保留未知 tracker。
     MakerCancelGraceExpired,
 }
 
 pub(crate) fn pending_elapsed_ms(po: &PendingOrder, now_ms: u64) -> u64 {
-    now_ms.saturating_sub(po.sent_ts_ms)
+    now_ms.saturating_sub(
+        po.progress
+            .maker_remainder_started_ts_ms
+            .unwrap_or(po.sent_ts_ms),
+    )
 }
 
 pub(crate) fn classify_pending_sweep(po: &PendingOrder, now_ms: u64) -> PendingSweepAction {
@@ -79,7 +83,7 @@ pub(crate) fn classify_pending_sweep(po: &PendingOrder, now_ms: u64) -> PendingS
             PendingSweepAction::Keep
         }
     } else if elapsed_ms > 60_000 {
-        PendingSweepAction::LegacyHardRemove
+        PendingSweepAction::ConfirmationTimeout
     } else if elapsed_ms > 5000 {
         PendingSweepAction::LegacySoftWarn
     } else {
@@ -186,7 +190,7 @@ pub(crate) fn close_maker_sweep_fallback_reason(
         }
         PendingSweepAction::Keep
         | PendingSweepAction::LegacySoftWarn
-        | PendingSweepAction::LegacyHardRemove => None,
+        | PendingSweepAction::ConfirmationTimeout => None,
     }
 }
 
@@ -205,7 +209,7 @@ pub(crate) fn tighten_postonly_entry_after_partial(po: &mut PendingOrder, exec_t
             .min(PARTIAL_FILL_REMAINDER_GRACE_MS),
     );
     if exec_ts_ms > 0 {
-        po.sent_ts_ms = exec_ts_ms;
+        po.progress.maker_remainder_started_ts_ms = Some(exec_ts_ms);
     }
     true
 }
@@ -213,8 +217,8 @@ pub(crate) fn tighten_postonly_entry_after_partial(po: &mut PendingOrder, exec_t
 /// EDGE-P2-3 Phase 1B-3.2: Non-blocking REST cancel for a timed-out PostOnly
 /// resting maker order. Uses client-minted `orderLinkId` (idempotent across
 /// restart + WS lag). Fail-soft: any API error is logged and swallowed — the
-/// tracker row has already been removed by the caller, so a racing fill after
-/// a failed cancel lands in the position reconciler's normal recovery path.
+/// tracker row remains available for racing fills and independent confirmation;
+/// a cancel request or failure is never treated as terminal evidence.
 ///
 /// 1B-5 FUP-3: routes through the shared `cancel_by_link_id_raw` helper in
 /// `order_manager` so the Bybit endpoint / body / success-log fields stay
@@ -224,7 +228,7 @@ pub(crate) fn tighten_postonly_entry_after_partial(po: &mut PendingOrder, exec_t
 ///
 /// EDGE-P2-3 Phase 1B-3.2：非阻塞 REST 取消超時的 PostOnly 掛單。
 /// 使用客戶端 orderLinkId（跨重啟/WS 延遲冪等）。fail-soft：API 失敗僅記 log 不回退；
-/// 調用端已移除 tracker，若取消失敗後 race 到成交，走對帳器常規恢復路徑。
+/// 調用端保留 tracker 以匹配晚到成交；取消請求或失敗不等同終態。
 ///
 /// 1B-5 FUP-3：改走 `order_manager::cancel_by_link_id_raw` 共用輔助，
 /// 使 endpoint / body / 成功日誌欄位與 `OrderManager::cancel_order_by_link_id`
@@ -233,7 +237,7 @@ pub(super) async fn cancel_resting_maker_order(
     client: std::sync::Arc<crate::bybit_rest_client::BybitRestClient>,
     symbol: String,
     order_link_id: String,
-) {
+) -> bool {
     match crate::order_manager::cancel_by_link_id_raw(
         &client,
         crate::order_manager::OrderCategory::Linear,
@@ -247,8 +251,9 @@ pub(super) async fn cancel_resting_maker_order(
                 symbol = %symbol,
                 order_link_id = %order_link_id,
                 reason = "maker_timeout_cancel",
-                "PostOnly maker cancel acknowledged / PostOnly 掛單取消已確認"
+                "PostOnly maker cancel request acknowledged / PostOnly 取消請求已接收，仍待終態"
             );
+            true
         }
         Err(err) => {
             // Common benign cases: 110001 order not exists (already filled/cancelled).
@@ -258,8 +263,9 @@ pub(super) async fn cancel_resting_maker_order(
                 order_link_id = %order_link_id,
                 error = %err,
                 reason = "maker_timeout_cancel_failed",
-                "PostOnly maker cancel REST failed — likely already filled/cancelled / PostOnly 取消失敗，很可能已成交或取消"
+                "PostOnly maker cancel REST failed — retain tracker for retry and confirmation / PostOnly 取消失敗，保留追蹤並重試確認"
             );
+            false
         }
     }
 }
@@ -279,6 +285,7 @@ mod tests {
     fn make_market_pending(elapsed_ms_is_zero: bool) -> PendingOrder {
         let _ = elapsed_ms_is_zero;
         PendingOrder {
+            progress: Default::default(),
             order_link_id: "oc_market_1".into(),
             symbol: "BTCUSDT".into(),
             is_long: true,
@@ -314,6 +321,7 @@ mod tests {
 
     fn make_postonly_pending(maker_timeout_ms: Option<u64>) -> PendingOrder {
         PendingOrder {
+            progress: Default::default(),
             order_link_id: "oc_maker_1".into(),
             symbol: "ETHUSDT".into(),
             is_long: false,
@@ -382,11 +390,11 @@ mod tests {
         // 60_001ms: one ms past hard timeout → remove tracker row.
         assert_eq!(
             classify_pending_sweep(&po, 60_001),
-            PendingSweepAction::LegacyHardRemove
+            PendingSweepAction::ConfirmationTimeout
         );
         assert_eq!(
             classify_pending_sweep(&po, 90_000),
-            PendingSweepAction::LegacyHardRemove
+            PendingSweepAction::ConfirmationTimeout
         );
     }
 
@@ -599,7 +607,19 @@ mod tests {
 
         assert!(tighten_postonly_entry_after_partial(&mut po, 12_345));
         assert_eq!(po.maker_timeout_ms, Some(PARTIAL_FILL_REMAINDER_GRACE_MS));
-        assert_eq!(po.sent_ts_ms, 12_345);
+        assert_eq!(
+            po.sent_ts_ms, 0,
+            "registration identity must remain immutable"
+        );
+        assert_eq!(po.progress.maker_remainder_started_ts_ms, Some(12_345));
+        assert_eq!(
+            classify_pending_sweep(&po, 17_344),
+            PendingSweepAction::Keep
+        );
+        assert_eq!(
+            classify_pending_sweep(&po, 17_345),
+            PendingSweepAction::MakerTimeoutCancel
+        );
     }
 
     #[test]

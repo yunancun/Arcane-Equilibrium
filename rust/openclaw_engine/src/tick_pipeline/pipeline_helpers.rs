@@ -668,7 +668,9 @@ impl TickPipeline {
 
     /// P1-03：取得 cancel-all OrderManager handle（交易所模式有；Paper None）。
     /// loop_handlers 攔截 CancelAllOrders 命令時 clone 此 Arc 出 borrow 後 await。
-    pub fn cancel_all_order_mgr(&self) -> Option<std::sync::Arc<crate::order_manager::OrderManager>> {
+    pub fn cancel_all_order_mgr(
+        &self,
+    ) -> Option<std::sync::Arc<crate::order_manager::OrderManager>> {
         self.cancel_all_order_mgr.clone()
     }
 
@@ -680,6 +682,15 @@ impl TickPipeline {
     /// EXT-1：清除交易對的待處理平倉標記（平倉訂單被拒/取消時調用）。
     pub fn clear_pending_close(&mut self, symbol: &str) {
         self.pending_close_symbols.remove(symbol);
+    }
+
+    /// Keep the symbol guard owned by a still-active replacement close.
+    pub(crate) fn retain_pending_close(&mut self, symbol: &str) {
+        self.pending_close_symbols.insert(symbol.to_owned());
+    }
+
+    pub(crate) fn has_pending_close(&self, symbol: &str) -> bool {
+        self.pending_close_symbols.contains(symbol)
     }
 
     /// EXT-1: Clear all pending close flags (on reset or DCP).
@@ -708,6 +719,12 @@ impl TickPipeline {
 
     /// Phase 2a: Set channel for dispatching trading lifecycle events to PG writer.
     /// Phase 2a：設定交易生命週期事件派發通道。
+    pub(crate) fn trading_channel(
+        &self,
+    ) -> Option<tokio::sync::mpsc::Sender<crate::database::TradingMsg>> {
+        self.trading_tx.clone()
+    }
+
     pub fn set_trading_channel(
         &mut self,
         tx: tokio::sync::mpsc::Sender<crate::database::TradingMsg>,

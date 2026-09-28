@@ -849,5 +849,21 @@ class TestReconcilerPaperStateDivergence(unittest.TestCase):
         self.assertIn("[deferred-no-ipc]", msg)
 
 
+class TestH1OrderLifecycleReadContract(unittest.TestCase):
+    def test_initial_pending_status_does_not_hide_confirmed_order_events(self) -> None:
+        from helper_scripts.db.passive_wait_healthcheck.checks_engine import _query_trading_pipeline_gap_context
+        cur = MagicMock()
+        cur.fetchone.return_value = (3, 1, 1, 0, 0, 0)
+        context, _ = _query_trading_pipeline_gap_context(cur)
+        self.assertEqual(context["working_maker_orders_1h"], 1)
+        sql = cur.execute.call_args.args[0]
+        self.assertIn("JOIN public.order_events", sql)
+        self.assertIn("e.status", sql)
+        self.assertIn("e.ts = o.ts", sql)
+        # 未確認 ACK／Unknown 不可當成 maker 已掛入市場的證據。
+        self.assertNotIn("'acknowledged'", sql)
+        self.assertNotIn("'unknown'", sql)
+
+
 if __name__ == "__main__":
     unittest.main()

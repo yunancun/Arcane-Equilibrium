@@ -144,225 +144,10 @@ pub(super) fn handle_tick_event(
         }
     }
 
-    // EXT-1 + EDGE-P2-3 Phase 1B-3.2: Sweep timed-out pending orders (every 5s).
-    // Branch by TimeInForce:
-    //   - PostOnly maker: once elapsed >= po.maker_timeout_ms (default 45s),
-    //     spawn non-blocking REST cancel via orderLinkId and keep the tracker
-    //     row until WS cancel ack/fill or cancel-ack grace expiry.
-    //   - Market (legacy): 5s soft warn / 60s hard remove (unchanged).
-    // Tracker row retention after cancel is intentional — if a race fills the
-    // order between our sweep and Bybit's cancel processing, the fill still
-    // gets the original strategy/context instead of falling into unmatched
-    // audit. OrderUpdate Cancelled/Rejected or grace expiry removes the row.
-    // EDGE-P2-3 Phase 1B-3.2：超時 pending order 掃描（每 5s）。
-    //   - PostOnly 掛單：elapsed >= maker_timeout_ms（預設 45s）→ 非阻塞 REST 取消，
-    //     保留 tracker 至 WS cancel ack/fill 或 grace 到期。
-    //   - Market（舊行為）：5s 軟警告 / 60s 硬移除，不變。
+    // 每輪檢查逾時，保留未知結果與取消競態的 execution 匹配。
+    // Market 終態逾時／maker cancel grace 到期均不構成移除依據。
     if !state.pending_orders.is_empty() && state.last_pending_check.elapsed() >= pending_timeout {
-        let now_ms = openclaw_core::now_ms();
-        let mut maker_to_cancel: Vec<(String, String, u64, u64)> = Vec::new();
-        let mut maker_grace_fallback: Vec<String> = Vec::new();
-        let mut legacy_to_remove: Vec<String> = Vec::new();
-        // MAKER-CLOSE-REPRICE-1：toward-touch 重掛候選。每元素 = (原 order_link_id,
-        // 新限價, reprice_count)。只在 PostOnly close maker 仍 Keep（30s-90s 窗、未
-        // 達 max_reprices、book 朝對我方向移動）時收集，後續串行 cancel 舊單 + 重發。
-        let mut maker_to_reprice: Vec<(String, f64, u32)> = Vec::new();
-        for (key, po) in state.pending_orders.iter() {
-            let elapsed = pending_sweep::pending_elapsed_ms(po, now_ms);
-            match classify_pending_sweep(po, now_ms) {
-                PendingSweepAction::MakerTimeoutCancel => {
-                    let deadline_ms = po.maker_timeout_ms.unwrap_or(45_000);
-                    maker_to_cancel.push((key.clone(), po.symbol.clone(), elapsed, deadline_ms));
-                }
-                PendingSweepAction::MakerCancelGraceExpired => {
-                    let grace_ms = if po.is_close {
-                        pending_sweep::CLOSE_MAKER_CANCEL_ACK_GRACE_MS
-                    } else {
-                        pending_sweep::MAKER_CANCEL_ACK_GRACE_MS
-                    };
-                    tracing::error!(
-                        order_link_id = %key,
-                        symbol = %po.symbol,
-                        elapsed_ms = elapsed,
-                        cancel_requested_ts_ms = po.cancel_requested_ts_ms.unwrap_or_default(),
-                        grace_ms = grace_ms,
-                        "PostOnly maker cancel ack grace expired — removing stale tracker / PostOnly 取消回報 grace 到期，移除過期追蹤"
-                    );
-                    maker_grace_fallback.push(key.clone());
-                    legacy_to_remove.push(key.clone());
-                }
-                PendingSweepAction::LegacyHardRemove => {
-                    tracing::error!(
-                        order_link_id = %key,
-                        symbol = %po.symbol,
-                        elapsed_ms = elapsed,
-                        "pending order hard timeout (>60s) — removing / 待處理訂單硬超時，移除"
-                    );
-                    legacy_to_remove.push(key.clone());
-                }
-                PendingSweepAction::LegacySoftWarn => {
-                    tracing::warn!(
-                        order_link_id = %key,
-                        symbol = %po.symbol,
-                        elapsed_ms = elapsed,
-                        filled = %po.cum_filled_qty,
-                        requested = %po.qty,
-                        "pending order soft timeout (>5s) / 待處理訂單軟超時"
-                    );
-                }
-                PendingSweepAction::Keep => {
-                    // MAKER-CLOSE-REPRICE-1：仍 Keep 的 PostOnly close maker 嘗試
-                    // toward-touch 重掛。compute_close_reprice_limit 讀快取 BBO 經
-                    // compute_close_limit_price 算新 inside quote（spread guard /
-                    // crossed-book strict skip 全套）；純函數 close_maker_reprice_decision
-                    // 判定「未達 max_reprices、在 [reprice_after, timeout) 窗、cancel
-                    // 未在途、新限價嚴格優於原掛價」才放行。stops/urgent 走 market
-                    // （tif=None）結構上到不了此分支（A.4 互斥證明）。
-                    if po.is_close
-                        && po.time_in_force == Some(TimeInForce::PostOnly)
-                        && po.cancel_requested_ts_ms.is_none()
-                        && po.reprice_count < crate::strategies::common::CLOSE_MAKER_MAX_REPRICES
-                    {
-                        // DIRECTION FIX（2026-06-17 E2/E4 RETURN HIGH）：po.is_long 是
-                        // **訂單方向**（close order 已 inverted：平多倉=SELL→is_long=false、
-                        // 平空倉=BUY→is_long=true），但 reprice 計價要的是**真實持倉方向**。
-                        // 經 *_for_pending 單一收口做 `!po.is_long` 轉換（sweep 與 e2e
-                        // 方向測試共用同一條，使「把方向寫反」的 mutation 必被測試抓到）。
-                        let new_inside_limit = pipeline.compute_close_reprice_limit_for_pending(po);
-                        if let Some(new_limit) = pending_sweep::close_maker_reprice_decision(
-                            po,
-                            now_ms,
-                            new_inside_limit,
-                            crate::strategies::common::CLOSE_MAKER_MAX_REPRICES,
-                            crate::strategies::common::CLOSE_MAKER_REPRICE_AFTER_MS,
-                        ) {
-                            maker_to_reprice.push((key.clone(), new_limit, po.reprice_count));
-                        }
-                    }
-                }
-            }
-        }
-        // MAKER-CLOSE-REPRICE-1：串行處理重掛候選 —— **cancel-before-dispatch**
-        //（2026-06-17 E2/E4 RETURN INFO，對齊 PA design §A.2「舊單先 cancel」）：
-        // 先對舊掛單發出 cancel（非阻塞 REST，fail-soft，與 timeout sweep 同一
-        // cancel_resting_maker_order 路徑），**再**發新 PostOnly close maker
-        //（reprice_count+1），最後移除舊 tracker（新單由 dispatch.rs Register 進
-        // tracker）。先 cancel 再 dispatch 收斂「新舊同時掛單」窗口（兩單皆
-        // reduceOnly 本就良性，但 cancel-first 更乾淨）。handle_tick_event 為同步
-        // 函數無法 .await，故 cancel 仍以 tokio::spawn 排程；其在 dispatch 之前
-        // 送出即達成 cancel-first 排序。dispatch 失敗（僅 channel 關閉等終態）則
-        // 不移除舊 tracker、舊單由後續 timeout→taker 兜底。
-        for (link_id, new_limit, reprice_count) in &maker_to_reprice {
-            let Some(po) = state.pending_orders.get(link_id).cloned() else {
-                continue;
-            };
-            if po.close_maker_audit.is_none() {
-                continue;
-            }
-            // 先 cancel 舊掛單（非阻塞 REST，fail-soft）。
-            if let Some(client) = shared_client {
-                let c = client.clone();
-                let sym = po.symbol.clone();
-                let lid = po.order_link_id.clone();
-                tokio::spawn(async move {
-                    pending_sweep::cancel_resting_maker_order(c, sym, lid).await;
-                });
-            }
-            // DIRECTION FIX（2026-06-17 E2/E4 RETURN HIGH）：經 *_for_pending 單一收口
-            // 做 po.is_long（訂單側）→ 真實持倉方向（`!po.is_long`）轉換，再派發。
-            let dispatched = pipeline.dispatch_close_maker_reprice_for_pending(
-                &po,
-                *new_limit,
-                *reprice_count,
-                now_ms,
-            );
-            if dispatched.is_some() {
-                // 重掛已派發 → 移除舊 tracker（新單已 Register）。
-                legacy_to_remove.push(link_id.clone());
-            }
-        }
-        for link_id in &maker_grace_fallback {
-            if let Some(po) = state.pending_orders.get(link_id).cloned() {
-                if po.is_close {
-                    pipeline.clear_pending_close(&po.symbol);
-                }
-                let reason = pending_sweep::close_maker_sweep_fallback_reason(&po, now_ms)
-                    .unwrap_or(CloseMakerFallbackReason::CancelGraceExpired);
-                dispatch_close_maker_fallback_from_pending(
-                    state,
-                    pipeline,
-                    &po,
-                    reason,
-                    None,
-                    "maker_cancel_grace_expired",
-                );
-            }
-        }
-        // Dispatch non-blocking cancels for timed-out PostOnly makers.
-        // 非阻塞派發超時 PostOnly 掛單取消。
-        let mut maker_cancel_dispatched: Vec<String> = Vec::new();
-        for (link_id, symbol, elapsed, deadline_ms) in &maker_to_cancel {
-            tracing::warn!(
-                order_link_id = %link_id,
-                symbol = %symbol,
-                elapsed_ms = elapsed,
-                deadline_ms = deadline_ms,
-                reason = "maker_timeout_cancel",
-                "PostOnly maker timed out — cancelling via orderLinkId / PostOnly 掛單超時 — 以 orderLinkId 取消"
-            );
-            if let Some(client) = shared_client {
-                let c = client.clone();
-                let sym = symbol.clone();
-                let lid = link_id.clone();
-                tokio::spawn(async move {
-                    pending_sweep::cancel_resting_maker_order(c, sym, lid).await;
-                });
-                maker_cancel_dispatched.push(link_id.clone());
-            } else {
-                tracing::error!(
-                    order_link_id = %link_id,
-                    symbol = %symbol,
-                    "PostOnly maker timed out but no REST client is available — removing tracker / PostOnly 超時但無 REST client，移除追蹤"
-                );
-                if let Some(po) = state.pending_orders.get(link_id).cloned() {
-                    if po.is_close {
-                        pipeline.clear_pending_close(&po.symbol);
-                    }
-                    let reason = pending_sweep::close_maker_sweep_fallback_reason(&po, now_ms)
-                        .unwrap_or(CloseMakerFallbackReason::TimeoutTaker);
-                    dispatch_close_maker_fallback_from_pending(
-                        state,
-                        pipeline,
-                        &po,
-                        reason,
-                        None,
-                        "maker_timeout_no_rest_client",
-                    );
-                }
-                legacy_to_remove.push(link_id.clone());
-            }
-        }
-        // Mark maker rows we just dispatched cancels for. Keep them in the
-        // tracker so racing fills before the WS cancel ack still match context.
-        // 標記剛派發 cancel 的 maker 訂單；保留 tracker 讓 ack 前 race 成交仍能匹配。
-        for link_id in &maker_cancel_dispatched {
-            if let Some(po) = state.pending_orders.get_mut(link_id) {
-                po.cancel_requested_ts_ms = Some(now_ms);
-            }
-        }
-        // Remove legacy Market hard-timeout rows and maker rows whose cancel
-        // ack grace expired.
-        // 移除舊 Market 硬超時，以及 cancel ack grace 到期的 maker 追蹤。
-        for key in &legacy_to_remove {
-            state.pending_orders.remove(key);
-        }
-        // Clean stale order_id mappings: only keep those with active pending orders
-        // 清理過期 order_id 映射：僅保留有活躍待處理訂單的
-        let active_links: std::collections::HashSet<&String> =
-            state.pending_orders.keys().collect();
-        state
-            .order_id_to_link
-            .retain(|_, link| active_links.contains(link));
+        sweep_pending_orders(pipeline, state, shared_client, openclaw_core::now_ms());
         state.last_pending_check = Instant::now();
         // R-02: Cross-check pipeline pending_close_symbols against open positions.
         // Clears stale flags for symbols whose close fill was already processed.
@@ -385,4 +170,390 @@ pub(super) fn handle_tick_event(
     );
 
     ControlFlow::Continue(())
+}
+
+/// H1：超時只標記未知並保留匹配；保護性 close fallback 沿用單次去重邊界。
+pub(super) fn sweep_pending_orders(
+    pipeline: &mut TickPipeline,
+    state: &mut LoopState,
+    shared_client: Option<&Arc<crate::bybit_rest_client::BybitRestClient>>,
+    now_ms: u64,
+) {
+    let outcomes = state.maker_cancel_outcome_tx.clone();
+    sweep_pending_orders_with_cancel(pipeline, state, now_ms, true, &|po, attempt_ms| {
+        dispatch_maker_cancel(shared_client, outcomes.as_ref(), po, attempt_ms)
+    });
+}
+
+/// The independent timer runs deadline cancellation and bounded protection even
+/// when public ticks stop. Quote-based repricing remains on the price-tick path.
+pub(super) fn handle_confirmation_interval(
+    pipeline: &mut TickPipeline,
+    state: &mut LoopState,
+    now_ms: u64,
+    cancel_maker: &dyn Fn(&super::types::PendingOrder, u64) -> bool,
+) {
+    sweep_pending_orders_with_cancel(pipeline, state, now_ms, false, cancel_maker);
+}
+
+#[derive(Debug)]
+pub(super) struct MakerCancelOutcome {
+    pub order_link_id: String,
+    pub registered_ts_ms: u64,
+    pub attempt_ts_ms: u64,
+    pub acknowledged: bool,
+}
+
+pub(super) fn dispatch_maker_cancel(
+    shared_client: Option<&Arc<crate::bybit_rest_client::BybitRestClient>>,
+    outcomes: Option<&tokio::sync::mpsc::UnboundedSender<MakerCancelOutcome>>,
+    po: &super::types::PendingOrder,
+    attempt_ts_ms: u64,
+) -> bool {
+    let (Some(client), Some(outcomes)) = (shared_client, outcomes) else {
+        return false;
+    };
+    let client = client.clone();
+    let outcomes = outcomes.clone();
+    let symbol = po.symbol.clone();
+    let order_link_id = po.order_link_id.clone();
+    let registered_ts_ms = po.sent_ts_ms;
+    tokio::spawn(async move {
+        // Include transport/rate-limiter waiting in the deadline. Completion is
+        // returned to the single state owner even on timeout; no overlapping retry.
+        let cancel =
+            pending_sweep::cancel_resting_maker_order(client, symbol, order_link_id.clone());
+        deliver_maker_cancel_outcome(
+            cancel,
+            outcomes,
+            MakerCancelOutcome {
+                order_link_id,
+                registered_ts_ms,
+                attempt_ts_ms,
+                acknowledged: false,
+            },
+            std::time::Duration::from_secs(15),
+        )
+        .await;
+    });
+    true
+}
+
+pub(super) async fn deliver_maker_cancel_outcome(
+    cancel: impl std::future::Future<Output = bool>,
+    outcomes: tokio::sync::mpsc::UnboundedSender<MakerCancelOutcome>,
+    mut result: MakerCancelOutcome,
+    deadline: std::time::Duration,
+) {
+    result.acknowledged = tokio::time::timeout(deadline, cancel)
+        .await
+        .unwrap_or(false);
+    let _ = outcomes.send(result);
+}
+
+pub(super) fn handle_maker_cancel_outcome(
+    state: &mut LoopState,
+    result: MakerCancelOutcome,
+    now_ms: u64,
+) {
+    let Some(po) = state.pending_orders.get_mut(&result.order_link_id) else {
+        return;
+    };
+    if po.sent_ts_ms != result.registered_ts_ms
+        || po.progress.maker_cancel_attempt_ts_ms != Some(result.attempt_ts_ms)
+        || po.progress.status.is_terminal()
+    {
+        return;
+    }
+    po.progress.maker_cancel_attempt_ts_ms = None;
+    // A successful REST response is still only an ACK. Retry the same idempotent
+    // cancellation after cooldown if authoritative evidence has not closed it.
+    po.progress.maker_cancel_retry_after_ms = Some(now_ms.saturating_add(30_000));
+    po.progress
+        .reconciliation_retry_after_ms
+        .get_or_insert(now_ms);
+    if !result.acknowledged {
+        tracing::warn!(order_link_id = %result.order_link_id,
+            "maker cancel failed/timed out; retry after cooldown while retaining attribution");
+    }
+}
+
+fn mark_maker_cancel_attempt(state: &mut LoopState, id: &str, now_ms: u64) {
+    if let Some(po) = state.pending_orders.get_mut(id) {
+        // Preserve the first cancel's grace anchor across failures/retries so
+        // protective close fallback cannot be postponed by repeated REST errors.
+        po.cancel_requested_ts_ms.get_or_insert(now_ms);
+        po.progress.maker_cancel_attempt_ts_ms = Some(now_ms);
+        po.progress.maker_cancel_retry_after_ms = None;
+    }
+}
+
+fn sweep_pending_orders_with_cancel(
+    pipeline: &mut TickPipeline,
+    state: &mut LoopState,
+    now_ms: u64,
+    allow_reprice: bool,
+    cancel_maker: &dyn Fn(&super::types::PendingOrder, u64) -> bool,
+) {
+    let mut maker_to_cancel: Vec<(String, String, u64, u64)> = Vec::new();
+    let mut maker_grace_fallback: Vec<String> = Vec::new();
+    let mut awaiting_confirmation: Vec<String> = Vec::new();
+    // MAKER-CLOSE-REPRICE-1：toward-touch 重掛候選。每元素 = (原 order_link_id,
+    // 新限價, reprice_count)。只在 PostOnly close maker 仍 Keep（30s-90s 窗、未
+    // 達 max_reprices、book 朝對我方向移動）時收集，後續串行 cancel 舊單 + 重發。
+    let mut maker_to_reprice: Vec<(String, f64, u32)> = Vec::new();
+    for (key, po) in state.pending_orders.iter() {
+        if po.progress.status.is_terminal() {
+            continue;
+        }
+        let elapsed = pending_sweep::pending_elapsed_ms(po, now_ms);
+        let retry_cancel = po.progress.maker_cancel_attempt_ts_ms.is_none()
+            && po
+                .progress
+                .maker_cancel_retry_after_ms
+                .is_some_and(|next| now_ms >= next);
+        if retry_cancel {
+            maker_to_cancel.push((
+                key.clone(),
+                po.symbol.clone(),
+                elapsed,
+                po.maker_timeout_ms.unwrap_or(45_000),
+            ));
+        }
+        // Reprice predecessors may still need their failed cancel retried, but
+        // must never generate another replacement or protective fallback.
+        if po.progress.replacement_order_link_id.is_some() {
+            continue;
+        }
+        match classify_pending_sweep(po, now_ms) {
+            PendingSweepAction::MakerTimeoutCancel => {
+                let deadline_ms = po.maker_timeout_ms.unwrap_or(45_000);
+                if !retry_cancel && po.progress.maker_cancel_attempt_ts_ms.is_none() {
+                    maker_to_cancel.push((key.clone(), po.symbol.clone(), elapsed, deadline_ms));
+                }
+            }
+            PendingSweepAction::MakerCancelGraceExpired => {
+                let grace_ms = if po.is_close {
+                    pending_sweep::CLOSE_MAKER_CANCEL_ACK_GRACE_MS
+                } else {
+                    pending_sweep::MAKER_CANCEL_ACK_GRACE_MS
+                };
+                tracing::error!(
+                    order_link_id = %key,
+                    symbol = %po.symbol,
+                    elapsed_ms = elapsed,
+                    cancel_requested_ts_ms = po.cancel_requested_ts_ms.unwrap_or_default(),
+                    grace_ms = grace_ms,
+                    "PostOnly maker cancel ack grace expired — awaiting confirmation / PostOnly 取消回報 grace 到期，保留追蹤"
+                );
+                maker_grace_fallback.push(key.clone());
+                awaiting_confirmation.push(key.clone());
+            }
+            PendingSweepAction::ConfirmationTimeout => {
+                tracing::error!(
+                    order_link_id = %key,
+                    symbol = %po.symbol,
+                    elapsed_ms = elapsed,
+                    "pending order confirmation timeout (>60s) / 待處理訂單確認逾時，保留追蹤"
+                );
+                awaiting_confirmation.push(key.clone());
+            }
+            PendingSweepAction::LegacySoftWarn => {
+                tracing::warn!(
+                    order_link_id = %key,
+                    symbol = %po.symbol,
+                    elapsed_ms = elapsed,
+                    filled = %po.cum_filled_qty,
+                    requested = %po.qty,
+                    "pending order soft timeout (>5s) / 待處理訂單軟超時"
+                );
+            }
+            PendingSweepAction::Keep => {
+                // MAKER-CLOSE-REPRICE-1：仍 Keep 的 PostOnly close maker 嘗試
+                // toward-touch 重掛。compute_close_reprice_limit 讀快取 BBO 經
+                // compute_close_limit_price 算新 inside quote（spread guard /
+                // crossed-book strict skip 全套）；純函數 close_maker_reprice_decision
+                // 判定「未達 max_reprices、在 [reprice_after, timeout) 窗、cancel
+                // 未在途、新限價嚴格優於原掛價」才放行。stops/urgent 走 market
+                // （tif=None）結構上到不了此分支（A.4 互斥證明）。
+                if allow_reprice
+                    && po.is_close
+                    && po.progress.status == super::order_lifecycle::OrderStatus::Working
+                    && po.time_in_force == Some(TimeInForce::PostOnly)
+                    && po.cancel_requested_ts_ms.is_none()
+                    && po.reprice_count < crate::strategies::common::CLOSE_MAKER_MAX_REPRICES
+                {
+                    // DIRECTION FIX（2026-06-17 E2/E4 RETURN HIGH）：po.is_long 是
+                    // **訂單方向**（close order 已 inverted：平多倉=SELL→is_long=false、
+                    // 平空倉=BUY→is_long=true），但 reprice 計價要的是**真實持倉方向**。
+                    // 經 *_for_pending 單一收口做 `!po.is_long` 轉換（sweep 與 e2e
+                    // 方向測試共用同一條，使「把方向寫反」的 mutation 必被測試抓到）。
+                    let new_inside_limit = pipeline.compute_close_reprice_limit_for_pending(po);
+                    if let Some(new_limit) = pending_sweep::close_maker_reprice_decision(
+                        po,
+                        now_ms,
+                        new_inside_limit,
+                        crate::strategies::common::CLOSE_MAKER_MAX_REPRICES,
+                        crate::strategies::common::CLOSE_MAKER_REPRICE_AFTER_MS,
+                    ) {
+                        maker_to_reprice.push((key.clone(), new_limit, po.reprice_count));
+                    }
+                }
+            }
+        }
+    }
+    // 沿用有界 reduce-only 重掛；取消仍為異步請求，不能宣稱已完成。
+    // 新單派發後保留舊 tracker，等待其 cancel／execution 確認。
+    for (link_id, new_limit, reprice_count) in &maker_to_reprice {
+        let Some(po) = state.pending_orders.get(link_id).cloned() else {
+            continue;
+        };
+        if po.close_maker_audit.is_none() {
+            continue;
+        }
+        // 先 cancel 舊掛單（非阻塞 REST，fail-soft）。
+        if cancel_maker(&po, now_ms) {
+            mark_maker_cancel_attempt(state, link_id, now_ms);
+        }
+        // DIRECTION FIX（2026-06-17 E2/E4 RETURN HIGH）：經 *_for_pending 單一收口
+        // 做 po.is_long（訂單側）→ 真實持倉方向（`!po.is_long`）轉換，再派發。
+        let dispatched = pipeline.dispatch_close_maker_reprice_for_pending(
+            &po,
+            *new_limit,
+            *reprice_count,
+            now_ms,
+        );
+        if let Some(replacement_id) = dispatched {
+            // 新單派發不等同舊單取消，舊 tracker 保留。
+            awaiting_confirmation.push(link_id.clone());
+            if let Some(po) = state.pending_orders.get_mut(link_id) {
+                po.cancel_requested_ts_ms = Some(now_ms);
+                po.progress.replacement_order_link_id = Some(replacement_id);
+            }
+        }
+    }
+    for link_id in &maker_grace_fallback {
+        if let Some(po) = state.pending_orders.get(link_id).cloned() {
+            let reason = pending_sweep::close_maker_sweep_fallback_reason(&po, now_ms)
+                .unwrap_or(CloseMakerFallbackReason::CancelGraceExpired);
+            dispatch_close_maker_fallback_from_pending(
+                state,
+                pipeline,
+                &po,
+                reason,
+                None,
+                "maker_cancel_grace_expired",
+            );
+        }
+    }
+    // Dispatch non-blocking cancels for timed-out PostOnly makers.
+    // 非阻塞派發超時 PostOnly 掛單取消。
+    let mut maker_cancel_dispatched: Vec<String> = Vec::new();
+    for (link_id, symbol, elapsed, deadline_ms) in &maker_to_cancel {
+        tracing::warn!(
+            order_link_id = %link_id,
+            symbol = %symbol,
+            elapsed_ms = elapsed,
+            deadline_ms = deadline_ms,
+            reason = "maker_timeout_cancel",
+            "PostOnly maker timed out — cancelling via orderLinkId / PostOnly 掛單超時 — 以 orderLinkId 取消"
+        );
+        let po = state
+            .pending_orders
+            .get(link_id)
+            .expect("sweep candidate remains tracked");
+        if cancel_maker(po, now_ms) {
+            maker_cancel_dispatched.push(link_id.clone());
+        } else {
+            tracing::error!(
+                order_link_id = %link_id,
+                symbol = %symbol,
+                "PostOnly maker timed out but no REST client is available — retaining tracker / PostOnly 超時但無 REST client，保留追蹤"
+            );
+            if let Some(po) = state.pending_orders.get(link_id).cloned() {
+                let reason = pending_sweep::close_maker_sweep_fallback_reason(&po, now_ms)
+                    .unwrap_or(CloseMakerFallbackReason::TimeoutTaker);
+                dispatch_close_maker_fallback_from_pending(
+                    state,
+                    pipeline,
+                    &po,
+                    reason,
+                    None,
+                    "maker_timeout_no_rest_client",
+                );
+            }
+            awaiting_confirmation.push(link_id.clone());
+        }
+    }
+    // Mark maker rows we just dispatched cancels for. Keep them in the
+    // tracker so racing fills before the WS cancel ack still match context.
+    // 標記剛派發 cancel 的 maker 訂單；保留 tracker 讓 ack 前 race 成交仍能匹配。
+    for link_id in &maker_cancel_dispatched {
+        mark_maker_cancel_attempt(state, link_id, now_ms);
+    }
+    // Retain legacy Market and maker cancel-grace rows until confirmation.
+    // Market／cancel grace 逾時只記未知，仍保留 execution 匹配。
+    let order_tx = pipeline.trading_channel();
+    for key in &awaiting_confirmation {
+        super::loop_pending_registration::handle_pending_registration(
+            Some(super::types::PendingOrderEvent::ConfirmationUnknown {
+                order_link_id: key.clone(),
+                reason: "pending_confirmation_timeout".into(),
+                ts_ms: now_ms,
+            }),
+            pipeline,
+            state,
+            order_tx.as_ref(),
+        );
+    }
+    schedule_pending_reconciliation(state, now_ms);
+    // Clean stale order_id mappings: only keep those with active pending orders
+    // 清理過期 order_id 映射：僅保留有活躍待處理訂單的
+    let active_links: std::collections::HashSet<&String> = state.pending_orders.keys().collect();
+    state
+        .order_id_to_link
+        .retain(|_, link| active_links.contains(link));
+}
+
+/// Read-only confirmation survives WS outages and failed/nonterminal batches.
+/// Each order has a 30s cooldown plus the reconciler's in-flight dedup and 3-attempt bound.
+pub(super) fn schedule_pending_reconciliation(state: &mut LoopState, now_ms: u64) {
+    let Some(reconciler) = &state.dcp_reconciler else {
+        return;
+    };
+    let pending: Vec<_> = state
+        .pending_orders
+        .values_mut()
+        .filter_map(|po| {
+            let needs_confirmation = po.progress.reconciliation_retry_after_ms.is_some()
+                || if po.progress.replacement_order_link_id.is_some() {
+                    po.cancel_requested_ts_ms.is_some_and(|sent| {
+                        now_ms.saturating_sub(sent)
+                            >= pending_sweep::CLOSE_MAKER_CANCEL_ACK_GRACE_MS
+                    })
+                } else {
+                    po.progress.status == super::order_lifecycle::OrderStatus::Unknown
+                        || (po.progress.status.is_terminal()
+                            && !po.progress.executions_accounted(po.cum_filled_qty))
+                        || (!po.progress.status.is_terminal()
+                            && matches!(
+                                pending_sweep::classify_pending_sweep(po, now_ms),
+                                pending_sweep::PendingSweepAction::ConfirmationTimeout
+                                    | pending_sweep::PendingSweepAction::MakerTimeoutCancel
+                                    | pending_sweep::PendingSweepAction::MakerCancelGraceExpired
+                            ))
+                };
+            if !needs_confirmation
+                || po
+                    .progress
+                    .reconciliation_retry_after_ms
+                    .is_some_and(|next| now_ms < next)
+            {
+                return None;
+            }
+            po.progress.reconciliation_retry_after_ms = Some(now_ms.saturating_add(30_000));
+            Some(po.clone())
+        })
+        .collect();
+    reconciler.schedule(&pending);
 }

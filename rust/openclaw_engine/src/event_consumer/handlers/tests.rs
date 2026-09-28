@@ -70,11 +70,13 @@ fn test_reset_clears_all_state() {
     let mut pipeline = TickPipeline::new(&["BTCUSDT"]);
     pipeline.paper_paused = true;
     pipeline.session_halted = true;
+    pipeline.exchange_submission_guard.track("order1");
     let mut writer = make_writer(dir.path());
     let mut pending = HashMap::new();
     pending.insert(
         "order1".to_string(),
         PendingOrder {
+            progress: Default::default(),
             order_link_id: "order1".into(),
             symbol: "BTCUSDT".into(),
             is_long: true,
@@ -120,6 +122,7 @@ fn test_reset_clears_all_state() {
     assert!(!pipeline.paper_paused);
     assert!(!pipeline.session_halted);
     assert!(pending.is_empty());
+    assert!(!pipeline.exchange_submission_guard.blocks_entry());
     assert!((pipeline.paper_state.balance() - 5000.0).abs() < 1e-9);
 }
 
@@ -814,4 +817,32 @@ fn test_reload_edge_predictor_trims_engine_name() {
         err.contains("registry_authorized_serving_contract_required"),
         "got: {err}"
     );
+}
+
+#[test]
+fn h1_reset_preserves_exchange_reservation_until_confirmation() {
+    let dir = tempfile::tempdir().unwrap();
+    let mut pipeline = TickPipeline::with_kind(
+        &["BTCUSDT"],
+        10_000.0,
+        crate::tick_pipeline::PipelineKind::Demo,
+    );
+    let mut writer = make_writer(dir.path());
+    let mut pending = HashMap::new();
+    let mut order_map = HashMap::from([("venue-h1".into(), "h1-reserved".into())]);
+    assert!(pipeline
+        .exchange_submission_guard
+        .reserve("h1-reserved", false));
+    handle_paper_command_with_order_map(
+        PipelineCommand::Reset {
+            new_balance: 5000.0,
+        },
+        &mut pipeline,
+        &mut writer,
+        &mut pending,
+        &mut order_map,
+    );
+    assert!(pipeline.exchange_submission_guard.blocks_entry());
+    assert_eq!(pipeline.paper_state.balance(), 10_000.0);
+    assert_eq!(order_map.len(), 1);
 }

@@ -1082,23 +1082,17 @@ pub(super) async fn bootstrap_runtime(deps: EventConsumerDeps) -> BootstrappedRu
                 );
 
                 // ── 把當日 Working orders 恢復到 producer-side pending cap ──
-                // trading.orders 是 exchange-accepted Working order 的 DB evidence。
+                // Base rows remain PendingSubmit; project lifecycle evidence and retain uncertain rows.
                 // 重啟後策略內存的 pending_entry_expiry 會清空；若不從 DB 恢復，已有
                 // resting PostOnly orders 不會計入 max_concurrent，deploy/restart 後會再掛新單。
                 let day_start_ms = now_ms.saturating_sub(now_ms % DAY_MS);
                 let pending_expiry_ms =
                     now_ms.saturating_add(DAY_MS.saturating_sub(now_ms % DAY_MS).max(15_000));
-                let pending_rows: Result<Vec<(String,)>, sqlx::Error> = sqlx::query_as(
-                    "SELECT DISTINCT symbol \
-                     FROM trading.orders \
-                     WHERE strategy_name = 'flash_dip_buy' \
-                       AND engine_mode = 'demo' \
-                       AND status = 'Working' \
-                       AND ts >= to_timestamp($1::double precision / 1000.0)",
-                )
-                .bind(day_start_ms as f64)
-                .fetch_all(pool)
-                .await;
+                let pending_rows: Result<Vec<(String,)>, sqlx::Error> =
+                    sqlx::query_as(include_str!("flash_dip_pending.sql"))
+                        .bind(day_start_ms as f64)
+                        .fetch_all(pool)
+                        .await;
                 match pending_rows {
                     Ok(rows) => {
                         let mut restored = 0_usize;

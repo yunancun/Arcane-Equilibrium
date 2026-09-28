@@ -8,6 +8,7 @@
 //!   擁有 TickPipeline 生命週期：創建管線、註冊策略、執行 K 線引導、然後循環接收 PriceEvent。
 
 mod bootstrap;
+mod dcp_reconciliation;
 mod dispatch;
 // EVENT-CONSUMER-SPLIT-2（2026-07-03）：dispatch.rs retcode 分類簇拆出（§九 2000 行治理）。
 mod dispatch_retcode;
@@ -21,6 +22,7 @@ mod loop_handlers;
 mod loop_pending_registration;
 mod loop_pipeline_command;
 mod loop_tick;
+pub(crate) mod order_lifecycle;
 // MUST-FIX-2 Round 2 (2026-05-19/20)：halt-state restore helper 在 sibling
 // crate test（tick_pipeline::tests::halt_ttl）內被呼叫 → pub(crate) 暴露足夠，
 // 不需要 pub。
@@ -94,12 +96,23 @@ pub async fn run_event_consumer(deps: EventConsumerDeps) {
     // G1-02 Step 2a（2026-04-24）：7 個 loop-internal mut 欄位合併進
     // `LoopState`，select! arm 可傳單一 `&mut state` 借用。
     let mut state = loop_handlers::LoopState::new(known_symbols);
+    let (reconciliation_tx, mut reconciliation_rx) = tokio::sync::mpsc::unbounded_channel();
+    state.dcp_reconciler = shared_client.as_ref().map(|client| {
+        dcp_reconciliation::DcpReconciler::new(client.clone(), reconciliation_tx.clone())
+    });
+    let (maker_cancel_tx, mut maker_cancel_rx) = tokio::sync::mpsc::unbounded_channel();
+    state.maker_cancel_outcome_tx = Some(maker_cancel_tx.clone());
     let status_interval = std::time::Duration::from_secs(STATUS_INTERVAL_SECS);
     let start_time = Instant::now();
 
     let mut exchange_event_rx = exchange_event_rx;
     let mut pending_reg_rx = pending_reg_rx_slot;
     let pending_timeout = std::time::Duration::from_secs(5);
+
+    // Keep maker deadlines on the same 5s maintenance cadence without price
+    // ticks; per-order read reconciliation retains its independent 30s cooldown.
+    let mut confirmation_interval = tokio::time::interval(pending_timeout);
+    confirmation_interval.set_missed_tick_behavior(tokio::time::MissedTickBehavior::Delay);
 
     // AMD-2026-05-02-01 Track H E-1 retrofit (HIGH-2 ExpiryGuardian sweep):
     // Periodic Decision Lease & Authorization expiry sweeper — invokes the
@@ -168,6 +181,11 @@ pub async fn run_event_consumer(deps: EventConsumerDeps) {
                 ).await;
             },
 
+            reconciled = reconciliation_rx.recv() => {
+                loop_handlers::handle_exchange_event(reconciled, &mut pipeline,
+                    &mut snapshot_writer, &mut state, order_tx.as_ref()).await;
+            },
+
             // ── EXT-1: Pending order registration from dispatch task (Arm D) ──
             // ── EXT-1：dispatch task 推送的 pending order 註冊（Arm D）──
             pending_reg = async {
@@ -225,6 +243,19 @@ pub async fn run_event_consumer(deps: EventConsumerDeps) {
                 if flow.is_break() {
                     break;
                 }
+            }
+
+            Some(outcome) = maker_cancel_rx.recv() => {
+                loop_tick::handle_maker_cancel_outcome(&mut state, outcome, openclaw_core::now_ms());
+            }
+
+            _ = confirmation_interval.tick() => {
+                loop_tick::handle_confirmation_interval(
+                    &mut pipeline, &mut state, openclaw_core::now_ms(),
+                    &|po, now_ms| loop_tick::dispatch_maker_cancel(
+                        shared_client.as_ref(), Some(&maker_cancel_tx), po, now_ms,
+                    ),
+                );
             }
 
             // ── AMD-2026-05-02-01 Track H E-1 retrofit Arm: lease & auth sweep ──

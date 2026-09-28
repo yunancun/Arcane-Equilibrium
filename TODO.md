@@ -502,3 +502,58 @@ E2 原始 UNVERIFIED 記錄保留；Operator 允許僅依既有 E4 證據補結�
 停用措施仍有效，完整 native 入口工程已歸檔，不再是 WAITING 後續施工。
 原測試／review 證據見 [已關閉總帳](docs/archive/2026-09-25--workflow-todo-closed.md)；
 不把歷史結果當本次重跑，也不宣稱 host enforcement 或實測效率完成。
+
+
+## Bybit H1 本機修復候選（2026-09-28）
+
+`H1-ORDER-STATE-TRUTH = SOURCE_FIXED_LOCAL_TESTED_NOT_ADOPTED`。
+Operator 明確指定 H1 後，在 `codex/bybit-h1-order-state` 隔離 worktree 修正
+送出前註冊、REST ACK／WS 狀態、未知結果保留、entry 阻擋及 reduce-only 保護邊界，
+並對齊兩個直接讀取訂單狀態的唯讀健康檢查。
+原本機修復階段 H1 專項 13、Python 消費者 57、Rust library 4,896 項通過；
+原修復報告與完整 log 保留於 workspace audits/2026-09-28-bybit-h1-repair。
+獨立 E2/E4 未執行；廣域 integration 的 2 個 RRC1、9 個 stress failure 均已在乾淨基準重現。
+本列不是 merge／部署／broker 或 W11 派發權，H2 durable recovery 未啟動；
+PR #199 原輪 Codex 六項意見已補修：保留已知曝險 FAIL、V161 最新狀態 view、
+明確拒單終態、close-only duplicate 語義、WS 解決後釋放租約，以及 reset 不得遺失未確認交易所訂單。
+第一批修補後 Rust library 4,900、Python 消費者 58 與 strict library Clippy 通過；該 head 的 hosted migration/schema 契約亦通過。
+Operator 授權的五項 H1 follow-up 已追加：reprice 前後單平倉旗標交接、
+以寫入序號與終態優先消除來源時鐘倒序、partial 剩餘曝險、全成交加權均價，
+以及 DCP 有界唯讀逐單對帳及缺失 execution 補回；不完整證據保留 Unknown。
+追加本機 Rust library 4,906、Python 消費者 59（含隔離 PG 真查詢）通過；
+V161 新增欄位保留歷史壓縮資料，compressed brownfield 契約交由 current-head hosted CI 驗證。
+Operator 再授權的三項 H1 review 缺口已修復：fallback 期間晚到前單成交保留平倉旗標、
+reprice 舊單在 cancel grace 後執行有界對帳（含終態但缺 execution），
+以及 execution 分頁必須具有明確字串 cursor；失敗或缺證不清除未確認訂單。
+後續 H1 review 再補：對帳每批最多三次、同單不重疊且批次間至少 30 秒，
+失敗／非終態可由獨立 timer 重試；一般 WS 斷線同樣啟動唯讀確認。
+WS execution 必填數值／身分驗證後才套用成交並登記 dedup，異常資料不阻斷有效 REST 重播。
+新增測試先重現缺口再通過；H1 專項 30、Rust library 4,913 與 strict library Clippy 通過。
+最後追加 H1 消費者修補：首次 duplicate ID 明確拒單，只有實際先前 transport ambiguity 才保留 Unknown；
+狀態投影按註冊序號區分重用 ID，成交持久化 order_registered_ts_ms 並按此精確歸屬，
+避免 venue 時鐘偏差或歷史 Filled／fills 污染新單；歸屬不明的重用 ID 歷史成交不猜配。
+FlashDip pending-cap 恢復與兩個健康檢查共用 public.order_events 投影；隔離 PG 重現後修復，
+Python 60 項與 migration guards 通過；完整 Timescale／compressed-history 契約由本 head CI 驗證。
+最末成交歸屬修補再驗證：H1 專項 31、Rust library 4,914、Python 60 項通過；
+成交時鐘倒序與缺失／畸形 registration metadata 均有回歸覆蓋；
+PostOnly 部分成交的剩餘掛單計時另存，不再改寫註冊時間，連續兩筆成交保留同一歸屬。
+追加 entry／dispatch admission 複核修補：先辨識既有持倉的反向減倉意圖，
+entry guard 僅攔風險增加開倉；在 Approved／intent／lineage 寫入前原子保留 queued 提交資格，
+非同步 dispatcher 僅可交接一次，避免第二筆排隊開倉被靜默丟棄後殘留本機狀態；
+本機 preflight／channel 失敗釋放提交資格，同 ID 重送不終止原單。
+本輪 H1 專項 35、Rust library 4,918 與 strict library Clippy 通過。
+最後對帳排程修補：不同訂單獨立執行，以跨批次共用 semaphore 限制最多四筆並行，
+慢單不再阻塞整批；每單重試／逾時、冷卻及防重複規則不變。
+兩項並行回歸先 RED 再 GREEN；H1 專項 37、Rust library 4,920、strict Clippy 通過。
+review 4125282489 要求一般重啟後重建未確認訂單與 entry guard，屬原報告 H2，
+依本 session 僅 H1 指示明列為尚未實作的限制；本修復不宣稱重啟後仍有提交阻擋保證。
+追加 scope 的 current-head review、merge 與 Mac/GitHub 同步以 workspace publication artifacts 收口；Linux 依 Operator 指示略過。
+本節記錄本機修復階段；source 發佈、合併及採用另以 exact-head PR／同步證據判定，
+`next_action=null`。
+
+H1 追加修補（同 PR #199）：bounded probe 共用送單保留在 durable admission 前取得，阻擋時落拒絕紀錄，持久化或 enqueue 失敗釋放；獨立 timer 直接選取逾時非終態做唯讀對帳；V161 lifecycle retention 改為 400 天以覆蓋訂單 365 天保留期。current-head 驗證／merge 證據以本輪 publication report 為準。
+本輪 H1 專項 39、Rust library 4,921、Python 60、strict Clippy、schema target 編譯，以及隔離 PG 行為／migration guards 通過；完整 retention／Timescale 契約待 current-head CI。
+最後 maker 保護修補：5 秒獨立 timer 沿用 deadline cancel 與單次保護性 fallback，行情停滯時照常維護；quote-based reprice 留在行情路徑。所有 primary close／reprice／fallback 在入隊前保留共用送單資格，前單失敗事件待 fallback 完成保留後才釋放前單；enqueue 失敗則清理其保留。兩項回歸先 RED 再 GREEN。
+本輪 H1 專項 41、Rust library 4,923、strict Clippy 及 schema target 編譯通過；SQL／Python 消費者未變，前輪 Python 60／PG 證據以相同雜湊復用。
+取消結果修補：REST cancel 結果／15 秒逾時回傳單一 state owner，以註冊時間和 attempt 時間拒絕過期結果；同單不重疊，完成後未獲終態則冷卻 30 秒再取消同一 ID。保持首次 cancel grace，不因重試延後單次保護性 fallback；重掛前單同樣可重試取消，ACK 不視為終態。
+本輪 H1 專項 43、Rust library 4,925、strict Clippy 及 schema target 編譯通過；SQL／Python 消費者未變，前輪 Python 60／PG 證據以相同雜湊復用。
