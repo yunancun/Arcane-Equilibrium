@@ -187,7 +187,7 @@ pub(super) fn sweep_pending_orders(
     // 達 max_reprices、book 朝對我方向移動）時收集，後續串行 cancel 舊單 + 重發。
     let mut maker_to_reprice: Vec<(String, f64, u32)> = Vec::new();
     for (key, po) in state.pending_orders.iter() {
-        if po.progress.status.is_terminal() {
+        if po.progress.status.is_terminal() || po.progress.replacement_order_link_id.is_some() {
             continue;
         }
         let elapsed = pending_sweep::pending_elapsed_ms(po, now_ms);
@@ -291,11 +291,12 @@ pub(super) fn sweep_pending_orders(
             *reprice_count,
             now_ms,
         );
-        if dispatched.is_some() {
+        if let Some(replacement_id) = dispatched {
             // 新單派發不等同舊單取消，舊 tracker 保留。
             awaiting_confirmation.push(link_id.clone());
             if let Some(po) = state.pending_orders.get_mut(link_id) {
                 po.cancel_requested_ts_ms = Some(now_ms);
+                po.progress.replacement_order_link_id = Some(replacement_id);
             }
         }
     }

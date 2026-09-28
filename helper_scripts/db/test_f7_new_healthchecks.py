@@ -860,7 +860,7 @@ class TestH1OrderLifecycleReadContract(unittest.TestCase):
         self.assertIn("LEFT JOIN LATERAL", sql)
         self.assertIn("COALESCE(ls.to_status, o.status)", sql)
         self.assertIn("osc.engine_mode = o.engine_mode", sql)
-        self.assertIn("ORDER BY osc.ts DESC", sql)
+        self.assertIn("osc.lifecycle_seq DESC NULLS LAST, osc.ts DESC", sql)
         # 未確認 ACK／Unknown 不可當成 maker 已掛入市場的證據。
         self.assertNotIn("'acknowledged'", sql)
         self.assertNotIn("'unknown'", sql)

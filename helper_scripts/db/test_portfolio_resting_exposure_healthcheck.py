@@ -546,5 +546,32 @@ class TestPortfolioRestingExposureHealthcheck(unittest.TestCase):
         self.assertIn("long_total=7000", msg)
 
 
+@unittest.skipUnless(
+    os.environ.get("OPENCLAW_TEST_PG") and os.environ.get("OPENCLAW_TEST_PG_DESTRUCTIVE") == "1",
+    "requires explicitly acknowledged disposable PostgreSQL",
+)
+class H1RestingPostgresContract(unittest.TestCase):
+    def test_causal_partial_resting_query_against_postgres(self):
+        import psycopg2
+        from helper_scripts.db.passive_wait_healthcheck.checks_portfolio_resting_exposure import _resting_notional_from_pg
+        conn = psycopg2.connect(os.environ["OPENCLAW_TEST_PG"])
+        try:
+            cur = conn.cursor()
+            order_id = f"h1-health-{os.getpid()}"
+            cur.execute("INSERT INTO trading.orders (ts,order_id,symbol,side,order_type,qty,price,status,engine_mode) VALUES (NOW(),%s,'H1TESTUSDT','Buy','Limit',10,100,'PendingSubmit','demo')", (order_id,))
+            for status, qty, delta in [("Acknowledged",0,10),("PartiallyFilled",9,-5)]:
+                cur.execute("INSERT INTO trading.order_state_changes (ts,order_id,to_status,filled_qty,engine_mode) VALUES (NOW()+%s*interval '1 second',%s,%s,%s,'demo')", (delta,order_id,status,qty))
+            resting, _, _, _, diag = _resting_notional_from_pg(cur, "demo", 24)
+            self.assertEqual(resting["H1TESTUSDT"]["long"],100.0)
+            self.assertNotIn("unresolved",diag)
+            cur.execute("INSERT INTO trading.order_state_changes (ts,order_id,to_status,filled_qty,engine_mode) VALUES (NOW()-interval '4 seconds',%s,'Filled',10,'demo')", (order_id,))
+            resting, _, _, _, diag = _resting_notional_from_pg(cur,"demo",24)
+            self.assertNotIn("H1TESTUSDT",resting)
+            self.assertNotIn("unresolved",diag)
+        finally:
+            conn.rollback()
+            conn.close()
+
+
 if __name__ == "__main__":
     unittest.main()

@@ -1726,3 +1726,5 @@ async fn h1_unknown_confirmation_settles_active_lease() {
         assert!(!pipeline.exchange_submission_guard.blocks_entry());
     }
 }
+
+include!("h1_review_tests.rs");

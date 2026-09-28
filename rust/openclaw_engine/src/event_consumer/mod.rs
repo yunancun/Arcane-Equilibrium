@@ -8,6 +8,7 @@
 //!   擁有 TickPipeline 生命週期：創建管線、註冊策略、執行 K 線引導、然後循環接收 PriceEvent。
 
 mod bootstrap;
+mod dcp_reconciliation;
 mod dispatch;
 // EVENT-CONSUMER-SPLIT-2（2026-07-03）：dispatch.rs retcode 分類簇拆出（§九 2000 行治理）。
 mod dispatch_retcode;
@@ -95,6 +96,10 @@ pub async fn run_event_consumer(deps: EventConsumerDeps) {
     // G1-02 Step 2a（2026-04-24）：7 個 loop-internal mut 欄位合併進
     // `LoopState`，select! arm 可傳單一 `&mut state` 借用。
     let mut state = loop_handlers::LoopState::new(known_symbols);
+    let (reconciliation_tx, mut reconciliation_rx) = tokio::sync::mpsc::unbounded_channel();
+    state.dcp_reconciler = shared_client.as_ref().map(|client| {
+        dcp_reconciliation::DcpReconciler::new(client.clone(), reconciliation_tx.clone())
+    });
     let status_interval = std::time::Duration::from_secs(STATUS_INTERVAL_SECS);
     let start_time = Instant::now();
 
@@ -167,6 +172,11 @@ pub async fn run_event_consumer(deps: EventConsumerDeps) {
                     &mut state,
                     order_tx.as_ref(),
                 ).await;
+            },
+
+            reconciled = reconciliation_rx.recv() => {
+                loop_handlers::handle_exchange_event(reconciled, &mut pipeline,
+                    &mut snapshot_writer, &mut state, order_tx.as_ref()).await;
             },
 
             // ── EXT-1: Pending order registration from dispatch task (Arm D) ──

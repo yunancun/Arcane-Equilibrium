@@ -90,6 +90,11 @@ pub struct OrderProgress {
     /// order topic 只宣告累計量；execution topic 仍是唯一持倉寫入者。
     pub venue_filled_qty: Option<f64>,
     pub venue_reject_reason: String,
+    /// A queued reprice successor owns close protection; this predecessor only
+    /// retains fill attribution until its own terminal confirmation arrives.
+    pub replacement_order_link_id: Option<String>,
+    /// Keep per-order replay dedup until terminal cleanup, independent of the global FIFO.
+    pub applied_execution_ids: HashSet<String>,
 }
 
 impl OrderProgress {

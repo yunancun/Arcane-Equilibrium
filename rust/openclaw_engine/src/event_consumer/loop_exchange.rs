@@ -212,6 +212,13 @@ pub(super) async fn handle_exchange_event(
 
             if let Some(key) = matched_key {
                 if let Some(po) = state.pending_orders.get_mut(&key) {
+                    if !po
+                        .progress
+                        .applied_execution_ids
+                        .insert(exec.exec_id.clone())
+                    {
+                        return;
+                    }
                     po.cum_filled_qty += exec_qty;
                     let liquidity_role = fill_liquidity_role(exec.is_maker, matched_tif);
                     // V145：同一純函數 adverse_slippage_bps 按 liquidity_role 互斥
@@ -242,6 +249,9 @@ pub(super) async fn handle_exchange_event(
                     // 訊號時刻 context_id 傳入 apply_confirmed_fill，
                     // 使 trading.fills.entry_context_id 與
                     // learning.decision_features.context_id 對齊。
+                    let preserve_close_guard = po.is_close
+                        && po.progress.replacement_order_link_id.is_some()
+                        && pipeline.has_pending_close(&po.symbol);
                     pipeline.apply_confirmed_fill_with_close_maker_audit(
                         &exec.symbol,
                         po.is_long,
@@ -267,6 +277,9 @@ pub(super) async fn handle_exchange_event(
                         // reduce-only fill 在本地無倉時 no-op（不開幻影倉，§4.3）。
                         po.is_close,
                     );
+                    if preserve_close_guard {
+                        pipeline.retain_pending_close(&po.symbol);
+                    }
                     snapshot_writer.force_write(&pipeline.snapshot());
                     settle_pending_lease(
                         po,
@@ -574,6 +587,11 @@ pub(super) async fn handle_exchange_event(
         }
         Some(ExchangeEvent::DcpTriggered) => {
             let pending: Vec<_> = state.pending_orders.values().cloned().collect();
+            if let Some(reconciler) = &state.dcp_reconciler {
+                reconciler.schedule(&pending);
+            } else {
+                tracing::error!("DCP reconciliation unavailable; retaining unknown trackers");
+            }
             for po in &pending {
                 super::loop_pending_registration::handle_pending_registration(
                     Some(super::types::PendingOrderEvent::ConfirmationUnknown {
@@ -627,7 +645,10 @@ fn finish_terminal_pending(id: &str, state: &mut LoopState, pipeline: &mut TickP
         openclaw_core::governance_core::LeaseOutcome::Cancelled
     };
     settle_pending_lease(&mut po, pipeline, outcome);
-    if po.is_close {
+    if po.is_close
+        && po.progress.replacement_order_link_id.is_none()
+        && !state.close_maker_fallback_dispatched.contains(id)
+    {
         pipeline.clear_pending_close(&po.symbol);
     }
     if po.progress.status != OrderStatus::Filled {

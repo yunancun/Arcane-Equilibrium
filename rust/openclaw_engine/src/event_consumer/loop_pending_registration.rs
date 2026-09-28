@@ -321,7 +321,8 @@ pub(super) fn handle_pending_registration(
     {
         // WS 已證實存在／成交的單，不能再被晚到的 REST 錯誤清除。
         if (!state.pending_orders.contains_key(&order_link_id)
-            && reason.starts_with("dispatch_structural"))
+            && (reason.starts_with("dispatch_structural")
+                || reason.starts_with("dispatch_rejected")))
             || state.pending_orders.get(&order_link_id).is_some_and(|po| {
                 matches!(
                     po.progress.status,

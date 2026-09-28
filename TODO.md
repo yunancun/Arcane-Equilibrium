@@ -516,6 +516,12 @@ Operator 明確指定 H1 後，在 `codex/bybit-h1-order-state` 隔離 worktree 
 本列不是 merge／部署／broker 或 W11 派發權，H2 durable recovery 未啟動；
 PR #199 原輪 Codex 六項意見已補修：保留已知曝險 FAIL、V161 最新狀態 view、
 明確拒單終態、close-only duplicate 語義、WS 解決後釋放租約，以及 reset 不得遺失未確認交易所訂單。
-修補後 Rust library 4,900、Python 消費者 58 與 strict Clippy 通過；V161 待 ephemeral PG CI 驗證。
+第一批修補後 Rust library 4,900、Python 消費者 58 與 strict library Clippy 通過；該 head 的 hosted migration/schema 契約亦通過。
+Operator 授權的五項 H1 follow-up 已追加：reprice 前後單平倉旗標交接、
+以寫入序號與終態優先消除來源時鐘倒序、partial 剩餘曝險、全成交加權均價，
+以及 DCP 有界唯讀逐單對帳及缺失 execution 補回；不完整證據保留 Unknown。
+追加本機 Rust library 4,906、Python 消費者 59（含隔離 PG 真查詢）通過；
+V161 新增欄位保留歷史壓縮資料，compressed brownfield 契約交由 current-head hosted CI 驗證。
+追加 scope 的 current-head review、merge 與 Mac/GitHub 同步以 workspace publication artifacts 收口；Linux 依 Operator 指示略過。
 本節記錄本機修復階段；source 發佈、合併及採用另以 exact-head PR／同步證據判定，
 `next_action=null`。

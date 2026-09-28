@@ -684,6 +684,15 @@ impl TickPipeline {
         self.pending_close_symbols.remove(symbol);
     }
 
+    /// Keep the symbol guard owned by a still-active replacement close.
+    pub(crate) fn retain_pending_close(&mut self, symbol: &str) {
+        self.pending_close_symbols.insert(symbol.to_owned());
+    }
+
+    pub(crate) fn has_pending_close(&self, symbol: &str) -> bool {
+        self.pending_close_symbols.contains(symbol)
+    }
+
     /// EXT-1: Clear all pending close flags (on reset or DCP).
     /// EXT-1：清除所有待處理平倉標記（重置或 DCP 時）。
     pub fn clear_all_pending_close(&mut self) {

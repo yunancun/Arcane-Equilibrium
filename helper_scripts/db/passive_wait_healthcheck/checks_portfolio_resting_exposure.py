@@ -367,21 +367,18 @@ def _resting_notional_from_pg(
             WITH latest_state AS (
                 SELECT DISTINCT ON (order_id)
                     order_id,
-                    to_status
+                    to_status, MAX(filled_qty) OVER (PARTITION BY order_id) AS filled_qty
                 FROM trading.order_state_changes
                 WHERE engine_mode = %s AND ts > NOW() - (%s::text || ' hours')::interval
-                ORDER BY order_id, ts DESC, CASE to_status
-                    WHEN 'Filled' THEN 9 WHEN 'Cancelled' THEN 8 WHEN 'Rejected' THEN 8
-                    WHEN 'Deactivated' THEN 8 WHEN 'PartiallyFilledCanceled' THEN 8
-                    WHEN 'Unknown' THEN 7 WHEN 'PartiallyFilled' THEN 6
-                    WHEN 'Working' THEN 5 WHEN 'Acknowledged' THEN 4
-                    WHEN 'Submitted' THEN 3 ELSE 0 END DESC
+                ORDER BY order_id, CASE WHEN to_status = 'Filled' THEN 2
+                    WHEN to_status IN ('Cancelled', 'Rejected', 'Deactivated', 'PartiallyFilledCanceled') THEN 1
+                    ELSE 0 END DESC, lifecycle_seq DESC NULLS LAST, ts DESC
             )
             SELECT
                 o.order_id,
                 o.symbol,
                 o.side,
-                SUM(o.qty * COALESCE(o.price, 0.0))::FLOAT AS notional_sum,
+                SUM(GREATEST(o.qty - COALESCE(ls.filled_qty, 0.0), 0.0) * COALESCE(o.price, 0.0))::FLOAT AS notional_sum,
                 COUNT(*)::INT AS row_count,
                 COALESCE(o.strategy_name, '') AS strategy_name,
                 COALESCE(ls.to_status, o.status) AS order_status

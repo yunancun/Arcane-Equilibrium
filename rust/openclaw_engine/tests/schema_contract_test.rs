@@ -954,3 +954,113 @@ async fn contract_h1_order_events_lifecycle() {
     assert_eq!(status, "Filled", "other engine must not replace demo state");
     tx.rollback().await.unwrap();
 }
+
+#[tokio::test]
+async fn contract_h1_clock_skew_and_complete_fill_average() {
+    let Some(pool) = migrated_pool().await else {
+        return;
+    };
+    let mut tx = pool.begin().await.unwrap();
+    let id = "schema-h1-causal-fills";
+    sqlx::query("INSERT INTO trading.orders (ts, order_id, symbol, side, order_type, qty, price, status, engine_mode) VALUES (NOW(),$1,'BTCUSDT','Buy','Limit',10,100,'PendingSubmit','demo')")
+        .bind(id).execute(&mut *tx).await.unwrap();
+    for (offset, status, qty, price) in [
+        (30, "Acknowledged", 0.0, None),
+        (-5, "PartiallyFilled", 3.0, Some(200.0)),
+        (40, "Unknown", 3.0, None),
+        (-4, "Working", 3.0, None),
+        (-3, "Filled", 3.0, None),
+    ] {
+        sqlx::query("INSERT INTO trading.order_state_changes (ts,order_id,to_status,filled_qty,avg_price,engine_mode) VALUES (NOW()+$2::INT*interval '1 second',$1,$3,$4,$5,'demo')")
+            .bind(id).bind(offset).bind(status).bind(qty as f32).bind(price.map(|p| p as f32)).execute(&mut *tx).await.unwrap();
+        let actual: String =
+            sqlx::query_scalar("SELECT status FROM public.order_events WHERE order_id=$1")
+                .bind(id)
+                .fetch_one(&mut *tx)
+                .await
+                .unwrap();
+        assert_eq!(
+            actual, status,
+            "arrival order must win over skewed source timestamps"
+        );
+    }
+    // Even an obsolete late ACK cannot hide definitive terminal evidence.
+    sqlx::query("INSERT INTO trading.order_state_changes (ts,order_id,to_status,engine_mode) VALUES (NOW()+interval '1 hour',$1,'Acknowledged','demo')")
+        .bind(id).execute(&mut *tx).await.unwrap();
+    for (fill_id, qty, price, mode) in [
+        ("h1-fill-a", 2.0, 100.0, "demo"),
+        ("h1-fill-b", 1.0, 200.0, "demo"),
+        ("h1-fill-other", 9.0, 999.0, "live"),
+    ] {
+        sqlx::query("INSERT INTO trading.fills (ts,fill_id,order_id,symbol,side,qty,price,engine_mode) VALUES (NOW(),$1,$2,'BTCUSDT','Buy',$3,$4,$5)")
+            .bind(fill_id).bind(id).bind(qty as f32).bind(price as f32).bind(mode).execute(&mut *tx).await.unwrap();
+    }
+    let (status,qty,avg):(String,f64,f64) = sqlx::query_as("SELECT status,filled_qty::float8,avg_price::float8 FROM public.order_events WHERE order_id=$1")
+        .bind(id).fetch_one(&mut *tx).await.unwrap();
+    assert_eq!(status, "Filled");
+    assert_eq!(qty, 3.0);
+    assert!((avg - 400.0 / 3.0).abs() < 1e-6);
+    // V161 must grant the new sequence default to the engine's writer role.
+    sqlx::query("GRANT USAGE ON SCHEMA trading TO trading_ai")
+        .execute(&mut *tx)
+        .await
+        .unwrap();
+    sqlx::query("GRANT INSERT, SELECT ON trading.order_state_changes TO trading_ai")
+        .execute(&mut *tx)
+        .await
+        .unwrap();
+    sqlx::query("SET LOCAL ROLE trading_ai")
+        .execute(&mut *tx)
+        .await
+        .unwrap();
+    sqlx::query("INSERT INTO trading.order_state_changes (ts,order_id,to_status,engine_mode) VALUES (NOW(),'h1-role','Working','demo')").execute(&mut *tx).await.unwrap();
+    tx.rollback().await.unwrap();
+}
+
+/// Apply the exact forward DDL to a populated compressed hypertable as well
+/// as the empty full-tree CI database. Historical chunks must not be rewritten.
+#[tokio::test]
+async fn contract_h1_migration_preserves_compressed_history() {
+    let Some(pool) = migrated_pool().await else {
+        return;
+    };
+    let mut tx = pool.begin().await.unwrap();
+    sqlx::raw_sql(
+        "CREATE SCHEMA h1_migration_probe;
+        CREATE TABLE h1_migration_probe.orders (LIKE trading.orders INCLUDING DEFAULTS);
+        CREATE TABLE h1_migration_probe.fills (LIKE trading.fills INCLUDING DEFAULTS);
+        CREATE TABLE h1_migration_probe.order_state_changes
+            (ts timestamptz NOT NULL, order_id text, to_status text,
+             filled_qty real, avg_price real, engine_mode text);
+        SELECT create_hypertable('h1_migration_probe.order_state_changes','ts');
+        ALTER TABLE h1_migration_probe.order_state_changes SET
+            (timescaledb.compress, timescaledb.compress_segmentby='order_id');
+        INSERT INTO h1_migration_probe.order_state_changes
+            VALUES (NOW()-interval '30 days','legacy','Working',0,NULL,'demo');
+        SELECT compress_chunk(show_chunks('h1_migration_probe.order_state_changes'));",
+    )
+    .execute(&mut *tx)
+    .await
+    .unwrap();
+    let ddl = std::fs::read_to_string(
+        srv_root().join("sql/migrations/V161__order_events_lifecycle_projection.sql"),
+    )
+    .unwrap()
+    .replace("trading.", "h1_migration_probe.")
+    .replace("public.order_events", "h1_migration_probe.order_events");
+    sqlx::raw_sql(&ddl)
+        .execute(&mut *tx)
+        .await
+        .expect("V161 on existing compressed history");
+    let old_seq: Option<i64> = sqlx::query_scalar(
+        "SELECT lifecycle_seq FROM h1_migration_probe.order_state_changes WHERE order_id='legacy'",
+    )
+    .fetch_one(&mut *tx)
+    .await
+    .unwrap();
+    assert_eq!(old_seq, None, "legacy compressed rows remain untouched");
+    let new_seq: i64 = sqlx::query_scalar("INSERT INTO h1_migration_probe.order_state_changes (ts,order_id,to_status,engine_mode) VALUES (NOW(),'new','Working','demo') RETURNING lifecycle_seq")
+        .fetch_one(&mut *tx).await.unwrap();
+    assert!(new_seq > 0);
+    tx.rollback().await.unwrap();
+}
