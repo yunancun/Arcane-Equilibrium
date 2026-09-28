@@ -95,6 +95,8 @@ pub struct OrderProgress {
     pub replacement_order_link_id: Option<String>,
     /// Earliest next bounded read-only confirmation batch; retained across failures.
     pub reconciliation_retry_after_ms: Option<u64>,
+    /// Partial-entry grace has its own clock; registration identity is immutable.
+    pub maker_remainder_started_ts_ms: Option<u64>,
     /// Keep per-order replay dedup until terminal cleanup, independent of the global FIFO.
     pub applied_execution_ids: HashSet<String>,
 }

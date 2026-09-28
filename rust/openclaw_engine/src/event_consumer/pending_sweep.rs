@@ -54,7 +54,11 @@ pub(crate) enum PendingSweepAction {
 }
 
 pub(crate) fn pending_elapsed_ms(po: &PendingOrder, now_ms: u64) -> u64 {
-    now_ms.saturating_sub(po.sent_ts_ms)
+    now_ms.saturating_sub(
+        po.progress
+            .maker_remainder_started_ts_ms
+            .unwrap_or(po.sent_ts_ms),
+    )
 }
 
 pub(crate) fn classify_pending_sweep(po: &PendingOrder, now_ms: u64) -> PendingSweepAction {
@@ -205,7 +209,7 @@ pub(crate) fn tighten_postonly_entry_after_partial(po: &mut PendingOrder, exec_t
             .min(PARTIAL_FILL_REMAINDER_GRACE_MS),
     );
     if exec_ts_ms > 0 {
-        po.sent_ts_ms = exec_ts_ms;
+        po.progress.maker_remainder_started_ts_ms = Some(exec_ts_ms);
     }
     true
 }
@@ -601,7 +605,19 @@ mod tests {
 
         assert!(tighten_postonly_entry_after_partial(&mut po, 12_345));
         assert_eq!(po.maker_timeout_ms, Some(PARTIAL_FILL_REMAINDER_GRACE_MS));
-        assert_eq!(po.sent_ts_ms, 12_345);
+        assert_eq!(
+            po.sent_ts_ms, 0,
+            "registration identity must remain immutable"
+        );
+        assert_eq!(po.progress.maker_remainder_started_ts_ms, Some(12_345));
+        assert_eq!(
+            classify_pending_sweep(&po, 17_344),
+            PendingSweepAction::Keep
+        );
+        assert_eq!(
+            classify_pending_sweep(&po, 17_345),
+            PendingSweepAction::MakerTimeoutCancel
+        );
     }
 
     #[test]

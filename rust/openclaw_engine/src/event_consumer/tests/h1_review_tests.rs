@@ -5,7 +5,7 @@ async fn h1_fill_carries_registration_identity_despite_venue_clock_skew() {
     let (tx, mut rx) = tokio::sync::mpsc::channel::<TradingMsg>(8);
     pipeline.set_trading_channel(tx);
     let mut state = make_loop_state();
-    let mut po = baseline_pending_order("market", None);
+    let mut po = baseline_pending_order("limit", Some(TimeInForce::PostOnly));
     po.order_link_id = "h1-clock-skew-fill".into();
     po.sent_ts_ms = 1_700_000_100_000;
     po.qty = 0.03;
@@ -23,22 +23,36 @@ async fn h1_fill_carries_registration_identity_despite_venue_clock_skew() {
         None,
     )
     .await;
-    let mut observed = false;
+    let mut second = h1_exec(&po.order_link_id, "clock-skew-exec-2", "0.01", "Buy");
+    second.exec_time = (po.sent_ts_ms - 30_000).to_string();
+    handle_exchange_event(
+        Some(ExchangeEvent::Fill(second)),
+        &mut pipeline,
+        &mut writer,
+        &mut state,
+        None,
+    )
+    .await;
+    let mut observed = 0;
     while let Ok(msg) = rx.try_recv() {
         if let TradingMsg::Fill { details, ts_ms, .. } = msg {
-            assert_eq!(ts_ms, po.sent_ts_ms - 60_000);
+            assert!(ts_ms < po.sent_ts_ms);
             assert_eq!(
                 details
                     .as_ref()
                     .and_then(|d| d["order_registered_ts_ms"].as_u64()),
                 Some(po.sent_ts_ms)
             );
-            observed = true;
+            observed += 1;
         }
     }
-    assert!(
-        observed,
-        "matched exchange execution must emit a persisted fill"
+    assert_eq!(
+        observed, 2,
+        "both partial fills retain the same registration identity"
+    );
+    assert_eq!(
+        state.pending_orders[&po.order_link_id].sent_ts_ms,
+        po.sent_ts_ms
     );
 }
 
