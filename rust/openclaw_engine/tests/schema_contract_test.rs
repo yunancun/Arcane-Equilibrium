@@ -1062,5 +1062,38 @@ async fn contract_h1_migration_preserves_compressed_history() {
     let new_seq: i64 = sqlx::query_scalar("INSERT INTO h1_migration_probe.order_state_changes (ts,order_id,to_status,engine_mode) VALUES (NOW(),'new','Working','demo') RETURNING lifecycle_seq")
         .fetch_one(&mut *tx).await.unwrap();
     assert!(new_seq > 0);
+    sqlx::raw_sql(&ddl)
+        .execute(&mut *tx)
+        .await
+        .expect("V161 replay on populated compressed history");
+    let next_seq: i64 = sqlx::query_scalar("INSERT INTO h1_migration_probe.order_state_changes (ts,order_id,to_status,engine_mode) VALUES (NOW(),'replay','Working','demo') RETURNING lifecycle_seq")
+        .fetch_one(&mut *tx).await.unwrap();
+    assert!(next_seq > new_seq, "replay must not reset the sequence");
     tx.rollback().await.unwrap();
+}
+
+#[tokio::test]
+async fn contract_h1_migration_rejects_ordinal_drift() {
+    let Some(pool) = migrated_pool().await else {
+        return;
+    };
+    let ddl = std::fs::read_to_string(
+        srv_root().join("sql/migrations/V161__order_events_lifecycle_projection.sql"),
+    )
+    .unwrap()
+    .replace("trading.", "h1_drift_probe.")
+    .replace("public.order_events", "h1_drift_probe.order_events");
+    for (preparation, expected) in [
+        ("CREATE TABLE h1_drift_probe.order_state_changes (lifecycle_seq TEXT)", "Guard B"),
+        ("CREATE TABLE h1_drift_probe.order_state_changes (lifecycle_seq BIGINT); CREATE TABLE h1_drift_probe.order_state_changes_lifecycle_seq (id INT)", "Guard A"),
+        ("CREATE TABLE h1_drift_probe.order_state_changes (lifecycle_seq BIGINT DEFAULT 0)", "default mismatch"),
+        ("CREATE TABLE h1_drift_probe.order_state_changes (lifecycle_seq BIGINT); INSERT INTO h1_drift_probe.order_state_changes VALUES (99)", "behind existing ordinals"),
+    ] {
+        let mut tx = pool.begin().await.unwrap();
+        sqlx::raw_sql(&format!("CREATE SCHEMA h1_drift_probe; {preparation}"))
+            .execute(&mut *tx).await.unwrap();
+        let error = sqlx::raw_sql(&ddl).execute(&mut *tx).await.unwrap_err();
+        assert!(error.to_string().contains(expected), "expected {expected}: {error}");
+        tx.rollback().await.unwrap();
+    }
 }

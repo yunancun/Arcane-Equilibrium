@@ -2,9 +2,56 @@
 -- V161 is new in this PR; applied migrations (including V005) remain unchanged.
 -- Add a nullable column first: do not rewrite historical compressed chunks.
 -- Only new writes receive insertion ordinals; legacy rows retain timestamp order.
-ALTER TABLE trading.order_state_changes ADD COLUMN lifecycle_seq BIGINT;
-CREATE SEQUENCE trading.order_state_changes_lifecycle_seq
-    OWNED BY trading.order_state_changes.lifecycle_seq;
+-- Guard A/B: existing objects must have the exact ordinal contract. Replays
+-- and partial manual preparation are accepted only when their shape is safe.
+DO $guard$
+BEGIN
+    IF to_regclass('trading.order_state_changes') IS NULL THEN
+        RAISE EXCEPTION 'V161 Guard A: missing trading.order_state_changes';
+    END IF;
+    IF EXISTS (SELECT 1 FROM pg_attribute
+        WHERE attrelid = 'trading.order_state_changes'::regclass
+          AND attname = 'lifecycle_seq' AND NOT attisdropped
+          AND (atttypid <> 'bigint'::regtype OR attidentity <> '' OR attgenerated <> '')) THEN
+        RAISE EXCEPTION 'V161 Guard B: lifecycle_seq must be plain BIGINT';
+    END IF;
+    IF to_regclass('trading.order_state_changes_lifecycle_seq') IS NOT NULL
+       AND NOT EXISTS (SELECT 1 FROM pg_class c JOIN pg_sequence s ON s.seqrelid = c.oid
+           WHERE c.oid = to_regclass('trading.order_state_changes_lifecycle_seq')
+             AND c.relkind = 'S' AND s.seqtypid = 'bigint'::regtype
+             AND s.seqincrement = 1 AND s.seqmin = 1 AND NOT s.seqcycle) THEN
+        RAISE EXCEPTION 'V161 Guard A: lifecycle sequence shape mismatch';
+    END IF;
+END
+$guard$;
+ALTER TABLE trading.order_state_changes ADD COLUMN IF NOT EXISTS lifecycle_seq BIGINT;
+CREATE SEQUENCE IF NOT EXISTS trading.order_state_changes_lifecycle_seq AS BIGINT;
+DO $binding$
+DECLARE ordinal_attnum SMALLINT; current_default TEXT; expected_default TEXT;
+        last_ordinal BIGINT; was_called BOOLEAN; max_ordinal BIGINT;
+BEGIN
+    SELECT attnum INTO ordinal_attnum FROM pg_attribute
+      WHERE attrelid = 'trading.order_state_changes'::regclass AND attname = 'lifecycle_seq' AND NOT attisdropped;
+    IF EXISTS (SELECT 1 FROM pg_depend
+        WHERE classid = 'pg_class'::regclass AND objid = 'trading.order_state_changes_lifecycle_seq'::regclass
+          AND deptype IN ('a','i')
+          AND (refobjid <> 'trading.order_state_changes'::regclass OR refobjsubid <> ordinal_attnum)) THEN
+        RAISE EXCEPTION 'V161 Guard A: lifecycle sequence belongs to another column';
+    END IF;
+    SELECT pg_get_expr(adbin, adrelid) INTO current_default FROM pg_attrdef
+      WHERE adrelid = 'trading.order_state_changes'::regclass AND adnum = ordinal_attnum;
+    expected_default := format('nextval(%L::regclass)', 'trading.order_state_changes_lifecycle_seq'::regclass::text);
+    IF current_default IS NOT NULL AND current_default <> expected_default THEN
+        RAISE EXCEPTION 'V161 Guard B: lifecycle_seq default mismatch';
+    END IF;
+    SELECT last_value, is_called INTO last_ordinal, was_called FROM trading.order_state_changes_lifecycle_seq;
+    SELECT MAX(lifecycle_seq) INTO max_ordinal FROM trading.order_state_changes;
+    IF max_ordinal > last_ordinal OR (max_ordinal = last_ordinal AND NOT was_called) THEN
+        RAISE EXCEPTION 'V161 Guard B: lifecycle sequence is behind existing ordinals';
+    END IF;
+END
+$binding$;
+ALTER SEQUENCE trading.order_state_changes_lifecycle_seq OWNED BY trading.order_state_changes.lifecycle_seq;
 ALTER TABLE trading.order_state_changes ALTER COLUMN lifecycle_seq
     SET DEFAULT nextval('trading.order_state_changes_lifecycle_seq');
 DO $grant$
