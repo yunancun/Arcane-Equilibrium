@@ -439,6 +439,31 @@ Codex 與 saved workflow executable binding 均已逐角色落地並由 validato
 
 ## 2026-09-28 amendment: bounded GPT-6 role adaptation
 
+### Operator-approved controlled CLI review entry
+
+The Operator subsequently selected a reusable controlled Codex CLI review entry
+while retaining native automatic containment. `codex_subagent_runner.py` executes
+only existing Context-bound read-only nodes; Registry models/efforts and the hybrid
+DAG are unchanged. Source stays read-only, each call has isolated scratch and a
+hard deadline, and spent calls/one explicit recheck persist per delivery. PM/CC
+remain the implementation owner. Native V2 hook/role gaps are not declared fixed
+by this alternative; see `.codex/README.md#controlled-cli-review` for operational
+limits. This bounded local entry does not restore archived workflow objectives or
+claim runtime, whole-role-roster, platform-attested efficiency or Linux adoption.
+
+The subsequent Operator-approved PR198 priority repair reuses the existing
+admission journal and committed-tree materializer, freezes the recheck question,
+and binds retained predecessor packets. It does not introduce an isolation service.
+The Operator subsequently approved separating source-review validity from cleanup
+uncertainty: normal exit cannot prove all unobserved descendants ended, but this
+limits the cleanup claim rather than blocking every source review. Observed live
+residuals after bounded cleanup still block successors; source/response binding,
+deadlines and finite call limits remain required. The entry stays on demand, with
+no resident agent or native auto-enable. This accepts a documented local observation
+limit; it does not claim exhaustive containment or measured efficiency gains.
+
+### Model routing
+
 Operator 要求小範圍適配並同步 Mac／GitHub、跳過 Linux。既有 T1／T2 的
 Codex 路由由 GPT-5.6 Sol 改為 `gpt-6-sol`，各角色 high／low 不變；T3
 保留 `gpt-5.6-terra/medium`，CC 的 opus／sonnet 和 effort tiers 不變。

@@ -3,6 +3,13 @@
 本目錄存放 OpenClaw 系統的維護、啟動、CI 輔助腳本。
 最後更新：2026-07-17。每批詳情見下方對應 `## YYYY-MM-DD` 區塊（per-batch SSOT）；最新數批摘要見「最新補充」段。
 
+## 2026-09-28 受控 CLI 審查候選
+
+| Script | Purpose |
+|---|---|
+| `maintenance_scripts/codex_subagent_runner.py` | 綁定既有 admission／delivery／Context 的有限唯讀審查候選；凍結題目、重驗前置證據、使用獨立 committed source，並清理已觀察程序。review.verdict 與 cleanup_status 分開：清理觀察不確定本身不否決有效審查；已觀察程序清理後仍存活才阻止後續。僅涵蓋已觀察程序，不宣稱完整隔離或 main 已採用。 |
+| `maintenance_scripts/codex_subagent_guard.py` | 原生子代理 hook 的範圍與遞迴拒絕檢查。保留原生自動派發關閉；此腳本本身不構成安裝、信任或平台隔離證明。 |
+
 ## 2026-07-30 S2E-LW1 B1 recovery anchor
 
 | Script | Purpose |

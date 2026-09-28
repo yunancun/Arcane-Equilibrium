@@ -893,6 +893,9 @@ adjacent Codex Markdown and role profiles are generated human views. All are
 Registry projections and must pass
 `python3 helper_scripts/maintenance_scripts/agent_governance.py render --check`.
 
+Controlled CLI review: [project entry](../README.md#controlled-cli-review).
+The entry uses these generated identities; native automatic delegation stays off.
+
 | Role | Execution mode | Codex type | Permission | Native Codex TOML | Claude agent | Broker Adapter |
 |---|---|---|---|---|---|---|
 {chr(10).join(rows)}

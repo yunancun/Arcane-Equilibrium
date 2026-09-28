@@ -10,7 +10,23 @@ Tool, a role name, or a generated TOML file is not permission to bypass this
 containment through another CLI, skill, task, or workflow. Keep authorized work
 with the current conductor; do not spawn or revive children autonomously while containment
 is active. Explicitly requested peer review follows the bounded exception below.
+The Operator-approved controlled CLI review entry below is the bounded exception.
 This does not turn missing independent verification into PASS.
+
+### Controlled CLI review
+
+For an assigned development task, PM may use
+`helper_scripts/maintenance_scripts/codex_subagent_runner.py` for the read-only
+review nodes required by the existing DAG, without another per-call permission
+question. Bind the exact Context, node, scope and one question; follow
+`.codex/README.md#controlled-cli-review`. One implementation owner remains in
+PM/CC, E2 examines correctness, E4 verifies behavior, and relevant documentation
+retains R4. Simple tasks do not summon extra roles. This entry is a permanent
+project capability, not a standing task, native automatic fan-out or a new DAG.
+The runner pins Registry model/effort, disables nested delegation, confines tool
+writes to scratch, retains spent calls, and terminates the CLI process group on
+deadline. A failed/expired/busy delivery does not authorize a fresh ID, direct
+CLI bypass, automatic retry, additional role or scope expansion.
 
 For one user delivery, PM freezes the objective, acceptance, owned paths, and
 stop conditions before work. Necessary implementation choices within that
