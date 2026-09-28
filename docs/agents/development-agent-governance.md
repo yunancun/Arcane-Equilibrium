@@ -1170,11 +1170,14 @@ process deadline. PM retains the DAG; no new controller framework or automatic
 successor is added. It is the named exception to the alternative-CLI containment
 below, not an upgrade of the native collaboration execution surface or host proof.
 
-The PR198 priority repair remains a candidate, blocked for permanent adoption:
-delivery identity comes from the retained controller admission, rechecks preserve
+Delivery identity comes from the retained controller admission, rechecks preserve
 the original question/results, and the reviewer consumes a private committed tree.
-All exits attempt observed-process cleanup, but normal-exit orphan ambiguity stays
-UNVERIFIED even when the raw reviewer verdict is PASS. This host blocker prevents
-successor dispatch; repeat reviews do not establish missing descendant containment.
+The Operator-approved revision separates `review.verdict` from `cleanup_status`:
+all exits attempt cleanup, but unobserved-descendant uncertainty alone does not
+invalidate a bound source review. An observed process surviving bounded cleanup
+still blocks successors; deadlines, source/identity checks and call caps remain.
+`OBSERVED_CLEAR` covers observed processes only, never exhaustive containment or
+measured savings. The entry is used on demand, with existing review gates;
+source adoption and platform/runtime claims remain separate.
 
 The local project defaults to `features.multi_agent=false` and `agents.enabled=false`. The desktop workspace root requires the same minimal local config projection because child project configuration is not a workspace-root entry. Follow `AGENTS.md` → `Native dispatch containment`: no alternative tool/CLI/skill dispatch or agent-initiated re-enable. Existing saved workflow and role source remain available for a separately admitted, verified entry; their presence is not permission to bypass containment. The current native collaboration profile remains `reported_only` / `mandatory_role_eligible=false`. This containment does not authenticate mandatory role execution or complete universal delivery binding.

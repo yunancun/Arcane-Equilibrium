@@ -454,9 +454,13 @@ claim runtime, whole-role-roster, platform-attested efficiency or Linux adoption
 The subsequent Operator-approved PR198 priority repair reuses the existing
 admission journal and committed-tree materializer, freezes the recheck question,
 and binds retained predecessor packets. It does not introduce an isolation service.
-Normal process exit still lacks proof that unobserved detached descendants ended;
-the runner therefore keeps UNVERIFIED and blocks successors. Permanent adoption
-remains blocked, irrespective of a raw reviewer PASS or local test count.
+The Operator subsequently approved separating source-review validity from cleanup
+uncertainty: normal exit cannot prove all unobserved descendants ended, but this
+limits the cleanup claim rather than blocking every source review. Observed live
+residuals after bounded cleanup still block successors; source/response binding,
+deadlines and finite call limits remain required. The entry stays on demand, with
+no resident agent or native auto-enable. This accepts a documented local observation
+limit; it does not claim exhaustive containment or measured efficiency gains.
 
 ### Model routing
 

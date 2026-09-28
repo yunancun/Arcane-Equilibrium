@@ -222,10 +222,10 @@ def command(binary: str, root: Path, output: Path, role: dict) -> list[str]:
 
 
 def process_snapshot() -> dict[int, tuple[int, str]]:
-    rows = subprocess.check_output(["/bin/ps", "-axo", "pid=,ppid=,lstart="],
+    rows = subprocess.check_output(["/bin/ps", "-axo", "pid=,ppid=,stat=,lstart="],
                                    text=True, timeout=2, stderr=subprocess.PIPE).splitlines()
-    return {int(pid): (int(parent), born) for pid, parent, born in
-            (row.split(maxsplit=2) for row in rows)}
+    return {int(pid): (int(parent), born) for pid, parent, state, born in
+            (row.split(maxsplit=3) for row in rows) if not state.startswith("Z")}
 
 
 def observe_descendants(process: subprocess.Popen, known: dict[int, str]) -> None:
@@ -241,18 +241,18 @@ def observe_descendants(process: subprocess.Popen, known: dict[int, str]) -> Non
     known.update({pid: current[pid][1] for pid in owned})
 
 
-def stop_group(process: subprocess.Popen, known: dict[int, str] | None = None) -> str | None:
-    # CLI tools may start a fresh session. Freeze the leader before finding its
-    # descendants, so killing only the original process group cannot strand them.
+def stop_group(process: subprocess.Popen, known: dict[int, str] | None = None) -> dict:
+    """Clean observed processes, then report surviving identities separately from uncertainty."""
     cleanup_error = None
+    residual_pids = []
     known = {} if known is None else known
     alive = process.poll() is None
     try:
         if alive:
-            os.killpg(process.pid, signal.SIGSTOP)
-    except ProcessLookupError:
-        pass
-    try:
+            try:
+                os.killpg(process.pid, signal.SIGSTOP)
+            except ProcessLookupError:
+                pass
         observe_descendants(process, known)
         current = process_snapshot()
         for pid, born in known.items():
@@ -262,6 +262,8 @@ def stop_group(process: subprocess.Popen, known: dict[int, str] | None = None) -
                 os.kill(pid, signal.SIGKILL)
             except ProcessLookupError:
                 pass
+            except OSError as exc:
+                cleanup_error = "DESCENDANT_CLEANUP_UNVERIFIED: " + str(exc)
     except (OSError, ValueError, subprocess.SubprocessError) as exc:
         cleanup_error = "DESCENDANT_CLEANUP_UNVERIFIED: " + str(exc)
     finally:
@@ -271,7 +273,24 @@ def stop_group(process: subprocess.Popen, known: dict[int, str] | None = None) -
         except ProcessLookupError:
             pass
         process.wait(timeout=3)
-    return cleanup_error
+    # Allow killed children to exit. Zombies are not running work; PID birth
+    # identity prevents a reused PID from being reported as our descendant.
+    until = time.monotonic() + 0.3
+    try:
+        while True:
+            current = process_snapshot()
+            residual_pids = sorted(pid for pid, born in known.items()
+                                   if pid in current and current[pid][1] == born)
+            if not residual_pids or time.monotonic() >= until:
+                break
+            time.sleep(0.05)
+    except (OSError, ValueError, subprocess.SubprocessError) as exc:
+        cleanup_error = "DESCENDANT_CLEANUP_UNVERIFIED: " + str(exc)
+    return {"cleanup_status": "RESIDUAL_DETECTED" if residual_pids else
+            ("UNVERIFIED" if cleanup_error else "OBSERVED_CLEAR"),
+            "cleanup_error": cleanup_error, "residual_pids": residual_pids,
+            "cleanup_scope": "observed_processes_only",
+            "cleanup_warning": "Detached descendants can escape observation; this is not exhaustive containment."}
 
 
 def execute(argv: list[str], prompt: str, output: Path, root: Path, deadline: float) -> dict:
@@ -305,12 +324,12 @@ def execute(argv: list[str], prompt: str, output: Path, root: Path, deadline: fl
                         cleanup_error = "DESCENDANT_CLEANUP_UNVERIFIED: " + str(exc)
                     time.sleep(0.1)
         finally:
-            cleanup_error = stop_group(process, known) or cleanup_error
-            # 父程序離開後，ps 無法證明瞬間 fork/setsid 的後代已不存在。
-            # 仍清理已觀察到的 PID，但不得把抽樣觀察升格為完整生命週期證明。
-            if reason is None:
-                cleanup_error = cleanup_error or "DESCENDANT_CLEANUP_UNVERIFIED: normal exit can orphan unobserved descendants"
-    return {"exit_code": process.returncode, "stop_reason": reason, "cleanup_error": cleanup_error,
+            cleanup = stop_group(process, known)
+            if cleanup_error:
+                cleanup["cleanup_error"] = cleanup["cleanup_error"] or cleanup_error
+                if cleanup["cleanup_status"] == "OBSERVED_CLEAR":
+                    cleanup["cleanup_status"] = "UNVERIFIED"
+    return {"exit_code": process.returncode, "stop_reason": reason, **cleanup,
             "elapsed_seconds": round(time.monotonic() - started, 3)}
 
 
@@ -410,8 +429,8 @@ def run(*, root: Path, context: dict, node_id: str, instruction: str,
                         pending.extend((label + "[" + str(index) + "]", value)
                                        for index, value in enumerate(metadata))
                 result["review"] = verdict
-                if result["cleanup_error"]:
-                    result["error"] = result["cleanup_error"]
+                if result["cleanup_status"] == "RESIDUAL_DETECTED":
+                    result["error"] = "OBSERVED_PROCESS_STILL_RUNNING"
                 else:
                     result["status"] = verdict["verdict"]
         except (OSError, ValueError, subprocess.SubprocessError) as exc:

@@ -177,13 +177,6 @@ def test_result_requires_unchanged_source_and_explicit_verdict(tmp_path, monkeyp
     monkeypatch.setattr(runner, "admitted_delivery", lambda *a: b["delivery"])
     monkeypatch.setattr(runner, "_bound_execution_task", lambda *a: (b["task"], {}, b["paths"]))
     monkeypatch.setattr(runner, "_fresh_committed_tree", lambda *a, **kw: contextlib.nullcontext((root, {})))
-    actual_execute = runner.execute
-    def identity_only_execute(*args):
-        result = actual_execute(*args)
-        # 本參數化測試只驗回覆身分；真實清理能力由下方程序測試覆蓋。
-        result["cleanup_error"] = None
-        return result
-    monkeypatch.setattr(runner, "execute", identity_only_execute)
     monkeypatch.setattr(runner, "capture_repository_baseline",
                         lambda *a: {"source_head": "changed" if source_changed else "head"})
     def fake_command(binary, root, output, role):
@@ -327,13 +320,15 @@ def test_preflight_git_cannot_run_repository_fsmonitor(tmp_path):
     assert not marker.exists()
 
 
-def test_normal_exit_never_silently_leaves_detached_child(tmp_path):
+def test_normal_exit_reports_observation_limit_without_claiming_full_cleanup(tmp_path):
     out = output_dir(tmp_path); marker = tmp_path / "survivor"
     child = "import time,pathlib; time.sleep(.6); pathlib.Path(" + repr(str(marker)) + ").touch()"
     parent = "import subprocess,sys; subprocess.Popen([sys.executable,'-c'," + repr(child) + "],start_new_session=True)"
     result = runner.execute([sys.executable, "-c", parent], "", out, tmp_path, 2)
     time.sleep(.8)
-    assert not marker.exists() or result["cleanup_error"], "不得把實際殘留誤報成清理已驗證"
+    assert result["cleanup_scope"] == "observed_processes_only"
+    assert result["cleanup_warning"]  # Fast detached children may escape observation.
+    assert result["cleanup_status"] in {"OBSERVED_CLEAR", "UNVERIFIED"}
 
 
 def test_context_git_ignores_ambient_executable_and_has_timeout(tmp_path, monkeypatch):
@@ -403,7 +398,9 @@ def test_normal_exit_cleans_observed_detached_child_but_does_not_claim_all(tmp_p
     result = runner.execute([sys.executable, "-c", parent], "", out, tmp_path, 2)
     time.sleep(1)
     assert not marker.exists()
-    assert result["cleanup_error"].startswith("DESCENDANT_CLEANUP_UNVERIFIED")
+    assert result["cleanup_status"] == "OBSERVED_CLEAR"
+    assert result["cleanup_warning"]
+    assert result["cleanup_error"] is None
 
 
 def test_script_index_registers_both_entries():
@@ -412,9 +409,14 @@ def test_script_index_registers_both_entries():
     assert "codex_subagent_guard.py" in index
 
 
-def test_raw_pass_cannot_hide_unverified_process_cleanup(tmp_path, monkeypatch):
+@pytest.mark.parametrize("case,expected", [("normal", "PASS"), ("monitor_failure", "PASS"),
+    ("residual", "UNVERIFIED"), ("review_fail", "FAIL"), ("timeout", "UNVERIFIED"),
+    ("transport", "UNVERIFIED")])
+def test_review_and_cleanup_have_separate_successor_decisions(tmp_path, monkeypatch, case, expected):
     root = tmp_path / "repo"; root.mkdir()
     b = binding(); b.update(paths=["owned.py"], role={}, contract={}, baseline={"source_head": "head"})
+    successor = dict(b["task"], node_id="regression", requires=["review"])
+    b["dag"]["nodes"].append(successor)
     b["policy"].update(max_call_duration_ms=300000, max_prompt_utf8_bytes_per_call=100000)
     context = {"shared_task_context_canonical": "task", "role_context_delta_canonical": "role",
                "artifact_digest": "context", "task_contract_digest": "contract"}
@@ -425,14 +427,71 @@ def test_raw_pass_cannot_hide_unverified_process_cleanup(tmp_path, monkeypatch):
     monkeypatch.setattr(runner, "git", lambda *a: str(tmp_path / "common"))
     monkeypatch.setattr(runner, "capture_repository_baseline", lambda *a: b["baseline"])
     monkeypatch.setattr(runner, "_fresh_committed_tree", lambda *a, **kw: contextlib.nullcontext((root, {})))
+    spawned = tmp_path / "child-pid"
+    actual_kill = os.kill
+    if case == "monitor_failure":
+        def unavailable():
+            raise subprocess.TimeoutExpired("ps", 2)
+        monkeypatch.setattr(runner, "process_snapshot", unavailable)
+    if case == "residual":
+        monkeypatch.setattr(runner.os, "kill", lambda pid, sig: None)
     def command(binary, source, output, role):
-        return [sys.executable, "-c", "from pathlib import Path; Path(" + repr(str(output / "verdict.txt")) + ").write_text('{\"verdict\":\"PASS\"}')"]
+        verdict = "FAIL" if case == "review_fail" else "PASS"
+        code = "from pathlib import Path; Path(" + repr(str(output / "verdict.txt")) + ").write_text(" + repr(json.dumps({"verdict": verdict})) + ")"
+        if case == "residual":
+            code += "; import subprocess,sys,time; p=subprocess.Popen([sys.executable,'-c','import time; time.sleep(10)'],start_new_session=True); Path(" + repr(str(spawned)) + ").write_text(str(p.pid)); time.sleep(.35)"
+        if case == "timeout": code += "; import time; time.sleep(10)"
+        if case == "transport": code += "; import sys,time; sys.stderr.write('stream disconnected - retrying sampling request\\n'); sys.stderr.flush(); time.sleep(10)"
+        return [sys.executable, "-c", code]
     monkeypatch.setattr(runner, "command", command)
-    result = runner.run(root=root, context=context, node_id="review", instruction="Review", output=tmp_path / "output", binary=sys.executable)
-    assert result["review"]["verdict"] == "PASS"
-    assert result["status"] == "UNVERIFIED"
-    assert result["error"].startswith("DESCENDANT_CLEANUP_UNVERIFIED")
-    with runner.delivery_lock(root, b) as state_path:
-        attempt = json.loads(state_path.read_text())["attempts"][-1]
-        assert attempt["status"] == "UNVERIFIED"
-        assert runner.retained_packet(attempt)["status"] == "UNVERIFIED"
+    try:
+        result = runner.run(root=root, context=context, node_id="review", instruction="Review",
+                            output=tmp_path / "output", binary=sys.executable, deadline=1)
+        assert result["status"] == expected
+        if case not in {"timeout", "transport"}:
+            assert result["review"]["verdict"] == ("FAIL" if case == "review_fail" else "PASS")
+        if case == "monitor_failure":
+            assert result["cleanup_status"] == "UNVERIFIED"
+            assert result["cleanup_error"] and "error" not in result
+        if case == "residual":
+            assert result["cleanup_status"] == "RESIDUAL_DETECTED"
+            assert int(spawned.read_text()) in result["residual_pids"]
+            assert result["error"] == "OBSERVED_PROCESS_STILL_RUNNING"
+        if case in {"normal", "review_fail"}:
+            assert result["cleanup_status"] == "OBSERVED_CLEAR"
+            assert result["cleanup_error"] is None
+        if case in {"timeout", "transport"}:
+            assert result["stop_reason"] == ("DEADLINE" if case == "timeout" else "TRANSPORT_FAILURE_NO_RETRY")
+        with runner.delivery_lock(root, b) as state_path:
+            state = json.loads(state_path.read_text())
+            attempt = state["attempts"][-1]
+            assert attempt["status"] == expected
+            assert runner.retained_packet(attempt)["status"] == expected
+        b["task"] = successor
+        if expected == "PASS":
+            runner.reserve(state, b, "controller", root, "Regression", None)
+        else:
+            with pytest.raises(PermissionError, match="PREDECESSOR_NOT_PASS"):
+                runner.reserve(state, b, "controller", root, "Regression", None)
+    finally:
+        if spawned.exists():
+            try:
+                actual_kill(int(spawned.read_text()), signal.SIGKILL)
+            except ProcessLookupError:
+                pass
+
+
+def test_process_snapshot_excludes_zombies_not_live_processes(monkeypatch):
+    monkeypatch.setattr(subprocess, "check_output", lambda *a, **kw:
+                        "  12 1 Z Mon Sep 28 12:00:00 2026\n  13 1 S Mon Sep 28 12:00:01 2026\n")
+    assert runner.process_snapshot() == {13: (1, "Mon Sep 28 12:00:01 2026")}
+
+
+def test_cleanup_never_kills_or_blocks_on_reused_pid(monkeypatch):
+    from types import SimpleNamespace
+    process = SimpleNamespace(pid=10, poll=lambda: 0, wait=lambda **kw: 0)
+    monkeypatch.setattr(runner, "process_snapshot", lambda: {20: (1, "new birth")})
+    monkeypatch.setattr(runner.os, "kill", lambda *a: pytest.fail("unrelated reused PID"))
+    result = runner.stop_group(process, {20: "old birth"})
+    assert result["cleanup_status"] == "OBSERVED_CLEAR"
+    assert result["residual_pids"] == []

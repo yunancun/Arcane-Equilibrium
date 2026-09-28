@@ -63,13 +63,12 @@ Persistence note:
 
 ## Controlled CLI review
 
-Current candidate status: **blocked for permanent adoption**. The priority repair
-rejects renamed Context identities, altered recheck questions and missing or
-changed predecessor packets. Normal CLI exit can still orphan descendants before
-the host observes them. The runner cleans observed processes but retains
-`DESCENDANT_CLEANUP_UNVERIFIED`; even a reviewer PASS remains an overall UNVERIFIED
-result and cannot authorize the next role. Do not spend another review call merely
-to repeat this known host blocker.
+The Operator-approved acceptance separates source-review validity from process
+cleanup uncertainty. This entry is available on demand; it starts no resident
+agent or automatic fan-out. PM selects complementary roles for their expected
+benefit within the existing required review gates. Native automatic delegation
+remains disabled. Source adoption still requires the applicable review and
+integration checks; host-wide descendant containment is not an adoption prerequisite.
 
 The Operator-approved project entry is
 `helper_scripts/maintenance_scripts/codex_subagent_runner.py`. PM keeps the existing
@@ -129,9 +128,18 @@ Review evidence and failures remain in the output directory. A process exit alon
 is not PASS; the reviewer must return a JSON verdict and source must remain exact.
 Every exit path attempts to terminate the live CLI process group and observed
 descendants, including separate sessions. PID observations include process birth
-time to avoid treating a reused PID as the old child. Enumeration failure and
-normal-exit orphan ambiguity record `DESCENDANT_CLEANUP_UNVERIFIED`; the result
-does not attest that all descendants stopped and cannot authorize a successor.
+time to avoid treating a reused PID as the old child; zombies are excluded from
+running-process observations. `review.verdict` records the validated reviewer
+conclusion. `cleanup_status` separately records `OBSERVED_CLEAR`, `UNVERIFIED`
+(enumeration failed), or `RESIDUAL_DETECTED` (an observed identity survives the
+bounded cleanup). `cleanup_scope=observed_processes_only` and `cleanup_warning`
+always preserve the possibility of unobserved detached descendants.
+Cleanup uncertainty alone does not reject a valid review. An observed surviving
+process leaves overall `status=UNVERIFIED` with `OBSERVED_PROCESS_STILL_RUNNING`
+and blocks successors, while retaining the review conclusion. Source/binding
+mismatch, deadline, transport failure or missing verdict still cannot PASS.
+A valid PASS with only cleanup uncertainty can authorize its declared successor;
+it never attests exhaustive termination, zero resource use or zero extra cost.
 Local source review is distinct from platform/runtime attestation. The OS sandbox
 applies to tool commands; hosted tools, model service traffic and runtime internals
 are not an air-gap claim. Extra calls still consume Codex quota and startup time:
