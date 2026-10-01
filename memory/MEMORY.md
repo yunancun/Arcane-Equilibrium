@@ -31,7 +31,7 @@
 - [ML/DL 自主學習架構](project_ml_dl_learning_architecture.md) — v0.4 Teacher-Student+LightGBM+Optuna+3DL
 - [Agent P2 動態 SL/TP](project_agent_p2_dynamic_sl_tp.md) — 默認 ATR 動態,agent_adjust() 可覆蓋,P1 max 硬頂
 - [Agent 工作空間系統](project_agent_workspace.md) — docs/CCAgentWorkSpace/ 下 profile/memory/workspace
-- [agent runtime 接線 (2026-04-25;08-01 更正)](project_18_agent_runtime_wired.md) — srv/.claude/agents 22 subagent+28 skills(08-01 實測);根 .claude=真目錄,內含 agents/skills/workflows 三 symlink 子項→srv/.claude+本地 settings.local.json(「無雙端」不再成立);演變軌跡在 topic 檔
+- [Agent 接線歷史與現行入口](project_18_agent_runtime_wired.md) — 舊接線／版本觀察僅供歷史；現行角色依 Registry，派發依 AGENTS.md 及 .codex/README.md 受控 CLI，按需讀取。
 - [Layer 2 AI 推理循環 (2026-04-23 更正)](project_layer2_agent_design.md) — L0/L1/L2 三層;真 gap=L2 自主推理+Executor shadow→live
 - [GUI 寫入面盤點](project_gui_write_paths_inventory.md) — 93 endpoints;Rust trading_mode 冷參數陷阱;fake-success 判別
 - [Edge 數據隔離 (2026-04-13)](project_edge_data_isolation.md) — paper 噪音污染 edge 估計;demo/paper 分離計算
@@ -70,7 +70,7 @@
 - [GitHub Actions cost policy (2026-05-09)](feedback_github_actions_cost.md) — 2000min/月;macOS 10x 僅 PR+週一 cron
 
 ## Workflow & roles
-- [強制工作鏈與審計模板](feedback_workflow_audit_chain.md) — E1→E2→E4→PM 不可跳過;策略改動加 QA Audit
+- [按需角色與互補審查](feedback_workflow_audit_chain.md) — 一位實作者、PM 整合；角色與驗證依現行 DAG 真實觸發，沿用有效證據；舊固定全角色／全量回歸要求已被取代。
 - [主會話角色:PM+Conductor](feedback_role_definition.md) — 主會話=PM+Conductor;sub-agent 只執行/審查/研究
 - [Sub-agent silent-failure 5步審計](feedback_subagent_code_writing_refusal.md) — sub-agent 自報成功可能實際沒做/被 idle-kill;5步查驗(2026-04-07 refuse-pattern 已於 04-18 解除,留史)
 - [governance continuation 的 delta 協議 (2026-07-26)](feedback_governance_continuation_delta_protocol.md) — continuation 一輪一次且必須在做完工作後呼叫;空呼叫或 scope 漂移即判 BLOCKED_NO_DELTA 且該 admission 終結,需 release→重建 contract→acquire

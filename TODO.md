@@ -1,7 +1,7 @@
 # 玄衡 TODO - 活躍派發佇列
 
-**版本** v883 | **校準日期** 2026-09-28 | **source 觀察基線** `45410a4510598c37e4be7937085bf84af23b1434`（已合併 PR195／Mac source；runtime 限制見 §0）。
-**當前狀態**：AIML／workflow 均零 ACTIVE；workflow 窄模型適配已驗證，採用条件見下方 PR196 紀錄；原總帳仍歸檔，W11 等待下一個 Operator 指定的真實產品功能。S2E=5/9、effect=0/6、authority=0/9，LW2 WAITING。
+**版本** v884 | **校準日期** 2026-10-01 | **source 觀察基線** `52a884d93f774a5f625a7d2db4ebe6e2ec95b23a`（GitHub／Mac main 相同，包含 PR196／PR198；本次跳過 Linux，runtime 限制見 §0）。
+**當前狀態**：AIML／workflow 均零 ACTIVE；workflow 選定 source 已採用，見下方 CLOSED 紀錄；原總帳仍歸檔，W11 等待下一個 Operator 指定的真實產品功能。S2E=5/9、effect=0/6、authority=0/9，LW2 WAITING。
 **證據與歷史**：當前 source／PR／runtime 限制見 §0；完整逐項 [audit](docs/references/2026-09-09--todo-workflow-freshness-audit.md)、[v880 快照](docs/archive/2026-09-09--todo-v880-pre-freshness-audit.md)、[版本日誌](docs/CLAUDE_CHANGELOG.md)。
 
 <details>
@@ -472,11 +472,11 @@ Linux 依 Operator 指示跳過；只有 source 採用，沒有新 runtime／交
 
 | ID | Queue lane | Owner | 驗收與解除等待條件 | Next action |
 |---|---|---|---|---|
-| `W11-REAL-PRODUCT-ACCEPTANCE` | `WAITING` | Operator 選功能；PM 凍結範圍並統籌，E2／E4 互補驗證 | 隨下一個 Operator 指定的真實產品功能一併驗收；PM 核對需求、可觀察功能與交付邊界，並確認該產品交付的明確 peer-review 授權後才轉 ACTIVE；未涵蓋時先交 Operator 決定。不是獨立 workflow 工程、示範專案或產品開發前置。 | 等 Operator 指定產品功能；不自動派發。 |
+| `W11-REAL-PRODUCT-ACCEPTANCE` | `WAITING` | Operator 選功能；PM 凍結範圍並統籌，E2／E4 互補驗證 | 隨下一個 Operator 指定的真實產品功能一併驗收；PM 核對需求、可觀察功能與交付邊界後才准入 ACTIVE，所需審查依 [既有受控入口授權](AGENTS.md#controlled-cli-review)；超出既有授權的路線、範圍或效果先交 Operator 決定。不是獨立 workflow 工程、示範專案或產品開發前置。 | 等 Operator 指定產品功能；不自動派發。 |
 
 W11 在該產品交付內驗收：
 1. 功能可實際使用並符合 Operator 核定的 acceptance；來源、測試、整合及上線／採用狀態分開提供證據。部署效果若未包含在該次授權，不冒稱已上線。
-2. 一位實作者、PM 單一整合；E2 給正確性／邊界反例，E4 驗證行為；派發須依該交付明確授權，未授權／未驗保持 UNVERIFIED。其他角色只依真實觸發加入。跨 Codex／CC 沿用同一需求、diff、證據及未解 finding，按現行門檻重用驗證。
+2. 一位實作者、PM 單一整合；E2 給正確性／邊界反例，E4 驗證行為；在既有受控入口授權內按需派發，未授權／未驗保持 UNVERIFIED。其他角色只依真實觸發加入。跨 Codex／CC 沿用同一需求、diff、證據及未解 finding，按現行門檻重用驗證。
 3. 路線、新範圍或 acceptance 變更先交 Operator 決策；範圍內自主完成，保留異議、失敗、修補與重驗結果，不用治理文件數替代功能交付。
 4. 在原產品收尾紀錄中簡記實際耗時、重工／重開及人工糾偏；沒有可靠 token／費用資料即標 unavailable，不要求另建量測平台或聲稱已節省。PM 依實際功能結果關閉本 row；缺項留精確原因。
 
@@ -486,7 +486,8 @@ W11 在該產品交付內驗收：
 |---|---|---|
 | `W3-CURRENT-STATE-INTEGRATION` | `DAILY_SOURCE_ADOPTED`（PR191）；本輪不重派 | `null` |
 | `WF-CLOSEOUT-ADOPTION-20260925` | `DAILY_SOURCE_ADOPTED`（PR194）：22 身份、W5 窄修補、W9 精簡 | `null` |
-| `WF-GPT6-CC-ADAPTATION-20260928` | `DONE_SOURCE_VERIFIED`：19 Sol 身份升至 GPT-6 Sol，原 effort／Terra／CC tiers／containment 不變；45 本地測試及 E2／E4／AI-E／R4 審查通過。source 採用只在 [PR196](https://github.com/yunancun/Arcane-Equilibrium/pull/196) 合併且 Mac ff-only 同步後生效；Linux 跳過。 | `null` |
+| `WF-GPT6-CC-ADAPTATION-20260928` | `DAILY_SOURCE_ADOPTED`：[PR196](https://github.com/yunancun/Arcane-Equilibrium/pull/196) 已合併至 `004a7a441abc25b962894e2f611dfa3cb6c439c3` 並由 Mac main 採用；19 Sol 身份升至 GPT-6 Sol，原 effort／Terra／CC tiers 保留；Linux 跳過。 | `null` |
+| `WF-CONTROLLED-CLI-ADOPTION-20260929` | `DAILY_SOURCE_ADOPTED`：[PR198](https://github.com/yunancun/Arcane-Equilibrium/pull/198) 已合併至 `f90ed913c26eadeac84cca6090872d2d01cdde30` 並由 Mac main 採用；受控 CLI 可按需執行所需唯讀審查，原生自動派發維持關閉。證據與限制見 [收尾日誌](docs/CLAUDE_CHANGELOG.md#workflow-source-採用紀錄)；Linux 跳過。 | `null` |
 | W0／W1 完整量測、W2-host／WF-RC-02、W4、完整 W5 reuse、W6、W7 廣義重構、W8、W10 改革、W11 全 W 前置／全域認證、WF6-02／03／05–07、PR190 整包採用 | `CLOSED`／已歸檔／停止投入；保留既有成果與控制，只有 Operator 新的明確指令可重啟 | `null` |
 
 E2 原始 UNVERIFIED 記錄保留；Operator 允許僅依既有 E4 證據補結論後 PASS，

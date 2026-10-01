@@ -81,6 +81,7 @@ classes. Runtime observation cannot legalize normative denial.
 
 - Operator 決定路線、範圍擴張與驗收變更；範圍內自主推進可用功能，流程工作須服務實際交付。
 - 一位實作者、PM 單一整合，E2 查反例、E4 驗行為；Codex／CC 交接沿用同一需求、diff、證據與未解 finding，避免重做已完成工作。
+- 所需唯讀角色按 [AGENTS.md 受控 CLI 授權](../AGENTS.md#controlled-cli-review) 及 [入口用法](README.md#controlled-cli-review) 執行；原生自動派發維持關閉。沿用既有授權與驗證重用門檻，不逐次追加許可或固定全角色／全量重跑。
 - Workflow 大目標已停止投入；有效 W11 真實產品功能驗收只讀 `TODO.md`。舊 workflow 總帳在 `docs/archive/2026-09-25--workflow-todo-closed.md`，僅按需查歷史，不能據此重派或恢復工程。
 - Triage exact objective/scope/acceptance/hard stops, surfaces, risk, evidence
   scope, source/dirty baseline, and allowed effects.

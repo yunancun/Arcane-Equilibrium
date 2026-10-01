@@ -1,9 +1,15 @@
 ---
 name: 18-agent runtime 接線完成 (2026-04-25)
-description: srv/.claude/agents/ 18 subagent definition + srv/.claude/skills/ 25 OpenClaw custom skill + ~/.claude/skills/k-dense-ai/ 134 scientific skill；雙端 git 同步；Anthropic invocation 三種 pattern + 動態 isolation 派工。
+description: 2026-04 起的 Agent 接線歷史；舊角色數、預載、派發、寫記憶及雙端部署觀察不代表目前設定。
 type: project
 originSessionId: 4a9d8351-899d-46d3-abf3-b51081dc5a5f
 ---
+## 現行入口與歷史邊界（2026-10-01）
+
+角色與權限以 [Registry](../.codex/agent_registry_v1.json) 為準；啟動與派發只依 [AGENTS.md](../AGENTS.md) 和 [受控 CLI 入口](../.codex/README.md#controlled-cli-review)。PR198 已採用按需唯讀審查，原生自動派發維持關閉；目前同步狀態讀 [主 TODO](../TODO.md#workflow-optimization-physical-queuesource-only)。
+
+下方是帶日期的接線演變紀錄，保留查證；其中自動派發、固定全角色／預載、每角色追加 memory/report 及舊 Linux 同步敘述均不提供現行執行權。它們已由上述現行入口取代，不重新執行舊啟用步驟。
+
 # 18-Agent Runtime 接線完成（2026-04-25）
 
 OpenClaw 從「concept-only 16-agent 體系」升級到「真實接線 18 agent」。`@PM` `@QC` 等 typeahead 直呼可用，自動 / 強制 / session-wide 三種 invocation pattern 都支援。
