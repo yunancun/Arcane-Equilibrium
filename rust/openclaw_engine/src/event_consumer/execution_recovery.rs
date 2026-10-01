@@ -83,7 +83,7 @@ impl Checkpoint {
             .restore_execution_projection(&self.paper);
         pipeline.stats.total_fills = self.total_fills;
         state.pending_orders = self.pending;
-        state.retired_orders.clear();
+        state.retired_orders = self.retired;
         state.order_id_to_link = self.order_ids;
         state.close_maker_fallback_dispatched = self.fallbacks;
         state.seen_exec_set.clear();
@@ -163,6 +163,25 @@ impl ExecutionRecovery {
                 return Err("unapplied inbox recovery incomplete".into());
             }
         }
+        let terminal = match self.store.terminal_orders_to_reconcile().await {
+            Ok(orders) => orders,
+            Err(e) => {
+                self.fail(pipeline, &e);
+                return Err(e);
+            }
+        };
+        for mut po in terminal {
+            po.progress.reconciliation_retry_after_ms = Some(0);
+            po.progress.maker_cancel_attempt_ts_ms = None;
+            pipeline.exchange_submission_guard.track(&po.order_link_id);
+            if po.is_close {
+                pipeline.retain_pending_close(&po.symbol);
+            }
+            state
+                .pending_orders
+                .entry(po.order_link_id.clone())
+                .or_insert(po);
+        }
         // Pending intents retain the ordinary entry guard, including intents
         // committed just before a crash that may never have reached Bybit.
         pipeline.exchange_submission_guard.block_storage(false);
@@ -191,15 +210,13 @@ impl ExecutionRecovery {
                 .block_reconciliation(true);
         }
         if let Some(ExchangeEvent::OrderUpdate(ref order)) = event {
-            if !order.order_id.is_empty() {
-                if let Err(e) = self
-                    .store
-                    .bind_order_id(&order.order_link_id, &order.order_id)
-                    .await
-                {
-                    self.fail(pipeline, &e);
-                    return;
-                }
+            if let Err(e) = self
+                .store
+                .bind_order_id(&order.order_link_id, &order.order_id)
+                .await
+            {
+                self.fail(pipeline, &e);
+                return;
             }
         }
         let exec_id = if let Some(ExchangeEvent::Fill(ref execution)) = event {
@@ -315,7 +332,7 @@ impl ExecutionRecovery {
             self.fail(pipeline, &e);
             return;
         }
-        pipeline.finish_recovery_projection(&messages);
+        pipeline.finish_recovery_projection(&messages, observation);
         state.retired_orders.clear();
         self.last_control = control(state);
         forward_non_accounting(messages, original.as_ref().or(order_tx));

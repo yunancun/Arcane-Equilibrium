@@ -30,12 +30,15 @@ impl SubmissionGuard {
     }
 
     pub(crate) fn reserve(&self, id: &str, is_close: bool) -> bool {
+        let mut pending = self.0.lock();
         if self.1.load(std::sync::atomic::Ordering::SeqCst)
             || (!is_close && self.2.load(std::sync::atomic::Ordering::SeqCst))
         {
+            if pending.get(id) == Some(&SubmissionPhase::Queued) {
+                pending.remove(id);
+            }
             return false;
         }
-        let mut pending = self.0.lock();
         // The producer reserved before persistence; exactly one dispatcher may
         // claim that queued request. An already-dispatched ID remains a duplicate.
         if pending.get(id) == Some(&SubmissionPhase::Queued) {

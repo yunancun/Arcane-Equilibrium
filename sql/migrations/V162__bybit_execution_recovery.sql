@@ -56,6 +56,27 @@ CREATE TABLE IF NOT EXISTS trading.bybit_execution_inbox (
     PRIMARY KEY(engine_mode,exec_id)
 );
 -- Index creation is on the new empty table; no hot-table index build.
+DO $guard_c$
+BEGIN
+    IF to_regclass('trading.bybit_execution_unapplied') IS NOT NULL AND NOT EXISTS (
+        SELECT 1 FROM pg_index i
+        JOIN pg_class c ON c.oid=i.indexrelid
+        JOIN pg_am am ON am.oid=c.relam
+        WHERE i.indexrelid=to_regclass('trading.bybit_execution_unapplied')
+          AND i.indrelid='trading.bybit_execution_inbox'::regclass
+          AND am.amname='btree' AND i.indisvalid AND i.indisready
+          AND NOT i.indisunique AND i.indnkeyatts=2 AND i.indnatts=2
+          AND i.indexprs IS NULL AND i.indoption[0]=0 AND i.indoption[1]=0
+          AND (SELECT string_agg(a.attname,',' ORDER BY k.ordinality)
+               FROM unnest(i.indkey) WITH ORDINALITY k(attnum,ordinality)
+               JOIN pg_attribute a ON a.attrelid=i.indrelid AND a.attnum=k.attnum)
+              ='engine_mode,receive_seq'
+          AND pg_get_expr(i.indpred,i.indrelid) IN ('(NOT applied)','NOT applied')
+    ) THEN
+        RAISE EXCEPTION 'V162 Guard C: incompatible unapplied execution index';
+    END IF;
+END
+$guard_c$;
 CREATE INDEX IF NOT EXISTS bybit_execution_unapplied ON trading.bybit_execution_inbox(engine_mode,receive_seq) WHERE NOT applied;
 DO $grant$
 BEGIN

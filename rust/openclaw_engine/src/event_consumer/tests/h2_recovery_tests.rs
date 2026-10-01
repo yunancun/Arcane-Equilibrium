@@ -876,3 +876,267 @@ async fn h2_slow_account_probe_keeps_event_owner_available_and_stale_success_fen
     }
     assert!(p.exchange_submission_guard.blocks_entry());
 }
+
+#[test]
+fn h2_review_queued_fence_rejection_releases_only_unclaimed_request() {
+    let guard = super::super::order_lifecycle::SubmissionGuard::default();
+    assert!(guard.reserve_queued("queued", false));
+    guard.block_reconciliation(true);
+    assert!(!guard.reserve("queued", false));
+    assert!(!guard.contains("queued"));
+    guard.block_reconciliation(false);
+    assert!(guard.reserve_queued("next", false));
+    assert!(guard.reserve("next", false));
+    guard.block_storage(true);
+    assert!(!guard.reserve("next", false));
+    assert!(guard.contains("next"), "claimed intent cannot be discarded");
+}
+
+#[tokio::test]
+#[ignore = "requires explicit isolated PostgreSQL fixture"]
+async fn h2_review_fast_rest_type_enrichment_preserves_identity_and_accounting() {
+    let pool = h2_pool().await;
+    let (mut r, mut p, mut s, mut w) = h2_start(&pool).await;
+    h2_register(&mut r, &mut p, &mut s, "fast", 0.01, false).await;
+    let mut fast = h1_exec("fast", "fast-exec", "0.01", "Buy");
+    fast.exec_type.clear();
+    r.exchange(
+        Some(ExchangeEvent::Fill(fast.clone())),
+        &mut p,
+        &mut s,
+        &mut w,
+        None,
+    )
+    .await;
+    let mut rest = fast.clone();
+    rest.exec_type = "Trade".into();
+    r.exchange(
+        Some(ExchangeEvent::Fill(rest.clone())),
+        &mut p,
+        &mut s,
+        &mut w,
+        None,
+    )
+    .await;
+    assert!(!p.exchange_submission_guard.storage_blocked());
+    h2_accounting(&p, 0.01, 0.01, 0.0);
+    assert_eq!(h2_count(&pool, "fills").await, 1);
+    assert!(!r.store.receive(&fast).await.unwrap());
+    rest.exec_type = "Funding".into();
+    assert!(
+        r.store.receive(&rest).await.is_err(),
+        "different known types conflict after enrichment"
+    );
+}
+
+#[tokio::test]
+#[ignore = "requires explicit isolated PostgreSQL fixture"]
+async fn h2_review_unknown_order_update_fences_without_mutating_accounting() {
+    for link in ["", "foreign"] {
+        let pool = h2_pool().await;
+        let (mut r, mut p, mut s, mut w) = h2_start(&pool).await;
+        let update = terminal_order_update(link, "New", "");
+        r.exchange(
+            Some(ExchangeEvent::OrderUpdate(update)),
+            &mut p,
+            &mut s,
+            &mut w,
+            None,
+        )
+        .await;
+        assert!(
+            p.exchange_submission_guard.storage_blocked(),
+            "unknown live order must fence submission"
+        );
+        assert_eq!(h2_count(&pool, "bybit_order_intents").await, 0);
+    }
+}
+
+#[tokio::test]
+#[ignore = "requires explicit isolated PostgreSQL fixture"]
+async fn h2_review_migration_rejects_incompatible_unapplied_indexes() {
+    let pool = h2_pool().await;
+    for definition in [
+        "ON trading.bybit_execution_inbox(receive_seq,engine_mode) WHERE NOT applied",
+        "ON trading.bybit_execution_inbox(engine_mode,receive_seq DESC) WHERE NOT applied",
+        "ON trading.bybit_execution_inbox(engine_mode,receive_seq) WHERE applied",
+        "ON trading.bybit_order_intents(engine_mode,order_link_id)",
+    ] {
+        sqlx::raw_sql(&format!("DROP INDEX trading.bybit_execution_unapplied; CREATE INDEX bybit_execution_unapplied {definition}"))
+            .execute(&pool).await.unwrap();
+        let error = sqlx::raw_sql(H2_MIGRATION)
+            .execute(&pool)
+            .await
+            .unwrap_err();
+        assert!(error.to_string().contains("V162 Guard C"), "{error}");
+    }
+    sqlx::raw_sql("DROP INDEX trading.bybit_execution_unapplied")
+        .execute(&pool)
+        .await
+        .unwrap();
+    for _ in 0..2 {
+        sqlx::raw_sql(H2_MIGRATION).execute(&pool).await.unwrap();
+    }
+}
+
+#[tokio::test]
+#[ignore = "requires explicit isolated PostgreSQL fixture"]
+async fn h2_review_retired_cancel_reconciles_rest_fill_after_later_checkpoint() {
+    let pool = h2_pool().await;
+    let (mut r, mut p, mut s, mut w) = h2_start(&pool).await;
+    h2_register(&mut r, &mut p, &mut s, "opened", 0.1, false).await;
+    r.exchange(
+        Some(ExchangeEvent::Fill(h1_exec(
+            "opened",
+            "opened-exec",
+            "0.1",
+            "Buy",
+        ))),
+        &mut p,
+        &mut s,
+        &mut w,
+        None,
+    )
+    .await;
+    h2_register(&mut r, &mut p, &mut s, "retired", 0.1, true).await;
+    let mut cancel = terminal_order_update("retired", "Cancelled", "");
+    cancel.order_type = "Market".into();
+    r.exchange(
+        Some(ExchangeEvent::OrderUpdate(cancel.clone())),
+        &mut p,
+        &mut s,
+        &mut w,
+        None,
+    )
+    .await;
+    r.checkpoint_control(&mut p, &mut s, true).await;
+    drop(r);
+    let (mut r, mut p, mut s, mut w) = h2_start(&pool).await;
+    assert!(
+        s.pending_orders.contains_key("retired"),
+        "durable terminal intent needs REST confirmation after restart"
+    );
+    assert!(p.exchange_submission_guard.blocks_entry());
+    cancel.cum_exec_qty = "0.1".into();
+    let execution = h1_exec("retired", "offline-close", "0.1", "Sell");
+    let (checker, mut events) = super::super::dcp_reconciliation::DcpReconciler::fixture(vec![
+        serde_json::json!({"list":[cancel],"nextPageCursor":""}),
+        serde_json::json!({"list":[execution],"nextPageCursor":""}),
+    ]);
+    s.dcp_reconciler = Some(checker);
+    super::super::loop_tick::schedule_pending_reconciliation(
+        &mut s,
+        openclaw_core::now_ms() + 60_000,
+    );
+    for _ in 0..2 {
+        let event = tokio::time::timeout(std::time::Duration::from_secs(1), events.recv())
+            .await
+            .unwrap()
+            .unwrap();
+        r.exchange(Some(event), &mut p, &mut s, &mut w, None).await;
+    }
+    h2_confirm_account(&mut r, &p, &mut s).await;
+    h2_accounting(&p, 0.0, 0.02, 0.0);
+    assert_eq!(h2_count(&pool, "fills").await, 2);
+    assert!(!p.exchange_submission_guard.blocks_entry());
+}
+
+#[tokio::test]
+#[ignore = "requires explicit isolated PostgreSQL fixture"]
+async fn h2_review_failed_close_does_not_publish_features_lineage_or_release_lease() {
+    let pool = h2_pool().await;
+    let (mut r, mut p, mut s, mut w) = h2_start(&pool).await;
+    h2_register(&mut r, &mut p, &mut s, "side-open", 0.1, false).await;
+    r.exchange(
+        Some(ExchangeEvent::Fill(h1_exec(
+            "side-open",
+            "side-open-exec",
+            "0.1",
+            "Buy",
+        ))),
+        &mut p,
+        &mut s,
+        &mut w,
+        None,
+    )
+    .await;
+    h2_register(&mut r, &mut p, &mut s, "side-close", 0.1, true).await;
+    p.governance.grant_paper_authorization(None).unwrap();
+    let lease = p
+        .governance
+        .acquire_lease(
+            "intent:h2-close",
+            "TRADE_ENTRY",
+            60_000,
+            GovernanceProfile::Production,
+            "h2_fixture",
+        )
+        .unwrap();
+    let LeaseId::Active(id) = lease else {
+        panic!("active fixture lease required");
+    };
+    let po = s.pending_orders.get_mut("side-close").unwrap();
+    po.decision_lease_id = Some(id.clone());
+    po.spine_order_plan_id = Some("h2-plan".into());
+    po.spine_decision_id = Some("h2-decision".into());
+    po.spine_stub_report_id = Some("h2-stub".into());
+    r.checkpoint_control(&mut p, &mut s, true).await;
+    let (exit_tx, mut exits) = tokio::sync::mpsc::channel(16);
+    p.set_exit_feature_tx(exit_tx);
+    let (spine_tx, mut spine) = tokio::sync::mpsc::channel(16);
+    p.set_agent_spine_runtime(
+        Some(spine_tx),
+        crate::agent_spine::config::AgentSpineMode::Shadow,
+    );
+    sqlx::raw_sql("CREATE FUNCTION h2_side_fail() RETURNS trigger LANGUAGE plpgsql AS $$ BEGIN RAISE EXCEPTION 'close commit failure'; END $$; CREATE TRIGGER side_fail BEFORE UPDATE ON trading.bybit_recovery FOR EACH ROW EXECUTE FUNCTION h2_side_fail();").execute(&pool).await.unwrap();
+    let mut close = h1_exec("side-close", "side-close-exec", "0.1", "Sell");
+    close.exec_price = "60000".into();
+    r.exchange(
+        Some(ExchangeEvent::Fill(close.clone())),
+        &mut p,
+        &mut s,
+        &mut w,
+        None,
+    )
+    .await;
+    assert!(exits.try_recv().is_err(), "no provisional exit label");
+    assert!(spine.try_recv().is_err(), "no provisional fill lineage");
+    assert!(
+        p.governance.get_lease_by_id(&id).is_ok(),
+        "failed commit retains decision lease"
+    );
+    h2_accounting(&p, 0.1, 0.01, 0.0);
+    assert_eq!(h2_count(&pool, "fills").await, 1);
+    drop(r);
+    sqlx::raw_sql("DROP TRIGGER side_fail ON trading.bybit_recovery")
+        .execute(&pool)
+        .await
+        .unwrap();
+    let mut r = ExecutionRecovery::open(&pool, "demo", "fixture-account", &mut p, &mut s)
+        .await
+        .unwrap();
+    r.recover(&mut p, &mut s, &mut w, None).await.unwrap();
+    h2_accounting(&p, 0.0, 0.02, 1000.0);
+    assert_eq!(h2_count(&pool, "fills").await, 2);
+    assert!(exits.try_recv().is_ok(), "committed replay publishes label");
+    assert!(
+        spine.try_recv().is_ok(),
+        "committed replay publishes lineage"
+    );
+    assert!(
+        p.governance.get_lease_by_id(&id).is_err(),
+        "committed replay settles lease"
+    );
+    while spine.try_recv().is_ok() {}
+    r.exchange(
+        Some(ExchangeEvent::Fill(close)),
+        &mut p,
+        &mut s,
+        &mut w,
+        None,
+    )
+    .await;
+    assert!(exits.try_recv().is_err());
+    assert!(spine.try_recv().is_err());
+    assert_eq!(h2_count(&pool, "fills").await, 2);
+}

@@ -28,6 +28,7 @@
 
 use crate::database::TradingMsg;
 use std::sync::Arc;
+use tokio::sync::mpsc;
 use tracing::{info, warn};
 
 use openclaw_core::governance_core::{GovernanceCore, LeaseId, LeaseOutcome};
@@ -72,22 +73,99 @@ pub(crate) fn release_decision_lease_for_governance(
     }
 }
 
+struct RecoveryChannel<T> {
+    original: Option<mpsc::Sender<T>>,
+    receiver: mpsc::Receiver<T>,
+}
+impl<T> RecoveryChannel<T> {
+    fn stage(slot: &mut Option<mpsc::Sender<T>>) -> Self {
+        let (sender, receiver) = mpsc::channel(64);
+        let original = slot.take();
+        *slot = original.as_ref().map(|_| sender);
+        Self { original, receiver }
+    }
+    fn restore(mut self, slot: &mut Option<mpsc::Sender<T>>, publish: bool) {
+        *slot = self.original;
+        while let Ok(message) = self.receiver.try_recv() {
+            if publish {
+                if let Some(tx) = slot.as_ref() {
+                    if let Err(e) = tx.try_send(message) {
+                        warn!(error=%e, "committed recovery observation channel unavailable");
+                    }
+                }
+            }
+        }
+    }
+}
+
+struct RecoveryUnboundedChannel<T> {
+    original: Option<mpsc::UnboundedSender<T>>,
+    receiver: mpsc::UnboundedReceiver<T>,
+}
+impl<T> RecoveryUnboundedChannel<T> {
+    fn stage(slot: &mut Option<mpsc::UnboundedSender<T>>) -> Self {
+        let (sender, receiver) = mpsc::unbounded_channel();
+        let original = slot.take();
+        *slot = original.as_ref().map(|_| sender);
+        Self { original, receiver }
+    }
+    fn restore(mut self, slot: &mut Option<mpsc::UnboundedSender<T>>, publish: bool) -> bool {
+        *slot = self.original;
+        let mut delivered = true;
+        while let Ok(message) = self.receiver.try_recv() {
+            if publish {
+                if let Some(tx) = slot.as_ref() {
+                    if let Err(e) = tx.send(message) {
+                        warn!(error=%e, "committed recovery dispatch channel unavailable");
+                        delivered = false;
+                    }
+                }
+            }
+        }
+        delivered
+    }
+}
+
+pub(crate) struct RecoveryObservation {
+    recent_fills: std::collections::VecDeque<TimestampedFill>,
+    pending_close_symbols: std::collections::HashSet<String>,
+    exits: RecoveryChannel<crate::database::ExitFeatureRow>,
+    spine: RecoveryChannel<crate::agent_spine::store::AgentSpineMsg>,
+    orders: RecoveryUnboundedChannel<OrderDispatchRequest>,
+    stops: RecoveryUnboundedChannel<StopRequest>,
+}
+
 impl TickPipeline {
-    pub(crate) fn begin_recovery_projection(
-        &mut self,
-    ) -> (
-        std::collections::VecDeque<TimestampedFill>,
-        std::collections::HashSet<String>,
-    ) {
+    pub(crate) fn begin_recovery_projection(&mut self) -> RecoveryObservation {
+        debug_assert!(!self.recovery_provisional);
         self.recovery_provisional = true;
-        (
-            self.recent_fills.clone(),
-            self.pending_close_symbols.clone(),
-        )
+        self.recovery_lease_releases.lock().clear();
+        RecoveryObservation {
+            recent_fills: self.recent_fills.clone(),
+            pending_close_symbols: self.pending_close_symbols.clone(),
+            exits: RecoveryChannel::stage(&mut self.exit_feature_tx),
+            spine: RecoveryChannel::stage(&mut self.agent_spine_tx),
+            orders: RecoveryUnboundedChannel::stage(&mut self.order_dispatch_tx),
+            stops: RecoveryUnboundedChannel::stage(&mut self.stop_request_tx),
+        }
     }
 
-    pub(crate) fn finish_recovery_projection(&mut self, messages: &[TradingMsg]) {
+    pub(crate) fn finish_recovery_projection(
+        &mut self,
+        messages: &[TradingMsg],
+        before: RecoveryObservation,
+    ) {
         self.recovery_provisional = false;
+        before.exits.restore(&mut self.exit_feature_tx, true);
+        before.spine.restore(&mut self.agent_spine_tx, true);
+        let orders_delivered = before.orders.restore(&mut self.order_dispatch_tx, true);
+        let stops_delivered = before.stops.restore(&mut self.stop_request_tx, true);
+        if !orders_delivered || !stops_delivered {
+            self.exchange_submission_guard.block_storage(true);
+        }
+        for (id, outcome, stage) in std::mem::take(&mut *self.recovery_lease_releases.lock()) {
+            release_decision_lease_for_governance(&self.governance, Some(&id), outcome, &stage);
+        }
         for message in messages {
             if let TradingMsg::Fill {
                 symbol,
@@ -103,16 +181,19 @@ impl TickPipeline {
         }
     }
 
-    pub(crate) fn rollback_recovery_observation(
-        &mut self,
-        before: (
-            std::collections::VecDeque<TimestampedFill>,
-            std::collections::HashSet<String>,
-        ),
-    ) {
+    pub(crate) fn rollback_recovery_observation(&mut self, mut before: RecoveryObservation) {
         self.recovery_provisional = false;
-        self.recent_fills = before.0;
-        self.pending_close_symbols = before.1;
+        self.recovery_lease_releases.lock().clear();
+        while let Ok(request) = before.orders.receiver.try_recv() {
+            self.exchange_submission_guard
+                .resolve(&request.order_link_id);
+        }
+        before.exits.restore(&mut self.exit_feature_tx, false);
+        before.spine.restore(&mut self.agent_spine_tx, false);
+        before.orders.restore(&mut self.order_dispatch_tx, false);
+        before.stops.restore(&mut self.stop_request_tx, false);
+        self.recent_fills = before.recent_fills;
+        self.pending_close_symbols = before.pending_close_symbols;
     }
 
     /// Release a decision lease that was handed off by the router success path.
@@ -126,6 +207,16 @@ impl TickPipeline {
         outcome: LeaseOutcome,
         stage: &str,
     ) {
+        if self.recovery_provisional {
+            if let Some(id) = lease_id.filter(|id| !id.is_empty()) {
+                self.recovery_lease_releases.lock().push((
+                    id.to_owned(),
+                    outcome,
+                    stage.to_owned(),
+                ));
+            }
+            return;
+        }
         release_decision_lease_for_governance(&self.governance, lease_id, outcome, stage);
     }
 

@@ -983,6 +983,8 @@ pub struct TickPipeline {
     recent_fills: VecDeque<TimestampedFill>,
     /// Financial projection is provisional until the H2 transaction commits.
     recovery_provisional: bool,
+    recovery_lease_releases:
+        parking_lot::Mutex<Vec<(String, openclaw_core::governance_core::LeaseOutcome, String)>>,
     /// Channel to dispatch server-side stop requests (Item 1: dual-track stops).
     /// 派發伺服器端止損請求的通道（項目 1：雙軌止損）。
     stop_request_tx: Option<tokio::sync::mpsc::UnboundedSender<StopRequest>>,

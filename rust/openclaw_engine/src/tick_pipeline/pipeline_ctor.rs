@@ -56,6 +56,7 @@ impl TickPipeline {
             recent_intents: VecDeque::new(),
             recent_fills: VecDeque::new(),
             recovery_provisional: false,
+            recovery_lease_releases: parking_lot::Mutex::new(Vec::new()),
             stop_request_tx: None,
             adl_alerts: VecDeque::new(),
             canary_mode: false,

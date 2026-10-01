@@ -105,6 +105,20 @@ impl RecoveryStore {
             .collect()
     }
 
+    /// A terminal WS update can precede its execution. These durable intents
+    /// must still receive REST confirmation even after later checkpoints have
+    /// replaced the transient retired map.
+    pub(super) async fn terminal_orders_to_reconcile(&mut self) -> Result<Vec<PendingOrder>> {
+        let rows: Vec<Value> = sqlx::query_scalar("SELECT progress FROM trading.bybit_order_intents WHERE engine_mode=$1 AND venue_order_id IS NOT NULL AND progress->'progress'->>'status' IN ('Cancelled','PartiallyFilledCanceled','Rejected','Deactivated') AND ((progress->>'qty')::double precision=0 OR (progress->>'qty')::double precision>(progress->>'cum_filled_qty')::double precision) ORDER BY order_link_id LIMIT 4097")
+            .bind(&self.engine).fetch_all(&mut self.conn).await.map_err(err)?;
+        if rows.len() > 4096 {
+            return Err("terminal reconciliation exceeds bounded startup budget".into());
+        }
+        rows.into_iter()
+            .map(|v| serde_json::from_value(v).map_err(err))
+            .collect()
+    }
+
     /// false = already atomically projected, true = durable and needs replay.
     pub(super) async fn receive(&mut self, execution: &ExecutionUpdate) -> Result<bool> {
         let value = serde_json::to_value(execution).map_err(err)?;
@@ -112,7 +126,7 @@ impl RecoveryStore {
             .bind(&self.engine).bind(&execution.exec_id).bind(&value).execute(&mut self.conn).await.map_err(err)?;
         let (old, applied): (Value,bool) = sqlx::query_as("SELECT payload,applied FROM trading.bybit_execution_inbox WHERE engine_mode=$1 AND exec_id=$2")
             .bind(&self.engine).bind(&execution.exec_id).fetch_one(&mut self.conn).await.map_err(err)?;
-        let old: ExecutionUpdate = serde_json::from_value(old).map_err(err)?;
+        let mut old: ExecutionUpdate = serde_json::from_value(old).map_err(err)?;
         // Fast/REST representations may enrich optional fee/maker fields or
         // orderLinkId. They cannot change the execution's economic identity.
         if old.order_id != execution.order_id
@@ -121,19 +135,33 @@ impl RecoveryStore {
             || old.exec_qty != execution.exec_qty
             || old.exec_price != execution.exec_price
             || old.exec_time != execution.exec_time
-            || old.exec_type != execution.exec_type
+            || (!old.exec_type.is_empty()
+                && !execution.exec_type.is_empty()
+                && old.exec_type != execution.exec_type)
             || (!old.order_link_id.is_empty()
                 && !execution.order_link_id.is_empty()
                 && old.order_link_id != execution.order_link_id)
         {
             return Err("conflicting execution identity".into());
         }
+        if old.exec_type.is_empty() && !execution.exec_type.is_empty() {
+            old.exec_type = execution.exec_type.clone();
+            sqlx::query("UPDATE trading.bybit_execution_inbox SET payload=$3 WHERE engine_mode=$1 AND exec_id=$2")
+                .bind(&self.engine).bind(&execution.exec_id).bind(serde_json::to_value(old).map_err(err)?)
+                .execute(&mut self.conn).await.map_err(err)?;
+        }
         Ok(!applied)
     }
 
     pub(super) async fn bind_order_id(&mut self, link: &str, venue: &str) -> Result<()> {
+        if link.is_empty() || venue.is_empty() {
+            return Err("order binding requires durable link and venue identity".into());
+        }
         let old: Option<Option<String>> = sqlx::query_scalar("SELECT venue_order_id FROM trading.bybit_order_intents WHERE engine_mode=$1 AND order_link_id=$2")
             .bind(&self.engine).bind(link).fetch_optional(&mut self.conn).await.map_err(err)?;
+        if old.is_none() {
+            return Err("order binding has no durable intent".into());
+        }
         if old
             .as_ref()
             .and_then(|x| x.as_ref())
@@ -141,8 +169,11 @@ impl RecoveryStore {
         {
             return Err("venue order ID changed for immutable intent".into());
         }
-        sqlx::query("UPDATE trading.bybit_order_intents SET venue_order_id=$3 WHERE engine_mode=$1 AND order_link_id=$2")
+        let updated = sqlx::query("UPDATE trading.bybit_order_intents SET venue_order_id=$3 WHERE engine_mode=$1 AND order_link_id=$2")
             .bind(&self.engine).bind(link).bind(venue).execute(&mut self.conn).await.map_err(err)?;
+        if updated.rows_affected() != 1 {
+            return Err("order binding did not update exactly one durable intent".into());
+        }
         Ok(())
     }
     pub(super) async fn order_for_execution(

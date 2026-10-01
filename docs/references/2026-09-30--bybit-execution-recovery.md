@@ -104,3 +104,35 @@ PA controlled CLI 初次及唯一一次 recheck 都在模型請求逾時後停�
 SSH 逾時，沒有 Linux 修改。合併與三端採用未完成；可保留 feature commit／draft PR
 供後續審核，不能宣告 `DONE`。exact-head 狀態與原失敗紀錄以 workspace
 `audits/2026-10-01-bybit-h2-publication/` 為準。沒有部署或套用共用 DB migration。
+
+## 2026-10-01 PR #200 review 修補
+
+本節 supersedes 前段「尚未發佈」的階段狀態；current-head publication、CI、review threads、
+merge 與 Mac source 採用，以 workspace `audits/2026-10-01-bybit-h2-merge/` 的 exact-head evidence 判定。
+Operator 已指示完成 merge／push，Linux host source 同步略過；不授予 runtime 或共享 DB 變更權。
+
+GitHub PR #200 的六項 review 已在同一 H2 範圍補修：
+
+- Provisional close 的 exit features、Agent Spine lineage、decision lease settlement，
+  以及 pipeline 產生的 stop／fallback 請求，都先留在單一 event owner 的 buffer。
+  recovery transaction 成功後才發佈；失敗丟棄 buffer、恢复 financial／tracker／close guard。
+  這些 derived observations 仍沿原有 best-effort channels，沒有跨 process 的 durable outbox 保證。
+- startup 除 checkpoint pending 外，從 durable intents 讀取已綁 venue、尚有未填量的 cancelled／
+  rejected terminal trackers，沿原有逐單 REST reconciliation 補 execution 後再跑 account barrier。
+  這不依賴 transient retired map 是否被較晚 checkpoint 清除；最多 4,096 筆，超限 fail closed，
+  缺失或不可查的 history 仍阻擋 entry，不自動捨棄 identity 或播種 baseline。
+- execution.fast 的空 execType 可由 REST 的已知 type 補全，已知 type 寫回 inbox；
+  兩個不同的非空 type 仍拒絕。已 applied 的 duplicate 不再計 qty／fee／PnL。
+- fence 在排隊後生效時，dispatcher 拒絕並移除未 claimed 的 queued reservation；
+  已 claimed 的 intent 仍保留，duplicate 不得終止原單。
+- venue order binding 必須有非空 identity 且更新恰好一個 durable intent；未知／manual order
+  不再因 UPDATE 0 rows 被視為成功，新提交維持 storage fence。
+- V162 Guard C 在重用 partial index 前核對 table、btree、欄位順序、ASC、有效性與 NOT applied
+  predicate；不相容的同名 index 明確拒絕，compatible double apply 保持冪等。
+
+六項新回歸先 RED；修補後 H2 25 項全部通過，engine library 4,928 通過、22 項 PG 預設 ignored
+已在 H2 suite 另行執行；strict library Clippy、完整 release engine binary 和 schema target 編譯通過。
+主程式驗證亦涵蓋 CI 揭露的 Send bound：checkpoint 使用 owner 的 exclusive pipeline borrow，
+沒有內部 await 的 account poll 為同步方法，不向 Strategy 增加 Sync 要求。
+以上仍為 source／隔離 fixture 證據；原 PA controlled CLI 初次與唯一 recheck 無 verdict 的事實保留，
+GitHub current-head review 與 CI 的實際結果另以 publication artifacts 記錄，不改寫成 independent PASS。

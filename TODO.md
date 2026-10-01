@@ -580,3 +580,11 @@ PA 初次及唯一 recheck 均因模型請求逾時而無 verdict，獨立 gate 
 preflight 逾時。原本機候選的「未 commit」為歷史階段；目前 feature commit／draft PR 及
 exact-head 證據以 workspace `audits/2026-10-01-bybit-h2-publication/` 判定，合併與三端採用
 尚未完成、`next_action=null`。不自動重試或啟動 successor。
+
+H2 PR #200 review 修補（2026-10-01）：Operator 明確指示 merge／push、skip Linux。
+六項 GitHub finding 已補上 deferred close outputs／lease、durable terminal REST 補查、fast／REST
+type enrichment、fence 後 queued 清理、exact-one order binding，以及 V162 partial-index Guard C。
+六項回歸先 RED；H2 25、library 4,928（22 PG 另行執行）、strict Clippy、release binary 與 schema
+編譯通過。current-head review／CI、merge 和 Mac/GitHub source 採用依 workspace
+`audits/2026-10-01-bybit-h2-merge/` 判定；原 controlled PA 未返回 verdict，runtime／shared PG 未驗證。
+本節不派發 successor，`next_action=null`。
