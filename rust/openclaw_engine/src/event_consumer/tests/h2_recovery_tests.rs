@@ -372,10 +372,10 @@ async fn h2_confirm_account(r: &mut ExecutionRecovery, p: &TickPipeline, s: &mut
     ]);
     s.dcp_reconciler = Some(reconciler);
     let now = openclaw_core::now_ms() + 60_000;
-    r.reconcile_startup(p, s, now).await;
+    r.reconcile_startup(p, s, now);
     for _ in 0..10 {
         tokio::task::yield_now().await;
-        r.reconcile_startup(p, s, now).await;
+        r.reconcile_startup(p, s, now);
     }
     s.dcp_reconciler = None;
 }
@@ -863,19 +863,16 @@ async fn h2_slow_account_probe_keeps_event_owner_available_and_stale_success_fen
     let (checker, _) = super::super::dcp_reconciliation::DcpReconciler::fixture_with_fetch(fetch);
     s.dcp_reconciler = Some(checker);
     let now = openclaw_core::now_ms() + 60_000;
-    tokio::time::timeout(
-        std::time::Duration::from_millis(100),
-        r.reconcile_startup(&p, &s, now),
-    )
-    .await
-    .unwrap();
+    let started = std::time::Instant::now();
+    r.reconcile_startup(&p, &s, now);
+    assert!(started.elapsed() < std::time::Duration::from_millis(100));
     // The owner handles an event while REST is stalled; that commit invalidates
     // the older account observation even if the network result later succeeds.
-    r.checkpoint_control(&p, &mut s, true).await;
+    r.checkpoint_control(&mut p, &mut s, true).await;
     gate.notify_one();
     for _ in 0..10 {
         tokio::task::yield_now().await;
-        r.reconcile_startup(&p, &s, now).await;
+        r.reconcile_startup(&p, &s, now);
     }
     assert!(p.exchange_submission_guard.blocks_entry());
 }

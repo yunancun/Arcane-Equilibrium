@@ -373,7 +373,7 @@ impl ExecutionRecovery {
             let _ = ready.send(());
         }
     }
-    pub(super) async fn reconcile_startup(
+    pub(super) fn reconcile_startup(
         &mut self,
         pipeline: &TickPipeline,
         state: &LoopState,
@@ -418,7 +418,7 @@ impl ExecutionRecovery {
     }
     pub(super) async fn checkpoint_control(
         &mut self,
-        pipeline: &TickPipeline,
+        pipeline: &mut TickPipeline,
         state: &mut LoopState,
         force: bool,
     ) {

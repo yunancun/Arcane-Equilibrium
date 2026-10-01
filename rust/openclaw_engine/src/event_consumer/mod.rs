@@ -235,7 +235,7 @@ pub async fn run_event_consumer(deps: EventConsumerDeps) {
                     _cross_engine_tx.as_ref(),
                     pipeline_kind,
                 ).await;
-                if let Some(recovery) = recovery.as_mut() { recovery.checkpoint_control(&pipeline, &mut state, true).await; }
+                if let Some(recovery) = recovery.as_mut() { recovery.checkpoint_control(&mut pipeline, &mut state, true).await; }
             },
 
             event = event_rx.recv() => {
@@ -262,7 +262,7 @@ pub async fn run_event_consumer(deps: EventConsumerDeps) {
                     bootstrap_client.as_ref(),
                     &kline_seed_tx,
                 );
-                if let Some(recovery) = recovery.as_mut() { recovery.checkpoint_control(&pipeline, &mut state, false).await; }
+                if let Some(recovery) = recovery.as_mut() { recovery.checkpoint_control(&mut pipeline, &mut state, false).await; }
                 if flow.is_break() {
                     break;
                 }
@@ -270,7 +270,7 @@ pub async fn run_event_consumer(deps: EventConsumerDeps) {
 
             Some(outcome) = maker_cancel_rx.recv() => {
                 loop_tick::handle_maker_cancel_outcome(&mut state, outcome, openclaw_core::now_ms());
-                if let Some(recovery) = recovery.as_mut() { recovery.checkpoint_control(&pipeline, &mut state, false).await; }
+                if let Some(recovery) = recovery.as_mut() { recovery.checkpoint_control(&mut pipeline, &mut state, false).await; }
             }
 
             _ = confirmation_interval.tick() => {
@@ -280,7 +280,7 @@ pub async fn run_event_consumer(deps: EventConsumerDeps) {
                         shared_client.as_ref(), Some(&maker_cancel_tx), po, now_ms,
                     ),
                 );
-                if let Some(recovery) = recovery.as_mut() { recovery.checkpoint_control(&pipeline, &mut state, false).await; recovery.reconcile_startup(&pipeline, &state, openclaw_core::now_ms()).await; }
+                if let Some(recovery) = recovery.as_mut() { recovery.checkpoint_control(&mut pipeline, &mut state, false).await; recovery.reconcile_startup(&pipeline, &state, openclaw_core::now_ms()); }
             }
 
             // ── AMD-2026-05-02-01 Track H E-1 retrofit Arm: lease & auth sweep ──
