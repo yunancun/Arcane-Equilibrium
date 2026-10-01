@@ -453,6 +453,46 @@ async fn h2_owner_account_and_execution_conflicts_fail_closed() {
 }
 
 #[tokio::test]
+async fn h2_account_barrier_uses_valid_endpoint_limits() {
+    use std::{future::Future, pin::Pin, sync::Arc};
+    let calls = Arc::new(parking_lot::Mutex::new(Vec::new()));
+    let observed = calls.clone();
+    let fetch = Arc::new(move |path: &'static str, params: Vec<(String, String)>| {
+        let maximum = match path {
+            "/v5/order/realtime" => 50,
+            "/v5/position/list" => 200,
+            _ => panic!("unexpected account reconciliation endpoint"),
+        };
+        let limit = params
+            .iter()
+            .find(|(key, _)| key == "limit")
+            .and_then(|(_, value)| value.parse::<u32>().ok());
+        observed.lock().push(path);
+        let result = if limit.is_some_and(|limit| (1..=maximum).contains(&limit)) {
+            Ok(serde_json::json!({"list":[],"nextPageCursor":""}))
+        } else {
+            Err("Bybit query limit exceeds endpoint contract".into())
+        };
+        let response: Pin<Box<dyn Future<Output = Result<serde_json::Value, String>> + Send>> =
+            Box::pin(std::future::ready(result));
+        response
+    });
+    let (checker, _) = super::super::dcp_reconciliation::DcpReconciler::fixture_with_fetch(fetch);
+    let p = TickPipeline::with_kind(&["BTCUSDT"], 10000.0, PipelineKind::Demo);
+    assert!(
+        checker
+            .account_matches(&p.paper_state.export_state())
+            .await
+            .is_ok(),
+        "an empty, reconciled account must clear the startup barrier"
+    );
+    assert_eq!(
+        *calls.lock(),
+        vec!["/v5/order/realtime", "/v5/position/list"]
+    );
+}
+
+#[tokio::test]
 async fn h2_account_barrier_requires_complete_matching_pages() {
     let p = TickPipeline::with_kind(&["BTCUSDT"], 10000.0, PipelineKind::Demo);
     let empty = serde_json::json!({"list":[],"nextPageCursor":""});

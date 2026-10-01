@@ -572,3 +572,11 @@ inbox、canonical accounting、projection／progress 原子提交；重啟恢復
 partial／cancel race 及六類 crash cutpoint 已本機验证。舊 lane 首次採用需明確對帳 baseline，
 本候選拒絕自動播種；獨立 PA／E2／E4／BB、完整 Timescale／Linux／真 venue recovery 未驗證。
 未 commit、push、merge、部署或變更共用 DB。這是有限 H2 source 修復收口，不啟動其他 queue 或 successor。
+
+H2 發布階段（2026-10-01）：Operator 已授權 commit／審核／三端 source 同步；候選位於
+`codex/bybit-h2-publication-20261001`。PM 修正 account barrier 的 open-order limit 200→50，
+參數契約回歸先 RED 再 GREEN；H2 19、engine library 4,927、strict library Clippy 通過。
+PA 初次及唯一 recheck 均因模型請求逾時而無 verdict，獨立 gate `UNVERIFIED`；Linux SSH
+preflight 逾時。原本機候選的「未 commit」為歷史階段；目前 feature commit／draft PR 及
+exact-head 證據以 workspace `audits/2026-10-01-bybit-h2-publication/` 判定，合併與三端採用
+尚未完成、`next_action=null`。不自動重試或啟動 successor。

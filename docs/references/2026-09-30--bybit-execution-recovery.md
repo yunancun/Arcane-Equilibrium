@@ -83,3 +83,24 @@ checkpoint，本轮為未 commit 的修復候選。沒有啟動 native automatic
 協定參照：[Bybit execution history](https://bybit-exchange.github.io/docs/v5/order/execution)、
 [PostgreSQL INSERT](https://www.postgresql.org/docs/current/sql-insert.html)。
 保證由原子 transaction 與恢復測試界定，不能從 ON CONFLICT 單獨推論。
+
+## 2026-10-01 發布審核觀察
+
+Operator 已授權 commit、審核及 Mac／GitHub／Linux source 同步。
+候選移至 `codex/bybit-h2-publication-20261001` 的 clean committed checkpoint，
+原修復 worktree 與歷史證據保留。本節 supersedes 上節「未 commit」的階段狀態。
+
+PM 檢查確認 `H2PUB-API-001`：account barrier 把 position 的 200-row limit
+用於 open-order endpoint，超出其 50-row 上限，使已對帳的空帳戶也不能解鎖。
+已改為 open orders `limit=50, openOnly=0`、positions `limit=200`；模擬實際 API
+參數拒絕的回歸先 RED 再 GREEN。這是 PM source 檢查，不能代替獨立審核。
+[Open-order contract](https://bybit-exchange.github.io/docs/v5/order/open-order)、
+[Position contract](https://bybit-exchange.github.io/docs/v5/position)。
+
+本輪重新執行 H2 19 項全部通過，engine library 4,927 通過、17 項 PG 預設 ignored
+（已在 H2 suite 另執行），strict library Clippy 通過。
+PA controlled CLI 初次及唯一一次 recheck 都在模型請求逾時後停止，未返回 verdict；
+獨立 gate 為 `UNVERIFIED`，E2／E4／BB／R4 沒有獨立 PASS。Linux source preflight
+SSH 逾時，沒有 Linux 修改。合併與三端採用未完成；可保留 feature commit／draft PR
+供後續審核，不能宣告 `DONE`。exact-head 狀態與原失敗紀錄以 workspace
+`audits/2026-10-01-bybit-h2-publication/` 為準。沒有部署或套用共用 DB migration。

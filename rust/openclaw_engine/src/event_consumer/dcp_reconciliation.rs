@@ -183,9 +183,13 @@ async fn account_matches(
     let params = vec![
         ("category".into(), "linear".into()),
         ("settleCoin".into(), "USDT".into()),
-        ("limit".into(), "200".into()),
     ];
-    let orders = (fetch)("/v5/order/realtime", params.clone()).await?;
+    // Order realtime permits at most 50 rows; position list permits 200.
+    // Sharing the position limit makes the startup barrier fail on a valid account.
+    let mut order_params = params.clone();
+    order_params.push(("limit".into(), "50".into()));
+    order_params.push(("openOnly".into(), "0".into()));
+    let orders = (fetch)("/v5/order/realtime", order_params).await?;
     if !rows(&orders)?.is_empty()
         || orders.get("nextPageCursor").and_then(Value::as_str) != Some("")
     {
@@ -196,6 +200,7 @@ async fn account_matches(
     let mut cursors = HashSet::new();
     for _ in 0..20 {
         let mut params = params.clone();
+        params.push(("limit".into(), "200".into()));
         if !cursor.is_empty() {
             params.push(("cursor".into(), cursor.clone()));
         }
