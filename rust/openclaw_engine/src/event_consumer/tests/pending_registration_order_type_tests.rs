@@ -1383,7 +1383,11 @@ async fn h1_registration_barrier_precedes_submission() {
     let (ready, mut receiver) = tokio::sync::oneshot::channel();
     let po = baseline_pending_order("market", None);
     let id = po.order_link_id.clone();
-    let event = PendingOrderEvent::RegisterBeforeSubmit { order: po, ready };
+    let event = PendingOrderEvent::RegisterBeforeSubmit {
+        request: h2_request(&po),
+        order: po,
+        ready,
+    };
     assert!(matches!(
         receiver.try_recv(),
         Err(tokio::sync::oneshot::error::TryRecvError::Empty)
@@ -1728,3 +1732,5 @@ async fn h1_unknown_confirmation_settles_active_lease() {
 }
 
 include!("h1_review_tests.rs");
+
+include!("h2_recovery_tests.rs");

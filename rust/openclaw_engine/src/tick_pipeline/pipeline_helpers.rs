@@ -26,6 +26,7 @@
 //!   `pub(super)`：`close_position_at_symbol_market` / `emit_close_fill` /
 //!   `should_persist_signal` / `derive_regime`。
 
+use crate::database::TradingMsg;
 use std::sync::Arc;
 use tracing::{info, warn};
 
@@ -72,6 +73,48 @@ pub(crate) fn release_decision_lease_for_governance(
 }
 
 impl TickPipeline {
+    pub(crate) fn begin_recovery_projection(
+        &mut self,
+    ) -> (
+        std::collections::VecDeque<TimestampedFill>,
+        std::collections::HashSet<String>,
+    ) {
+        self.recovery_provisional = true;
+        (
+            self.recent_fills.clone(),
+            self.pending_close_symbols.clone(),
+        )
+    }
+
+    pub(crate) fn finish_recovery_projection(&mut self, messages: &[TradingMsg]) {
+        self.recovery_provisional = false;
+        for message in messages {
+            if let TradingMsg::Fill {
+                symbol,
+                realized_pnl,
+                ..
+            } = message
+            {
+                if realized_pnl.abs() > f64::EPSILON {
+                    self.intent_processor.record_trade(symbol, *realized_pnl);
+                    self.dynamic_risk_sizer.record_closed_trade(*realized_pnl);
+                }
+            }
+        }
+    }
+
+    pub(crate) fn rollback_recovery_observation(
+        &mut self,
+        before: (
+            std::collections::VecDeque<TimestampedFill>,
+            std::collections::HashSet<String>,
+        ),
+    ) {
+        self.recovery_provisional = false;
+        self.recent_fills = before.0;
+        self.pending_close_symbols = before.1;
+    }
+
     /// Release a decision lease that was handed off by the router success path.
     ///
     /// The router intentionally stops owning the lease once an intent/order is
@@ -723,6 +766,13 @@ impl TickPipeline {
         &self,
     ) -> Option<tokio::sync::mpsc::Sender<crate::database::TradingMsg>> {
         self.trading_tx.clone()
+    }
+
+    pub(crate) fn replace_recovery_trading_channel(
+        &mut self,
+        next: Option<tokio::sync::mpsc::Sender<crate::database::TradingMsg>>,
+    ) -> Option<tokio::sync::mpsc::Sender<crate::database::TradingMsg>> {
+        std::mem::replace(&mut self.trading_tx, next)
     }
 
     pub fn set_trading_channel(

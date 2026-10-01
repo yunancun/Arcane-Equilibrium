@@ -50,6 +50,32 @@ impl DcpReconciler {
         }
     }
 
+    /// Startup barrier: all open orders must be accounted for and every
+    /// paginated one-way USDT position must match the execution projection.
+    #[cfg(test)]
+    pub(super) async fn account_matches(
+        &self,
+        paper: &crate::paper_state::PaperStateSnapshot,
+    ) -> Result<(), String> {
+        account_matches(&self.fetch, paper).await
+    }
+
+    pub(super) fn schedule_account(
+        &self,
+        paper: crate::paper_state::PaperStateSnapshot,
+    ) -> tokio::sync::oneshot::Receiver<Result<(), String>> {
+        let fetch = self.fetch.clone();
+        let (tx, rx) = tokio::sync::oneshot::channel();
+        tokio::spawn(async move {
+            let result =
+                tokio::time::timeout(Duration::from_secs(15), account_matches(&fetch, &paper))
+                    .await
+                    .unwrap_or_else(|_| Err("account reconciliation timed out".into()));
+            let _ = tx.send(result);
+        });
+        rx
+    }
+
     pub(super) fn schedule(&self, pending: &[PendingOrder]) {
         let work: Vec<_> = pending
             .iter()
@@ -148,6 +174,95 @@ impl DcpReconciler {
             rx,
         )
     }
+}
+
+async fn account_matches(
+    fetch: &Fetch,
+    paper: &crate::paper_state::PaperStateSnapshot,
+) -> Result<(), String> {
+    let params = vec![
+        ("category".into(), "linear".into()),
+        ("settleCoin".into(), "USDT".into()),
+        ("limit".into(), "200".into()),
+    ];
+    let orders = (fetch)("/v5/order/realtime", params.clone()).await?;
+    if !rows(&orders)?.is_empty()
+        || orders.get("nextPageCursor").and_then(Value::as_str) != Some("")
+    {
+        return Err("unaccounted open orders or incomplete order page".into());
+    }
+    let mut positions = std::collections::HashMap::new();
+    let mut cursor = String::new();
+    let mut cursors = HashSet::new();
+    for _ in 0..20 {
+        let mut params = params.clone();
+        if !cursor.is_empty() {
+            params.push(("cursor".into(), cursor.clone()));
+        }
+        let value = (fetch)("/v5/position/list", params).await?;
+        for item in rows(&value)? {
+            if item.get("positionIdx").and_then(Value::as_u64) != Some(0) {
+                return Err("unknown or hedge position mode".into());
+            }
+            let symbol = item
+                .get("symbol")
+                .and_then(Value::as_str)
+                .filter(|s| !s.is_empty())
+                .ok_or("missing position symbol")?;
+            let size = nonnegative(
+                item.get("size")
+                    .and_then(Value::as_str)
+                    .ok_or("missing position size")?,
+            )?;
+            if size == 0.0 {
+                continue;
+            }
+            let side = item
+                .get("side")
+                .and_then(Value::as_str)
+                .filter(|s| matches!(*s, "Buy" | "Sell"))
+                .ok_or("invalid position side")?;
+            let price = nonnegative(
+                item.get("avgPrice")
+                    .and_then(Value::as_str)
+                    .ok_or("missing position price")?,
+            )?;
+            if price == 0.0
+                || positions
+                    .insert(symbol.to_owned(), (side == "Buy", size, price))
+                    .is_some()
+            {
+                return Err("invalid/duplicate position".into());
+            }
+        }
+        cursor = value
+            .get("nextPageCursor")
+            .and_then(Value::as_str)
+            .ok_or("missing position cursor")?
+            .to_owned();
+        if cursor.is_empty() {
+            if positions.len() != paper.positions.len() {
+                return Err("position universe differs".into());
+            }
+            for pos in &paper.positions {
+                let p = &pos.position;
+                let Some((side, qty, price)) = positions.get(&p.symbol) else {
+                    return Err("position missing".into());
+                };
+                if *side != p.is_long
+                    || (*qty - p.qty).abs() > 1e-10 * p.qty.abs().max(1.0)
+                    || (*price - p.entry_price).abs() > 1e-10 * p.entry_price.abs().max(1.0)
+                {
+                    return Err("position accounting differs".into());
+                }
+            }
+            return Ok(());
+        }
+        if !cursors.insert(cursor.clone()) {
+            return Err("repeated position cursor".into());
+        }
+    }
+    Err("position page budget exhausted".into())
 }
 
 fn nonnegative(value: &str) -> Result<f64, String> {

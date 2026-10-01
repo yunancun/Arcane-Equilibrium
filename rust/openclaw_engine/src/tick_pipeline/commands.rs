@@ -770,7 +770,7 @@ impl TickPipeline {
         // Non-zero realized_pnl indicates a position close (open fills return 0.0).
         // 交易所成交時更新 Kelly 統計（先前遺漏 — QC P2-2 修復）。
         // 非零 realized_pnl 表示平倉成交（開倉成交返回 0.0）。
-        if realized_pnl.abs() > f64::EPSILON {
+        if !self.recovery_provisional && realized_pnl.abs() > f64::EPSILON {
             self.intent_processor.record_trade(symbol, realized_pnl);
             // DYNAMIC-RISK-1: realized close on exchange-confirmed fill.
             // DYNAMIC-RISK-1：交易所確認的平倉成交，餵入動態風險調整器。
@@ -1111,7 +1111,11 @@ impl TickPipeline {
                 reprice_count: 0,
             };
             let close_id = request.order_link_id.clone();
-            if is_primary && !self.exchange_submission_guard.reserve_queued(&close_id, true) {
+            if is_primary
+                && !self
+                    .exchange_submission_guard
+                    .reserve_queued(&close_id, true)
+            {
                 return false;
             }
             match tx.send(request) {
@@ -1273,7 +1277,10 @@ impl TickPipeline {
             reprice_count: 0,
         };
 
-        if !self.exchange_submission_guard.reserve_queued(&order_link_id, true) {
+        if !self
+            .exchange_submission_guard
+            .reserve_queued(&order_link_id, true)
+        {
             return false;
         }
         match tx.send(request) {
@@ -1460,7 +1467,10 @@ impl TickPipeline {
             // 累計重掛次數 +1，使下一輪 sweep 對新單繼續計數至 max_reprices 硬上限。
             reprice_count: reprice_count.saturating_add(1),
         };
-        if !self.exchange_submission_guard.reserve_queued(&new_order_link_id, true) {
+        if !self
+            .exchange_submission_guard
+            .reserve_queued(&new_order_link_id, true)
+        {
             return None;
         }
         match tx.send(request) {

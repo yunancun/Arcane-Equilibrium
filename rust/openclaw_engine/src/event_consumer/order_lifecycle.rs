@@ -1,4 +1,4 @@
-//! H1：本機送出進度與 venue 證據分流；不提供跨重啟恢復。
+//! H1 本機送出進度與 venue 證據分流；H2 由 execution_recovery 持久化並重建。
 
 use std::collections::{HashMap, HashSet};
 use std::sync::Arc;
@@ -6,7 +6,11 @@ use std::sync::Arc;
 /// dispatch 與 pipeline 共用的未結案集合；鎖內同時檢查及保留，避免排隊開倉穿透。
 /// 任何未結案單均禁止新增開倉；reduce-only 平倉仍可進入原有受控路徑。
 #[derive(Clone, Debug, Default)]
-pub(crate) struct SubmissionGuard(Arc<parking_lot::Mutex<HashMap<String, SubmissionPhase>>>);
+pub(crate) struct SubmissionGuard(
+    Arc<parking_lot::Mutex<HashMap<String, SubmissionPhase>>>,
+    Arc<std::sync::atomic::AtomicBool>,
+    Arc<std::sync::atomic::AtomicBool>,
+);
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 enum SubmissionPhase {
@@ -15,7 +19,22 @@ enum SubmissionPhase {
 }
 
 impl SubmissionGuard {
+    pub(crate) fn block_reconciliation(&self, blocked: bool) {
+        self.2.store(blocked, std::sync::atomic::Ordering::SeqCst);
+    }
+    pub(crate) fn block_storage(&self, blocked: bool) {
+        self.1.store(blocked, std::sync::atomic::Ordering::SeqCst);
+    }
+    pub(crate) fn storage_blocked(&self) -> bool {
+        self.1.load(std::sync::atomic::Ordering::SeqCst)
+    }
+
     pub(crate) fn reserve(&self, id: &str, is_close: bool) -> bool {
+        if self.1.load(std::sync::atomic::Ordering::SeqCst)
+            || (!is_close && self.2.load(std::sync::atomic::Ordering::SeqCst))
+        {
+            return false;
+        }
         let mut pending = self.0.lock();
         // The producer reserved before persistence; exactly one dispatcher may
         // claim that queued request. An already-dispatched ID remains a duplicate.
@@ -31,6 +50,11 @@ impl SubmissionGuard {
     }
 
     pub(crate) fn reserve_queued(&self, id: &str, is_close: bool) -> bool {
+        if self.1.load(std::sync::atomic::Ordering::SeqCst)
+            || (!is_close && self.2.load(std::sync::atomic::Ordering::SeqCst))
+        {
+            return false;
+        }
         let mut pending = self.0.lock();
         if pending.contains_key(id) || (!is_close && !pending.is_empty()) {
             return false;
@@ -54,7 +78,9 @@ impl SubmissionGuard {
     }
 
     pub(crate) fn blocks_entry(&self) -> bool {
-        !self.0.lock().is_empty()
+        self.1.load(std::sync::atomic::Ordering::SeqCst)
+            || self.2.load(std::sync::atomic::Ordering::SeqCst)
+            || !self.0.lock().is_empty()
     }
 
     pub(crate) fn contains(&self, id: &str) -> bool {
@@ -62,7 +88,7 @@ impl SubmissionGuard {
     }
 }
 
-#[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
 pub enum OrderStatus {
     #[default]
     PendingSubmit,
@@ -107,7 +133,7 @@ impl OrderStatus {
     }
 }
 
-#[derive(Clone, Debug, Default)]
+#[derive(Clone, Debug, Default, serde::Serialize, serde::Deserialize)]
 pub struct OrderProgress {
     pub status: OrderStatus,
     /// order topic 只宣告累計量；execution topic 仍是唯一持倉寫入者。

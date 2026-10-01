@@ -10,6 +10,8 @@
 mod bootstrap;
 mod dcp_reconciliation;
 mod dispatch;
+mod execution_recovery;
+mod recovery_store;
 // EVENT-CONSUMER-SPLIT-2（2026-07-03）：dispatch.rs retcode 分類簇拆出（§九 2000 行治理）。
 mod dispatch_retcode;
 mod execution_fill_helpers;
@@ -66,7 +68,8 @@ pub async fn run_event_consumer(deps: EventConsumerDeps) {
         data_path: _data_path,
         kind_tag: _kind_tag,
         order_tx,
-        known_symbols,
+        loop_state: mut state,
+        mut recovery,
         cfg_snapshot,
         bootstrap_client,
         symbol_registry,
@@ -95,13 +98,26 @@ pub async fn run_event_consumer(deps: EventConsumerDeps) {
     // now `LoopState::MAX_SEEN_EXEC_IDS`.
     // G1-02 Step 2a（2026-04-24）：7 個 loop-internal mut 欄位合併進
     // `LoopState`，select! arm 可傳單一 `&mut state` 借用。
-    let mut state = loop_handlers::LoopState::new(known_symbols);
+
     let (reconciliation_tx, mut reconciliation_rx) = tokio::sync::mpsc::unbounded_channel();
     state.dcp_reconciler = shared_client.as_ref().map(|client| {
         dcp_reconciliation::DcpReconciler::new(client.clone(), reconciliation_tx.clone())
     });
     let (maker_cancel_tx, mut maker_cancel_rx) = tokio::sync::mpsc::unbounded_channel();
     state.maker_cancel_outcome_tx = Some(maker_cancel_tx.clone());
+    if let Some(recovery) = recovery.as_mut() {
+        if let Err(error) = recovery
+            .recover(
+                &mut pipeline,
+                &mut state,
+                &mut snapshot_writer,
+                order_tx.as_ref(),
+            )
+            .await
+        {
+            tracing::error!(%error,"Execution inbox startup failed; submissions remain fenced");
+        }
+    }
     let status_interval = std::time::Duration::from_secs(STATUS_INTERVAL_SECS);
     let start_time = Instant::now();
 
@@ -172,18 +188,21 @@ pub async fn run_event_consumer(deps: EventConsumerDeps) {
             exchange_evt = async {
                 if let Some(ref mut rx) = exchange_event_rx { rx.recv().await } else { std::future::pending().await }
             } => {
-                loop_handlers::handle_exchange_event(
+                if let Some(recovery) = recovery.as_mut() {
+                    recovery.exchange(exchange_evt, &mut pipeline, &mut state, &mut snapshot_writer, order_tx.as_ref()).await;
+                } else if !pipeline_kind.is_exchange() { loop_handlers::handle_exchange_event(
                     exchange_evt,
                     &mut pipeline,
                     &mut snapshot_writer,
                     &mut state,
                     order_tx.as_ref(),
-                ).await;
+                ).await; }
             },
 
             reconciled = reconciliation_rx.recv() => {
-                loop_handlers::handle_exchange_event(reconciled, &mut pipeline,
-                    &mut snapshot_writer, &mut state, order_tx.as_ref()).await;
+                if let Some(recovery) = recovery.as_mut() {
+                    recovery.exchange(reconciled, &mut pipeline, &mut state, &mut snapshot_writer, order_tx.as_ref()).await;
+                }
             },
 
             // ── EXT-1: Pending order registration from dispatch task (Arm D) ──
@@ -191,12 +210,14 @@ pub async fn run_event_consumer(deps: EventConsumerDeps) {
             pending_reg = async {
                 if let Some(ref mut rx) = pending_reg_rx { rx.recv().await } else { std::future::pending().await }
             } => {
-                loop_handlers::handle_pending_registration(
+                if let Some(recovery) = recovery.as_mut() {
+                    recovery.registration(pending_reg, &mut pipeline, &mut state, order_tx.as_ref()).await;
+                } else if !pipeline_kind.is_exchange() { loop_handlers::handle_pending_registration(
                     pending_reg,
                     &mut pipeline,
                     &mut state,
                     order_tx.as_ref(),
-                );
+                ); }
             },
 
             // ── Paper session commands from IPC (Arm E) ──
@@ -214,6 +235,7 @@ pub async fn run_event_consumer(deps: EventConsumerDeps) {
                     _cross_engine_tx.as_ref(),
                     pipeline_kind,
                 ).await;
+                if let Some(recovery) = recovery.as_mut() { recovery.checkpoint_control(&pipeline, &mut state, true).await; }
             },
 
             event = event_rx.recv() => {
@@ -240,6 +262,7 @@ pub async fn run_event_consumer(deps: EventConsumerDeps) {
                     bootstrap_client.as_ref(),
                     &kline_seed_tx,
                 );
+                if let Some(recovery) = recovery.as_mut() { recovery.checkpoint_control(&pipeline, &mut state, false).await; }
                 if flow.is_break() {
                     break;
                 }
@@ -247,6 +270,7 @@ pub async fn run_event_consumer(deps: EventConsumerDeps) {
 
             Some(outcome) = maker_cancel_rx.recv() => {
                 loop_tick::handle_maker_cancel_outcome(&mut state, outcome, openclaw_core::now_ms());
+                if let Some(recovery) = recovery.as_mut() { recovery.checkpoint_control(&pipeline, &mut state, false).await; }
             }
 
             _ = confirmation_interval.tick() => {
@@ -256,6 +280,7 @@ pub async fn run_event_consumer(deps: EventConsumerDeps) {
                         shared_client.as_ref(), Some(&maker_cancel_tx), po, now_ms,
                     ),
                 );
+                if let Some(recovery) = recovery.as_mut() { recovery.checkpoint_control(&pipeline, &mut state, false).await; recovery.reconcile_startup(&pipeline, &state, openclaw_core::now_ms()).await; }
             }
 
             // ── AMD-2026-05-02-01 Track H E-1 retrofit Arm: lease & auth sweep ──

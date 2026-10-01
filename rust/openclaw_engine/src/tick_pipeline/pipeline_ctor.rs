@@ -16,9 +16,8 @@
 //!   / risk store accessor 的注入 setter + 取用器。
 
 use openclaw_core::{
-    governance_core::GovernanceCore, h0_gate::H0Gate,
-    hot_path_metrics::H0LatencyRecorder, klines::KlineManager,
-    risk::PriceHistoryTracker, signals::SignalEngine,
+    governance_core::GovernanceCore, h0_gate::H0Gate, hot_path_metrics::H0LatencyRecorder,
+    klines::KlineManager, risk::PriceHistoryTracker, signals::SignalEngine,
 };
 use std::collections::{HashMap, VecDeque};
 use std::sync::Arc;
@@ -56,6 +55,7 @@ impl TickPipeline {
             recent_signals: VecDeque::new(),
             recent_intents: VecDeque::new(),
             recent_fills: VecDeque::new(),
+            recovery_provisional: false,
             stop_request_tx: None,
             adl_alerts: VecDeque::new(),
             canary_mode: false,

@@ -47,7 +47,7 @@ pub enum ExchangeEvent {
 
 /// EXT-1: Pending order tracked in exchange mode, waiting for exchange confirmation.
 /// EXT-1：交易所模式中追蹤的待處理訂單，等待交易所確認。
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
 pub struct PendingOrder {
     /// 送出／確認進度與等待 execution 的 venue 累計量。
     pub progress: super::order_lifecycle::OrderProgress,
@@ -175,6 +175,7 @@ pub enum PendingOrderEvent {
     /// 先由唯一 event loop 完成註冊，dispatch 才能接觸 venue。
     RegisterBeforeSubmit {
         order: PendingOrder,
+        request: crate::order_manager::CreateOrderRequest,
         ready: tokio::sync::oneshot::Sender<()>,
     },
     SubmissionStarted {

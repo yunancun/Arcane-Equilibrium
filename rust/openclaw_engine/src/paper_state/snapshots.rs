@@ -46,6 +46,27 @@ pub struct PaperStateSnapshot {
 }
 
 impl PaperState {
+    pub(crate) fn restore_execution_projection(&mut self, snapshot: &PaperStateSnapshot) {
+        self.balance = snapshot.balance;
+        self._initial_balance = snapshot.initial_balance;
+        self.peak_balance = snapshot.peak_balance;
+        self.total_realized_pnl = snapshot.total_realized_pnl;
+        self.total_fees = snapshot.total_fees;
+        self.total_funding_pnl = snapshot.total_funding_pnl;
+        self.trade_count = snapshot.trade_count;
+        self.bybit_sync_balance = snapshot.bybit_sync_balance;
+        self.positions.clear();
+        self.positions_mirror.write().clear();
+        self.api_unrealized_pnl.clear();
+        for item in &snapshot.positions {
+            self.positions_insert(item.position.symbol.clone(), item.position.clone());
+            if let Some(pnl) = item.api_pnl {
+                self.api_unrealized_pnl
+                    .insert(item.position.symbol.clone(), pnl);
+            }
+        }
+    }
+
     /// Export state for persistence (with real-time unrealized PnL).
     /// 導出狀態用於持久化（含即時未實現損益）。
     pub fn export_state(&self) -> PaperStateSnapshot {
