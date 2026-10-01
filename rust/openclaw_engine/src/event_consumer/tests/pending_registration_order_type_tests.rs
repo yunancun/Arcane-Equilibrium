@@ -1383,7 +1383,11 @@ async fn h1_registration_barrier_precedes_submission() {
     let (ready, mut receiver) = tokio::sync::oneshot::channel();
     let po = baseline_pending_order("market", None);
     let id = po.order_link_id.clone();
-    let event = PendingOrderEvent::RegisterBeforeSubmit { order: po, ready };
+    let event = PendingOrderEvent::RegisterBeforeSubmit {
+        request: h2_request(&po),
+        order: po,
+        ready,
+    };
     assert!(matches!(
         receiver.try_recv(),
         Err(tokio::sync::oneshot::error::TryRecvError::Empty)
@@ -1728,3 +1732,98 @@ async fn h1_unknown_confirmation_settles_active_lease() {
 }
 
 include!("h1_review_tests.rs");
+
+include!("h2_recovery_tests.rs");
+
+#[tokio::test]
+#[ignore = "requires explicit isolated PostgreSQL fixture"]
+async fn h2_fourth_commands_commit_before_memory_snapshot_and_reply() {
+    use crate::tick_pipeline::PipelineCommand;
+    for fail in [false, true] {
+        for reset in [false, true] {
+            let pool = h2_pool().await;
+            let (mut r, mut p, mut s, _) = h2_start(&pool).await;
+            let mut snapshot = p.paper_state.export_state();
+            snapshot.peak_balance = 12_000.0;
+            p.paper_state.restore_execution_projection(&snapshot);
+            r.checkpoint_control(&mut p, &mut s, true).await;
+            let path =
+                std::env::temp_dir().join(format!("h2-command-{}.json", uuid::Uuid::new_v4()));
+            let mut writer = crate::persistence::DualStateWriter::new(
+                crate::persistence::StateWriter::new(&path, 0),
+                None,
+            );
+            writer.force_write(&p.snapshot());
+            let before = std::fs::read(&path).unwrap();
+            if fail {
+                sqlx::raw_sql("CREATE FUNCTION fail_command() RETURNS trigger LANGUAGE plpgsql AS $$ BEGIN RAISE EXCEPTION 'fixture command cutpoint'; END $$; CREATE TRIGGER fail_command BEFORE UPDATE ON trading.bybit_recovery FOR EACH ROW EXECUTE FUNCTION fail_command();").execute(&pool).await.unwrap();
+            }
+            let (tx, rx) = tokio::sync::oneshot::channel();
+            let command = if reset {
+                PipelineCommand::Reset {
+                    new_balance: 5000.0,
+                }
+            } else {
+                PipelineCommand::ResetDrawdownBaseline { response_tx: tx }
+            };
+            assert!(r
+                .command(command, &mut p, &mut s, &mut writer)
+                .await
+                .is_none());
+            if !reset {
+                assert_eq!(rx.await.unwrap().is_err(), fail);
+            }
+            if fail {
+                assert_eq!(p.paper_state.balance(), 10_000.0);
+                assert_eq!(p.paper_state.peak_balance(), 12_000.0);
+                assert_eq!(std::fs::read(&path).unwrap(), before);
+                assert!(p.exchange_submission_guard.storage_blocked());
+            }
+            drop(r);
+            let (_, p, _, _) = h2_start(&pool).await;
+            assert_eq!(
+                p.paper_state.balance(),
+                if reset && !fail { 5000.0 } else { 10_000.0 }
+            );
+            assert_eq!(
+                p.paper_state.peak_balance(),
+                if fail {
+                    12_000.0
+                } else if reset {
+                    5000.0
+                } else {
+                    10_000.0
+                }
+            );
+            std::fs::remove_file(path).unwrap();
+        }
+    }
+}
+
+#[tokio::test]
+#[ignore = "requires explicit isolated PostgreSQL fixture"]
+async fn h2_fourth_ordinary_market_events_do_not_write_large_pending_maps() {
+    let pool = h2_pool().await;
+    let (mut r, mut p, mut s, _) = h2_start(&pool).await;
+    let generation = r.store.generation();
+    for i in 0..4000 {
+        let mut po = baseline_pending_order("market", None);
+        po.order_link_id = format!("large-pending-{i}");
+        s.pending_orders.insert(po.order_link_id.clone(), po);
+    }
+    sqlx::raw_sql("CREATE FUNCTION reject_tick_write() RETURNS trigger LANGUAGE plpgsql AS $$ BEGIN RAISE EXCEPTION 'ordinary tick must not checkpoint'; END $$; CREATE TRIGGER reject_tick_write BEFORE UPDATE ON trading.bybit_recovery FOR EACH ROW EXECUTE FUNCTION reject_tick_write();").execute(&pool).await.unwrap();
+    let start = std::time::Instant::now();
+    for _ in 0..10_000 {
+        assert_eq!(
+            r.market_event(&mut p, &mut s, false, |_, _| 7).await,
+            Some(7)
+        );
+    }
+    eprintln!(
+        "h2 ordinary recovery boundary: 10000 events, 4000 pending, {} us",
+        start.elapsed().as_micros()
+    );
+    assert_eq!(r.store.generation(), generation);
+    assert_eq!(s.pending_orders.len(), 4000);
+    assert!(!p.exchange_submission_guard.storage_blocked());
+}

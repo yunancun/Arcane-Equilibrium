@@ -21,9 +21,15 @@ pub(super) struct DcpReconciler {
     tx: mpsc::UnboundedSender<ExchangeEvent>,
     in_flight: Arc<parking_lot::Mutex<HashSet<String>>>,
     slots: Arc<Semaphore>,
+    recovery_events: std::sync::atomic::AtomicBool,
 }
 
 impl DcpReconciler {
+    pub(super) fn enable_recovery_events(&self) {
+        self.recovery_events
+            .store(true, std::sync::atomic::Ordering::Relaxed);
+    }
+
     pub(super) fn new(
         client: Arc<BybitRestClient>,
         tx: mpsc::UnboundedSender<ExchangeEvent>,
@@ -47,7 +53,34 @@ impl DcpReconciler {
             tx,
             in_flight: Default::default(),
             slots: Arc::new(Semaphore::new(MAX_CONCURRENT_ORDERS)),
+            recovery_events: std::sync::atomic::AtomicBool::new(false),
         }
+    }
+
+    /// Startup barrier: all open orders must be accounted for and every
+    /// paginated one-way USDT position must match the execution projection.
+    #[cfg(test)]
+    pub(super) async fn account_matches(
+        &self,
+        paper: &crate::paper_state::PaperStateSnapshot,
+    ) -> Result<(), String> {
+        account_matches(&self.fetch, paper).await
+    }
+
+    pub(super) fn schedule_account(
+        &self,
+        paper: crate::paper_state::PaperStateSnapshot,
+    ) -> tokio::sync::oneshot::Receiver<Result<(), String>> {
+        let fetch = self.fetch.clone();
+        let (tx, rx) = tokio::sync::oneshot::channel();
+        tokio::spawn(async move {
+            let result =
+                tokio::time::timeout(Duration::from_secs(15), account_matches(&fetch, &paper))
+                    .await
+                    .unwrap_or_else(|_| Err("account reconciliation timed out".into()));
+            let _ = tx.send(result);
+        });
+        rx
     }
 
     pub(super) fn schedule(&self, pending: &[PendingOrder]) {
@@ -66,6 +99,9 @@ impl DcpReconciler {
             let tx = self.tx.clone();
             let in_flight = self.in_flight.clone();
             let slots = self.slots.clone();
+            let recovery_events = self
+                .recovery_events
+                .load(std::sync::atomic::Ordering::Relaxed);
             tokio::spawn(async move {
                 let Ok(_permit) = slots.acquire_owned().await else {
                     in_flight.lock().remove(&po.order_link_id);
@@ -77,8 +113,11 @@ impl DcpReconciler {
                         break;
                     }
                     tokio::time::sleep(Duration::from_millis(delay)).await;
-                    match tokio::time::timeout(Duration::from_secs(15), reconcile(&po, &fetch))
-                        .await
+                    match tokio::time::timeout(
+                        Duration::from_secs(15),
+                        reconcile(&po, &fetch, recovery_events),
+                    )
+                    .await
                     {
                         Ok(Ok(events)) => {
                             for event in events {
@@ -110,7 +149,13 @@ impl DcpReconciler {
         &self,
         po: &PendingOrder,
     ) -> Result<Vec<ExchangeEvent>, String> {
-        reconcile(po, &self.fetch).await
+        reconcile(
+            po,
+            &self.fetch,
+            self.recovery_events
+                .load(std::sync::atomic::Ordering::Relaxed),
+        )
+        .await
     }
 
     #[cfg(test)]
@@ -144,10 +189,105 @@ impl DcpReconciler {
                 tx,
                 in_flight: Default::default(),
                 slots: Arc::new(Semaphore::new(MAX_CONCURRENT_ORDERS)),
+                recovery_events: std::sync::atomic::AtomicBool::new(false),
             },
             rx,
         )
     }
+}
+
+async fn account_matches(
+    fetch: &Fetch,
+    paper: &crate::paper_state::PaperStateSnapshot,
+) -> Result<(), String> {
+    let params = vec![
+        ("category".into(), "linear".into()),
+        ("settleCoin".into(), "USDT".into()),
+    ];
+    // Order realtime permits at most 50 rows; position list permits 200.
+    // Sharing the position limit makes the startup barrier fail on a valid account.
+    let mut order_params = params.clone();
+    order_params.push(("limit".into(), "50".into()));
+    order_params.push(("openOnly".into(), "0".into()));
+    let orders = (fetch)("/v5/order/realtime", order_params).await?;
+    if !rows(&orders)?.is_empty()
+        || orders.get("nextPageCursor").and_then(Value::as_str) != Some("")
+    {
+        return Err("unaccounted open orders or incomplete order page".into());
+    }
+    let mut positions = std::collections::HashMap::new();
+    let mut cursor = String::new();
+    let mut cursors = HashSet::new();
+    for _ in 0..20 {
+        let mut params = params.clone();
+        params.push(("limit".into(), "200".into()));
+        if !cursor.is_empty() {
+            params.push(("cursor".into(), cursor.clone()));
+        }
+        let value = (fetch)("/v5/position/list", params).await?;
+        for item in rows(&value)? {
+            if item.get("positionIdx").and_then(Value::as_u64) != Some(0) {
+                return Err("unknown or hedge position mode".into());
+            }
+            let symbol = item
+                .get("symbol")
+                .and_then(Value::as_str)
+                .filter(|s| !s.is_empty())
+                .ok_or("missing position symbol")?;
+            let size = nonnegative(
+                item.get("size")
+                    .and_then(Value::as_str)
+                    .ok_or("missing position size")?,
+            )?;
+            if size == 0.0 {
+                continue;
+            }
+            let side = item
+                .get("side")
+                .and_then(Value::as_str)
+                .filter(|s| matches!(*s, "Buy" | "Sell"))
+                .ok_or("invalid position side")?;
+            let price = nonnegative(
+                item.get("avgPrice")
+                    .and_then(Value::as_str)
+                    .ok_or("missing position price")?,
+            )?;
+            if price == 0.0
+                || positions
+                    .insert(symbol.to_owned(), (side == "Buy", size, price))
+                    .is_some()
+            {
+                return Err("invalid/duplicate position".into());
+            }
+        }
+        cursor = value
+            .get("nextPageCursor")
+            .and_then(Value::as_str)
+            .ok_or("missing position cursor")?
+            .to_owned();
+        if cursor.is_empty() {
+            if positions.len() != paper.positions.len() {
+                return Err("position universe differs".into());
+            }
+            for pos in &paper.positions {
+                let p = &pos.position;
+                let Some((side, qty, price)) = positions.get(&p.symbol) else {
+                    return Err("position missing".into());
+                };
+                if *side != p.is_long
+                    || (*qty - p.qty).abs() > 1e-10 * p.qty.abs().max(1.0)
+                    || (*price - p.entry_price).abs() > 1e-10 * p.entry_price.abs().max(1.0)
+                {
+                    return Err("position accounting differs".into());
+                }
+            }
+            return Ok(());
+        }
+        if !cursors.insert(cursor.clone()) {
+            return Err("repeated position cursor".into());
+        }
+    }
+    Err("position page budget exhausted".into())
 }
 
 fn nonnegative(value: &str) -> Result<f64, String> {
@@ -164,7 +304,11 @@ fn rows(value: &Value) -> Result<&Vec<Value>, String> {
         .ok_or_else(|| "missing list".into())
 }
 
-async fn reconcile(po: &PendingOrder, fetch: &Fetch) -> Result<Vec<ExchangeEvent>, String> {
+async fn reconcile(
+    po: &PendingOrder,
+    fetch: &Fetch,
+    recovery_events: bool,
+) -> Result<Vec<ExchangeEvent>, String> {
     let params = vec![
         ("category".into(), "linear".into()),
         ("symbol".into(), po.symbol.clone()),
@@ -264,6 +408,15 @@ async fn reconcile(po: &PendingOrder, fetch: &Fetch) -> Result<Vec<ExchangeEvent
         .filter(|e| !po.progress.applied_execution_ids.contains(&e.exec_id))
         .map(ExchangeEvent::Fill)
         .collect();
+    let completion = ExchangeEvent::ReconciliationCompleted {
+        order_link_id: po.order_link_id.clone(),
+        order_id: order.order_id.clone(),
+        sent_ts_ms: po.sent_ts_ms,
+        filled_qty: expected,
+    };
     events.push(ExchangeEvent::OrderUpdate(order));
+    if recovery_events {
+        events.push(completion);
+    }
     Ok(events)
 }

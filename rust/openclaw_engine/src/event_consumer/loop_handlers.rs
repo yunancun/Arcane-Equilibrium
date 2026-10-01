@@ -33,6 +33,8 @@ use crate::tick_pipeline::{EngineEvent, PipelineKind, TickPipeline};
 pub(super) struct LoopState {
     /// EXT-1 pending order tracking / EXT-1 待處理訂單追蹤
     pub pending_orders: HashMap<String, PendingOrder>,
+    /// Terminal progress awaiting the same durable checkpoint as its accounting.
+    pub retired_orders: HashMap<String, PendingOrder>,
     pub dcp_reconciler: Option<super::dcp_reconciliation::DcpReconciler>,
     pub maker_cancel_outcome_tx:
         Option<tokio::sync::mpsc::UnboundedSender<super::loop_tick::MakerCancelOutcome>>,
@@ -73,6 +75,7 @@ impl LoopState {
         let now = Instant::now();
         Self {
             pending_orders: HashMap::new(),
+            retired_orders: HashMap::new(),
             dcp_reconciler: None,
             maker_cancel_outcome_tx: None,
             order_id_to_link: HashMap::new(),

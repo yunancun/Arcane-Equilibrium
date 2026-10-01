@@ -513,7 +513,7 @@ Operator 明確指定 H1 後，在 `codex/bybit-h1-order-state` 隔離 worktree 
 原本機修復階段 H1 專項 13、Python 消費者 57、Rust library 4,896 項通過；
 原修復報告與完整 log 保留於 workspace audits/2026-09-28-bybit-h1-repair。
 獨立 E2/E4 未執行；廣域 integration 的 2 個 RRC1、9 個 stress failure 均已在乾淨基準重現。
-本列不是 merge／部署／broker 或 W11 派發權，H2 durable recovery 未啟動；
+本列不是 merge／部署／broker 或 W11 派發權；H2 當時未啟動，後續本機候選見下節；
 PR #199 原輪 Codex 六項意見已補修：保留已知曝險 FAIL、V161 最新狀態 view、
 明確拒單終態、close-only duplicate 語義、WS 解決後釋放租約，以及 reset 不得遺失未確認交易所訂單。
 第一批修補後 Rust library 4,900、Python 消費者 58 與 strict library Clippy 通過；該 head 的 hosted migration/schema 契約亦通過。
@@ -546,7 +546,7 @@ entry guard 僅攔風險增加開倉；在 Approved／intent／lineage 寫入前
 慢單不再阻塞整批；每單重試／逾時、冷卻及防重複規則不變。
 兩項並行回歸先 RED 再 GREEN；H1 專項 37、Rust library 4,920、strict Clippy 通過。
 review 4125282489 要求一般重啟後重建未確認訂單與 entry guard，屬原報告 H2，
-依本 session 僅 H1 指示明列為尚未實作的限制；本修復不宣稱重啟後仍有提交阻擋保證。
+依當時 session 僅 H1 指示保留為限制；本節 H1 不宣稱跨重啟保證，後續 H2 候選見下節。
 追加 scope 的 current-head review、merge 與 Mac/GitHub 同步以 workspace publication artifacts 收口；Linux 依 Operator 指示略過。
 本節記錄本機修復階段；source 發佈、合併及採用另以 exact-head PR／同步證據判定，
 `next_action=null`。
@@ -557,3 +557,47 @@ H1 追加修補（同 PR #199）：bounded probe 共用送單保留在 durable a
 本輪 H1 專項 41、Rust library 4,923、strict Clippy 及 schema target 編譯通過；SQL／Python 消費者未變，前輪 Python 60／PG 證據以相同雜湊復用。
 取消結果修補：REST cancel 結果／15 秒逾時回傳單一 state owner，以註冊時間和 attempt 時間拒絕過期結果；同單不重疊，完成後未獲終態則冷卻 30 秒再取消同一 ID。保持首次 cancel grace，不因重試延後單次保護性 fallback；重掛前單同樣可重試取消，ACK 不視為終態。
 本輪 H1 專項 43、Rust library 4,925、strict Clippy 及 schema target 編譯通過；SQL／Python 消費者未變，前輪 Python 60／PG 證據以相同雜湊復用。
+
+## Bybit H2 本機修復候選（2026-10-01；CLOSED）
+
+本節是原修復階段紀錄；Operator 隨後授權 commit／審核／三端同步，
+發布與採用另依 workspace `audits/2026-10-01-bybit-h2-publication/` 的 exact-head evidence 判定。
+
+| ID／lane | 狀態／owner | 本機證據 | next action |
+|---|---|---|---|
+| `bybit-h2-recovery-20260930`／`source-repair`／CLOSED | `SOURCE_FIXED_LOCAL_TESTED_NOT_ADOPTED`、`DONE_WITH_CONCERNS`；PM | [恢復邊界與驗收](docs/references/2026-09-30--bybit-execution-recovery.md)；workspace `audits/2026-10-01-bybit-h2-repair/REPORT.md`／`source-manifest.json`。H2 18、engine library 4,926、strict library Clippy 通過；17 項 PG ignored 已在 H2 suite 另執行通過。 | `null` |
+
+候選位於 `codex/bybit-h2-recovery-final` linked worktree。immutable intent 在 venue call 前提交；
+inbox、canonical accounting、projection／progress 原子提交；重啟恢復 guards、502 筆後 replay、
+partial／cancel race 及六類 crash cutpoint 已本機验证。舊 lane 首次採用需明確對帳 baseline，
+本候選拒絕自動播種；獨立 PA／E2／E4／BB、完整 Timescale／Linux／真 venue recovery 未驗證。
+未 commit、push、merge、部署或變更共用 DB。這是有限 H2 source 修復收口，不啟動其他 queue 或 successor。
+
+H2 發布階段（2026-10-01）：Operator 已授權 commit／審核／三端 source 同步；候選位於
+`codex/bybit-h2-publication-20261001`。PM 修正 account barrier 的 open-order limit 200→50，
+參數契約回歸先 RED 再 GREEN；H2 19、engine library 4,927、strict library Clippy 通過。
+PA 初次及唯一 recheck 均因模型請求逾時而無 verdict，獨立 gate `UNVERIFIED`；Linux SSH
+preflight 逾時。原本機候選的「未 commit」為歷史階段；目前 feature commit／draft PR 及
+exact-head 證據以 workspace `audits/2026-10-01-bybit-h2-publication/` 判定，合併與三端採用
+尚未完成、`next_action=null`。不自動重試或啟動 successor。
+
+H2 PR #200 review 修補（2026-10-01）：Operator 明確指示 merge／push、skip Linux。
+六項 GitHub finding 已補上 deferred close outputs／lease、durable terminal REST 補查、fast／REST
+type enrichment、fence 後 queued 清理、exact-one order binding，以及 V162 partial-index Guard C。
+六項回歸先 RED；H2 25、library 4,928（22 PG 另行執行）、strict Clippy、release binary 與 schema
+編譯通過。current-head review／CI、merge 和 Mac/GitHub source 採用依 workspace
+`audits/2026-10-01-bybit-h2-merge/` 判定；原 controlled PA 未返回 verdict，runtime／shared PG 未驗證。
+本節不派發 successor，`next_action=null`。
+
+H2 PR #200 current-head 複查另五項已補修：原子 pre-venue fence、applied=false default、
+持久化 terminal REST completion、legacy accounting 首採用拒絕、closed channel fence／退出。
+新增五項先 RED；H2 32 項隔離 fixture 通過，包含 failed/stale completion 及 4,097 completed
+cancels。此為 source candidate；exact-head CI／review／merge 與 Mac 採用以
+`audits/2026-10-01-bybit-h2-merge/` workspace 證據判定。Linux 按指示略過，controlled
+PA／E2／E4／BB／R4 維持 UNVERIFIED，不宣告 runtime／三端採用。
+
+H2 current-head 第三批四項 review 與同一 timer gap 已補修：runtime terminal REST 保留、
+registration provisional rollback、unresolved partial index Guard D、checkpoint protective
+reduce-only outbox。tick／timer／WS／registration 同界，durable registration 後不重送；
+110017 不改 execution accounting。H2 39（35 PG 另行執行）通過；後續 exact-head CI／review／
+merge／Mac 採用以本輪 workspace artifacts 為準。沒有 source scope 或 queue 擴展；Linux 略過。

@@ -686,7 +686,6 @@ pub enum PipelineCommand {
     // 硬邊界：不碰 execution_authority / live_reserved / 5 道 live-auth gate；
     // lease acquire 對 Production profile 仍受 GovernanceCore `is_authorized()` 硬
     // fail-closed gate 約束（governance_core.rs acquire_lease）。
-
     /// SM step (i) · 經 IPC 取得 Decision Lease（鏡像 governance_lease_bridge.py
     /// `acquire_lease_via_ipc` / `lease_ipc_schema.METHOD_ACQUIRE_LEASE`）。
     /// handler 調 `core.acquire_lease(intent_id, scope, ttl_ms, profile, source_stage)`
@@ -762,7 +761,7 @@ pub struct StopRequest {
 
 /// Order dispatch request from tick_pipeline to exchange API (EXT-1, R-04).
 /// 從 tick_pipeline 到交易所的訂單派發請求。paper_only=shadow; exchange=primary。
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
 pub struct OrderDispatchRequest {
     pub symbol: String,        // Trading symbol / 交易對
     pub is_long: bool,         // Long direction / 多方向
@@ -859,7 +858,7 @@ pub struct OrderDispatchRequest {
 
 /// V094 close-maker audit payload carried from dispatch registration to fill.
 /// V094 close-maker 審計 payload，從派發註冊攜帶到成交寫入。
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
 pub struct CloseMakerFillAudit {
     pub initial_limit_price: Option<f64>,
     pub eligible_reason: String,
@@ -982,6 +981,13 @@ pub struct TickPipeline {
     recent_intents: VecDeque<TimestampedIntent>,
     /// Recent fills ring buffer (max 50) / 最近成交環形緩衝（最大 50）
     recent_fills: VecDeque<TimestampedFill>,
+    /// Financial projection is provisional until the H2 transaction commits.
+    recovery_provisional: bool,
+    recovery_observation_cache: Option<pipeline_helpers::RecoveryObservation>,
+    pub(crate) recovery_dispatch_outbox: HashMap<String, OrderDispatchRequest>,
+    pub(crate) recovery_dispatch_sent: std::collections::HashSet<String>,
+    recovery_lease_releases:
+        parking_lot::Mutex<Vec<(String, openclaw_core::governance_core::LeaseOutcome, String)>>,
     /// Channel to dispatch server-side stop requests (Item 1: dual-track stops).
     /// 派發伺服器端止損請求的通道（項目 1：雙軌止損）。
     stop_request_tx: Option<tokio::sync::mpsc::UnboundedSender<StopRequest>>,
@@ -1335,8 +1341,7 @@ pub struct TickPipeline {
     /// `None` = aggregator 未 spawn 或 5m 視窗無事件，declared LiquidationCascade
     /// tag 的策略（W-AUDIT-8c）必 fail-closed 跳過自身 alpha source。
     /// 本 wave provider only — setter 由下游 wave（main.rs 接線）late-inject。
-    pub(crate) liquidation_pulse_panel_slot:
-        Option<crate::ipc_server::LiquidationPulsePanelSlot>,
+    pub(crate) liquidation_pulse_panel_slot: Option<crate::ipc_server::LiquidationPulsePanelSlot>,
     /// P2-LG1-DEMO-SLO-CARVEOUT (2026-05-21)：HdrHistogram-based H0 hot-path latency
     /// recorder。
     ///

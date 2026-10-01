@@ -63,7 +63,8 @@ pub(super) struct BootstrappedRuntime {
     /// D2/D3 scanner universe diff baseline — starts with static `SYMBOLS`,
     /// loop updates on each registry snapshot diff.
     /// D2/D3 掃描器品類差分基線 — 初始為靜態 `SYMBOLS`，loop 根據每次 registry 快照更新。
-    pub known_symbols: std::collections::HashSet<String>,
+    pub loop_state: super::loop_handlers::LoopState,
+    pub recovery: Option<super::execution_recovery::ExecutionRecovery>,
     /// `EngineBootstrap` snapshot captured at bootstrap time (Arc — cheap clone).
     /// Loop's tick arm reads `cfg_snapshot.kline_bootstrap` to gate D3 dynamic refetch.
     /// Bootstrap 時的 EngineBootstrap 快照（Arc，clone 成本低）。
@@ -201,6 +202,9 @@ pub(super) async fn bootstrap_runtime(deps: EventConsumerDeps) -> BootstrappedRu
     // Live+demo endpoint 的資料列標 `live_demo` 而非誤導性的 `live`。Paper 傳 None。
     if let Some(env) = endpoint_env {
         pipeline.set_endpoint_env(env);
+    }
+    if pipeline.pipeline_kind.is_exchange() {
+        pipeline.exchange_submission_guard.block_storage(true);
     }
     wire_earn_capabilities(&mut pipeline, shared_client.as_ref(), audit_pool.as_ref());
     // P2-LG1-DEMO-SLO-CARVEOUT (2026-05-21)：注入 per-pipeline 獨立的
@@ -851,6 +855,43 @@ pub(super) async fn bootstrap_runtime(deps: EventConsumerDeps) -> BootstrappedRu
 
     // Exchange mode = pipeline connects to real exchange (Demo or Live).
     // 交易所模式 = 管線連接真實交易所（Demo 或 Live）。
+    let mut loop_state = super::loop_handlers::LoopState::new(known_symbols);
+    let recovery = if pipeline_kind.is_exchange() {
+        use sha2::{Digest, Sha256};
+        pipeline.exchange_submission_guard.block_storage(true);
+        if let (Some(pool), Some(client)) = (audit_pool.as_ref(), shared_client.as_ref()) {
+            // Key rotation is a scope change, never silent account adoption.
+            let scope = format!(
+                "{:x}",
+                Sha256::digest(format!(
+                    "bybit|{}|{}|linear",
+                    client.base_url(),
+                    client.credentials().0
+                ))
+            );
+            let mode = pipeline.effective_engine_mode().to_string();
+            match super::execution_recovery::ExecutionRecovery::open(
+                pool,
+                &mode,
+                &scope,
+                &mut pipeline,
+                &mut loop_state,
+            )
+            .await
+            {
+                Ok(recovery) => Some(recovery),
+                Err(error) => {
+                    tracing::error!(%error, "Execution recovery unavailable; submissions fenced");
+                    None
+                }
+            }
+        } else {
+            tracing::error!("Execution recovery requires its PG store and bound venue identity");
+            None
+        }
+    } else {
+        None
+    };
     let is_exchange_mode = pipeline.pipeline_kind.is_exchange();
     if is_exchange_mode {
         info!(
@@ -1195,7 +1236,8 @@ pub(super) async fn bootstrap_runtime(deps: EventConsumerDeps) -> BootstrappedRu
         data_path,
         kind_tag,
         order_tx,
-        known_symbols,
+        loop_state,
+        recovery,
         cfg_snapshot,
         bootstrap_client,
         symbol_registry: symbol_registry_for_loop,

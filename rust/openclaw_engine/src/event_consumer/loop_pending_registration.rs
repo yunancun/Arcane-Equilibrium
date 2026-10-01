@@ -40,7 +40,7 @@ pub(super) fn handle_pending_registration(
     order_tx: Option<&tokio::sync::mpsc::Sender<crate::database::TradingMsg>>,
 ) {
     let (reg, ready) = match reg {
-        Some(PendingOrderEvent::RegisterBeforeSubmit { order, ready }) => {
+        Some(PendingOrderEvent::RegisterBeforeSubmit { order, ready, .. }) => {
             (Some(PendingOrderEvent::Register(order)), Some(ready))
         }
         other => (other, None),
@@ -337,6 +337,11 @@ pub(super) fn handle_pending_registration(
             pipeline.clear_pending_close(&symbol);
         }
         let removed_po = state.pending_orders.remove(&order_link_id);
+        if let Some(po) = removed_po.as_ref() {
+            state
+                .retired_orders
+                .insert(order_link_id.clone(), po.clone());
+        }
         state
             .order_id_to_link
             .retain(|_, link| link.as_str() != order_link_id.as_str());
@@ -447,6 +452,11 @@ pub(super) fn handle_pending_registration(
         // 為 flat，斷開「每 tick 重發 close → 110017」自持迴圈。
         // 同步移除 pending_orders 追蹤列（若有），避免 sweep 殘留。
         let removed_po = state.pending_orders.remove(&order_link_id);
+        if let Some(po) = removed_po.as_ref() {
+            state
+                .retired_orders
+                .insert(order_link_id.clone(), po.clone());
+        }
         let removed_pending = removed_po.is_some();
         pipeline.exchange_submission_guard.resolve(&order_link_id);
         state

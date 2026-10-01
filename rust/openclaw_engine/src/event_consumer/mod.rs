@@ -10,6 +10,8 @@
 mod bootstrap;
 mod dcp_reconciliation;
 mod dispatch;
+mod execution_recovery;
+mod recovery_store;
 // EVENT-CONSUMER-SPLIT-2（2026-07-03）：dispatch.rs retcode 分類簇拆出（§九 2000 行治理）。
 mod dispatch_retcode;
 mod execution_fill_helpers;
@@ -66,7 +68,8 @@ pub async fn run_event_consumer(deps: EventConsumerDeps) {
         data_path: _data_path,
         kind_tag: _kind_tag,
         order_tx,
-        known_symbols,
+        loop_state: mut state,
+        mut recovery,
         cfg_snapshot,
         bootstrap_client,
         symbol_registry,
@@ -95,13 +98,26 @@ pub async fn run_event_consumer(deps: EventConsumerDeps) {
     // now `LoopState::MAX_SEEN_EXEC_IDS`.
     // G1-02 Step 2a（2026-04-24）：7 個 loop-internal mut 欄位合併進
     // `LoopState`，select! arm 可傳單一 `&mut state` 借用。
-    let mut state = loop_handlers::LoopState::new(known_symbols);
+
     let (reconciliation_tx, mut reconciliation_rx) = tokio::sync::mpsc::unbounded_channel();
     state.dcp_reconciler = shared_client.as_ref().map(|client| {
         dcp_reconciliation::DcpReconciler::new(client.clone(), reconciliation_tx.clone())
     });
     let (maker_cancel_tx, mut maker_cancel_rx) = tokio::sync::mpsc::unbounded_channel();
     state.maker_cancel_outcome_tx = Some(maker_cancel_tx.clone());
+    if let Some(recovery) = recovery.as_mut() {
+        if let Err(error) = recovery
+            .recover(
+                &mut pipeline,
+                &mut state,
+                &mut snapshot_writer,
+                order_tx.as_ref(),
+            )
+            .await
+        {
+            tracing::error!(%error,"Execution inbox startup failed; submissions remain fenced");
+        }
+    }
     let status_interval = std::time::Duration::from_secs(STATUS_INTERVAL_SECS);
     let start_time = Instant::now();
 
@@ -155,13 +171,14 @@ pub async fn run_event_consumer(deps: EventConsumerDeps) {
             engine_evt = async {
                 if let Some(ref mut rx) = cross_engine_rx { rx.recv().await } else { std::future::pending().await }
             } => {
+                if matches!(engine_evt, Err(tokio::sync::broadcast::error::RecvError::Closed)) { cross_engine_rx=None; continue; }
                 loop_handlers::handle_cross_engine_event(engine_evt, &mut pipeline, pipeline_kind);
             },
 
             // ── D3: Receive async kline bootstrap results and seed pipeline (Arm B) ──
             // ── D3：接收異步 K 線引導結果並植入管線（Arm B）──
-            seed = kline_seed_rx.recv() => {
-                loop_handlers::handle_kline_seed(seed, &mut pipeline);
+            Some(seed) = kline_seed_rx.recv() => {
+                loop_handlers::handle_kline_seed(Some(seed), &mut pipeline);
             },
 
             // ── EXT-1: Exchange events (fills/order updates) from ExecutionListener (Arm C) ──
@@ -172,18 +189,23 @@ pub async fn run_event_consumer(deps: EventConsumerDeps) {
             exchange_evt = async {
                 if let Some(ref mut rx) = exchange_event_rx { rx.recv().await } else { std::future::pending().await }
             } => {
-                loop_handlers::handle_exchange_event(
+                if exchange_evt.is_none() { pipeline.exchange_submission_guard.block_storage(true); break; }
+                if let Some(recovery) = recovery.as_mut() {
+                    recovery.exchange(exchange_evt, &mut pipeline, &mut state, &mut snapshot_writer, order_tx.as_ref()).await;
+                } else if !pipeline_kind.is_exchange() { loop_handlers::handle_exchange_event(
                     exchange_evt,
                     &mut pipeline,
                     &mut snapshot_writer,
                     &mut state,
                     order_tx.as_ref(),
-                ).await;
+                ).await; }
             },
 
             reconciled = reconciliation_rx.recv() => {
-                loop_handlers::handle_exchange_event(reconciled, &mut pipeline,
-                    &mut snapshot_writer, &mut state, order_tx.as_ref()).await;
+                if reconciled.is_none() { pipeline.exchange_submission_guard.block_storage(true); break; }
+                if let Some(recovery) = recovery.as_mut() {
+                    recovery.exchange(reconciled, &mut pipeline, &mut state, &mut snapshot_writer, order_tx.as_ref()).await;
+                }
             },
 
             // ── EXT-1: Pending order registration from dispatch task (Arm D) ──
@@ -191,12 +213,15 @@ pub async fn run_event_consumer(deps: EventConsumerDeps) {
             pending_reg = async {
                 if let Some(ref mut rx) = pending_reg_rx { rx.recv().await } else { std::future::pending().await }
             } => {
-                loop_handlers::handle_pending_registration(
+                if pending_reg.is_none() { pipeline.exchange_submission_guard.block_storage(true); break; }
+                if let Some(recovery) = recovery.as_mut() {
+                    recovery.registration(pending_reg, &mut pipeline, &mut state, order_tx.as_ref()).await;
+                } else if !pipeline_kind.is_exchange() { loop_handlers::handle_pending_registration(
                     pending_reg,
                     &mut pipeline,
                     &mut state,
                     order_tx.as_ref(),
-                );
+                ); }
             },
 
             // ── Paper session commands from IPC (Arm E) ──
@@ -204,6 +229,11 @@ pub async fn run_event_consumer(deps: EventConsumerDeps) {
             cmd = async {
                 if let Some(ref mut rx) = pipeline_cmd_rx { rx.recv().await } else { std::future::pending().await }
             } => {
+                if cmd.is_none() { pipeline.exchange_submission_guard.block_storage(true); break; }
+                let cmd = if let Some(recovery) = recovery.as_mut() {
+                    recovery.command(cmd.unwrap(), &mut pipeline, &mut state, &mut snapshot_writer).await
+                } else { cmd };
+                if cmd.is_none() { continue; }
                 loop_handlers::handle_pipeline_command(
                     cmd,
                     &mut pipeline,
@@ -217,13 +247,15 @@ pub async fn run_event_consumer(deps: EventConsumerDeps) {
             },
 
             event = event_rx.recv() => {
-                let flow = loop_handlers::handle_tick_event(
+                if event.is_none() {pipeline.exchange_submission_guard.block_storage(true);break;}
+                let handle=|pipeline:&mut crate::tick_pipeline::TickPipeline,state:&mut loop_handlers::LoopState| {
+                    loop_handlers::handle_tick_event(
                     event,
-                    &mut pipeline,
+                    pipeline,
                     &mut state_writer,
                     &mut snapshot_writer,
                     &audit_writer,
-                    &mut state,
+                    state,
                     start_time,
                     status_interval,
                     pending_timeout,
@@ -239,23 +271,30 @@ pub async fn run_event_consumer(deps: EventConsumerDeps) {
                     &cfg_snapshot,
                     bootstrap_client.as_ref(),
                     &kline_seed_tx,
-                );
-                if flow.is_break() {
-                    break;
-                }
+                )
+                };
+                let flow=if let Some(recovery)=recovery.as_mut() {
+                    let inspect_pending = !state.pending_orders.is_empty() && state.last_pending_check.elapsed() >= pending_timeout;
+                    recovery.market_event(&mut pipeline,&mut state,inspect_pending,handle).await
+                } else {Some(handle(&mut pipeline,&mut state))};
+                if flow.is_some_and(|flow|flow.is_break()) {break;}
             }
 
             Some(outcome) = maker_cancel_rx.recv() => {
-                loop_tick::handle_maker_cancel_outcome(&mut state, outcome, openclaw_core::now_ms());
+                if let Some(recovery)=recovery.as_mut() {
+                    let _=recovery.control_event(&mut pipeline,&mut state,|_,state|loop_tick::handle_maker_cancel_outcome(state,outcome,openclaw_core::now_ms())).await;
+                } else {loop_tick::handle_maker_cancel_outcome(&mut state,outcome,openclaw_core::now_ms());}
             }
 
             _ = confirmation_interval.tick() => {
-                loop_tick::handle_confirmation_interval(
-                    &mut pipeline, &mut state, openclaw_core::now_ms(),
-                    &|po, now_ms| loop_tick::dispatch_maker_cancel(
-                        shared_client.as_ref(), Some(&maker_cancel_tx), po, now_ms,
-                    ),
-                );
+                let handle=|pipeline:&mut crate::tick_pipeline::TickPipeline,state:&mut loop_handlers::LoopState| {
+                    loop_tick::handle_confirmation_interval(pipeline,state,openclaw_core::now_ms(),
+                        &|po,now_ms|loop_tick::dispatch_maker_cancel(shared_client.as_ref(),Some(&maker_cancel_tx),po,now_ms));
+                };
+                if let Some(recovery)=recovery.as_mut() {
+                    let _=recovery.control_event(&mut pipeline,&mut state,handle).await;
+                    recovery.reconcile_startup(&pipeline,&state,openclaw_core::now_ms());
+                } else {handle(&mut pipeline,&mut state);}
             }
 
             // ── AMD-2026-05-02-01 Track H E-1 retrofit Arm: lease & auth sweep ──
@@ -294,7 +333,12 @@ pub async fn run_event_consumer(deps: EventConsumerDeps) {
     // outcomes (DYNAMIC-RISK-1 BUG-1 fix). The sizer persists only in-memory,
     // but recording keeps semantics consistent with the paper close-all path.
     // 關閉：先平掉所有持倉；把實現 PnL 餵入 sizer，語義對齊 paper close-all。
-    let results = pipeline.paper_state.close_all_positions();
+    // Exchange positions remain execution-owned even when an input closes.
+    let results = if pipeline_kind.is_exchange() {
+        Vec::new()
+    } else {
+        pipeline.paper_state.close_all_positions()
+    };
     for (_, pnl) in &results {
         if *pnl != 0.0 {
             pipeline.dynamic_risk_sizer.record_closed_trade(*pnl);

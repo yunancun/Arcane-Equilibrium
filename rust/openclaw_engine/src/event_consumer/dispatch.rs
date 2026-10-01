@@ -337,7 +337,8 @@ pub(super) fn spawn_order_dispatch(
                         let est_notional = req.qty * req.price;
                         if est_notional < spec.min_notional {
                             if req.is_primary
-                                && !(req.is_close && close_maker_audit_for_dispatch_req(&req).is_some())
+                                && !(req.is_close
+                                    && close_maker_audit_for_dispatch_req(&req).is_some())
                             {
                                 submission_guard.resolve(&req.order_link_id);
                             }
@@ -370,6 +371,46 @@ pub(super) fn spawn_order_dispatch(
                 }
             }
             // EXT-1: Register pending order BEFORE placing (for exchange mode)
+            let side = if req.is_long {
+                OrderSide::Buy
+            } else {
+                OrderSide::Sell
+            };
+            let create_req = CreateOrderRequest {
+                category: OrderCategory::Linear,
+                symbol: req.symbol.clone(),
+                side,
+                order_type: if req.order_type.eq_ignore_ascii_case("limit") {
+                    OrderType::Limit
+                } else {
+                    OrderType::Market
+                },
+                qty: req.qty,
+                price: req.limit_price,
+                time_in_force: req.time_in_force,
+                reduce_only: if req.is_close { Some(true) } else { None },
+                close_on_trigger: if is_qty_zero_full_close {
+                    Some(true)
+                } else {
+                    None
+                },
+                order_link_id: Some(req.order_link_id.clone()),
+                trigger_price: None,
+                trigger_direction: None,
+                // I-08 雙軌止損：forward broker-side SL/TP only on primary opens
+                take_profit: if req.is_primary && !req.is_close {
+                    req.take_profit
+                } else {
+                    None
+                },
+                stop_loss: if req.is_primary && !req.is_close {
+                    req.stop_loss
+                } else {
+                    None
+                },
+                tp_trigger_by: None,
+                sl_trigger_by: None,
+            };
             if req.is_primary {
                 let (ready_tx, ready_rx) = tokio::sync::oneshot::channel();
                 let now_ms = openclaw_core::now_ms();
@@ -426,6 +467,7 @@ pub(super) fn spawn_order_dispatch(
                         intent_id: req.intent_id.clone(),
                         decision_lease_id: req.decision_lease_id.clone(),
                     },
+                    request: create_req.clone(),
                     ready: ready_tx,
                 });
                 if registered.is_err() || ready_rx.await.is_err() {
@@ -443,46 +485,13 @@ pub(super) fn spawn_order_dispatch(
                     break;
                 }
             }
-            let side = if req.is_long {
-                OrderSide::Buy
-            } else {
-                OrderSide::Sell
-            };
-            let create_req = CreateOrderRequest {
-                category: OrderCategory::Linear,
-                symbol: req.symbol.clone(),
-                side,
-                order_type: if req.order_type.eq_ignore_ascii_case("limit") {
-                    OrderType::Limit
-                } else {
-                    OrderType::Market
-                },
-                qty: req.qty,
-                price: req.limit_price,
-                time_in_force: req.time_in_force,
-                reduce_only: if req.is_close { Some(true) } else { None },
-                close_on_trigger: if is_qty_zero_full_close {
-                    Some(true)
-                } else {
-                    None
-                },
-                order_link_id: Some(req.order_link_id.clone()),
-                trigger_price: None,
-                trigger_direction: None,
-                // I-08 雙軌止損：forward broker-side SL/TP only on primary opens
-                take_profit: if req.is_primary && !req.is_close {
-                    req.take_profit
-                } else {
-                    None
-                },
-                stop_loss: if req.is_primary && !req.is_close {
-                    req.stop_loss
-                } else {
-                    None
-                },
-                tp_trigger_by: None,
-                sl_trigger_by: None,
-            };
+            if req.is_primary
+                && !submission_guard.claim_venue_handoff(&req.order_link_id, req.is_close)
+            {
+                // A later failed commit can fence a previously acknowledged handshake.
+                // Keep its durable intent unresolved; never create while accounting is unavailable.
+                break;
+            }
             let dispatch_type = if req.is_primary { "primary" } else { "shadow" };
             // DISPATCH-RETRY-1 (2026-04-19) + P1-07 (2026-05-29): retry loop via
             // run_dispatch_retry helper.

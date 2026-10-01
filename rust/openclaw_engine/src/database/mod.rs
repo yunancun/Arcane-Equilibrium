@@ -40,6 +40,7 @@ pub mod outcome_backfiller;
 pub mod pool;
 pub mod pool_wait_stats;
 pub mod quality_writer;
+pub(crate) mod recovery_sql;
 pub mod rest_poller;
 pub mod shadow_exit_writer;
 pub mod shadow_fill_writer;

@@ -49,6 +49,17 @@ pub(super) async fn handle_exchange_event(
     state: &mut LoopState,
     order_tx: Option<&tokio::sync::mpsc::Sender<crate::database::TradingMsg>>,
 ) {
+    apply_exchange_event(evt, pipeline, snapshot_writer, state, order_tx, true).await;
+}
+
+pub(super) async fn apply_exchange_event(
+    evt: Option<ExchangeEvent>,
+    pipeline: &mut TickPipeline,
+    snapshot_writer: &mut DualStateWriter,
+    state: &mut LoopState,
+    order_tx: Option<&tokio::sync::mpsc::Sender<crate::database::TradingMsg>>,
+    publish_snapshot: bool,
+) {
     match evt {
         Some(ExchangeEvent::Fill(exec)) => {
             // P0-2: Dedup by exec_id (prevent duplicate fill on WS reconnect)
@@ -60,7 +71,9 @@ pub(super) async fn handle_exchange_event(
             if is_funding_execution(&exec) {
                 remember_execution(state, &exec.exec_id);
                 let emitted = apply_and_emit_funding_settlement(pipeline, &exec, order_tx).await;
-                snapshot_writer.force_write(&pipeline.snapshot());
+                if publish_snapshot {
+                    snapshot_writer.force_write(&pipeline.snapshot());
+                }
                 tracing::info!(
                     exec_id = %exec.exec_id,
                     symbol = %exec.symbol,
@@ -291,13 +304,16 @@ pub(super) async fn handle_exchange_event(
                     );
                     // Commit dedup only after validated execution accounting.
                     po.cum_filled_qty += exec_qty;
+                    po.progress.terminal_reconciliation_complete = false;
                     po.progress
                         .applied_execution_ids
                         .insert(exec.exec_id.clone());
                     if preserve_close_guard {
                         pipeline.retain_pending_close(&po.symbol);
                     }
-                    snapshot_writer.force_write(&pipeline.snapshot());
+                    if publish_snapshot {
+                        snapshot_writer.force_write(&pipeline.snapshot());
+                    }
                     settle_pending_lease(
                         po,
                         pipeline,
@@ -386,7 +402,9 @@ pub(super) async fn handle_exchange_event(
                         state
                             .order_id_to_link
                             .retain(|_, link| link.as_str() != key.as_str());
-                        state.pending_orders.remove(&key);
+                        if let Some(po) = state.pending_orders.remove(&key) {
+                            state.retired_orders.insert(key.clone(), po);
+                        }
                         pipeline.exchange_submission_guard.resolve(&key);
                     } else if pending_sweep::tighten_postonly_entry_after_partial(po, exec_ts) {
                         tracing::info!(
@@ -469,6 +487,11 @@ pub(super) async fn handle_exchange_event(
                         let reported = order.cum_exec_qty.parse::<f64>().ok().filter(|n| {
                             n.is_finite() && *n >= 0.0 && (next != OrderStatus::Filled || *n > 0.0)
                         });
+                        if previous != next
+                            || reported.is_some_and(|qty| Some(qty) != po.progress.venue_filled_qty)
+                        {
+                            po.progress.terminal_reconciliation_complete = false;
+                        }
                         po.progress.venue_filled_qty = reported
                             .map(|qty| qty.max(po.progress.venue_filled_qty.unwrap_or(0.0)))
                             .or(po.progress.venue_filled_qty);
@@ -560,7 +583,9 @@ pub(super) async fn handle_exchange_event(
                         "PHANTOM-FILL-FIX-1: WS position flat — converged drifted local position (advisory) \
                          / WS 倉位已 flat — 收斂本地漂移倉（advisory）"
                     );
-                    snapshot_writer.force_write(&pipeline.snapshot());
+                    if publish_snapshot {
+                        snapshot_writer.force_write(&pipeline.snapshot());
+                    }
                 }
             } else {
                 // size>0：advisory 只讀比對，不 mutate 本地帳。背離大聲 WARN 供觀測；
@@ -647,7 +672,8 @@ pub(super) async fn handle_exchange_event(
                 tracing::error!("Order reconciliation unavailable; retaining unresolved trackers");
             }
         }
-        None => {} // channel closed
+        Some(ExchangeEvent::ReconciliationCompleted { .. }) => {} // H2 owner commits the proof.
+        None => {}                                                // channel closed
     }
 }
 
@@ -701,6 +727,7 @@ fn finish_terminal_pending(id: &str, state: &mut LoopState, pipeline: &mut TickP
         );
     }
     state.pending_orders.remove(id);
+    state.retired_orders.insert(id.to_owned(), po);
     state.order_id_to_link.retain(|_, link| link != id);
     pipeline.exchange_submission_guard.resolve(id);
 }
