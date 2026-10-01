@@ -1,9 +1,26 @@
 # CLAUDE_CHANGELOG.md — 開發歷史歸檔
 
 > 從 CLAUDE.md / TODO.md 遷出的 Wave/Sprint/Batch + TODO version-increment 歷史敘事。新 session 不需要讀此文件，僅供回顧歷史時查閱。
-> 最後更新：2026-09-28（TODO v883／窄模型與客戶端適配）
+> 最後更新：2026-10-01（TODO v884／既有 workflow 採用狀態與記憶對齊）
 
 ---
+
+## TODO v884：Workflow 文件收尾對齊（2026-10-01）
+
+- 對齊既有 source 採用結果、Codex 記憶指針與 Claude 記憶／索引；舊固定角色、全量回歸與自動派發敘述保留為已被取代的歷史。沒有新增流程、模型、程式或驗收要求。
+- 主 TODO 維持 workflow 零 ACTIVE，已歸檔大目標 CLOSED／`next_action=null`；W11 仍隨 Operator 指定真實產品功能驗收。W11 審查授權指向既有受控入口，路線／範圍／效果擴張仍由 Operator 決定。
+- README 繼續負責穩定入口；當前狀態只在主 TODO。根 `WORKFLOW_TODO.md` 已移至 [歷史總帳](archive/2026-09-25--workflow-todo-closed.md)，不恢復為派發來源。
+
+### Workflow source 採用紀錄
+
+| 交付 | 已合併 main | 採用範圍與證據 |
+|---|---|---|
+| [PR196](https://github.com/yunancun/Arcane-Equilibrium/pull/196) | `004a7a441abc25b962894e2f611dfa3cb6c439c3` | GPT-6／CC 窄適配已由 Mac main 採用；原始角色審查、例外批准及測試封包保留於下方 v883 歷史紀錄。 |
+| [PR198](https://github.com/yunancun/Arcane-Equilibrium/pull/198) | `f90ed913c26eadeac84cca6090872d2d01cdde30` | 受控 CLI 入口已由 Mac main 採用；最終受審來源 `acf8c1316210515c1a054a434034c0fc4be025db` 的 [CI](https://github.com/yunancun/Arcane-Equilibrium/actions/runs/36456308143) 通過。最後索引一句修正不改程式／測試，E2／E4 重用原有效證據；Operator 授權 R4 以最新來源補結論 PASS，舊 FAIL 保留。 |
+
+2026-10-01 唯讀核對：GitHub／Mac main 同為 `52a884d93f774a5f625a7d2db4ebe6e2ec95b23a`，工作樹乾淨且包含上述兩個 merge commit。這取代下方歷史「合併／同步後才採用」的待辦口徑；該 SHA 是文件修訂前的觀察基線，不冒稱本次文件 patch 已發布。
+
+Linux 按 Operator 指示跳過。原生自動派發維持關閉，受控 CLI 只按需啟動所需唯讀節點；沒有常駐子代理。有效審查與清理不確定性分開，已觀察到存活殘留仍阻止後續；不宣稱完整後代隔離、runtime／交易驗收或實測省時省費。現行使用方式只讀 [.codex/README](../.codex/README.md#controlled-cli-review)。
 
 ## TODO v883：GPT-6／Claude Code 窄適配（2026-09-28）
 
