@@ -171,13 +171,14 @@ pub async fn run_event_consumer(deps: EventConsumerDeps) {
             engine_evt = async {
                 if let Some(ref mut rx) = cross_engine_rx { rx.recv().await } else { std::future::pending().await }
             } => {
+                if matches!(engine_evt, Err(tokio::sync::broadcast::error::RecvError::Closed)) { cross_engine_rx=None; continue; }
                 loop_handlers::handle_cross_engine_event(engine_evt, &mut pipeline, pipeline_kind);
             },
 
             // ── D3: Receive async kline bootstrap results and seed pipeline (Arm B) ──
             // ── D3：接收異步 K 線引導結果並植入管線（Arm B）──
-            seed = kline_seed_rx.recv() => {
-                loop_handlers::handle_kline_seed(seed, &mut pipeline);
+            Some(seed) = kline_seed_rx.recv() => {
+                loop_handlers::handle_kline_seed(Some(seed), &mut pipeline);
             },
 
             // ── EXT-1: Exchange events (fills/order updates) from ExecutionListener (Arm C) ──
@@ -188,6 +189,7 @@ pub async fn run_event_consumer(deps: EventConsumerDeps) {
             exchange_evt = async {
                 if let Some(ref mut rx) = exchange_event_rx { rx.recv().await } else { std::future::pending().await }
             } => {
+                if exchange_evt.is_none() { pipeline.exchange_submission_guard.block_storage(true); break; }
                 if let Some(recovery) = recovery.as_mut() {
                     recovery.exchange(exchange_evt, &mut pipeline, &mut state, &mut snapshot_writer, order_tx.as_ref()).await;
                 } else if !pipeline_kind.is_exchange() { loop_handlers::handle_exchange_event(
@@ -200,6 +202,7 @@ pub async fn run_event_consumer(deps: EventConsumerDeps) {
             },
 
             reconciled = reconciliation_rx.recv() => {
+                if reconciled.is_none() { pipeline.exchange_submission_guard.block_storage(true); break; }
                 if let Some(recovery) = recovery.as_mut() {
                     recovery.exchange(reconciled, &mut pipeline, &mut state, &mut snapshot_writer, order_tx.as_ref()).await;
                 }
@@ -210,6 +213,7 @@ pub async fn run_event_consumer(deps: EventConsumerDeps) {
             pending_reg = async {
                 if let Some(ref mut rx) = pending_reg_rx { rx.recv().await } else { std::future::pending().await }
             } => {
+                if pending_reg.is_none() { pipeline.exchange_submission_guard.block_storage(true); break; }
                 if let Some(recovery) = recovery.as_mut() {
                     recovery.registration(pending_reg, &mut pipeline, &mut state, order_tx.as_ref()).await;
                 } else if !pipeline_kind.is_exchange() { loop_handlers::handle_pending_registration(
@@ -225,6 +229,7 @@ pub async fn run_event_consumer(deps: EventConsumerDeps) {
             cmd = async {
                 if let Some(ref mut rx) = pipeline_cmd_rx { rx.recv().await } else { std::future::pending().await }
             } => {
+                if cmd.is_none() { pipeline.exchange_submission_guard.block_storage(true); break; }
                 loop_handlers::handle_pipeline_command(
                     cmd,
                     &mut pipeline,
@@ -319,7 +324,12 @@ pub async fn run_event_consumer(deps: EventConsumerDeps) {
     // outcomes (DYNAMIC-RISK-1 BUG-1 fix). The sizer persists only in-memory,
     // but recording keeps semantics consistent with the paper close-all path.
     // 關閉：先平掉所有持倉；把實現 PnL 餵入 sizer，語義對齊 paper close-all。
-    let results = pipeline.paper_state.close_all_positions();
+    // Exchange positions remain execution-owned even when an input closes.
+    let results = if pipeline_kind.is_exchange() {
+        Vec::new()
+    } else {
+        pipeline.paper_state.close_all_positions()
+    };
     for (_, pnl) in &results {
         if *pnl != 0.0 {
             pipeline.dynamic_risk_sizer.record_closed_trade(*pnl);

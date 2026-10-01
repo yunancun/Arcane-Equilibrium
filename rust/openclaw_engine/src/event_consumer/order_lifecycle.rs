@@ -16,17 +16,34 @@ pub(crate) struct SubmissionGuard(
 enum SubmissionPhase {
     Queued,
     Claimed,
+    HandedOff,
 }
 
 impl SubmissionGuard {
     pub(crate) fn block_reconciliation(&self, blocked: bool) {
+        let _pending = self.0.lock();
         self.2.store(blocked, std::sync::atomic::Ordering::SeqCst);
     }
     pub(crate) fn block_storage(&self, blocked: bool) {
+        let _pending = self.0.lock();
         self.1.store(blocked, std::sync::atomic::Ordering::SeqCst);
     }
     pub(crate) fn storage_blocked(&self) -> bool {
         self.1.load(std::sync::atomic::Ordering::SeqCst)
+    }
+
+    /// Linearize first venue handoff with fence updates. A fence that wins
+    /// keeps the durable intent unresolved; an earlier handoff is already in flight.
+    pub(crate) fn claim_venue_handoff(&self, id: &str, is_close: bool) -> bool {
+        let mut pending = self.0.lock();
+        if self.storage_blocked()
+            || (!is_close && self.2.load(std::sync::atomic::Ordering::SeqCst))
+            || pending.get(id) != Some(&SubmissionPhase::Claimed)
+        {
+            return false;
+        }
+        pending.insert(id.to_owned(), SubmissionPhase::HandedOff);
+        true
     }
 
     pub(crate) fn reserve(&self, id: &str, is_close: bool) -> bool {
@@ -53,12 +70,12 @@ impl SubmissionGuard {
     }
 
     pub(crate) fn reserve_queued(&self, id: &str, is_close: bool) -> bool {
+        let mut pending = self.0.lock();
         if self.1.load(std::sync::atomic::Ordering::SeqCst)
             || (!is_close && self.2.load(std::sync::atomic::Ordering::SeqCst))
         {
             return false;
         }
-        let mut pending = self.0.lock();
         if pending.contains_key(id) || (!is_close && !pending.is_empty()) {
             return false;
         }
@@ -138,6 +155,10 @@ impl OrderStatus {
 
 #[derive(Clone, Debug, Default, serde::Serialize, serde::Deserialize)]
 pub struct OrderProgress {
+    /// Verified REST terminal quantity and its full execution set were committed.
+    /// Ordinary WS terminal status alone cannot establish this completion fact.
+    #[serde(default)]
+    pub terminal_reconciliation_complete: bool,
     pub status: OrderStatus,
     /// order topic 只宣告累計量；execution topic 仍是唯一持倉寫入者。
     pub venue_filled_qty: Option<f64>,

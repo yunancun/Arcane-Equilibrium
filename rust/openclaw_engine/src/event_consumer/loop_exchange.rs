@@ -304,6 +304,7 @@ pub(super) async fn apply_exchange_event(
                     );
                     // Commit dedup only after validated execution accounting.
                     po.cum_filled_qty += exec_qty;
+                    po.progress.terminal_reconciliation_complete = false;
                     po.progress
                         .applied_execution_ids
                         .insert(exec.exec_id.clone());
@@ -486,6 +487,11 @@ pub(super) async fn apply_exchange_event(
                         let reported = order.cum_exec_qty.parse::<f64>().ok().filter(|n| {
                             n.is_finite() && *n >= 0.0 && (next != OrderStatus::Filled || *n > 0.0)
                         });
+                        if previous != next
+                            || reported.is_some_and(|qty| Some(qty) != po.progress.venue_filled_qty)
+                        {
+                            po.progress.terminal_reconciliation_complete = false;
+                        }
                         po.progress.venue_filled_qty = reported
                             .map(|qty| qty.max(po.progress.venue_filled_qty.unwrap_or(0.0)))
                             .or(po.progress.venue_filled_qty);
@@ -666,7 +672,8 @@ pub(super) async fn apply_exchange_event(
                 tracing::error!("Order reconciliation unavailable; retaining unresolved trackers");
             }
         }
-        None => {} // channel closed
+        Some(ExchangeEvent::ReconciliationCompleted { .. }) => {} // H2 owner commits the proof.
+        None => {}                                                // channel closed
     }
 }
 

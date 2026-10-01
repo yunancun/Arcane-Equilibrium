@@ -35,6 +35,13 @@ pub enum ExchangeEvent {
     Fill(ExecutionUpdate),
     /// An order status update from the exchange / 交易所的訂單狀態更新
     OrderUpdate(OrderUpdate),
+    /// H2-only proof emitted after the verified, paginated REST execution set.
+    ReconciliationCompleted {
+        order_link_id: String,
+        order_id: String,
+        sent_ts_ms: u64,
+        filled_qty: f64,
+    },
     /// B-1 Phase 2: Runtime position delta from the exchange — paper_state should
     /// upsert/remove the entry to stay in sync with what Bybit thinks we hold.
     /// B-1 Phase 2：交易所推送的運行時持倉變更，paper_state 應 upsert/移除以保持同步。

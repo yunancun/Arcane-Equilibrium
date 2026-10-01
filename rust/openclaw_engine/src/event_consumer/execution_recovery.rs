@@ -143,6 +143,9 @@ impl ExecutionRecovery {
         writer: &mut DualStateWriter,
         tx: Option<&mpsc::Sender<TradingMsg>>,
     ) -> Result<()> {
+        if let Some(reconciler) = state.dcp_reconciler.as_ref() {
+            reconciler.enable_recovery_events();
+        }
         let unapplied = match self.store.unapplied().await {
             Ok(v) => v,
             Err(e) => {
@@ -197,6 +200,71 @@ impl ExecutionRecovery {
         order_tx: Option<&mpsc::Sender<TradingMsg>>,
     ) {
         if self.failed {
+            return;
+        }
+        if event.is_none() {
+            self.fail(pipeline, "exchange input channel closed");
+            return;
+        }
+        if let Some(ExchangeEvent::ReconciliationCompleted {
+            order_link_id,
+            order_id,
+            sent_ts_ms,
+            filled_qty,
+        }) = event.as_ref()
+        {
+            let mut po = match self.store.terminal_progress(order_link_id, order_id).await {
+                Ok(po) => po,
+                Err(e) => {
+                    self.fail(pipeline, &e);
+                    return;
+                }
+            };
+            if po.sent_ts_ms != *sent_ts_ms || !filled_qty.is_finite() || *filled_qty < 0.0 {
+                self.fail(pipeline, "invalid terminal reconciliation proof");
+                return;
+            }
+            let before = Checkpoint::capture(pipeline, state);
+            let complete = po.progress.status.is_terminal()
+                && (po.cum_filled_qty - filled_qty).abs() <= 1e-10
+                && po
+                    .progress
+                    .venue_filled_qty
+                    .is_none_or(|qty| qty <= *filled_qty + 1e-10);
+            if complete {
+                if po.progress.terminal_reconciliation_complete {
+                    return;
+                }
+                po.progress.terminal_reconciliation_complete = true;
+                po.progress.venue_filled_qty = Some(*filled_qty);
+                state.retired_orders.insert(order_link_id.clone(), po);
+            } else {
+                // A racing WS update made this REST batch stale. Retain the
+                // intent for another bounded confirmation, never mark it complete.
+                po.progress.terminal_reconciliation_complete = false;
+                po.progress.reconciliation_retry_after_ms =
+                    Some(openclaw_core::now_ms().saturating_add(30_000));
+                pipeline.exchange_submission_guard.track(order_link_id);
+                if po.is_close {
+                    pipeline.retain_pending_close(&po.symbol);
+                }
+                state.pending_orders.insert(order_link_id.clone(), po);
+                self.startup_pending = true;
+                pipeline
+                    .exchange_submission_guard
+                    .block_reconciliation(true);
+            }
+            if let Err(e) = self
+                .store
+                .commit(&Checkpoint::capture(pipeline, state), &[], None, None)
+                .await
+            {
+                before.restore(pipeline, state);
+                self.fail(pipeline, &e);
+                return;
+            }
+            state.retired_orders.clear();
+            self.last_control = control(state);
             return;
         }
         if matches!(
@@ -348,6 +416,10 @@ impl ExecutionRecovery {
         if self.failed {
             return;
         }
+        if event.is_none() {
+            self.fail(pipeline, "registration input channel closed");
+            return;
+        }
         let (event, intent, ready) = match event {
             Some(PendingOrderEvent::RegisterBeforeSubmit {
                 order,
@@ -398,6 +470,9 @@ impl ExecutionRecovery {
     ) {
         if self.failed {
             return;
+        }
+        if let Some(reconciler) = state.dcp_reconciler.as_ref() {
+            reconciler.enable_recovery_events();
         }
         if let Some((generation, receiver)) = self.account_check.as_mut() {
             match receiver.try_recv() {

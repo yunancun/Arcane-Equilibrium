@@ -21,9 +21,15 @@ pub(super) struct DcpReconciler {
     tx: mpsc::UnboundedSender<ExchangeEvent>,
     in_flight: Arc<parking_lot::Mutex<HashSet<String>>>,
     slots: Arc<Semaphore>,
+    recovery_events: std::sync::atomic::AtomicBool,
 }
 
 impl DcpReconciler {
+    pub(super) fn enable_recovery_events(&self) {
+        self.recovery_events
+            .store(true, std::sync::atomic::Ordering::Relaxed);
+    }
+
     pub(super) fn new(
         client: Arc<BybitRestClient>,
         tx: mpsc::UnboundedSender<ExchangeEvent>,
@@ -47,6 +53,7 @@ impl DcpReconciler {
             tx,
             in_flight: Default::default(),
             slots: Arc::new(Semaphore::new(MAX_CONCURRENT_ORDERS)),
+            recovery_events: std::sync::atomic::AtomicBool::new(false),
         }
     }
 
@@ -92,6 +99,9 @@ impl DcpReconciler {
             let tx = self.tx.clone();
             let in_flight = self.in_flight.clone();
             let slots = self.slots.clone();
+            let recovery_events = self
+                .recovery_events
+                .load(std::sync::atomic::Ordering::Relaxed);
             tokio::spawn(async move {
                 let Ok(_permit) = slots.acquire_owned().await else {
                     in_flight.lock().remove(&po.order_link_id);
@@ -103,8 +113,11 @@ impl DcpReconciler {
                         break;
                     }
                     tokio::time::sleep(Duration::from_millis(delay)).await;
-                    match tokio::time::timeout(Duration::from_secs(15), reconcile(&po, &fetch))
-                        .await
+                    match tokio::time::timeout(
+                        Duration::from_secs(15),
+                        reconcile(&po, &fetch, recovery_events),
+                    )
+                    .await
                     {
                         Ok(Ok(events)) => {
                             for event in events {
@@ -136,7 +149,13 @@ impl DcpReconciler {
         &self,
         po: &PendingOrder,
     ) -> Result<Vec<ExchangeEvent>, String> {
-        reconcile(po, &self.fetch).await
+        reconcile(
+            po,
+            &self.fetch,
+            self.recovery_events
+                .load(std::sync::atomic::Ordering::Relaxed),
+        )
+        .await
     }
 
     #[cfg(test)]
@@ -170,6 +189,7 @@ impl DcpReconciler {
                 tx,
                 in_flight: Default::default(),
                 slots: Arc::new(Semaphore::new(MAX_CONCURRENT_ORDERS)),
+                recovery_events: std::sync::atomic::AtomicBool::new(false),
             },
             rx,
         )
@@ -284,7 +304,11 @@ fn rows(value: &Value) -> Result<&Vec<Value>, String> {
         .ok_or_else(|| "missing list".into())
 }
 
-async fn reconcile(po: &PendingOrder, fetch: &Fetch) -> Result<Vec<ExchangeEvent>, String> {
+async fn reconcile(
+    po: &PendingOrder,
+    fetch: &Fetch,
+    recovery_events: bool,
+) -> Result<Vec<ExchangeEvent>, String> {
     let params = vec![
         ("category".into(), "linear".into()),
         ("symbol".into(), po.symbol.clone()),
@@ -384,6 +408,15 @@ async fn reconcile(po: &PendingOrder, fetch: &Fetch) -> Result<Vec<ExchangeEvent
         .filter(|e| !po.progress.applied_execution_ids.contains(&e.exec_id))
         .map(ExchangeEvent::Fill)
         .collect();
+    let completion = ExchangeEvent::ReconciliationCompleted {
+        order_link_id: po.order_link_id.clone(),
+        order_id: order.order_id.clone(),
+        sent_ts_ms: po.sent_ts_ms,
+        filled_qty: expected,
+    };
     events.push(ExchangeEvent::OrderUpdate(order));
+    if recovery_events {
+        events.push(completion);
+    }
     Ok(events)
 }

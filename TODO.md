@@ -588,3 +588,10 @@ type enrichment、fence 後 queued 清理、exact-one order binding，以及 V16
 編譯通過。current-head review／CI、merge 和 Mac/GitHub source 採用依 workspace
 `audits/2026-10-01-bybit-h2-merge/` 判定；原 controlled PA 未返回 verdict，runtime／shared PG 未驗證。
 本節不派發 successor，`next_action=null`。
+
+H2 PR #200 current-head 複查另五項已補修：原子 pre-venue fence、applied=false default、
+持久化 terminal REST completion、legacy accounting 首採用拒絕、closed channel fence／退出。
+新增五項先 RED；H2 32 項隔離 fixture 通過，包含 failed/stale completion 及 4,097 completed
+cancels。此為 source candidate；exact-head CI／review／merge 與 Mac 採用以
+`audits/2026-10-01-bybit-h2-merge/` workspace 證據判定。Linux 按指示略過，controlled
+PA／E2／E4／BB／R4 維持 UNVERIFIED，不宣告 runtime／三端採用。

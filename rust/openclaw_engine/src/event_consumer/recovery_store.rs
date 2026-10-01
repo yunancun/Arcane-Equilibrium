@@ -66,7 +66,7 @@ impl RecoveryStore {
             // snapshot or legacy async aggregates. First adoption needs a clean
             // empty lane; brownfield recovery is explicitly fail-closed.
             let legacy: bool = sqlx::query_scalar(
-                "SELECT EXISTS (SELECT 1 FROM trading.orders WHERE engine_mode=$1)",
+                "SELECT EXISTS (SELECT 1 FROM trading.orders WHERE engine_mode=$1 UNION ALL SELECT 1 FROM trading.fills WHERE engine_mode=$1 UNION ALL SELECT 1 FROM trading.funding_settlements WHERE engine_mode=$1 UNION ALL SELECT 1 FROM trading.order_state_changes WHERE engine_mode=$1)",
             )
             .bind(engine)
             .fetch_one(&mut conn)
@@ -74,7 +74,7 @@ impl RecoveryStore {
             .map_err(err)?;
             if legacy || !initial.paper.positions.is_empty() {
                 return Err(
-                    "legacy orders/positions require an explicitly reconciled recovery baseline"
+                    "legacy accounting/positions require an explicitly reconciled recovery baseline"
                         .into(),
                 );
             }
@@ -109,7 +109,7 @@ impl RecoveryStore {
     /// must still receive REST confirmation even after later checkpoints have
     /// replaced the transient retired map.
     pub(super) async fn terminal_orders_to_reconcile(&mut self) -> Result<Vec<PendingOrder>> {
-        let rows: Vec<Value> = sqlx::query_scalar("SELECT progress FROM trading.bybit_order_intents WHERE engine_mode=$1 AND venue_order_id IS NOT NULL AND progress->'progress'->>'status' IN ('Cancelled','PartiallyFilledCanceled','Rejected','Deactivated') AND ((progress->>'qty')::double precision=0 OR (progress->>'qty')::double precision>(progress->>'cum_filled_qty')::double precision) ORDER BY order_link_id LIMIT 4097")
+        let rows: Vec<Value> = sqlx::query_scalar("SELECT progress FROM trading.bybit_order_intents WHERE engine_mode=$1 AND venue_order_id IS NOT NULL AND progress->'progress'->>'status' IN ('Cancelled','PartiallyFilledCanceled','Rejected','Deactivated') AND NOT COALESCE((progress->'progress'->>'terminal_reconciliation_complete')::boolean,FALSE) ORDER BY order_link_id LIMIT 4097")
             .bind(&self.engine).fetch_all(&mut self.conn).await.map_err(err)?;
         if rows.len() > 4096 {
             return Err("terminal reconciliation exceeds bounded startup budget".into());
@@ -119,10 +119,24 @@ impl RecoveryStore {
             .collect()
     }
 
+    pub(super) async fn terminal_progress(
+        &mut self,
+        link: &str,
+        venue: &str,
+    ) -> Result<PendingOrder> {
+        let row: Option<(Value,Option<String>)> = sqlx::query_as("SELECT progress,venue_order_id FROM trading.bybit_order_intents WHERE engine_mode=$1 AND order_link_id=$2")
+            .bind(&self.engine).bind(link).fetch_optional(&mut self.conn).await.map_err(err)?;
+        let (value, bound) = row.ok_or("completion has no durable intent")?;
+        if bound.as_deref() != Some(venue) {
+            return Err("completion venue identity differs".into());
+        }
+        serde_json::from_value(value).map_err(err)
+    }
+
     /// false = already atomically projected, true = durable and needs replay.
     pub(super) async fn receive(&mut self, execution: &ExecutionUpdate) -> Result<bool> {
         let value = serde_json::to_value(execution).map_err(err)?;
-        sqlx::query("INSERT INTO trading.bybit_execution_inbox(engine_mode,exec_id,payload) VALUES($1,$2,$3) ON CONFLICT(engine_mode,exec_id) DO NOTHING")
+        sqlx::query("INSERT INTO trading.bybit_execution_inbox(engine_mode,exec_id,payload,applied) VALUES($1,$2,$3,FALSE) ON CONFLICT(engine_mode,exec_id) DO NOTHING")
             .bind(&self.engine).bind(&execution.exec_id).bind(&value).execute(&mut self.conn).await.map_err(err)?;
         let (old, applied): (Value,bool) = sqlx::query_as("SELECT payload,applied FROM trading.bybit_execution_inbox WHERE engine_mode=$1 AND exec_id=$2")
             .bind(&self.engine).bind(&execution.exec_id).fetch_one(&mut self.conn).await.map_err(err)?;

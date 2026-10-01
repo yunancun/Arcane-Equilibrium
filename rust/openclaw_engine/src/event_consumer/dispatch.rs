@@ -485,7 +485,9 @@ pub(super) fn spawn_order_dispatch(
                     break;
                 }
             }
-            if req.is_primary && submission_guard.storage_blocked() {
+            if req.is_primary
+                && !submission_guard.claim_venue_handoff(&req.order_link_id, req.is_close)
+            {
                 // A later failed commit can fence a previously acknowledged handshake.
                 // Keep its durable intent unresolved; never create while accounting is unavailable.
                 break;

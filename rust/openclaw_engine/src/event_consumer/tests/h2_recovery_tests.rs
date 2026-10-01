@@ -1023,12 +1023,13 @@ async fn h2_review_retired_cancel_reconciles_rest_fill_after_later_checkpoint() 
         serde_json::json!({"list":[cancel],"nextPageCursor":""}),
         serde_json::json!({"list":[execution],"nextPageCursor":""}),
     ]);
+    checker.enable_recovery_events();
     s.dcp_reconciler = Some(checker);
     super::super::loop_tick::schedule_pending_reconciliation(
         &mut s,
         openclaw_core::now_ms() + 60_000,
     );
-    for _ in 0..2 {
+    for _ in 0..3 {
         let event = tokio::time::timeout(std::time::Duration::from_secs(1), events.recv())
             .await
             .unwrap()
@@ -1139,4 +1140,198 @@ async fn h2_review_failed_close_does_not_publish_features_lineage_or_release_lea
     assert!(exits.try_recv().is_err());
     assert!(spine.try_recv().is_err());
     assert_eq!(h2_count(&pool, "fills").await, 2);
+}
+
+#[test]
+fn h2_followup_final_handoff_rechecks_both_fences() {
+    let guard = super::super::order_lifecycle::SubmissionGuard::default();
+    assert!(guard.reserve_queued("late-fence", false));
+    assert!(guard.reserve("late-fence", false));
+    guard.block_reconciliation(true);
+    assert!(!guard.claim_venue_handoff("late-fence", false));
+    assert!(
+        guard.contains("late-fence"),
+        "durable ambiguous intent stays unresolved"
+    );
+    assert!(guard.reserve("protect", true));
+    assert!(guard.claim_venue_handoff("protect", true));
+    assert!(
+        !guard.claim_venue_handoff("protect", true),
+        "first handoff cannot be duplicated"
+    );
+    guard.block_storage(true);
+    assert!(!guard.claim_venue_handoff("protect", true));
+}
+
+#[tokio::test]
+#[ignore = "requires explicit isolated PostgreSQL fixture"]
+async fn h2_followup_applied_default_requires_false() {
+    for replacement in ["SET DEFAULT TRUE", "DROP DEFAULT"] {
+        let pool = h2_pool().await;
+        sqlx::raw_sql(&format!(
+            "ALTER TABLE trading.bybit_execution_inbox ALTER COLUMN applied {replacement}"
+        ))
+        .execute(&pool)
+        .await
+        .unwrap();
+        let error = sqlx::raw_sql(H2_MIGRATION)
+            .execute(&pool)
+            .await
+            .expect_err("unsafe default must be rejected");
+        assert!(error.to_string().contains("Guard A"));
+    }
+}
+
+#[tokio::test]
+#[ignore = "requires explicit isolated PostgreSQL fixture"]
+async fn h2_followup_legacy_accounting_requires_baseline() {
+    for insert in [
+        "INSERT INTO trading.fills(ts,fill_id,engine_mode) VALUES(now(),'legacy','demo')",
+        "INSERT INTO trading.funding_settlements(ts,settlement_id,engine_mode) VALUES(now(),'legacy','demo')",
+        "INSERT INTO trading.order_state_changes(ts,order_id,to_status,engine_mode) VALUES(now(),'legacy','Filled','demo')",
+    ] {
+        let pool = h2_pool().await;
+        sqlx::raw_sql(insert).execute(&pool).await.unwrap();
+        let mut p = TickPipeline::with_kind(&["BTCUSDT"], 10_000.0, PipelineKind::Demo);
+        let mut s = make_loop_state();
+        assert!(ExecutionRecovery::open(&pool,"demo","fixture-account",&mut p,&mut s).await.is_err(),
+            "legacy accounting cannot seed an unverified ledger");
+        assert_eq!(h2_count(&pool,"bybit_recovery").await,0);
+    }
+}
+
+#[tokio::test]
+#[ignore = "requires explicit isolated PostgreSQL fixture"]
+async fn h2_followup_closed_channels_never_checkpoint() {
+    for registration in [false, true] {
+        let pool = h2_pool().await;
+        let (mut r, mut p, mut s, mut w) = h2_start(&pool).await;
+        let generation = r.store.generation();
+        for _ in 0..2 {
+            if registration {
+                r.registration(None, &mut p, &mut s, None).await;
+            } else {
+                r.exchange(None, &mut p, &mut s, &mut w, None).await;
+            }
+        }
+        assert_eq!(
+            r.store.generation(),
+            generation,
+            "closed channel cannot advance accounting"
+        );
+        assert!(p.exchange_submission_guard.storage_blocked());
+    }
+}
+
+#[tokio::test]
+#[ignore = "requires explicit isolated PostgreSQL fixture"]
+async fn h2_followup_rest_terminal_completion_survives_restart() {
+    let pool = h2_pool().await;
+    let (mut r, mut p, mut s, mut w) = h2_start(&pool).await;
+    let po = h2_register(&mut r, &mut p, &mut s, "confirmed-cancel", 0.1, true).await;
+    let cancel = terminal_order_update("confirmed-cancel", "Cancelled", "");
+    let (checker, _) = super::super::dcp_reconciliation::DcpReconciler::fixture(vec![
+        serde_json::json!({"list":[cancel],"nextPageCursor":""}),
+    ]);
+    checker.enable_recovery_events();
+    let events = checker.reconcile_fixture(&po).await.unwrap();
+    for event in events {
+        r.exchange(Some(event), &mut p, &mut s, &mut w, None).await;
+    }
+    r.checkpoint_control(&mut p, &mut s, true).await;
+    // Completed lifetime cancellations must not consume the unresolved startup budget.
+    sqlx::query("INSERT INTO trading.bybit_order_intents SELECT engine_mode,'archive-'||n,request_hash,request,pending,jsonb_set(progress,'{order_link_id}',to_jsonb('archive-'||n)),'venue-archive-'||n FROM trading.bybit_order_intents CROSS JOIN generate_series(1,4097) n WHERE order_link_id='confirmed-cancel'")
+        .execute(&pool).await.unwrap();
+    drop(r);
+    let (_, _, s, _) = h2_start(&pool).await;
+    assert!(
+        !s.pending_orders.contains_key("confirmed-cancel"),
+        "complete zero-fill cancel is not an unresolved backlog"
+    );
+}
+
+#[tokio::test]
+#[ignore = "requires explicit isolated PostgreSQL fixture"]
+async fn h2_followup_completion_commit_failure_requires_reconciliation() {
+    let pool = h2_pool().await;
+    let (mut r, mut p, mut s, mut w) = h2_start(&pool).await;
+    let po = h2_register(&mut r, &mut p, &mut s, "proof-failure", 0.1, true).await;
+    r.exchange(
+        Some(ExchangeEvent::OrderUpdate(terminal_order_update(
+            "proof-failure",
+            "Cancelled",
+            "",
+        ))),
+        &mut p,
+        &mut s,
+        &mut w,
+        None,
+    )
+    .await;
+    sqlx::raw_sql("CREATE FUNCTION fail_proof() RETURNS trigger LANGUAGE plpgsql AS $$ BEGIN RAISE EXCEPTION 'fixture proof cutpoint'; END $$; CREATE TRIGGER fail_proof BEFORE UPDATE ON trading.bybit_recovery FOR EACH ROW EXECUTE FUNCTION fail_proof();").execute(&pool).await.unwrap();
+    let generation = r.store.generation();
+    r.exchange(
+        Some(ExchangeEvent::ReconciliationCompleted {
+            order_link_id: po.order_link_id.clone(),
+            order_id: "bybit-proof-failure".into(),
+            sent_ts_ms: po.sent_ts_ms,
+            filled_qty: 0.0,
+        }),
+        &mut p,
+        &mut s,
+        &mut w,
+        None,
+    )
+    .await;
+    assert_eq!(r.store.generation(), generation);
+    assert!(p.exchange_submission_guard.storage_blocked());
+    sqlx::raw_sql("DROP TRIGGER fail_proof ON trading.bybit_recovery")
+        .execute(&pool)
+        .await
+        .unwrap();
+    drop(r);
+    let (_, _, s, _) = h2_start(&pool).await;
+    assert!(s.pending_orders.contains_key("proof-failure"));
+}
+
+#[tokio::test]
+#[ignore = "requires explicit isolated PostgreSQL fixture"]
+async fn h2_followup_stale_completion_retains_pending_guard() {
+    let pool = h2_pool().await;
+    let (mut r, mut p, mut s, mut w) = h2_start(&pool).await;
+    let po = h2_register(&mut r, &mut p, &mut s, "proof-stale", 0.1, false).await;
+    let mut cancel = terminal_order_update("proof-stale", "Cancelled", "");
+    cancel.side = "Buy".into();
+    cancel.cum_exec_qty = "0.02".into();
+    r.exchange(
+        Some(ExchangeEvent::OrderUpdate(cancel)),
+        &mut p,
+        &mut s,
+        &mut w,
+        None,
+    )
+    .await;
+    r.exchange(
+        Some(ExchangeEvent::ReconciliationCompleted {
+            order_link_id: po.order_link_id.clone(),
+            order_id: "bybit-proof-stale".into(),
+            sent_ts_ms: po.sent_ts_ms,
+            filled_qty: 0.0,
+        }),
+        &mut p,
+        &mut s,
+        &mut w,
+        None,
+    )
+    .await;
+    assert!(p.exchange_submission_guard.blocks_entry());
+    assert!(
+        !s.pending_orders["proof-stale"]
+            .progress
+            .terminal_reconciliation_complete
+    );
+    drop(r);
+    let (_, p, s, _) = h2_start(&pool).await;
+    assert!(s.pending_orders.contains_key("proof-stale"));
+    assert!(p.exchange_submission_guard.blocks_entry());
 }

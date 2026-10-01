@@ -136,3 +136,25 @@ GitHub PR #200 的六項 review 已在同一 H2 範圍補修：
 沒有內部 await 的 account poll 為同步方法，不向 Strategy 增加 Sync 要求。
 以上仍為 source／隔離 fixture 證據；原 PA controlled CLI 初次與唯一 recheck 無 verdict 的事實保留，
 GitHub current-head review 與 CI 的實際結果另以 publication artifacts 記錄，不改寫成 independent PASS。
+
+## 2026-10-01 current-head 複查修補
+
+第二次 GitHub current-head review 的五項新缺口均在原 H2 scope 修補；新增五項回歸先全部
+RED。終態取消單使用已提交的 REST completion fact 判定是否需要 startup 對帳，supersedes
+前節以 requested qty 未填餘額判定 backlog 的方式。舊 checkpoint 沒有此欄位時預設 false，
+仍需 REST 確認；REST 完整 execution set 的 cumulative qty 必須與已入帳 qty 相同，且不能
+落後已知 venue qty。completion 與 checkpoint 在同一 transaction 寫入；失敗或 racing WS
+讓證據過期時，仍保留 fence／pending。完成記錄不會刪除 execution 或 immutable intent。
+
+venue 首次 handoff 與 storage／reconciliation fence 共用短鎖，只有已 claimed intent 可
+handoff 一次；後生效的 reconciliation fence 阻止開倉，reduce-only 仍沿既有受控路徑。
+V162 Guard A 驗證 inbox applied 預設 false，receive INSERT 亦明確寫 false。
+首採用除 orders／positions 外亦拒絕既有 fills、funding 和 order-state accounting；沒有
+baseline importer。關閉的 exchange／registration／command 通道先 fence 再退出，不再
+把 None 當 checkpoint；closed auxiliary receivers 被停用。exchange shutdown 保留
+execution-owned 持倉，不以紙盤 close-all 改寫其投影。
+
+H2 32 項通過，包括 completion transaction cutpoint、stale proof、4,097 筆已完成取消單
+不耗用 unresolved startup budget。完整 library 4,929 通過，28 項 PG 已在 H2 suite 另行執行；strict Clippy、release binary、
+schema 編譯通過。hosted CI 的最終結果以本輪 publication artifacts 記錄。Linux host 按 Operator 指示略過；
+原 PA／E2／E4／BB／R4 controlled gate 未取得 verdict 的事實保留，runtime 未驗證。

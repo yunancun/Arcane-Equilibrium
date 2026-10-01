@@ -30,6 +30,12 @@ BEGIN
           ]::smallint[]
         ) THEN RAISE EXCEPTION 'V162 Guard A: missing unique venue identity'; END IF;
         IF name='bybit_execution_inbox' AND NOT EXISTS (
+          SELECT 1 FROM pg_attribute a JOIN pg_attrdef d
+            ON d.adrelid=a.attrelid AND d.adnum=a.attnum
+          WHERE a.attrelid=to_regclass('trading.'||name) AND a.attname='applied'
+            AND pg_get_expr(d.adbin,d.adrelid)='false'
+        ) THEN RAISE EXCEPTION 'V162 Guard A: applied default must be false'; END IF;
+        IF name='bybit_execution_inbox' AND NOT EXISTS (
           SELECT 1 FROM pg_attribute WHERE attrelid=to_regclass('trading.'||name)
           AND attname='receive_seq' AND attidentity='a'
         ) THEN RAISE EXCEPTION 'V162 Guard A: missing receive sequence identity'; END IF;
