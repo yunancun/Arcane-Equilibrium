@@ -595,3 +595,9 @@ H2 PR #200 current-head 複查另五項已補修：原子 pre-venue fence、appl
 cancels。此為 source candidate；exact-head CI／review／merge 與 Mac 採用以
 `audits/2026-10-01-bybit-h2-merge/` workspace 證據判定。Linux 按指示略過，controlled
 PA／E2／E4／BB／R4 維持 UNVERIFIED，不宣告 runtime／三端採用。
+
+H2 current-head 第三批四項 review 與同一 timer gap 已補修：runtime terminal REST 保留、
+registration provisional rollback、unresolved partial index Guard D、checkpoint protective
+reduce-only outbox。tick／timer／WS／registration 同界，durable registration 後不重送；
+110017 不改 execution accounting。H2 39（35 PG 另行執行）通過；後續 exact-head CI／review／
+merge／Mac 採用以本輪 workspace artifacts 為準。沒有 source scope 或 queue 擴展；Linux 略過。

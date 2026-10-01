@@ -21,6 +21,8 @@ pub(super) struct Checkpoint {
     pub(super) pending: HashMap<String, PendingOrder>,
     #[serde(default)]
     pub(super) retired: HashMap<String, PendingOrder>,
+    #[serde(default)]
+    dispatch_outbox: HashMap<String, crate::tick_pipeline::OrderDispatchRequest>,
     order_ids: HashMap<String, String>,
     fallbacks: HashSet<String>,
     total_fills: u64,
@@ -32,6 +34,7 @@ impl Checkpoint {
             paper: pipeline.paper_state.export_state(),
             pending: state.pending_orders.clone(),
             retired: state.retired_orders.clone(),
+            dispatch_outbox: pipeline.recovery_dispatch_outbox.clone(),
             order_ids: state.order_id_to_link.clone(),
             fallbacks: state.close_maker_fallback_dispatched.clone(),
             total_fills: pipeline.stats.total_fills,
@@ -39,6 +42,16 @@ impl Checkpoint {
     }
     pub(super) fn validate(&self) -> Result<()> {
         if self.version != 1
+            || self.dispatch_outbox.len() > 4096
+            || self.dispatch_outbox.iter().any(|(id, r)| {
+                id.is_empty()
+                    || id != &r.order_link_id
+                    || r.symbol.is_empty()
+                    || !r.is_close
+                    || !r.is_primary
+                    || !r.qty.is_finite()
+                    || r.qty <= 0.0
+            })
             || self.pending.len() > 4096
             || self.retired.len() > 4096
             || self.order_ids.len() > 4096
@@ -82,6 +95,8 @@ impl Checkpoint {
             .paper_state
             .restore_execution_projection(&self.paper);
         pipeline.stats.total_fills = self.total_fills;
+        pipeline.recovery_dispatch_outbox = self.dispatch_outbox;
+        pipeline.recovery_dispatch_sent.clear();
         state.pending_orders = self.pending;
         state.retired_orders = self.retired;
         state.order_id_to_link = self.order_ids;
@@ -187,10 +202,65 @@ impl ExecutionRecovery {
         }
         // Pending intents retain the ordinary entry guard, including intents
         // committed just before a crash that may never have reached Bybit.
+        let ids: Vec<_> = pipeline.recovery_dispatch_outbox.keys().cloned().collect();
+        let registered = match self.store.registered_outbox_intents(&ids).await {
+            Ok(ids) => ids,
+            Err(e) => {
+                self.fail(pipeline, &e);
+                return Err(e);
+            }
+        };
+        if !registered.is_empty() {
+            for id in registered {
+                pipeline.recovery_dispatch_outbox.remove(&id);
+            }
+            if let Err(e) = self
+                .store
+                .commit(&Checkpoint::capture(pipeline, state), &[], None, None)
+                .await
+            {
+                self.fail(pipeline, &e);
+                return Err(e);
+            }
+        }
         pipeline.exchange_submission_guard.block_storage(false);
+        if let Err(e) = pipeline.publish_recovery_dispatches() {
+            self.fail(pipeline, &e);
+            return Err(e);
+        }
         super::loop_tick::schedule_pending_reconciliation(state, openclaw_core::now_ms());
         Ok(())
     }
+    async fn retain_terminal_confirmation(
+        &mut self,
+        pipeline: &mut TickPipeline,
+        state: &mut LoopState,
+    ) -> Result<()> {
+        let terminal: Vec<_> = state
+            .retired_orders
+            .values()
+            .filter(|po| {
+                matches!(
+                    po.progress.status,
+                    super::order_lifecycle::OrderStatus::Cancelled
+                        | super::order_lifecycle::OrderStatus::PartiallyFilledCanceled
+                        | super::order_lifecycle::OrderStatus::Rejected
+                        | super::order_lifecycle::OrderStatus::Deactivated
+                ) && !po.progress.terminal_reconciliation_complete
+            })
+            .cloned()
+            .collect();
+        for mut po in terminal {
+            if self.store.has_venue_binding(&po.order_link_id).await? {
+                po.progress.reconciliation_retry_after_ms = Some(0);
+                pipeline.exchange_submission_guard.track(&po.order_link_id);
+                state.retired_orders.remove(&po.order_link_id);
+                state.pending_orders.insert(po.order_link_id.clone(), po);
+            }
+        }
+        Ok(())
+    }
+
     pub(super) async fn exchange(
         &mut self,
         mut event: Option<ExchangeEvent>,
@@ -237,6 +307,11 @@ impl ExecutionRecovery {
                 }
                 po.progress.terminal_reconciliation_complete = true;
                 po.progress.venue_filled_qty = Some(*filled_qty);
+                state.pending_orders.remove(order_link_id);
+                state
+                    .order_id_to_link
+                    .retain(|_, link| link != order_link_id);
+                pipeline.exchange_submission_guard.resolve(order_link_id);
                 state.retired_orders.insert(order_link_id.clone(), po);
             } else {
                 // A racing WS update made this REST batch stale. Retain the
@@ -375,7 +450,7 @@ impl ExecutionRecovery {
             return;
         }
         let before = Checkpoint::capture(pipeline, state);
-        let observation = pipeline.begin_recovery_projection();
+        let mut observation = pipeline.begin_recovery_projection();
         let (buffer, mut rx) = mpsc::channel(256);
         let original = pipeline.replace_recovery_trading_channel(Some(buffer.clone()));
         super::loop_exchange::apply_exchange_event(
@@ -389,6 +464,13 @@ impl ExecutionRecovery {
         .await;
         pipeline.replace_recovery_trading_channel(original.clone());
         let messages = drain(&mut rx);
+        if let Err(e) = self.retain_terminal_confirmation(pipeline, state).await {
+            before.restore(pipeline, state);
+            pipeline.rollback_recovery_observation(observation);
+            self.fail(pipeline, &e);
+            return;
+        }
+        pipeline.stage_recovery_dispatches(&mut observation);
         let checkpoint = Checkpoint::capture(pipeline, state);
         if let Err(e) = self
             .store
@@ -420,6 +502,32 @@ impl ExecutionRecovery {
             self.fail(pipeline, "registration input channel closed");
             return;
         }
+        let before = Checkpoint::capture(pipeline, state);
+        let mut observation = pipeline.begin_recovery_projection();
+        // 110017 is comparison evidence, not an execution. Never erase H2
+        // accounting from this receipt; retain the intent for reconciliation.
+        let event = if let Some(PendingOrderEvent::ExchangeZeroClose {
+            order_link_id,
+            ts_ms,
+            ..
+        }) = event
+        {
+            self.startup_pending = true;
+            self.next_position_check_ms = 0;
+            pipeline
+                .exchange_submission_guard
+                .block_reconciliation(true);
+            if let Some(po) = state.pending_orders.get_mut(&order_link_id) {
+                po.progress.reconciliation_retry_after_ms = Some(0);
+            }
+            Some(PendingOrderEvent::ConfirmationUnknown {
+                order_link_id,
+                ts_ms,
+                reason: "exchange_zero:await_execution_reconciliation".into(),
+            })
+        } else {
+            event
+        };
         let (event, intent, ready) = match event {
             Some(PendingOrderEvent::RegisterBeforeSubmit {
                 order,
@@ -433,13 +541,19 @@ impl ExecutionRecovery {
             other => (other, None, None),
         };
         let (buffer, mut rx) = mpsc::channel(256);
+        let original = pipeline.replace_recovery_trading_channel(Some(buffer.clone()));
         super::loop_pending_registration::handle_pending_registration(
             event,
             pipeline,
             state,
             Some(&buffer),
         );
+        pipeline.replace_recovery_trading_channel(original.clone());
         let messages = drain(&mut rx);
+        pipeline.stage_recovery_dispatches(&mut observation);
+        if let Some((po, _)) = &intent {
+            pipeline.recovery_dispatch_outbox.remove(&po.order_link_id);
+        }
         let checkpoint = Checkpoint::capture(pipeline, state);
         if let Err(e) = self
             .store
@@ -451,12 +565,18 @@ impl ExecutionRecovery {
             )
             .await
         {
+            before.restore(pipeline, state);
+            pipeline.rollback_recovery_observation(observation);
             self.fail(pipeline, &e);
             return;
         }
         state.retired_orders.clear();
         self.last_control = control(state);
-        forward_non_accounting(messages, tx);
+        if let Some((po, _)) = &intent {
+            pipeline.recovery_dispatch_sent.remove(&po.order_link_id);
+        }
+        pipeline.finish_recovery_projection(&messages, observation);
+        forward_non_accounting(messages, original.as_ref().or(tx));
         // This is the only authority for the dispatcher's first venue call.
         if let Some(ready) = ready {
             let _ = ready.send(());
@@ -508,6 +628,57 @@ impl ExecutionRecovery {
             reconciler.schedule_account(pipeline.paper_state.export_state()),
         ));
     }
+    /// Timer/tick sweeps can generate the same protective fallback as WS.
+    /// Keep their progress, canonical rows and dispatch outbox in one boundary.
+    pub(super) async fn control_event<
+        R: Send,
+        F: FnOnce(&mut TickPipeline, &mut LoopState) -> R + Send,
+    >(
+        &mut self,
+        pipeline: &mut TickPipeline,
+        state: &mut LoopState,
+        callback: F,
+    ) -> Option<R> {
+        if self.failed {
+            return None;
+        }
+        let before = Checkpoint::capture(pipeline, state);
+        let mut observation = pipeline.begin_recovery_projection();
+        let (buffer, mut rx) = mpsc::channel(256);
+        let original = pipeline.replace_recovery_trading_channel(Some(buffer));
+        let result = callback(pipeline, state);
+        pipeline.replace_recovery_trading_channel(original.clone());
+        let messages = drain(&mut rx);
+        pipeline.stage_recovery_dispatches(&mut observation);
+        let next = control(state);
+        let canonical = messages.iter().any(|m| {
+            matches!(
+                m,
+                TradingMsg::Order { .. }
+                    | TradingMsg::Fill { .. }
+                    | TradingMsg::FundingSettlement { .. }
+                    | TradingMsg::OrderStateChange { .. }
+            )
+        });
+        if next != self.last_control || canonical || !observation.staged_order_ids.is_empty() {
+            if let Err(error) = self
+                .store
+                .commit(&Checkpoint::capture(pipeline, state), &messages, None, None)
+                .await
+            {
+                before.restore(pipeline, state);
+                pipeline.rollback_recovery_observation(observation);
+                self.fail(pipeline, &error);
+                return None;
+            }
+            state.retired_orders.clear();
+            self.last_control = control(state);
+        }
+        pipeline.finish_recovery_projection(&messages, observation);
+        forward_non_accounting(messages, original.as_ref());
+        Some(result)
+    }
+
     pub(super) async fn checkpoint_control(
         &mut self,
         pipeline: &mut TickPipeline,

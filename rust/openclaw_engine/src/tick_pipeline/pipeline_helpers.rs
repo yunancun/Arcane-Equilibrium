@@ -127,6 +127,8 @@ impl<T> RecoveryUnboundedChannel<T> {
 }
 
 pub(crate) struct RecoveryObservation {
+    pub(crate) staged_order_ids: Vec<String>,
+    best_effort_orders: Vec<OrderDispatchRequest>,
     recent_fills: std::collections::VecDeque<TimestampedFill>,
     pending_close_symbols: std::collections::HashSet<String>,
     exits: RecoveryChannel<crate::database::ExitFeatureRow>,
@@ -141,6 +143,8 @@ impl TickPipeline {
         self.recovery_provisional = true;
         self.recovery_lease_releases.lock().clear();
         RecoveryObservation {
+            staged_order_ids: Vec::new(),
+            best_effort_orders: Vec::new(),
             recent_fills: self.recent_fills.clone(),
             pending_close_symbols: self.pending_close_symbols.clone(),
             exits: RecoveryChannel::stage(&mut self.exit_feature_tx),
@@ -148,6 +152,41 @@ impl TickPipeline {
             orders: RecoveryUnboundedChannel::stage(&mut self.order_dispatch_tx),
             stops: RecoveryUnboundedChannel::stage(&mut self.stop_request_tx),
         }
+    }
+
+    /// Capture protective requests in the same durable checkpoint as their
+    /// source terminal transition. Channel acceptance does not consume this outbox.
+    pub(crate) fn stage_recovery_dispatches(&mut self, before: &mut RecoveryObservation) {
+        while let Ok(request) = before.orders.receiver.try_recv() {
+            if !request.is_primary || !request.is_close {
+                before.best_effort_orders.push(request);
+                continue;
+            }
+            before.staged_order_ids.push(request.order_link_id.clone());
+            self.recovery_dispatch_outbox
+                .insert(request.order_link_id.clone(), request);
+        }
+    }
+
+    pub(crate) fn publish_recovery_dispatches(&mut self) -> Result<(), String> {
+        for (id, request) in &self.recovery_dispatch_outbox {
+            if self.recovery_dispatch_sent.contains(id) {
+                continue;
+            }
+            if !self.exchange_submission_guard.contains(id)
+                && !self.exchange_submission_guard.reserve_queued(id, true)
+            {
+                return Err("protective outbox reservation fenced".into());
+            }
+            let tx = self
+                .order_dispatch_tx
+                .as_ref()
+                .ok_or("protective dispatch channel unavailable")?;
+            tx.send(request.clone())
+                .map_err(|_| "protective dispatch channel closed")?;
+            self.recovery_dispatch_sent.insert(id.clone());
+        }
+        Ok(())
     }
 
     pub(crate) fn finish_recovery_projection(
@@ -158,7 +197,19 @@ impl TickPipeline {
         self.recovery_provisional = false;
         before.exits.restore(&mut self.exit_feature_tx, true);
         before.spine.restore(&mut self.agent_spine_tx, true);
-        let orders_delivered = before.orders.restore(&mut self.order_dispatch_tx, true);
+        // Requests were checkpointed before commit. Keep them until the
+        // dispatcher's RegisterBeforeSubmit commits the immutable venue intent.
+        before.orders.restore(&mut self.order_dispatch_tx, false);
+        for request in before.best_effort_orders {
+            if let Some(tx) = self.order_dispatch_tx.as_ref() {
+                if let Err(error) = tx.send(request) {
+                    self.exchange_submission_guard
+                        .resolve(&error.0.order_link_id);
+                    self.exchange_submission_guard.block_storage(true);
+                }
+            }
+        }
+        let orders_delivered = self.publish_recovery_dispatches().is_ok();
         let stops_delivered = before.stops.restore(&mut self.stop_request_tx, true);
         if !orders_delivered || !stops_delivered {
             self.exchange_submission_guard.block_storage(true);
@@ -183,7 +234,15 @@ impl TickPipeline {
 
     pub(crate) fn rollback_recovery_observation(&mut self, mut before: RecoveryObservation) {
         self.recovery_provisional = false;
+        for id in &before.staged_order_ids {
+            self.exchange_submission_guard.resolve(id);
+        }
+
         self.recovery_lease_releases.lock().clear();
+        for request in &before.best_effort_orders {
+            self.exchange_submission_guard
+                .resolve(&request.order_link_id);
+        }
         while let Ok(request) = before.orders.receiver.try_recv() {
             self.exchange_submission_guard
                 .resolve(&request.order_link_id);

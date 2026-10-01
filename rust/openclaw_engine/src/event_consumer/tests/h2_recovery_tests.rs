@@ -339,7 +339,10 @@ async fn h2_cancel_then_late_close_fill_recovers_attribution_and_pnl() {
         None,
     )
     .await;
-    assert!(!s.pending_orders.contains_key("close"));
+    assert!(
+        s.pending_orders.contains_key("close"),
+        "terminal WS is not full REST proof"
+    );
     drop(r);
     let (mut r, mut p, mut s, mut w) = h2_start(&pool).await;
     let mut e = h1_exec("close", "close-exec", "0.1", "Sell");
@@ -751,6 +754,7 @@ async fn h2_venue_received_before_ack_and_partial_cancel_restart() {
         serde_json::json!({"list":[terminal],"nextPageCursor":""}),
         serde_json::json!({"list":[execution.clone()],"nextPageCursor":""}),
     ]);
+    reconciler.enable_recovery_events();
     let events = reconciler.reconcile_fixture(&pending).await.unwrap();
     for event in events {
         r.exchange(Some(event), &mut p, &mut s, &mut w, None).await;
@@ -1242,6 +1246,24 @@ async fn h2_followup_rest_terminal_completion_survives_restart() {
     // Completed lifetime cancellations must not consume the unresolved startup budget.
     sqlx::query("INSERT INTO trading.bybit_order_intents SELECT engine_mode,'archive-'||n,request_hash,request,pending,jsonb_set(progress,'{order_link_id}',to_jsonb('archive-'||n)),'venue-archive-'||n FROM trading.bybit_order_intents CROSS JOIN generate_series(1,4097) n WHERE order_link_id='confirmed-cancel'")
         .execute(&pool).await.unwrap();
+    let mut conn = pool.acquire().await.unwrap();
+    sqlx::query("SET enable_seqscan=off")
+        .execute(&mut *conn)
+        .await
+        .unwrap();
+    let plan: Vec<String> = sqlx::query_scalar(&format!(
+        "EXPLAIN (COSTS OFF) {}",
+        super::super::recovery_store::TERMINAL_QUERY
+    ))
+    .bind("demo")
+    .fetch_all(&mut *conn)
+    .await
+    .unwrap();
+    assert!(
+        plan.join("\n").contains("bybit_terminal_unconfirmed"),
+        "{plan:?}"
+    );
+    drop(conn);
     drop(r);
     let (_, _, s, _) = h2_start(&pool).await;
     assert!(
@@ -1334,4 +1356,477 @@ async fn h2_followup_stale_completion_retains_pending_guard() {
     let (_, p, s, _) = h2_start(&pool).await;
     assert!(s.pending_orders.contains_key("proof-stale"));
     assert!(p.exchange_submission_guard.blocks_entry());
+}
+
+#[tokio::test]
+#[ignore = "requires explicit isolated PostgreSQL fixture"]
+async fn h2_lastreview_runtime_cancel_keeps_rest_confirmation() {
+    let pool = h2_pool().await;
+    let (mut r, mut p, mut s, mut w) = h2_start(&pool).await;
+    h2_register(&mut r, &mut p, &mut s, "runtime-cancel", 0.1, false).await;
+    let mut cancel = terminal_order_update("runtime-cancel", "Cancelled", "");
+    cancel.side = "Buy".into();
+    r.exchange(
+        Some(ExchangeEvent::OrderUpdate(cancel.clone())),
+        &mut p,
+        &mut s,
+        &mut w,
+        None,
+    )
+    .await;
+    assert!(
+        s.pending_orders.contains_key("runtime-cancel"),
+        "ordinary cancel must reach runtime REST scheduler"
+    );
+    let (checker, mut events) = super::super::dcp_reconciliation::DcpReconciler::fixture(vec![
+        serde_json::json!({"list":[cancel],"nextPageCursor":""}),
+    ]);
+    checker.enable_recovery_events();
+    s.dcp_reconciler = Some(checker);
+    super::super::loop_tick::schedule_pending_reconciliation(
+        &mut s,
+        openclaw_core::now_ms() + 60000,
+    );
+    for _ in 0..2 {
+        let event = tokio::time::timeout(std::time::Duration::from_secs(1), events.recv())
+            .await
+            .unwrap()
+            .unwrap();
+        r.exchange(Some(event), &mut p, &mut s, &mut w, None).await;
+    }
+    assert!(!s.pending_orders.contains_key("runtime-cancel"));
+    let complete:bool=sqlx::query_scalar("SELECT (progress->'progress'->>'terminal_reconciliation_complete')::boolean FROM trading.bybit_order_intents WHERE order_link_id='runtime-cancel'").fetch_one(&pool).await.unwrap();
+    assert!(complete);
+    drop(r);
+    let (_, _, s, _) = h2_start(&pool).await;
+    assert!(!s.pending_orders.contains_key("runtime-cancel"));
+}
+
+#[tokio::test]
+#[ignore = "requires explicit isolated PostgreSQL fixture"]
+async fn h2_lastreview_registration_failure_restores_projection_and_lease() {
+    for lease_event in [false, true] {
+        let pool = h2_pool().await;
+        let (mut r, mut p, mut s, mut w) = h2_start(&pool).await;
+        h2_register(&mut r, &mut p, &mut s, "reg-open", 0.1, false).await;
+        r.exchange(
+            Some(ExchangeEvent::Fill(h1_exec(
+                "reg-open",
+                "reg-open-exec",
+                "0.1",
+                "Buy",
+            ))),
+            &mut p,
+            &mut s,
+            &mut w,
+            None,
+        )
+        .await;
+        h2_register(&mut r, &mut p, &mut s, "reg-close", 0.1, true).await;
+        p.governance.grant_paper_authorization(None).unwrap();
+        let lease = p
+            .governance
+            .acquire_lease(
+                "intent:reg-failure",
+                "TRADE_ENTRY",
+                60_000,
+                GovernanceProfile::Production,
+                "h2_fixture",
+            )
+            .unwrap();
+        let LeaseId::Active(id) = lease else {
+            panic!("fixture must have active lease")
+        };
+        sqlx::raw_sql("CREATE FUNCTION fail_reg() RETURNS trigger LANGUAGE plpgsql AS $$ BEGIN RAISE EXCEPTION 'fixture registration cutpoint'; END $$; CREATE TRIGGER fail_reg BEFORE UPDATE ON trading.bybit_recovery FOR EACH ROW EXECUTE FUNCTION fail_reg();").execute(&pool).await.unwrap();
+        let event = if lease_event {
+            PendingOrderEvent::ReleaseDecisionLease {
+                order_link_id: "reg-close".into(),
+                decision_lease_id: Some(id.clone()),
+                outcome: openclaw_core::governance_core::LeaseOutcome::Consumed,
+                reason: "fixture".into(),
+                ts_ms: openclaw_core::now_ms(),
+            }
+        } else {
+            PendingOrderEvent::ExchangeZeroClose {
+                order_link_id: "reg-close".into(),
+                symbol: "BTCUSDT".into(),
+                is_long: true,
+                strategy: "fixture".into(),
+                ts_ms: openclaw_core::now_ms(),
+            }
+        };
+        r.registration(Some(event), &mut p, &mut s, None).await;
+        h2_accounting(&p, 0.1, 0.01, 0.0);
+        assert!(s.pending_orders.contains_key("reg-close"));
+        assert!(p.governance.get_lease_by_id(&id).is_ok());
+        assert!(p.exchange_submission_guard.storage_blocked());
+    }
+}
+
+#[tokio::test]
+#[ignore = "requires explicit isolated PostgreSQL fixture"]
+async fn h2_lastreview_unconfirmed_terminal_index_is_guarded() {
+    let pool = h2_pool().await;
+    let exists: bool =
+        sqlx::query_scalar("SELECT to_regclass('trading.bybit_terminal_unconfirmed') IS NOT NULL")
+            .fetch_one(&pool)
+            .await
+            .unwrap();
+    assert!(
+        exists,
+        "unbounded history needs indexed unresolved predicate"
+    );
+    sqlx::raw_sql("DROP INDEX trading.bybit_terminal_unconfirmed; CREATE INDEX bybit_terminal_unconfirmed ON trading.bybit_order_intents(engine_mode,order_link_id);").execute(&pool).await.unwrap();
+    let error = sqlx::raw_sql(H2_MIGRATION)
+        .execute(&pool)
+        .await
+        .expect_err("wrong terminal predicate must fail");
+    assert!(error.to_string().contains("Guard D"));
+}
+
+#[tokio::test]
+#[ignore = "requires explicit isolated PostgreSQL fixture"]
+async fn h2_lastreview_failed_protective_delivery_replays_before_first_submit() {
+    for channel_failed in [false, true] {
+        let pool = h2_pool().await;
+        let (mut r, mut p, mut s, mut w) = h2_start(&pool).await;
+        h2_register(&mut r, &mut p, &mut s, "outbox-open", 0.1, false).await;
+        r.exchange(
+            Some(ExchangeEvent::Fill(h1_exec(
+                "outbox-open",
+                "outbox-open-exec",
+                "0.1",
+                "Buy",
+            ))),
+            &mut p,
+            &mut s,
+            &mut w,
+            None,
+        )
+        .await;
+        let mut po = baseline_pending_order("limit", Some(TimeInForce::PostOnly));
+        po.order_link_id = "outbox-parent".into();
+        po.is_close = true;
+        po.is_long = false;
+        po.qty = 0.1;
+        po.limit_price = Some(50000.0);
+        po.close_maker_audit = Some(CloseMakerFillAudit {
+            initial_limit_price: Some(50000.0),
+            eligible_reason: "fixture-close".into(),
+            fallback_reason: None,
+            rate_limit_scope: None,
+        });
+        let (ready, rx) = tokio::sync::oneshot::channel();
+        r.registration(
+            Some(PendingOrderEvent::RegisterBeforeSubmit {
+                request: {
+                    let mut request = h2_request(&po);
+                    request.order_type = crate::order_manager::OrderType::Limit;
+                    request.price = Some(50000.0);
+                    request
+                },
+                order: po.clone(),
+                ready,
+            }),
+            &mut p,
+            &mut s,
+            None,
+        )
+        .await;
+        rx.await.unwrap();
+        let (closed_tx, mut closed_rx) = tokio::sync::mpsc::unbounded_channel();
+        if channel_failed {
+            closed_rx.close();
+        }
+        p.set_shadow_channel(closed_tx);
+        r.exchange(
+            Some(ExchangeEvent::OrderUpdate(terminal_order_update(
+                "outbox-parent",
+                "Cancelled",
+                "",
+            ))),
+            &mut p,
+            &mut s,
+            &mut w,
+            None,
+        )
+        .await;
+        assert_eq!(
+            p.exchange_submission_guard.storage_blocked(),
+            channel_failed
+        );
+        let original_id = if channel_failed {
+            None
+        } else {
+            Some(closed_rx.try_recv().unwrap().order_link_id)
+        };
+        drop(r);
+        let mut p = TickPipeline::with_kind(&["BTCUSDT"], 10000.0, PipelineKind::Demo);
+        let mut s = make_loop_state();
+        let mut w = super::make_test_writer();
+        let (tx, mut requests) = tokio::sync::mpsc::unbounded_channel();
+        p.set_shadow_channel(tx);
+        let mut r = ExecutionRecovery::open(&pool, "demo", "fixture-account", &mut p, &mut s)
+            .await
+            .unwrap();
+        r.recover(&mut p, &mut s, &mut w, None).await.unwrap();
+        let req = tokio::time::timeout(std::time::Duration::from_millis(100), requests.recv())
+            .await
+            .expect("committed protective request must survive failed channel delivery")
+            .unwrap();
+        if let Some(id) = original_id {
+            assert_eq!(
+                req.order_link_id, id,
+                "restart retains the exact unsent intent identity"
+            );
+        }
+        assert!(req.is_close && req.is_primary);
+        assert_eq!(req.qty, 0.1);
+        assert!(req
+            .close_maker_audit
+            .as_ref()
+            .unwrap()
+            .fallback_reason
+            .is_some());
+        po.order_link_id = req.order_link_id.clone();
+        po.sent_ts_ms = req.paper_fill_ts;
+        po.order_type = "market".into();
+        po.time_in_force = None;
+        po.limit_price = None;
+        po.close_maker_audit = req.close_maker_audit.clone();
+        let (ready, rx) = tokio::sync::oneshot::channel();
+        r.registration(
+            Some(PendingOrderEvent::RegisterBeforeSubmit {
+                request: h2_request(&po),
+                order: po,
+                ready,
+            }),
+            &mut p,
+            &mut s,
+            None,
+        )
+        .await;
+        rx.await.unwrap();
+        drop(r);
+        let mut p = TickPipeline::with_kind(&["BTCUSDT"], 10000.0, PipelineKind::Demo);
+        let mut s = make_loop_state();
+        let (tx, mut requests) = tokio::sync::mpsc::unbounded_channel();
+        p.set_shadow_channel(tx);
+        let mut r = ExecutionRecovery::open(&pool, "demo", "fixture-account", &mut p, &mut s)
+            .await
+            .unwrap();
+        r.recover(&mut p, &mut s, &mut w, None).await.unwrap();
+        assert!(
+            requests.try_recv().is_err(),
+            "registered immutable intent cannot be resubmitted"
+        );
+    }
+}
+
+#[tokio::test]
+#[ignore = "requires explicit isolated PostgreSQL fixture"]
+async fn h2_lastreview_zero_position_receipt_keeps_execution_accounting() {
+    let pool = h2_pool().await;
+    let (mut r, mut p, mut s, mut w) = h2_start(&pool).await;
+    h2_register(&mut r, &mut p, &mut s, "zero-open", 0.1, false).await;
+    r.exchange(
+        Some(ExchangeEvent::Fill(h1_exec(
+            "zero-open",
+            "zero-open-exec",
+            "0.1",
+            "Buy",
+        ))),
+        &mut p,
+        &mut s,
+        &mut w,
+        None,
+    )
+    .await;
+    h2_register(&mut r, &mut p, &mut s, "zero-close", 0.1, true).await;
+    r.registration(
+        Some(PendingOrderEvent::ExchangeZeroClose {
+            order_link_id: "zero-close".into(),
+            symbol: "BTCUSDT".into(),
+            is_long: true,
+            strategy: "fixture".into(),
+            ts_ms: openclaw_core::now_ms(),
+        }),
+        &mut p,
+        &mut s,
+        None,
+    )
+    .await;
+    h2_accounting(&p, 0.1, 0.01, 0.0);
+    assert!(s.pending_orders.contains_key("zero-close"));
+    assert!(p.exchange_submission_guard.blocks_entry());
+    drop(r);
+    let (_, p, s, _) = h2_start(&pool).await;
+    h2_accounting(&p, 0.1, 0.01, 0.0);
+    assert!(s.pending_orders.contains_key("zero-close"));
+}
+
+#[tokio::test]
+#[ignore = "requires explicit isolated PostgreSQL fixture"]
+async fn h2_lastreview_failed_fallback_commit_discards_outbox_reservation() {
+    let pool = h2_pool().await;
+    let (mut r, mut p, mut s, mut w) = h2_start(&pool).await;
+    h2_register(&mut r, &mut p, &mut s, "failed-outbox-open", 0.1, false).await;
+    r.exchange(
+        Some(ExchangeEvent::Fill(h1_exec(
+            "failed-outbox-open",
+            "failed-outbox-open-exec",
+            "0.1",
+            "Buy",
+        ))),
+        &mut p,
+        &mut s,
+        &mut w,
+        None,
+    )
+    .await;
+    let mut po = baseline_pending_order("limit", Some(TimeInForce::PostOnly));
+    po.order_link_id = "failed-outbox-parent".into();
+    po.is_close = true;
+    po.is_long = false;
+    po.qty = 0.1;
+    po.limit_price = Some(50000.0);
+    po.close_maker_audit = Some(CloseMakerFillAudit {
+        initial_limit_price: Some(50000.0),
+        eligible_reason: "fixture-close".into(),
+        fallback_reason: None,
+        rate_limit_scope: None,
+    });
+    let mut request = h2_request(&po);
+    request.order_type = crate::order_manager::OrderType::Limit;
+    request.price = Some(50000.0);
+    let (ready, rx) = tokio::sync::oneshot::channel();
+    r.registration(
+        Some(PendingOrderEvent::RegisterBeforeSubmit {
+            request,
+            order: po,
+            ready,
+        }),
+        &mut p,
+        &mut s,
+        None,
+    )
+    .await;
+    rx.await.unwrap();
+    let (tx, mut requests) = tokio::sync::mpsc::unbounded_channel();
+    p.set_shadow_channel(tx);
+    sqlx::raw_sql("CREATE FUNCTION fail_outbox() RETURNS trigger LANGUAGE plpgsql AS $$ BEGIN RAISE EXCEPTION 'fixture outbox cutpoint'; END $$; CREATE TRIGGER fail_outbox BEFORE UPDATE ON trading.bybit_recovery FOR EACH ROW EXECUTE FUNCTION fail_outbox();").execute(&pool).await.unwrap();
+    r.exchange(
+        Some(ExchangeEvent::OrderUpdate(terminal_order_update(
+            "failed-outbox-parent",
+            "Cancelled",
+            "",
+        ))),
+        &mut p,
+        &mut s,
+        &mut w,
+        None,
+    )
+    .await;
+    assert!(requests.try_recv().is_err());
+    assert!(p.recovery_dispatch_outbox.is_empty());
+    assert!(!s
+        .close_maker_fallback_dispatched
+        .contains("failed-outbox-parent"));
+    assert!(s.pending_orders.contains_key("failed-outbox-parent"));
+    assert!(p.exchange_submission_guard.storage_blocked());
+    p.exchange_submission_guard.block_storage(false);
+    p.exchange_submission_guard.resolve("failed-outbox-parent");
+    assert!(
+        !p.exchange_submission_guard.blocks_entry(),
+        "rolled-back request cannot leak a queued reservation"
+    );
+    let checkpoint: serde_json::Value = sqlx::query_scalar(
+        "SELECT checkpoint FROM trading.bybit_recovery WHERE engine_mode='demo'",
+    )
+    .fetch_one(&pool)
+    .await
+    .unwrap();
+    assert!(checkpoint["dispatch_outbox"]
+        .as_object()
+        .unwrap()
+        .is_empty());
+}
+
+#[tokio::test]
+#[ignore = "requires explicit isolated PostgreSQL fixture"]
+async fn h2_lastreview_timer_fallback_uses_same_durable_boundary() {
+    let pool = h2_pool().await;
+    let (mut r, mut p, mut s, mut w) = h2_start(&pool).await;
+    h2_register(&mut r, &mut p, &mut s, "timer-outbox-open", 0.1, false).await;
+    r.exchange(
+        Some(ExchangeEvent::Fill(h1_exec(
+            "timer-outbox-open",
+            "timer-outbox-open-exec",
+            "0.1",
+            "Buy",
+        ))),
+        &mut p,
+        &mut s,
+        &mut w,
+        None,
+    )
+    .await;
+    let mut po = baseline_pending_order("limit", Some(TimeInForce::PostOnly));
+    po.order_link_id = "timer-outbox-parent".into();
+    po.is_close = true;
+    po.is_long = false;
+    po.qty = 0.1;
+    po.limit_price = Some(50000.0);
+    po.close_maker_audit = Some(CloseMakerFillAudit {
+        initial_limit_price: Some(50000.0),
+        eligible_reason: "fixture-close".into(),
+        fallback_reason: None,
+        rate_limit_scope: None,
+    });
+    let mut request = h2_request(&po);
+    request.order_type = crate::order_manager::OrderType::Limit;
+    request.price = Some(50000.0);
+    let (ready, rx) = tokio::sync::oneshot::channel();
+    r.registration(
+        Some(PendingOrderEvent::RegisterBeforeSubmit {
+            request,
+            order: po.clone(),
+            ready,
+        }),
+        &mut p,
+        &mut s,
+        None,
+    )
+    .await;
+    rx.await.unwrap();
+    let (tx, requests) = tokio::sync::mpsc::unbounded_channel();
+    p.set_shadow_channel(tx);
+    let _ = r
+        .control_event(&mut p, &mut s, move |p, s| {
+            assert!(
+                super::super::loop_handlers::dispatch_close_maker_fallback_from_pending(
+                    s,
+                    p,
+                    &po,
+                    crate::strategies::maker_rejection::CloseMakerFallbackReason::TimeoutTaker,
+                    None,
+                    "confirmation_timer"
+                )
+            );
+            drop(requests);
+        })
+        .await;
+    drop(r);
+    let mut p = TickPipeline::with_kind(&["BTCUSDT"], 10000.0, PipelineKind::Demo);
+    let mut s = make_loop_state();
+    let (tx, mut requests) = tokio::sync::mpsc::unbounded_channel();
+    p.set_shadow_channel(tx);
+    let mut r = ExecutionRecovery::open(&pool, "demo", "fixture-account", &mut p, &mut s)
+        .await
+        .unwrap();
+    r.recover(&mut p, &mut s, &mut w, None).await.unwrap();
+    assert!(
+        requests.try_recv().is_ok(),
+        "timer path must persist protective request before its marker"
+    );
 }

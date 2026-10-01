@@ -761,7 +761,7 @@ pub struct StopRequest {
 
 /// Order dispatch request from tick_pipeline to exchange API (EXT-1, R-04).
 /// 從 tick_pipeline 到交易所的訂單派發請求。paper_only=shadow; exchange=primary。
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
 pub struct OrderDispatchRequest {
     pub symbol: String,        // Trading symbol / 交易對
     pub is_long: bool,         // Long direction / 多方向
@@ -983,6 +983,8 @@ pub struct TickPipeline {
     recent_fills: VecDeque<TimestampedFill>,
     /// Financial projection is provisional until the H2 transaction commits.
     recovery_provisional: bool,
+    pub(crate) recovery_dispatch_outbox: HashMap<String, OrderDispatchRequest>,
+    pub(crate) recovery_dispatch_sent: std::collections::HashSet<String>,
     recovery_lease_releases:
         parking_lot::Mutex<Vec<(String, openclaw_core::governance_core::LeaseOutcome, String)>>,
     /// Channel to dispatch server-side stop requests (Item 1: dual-track stops).

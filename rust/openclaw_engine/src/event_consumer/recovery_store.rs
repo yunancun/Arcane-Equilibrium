@@ -10,6 +10,8 @@ use serde_json::Value;
 use sha2::{Digest, Sha256};
 use sqlx::{Connection, PgConnection, PgPool};
 
+pub(super) const TERMINAL_QUERY: &str = "SELECT progress FROM trading.bybit_order_intents WHERE engine_mode=$1 AND venue_order_id IS NOT NULL AND progress->'progress'->>'status' IN ('Cancelled','PartiallyFilledCanceled','Rejected','Deactivated') AND NOT COALESCE((progress->'progress'->>'terminal_reconciliation_complete')::boolean,FALSE) ORDER BY order_link_id LIMIT 4097";
+
 pub(super) type Result<T> = std::result::Result<T, String>;
 pub(super) struct RecoveryStore {
     conn: PgConnection,
@@ -109,14 +111,32 @@ impl RecoveryStore {
     /// must still receive REST confirmation even after later checkpoints have
     /// replaced the transient retired map.
     pub(super) async fn terminal_orders_to_reconcile(&mut self) -> Result<Vec<PendingOrder>> {
-        let rows: Vec<Value> = sqlx::query_scalar("SELECT progress FROM trading.bybit_order_intents WHERE engine_mode=$1 AND venue_order_id IS NOT NULL AND progress->'progress'->>'status' IN ('Cancelled','PartiallyFilledCanceled','Rejected','Deactivated') AND NOT COALESCE((progress->'progress'->>'terminal_reconciliation_complete')::boolean,FALSE) ORDER BY order_link_id LIMIT 4097")
-            .bind(&self.engine).fetch_all(&mut self.conn).await.map_err(err)?;
+        let rows: Vec<Value> = sqlx::query_scalar(TERMINAL_QUERY)
+            .bind(&self.engine)
+            .fetch_all(&mut self.conn)
+            .await
+            .map_err(err)?;
         if rows.len() > 4096 {
             return Err("terminal reconciliation exceeds bounded startup budget".into());
         }
         rows.into_iter()
             .map(|v| serde_json::from_value(v).map_err(err))
             .collect()
+    }
+
+    pub(super) async fn registered_outbox_intents(
+        &mut self,
+        ids: &[String],
+    ) -> Result<Vec<String>> {
+        if ids.is_empty() {
+            return Ok(Vec::new());
+        }
+        sqlx::query_scalar("SELECT order_link_id FROM trading.bybit_order_intents WHERE engine_mode=$1 AND order_link_id=ANY($2)")
+            .bind(&self.engine).bind(ids).fetch_all(&mut self.conn).await.map_err(err)
+    }
+    pub(super) async fn has_venue_binding(&mut self, link: &str) -> Result<bool> {
+        sqlx::query_scalar("SELECT EXISTS(SELECT 1 FROM trading.bybit_order_intents WHERE engine_mode=$1 AND order_link_id=$2 AND venue_order_id IS NOT NULL)")
+            .bind(&self.engine).bind(link).fetch_one(&mut self.conn).await.map_err(err)
     }
 
     pub(super) async fn terminal_progress(

@@ -84,6 +84,27 @@ BEGIN
 END
 $guard_c$;
 CREATE INDEX IF NOT EXISTS bybit_execution_unapplied ON trading.bybit_execution_inbox(engine_mode,receive_seq) WHERE NOT applied;
+-- Guard D: only unresolved terminal evidence belongs in the startup scan.
+-- Historical completed intents remain immutable without scanning their JSON heap.
+DO $guard_d$
+BEGIN
+    IF to_regclass('trading.bybit_terminal_unconfirmed') IS NOT NULL AND NOT EXISTS (
+        SELECT 1 FROM pg_index i JOIN pg_class c ON c.oid=i.indexrelid JOIN pg_am am ON am.oid=c.relam
+        WHERE i.indexrelid=to_regclass('trading.bybit_terminal_unconfirmed')
+          AND i.indrelid='trading.bybit_order_intents'::regclass
+          AND am.amname='btree' AND i.indisvalid AND i.indisready
+          AND NOT i.indisunique AND i.indnkeyatts=2 AND i.indnatts=2
+          AND i.indexprs IS NULL AND i.indoption[0]=0 AND i.indoption[1]=0
+          AND (SELECT string_agg(a.attname,',' ORDER BY k.ordinality)
+               FROM unnest(i.indkey) WITH ORDINALITY k(attnum,ordinality)
+               JOIN pg_attribute a ON a.attrelid=i.indrelid AND a.attnum=k.attnum)
+              ='engine_mode,order_link_id'
+          AND pg_get_expr(i.indpred,i.indrelid)=$terminal_predicate$((venue_order_id IS NOT NULL) AND (((progress -> 'progress'::text) ->> 'status'::text) = ANY (ARRAY['Cancelled'::text, 'PartiallyFilledCanceled'::text, 'Rejected'::text, 'Deactivated'::text])) AND (NOT COALESCE((((progress -> 'progress'::text) ->> 'terminal_reconciliation_complete'::text))::boolean, false)))$terminal_predicate$
+    ) THEN RAISE EXCEPTION 'V162 Guard D: incompatible unresolved terminal index'; END IF;
+END
+$guard_d$;
+CREATE INDEX IF NOT EXISTS bybit_terminal_unconfirmed ON trading.bybit_order_intents(engine_mode,order_link_id)
+WHERE venue_order_id IS NOT NULL AND progress->'progress'->>'status' IN ('Cancelled','PartiallyFilledCanceled','Rejected','Deactivated') AND NOT COALESCE((progress->'progress'->>'terminal_reconciliation_complete')::boolean,FALSE);
 DO $grant$
 BEGIN
     IF EXISTS(SELECT 1 FROM pg_roles WHERE rolname='trading_ai') THEN

@@ -158,3 +158,30 @@ H2 32 項通過，包括 completion transaction cutpoint、stale proof、4,097 �
 不耗用 unresolved startup budget。完整 library 4,929 通過，28 項 PG 已在 H2 suite 另行執行；strict Clippy、release binary、
 schema 編譯通過。hosted CI 的最終結果以本輪 publication artifacts 記錄。Linux host 按 Operator 指示略過；
 原 PA／E2／E4／BB／R4 controlled gate 未取得 verdict 的事實保留，runtime 未驗證。
+
+## 2026-10-01 終態 runtime 與保護性請求複查
+
+第三次 GitHub review 的四項缺口及同一 timer 路徑反例已先重現，再於同一原 H2 scope 修補。
+普通取消／拒絕在 execution 已入帳後仍留於原 pending scheduler，直到 REST completion
+fact 提交才退出；不再只等 restart 才掃描。V162 Guard D 對 exact unresolved-terminal
+predicate 提供 partial index，驗證欄位、ASC、btree、table、validity 與 predicate；4,097
+已完成歷史列的真 EXPLAIN 使用此 index，不以掃描整個 immutable history 證明空 backlog。
+
+registration 的 financial／tracker／derived observations 與 lease release 亦為 provisional，
+commit 失敗回復舊 checkpoint 並丟棄輸出。110017 zero-position receipt 只作 comparison／
+reconciliation 訊號，不能刪除 execution-owned qty／fee／PnL。
+
+本節 supersedes 先前 protective order channel 只有 best-effort 的限制：單一 checkpoint
+增加有界、serde-default 的 reduce-only primary dispatch outbox。fallback marker 與原 request
+同 transaction 提交；commit 後才入原 channel。channel failure 或已入 channel 但尚未 durable
+registration 的 crash 保留同一 orderLinkId；RegisterBeforeSubmit 的 immutable intent 與
+outbox consumption 同 transaction 提交，成功後才 release ready，因此已登記 intent 不重送。
+原 WS／registration 與 tick／confirmation timer sweeps 共用此 boundary，沒有第二個 writer
+或新的 queue platform。rollback 丟棄 outbox 並釋放其未送 queued reservation。
+
+outbox 僅保護已有 primary reduce-only 請求，不為開倉引入自動重送。exit／Spine observations
+與 server-stop channel 仍沿原 best-effort／local stop rail，未宣稱所有 derived outputs 有 durable
+outbox。storage failure 保留 fence，缺失 history／legacy baseline 仍需另外核對。
+H2 39 項通過，包含 35 isolated PG case；完整 library／release binary／Clippy／schema 與
+current-head CI／review 結果，以 workspace publication evidence 判定。Linux host 略過，
+原 controlled-review debt 和 runtime UNVERIFIED 邊界保留。

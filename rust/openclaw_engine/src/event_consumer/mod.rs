@@ -244,13 +244,15 @@ pub async fn run_event_consumer(deps: EventConsumerDeps) {
             },
 
             event = event_rx.recv() => {
-                let flow = loop_handlers::handle_tick_event(
+                if event.is_none() {pipeline.exchange_submission_guard.block_storage(true);break;}
+                let handle=|pipeline:&mut crate::tick_pipeline::TickPipeline,state:&mut loop_handlers::LoopState| {
+                    loop_handlers::handle_tick_event(
                     event,
-                    &mut pipeline,
+                    pipeline,
                     &mut state_writer,
                     &mut snapshot_writer,
                     &audit_writer,
-                    &mut state,
+                    state,
                     start_time,
                     status_interval,
                     pending_timeout,
@@ -266,26 +268,29 @@ pub async fn run_event_consumer(deps: EventConsumerDeps) {
                     &cfg_snapshot,
                     bootstrap_client.as_ref(),
                     &kline_seed_tx,
-                );
-                if let Some(recovery) = recovery.as_mut() { recovery.checkpoint_control(&mut pipeline, &mut state, false).await; }
-                if flow.is_break() {
-                    break;
-                }
+                )
+                };
+                let flow=if let Some(recovery)=recovery.as_mut() {
+                    recovery.control_event(&mut pipeline,&mut state,handle).await
+                } else {Some(handle(&mut pipeline,&mut state))};
+                if flow.is_some_and(|flow|flow.is_break()) {break;}
             }
 
             Some(outcome) = maker_cancel_rx.recv() => {
-                loop_tick::handle_maker_cancel_outcome(&mut state, outcome, openclaw_core::now_ms());
-                if let Some(recovery) = recovery.as_mut() { recovery.checkpoint_control(&mut pipeline, &mut state, false).await; }
+                if let Some(recovery)=recovery.as_mut() {
+                    let _=recovery.control_event(&mut pipeline,&mut state,|_,state|loop_tick::handle_maker_cancel_outcome(state,outcome,openclaw_core::now_ms())).await;
+                } else {loop_tick::handle_maker_cancel_outcome(&mut state,outcome,openclaw_core::now_ms());}
             }
 
             _ = confirmation_interval.tick() => {
-                loop_tick::handle_confirmation_interval(
-                    &mut pipeline, &mut state, openclaw_core::now_ms(),
-                    &|po, now_ms| loop_tick::dispatch_maker_cancel(
-                        shared_client.as_ref(), Some(&maker_cancel_tx), po, now_ms,
-                    ),
-                );
-                if let Some(recovery) = recovery.as_mut() { recovery.checkpoint_control(&mut pipeline, &mut state, false).await; recovery.reconcile_startup(&pipeline, &state, openclaw_core::now_ms()); }
+                let handle=|pipeline:&mut crate::tick_pipeline::TickPipeline,state:&mut loop_handlers::LoopState| {
+                    loop_tick::handle_confirmation_interval(pipeline,state,openclaw_core::now_ms(),
+                        &|po,now_ms|loop_tick::dispatch_maker_cancel(shared_client.as_ref(),Some(&maker_cancel_tx),po,now_ms));
+                };
+                if let Some(recovery)=recovery.as_mut() {
+                    let _=recovery.control_event(&mut pipeline,&mut state,handle).await;
+                    recovery.reconcile_startup(&pipeline,&state,openclaw_core::now_ms());
+                } else {handle(&mut pipeline,&mut state);}
             }
 
             // ── AMD-2026-05-02-01 Track H E-1 retrofit Arm: lease & auth sweep ──
