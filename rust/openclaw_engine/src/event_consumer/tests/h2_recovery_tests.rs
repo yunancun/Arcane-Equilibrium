@@ -17,7 +17,7 @@ fn h2_request(po: &PendingOrder) -> crate::order_manager::CreateOrderRequest {
         price: po.limit_price,
         time_in_force: po.time_in_force,
         reduce_only: Some(po.is_close),
-        close_on_trigger: None,
+        close_on_trigger: (po.is_close && po.qty == 0.0).then_some(true),
         order_link_id: Some(po.order_link_id.clone()),
         trigger_price: None,
         trigger_direction: None,
@@ -366,6 +366,14 @@ async fn h2_cancel_then_late_close_fill_recovers_attribution_and_pnl() {
 }
 
 async fn h2_confirm_account(r: &mut ExecutionRecovery, p: &TickPipeline, s: &mut LoopState) {
+    h2_confirm_account_at(r, p, s, openclaw_core::now_ms() + 60_000).await;
+}
+async fn h2_confirm_account_at(
+    r: &mut ExecutionRecovery,
+    p: &TickPipeline,
+    s: &mut LoopState,
+    now: u64,
+) {
     let positions:Vec<_>=p.paper_state.export_state().positions.iter().map(|row|{
         let pos=&row.position;serde_json::json!({"positionIdx":0,"symbol":pos.symbol,"side":if pos.is_long{"Buy"}else{"Sell"},"size":pos.qty.to_string(),"avgPrice":pos.entry_price.to_string()})
     }).collect();
@@ -374,7 +382,6 @@ async fn h2_confirm_account(r: &mut ExecutionRecovery, p: &TickPipeline, s: &mut
         serde_json::json!({"list":positions,"nextPageCursor":""}),
     ]);
     s.dcp_reconciler = Some(reconciler);
-    let now = openclaw_core::now_ms() + 60_000;
     r.reconcile_startup(p, s, now);
     for _ in 0..10 {
         tokio::task::yield_now().await;
@@ -1581,6 +1588,10 @@ async fn h2_lastreview_failed_protective_delivery_replays_before_first_submit() 
             );
         }
         assert!(req.is_close && req.is_primary);
+        assert!(
+            p.has_pending_close("BTCUSDT"),
+            "restored outbox must suppress a fresh close ID"
+        );
         assert_eq!(req.qty, 0.1);
         assert!(req
             .close_maker_audit
@@ -1829,4 +1840,114 @@ async fn h2_lastreview_timer_fallback_uses_same_durable_boundary() {
         requests.try_recv().is_ok(),
         "timer path must persist protective request before its marker"
     );
+}
+
+#[tokio::test]
+#[ignore = "requires explicit isolated PostgreSQL fixture"]
+async fn h2_fourth_position_drift_waits_for_account_barrier() {
+    let pool = h2_pool().await;
+    let (mut r, mut p, mut s, mut w) = h2_start(&pool).await;
+    h2_register(&mut r, &mut p, &mut s, "drift-open", 1.0, false).await;
+    r.exchange(
+        Some(ExchangeEvent::Fill(h1_exec(
+            "drift-open",
+            "drift-fill",
+            "1.0",
+            "Buy",
+        ))),
+        &mut p,
+        &mut s,
+        &mut w,
+        None,
+    )
+    .await;
+    h2_register(&mut r, &mut p, &mut s, "drift-close", 0.2, true).await;
+    let position = serde_json::from_value(
+        serde_json::json!({"symbol":"BTCUSDT","side":"Buy","size":"0.5","entryPrice":"50000"}),
+    )
+    .unwrap();
+    r.exchange(
+        Some(ExchangeEvent::PositionUpdate(position)),
+        &mut p,
+        &mut s,
+        &mut w,
+        None,
+    )
+    .await;
+    r.exchange(
+        Some(ExchangeEvent::Fill(h1_exec(
+            "drift-close",
+            "drift-close-fill",
+            "0.2",
+            "Sell",
+        ))),
+        &mut p,
+        &mut s,
+        &mut w,
+        None,
+    )
+    .await;
+    assert!(s.pending_orders.is_empty());
+    assert!(
+        p.exchange_submission_guard.blocks_entry(),
+        "order repair alone cannot prove account consistency"
+    );
+    let (reconciler, _) = super::super::dcp_reconciliation::DcpReconciler::fixture(vec![
+        serde_json::json!({"list":[],"nextPageCursor":""}),
+        serde_json::json!({"list":[{"positionIdx":0,"symbol":"BTCUSDT","side":"Buy","size":"0.5","avgPrice":"50000"}],"nextPageCursor":""}),
+    ]);
+    s.dcp_reconciler = Some(reconciler);
+    let now = openclaw_core::now_ms() + 60_000;
+    for _ in 0..10 {
+        r.reconcile_startup(&p, &s, now);
+        tokio::task::yield_now().await;
+    }
+    assert!(p.exchange_submission_guard.blocks_entry());
+    h2_confirm_account_at(&mut r, &p, &mut s, now + 30_001).await;
+    assert!(!p.exchange_submission_guard.blocks_entry());
+}
+
+#[tokio::test]
+#[ignore = "requires explicit isolated PostgreSQL fixture"]
+async fn h2_fourth_full_close_zero_quantity_survives_restart() {
+    let pool = h2_pool().await;
+    let (mut r, mut p, mut s, mut w) = h2_start(&pool).await;
+    h2_register(&mut r, &mut p, &mut s, "zero-outbox-open", 0.1, false).await;
+    r.exchange(
+        Some(ExchangeEvent::Fill(h1_exec(
+            "zero-outbox-open",
+            "zero-outbox-fill",
+            "0.1",
+            "Buy",
+        ))),
+        &mut p,
+        &mut s,
+        &mut w,
+        None,
+    )
+    .await;
+    let (tx, mut requests) = tokio::sync::mpsc::unbounded_channel();
+    p.set_shadow_channel(tx);
+    let result = r
+        .control_event(&mut p, &mut s, |p, _| {
+            p.ipc_close_symbol("BTCUSDT", None, None)
+        })
+        .await;
+    assert_eq!(result, Some(true));
+    assert_eq!(requests.try_recv().unwrap().qty, 0.0);
+    drop(r);
+    let mut p = TickPipeline::with_kind(&["BTCUSDT"], 10_000.0, PipelineKind::Demo);
+    let mut s = make_loop_state();
+    let (tx, mut requests) = tokio::sync::mpsc::unbounded_channel();
+    p.set_shadow_channel(tx);
+    let mut r = ExecutionRecovery::open(&pool, "demo", "fixture-account", &mut p, &mut s)
+        .await
+        .unwrap();
+    assert!(p.has_pending_close("BTCUSDT"));
+    r.recover(&mut p, &mut s, &mut w, None).await.unwrap();
+    let request = requests.try_recv().unwrap();
+    assert_eq!(request.qty, 0.0);
+    let po = h2_register(&mut r, &mut p, &mut s, &request.order_link_id, 0.0, true).await;
+    assert_eq!(po.qty, 0.0);
+    assert!(p.has_pending_close("BTCUSDT"));
 }

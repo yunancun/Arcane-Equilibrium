@@ -50,7 +50,8 @@ impl Checkpoint {
                     || !r.is_close
                     || !r.is_primary
                     || !r.qty.is_finite()
-                    || r.qty <= 0.0
+                    || r.qty < 0.0
+                    || (r.qty == 0.0 && r.order_type != "market")
             })
             || self.pending.len() > 4096
             || self.retired.len() > 4096
@@ -97,6 +98,14 @@ impl Checkpoint {
         pipeline.stats.total_fills = self.total_fills;
         pipeline.recovery_dispatch_outbox = self.dispatch_outbox;
         pipeline.recovery_dispatch_sent.clear();
+        let close_symbols: Vec<_> = pipeline
+            .recovery_dispatch_outbox
+            .values()
+            .map(|r| r.symbol.clone())
+            .collect();
+        for symbol in close_symbols {
+            pipeline.retain_pending_close(&symbol);
+        }
         state.pending_orders = self.pending;
         state.retired_orders = self.retired;
         state.order_id_to_link = self.order_ids;
@@ -121,6 +130,8 @@ pub(super) struct ExecutionRecovery {
     account_check: Option<(i64, tokio::sync::oneshot::Receiver<Result<()>>)>,
     failed: bool,
     last_control: serde_json::Value,
+    committed_checkpoint: Checkpoint,
+    trading_buffer: (mpsc::Sender<TradingMsg>, mpsc::Receiver<TradingMsg>),
 }
 impl ExecutionRecovery {
     pub(super) async fn open(
@@ -136,14 +147,16 @@ impl ExecutionRecovery {
             .block_reconciliation(true);
         let initial = Checkpoint::capture(pipeline, state);
         let (store, checkpoint) = RecoveryStore::open(pool, engine, account, &initial).await?;
-        checkpoint.restore(pipeline, state);
+        checkpoint.clone().restore(pipeline, state);
         Ok(Self {
             store,
             startup_pending: true,
             next_position_check_ms: 0,
             account_check: None,
             failed: false,
-            last_control: serde_json::Value::Null,
+            last_control: control(state),
+            committed_checkpoint: checkpoint,
+            trading_buffer: mpsc::channel(256),
         })
     }
     fn fail(&mut self, pipeline: &TickPipeline, error: &str) {
@@ -222,6 +235,7 @@ impl ExecutionRecovery {
                 self.fail(pipeline, &e);
                 return Err(e);
             }
+            self.committed_checkpoint = Checkpoint::capture(pipeline, state);
         }
         pipeline.exchange_submission_guard.block_storage(false);
         if let Err(e) = pipeline.publish_recovery_dispatches() {
@@ -433,6 +447,12 @@ impl ExecutionRecovery {
                 _ => false,
             };
             if !consistent {
+                self.startup_pending = true;
+                self.next_position_check_ms = 0;
+                self.account_check = None;
+                pipeline
+                    .exchange_submission_guard
+                    .block_reconciliation(true);
                 // Per-order reconciliation can repair known in-flight gaps.
                 if state
                     .pending_orders
@@ -485,6 +505,7 @@ impl ExecutionRecovery {
         pipeline.finish_recovery_projection(&messages, observation);
         state.retired_orders.clear();
         self.last_control = control(state);
+        self.committed_checkpoint = checkpoint;
         forward_non_accounting(messages, original.as_ref().or(order_tx));
         writer.force_write(&pipeline.snapshot());
     }
@@ -572,6 +593,7 @@ impl ExecutionRecovery {
         }
         state.retired_orders.clear();
         self.last_control = control(state);
+        self.committed_checkpoint = checkpoint;
         if let Some((po, _)) = &intent {
             pipeline.recovery_dispatch_sent.remove(&po.order_link_id);
         }
@@ -639,18 +661,32 @@ impl ExecutionRecovery {
         state: &mut LoopState,
         callback: F,
     ) -> Option<R> {
+        self.market_event(pipeline, state, true, callback).await
+    }
+
+    /// Ordinary ticks reuse channel storage and the last committed rollback
+    /// image. Inspect pending maps only when their timed sweep can mutate them.
+    pub(super) async fn market_event<
+        R: Send,
+        F: FnOnce(&mut TickPipeline, &mut LoopState) -> R + Send,
+    >(
+        &mut self,
+        pipeline: &mut TickPipeline,
+        state: &mut LoopState,
+        inspect_control: bool,
+        callback: F,
+    ) -> Option<R> {
         if self.failed {
             return None;
         }
-        let before = Checkpoint::capture(pipeline, state);
         let mut observation = pipeline.begin_recovery_projection();
-        let (buffer, mut rx) = mpsc::channel(256);
-        let original = pipeline.replace_recovery_trading_channel(Some(buffer));
+        let original =
+            pipeline.replace_recovery_trading_channel(Some(self.trading_buffer.0.clone()));
         let result = callback(pipeline, state);
         pipeline.replace_recovery_trading_channel(original.clone());
-        let messages = drain(&mut rx);
+        let messages = drain(&mut self.trading_buffer.1);
         pipeline.stage_recovery_dispatches(&mut observation);
-        let next = control(state);
+        let changed = inspect_control && control(state) != self.last_control;
         let canonical = messages.iter().any(|m| {
             matches!(
                 m,
@@ -660,25 +696,133 @@ impl ExecutionRecovery {
                     | TradingMsg::OrderStateChange { .. }
             )
         });
-        if next != self.last_control || canonical || !observation.staged_order_ids.is_empty() {
-            if let Err(error) = self
-                .store
-                .commit(&Checkpoint::capture(pipeline, state), &messages, None, None)
-                .await
-            {
-                before.restore(pipeline, state);
+        if changed || canonical || !observation.staged_order_ids.is_empty() {
+            let checkpoint = Checkpoint::capture(pipeline, state);
+            if let Err(error) = self.store.commit(&checkpoint, &messages, None, None).await {
+                self.committed_checkpoint.clone().restore(pipeline, state);
                 pipeline.rollback_recovery_observation(observation);
                 self.fail(pipeline, &error);
                 return None;
             }
             state.retired_orders.clear();
             self.last_control = control(state);
+            self.committed_checkpoint = checkpoint;
         }
         pipeline.finish_recovery_projection(&messages, observation);
         forward_non_accounting(messages, original.as_ref());
         Some(result)
     }
 
+    /// Commands that own the execution projection cannot use the paper IPC
+    /// handler's pre-commit snapshots, responses or legacy checkpoint DELETE.
+    pub(super) async fn command(
+        &mut self,
+        command: crate::tick_pipeline::PipelineCommand,
+        pipeline: &mut TickPipeline,
+        state: &mut LoopState,
+        writer: &mut DualStateWriter,
+    ) -> Option<crate::tick_pipeline::PipelineCommand> {
+        use crate::tick_pipeline::PipelineCommand;
+        match command {
+            PipelineCommand::Reset { new_balance } => {
+                if self.failed
+                    || pipeline.exchange_submission_guard.blocks_entry()
+                    || !state.pending_orders.is_empty()
+                    || !pipeline.recovery_dispatch_outbox.is_empty()
+                {
+                    return None;
+                }
+                let mut checkpoint = Checkpoint::capture(pipeline, state);
+                checkpoint.paper = crate::paper_state::PaperState::new(new_balance).export_state();
+                checkpoint.total_fills = 0;
+                checkpoint.order_ids.clear();
+                if let Err(error) = self.store.commit(&checkpoint, &[], None, None).await {
+                    self.fail(pipeline, &error);
+                    return None;
+                }
+                super::handlers::handle_paper_command_with_order_map(
+                    PipelineCommand::Reset { new_balance },
+                    pipeline,
+                    writer,
+                    &mut state.pending_orders,
+                    &mut state.order_id_to_link,
+                );
+                self.committed_checkpoint = checkpoint;
+                self.last_control = control(state);
+                self.startup_pending = true;
+                self.next_position_check_ms = 0;
+                self.account_check = None;
+                pipeline
+                    .exchange_submission_guard
+                    .block_reconciliation(true);
+            }
+            PipelineCommand::ResetDrawdownBaseline { response_tx } => {
+                if self.failed {
+                    let _ = response_tx.send(Err("execution recovery storage is fenced".into()));
+                    return None;
+                }
+                let mut checkpoint = Checkpoint::capture(pipeline, state);
+                let peak_before = checkpoint.paper.peak_balance;
+                checkpoint.paper.peak_balance = checkpoint.paper.balance;
+                let result = self.store.commit(&checkpoint, &[], None, None).await;
+                let reply = match result {
+                    Ok(()) => {
+                        pipeline.paper_state.reset_drawdown_baseline();
+                        writer.force_write(&pipeline.snapshot());
+                        self.committed_checkpoint = checkpoint;
+                        Ok(format!(
+                            "reset engine_mode={} peak_before={peak_before:.2} peak_after={:.2}",
+                            pipeline.effective_engine_mode(),
+                            pipeline.paper_state.balance()
+                        ))
+                    }
+                    Err(error) => {
+                        self.fail(pipeline, &error);
+                        Err(error)
+                    }
+                };
+                let _ = response_tx.send(reply);
+            }
+            PipelineCommand::CloseAll | PipelineCommand::CloseSymbol { .. } => {
+                let committed = self
+                    .control_event(pipeline, state, |pipeline, _| match command {
+                        PipelineCommand::CloseAll => {
+                            pipeline.ipc_close_all();
+                        }
+                        PipelineCommand::CloseSymbol {
+                            symbol,
+                            hint_is_long,
+                            hint_qty,
+                        } => {
+                            pipeline.ipc_close_symbol(&symbol, hint_is_long, hint_qty);
+                        }
+                        _ => unreachable!(),
+                    })
+                    .await;
+                if committed.is_some() {
+                    writer.force_write(&pipeline.snapshot());
+                }
+            }
+            PipelineCommand::SubmitOrder { response_tx, .. } => {
+                let _ = response_tx.send(Err(
+                    "paper simulation cannot mutate an execution-owned projection".into(),
+                ));
+            }
+            PipelineCommand::AdoptOrphan { .. } | PipelineCommand::ConvergeExchangeZero { .. } => {
+                self.startup_pending = true;
+                self.next_position_check_ms = 0;
+                self.account_check = None;
+                pipeline
+                    .exchange_submission_guard
+                    .block_reconciliation(true);
+                super::loop_tick::schedule_pending_reconciliation(state, openclaw_core::now_ms());
+            }
+            other => return Some(other),
+        }
+        None
+    }
+
+    #[cfg(test)]
     pub(super) async fn checkpoint_control(
         &mut self,
         pipeline: &mut TickPipeline,
@@ -690,16 +834,14 @@ impl ExecutionRecovery {
         }
         let next = control(state);
         if force || next != self.last_control {
-            if let Err(e) = self
-                .store
-                .commit(&Checkpoint::capture(pipeline, state), &[], None, None)
-                .await
-            {
+            let checkpoint = Checkpoint::capture(pipeline, state);
+            if let Err(e) = self.store.commit(&checkpoint, &[], None, None).await {
                 self.fail(pipeline, &e);
                 return;
             }
             state.retired_orders.clear();
             self.last_control = next;
+            self.committed_checkpoint = checkpoint;
         }
     }
 }

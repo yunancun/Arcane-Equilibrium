@@ -56,6 +56,7 @@ impl TickPipeline {
             recent_intents: VecDeque::new(),
             recent_fills: VecDeque::new(),
             recovery_provisional: false,
+            recovery_observation_cache: None,
             recovery_dispatch_outbox: Default::default(),
             recovery_dispatch_sent: Default::default(),
             recovery_lease_releases: parking_lot::Mutex::new(Vec::new()),

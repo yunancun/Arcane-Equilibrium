@@ -230,6 +230,10 @@ pub async fn run_event_consumer(deps: EventConsumerDeps) {
                 if let Some(ref mut rx) = pipeline_cmd_rx { rx.recv().await } else { std::future::pending().await }
             } => {
                 if cmd.is_none() { pipeline.exchange_submission_guard.block_storage(true); break; }
+                let cmd = if let Some(recovery) = recovery.as_mut() {
+                    recovery.command(cmd.unwrap(), &mut pipeline, &mut state, &mut snapshot_writer).await
+                } else { cmd };
+                if cmd.is_none() { continue; }
                 loop_handlers::handle_pipeline_command(
                     cmd,
                     &mut pipeline,
@@ -240,7 +244,6 @@ pub async fn run_event_consumer(deps: EventConsumerDeps) {
                     _cross_engine_tx.as_ref(),
                     pipeline_kind,
                 ).await;
-                if let Some(recovery) = recovery.as_mut() { recovery.checkpoint_control(&mut pipeline, &mut state, true).await; }
             },
 
             event = event_rx.recv() => {
@@ -271,7 +274,8 @@ pub async fn run_event_consumer(deps: EventConsumerDeps) {
                 )
                 };
                 let flow=if let Some(recovery)=recovery.as_mut() {
-                    recovery.control_event(&mut pipeline,&mut state,handle).await
+                    let inspect_pending = !state.pending_orders.is_empty() && state.last_pending_check.elapsed() >= pending_timeout;
+                    recovery.market_event(&mut pipeline,&mut state,inspect_pending,handle).await
                 } else {Some(handle(&mut pipeline,&mut state))};
                 if flow.is_some_and(|flow|flow.is_break()) {break;}
             }

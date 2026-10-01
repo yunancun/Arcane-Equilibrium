@@ -983,6 +983,7 @@ pub struct TickPipeline {
     recent_fills: VecDeque<TimestampedFill>,
     /// Financial projection is provisional until the H2 transaction commits.
     recovery_provisional: bool,
+    recovery_observation_cache: Option<pipeline_helpers::RecoveryObservation>,
     pub(crate) recovery_dispatch_outbox: HashMap<String, OrderDispatchRequest>,
     pub(crate) recovery_dispatch_sent: std::collections::HashSet<String>,
     recovery_lease_releases:

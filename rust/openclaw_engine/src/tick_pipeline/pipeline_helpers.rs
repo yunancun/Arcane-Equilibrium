@@ -75,17 +75,26 @@ pub(crate) fn release_decision_lease_for_governance(
 
 struct RecoveryChannel<T> {
     original: Option<mpsc::Sender<T>>,
+    sender: mpsc::Sender<T>,
     receiver: mpsc::Receiver<T>,
 }
 impl<T> RecoveryChannel<T> {
     fn stage(slot: &mut Option<mpsc::Sender<T>>) -> Self {
         let (sender, receiver) = mpsc::channel(64);
         let original = slot.take();
-        *slot = original.as_ref().map(|_| sender);
-        Self { original, receiver }
+        *slot = original.as_ref().map(|_| sender.clone());
+        Self {
+            original,
+            sender,
+            receiver,
+        }
     }
-    fn restore(mut self, slot: &mut Option<mpsc::Sender<T>>, publish: bool) {
-        *slot = self.original;
+    fn stage_again(&mut self, slot: &mut Option<mpsc::Sender<T>>) {
+        self.original = slot.take();
+        *slot = self.original.as_ref().map(|_| self.sender.clone());
+    }
+    fn restore(&mut self, slot: &mut Option<mpsc::Sender<T>>, publish: bool) {
+        *slot = self.original.take();
         while let Ok(message) = self.receiver.try_recv() {
             if publish {
                 if let Some(tx) = slot.as_ref() {
@@ -100,17 +109,26 @@ impl<T> RecoveryChannel<T> {
 
 struct RecoveryUnboundedChannel<T> {
     original: Option<mpsc::UnboundedSender<T>>,
+    sender: mpsc::UnboundedSender<T>,
     receiver: mpsc::UnboundedReceiver<T>,
 }
 impl<T> RecoveryUnboundedChannel<T> {
     fn stage(slot: &mut Option<mpsc::UnboundedSender<T>>) -> Self {
         let (sender, receiver) = mpsc::unbounded_channel();
         let original = slot.take();
-        *slot = original.as_ref().map(|_| sender);
-        Self { original, receiver }
+        *slot = original.as_ref().map(|_| sender.clone());
+        Self {
+            original,
+            sender,
+            receiver,
+        }
     }
-    fn restore(mut self, slot: &mut Option<mpsc::UnboundedSender<T>>, publish: bool) -> bool {
-        *slot = self.original;
+    fn stage_again(&mut self, slot: &mut Option<mpsc::UnboundedSender<T>>) {
+        self.original = slot.take();
+        *slot = self.original.as_ref().map(|_| self.sender.clone());
+    }
+    fn restore(&mut self, slot: &mut Option<mpsc::UnboundedSender<T>>, publish: bool) -> bool {
+        *slot = self.original.take();
         let mut delivered = true;
         while let Ok(message) = self.receiver.try_recv() {
             if publish {
@@ -142,6 +160,19 @@ impl TickPipeline {
         debug_assert!(!self.recovery_provisional);
         self.recovery_provisional = true;
         self.recovery_lease_releases.lock().clear();
+        if let Some(mut before) = self.recovery_observation_cache.take() {
+            before.staged_order_ids.clear();
+            before.best_effort_orders.clear();
+            before.recent_fills.clone_from(&self.recent_fills);
+            before
+                .pending_close_symbols
+                .clone_from(&self.pending_close_symbols);
+            before.exits.stage_again(&mut self.exit_feature_tx);
+            before.spine.stage_again(&mut self.agent_spine_tx);
+            before.orders.stage_again(&mut self.order_dispatch_tx);
+            before.stops.stage_again(&mut self.stop_request_tx);
+            return before;
+        }
         RecoveryObservation {
             staged_order_ids: Vec::new(),
             best_effort_orders: Vec::new(),
@@ -192,7 +223,7 @@ impl TickPipeline {
     pub(crate) fn finish_recovery_projection(
         &mut self,
         messages: &[TradingMsg],
-        before: RecoveryObservation,
+        mut before: RecoveryObservation,
     ) {
         self.recovery_provisional = false;
         before.exits.restore(&mut self.exit_feature_tx, true);
@@ -200,7 +231,7 @@ impl TickPipeline {
         // Requests were checkpointed before commit. Keep them until the
         // dispatcher's RegisterBeforeSubmit commits the immutable venue intent.
         before.orders.restore(&mut self.order_dispatch_tx, false);
-        for request in before.best_effort_orders {
+        for request in before.best_effort_orders.drain(..) {
             if let Some(tx) = self.order_dispatch_tx.as_ref() {
                 if let Err(error) = tx.send(request) {
                     self.exchange_submission_guard
@@ -230,6 +261,7 @@ impl TickPipeline {
                 }
             }
         }
+        self.recovery_observation_cache = Some(before);
     }
 
     pub(crate) fn rollback_recovery_observation(&mut self, mut before: RecoveryObservation) {
@@ -251,8 +283,10 @@ impl TickPipeline {
         before.spine.restore(&mut self.agent_spine_tx, false);
         before.orders.restore(&mut self.order_dispatch_tx, false);
         before.stops.restore(&mut self.stop_request_tx, false);
-        self.recent_fills = before.recent_fills;
-        self.pending_close_symbols = before.pending_close_symbols;
+        self.recent_fills.clone_from(&before.recent_fills);
+        self.pending_close_symbols
+            .clone_from(&before.pending_close_symbols);
+        self.recovery_observation_cache = Some(before);
     }
 
     /// Release a decision lease that was handed off by the router success path.

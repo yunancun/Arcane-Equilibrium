@@ -185,3 +185,27 @@ outbox。storage failure 保留 fence，缺失 history／legacy baseline 仍需�
 H2 39 項通過，包含 35 isolated PG case；完整 library／release binary／Clippy／schema 與
 current-head CI／review 結果，以 workspace publication evidence 判定。Linux host 略過，
 原 controlled-review debt 和 runtime UNVERIFIED 邊界保留。
+
+## 2026-10-01 倉位 barrier、IPC 與 tick 邊界修補
+
+第四批五項 review 缺口仍在原 H2 scope 內處理。任何 WS position 偏差都重新啟用
+account reconciliation fence；逐單 execution 補齊後，必須由完整、同 generation 的
+account-position 核對解鎖，不能因 pending map 已清空便允許新風險。
+
+primary market reduce-only outbox 接受 Bybit 的 qty=0 full-close 形狀；immutable
+registration 仍要求 closeOnTrigger=true。outbox restore 同時重建 pending-close symbol，
+在 replay 前及 durable registration 後都抑制產生另一個平倉 ID。
+
+H2 IPC reset／drawdown reset 先提交候選 checkpoint，成功後才改記憶體、snapshot 或回覆；
+失敗保留原狀且 storage fenced。drawdown reset 不刪除另一個 legacy checkpoint 來代替
+H2 transaction。CloseAll／CloseSymbol 共用 protective outbox transaction，commit 後才
+發佈 snapshot。paper simulation 的 SubmitOrder 不可改寫 execution-owned projection；
+AdoptOrphan／ConvergeExchangeZero 是 comparison／account reconciliation 訊號，不能
+憑非 execution 指令製造或刪除已入帳倉位。
+
+ordinary market tick 重用 observation／trading channel buffers 與已提交的 rollback image，
+只有實際 canonical rows、protective requests 或到期 pending sweep 的 control 變更才
+capture／提交 checkpoint；不再逐 tick clone／serialize 完整 pending、retired 與 outbox。
+4,000 pending、10,000 無 OMS 變更 boundary callbacks 的隔離測試驗證沒有 checkpoint 寫入；
+這不是 runtime latency 或 venue 行為證明。exact-head test／CI／複查與合併結果仍以本輪
+workspace evidence 為準，Linux host 略過，原 controlled-review debt 保留。
