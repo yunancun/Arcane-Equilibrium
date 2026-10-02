@@ -9,10 +9,14 @@ mod predictor_wiring_tests {
     use std::sync::Arc;
 
     struct StubOkPredictor {
+        binding: crate::edge_predictor::PredictorArtifactBinding,
         pred: Prediction,
     }
 
     impl EdgePredictorTrait for StubOkPredictor {
+        fn artifact_binding(&self) -> Option<crate::edge_predictor::PredictorArtifactBinding> {
+            Some(self.binding.clone())
+        }
         fn predict(&self, _f: &FeatureVectorV1) -> Result<Prediction, PredictError> {
             Ok(self.pred)
         }
@@ -20,10 +24,10 @@ mod predictor_wiring_tests {
             0
         }
         fn schema_hash(&self) -> &str {
-            "stub-schema"
+            crate::edge_predictor::features::feature_schema_hash()
         }
         fn definition_hash(&self) -> &str {
-            "stub-def"
+            crate::edge_predictor::features::feature_definition_hash()
         }
         fn model_id(&self) -> &str {
             "stub"
@@ -63,6 +67,183 @@ mod predictor_wiring_tests {
     }
 
     #[test]
+    fn test_d1_advisory_size_down_same_event() {
+        use crate::edge_predictor::gate::{
+            apply_advisory_action, AdvisoryAction, AdvisoryDecision, AdvisoryPositionEffect,
+        };
+        let context = "fixture:d1.1:advisory-size-down";
+        let baseline = IntentProcessor::new().process_gates_only_with_features(
+            &intent_btc(0.7),
+            &approved_governance(),
+            &paper_state_with_price(30_000.0),
+            500.0,
+            GovernanceProfile::Exploration,
+            Some(&FeatureVectorV1::zeroed()),
+            Some(context),
+            1_700_000_000_000,
+        );
+        assert!(baseline.approved);
+        assert_eq!(baseline.approved_qty, 0.001);
+        assert_eq!(baseline.rejected_reason, None);
+        let shared: serde_json::Value = serde_json::from_str(include_str!(
+            "../../tests/fixtures/edge_predictor/aiml_d1_shared_inputs.json"
+        ))
+        .unwrap();
+        let action: AdvisoryAction = serde_json::from_value(
+            shared["action_contract"]["fixture_size_down"]["model_action"].clone(),
+        )
+        .unwrap();
+        let fixture = &shared["action_contract"]["fixture_size_down"];
+        assert_eq!(fixture["context_id"], context);
+        assert_eq!(fixture["baseline_allowed"], true);
+        assert_eq!(fixture["baseline_quantity"], 0.001);
+        assert_eq!(fixture["expected_final_allowed"], true);
+        assert_eq!(fixture["expected_final_quantity"], 0.0004);
+        assert_eq!(
+            fixture["expected_final_reason"],
+            "fixture_policy_quantity_cap"
+        );
+        assert_eq!(
+            action,
+            AdvisoryAction::SizeDown {
+                max_quantity: 0.0004,
+                reason: "fixture_policy_quantity_cap".into(),
+            }
+        );
+        let actual = apply_advisory_action(
+            AdvisoryDecision {
+                allowed: baseline.approved,
+                quantity: baseline.approved_qty,
+                reason: baseline.rejected_reason,
+            },
+            &action,
+            AdvisoryPositionEffect::RiskIncreasingEntry,
+            true,
+        );
+        eprintln!(
+            "D1_ADVISORY_TRACE {}",
+            serde_json::json!({
+                "context_id": context, "baseline_action": "ALLOW", "baseline_quantity": 0.001,
+                "model_action": action, "final_allowed": actual.allowed,
+                "final_quantity": actual.quantity, "reason": actual.reason,
+            })
+        );
+        assert_eq!(
+            actual,
+            AdvisoryDecision {
+                allowed: true,
+                quantity: 0.0004,
+                reason: Some("fixture_policy_quantity_cap".into())
+            }
+        );
+    }
+
+    #[test]
+    fn test_d1_advisory_preserves_router_deny_and_reduction() {
+        use crate::edge_predictor::gate::{
+            apply_advisory_action, AdvisoryAction, AdvisoryDecision, AdvisoryPositionEffect,
+        };
+        let gov = approved_governance();
+        let mut state = paper_state_with_price(30_000.0);
+        let features = FeatureVectorV1::zeroed();
+        let context = "fixture:d1.1:advisory-superior-gates";
+        let lease = super::seed_production_lease(&gov, "intent-features-advisory");
+        let baseline = IntentProcessor::new().process_gates_only_with_features(
+            &intent_btc(0.7),
+            &gov,
+            &state,
+            500.0,
+            GovernanceProfile::Production,
+            Some(&features),
+            Some(context),
+            1_700_000_000_000,
+        );
+        assert!(!baseline.approved);
+        assert_eq!(baseline.approved_qty, 0.0);
+        let reason =
+            "cost_gate(JS-live): no edge estimate — fail-closed (cold-start) / 無估計失敗關閉";
+        assert_eq!(baseline.rejected_reason.as_deref(), Some(reason));
+        let actions = [
+            AdvisoryAction::NoOp,
+            AdvisoryAction::Veto {
+                reason: "model_veto".into(),
+            },
+            AdvisoryAction::SizeDown {
+                max_quantity: 0.0004,
+                reason: "model_cap".into(),
+            },
+        ];
+        for action in &actions {
+            let actual = apply_advisory_action(
+                AdvisoryDecision {
+                    allowed: baseline.approved,
+                    quantity: baseline.approved_qty,
+                    reason: baseline.rejected_reason.clone(),
+                },
+                action,
+                AdvisoryPositionEffect::RiskIncreasingEntry,
+                true,
+            );
+            assert_eq!(
+                actual,
+                AdvisoryDecision {
+                    allowed: false,
+                    quantity: 0.0,
+                    reason: Some(reason.into())
+                }
+            );
+            eprintln!(
+                "D1_ADVISORY_TRACE {}",
+                serde_json::json!({
+                    "context_id": context, "baseline_action": "DENY", "baseline_quantity": 0.0,
+                    "model_action": action, "final_allowed": actual.allowed,
+                    "final_quantity": actual.quantity, "reason": actual.reason,
+                })
+            );
+        }
+        gov.release_lease(&lease, LeaseOutcome::Consumed).unwrap();
+
+        // A real opposite-position router baseline caps the request to a reduction.
+        // The pure contract consumes that baseline; no new serving path is enabled.
+        state.apply_fill("BTCUSDT", false, 0.001, 30_000.0, 0.0, 0, "test");
+        let mut reducing = intent_btc(0.7);
+        reducing.qty = 0.01;
+        let baseline = IntentProcessor::new().process_gates_only_with_features(
+            &reducing,
+            &gov,
+            &state,
+            500.0,
+            GovernanceProfile::Exploration,
+            Some(&features),
+            Some(context),
+            1_700_000_000_000,
+        );
+        assert!(baseline.approved);
+        assert_eq!(baseline.approved_qty, 0.001);
+        assert_eq!(baseline.rejected_reason, None);
+        for action in &actions {
+            let actual = apply_advisory_action(
+                AdvisoryDecision {
+                    allowed: baseline.approved,
+                    quantity: baseline.approved_qty,
+                    reason: baseline.rejected_reason.clone(),
+                },
+                action,
+                AdvisoryPositionEffect::RiskReduction,
+                true,
+            );
+            assert_eq!(
+                actual,
+                AdvisoryDecision {
+                    allowed: true,
+                    quantity: 0.001,
+                    reason: None
+                }
+            );
+        }
+    }
+
+    #[test]
     fn test_panel_unavailable_evaluation_emit() {
         let mut proc = IntentProcessor::new();
         let (tx, mut rx) = tokio::sync::mpsc::channel(4);
@@ -79,7 +260,10 @@ mod predictor_wiring_tests {
         let msg = rx
             .try_recv()
             .expect("panel unavailable evaluation row must be emitted");
-        assert_eq!(msg.context_id, "panel_fail_closed:bb_breakout:BTCUSDT:1700000000123");
+        assert_eq!(
+            msg.context_id,
+            "panel_fail_closed:bb_breakout:BTCUSDT:1700000000123"
+        );
         assert_eq!(msg.engine_mode, "paper");
         assert_eq!(msg.strategy_name, "bb_breakout");
         assert_eq!(msg.symbol, "BTCUSDT");
@@ -102,6 +286,7 @@ mod predictor_wiring_tests {
         store.swap(
             "test",
             Arc::new(StubOkPredictor {
+                binding: crate::edge_predictor::test_artifact_binding("paper", "test"),
                 pred: Prediction {
                     q10: 100.0,
                     q50: 200.0,
@@ -110,6 +295,10 @@ mod predictor_wiring_tests {
             }),
         );
         proc.set_edge_predictor_store(store);
+        proc.set_edge_predictor_binding(
+            "test",
+            crate::edge_predictor::test_artifact_binding(proc.pipeline_kind.db_mode(), "test"),
+        );
         let gov = approved_governance();
         let state = paper_state_with_price(30_000.0);
         // Intent goes through legacy JS cost_gate_paper path — cold-start exploration mode
@@ -140,6 +329,10 @@ mod predictor_wiring_tests {
         assert!(!proc.risk_config.edge_predictor.use_edge_predictor);
         let store = Arc::new(EdgePredictorStore::new());
         proc.set_edge_predictor_store(store);
+        proc.set_edge_predictor_binding(
+            "test",
+            crate::edge_predictor::test_artifact_binding(proc.pipeline_kind.db_mode(), "test"),
+        );
         let gov = approved_governance();
         let state = paper_state_with_price(30_000.0);
         let features = FeatureVectorV1::zeroed();
@@ -172,6 +365,7 @@ mod predictor_wiring_tests {
         store.swap(
             "test",
             Arc::new(StubOkPredictor {
+                binding: crate::edge_predictor::test_artifact_binding("paper", "test"),
                 pred: Prediction {
                     q10: -100.0,
                     q50: -50.0,
@@ -180,6 +374,10 @@ mod predictor_wiring_tests {
             }),
         );
         proc.set_edge_predictor_store(store);
+        proc.set_edge_predictor_binding(
+            "test",
+            crate::edge_predictor::test_artifact_binding(proc.pipeline_kind.db_mode(), "test"),
+        );
         let gov = approved_governance();
         let state = paper_state_with_price(30_000.0);
         let features = FeatureVectorV1::zeroed();
@@ -201,10 +399,10 @@ mod predictor_wiring_tests {
     }
 
     #[test]
-    fn test_accept_bypasses_legacy_gate() {
-        // shadow_mode=false + predictor Accept → submitted (JS gate bypassed).
+    fn test_accept_preserves_allowed_baseline_quantity() {
+        // ADR-0051: Accept is NO_OP; the allowed baseline quantity is preserved.
         // Use a Prediction with large positive margin vs tiny cost.
-        // shadow_mode=false + Accept → submitted（跳過 JS gate）。
+        // Accept 不得跳過 baseline；允許的數量不增加。
         let mut proc = IntentProcessor::new();
         proc.risk_config.edge_predictor.use_edge_predictor = true;
         proc.risk_config.edge_predictor.shadow_mode = false;
@@ -212,6 +410,7 @@ mod predictor_wiring_tests {
         store.swap(
             "test",
             Arc::new(StubOkPredictor {
+                binding: crate::edge_predictor::test_artifact_binding("paper", "test"),
                 pred: Prediction {
                     q10: 100.0,
                     q50: 200.0,
@@ -220,6 +419,10 @@ mod predictor_wiring_tests {
             }),
         );
         proc.set_edge_predictor_store(store);
+        proc.set_edge_predictor_binding(
+            "test",
+            crate::edge_predictor::test_artifact_binding(proc.pipeline_kind.db_mode(), "test"),
+        );
         let gov = approved_governance();
         let state = paper_state_with_price(30_000.0);
         let features = FeatureVectorV1::zeroed();
@@ -235,9 +438,83 @@ mod predictor_wiring_tests {
         );
         assert!(
             r.submitted,
-            "Accept must bypass JS gate and submit; got {:?}",
+            "NO_OP must preserve allowed baseline; got {:?}",
             r.rejected_reason
         );
+        let baseline = IntentProcessor::new().process_with_features(
+            &intent_btc(0.7),
+            &gov,
+            &state,
+            500.0,
+            GovernanceProfile::Exploration,
+            Some(&features),
+            Some("ctx-1"),
+            0,
+        );
+        assert!(baseline.submitted);
+        assert_eq!(baseline.approved_qty, 0.001);
+        assert_eq!(r.approved_qty, 0.001);
+    }
+
+    #[test]
+    fn test_d1_opposite_position_reduce_is_not_model_vetoed() {
+        let mut proc = IntentProcessor::new();
+        proc.risk_config.edge_predictor.use_edge_predictor = true;
+        proc.risk_config.edge_predictor.shadow_mode = false;
+        proc.risk_config.edge_predictor.exploration_rate = 0.0;
+        let store = Arc::new(EdgePredictorStore::new());
+        store.swap(
+            "test",
+            Arc::new(StubOkPredictor {
+                binding: crate::edge_predictor::test_artifact_binding("paper", "test"),
+                pred: Prediction {
+                    q10: -100.0,
+                    q50: -50.0,
+                    q90: -10.0,
+                },
+            }),
+        );
+        proc.set_edge_predictor_store(store);
+        proc.set_edge_predictor_binding(
+            "test",
+            crate::edge_predictor::test_artifact_binding(proc.pipeline_kind.db_mode(), "test"),
+        );
+        let gov = approved_governance();
+        let mut state = paper_state_with_price(30_000.0);
+        state.apply_fill("BTCUSDT", false, 0.001, 30_000.0, 0.0, 0, "test");
+        let features = FeatureVectorV1::zeroed();
+        let baseline = IntentProcessor::new().process_with_features(
+            &intent_btc(0.7),
+            &gov,
+            &state,
+            500.0,
+            GovernanceProfile::Exploration,
+            Some(&features),
+            Some("fixture:d1.1:reduce"),
+            1_780_000_000_000,
+        );
+        let final_result = proc.process_with_features(
+            &intent_btc(0.7),
+            &gov,
+            &state,
+            500.0,
+            GovernanceProfile::Exploration,
+            Some(&features),
+            Some("fixture:d1.1:reduce"),
+            1_780_000_000_000,
+        );
+        assert!(
+            baseline.submitted,
+            "baseline reduction must be allowed: {:?}",
+            baseline.rejected_reason
+        );
+        assert!(
+            final_result.submitted,
+            "model must not veto reduction: {:?}",
+            final_result.rejected_reason
+        );
+        assert_eq!(baseline.approved_qty, 0.001);
+        assert_eq!(final_result.approved_qty, 0.001);
     }
 
     #[test]
@@ -252,6 +529,7 @@ mod predictor_wiring_tests {
         store.swap(
             "test",
             Arc::new(StubOkPredictor {
+                binding: crate::edge_predictor::test_artifact_binding("paper", "test"),
                 pred: Prediction {
                     q10: -100.0,
                     q50: -50.0,
@@ -260,6 +538,10 @@ mod predictor_wiring_tests {
             }),
         );
         proc.set_edge_predictor_store(store);
+        proc.set_edge_predictor_binding(
+            "test",
+            crate::edge_predictor::test_artifact_binding(proc.pipeline_kind.db_mode(), "test"),
+        );
         let gov = approved_governance();
         let state = paper_state_with_price(30_000.0);
         let features = FeatureVectorV1::zeroed();
@@ -292,6 +574,10 @@ mod predictor_wiring_tests {
         let store = Arc::new(EdgePredictorStore::new());
         // No swap — gate returns Fallback(NoModel).
         proc.set_edge_predictor_store(store);
+        proc.set_edge_predictor_binding(
+            "test",
+            crate::edge_predictor::test_artifact_binding(proc.pipeline_kind.db_mode(), "test"),
+        );
         let gov = approved_governance();
         let state = paper_state_with_price(30_000.0);
         let features = FeatureVectorV1::zeroed();
@@ -324,6 +610,10 @@ mod predictor_wiring_tests {
         proc.risk_config.edge_predictor.fallback_on_error = EdgePredictorFallback::FailClosed;
         let store = Arc::new(EdgePredictorStore::new());
         proc.set_edge_predictor_store(store);
+        proc.set_edge_predictor_binding(
+            "test",
+            crate::edge_predictor::test_artifact_binding(proc.pipeline_kind.db_mode(), "test"),
+        );
         let gov = approved_governance();
         let state = paper_state_with_price(30_000.0);
         let features = FeatureVectorV1::zeroed();
@@ -359,6 +649,7 @@ mod predictor_wiring_tests {
         store.swap(
             "test",
             Arc::new(StubOkPredictor {
+                binding: crate::edge_predictor::test_artifact_binding("paper", "test"),
                 pred: Prediction {
                     q10: -100.0,
                     q50: -50.0,
@@ -367,6 +658,10 @@ mod predictor_wiring_tests {
             }),
         );
         proc.set_edge_predictor_store(store);
+        proc.set_edge_predictor_binding(
+            "test",
+            crate::edge_predictor::test_artifact_binding(proc.pipeline_kind.db_mode(), "test"),
+        );
 
         let (tx, mut rx) = tokio::sync::mpsc::unbounded_channel::<PipelineCommand>();
         proc.set_shadow_fill_tx(tx);
@@ -424,6 +719,7 @@ mod predictor_wiring_tests {
         store.swap(
             "test",
             Arc::new(StubOkPredictor {
+                binding: crate::edge_predictor::test_artifact_binding("demo", "test"),
                 pred: Prediction {
                     q10: -100.0,
                     q50: -50.0,
@@ -432,6 +728,10 @@ mod predictor_wiring_tests {
             }),
         );
         proc.set_edge_predictor_store(store);
+        proc.set_edge_predictor_binding(
+            "test",
+            crate::edge_predictor::test_artifact_binding(proc.pipeline_kind.db_mode(), "test"),
+        );
 
         let (tx, mut rx) = tokio::sync::mpsc::unbounded_channel::<PipelineCommand>();
         proc.set_shadow_fill_tx(tx);
@@ -457,9 +757,9 @@ mod predictor_wiring_tests {
     }
 
     #[test]
-    fn test_process_gates_only_with_features_accept_bypasses_legacy() {
-        // Exchange path: Accept → approved, legacy JS shrinkage bypassed.
-        // 交易所路徑：Accept → approved，跳過 JS shrinkage。
+    fn test_d1_accept_cannot_restore_baseline_deny() {
+        // ADR-0051 A3/A4: an optimistic predictor cannot restore a strict baseline deny.
+        // 樂觀模型不能恢復被既有成本門拒絕的權限。
         let mut proc = IntentProcessor::new();
         proc.risk_config.edge_predictor.use_edge_predictor = true;
         proc.risk_config.edge_predictor.shadow_mode = false;
@@ -467,6 +767,7 @@ mod predictor_wiring_tests {
         store.swap(
             "test",
             Arc::new(StubOkPredictor {
+                binding: crate::edge_predictor::test_artifact_binding("paper", "test"),
                 pred: Prediction {
                     q10: 100.0,
                     q50: 200.0,
@@ -475,6 +776,10 @@ mod predictor_wiring_tests {
             }),
         );
         proc.set_edge_predictor_store(store);
+        proc.set_edge_predictor_binding(
+            "test",
+            crate::edge_predictor::test_artifact_binding(proc.pipeline_kind.db_mode(), "test"),
+        );
         let gov = approved_governance();
         let state = paper_state_with_price(30_000.0);
         let features = FeatureVectorV1::zeroed();
@@ -484,6 +789,16 @@ mod predictor_wiring_tests {
         // AMD-2026-05-02-01 Track E E-1：Production process_gates_only_with_features
         // 前播下真實 Active lease（PA push back #4 — Production fixture 禁 Bypass 短路）。
         let lease = super::seed_production_lease(&gov, "intent-features-accept");
+        let baseline = IntentProcessor::new().process_gates_only_with_features(
+            &intent_btc(0.7),
+            &gov,
+            &state,
+            500.0,
+            GovernanceProfile::Production,
+            Some(&features),
+            Some("fixture:d1.1:same-event"),
+            0,
+        );
         let r = proc.process_gates_only_with_features(
             &intent_btc(0.7),
             &gov,
@@ -491,16 +806,644 @@ mod predictor_wiring_tests {
             500.0,
             GovernanceProfile::Production,
             Some(&features),
-            Some("ctx-exch"),
+            Some("fixture:d1.1:same-event"),
             0,
         );
+        assert!(!baseline.approved);
         assert!(
-            r.approved,
-            "Accept must bypass strict live JS gate; got {:?}",
-            r.rejected_reason
+            !r.approved,
+            "Accept must preserve baseline deny; got {:?}",
+            r
         );
-        // Successful Accept path → release as Consumed. / Accept 路徑 → release Consumed。
+        assert_eq!(r.approved_qty, 0.0);
+        assert_eq!(r.rejected_reason, baseline.rejected_reason);
+        assert_eq!(
+            r.rejected_reason.as_deref(),
+            Some(
+                "cost_gate(JS-live): no edge estimate — fail-closed (cold-start) / 無估計失敗關閉"
+            )
+        );
+        eprintln!(
+            "D1_TRACE {}",
+            serde_json::json!({
+                "context_id": "fixture:d1.1:same-event", "baseline_action": "DENY",
+                "baseline_quantity": baseline.approved_qty, "model_action": "NO_OP",
+                "model_quantiles_bps": [100.0, 200.0, 300.0], "final_action": "DENY",
+                "final_quantity": r.approved_qty, "reason": r.rejected_reason
+            })
+        );
+        // Local governance fixture cleanup; no venue contact.
         gov.release_lease(&lease, LeaseOutcome::Consumed).unwrap();
+    }
+
+    #[test]
+    fn test_d1_unidentified_stale_success_preserves_baseline() {
+        struct Unknown(u64);
+        impl EdgePredictorTrait for Unknown {
+            fn predict(&self, _: &FeatureVectorV1) -> Result<Prediction, PredictError> {
+                Ok(Prediction {
+                    q10: -100.0,
+                    q50: -50.0,
+                    q90: -10.0,
+                })
+            }
+            fn age_seconds(&self) -> u64 {
+                self.0
+            }
+            fn schema_hash(&self) -> &str {
+                crate::edge_predictor::features::feature_schema_hash()
+            }
+            fn definition_hash(&self) -> &str {
+                crate::edge_predictor::features::feature_definition_hash()
+            }
+            fn model_id(&self) -> &str {
+                "unidentified-test-backend"
+            }
+        }
+        for age in [0, 11] {
+            let mut proc = IntentProcessor::new();
+            proc.risk_config.edge_predictor.use_edge_predictor = true;
+            proc.risk_config.edge_predictor.shadow_mode = false;
+            proc.risk_config.edge_predictor.fallback_on_error = EdgePredictorFallback::FailClosed;
+            proc.risk_config.edge_predictor.model_max_age_seconds = 10;
+            proc.risk_config.edge_predictor.exploration_rate = 0.0;
+            let store = Arc::new(EdgePredictorStore::new());
+            store.swap("test", Arc::new(Unknown(age)));
+            proc.set_edge_predictor_store(store);
+            let gov = approved_governance();
+            let state = paper_state_with_price(30_000.0);
+            let features = FeatureVectorV1::zeroed();
+            let intent = intent_btc(0.7);
+            let context = "fixture:d1.1:unknown-stale";
+            let now = 1_700_000_000_000;
+            let baseline = IntentProcessor::new().process_gates_only_with_features(
+                &intent,
+                &gov,
+                &state,
+                500.0,
+                GovernanceProfile::Exploration,
+                Some(&features),
+                Some(context),
+                now,
+            );
+            let actual = proc.process_gates_only_with_features(
+                &intent,
+                &gov,
+                &state,
+                500.0,
+                GovernanceProfile::Exploration,
+                Some(&features),
+                Some(context),
+                now,
+            );
+            eprintln!("D1_UNKNOWN_STALE_ROUTER age={age} baseline_allowed={} baseline_qty={} baseline_reason={:?} expected_model_action=NO_OP final_allowed={} final_qty={} final_reason={:?}",
+                baseline.approved, baseline.approved_qty, baseline.rejected_reason,
+                actual.approved, actual.approved_qty, actual.rejected_reason);
+            assert!(baseline.approved);
+            assert_eq!(baseline.approved_qty, 0.001);
+            assert_eq!(baseline.rejected_reason, None);
+            assert!(actual.approved);
+            assert_eq!(actual.approved_qty, 0.001);
+            assert_eq!(actual.rejected_reason, None);
+
+            let lease = super::seed_production_lease(&gov, "intent-features-unknown-stale");
+            let denied_baseline = IntentProcessor::new().process_gates_only_with_features(
+                &intent,
+                &gov,
+                &state,
+                500.0,
+                GovernanceProfile::Production,
+                Some(&features),
+                Some(context),
+                now,
+            );
+            let denied_actual = proc.process_gates_only_with_features(
+                &intent,
+                &gov,
+                &state,
+                500.0,
+                GovernanceProfile::Production,
+                Some(&features),
+                Some(context),
+                now,
+            );
+            let reason = Some(
+                "cost_gate(JS-live): no edge estimate — fail-closed (cold-start) / 無估計失敗關閉",
+            );
+            assert!(!denied_baseline.approved && !denied_actual.approved);
+            assert_eq!(denied_baseline.approved_qty, 0.0);
+            assert_eq!(denied_actual.approved_qty, 0.0);
+            assert_eq!(denied_baseline.rejected_reason.as_deref(), reason);
+            assert_eq!(denied_actual.rejected_reason.as_deref(), reason);
+            gov.release_lease(&lease, LeaseOutcome::Consumed).unwrap();
+
+            for intent_type in [
+                IntentType::CloseLong,
+                IntentType::CloseShort,
+                IntentType::PositionAdjust,
+            ] {
+                let mut protected = intent.clone();
+                protected.intent_type = intent_type;
+                assert!(matches!(
+                    proc.evaluate_predictor_gate(
+                        &protected,
+                        &state,
+                        Some(&features),
+                        context,
+                        now,
+                        20.0
+                    ),
+                    PredictorAction::UseLegacyGate
+                ));
+            }
+        }
+    }
+
+    struct D1FaultPredictor(&'static str);
+    impl EdgePredictorTrait for D1FaultPredictor {
+        fn artifact_binding(&self) -> Option<crate::edge_predictor::PredictorArtifactBinding> {
+            let mut binding = crate::edge_predictor::test_artifact_binding("paper", "test");
+            binding.model_ids = [
+                "fault-injection-fixture".into(),
+                "fault-injection-fixture".into(),
+                "fault-injection-fixture".into(),
+            ];
+            Some(binding)
+        }
+        fn predict(&self, _: &FeatureVectorV1) -> Result<Prediction, PredictError> {
+            match self.0 {
+                "inference" => Err(PredictError::InferenceFailed(
+                    "fixture backend fault".into(),
+                )),
+                "no_model" => Err(PredictError::NoModel),
+                "nan_output" => Ok(Prediction {
+                    q10: f32::NAN,
+                    q50: 2.0,
+                    q90: 3.0,
+                }),
+                _ => Ok(Prediction {
+                    q10: 100.0,
+                    q50: 200.0,
+                    q90: 300.0,
+                }),
+            }
+        }
+        fn age_seconds(&self) -> u64 {
+            if self.0 == "stale" {
+                u64::MAX
+            } else {
+                0
+            }
+        }
+        fn schema_hash(&self) -> &str {
+            if self.0 == "schema" {
+                "wrong"
+            } else {
+                crate::edge_predictor::features::feature_schema_hash()
+            }
+        }
+        fn definition_hash(&self) -> &str {
+            if self.0 == "definition" {
+                "wrong"
+            } else {
+                crate::edge_predictor::features::feature_definition_hash()
+            }
+        }
+        fn model_id(&self) -> &str {
+            "fault-injection-fixture"
+        }
+    }
+
+    #[test]
+    fn test_d1_faults_deny_entry_but_preserve_reduction_and_quantity_cap() {
+        for (fault, metric) in [
+            ("no_model", "predict_no_model"),
+            ("schema", "predict_schema_error"),
+            ("definition", "predict_schema_error"),
+            ("stale", "model_stale"),
+            ("inference", "predict_errors"),
+            ("nan_output", "quantile_crossing_fatal"),
+            ("nan_input", "feature_out_of_range"),
+        ] {
+            let mut proc = IntentProcessor::new();
+            proc.risk_config.edge_predictor.use_edge_predictor = true;
+            proc.risk_config.edge_predictor.shadow_mode = false;
+            proc.risk_config.edge_predictor.fallback_on_error = EdgePredictorFallback::FailClosed;
+            let store = Arc::new(EdgePredictorStore::new());
+            store.swap("test", Arc::new(D1FaultPredictor(fault)));
+            proc.set_edge_predictor_store(store);
+            let mut expected = crate::edge_predictor::test_artifact_binding("paper", "test");
+            expected.model_ids = [
+                "fault-injection-fixture".into(),
+                "fault-injection-fixture".into(),
+                "fault-injection-fixture".into(),
+            ];
+            proc.set_edge_predictor_binding("test", expected);
+            let gov = approved_governance();
+            let mut state = paper_state_with_price(30_000.0);
+            let mut features = FeatureVectorV1::zeroed();
+            if fault == "nan_input" {
+                features.adx_1h = f32::NAN;
+            }
+            let result = proc.process_with_features(
+                &intent_btc(0.7),
+                &gov,
+                &state,
+                500.0,
+                GovernanceProfile::Exploration,
+                Some(&features),
+                Some("fixture:d1.1:fault"),
+                1_780_000_000_000,
+            );
+            assert!(!result.submitted, "{fault}");
+            assert_eq!(result.approved_qty, 0.0);
+            assert_eq!(
+                result.rejected_reason.as_deref(),
+                Some(format!("predictor_fallback_fail_closed:{metric}").as_str())
+            );
+            state.apply_fill("BTCUSDT", false, 0.001, 30_000.0, 0.0, 0, "test");
+            let mut reducing = intent_btc(0.7);
+            reducing.qty = 0.01;
+            let baseline = IntentProcessor::new().process_with_features(
+                &reducing,
+                &gov,
+                &state,
+                500.0,
+                GovernanceProfile::Exploration,
+                Some(&features),
+                Some("fixture:d1.1:reduce-cap"),
+                1_780_000_000_000,
+            );
+            let final_result = proc.process_with_features(
+                &reducing,
+                &gov,
+                &state,
+                500.0,
+                GovernanceProfile::Exploration,
+                Some(&features),
+                Some("fixture:d1.1:reduce-cap"),
+                1_780_000_000_000,
+            );
+            assert!(
+                baseline.submitted && final_result.submitted,
+                "{fault}: {:?}",
+                final_result.rejected_reason
+            );
+            assert_eq!(baseline.approved_qty, 0.001);
+            assert_eq!(final_result.approved_qty, 0.001);
+            for intent_type in [
+                IntentType::CloseLong,
+                IntentType::CloseShort,
+                IntentType::PositionAdjust,
+            ] {
+                let mut protective = reducing.clone();
+                protective.intent_type = intent_type;
+                assert!(matches!(
+                    proc.evaluate_predictor_gate(
+                        &protective,
+                        &state,
+                        Some(&features),
+                        "fixture:d1.1:protect",
+                        1_780_000_000_000,
+                        20.0
+                    ),
+                    PredictorAction::UseLegacyGate
+                ));
+            }
+            eprintln!(
+                "D1_TRACE {}",
+                serde_json::json!({"context_id":"fixture:d1.1:reduce-cap", "fault":fault,
+                "baseline_action":"SIZE_DOWN", "baseline_quantity":0.001, "model_action":"BYPASS_REDUCTION",
+                "requested_quantity":0.01, "final_action":"ALLOW", "final_quantity":final_result.approved_qty,
+                "reason":"opposite position quantity cap preserved"})
+            );
+        }
+    }
+
+    #[cfg(feature = "edge_predictor_ort")]
+    #[test]
+    fn test_d1_actual_onnx_policy_and_router_trace() {
+        use crate::edge_predictor::{
+            gate::{edge_predictor_gate, GateInputs, PredictorGateOutcome},
+            load_predictor_from_path,
+        };
+        use rand::{rngs::SmallRng, SeedableRng};
+        let shared: serde_json::Value = serde_json::from_str(include_str!(
+            "../../tests/fixtures/edge_predictor/aiml_d1_shared_inputs.json"
+        ))
+        .unwrap();
+        let fixture_dir = std::env::var_os("AIML_D1_FIXTURE_DIR")
+            .map(std::path::PathBuf::from)
+            .unwrap_or_else(|| {
+                std::path::Path::new(env!("CARGO_MANIFEST_DIR"))
+                    .join("tests/fixtures/edge_predictor")
+            });
+        let predictor = load_predictor_from_path(
+            &fixture_dir.join(shared["fixtures"]["q50"]["path"].as_str().unwrap()),
+        )
+        .unwrap();
+        let row: Vec<f32> = shared["smoke"]["feature_values"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .map(|v| v.as_f64().unwrap() as f32)
+            .collect();
+        assert_eq!(row.len(), 17);
+        let features = FeatureVectorV1 {
+            adx_1h: row[0],
+            bb_width_pct: row[1],
+            atr_pct: row[2],
+            funding_rate: row[3],
+            realized_vol_1h: row[4],
+            basis_bps: row[5],
+            orderbook_imbalance_top5: row[6],
+            spread_bps: row[7],
+            confluence_score: row[8],
+            persistence_elapsed_ms: row[9],
+            side: row[10] as i8,
+            notional_pct_of_bal: row[11],
+            concurrent_positions: row[12] as u8,
+            same_direction_cnt: row[13] as u8,
+            tod_sin: row[14],
+            tod_cos: row[15],
+            is_funding_settlement_window: row[16] as u8,
+        };
+        assert_eq!(features.to_array().as_slice(), row.as_slice());
+        let predicted = predictor.predict(&features).unwrap();
+        let binding = crate::edge_predictor::PredictorArtifactBinding {
+            engine_mode: "demo".into(),
+            strategy_name: "fixture_strategy".into(),
+            model_ids: ["q10", "q50", "q90"].map(|q| {
+                shared["fixtures"][q]["metadata"]["edge_p3_model_id"]
+                    .as_str()
+                    .unwrap()
+                    .into()
+            }),
+            artifact_sha256: ["q10", "q50", "q90"]
+                .map(|q| shared["fixtures"][q]["sha256"].as_str().unwrap().into()),
+        };
+        let mut intent = intent_btc(0.7);
+        intent.strategy = "fixture_strategy".into();
+        let store = Arc::new(EdgePredictorStore::new());
+        store.swap("fixture_strategy", predictor);
+        let mut proc = IntentProcessor::new();
+        proc.risk_config.edge_predictor.use_edge_predictor = true;
+        proc.risk_config.edge_predictor.shadow_mode = false;
+        proc.risk_config.edge_predictor.exploration_rate = 0.0;
+        proc.risk_config.edge_predictor.model_max_age_seconds = 315_360_000; // fixture mechanics only
+        proc.set_edge_predictor_store(store.clone());
+        proc.set_edge_predictor_binding(
+            "test",
+            crate::edge_predictor::test_artifact_binding(proc.pipeline_kind.db_mode(), "test"),
+        );
+        proc.set_pipeline_kind(crate::tick_pipeline::PipelineKind::Demo);
+        proc.set_edge_predictor_binding("fixture_strategy", binding.clone());
+        let mut inputs = GateInputs {
+            expected_binding: Some(binding),
+            engine_kind: crate::tick_pipeline::PipelineKind::Demo,
+            strategy: "fixture_strategy",
+            symbol: "BTCUSDT",
+            context_id: "fixture:d1.1:same-event",
+            cost_bps: 0.0,
+            is_add_to_existing: false,
+            now_ms: 1_780_000_000_000,
+        };
+        let mut rng = SmallRng::seed_from_u64(0);
+        assert!(matches!(
+            edge_predictor_gate(
+                &inputs,
+                &features,
+                &store,
+                &mut rng,
+                &proc.risk_config.edge_predictor,
+                || features.to_jsonb()
+            ),
+            PredictorGateOutcome::Accept
+        ));
+        inputs.cost_bps = 20.0;
+        let outcome = edge_predictor_gate(
+            &inputs,
+            &features,
+            &store,
+            &mut rng,
+            &proc.risk_config.edge_predictor,
+            || features.to_jsonb(),
+        );
+        let expected_reason = "predictor_cost_margin_insufficient: safety_margin=0.09bps < cost=20.00bps (q10=-1.53, q50=1.70, q90=4.10, k=0.50)";
+        match outcome {
+            PredictorGateOutcome::Reject(reason) => assert_eq!(reason, expected_reason),
+            _ => panic!("expected actual ONNX VETO"),
+        }
+        let gov = approved_governance();
+        let state = paper_state_with_price(30_000.0);
+        let baseline = IntentProcessor::new().process_with_features(
+            &intent,
+            &gov,
+            &state,
+            500.0,
+            GovernanceProfile::Exploration,
+            Some(&features),
+            Some(inputs.context_id),
+            inputs.now_ms,
+        );
+        let final_result = proc.process_with_features(
+            &intent,
+            &gov,
+            &state,
+            500.0,
+            GovernanceProfile::Exploration,
+            Some(&features),
+            Some(inputs.context_id),
+            inputs.now_ms,
+        );
+        assert!(baseline.submitted);
+        assert_eq!(baseline.approved_qty, 0.001);
+        assert!(!final_result.submitted);
+        assert_eq!(final_result.approved_qty, 0.0);
+        assert_eq!(final_result.rejected_reason.as_deref(), Some("predictor_cost_margin_insufficient: safety_margin=0.09bps < cost=15.00bps (q10=-1.53, q50=1.70, q90=4.10, k=0.50)"));
+        eprintln!(
+            "D1_TRACE {}",
+            serde_json::json!({"context_id":inputs.context_id, "baseline_action":"ALLOW", "baseline_quantity":baseline.approved_qty,
+            "model_action":"VETO", "model_quantiles_bps":[predicted.q10,predicted.q50,predicted.q90], "final_action":"DENY", "final_quantity":final_result.approved_qty, "reason":final_result.rejected_reason})
+        );
+        proc.risk_config.edge_predictor.model_max_age_seconds = 0;
+        assert!(matches!(
+            edge_predictor_gate(
+                &inputs,
+                &features,
+                &store,
+                &mut rng,
+                &proc.risk_config.edge_predictor,
+                || features.to_jsonb()
+            ),
+            PredictorGateOutcome::Fallback(crate::edge_predictor::gate::FallbackReason::ModelStale)
+        ));
+    }
+
+    #[cfg(feature = "edge_predictor_ort")]
+    #[test]
+    fn test_d1_actual_onnx_identity_fallback_preserves_baseline_and_protection() {
+        use crate::edge_predictor::{load_predictor_from_path, PredictorArtifactBinding};
+        let shared: serde_json::Value = serde_json::from_str(include_str!(
+            "../../tests/fixtures/edge_predictor/aiml_d1_shared_inputs.json"
+        ))
+        .unwrap();
+        let dir = std::env::var_os("AIML_D1_FIXTURE_DIR")
+            .map(std::path::PathBuf::from)
+            .unwrap_or_else(|| {
+                std::path::Path::new(env!("CARGO_MANIFEST_DIR"))
+                    .join("tests/fixtures/edge_predictor")
+            });
+        let path = dir.join(shared["fixtures"]["q50"]["path"].as_str().unwrap());
+        let expected = PredictorArtifactBinding {
+            engine_mode: "demo".into(),
+            strategy_name: "fixture_strategy".into(),
+            model_ids: ["q10", "q50", "q90"].map(|q| {
+                shared["fixtures"][q]["metadata"]["edge_p3_model_id"]
+                    .as_str()
+                    .unwrap()
+                    .into()
+            }),
+            artifact_sha256: ["q10", "q50", "q90"]
+                .map(|q| shared["fixtures"][q]["sha256"].as_str().unwrap().into()),
+        };
+        let gov = approved_governance();
+        let state = paper_state_with_price(30_000.0);
+        let mut intent = intent_btc(0.7);
+        intent.strategy = "fixture_strategy".into();
+        let features = FeatureVectorV1::zeroed();
+        for fault in ["engine", "strategy", "model_id", "hash", "missing_binding"] {
+            let mut proc = IntentProcessor::new();
+            proc.risk_config.edge_predictor.use_edge_predictor = true;
+            proc.risk_config.edge_predictor.shadow_mode = false;
+            proc.risk_config.edge_predictor.fallback_on_error = EdgePredictorFallback::FailClosed;
+            proc.risk_config.edge_predictor.model_max_age_seconds = u64::MAX;
+            proc.set_pipeline_kind(PipelineKind::Demo);
+            let store = Arc::new(EdgePredictorStore::new());
+            store.swap("fixture_strategy", load_predictor_from_path(&path).unwrap());
+            proc.set_edge_predictor_store(store);
+            let mut binding = expected.clone();
+            match fault {
+                "engine" => proc.set_pipeline_kind(PipelineKind::Live),
+                "strategy" => binding.strategy_name = "other_strategy".into(),
+                "model_id" => binding.model_ids[1] = "wrong-id".into(),
+                "hash" => binding.artifact_sha256[1] = "0".repeat(64),
+                _ => {}
+            }
+            if fault != "missing_binding" {
+                proc.set_edge_predictor_binding("fixture_strategy", binding);
+            }
+            for profile in [
+                GovernanceProfile::Exploration,
+                GovernanceProfile::Production,
+            ] {
+                let lease = if matches!(profile, GovernanceProfile::Production) {
+                    Some(super::seed_production_lease(
+                        &gov,
+                        "intent-features-identity",
+                    ))
+                } else {
+                    None
+                };
+                let (
+                    baseline_allow,
+                    baseline_qty,
+                    baseline_reason,
+                    final_allow,
+                    final_qty,
+                    final_reason,
+                ) = if matches!(profile, GovernanceProfile::Exploration) {
+                    let b = IntentProcessor::new().process_with_features(
+                        &intent,
+                        &gov,
+                        &state,
+                        500.0,
+                        profile,
+                        Some(&features),
+                        Some("fixture:d1.1:identity-baseline"),
+                        0,
+                    );
+                    let f = proc.process_with_features(
+                        &intent,
+                        &gov,
+                        &state,
+                        500.0,
+                        profile,
+                        Some(&features),
+                        Some("fixture:d1.1:identity-baseline"),
+                        0,
+                    );
+                    (
+                        b.submitted,
+                        b.approved_qty,
+                        b.rejected_reason,
+                        f.submitted,
+                        f.approved_qty,
+                        f.rejected_reason,
+                    )
+                } else {
+                    let b = IntentProcessor::new().process_gates_only_with_features(
+                        &intent,
+                        &gov,
+                        &state,
+                        500.0,
+                        profile,
+                        Some(&features),
+                        Some("fixture:d1.1:identity-baseline"),
+                        0,
+                    );
+                    let f = proc.process_gates_only_with_features(
+                        &intent,
+                        &gov,
+                        &state,
+                        500.0,
+                        profile,
+                        Some(&features),
+                        Some("fixture:d1.1:identity-baseline"),
+                        0,
+                    );
+                    assert_eq!(b.rejected_reason.as_deref(), Some("cost_gate(JS-live): no edge estimate — fail-closed (cold-start) / 無估計失敗關閉"));
+                    (
+                        b.approved,
+                        b.approved_qty,
+                        b.rejected_reason,
+                        f.approved,
+                        f.approved_qty,
+                        f.rejected_reason,
+                    )
+                };
+                assert_eq!(
+                    baseline_allow,
+                    matches!(profile, GovernanceProfile::Exploration)
+                );
+                assert_eq!(baseline_qty, if baseline_allow { 0.001 } else { 0.0 });
+                assert_eq!(
+                    (final_allow, final_qty, &final_reason),
+                    (baseline_allow, baseline_qty, &baseline_reason)
+                );
+                eprintln!(
+                    "D1_TRACE {}",
+                    serde_json::json!({"fault":fault, "baseline_action":if baseline_allow {"ALLOW"}else{"DENY"}, "baseline_quantity":baseline_qty,
+                    "model_action":"NO_OP_IDENTITY", "final_action":if final_allow {"ALLOW"}else{"DENY"}, "final_quantity":final_qty, "reason":final_reason})
+                );
+                if let Some(lease) = lease {
+                    gov.release_lease(&lease, LeaseOutcome::Consumed).unwrap();
+                }
+            }
+            let mut protective = intent.clone();
+            protective.intent_type = IntentType::CloseLong;
+            assert!(matches!(
+                proc.evaluate_predictor_gate(
+                    &protective,
+                    &state,
+                    Some(&features),
+                    "fixture:d1.1:identity-protect",
+                    0,
+                    20.0
+                ),
+                PredictorAction::UseLegacyGate
+            ));
+        }
     }
 
     // ========================================================

@@ -42,10 +42,11 @@ use std::path::{Path, PathBuf};
 use ort::session::{builder::GraphOptimizationLevel, Session};
 use ort::value::Tensor;
 use parking_lot::Mutex;
+use sha2::{Digest, Sha256};
 
 use super::features::{feature_definition_hash, feature_schema_hash, FEATURE_SCHEMA_VERSION};
 use super::rearrangement::enforce_monotone;
-use super::{EdgePredictor, FeatureVectorV1, PredictError, Prediction};
+use super::{EdgePredictor, FeatureVectorV1, PredictError, Prediction, PredictorArtifactBinding};
 
 // ── Owned metadata keys (MUST mirror program_code/ml_training/onnx_exporter.py).
 // ── 擁有的 metadata key（必須鏡像 Python onnx_exporter.py）。
@@ -123,20 +124,25 @@ const ONNX_INPUT_NAME: &str = "input";
 /// `Session::run` 需 `&mut self`，用 Mutex 包裝供 Arc<dyn EdgePredictor> 串行化。
 pub(crate) struct OrtPredictor {
     meta: OnnxMetadata,
+    artifact_sha256: String,
     input_name: String,
     session: Mutex<Session>,
 }
 
 impl OrtPredictor {
     fn load(path: &Path) -> Result<Self, String> {
+        // Hash exactly the immutable buffer passed to ORT, not a later path read.
+        let bytes = std::fs::read(path)
+            .map_err(|e| format!("read ONNX artifact {}: {}", path.display(), e))?;
+        let artifact_sha256 = format!("{:x}", Sha256::digest(&bytes));
         let session = Session::builder()
             .map_err(|e| format!("ort Session::builder(): {}", e))?
             .with_optimization_level(GraphOptimizationLevel::Level3)
             .map_err(|e| format!("with_optimization_level: {}", e))?
-            .commit_from_file(path)
+            .commit_from_memory(&bytes)
             .map_err(|e| {
                 format!(
-                    "ort commit_from_file({}) failed: {} / ort 載入失敗",
+                    "ort commit_from_memory({}) failed: {} / ort 載入失敗",
                     path.display(),
                     e
                 )
@@ -164,6 +170,7 @@ impl OrtPredictor {
 
         Ok(Self {
             meta,
+            artifact_sha256,
             input_name,
             session: Mutex::new(session),
         })
@@ -254,6 +261,7 @@ fn validate_metadata_against_runtime(meta: &OnnxMetadata, path: &Path) -> Result
 /// 三重預測器 — q10/q50/q90 作為邏輯單元載入；實作 `EdgePredictor` 時先跑三次
 /// 推理再跑 `enforce_monotone`，gate 永遠不會看到 quantile crossing。
 pub struct OnnxTrioPredictor {
+    artifact_binding: PredictorArtifactBinding,
     q10: OrtPredictor,
     q50: OrtPredictor,
     q90: OrtPredictor,
@@ -294,8 +302,26 @@ impl OnnxTrioPredictor {
         let definition_hash = q50.meta.definition_hash.clone();
         let model_id = q50.meta.model_id.clone();
         let train_date_unix = parse_train_date_unix(&q50.meta.train_date);
+        let artifact_binding = PredictorArtifactBinding {
+            engine_mode: q50.meta.engine_mode.clone(),
+            strategy_name: q50.meta.strategy_name.clone(),
+            model_ids: [
+                q10.meta.model_id.clone(),
+                q50.meta.model_id.clone(),
+                q90.meta.model_id.clone(),
+            ],
+            artifact_sha256: [
+                q10.artifact_sha256.clone(),
+                q50.artifact_sha256.clone(),
+                q90.artifact_sha256.clone(),
+            ],
+        };
+        if !artifact_binding.is_complete() {
+            return Err("incomplete ONNX artifact identity".into());
+        }
 
         Ok(Self {
+            artifact_binding,
             q10,
             q50,
             q90,
@@ -390,6 +416,10 @@ fn parse_train_date_unix(s: &str) -> u64 {
 }
 
 impl EdgePredictor for OnnxTrioPredictor {
+    fn artifact_binding(&self) -> Option<PredictorArtifactBinding> {
+        Some(self.artifact_binding.clone())
+    }
+
     fn predict(&self, features: &FeatureVectorV1) -> Result<Prediction, PredictError> {
         // Invariant #12 — NaN/Inf/out-of-range → fail-closed before inference.
         // Invariant #12 — NaN/Inf/超界 → 推理前 fail-closed。

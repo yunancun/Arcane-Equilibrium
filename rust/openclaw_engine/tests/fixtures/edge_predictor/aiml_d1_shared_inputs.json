@@ -1,0 +1,349 @@
+{
+  "source_head": "af12fc9e0b75925ad0404a351018cebd21598277",
+  "status": "BLOCKED_SHARED_INPUT",
+  "evidence_source_tier": "fixture_only",
+  "selected_cell": null,
+  "selection_time": null,
+  "selection_reason": "BLOCKED: no authorized declared-universe/cell or source snapshot metadata supplied. No real fit/OOS/final holdout results were viewed.",
+  "baseline": "existing Rust router with use_edge_predictor=false and all existing gates",
+  "policy_surface_id": null,
+  "policy_source": "ADR-0051 A3/A4/A5",
+  "feature_schema_version": "v1",
+  "feature_names": [
+    "adx_1h",
+    "bb_width_pct",
+    "atr_pct",
+    "funding_rate",
+    "realized_vol_1h",
+    "basis_bps",
+    "orderbook_imbalance_top5",
+    "spread_bps",
+    "confluence_score",
+    "persistence_elapsed_ms",
+    "side",
+    "notional_pct_of_bal",
+    "concurrent_positions",
+    "same_direction_cnt",
+    "tod_sin",
+    "tod_cos",
+    "is_funding_settlement_window"
+  ],
+  "feature_definitions": [
+    "adx_1h=ADX trend strength on 1h klines; range[0,100]",
+    "bb_width_pct=Bollinger Band width percent on 5m klines; range[0,50]",
+    "atr_pct=ATR14 as percent of price on 5m klines; range[0,20]",
+    "funding_rate=Bybit funding rate decimal; range[-0.01,0.01]",
+    "realized_vol_1h=1h realized vol percent from 1m log returns sqrt(60)*100; range[0,20]",
+    "basis_bps=(index_price-last_price)/mid_price*10000; range[-500,500]",
+    "orderbook_imbalance_top5=(bid_l5_qty-ask_l5_qty)/(bid_l5_qty+ask_l5_qty); range[-1,1]",
+    "spread_bps=(ask_price-bid_price)/mid_price*10000; range[0,1000]",
+    "confluence_score=sum of local strategy confluence components; range[0,65]",
+    "persistence_elapsed_ms=milliseconds since signal onset; range[0,3600000]",
+    "side=order side encoded long=1 short=-1; range{-1,1}",
+    "notional_pct_of_bal=intended_notional/paper_balance*100; range[0,100]",
+    "concurrent_positions=open position count at decision time; range[0,100]",
+    "same_direction_cnt=open positions sharing side at decision time; range[0,100]",
+    "tod_sin=sin(2*pi*utc_hour/24); range[-1,1]",
+    "tod_cos=cos(2*pi*utc_hour/24); range[-1,1]",
+    "is_funding_settlement_window=1 iff within last 15m of 8h funding window; range{0,1}"
+  ],
+  "feature_schema_hash": "sha256:de234e827d734a48",
+  "feature_definition_hash": "sha256:d701f7d30e3c29f8",
+  "missingness": {
+    "pure_vector": "all 17 finite, in-range values required; missing typed vector -> existing router baseline; JSON missing field cannot be interpreted as a new sample",
+    "producer": "feature_builder currently zero-fills missing inputs and clamps; therefore typed-vector validity does not certify observed source availability"
+  },
+  "freshness": {
+    "model_max_age_seconds_source": "RiskConfig.edge_predictor.model_max_age_seconds; production default unchanged",
+    "feature_observed_at": null,
+    "feature_available_at": null,
+    "gap": "FeatureVectorV1 has no per-feature freshness/availability time. No new freshness gate is asserted."
+  },
+  "split_lineage": {
+    "split_id": null,
+    "train": null,
+    "validation": null,
+    "calibration": null,
+    "final_holdout": null,
+    "existing_algorithm": "quantile_trainer: ordered tail holdout 7d, funding_arb 14d; one-sided embargo 24h, funding_arb 72h; tail splits .25 validation/.25 calibration/.50 final test",
+    "purge": "actual label interval purge required for qualification; current quantile trainer does not enforce label_window_hours purge; D1.2 remains WAITING",
+    "embargo": "existing train cutoff strictly before holdout start minus embargo; failure/unenforced flag cannot certify eligibility"
+  },
+  "label_lineage": {
+    "outcome_cutoff_ts": null,
+    "label_schema_hash": null,
+    "label_config_hash": null,
+    "label_interval_start": null,
+    "label_interval_end": null,
+    "label_available_at": null,
+    "label_maturity": null,
+    "revision_recorded_at": null,
+    "fit_cutoff": null
+  },
+  "action_contract": {
+    "outputs": [
+      "q10",
+      "q50",
+      "q90"
+    ],
+    "units": "bps",
+    "actions": [
+      "NO_OP",
+      "VETO",
+      "SIZE_DOWN"
+    ],
+    "ALLOW": "NO_OP",
+    "constraints": [
+      "final_allowed => baseline_allowed AND existing gates pass",
+      "final_notional <= baseline_notional",
+      "risk reduction/protective/close/cancel bypass model",
+      "unknown/mixed/uncovered scope/hash drift disables model contribution"
+    ],
+    "seam_limit": "Pure apply_advisory_action implements NO_OP/VETO/SIZE_DOWN on an existing router baseline. Legacy predictor still emits Accept/Reject/Fallback; no quantile-to-size policy, qualified generation, lot normalization or serving activation is claimed.",
+    "size_down": {
+      "quantity_unit": "same instrument quantity unit as baseline; instrument and price immutable",
+      "max_quantity": "finite absolute cap, not a multiplier; cannot increase baseline quantity",
+      "zero": "deny with action reason",
+      "invalid": "negative or non-finite cap denies eligible increasing entry; protection/unknown identity bypass takes precedence",
+      "identity": "caller independently validates exact artifact/scope; unknown disables contribution",
+      "position_effect": "Rust caller classifies risk increasing entry; reduction/unknown bypass",
+      "higher_or_equal_cap": "preserve baseline action, quantity and reason"
+    },
+    "fixture_size_down": {
+      "context_id": "fixture:d1.1:advisory-size-down",
+      "baseline_allowed": true,
+      "baseline_quantity": 0.001,
+      "model_action": {
+        "action": "SIZE_DOWN",
+        "max_quantity": 0.0004,
+        "reason": "fixture_policy_quantity_cap"
+      },
+      "expected_final_allowed": true,
+      "expected_final_quantity": 0.0004,
+      "expected_final_reason": "fixture_policy_quantity_cap",
+      "qualification": "mechanics_only_not_a_fitted_policy"
+    }
+  },
+  "eligibility": {
+    "source": "program_code/ml_training/quantile_reports.py",
+    "pinball_skill_gt": 0.1,
+    "coverage_error_pp_lt": 3.0,
+    "decile_lift_ci_lower_gt": 1.3,
+    "decile_lift_point_gt": 1.5,
+    "crossing_rate_lt": 0.01,
+    "lgbm_vs_linear_qr_skill_diff_gt": 0.05,
+    "sample_gate_prod": 500,
+    "sample_gate_shadow": 200,
+    "synthetic_share_max": 0.0,
+    "zeros_share_max": 0.5,
+    "min_train_rows": 50,
+    "min_validation_rows": 10,
+    "min_calibration_rows": 10,
+    "min_test_rows": 10,
+    "qualification_receipt_digest": null,
+    "n_raw": null,
+    "n_unique_events": null,
+    "n_nonoverlap": null,
+    "n_days": null,
+    "concentration": null,
+    "power": "unknown; nonoverlap count is not statistical independence; existing counts are reference only"
+  },
+  "holdout_id": null,
+  "trial_id": null,
+  "toolchain": {
+    "rustc": "rustc 1.95.0 (59807616e 2026-04-14)\nbinary: rustc\ncommit-hash: 59807616e1fa2540724bfbac14d7976d7e4a3860\ncommit-date: 2026-04-14\nhost: aarch64-apple-darwin\nrelease: 1.95.0\nLLVM version: 22.1.2\n",
+    "cargo": "cargo 1.95.0 (f2d3ce0bd 2026-03-21)\n",
+    "rust_ort": "2.0.0-rc.12; API24; explicit edge_predictor_ort",
+    "runtime": {
+      "native_library_source": "/Users/ncyu/.cache/uv/archive-v0/5-Ehuax-jmLaadqm/onnxruntime/capi/libonnxruntime.1.27.0.dylib",
+      "native_library_sha256": "0d96dce50b9b3bf104857ce1c20352b9a268fab5b60e35cab613c0a8dd161c82",
+      "native_runtime_version": "1.27.0",
+      "api_24_available": true,
+      "configuration": "ORT_LIB_LOCATION=<audit>/native; ORT_PREFER_DYNAMIC_LINK=1; ORT_SKIP_DOWNLOAD=1; CARGO_NET_OFFLINE=true; local vendor read-only; no Cargo policy change"
+    }
+  },
+  "fixtures": {
+    "q10": {
+      "path": "edge_predictor_demo_fixture_strategy_q10_v1_2026-04-15.onnx",
+      "sha256": "afe5733af214e49797a2997e1ca314ee99d87232e03fea2eaa05b0aa2038aa31",
+      "expected_bps": -1.5273265838623047,
+      "selected_leaf_weights": [
+        -2.4934730529785156,
+        0.0889727920293808,
+        0.10313563048839569,
+        0.09282206743955612,
+        0.11532846093177795,
+        0.1037956103682518,
+        0.09341605007648468,
+        0.08407444506883621,
+        0.04704611003398895,
+        0.07096239179372787,
+        0.08524762839078903,
+        0.08134528249502182
+      ],
+      "metadata": {
+        "edge_p3_schema_version": "v1",
+        "edge_p3_feature_schema_hash": "sha256:de234e827d734a48",
+        "edge_p3_feature_definition_hash": "sha256:d701f7d30e3c29f8",
+        "edge_p3_engine_mode": "demo",
+        "edge_p3_strategy_name": "fixture_strategy",
+        "edge_p3_quantile": "q10",
+        "edge_p3_train_date": "2026-04-15",
+        "edge_p3_model_id": "edge_predictor_demo_fixture_strategy_q10_v1_2026-04-15",
+        "edge_p3_n_features": "17"
+      },
+      "original_sha256": "22184783de5e5ad0dab623644ab17bcc7e17f071a681334c1ec674a4322dc9c3",
+      "graph_sha256": "31ce1bf939d89723547ed5378d878e28c9b9d56b636f0d65149308b8f49e06a8"
+    },
+    "q50": {
+      "path": "edge_predictor_demo_fixture_strategy_q50_v1_2026-04-15.onnx",
+      "sha256": "d8201723e4fc5d0c06193d542b54a0ac2a6c6dd4a0c9b6339f3ac2e6f283bf59",
+      "expected_bps": 1.7042269483208656,
+      "selected_leaf_weights": [
+        0.3065752685070038,
+        0.16106802225112915,
+        0.15090900659561157,
+        0.1389363408088684,
+        0.12850815057754517,
+        0.11921235918998718,
+        0.10729111731052399,
+        0.13593286275863647,
+        0.12233958393335342,
+        0.12281950563192368,
+        0.11086038500070572,
+        0.09977434575557709
+      ],
+      "metadata": {
+        "edge_p3_schema_version": "v1",
+        "edge_p3_feature_schema_hash": "sha256:de234e827d734a48",
+        "edge_p3_feature_definition_hash": "sha256:d701f7d30e3c29f8",
+        "edge_p3_engine_mode": "demo",
+        "edge_p3_strategy_name": "fixture_strategy",
+        "edge_p3_quantile": "q50",
+        "edge_p3_train_date": "2026-04-15",
+        "edge_p3_model_id": "edge_predictor_demo_fixture_strategy_q50_v1_2026-04-15",
+        "edge_p3_n_features": "17"
+      },
+      "original_sha256": "b505af8a086b93bdfbba608e62a17242fb1693ce4d8f8ff801fb72ef29e7335d",
+      "graph_sha256": "f619e41926fda11c472a99631145410b1f1d5640e62e98febe74d72ebdc5cd7f"
+    },
+    "q90": {
+      "path": "edge_predictor_demo_fixture_strategy_q90_v1_2026-04-15.onnx",
+      "sha256": "dd222cd5ecf5b47af325c869a7f0eb1a329c134cf6791b950edad8b570d5e10c",
+      "expected_bps": 4.102983659686288,
+      "selected_leaf_weights": [
+        2.7804224491119385,
+        0.18285013735294342,
+        0.16456513106822968,
+        0.19208768010139465,
+        0.1728789061307907,
+        0.16466037929058075,
+        0.09514593333005905,
+        0.13867974281311035,
+        -0.004019325133413076,
+        0.11369100213050842,
+        0.10232190042734146,
+        -0.0003002769371960312
+      ],
+      "metadata": {
+        "edge_p3_schema_version": "v1",
+        "edge_p3_feature_schema_hash": "sha256:de234e827d734a48",
+        "edge_p3_feature_definition_hash": "sha256:d701f7d30e3c29f8",
+        "edge_p3_engine_mode": "demo",
+        "edge_p3_strategy_name": "fixture_strategy",
+        "edge_p3_quantile": "q90",
+        "edge_p3_train_date": "2026-04-15",
+        "edge_p3_model_id": "edge_predictor_demo_fixture_strategy_q90_v1_2026-04-15",
+        "edge_p3_n_features": "17"
+      },
+      "original_sha256": "3820f52dc012a24773ece174516ecb07bedf8bbe4632f2c4f076008e0d7167c5",
+      "graph_sha256": "4b66a10e2762679846468bd59be222fdcff443e4e530813853214678d0063b25"
+    }
+  },
+  "smoke": {
+    "context_id": "fixture:d1.1:same-event",
+    "strategy_name": "fixture_strategy",
+    "symbol": "BTCUSDT",
+    "side": 1,
+    "ts_ms": 1780000000000,
+    "feature_values": [
+      25.0,
+      1.5,
+      0.5,
+      0.0001,
+      1.2,
+      5.0,
+      0.1,
+      2.0,
+      30.0,
+      60000.0,
+      1.0,
+      5.0,
+      1.0,
+      1.0,
+      0.5,
+      0.8,
+      0.0
+    ],
+    "absolute_tolerance_bps": 1e-05,
+    "expected_bps": {
+      "q10": -1.5273265838623047,
+      "q50": 1.7042269483208656,
+      "q90": 4.102983659686288
+    },
+    "oracle_method": "Independent traversal of committed ONNX tree attributes; f32 leaf weights summed in Python f64. No fit, OOS or holdout results read.",
+    "oracle_sha256": "e3f93f317502c4bfb368a2cda378f7948bd8c524b25693e6bcd5b5ac9fa627d3",
+    "model_max_age_seconds_for_mechanics": 315360000,
+    "baseline_quantity": 0.001,
+    "cost_bps_reject_case": 20.0,
+    "qualification": "none; fixture identities only"
+  },
+  "h3": {
+    "market_event_identity_fields": [
+      "venue",
+      "instrument_class",
+      "symbol",
+      "event_type",
+      "source_sequence_or_event_id",
+      "source_event_time"
+    ],
+    "event_identity": null,
+    "context_id_role": "existing consumer join key, not independently proven market event identity",
+    "ingestion_attempt": null,
+    "feature_revision": null,
+    "label_revision": null,
+    "source_identity": null,
+    "cost_snapshot_identity": null,
+    "visibility_boundary": "feature observation/available-at <= decision time; label interval ended and available/mature/revision_recorded_at <= fit_cutoff; choose visible revisions only; purge actual interval overlaps",
+    "deduplication": "retry, ingestion attempt, feature/label revision and model versions cannot create new independent market samples",
+    "existing_loader_gap": "parquet_etl actual loader projects context_id/ts_ms/features/label/symbol/strategy/schema/definition/close tag only. No attempt/revision/available-at/cost identity projected."
+  },
+  "source_inputs_sha256": {
+    "rust/openclaw_engine/src/edge_predictor/features.rs": "9548c4c4d5be143d62890e4ec69596ca1a4dba430e7b3f84ffff1f6a9ae7ea59",
+    "rust/openclaw_engine/src/edge_predictor/feature_builder.rs": "3286d8a5857ecbaa37e4abf42f3f0d74832c7695d85c582fe3b32f4503180d27",
+    "program_code/ml_training/parquet_etl.py": "08c4091ad3c0a36d7b62538c513401b0a96310843b4927840c4fc32a8a78e2e6",
+    "program_code/ml_training/quantile_trainer.py": "cbc484a5b34aad700bc0c4de29874dc7821b70e9d9d3c0f177ea9aed72f4aeb2",
+    "program_code/ml_training/quantile_reports.py": "37dc38b92ee753cafa3c908a4469f471355482c4c2b44154c4f315f4cf98b246",
+    "program_code/ml_training/pit_dataset_manifest.py": "58013ac1c4f06f0b8f20c4902c7ecba21720f9920f8e835209b43df104bf0cd9",
+    "docs/adr/0051-registry-authorized-advisory-model-serving.md": "7d8780fbc790f61e9ef1fdbd4cc601d12443f38f76d8fe0d08bff5e09748e805",
+    "rust/openclaw_engine/Cargo.toml": "2b92500535e559f3ce6b5e5bb02a3bc5e24ea08bf40ca49f123adcbf1541b310",
+    "rust/Cargo.lock": "f98e391038265c3f4fbf52109d68ac8169b8eb74bcee09954c2278615e18a1d8"
+  },
+  "gaps": [
+    "REAL_CELL_METADATA_MISSING",
+    "REAL_SOURCE_SNAPSHOT_AND_PIT_REVISIONS_MISSING",
+    "POLICY_SURFACE_SCOPE_TRIAL_HOLDOUT_IDS_MISSING",
+    "FEATURE_PRODUCER_DEFINITION_PARITY_UNVERIFIED: realized_vol uses EWMA, basis uses last instead of mid; missing values zero-filled",
+    "QUALIFIED_MODEL_SCOPE_HASH_AND_SIZE_DOWN_NOT_EXPOSED_BY_LEGACY_SEAM",
+    "REVIEW_REQUIRES_COMMITTED_CLEAN_CHECKPOINT_BUT_NO_COMMIT_AUTHORITY",
+    "PA_TRANSPORT_FAILURE_NO_RETRY",
+    "INDEPENDENT_FREEZE_AND_E2_E4_FA_R4_VERDICTS_MISSING"
+  ],
+  "freeze": {
+    "status": "CANDIDATE_NOT_ACCEPTED",
+    "PA": "UNVERIFIED_TRANSPORT_FAILURE_NO_RETRY",
+    "MIT": "UNVERIFIED_PREDECESSOR_BLOCKED",
+    "PM": "mechanics bytes pinned only; shared-input qualification freeze NOT accepted",
+    "operator_delta": "Approved four-file definition metadata correction; parent review IDs/budget unchanged"
+  }
+}

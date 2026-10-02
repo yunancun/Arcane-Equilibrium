@@ -25,7 +25,7 @@ use crate::edge_predictor::{
     gate::{
         edge_predictor_gate, FallbackReason, GateInputs, PredictorGateOutcome, ShadowFillPayload,
     },
-    EdgePredictorStore,
+    EdgePredictorStore, PredictorArtifactBinding,
 };
 use crate::risk_checks::check_order_allowed;
 use crate::tick_pipeline::{PipelineCommand, PipelineKind};
@@ -589,6 +589,7 @@ pub struct IntentProcessor {
     /// EDGE-P3-1 A4：逐引擎 ML edge predictor store（None → 跳過 gate 回退 JS
     /// shrinkage）。由引擎啟動時經 `set_edge_predictor_store` 注入。
     edge_predictor_store: Option<Arc<EdgePredictorStore>>,
+    edge_predictor_bindings: std::collections::HashMap<String, PredictorArtifactBinding>,
     /// EDGE-P3-1 A4: Pipeline kind — only Paper engine runs ε-greedy branch.
     /// EDGE-P3-1 A4：管線種類——僅 Paper 走 ε-greedy 分支。
     pipeline_kind: PipelineKind,
@@ -660,9 +661,6 @@ pub(super) enum PredictorAction {
     /// No-op — predictor disabled or no store; continue to legacy JS gate.
     /// 無動作 — predictor 禁用或無 store；繼續走 JS gate。
     UseLegacyGate,
-    /// Predictor accepted (shadow_mode=false); skip legacy JS gate, continue pipeline.
-    /// Predictor 接受（shadow_mode=false）；跳過 JS gate 繼續管線。
-    SkipLegacyGate,
     /// Predictor rejected (hard reject OR ε-greedy fired OR fail-closed fallback).
     /// Predictor 拒絕（硬拒絕 / ε-greedy / fail-closed 回退）。
     Reject(String),
@@ -686,6 +684,7 @@ impl IntentProcessor {
             global_exposure_usdt: None,
             account_leverage: 1.0,
             edge_predictor_store: None,
+            edge_predictor_bindings: std::collections::HashMap::new(),
             pipeline_kind: PipelineKind::Paper,
             endpoint_env: None,
             // Tests get a fixed seed; production overrides via `set_predictor_rng_seed`.
@@ -721,6 +720,7 @@ impl IntentProcessor {
             global_exposure_usdt: None,
             account_leverage: 1.0,
             edge_predictor_store: None,
+            edge_predictor_bindings: std::collections::HashMap::new(),
             pipeline_kind: PipelineKind::Paper,
             endpoint_env: None,
             predictor_rng: Mutex::new(SmallRng::seed_from_u64(0)),
@@ -1363,6 +1363,17 @@ impl IntentProcessor {
         }
     }
 
+    /// Bind independently accepted expected identity; installing a predictor alone
+    /// never accepts its model IDs or bytes. This does not activate serving.
+    pub fn set_edge_predictor_binding(
+        &mut self,
+        strategy: &str,
+        binding: PredictorArtifactBinding,
+    ) {
+        self.edge_predictor_bindings
+            .insert(strategy.into(), binding);
+    }
+
     /// EDGE-P3-1 A4: Wire the per-engine EdgePredictorStore. None → gate skipped.
     /// EDGE-P3-1 A4：注入逐引擎 EdgePredictorStore。None → 跳過 gate。
     pub fn set_edge_predictor_store(&mut self, store: Arc<EdgePredictorStore>) {
@@ -1463,7 +1474,7 @@ impl IntentProcessor {
     /// Policy (spec §7.3 · §7.4):
     /// - `!cfg.use_edge_predictor || store=None || features=None` → UseLegacyGate.
     /// - `cfg.shadow_mode=true` → always UseLegacyGate (Stage 3 observation).
-    /// - Outcome=Accept → SkipLegacyGate (predictor decides).
+    /// - Outcome=Accept → UseLegacyGate (ADR-0051 NO_OP preserves baseline).
     /// - Outcome=Reject/RejectAdd → Reject.
     /// - Outcome=ShadowFill → emit IPC, Reject("epsilon_greedy_exploration").
     /// - Outcome=Fallback(reason) → Shrinkage config: UseLegacyGate;
@@ -1496,6 +1507,21 @@ impl IntentProcessor {
         // 再返回 PredictorAction。
         // Spec: docs/CCAgentWorkSpace/PA/workspace/reports/
         //       2026-05-09--full_dispatch_engineering_plan.md §2.5 B-M1
+        // ADR-0051 A3: model contribution is confined to increasing entries.
+        // The router caps opposite-position intents at the existing quantity;
+        // closing/adjustment intents and those reductions bypass inference.
+        // This does not bypass any baseline governance, risk or cost gate.
+        let increasing_entry = matches!(
+            intent.intent_type,
+            IntentType::OpenLong | IntentType::OpenShort
+        ) && !paper_state
+            .get_position(&intent.symbol)
+            .map(|p| p.is_long != intent.is_long)
+            .unwrap_or(false);
+        if !increasing_entry {
+            return PredictorAction::UseLegacyGate;
+        }
+
         let cfg = &self.risk_config.edge_predictor;
         let no_predictor =
             !cfg.use_edge_predictor || self.edge_predictor_store.is_none() || features.is_none();
@@ -1525,6 +1551,7 @@ impl IntentProcessor {
             .unwrap_or(false);
 
         let inputs = GateInputs {
+            expected_binding: self.edge_predictor_bindings.get(&intent.strategy).cloned(),
             engine_kind: self.pipeline_kind,
             strategy: &intent.strategy,
             symbol: &intent.symbol,
@@ -1555,6 +1582,9 @@ impl IntentProcessor {
             PredictorGateOutcome::Reject(_) => ("reject", "evaluation_log"),
             PredictorGateOutcome::RejectAdd(_) => ("reject_add", "evaluation_log"),
             PredictorGateOutcome::ShadowFill(_) => ("shadow_fill", "shadow_synthetic"),
+            PredictorGateOutcome::Fallback(
+                FallbackReason::UnboundModel | FallbackReason::ModelIdentityMismatch,
+            ) => ("fallback_model_identity", "evaluation_log"),
             PredictorGateOutcome::Fallback(_) => match cfg.fallback_on_error {
                 EdgePredictorFallback::Shrinkage => ("fallback_use_legacy", "evaluation_log"),
                 EdgePredictorFallback::FailClosed => ("fallback_fail_closed", "evaluation_log"),
@@ -1578,7 +1608,7 @@ impl IntentProcessor {
         }
 
         match outcome {
-            PredictorGateOutcome::Accept => PredictorAction::SkipLegacyGate,
+            PredictorGateOutcome::Accept => PredictorAction::UseLegacyGate,
             PredictorGateOutcome::Reject(reason) => PredictorAction::Reject(reason),
             PredictorGateOutcome::RejectAdd(reason) => PredictorAction::Reject(reason),
             PredictorGateOutcome::ShadowFill(payload) => {
@@ -1587,6 +1617,9 @@ impl IntentProcessor {
                     "predictor_epsilon_greedy_exploration: paper shadow-fill dispatched".into(),
                 )
             }
+            PredictorGateOutcome::Fallback(
+                FallbackReason::UnboundModel | FallbackReason::ModelIdentityMismatch,
+            ) => PredictorAction::UseLegacyGate,
             PredictorGateOutcome::Fallback(reason) => self.apply_fallback(reason),
         }
     }

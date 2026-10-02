@@ -77,6 +77,16 @@ classes. Runtime observation cannot legalize normative denial.
 - Learning/AI output remains advisory until the full governance path accepts it.
 - Never fake AI calls, tests, runtime state, trading, fills, lineage, or proof.
 
+## Predictor advisory contract
+
+- ADR-0051 action semantics belong to the pure consumer documented in
+  [the fixture README](../rust/openclaw_engine/tests/fixtures/edge_predictor/README.md).
+  Baseline quantity caps are not model SIZE_DOWN evidence; test an explicit
+  model cap against a real router baseline, preserving denial reasons and protection.
+- Pure action mechanics and fixed ONNX parity do not prove a quantile-to-size policy,
+  qualified real data, active serving, source adoption or runtime. Missing real
+  shared-input lineage and independent verdicts remain explicit gates.
+
 ## Development workflow
 
 - Operator 決定路線、範圍擴張與驗收變更；範圍內自主推進可用功能，流程工作須服務實際交付。

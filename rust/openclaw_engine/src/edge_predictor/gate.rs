@@ -20,14 +20,105 @@
 use rand::{rngs::SmallRng, Rng};
 
 use super::rearrangement::enforce_monotone;
-use super::{EdgePredictorStore, FeatureVectorV1, PredictError};
+use super::{EdgePredictorStore, FeatureVectorV1, PredictError, PredictorArtifactBinding};
 use crate::config::risk_config::EdgePredictor as EdgePredictorCfg;
 use crate::tick_pipeline::PipelineKind;
+
+/// ADR-0051 A3 action contract. Quantity uses the baseline instrument's units.
+/// This pure contract does not select a quantile-to-size policy or activate serving.
+#[derive(Debug, Clone, PartialEq, serde::Serialize, serde::Deserialize)]
+#[serde(
+    tag = "action",
+    rename_all = "SCREAMING_SNAKE_CASE",
+    deny_unknown_fields
+)]
+pub enum AdvisoryAction {
+    #[serde(alias = "ALLOW")]
+    NoOp,
+    Veto {
+        reason: String,
+    },
+    SizeDown {
+        max_quantity: f64,
+        reason: String,
+    },
+}
+
+/// Derived by the Rust caller, never by a model-supplied classification.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum AdvisoryPositionEffect {
+    RiskIncreasingEntry,
+    RiskReduction,
+    Unknown,
+}
+
+/// Scalar decision after all existing gates; a denial retains its original reason.
+#[derive(Debug, Clone, PartialEq)]
+pub struct AdvisoryDecision {
+    pub allowed: bool,
+    pub quantity: f64,
+    pub reason: Option<String>,
+}
+
+/// Apply an already-selected advisory action to an authoritative baseline.
+/// `identity_matches` must come from the caller's scope/artifact checks; false
+/// disables all model contribution. This is not a qualification/activation check.
+/// The action cannot mutate instrument, side, price, venue or order attributes.
+pub fn apply_advisory_action(
+    mut baseline: AdvisoryDecision,
+    action: &AdvisoryAction,
+    position_effect: AdvisoryPositionEffect,
+    identity_matches: bool,
+) -> AdvisoryDecision {
+    // Preserve superior denials and bypass even malformed actions on protection
+    // paths or unknown identity. Model input cannot delay or shrink a reduction.
+    if !baseline.allowed
+        || position_effect != AdvisoryPositionEffect::RiskIncreasingEntry
+        || !identity_matches
+    {
+        return baseline;
+    }
+    match action {
+        AdvisoryAction::NoOp => {}
+        AdvisoryAction::Veto { reason } => {
+            baseline.allowed = false;
+            baseline.quantity = 0.0;
+            baseline.reason = Some(reason.clone());
+        }
+        AdvisoryAction::SizeDown {
+            max_quantity,
+            reason,
+        } => {
+            if !max_quantity.is_finite() || *max_quantity < 0.0 {
+                return AdvisoryDecision {
+                    allowed: false,
+                    quantity: 0.0,
+                    reason: Some("predictor_size_down_invalid_quantity".into()),
+                };
+            }
+            if !baseline.quantity.is_finite() || baseline.quantity <= 0.0 {
+                return AdvisoryDecision {
+                    allowed: false,
+                    quantity: 0.0,
+                    reason: Some("predictor_size_down_invalid_baseline_quantity".into()),
+                };
+            }
+            if *max_quantity < baseline.quantity {
+                baseline.quantity = *max_quantity;
+                baseline.allowed = *max_quantity > 0.0;
+                baseline.reason = Some(reason.clone());
+            }
+        }
+    }
+    baseline
+}
 
 /// Identifiers every predictor gate call needs independent of features.
 /// gate 除 features 外每次調用需要的識別資訊。
 #[derive(Debug, Clone)]
 pub struct GateInputs<'a> {
+    /// Independently frozen expected artifact identity; absent disables contribution.
+    pub expected_binding: Option<PredictorArtifactBinding>,
     /// Engine calling into the gate. Paper uniquely honours ε-greedy exploration.
     /// 呼叫 gate 的引擎種類。僅 Paper 走 ε-greedy 探索分支。
     pub engine_kind: PipelineKind,
@@ -58,6 +149,10 @@ pub struct GateInputs<'a> {
 /// predictor gate 無法決斷的原因；caller 回退 JS shrinkage，通常以同名 metric 計數。
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum FallbackReason {
+    /// Missing/incomplete expected or actual artifact identity.
+    UnboundModel,
+    /// Engine, strategy, model IDs or consumed artifact bytes differ.
+    ModelIdentityMismatch,
     /// One or more features out of invariant #12 range or NaN/Inf.
     /// 一個或多個 feature 越界或 NaN/Inf（違反不變量 #12）。
     FeatureOutOfRange,
@@ -83,6 +178,8 @@ impl FallbackReason {
     /// 對應 §10.1 metric 名稱。
     pub fn metric_name(&self) -> &'static str {
         match self {
+            Self::UnboundModel => "predict_model_unbound",
+            Self::ModelIdentityMismatch => "predict_model_identity_mismatch",
             Self::FeatureOutOfRange => "feature_out_of_range",
             Self::NoModel => "predict_no_model",
             Self::SchemaMismatch => "predict_schema_error",
@@ -170,6 +267,33 @@ pub fn edge_predictor_gate(
         None => return PredictorGateOutcome::Fallback(FallbackReason::NoModel),
     };
 
+    let actual_binding = predictor.artifact_binding();
+    if let Some(actual) = &actual_binding {
+        let expected = match &inputs.expected_binding {
+            Some(expected) if expected.is_complete() && actual.is_complete() => expected,
+            _ => return PredictorGateOutcome::Fallback(FallbackReason::UnboundModel),
+        };
+        if actual.engine_mode != inputs.engine_kind.db_mode()
+            || actual.strategy_name != inputs.strategy
+            || actual != expected
+            || predictor.model_id() != actual.model_ids[1]
+        {
+            return PredictorGateOutcome::Fallback(FallbackReason::ModelIdentityMismatch);
+        }
+    }
+
+    // An unidentified successful backend has no model contribution, even when
+    // stale. Cache errors once so NoModel/error fallback and stale precedence
+    // stay intact without invoking inference twice.
+    let unidentified_error = if actual_binding.is_none() {
+        match predictor.predict(features) {
+            Ok(_) => return PredictorGateOutcome::Fallback(FallbackReason::UnboundModel),
+            Err(error) => Some(error),
+        }
+    } else {
+        None
+    };
+
     // Step 3 · invariant #11 staleness.
     // 步驟 3 · 不變量 #11 模型陳舊檢查。
     if predictor.age_seconds() > cfg.model_max_age_seconds {
@@ -178,7 +302,11 @@ pub fn edge_predictor_gate(
 
     // Step 4 · inference.
     // 步驟 4 · 推理。
-    let pred = match predictor.predict(features) {
+    let prediction = match unidentified_error {
+        Some(error) => Err(error),
+        None => predictor.predict(features),
+    };
+    let pred = match prediction {
         Ok(p) => p,
         Err(PredictError::NoModel) => {
             return PredictorGateOutcome::Fallback(FallbackReason::NoModel)
@@ -191,6 +319,15 @@ pub fn edge_predictor_gate(
             return PredictorGateOutcome::Fallback(FallbackReason::InferenceError)
         }
     };
+
+    // Validate successful backend output against the authoritative contract.
+    // Keep errors (including NullPredictor's NoModel) on their existing path;
+    // a backend returning Ok must not decide using drifted names/definitions.
+    if predictor.schema_hash() != super::features::feature_schema_hash()
+        || predictor.definition_hash() != super::features::feature_definition_hash()
+    {
+        return PredictorGateOutcome::Fallback(FallbackReason::SchemaMismatch);
+    }
 
     // Step 5 · C1 monotone rearrangement (idempotent sort).
     // 步驟 5 · C1 單調重排（冪等 sort）。
@@ -270,6 +407,163 @@ mod tests {
     use rand::SeedableRng;
     use std::sync::Arc;
 
+    #[test]
+    fn test_d1_advisory_action_serialization_contract() {
+        let legacy: AdvisoryAction = serde_json::from_str(r#"{"action":"ALLOW"}"#).unwrap();
+        assert_eq!(legacy, AdvisoryAction::NoOp);
+        assert_eq!(
+            serde_json::to_string(&legacy).unwrap(),
+            r#"{"action":"NO_OP"}"#
+        );
+        for invalid in [
+            r#"{"action":"BUY"}"#,
+            r#"{"action":"SIZE_DOWN","reason":"missing cap"}"#,
+            r#"{"action":"SIZE_DOWN","max_quantity":0.001,"reason":"cap","symbol":"OTHER"}"#,
+            r#"{"action":"SIZE_DOWN","max_quantity":null,"reason":"invalid"}"#,
+        ] {
+            assert!(
+                serde_json::from_str::<AdvisoryAction>(invalid).is_err(),
+                "{invalid}"
+            );
+        }
+    }
+
+    #[test]
+    fn test_d1_advisory_caps_and_invalid_values() {
+        let baseline = AdvisoryDecision {
+            allowed: true,
+            quantity: 0.001,
+            reason: Some("baseline_reason".into()),
+        };
+        let entry = AdvisoryPositionEffect::RiskIncreasingEntry;
+        assert_eq!(
+            apply_advisory_action(baseline.clone(), &AdvisoryAction::NoOp, entry, true),
+            baseline
+        );
+        assert_eq!(
+            apply_advisory_action(
+                baseline.clone(),
+                &AdvisoryAction::Veto {
+                    reason: "model_veto".into()
+                },
+                entry,
+                true
+            ),
+            AdvisoryDecision {
+                allowed: false,
+                quantity: 0.0,
+                reason: Some("model_veto".into())
+            }
+        );
+        for cap in [0.001, 10.0, f64::MAX] {
+            let action = AdvisoryAction::SizeDown {
+                max_quantity: cap,
+                reason: "cap".into(),
+            };
+            assert_eq!(
+                apply_advisory_action(baseline.clone(), &action, entry, true),
+                baseline
+            );
+        }
+        let zero = AdvisoryAction::SizeDown {
+            max_quantity: 0.0,
+            reason: "zero_cap".into(),
+        };
+        assert_eq!(
+            apply_advisory_action(baseline.clone(), &zero, entry, true),
+            AdvisoryDecision {
+                allowed: false,
+                quantity: 0.0,
+                reason: Some("zero_cap".into())
+            }
+        );
+        for cap in [-0.1, f64::NAN, f64::INFINITY, f64::NEG_INFINITY] {
+            let action = AdvisoryAction::SizeDown {
+                max_quantity: cap,
+                reason: "untrusted".into(),
+            };
+            assert_eq!(
+                apply_advisory_action(baseline.clone(), &action, entry, true),
+                AdvisoryDecision {
+                    allowed: false,
+                    quantity: 0.0,
+                    reason: Some("predictor_size_down_invalid_quantity".into())
+                }
+            );
+        }
+        for quantity in [0.0, -0.001, f64::NAN, f64::INFINITY] {
+            let invalid_baseline = AdvisoryDecision {
+                quantity,
+                ..baseline.clone()
+            };
+            assert_eq!(
+                apply_advisory_action(invalid_baseline, &zero, entry, true),
+                AdvisoryDecision {
+                    allowed: false,
+                    quantity: 0.0,
+                    reason: Some("predictor_size_down_invalid_baseline_quantity".into())
+                }
+            );
+        }
+    }
+
+    #[test]
+    fn test_d1_advisory_bypasses_unknown_identity_and_risk_reduction() {
+        let baseline = AdvisoryDecision {
+            allowed: true,
+            quantity: 0.001,
+            reason: None,
+        };
+        let actions = [
+            AdvisoryAction::NoOp,
+            AdvisoryAction::Veto {
+                reason: "must_not_block_protection".into(),
+            },
+            AdvisoryAction::SizeDown {
+                max_quantity: 0.0001,
+                reason: "must_not_shrink_protection".into(),
+            },
+            AdvisoryAction::SizeDown {
+                max_quantity: f64::NAN,
+                reason: "invalid_but_bypassed".into(),
+            },
+        ];
+        for action in actions {
+            for effect in [
+                AdvisoryPositionEffect::RiskReduction,
+                AdvisoryPositionEffect::Unknown,
+            ] {
+                assert_eq!(
+                    apply_advisory_action(baseline.clone(), &action, effect, true),
+                    baseline
+                );
+            }
+            assert_eq!(
+                apply_advisory_action(
+                    baseline.clone(),
+                    &action,
+                    AdvisoryPositionEffect::RiskIncreasingEntry,
+                    false
+                ),
+                baseline
+            );
+            let denied = AdvisoryDecision {
+                allowed: false,
+                quantity: 0.0,
+                reason: Some("superior_gate_deny".into()),
+            };
+            assert_eq!(
+                apply_advisory_action(
+                    denied.clone(),
+                    &action,
+                    AdvisoryPositionEffect::RiskIncreasingEntry,
+                    true
+                ),
+                denied
+            );
+        }
+    }
+
     fn make_features() -> FeatureVectorV1 {
         // all-zero feature vector is in-range for FeatureVectorV1::zeroed().
         FeatureVectorV1::zeroed()
@@ -282,6 +576,10 @@ mod tests {
         is_add: bool,
     ) -> GateInputs<'a> {
         GateInputs {
+            expected_binding: Some(super::super::test_artifact_binding(
+                kind.db_mode(),
+                strategy,
+            )),
             engine_kind: kind,
             strategy,
             symbol: "BTCUSDT",
@@ -360,11 +658,15 @@ mod tests {
     // post-inference branches without a real model.
     // 固定 Prediction 的 stub，測試 inference 後各分支無需真實模型。
     struct StubPredictor {
+        binding: PredictorArtifactBinding,
         pred: Prediction,
         age_secs: u64,
     }
 
     impl EdgePredictor for StubPredictor {
+        fn artifact_binding(&self) -> Option<PredictorArtifactBinding> {
+            Some(self.binding.clone())
+        }
         fn predict(&self, _f: &FeatureVectorV1) -> Result<Prediction, PredictError> {
             Ok(self.pred)
         }
@@ -372,10 +674,10 @@ mod tests {
             self.age_secs
         }
         fn schema_hash(&self) -> &str {
-            "stub-schema"
+            super::super::features::feature_schema_hash()
         }
         fn definition_hash(&self) -> &str {
-            "stub-def"
+            super::super::features::feature_definition_hash()
         }
         fn model_id(&self) -> &str {
             "stub"
@@ -383,7 +685,86 @@ mod tests {
     }
 
     fn stubbed(store: &EdgePredictorStore, strategy: &str, pred: Prediction, age_secs: u64) {
-        store.swap(strategy, Arc::new(StubPredictor { pred, age_secs }));
+        stubbed_for_engine(store, strategy, pred, age_secs, PipelineKind::Paper);
+    }
+
+    fn stubbed_for_engine(
+        store: &EdgePredictorStore,
+        strategy: &str,
+        pred: Prediction,
+        age_secs: u64,
+        kind: PipelineKind,
+    ) {
+        store.swap(
+            strategy,
+            Arc::new(StubPredictor {
+                pred,
+                age_secs,
+                binding: super::super::test_artifact_binding(kind.db_mode(), strategy),
+            }),
+        );
+    }
+
+    struct ContractMismatchPredictor(bool);
+
+    impl EdgePredictor for ContractMismatchPredictor {
+        fn artifact_binding(&self) -> Option<PredictorArtifactBinding> {
+            Some(super::super::test_artifact_binding("demo", "ma_crossover"))
+        }
+        fn predict(&self, _: &FeatureVectorV1) -> Result<Prediction, PredictError> {
+            Ok(Prediction {
+                q10: 100.0,
+                q50: 200.0,
+                q90: 300.0,
+            })
+        }
+        fn age_seconds(&self) -> u64 {
+            0
+        }
+        fn schema_hash(&self) -> &str {
+            if self.0 {
+                "wrong-feature-order"
+            } else {
+                super::super::features::feature_schema_hash()
+            }
+        }
+        fn definition_hash(&self) -> &str {
+            if self.0 {
+                super::super::features::feature_definition_hash()
+            } else {
+                "wrong-definition"
+            }
+        }
+        fn model_id(&self) -> &str {
+            "stub"
+        }
+    }
+
+    #[test]
+    fn test_d1_pure_gate_rejects_backend_contract_mismatch() {
+        for wrong_schema in [true, false] {
+            let store = EdgePredictorStore::new();
+            store.swap(
+                "ma_crossover",
+                Arc::new(ContractMismatchPredictor(wrong_schema)),
+            );
+            let out = edge_predictor_gate(
+                &make_inputs(PipelineKind::Demo, "ma_crossover", 20.0, false),
+                &make_features(),
+                &store,
+                &mut SmallRng::seed_from_u64(0),
+                &Cfg::default(),
+                || "{}".into(),
+            );
+            assert!(
+                matches!(
+                    out,
+                    PredictorGateOutcome::Fallback(FallbackReason::SchemaMismatch)
+                ),
+                "schema/definition drift cannot become Accept: {:?}",
+                out
+            );
+        }
     }
 
     #[test]
@@ -448,7 +829,7 @@ mod tests {
         // exploration_rate=0.2 (max), but engine=Demo → must be Reject, not ShadowFill.
         // Demo/live 不走探索分支，即使 exploration_rate 拉滿也必須拒絕。
         let store = EdgePredictorStore::new();
-        stubbed(
+        stubbed_for_engine(
             &store,
             "ma_crossover",
             Prediction {
@@ -457,6 +838,7 @@ mod tests {
                 q90: 2.0,
             },
             0,
+            PipelineKind::Demo,
         );
         let mut rng = SmallRng::seed_from_u64(0);
         let mut cfg = Cfg::default();
@@ -631,6 +1013,168 @@ mod tests {
             || "{}".into(),
         );
         assert!(matches!(out, PredictorGateOutcome::Accept));
+    }
+
+    #[test]
+    fn test_successful_unidentified_backend_cannot_veto() {
+        struct Unknown;
+        impl EdgePredictor for Unknown {
+            fn predict(&self, _: &FeatureVectorV1) -> Result<Prediction, PredictError> {
+                Ok(Prediction {
+                    q10: -100.0,
+                    q50: -50.0,
+                    q90: -10.0,
+                })
+            }
+            fn age_seconds(&self) -> u64 {
+                0
+            }
+            fn schema_hash(&self) -> &str {
+                super::super::features::feature_schema_hash()
+            }
+            fn definition_hash(&self) -> &str {
+                super::super::features::feature_definition_hash()
+            }
+            fn model_id(&self) -> &str {
+                "unknown"
+            }
+        }
+        let store = EdgePredictorStore::new();
+        store.swap("ma_crossover", Arc::new(Unknown));
+        let out = edge_predictor_gate(
+            &make_inputs(PipelineKind::Paper, "ma_crossover", 20.0, false),
+            &make_features(),
+            &store,
+            &mut SmallRng::seed_from_u64(0),
+            &Cfg::default(),
+            || "{}".into(),
+        );
+        assert!(matches!(
+            out,
+            PredictorGateOutcome::Fallback(FallbackReason::UnboundModel)
+        ));
+    }
+
+    struct D1UnidentifiedPredictor {
+        result: Result<Prediction, PredictError>,
+        age: u64,
+        calls: Arc<std::sync::atomic::AtomicUsize>,
+    }
+
+    impl EdgePredictor for D1UnidentifiedPredictor {
+        fn predict(&self, _: &FeatureVectorV1) -> Result<Prediction, PredictError> {
+            self.calls.fetch_add(1, std::sync::atomic::Ordering::SeqCst);
+            self.result.clone()
+        }
+        fn age_seconds(&self) -> u64 {
+            self.age
+        }
+        fn schema_hash(&self) -> &str {
+            super::super::features::feature_schema_hash()
+        }
+        fn definition_hash(&self) -> &str {
+            super::super::features::feature_definition_hash()
+        }
+        fn model_id(&self) -> &str {
+            "unidentified-test-backend"
+        }
+    }
+
+    #[test]
+    fn test_d1_unidentified_stale_success_is_no_op() {
+        for age in [0, 11] {
+            let calls = Arc::new(std::sync::atomic::AtomicUsize::new(0));
+            let store = EdgePredictorStore::new();
+            store.swap(
+                "ma_crossover",
+                Arc::new(D1UnidentifiedPredictor {
+                    result: Ok(Prediction {
+                        q10: -100.0,
+                        q50: -50.0,
+                        q90: -10.0,
+                    }),
+                    age,
+                    calls: calls.clone(),
+                }),
+            );
+            let cfg = Cfg {
+                model_max_age_seconds: 10,
+                ..Default::default()
+            };
+            let out = edge_predictor_gate(
+                &make_inputs(PipelineKind::Paper, "ma_crossover", 20.0, false),
+                &make_features(),
+                &store,
+                &mut SmallRng::seed_from_u64(51),
+                &cfg,
+                || "{}".into(),
+            );
+            eprintln!("D1_UNKNOWN_STALE_GATE age={age} expected=UnboundModel actual={out:?}");
+            assert!(matches!(
+                out,
+                PredictorGateOutcome::Fallback(FallbackReason::UnboundModel)
+            ));
+            assert_eq!(calls.load(std::sync::atomic::Ordering::SeqCst), 1);
+        }
+    }
+
+    #[test]
+    fn test_d1_unidentified_errors_keep_existing_fallbacks() {
+        for (error, fresh_reason) in [
+            (PredictError::NoModel, FallbackReason::NoModel),
+            (
+                PredictError::InferenceFailed("fixture fault".into()),
+                FallbackReason::InferenceError,
+            ),
+            (
+                PredictError::SchemaHashMismatch {
+                    expected: "expected".into(),
+                    got: "wrong".into(),
+                },
+                FallbackReason::SchemaMismatch,
+            ),
+            (
+                PredictError::DefinitionHashMismatch {
+                    expected: "expected".into(),
+                    got: "wrong".into(),
+                },
+                FallbackReason::SchemaMismatch,
+            ),
+        ] {
+            for age in [0, 11] {
+                let store = EdgePredictorStore::new();
+                let calls = Arc::new(std::sync::atomic::AtomicUsize::new(0));
+                store.swap(
+                    "ma_crossover",
+                    Arc::new(D1UnidentifiedPredictor {
+                        result: Err(error.clone()),
+                        age,
+                        calls: calls.clone(),
+                    }),
+                );
+                let cfg = Cfg {
+                    model_max_age_seconds: 10,
+                    ..Default::default()
+                };
+                let out = edge_predictor_gate(
+                    &make_inputs(PipelineKind::Paper, "ma_crossover", 20.0, false),
+                    &make_features(),
+                    &store,
+                    &mut SmallRng::seed_from_u64(51),
+                    &cfg,
+                    || "{}".into(),
+                );
+                let expected = if age == 0 {
+                    fresh_reason
+                } else {
+                    FallbackReason::ModelStale
+                };
+                assert!(
+                    matches!(out, PredictorGateOutcome::Fallback(reason) if reason == expected)
+                );
+                assert!(calls.load(std::sync::atomic::Ordering::SeqCst) <= 1);
+            }
+        }
     }
 
     #[test]

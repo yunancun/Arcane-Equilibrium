@@ -648,10 +648,6 @@ impl IntentProcessor {
                 PredictorAction::Reject(reason) => {
                     return IntentResult::rejected(reason);
                 }
-                PredictorAction::SkipLegacyGate => {
-                    // Predictor accepted; skip JS shrinkage fall-through.
-                    // Predictor 接受；跳過 JS shrinkage 回退檢查。
-                }
                 PredictorAction::UseLegacyGate => {
                     if let Some(r) = self.cost_gate_paper(
                         &intent.strategy,
@@ -1163,9 +1159,6 @@ impl IntentProcessor {
             ) {
                 PredictorAction::Reject(reason) => {
                     return ExchangeGateResult::rejected(reason);
-                }
-                PredictorAction::SkipLegacyGate => {
-                    // Predictor accepted; bypass JS shrinkage fall-through entirely.
                 }
                 PredictorAction::UseLegacyGate => {
                     // Profile-based cost gate selection (D3):

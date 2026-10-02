@@ -24,7 +24,7 @@ sys.path.insert(0, str(SRV_ROOT / "program_code"))
 
 import numpy as np  # noqa: E402
 
-from ml_training.quantile_trainer import _compute_feature_schema_hash  # noqa: E402
+from ml_training.quantile_trainer import _compute_feature_definition_hash, _compute_feature_schema_hash  # noqa: E402
 from ml_training.onnx_exporter import export_quantile_trio_to_onnx  # noqa: E402
 from ml_training.parquet_etl import EDGE_P3_FEATURE_NAMES  # noqa: E402
 
@@ -41,6 +41,7 @@ def main() -> None:
     feature_names = list(EDGE_P3_FEATURE_NAMES)
     nf = len(feature_names)
     schema_hash = _compute_feature_schema_hash(feature_names, "v1")
+    definition_hash = _compute_feature_definition_hash(feature_names, "v1")
 
     rng = np.random.default_rng(42)
     n = 400
@@ -78,7 +79,7 @@ def main() -> None:
         schema_version="v1",
         train_date=TRAIN_DATE,
         feature_schema_hash=schema_hash,
-        feature_definition_hash=schema_hash,
+        feature_definition_hash=definition_hash,
     )
     if not result.get("success"):
         raise SystemExit(f"export failed: {result.get('error')}")

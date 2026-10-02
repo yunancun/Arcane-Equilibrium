@@ -1,8 +1,35 @@
 # AI/ML Landing Progress Ledger
 
 **Program**: `AIML-LONG-LIVED-LANDING-V2`
-**Ledger version**: 33
-**Updated**: 2026-09-09（PR189 source publication 已完成；runtime 與 LW2 admission 仍未證）
+**Ledger version**: 34
+**Updated**: 2026-10-03（只補 D1.1 最小本機契約候選；正式 Sessions／LW2 狀態保持）
+
+## D1.1 最小本機契約候選（2026-10-03）
+
+本段是 Operator 授權的有限 D1.1 source／checkpoint 更新，不採用舊 worktree 的四份
+D1 規劃文件，不重排正式 Sessions 或 LW2，完整 D1.1 **仍未驗收**。
+
+- [x] 固定 ONNX public loader／predictor、identity／scope／hash 反例與 unknown＋stale
+  NO_OP 修復已納入候選；fixtures 只證 mechanics。
+- [x] 最小 `apply_advisory_action` 實作 NO_OP／VETO／SIZE_DOWN 絕對 quantity cap。
+  同事件真 router baseline 0.001 → fixture cap 0.0004 → final 0.0004；baseline deny、
+  reason、數量上限與 reduction／unknown bypass 均有獨立預期測試。
+- [ ] **資料 owner＋MIT／PA → PM**：提供完整 immutable selected-cell／17-feature PIT／
+  H3 event-attempt-revision／label-availability／source-cost／split／trial／holdout，接受
+  真 shared-input SHA。producer definition／missingness／freshness 差異仍須核對。
+- [ ] **PM＋原 runner／治理 owner**：原 delivery `AIML-D1.1-20261001 / local-source`
+  的 PA timeout／逾期與缺 verdict 保持；新增 commit 授權解除 checkpoint 禁令，沒有
+  重設 reviewer、問題、已耗 calls 或期限。PA／MIT／E2→E4／FA／R4 仍 UNVERIFIED。
+- [ ] **PM publication**：本機 commit 與 Mac↔GitHub 同步已授權；main 採用仍須適用的
+  exact-head review／CI。Linux 依 Operator 指示 SKIPPED，runtime 未驗證。
+
+[Fixture README](../../../rust/openclaw_engine/tests/fixtures/edge_predictor/README.md)
+載有契約、精確 input hashes 與可重跑命令。SIZE_DOWN 是純 action consumer；現行
+predictor 未新增 quantile→size 策略或 serving caller，full D1.4 registry／CAS／ACK／
+activation 未實作，也不追加為本包前置。H1/H2 不重派；不啟動 D1.2/H5/H6 或 wakeup。
+
+## 正式 Sessions 狀態（既有）
+
 **Overall state**: `PROGRAM_ADOPTED` · **`S1_CLOSED`** · every S2 effect-session
 source-seam predicate is narrowly `SOURCE_READY` (S2.0 + S2.1 + S2.2A + S2.3 +
 S2.4 + S2.5 + S2.2B), while Sprint 2 remains

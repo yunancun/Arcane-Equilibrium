@@ -85,9 +85,48 @@ pub enum PredictError {
     InferenceFailed(String),
 }
 
+/// Immutable identity of the q10/q50/q90 bytes consumed by a predictor.
+/// Expected values must be selected independently before loading the model.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct PredictorArtifactBinding {
+    pub engine_mode: String,
+    pub strategy_name: String,
+    pub model_ids: [String; 3],
+    pub artifact_sha256: [String; 3],
+}
+
+impl PredictorArtifactBinding {
+    pub fn is_complete(&self) -> bool {
+        matches!(self.engine_mode.as_str(), "paper" | "demo" | "live")
+            && !self.strategy_name.is_empty()
+            && self.model_ids.iter().all(|id| !id.is_empty())
+            && self.artifact_sha256.iter().all(|hash| {
+                hash.len() == 64
+                    && hash
+                        .bytes()
+                        .all(|c| c.is_ascii_digit() || (b'a'..=b'f').contains(&c))
+            })
+    }
+}
+
+#[cfg(test)]
+pub(crate) fn test_artifact_binding(engine: &str, strategy: &str) -> PredictorArtifactBinding {
+    PredictorArtifactBinding {
+        engine_mode: engine.into(),
+        strategy_name: strategy.into(),
+        model_ids: ["stub".into(), "stub".into(), "stub".into()],
+        artifact_sha256: ["0".repeat(64), "1".repeat(64), "2".repeat(64)],
+    }
+}
+
 /// `EdgePredictor` trait — per-strategy predictor with liveness + schema gates.
 /// `EdgePredictor` trait — 逐策略預測器，帶存活期 + schema 門。
 pub trait EdgePredictor: Send + Sync {
+    /// None means the backend cannot establish a usable artifact identity.
+    fn artifact_binding(&self) -> Option<PredictorArtifactBinding> {
+        None
+    }
+
     /// Run inference on the feature vector.
     /// 在 feature 向量上運行推理。
     fn predict(&self, features: &FeatureVectorV1) -> Result<Prediction, PredictError>;
