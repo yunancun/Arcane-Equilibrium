@@ -14,6 +14,7 @@
 | Canary / release gate 架构 | `2026-05-10--ARCH-04-graduated-canary-5-stage.md` |
 | 数据存储架构 | `DATA_STORAGE_ARCHITECTURE_V1.md` |
 | Singleton authority | `singleton-registry.md` |
+| 本機學習／雲端歷史回測候選設計 | [正式評估報告](2026-10-03--local-learning-cloud-backtest-report.md) — 框架、工程要求、平台建議及可實行性；尚待接入驗收 |
 
 ## Historical Ledgers
 

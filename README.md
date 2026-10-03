@@ -11,6 +11,15 @@ Agentic trading governance system — 自主扫描 650+ 交易对，智能部署
 
 ---
 
+## 本機學習與雲端回測架構評估
+
+[正式評估報告](docs/architecture/2026-10-03--local-learning-cloud-backtest-report.md)說明本機草擬與學習、平台歷史回測及本機交易的分工，涵蓋 Bybit 與後續 IBKR 普通股票／ETF。文件為候選設計與工程要求，尚未完成雲端接入驗收。
+
+- [框架設計修改意見](docs/architecture/2026-10-03--local-learning-cloud-backtest-report.md#framework-design)
+- [工程要求](docs/architecture/2026-10-03--local-learning-cloud-backtest-report.md#engineering-requirements)
+- [雲端解決方案建議](docs/architecture/2026-10-03--local-learning-cloud-backtest-report.md#cloud-solutions)
+- [可實行性分析](docs/architecture/2026-10-03--local-learning-cloud-backtest-report.md#feasibility)
+
 ## 🖥️ GUI 访问（Tailscale 网络内）
 
 | 地址 | 功能 |
