@@ -1,9 +1,20 @@
 # CLAUDE_CHANGELOG.md — 開發歷史歸檔
 
 > 從 CLAUDE.md / TODO.md 遷出的 Wave/Sprint/Batch + TODO version-increment 歷史敘事。新 session 不需要讀此文件，僅供回顧歷史時查閱。
-> 最後更新：2026-10-01（TODO v884／既有 workflow 採用狀態與記憶對齊）
+> 最後更新：2026-10-03（R1–R8 歷史分類與 Git 記錄入口；TODO v884 不變）
 
 ---
+
+## R1–R8 Git 歷史登記 — 2026-10-03
+
+- Operator 採用分期命名；[歷史總覽](references/2026-10-03--route-history.md) 與
+  [結構化來源登記](references/2026-10-03--route-history-register.json) 對照八個路線 ID、
+  十八個五月方案節點及 H2／D1.1 工程錨點。v5.1 保留為間接引用。
+- [記錄決策](decisions/2026-10-03--route-history-versioning.md) 定義同提交維護、事件、
+  trailers 與 annotated recording tag；現有 README／docs router／主題索引已串接。
+- [R8](decisions/2026-10-03--r8-hybrid-research-candidate.md) 是可攜候選摘要。
+  本項只改文件與歷史索引；沒有產品程式、TODO 派工、部署、雲端作業或 runtime 成果。
+  Git source 整合狀態依實際 commit／ref；獨立 review 不由此條目自證 PASS。
 
 ## TODO v884：Workflow 文件收尾對齊（2026-10-01）
 

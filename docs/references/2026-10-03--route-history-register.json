@@ -1,0 +1,696 @@
+{
+  "schema_version": "route_history_v1",
+  "recorded_on": "2026-10-03",
+  "timezone": "Asia/Shanghai",
+  "taxonomy_adopted_on": "2026-10-03",
+  "taxonomy_adoption_scope": "Operator adopted R1-R8 history classification and Git recording, not retroactive implementation or R8 runtime activation",
+  "source_baseline": "af12fc9e0b75925ad0404a351018cebd21598277",
+  "authority": "historical_navigation_not_dispatch",
+  "history_window_note": "Approximate overlapping periods; documents can be drafted, approved, committed and adopted on different dates. Existing document status is not runtime verification.",
+  "revision_family": "May-2026-strategy-roadmap; not Rust migration, Fusion Plan, TODO, database migration or product release versions",
+  "coverage": {
+    "routes": 8,
+    "may_revision_nodes": 18,
+    "standalone_revision_documents": 16,
+    "changelog_only": 1,
+    "reference_only": 1
+  },
+  "sources": {
+    "march-roadmap": {
+      "kind": "git_blob",
+      "path": "docs/archive/2026-07-09--governance_dev_phase_history/audits/2026-03-31--development_roadmap_v2.md",
+      "commit": "af12fc9e0b75925ad0404a351018cebd21598277",
+      "blob": "5d52f8b57be70763c3209018ab5dbd92baef03a6",
+      "sha256": "45ea5d73d249f3e01f723df3545d4660dbf3810dc2f85d4a4ec2ae2c04d9521a"
+    },
+    "rust-authority": {
+      "kind": "git_blob",
+      "path": "docs/adr/0001-rust-as-trading-authority.md",
+      "commit": "af12fc9e0b75925ad0404a351018cebd21598277",
+      "blob": "2d06d677fdb07cda02cc0e6a6bd11aef5113724f",
+      "sha256": "0a7776f21c167e6f8e3217bb80168cc9a98d2db2988bfd33b47086833047b85c"
+    },
+    "fusion-plan": {
+      "kind": "git_blob",
+      "path": "docs/references/2026-04-04--execution_plan_v1.md",
+      "commit": "af12fc9e0b75925ad0404a351018cebd21598277",
+      "blob": "7b410a901c31909b06ba1a5c430103097510939f",
+      "sha256": "fa21578970ee63d651d9391ee7aa9ed34e7328a1462403a0f5a21512f13f8970"
+    },
+    "three-engine": {
+      "kind": "git_blob",
+      "path": "docs/adr/0002-three-mode-engine-independent-risk-configs.md",
+      "commit": "af12fc9e0b75925ad0404a351018cebd21598277",
+      "blob": "8e048c7cafb3cec98890b75f642bb9cb8cf25057",
+      "sha256": "ecd7eda097f0023c91f97186e9ca1a0f93970b5563d97c84f92782d4859e725d"
+    },
+    "positioning-amendment": {
+      "kind": "git_blob",
+      "path": "docs/governance_dev/amendments/2026-05-25--AMD-2026-05-25-02-v55-bot-positioning-capital-structure-formalization.md",
+      "commit": "af12fc9e0b75925ad0404a351018cebd21598277",
+      "blob": "fe3f1d9fe9b34faa7b6925d8b150e5396cb8d607",
+      "sha256": "2ce89768b9796f0ad92072fed64b54a864a68af76807c832a7b0c938b4c45430"
+    },
+    "alpha-amendment": {
+      "kind": "git_blob",
+      "path": "docs/governance_dev/amendments/2026-05-31--AMD-2026-05-31-01-alpha-edge-evidence-governance.md",
+      "commit": "af12fc9e0b75925ad0404a351018cebd21598277",
+      "blob": "f758f80b3cfae240289a4a4f304f7a0b3d24f64a",
+      "sha256": "b9d01b1a768e95a52a9207c2ab08704a86183d9d62eebf4a1b86f2d6225df385"
+    },
+    "aiml-v2": {
+      "kind": "git_blob",
+      "path": "docs/execution_plan/2026-07-19--ai_ml_long_lived_repair_and_landing_plan.md",
+      "commit": "af12fc9e0b75925ad0404a351018cebd21598277",
+      "blob": "0758eab6d247db3baa2cbd0cf4cb12da6a81e970",
+      "sha256": "afb1c1bc1402d49bfe8fb5e8abb88298b9184562914a9052554a18e0871e788d"
+    },
+    "aiml-ledger": {
+      "kind": "git_blob",
+      "path": "docs/execution_plan/ai_ml_landing/PROGRESS.md",
+      "commit": "af12fc9e0b75925ad0404a351018cebd21598277",
+      "blob": "c0e902ce4b82428c20a28b9c8f4170b8681bff4d",
+      "sha256": "7176b3413c04d21257b1abb57ac87367809ff18e5f7070e50e5c234833eade56"
+    },
+    "current-todo-snapshot": {
+      "kind": "git_blob",
+      "path": "TODO.md",
+      "commit": "af12fc9e0b75925ad0404a351018cebd21598277",
+      "blob": "98b47d43d4ded9de705939bebc6d7dc47bdff220",
+      "sha256": "ee7f549c8c1fe667cf378bdafdb417d88f208047eedb492c02c48aef5e58ce3c"
+    },
+    "engineering-log": {
+      "kind": "git_blob",
+      "path": "docs/CLAUDE_CHANGELOG.md",
+      "commit": "af12fc9e0b75925ad0404a351018cebd21598277",
+      "blob": "067a5be34e9d98216be5f496b091dfe7a6ecccd7",
+      "sha256": "fb9971a6847b88972a44e6164fc515eccb216edb891e32c5e41a309d4e20bc8a"
+    },
+    "plan-changelog": {
+      "kind": "git_blob",
+      "path": "CHANGELOG.md",
+      "commit": "af12fc9e0b75925ad0404a351018cebd21598277",
+      "blob": "98ad8352bed4aa2047bf07c41a61c27041a48a8d",
+      "sha256": "c47368fa3a0a38c4b1757251b9ba08eac3d9fc807899a7a20b5ef4465884fd45"
+    },
+    "may-v1": {
+      "kind": "git_blob",
+      "path": "docs/archive/2026-05-21--srv_root_cleanup/2026-05-20--strategy-architecture-redesign-recommendation.md",
+      "commit": "af12fc9e0b75925ad0404a351018cebd21598277",
+      "blob": "c0db81fb86eb6eacc9c89a1c9d6ce33ce7ecafe9",
+      "sha256": "62986b04a02222abf5957f4b1991c324777bdafad579dfbaa9904e42b6afe1f0"
+    },
+    "may-v2": {
+      "kind": "git_blob",
+      "path": "docs/archive/2026-05-21--srv_root_cleanup/2026-05-20--autonomous-strategy-system-v2.md",
+      "commit": "af12fc9e0b75925ad0404a351018cebd21598277",
+      "blob": "149349127483080e3ea4a8f0fed17a1eb7bbe709",
+      "sha256": "70a602598eb3ee31f5f004b018d5a422dbfdb549e71fa1ea68e6fa5cf619235b"
+    },
+    "may-v3": {
+      "kind": "git_blob",
+      "path": "docs/archive/2026-05-21--srv_root_cleanup/2026-05-20--lean-direct-alpha-capture-v3.md",
+      "commit": "af12fc9e0b75925ad0404a351018cebd21598277",
+      "blob": "0454c436f4718e303067788a93491a84cdbcdbbd",
+      "sha256": "26cdd84471e245625c638d5689084bc945e714ae8aced0e21266cc2aa90d6f08"
+    },
+    "may-v4": {
+      "kind": "git_blob",
+      "path": "docs/archive/2026-05-21--srv_root_cleanup/2026-05-20--dual-track-architecture-v4.md",
+      "commit": "af12fc9e0b75925ad0404a351018cebd21598277",
+      "blob": "4c59e2a72196846ed2beac7825910c7b5044190c",
+      "sha256": "2cc319b9100fbc7a9745f06f5c3eecb0f4a0042373302ea7e8ba59a343b95d11"
+    },
+    "may-v4.1": {
+      "kind": "git_blob",
+      "path": "docs/archive/2026-05-21--srv_root_cleanup/2026-05-20--dual-track-architecture-v4.1.md",
+      "commit": "af12fc9e0b75925ad0404a351018cebd21598277",
+      "blob": "ad08821a0f056b22ac9c967fc156efdcbf19780b",
+      "sha256": "18ef7f97171c726c278ff32da3975d5e5df495906ce694577fab5015fa71dc6c"
+    },
+    "may-v4.2": {
+      "kind": "git_blob",
+      "path": "docs/archive/2026-05-21--srv_root_cleanup/2026-05-20--dual-track-architecture-v4.2.md",
+      "commit": "af12fc9e0b75925ad0404a351018cebd21598277",
+      "blob": "389f7e811b95118ad82d926f47e0b5697884b0e1",
+      "sha256": "29bb0147404f872cd847d8c053964baee4fdde8d698eb96a8ab1e69beee20d41"
+    },
+    "may-v4.3": {
+      "kind": "git_blob",
+      "path": "docs/archive/2026-05-21--srv_root_cleanup/2026-05-20--commercial-evidence-sprint-v4.3.md",
+      "commit": "af12fc9e0b75925ad0404a351018cebd21598277",
+      "blob": "8ed42753a061caae1409627808f8f81ab2742ab9",
+      "sha256": "a76913980d83ba58f7dcfc70a065934c2c85ce85908592d70bdbd723b0efcc12"
+    },
+    "may-v4.4": {
+      "kind": "git_blob",
+      "path": "docs/archive/2026-05-21--srv_root_cleanup/2026-05-20--execution-plan-v4.4.md",
+      "commit": "af12fc9e0b75925ad0404a351018cebd21598277",
+      "blob": "780cfa7390bff7f09980d9c569f6044fb3be1aee",
+      "sha256": "d0577d2549e96bbc717ed652e3c1f616a3188e60632cedd22d6148e607275df5"
+    },
+    "may-v5.0": {
+      "kind": "git_blob",
+      "path": "docs/archive/2026-05-21--srv_root_cleanup/2026-05-20--execution-plan-v5.0.md",
+      "commit": "af12fc9e0b75925ad0404a351018cebd21598277",
+      "blob": "82cdfbdc1e984e1867f23d2517691fcace2dcbe4",
+      "sha256": "6867494b8f1430135dd29071e0784fefa4c5d9bf1bc47c31657d5e928b20b4d6"
+    },
+    "may-v5.2": {
+      "kind": "git_blob",
+      "path": "docs/archive/2026-05-21--srv_root_cleanup/2026-05-20--execution-plan-v5.2.md",
+      "commit": "af12fc9e0b75925ad0404a351018cebd21598277",
+      "blob": "0c96f0f02990a00322ad2f16563ccd3d74954d9e",
+      "sha256": "a22c01c1fe988e7cb8e24af65336cda3ffb4d601d125539507fa2d1e8378c475"
+    },
+    "may-v5.3": {
+      "kind": "git_blob",
+      "path": "docs/archive/2026-05-21--srv_root_cleanup/2026-05-20--execution-plan-v5.3.md",
+      "commit": "af12fc9e0b75925ad0404a351018cebd21598277",
+      "blob": "910627baaf661fc90344145e47099d2416ccbbbf",
+      "sha256": "23932452ddaf40af98d25766f0142b41442cf8bcf714f7a0a468406b422d6132"
+    },
+    "may-v5.4": {
+      "kind": "git_blob",
+      "path": "docs/archive/2026-05-21--srv_root_cleanup/2026-05-20--execution-plan-v5.4.md",
+      "commit": "af12fc9e0b75925ad0404a351018cebd21598277",
+      "blob": "3b5cb3f8eb697d20b59481e9e75a2b2f12093d07",
+      "sha256": "049509dfbf89f07116d044e356ea401cc8c77e183edf16f5e6058af6101b97d3"
+    },
+    "may-v5.5": {
+      "kind": "git_blob",
+      "path": "docs/archive/2026-05-21--srv_root_cleanup/2026-05-20--execution-plan-v5.5.md",
+      "commit": "af12fc9e0b75925ad0404a351018cebd21598277",
+      "blob": "b91a0905c35fe9cc5de4a98304eb8ae766801d3c",
+      "sha256": "f04829900e16385525e499d46ea311085c6155e589c8e540f6b397fbb2e046e8"
+    },
+    "may-v5.6": {
+      "kind": "git_blob",
+      "path": "docs/archive/2026-05-21--srv_root_cleanup/2026-05-20--execution-plan-v5.6.md",
+      "commit": "af12fc9e0b75925ad0404a351018cebd21598277",
+      "blob": "917a6ca532400d24a657f2eff1ac0fa25af66c31",
+      "sha256": "ceb1501646ad3ae1661e55051a61953d4aa2a1caf669e65f9c3b97195a7b5771"
+    },
+    "may-v5.7": {
+      "kind": "git_blob",
+      "path": "docs/execution_plan/2026-05-20--execution-plan-v5.7.md",
+      "commit": "af12fc9e0b75925ad0404a351018cebd21598277",
+      "blob": "688348167e5bf0c043ba611d587701c27324f404",
+      "sha256": "8ebd9b37ff4a54be3f3db2f0ca352d9ed297adb098f4244e5db5c73f2ac57e45"
+    },
+    "may-v5.8": {
+      "kind": "git_blob",
+      "path": "docs/execution_plan/2026-05-20--execution-plan-v5.8.md",
+      "commit": "af12fc9e0b75925ad0404a351018cebd21598277",
+      "blob": "bd72eee45d797de89a9f8795ec3cc77d47fea076",
+      "sha256": "953a1a3a12e95433590032888d3d8dc4a284adb0fb3223ebedb9a6172987d81a"
+    },
+    "r8-portable": {
+      "kind": "recorded_file",
+      "path": "docs/decisions/2026-10-03--r8-hybrid-research-candidate.md",
+      "sha256": "f3d793c27b62d180d8a1dc1555994d2a8243c450223431ea3ce4a926caeb7ac1",
+      "meaning": "portable retrospective summary recorded in this history commit; not historical adoption attestation"
+    }
+  },
+  "routes": [
+    {
+      "id": "R1",
+      "title": "受治理的 Bybit 自動交易系統",
+      "period_label": "2026-03 ～ 2026-04 初",
+      "period_precision": "retrospective_approximate_window",
+      "record_status": "historical",
+      "change_type": "initial_direction",
+      "follows_in_retrospective": null,
+      "summary": "建立多策略、五 Agent、風控與 Decision Lease，當時以 Paper 穩定運行後準備 Live 為目標。",
+      "reason": "先把自動交易置於受控、可解釋的執行框架。",
+      "retained": "風控、執行與學習分離。",
+      "limits": "Paper promotion 是歷史路線，後續 Stage 0R／Demo 政策已改。",
+      "source_refs": [
+        "march-roadmap"
+      ]
+    },
+    {
+      "id": "R2",
+      "title": "Rust 交易核心與研究基礎整合",
+      "period_label": "2026-04 ～ 2026-05 初",
+      "period_precision": "retrospective_approximate_window",
+      "record_status": "historical",
+      "change_type": "platform_consolidation",
+      "follows_in_retrospective": "R1",
+      "summary": "Rust 單一交易權威、三模式引擎與 DB／ML／回放研究基礎整合。",
+      "reason": "消除 Python／Rust 雙權威漂移，建立共用交易與研究底座。",
+      "retained": "Python API／GUI／分析與既有治理能力。",
+      "limits": "融合方案的舊二十週排程只供歷史追溯。",
+      "source_refs": [
+        "rust-authority",
+        "three-engine",
+        "fusion-plan"
+      ]
+    },
+    {
+      "id": "R3",
+      "title": "產品定位與盈利路徑收斂",
+      "period_label": "2026-05-20 ～ 2026-05 下旬",
+      "period_precision": "retrospective_approximate_window",
+      "record_status": "historical",
+      "change_type": "product_positioning",
+      "follows_in_retrospective": "R2",
+      "summary": "同一審議週期比較策略工廠、直接 alpha、雙軌、商業驗證、Copy Trading，收斂為完整自營 quant bot。",
+      "reason": "校準產品定位、成本、資本規模與可驗證的盈利路徑。",
+      "retained": "自營主帳完整能力；Copy Trading 保留為有條件後續渠道。",
+      "limits": "本期含多個草案與否決；不是所有方案均實作或正式採納。",
+      "source_refs": [
+        "may-v2",
+        "may-v3",
+        "may-v4",
+        "may-v4.3",
+        "may-v5.5",
+        "may-v5.7",
+        "positioning-amendment"
+      ]
+    },
+    {
+      "id": "R4",
+      "title": "完整自治能力擴張",
+      "period_label": "2026-05-21 ～ 2026-05-31 起凍結大部分實作",
+      "period_precision": "retrospective_approximate_window",
+      "record_status": "historical",
+      "change_type": "scope_expansion",
+      "follows_in_retrospective": "R3",
+      "summary": "v5.8 補充 M1–M13，自主選題、學習、監控、退役、配置與路由。",
+      "reason": "把長期自行迭代目標拆成具體自治能力。",
+      "retained": "v5.7 派工基線及交易權威。",
+      "limits": "十三模組入 scope 不等於全部已實作、採用或有效。",
+      "source_refs": [
+        "may-v5.8",
+        "plan-changelog"
+      ]
+    },
+    {
+      "id": "R5",
+      "title": "Alpha 證據優先",
+      "period_label": "2026-05-31 ～ 2026-06 起延續",
+      "period_precision": "retrospective_approximate_window",
+      "record_status": "historical",
+      "change_type": "priority_shift",
+      "follows_in_retrospective": "R4",
+      "summary": "v5.9 凍結大部分自治 active-IMPL，先找可信成本後 alpha；M7 保留例外。",
+      "reason": "當時成本牆調查顯示候選優勢不足，先解策略證據缺口。",
+      "retained": "自治設計與既有 Stage／風控；凍結並非全部取消。",
+      "limits": "歷史研究結果不能當今日候選／市場結論。",
+      "source_refs": [
+        "plan-changelog",
+        "alpha-amendment"
+      ]
+    },
+    {
+      "id": "R6",
+      "title": "AI／ML 真實落地與證據修復",
+      "period_label": "2026-07 ～ 2026-09 及未完成尾項",
+      "period_precision": "retrospective_approximate_window",
+      "record_status": "historical_with_open_program",
+      "change_type": "operational_landing",
+      "follows_in_retrospective": "R5",
+      "summary": "AIML V2 要求合格資料、真實 fit、Rust 消費、自然第二代、恢復與運行證據。",
+      "reason": "修復 source／tests 與真正功能、部署及效果之間的差距。",
+      "retained": "研究資料與模型零件、Rust 權威、資格與效果邊界。",
+      "limits": "PROGRAM_ADOPTED／S1_CLOSED 不等於完整學習或交易落地；狀態仍讀 TODO。",
+      "source_refs": [
+        "aiml-v2",
+        "aiml-ledger"
+      ]
+    },
+    {
+      "id": "R7",
+      "title": "有限工程單元、可用功能優先",
+      "period_label": "2026-09 下旬 ～ 截至 2026-10-03",
+      "period_precision": "retrospective_approximate_window",
+      "record_status": "current_delivery_emphasis",
+      "change_type": "delivery_resequence",
+      "follows_in_retrospective": "R6",
+      "summary": "先以有限單元驗證窄範圍功能；Bybit 修復與 D1.1 本機模型消費屬此分期。",
+      "reason": "避免把遠端正式環境證明前置為所有本機開發的阻塞。",
+      "retained": "正式上線要求、舊契約與權限繼續有效；只調整交付節奏。",
+      "limits": "H2 source 採用、D1.1 候選與 runtime 狀態分開；不是重開已關閉 workflow。",
+      "source_refs": [
+        "current-todo-snapshot",
+        "engineering-log"
+      ]
+    },
+    {
+      "id": "R8",
+      "title": "本機學習與交易＋外部歷史回測",
+      "period_label": "2026-10-03",
+      "period_precision": "retrospective_approximate_window",
+      "record_status": "candidate",
+      "change_type": "architecture_candidate",
+      "follows_in_retrospective": "R7",
+      "summary": "本機草擬、學習及交易，成熟平台提供歷史回測／評估，回傳有限結果。",
+      "reason": "減少全市場歷史自持與研究基礎設施維護負擔。",
+      "retained": "本機交易證據、策略／學習所有權與既有風控／採用閘門。",
+      "limits": "分類已採用，技術架構仍候選；QuantConnect 選型與遷移未驗收。",
+      "source_refs": [
+        "r8-portable"
+      ]
+    }
+  ],
+  "revisions": [
+    {
+      "id": "MAY26-v1",
+      "version": "v1",
+      "route_id": "R3",
+      "document_date": "2026-05-20",
+      "date_basis": "source_declared_date",
+      "change_type": "initial_proposal",
+      "previous_discussion_node": null,
+      "relation_to_previous": "discussion_sequence_not_adoption_proof",
+      "as_written_status": "DRAFT",
+      "summary": "策略與架構重設計；其中人工紀律執行層分支後被拒絕",
+      "source_refs": [
+        "may-v1"
+      ],
+      "evidence_form": "standalone_document"
+    },
+    {
+      "id": "MAY26-v2",
+      "version": "v2",
+      "route_id": "R3",
+      "document_date": "2026-05-20",
+      "date_basis": "source_declared_date",
+      "change_type": "thesis_change",
+      "previous_discussion_node": "MAY26-v1",
+      "relation_to_previous": "discussion_sequence_not_adoption_proof",
+      "as_written_status": "DRAFT",
+      "summary": "ASDS：自主策略發現工廠，保留執行與治理底盤",
+      "source_refs": [
+        "may-v2"
+      ],
+      "evidence_form": "standalone_document"
+    },
+    {
+      "id": "MAY26-v3",
+      "version": "v3",
+      "route_id": "R3",
+      "document_date": "2026-05-20",
+      "date_basis": "source_declared_date",
+      "change_type": "thesis_change",
+      "previous_discussion_node": "MAY26-v2",
+      "relation_to_previous": "discussion_sequence_not_adoption_proof",
+      "as_written_status": "DRAFT",
+      "summary": "直接 alpha／短期現金流，策略工廠後置",
+      "source_refs": [
+        "may-v3"
+      ],
+      "evidence_form": "standalone_document"
+    },
+    {
+      "id": "MAY26-v4",
+      "version": "v4",
+      "route_id": "R3",
+      "document_date": "2026-05-20",
+      "date_basis": "source_declared_date",
+      "change_type": "thesis_change",
+      "previous_discussion_node": "MAY26-v3",
+      "relation_to_previous": "discussion_sequence_not_adoption_proof",
+      "as_written_status": "DRAFT",
+      "summary": "短期 Direct Exploit＋長期 ASDS 雙軌",
+      "source_refs": [
+        "may-v4"
+      ],
+      "evidence_form": "standalone_document"
+    },
+    {
+      "id": "MAY26-v4.1",
+      "version": "v4.1",
+      "route_id": "R3",
+      "document_date": "2026-05-20",
+      "date_basis": "source_declared_date",
+      "change_type": "engineering_correction",
+      "previous_discussion_node": "MAY26-v4",
+      "relation_to_previous": "discussion_sequence_not_adoption_proof",
+      "as_written_status": "DRAFT",
+      "summary": "對齊真實 schema、資料與派工條件",
+      "source_refs": [
+        "may-v4.1"
+      ],
+      "evidence_form": "standalone_document"
+    },
+    {
+      "id": "MAY26-v4.2",
+      "version": "v4.2",
+      "route_id": "R3",
+      "document_date": "2026-05-20",
+      "date_basis": "source_declared_date",
+      "change_type": "scope_contraction",
+      "previous_discussion_node": "MAY26-v4.1",
+      "relation_to_previous": "discussion_sequence_not_adoption_proof",
+      "as_written_status": "DRAFT",
+      "summary": "Track B 投入縮至零，收緊資料與 Demo 證據",
+      "source_refs": [
+        "may-v4.2"
+      ],
+      "evidence_form": "standalone_document"
+    },
+    {
+      "id": "MAY26-v4.3",
+      "version": "v4.3",
+      "route_id": "R3",
+      "document_date": "2026-05-20",
+      "date_basis": "source_declared_date",
+      "change_type": "thesis_change",
+      "previous_discussion_node": "MAY26-v4.2",
+      "relation_to_previous": "discussion_sequence_not_adoption_proof",
+      "as_written_status": "DRAFT_WITH_RETRACTION",
+      "summary": "改為技術＋商業證據衝刺；IP sale 後被撤回",
+      "source_refs": [
+        "may-v4.3"
+      ],
+      "evidence_form": "standalone_document"
+    },
+    {
+      "id": "MAY26-v4.4",
+      "version": "v4.4",
+      "route_id": "R3",
+      "document_date": "2026-05-20",
+      "date_basis": "source_declared_date",
+      "change_type": "scope_reframe",
+      "previous_discussion_node": "MAY26-v4.3",
+      "relation_to_previous": "discussion_sequence_not_adoption_proof",
+      "as_written_status": "ACTIVE_AS_WRITTEN",
+      "summary": "放棄雙軌敘事及內容訂閱變現，重定資本／時間邊界",
+      "source_refs": [
+        "may-v4.4"
+      ],
+      "evidence_form": "standalone_document"
+    },
+    {
+      "id": "MAY26-v5.0",
+      "version": "v5.0",
+      "route_id": "R3",
+      "document_date": "2026-05-20",
+      "date_basis": "source_declared_date",
+      "change_type": "thesis_change",
+      "previous_discussion_node": "MAY26-v4.4",
+      "relation_to_previous": "discussion_sequence_not_adoption_proof",
+      "as_written_status": "DRAFT",
+      "summary": "放棄訂閱成本損益兩平敘事，候選回到資料驗證",
+      "source_refs": [
+        "may-v5.0"
+      ],
+      "evidence_form": "standalone_document"
+    },
+    {
+      "id": "MAY26-v5.1",
+      "version": "v5.1",
+      "route_id": "R3",
+      "document_date": "2026-05-20",
+      "date_basis": "inferred_from_referring_document",
+      "change_type": "reviewer_proposal",
+      "previous_discussion_node": "MAY26-v5.0",
+      "relation_to_previous": "discussion_sequence_not_adoption_proof",
+      "as_written_status": "REFERENCE_ONLY",
+      "summary": "僅在 v5.2 引用的 reviewer proposal；未找到獨立正文",
+      "source_refs": [
+        "may-v5.2"
+      ],
+      "evidence_form": "reference_only"
+    },
+    {
+      "id": "MAY26-v5.2",
+      "version": "v5.2",
+      "route_id": "R3",
+      "document_date": "2026-05-20",
+      "date_basis": "source_declared_date",
+      "change_type": "thesis_change",
+      "previous_discussion_node": "MAY26-v5.1",
+      "relation_to_previous": "discussion_sequence_not_adoption_proof",
+      "as_written_status": "DRAFT",
+      "summary": "Adaptive Strategy Lab：生存底座＋動態 alpha＋配置",
+      "source_refs": [
+        "may-v5.2"
+      ],
+      "evidence_form": "standalone_document"
+    },
+    {
+      "id": "MAY26-v5.3",
+      "version": "v5.3",
+      "route_id": "R3",
+      "document_date": "2026-05-20",
+      "date_basis": "source_declared_date",
+      "change_type": "engineering_correction",
+      "previous_discussion_node": "MAY26-v5.2",
+      "relation_to_previous": "discussion_sequence_not_adoption_proof",
+      "as_written_status": "DRAFT",
+      "summary": "Sensor-first／alpha-first，修正期權成本與開發順序",
+      "source_refs": [
+        "may-v5.3"
+      ],
+      "evidence_form": "standalone_document"
+    },
+    {
+      "id": "MAY26-v5.4",
+      "version": "v5.4",
+      "route_id": "R3",
+      "document_date": "2026-05-20",
+      "date_basis": "source_declared_date",
+      "change_type": "scaling_reframe",
+      "previous_discussion_node": "MAY26-v5.3",
+      "relation_to_previous": "discussion_sequence_not_adoption_proof",
+      "as_written_status": "DRAFT",
+      "summary": "把 Master Trader Copy Trading 設為主要擴張途徑",
+      "source_refs": [
+        "may-v5.4"
+      ],
+      "evidence_form": "standalone_document"
+    },
+    {
+      "id": "MAY26-v5.5",
+      "version": "v5.5",
+      "route_id": "R3",
+      "document_date": "2026-05-20",
+      "date_basis": "source_declared_date",
+      "change_type": "product_positioning_change",
+      "previous_discussion_node": "MAY26-v5.4",
+      "relation_to_previous": "discussion_sequence_not_adoption_proof",
+      "as_written_status": "FINAL_DRAFT",
+      "summary": "完整自營 quant bot 單一產品；Copy Trading 有條件後置",
+      "source_refs": [
+        "may-v5.5"
+      ],
+      "evidence_form": "standalone_document"
+    },
+    {
+      "id": "MAY26-v5.6",
+      "version": "v5.6",
+      "route_id": "R3",
+      "document_date": "2026-05-20",
+      "date_basis": "source_declared_date",
+      "change_type": "scope_expansion",
+      "previous_discussion_node": "MAY26-v5.5",
+      "relation_to_previous": "discussion_sequence_not_adoption_proof",
+      "as_written_status": "FINAL_PENDING_DISPATCH",
+      "summary": "加 Macro／On-chain／Earn，並修正策略建設順序",
+      "source_refs": [
+        "may-v5.6"
+      ],
+      "evidence_form": "standalone_document"
+    },
+    {
+      "id": "MAY26-v5.7",
+      "version": "v5.7",
+      "route_id": "R3",
+      "document_date": "2026-05-20",
+      "date_basis": "source_declared_date",
+      "change_type": "engineering_correction",
+      "previous_discussion_node": "MAY26-v5.6",
+      "relation_to_previous": "discussion_sequence_not_adoption_proof",
+      "as_written_status": "HISTORICAL_DISPATCH_PACKET",
+      "summary": "Dispatch-Safe Patch；六項工程精度修正，thesis 不變",
+      "source_refs": [
+        "may-v5.7"
+      ],
+      "evidence_form": "standalone_document"
+    },
+    {
+      "id": "MAY26-v5.8",
+      "version": "v5.8",
+      "route_id": "R4",
+      "document_date": "2026-05-21",
+      "date_basis": "source_declared_date",
+      "change_type": "scope_expansion",
+      "previous_discussion_node": "MAY26-v5.7",
+      "relation_to_previous": "supplements",
+      "as_written_status": "HISTORICAL_FROZEN_AUTONOMY_TRACK",
+      "summary": "M1–M13 自治擴張，補充 v5.7 而非全面取代",
+      "source_refs": [
+        "may-v5.8"
+      ],
+      "evidence_form": "standalone_document"
+    },
+    {
+      "id": "MAY26-v5.9",
+      "version": "v5.9",
+      "route_id": "R5",
+      "document_date": "2026-05-31",
+      "date_basis": "source_declared_date",
+      "change_type": "priority_shift",
+      "previous_discussion_node": "MAY26-v5.8",
+      "relation_to_previous": "freezes_active_implementation",
+      "as_written_status": "THESIS_SHIFT_RECORDED",
+      "summary": "凍結大部分自治 active-IMPL，改為 Alpha-Edge 證據優先",
+      "source_refs": [
+        "plan-changelog"
+      ],
+      "evidence_form": "changelog_entry"
+    }
+  ],
+  "engineering_anchors": [
+    {
+      "route_id": "R7",
+      "delivery": "Bybit H2",
+      "commit": "52a884d93f774a5f625a7d2db4ebe6e2ec95b23a",
+      "role": "main_merge_commit",
+      "source_adoption": "ancestor_of_recording_baseline",
+      "runtime": "not_verified_by_this_record",
+      "pull_request": 200
+    },
+    {
+      "route_id": "R7",
+      "delivery": "D1.1",
+      "commit": "4b5b6b0079b2b4614692b7df2e0185f6b4923d45",
+      "role": "feature_checkpoint",
+      "source_adoption": "not_ancestor_of_recording_baseline",
+      "runtime": "not_verified_by_this_record",
+      "note": "Commit identity is an optional cross-branch anchor; core history uses portable records and does not require this feature branch to be fetched."
+    }
+  ],
+  "events": [
+    {
+      "id": "RH-20261003-01",
+      "recorded_on": "2026-10-03",
+      "event_type": "taxonomy_adopted",
+      "route_ids": [
+        "R1",
+        "R2",
+        "R3",
+        "R4",
+        "R5",
+        "R6",
+        "R7",
+        "R8"
+      ],
+      "decision_ref": "docs/decisions/2026-10-03--route-history-versioning.md",
+      "authority_source": "Operator message in current chat",
+      "operator_excerpt": "按照你描述的R1-R8（我會採用）和版本變化歷史寫進git",
+      "meaning": "Retrospective classification and recording convention; no historical commit rewrites or runtime effects."
+    }
+  ],
+  "external_provenance": [
+    {
+      "path_at_capture": "reports/2026-10-03-local-first-feasibility/REPORT.md",
+      "sha256": "fd4d86a05122ead32c38856058607392fe821e2111840cef4226d10d8ca823aa",
+      "availability": "outside_repository; optional provenance only",
+      "portable_summary": "docs/decisions/2026-10-03--r8-hybrid-research-candidate.md"
+    }
+  ]
+}

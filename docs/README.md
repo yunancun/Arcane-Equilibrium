@@ -16,6 +16,7 @@ This directory holds all engineering documents, logs, handoff records, and decis
 | 需要 | 入口 |
 |---|---|
 | 当前活跃工作 / blocker / next action | `../TODO.md` |
+| 查 R1–R8／舊版路線，或記錄路線變更 | [歷史總覽](references/2026-10-03--route-history.md) → [Git 記錄方式](decisions/2026-10-03--route-history-versioning.md)；固定來源見 [登記簿](references/2026-10-03--route-history-register.json) |
 | 稳定项目入口 / 架构地图 | `../README.md` |
 | IBKR stock/ETF capability policy | `governance_dev/amendments/2026-07-11--AMD-2026-07-11-01-ibkr-stock-etf-full-live-capability-development.md` — implementation is allowed; activation remains separate |
 | agent 启动路由 | `agents/context-loading.md` |
