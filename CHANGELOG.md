@@ -1,16 +1,18 @@
 # Changelog — 玄衡 · Arcane Equilibrium 執行計畫版本紀錄
 
-> 本檔為 Execution Plan 版本級 changelog，不是日常工程歷史。日常 Wave / Sprint / Batch 等
-> 工程紀錄請見 `docs/CLAUDE_CHANGELOG.md`。
->
-> 規則：
-> - 每個版本一個 `## [v5.x] — YYYY-MM-DD` H2 section。
-> - 採 keep-a-changelog 風格欄位（Added / Changed / Deprecated / Removed / Security /
->   Performance / Test / Docs / Sign-off）。
-> - 對應 `docs/execution_plan/YYYY-MM-DD--execution-plan-v5.x.md` 主檔。
-> - thesis-shift 版（v5.4→v5.5、v5.6→v5.7）+ scope-expansion 版（v5.7→v5.8）才在本檔登記；
->   微版（patch、rebase）走 `docs/CLAUDE_CHANGELOG.md`。
-> - 16 根原則（CLAUDE.md §二）每版必須在 Sign-off 確認 0 紅線。
+> 本檔保留執行計畫版本與路線事件摘要；日常工程仍見 `docs/CLAUDE_CHANGELOG.md`。
+> R1–R8、舊版本對照與固定來源見 [路線總覽](docs/references/2026-10-03--route-history.md)；
+> 記錄新路線／追溯版本時依 [Git 記錄方式](docs/decisions/2026-10-03--route-history-versioning.md)。
+> 舊 v5.x 原文保留，新增事件用日期＋Route-Id；工程修正不自動提升路線世代。
+> 舊引言誤把 v5.6→v5.7 列為 thesis-shift，本次依下方正文校正為 engineering-only。
+> 舊主檔命名／路徑以固定來源登記為準；v5.9 起已改用 AEG packet。
+
+## [RH-20261003-01] — 2026-10-03 — R1–R8 歷史分類採用
+
+Operator 採用七個主要開發階段＋R8 架構候選的歷史分類，建立固定 Git 來源、
+十八個五月審議節點、路線事件、commit trailers 與 annotated history baseline。
+R8 保存「本機草擬／學習／交易＋外部歷史回測」候選分工；供應商及遷移未驗收。
+這是歷史記錄機制採用，不是回溯發佈八個產品版本，也未改變 TODO 或交易／部署權限。
 
 ## [v5.9] — 2026-05-31
 
