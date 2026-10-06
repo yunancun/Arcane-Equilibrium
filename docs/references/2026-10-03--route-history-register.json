@@ -210,6 +210,12 @@
       "path": "docs/decisions/2026-10-03--r8-hybrid-research-candidate.md",
       "sha256": "f3d793c27b62d180d8a1dc1555994d2a8243c450223431ea3ce4a926caeb7ac1",
       "meaning": "portable retrospective summary recorded in this history commit; not historical adoption attestation"
+    },
+    "r8-adoption": {
+      "kind": "recorded_file",
+      "path": "docs/decisions/2026-10-07--r8-adoption-agent-experiment-bench.md",
+      "sha256": "cac0f001979b1f0414d2d345b74963ca993f9f5597a5012395fc107a94628001",
+      "meaning": "dated direction-adoption decision recorded in this commit; not platform, runtime or dispatch attestation"
     }
   },
   "routes": [
@@ -339,18 +345,39 @@
     },
     {
       "id": "R8",
-      "title": "本機學習與交易＋外部歷史回測",
-      "period_label": "2026-10-03",
+      "title": "以 QuantConnect 作 Agent 實驗台的有界融合",
+      "period_label": "2026-10-03 提出；2026-10-07 方向採納",
       "period_precision": "retrospective_approximate_window",
-      "record_status": "candidate",
-      "change_type": "architecture_candidate",
+      "record_status": "accepted_direction",
+      "change_type": "architecture_direction_accepted",
       "follows_in_retrospective": "R7",
-      "summary": "本機草擬、學習及交易，成熟平台提供歷史回測／評估，回傳有限結果。",
-      "reason": "減少全市場歷史自持與研究基礎設施維護負擔。",
-      "retained": "本機交易證據、策略／學習所有權與既有風控／採用閘門。",
-      "limits": "分類已採用，技術架構仍候選；QuantConnect 選型與遷移未驗收。",
+      "summary": "成熟平台作 Agent 進化閉環的實驗台；AE 保留自主決策、學習所有權、Rust 交易權威與本機運行。",
+      "reason": "進化閉環缺實驗引擎；檢驗「選擇」需要多年跨品種歷史；減少歷史自持負擔為次要收益。",
+      "retained": "Rust 交易權威、風控／採用閘門、本機交易證據、策略與學習所有權；Bybit 執行不外遷。",
+      "limits": "只採納方向與設計原則；平台准入、訊號邊界 ADR、TODO 派工及 runtime 效果均未完成或授權。",
       "source_refs": [
-        "r8-portable"
+        "r8-portable",
+        "r8-adoption"
+      ],
+      "status_history": [
+        {
+          "recorded_on": "2026-10-03",
+          "event": "RH-20261003-01",
+          "snapshot": {
+            "period_label": "2026-10-03",
+            "record_status": "candidate",
+            "change_type": "architecture_candidate",
+            "summary": "本機草擬、學習及交易，成熟平台提供歷史回測／評估，回傳有限結果。",
+            "reason": "減少全市場歷史自持與研究基礎設施維護負擔。",
+            "retained": "本機交易證據、策略／學習所有權與既有風控／採用閘門。",
+            "limits": "分類已採用，技術架構仍候選；QuantConnect 選型與遷移未驗收。"
+          }
+        },
+        {
+          "recorded_on": "2026-10-07",
+          "event": "RH-20261007-01",
+          "record_status": "accepted_direction"
+        }
       ]
     }
   ],
@@ -683,6 +710,19 @@
       "authority_source": "Operator message in current chat",
       "operator_excerpt": "按照你描述的R1-R8（我會採用）和版本變化歷史寫進git",
       "meaning": "Retrospective classification and recording convention; no historical commit rewrites or runtime effects."
+    },
+    {
+      "id": "RH-20261007-01",
+      "recorded_on": "2026-10-07",
+      "event_type": "route_accepted",
+      "route_ids": [
+        "R8"
+      ],
+      "decision_ref": "docs/decisions/2026-10-07--r8-adoption-agent-experiment-bench.md",
+      "prior_record": "docs/decisions/2026-10-03--r8-hybrid-research-candidate.md",
+      "authority_source": "Operator message in current chat",
+      "operator_excerpt": "三點都確認，把採納版寫成 R8 決策文件",
+      "meaning": "R8 direction and design principles accepted. Platform admission, signal-boundary ADR, TODO dispatch and every runtime or trading effect remain separate and unverified."
     }
   ],
   "external_provenance": [
@@ -691,6 +731,19 @@
       "sha256": "fd4d86a05122ead32c38856058607392fe821e2111840cef4226d10d8ca823aa",
       "availability": "outside_repository; optional provenance only",
       "portable_summary": "docs/decisions/2026-10-03--r8-hybrid-research-candidate.md"
+    },
+    {
+      "path_at_capture": "https://chatgpt.com/share/6ac546a9-3258-83ec-b7ae-83c59e696fc4",
+      "availability": "external shared conversation; optional provenance only",
+      "portable_summary": "docs/decisions/2026-10-07--r8-adoption-agent-experiment-bench.md"
+    },
+    {
+      "path_at_capture": "https://www.quantconnect.com/terms/",
+      "observed_on": "2026-10-06",
+      "observed_version": "Version 1.4. Last Updated October 2, 2026",
+      "availability": "external vendor policy; tool-extracted, may change; optional provenance only",
+      "portable_summary": "docs/decisions/2026-10-07--r8-adoption-agent-experiment-bench.md"
     }
-  ]
+  ],
+  "last_event_recorded_on": "2026-10-07"
 }

@@ -1,9 +1,18 @@
 # CLAUDE_CHANGELOG.md — 開發歷史歸檔
 
 > 從 CLAUDE.md / TODO.md 遷出的 Wave/Sprint/Batch + TODO version-increment 歷史敘事。新 session 不需要讀此文件，僅供回顧歷史時查閱。
-> 最後更新：2026-10-03（R1–R8 歷史分類與 Git 記錄入口；TODO v884 不變）
+> 最後更新：2026-10-07（R8 方向採納記錄；TODO v884 不變）
 
 ---
+
+## R8 方向採納記錄 — 2026-10-07
+
+- Operator 採納 R8 方向；[採納決策](decisions/2026-10-07--r8-adoption-agent-experiment-bench.md)
+  記錄確認的三點、舊／新做法、設計原則、順序、保留範圍與未決／未驗項目。
+- [登記簿](references/2026-10-03--route-history-register.json) 追加事件 `RH-20261007-01` 與來源
+  `r8-adoption`；[歷史總覽](references/2026-10-03--route-history.md) 同步 R8 狀態。
+  10-03 候選原文保留不改。
+- 本項只改文件與歷史索引；沒有產品程式、TODO 派工、ADR、帳戶、部署或 runtime 成果。
 
 ## R1–R8 Git 歷史登記 — 2026-10-03
 

@@ -3,6 +3,7 @@
 首次記錄／分期採用：2026-10-03（Asia/Shanghai）。歷史來源觀察基線：`af12fc9e0b75925ad0404a351018cebd21598277`。
 Operator 已採用 R1–R8 作為日誌分類；這是七個主要開發階段加一個架構候選，
 不是八個正式產品 release，也不聲稱前七階段全部完成。期間是近似且重疊的開發重心。
+2026-10-07 起 R8 由候選轉為已採納方向（事件 `RH-20261007-01`）；平台准入與效果仍未驗。
 
 [Git 記錄決策與查詢方法](../decisions/2026-10-03--route-history-versioning.md) ·
 [結構化登記簿](2026-10-03--route-history-register.json) ·
@@ -19,7 +20,7 @@ Operator 已採用 R1–R8 作為日誌分類；這是七個主要開發階段�
 | R5：Alpha 證據優先 | 2026-05-31 ～ 2026-06 起延續；`historical` | v5.9 凍結大部分自治 active-IMPL，先找可信成本後 alpha；M7 保留例外。 | 當時成本牆調查顯示候選優勢不足，先解策略證據缺口。 保留：自治設計與既有 Stage／風控；凍結並非全部取消。 |
 | R6：AI／ML 真實落地與證據修復 | 2026-07 ～ 2026-09 及未完成尾項；`historical_with_open_program` | AIML V2 要求合格資料、真實 fit、Rust 消費、自然第二代、恢復與運行證據。 | 修復 source／tests 與真正功能、部署及效果之間的差距。 保留：研究資料與模型零件、Rust 權威、資格與效果邊界。 |
 | R7：有限工程單元、可用功能優先 | 2026-09 下旬 ～ 截至 2026-10-03；`current_delivery_emphasis` | 先以有限單元驗證窄範圍功能；Bybit 修復與 D1.1 本機模型消費屬此分期。 | 避免把遠端正式環境證明前置為所有本機開發的阻塞。 保留：正式上線要求、舊契約與權限繼續有效；只調整交付節奏。 |
-| R8：本機學習與交易＋外部歷史回測 | 2026-10-03；`candidate` | 本機草擬、學習及交易，成熟平台提供歷史回測／評估，回傳有限結果。 | 減少全市場歷史自持與研究基礎設施維護負擔。 保留：本機交易證據、策略／學習所有權與既有風控／採用閘門。 |
+| R8：以 QuantConnect 作 Agent 實驗台的有界融合 | 2026-10-03 提出、2026-10-07 方向採納；`accepted_direction` | 成熟平台作 Agent 進化閉環的實驗台；AE 保留自主決策、學習所有權、Rust 交易權威與本機運行。 | 進化閉環缺實驗引擎，檢驗「選擇」需要多年跨品種歷史；減少歷史自持負擔為次要收益。 保留：本機交易證據、策略／學習所有權、既有風控／採用閘門；Bybit 執行不外遷。 |
 
 ## 各期證據與限制
 
@@ -30,7 +31,7 @@ Operator 已採用 R1–R8 作為日誌分類；這是七個主要開發階段�
 - **R5**：[plan-changelog](../../CHANGELOG.md)、[alpha-amendment](../governance_dev/amendments/2026-05-31--AMD-2026-05-31-01-alpha-edge-evidence-governance.md)。歷史研究結果不能當今日候選／市場結論。
 - **R6**：[aiml-v2](../execution_plan/2026-07-19--ai_ml_long_lived_repair_and_landing_plan.md)、[aiml-ledger](../execution_plan/ai_ml_landing/PROGRESS.md)。PROGRAM_ADOPTED／S1_CLOSED 不等於完整學習或交易落地；狀態仍讀 TODO。
 - **R7**：[current-todo-snapshot](../../TODO.md)、[engineering-log](../CLAUDE_CHANGELOG.md)。H2 source 採用、D1.1 候選與 runtime 狀態分開；不是重開已關閉 workflow。
-- **R8**：[r8-portable](../decisions/2026-10-03--r8-hybrid-research-candidate.md)。分類已採用，技術架構仍候選；QuantConnect 選型與遷移未驗收。
+- **R8**：[r8-portable](../decisions/2026-10-03--r8-hybrid-research-candidate.md)（候選原文，保留不改）、[r8-adoption](../decisions/2026-10-07--r8-adoption-agent-experiment-bench.md)。方向與設計原則已採納；平台准入、訊號邊界 ADR、TODO 派工與 runtime 效果均未完成。
 
 以上連結方便閱讀工作樹；需要精確原文時使用登記簿的固定 Git commit/path/blob/sha256。
 原文中歷史數值、採用或運行敘述只屬原觀察期，本次沒有重驗其市場、主機或交易結果。
@@ -78,7 +79,7 @@ v5.8 **補充** v5.7，v5.9 **凍結大部分實作並重排優先級**；不能
 |---|---|---|
 | R7／Bybit H2 | `52a884d93f774a5f625a7d2db4ebe6e2ec95b23a`，PR200 merge | 本次基線的 ancestor，source 已整合；不證明 Linux／PG／真 venue recovery |
 | R7／D1.1 | `4b5b6b0079b2b4614692b7df2e0185f6b4923d45`，feature checkpoint | 本次基線的非 ancestor 候選；不表示完整 D1.1、独立 review、main 採用或 serving 已完成 |
-| R8／混合研究架構 | [可攜候選紀錄](../decisions/2026-10-03--r8-hybrid-research-candidate.md) | 歷史需求／候選分工；平台選型及遷移尚未驗收 |
+| R8／Agent 實驗台融合 | [採納決策](../decisions/2026-10-07--r8-adoption-agent-experiment-bench.md)；[候選紀錄](../decisions/2026-10-03--r8-hybrid-research-candidate.md) | 方向採納與設計原則；尚無工程交付錨點，平台准入未驗收 |
 
 H1/H2、D1.1 是工程單元；AIML V2 是子計畫；TODO／PROGRESS 版號是帳本修訂；
 Route-Id 是本歷史命名空間。這些都不能互相當成完整產品版本。
@@ -87,6 +88,9 @@ Route-Id 是本歷史命名空間。這些都不能互相當成完整產品版�
 ## 記錄事件
 
 - **RH-20261003-01／taxonomy_adopted**：Operator 採用 R1–R8 分期與 Git 記錄要求。
-  今日回溯補建歷史，而非補造過去的發布；R8 保持候選。
+  今日回溯補建歷史，而非補造過去的發布；當時 R8 為候選。
+- **RH-20261007-01／route_accepted**：Operator 採納 R8 方向與設計原則，見
+  [採納決策](../decisions/2026-10-07--r8-adoption-agent-experiment-bench.md)。沿用 `Route-Id: R8`，
+  不新增 R9；R7 的有限工程單元節奏照舊。只記錄方向，不授予帳戶、支出、派工或交易效果。
 - 新路線、採納、撤回、取代及更正按 [決策規則](../decisions/2026-10-03--route-history-versioning.md)
   追加事件；現行派工及效果授權仍回 TODO 與既有 ADR/AMD。

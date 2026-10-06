@@ -16,7 +16,7 @@
 | agent 启动路由 | `docs/agents/context-loading.md` |
 | TODO 维护规则 | `docs/agents/todo-maintenance.md` |
 | 版本增量历史 | `docs/CLAUDE_CHANGELOG.md` |
-| R1–R8 路線沿革／歷史版本／變更記錄 | [歷史總覽](../references/2026-10-03--route-history.md) · [登記簿](../references/2026-10-03--route-history-register.json) · [記錄決策](../decisions/2026-10-03--route-history-versioning.md) · [R8 候選](../decisions/2026-10-03--r8-hybrid-research-candidate.md) |
+| R1–R8 路線沿革／歷史版本／變更記錄 | [歷史總覽](../references/2026-10-03--route-history.md) · [登記簿](../references/2026-10-03--route-history-register.json) · [記錄決策](../decisions/2026-10-03--route-history-versioning.md) · [R8 候選](../decisions/2026-10-03--r8-hybrid-research-candidate.md) · [R8 採納](../decisions/2026-10-07--r8-adoption-agent-experiment-bench.md) |
 | 深历史 / RCA | `docs/archive/2026-04-25--ae_inventory_consolidated.md`（按需；2026-07-12 自 srv 根歸檔） |
 | 開發 sub-agent 治理 / consumption | `docs/agents/development-agent-governance.md`; `.codex/agent_registry_v1.json`; `docs/adr/0050-development-agent-governance.md`; `docs/adr/0052-gpt56-bounded-multi-agent-execution.md` |
 

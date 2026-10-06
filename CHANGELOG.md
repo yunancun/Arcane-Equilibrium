@@ -7,6 +7,14 @@
 > 舊引言誤把 v5.6→v5.7 列為 thesis-shift，本次依下方正文校正為 engineering-only。
 > 舊主檔命名／路徑以固定來源登記為準；v5.9 起已改用 AEG packet。
 
+## [RH-20261007-01] — 2026-10-07 — R8 方向採納
+
+Operator 採納 R8：以成熟平台（QuantConnect 為准入對象）作 Agent 進化閉環的實驗台，
+AE 保留自主決策、學習所有權、Rust 交易權威與本機運行；Bybit 執行不外遷。
+同時確認三點：另立訊號邊界 ADR；三項補充列為正式需求；核心能力定位為「選擇」。
+詳見 [採納決策](docs/decisions/2026-10-07--r8-adoption-agent-experiment-bench.md)。
+只採納方向與設計原則；平台准入、ADR、TODO 派工及交易／部署權限均未改變。
+
 ## [RH-20261003-01] — 2026-10-03 — R1–R8 歷史分類採用
 
 Operator 採用七個主要開發階段＋R8 架構候選的歷史分類，建立固定 Git 來源、
