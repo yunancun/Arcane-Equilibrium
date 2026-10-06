@@ -92,5 +92,7 @@ Route-Id 是本歷史命名空間。這些都不能互相當成完整產品版�
 - **RH-20261007-01／route_accepted**：Operator 採納 R8 方向與設計原則，見
   [採納決策](../decisions/2026-10-07--r8-adoption-agent-experiment-bench.md)。沿用 `Route-Id: R8`，
   不新增 R9；R7 的有限工程單元節奏照舊。只記錄方向，不授予帳戶、支出、派工或交易效果。
+- **RH-20261007-02／record_corrected**：應 Operator 要求，採納記錄由簡記改寫為正式決策文件；
+  決定本身不變。改寫前的版本身份保存在登記簿該事件的 `prior_record_identity`。
 - 新路線、採納、撤回、取代及更正按 [決策規則](../decisions/2026-10-03--route-history-versioning.md)
   追加事件；現行派工及效果授權仍回 TODO 與既有 ADR/AMD。

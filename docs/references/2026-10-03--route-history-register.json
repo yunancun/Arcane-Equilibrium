@@ -214,8 +214,8 @@
     "r8-adoption": {
       "kind": "recorded_file",
       "path": "docs/decisions/2026-10-07--r8-adoption-agent-experiment-bench.md",
-      "sha256": "cac0f001979b1f0414d2d345b74963ca993f9f5597a5012395fc107a94628001",
-      "meaning": "dated direction-adoption decision recorded in this commit; not platform, runtime or dispatch attestation"
+      "sha256": "5e8eb3f9b87375c157424e4ccf44ffebe6fbfd259fa7a912f0d053034cea4c4f",
+      "meaning": "formal R8 direction-adoption decision document, revised in place under RH-20261007-02 before publication; not platform, runtime or dispatch attestation"
     }
   },
   "routes": [
@@ -377,6 +377,11 @@
           "recorded_on": "2026-10-07",
           "event": "RH-20261007-01",
           "record_status": "accepted_direction"
+        },
+        {
+          "recorded_on": "2026-10-07",
+          "event": "RH-20261007-02",
+          "note": "decision record formalized; decision and record_status unchanged"
         }
       ]
     }
@@ -723,6 +728,26 @@
       "authority_source": "Operator message in current chat",
       "operator_excerpt": "三點都確認，把採納版寫成 R8 決策文件",
       "meaning": "R8 direction and design principles accepted. Platform admission, signal-boundary ADR, TODO dispatch and every runtime or trading effect remain separate and unverified."
+    },
+    {
+      "id": "RH-20261007-02",
+      "recorded_on": "2026-10-07",
+      "event_type": "record_corrected",
+      "route_ids": [
+        "R8"
+      ],
+      "corrects": "RH-20261007-01",
+      "decision_ref": "docs/decisions/2026-10-07--r8-adoption-agent-experiment-bench.md",
+      "authority_source": "Operator message in current chat",
+      "operator_excerpt": "你這份讀起來不像是決策文件而是一個你的簡記，我希望你給我一份正式的R8決策文件符合R標準。",
+      "prior_record_identity": {
+        "commit": "2daf98aade575c1fecd88aa7900a2c9fb332b97f",
+        "path": "docs/decisions/2026-10-07--r8-adoption-agent-experiment-bench.md",
+        "blob": "9ffc3b0ded9215143e8b330d8d19e3e121a84a95",
+        "sha256": "cac0f001979b1f0414d2d345b74963ca993f9f5597a5012395fc107a94628001",
+        "availability": "feature-branch commit; optional provenance, may be absent from a main-only clone"
+      },
+      "meaning": "The adoption record was rewritten as a formal decision document at Operator request. The decision recorded by RH-20261007-01 is unchanged."
     }
   ],
   "external_provenance": [
