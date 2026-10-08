@@ -12,6 +12,7 @@
 | 需要 | 先读 |
 |---|---|
 | 当前 active queue / owner / gate / runtime evidence | 根目录 `TODO.md` |
+| R8 階段 1 回放修補的派工指令與交接摘要 | `2026-10-09--r8-stage1-replay-patches-dispatch.md`；是否可派發回到 `TODO.md` 的 `P1-R8-STAGE1-REPLAY-PATCHES` |
 | 跨主题证据入口 | `docs/_indexes/initiative_index.md` |
 | L2 Advisory Mesh 当前尾巴 | `TODO.md` row `P1-L2-ADVISORY-MESH-TAILS`; 本目录 L2 文件只作 roadmap/reference |
 | AEG / Alpha-Edge 当前路线 | `TODO.md` `P0-EDGE-1` / `AEG-S3-CANDIDATE-DIRECT-ROWS` + `docs/_indexes/initiative_index.md` |

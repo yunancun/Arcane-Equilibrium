@@ -218,10 +218,32 @@
       "meaning": "formal R8 direction-adoption decision document; revised in place under RH-20261007-02, annotated with factual corrections (RH-20261008-01) and with the passages amended by amendment 1 (RH-20261009-01); not platform, runtime or dispatch attestation"
     },
     "r8-amendment-1": {
+      "kind": "git_blob",
+      "path": "docs/decisions/2026-10-08--r8-amendment-1-first-loop-on-native-replay.md",
+      "commit": "49c05c6fdd70f2d9035184ab45ad53f12650a2c9",
+      "blob": "4f68e681471ccf2327f58002300e1622fc6ae2d3",
+      "sha256": "c7f112b4393f1443749f54e47405cf83422a573aa45abafb944434d58fcf32e9",
+      "meaning": "first amendment to the R8 decision, accepted by the Operator on 2026-10-09 and annotated with post-review clarifications (RH-20261009-02); direction and contract only, not platform, runtime or dispatch attestation. Recorded digest unchanged; pinned to its Git object when a later version was recorded (RH-20261009-04)"
+    },
+    "r8-amendment-1-r2": {
       "kind": "recorded_file",
       "path": "docs/decisions/2026-10-08--r8-amendment-1-first-loop-on-native-replay.md",
-      "sha256": "c7f112b4393f1443749f54e47405cf83422a573aa45abafb944434d58fcf32e9",
-      "meaning": "first amendment to the R8 decision, accepted by the Operator on 2026-10-09 and annotated with post-review clarifications (RH-20261009-02); direction and contract only, not platform, runtime or dispatch attestation"
+      "sha256": "6136cfc28d02add073774f7c3e45ddd8b6cd1b9ad37a5d4486e697dae2608d96",
+      "meaning": "later version of the accepted amendment, adding the dated note for the funding scope decision (RH-20261009-03); body AM1-AM12 unchanged; direction and contract only, not platform, runtime or dispatch attestation"
+    },
+    "r8-stage1-dispatch": {
+      "kind": "git_blob",
+      "path": "docs/execution_plan/2026-10-09--r8-stage1-replay-patches-dispatch.md",
+      "commit": "da83312615c7178ef5730dc57f7bc25e83238c12",
+      "blob": "a7ca8bda1bfbed7bf4cbfedf7ae2b3ec9d1bfb24",
+      "sha256": "45f84c9b11fad71b2c90bc9c2cdd73ab93bc478d9215d88f0c0eb73252c18058",
+      "meaning": "stage 1 dispatch instruction and handoff summary as first recorded; not an authorization; superseded as the working instruction by r8-stage1-dispatch-r2. The commit is on a feature branch and reaches main only through a merge commit"
+    },
+    "r8-stage1-dispatch-r2": {
+      "kind": "recorded_file",
+      "path": "docs/execution_plan/2026-10-09--r8-stage1-replay-patches-dispatch.md",
+      "sha256": "002bc524eb3a48a184c54e36f4db845a9f0801327d6fc239f5b133a1f34724a3",
+      "meaning": "stage 1 dispatch instruction and handoff summary, corrected after automated pull-request review (RH-20261009-04); not an authorization; dispatch state is the TODO row P1-R8-STAGE1-REPLAY-PATCHES"
     }
   },
   "routes": [
@@ -364,7 +386,10 @@
       "source_refs": [
         "r8-portable",
         "r8-adoption",
-        "r8-amendment-1"
+        "r8-amendment-1",
+        "r8-amendment-1-r2",
+        "r8-stage1-dispatch",
+        "r8-stage1-dispatch-r2"
       ],
       "status_history": [
         {
@@ -409,6 +434,16 @@
           "recorded_on": "2026-10-09",
           "event": "RH-20261009-02",
           "note": "post-review clarifications annotated in amendment 1; record_status unchanged"
+        },
+        {
+          "recorded_on": "2026-10-09",
+          "event": "RH-20261009-03",
+          "note": "funding settlement excluded from stage 1 by Operator; dispatch instruction added; record_status unchanged"
+        },
+        {
+          "recorded_on": "2026-10-09",
+          "event": "RH-20261009-04",
+          "note": "dispatch instruction corrected after automated review; changed source files recorded as appended source records; record_status unchanged"
         }
       ]
     }
@@ -857,6 +892,54 @@
         "availability": "feature-branch commit; optional provenance, may be absent from a main-only clone"
       },
       "meaning": "Clarifications annotated in the accepted amendment with original text kept: selector actions must take effect inside the isolated replay while staying non-effectful in forward shadow, Demo and live; until replay settles funding, a gain verdict requires that no arm holds a position across a funding settlement; manifests must record parameter provenance because repository settings can differ from effective runtime parameters; stage 1 is entered in TODO as a waiting row. One open Operator decision is added (whether funding settlement joins stage 1). No accepted decision is changed."
+    },
+    {
+      "id": "RH-20261009-03",
+      "recorded_on": "2026-10-09",
+      "event_type": "open_item_decided",
+      "route_ids": [
+        "R8"
+      ],
+      "decides_open_item_of": "RH-20261009-02",
+      "decision_ref": "docs/decisions/2026-10-08--r8-amendment-1-first-loop-on-native-replay.md",
+      "authority_source": "Operator message in current chat",
+      "operator_excerpt": "不納入,合併",
+      "prior_record_identity": {
+        "commit": "49c05c6fdd70f2d9035184ab45ad53f12650a2c9",
+        "path": "docs/decisions/2026-10-08--r8-amendment-1-first-loop-on-native-replay.md",
+        "blob": "4f68e681471ccf2327f58002300e1622fc6ae2d3",
+        "sha256": "c7f112b4393f1443749f54e47405cf83422a573aa45abafb944434d58fcf32e9",
+        "availability": "ancestor of main at recording time"
+      },
+      "meaning": "Operator decided the open item raised by RH-20261009-02: funding settlement is not part of stage 1. The first loop may therefore reach a gain verdict only when no arm holds a position across a funding settlement. The stage 1 dispatch instruction and a handoff summary are added in the repository. No dispatch, account, spend, runtime or trading authority is granted."
+    },
+    {
+      "id": "RH-20261009-04",
+      "recorded_on": "2026-10-09",
+      "event_type": "record_corrected",
+      "route_ids": [
+        "R8"
+      ],
+      "corrects": "RH-20261009-03",
+      "decision_ref": "docs/decisions/2026-10-08--r8-amendment-1-first-loop-on-native-replay.md",
+      "authority_source": "recorder correction after automated pull-request review",
+      "prior_record_identity": {
+        "dispatch": {
+          "commit": "da83312615c7178ef5730dc57f7bc25e83238c12",
+          "path": "docs/execution_plan/2026-10-09--r8-stage1-replay-patches-dispatch.md",
+          "blob": "a7ca8bda1bfbed7bf4cbfedf7ae2b3ec9d1bfb24",
+          "sha256": "45f84c9b11fad71b2c90bc9c2cdd73ab93bc478d9215d88f0c0eb73252c18058",
+          "availability": "feature-branch commit; reaches main only through a merge commit"
+        },
+        "amendment": {
+          "commit": "49c05c6fdd70f2d9035184ab45ad53f12650a2c9",
+          "path": "docs/decisions/2026-10-08--r8-amendment-1-first-loop-on-native-replay.md",
+          "blob": "4f68e681471ccf2327f58002300e1622fc6ae2d3",
+          "sha256": "c7f112b4393f1443749f54e47405cf83422a573aa45abafb944434d58fcf32e9",
+          "availability": "ancestor of main at recording time; the version pinned by source record r8-amendment-1"
+        }
+      },
+      "meaning": "The stage 1 dispatch instruction is corrected after automated review of pull request 204: the baseline commit is fixed before task context is bound; a substitute fixture must be pinned with source metadata and digest and may not be fetched; the goal no longer claims production parameters; SIZE_DOWN is required in stage 1 as the accepted amendment already demands; positions still open at the end of a replay take part in the funding-crossing check and in PnL reconciliation; the curve is a realized-balance curve, not an equity curve, which the recorder marks as a narrowing of gap G7 left for the Operator to confirm; a size-reduced entry is closed at the quantity actually held; one implementation owner. Source records for the amendment and the dispatch instruction are now appended instead of refreshed in place, and the earlier recorded versions are pinned to their Git objects. The accepted amendment text is not changed. No dispatch, account, spend, runtime or trading authority is granted."
     }
   ],
   "external_provenance": [
