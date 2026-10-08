@@ -1,9 +1,16 @@
 # CLAUDE_CHANGELOG.md — 開發歷史歸檔
 
 > 從 CLAUDE.md / TODO.md 遷出的 Wave/Sprint/Batch + TODO version-increment 歷史敘事。新 session 不需要讀此文件，僅供回顧歷史時查閱。
-> 最後更新：2026-10-08（R8 事實更正與修訂一提議；TODO v884 不變）
+> 最後更新：2026-10-09（R8 修訂一採納；TODO v884 不變）
 
 ---
+
+## R8 修訂一採納 — 2026-10-09
+
+- 事件 `RH-20261009-01`：Operator 整體採納 [R8 修訂一](decisions/2026-10-08--r8-amendment-1-first-loop-on-native-replay.md)。
+  [R8 採納決策](decisions/2026-10-07--r8-adoption-agent-experiment-bench.md)中被修訂的段落以註記標出，原文保留。
+- 階段 1（回放的四項修補）依 Operator 指示以派工指令交付，記錄者不改動代碼。
+- 本項只改文件與歷史索引；沒有產品程式變更、TODO 派工、ADR、帳戶、部署或 runtime 成果。
 
 ## R8 更正與修訂一提議 — 2026-10-08
 
