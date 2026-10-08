@@ -14,6 +14,9 @@
 | 權威類別 | `normative_policy` 中的 Operator 明確決定；效力限於路線方向與設計原則 |
 | 驗證範圍 | 倉庫正本與公開文件。沒有帳戶級實測，沒有 runtime 觀察，沒有獨立架構審核 |
 
+> **2026-10-08 註記**：本文件有三處事實與用語更正，已在原處以註記標出（事件 `RH-20261008-01`），原文保留。
+> 其後的修訂提議與採納狀態，見[路線總覽](../references/2026-10-03--route-history.md)的 R8 事件。
+
 本文件依 [路線歷史記錄規則](2026-10-03--route-history-versioning.md) 撰寫。
 文中「平台」指 QuantConnect Cloud 與其開源引擎 LEAN；「實驗台」指 Agent 用來檢驗假說的
 歷史回測與評估能力；「意圖」指交付 Rust 引擎審核的交易提案。
@@ -63,6 +66,8 @@ D3、D4 的補充三項與 D5 是 Operator 逐點確認的三點。其餘決定�
    2026-05-23 起為 Archive），現行晉級只走 Stage 0R 之後的 Demo。
 3. [backtest_routes.py](../../program_code/exchange_connectors/bybit_connector/control_api_v1/app/backtest_routes.py)
    仍記載 Python BacktestEngine 為 stub；進化管線的實驗環節沒有接上真實的歷史回測引擎。
+   > **2026-10-08 更正**：此處只查了 Python 入口。AE 另有 Rust 回放（`rust/openclaw_engine/src/replay`），
+   > 可讓 production 策略在隔離環境中對公開 K 線重放；它尚未接入進化鏈，保真度亦未驗證。
 4. [TODO](../../TODO.md) v884（校準日 2026-10-01）記錄 AIML 工作線為 S2E 5/9、effect 0/6、
    authority 0/9、零 ACTIVE。同一文件保存 2026-07-10 候選板零合格與 2026-07-06 maker-first
    NO-GO 的歷史裁決。
@@ -79,6 +84,9 @@ D3、D4 的補充三項與 D5 是 Operator 逐點確認的三點。其餘決定�
 憲法指定的優勢來源是選擇。檢驗選擇能力需要多年、跨數百品種的歷史；AE 自有的是有界保留的
 近期行情，其實際保留深度未驗。成熟平台已持有的歷史資料與回測引擎，可把實驗時鐘由週縮短到
 分鐘。這是融合的主要價值；減少本機歷史儲存負擔是次要收益。
+
+> **2026-10-08 更正**：準確的說法是「缺少接入進化鏈、有足夠歷史、帶成本與統計閘門、且保真度經過驗證的
+> 實驗服務」，不是缺少回測程式。「檢驗選擇需要跨數百品種」亦說過頭：廣度是部分選擇任務的需要，不是起點。
 
 ### 2.4 與 R8 候選的關係
 
@@ -210,6 +218,10 @@ Operator 確認下列三項為正式需求。
 其明列的間接途徑包括日誌、圖表、Object Store、網路請求、API 與 MCP。可離開平台的只有
 自有源碼，以及自有回測與實盤的摘要結果，即績效統計、權益曲線與自有訂單歷史。
 使用者對自動化工具的一切行為負責。
+
+> **2026-10-08 更正**：上段漏列一條合法途徑。平台另有付費下載（條款所稱 CLI API Access and Data Agreement）。
+> 依平台的[資料授權說明](https://www.quantconnect.com/docs/v2/cloud-platform/datasets/licensing)，下載資料限組織內部
+> LEAN 使用，不得轉換格式或再分發，因此不能作為 Rust 回放的資料來源。本路線預設不採購下載授權。
 
 據此規定：
 
