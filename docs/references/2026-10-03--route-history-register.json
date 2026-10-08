@@ -220,8 +220,14 @@
     "r8-amendment-1": {
       "kind": "recorded_file",
       "path": "docs/decisions/2026-10-08--r8-amendment-1-first-loop-on-native-replay.md",
-      "sha256": "c7f112b4393f1443749f54e47405cf83422a573aa45abafb944434d58fcf32e9",
-      "meaning": "first amendment to the R8 decision, accepted by the Operator on 2026-10-09 and annotated with post-review clarifications (RH-20261009-02); direction and contract only, not platform, runtime or dispatch attestation"
+      "sha256": "6136cfc28d02add073774f7c3e45ddd8b6cd1b9ad37a5d4486e697dae2608d96",
+      "meaning": "first amendment to the R8 decision, accepted by the Operator on 2026-10-09; annotated with post-review clarifications (RH-20261009-02) and the funding scope decision (RH-20261009-03); direction and contract only, not platform, runtime or dispatch attestation"
+    },
+    "r8-stage1-dispatch": {
+      "kind": "recorded_file",
+      "path": "docs/execution_plan/2026-10-09--r8-stage1-replay-patches-dispatch.md",
+      "sha256": "45f84c9b11fad71b2c90bc9c2cdd73ab93bc478d9215d88f0c0eb73252c18058",
+      "meaning": "stage 1 dispatch instruction and handoff summary; not an authorization; dispatch state is the TODO row P1-R8-STAGE1-REPLAY-PATCHES"
     }
   },
   "routes": [
@@ -364,7 +370,8 @@
       "source_refs": [
         "r8-portable",
         "r8-adoption",
-        "r8-amendment-1"
+        "r8-amendment-1",
+        "r8-stage1-dispatch"
       ],
       "status_history": [
         {
@@ -409,6 +416,11 @@
           "recorded_on": "2026-10-09",
           "event": "RH-20261009-02",
           "note": "post-review clarifications annotated in amendment 1; record_status unchanged"
+        },
+        {
+          "recorded_on": "2026-10-09",
+          "event": "RH-20261009-03",
+          "note": "funding settlement excluded from stage 1 by Operator; dispatch instruction added; record_status unchanged"
         }
       ]
     }
@@ -857,6 +869,26 @@
         "availability": "feature-branch commit; optional provenance, may be absent from a main-only clone"
       },
       "meaning": "Clarifications annotated in the accepted amendment with original text kept: selector actions must take effect inside the isolated replay while staying non-effectful in forward shadow, Demo and live; until replay settles funding, a gain verdict requires that no arm holds a position across a funding settlement; manifests must record parameter provenance because repository settings can differ from effective runtime parameters; stage 1 is entered in TODO as a waiting row. One open Operator decision is added (whether funding settlement joins stage 1). No accepted decision is changed."
+    },
+    {
+      "id": "RH-20261009-03",
+      "recorded_on": "2026-10-09",
+      "event_type": "open_item_decided",
+      "route_ids": [
+        "R8"
+      ],
+      "decides_open_item_of": "RH-20261009-02",
+      "decision_ref": "docs/decisions/2026-10-08--r8-amendment-1-first-loop-on-native-replay.md",
+      "authority_source": "Operator message in current chat",
+      "operator_excerpt": "不納入,合併",
+      "prior_record_identity": {
+        "commit": "49c05c6fdd70f2d9035184ab45ad53f12650a2c9",
+        "path": "docs/decisions/2026-10-08--r8-amendment-1-first-loop-on-native-replay.md",
+        "blob": "4f68e681471ccf2327f58002300e1622fc6ae2d3",
+        "sha256": "c7f112b4393f1443749f54e47405cf83422a573aa45abafb944434d58fcf32e9",
+        "availability": "ancestor of main at recording time"
+      },
+      "meaning": "Operator decided the open item raised by RH-20261009-02: funding settlement is not part of stage 1. The first loop may therefore reach a gain verdict only when no arm holds a position across a funding settlement. The stage 1 dispatch instruction and a handoff summary are added in the repository. No dispatch, account, spend, runtime or trading authority is granted."
     }
   ],
   "external_provenance": [

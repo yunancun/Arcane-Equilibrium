@@ -104,5 +104,7 @@ Route-Id 是本歷史命名空間。這些都不能互相當成完整產品版�
 - **RH-20261009-02／record_corrected**：自動審查後在修訂一原處加註釐清，原文保留：選擇器的動作在隔離回放內必須生效；
   回放補上資金費結算之前，增益裁決要求各組持倉都不跨結算點；manifest 須記錄參數來源；階段 1 已寫入 TODO 的等待列。
   新增一項待 Operator 裁決：資金費結算是否納入階段 1。已採納的決定不變。
+- **RH-20261009-03／open_item_decided**：Operator 裁決資金費結算不納入階段 1；第一圈只能在各組持倉都不跨結算點時作增益裁決。
+  同時加入[階段 1 派工指令與交接摘要](../execution_plan/2026-10-09--r8-stage1-replay-patches-dispatch.md)。不授予派工或任何效果。
 - 新路線、採納、撤回、取代及更正按 [決策規則](../decisions/2026-10-03--route-history-versioning.md)
   追加事件；現行派工及效果授權仍回 TODO 與既有 ADR/AMD。

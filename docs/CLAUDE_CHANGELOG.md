@@ -1,9 +1,27 @@
 # CLAUDE_CHANGELOG.md — 開發歷史歸檔
 
 > 從 CLAUDE.md / TODO.md 遷出的 Wave/Sprint/Batch + TODO version-increment 歷史敘事。新 session 不需要讀此文件，僅供回顧歷史時查閱。
-> 最後更新：2026-10-09（R8 修訂一採納與審查後釐清；TODO v885 新增 R8 階段 1 等待列）
+> 最後更新：2026-10-09（R8 階段 1 範圍裁決與交接；TODO v886 更新 R8 等待列）
 
 ---
+
+## R8 階段 1 範圍裁決與交接 — 2026-10-09
+
+- 事件 `RH-20261009-03`：Operator 裁決資金費結算不納入階段 1，已記入
+  [R8 修訂一](decisions/2026-10-08--r8-amendment-1-first-loop-on-native-replay.md)。
+- 新增 [R8 階段 1 派工指令](execution_plan/2026-10-09--r8-stage1-replay-patches-dispatch.md)，含交接摘要；
+  是否可派發仍以 TODO 的等待列為準。
+- **更正**：提交 `b6ff86858` 的說明稱「五個 profit-control 測試在改動前即已在這台 Mac 上失敗」。該說法不成立。
+  實測基線輪 258 通過／5 失敗，改動後輪 262 通過／1 失敗，兩輪失敗的測試互不相同，且都落在執行途中工作樹被編輯的時段；
+  在乾淨且不再變動的工作樹（`b6ff86858`）重跑同一批八個測試檔為 263 通過、0 失敗。
+  讀取倉庫當下狀態的結構測試，執行期間不可改動工作樹。提交說明無法改寫，以本條為準。
+- 本項只改文件與歷史索引；沒有產品程式變更、ADR、帳戶、部署或 runtime 成果。
+
+## TODO v886：更新 R8 階段 1 等待列（2026-10-09）
+
+- 等待列 `P1-R8-STAGE1-REPLAY-PATCHES` 記入 Operator 的範圍裁決（資金費結算不納入），派工指令改指向倉庫內文件，
+  並補上乾淨工作樹的結構測試結果。狀態仍為 WAITING_FRESH_ADMISSION、NOT_STARTED。
+- 其他各列未動，亦未重新校準。
 
 ## R8 修訂一採納 — 2026-10-09
 
