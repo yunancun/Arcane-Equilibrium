@@ -19,6 +19,10 @@
 - **偏差與更正**：R8 採納決策初版漏查了既有 Rust 回放，已以註記更正。提交 `b6ff86858` 的說明稱「五個 profit-control
   測試在改動前即已失敗」，該說法不成立：那是測試執行途中工作樹被編輯造成的，乾淨重跑為 263 項全過（見 §6）。
   2026-05-11 回放對實際成交的偏差仍未結案，屬階段 2 的範圍。
+- **本文件的修訂**：PR #204 的自動審查提出十點，九點已修入本文件與登記簿（事件 `RH-20261009-04`）：
+  先固定基線再綁定 context、備用 fixture 須固定、目標不再稱 production 參數、SIZE_DOWN 列為必做、
+  未平倉部位納入跨結算點判定與對帳、餘額曲線不稱權益曲線、單一實作者、來源記錄改為追加。
+  另一點稱事件提交缺少 trailer，查無此事：被檢查的是 GitHub 的合成合併提交，事件提交本身帶有 trailer。
 - **功能可用程度**：回放的真策略路徑可以執行；R8 第一圈所需的四項修補都還沒做。沒有任何 runtime、Demo 或平台效果。
 - **Operator 已決定**：資金費結算不納入階段 1（2026-10-09）。因此第一圈只能在各組持倉都不跨結算點時作增益裁決。
 - **仍未決**：階段 2 所需的 Linux 唯讀存取；R8 採納決策 §12 的三項；訊號邊界 ADR 尚未起草。
@@ -26,28 +30,35 @@
 
 以下為給執行者的指令原文。
 
-你是本任務的 PM／Conductor。依 `AGENTS.md`、`CLAUDE.md` 與 `.codex/agent_registry_v1.json`，用
-`helper_scripts/maintenance_scripts/agent_governance.py route` 與 `context` 綁定任務事實後再動工。
+你是本任務的 PM／Conductor。先完成 §0 第 1 點（`git fetch` 並選定基線），再依 `AGENTS.md`、`CLAUDE.md` 與
+`.codex/agent_registry_v1.json`，用 `helper_scripts/maintenance_scripts/agent_governance.py route` 與 `context`
+對**該固定的基線 commit** 綁定任務事實，然後才動工。綁定之後基線若有改變，重新綁定，不要沿用舊的 context。
 這是源碼實作：需要簡短的 PA 設計說明在前，獨立的 E2 代碼審查與 E4 測試驗證在後。對 operator 一律用中文回報。
 
 ## 0. 前置檢查（任一不成立即停止並回報，不要繞過）
 
 1. 基線必須含有已採納的修訂文件 `docs/decisions/2026-10-08--r8-amendment-1-first-loop-on-native-replay.md`，
    表頭狀態為 Accepted。它已於 2026-10-09 經 PR yunancun/Arcane-Equilibrium#203 合入 main（merge commit `49c05c6fd`）。
-   先 `git fetch`，從最新的 main 開工；若 main 上找不到該文件，回報 `NEEDS_CONTEXT`。
+   先 `git fetch`，以當時最新的 main 為基線並記下它的完整 commit；task contract 與 context 都綁這個 commit。
+   若 main 上找不到該文件，回報 `NEEDS_CONTEXT`。
 2. 先查有沒有人做過：對 `rust/openclaw_engine/src/replay` 與遠端分支做 log 與 grep。已有等價實作就回報 NO-OP。
 3. 重現基線：離線編譯 `replay_runner`（`-p openclaw_engine --features replay_isolated --offline`），
    用工作區 `audits/2026-10-08-r8-replay-gap-inventory/evidence/fixture_btc_1m.json`（倉庫外；
    sha256 `ef64d48bc2f4b7212f97f64955143939d4454803c4dde96aa76a0ac1e185de38`）跑 ma_crossover、策略預設參數、起始資金 10000。
    必須得到 27 筆成交、`net_pnl = -9.137611406571523`。重現不了就停，先查原因。
-   取不到該檔時，改用任一份公開的一分鐘線自建 fixture，在改碼之前記下自己的基線數字，並在回報中說明。
+   取不到該檔時不要自行取數（§4 禁止網路請求）。改用已在本機、來源說得清楚的一分鐘線資料自建 fixture，
+   並在改碼之前把它固定下來：保存 fixture 檔、它的來源說明（資料來源、標的、週期、起訖時間、取得日期）與 SHA-256，
+   記下它的基線數字（成交筆數與 `net_pnl`），之後所有對照都用同一份。保存位置寫進回報；
+   倉庫是公開的，要把資料提交進倉庫須先確認它可以公開。
+   本機沒有可用資料時回報 `NEEDS_CONTEXT`，請 Operator 提供 fixture，不要用未固定的資料開工。
    manifest 需要同目錄的 `key.hex`（32 位元組的十六進位）；用你自己臨時生成的測試金鑰，不要提交。
    2026-10-08 開發機上 `~/.cargo/bin/cargo` 的捷徑失效；遇到時把 `~/.rustup/toolchains/<toolchain>/bin` 加進 PATH。
 
 ## 1. 目標
 
 讓既有 Rust 回放足以承擔 R8 第一圈的「停手」選擇實驗：成交時點不偷看、可以注入選擇器的決定、
-輸出能餵統計閘門、跑的是 production 參數。只做這四項，不做別的。
+輸出能餵統計閘門、跑的是來源明確的參數（倉庫設定檔或呼叫者提供的快照，不再是策略預設值）。只做這四項，不做別的。
+本階段不宣稱所跑的參數等於引擎實際生效的參數；那要等階段 2 擷取運行環境的快照。
 
 ## 2. 必讀
 
@@ -95,11 +106,16 @@
 - 每個被套用的決定都寫進決策軌跡與成交記錄，使三方對照可以稽核。
 - 這些決定只在隔離回放內生效，目的是讓三組對照的回放結果真的不同。它們不是對任何真實進場的採用；
   前向 shadow、Demo 與 live 的行為不在本項範圍內，也不得因本項改變。
-- VETO 必須完成。SIZE_DOWN 若超出預算可以延後，但要在回報裡列為未完成。
+- VETO 與 SIZE_DOWN 都必須完成。修訂一 AM3 的 2026-10-09 更正要求兩者都在隔離回放內生效；
+  缺任何一個，本工作項即未完成，階段 1 不得回報為完成。
+- SIZE_DOWN 帶一個縮量係數，只能讓該次進場的數量變小，不得放大，也不得改變方向或標的。
+  係數缺失或超出合法範圍時怎麼處理（拒絕該 fixture，或保守地當成 VETO），由 PA 規定並寫成測試；不得默默當成 `NO_OP`。
 
 驗收：
 - 缺欄位時輸出與現行逐位元組相同。
 - VETO 時該事件的 Open 不成交，Close 不受影響。
+- SIZE_DOWN 時該事件的 Open 以縮小後的數量成交；有測試證明成交數量不會大於未套用時的數量。
+  選擇器的決定不改變任何 Close 意圖；之後的 Close 平掉實際持有的數量，不得多平，也不得因此反向開倉，並有測試覆蓋。
 - 用後半天全部 VETO 的 fixture 重跑 ma_crossover，後半天沒有新開倉；輸出與基線不同，且差異可由記錄解釋。
 
 ### C. 逐筆輸出（G7）
@@ -111,22 +127,34 @@
 要求：
 - 先確認既有純函數能否離線直接使用，只補缺的部分。
 - 補齊：由成交配對出的來回交易清單（進出時間、方向、數量、進出價、手續費、滑點成本、淨損益、淨報酬 bps）、
-  權益曲線、手續費與滑點的成本分解。
+  已實現餘額曲線、手續費與滑點的成本分解。
+- 回放結束時尚未平倉的部位另列為「未配對成交」（進場時間、方向、數量、進場價、已付手續費與滑點成本），
+  不得當成來回交易。
+- 餘額曲線只在成交時變動，不含未實現損益。輸出中要這樣標示，不得稱為權益曲線；由它算出的回撤會低估持倉期間的回撤。
+  報告目前沒有逐事件的標記價格，真正的權益曲線不在本單元範圍內。
+  修訂一把「權益曲線」列在缺口 G7 之下；本單元對這一部分只交付已實現餘額曲線，含未實現損益的權益曲線仍是缺口。
+  這是記錄者的範圍界定，未經 Operator 確認；回報時列為未完成的部分，由 Operator 決定是否在階段 3 之前補上。
 - 提供不依賴資料庫與 Control API 的本機入口，輸入 `replay_report.json`，輸出 JSON。
-- 每筆來回交易標出是否跨越資金費結算點。結算時刻以參數提供，預設為 UTC 00:00、08:00、16:00；
-  不同標的的結算間隔可能不同，不要寫死。輸出另給出「跨結算點的交易筆數」彙總。
-  回放目前不結算資金費，修訂一規定第一圈只能在各組都不跨結算點時作增益裁決，這個標記就是用來驗證它的。
+- 每一段持倉區間都標出是否跨越資金費結算點：已完成的來回交易用進場到出場的區間，
+  未配對成交用進場到回放最後一個事件的區間。結算時刻以參數提供，預設為 UTC 00:00、08:00、16:00；
+  不同標的的結算間隔可能不同，不要寫死。區間端點恰好落在結算時刻時算不算跨越，由 PA 規定並寫成測試。
+- 輸出另給出：跨結算點的來回交易筆數、跨結算點的未平倉部位數，以及一個整次回放層級的旗標
+  （任何一段持倉區間跨結算點即為真）。回放目前不結算資金費，修訂一規定第一圈只能在各組持倉都不跨結算點時
+  作增益裁決；階段 3 的閘門讀的就是這個旗標，所以它不能漏掉未平倉的部位。
 - 新腳本登記到 `helper_scripts/SCRIPT_INDEX.md`。
 
 驗收：
-- 對基線報告，來回交易的淨損益加總與報告的 `net_pnl` 對得上，容差事前寫定。
+- 對基線報告做對帳，分三項列出：已完成來回交易的淨損益加總、未配對成交對餘額的影響（已扣的手續費等）、殘差。
+  三項之和等於報告的 `net_pnl`（回放以期末餘額減起始資金計算），殘差須在事前寫定的容差之內。
+  ma_crossover 的基線結束時留有一個未平倉的多頭部位（倉庫外證據：27 筆成交的帶號數量加總等於最後一筆進場的數量），
+  所以只加總來回交易是對不上的。
 - 含風控拒絕記錄（數量為零）的報告不出錯（grid_trading 的基線報告有 14 筆）。
-- 有測試覆蓋跨結算點與不跨結算點兩種來回交易的標記。
+- 有測試覆蓋跨結算點與不跨結算點的來回交易，以及跨結算點的未平倉部位；後者必須讓整次回放的旗標為真。
 
-### D. production 參數的 manifest（G8）
+### D. 帶參數來源的 manifest（G8）
 
 現況：獨立執行時 stderr 顯示 `strategy_params_supplied=false risk_overrides_supplied=false`，跑的是策略預設值。
-production 設定在 `settings/strategy_params_demo.toml`、`settings/risk_control_rules/risk_config_demo.toml`、
+倉庫內 Demo 環境的設定檔是 `settings/strategy_params_demo.toml`、`settings/risk_control_rules/risk_config_demo.toml`、
 `settings/risk_control_rules/scanner_config.toml`。既有的組裝與簽名在 Control API
 （`app/replay_full_chain_routes.py`、`replay/route_helpers.py`），依賴資料庫與運行環境。
 
@@ -146,7 +174,8 @@ production 設定在 `settings/strategy_params_demo.toml`、`settings/risk_contr
 - `rust/openclaw_engine/tests/replay_manifest_signer_xlang_consistency.rs` 通過。
 - 同一組設定檔重跑，manifest 主體逐位元組相同。
 
-A 與 B 改同一批 Rust 檔，串行。C、D 是 Python，路徑互斥時可與 A／B 並行，同時最多兩個 writer。
+A 至 D 由同一位實作者依序完成（A 與 B 改同一批 Rust 檔；C、D 是 Python）。同一時間只有一位 writer；
+E2 與 E4 只作唯讀的審查與驗證。
 
 ## 4. 明確不做
 
@@ -198,6 +227,7 @@ A 與 B 改同一批 Rust 檔，串行。C、D 是 Python，路徑互斥時可�
 ## 8. 預算與停止條件
 
 - 四項合計的工程投入估計為 2.5 至 4.5 個工程日，這是未量測的估計。階段 1 至 3 合計上限為十個工作日。
+  盤點時的估計把 SIZE_DOWN 列為可以後補，所以這個數字沒有含它。超出預算時停止並回報，不要用省略 SIZE_DOWN 的方式收尾。
 - 出現下列任一情形即停止並回報，不要擴大範圍：需要重造撮合或資料平台；需要改動 §4 所列的 production 熱路徑；
   無法維持缺省行為逐位元組不變；前置檢查不成立。
 
