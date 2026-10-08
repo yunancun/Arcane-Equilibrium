@@ -1,7 +1,7 @@
 # CLAUDE_CHANGELOG.md — 開發歷史歸檔
 
 > 從 CLAUDE.md / TODO.md 遷出的 Wave/Sprint/Batch + TODO version-increment 歷史敘事。新 session 不需要讀此文件，僅供回顧歷史時查閱。
-> 最後更新：2026-10-09（R8 修訂一採納；TODO v884 不變）
+> 最後更新：2026-10-09（R8 修訂一採納與審查後釐清；TODO v885 新增 R8 階段 1 等待列）
 
 ---
 
@@ -10,7 +10,16 @@
 - 事件 `RH-20261009-01`：Operator 整體採納 [R8 修訂一](decisions/2026-10-08--r8-amendment-1-first-loop-on-native-replay.md)。
   [R8 採納決策](decisions/2026-10-07--r8-adoption-agent-experiment-bench.md)中被修訂的段落以註記標出，原文保留。
 - 階段 1（回放的四項修補）依 Operator 指示以派工指令交付，記錄者不改動代碼。
-- 本項只改文件與歷史索引；沒有產品程式變更、TODO 派工、ADR、帳戶、部署或 runtime 成果。
+- 事件 `RH-20261009-02`：PR 自動審查後在修訂一原處加註釐清（選擇器在隔離回放內生效、資金費跨結算點的限制、
+  manifest 的參數來源、TODO 等待列），原文保留；新增一項待 Operator 裁決（資金費結算是否納入階段 1）。
+- 本項只改文件與歷史索引；沒有產品程式變更、ADR、帳戶、部署或 runtime 成果。TODO 的變動見下一節。
+
+## TODO v885：新增 R8 階段 1 等待列（2026-10-09）
+
+- 文末新增「R8 階段 1 回放修補」一節與等待列 `P1-R8-STAGE1-REPLAY-PATCHES`（WAITING_FRESH_ADMISSION、`dispatchable=false`、NOT_STARTED）。
+  依據為 Operator 採納 R8 修訂一並指示開始階段 1；派工指令在倉庫外，不取代該列。
+- 表頭只加一句指標；AIML、IBKR、workflow 各列與 2026-10-01 的校準內容未動，亦未重新校準。
+- 沒有 task contract、DAG、writer lease 或源碼變更；移入 ACTIVE 須由 PM fresh admission。
 
 ## R8 更正與修訂一提議 — 2026-10-08
 
