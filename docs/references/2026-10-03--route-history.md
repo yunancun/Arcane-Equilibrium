@@ -31,7 +31,7 @@ Operator 已採用 R1–R8 作為日誌分類；這是七個主要開發階段�
 - **R5**：[plan-changelog](../../CHANGELOG.md)、[alpha-amendment](../governance_dev/amendments/2026-05-31--AMD-2026-05-31-01-alpha-edge-evidence-governance.md)。歷史研究結果不能當今日候選／市場結論。
 - **R6**：[aiml-v2](../execution_plan/2026-07-19--ai_ml_long_lived_repair_and_landing_plan.md)、[aiml-ledger](../execution_plan/ai_ml_landing/PROGRESS.md)。PROGRAM_ADOPTED／S1_CLOSED 不等於完整學習或交易落地；狀態仍讀 TODO。
 - **R7**：[current-todo-snapshot](../../TODO.md)、[engineering-log](../CLAUDE_CHANGELOG.md)。H2 source 採用、D1.1 候選與 runtime 狀態分開；不是重開已關閉 workflow。
-- **R8**：[r8-portable](../decisions/2026-10-03--r8-hybrid-research-candidate.md)（候選原文，保留不改）、[r8-adoption](../decisions/2026-10-07--r8-adoption-agent-experiment-bench.md)。方向與設計原則已採納；平台准入、訊號邊界 ADR、TODO 派工與 runtime 效果均未完成。
+- **R8**：[r8-portable](../decisions/2026-10-03--r8-hybrid-research-candidate.md)（候選原文，保留不改）、[r8-adoption](../decisions/2026-10-07--r8-adoption-agent-experiment-bench.md)、[r8-amendment-1-proposed](../decisions/2026-10-08--r8-amendment-1-first-loop-on-native-replay.md)（提議，未採納）。方向與設計原則已採納；平台准入、訊號邊界 ADR、TODO 派工與 runtime 效果均未完成。
 
 以上連結方便閱讀工作樹；需要精確原文時使用登記簿的固定 Git commit/path/blob/sha256。
 原文中歷史數值、採用或運行敘述只屬原觀察期，本次沒有重驗其市場、主機或交易結果。
@@ -97,5 +97,7 @@ Route-Id 是本歷史命名空間。這些都不能互相當成完整產品版�
 - **RH-20261008-01／record_corrected**：R8 採納決策有三處事實與用語更正，以註記標在原處，原文保留：
   漏查既有 Rust 回放；缺的是已接入並經驗證的實驗服務而非回測程式；平台另有付費下載途徑但限 LEAN 內部使用。
   D1–D8 不變。
+- **RH-20261008-02／amendment_proposed**：[R8 修訂一](../decisions/2026-10-08--r8-amendment-1-first-loop-on-native-replay.md)已起草，狀態為提議：
+  第一圈改用既有 Rust 回放、寫明平台進場條件、補齊對抗審核指出的工程契約缺口。Operator 裁決前，R8 原文照舊有效。
 - 新路線、採納、撤回、取代及更正按 [決策規則](../decisions/2026-10-03--route-history-versioning.md)
   追加事件；現行派工及效果授權仍回 TODO 與既有 ADR/AMD。

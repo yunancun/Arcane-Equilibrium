@@ -216,6 +216,12 @@
       "path": "docs/decisions/2026-10-07--r8-adoption-agent-experiment-bench.md",
       "sha256": "bea221634329f38bb176e7ab0c8347a39a70e7b3e21d817e8ef73936cbd93278",
       "meaning": "formal R8 direction-adoption decision document; revised in place under RH-20261007-02 and annotated with factual corrections under RH-20261008-01; not platform, runtime or dispatch attestation"
+    },
+    "r8-amendment-1-proposed": {
+      "kind": "recorded_file",
+      "path": "docs/decisions/2026-10-08--r8-amendment-1-first-loop-on-native-replay.md",
+      "sha256": "a38309acaae40f0766ce9cf95142683aa15f4792cf18e02991f9da952051fe22",
+      "meaning": "proposed first amendment to the R8 decision; not accepted; not platform, runtime or dispatch attestation"
     }
   },
   "routes": [
@@ -357,7 +363,8 @@
       "limits": "只採納方向與設計原則；平台准入、訊號邊界 ADR、TODO 派工及 runtime 效果均未完成或授權。",
       "source_refs": [
         "r8-portable",
-        "r8-adoption"
+        "r8-adoption",
+        "r8-amendment-1-proposed"
       ],
       "status_history": [
         {
@@ -387,6 +394,11 @@
           "recorded_on": "2026-10-08",
           "event": "RH-20261008-01",
           "note": "factual corrections annotated; decision and record_status unchanged"
+        },
+        {
+          "recorded_on": "2026-10-08",
+          "event": "RH-20261008-02",
+          "note": "amendment 1 proposed; record_status unchanged pending Operator decision"
         }
       ]
     }
@@ -772,6 +784,20 @@
         "availability": "feature-branch commit; optional provenance, may be absent from a main-only clone"
       },
       "meaning": "Three factual or wording corrections annotated in place with original text kept: an existing Rust replay engine was overlooked; the missing capability is a wired, validated experiment service rather than a backtest program; a paid data-download path exists but is limited to internal LEAN use. Decisions D1-D8 are unchanged."
+    },
+    {
+      "id": "RH-20261008-02",
+      "recorded_on": "2026-10-08",
+      "event_type": "amendment_proposed",
+      "route_ids": [
+        "R8"
+      ],
+      "amends": "RH-20261007-01",
+      "decision_ref": "docs/decisions/2026-10-08--r8-amendment-1-first-loop-on-native-replay.md",
+      "authority_source": "Operator message in current chat",
+      "operator_excerpt": "寫修訂稿",
+      "status": "proposed",
+      "meaning": "First amendment to R8 drafted at Operator request: first loop on the existing Rust replay, platform entry criteria, and closure of adversarial-review findings F1-F10. Not accepted. R8 decisions and phases stay in force as written until the Operator decides."
     }
   ],
   "external_provenance": [
@@ -792,6 +818,24 @@
       "observed_version": "Version 1.4. Last Updated October 2, 2026",
       "availability": "external vendor policy; tool-extracted, may change; optional provenance only",
       "portable_summary": "docs/decisions/2026-10-07--r8-adoption-agent-experiment-bench.md"
+    },
+    {
+      "path_at_capture": "audits/2026-10-06-r8-adversarial-review/REPORT.md",
+      "sha256": "c7d4102a1c1d3ec0d043879011470d03a97bb5a4466183e83d1a1318c824064e",
+      "availability": "outside_repository; candidate review by another agent; optional provenance only",
+      "portable_summary": "docs/decisions/2026-10-08--r8-amendment-1-first-loop-on-native-replay.md"
+    },
+    {
+      "path_at_capture": "audits/2026-10-06-r8-adversarial-review/FOLLOWUP.md",
+      "sha256": "61c7493c020d48c778837b3d118587248a58892c27947fd1ed0f1909f60db642",
+      "availability": "outside_repository; candidate review by another agent; optional provenance only",
+      "portable_summary": "docs/decisions/2026-10-08--r8-amendment-1-first-loop-on-native-replay.md"
+    },
+    {
+      "path_at_capture": "audits/2026-10-08-r8-replay-gap-inventory/REPORT.md",
+      "sha256": "31ea4edf7a4f1df8d6b0ed4a92165e1d4145efd505fd99e541897995b247845d",
+      "availability": "outside_repository; local replay execution evidence, not independently reviewed; optional provenance only",
+      "portable_summary": "docs/decisions/2026-10-08--r8-amendment-1-first-loop-on-native-replay.md"
     }
   ],
   "last_event_recorded_on": "2026-10-08"
