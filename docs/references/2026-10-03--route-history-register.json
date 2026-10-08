@@ -210,6 +210,18 @@
       "path": "docs/decisions/2026-10-03--r8-hybrid-research-candidate.md",
       "sha256": "f3d793c27b62d180d8a1dc1555994d2a8243c450223431ea3ce4a926caeb7ac1",
       "meaning": "portable retrospective summary recorded in this history commit; not historical adoption attestation"
+    },
+    "r8-adoption": {
+      "kind": "recorded_file",
+      "path": "docs/decisions/2026-10-07--r8-adoption-agent-experiment-bench.md",
+      "sha256": "70bd99144aca8632766218aa71f0db2f0b1e0cb192362086e846c1a1aad9d067",
+      "meaning": "formal R8 direction-adoption decision document; revised in place under RH-20261007-02, annotated with factual corrections (RH-20261008-01) and with the passages amended by amendment 1 (RH-20261009-01); not platform, runtime or dispatch attestation"
+    },
+    "r8-amendment-1": {
+      "kind": "recorded_file",
+      "path": "docs/decisions/2026-10-08--r8-amendment-1-first-loop-on-native-replay.md",
+      "sha256": "c7f112b4393f1443749f54e47405cf83422a573aa45abafb944434d58fcf32e9",
+      "meaning": "first amendment to the R8 decision, accepted by the Operator on 2026-10-09 and annotated with post-review clarifications (RH-20261009-02); direction and contract only, not platform, runtime or dispatch attestation"
     }
   },
   "routes": [
@@ -339,18 +351,65 @@
     },
     {
       "id": "R8",
-      "title": "本機學習與交易＋外部歷史回測",
-      "period_label": "2026-10-03",
+      "title": "以 QuantConnect 作 Agent 實驗台的有界融合",
+      "period_label": "2026-10-03 提出；2026-10-07 方向採納",
       "period_precision": "retrospective_approximate_window",
-      "record_status": "candidate",
-      "change_type": "architecture_candidate",
+      "record_status": "accepted_direction",
+      "change_type": "architecture_direction_accepted",
       "follows_in_retrospective": "R7",
-      "summary": "本機草擬、學習及交易，成熟平台提供歷史回測／評估，回傳有限結果。",
-      "reason": "減少全市場歷史自持與研究基礎設施維護負擔。",
-      "retained": "本機交易證據、策略／學習所有權與既有風控／採用閘門。",
-      "limits": "分類已採用，技術架構仍候選；QuantConnect 選型與遷移未驗收。",
+      "summary": "成熟平台作 Agent 進化閉環的實驗台；第一圈先用既有 Rust 回放（修訂一）；AE 保留自主決策、學習所有權、Rust 交易權威與本機運行。",
+      "reason": "進化閉環缺實驗引擎；檢驗「選擇」需要多年跨品種歷史；減少歷史自持負擔為次要收益。",
+      "retained": "Rust 交易權威、風控／採用閘門、本機交易證據、策略與學習所有權；Bybit 執行不外遷。",
+      "limits": "只採納方向、設計原則與修訂一的工程契約；回放修補、儀器驗證、平台准入、訊號邊界 ADR、TODO 派工及 runtime 效果均未完成或授權。",
       "source_refs": [
-        "r8-portable"
+        "r8-portable",
+        "r8-adoption",
+        "r8-amendment-1"
+      ],
+      "status_history": [
+        {
+          "recorded_on": "2026-10-03",
+          "event": "RH-20261003-01",
+          "snapshot": {
+            "period_label": "2026-10-03",
+            "record_status": "candidate",
+            "change_type": "architecture_candidate",
+            "summary": "本機草擬、學習及交易，成熟平台提供歷史回測／評估，回傳有限結果。",
+            "reason": "減少全市場歷史自持與研究基礎設施維護負擔。",
+            "retained": "本機交易證據、策略／學習所有權與既有風控／採用閘門。",
+            "limits": "分類已採用，技術架構仍候選；QuantConnect 選型與遷移未驗收。"
+          }
+        },
+        {
+          "recorded_on": "2026-10-07",
+          "event": "RH-20261007-01",
+          "record_status": "accepted_direction"
+        },
+        {
+          "recorded_on": "2026-10-07",
+          "event": "RH-20261007-02",
+          "note": "decision record formalized; decision and record_status unchanged"
+        },
+        {
+          "recorded_on": "2026-10-08",
+          "event": "RH-20261008-01",
+          "note": "factual corrections annotated; decision and record_status unchanged"
+        },
+        {
+          "recorded_on": "2026-10-08",
+          "event": "RH-20261008-02",
+          "note": "amendment 1 proposed; record_status unchanged pending Operator decision"
+        },
+        {
+          "recorded_on": "2026-10-09",
+          "event": "RH-20261009-01",
+          "note": "amendment 1 accepted; record_status unchanged (accepted_direction)"
+        },
+        {
+          "recorded_on": "2026-10-09",
+          "event": "RH-20261009-02",
+          "note": "post-review clarifications annotated in amendment 1; record_status unchanged"
+        }
       ]
     }
   ],
@@ -683,6 +742,121 @@
       "authority_source": "Operator message in current chat",
       "operator_excerpt": "按照你描述的R1-R8（我會採用）和版本變化歷史寫進git",
       "meaning": "Retrospective classification and recording convention; no historical commit rewrites or runtime effects."
+    },
+    {
+      "id": "RH-20261007-01",
+      "recorded_on": "2026-10-07",
+      "event_type": "route_accepted",
+      "route_ids": [
+        "R8"
+      ],
+      "decision_ref": "docs/decisions/2026-10-07--r8-adoption-agent-experiment-bench.md",
+      "prior_record": "docs/decisions/2026-10-03--r8-hybrid-research-candidate.md",
+      "authority_source": "Operator message in current chat",
+      "operator_excerpt": "三點都確認，把採納版寫成 R8 決策文件",
+      "meaning": "R8 direction and design principles accepted. Platform admission, signal-boundary ADR, TODO dispatch and every runtime or trading effect remain separate and unverified."
+    },
+    {
+      "id": "RH-20261007-02",
+      "recorded_on": "2026-10-07",
+      "event_type": "record_corrected",
+      "route_ids": [
+        "R8"
+      ],
+      "corrects": "RH-20261007-01",
+      "decision_ref": "docs/decisions/2026-10-07--r8-adoption-agent-experiment-bench.md",
+      "authority_source": "Operator message in current chat",
+      "operator_excerpt": "你這份讀起來不像是決策文件而是一個你的簡記，我希望你給我一份正式的R8決策文件符合R標準。",
+      "prior_record_identity": {
+        "commit": "2daf98aade575c1fecd88aa7900a2c9fb332b97f",
+        "path": "docs/decisions/2026-10-07--r8-adoption-agent-experiment-bench.md",
+        "blob": "9ffc3b0ded9215143e8b330d8d19e3e121a84a95",
+        "sha256": "cac0f001979b1f0414d2d345b74963ca993f9f5597a5012395fc107a94628001",
+        "availability": "feature-branch commit; optional provenance, may be absent from a main-only clone"
+      },
+      "meaning": "The adoption record was rewritten as a formal decision document at Operator request. The decision recorded by RH-20261007-01 is unchanged."
+    },
+    {
+      "id": "RH-20261008-01",
+      "recorded_on": "2026-10-08",
+      "event_type": "record_corrected",
+      "route_ids": [
+        "R8"
+      ],
+      "corrects": "RH-20261007-01",
+      "decision_ref": "docs/decisions/2026-10-07--r8-adoption-agent-experiment-bench.md",
+      "authority_source": "recorder correction after adversarial review and source inspection",
+      "prior_record_identity": {
+        "commit": "c48b45df4927c2084c0b594100f281869c5c764a",
+        "path": "docs/decisions/2026-10-07--r8-adoption-agent-experiment-bench.md",
+        "blob": "950c215660c8e146743fcc12e2e94f28aca9e1ff",
+        "sha256": "5e8eb3f9b87375c157424e4ccf44ffebe6fbfd259fa7a912f0d053034cea4c4f",
+        "availability": "feature-branch commit; optional provenance, may be absent from a main-only clone"
+      },
+      "meaning": "Three factual or wording corrections annotated in place with original text kept: an existing Rust replay engine was overlooked; the missing capability is a wired, validated experiment service rather than a backtest program; a paid data-download path exists but is limited to internal LEAN use. Decisions D1-D8 are unchanged."
+    },
+    {
+      "id": "RH-20261008-02",
+      "recorded_on": "2026-10-08",
+      "event_type": "amendment_proposed",
+      "route_ids": [
+        "R8"
+      ],
+      "amends": "RH-20261007-01",
+      "decision_ref": "docs/decisions/2026-10-08--r8-amendment-1-first-loop-on-native-replay.md",
+      "authority_source": "Operator message in current chat",
+      "operator_excerpt": "寫修訂稿",
+      "status": "proposed",
+      "meaning": "First amendment to R8 drafted at Operator request: first loop on the existing Rust replay, platform entry criteria, and closure of adversarial-review findings F1-F10. Not accepted. R8 decisions and phases stay in force as written until the Operator decides."
+    },
+    {
+      "id": "RH-20261009-01",
+      "recorded_on": "2026-10-09",
+      "event_type": "amendment_accepted",
+      "route_ids": [
+        "R8"
+      ],
+      "accepts": "RH-20261008-02",
+      "amends": "RH-20261007-01",
+      "decision_ref": "docs/decisions/2026-10-08--r8-amendment-1-first-loop-on-native-replay.md",
+      "authority_source": "Operator message in current chat",
+      "operator_excerpt": "採納修訂一，開始階段 1，不要動代碼，給指令prompt",
+      "prior_record_identity": {
+        "amendment": {
+          "commit": "94cb5198adcba2037e5ce0ed64abc13f320c6aee",
+          "path": "docs/decisions/2026-10-08--r8-amendment-1-first-loop-on-native-replay.md",
+          "blob": "ad645fa9210b4ef4b77f76051247d3d86b3c9c0b",
+          "sha256": "a38309acaae40f0766ce9cf95142683aa15f4792cf18e02991f9da952051fe22",
+          "availability": "feature-branch commit; optional provenance, may be absent from a main-only clone"
+        },
+        "decision": {
+          "commit": "94cb5198adcba2037e5ce0ed64abc13f320c6aee",
+          "path": "docs/decisions/2026-10-07--r8-adoption-agent-experiment-bench.md",
+          "blob": "56f4907a983b3001cef3c08ce57e840dd92f2ab2",
+          "sha256": "bea221634329f38bb176e7ab0c8347a39a70e7b3e21d817e8ef73936cbd93278",
+          "availability": "feature-branch commit; optional provenance, may be absent from a main-only clone"
+        }
+      },
+      "meaning": "Operator accepted R8 amendment 1 as a whole. The amended passages of the R8 decision are annotated in place with original text kept. Stage 1 is to be dispatched by instruction prompt; the recorder changes no code. No TODO dispatch, ADR, account, spend, runtime or trading authority is granted by this record."
+    },
+    {
+      "id": "RH-20261009-02",
+      "recorded_on": "2026-10-09",
+      "event_type": "record_corrected",
+      "route_ids": [
+        "R8"
+      ],
+      "corrects": "RH-20261009-01",
+      "decision_ref": "docs/decisions/2026-10-08--r8-amendment-1-first-loop-on-native-replay.md",
+      "authority_source": "recorder clarification after automated pull-request review",
+      "prior_record_identity": {
+        "commit": "5bd70155c99be9381b6948450e1a491644df9c79",
+        "path": "docs/decisions/2026-10-08--r8-amendment-1-first-loop-on-native-replay.md",
+        "blob": "45a57a4203e5858b02676dda0181677599ac4139",
+        "sha256": "785e209b90e212a998589d4f7732e023d0e1bc78f8c9bf7d50645d8731788b29",
+        "availability": "feature-branch commit; optional provenance, may be absent from a main-only clone"
+      },
+      "meaning": "Clarifications annotated in the accepted amendment with original text kept: selector actions must take effect inside the isolated replay while staying non-effectful in forward shadow, Demo and live; until replay settles funding, a gain verdict requires that no arm holds a position across a funding settlement; manifests must record parameter provenance because repository settings can differ from effective runtime parameters; stage 1 is entered in TODO as a waiting row. One open Operator decision is added (whether funding settlement joins stage 1). No accepted decision is changed."
     }
   ],
   "external_provenance": [
@@ -691,6 +865,37 @@
       "sha256": "fd4d86a05122ead32c38856058607392fe821e2111840cef4226d10d8ca823aa",
       "availability": "outside_repository; optional provenance only",
       "portable_summary": "docs/decisions/2026-10-03--r8-hybrid-research-candidate.md"
+    },
+    {
+      "path_at_capture": "https://chatgpt.com/share/6ac546a9-3258-83ec-b7ae-83c59e696fc4",
+      "availability": "external shared conversation; optional provenance only",
+      "portable_summary": "docs/decisions/2026-10-07--r8-adoption-agent-experiment-bench.md"
+    },
+    {
+      "path_at_capture": "https://www.quantconnect.com/terms/",
+      "observed_on": "2026-10-06",
+      "observed_version": "Version 1.4. Last Updated October 2, 2026",
+      "availability": "external vendor policy; tool-extracted, may change; optional provenance only",
+      "portable_summary": "docs/decisions/2026-10-07--r8-adoption-agent-experiment-bench.md"
+    },
+    {
+      "path_at_capture": "audits/2026-10-06-r8-adversarial-review/REPORT.md",
+      "sha256": "c7d4102a1c1d3ec0d043879011470d03a97bb5a4466183e83d1a1318c824064e",
+      "availability": "outside_repository; candidate review by another agent; optional provenance only",
+      "portable_summary": "docs/decisions/2026-10-08--r8-amendment-1-first-loop-on-native-replay.md"
+    },
+    {
+      "path_at_capture": "audits/2026-10-06-r8-adversarial-review/FOLLOWUP.md",
+      "sha256": "61c7493c020d48c778837b3d118587248a58892c27947fd1ed0f1909f60db642",
+      "availability": "outside_repository; candidate review by another agent; optional provenance only",
+      "portable_summary": "docs/decisions/2026-10-08--r8-amendment-1-first-loop-on-native-replay.md"
+    },
+    {
+      "path_at_capture": "audits/2026-10-08-r8-replay-gap-inventory/REPORT.md",
+      "sha256": "31ea4edf7a4f1df8d6b0ed4a92165e1d4145efd505fd99e541897995b247845d",
+      "availability": "outside_repository; local replay execution evidence, not independently reviewed; optional provenance only",
+      "portable_summary": "docs/decisions/2026-10-08--r8-amendment-1-first-loop-on-native-replay.md"
     }
-  ]
+  ],
+  "last_event_recorded_on": "2026-10-09"
 }
