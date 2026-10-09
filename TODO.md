@@ -603,17 +603,21 @@ reduce-only outbox。tick／timer／WS／registration 同界，durable registrat
 110017 不改 execution accounting。H2 39（35 PG 另行執行）通過；後續 exact-head CI／review／
 merge／Mac 採用以本輪 workspace artifacts 為準。沒有 source scope 或 queue 擴展；Linux 略過。
 
-## R8 階段 1 回放修補（2026-10-09；WAITING）
+## R8 階段 1 回放修補（2026-10-09；ACTIVE）
 
 Operator 於 2026-10-09 採納 [R8 修訂一](docs/decisions/2026-10-08--r8-amendment-1-first-loop-on-native-replay.md)並指示開始階段 1。
-本列記錄該指示與範圍。A 至 D **尚未實作**，沒有任何源碼變更。2026-10-08 有過一次停在設計審查的嘗試
+本列初次登記時 A 至 D **尚未實作**，沒有任何源碼變更；本次送審 checkpoint 已完成 A–D 源碼與本機驗收，見下方追加證據。2026-10-08 有過一次停在設計審查的嘗試
 （交付身分 `R8-STAGE1-NATIVE-REPLAY`，本機分支 `codex/r8-stage1-native-replay`，未推送）；本節先前寫「沒有 task contract」，與事實不符，已更正。
 派工指令與交接摘要見 [R8 階段 1 派工指令](docs/execution_plan/2026-10-09--r8-stage1-replay-patches-dispatch.md)；它不取代本列。
 
-### WAITING
+### ACTIVE
 
 | ID | 優先級 | 狀態 | Owner 路徑 | 驗收條件 | 最新證據 | 具名解除條件／下一步 |
 |---|---:|---|---|---|---|---|
-| `P1-R8-STAGE1-REPLAY-PATCHES` | 1 | WAITING_FRESH_ADMISSION；`dispatchable=false`；work status=NOT_STARTED（新交付；先前的交付停在設計審查，維持失敗結案） | PM 依 Operator 的明示指示，以新交付身分 `R8-STAGE1-REPLAY-PATCHES-20261009` 取得准入；舊交付 `R8-STAGE1-NATIVE-REPLAY` 不重開、不重設；源碼實作依當時的 DAG 派生，須有獨立的代碼審查與測試驗證，不預填角色鏈 | 修訂一 §5 階段 1 的四項：成交時點開關、停手選擇器的注入點、逐筆輸出（含跨資金費結算點的標記）、記錄參數來源的 manifest。新欄位缺省時行為與現行逐位元組相同；既有回放測試不改而通過；不碰 production 熱路徑、取數、Linux、資料庫或 Demo。驗收以派工指令 §3 的現行內容為準（`VETO` 與 `SIZE_DOWN` 都必做；曲線只交付已實現餘額曲線） | 2026-10-09 Operator 採納與指示（路線事件 `RH-20261009-01`）。2026-10-08 本機差距盤點實跑了回放的真策略路徑。2026-10-09 本機 Mac、提交 `5bd70155c`：回放單元測試 117 通過、七個回放整合測試 35 通過，均 0 失敗；同日在乾淨工作樹上，讀取 TODO 的八個結構測試檔為 263 通過、0 失敗。以上為本機 source 證據，不是 runtime 或 Linux 證據。2026-10-08 的先前嘗試：設計初審提出四個阻塞項，修正後的唯一一次複核沒有讀到修正設計而仍判不通過，單元停止（審查記錄在倉庫外） | Operator 已於 2026-10-09 明示以修訂後的驗收另立新交付，取代同日稍早的重開裁決（路線事件 `RH-20261009-06`；重開經查明須重設已用掉的審查狀態，做不到）。PM 依派工指令的「新交付條件」取得准入後移入 ACTIVE；設計從頭獨立審查，審查提問須以檔案路徑指向設計。Operator 同日裁決資金費結算不納入本階段（路線事件 `RH-20261009-03`）；第一圈只能在各組持倉都不跨結算點的設定下作增益裁決 |
+| `P1-R8-STAGE1-REPLAY-PATCHES` | 1 | ACTIVE；`dispatchable=false`；work status=IMPLEMENTED_PENDING_REVIEW（本次 source checkpoint；PA 設計初審 PASS，85af1387；等待 E2／E4／R4） | PM 依 Operator 的明示指示，以新交付身分 `R8-STAGE1-REPLAY-PATCHES-20261009` 取得准入；舊交付 `R8-STAGE1-NATIVE-REPLAY` 不重開、不重設；源碼實作依當時的 DAG 派生，須有獨立的代碼審查與測試驗證，不預填角色鏈 | 修訂一 §5 階段 1 的四項：成交時點開關、停手選擇器的注入點、逐筆輸出（含跨資金費結算點的標記）、記錄參數來源的 manifest。新欄位缺省時行為與現行逐位元組相同；既有回放測試不改而通過；不碰 production 熱路徑、取數、Linux、資料庫或 Demo。驗收以派工指令 §3 的現行內容為準（`VETO` 與 `SIZE_DOWN` 都必做；曲線只交付已實現餘額曲線） | 2026-10-09 Operator 採納與指示（路線事件 `RH-20261009-01`）。2026-10-08 本機差距盤點實跑了回放的真策略路徑。2026-10-09 本機 Mac、提交 `5bd70155c`：回放單元測試 117 通過、七個回放整合測試 35 通過，均 0 失敗；同日在乾淨工作樹上，讀取 TODO 的八個結構測試檔為 263 通過、0 失敗。以上為本機 source 證據，不是 runtime 或 Linux 證據。2026-10-08 的先前嘗試：設計初審提出四個阻塞項，修正後的唯一一次複核沒有讀到修正設計而仍判不通過，單元停止（審查記錄在倉庫外） | Operator 已於 2026-10-09 明示以修訂後的驗收另立新交付，取代同日稍早的重開裁決（路線事件 `RH-20261009-06`；重開經查明須重設已用掉的審查狀態，做不到）。PM 依派工指令的「新交付條件」取得准入後移入 ACTIVE；設計從頭獨立審查，審查提問須以檔案路徑指向設計。Operator 同日裁決資金費結算不納入本階段（路線事件 `RH-20261009-03`）；第一圈只能在各組持倉都不跨結算點的設定下作增益裁決 |
 
 階段 2 及以後不在本列範圍。階段 2 的 Demo 對帳需要 Linux 唯讀資料與運行環境的生效參數，須另行授權。
+
+新交付設計：[R8 Stage 1](docs/runbooks/r8_stage1_replay_patches.md)。固定基線 `0174315628ba74c322c0c9404a1bba446759763a`；2026-10-09 PA 初審 `91085a66` 綁定 `85af1387`，沒有 finding。基線已自行重現 27 筆成交、net_pnl=-9.137611406571523；A–D 的實作與驗證進行中。舊交付與舊帳本保持原狀。
+
+本次 source 送審追加證據：Rust 117 單元＋35 原整合＋16 新整合＋3 emitter＋9 binary = 180 通過，Python 43 通過；均 0 失敗／略過／錯誤。缺省報告排除 generated_at_ms 後 byte-identical；release symbol audit PASS。完整命令、迭代失敗記錄、A–D 數值與未驗範圍見上述新設計 runbook；獨立 gate 以新交付的 current-head review artifacts 與 PR 回報為準。未合併、未部署，沒有 runtime 採用。

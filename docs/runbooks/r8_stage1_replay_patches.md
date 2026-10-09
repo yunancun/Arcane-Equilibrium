@@ -1,6 +1,6 @@
 # R8 階段 1：隔離回放修補設計
 
-狀態：DESIGN_REVIEW_PENDING；A–D 未實作。本文件是新交付的受審設計，不是 runtime 授權。
+狀態：IMPLEMENTED_PENDING_REVIEW；PA 初審 PASS（`85af1387`，attempt `91085a66`）；A–D 已實作，等待 E2／E4／R4。本文件是新交付的受審設計，不是 runtime 授權。
 交付 `R8-STAGE1-REPLAY-PATCHES-20261009`；PM／唯一 writer：`codex-r8-stage1`。
 固定 main 基線：`0174315628ba74c322c0c9404a1bba446759763a`。
 唯一派工正本：[2026-10-09 派工指令](../execution_plan/2026-10-09--r8-stage1-replay-patches-dispatch.md)。
@@ -60,7 +60,7 @@ Operator 以 `RH-20261009-06` 明示另立新交付；曲線範圍按 `RH-202610
    尚未成交不提前建立持倉；同批／交錯標的事件再發 Open 時以 `pending_open_exists` 拒絕並留痕。
    下一事件處理完 pending 後才執行當前 on_tick，策略看到實際成交後持倉。
 7. Close 也延到下一事件，繞過 selector；以成交時仍持有的實際數量平倉，保留既有深度部分成交。
-   pending Close 綁定訊號時持倉方向；若已無倉或方向不符，記 `close_position_unavailable`，不能反向開倉。
+   pending Close 綁定訊號時持倉方向與世代；若已無倉、方向或世代不符，記 `reduction_position_changed`，不能誤平重開新倉；訊號時無倉則記 `close_no_position`。
    同標的重複 Close 不新增可過度平倉的數量。深度未成交餘額不自動跨更多事件重掛，保留既有一次性模型。
 8. 市價要求為 Open 的 order_type=market（不分大小寫）、limit_price=None 且非 PostOnly。
    非市價 Open 記 `unsupported_nonmarket` 零量列；不能暗轉市價。Close 本身沒有 order type，沿用市價語義。
@@ -173,8 +173,63 @@ python3 -m pytest program_code/exchange_connectors/bybit_connector/control_api_v
 ```
 
 此外補跑其他 replay_*.rs 與對應 Python 回歸；只能在 Linux 跑的檢查標 UNVERIFIED。
-先以新 public Interface 寫可觀察驗收，再實作；不改、刪或略過原 152 項以取得通過。
+新增驗收透過 public Interface 檢查行為；不改、刪或略過原 152 項以取得通過。
 測試讀取 repository state 時整個工作樹保持不變。E2 看正確性／邊界，E4 驗行為，R4 驗文件與證據。
 無法保持缺省 bytes、需改 production 熱路徑、需重建撮合／資料平台、或唯一複核仍失敗，都停止。
 不取數、不連 Linux／DB／Demo，不部署、不改治理、不啟動階段 2；GitHub 操作限已授權的 feature 發布及 PR。
 所有 source 檔案小於 2000 行，新增註釋用中文。
+
+
+## 本次送審 checkpoint（2026-10-09，本機 Mac）
+
+本節記錄 PM 的 source 驗證，不代替 E2／E4／R4；獨立 verdict 另保存在本工作區
+`audits/2026-10-09-r8-stage1-replay-patches/`，並彙整於 feature PR。尚未合併或部署。
+fixture 仍為前述固定 hash；新 fixture 只在本機由它追加 selector，不另行取數。
+
+| 檢查 | passed / failed / skipped / error | 證據 |
+|---|---|---|
+| 既有 replay 單元 | 117 / 0 / 0 / 0 | `rust-unit-verified.log` |
+| 原七組 replay 整合 | 35 / 0 / 0 / 0 | `rust-integration-verified.log`；原測試檔無差異 |
+| 新 Stage 1 整合 | 16 / 0 / 0 / 0 | 同上；時點、BBO、同標的、scanner skip、風控餘額、部分平倉、重開世代、單調選擇器 |
+| m3 emitter 隔離 | 3 / 0 / 0 / 0 | 同上 |
+| replay_runner binary 單元 | 9 / 0 / 0 / 0 | `rust-binary-verified.log` |
+| Python 新工具＋既有 analytics／xlang | 43 / 0 / 0 / 0 | `python-tests-verified.log` |
+| 真策略／逐位元組／設定來源驗收組 | 8 / 0 / 0 / 0 | `run_acceptance.py`、`acceptance-results.json`（倉庫外） |
+| release forbidden symbol audit | 1 / 0 / 0 / 0 | `symbol-audit-verified.log`，Darwin `nm -gU`；0 forbidden，1 defined symbol |
+
+原 152 項全部保留。迭代中曾有新測試 fixture 少了 `source`（11 失敗），修正測試後另發現
+NO_OP 多餘係數未被拒絕（10 通過／1 失敗）；已改用嚴格物件 variant，最後結果如表。
+這些失敗記錄保留，不覆寫成初次即通過。測試與實作交錯完成，沒有主張全程先測後寫。
+
+- A：同 fixture 缺省 27 fills、net_pnl=-9.137611406571523；只移除 generated_at_ms 一行後 byte-identical。
+  next-symbol-open 的 27 個正量 fill 均核對下一事件 open 加既有滑點，effective_ts_ms 是成交事件時間。
+- B：current-bar-close 後半天 VETO 有 15 個拒絕進場記錄，該段沒有新風險進場；Close 仍可執行。
+  報告 net_pnl=-5.49817523677666，與缺省不同；這是機制驗收，不能據此裁決增益。
+- C：13 筆來回交易 net 合計 -8.97267702976942；1 個未平倉入場費的餘額影響 -0.16493437680442335；
+  殘差 2.320366121466577e-12。grid 原始 62 列中有 14 個零量拒絕，分析成功。
+  只交付已實現餘額曲線；權益曲線仍未完成。保留當前逐筆成交標籤與資料分級。
+- D：repo Demo＋明示 taker-entry 與 caller snapshot 都通過 Rust 驗簽，stderr 的兩個 supplied=true；
+  同組檔案重跑 manifest 相同。來源與覆寫均已簽名並回聲至報告。離線 imports 沒有載入 app 或 DB driver。
+- 新選項要求明示 strategy，不能讓 synthetic walker 默默忽略選項；公開 pipeline setter 也拒絕非零 latency。
+
+### 本機使用
+
+先由呼叫者在輸出 manifest 同目錄放妥自己的測試 `key.hex`（工具不生成／複製），
+以下 `$FIXTURE`、`$OUT`、`$KEY` 均由呼叫者提供；勿把私有 fixture／金鑰提交進倉庫。
+
+```sh
+python3 helper_scripts/replay/replay_local.py manifest --fixture "$FIXTURE" --key-file "$KEY" --output "$OUT/manifest.json" --experiment-id r8-local --next-open --taker-entry
+OPENCLAW_REPLAY_MAC_NO_PRIVATE=1 rust/target/debug/replay_runner --manifest "$OUT/manifest.json" --output-dir "$OUT/report"
+python3 helper_scripts/replay/replay_local.py analytics "$OUT/report/replay_report.json" --output "$OUT/analytics.json"
+# 舊報告沒有可靠末事件時間時，必須額外給實際 fixture 最後事件時間。
+python3 helper_scripts/replay/replay_local.py analytics "$OUT/legacy-report.json" --replay-end-ts-ms 1704153540000 --output "$OUT/legacy-analytics.json"
+```
+
+caller snapshot 使用 `--snapshot snapshot.json`；不同標的結算時刻以 `--funding-hours hours.json` 提供，
+例如 `{"*": [0,8,16], "ETHUSDT": [0,4,8,12,16,20]}`。`funding.funding_crossed=true` 時不作第一圈增益裁決。
+新生成來源路徑目前採本機解析後的絕對路徑，方便外部 snapshot 與 fixture 追查；没有把機器路徑硬編入源碼。
+原設計偏好的 repository-relative 路徑未採用，檔案 SHA-256 保留。
+
+未驗證 Linux、資料庫、Demo／live 帳戶與 runtime 生效參數；沒有執行需這些環境的測試，也未啟動階段 2。
+階段 2 建議另行授權 Linux 唯讀讀取：生效策略／風控快照、實際委託／成交／費用／資金費流水與同時段行情，
+用共同時間與訂單識別鍵對帳；公開一分鐘 fixture 只能提供 sandbox 時點與機制證據，不能替代 Demo 對帳。

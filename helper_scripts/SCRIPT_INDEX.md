@@ -1826,3 +1826,9 @@ fail-closed，total-miss + partial-miss 同歸此判，絕不誤報 PASS_CAPTURE
 最新補充（2026-07-11 R3 move2 L1 切片釘存 exporter）：`program_code/research/microstructure/episode_slice_pin.py` 是 dossier FIX-4/C2 的 $0 read-only 死線釘存工具——解析 bb_reversion entry 信號 episode（per-symbol 30min gap-dedup）∪ 已成交 fill（Buy 開倉+Sell 平倉）anchor，計算每窗 `[t-60s, t+360s]`（τ=60s）並匯出 `market.l1_events`/`trading.fills`/`orders`/`signals` 原始切片為 write-once immutable artifact（manifest.json + per-window parquet + sha256sums）。預設 `--dry-run`（0 PG）；`--apply` 才連線，走 `data_loader.connect()` read-only session + `SET default_transaction_read_only=on`/`statement_timeout` 護欄。G8 grid close_maker 校準 L1 已於 06-19 蒸發（`g8_status=unpinnable_l1_aged_out`）。2026-07-11 首跑釘存 31 窗/136,772 l1_events rows，manifest sha256 `0a4dff9c...`，07-19 保留崖 DEFUSED。測試 `program_code/research/tests/test_episode_slice_pin.py`（12 passed）。runbook `docs/CCAgentWorkSpace/PM/workspace/reports/2026-07-11--move2_slice_pin_runbook.md`。
 
 最新補充（2026-07-30 S2E-LW1 recovery scanner）：S2 trusted-host AST scanner 現由磁碟治理八支 S2.5 recovery leaf；每檔有 exact stdlib/governance import allowlist，`os`/`fcntl`/`socket` callable 另有 per-file 封閉表。module alias、from-import alias 與 callable alias 鏈均保留來源並 fail closed；`os.unlink` 與 `socket.create_connection` mutation 對每支 leaf 都必須產生 finding，真實 leaf 則維持零 finding。
+
+### R8 隔離回放的本機工具
+
+| 路徑 | 用途 | 邊界 |
+|---|---|---|
+| `replay/replay_local.py` | `manifest` 從倉庫設定或呼叫者快照簽名；`analytics` 從回放 JSON 配對交易、對帳並標記跨結算點 | 純本機檔案；不取數、不連 DB/API、不產生金鑰；只交付已實現餘額曲線。用法見 `docs/runbooks/r8_stage1_replay_patches.md` |

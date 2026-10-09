@@ -87,6 +87,15 @@ pub(crate) struct ReplayManifest {
     /// 欄位即視為 synthetic walker 路徑，proof_1/4/5 不退）。
     #[serde(default)]
     pub(crate) strategy: Option<String>,
+    /// R8 隔離回放的選用時點與來源；缺省不改既有行為。
+    #[serde(default)]
+    pub(crate) execution_timing: openclaw_engine::replay::stage1::ExecutionTiming,
+    #[serde(default)]
+    pub(crate) include_replay_metadata: bool,
+    #[serde(default)]
+    pub(crate) parameter_provenance: Option<serde_json::Value>,
+    #[serde(default)]
+    pub(crate) parameter_overrides: Option<serde_json::Value>,
     /// REF-20 Sprint B2 R5-T4: optional starting balance (defaults to
     /// `runner::DEFAULT_STARTING_BALANCE = 10_000.0`). Sourced from
     /// `manifest_jsonb.starting_balance` if present. Sprint A baseline picks
