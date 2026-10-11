@@ -31,11 +31,18 @@ impl Default for Selector {
     }
 }
 
+/// 鍵缺席仍代表 NO_OP；明確寫 null 必須讓載入失敗，不得靜默視為缺席。
+fn explicit_selector<'de, D: serde::Deserializer<'de>>(
+    deserializer: D,
+) -> Result<Option<Selector>, D::Error> {
+    Selector::deserialize(deserializer).map(Some)
+}
+
 #[derive(Debug, Clone, Default, Deserialize)]
 struct EventExtension {
     ts_ms: i64,
     symbol: String,
-    #[serde(default)]
+    #[serde(default, deserialize_with = "explicit_selector")]
     selector_decision: Option<Selector>,
     #[serde(default)]
     execution_quote_at_open: bool,

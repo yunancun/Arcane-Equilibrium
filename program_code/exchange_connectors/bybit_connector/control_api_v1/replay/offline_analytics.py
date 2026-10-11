@@ -50,13 +50,27 @@ def analyze_report(payload: dict[str, Any], *, replay_end_ts_ms: int | None = No
         value = fill.get("effective_ts_ms")
         return int(fill["ts_ms"] if value is None else value)
     indexed.sort(key=lambda item: (timestamp(item[1]), item[0]))
-    end = replay_end_ts_ms
-    if end is None:
-        end = payload.get("stage1", {}).get("replay_end_ts_ms")
-    if end is None:
+    # 先取報告自身的結束時間；呼叫端不得把它往前改，否則會漏標跨結算的未平倉。
+    stage1_end = payload.get("stage1", {}).get("replay_end_ts_ms")
+    label_end = None
+    if stage1_end is None:
         match = re.fullmatch(r"on_tick:[^@]+@(-?\d+)", result.get("diagnostics", {}).get("last_action_label", ""))
         if match:
-            end = int(match[1])
+            label_end = int(match[1])
+    if replay_end_ts_ms is not None:
+        if stage1_end is not None and replay_end_ts_ms != stage1_end:
+            raise ValueError("replay_end_ts_ms conflicts with report stage1.replay_end_ts_ms")
+        if label_end is not None and replay_end_ts_ms < label_end:
+            raise ValueError("replay_end_ts_ms precedes report last action timestamp")
+        end, end_source = replay_end_ts_ms, "caller"
+    elif stage1_end is not None:
+        end, end_source = stage1_end, "report_stage1"
+    elif label_end is not None:
+        end, end_source = label_end, "report_last_action_label"
+    else:
+        end, end_source = None, None
+    # 舊時序的成交時間戳是 K 線開盤時間，但成交模擬在收盤；結算前最後一根的出場或結束不會被標記。
+    exact = payload.get("stage1", {}).get("execution_timing") == "next_symbol_open"
     positions: dict[str, dict[str, Any]] = {}
     trades: list[dict[str, Any]] = []
     zero_reasons: Counter[str] = Counter()
@@ -158,4 +172,7 @@ def analyze_report(payload: dict[str, Any], *, replay_end_ts_ms: int | None = No
             "funding": {"hours_utc": {"*": default_hours, **schedules}, "endpoints": "inclusive",
                         "completed_crossing_count": closed_count, "open_position_crossing_count": open_count,
                         "funding_crossed": bool(closed_count or open_count),
-                        "funding_settled": False}}
+                        "funding_settled": False,
+                        "replay_end_ts_ms": end, "replay_end_source": end_source,
+                        "timestamp_basis": "execution_event_open" if exact else "bar_open_label",
+                        "crossing_check_exact": exact}}

@@ -3,6 +3,7 @@ from __future__ import annotations
 
 import copy
 import hashlib
+import importlib
 import json
 import math
 import os
@@ -15,20 +16,42 @@ from .manifest_signer import ManifestSigner, compute_body_hash, compute_key_fing
 from .route_helpers import build_default_manifest_payload
 
 
-def _source(path: Path) -> dict[str, str]:
-    return {"path": str(path.resolve(strict=True)), "sha256": hashlib.sha256(path.read_bytes()).hexdigest()}
+def _source(path: Path, repo_root: Path | None = None) -> dict[str, str]:
+    recorded = str(path.resolve(strict=True))
+    if repo_root is not None:
+        # 倉庫內設定檔以相對倉庫根的 POSIX 路徑入簽名本文，避免寫入本機絕對路徑。
+        try:
+            recorded = path.resolve(strict=True).relative_to(repo_root.resolve(strict=True)).as_posix()
+        except ValueError:
+            pass
+    return {"path": recorded, "sha256": hashlib.sha256(path.read_bytes()).hexdigest()}
+
+
+def _require_toml_parser() -> None:
+    # 既有載入器在缺少解析器時回傳 None，會被誤報成設定缺失；先明確檢查。
+    for name in ("tomllib", "tomli"):
+        try:
+            importlib.import_module(name)
+            return
+        except ImportError:
+            continue
+    raise ValueError("no TOML parser available (need Python 3.11+ tomllib or the tomli package)")
 
 
 def build_signed_manifest(*, repo_root: Path, fixture: Path, key_file: Path, output: Path,
-                          experiment_id: str, strategy: str = "ma_crossover", environment: str = "demo",
+                          experiment_id: str, strategy: str = "ma_crossover", environment: str | None = None,
                           snapshot: Path | None = None, next_open: bool = False, taker_entry: bool = False,
                           full_chain: bool = False, starting_balance: float = 10000,
                           data_tier: str = "S2", run_id: str | None = None) -> dict[str, Any]:
-    if environment not in ("demo", "paper", "live"):
+    if snapshot is not None and environment is not None:
+        raise ValueError("--environment cannot be combined with --snapshot; the snapshot is the only parameter source")
+    if snapshot is None and environment is None:
+        environment = "demo"
+    if environment not in (None, "demo", "paper", "live"):
         raise ValueError("unknown repository configuration environment")
     if not math.isfinite(starting_balance) or starting_balance <= 0:
         raise ValueError("starting_balance must be positive finite")
-    if data_tier not in ("S1", "S2", "S3"):
+    if data_tier not in ("S2", "S3"):
         raise ValueError("unknown data tier")
     if not experiment_id.strip():
         raise ValueError("experiment_id is required")
@@ -36,12 +59,16 @@ def build_signed_manifest(*, repo_root: Path, fixture: Path, key_file: Path, out
     output = output.resolve()
     fixture = fixture.resolve(strict=True)
     sources = []
+    # 覆寫保護必須比對絕對路徑，與寫入本文的紀錄路徑分開保存。
+    source_paths = []
     if snapshot is not None:
         params = json.loads(snapshot.read_text())
         sources.append(_source(snapshot))
+        source_paths.append(snapshot.resolve(strict=True))
         provenance_kind = "caller_snapshot"
     else:
         # 既有載入器以環境變數定位；僅在同步本機組裝期間覆寫並還原。
+        _require_toml_parser()
         old_root = os.environ.get("OPENCLAW_BASE_DIR")
         try:
             os.environ["OPENCLAW_BASE_DIR"] = str(repo_root.resolve(strict=True))
@@ -53,7 +80,8 @@ def build_signed_manifest(*, repo_root: Path, fixture: Path, key_file: Path, out
                      repo_root / "settings/risk_control_rules" / f"risk_config_{environment}.toml"]
             if full_chain:
                 paths.append(repo_root / "settings/risk_control_rules/scanner_config.toml")
-            sources.extend(_source(path) for path in paths)
+            sources.extend(_source(path, repo_root) for path in paths)
+            source_paths.extend(path.resolve(strict=True) for path in paths)
         finally:
             if old_root is None:
                 os.environ.pop("OPENCLAW_BASE_DIR", None)
@@ -78,7 +106,7 @@ def build_signed_manifest(*, repo_root: Path, fixture: Path, key_file: Path, out
                           "after": False, "reason": "R8 Stage 1 explicitly requests taker entry"})
     if next_open and strategy == "ma_crossover" and params["strategy_params"][strategy].get("use_maker_entry", True):
         raise ValueError("next-symbol-open with maker entry requires explicit --taker-entry")
-    protected = {key_file, fixture, *(Path(s["path"]) for s in sources)}
+    protected = {key_file, fixture, *source_paths}
     if output in protected or output.name == "key.hex":
         raise ValueError("output must not overwrite any input or signing key")
     fingerprint = compute_key_fingerprint(key_file.read_bytes())

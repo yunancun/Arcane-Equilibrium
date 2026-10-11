@@ -260,6 +260,21 @@ fn invalid_selector_coefficients_fail_closed() {
     }
 }
 #[test]
+fn explicit_null_selector_is_rejected_and_absent_key_stays_no_op() {
+    // 明確的 null 不得被當成缺席；缺席鍵維持原行為（不啟用擴充、照常成交）。
+    let mut row = event(1, "BTCUSDT", 100.);
+    row["selector_decision"] = Value::Null;
+    assert!(!config_result(vec![row], None));
+    assert!(config_result(vec![event(1, "BTCUSDT", 100.)], None));
+    let (r, m) = run(
+        vec![event(1, "BTCUSDT", 100.)],
+        vec![(1, vec![open("BTCUSDT")])],
+        ExecutionTiming::CurrentBarClose,
+    );
+    assert!(m.is_null());
+    assert!(r.fills[0].qty > 0.);
+}
+#[test]
 fn quote_time_latency_and_order_require_explicit_contract() {
     let mut row = event(1, "BTCUSDT", 100.);
     row["best_bid"] = json!(99.);
