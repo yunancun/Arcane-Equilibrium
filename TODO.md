@@ -1,7 +1,7 @@
 # 玄衡 TODO - 活躍派發佇列
 
-**版本** v887 | **校準日期** 2026-10-01（v885–v887 於 2026-10-09 只新增並更新文末 R8 階段 1 等待列，其餘未重新校準） | **source 觀察基線** `52a884d93f774a5f625a7d2db4ebe6e2ec95b23a`（GitHub／Mac main 相同，包含 PR196／PR198；本次跳過 Linux，runtime 限制見 §0）。
-**當前狀態**：AIML／workflow 均零 ACTIVE；workflow 選定 source 已採用，見下方 CLOSED 紀錄；原總帳仍歸檔，W11 等待下一個 Operator 指定的真實產品功能。S2E=5/9、effect=0/6、authority=0/9，LW2 WAITING。R8 階段 1（回放修補）為等待准入，見文末。
+**版本** v888 | **校準日期** 2026-10-01（v885–v888 於 2026-10-09 至 10-11 只新增並更新文末 R8 階段 1 一節，其餘未重新校準） | **source 觀察基線** `52a884d93f774a5f625a7d2db4ebe6e2ec95b23a`（GitHub／Mac main 相同，包含 PR196／PR198；本次跳過 Linux，runtime 限制見 §0）。
+**當前狀態**：AIML／workflow 均零 ACTIVE；workflow 選定 source 已採用，見下方 CLOSED 紀錄；原總帳仍歸檔，W11 等待下一個 Operator 指定的真實產品功能。S2E=5/9、effect=0/6、authority=0/9，LW2 WAITING。R8 階段 1（回放修補）的 source 已交付並結案，階段 2 待 Operator 決定，見文末。
 **證據與歷史**：當前 source／PR／runtime 限制見 §0；完整逐項 [audit](docs/references/2026-09-09--todo-workflow-freshness-audit.md)、[v880 快照](docs/archive/2026-09-09--todo-v880-pre-freshness-audit.md)、[版本日誌](docs/CLAUDE_CHANGELOG.md)。
 
 <details>
@@ -603,17 +603,20 @@ reduce-only outbox。tick／timer／WS／registration 同界，durable registrat
 110017 不改 execution accounting。H2 39（35 PG 另行執行）通過；後續 exact-head CI／review／
 merge／Mac 採用以本輪 workspace artifacts 為準。沒有 source scope 或 queue 擴展；Linux 略過。
 
-## R8 階段 1 回放修補（2026-10-09；WAITING）
+## R8 階段 1 回放修補（2026-10-11；CLOSED）
 
 Operator 於 2026-10-09 採納 [R8 修訂一](docs/decisions/2026-10-08--r8-amendment-1-first-loop-on-native-replay.md)並指示開始階段 1。
-本列記錄該指示與範圍。A 至 D **尚未實作**，沒有任何源碼變更。2026-10-08 有過一次停在設計審查的嘗試
-（交付身分 `R8-STAGE1-NATIVE-REPLAY`，本機分支 `codex/r8-stage1-native-replay`，未推送）；本節先前寫「沒有 task contract」，與事實不符，已更正。
-派工指令與交接摘要見 [R8 階段 1 派工指令](docs/execution_plan/2026-10-09--r8-stage1-replay-patches-dispatch.md)；它不取代本列。
+A 至 D 已實作並經獨立審查。本列與 source 由同一個 PR 進入 main，合併之前不算交付；沒有 runtime、Demo 或交易效果。
+經過：2026-10-08 第一次嘗試（交付身分 `R8-STAGE1-NATIVE-REPLAY`）停在設計審查，維持失敗結案。
+2026-10-09 Operator 明示另立新交付 `R8-STAGE1-REPLAY-PATCHES-20261009`，該交付完成實作，但在發布前因寫入租約與審查時限到期而停止。
+2026-10-11 Operator 指示由另一執行者獨立審查並發布保留的補丁（路線事件 `RH-20261011-01`）。兩個交付的帳本與審查狀態都沒有被更動。
+派工指令見 [R8 階段 1 派工指令](docs/execution_plan/2026-10-09--r8-stage1-replay-patches-dispatch.md)；設計、審查結果與使用說明見 [runbook](docs/runbooks/r8_stage1_replay_patches.md)。
 
-### WAITING
+### CLOSED
 
 | ID | 優先級 | 狀態 | Owner 路徑 | 驗收條件 | 最新證據 | 具名解除條件／下一步 |
 |---|---:|---|---|---|---|---|
-| `P1-R8-STAGE1-REPLAY-PATCHES` | 1 | WAITING_FRESH_ADMISSION；`dispatchable=false`；work status=NOT_STARTED（新交付；先前的交付停在設計審查，維持失敗結案） | PM 依 Operator 的明示指示，以新交付身分 `R8-STAGE1-REPLAY-PATCHES-20261009` 取得准入；舊交付 `R8-STAGE1-NATIVE-REPLAY` 不重開、不重設；源碼實作依當時的 DAG 派生，須有獨立的代碼審查與測試驗證，不預填角色鏈 | 修訂一 §5 階段 1 的四項：成交時點開關、停手選擇器的注入點、逐筆輸出（含跨資金費結算點的標記）、記錄參數來源的 manifest。新欄位缺省時行為與現行逐位元組相同；既有回放測試不改而通過；不碰 production 熱路徑、取數、Linux、資料庫或 Demo。驗收以派工指令 §3 的現行內容為準（`VETO` 與 `SIZE_DOWN` 都必做；曲線只交付已實現餘額曲線） | 2026-10-09 Operator 採納與指示（路線事件 `RH-20261009-01`）。2026-10-08 本機差距盤點實跑了回放的真策略路徑。2026-10-09 本機 Mac、提交 `5bd70155c`：回放單元測試 117 通過、七個回放整合測試 35 通過，均 0 失敗；同日在乾淨工作樹上，讀取 TODO 的八個結構測試檔為 263 通過、0 失敗。以上為本機 source 證據，不是 runtime 或 Linux 證據。2026-10-08 的先前嘗試：設計初審提出四個阻塞項，修正後的唯一一次複核沒有讀到修正設計而仍判不通過，單元停止（審查記錄在倉庫外） | Operator 已於 2026-10-09 明示以修訂後的驗收另立新交付，取代同日稍早的重開裁決（路線事件 `RH-20261009-06`；重開經查明須重設已用掉的審查狀態，做不到）。PM 依派工指令的「新交付條件」取得准入後移入 ACTIVE；設計從頭獨立審查，審查提問須以檔案路徑指向設計。Operator 同日裁決資金費結算不納入本階段（路線事件 `RH-20261009-03`）；第一圈只能在各組持倉都不跨結算點的設定下作增益裁決 |
+| `P1-R8-STAGE1-REPLAY-PATCHES` | 1 | CLOSED；work status=DONE_WITH_CONCERNS（source 已交付；沒有 runtime 採用） | 實作：交付 `R8-STAGE1-REPLAY-PATCHES-20261009`，發布前因寫入租約與審查時限到期而停止，補丁保留。獨立審查與發布：依 Operator 2026-10-11 的指示由另一執行者完成（路線事件 `RH-20261011-01`） | 修訂一 §5 階段 1 的四項：成交時點開關、停手選擇器的注入點、逐筆輸出（含跨資金費結算點的標記）、記錄參數來源的 manifest。新欄位缺省時行為與現行逐位元組相同；既有回放測試不改而通過；不碰 production 熱路徑、取數、Linux、資料庫或 Demo。驗收以派工指令 §3 的現行內容為準（`VETO` 與 `SIZE_DOWN` 都必做；曲線只交付已實現餘額曲線） | 2026-10-11 本機 Mac、離線、提交 `dc30286e6`、乾淨工作樹：回放單元 117、原七組整合 35、階段 1 驗收 21、emitter 隔離 3、binary 單元 9、Python 新工具 40，皆 0 失敗／略過／錯誤；補丁前簽好的四份 manifest 重跑後報告逐位元組相同（只排除 `generated_at_ms`）。獨立代碼審查與測試驗證皆為 PASS_WITH_NOTES（各複核一次）。禁用符號稽核腳本在 macOS 上沒有實質偵測力，另以未剝除的 debug binary 補查為 0 命中。GitHub CI 不執行這組測試。以上為本機 source 證據，不是 runtime 或 Linux 證據。細節、使用要求與已知限制見 [runbook](docs/runbooks/r8_stage1_replay_patches.md) | — |
 
-階段 2 及以後不在本列範圍。階段 2 的 Demo 對帳需要 Linux 唯讀資料與運行環境的生效參數，須另行授權。
+階段 2 及以後不在本列範圍，本檔目前沒有對應的可派發列。階段 2 的 Demo 對帳需要 Linux 唯讀資料與運行環境的生效參數，須由 Operator 另行決定與授權。
+runbook「已知限制與後續項」所列各項尚未處理；其中回放結束時的結算點檢查須在階段 3 使用增益閘門之前補上。
