@@ -1,7 +1,9 @@
 # R8 階段 1：隔離回放修補設計
 
-狀態：IMPLEMENTED_PENDING_REVIEW；PA 初審 PASS（`85af1387`，attempt `91085a66`）；A–D 已實作，等待 E2／E4／R4。本文件是新交付的受審設計，不是 runtime 授權。
-交付 `R8-STAGE1-REPLAY-PATCHES-20261009`；PM／唯一 writer：`codex-r8-stage1`。
+狀態：A–D 已實作，並經獨立的代碼審查與測試驗證（皆為 PASS_WITH_NOTES，2026-10-11），見文末「獨立審查與發布」。
+設計初審 PASS（`85af1387`，attempt `91085a66`）。本文件是受審設計與使用說明，不是 runtime 授權。
+交付 `R8-STAGE1-REPLAY-PATCHES-20261009`；PM／唯一 writer：`codex-r8-stage1`。該交付在發布前因寫入租約與審查時限到期而停止，
+補丁保留；Operator 於 2026-10-11 指示由另一執行者獨立審查並發布（路線事件 `RH-20261011-01`）。
 固定 main 基線：`0174315628ba74c322c0c9404a1bba446759763a`。
 唯一派工正本：[2026-10-09 派工指令](../execution_plan/2026-10-09--r8-stage1-replay-patches-dispatch.md)。
 Operator 以 `RH-20261009-06` 明示另立新交付；曲線範圍按 `RH-20261009-05` 僅含已實現餘額。
@@ -121,6 +123,7 @@ NO_OP／VETO 不接受額外 size_factor，防止含混資料被誤用。
   舊報告若 diagnostics.last_action_label 為明確 `on_tick:<symbol>@<ts>`，可取其最後事件時間；
   否則有未平倉時必須由呼叫者提供 `--replay-end-ts-ms`，缺失直接報錯，不能當作沒有跨點。
   supplied end 必須不早於最後成交；基線對帳的 end 取固定 fixture 最後事件，記錄來源。
+  2026-10-11 審查修正：報告已記錄結束時間時，呼叫者的值與它不同即拒絕；只有由最後動作標籤推得的時間時，呼叫者的值不得更早。見文末已修正的第 1 項。
 - 輸出 completed_crossing_count、open_position_crossing_count，以及 funding_crossed = 任一持倉區間跨點。
   不計提、不扣資金費。此旗標為 true 時第一圈不能作增益裁決。
 
@@ -140,6 +143,7 @@ NO_OP／VETO 不接受額外 size_factor，防止含混資料被誤用。
 3. 倉庫路徑用既有 full_chain_fixture 的設定解析與 TOML loader；三環境策略／風控檔保持分開。
    對必要檔案做存在、解析與非空檢查，既有 loader 回 None 一律失敗，不能退回策略／風控預設。
    需要 full_chain 時才載入 scanner_config；呼叫者 snapshot 若要求 full_chain 而缺 scanner 就失敗。
+   2026-10-11 審查修正：資料層只接受 S2 與 S3；`--snapshot` 與 `--environment` 並用即報錯；缺 TOML 解析器時明確報錯。見文末已修正的第 5 項。
 4. 主體先重用 `route_helpers.build_default_manifest_payload(cur=None)`，再顯式填 fixture/data_tier/strategy、
    載入的 strategy_params/risk_overrides/scanner_config；不傳 cursor、不走現有路由、不寫 DB。
    canonical 用 `experiment_registry.compute_manifest_canonical_bytes`，簽名用 `ManifestSigner(key_path, fingerprint)`
@@ -182,6 +186,8 @@ python3 -m pytest program_code/exchange_connectors/bybit_connector/control_api_v
 
 ## 本次送審 checkpoint（2026-10-09，本機 Mac）
 
+以下是實作者在 2026-10-09 送審時的自我驗證，原文保留。其後的獨立審查、修正與最終數字見文末「獨立審查與發布」。
+
 本節記錄 PM 的 source 驗證，不代替 E2／E4／R4；獨立 verdict 另保存在本工作區
 `audits/2026-10-09-r8-stage1-replay-patches/`，並彙整於 feature PR。尚未合併或部署。
 fixture 仍為前述固定 hash；新 fixture 只在本機由它追加 selector，不另行取數。
@@ -195,7 +201,7 @@ fixture 仍為前述固定 hash；新 fixture 只在本機由它追加 selector�
 | replay_runner binary 單元 | 9 / 0 / 0 / 0 | `rust-binary-verified.log` |
 | Python 新工具＋既有 analytics／xlang | 43 / 0 / 0 / 0 | `python-tests-verified.log` |
 | 真策略／逐位元組／設定來源驗收組 | 8 / 0 / 0 / 0 | `run_acceptance.py`、`acceptance-results.json`（倉庫外） |
-| release forbidden symbol audit | 1 / 0 / 0 / 0 | `symbol-audit-verified.log`，Darwin `nm -gU`；0 forbidden，1 defined symbol |
+| release forbidden symbol audit | 1 / 0 / 0 / 0 | `symbol-audit-verified.log`，Darwin `nm -gU`；0 forbidden，1 defined symbol（macOS 上的偵測力見文末已知限制） |
 
 原 152 項全部保留。迭代中曾有新測試 fixture 少了 `source`（11 失敗），修正測試後另發現
 NO_OP 多餘係數未被拒絕（10 通過／1 失敗）；已改用嚴格物件 variant，最後結果如表。
@@ -227,9 +233,92 @@ python3 helper_scripts/replay/replay_local.py analytics "$OUT/legacy-report.json
 
 caller snapshot 使用 `--snapshot snapshot.json`；不同標的結算時刻以 `--funding-hours hours.json` 提供，
 例如 `{"*": [0,8,16], "ETHUSDT": [0,4,8,12,16,20]}`。`funding.funding_crossed=true` 時不作第一圈增益裁決。
-新生成來源路徑目前採本機解析後的絕對路徑，方便外部 snapshot 與 fixture 追查；没有把機器路徑硬編入源碼。
-原設計偏好的 repository-relative 路徑未採用，檔案 SHA-256 保留。
+倉庫設定檔的來源路徑記為相對倉庫根的路徑（2026-10-11 審查修正後；送審當時是絕對路徑）。
+呼叫者提供的快照與 fixture 仍記為解析後的絕對路徑，`fixture_uri` 也是絕對路徑，所以同一組輸入在不同機器上的 `manifest_hash` 不同。
+沒有把機器路徑硬編入源碼；檔案 SHA-256 保留。
 
 未驗證 Linux、資料庫、Demo／live 帳戶與 runtime 生效參數；沒有執行需這些環境的測試，也未啟動階段 2。
 階段 2 建議另行授權 Linux 唯讀讀取：生效策略／風控快照、實際委託／成交／費用／資金費流水與同時段行情，
 用共同時間與訂單識別鍵對帳；公開一分鐘 fixture 只能提供 sandbox 時點與機制證據，不能替代 Demo 對帳。
+
+## 獨立審查與發布（2026-10-11）
+
+實作者的交付 `R8-STAGE1-REPLAY-PATCHES-20261009` 在發布前停止：寫入租約於 2026-10-09 16:10 UTC 到期而未續租，
+受控審查的時限也在代碼審查開始之前到期。設計審查已通過；代碼審查、測試驗證與文件審查當時都沒有執行。
+該交付維持停止狀態，它的准入帳本與審查狀態沒有被更動。
+Operator 於 2026-10-11 指示由另一執行者獨立審查並發布保留的補丁，局部修正由該執行者處理（路線事件 `RH-20261011-01`）。
+審查方與實作方是不同廠商的代理。
+
+### 審查結果
+
+| 步驟 | 對象 | 結論 |
+|---|---|---|
+| 設計審查（沿用實作方的結果，未重做） | `85af1387` 的設計 | PASS，無 finding。實作期間設計改過一條規則（待成交的 Close 綁定持倉的方向與世代），已交代碼審查特別核對 |
+| 代碼審查，初審 | `d48b84e75` | PASS_WITH_NOTES：無阻塞項；1 項重要、9 項次要 |
+| 修正 | `4623a5525` | 處理其中 5 項，見下 |
+| 代碼審查，複核一次 | `4623a5525` | PASS_WITH_NOTES：5 項皆已關閉；另有 3 項低度註記 |
+| 測試驗證，初審 | `4623a5525` | PASS_WITH_NOTES：A 至 D 每條驗收都有可判別的測試或實跑證據；2 項檢查須補跑、6 項測試或證據缺口 |
+| 補測試與補跑 | `dc30286e6` | 只新增測試；補跑見下表 |
+| 測試驗證，複核一次 | `dc30286e6` | PASS_WITH_NOTES：8 項皆已關閉；指出禁用符號稽核在 macOS 上偵測力很弱（見已知限制） |
+
+已修正的五項：
+
+1. 分析工具：呼叫者給的回放結束時間不得與報告內記錄的不同。先前可以往前覆寫，會漏標跨結算點的未平倉部位。輸出同時記下所用的值與來源。
+2. 分析工具：輸出 `funding.timestamp_basis` 與 `funding.crossing_check_exact`。只有 `next_symbol_open` 的報告標為精確。
+3. 回放：fixture 內明確寫 `"selector_decision": null` 會被拒絕，不再當成缺欄位。
+4. manifest 工具：倉庫設定檔的來源改記相對路徑。
+5. manifest 工具：不再接受資料層 S1；`--snapshot` 與 `--environment` 並用即報錯；缺 TOML 解析器時給出明確錯誤。
+
+### 最終驗證（本機 Mac，離線，提交 `dc30286e6`，乾淨工作樹）
+
+數字順序為 passed／failed／skipped／error。測試由發布方直接執行並保留輸出，不是治理工具的受控擷取：
+受控擷取會隔離家目錄，離線的 cargo 讀不到本機套件快取。測試驗證角色讀的是測試源碼與這些輸出。
+
+| 檢查 | 結果 |
+|---|---|
+| 回放單元測試（`--lib replay::`） | 117／0／0／0 |
+| 原七組回放整合測試（測試檔未改動） | 35／0／0／0 |
+| 階段 1 驗收（`replay_stage1_acceptance`） | 21／0／0／0 |
+| emitter 隔離（`m3_emitter_replay_forbidden`） | 3／0／0／0 |
+| `replay_runner` binary 單元測試 | 9／0／0／0 |
+| Python 新工具測試（`test_stage1_offline_tools.py`） | 40／0／0／0 |
+| Python 既有簽名相關兩檔 | 26／0／0／0 |
+| 禁用符號稽核腳本（release） | 腳本回報通過，但 macOS 的 release binary 已剝除符號，只掃到 1 個；這個結果沒有實質偵測力 |
+| 禁用符號補充檢查 | 以同一組禁用樣式掃描未剝除的 debug binary（16,083 個符號，其中 113 個屬於新模組）：0 個命中 |
+| 缺省路徑 | 補丁前簽好的四份 manifest（ma_crossover、grid_trading、bb_reversion，另一份帶 `h0_allowed`）在補丁後的 binary 重跑，報告只排除 `generated_at_ms` 一行後逐位元組相同 |
+| 對舊報告跑分析工具 | ma_crossover：13 筆來回、1 個未平倉，殘差 2.3e-12；grid_trading：24 筆來回，14 筆零數量拒絕列分類列出且未配對，殘差 8.4e-12 |
+| 新路徑端到端 | 倉庫 Demo 設定加明示吃單覆寫、`next_symbol_open`，三組（無選擇器、後半天 VETO、全程 SIZE_DOWN 0.5）：正數量成交的價格皆為下一事件開盤價加既有滑點；後半天 VETO 組沒有新的風險進場；SIZE_DOWN 的成交量皆不大於係數乘以風控核可量；對帳殘差在 1e-12 量級；兩個 `supplied=true` |
+
+fixture 是前述固定雜湊的一日公開一分鐘線。端到端各組的損益只用來核對機制，不是增益或策略結論。
+GitHub CI 不執行 `replay_isolated` 的測試，所以以上只有本機證據。Linux、資料庫、Demo／live 與 runtime 都沒有驗證。
+
+### 三方對照的使用要求
+
+1. 三組都用同一組 manifest 選項（`execution_timing=next_symbol_open`、`include_replay_metadata=true`、同一參數來源與覆寫），
+   只在 fixture 的 `selector_decision` 上不同。不要拿沒有新欄位的舊路徑當對照組：擴充啟用後，即使全是 `NO_OP`，
+   反向 Open 的數量也會被截到持倉量，無倉的 Close 會多一列記錄。
+2. 增益裁決只接受 `funding.crossing_check_exact=true` 且 `funding.funding_crossed=false` 的報告。
+   舊時序（`current_bar_close`）的成交時間戳是 K 線開盤時間，成交卻模擬在收盤，結算前最後一根的出場不會被標記。
+3. 回放結束時仍有未平倉部位（`unmatched_fills` 非空）時，結算點只檢查到最後一根 K 線的開盤時間。
+   最後一根 K 線的收盤恰為結算時刻的情形（例如整日 fixture 結束於 00:00 UTC）不會被標記，而工具此時仍回報 `crossing_check_exact=true`。
+   這一點補上之前，有未平倉部位的組別不作增益裁決，或改用在結算時刻之前結束的 fixture。
+4. 核對成交價時先濾掉零數量列。它們的 `price` 欄只是標示：訊號那一根的收盤價，或到期列的 0。
+5. `selector_decision` 的鍵若拼錯，會被當成缺欄位，該組實際跑成基線。跑完後核對報告 `stage1.action_audit` 內的 selector 是否如預期。
+6. `SIZE_DOWN` 的「只會變小」是逐筆成立的。前一筆縮量之後，後續進場可能比基線組大，
+   或通過在基線組被曝險上限擋下的進場。解讀對照時要留意這種路徑依賴。
+
+### 已知限制與後續項（本次未處理）
+
+| 項目 | 說明 |
+|---|---|
+| 回放結束時的結算點檢查 | 上面第 3 點。需要工具以最後一根 K 線的收盤時間作結束時間，或允許呼叫者給較晚的結束時間；現在呼叫者的值與報告值不同即拒絕 |
+| 同事件的平倉加反手 | `next_symbol_open` 下同一事件發出 Close 與反向 Open 時，Open 會以 `reduction_position_changed` 被拒，反手進場不成立。比設計寫的「保守重判」更嚴。現有三個策略每個事件只發一種動作，不會觸發 |
+| 擴充報告的寫入 | `extend_report` 以整檔覆寫，不是先寫暫存檔再改名；鍵會變成字母序。只影響啟用擴充的報告 |
+| 函式庫層的防護 | 延遲檢查只在設定階段做；沒有策略 adapter 的管線會靜默忽略擴充；設定與 fixture 筆數不符時會 panic。經 `replay_runner` 的路徑都有擋 |
+| 手工製作的報告 | `"stage1": null` 會讓分析工具拋出未轉換的例外。結果仍是失敗，不會給出錯誤的數字 |
+| TOML 解析器檢查 | 檢查的是當下能否匯入；既有載入器在匯入時就綁定了結果，兩者通常一致。對應測試驗到的是錯誤訊息，不是原始情境 |
+| binary 層的缺省路徑 | `full_chain`、帶延遲、S3、多標的、無 `strategy` 的 manifest 只有函式庫層測試，沒有經 `replay_runner` 的逐位元組對照 |
+| binary 層的回寫 | 來源與覆寫回寫到報告，只有端到端實跑與函式庫層測試，沒有倉庫內的 binary 層測試 |
+| 跨機器重現 | `fixture_uri` 與呼叫者提供的檔案是絕對路徑。Python 與 Rust 對指數形式浮點數的 canonical 寫法不同（既有問題；現有設定檔沒有這類值） |
+| 禁用符號稽核腳本 | 在 macOS 上 release binary 已剝除符號，腳本只掃到 1 個，且符號數為 0 時不會失敗。既有腳本的限制，不是本次引入；有效的檢查要在 Linux 做 |
+| CI | GitHub CI 不執行 `replay_isolated` 的測試；日後的回歸只能靠本機執行 |
