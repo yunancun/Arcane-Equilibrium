@@ -446,3 +446,98 @@ fn pending_fills_before_scanner_can_skip_an_inactive_event() {
     assert!(r.fills[0].qty > 0.);
     assert_eq!(r.fills[0].ts_ms, 2);
 }
+
+#[test]
+fn pending_close_without_next_symbol_event_expires_and_keeps_position() {
+    // 平倉訊號之後只剩別的標的事件；不得借用它成交，也不得在結尾補平。
+    let (r, m) = run(
+        vec![
+            event(1, "BTCUSDT", 100.),
+            event(2, "BTCUSDT", 100.),
+            event(3, "ETHUSDT", 500.),
+        ],
+        vec![(1, vec![open("BTCUSDT")]), (2, vec![close("BTCUSDT")])],
+        ExecutionTiming::NextSymbolOpen,
+    );
+    assert_eq!(r.fills.len(), 2);
+    assert!(r.fills[0].qty > 0.);
+    assert_eq!(r.fills[0].side, "long");
+    let expired = &r.fills[1];
+    assert_eq!(expired.fill_status, "expired_no_next_event");
+    assert_eq!(expired.symbol, "BTCUSDT");
+    assert_eq!(expired.qty, 0.);
+    assert_eq!(expired.requested_qty, 0.);
+    assert_eq!(expired.fee, 0.);
+    assert_eq!(expired.ts_ms, 2);
+    assert_eq!(m["action_audit"][1]["action_kind"], "Close");
+    assert_eq!(m["action_audit"][1]["disposition"], "expired_no_next_event");
+    assert_eq!(m["action_audit"][1]["filled_qty"], 0.0);
+    assert!(m["action_audit"][1]["execution_event_index"].is_null());
+    // 倉位仍在：沒有任何反向成交，已實現餘額只扣開倉手續費。
+    assert_eq!(r.fills.iter().filter(|f| f.qty > 0.).count(), 1);
+    assert!((r.pnl_summary.ending_balance - (10000. - r.fills[0].fee)).abs() < 1e-9);
+}
+#[test]
+fn post_only_open_is_refused_and_never_filled_later() {
+    use openclaw_engine::order_manager::TimeInForce;
+    // 掛單限定的開倉在下一事件開盤成交沒有定義；市價與非市價型別都必須當場拒絕。
+    for order_type in ["market", "limit"] {
+        let mut post_only = open("BTCUSDT");
+        if let StrategyAction::Open(i) = &mut post_only {
+            i.order_type = order_type.into();
+            i.time_in_force = Some(TimeInForce::PostOnly);
+        }
+        let (r, m) = run(
+            vec![
+                event(1, "BTCUSDT", 100.),
+                event(2, "BTCUSDT", 110.),
+                event(3, "BTCUSDT", 120.),
+            ],
+            vec![(1, vec![post_only])],
+            ExecutionTiming::NextSymbolOpen,
+        );
+        assert_eq!(r.fills.len(), 1, "{order_type}");
+        assert_eq!(r.fills[0].fill_status, "unsupported_nonmarket");
+        assert_eq!(r.fills[0].qty, 0.);
+        assert_eq!(r.fills[0].fee, 0.);
+        assert_eq!(r.fills[0].ts_ms, 1);
+        assert_eq!(m["action_audit"].as_array().unwrap().len(), 1);
+        assert_eq!(m["action_audit"][0]["disposition"], "unsupported_nonmarket");
+        assert!(m["action_audit"][0]["execution_event_index"].is_null());
+        assert_eq!(r.pnl_summary.ending_balance, 10000.);
+    }
+}
+#[test]
+fn extend_report_writes_provenance_overrides_and_stage1_block() {
+    let dir = tempfile::tempdir().unwrap();
+    let path = dir.path().join("replay_report.json");
+    let original = json!({"result":{"fills":[],"decision_traces":[]},"kept":"as_is"});
+    std::fs::write(&path, serde_json::to_vec(&original).unwrap()).unwrap();
+    let meta = json!({"execution_timing":"next_symbol_open","replay_end_ts_ms":5,"action_audit":[]});
+    let provenance = json!({"source_kind":"caller_snapshot","files":[{"path":"p.json","sha256":"ab"}]});
+    let overrides = json!([{"path":"strategy_params.ma_crossover.use_maker_entry","before":true,"after":false}]);
+    openclaw_engine::replay::stage1::extend_report(
+        &path,
+        Some(meta.clone()),
+        Some(&provenance),
+        Some(&overrides),
+    )
+    .unwrap();
+    let v: Value = serde_json::from_slice(&std::fs::read(&path).unwrap()).unwrap();
+    assert_eq!(v["parameter_provenance"], provenance);
+    assert_eq!(v["parameter_overrides"], overrides);
+    assert_eq!(v["stage1"], meta);
+    // 既有內容不得被擴充覆蓋掉。
+    assert_eq!(v["result"], original["result"]);
+    assert_eq!(v["kept"], "as_is");
+}
+#[test]
+fn extend_report_with_nothing_to_add_leaves_bytes_untouched() {
+    let dir = tempfile::tempdir().unwrap();
+    let path = dir.path().join("replay_report.json");
+    // 刻意使用非標準空白；只要被重新序列化，位元組就會改變。
+    let bytes = b"{ \"result\" :{\"fills\":[ ]},\n\n \"kept\":1 }\n".to_vec();
+    std::fs::write(&path, &bytes).unwrap();
+    openclaw_engine::replay::stage1::extend_report(&path, None, None, None).unwrap();
+    assert_eq!(std::fs::read(&path).unwrap(), bytes);
+}

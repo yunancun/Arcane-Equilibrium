@@ -323,3 +323,36 @@ def test_cli_rejects_s1_and_snapshot_with_environment(manifest_args,monkeypatch,
     assert "snapshot" in capsys.readouterr().err
     run_cli(monkeypatch,[*cli_manifest_argv(manifest_args),"--snapshot",str(snapshot)])
     assert json.loads(capsys.readouterr().out)["parameter_provenance"]["source_kind"] == "caller_snapshot"
+
+
+def test_analytics_completed_round_trip_sets_run_level_funding_flag():
+    # 已平倉且跨 08:00 UTC 結算點；全域旗標必須由已完成交易推得，不能只看未平倉。
+    result = analyze_report(report([fill(1,"long",1,100,0.1),fill(28800001,"short",1,110,0.1)],9.8,28800002))
+    assert result["unmatched_fills"] == []
+    assert result["round_trips"][0]["crosses_funding"] is True
+    funding = result["funding"]
+    assert funding["completed_crossing_count"] == 1
+    assert funding["open_position_crossing_count"] == 0
+    assert funding["funding_crossed"] is True
+    # 兩個標的各一筆跨結算的已完成交易，計數須逐筆累加而非只記布林值。
+    both = analyze_report(report([fill(1,"long",1,100),fill(2,"long",1,50,symbol="ETHUSDT"),
+                                  fill(28800001,"short",1,100),fill(28800002,"short",1,50,symbol="ETHUSDT")],0,28800003))
+    assert both["funding"]["completed_crossing_count"] == 2
+    assert both["funding"]["open_position_crossing_count"] == 0
+    assert both["funding"]["funding_crossed"] is True
+
+
+def test_manifest_mismatched_sibling_key_is_rejected_without_output(manifest_args,tmp_path):
+    from replay.offline_manifest import build_signed_manifest
+    # 輸出目錄確實有 key.hex，但內容與呼叫端金鑰不同；只檢查檔案存在的實作會在此誤放行。
+    sub=tmp_path/"other";sub.mkdir()
+    sibling=sub/"key.hex";sibling.write_text("cd"*32+"\n")
+    manifest_args["output"]=sub/"manifest.json"
+    with pytest.raises(ValueError,match="key.hex"): build_signed_manifest(**manifest_args)
+    assert not manifest_args["output"].exists()
+    assert sorted(p.name for p in sub.iterdir()) == ["key.hex"]
+    assert sibling.read_text() == "cd"*32+"\n"
+    # 對照組：同一目錄換成相符內容即可簽出，證明上面的拒絕來自內容比對而非目錄本身。
+    sibling.write_bytes(manifest_args["key_file"].read_bytes())
+    signed=build_signed_manifest(**manifest_args)
+    assert json.loads(manifest_args["output"].read_text()) == signed
