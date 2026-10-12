@@ -13,13 +13,13 @@
 #   Three-layer defense (this script is layer 3):
 #     L1 compile-time   : Cargo `replay_isolated` feature gate (P0-T2)
 #     L2 runtime        : `ReplayProfile::Isolated` enum guard (P2b-S7)
-#     L3 binary symbols : nm/objdump grep on stripped release artifact (THIS)
+#     L3 binary symbols : 掃描保留符號的 debug 產物（本腳本）
 #
 #   Cross-platform split (per Wave 2 dispatch §2 ambiguity #5):
 #     - macOS (Darwin / aarch64-apple-darwin)  → primary CI target
-#         use `nm -gU` (BSD nm, list externally-visible defined symbols only)
+#         使用 `nm --demangle` 掃描完整符號表，包含非對外符號
 #     - Linux (x86_64-unknown-linux-gnu)        → secondary CI target
-#         use `nm --extern-only --defined-only` (GNU binutils equivalent)
+#         使用 `nm --demangle` 掃描完整符號表，包含非對外符號
 #     Both branches must produce a 0 forbidden symbol verdict.
 #
 #   Exit codes:
@@ -27,7 +27,7 @@
 #     1  AUDIT FAIL — at least one forbidden symbol class hit
 #     2  BUILD FAIL — `cargo build` failed
 #     3  NM NOT FOUND — `nm` toolchain absent on $PATH
-#     4  BINARY NOT FOUND — expected `target/release/replay_runner` missing
+#     4  BINARY NOT FOUND — expected `target/debug/replay_runner` missing
 #
 #   Spec source:
 #     - docs/execution_plan/2026-05-03--ref20_paper_replay_lab_dev_plan_v3.md
@@ -50,13 +50,13 @@
 #   三層縱深防禦（本 script 為第三層）：
 #     L1 編譯期   ：Cargo `replay_isolated` feature gate（P0-T2）
 #     L2 runtime  ：`ReplayProfile::Isolated` enum guard（P2b-S7）
-#     L3 binary 層：nm/objdump grep 已剝離 release artifact（本 script）
+#     L3 binary 層：nm 掃描未剝除的 debug 產物（本 script）
 #
 #   跨平台分支（依 Wave 2 dispatch §2 ambiguity #5）：
 #     - macOS (Darwin / aarch64-apple-darwin)  → CI 主軸
-#         用 `nm -gU`（BSD nm，僅列 external + defined）
+#         用 `nm --demangle`（完整符號表）
 #     - Linux (x86_64-unknown-linux-gnu)        → CI 次軸
-#         用 `nm --extern-only --defined-only`（GNU binutils 等價）
+#         用 `nm --demangle`（完整符號表）
 #     兩分支都必須回 0 forbidden symbol。
 #
 #   Exit code：
@@ -64,7 +64,8 @@
 #     1  AUDIT FAIL — ≥1 個 forbidden symbol class 命中
 #     2  BUILD FAIL — `cargo build` 失敗
 #     3  NM NOT FOUND — 環境無 `nm` 工具鏈
-#     4  BINARY NOT FOUND — 找不到 `target/release/replay_runner`
+#     4  BINARY NOT FOUND — 找不到 `target/debug/replay_runner`
+#     5  INCONCLUSIVE — 空表、已剝除、缺定位符號或無法讀取符號表
 #
 #   契約來源：見 EN 區段 Spec source 列。
 # ─────────────────────────────────────────────────────────────────────────────
@@ -103,7 +104,7 @@ RUST_CRATE_DIR="$SRV_ROOT/rust/openclaw_engine"
 # 基準解析 crate-local Cargo.toml）。
 # 詳見 PA report：docs/CCAgentWorkSpace/PA/workspace/reports/
 #                 2026-05-04--ref20_sprint_a_task_dag.md §1 R1-T4 / §5 H1。
-RUST_TARGET_DIR="$SRV_ROOT/rust/target/release"
+RUST_TARGET_DIR="$SRV_ROOT/rust/target/debug"
 BIN_NAME="replay_runner"
 # release artifact 的標準 cargo workspace 輸出路徑 / Standard cargo workspace
 # release artifact path (post 2026-04-15 workspace consolidation).
@@ -129,17 +130,17 @@ log() {
 # 否則 force rebuild 確保 audit 對最新 source 生效
 # Otherwise force rebuild to ensure audit reflects latest source.
 build_binary() {
-    if [[ "${SKIP_BUILD:-0}" == "1" && -f "$BIN_PATH" ]]; then
-        log "SKIP_BUILD=1 + binary exists → skip cargo build"
+    if [[ "${SKIP_BUILD:-0}" == "1" ]]; then
+        log "SKIP_BUILD=1 → skip cargo build; check binary separately"
         return 0
     fi
 
-    log "cargo build --release --bin $BIN_NAME --features replay_isolated ..."
+    log "cargo build --offline --bin $BIN_NAME --features replay_isolated (unstripped debug) ..."
     # cd 到 crate dir 跑 cargo（cargo 對工作目錄敏感）
     # cd into crate dir for cargo (cargo is cwd-sensitive).
     if ! (
         cd "$RUST_CRATE_DIR" && \
-        cargo build --release \
+        CARGO_PROFILE_DEV_STRIP=none cargo build --offline \
             --package openclaw_engine \
             --bin "$BIN_NAME" \
             --features replay_isolated
@@ -190,22 +191,10 @@ dump_symbols() {
     local os
     os="$(uname -s)"
     case "$os" in
-        Darwin)
-            # macOS / aarch64-apple-darwin
-            #   -g: 僅外部 symbol（external only）
-            #   -U: 僅 defined（已定義，不含 undefined / extern reference）
-            # macOS / aarch64-apple-darwin
-            #   -g: external symbols only
-            #   -U: defined only (no undefined / extern references)
-            log "platform=Darwin → nm -gU"
-            nm -gU "$BIN_PATH"
-            ;;
-        Linux)
-            # Linux / GNU binutils
-            #   --extern-only: external only
-            #   --defined-only: defined only
-            log "platform=Linux → nm --extern-only --defined-only"
-            nm --extern-only --defined-only "$BIN_PATH"
+        Darwin|Linux)
+            # 保留全部符號（含 local 與 undefined），解碼名稱供既有 namespace 樣式檢查。
+            log "platform=$os → nm --demangle (full symbol table)"
+            nm --demangle "$BIN_PATH"
             ;;
         *)
             # 不支援的 OS 不 false-PASS；fail-closed exit 3
@@ -289,14 +278,28 @@ audit_symbols() {
     # Dump symbols once, grep multiple times against same input
     # (avoid repeated nm invocations).
     local symbols
-    if ! symbols="$(dump_symbols)"; then
-        log "BUILD FAIL: nm dump failed (binary may be corrupt)"
-        exit 2
+    if [[ "$#" -gt 0 ]]; then
+        symbols="$1"
+    elif ! symbols="$(dump_symbols)"; then
+        log "INCONCLUSIVE: nm dump failed"
+        exit 5
     fi
 
     local total_lines
-    total_lines="$(printf '%s\n' "$symbols" | wc -l | tr -d ' ')"
-    log "symbol count: $total_lines"
+    total_lines="$(printf '%s\n' "$symbols" | grep -c '[^[:space:]]' || true)"
+    if [[ "${total_lines:-0}" -eq 0 ]]; then
+        log "INCONCLUSIVE: empty symbol table (stripped or empty binary)"
+        exit 5
+    fi
+    # 引擎與入口兩個定位符號均需存在；標頭單一符號不能形成通過證據。
+    local anchor
+    for anchor in openclaw_engine replay_runner; do
+        if ! grep -q "$anchor" <<< "$symbols"; then
+            log "INCONCLUSIVE: missing anchor $anchor ($total_lines symbols)"
+            exit 5
+        fi
+    done
+    log "symbol count: $total_lines; anchors present"
 
     local fail_count=0
     local pattern label hits sample
@@ -312,9 +315,8 @@ audit_symbols() {
         if [[ "${hits:-0}" -gt 0 ]]; then
             label="$(printf '%s' "$pattern" | tr '|' ',' | head -c 60)"
             log "FORBIDDEN HIT [$label]: $hits symbol(s)"
-            # sample 前 5 行作 evidence；不 dump 全部以避免 log 爆炸
-            # Sample top-5 as evidence; don't dump all to keep log small
-            sample="$(printf '%s\n' "$symbols" | grep -E "$pattern" | head -5)"
+            # 保留完整命中清單；不接 head，避免大符號表的 SIGPIPE 蓋掉 exit 1。
+            sample="$(printf '%s\n' "$symbols" | grep -E "$pattern" || true)"
             printf '%s\n' "$sample" | while IFS= read -r line; do
                 log "  | $line"
             done
@@ -338,6 +340,10 @@ audit_symbols() {
 # Section 9 — Main entry / 主入口
 # ──────────────────────────────────────────────────────────────────────
 main() {
+    if [[ "${1:-}" == "--self-test" ]]; then
+        log "positive control: injected forbidden symbol must return exit 1"
+        audit_symbols $'0 t openclaw_engine::replay::runner\n0 t replay_runner::main\n0 t governance_hub::acquire_lease'
+    fi
     log "=== replay_runner symbol audit start ==="
     log "srv root: $SRV_ROOT"
     log "platform: $(uname -s) $(uname -m)"
