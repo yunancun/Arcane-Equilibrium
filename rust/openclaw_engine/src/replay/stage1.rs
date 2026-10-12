@@ -66,11 +66,21 @@ impl Stage1Config {
         latency_ms: Option<u64>,
         metadata: bool,
     ) -> Result<Self, Box<dyn std::error::Error>> {
+        Self::from_fixture_bytes(&std::fs::read(path)?, events, timing, latency_ms, metadata)
+    }
+    /// 與雜湊、事件載入共用同一份輸入位元組。
+    pub fn from_fixture_bytes(
+        bytes: &[u8],
+        events: &[MarketEvent],
+        timing: ExecutionTiming,
+        latency_ms: Option<u64>,
+        metadata: bool,
+    ) -> Result<Self, Box<dyn std::error::Error>> {
         #[derive(Deserialize)]
         struct Envelope {
             events: Vec<EventExtension>,
         }
-        let extra: Envelope = serde_json::from_slice(&std::fs::read(path)?)?;
+        let extra: Envelope = serde_json::from_slice(bytes)?;
         if extra.events.len() != events.len() {
             return Err("stage1 fixture row mismatch".into());
         }
@@ -79,6 +89,7 @@ impl Stage1Config {
             return Err("next_symbol_open requires zero latency".into());
         }
         let mut last = HashMap::new();
+        let mut global_last = None;
         for (row, event) in extra.events.iter().zip(events) {
             if row.ts_ms != event.ts_ms || row.symbol != event.symbol {
                 return Err("stage1 fixture identity mismatch".into());
@@ -89,6 +100,10 @@ impl Stage1Config {
                 }
             }
             if next {
+                if global_last.is_some_and(|ts| ts > event.ts_ms) {
+                    return Err("next_symbol_open requires nondecreasing global timestamps".into());
+                }
+                global_last = Some(event.ts_ms);
                 if last
                     .insert(&event.symbol, event.ts_ms)
                     .is_some_and(|ts| ts >= event.ts_ms)
@@ -184,6 +199,7 @@ impl IsolatedPipeline {
             return Err("next_symbol_open requires zero pipeline latency".into());
         }
         if config.enabled {
+            self.validate_stage1_inputs(config.events.len())?;
             let end_ts = config.events.iter().map(|e| e.ts_ms).max();
             self.stage1 = Some(Stage1State {
                 config,
@@ -429,6 +445,12 @@ impl IsolatedPipeline {
         audit.disposition = self.last_action.clone();
     }
     fn stage1_reject(&mut self, item: &Pending, ts_ms: i64, price: f64, reason: &str) {
+        // 下一事件模式的零數量記錄沒有成交價格；舊模式保留原欄位。
+        let price = if self.stage1.as_ref().unwrap().config.timing == ExecutionTiming::NextSymbolOpen {
+            0.0
+        } else {
+            price
+        };
         let is_long = match &item.action {
             StrategyAction::Open(i) => i.is_long,
             _ => !item.bound_side.unwrap_or(true),
@@ -506,6 +528,23 @@ pub fn extend_report(
     if let Some(overrides) = overrides {
         report["parameter_overrides"] = overrides.clone();
     }
-    std::fs::write(path, serde_json::to_vec_pretty(&report)?)?;
+    let bytes = serde_json::to_vec_pretty(&report)?;
+    // 同目錄新建暫存檔，完整寫入後才取代原報告；失敗時清除本次暫存檔。
+    use std::io::Write;
+    use std::sync::atomic::{AtomicU64, Ordering};
+    static NEXT_TEMP: AtomicU64 = AtomicU64::new(0);
+    let mut name = path.file_name().ok_or("report path requires a filename")?.to_os_string();
+    name.push(format!(".stage1-{}-{}.tmp", std::process::id(), NEXT_TEMP.fetch_add(1, Ordering::Relaxed)));
+    let temporary = path.with_file_name(name);
+    let mut file = std::fs::OpenOptions::new().write(true).create_new(true).open(&temporary)?;
+    let write_result = (|| -> std::io::Result<()> {
+        file.write_all(&bytes)?;
+        file.sync_all()?;
+        std::fs::rename(&temporary, path)
+    })();
+    if write_result.is_err() {
+        let _ = std::fs::remove_file(&temporary);
+    }
+    write_result?;
     Ok(())
 }
