@@ -67,6 +67,8 @@
 #     4  BINARY NOT FOUND — 找不到 `target/debug/replay_runner`
 #     5  INCONCLUSIVE — 空表、已剝除、缺定位符號或無法讀取符號表
 #
+#   正向控制：`--self-test` 注入一個禁用符號；偵測到回 0，未偵測到回 5。
+#
 #   契約來源：見 EN 區段 Spec source 列。
 # ─────────────────────────────────────────────────────────────────────────────
 # Strict bash mode / 嚴格模式
@@ -106,8 +108,8 @@ RUST_CRATE_DIR="$SRV_ROOT/rust/openclaw_engine"
 #                 2026-05-04--ref20_sprint_a_task_dag.md §1 R1-T4 / §5 H1。
 RUST_TARGET_DIR="$SRV_ROOT/rust/target/debug"
 BIN_NAME="replay_runner"
-# release artifact 的標準 cargo workspace 輸出路徑 / Standard cargo workspace
-# release artifact path (post 2026-04-15 workspace consolidation).
+# debug artifact 的標準 cargo workspace 輸出路徑（2026-04-15 workspace 合併後）。
+# release 產物已剝除符號，稽核沒有偵測力，因此改掃 debug 產物。
 BIN_PATH_DEFAULT="$RUST_TARGET_DIR/$BIN_NAME"
 # 允許 caller 透過 $REPLAY_RUNNER_BIN env var 覆寫（測試 / CI matrix 用）
 # Allow caller to override via $REPLAY_RUNNER_BIN env var (test / CI matrix)
@@ -135,12 +137,14 @@ build_binary() {
         return 0
     fi
 
-    log "cargo build --offline --bin $BIN_NAME --features replay_isolated (unstripped debug) ..."
+    log "cargo build --bin $BIN_NAME --features replay_isolated (unstripped debug) ..."
     # cd 到 crate dir 跑 cargo（cargo 對工作目錄敏感）
     # cd into crate dir for cargo (cargo is cwd-sensitive).
+    # 不寫死離線旗標：沒有套件快取的機器仍須能建置；需要離線時由呼叫端設
+    # CARGO_NET_OFFLINE=true，cargo 原生支援。
     if ! (
         cd "$RUST_CRATE_DIR" && \
-        CARGO_PROFILE_DEV_STRIP=none cargo build --offline \
+        CARGO_PROFILE_DEV_STRIP=none cargo build \
             --package openclaw_engine \
             --bin "$BIN_NAME" \
             --features replay_isolated
@@ -341,8 +345,17 @@ audit_symbols() {
 # ──────────────────────────────────────────────────────────────────────
 main() {
     if [[ "${1:-}" == "--self-test" ]]; then
-        log "positive control: injected forbidden symbol must return exit 1"
-        audit_symbols $'0 t openclaw_engine::replay::runner\n0 t replay_runner::main\n0 t governance_hub::acquire_lease'
+        # 正向控制：注入一個禁用符號，稽核必須判定失敗（內層 exit 1）。
+        # 對外回 0 才代表偵測有效；其餘一律回 5，呼叫端不必反轉結束碼。
+        log "positive control: an injected forbidden symbol must be detected"
+        local control_exit=0
+        ( audit_symbols $'0 t openclaw_engine::replay::runner\n0 t replay_runner::main\n0 t governance_hub::acquire_lease' ) || control_exit=$?
+        if [[ "$control_exit" -eq 1 ]]; then
+            log "SELF-TEST PASS: positive control detected"
+            exit 0
+        fi
+        log "INCONCLUSIVE: positive control was not detected (inner exit $control_exit)"
+        exit 5
     fi
     log "=== replay_runner symbol audit start ==="
     log "srv root: $SRV_ROOT"

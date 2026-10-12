@@ -284,7 +284,8 @@ test_symbol_table_rejected() {
 test_positive_control() {
     local output actual_exit=0
     output="$(bash "$AUDIT_SCRIPT" --self-test 2>&1)" || actual_exit=$?
-    [[ "$actual_exit" -eq 1 && "$output" == *"FORBIDDEN HIT"* ]]
+    # 偵測有效時對外回 0，且輸出必須同時含命中紀錄與通過標記。
+    [[ "$actual_exit" -eq 0 && "$output" == *"FORBIDDEN HIT"* && "$output" == *"SELF-TEST PASS"* ]]
 }
 test_full_symbols_platform() {
     local platform="$1" tmpdir mock_path mock_bin
