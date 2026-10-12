@@ -17,6 +17,7 @@ def main() -> None:
     analytics.add_argument("report", type=Path)
     analytics.add_argument("--output", required=True, type=Path)
     analytics.add_argument("--replay-end-ts-ms", type=int)
+    analytics.add_argument("--bar-duration-ms", type=int, help="K 線長度（正整數毫秒），用於未平倉區間的最後收盤")
     analytics.add_argument("--funding-hours", type=Path, help='JSON symbol -> UTC hours; "*" sets default')
     manifest = subs.add_parser("manifest")
     for name in ("fixture", "key-file", "output"):
