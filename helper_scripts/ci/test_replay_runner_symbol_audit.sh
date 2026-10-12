@@ -302,13 +302,75 @@ EOF
     cat >"$mock_path/nm" <<EOF
 #!/bin/bash
 for arg in "\$@"; do
-    case "\$arg" in -g*|--extern-only) exit 19 ;; esac
+    case "\$arg" in -g*|-U|--extern-only|--defined-only) exit 19 ;; esac
 done
 cat <<'SYMS'
 $CLEAN_SYMBOLS
 SYMS
 EOF
     run_audit 0 "$mock_path" "$mock_bin"
+}
+
+# 未解碼的符號表：兩個名稱都含 openclaw_engine／replay_runner 字樣，但沒有 `::`。
+# 解碼沒有生效時，帶 `::` 的禁用樣式全部失效，稽核不得回報通過。
+MANGLED_ONLY_SYMBOLS='0000000100001900 t __ZN15openclaw_engine6replay6runner16IsolatedPipeline7execute17h0123456789abcdefE
+0000000100002000 T __ZN13replay_runner4main17h0123456789abcdefE
+0000000100003000 T __ZN4hmac3Mac4sign17h0123456789abcdefE'
+
+# 不經 SKIP_BUILD／REPLAY_RUNNER_BIN 的呼叫；用於建置前就該結束的案例。
+test_cargo_output_override_is_inconclusive() {
+    local variable="$1" tmpdir mock_path actual_exit=0
+    tmpdir="$(make_tmpdir)"
+    trap "rm -rf '$tmpdir'" RETURN
+    mock_path="$(make_mock_nm "$tmpdir" "$CLEAN_SYMBOLS")"
+    # 模擬 cargo 一被呼叫就留下記號：防護必須在建置之前結束。
+    printf '#!/bin/bash\n: > %q\nexit 0\n' "$tmpdir/cargo_was_called" >"$mock_path/cargo"
+    chmod +x "$mock_path/cargo"
+    env -u REPLAY_RUNNER_BIN -u SKIP_BUILD -u CARGO_TARGET_DIR -u CARGO_BUILD_TARGET \
+        "$variable=$tmpdir/elsewhere" PATH="$mock_path:$PATH" \
+        bash "$AUDIT_SCRIPT" >/dev/null 2>&1 || actual_exit=$?
+    [[ "$actual_exit" -eq 5 && ! -e "$tmpdir/cargo_was_called" ]]
+}
+test_unknown_argument_is_usage_error() {
+    local actual_exit=0
+    bash "$AUDIT_SCRIPT" "$@" >/dev/null 2>&1 || actual_exit=$?
+    [[ "$actual_exit" -eq 64 ]]
+}
+# 以 source 載入後覆寫內部陣列，驗證錯誤路徑；每個案例都在子殼內執行。
+# 每個案例先跑一次未覆寫的對照（必須回 0），確認結束碼 5 來自覆寫而不是載入方式本身。
+sourced_audit_passes_unmodified() {
+    local control_exit=0
+    ( source "$AUDIT_SCRIPT"; audit_symbols "$CLEAN_SYMBOLS" ) >/dev/null 2>&1 || control_exit=$?
+    [[ "$control_exit" -eq 0 ]]
+}
+sourced_self_test_passes_unmodified() {
+    local control_exit=0
+    ( source "$AUDIT_SCRIPT"; main --self-test ) >/dev/null 2>&1 || control_exit=$?
+    [[ "$control_exit" -eq 0 ]]
+}
+test_unusable_pattern_is_inconclusive() {
+    local actual_exit=0
+    sourced_audit_passes_unmodified || return 1
+    ( source "$AUDIT_SCRIPT"; FORBIDDEN_PATTERNS=('('); audit_symbols "$CLEAN_SYMBOLS" ) >/dev/null 2>&1 || actual_exit=$?
+    [[ "$actual_exit" -eq 5 ]]
+}
+test_self_test_detects_broken_class() {
+    local index="$1" actual_exit=0
+    sourced_self_test_passes_unmodified || return 1
+    ( source "$AUDIT_SCRIPT"; FORBIDDEN_PATTERNS[$index]='zzz_never_matches'; main --self-test ) >/dev/null 2>&1 || actual_exit=$?
+    [[ "$actual_exit" -eq 5 ]]
+}
+test_self_test_detects_overbroad_class() {
+    local actual_exit=0
+    sourced_self_test_passes_unmodified || return 1
+    ( source "$AUDIT_SCRIPT"; FORBIDDEN_PATTERNS[1]='GovernanceHub|runner'; main --self-test ) >/dev/null 2>&1 || actual_exit=$?
+    [[ "$actual_exit" -eq 5 ]]
+}
+test_self_test_requires_one_sample_per_class() {
+    local actual_exit=0
+    sourced_self_test_passes_unmodified || return 1
+    ( source "$AUDIT_SCRIPT"; FORBIDDEN_PATTERNS+=('new_forbidden_class'); main --self-test ) >/dev/null 2>&1 || actual_exit=$?
+    [[ "$actual_exit" -eq 5 ]]
 }
 
 # ──────────────────────────────────────────────────────────────────────
@@ -354,10 +416,34 @@ main() {
     record_test "T10 Darwin includes local symbols" "$outcome"
     outcome=0; ( test_full_symbols_platform Linux ) || outcome=$?
     record_test "T11 Linux includes local symbols (mock)" "$outcome"
+    outcome=0; ( test_symbol_table_rejected "$MANGLED_ONLY_SYMBOLS" ) || outcome=$?
+    record_test "T12 mangled-only symbols (demangle ineffective) → exit 5" "$outcome"
+    outcome=0; ( test_symbol_table_rejected '0000000100001900 t _openclaw_engine::replay::runner::IsolatedPipeline' ) || outcome=$?
+    record_test "T13 only the engine anchor → exit 5" "$outcome"
+    outcome=0; ( test_symbol_table_rejected '0000000100002000 T _replay_runner::main' ) || outcome=$?
+    record_test "T14 only the entry anchor → exit 5" "$outcome"
+    outcome=0; ( test_cargo_output_override_is_inconclusive CARGO_TARGET_DIR ) || outcome=$?
+    record_test "T15 CARGO_TARGET_DIR set → exit 5 before building" "$outcome"
+    outcome=0; ( test_cargo_output_override_is_inconclusive CARGO_BUILD_TARGET ) || outcome=$?
+    record_test "T16 CARGO_BUILD_TARGET set → exit 5 before building" "$outcome"
+    outcome=0; ( test_unknown_argument_is_usage_error --selftest ) || outcome=$?
+    record_test "T17 misspelled option → exit 64" "$outcome"
+    outcome=0; ( test_unknown_argument_is_usage_error --self-test extra ) || outcome=$?
+    record_test "T18 extra argument → exit 64" "$outcome"
+    outcome=0; ( test_unusable_pattern_is_inconclusive ) || outcome=$?
+    record_test "T19 unusable pattern → exit 5" "$outcome"
+    outcome=0; ( test_self_test_detects_broken_class 0 ) || outcome=$?
+    record_test "T20 self-test: first class broken → exit 5" "$outcome"
+    outcome=0; ( test_self_test_detects_broken_class 9 ) || outcome=$?
+    record_test "T21 self-test: last class broken → exit 5" "$outcome"
+    outcome=0; ( test_self_test_detects_overbroad_class ) || outcome=$?
+    record_test "T22 self-test: over-broad class hits clean control → exit 5" "$outcome"
+    outcome=0; ( test_self_test_requires_one_sample_per_class ) || outcome=$?
+    record_test "T23 self-test: class without a sample → exit 5" "$outcome"
 
     # Summary / 結尾總結
     printf '\n--- summary ---\n'
-    printf 'PASS: %d / FAIL: %d / total: 11\n' \
+    printf 'PASS: %d / FAIL: %d / total: 23\n' \
         "$PASS_COUNT" "$FAIL_COUNT"
 
     if [[ "$FAIL_COUNT" -gt 0 ]]; then

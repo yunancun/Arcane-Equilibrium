@@ -65,9 +65,12 @@
 #     2  BUILD FAIL — `cargo build` 失敗
 #     3  NM NOT FOUND — 環境無 `nm` 工具鏈
 #     4  BINARY NOT FOUND — 找不到 `target/debug/replay_runner`
-#     5  INCONCLUSIVE — 空表、已剝除、缺定位符號或無法讀取符號表
+#     5  INCONCLUSIVE — 空表、已剝除、缺定位符號、無法讀取符號表、樣式無法評估，
+#                        或無法確定建置產物的位置
+#     64 USAGE — 不認得的參數（只接受 `--self-test`）
 #
-#   正向控制：`--self-test` 注入一個禁用符號；偵測到回 0，未偵測到回 5。
+#   正向控制：`--self-test` 逐類確認每一條禁用樣式都能命中自己的樣本，並確認乾淨
+#   樣本不被命中；全部成立回 0，否則回 5。不建置、不讀執行檔。
 #
 #   契約來源：見 EN 區段 Spec source 列。
 # ─────────────────────────────────────────────────────────────────────────────
@@ -127,14 +130,20 @@ log() {
 # ──────────────────────────────────────────────────────────────────────
 # Section 3 — Build phase / 建置階段
 # ──────────────────────────────────────────────────────────────────────
-# 預設策略：若 binary 已存在且 caller 設定 SKIP_BUILD=1 跳過 cargo build
-# Default policy: skip cargo build if binary exists AND caller set SKIP_BUILD=1
-# 否則 force rebuild 確保 audit 對最新 source 生效
-# Otherwise force rebuild to ensure audit reflects latest source.
+# 預設每次都建置，確保稽核對象是目前的源碼。SKIP_BUILD=1 時一律不建置，
+# 執行檔是否存在由 check_binary 另行檢查；此時受審檔是否對應目前源碼由呼叫端負責。
 build_binary() {
     if [[ "${SKIP_BUILD:-0}" == "1" ]]; then
         log "SKIP_BUILD=1 → skip cargo build; check binary separately"
         return 0
+    fi
+
+    # 這兩個變數會改變 cargo 的輸出位置；此時預設路徑上若留有舊產物，稽核它等於誤報通過。
+    # （.cargo/config 的 target-dir 設定偵測不到，屬已知限制。）
+    if [[ -z "${REPLAY_RUNNER_BIN:-}" && ( -n "${CARGO_TARGET_DIR:-}" || -n "${CARGO_BUILD_TARGET:-}" ) ]]; then
+        log "INCONCLUSIVE: CARGO_TARGET_DIR or CARGO_BUILD_TARGET is set; cannot locate the artifact this build produces"
+        log "  hint: unset them, or point REPLAY_RUNNER_BIN at the artifact that was just built"
+        exit 5
     fi
 
     log "cargo build --bin $BIN_NAME --features replay_isolated (unstripped debug) ..."
@@ -180,17 +189,21 @@ check_binary() {
         exit 4
     fi
     log "binary path: $BIN_PATH"
+    # 記下受審檔的雜湊，事後才能對出稽核的是哪一份產物。
+    local digest="unavailable"
+    if command -v sha256sum >/dev/null 2>&1; then
+        digest="$(sha256sum "$BIN_PATH" | cut -d' ' -f1)"
+    elif command -v shasum >/dev/null 2>&1; then
+        digest="$(shasum -a 256 "$BIN_PATH" | cut -d' ' -f1)"
+    fi
+    log "binary sha256: $digest"
 }
 
 # ──────────────────────────────────────────────────────────────────────
 # Section 6 — Cross-platform symbol dump / 跨平台 symbol dump
 # ──────────────────────────────────────────────────────────────────────
-# Darwin = macOS（含 Apple Silicon aarch64-apple-darwin）→ 用 BSD-style flags
-# Linux  = GNU/Linux（含 x86_64 + linux-arm64）→ 用 GNU binutils flags
-# 注：Apple llvm-nm 同時相容 GNU flag，但本分支以「OS 慣用 flag」為主軸，
-#     確保 raw BSD nm（例如 macOS classic toolchain 無 llvm-nm 時）也能 work。
-# Note: Apple llvm-nm also accepts GNU flags, but we pick OS-conventional
-#       flags so raw BSD nm (macOS classic toolchain w/o llvm-nm) still works.
+# Darwin 與 Linux 都用 `nm --demangle` 傾印完整符號表（含非對外與未定義符號）。
+# 本函式在指令替換的子殼裡執行；任何非零結束都由 audit_symbols 統一回 5（無法判定）。
 dump_symbols() {
     local os
     os="$(uname -s)"
@@ -201,10 +214,9 @@ dump_symbols() {
             nm --demangle "$BIN_PATH"
             ;;
         *)
-            # 不支援的 OS 不 false-PASS；fail-closed exit 3
-            # Unsupported OS does not false-PASS; fail-closed exit 3.
+            # 不支援的作業系統不得誤報通過；回非零，由呼叫端回 5。
             log "UNSUPPORTED OS: $os (only Darwin / Linux supported)"
-            exit 3
+            return 1
             ;;
     esac
 }
@@ -274,6 +286,25 @@ declare -a FORBIDDEN_PATTERNS=(
     'canary_writer::write|database::writer'
 )
 
+# 正向控制樣本：與 FORBIDDEN_PATTERNS 同序、一類一筆，每筆只會被自己那一類命中。
+# 新增或調整樣式時必須同步這裡；數量不一致時 --self-test 回 5。
+declare -a SELF_TEST_SAMPLES=(
+    '0 t governance_hub::acquire_lease'
+    '0 t control::GovernanceHub::new'
+    '0 t ipc_server::start'
+    '0 t startup::build_exchange_pipeline'
+    '0 t lease::DecisionLease::drop'
+    '0 t exchange_dispatch::send'
+    '0 t bybit_rest::get'
+    '0 t live_authorization::load'
+    '0 t orders::place_order'
+    '0 t database::writer::flush'
+)
+
+# 定位符號：解碼後的引擎與入口命名空間。必須帶 `::`，未解碼的名稱不含它，
+# 因此這項檢查同時證明 `nm --demangle` 確實生效（否則帶 `::` 的禁用樣式會全部失效）。
+declare -a ANCHOR_SYMBOLS=('openclaw_engine::' 'replay_runner::')
+
 # ──────────────────────────────────────────────────────────────────────
 # Section 8 — Audit phase / 稽核階段
 # ──────────────────────────────────────────────────────────────────────
@@ -295,10 +326,10 @@ audit_symbols() {
         log "INCONCLUSIVE: empty symbol table (stripped or empty binary)"
         exit 5
     fi
-    # 引擎與入口兩個定位符號均需存在；標頭單一符號不能形成通過證據。
+    # 引擎與入口兩個定位符號均需存在；標頭單一符號或未解碼的符號表不能形成通過證據。
     local anchor
-    for anchor in openclaw_engine replay_runner; do
-        if ! grep -q "$anchor" <<< "$symbols"; then
+    for anchor in "${ANCHOR_SYMBOLS[@]}"; do
+        if ! grep -qF -- "$anchor" <<< "$symbols"; then
             log "INCONCLUSIVE: missing anchor $anchor ($total_lines symbols)"
             exit 5
         fi
@@ -306,21 +337,23 @@ audit_symbols() {
     log "symbol count: $total_lines; anchors present"
 
     local fail_count=0
-    local pattern label hits sample
+    local pattern label hits sample status
 
     for pattern in "${FORBIDDEN_PATTERNS[@]}"; do
-        # 先 count hit 數，再決定是否 sample echo
-        # First count hits, then decide whether to sample-echo
-        # 注：grep 找不到時 exit 1（POSIX），用 || true 防 set -e 中止整 script
-        # Note: grep returns 1 when no match (POSIX); use || true to prevent
-        #       set -e from aborting the whole script.
-        hits="$(printf '%s\n' "$symbols" | grep -E "$pattern" | wc -l | tr -d ' ' || true)"
+        # grep 的結束碼：0 有命中、1 無命中、2 以上是樣式或讀取錯誤。
+        # 錯誤不得當成「無命中」，否則壞掉的樣式會讓該類永遠乾淨。
+        status=0
+        hits="$(grep -cE -- "$pattern" <<< "$symbols")" || status=$?
+        if [[ "$status" -ge 2 ]]; then
+            log "INCONCLUSIVE: pattern could not be evaluated (grep exit $status): $pattern"
+            exit 5
+        fi
 
         if [[ "${hits:-0}" -gt 0 ]]; then
             label="$(printf '%s' "$pattern" | tr '|' ',' | head -c 60)"
             log "FORBIDDEN HIT [$label]: $hits symbol(s)"
             # 保留完整命中清單；不接 head，避免大符號表的 SIGPIPE 蓋掉 exit 1。
-            sample="$(printf '%s\n' "$symbols" | grep -E "$pattern" || true)"
+            sample="$(grep -E -- "$pattern" <<< "$symbols" || true)"
             printf '%s\n' "$sample" | while IFS= read -r line; do
                 log "  | $line"
             done
@@ -343,19 +376,57 @@ audit_symbols() {
 # ──────────────────────────────────────────────────────────────────────
 # Section 9 — Main entry / 主入口
 # ──────────────────────────────────────────────────────────────────────
-main() {
-    if [[ "${1:-}" == "--self-test" ]]; then
-        # 正向控制：注入一個禁用符號，稽核必須判定失敗（內層 exit 1）。
-        # 對外回 0 才代表偵測有效；其餘一律回 5，呼叫端不必反轉結束碼。
-        log "positive control: an injected forbidden symbol must be detected"
-        local control_exit=0
-        ( audit_symbols $'0 t openclaw_engine::replay::runner\n0 t replay_runner::main\n0 t governance_hub::acquire_lease' ) || control_exit=$?
-        if [[ "$control_exit" -eq 1 ]]; then
-            log "SELF-TEST PASS: positive control detected"
-            exit 0
+# 正向控制。對外回 0 才代表偵測有效；其餘一律回 5，呼叫端不必反轉結束碼。
+self_test() {
+    log "positive control: every forbidden class must detect its own sample"
+    if [[ "${#SELF_TEST_SAMPLES[@]}" -ne "${#FORBIDDEN_PATTERNS[@]}" ]]; then
+        log "INCONCLUSIVE: ${#SELF_TEST_SAMPLES[@]} samples for ${#FORBIDDEN_PATTERNS[@]} pattern classes"
+        exit 5
+    fi
+    # 一、逐類：每條樣式必須命中同序的樣本（不靠別的類代為命中）。
+    local index status
+    for index in "${!FORBIDDEN_PATTERNS[@]}"; do
+        status=0
+        grep -qE -- "${FORBIDDEN_PATTERNS[$index]}" <<< "${SELF_TEST_SAMPLES[$index]}" || status=$?
+        if [[ "$status" -ne 0 ]]; then
+            log "INCONCLUSIVE: class $index did not detect its sample (grep exit $status): ${FORBIDDEN_PATTERNS[$index]}"
+            exit 5
         fi
+    done
+    # 二、乾淨樣本（只有定位符號）走完整流程必須通過，確認沒有任何一類命中過寬。
+    local clean=$'0 t openclaw_engine::replay::runner\n0 t replay_runner::main'
+    local control_exit=0
+    log "self-test: clean control (the next verdict line is expected to be AUDIT PASS)"
+    ( audit_symbols "$clean" ) || control_exit=$?
+    if [[ "$control_exit" -ne 0 ]]; then
+        log "INCONCLUSIVE: clean control did not pass (inner exit $control_exit)"
+        exit 5
+    fi
+    # 三、全部樣本走完整流程必須判定失敗（內層 exit 1）。
+    local injected="$clean" sample
+    for sample in "${SELF_TEST_SAMPLES[@]}"; do
+        injected+=$'\n'"$sample"
+    done
+    control_exit=0
+    log "self-test: injected control (the next verdict line is expected to be AUDIT FAIL)"
+    ( audit_symbols "$injected" ) || control_exit=$?
+    if [[ "$control_exit" -ne 1 ]]; then
         log "INCONCLUSIVE: positive control was not detected (inner exit $control_exit)"
         exit 5
+    fi
+    log "SELF-TEST PASS: ${#FORBIDDEN_PATTERNS[@]} classes detected their samples; clean control passed"
+    exit 0
+}
+
+main() {
+    # 不認得的參數不得被默默忽略：打錯的 --self-test 會變成跑完整稽核並可能回 0。
+    if [[ "$#" -gt 1 || ( "$#" -eq 1 && "$1" != "--self-test" ) ]]; then
+        log "USAGE: unknown argument(s): $*"
+        log "  usage: $(basename "$0") [--self-test]"
+        exit 64
+    fi
+    if [[ "${1:-}" == "--self-test" ]]; then
+        self_test
     fi
     log "=== replay_runner symbol audit start ==="
     log "srv root: $SRV_ROOT"
