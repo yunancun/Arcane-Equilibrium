@@ -137,6 +137,7 @@ record_test() {
 # 乾淨 symbol set（典型 Rust release binary 含的合法 symbol）
 # Clean symbol set (typical Rust release binary's legitimate symbols)
 CLEAN_SYMBOLS='0000000100001234 T _main
+0000000100001900 t _openclaw_engine::replay::runner::IsolatedPipeline
 0000000100002000 T _replay_runner::main
 0000000100002500 T _replay_runner::ReplayProfile::Isolated
 0000000100003000 T _hmac::Mac::sign
@@ -271,6 +272,44 @@ test_t5_multi_hit() {
     run_audit 1 "$mock_path" "$mock_bin"
 }
 
+# 新案例只擴充覆蓋，不改既有五個案例的斷言。
+test_symbol_table_rejected() {
+    local payload="$1" tmpdir mock_path mock_bin
+    tmpdir="$(make_tmpdir)"
+    trap "rm -rf '$tmpdir'" RETURN
+    mock_path="$(make_mock_nm "$tmpdir" "$payload")"
+    mock_bin="$(make_mock_binary "$tmpdir")"
+    run_audit 5 "$mock_path" "$mock_bin"
+}
+test_positive_control() {
+    local output actual_exit=0
+    output="$(bash "$AUDIT_SCRIPT" --self-test 2>&1)" || actual_exit=$?
+    [[ "$actual_exit" -eq 1 && "$output" == *"FORBIDDEN HIT"* ]]
+}
+test_full_symbols_platform() {
+    local platform="$1" tmpdir mock_path mock_bin
+    tmpdir="$(make_tmpdir)"
+    trap "rm -rf '$tmpdir'" RETURN
+    mock_path="$(make_mock_nm "$tmpdir" "$CLEAN_SYMBOLS")"
+    mock_bin="$(make_mock_binary "$tmpdir")"
+    cat >"$mock_path/uname" <<EOF
+#!/bin/bash
+printf '%s\n' '$platform'
+EOF
+    chmod +x "$mock_path/uname"
+    # 若仍只掃外部符號，模擬 nm 必須拒絕，不能把分支測試寫成恆真。
+    cat >"$mock_path/nm" <<EOF
+#!/bin/bash
+for arg in "\$@"; do
+    case "\$arg" in -g*|--extern-only) exit 19 ;; esac
+done
+cat <<'SYMS'
+$CLEAN_SYMBOLS
+SYMS
+EOF
+    run_audit 0 "$mock_path" "$mock_bin"
+}
+
 # ──────────────────────────────────────────────────────────────────────
 # Section 4 — Run all tests / 執行全部測試
 # ──────────────────────────────────────────────────────────────────────
@@ -302,9 +341,22 @@ main() {
     outcome=0; ( test_t5_multi_hit ) || outcome=$?
     record_test "T5 multi-class hit → exit 1" "$outcome"
 
+    outcome=0; ( test_symbol_table_rejected "" ) || outcome=$?
+    record_test "T6 empty symbols → exit 5" "$outcome"
+    outcome=0; ( test_symbol_table_rejected '0000000100000000 T __mh_execute_header' ) || outcome=$?
+    record_test "T7 stripped symbols → exit 5" "$outcome"
+    outcome=0; ( test_symbol_table_rejected '0000000100000000 t unrelated::function' ) || outcome=$?
+    record_test "T8 missing anchors → exit 5" "$outcome"
+    outcome=0; ( test_positive_control ) || outcome=$?
+    record_test "T9 positive control → forbidden hit" "$outcome"
+    outcome=0; ( test_full_symbols_platform Darwin ) || outcome=$?
+    record_test "T10 Darwin includes local symbols" "$outcome"
+    outcome=0; ( test_full_symbols_platform Linux ) || outcome=$?
+    record_test "T11 Linux includes local symbols (mock)" "$outcome"
+
     # Summary / 結尾總結
     printf '\n--- summary ---\n'
-    printf 'PASS: %d / FAIL: %d / total: 5\n' \
+    printf 'PASS: %d / FAIL: %d / total: 11\n' \
         "$PASS_COUNT" "$FAIL_COUNT"
 
     if [[ "$FAIL_COUNT" -gt 0 ]]; then
