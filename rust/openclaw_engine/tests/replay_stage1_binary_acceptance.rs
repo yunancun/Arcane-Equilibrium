@@ -139,17 +139,23 @@ fn default_case(mode: &str) {
     for key in ["stage1", "parameter_provenance", "parameter_overrides"] {
         assert!(report.get(key).is_none(), "unexpected {key} in {mode}");
     }
+    // 移除舊報告，確保第二次執行確實產生新輸出。
+    fs::remove_file(c.report()).unwrap();
     success(c.run());
     let after = fs::read(c.report()).unwrap();
     // 僅移除時間戳所在行，不重新序列化 JSON 或忽略其他欄位。
     let stable = |bytes: &[u8]| -> Vec<u8> {
-        bytes
-            .split_inclusive(|b| *b == b'\n')
-            .filter(|line| {
-                !line
-                    .windows(b"\"generated_at_ms\"".len())
-                    .any(|w| w == b"\"generated_at_ms\"")
-            })
+        let report: Value = serde_json::from_slice(bytes).unwrap();
+        assert!(report["generated_at_ms"].as_u64().is_some());
+        let lines: Vec<&[u8]> = bytes.split_inclusive(|b| *b == b'\n').collect();
+        let prefix = b"  \"generated_at_ms\": ";
+        assert_eq!(
+            lines.iter().filter(|line| line.starts_with(prefix)).count(),
+            1
+        );
+        lines
+            .into_iter()
+            .filter(|line| !line.starts_with(prefix))
             .flatten()
             .copied()
             .collect()
@@ -192,25 +198,25 @@ fn extension_requires_explicit_strategy() {
     c.sign(body);
     rejected(&c, "require an explicit strategy");
 }
-fn invalid_selector(value: Value) {
+fn invalid_selector(value: Value, message: &str) {
     let mut row = event(1, "BTCUSDT");
     row["selector_decision"] = value;
     let c = BinaryCase::new(vec![row]);
     let mut body = c.body();
     body["strategy"] = json!("ma_crossover");
     c.sign(body);
-    let output = c.run();
-    assert!(!output.status.success());
-    assert!(!c.report().exists());
-    assert!(!output.stderr.is_empty());
+    rejected(&c, message);
 }
 #[test]
 fn oversized_selector_is_rejected() {
-    invalid_selector(json!({"action":"SIZE_DOWN","size_factor":2}));
+    invalid_selector(
+        json!({"action":"SIZE_DOWN","size_factor":2}),
+        "SIZE_DOWN size_factor must be finite in (0,1]",
+    );
 }
 #[test]
 fn explicit_null_selector_is_rejected() {
-    invalid_selector(Value::Null);
+    invalid_selector(Value::Null, "invalid type: null");
 }
 #[test]
 fn provenance_and_overrides_round_trip_with_correct_fixture_hash() {
