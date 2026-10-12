@@ -48,6 +48,9 @@ impl BinaryCase {
     fn run(&self) -> Output {
         Command::new(env!("CARGO_BIN_EXE_replay_runner"))
             .env("OPENCLAW_REPLAY_MAC_NO_PRIVATE", "1")
+            // 啟動守衛會讀這兩個來源的禁用標記；移除後子程序只看本案例的輸入。
+            .env_remove("OPENCLAW_REPLAY_FORBIDDEN_TRIPPED")
+            .env_remove("OPENCLAW_DATA_DIR")
             .args([
                 "--manifest",
                 self.dir.path().join("manifest.json").to_str().unwrap(),
@@ -100,6 +103,15 @@ fn binary_hash_matches_and_single_byte_tamper_fails() {
         .write_all(b" ")
         .unwrap();
     rejected(&c, "fixture sha256 mismatch");
+}
+#[test]
+fn binary_missing_fixture_keeps_typed_error_with_path() {
+    let c = BinaryCase::new(vec![event(1, "BTCUSDT")]);
+    c.sign(c.body());
+    fs::remove_file(&c.fixture).unwrap();
+    // 改為單次讀取後，仍須回報既有的具型別錯誤與檔案路徑，不能只剩作業系統訊息。
+    rejected(&c, "FixtureNotFound");
+    rejected(&c, "fixture.json");
 }
 #[test]
 fn binary_legacy_without_hash_still_runs() {

@@ -337,7 +337,13 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
         FixtureSource::from_manifest_strings(&manifest.data_tier, &manifest.fixture_uri)?;
     let tier_label = fixture_source.tier_label();
     // 固定一次讀取：簽名中的雜湊、事件與擴充欄位均核對同一份位元組。
-    let fixture_bytes = std::fs::read(fixture_source.path())?;
+    // 讀取失敗沿用載入器既有的具型別錯誤，訊息才會帶出檔案路徑。
+    let fixture_bytes = std::fs::read(fixture_source.path()).map_err(|source| {
+        fixture_loader::FixtureError::FixtureNotFound {
+            path: fixture_source.path().to_path_buf(),
+            source,
+        }
+    })?;
     if let Some(expected) = manifest.parameter_provenance.as_ref()
         .and_then(|p| p.pointer("/fixture/sha256"))
     {

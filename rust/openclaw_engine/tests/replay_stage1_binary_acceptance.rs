@@ -50,6 +50,9 @@ impl BinaryCase {
     fn run(&self) -> Output {
         Command::new(env!("CARGO_BIN_EXE_replay_runner"))
             .env("OPENCLAW_REPLAY_MAC_NO_PRIVATE", "1")
+            // 啟動守衛會讀這兩個來源的禁用標記；移除後子程序只看本案例的輸入。
+            .env_remove("OPENCLAW_REPLAY_FORBIDDEN_TRIPPED")
+            .env_remove("OPENCLAW_DATA_DIR")
             .args([
                 "--manifest",
                 self.dir.path().join("manifest.json").to_str().unwrap(),
@@ -139,6 +142,16 @@ fn default_case(mode: &str) {
     for key in ["stage1", "parameter_provenance", "parameter_overrides"] {
         assert!(report.get(key).is_none(), "unexpected {key} in {mode}");
     }
+    // 只有 full_chain 會接上 scanner 時間線；其餘案例必須維持關閉。
+    let diagnostics = &report["result"]["diagnostics"];
+    assert_eq!(
+        diagnostics["scanner_timeline_enabled"],
+        json!(mode == "full_chain"),
+        "{mode} scanner timeline wiring"
+    );
+    if mode == "full_chain" {
+        assert!(diagnostics["scanner_timeline_cycles"].as_u64().unwrap() > 0);
+    }
     // 移除舊報告，確保第二次執行確實產生新輸出。
     fs::remove_file(c.report()).unwrap();
     success(c.run());
@@ -177,6 +190,49 @@ fn default_strategy_params_and_risk_are_stable() {
 #[test]
 fn default_execution_latency_is_stable() {
     default_case("latency");
+}
+/// 三根平盤 K 線不會產生成交，`default_execution_latency_is_stable` 只能證明輸出穩定；
+/// 這裡改用既有的單邊上行 fixture 讓真實策略成交，確認校準延遲確實寫進成交紀錄。
+#[test]
+fn execution_latency_reaches_fill_records() {
+    let source = std::path::Path::new(env!("CARGO_MANIFEST_DIR"))
+        .join("tests/fixtures/replay_runner_e2e/synthetic_btcusdt.json");
+    let fixture: Value = serde_json::from_slice(&fs::read(source).unwrap()).unwrap();
+    let c = BinaryCase::new(fixture["events"].as_array().unwrap().clone());
+    let executed = |latency: Option<u64>| -> Vec<Value> {
+        let mut body = c.body();
+        body["strategy"] = json!("grid_trading");
+        if let Some(latency) = latency {
+            body["execution_calibration"] = json!({"recommended_latency_ms":latency});
+        }
+        c.sign(body);
+        let _ = fs::remove_file(c.report());
+        success(c.run());
+        let report: Value = serde_json::from_slice(&fs::read(c.report()).unwrap()).unwrap();
+        report["result"]["fills"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .filter(|fill| fill["qty"].as_f64().unwrap() > 0.)
+            .cloned()
+            .collect()
+    };
+    let delayed = executed(Some(25));
+    assert!(!delayed.is_empty(), "fixture must produce an executed fill");
+    for fill in &delayed {
+        assert_eq!(fill["latency_ms"], json!(25));
+        assert_eq!(
+            fill["effective_ts_ms"].as_i64().unwrap(),
+            fill["ts_ms"].as_i64().unwrap() + 25
+        );
+    }
+    // 對照組：未提供校準時不得帶延遲，避免上面的斷言對任何輸入都成立。
+    let plain = executed(None);
+    assert_eq!(plain.len(), delayed.len());
+    for fill in &plain {
+        assert!(fill["latency_ms"].is_null());
+        assert_eq!(fill["effective_ts_ms"], fill["ts_ms"]);
+    }
 }
 #[test]
 fn default_s3_is_stable() {
