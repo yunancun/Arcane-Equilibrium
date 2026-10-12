@@ -67,6 +67,7 @@ def test_categories_are_narrow_but_cover_their_own_contracts() -> None:
         "schema": True,
         "stock_etf": True,
         "sealed_build": True,
+        "replay": False,
     }
 
 
@@ -183,4 +184,45 @@ def test_cli_writes_nul_safe_github_outputs(tmp_path) -> None:
         "schema=true",
         "stock_etf=false",
         "sealed_build=false",
+        "replay=false",
     ]
+
+
+def test_replay_gate_covers_sources_tools_and_future_test_files() -> None:
+    control = "program_code/exchange_connectors/bybit_connector/control_api_v1/"
+    for path in (
+        "rust/openclaw_engine/src/replay/stage1.rs",
+        "rust/openclaw_engine/src/bin/replay_runner.rs",
+        "rust/openclaw_engine/src/bin/replay_runner/nested.rs",
+        "rust/openclaw_engine/tests/replay_future_acceptance.rs",
+        "rust/openclaw_engine/tests/m3_emitter_replay_forbidden.rs",
+        "helper_scripts/replay/replay_local.py",
+        control + "replay/offline_analytics.py",
+        control + "replay/offline_manifest.py",
+        control + "tests/replay/test_stage1_future.py",
+        "rust/Cargo.toml",
+        "rust/Cargo.lock",
+        "rust/openclaw_engine/Cargo.toml",
+    ):
+        assert classify_paths([path])["replay"] is True, path
+
+
+def test_replay_gate_does_not_select_unrelated_paths() -> None:
+    control = "program_code/exchange_connectors/bybit_connector/control_api_v1/"
+    for path in (
+        "docs/replay.md",
+        "rust/openclaw_engine/src/main.rs",
+        "rust/openclaw_engine/src/bin/replay_runner_extra.rs",
+        "rust/openclaw_engine/tests/other_replay.rs",
+        "helper_scripts/ci/replay_runner_symbol_audit.sh",
+        control + "replay/live.py",
+        control + "tests/replay/test_other.py",
+    ):
+        assert classify_paths([path])["replay"] is False, path
+
+
+def test_replay_gate_preserves_other_gate_decisions() -> None:
+    assert classify_paths(["helper_scripts/replay/replay_local.py"]) == {
+        gate: gate == "replay" for gate in GATES
+    }
+    assert all(classify_paths([], force_all=True).values())

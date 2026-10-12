@@ -21,6 +21,7 @@ GATES = (
     "schema",
     "stock_etf",
     "sealed_build",
+    "replay",
 )
 
 _CONTROL_PLANE_PATHS = {
@@ -113,6 +114,25 @@ def classify_paths(paths: Iterable[str], *, force_all: bool = False) -> dict[str
 
         if path.startswith("rust/"):
             result["rust"] = True
+
+        # 回放自身、離線工具與後續測試皆自動納入；相依鎖異動也重新驗證。
+        if _matches(
+            path,
+            exact=_RUST_WORKSPACE_FILES | {
+                "rust/openclaw_engine/Cargo.toml",
+                "rust/openclaw_engine/src/bin/replay_runner.rs",
+                "rust/openclaw_engine/tests/m3_emitter_replay_forbidden.rs",
+            },
+            prefixes=(
+                "rust/openclaw_engine/src/replay/",
+                "rust/openclaw_engine/src/bin/replay_runner/",
+                "rust/openclaw_engine/tests/replay_",
+                "helper_scripts/replay/",
+                "program_code/exchange_connectors/bybit_connector/control_api_v1/replay/offline_",
+                "program_code/exchange_connectors/bybit_connector/control_api_v1/tests/replay/test_stage1_",
+            ),
+        ):
+            result["replay"] = True
 
         if _matches(
             path,
