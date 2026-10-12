@@ -58,8 +58,10 @@ def build_signed_manifest(*, repo_root: Path, fixture: Path, key_file: Path, out
     key_file = key_file.resolve(strict=True)
     output = output.resolve()
     fixture = fixture.resolve(strict=True)
-    envelope = json.loads(fixture.read_bytes())
-    if "source" in envelope:
+    # 只讀一次：資料層檢查與寫進簽名本文的雜湊必須來自同一份位元組。
+    fixture_bytes = fixture.read_bytes()
+    envelope = json.loads(fixture_bytes)
+    if isinstance(envelope, dict) and "source" in envelope:
         source = envelope["source"]
         if not isinstance(source, str) or source.startswith("s2_") != (data_tier == "S2"):
             raise ValueError("fixture source conflicts with data_tier")
@@ -130,7 +132,8 @@ def build_signed_manifest(*, repo_root: Path, fixture: Path, key_file: Path, out
                  "parameter_overrides": overrides,
                  "parameter_provenance": {"source_kind": provenance_kind, "environment": environment if snapshot is None else None,
                                           "runtime_effective_verified": False, "files": sources,
-                                          "fixture": _source(fixture)}})
+                                          "fixture": {"path": str(fixture),
+                                                      "sha256": hashlib.sha256(fixture_bytes).hexdigest()}}})
     if full_chain:
         body.update(mode="full_chain", scanner_config=params["scanner_config"])
     if next_open:
@@ -139,5 +142,18 @@ def build_signed_manifest(*, repo_root: Path, fixture: Path, key_file: Path, out
         body["run_id"] = run_id
     canonical = compute_manifest_canonical_bytes(body)
     signed = {**body, "manifest_hash": compute_body_hash(canonical), "signature": signer.sign(canonical)}
-    output.write_text(json.dumps(signed, ensure_ascii=False, sort_keys=True, indent=2, allow_nan=False) + "\n")
+    text = json.dumps(signed, ensure_ascii=False, sort_keys=True, indent=2, allow_nan=False) + "\n"
+    # 先寫同目錄的新檔再取代目錄項目，不就地截斷：輸出即使在檢查之後被換成指向其他檔案的
+    # 硬連結，也不會寫穿到那個檔案。
+    temporary = output.with_name(f".{output.name}.{os.getpid()}.tmp")
+    created = False
+    try:
+        with open(temporary, "x", encoding="utf-8") as handle:
+            created = True
+            handle.write(text)
+        os.replace(temporary, output)
+    except BaseException:
+        if created:
+            temporary.unlink(missing_ok=True)
+        raise
     return signed

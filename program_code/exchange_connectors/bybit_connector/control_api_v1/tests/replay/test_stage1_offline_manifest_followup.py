@@ -57,6 +57,39 @@ def test_source_tier_validation(args, tier, source, accepted):
         assert args["output"].read_bytes() == before
 
 
+@pytest.mark.parametrize("source", [None, 123, ["s2_bybit_public"], {"tier": "S2"}])
+@pytest.mark.parametrize("tier", ["S2", "S3"])
+def test_non_string_source_is_rejected(args, tier, source):
+    # 這裡的 None 是寫進 fixture 的 JSON null（欄位存在），與「沒有 source 欄位」不同。
+    fixture = json.loads(args["fixture"].read_text())
+    fixture["source"] = source
+    args["fixture"].write_text(json.dumps(fixture))
+    with pytest.raises(ValueError, match="source.*data_tier"):
+        build_signed_manifest(**args, data_tier=tier)
+    assert not args["output"].exists()
+
+
+def test_signed_fixture_hash_is_of_the_bytes_that_were_checked(args):
+    import hashlib
+    signed = build_signed_manifest(**args)
+    recorded = signed["parameter_provenance"]["fixture"]
+    assert recorded == {"path": str(args["fixture"].resolve()),
+                        "sha256": hashlib.sha256(args["fixture"].read_bytes()).hexdigest()}
+
+
+def test_output_is_replaced_not_written_through(args):
+    # 輸出事先是某個不相干檔案的硬連結：新 manifest 必須成為獨立檔案，那個檔案一個位元組都不能變。
+    bystander = args["fixture"].parent / "bystander.txt"
+    bystander.write_text("unrelated bytes\n")
+    os.link(bystander, args["output"])
+    signed = build_signed_manifest(**args)
+    assert bystander.read_text() == "unrelated bytes\n"
+    assert not args["output"].samefile(bystander)
+    assert json.loads(args["output"].read_text()) == signed
+    leftovers = [p.name for p in args["output"].parent.iterdir() if p.name.endswith(".tmp")]
+    assert leftovers == []
+
+
 @pytest.mark.parametrize("target", ["key", "fixture", "snapshot", "strategy_config", "risk_config"])
 def test_output_hardlink_never_overwrites_input(args, target):
     signed = build_signed_manifest(**args)

@@ -43,12 +43,19 @@ def analyze_report(payload: dict[str, Any], *, replay_end_ts_ms: int | None = No
                    funding_hours: dict[str, list[int]] | None = None) -> dict[str, Any]:
     if bar_duration_ms is not None and (type(bar_duration_ms) is not int or bar_duration_ms <= 0):
         raise ValueError("bar_duration_ms must be a positive integer")
+    # 形狀不對的報告一律以 ValueError 拒絕，CLI 才能回結束碼 2 與一行訊息，不留下未處理的例外。
+    if not isinstance(payload, dict):
+        raise ValueError("report must be an object")
     stage1 = payload.get("stage1", {})
     if not isinstance(stage1, dict):
         raise ValueError("stage1 must be an object")
     result = payload.get("result", payload)
+    if not isinstance(result, dict):
+        raise ValueError("result must be an object")
     status = result.get("status", {})
-    if isinstance(status, dict) and "kind" in status and status["kind"] != "completed":
+    if not isinstance(status, dict):
+        raise ValueError("result.status must be an object")
+    if "kind" in status and status["kind"] != "completed":
         raise ValueError("report status must be completed")
     schedules = funding_hours or {}
     for hours in schedules.values():

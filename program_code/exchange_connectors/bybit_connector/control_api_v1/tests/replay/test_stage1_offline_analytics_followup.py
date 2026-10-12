@@ -93,20 +93,63 @@ def test_caller_end_still_compared_before_duration():
     assert analyze_report(report(), replay_end_ts_ms=86_340_000, bar_duration_ms=60_000)["funding"]["replay_end_ts_ms"] == 86_400_000
 
 
-@pytest.mark.parametrize("null_stage1", [False, True])
-def test_cli_duration_and_null_stage1(tmp_path, null_stage1):
-    payload = report()
-    if null_stage1: payload["stage1"] = None
+@pytest.mark.parametrize("value", [None, [], "bad", 1])
+def test_non_object_result_is_value_error(value):
+    payload = report(); payload["result"] = value
+    with pytest.raises(ValueError, match="result must be an object"):
+        analyze_report(payload)
+
+
+@pytest.mark.parametrize("value", [None, "aborted_forbidden", [], 1])
+def test_non_object_status_is_value_error(value):
+    # 狀態不是物件時無從判斷是否完成，不得當成舊報告放行。
+    payload = report(); payload["result"]["status"] = value
+    with pytest.raises(ValueError, match="result.status must be an object"):
+        analyze_report(payload)
+
+
+@pytest.mark.parametrize("payload", [None, [], "bad", 1])
+def test_non_object_report_is_value_error(payload):
+    with pytest.raises(ValueError, match="report must be an object"):
+        analyze_report(payload)
+
+
+def run_cli(tmp_path, payload, duration="60000"):
     source = tmp_path / "report.json"; source.write_text(json.dumps(payload))
     output = tmp_path / "analytics.json"
     run = subprocess.run([sys.executable, str(ROOT / "helper_scripts/replay/replay_local.py"),
-                          "analytics", str(source), "--output", str(output), "--bar-duration-ms", "60000"],
+                          "analytics", str(source), "--output", str(output), "--bar-duration-ms", duration],
                          capture_output=True, text=True)
-    if null_stage1:
-        assert run.returncode == 2
-        assert len(run.stderr.splitlines()) == 1
-        assert "stage1" in run.stderr and "Traceback" not in run.stderr
-        assert not output.exists()
-    else:
-        assert run.returncode == 0, run.stderr
-        assert json.loads(output.read_text())["funding"]["crossing_check_exact"] is True
+    return run, output
+
+
+def test_cli_duration_reaches_analysis(tmp_path):
+    run, output = run_cli(tmp_path, report())
+    assert run.returncode == 0, run.stderr
+    assert json.loads(output.read_text())["funding"]["crossing_check_exact"] is True
+
+
+def rejected_payload(kind):
+    payload = report()
+    if kind == "null_stage1": payload["stage1"] = None
+    elif kind == "null_result": payload["result"] = None
+    elif kind == "string_status": payload["result"]["status"] = "aborted_forbidden"
+    elif kind == "aborted": payload["result"]["status"]["kind"] = "aborted_forbidden"
+    return payload
+
+
+@pytest.mark.parametrize("kind,duration,reason", [
+    ("null_stage1", "60000", "stage1 must be an object"),
+    ("null_result", "60000", "result must be an object"),
+    ("string_status", "60000", "result.status must be an object"),
+    ("aborted", "60000", "report status must be completed"),
+    ("valid", "0", "bar_duration_ms must be a positive integer"),
+])
+def test_cli_rejections_exit_2_with_one_message(tmp_path, kind, duration, reason):
+    run, output = run_cli(tmp_path, rejected_payload(kind), duration)
+    assert run.returncode == 2, run.stderr
+    assert "Traceback" not in run.stderr
+    # 只數工具自己的訊息行；直譯器在某些版本會另外印警告，不屬於本工具的輸出。
+    messages = [line for line in run.stderr.splitlines() if line.startswith("replay_local: ")]
+    assert messages == [f"replay_local: {reason}"]
+    assert not output.exists()
