@@ -127,6 +127,7 @@ pub mod scanner_timeline;
 pub mod risk_adapter;
 pub mod runner;
 pub mod strategy_adapter;
+pub mod stage1;
 
 // Subsystem-level re-export: `ReplayIsolationError` is the public failure
 // type carried by `ReplayProfile::fail_closed_assert_isolated()`. Re-exporting

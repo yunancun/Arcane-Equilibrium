@@ -387,6 +387,14 @@ impl IsolatedPipeline {
         );
         match decision {
             RiskDecision::Accepted { final_qty, .. } => {
+                if self.stage1_quantity.is_some() {
+                    self.stage1_accepted_qty = Some(final_qty);
+                }
+                // 選擇器只能縮小已通過風控的數量；減倉上限是實際持倉。
+                let final_qty = match self.stage1_quantity {
+                    Some((scale, cap)) => (final_qty * scale).min(cap.unwrap_or(f64::MAX)),
+                    None => final_qty,
+                };
                 let partial = partial_fill_decision(
                     final_qty,
                     intent.is_long,

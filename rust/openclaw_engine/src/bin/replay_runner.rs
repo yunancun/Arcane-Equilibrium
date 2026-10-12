@@ -138,7 +138,6 @@
     clippy::empty_line_after_doc_comments,
     clippy::too_many_arguments
 )]
-
 #![cfg(feature = "replay_isolated")]
 
 #[path = "replay_runner/calibration.rs"]
@@ -338,6 +337,16 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
         FixtureSource::from_manifest_strings(&manifest.data_tier, &manifest.fixture_uri)?;
     let tier_label = fixture_source.tier_label();
     let events = fixture_loader::load_fixtures(&fixture_source)?;
+    let stage1_config = openclaw_engine::replay::stage1::Stage1Config::from_fixture(
+        fixture_source.path(),
+        &events,
+        manifest.execution_timing,
+        latency_ms_from_manifest(manifest.execution_calibration.as_ref())?,
+        manifest.include_replay_metadata || manifest.parameter_provenance.is_some(),
+    )?;
+    if stage1_config.enabled() && manifest.strategy.is_none() {
+        return Err("R8 replay options require an explicit strategy".into());
+    }
     let scanner_timeline = if manifest.mode.as_deref() == Some("full_chain") {
         let scanner_config = scanner_config_from_manifest(manifest.scanner_config.as_ref())?;
         let edge_estimates = edge_estimates_from_manifest(manifest.edge_estimates.as_ref())?;
@@ -620,7 +629,9 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
              R5-T3 e2e proof_1/4/5 baseline)"
         );
     }
+    pipeline = pipeline.with_stage1(stage1_config)?;
     let exec_outcome = pipeline.execute();
+    let stage1_metadata = pipeline.stage1_metadata();
     let result: ReplayResult = pipeline.into_result();
 
     // Step 5: write report (always, even on aborted runs — auditability
@@ -629,6 +640,12 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
     // Step 5：寫 report（永遠寫，即使 abort run — 可審計性要求 artifact 存在
     // 使 operator 可檢視 abort 原因）。
     let json_path = report_writer::write_replay_report(&args.output_dir, &result)?;
+    openclaw_engine::replay::stage1::extend_report(
+        &json_path,
+        stage1_metadata,
+        manifest.parameter_provenance.as_ref(),
+        manifest.parameter_overrides.as_ref(),
+    )?;
 
     // Step 6: surface the outcome on stderr (CI / operator parses this).
     // Step 6：將結果揭露於 stderr（CI / operator 解析此行）。

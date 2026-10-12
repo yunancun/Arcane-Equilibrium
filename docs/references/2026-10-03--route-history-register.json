@@ -272,10 +272,24 @@
       "meaning": "later version of the accepted amendment, adding the dated note that the reopening was replaced by a new delivery (RH-20261009-06); body AM1-AM12 unchanged; direction and contract only, not platform, runtime or dispatch attestation"
     },
     "r8-stage1-dispatch-r4": {
+      "kind": "git_blob",
+      "path": "docs/execution_plan/2026-10-09--r8-stage1-replay-patches-dispatch.md",
+      "commit": "0174315628ba74c322c0c9404a1bba446759763a",
+      "blob": "7f7e210ec3e19dbddc157561d079e9463d460104",
+      "sha256": "d1e07f01724596e9e486cfef564142137db8e06a064725a7cad79ffc506ceef3",
+      "meaning": "stage 1 dispatch instruction with the Operator's new-delivery conditions replacing the reopening conditions (RH-20261009-06); not an authorization by itself; dispatch state is the TODO row P1-R8-STAGE1-REPLAY-PATCHES. Recorded digest unchanged; pinned to its Git object when a later version was recorded (RH-20261011-01)"
+    },
+    "r8-stage1-dispatch-r5": {
       "kind": "recorded_file",
       "path": "docs/execution_plan/2026-10-09--r8-stage1-replay-patches-dispatch.md",
-      "sha256": "d1e07f01724596e9e486cfef564142137db8e06a064725a7cad79ffc506ceef3",
-      "meaning": "stage 1 dispatch instruction with the Operator's new-delivery conditions replacing the reopening conditions (RH-20261009-06); not an authorization by itself; dispatch state is the TODO row P1-R8-STAGE1-REPLAY-PATCHES"
+      "sha256": "1ad50f55d7b6ed28b4eb9d8fef2ba17e96a1411f78d6987420b5a7ebc7319534",
+      "meaning": "stage 1 dispatch instruction kept as the record of what was instructed, with a dated note on how the unit ended (RH-20261011-01); not an authorization"
+    },
+    "r8-stage1-runbook": {
+      "kind": "recorded_file",
+      "path": "docs/runbooks/r8_stage1_replay_patches.md",
+      "sha256": "51b27928f50386baad1c9601497e3a78662194480d8beafcbdbfce9f234df2f7",
+      "meaning": "design, independent review results, final local verification, usage requirements and known limits of the R8 stage 1 isolated-replay patches; local source evidence only, not runtime, Demo or trading attestation"
     }
   },
   "routes": [
@@ -425,7 +439,9 @@
         "r8-amendment-1-r3",
         "r8-stage1-dispatch-r3",
         "r8-amendment-1-r4",
-        "r8-stage1-dispatch-r4"
+        "r8-stage1-dispatch-r4",
+        "r8-stage1-dispatch-r5",
+        "r8-stage1-runbook"
       ],
       "status_history": [
         {
@@ -490,6 +506,11 @@
           "recorded_on": "2026-10-09",
           "event": "RH-20261009-06",
           "note": "reopening found not executable; Operator replaced it with an explicit new delivery under amended acceptance; record_status unchanged"
+        },
+        {
+          "recorded_on": "2026-10-11",
+          "event": "RH-20261011-01",
+          "note": "stage 1 replay patches delivered after independent review and publication by another executor on Operator instruction; record_status unchanged"
         }
       ]
     }
@@ -1062,6 +1083,45 @@
         }
       },
       "meaning": "The reopening recorded in RH-20261009-05 turned out not to be executable. The controlled review runner had already recorded two calls for the design-review node of the old delivery and refuses a third; a recheck question must be byte-identical to the first one; by its binding fields the retained review state would not match an amended contract (inferred from the code, not re-run), and its deadline had passed. Reopening would have required resetting spent review state, which the governance rules do not allow (a third round is refused and the budget cannot be reset). The recorder had recommended reopening after checking the admission journal only. The Operator therefore replaced the reopening with an explicit instruction to create a new delivery, R8-STAGE1-REPLAY-PATCHES-20261009, under the amended acceptance. The old delivery R8-STAGE1-NATIVE-REPLAY stays closed as failed with its history kept and referenced; the design is reviewed independently from scratch within one standard budget; the review question must point to the design by file path. No governance source, admission journal or review state is changed. The curve-scope decision and the correction in RH-20261009-05 stand. No dispatch, admission, account, spend, Linux access, runtime or trading authority is granted; dispatch state remains the TODO row."
+    },
+    {
+      "id": "RH-20261011-01",
+      "recorded_on": "2026-10-11",
+      "event_type": "open_item_decided",
+      "route_ids": [
+        "R8"
+      ],
+      "follows": "RH-20261009-06",
+      "decision_ref": "docs/decisions/2026-10-08--r8-amendment-1-first-loop-on-native-replay.md",
+      "authority_source": "Operator selections in current chat, in answer to two questions put by the recorder; the detailed terms come from the descriptions attached to the selected options and were set down by the recorder, not written verbatim by the Operator",
+      "operator_excerpt": [
+        "由我這邊審查並發布",
+        "小修由我這邊改,大改先問你"
+      ],
+      "prior_record_identity": {
+        "dispatch": {
+          "commit": "0174315628ba74c322c0c9404a1bba446759763a",
+          "path": "docs/execution_plan/2026-10-09--r8-stage1-replay-patches-dispatch.md",
+          "blob": "7f7e210ec3e19dbddc157561d079e9463d460104",
+          "sha256": "d1e07f01724596e9e486cfef564142137db8e06a064725a7cad79ffc506ceef3",
+          "availability": "main at recording time"
+        },
+        "todo": {
+          "commit": "0174315628ba74c322c0c9404a1bba446759763a",
+          "path": "TODO.md",
+          "blob": "f5d47d7283f3e7d4a23ca4f756bffc7890ba758f",
+          "sha256": "9602df6586ac95702d7f362c5f34a50e734038e21cb0e952f023e6ae794a3349",
+          "availability": "main at recording time"
+        }
+      },
+      "engineering_commits": {
+        "design": "85af138719b27572f9b83498202c2bd4eb9a9013",
+        "implementation": "d48b84e75f4a5d3569a752c262fbfaa0810948a0",
+        "review_fixes": "4623a55257452bee0155b4e9707628a421362c74",
+        "added_tests": "dc30286e6ca53cdd0bad4da27ca80d4a15a09a3c",
+        "availability": "feature-branch commits; reach main only through a merge commit"
+      },
+      "meaning": "The new delivery R8-STAGE1-REPLAY-PATCHES-20261009 passed its design review and implemented the four stage 1 replay patches, but stopped before publication: its writer lease expired without renewal and the single controlled-review window, which starts at the first review call, lapsed before code review could begin. The public tools offered no recovery, and the patch was retained locally. The Operator instructed another executor to review and publish the retained patch independently, to make small local fixes itself and to ask before any redesign. Independent code review and test verification both returned PASS_WITH_NOTES after one recheck each; five review findings were fixed and four test gaps were closed. The earlier design review was reused, not repeated. Evidence is local source evidence on one development machine: the forbidden-symbol audit script has no real detection power on macOS, and GitHub CI does not run these tests. The admission journals and review state of both earlier deliveries were not touched, and no governance source was changed. The recorder's dispatch instruction had required design review before implementation, which made the later reviews hard to fit into that single window; the recorder did not know how the window was counted. Stage 1 source is delivered with known limits listed in the runbook. No account, spend, Linux access, runtime, Demo or trading authority is granted; stage 2 still awaits an Operator decision."
     }
   ],
   "external_provenance": [
@@ -1102,5 +1162,5 @@
       "portable_summary": "docs/decisions/2026-10-08--r8-amendment-1-first-loop-on-native-replay.md"
     }
   ],
-  "last_event_recorded_on": "2026-10-09"
+  "last_event_recorded_on": "2026-10-11"
 }

@@ -502,6 +502,9 @@ pub struct IsolatedPipeline {
     /// exits remain observable.
     pub(super) scanner_timeline: Option<ReplayScannerTimeline>,
     pub(super) scanner_timeline_skipped_events: u64,
+    pub(super) stage1: Option<crate::replay::stage1::Stage1State>,
+    pub(super) stage1_quantity: Option<(f64, Option<f64>)>,
+    pub(super) stage1_accepted_qty: Option<f64>,
 }
 
 /// Public constructor for `IsolatedPipeline` that funnels callers through the
@@ -551,6 +554,9 @@ pub fn build_isolated_pipeline(
         execution_latency_ms: None,
         scanner_timeline: None,
         scanner_timeline_skipped_events: 0,
+        stage1: None,
+        stage1_quantity: None,
+        stage1_accepted_qty: None,
     })
 }
 
@@ -955,10 +961,14 @@ impl IsolatedPipeline {
     /// 禁忌匯入稽核（V3 §6.2，**必**保綠）：見 EN 列表；adapter 內部使用
     /// `openclaw_core::guardian` + `crate::risk_checks` + `crate::ml::kelly_sizer`
     /// 為 R5-T2 既綠路徑。
+    pub(super) fn fixture_tier_label_for_stage1(&self) -> String {
+        self.fixture_tier_label.clone()
+    }
+
     fn execute_adapter_pipeline(&mut self) -> Result<(), ForbiddenPathError> {
         let fixtures = std::mem::take(&mut self.fixtures);
         let mut context_builder = ReplayContextBuilder::new();
-        for event in fixtures.iter() {
+        for (event_index, event) in fixtures.iter().enumerate() {
             // Pre-step runtime guard. V3 §12 #10 + Proof 4 acceptance.
             // 步驟前 runtime guard。V3 §12 #10 + Proof 4 acceptance。
             let action = format!("on_tick:{}@{}", event.symbol, event.ts_ms);
@@ -971,6 +981,7 @@ impl IsolatedPipeline {
                 err
             })?;
 
+            self.stage1_execute_pending(event_index, event);
             let tick_inputs = context_builder.update(event);
 
             // Update snapshot's last-seen price for this symbol so Gate 2.6
@@ -1037,6 +1048,11 @@ impl IsolatedPipeline {
 
             // Strategy emits actions (mut borrow on adapter).
             // 策略發出 action（adapter 取 mut borrow）。
+            let trace_index = self
+                .strategy_adapter
+                .as_ref()
+                .map(|s| s.trace_len())
+                .unwrap_or(0);
             let actions = if let Some(strategy) = self.strategy_adapter.as_mut() {
                 strategy.on_tick(&ctx)
             } else {
@@ -1045,7 +1061,11 @@ impl IsolatedPipeline {
 
             // Process each action: Open via risk gate, Close lightweight.
             // 處理每個 action：Open 走風控、Close 輕量。
-            for act in actions {
+            for (action_index, act) in actions.into_iter().enumerate() {
+                if self.stage1.is_some() {
+                    self.stage1_submit(event_index, action_index, trace_index, event, atr, act);
+                    continue;
+                }
                 match act {
                     StrategyAction::Open(intent) => {
                         self.process_open_intent(
@@ -1080,6 +1100,7 @@ impl IsolatedPipeline {
             }
         }
 
+        self.stage1_expire();
         self.fixtures = fixtures;
         self.status = ReplayStatus::Completed;
         Ok(())

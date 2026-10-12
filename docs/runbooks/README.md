@@ -13,6 +13,7 @@
 | 凭证 / key rotation | `credential_rotation.md`, `replay_signing_key_rotation.md` |
 | DB restore / 演练 | `pg_restore_drill_sop.md` |
 | Replay / REF-21 操作 | `ref21_replay_operator_runbook.md`, `2026-05-21--counterfactual_quality_report_runbook.md` |
+| R8 隔離回放的本機工具（下一事件成交、選擇器、逐筆分析、來源 manifest） | `r8_stage1_replay_patches.md`（設計、審查結果、使用要求與已知限制；只有本機 source 證據） |
 | Cost Gate demo-learning lane activation | `2026-06-21--cost_gate_learning_lane_runtime_activation.md`（installer apply path now enforces read-only expected-head activation preflight by default） |
 | Earn / 资金移动 | `2026-05-21--earn_governance_runbook.md` |
 | M-series 运维 | `2026-05-21--m*_runbook.md` |
