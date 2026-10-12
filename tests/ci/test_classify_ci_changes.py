@@ -58,6 +58,7 @@ def test_categories_are_narrow_but_cover_their_own_contracts() -> None:
             "program_code/exchange_connectors/bybit_connector/"
             "control_api_v1/tests/test_stock_etf_route_static_guard.py",
             "requirements-ml.lock",
+            "helper_scripts/replay/replay_local.py",
         ]
     )
     assert result == {
@@ -67,7 +68,7 @@ def test_categories_are_narrow_but_cover_their_own_contracts() -> None:
         "schema": True,
         "stock_etf": True,
         "sealed_build": True,
-        "replay": False,
+        "replay": True,
     }
 
 
