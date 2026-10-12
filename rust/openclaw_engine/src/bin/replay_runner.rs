@@ -336,14 +336,28 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
     let fixture_source =
         FixtureSource::from_manifest_strings(&manifest.data_tier, &manifest.fixture_uri)?;
     let tier_label = fixture_source.tier_label();
-    let events = fixture_loader::load_fixtures(&fixture_source)?;
-    let stage1_config = openclaw_engine::replay::stage1::Stage1Config::from_fixture(
-        fixture_source.path(),
+    // 固定一次讀取：簽名中的雜湊、事件與擴充欄位均核對同一份位元組。
+    let fixture_bytes = std::fs::read(fixture_source.path())?;
+    if let Some(expected) = manifest.parameter_provenance.as_ref()
+        .and_then(|p| p.pointer("/fixture/sha256"))
+    {
+        use sha2::{Digest, Sha256};
+        let expected = expected.as_str().ok_or("fixture sha256 must be a string")?;
+        if hex::encode(Sha256::digest(&fixture_bytes)) != expected {
+            return Err("fixture sha256 mismatch".into());
+        }
+    }
+    let events = fixture_loader::load_fixture_bytes(&fixture_source, &fixture_bytes)?;
+    let stage1_config = openclaw_engine::replay::stage1::Stage1Config::from_fixture_bytes(
+        &fixture_bytes,
         &events,
         manifest.execution_timing,
         latency_ms_from_manifest(manifest.execution_calibration.as_ref())?,
         manifest.include_replay_metadata || manifest.parameter_provenance.is_some(),
     )?;
+    if manifest.parameter_overrides.is_some() && manifest.strategy.is_none() {
+        return Err("parameter_overrides require an explicit strategy".into());
+    }
     if stage1_config.enabled() && manifest.strategy.is_none() {
         return Err("R8 replay options require an explicit strategy".into());
     }
