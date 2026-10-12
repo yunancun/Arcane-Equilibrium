@@ -112,11 +112,14 @@ def build_signed_manifest(*, repo_root: Path, fixture: Path, key_file: Path, out
     if next_open and strategy == "ma_crossover" and params["strategy_params"][strategy].get("use_maker_entry", True):
         raise ValueError("next-symbol-open with maker entry requires explicit --taker-entry")
     protected = {key_file, fixture, *source_paths}
+    sibling = output.parent / "key.hex"
+    # 呼叫端金鑰與旁置金鑰可以是內容相同的不同檔案，兩者都不能被輸出覆寫。
+    if sibling.exists():
+        protected.add(sibling)
     if (output in protected or output.name == "key.hex"
             or (output.exists() and any(output.samefile(path) for path in protected))):
         raise ValueError("output must not overwrite any input or signing key")
     fingerprint = compute_key_fingerprint(key_file.read_bytes())
-    sibling = output.parent / "key.hex"
     if not sibling.is_file() or compute_key_fingerprint(sibling.read_bytes()) != fingerprint:
         raise ValueError("caller must provide matching key.hex beside output manifest")
     signer = ManifestSigner(key_file, fingerprint)

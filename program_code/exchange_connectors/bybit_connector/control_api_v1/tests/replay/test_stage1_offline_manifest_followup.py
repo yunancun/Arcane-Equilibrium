@@ -76,3 +76,19 @@ def test_output_hardlink_never_overwrites_input(args, target):
         build_signed_manifest(**args)
     assert protected.read_bytes() == before
     assert args["output"].read_bytes() == before
+
+
+def test_output_hardlink_to_distinct_matching_sibling_key_is_rejected(args):
+    output_dir = args["fixture"].parent / "output"
+    output_dir.mkdir()
+    sibling = output_dir / "key.hex"
+    sibling.write_bytes(args["key_file"].read_bytes())
+    assert not sibling.samefile(args["key_file"])
+    args["output"] = output_dir / "manifest.json"
+    os.link(sibling, args["output"])
+    before = sibling.read_bytes()
+    with pytest.raises(ValueError, match="overwrite"):
+        build_signed_manifest(**args)
+    assert sibling.read_bytes() == before
+    assert args["key_file"].read_bytes() == before
+    assert args["output"].read_bytes() == before
