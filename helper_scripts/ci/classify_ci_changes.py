@@ -30,8 +30,9 @@ _CONTROL_PLANE_PATHS = {
 }
 _RUST_WORKSPACE_FILES = {"rust/Cargo.toml", "rust/Cargo.lock"}
 _CONTROL_API = "program_code/exchange_connectors/bybit_connector/control_api_v1/"
-# 階段 1 離線工具與其測試直接載入的模組、共用 conftest 與 Demo 設定檔；
-# 逐檔列出以維持窄範圍，回放套件的其他路由模組不在內。
+# 階段 1 離線工具與其測試直接載入的模組、pytest 會自動載入的 conftest（含它在匯入期
+# 就載入的 app 模組）、pytest 設定與 Demo 設定檔；逐檔列出以維持窄範圍，回放套件的其他
+# 路由模組不在內。離線工具新增同套件相依時，tests/ci 有一條測試會要求把它列進來。
 _REPLAY_TOOL_DEPENDENCIES = {
     _CONTROL_API + "replay/__init__.py",
     _CONTROL_API + "replay/experiment_registry.py",
@@ -40,6 +41,11 @@ _REPLAY_TOOL_DEPENDENCIES = {
     _CONTROL_API + "replay/report_analytics.py",
     _CONTROL_API + "replay/route_helpers.py",
     _CONTROL_API + "tests/conftest.py",
+    _CONTROL_API + "tests/replay/conftest.py",
+    _CONTROL_API + "app/__init__.py",
+    _CONTROL_API + "app/db_pool.py",
+    _CONTROL_API + "app/error_sanitize.py",
+    "pytest.ini",
     "settings/strategy_params_demo.toml",
     "settings/risk_control_rules/risk_config_demo.toml",
     "settings/risk_control_rules/scanner_config.toml",

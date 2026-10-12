@@ -209,6 +209,13 @@ def test_replay_gate_covers_sources_tools_and_future_test_files() -> None:
         control + "replay/report_analytics.py",
         control + "replay/route_helpers.py",
         control + "tests/conftest.py",
+        # 目前不存在；一旦新增，pytest 會對這組測試自動載入
+        control + "tests/replay/conftest.py",
+        # 共用 conftest 在匯入期就載入的模組
+        control + "app/__init__.py",
+        control + "app/db_pool.py",
+        control + "app/error_sanitize.py",
+        "pytest.ini",
         "settings/strategy_params_demo.toml",
         "settings/risk_control_rules/risk_config_demo.toml",
         "settings/risk_control_rules/scanner_config.toml",
@@ -230,11 +237,30 @@ def test_replay_gate_does_not_select_unrelated_paths() -> None:
         control + "replay/live.py",
         control + "replay/run_route.py",
         control + "tests/replay/test_other.py",
-        control + "tests/replay/conftest.py",
+        control + "app/main.py",
         "settings/strategy_params_live.toml",
         "settings/risk_control_rules/risk_config_live.toml",
     ):
         assert classify_paths([path])["replay"] is False, path
+
+
+def test_replay_gate_tracks_same_package_imports_of_the_offline_tools() -> None:
+    # 防止清單漂移：離線工具新增同套件相依卻沒有列進關卡時，這條測試會失敗。
+    import ast
+
+    control = "program_code/exchange_connectors/bybit_connector/control_api_v1/"
+    checked = 0
+    for name in ("offline_analytics.py", "offline_manifest.py"):
+        source = (REPO_ROOT / control / "replay" / name).read_text(encoding="utf-8")
+        for node in ast.walk(ast.parse(source)):
+            if not isinstance(node, ast.ImportFrom) or node.level != 1:
+                continue
+            modules = [node.module] if node.module else [alias.name for alias in node.names]
+            for module in modules:
+                path = control + "replay/" + module.split(".")[0] + ".py"
+                assert classify_paths([path])["replay"] is True, path
+                checked += 1
+    assert checked >= 5
 
 
 def test_replay_gate_preserves_other_gate_decisions() -> None:
