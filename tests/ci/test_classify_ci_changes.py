@@ -201,6 +201,17 @@ def test_replay_gate_covers_sources_tools_and_future_test_files() -> None:
         control + "replay/offline_analytics.py",
         control + "replay/offline_manifest.py",
         control + "tests/replay/test_stage1_future.py",
+        # 階段 1 工具與測試直接載入的模組、共用 conftest 與 Demo 設定檔
+        control + "replay/__init__.py",
+        control + "replay/experiment_registry.py",
+        control + "replay/full_chain_fixture.py",
+        control + "replay/manifest_signer.py",
+        control + "replay/report_analytics.py",
+        control + "replay/route_helpers.py",
+        control + "tests/conftest.py",
+        "settings/strategy_params_demo.toml",
+        "settings/risk_control_rules/risk_config_demo.toml",
+        "settings/risk_control_rules/scanner_config.toml",
         "rust/Cargo.toml",
         "rust/Cargo.lock",
         "rust/openclaw_engine/Cargo.toml",
@@ -217,7 +228,11 @@ def test_replay_gate_does_not_select_unrelated_paths() -> None:
         "rust/openclaw_engine/tests/other_replay.rs",
         "helper_scripts/ci/replay_runner_symbol_audit.sh",
         control + "replay/live.py",
+        control + "replay/run_route.py",
         control + "tests/replay/test_other.py",
+        control + "tests/replay/conftest.py",
+        "settings/strategy_params_live.toml",
+        "settings/risk_control_rules/risk_config_live.toml",
     ):
         assert classify_paths([path])["replay"] is False, path
 
