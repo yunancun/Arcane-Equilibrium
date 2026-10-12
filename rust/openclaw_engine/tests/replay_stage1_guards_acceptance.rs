@@ -139,6 +139,23 @@ fn binary_global_time_regression_rejected_only_in_next_mode() {
     success(c.run());
 }
 #[test]
+fn binary_equal_timestamps_across_symbols_are_accepted_in_next_mode() {
+    // 全域檢查只擋時間倒退；不同標的同一時間戳是合法的多標的輸入。
+    let c = BinaryCase::new(vec![
+        event(1, "BTCUSDT"),
+        event(1, "ETHUSDT"),
+        event(2, "BTCUSDT"),
+        event(2, "ETHUSDT"),
+    ]);
+    let mut body = c.body();
+    body["strategy"] = json!("ma_crossover");
+    body["execution_timing"] = json!("next_symbol_open");
+    c.sign(body);
+    success(c.run());
+    let report: Value = serde_json::from_slice(&fs::read(c.report()).unwrap()).unwrap();
+    assert_eq!(report["stage1"]["execution_timing"], "next_symbol_open");
+}
+#[test]
 fn binary_overrides_without_strategy_rejected_independently() {
     let c = BinaryCase::new(vec![event(1, "BTCUSDT")]);
     let mut body = c.body();
@@ -254,7 +271,9 @@ fn library_run(
 #[test]
 fn enabled_config_without_adapter_returns_error() {
     let (p, c) = library_case(vec![event(1, "BTCUSDT")], ExecutionTiming::NextSymbolOpen);
-    assert!(p.with_stage1(c).is_err());
+    // 固定原因：兩種誤用互換、或因別的原因報錯，都不能通過。
+    let error = p.with_stage1(c).err().unwrap().to_string();
+    assert!(error.contains("stage1 requires a strategy adapter"), "{error}");
 }
 #[test]
 fn config_count_mismatch_returns_error_before_execution() {
@@ -263,7 +282,8 @@ fn config_count_mismatch_returns_error_before_execution() {
         vec![event(1, "BTCUSDT"), event(2, "BTCUSDT")],
         ExecutionTiming::NextSymbolOpen,
     );
-    assert!(adapted(p, vec![]).with_stage1(c).is_err());
+    let error = adapted(p, vec![]).with_stage1(c).err().unwrap().to_string();
+    assert!(error.contains("stage1 fixture row mismatch"), "{error}");
 }
 #[test]
 fn next_mode_zero_records_have_zero_price_and_legacy_veto_keeps_price() {
@@ -348,6 +368,13 @@ fn report_temp_write_failure_preserves_original_bytes() {
     // 原檔可寫但父目錄不可建立暫存檔；直接截斷原檔的舊實作會讓此測試失敗。
     let permissions = fs::metadata(dir.path()).unwrap().permissions();
     fs::set_permissions(dir.path(), fs::Permissions::from_mode(0o555)).unwrap();
+    // 以 root 執行時目錄權限不生效，無法用這個方式注入失敗；先探測，避免在那種環境假失敗。
+    let probe = dir.path().join("probe");
+    if fs::write(&probe, b"").is_ok() {
+        fs::set_permissions(dir.path(), permissions).unwrap();
+        eprintln!("skipped: directory permissions are not enforced for this user");
+        return;
+    }
     let result = extend_report(&p, Some(json!({"action_audit":[]})), None, None);
     fs::set_permissions(dir.path(), permissions).unwrap();
     assert!(result.is_err());

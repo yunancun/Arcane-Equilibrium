@@ -87,12 +87,22 @@ fn rejected(case: &BinaryCase, message: &str) {
     assert!(!case.report().exists());
 }
 
+/// 既有的單邊上行 fixture；真實 grid_trading 在它上面會成交。
+fn fill_producing_rows() -> Vec<Value> {
+    let source = std::path::Path::new(env!("CARGO_MANIFEST_DIR"))
+        .join("tests/fixtures/replay_runner_e2e/synthetic_btcusdt.json");
+    let fixture: Value = serde_json::from_slice(&fs::read(source).unwrap()).unwrap();
+    fixture["events"].as_array().unwrap().clone()
+}
 fn default_case(mode: &str) {
     let mut rows = vec![
         event(60_000, "BTCUSDT"),
         event(120_000, "BTCUSDT"),
         event(180_000, "BTCUSDT"),
     ];
+    if mode == "fills" {
+        rows = fill_producing_rows();
+    }
     if mode == "quotes" {
         rows.push(event(180_000, "ETHUSDT"));
         for row in &mut rows {
@@ -106,7 +116,9 @@ fn default_case(mode: &str) {
     }
     let c = BinaryCase::new(rows);
     let mut body = c.body();
-    if mode != "synthetic" && mode != "s3" {
+    if mode == "fills" {
+        body["strategy"] = json!("grid_trading");
+    } else if mode != "synthetic" && mode != "s3" {
         body["strategy"] = json!("ma_crossover");
     }
     if mode == "params" {
@@ -139,6 +151,16 @@ fn default_case(mode: &str) {
     let before = fs::read(c.report()).unwrap();
     let report: Value = serde_json::from_slice(&before).unwrap();
     assert_eq!(report["result"]["status"]["kind"], "completed");
+    if mode == "fills" {
+        // 平盤案例沒有成交，逐位元組比對幾乎抓不到不穩定；這一案例要求報告內確有成交。
+        let executed = report["result"]["fills"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .filter(|fill| fill["qty"].as_f64().unwrap() > 0.)
+            .count();
+        assert!(executed > 0, "fills case must contain executed fills");
+    }
     for key in ["stage1", "parameter_provenance", "parameter_overrides"] {
         assert!(report.get(key).is_none(), "unexpected {key} in {mode}");
     }
@@ -195,10 +217,7 @@ fn default_execution_latency_is_stable() {
 /// 這裡改用既有的單邊上行 fixture 讓真實策略成交，確認校準延遲確實寫進成交紀錄。
 #[test]
 fn execution_latency_reaches_fill_records() {
-    let source = std::path::Path::new(env!("CARGO_MANIFEST_DIR"))
-        .join("tests/fixtures/replay_runner_e2e/synthetic_btcusdt.json");
-    let fixture: Value = serde_json::from_slice(&fs::read(source).unwrap()).unwrap();
-    let c = BinaryCase::new(fixture["events"].as_array().unwrap().clone());
+    let c = BinaryCase::new(fill_producing_rows());
     let executed = |latency: Option<u64>| -> Vec<Value> {
         let mut body = c.body();
         body["strategy"] = json!("grid_trading");
@@ -233,6 +252,10 @@ fn execution_latency_reaches_fill_records() {
         assert!(fill["latency_ms"].is_null());
         assert_eq!(fill["effective_ts_ms"], fill["ts_ms"]);
     }
+}
+#[test]
+fn default_with_executed_fills_is_stable() {
+    default_case("fills");
 }
 #[test]
 fn default_s3_is_stable() {
