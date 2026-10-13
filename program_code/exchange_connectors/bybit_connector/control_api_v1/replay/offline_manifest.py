@@ -58,13 +58,23 @@ def build_signed_manifest(*, repo_root: Path, fixture: Path, key_file: Path, out
     key_file = key_file.resolve(strict=True)
     output = output.resolve()
     fixture = fixture.resolve(strict=True)
+    # 只讀一次：資料層檢查與寫進簽名本文的雜湊必須來自同一份位元組。
+    fixture_bytes = fixture.read_bytes()
+    envelope = json.loads(fixture_bytes)
+    if isinstance(envelope, dict) and "source" in envelope:
+        source = envelope["source"]
+        if not isinstance(source, str) or source.startswith("s2_") != (data_tier == "S2"):
+            raise ValueError("fixture source conflicts with data_tier")
     sources = []
-    # 覆寫保護必須比對絕對路徑，與寫入本文的紀錄路徑分開保存。
+    # 覆寫保護使用來源的實際路徑與檔案身分，與本文的紀錄路徑分開保存。
     source_paths = []
     if snapshot is not None:
-        params = json.loads(snapshot.read_text())
-        sources.append(_source(snapshot))
-        source_paths.append(snapshot.resolve(strict=True))
+        # 與 fixture 相同：解析的內容與記錄的雜湊來自同一份位元組。
+        snapshot_path = snapshot.resolve(strict=True)
+        snapshot_bytes = snapshot_path.read_bytes()
+        params = json.loads(snapshot_bytes)
+        sources.append({"path": str(snapshot_path), "sha256": hashlib.sha256(snapshot_bytes).hexdigest()})
+        source_paths.append(snapshot_path)
         provenance_kind = "caller_snapshot"
     else:
         # 既有載入器以環境變數定位；僅在同步本機組裝期間覆寫並還原。
@@ -107,10 +117,14 @@ def build_signed_manifest(*, repo_root: Path, fixture: Path, key_file: Path, out
     if next_open and strategy == "ma_crossover" and params["strategy_params"][strategy].get("use_maker_entry", True):
         raise ValueError("next-symbol-open with maker entry requires explicit --taker-entry")
     protected = {key_file, fixture, *source_paths}
-    if output in protected or output.name == "key.hex":
+    sibling = output.parent / "key.hex"
+    # 呼叫端金鑰與旁置金鑰可以是內容相同的不同檔案，兩者都不能被輸出覆寫。
+    if sibling.exists():
+        protected.add(sibling)
+    if (output in protected or output.name == "key.hex"
+            or (output.exists() and any(output.samefile(path) for path in protected))):
         raise ValueError("output must not overwrite any input or signing key")
     fingerprint = compute_key_fingerprint(key_file.read_bytes())
-    sibling = output.parent / "key.hex"
     if not sibling.is_file() or compute_key_fingerprint(sibling.read_bytes()) != fingerprint:
         raise ValueError("caller must provide matching key.hex beside output manifest")
     signer = ManifestSigner(key_file, fingerprint)
@@ -121,7 +135,8 @@ def build_signed_manifest(*, repo_root: Path, fixture: Path, key_file: Path, out
                  "parameter_overrides": overrides,
                  "parameter_provenance": {"source_kind": provenance_kind, "environment": environment if snapshot is None else None,
                                           "runtime_effective_verified": False, "files": sources,
-                                          "fixture": _source(fixture)}})
+                                          "fixture": {"path": str(fixture),
+                                                      "sha256": hashlib.sha256(fixture_bytes).hexdigest()}}})
     if full_chain:
         body.update(mode="full_chain", scanner_config=params["scanner_config"])
     if next_open:
@@ -130,5 +145,18 @@ def build_signed_manifest(*, repo_root: Path, fixture: Path, key_file: Path, out
         body["run_id"] = run_id
     canonical = compute_manifest_canonical_bytes(body)
     signed = {**body, "manifest_hash": compute_body_hash(canonical), "signature": signer.sign(canonical)}
-    output.write_text(json.dumps(signed, ensure_ascii=False, sort_keys=True, indent=2, allow_nan=False) + "\n")
+    text = json.dumps(signed, ensure_ascii=False, sort_keys=True, indent=2, allow_nan=False) + "\n"
+    # 先寫同目錄的新檔再取代目錄項目，不就地截斷：輸出即使在檢查之後被換成指向其他檔案的
+    # 硬連結，也不會寫穿到那個檔案。
+    temporary = output.with_name(f".{output.name}.{os.getpid()}.tmp")
+    created = False
+    try:
+        with open(temporary, "x", encoding="utf-8") as handle:
+            created = True
+            handle.write(text)
+        os.replace(temporary, output)
+    except BaseException:
+        if created:
+            temporary.unlink(missing_ok=True)
+        raise
     return signed

@@ -598,6 +598,19 @@ fn tier_label_to_evidence_source(tier_label: &str) -> String {
 // `super::*` 位元級不變地引用。
 
 impl IsolatedPipeline {
+    /// 擴充必須綁定策略管線與同筆數的 fixture，避免索引 panic 或合成路徑誤用。
+    pub(super) fn validate_stage1_inputs(
+        &self,
+        rows: usize,
+    ) -> Result<(), Box<dyn std::error::Error>> {
+        if self.strategy_adapter.is_none() {
+            return Err("stage1 requires a strategy adapter".into());
+        }
+        if self.fixtures.len() != rows {
+            return Err("stage1 fixture row mismatch".into());
+        }
+        Ok(())
+    }
     /// Read-only profile getter (used by tests + future T2 wiring).
     /// 唯讀 profile getter（供 test 與未來 T2 接線使用）。
     pub fn profile(&self) -> ReplayProfile {

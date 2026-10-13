@@ -137,6 +137,7 @@ record_test() {
 # 乾淨 symbol set（典型 Rust release binary 含的合法 symbol）
 # Clean symbol set (typical Rust release binary's legitimate symbols)
 CLEAN_SYMBOLS='0000000100001234 T _main
+0000000100001900 t _openclaw_engine::replay::runner::IsolatedPipeline
 0000000100002000 T _replay_runner::main
 0000000100002500 T _replay_runner::ReplayProfile::Isolated
 0000000100003000 T _hmac::Mac::sign
@@ -271,6 +272,138 @@ test_t5_multi_hit() {
     run_audit 1 "$mock_path" "$mock_bin"
 }
 
+# 新案例只擴充覆蓋，不改既有五個案例的斷言。
+test_symbol_table_rejected() {
+    local payload="$1" tmpdir mock_path mock_bin
+    tmpdir="$(make_tmpdir)"
+    trap "rm -rf '$tmpdir'" RETURN
+    mock_path="$(make_mock_nm "$tmpdir" "$payload")"
+    mock_bin="$(make_mock_binary "$tmpdir")"
+    run_audit 5 "$mock_path" "$mock_bin"
+}
+test_positive_control() {
+    local output actual_exit=0
+    output="$(bash "$AUDIT_SCRIPT" --self-test 2>&1)" || actual_exit=$?
+    # 偵測有效時對外回 0，且輸出必須同時含命中紀錄與通過標記。
+    [[ "$actual_exit" -eq 0 && "$output" == *"FORBIDDEN HIT"* && "$output" == *"SELF-TEST PASS"* ]]
+}
+test_full_symbols_platform() {
+    local platform="$1" tmpdir mock_path mock_bin
+    tmpdir="$(make_tmpdir)"
+    trap "rm -rf '$tmpdir'" RETURN
+    mock_path="$(make_mock_nm "$tmpdir" "$CLEAN_SYMBOLS")"
+    mock_bin="$(make_mock_binary "$tmpdir")"
+    cat >"$mock_path/uname" <<EOF
+#!/bin/bash
+printf '%s\n' '$platform'
+EOF
+    chmod +x "$mock_path/uname"
+    # 若仍只掃外部符號，模擬 nm 必須拒絕，不能把分支測試寫成恆真。
+    cat >"$mock_path/nm" <<EOF
+#!/bin/bash
+for arg in "\$@"; do
+    case "\$arg" in -g*|-U|--extern-only|--defined-only) exit 19 ;; esac
+done
+cat <<'SYMS'
+$CLEAN_SYMBOLS
+SYMS
+EOF
+    run_audit 0 "$mock_path" "$mock_bin"
+}
+
+# 未解碼的符號表：兩個名稱都含 openclaw_engine／replay_runner 字樣，但沒有 `::`。
+# 解碼沒有生效時，帶 `::` 的禁用樣式全部失效，稽核不得回報通過。
+MANGLED_ONLY_SYMBOLS='0000000100001900 t __ZN15openclaw_engine6replay6runner16IsolatedPipeline7execute17h0123456789abcdefE
+0000000100002000 T __ZN13replay_runner4main17h0123456789abcdefE
+0000000100003000 T __ZN4hmac3Mac4sign17h0123456789abcdefE'
+
+# 不經 SKIP_BUILD／REPLAY_RUNNER_BIN 的呼叫；用於建置前就該結束的案例。
+test_cargo_output_override_is_inconclusive() {
+    local variable="$1" tmpdir mock_path actual_exit=0
+    tmpdir="$(make_tmpdir)"
+    trap "rm -rf '$tmpdir'" RETURN
+    mock_path="$(make_mock_nm "$tmpdir" "$CLEAN_SYMBOLS")"
+    # 模擬 cargo 一被呼叫就留下記號：防護必須在建置之前結束。
+    printf '#!/bin/bash\n: > %q\nexit 0\n' "$tmpdir/cargo_was_called" >"$mock_path/cargo"
+    chmod +x "$mock_path/cargo"
+    env -u REPLAY_RUNNER_BIN -u SKIP_BUILD -u CARGO_TARGET_DIR -u CARGO_BUILD_TARGET_DIR -u CARGO_BUILD_TARGET \
+        "$variable=$tmpdir/elsewhere" PATH="$mock_path:$PATH" \
+        bash "$AUDIT_SCRIPT" >/dev/null 2>&1 || actual_exit=$?
+    [[ "$actual_exit" -eq 5 && ! -e "$tmpdir/cargo_was_called" ]]
+}
+test_unknown_argument_is_usage_error() {
+    local actual_exit=0
+    bash "$AUDIT_SCRIPT" "$@" >/dev/null 2>&1 || actual_exit=$?
+    [[ "$actual_exit" -eq 64 ]]
+}
+# 以 source 載入後覆寫內部陣列，驗證錯誤路徑；每個案例都在子殼內執行。
+# 每個案例先跑一次未覆寫的對照（必須回 0），確認結束碼 5 來自覆寫而不是載入方式本身。
+sourced_audit_passes_unmodified() {
+    local control_exit=0
+    ( source "$AUDIT_SCRIPT"; audit_symbols "$CLEAN_SYMBOLS" ) >/dev/null 2>&1 || control_exit=$?
+    [[ "$control_exit" -eq 0 ]]
+}
+sourced_self_test_passes_unmodified() {
+    local control_exit=0
+    ( source "$AUDIT_SCRIPT"; main --self-test ) >/dev/null 2>&1 || control_exit=$?
+    [[ "$control_exit" -eq 0 ]]
+}
+test_unusable_pattern_is_inconclusive() {
+    local actual_exit=0
+    sourced_audit_passes_unmodified || return 1
+    ( source "$AUDIT_SCRIPT"; FORBIDDEN_PATTERNS=('('); audit_symbols "$CLEAN_SYMBOLS" ) >/dev/null 2>&1 || actual_exit=$?
+    [[ "$actual_exit" -eq 5 ]]
+}
+test_self_test_detects_broken_class() {
+    local index="$1" actual_exit=0
+    sourced_self_test_passes_unmodified || return 1
+    ( source "$AUDIT_SCRIPT"; FORBIDDEN_PATTERNS[$index]='zzz_never_matches'; main --self-test ) >/dev/null 2>&1 || actual_exit=$?
+    [[ "$actual_exit" -eq 5 ]]
+}
+test_self_test_detects_overbroad_class() {
+    local actual_exit=0
+    sourced_self_test_passes_unmodified || return 1
+    ( source "$AUDIT_SCRIPT"; FORBIDDEN_PATTERNS[1]='GovernanceHub|runner'; main --self-test ) >/dev/null 2>&1 || actual_exit=$?
+    [[ "$actual_exit" -eq 5 ]]
+}
+test_self_test_requires_one_sample_per_class() {
+    local actual_exit=0
+    sourced_self_test_passes_unmodified || return 1
+    ( source "$AUDIT_SCRIPT"; FORBIDDEN_PATTERNS+=('new_forbidden_class'); main --self-test ) >/dev/null 2>&1 || actual_exit=$?
+    [[ "$actual_exit" -eq 5 ]]
+}
+
+# 未解碼、但泛型參數裡帶 `..` 的符號表：正規化後會出現 `openclaw_engine::` 字樣，
+# 定位檢查必須仍以原始輸出判定為未解碼。
+MANGLED_GENERIC_SYMBOLS='0000000100001900 t __ZN4core3ptr70drop_in_place$LT$openclaw_engine..replay..runner..IsolatedPipeline$GT$17h0123456789abcdefE
+0000000100002000 T __ZN4core3ptr50drop_in_place$LT$replay_runner..cli..Args$GT$17h0123456789abcdefE'
+
+# 禁用路徑只以泛型參數形式出現（`a..b`）：必須命中。
+GENERIC_FORM_FORBIDDEN_SYMBOLS="$CLEAN_SYMBOLS"'
+0000000100099300 t core::ptr::drop_in_place$LT$openclaw_engine..ipc_server..Server$GT$::h0123456789abcdef'
+
+test_generic_form_is_detected() {
+    local tmpdir mock_path mock_bin
+    tmpdir="$(make_tmpdir)"
+    trap "rm -rf '$tmpdir'" RETURN
+    mock_path="$(make_mock_nm "$tmpdir" "$GENERIC_FORM_FORBIDDEN_SYMBOLS")"
+    mock_bin="$(make_mock_binary "$tmpdir")"
+    run_audit 1 "$mock_path" "$mock_bin"
+}
+test_empty_pattern_list_is_inconclusive() {
+    local actual_exit=0
+    sourced_audit_passes_unmodified || return 1
+    ( source "$AUDIT_SCRIPT"; FORBIDDEN_PATTERNS=(); audit_symbols "$CLEAN_SYMBOLS" ) >/dev/null 2>&1 || actual_exit=$?
+    [[ "$actual_exit" -eq 5 ]]
+}
+test_self_test_detects_ineffective_normalisation() {
+    local actual_exit=0
+    sourced_self_test_passes_unmodified || return 1
+    # 把 sed 換成原樣輸出：正規化失效時，泛型參數形式的樣本不再被命中。
+    ( source "$AUDIT_SCRIPT"; sed() { cat; }; main --self-test ) >/dev/null 2>&1 || actual_exit=$?
+    [[ "$actual_exit" -eq 5 ]]
+}
+
 # ──────────────────────────────────────────────────────────────────────
 # Section 4 — Run all tests / 執行全部測試
 # ──────────────────────────────────────────────────────────────────────
@@ -302,9 +435,56 @@ main() {
     outcome=0; ( test_t5_multi_hit ) || outcome=$?
     record_test "T5 multi-class hit → exit 1" "$outcome"
 
+    outcome=0; ( test_symbol_table_rejected "" ) || outcome=$?
+    record_test "T6 empty symbols → exit 5" "$outcome"
+    outcome=0; ( test_symbol_table_rejected '0000000100000000 T __mh_execute_header' ) || outcome=$?
+    record_test "T7 stripped symbols → exit 5" "$outcome"
+    outcome=0; ( test_symbol_table_rejected '0000000100000000 t unrelated::function' ) || outcome=$?
+    record_test "T8 missing anchors → exit 5" "$outcome"
+    outcome=0; ( test_positive_control ) || outcome=$?
+    record_test "T9 positive control → forbidden hit" "$outcome"
+    outcome=0; ( test_full_symbols_platform Darwin ) || outcome=$?
+    record_test "T10 Darwin includes local symbols" "$outcome"
+    outcome=0; ( test_full_symbols_platform Linux ) || outcome=$?
+    record_test "T11 Linux includes local symbols (mock)" "$outcome"
+    outcome=0; ( test_symbol_table_rejected "$MANGLED_ONLY_SYMBOLS" ) || outcome=$?
+    record_test "T12 mangled-only symbols (demangle ineffective) → exit 5" "$outcome"
+    outcome=0; ( test_symbol_table_rejected '0000000100001900 t _openclaw_engine::replay::runner::IsolatedPipeline' ) || outcome=$?
+    record_test "T13 only the engine anchor → exit 5" "$outcome"
+    outcome=0; ( test_symbol_table_rejected '0000000100002000 T _replay_runner::main' ) || outcome=$?
+    record_test "T14 only the entry anchor → exit 5" "$outcome"
+    outcome=0; ( test_cargo_output_override_is_inconclusive CARGO_TARGET_DIR ) || outcome=$?
+    record_test "T15 CARGO_TARGET_DIR set → exit 5 before building" "$outcome"
+    outcome=0; ( test_cargo_output_override_is_inconclusive CARGO_BUILD_TARGET ) || outcome=$?
+    record_test "T16 CARGO_BUILD_TARGET set → exit 5 before building" "$outcome"
+    outcome=0; ( test_unknown_argument_is_usage_error --selftest ) || outcome=$?
+    record_test "T17 misspelled option → exit 64" "$outcome"
+    outcome=0; ( test_unknown_argument_is_usage_error --self-test extra ) || outcome=$?
+    record_test "T18 extra argument → exit 64" "$outcome"
+    outcome=0; ( test_unusable_pattern_is_inconclusive ) || outcome=$?
+    record_test "T19 unusable pattern → exit 5" "$outcome"
+    outcome=0; ( test_self_test_detects_broken_class 0 ) || outcome=$?
+    record_test "T20 self-test: first class broken → exit 5" "$outcome"
+    outcome=0; ( test_self_test_detects_broken_class 9 ) || outcome=$?
+    record_test "T21 self-test: last class broken → exit 5" "$outcome"
+    outcome=0; ( test_self_test_detects_overbroad_class ) || outcome=$?
+    record_test "T22 self-test: over-broad class hits clean control → exit 5" "$outcome"
+    outcome=0; ( test_self_test_requires_one_sample_per_class ) || outcome=$?
+    record_test "T23 self-test: class without a sample → exit 5" "$outcome"
+    outcome=0; ( test_cargo_output_override_is_inconclusive CARGO_BUILD_TARGET_DIR ) || outcome=$?
+    record_test "T24 CARGO_BUILD_TARGET_DIR set → exit 5 before building" "$outcome"
+    outcome=0; ( test_generic_form_is_detected ) || outcome=$?
+    record_test "T25 forbidden path only in generic-argument form → exit 1" "$outcome"
+    outcome=0; ( test_symbol_table_rejected "$MANGLED_GENERIC_SYMBOLS" ) || outcome=$?
+    record_test "T26 mangled table with generic-argument paths → exit 5" "$outcome"
+    outcome=0; ( test_empty_pattern_list_is_inconclusive ) || outcome=$?
+    record_test "T27 empty pattern list → exit 5" "$outcome"
+    outcome=0; ( test_self_test_detects_ineffective_normalisation ) || outcome=$?
+    record_test "T28 self-test: normalisation ineffective → exit 5" "$outcome"
+
     # Summary / 結尾總結
     printf '\n--- summary ---\n'
-    printf 'PASS: %d / FAIL: %d / total: 5\n' \
+    printf 'PASS: %d / FAIL: %d / total: 28\n' \
         "$PASS_COUNT" "$FAIL_COUNT"
 
     if [[ "$FAIL_COUNT" -gt 0 ]]; then

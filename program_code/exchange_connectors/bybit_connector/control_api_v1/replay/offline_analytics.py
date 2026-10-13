@@ -39,8 +39,24 @@ def crosses_funding(start: int, end: int, hours: list[int]) -> bool:
 
 
 def analyze_report(payload: dict[str, Any], *, replay_end_ts_ms: int | None = None,
+                   bar_duration_ms: int | None = None,
                    funding_hours: dict[str, list[int]] | None = None) -> dict[str, Any]:
+    if bar_duration_ms is not None and (type(bar_duration_ms) is not int or bar_duration_ms <= 0):
+        raise ValueError("bar_duration_ms must be a positive integer")
+    # 形狀不對的報告一律以 ValueError 拒絕，CLI 才能回結束碼 2 與一行訊息，不留下未處理的例外。
+    if not isinstance(payload, dict):
+        raise ValueError("report must be an object")
+    stage1 = payload.get("stage1", {})
+    if not isinstance(stage1, dict):
+        raise ValueError("stage1 must be an object")
     result = payload.get("result", payload)
+    if not isinstance(result, dict):
+        raise ValueError("result must be an object")
+    status = result.get("status", {})
+    if not isinstance(status, dict):
+        raise ValueError("result.status must be an object")
+    if "kind" in status and status["kind"] != "completed":
+        raise ValueError("report status must be completed")
     schedules = funding_hours or {}
     for hours in schedules.values():
         _schedule(hours)
@@ -51,7 +67,7 @@ def analyze_report(payload: dict[str, Any], *, replay_end_ts_ms: int | None = No
         return int(fill["ts_ms"] if value is None else value)
     indexed.sort(key=lambda item: (timestamp(item[1]), item[0]))
     # 先取報告自身的結束時間；呼叫端不得把它往前改，否則會漏標跨結算的未平倉。
-    stage1_end = payload.get("stage1", {}).get("replay_end_ts_ms")
+    stage1_end = stage1.get("replay_end_ts_ms")
     label_end = None
     if stage1_end is None:
         match = re.fullmatch(r"on_tick:[^@]+@(-?\d+)", result.get("diagnostics", {}).get("last_action_label", ""))
@@ -70,7 +86,7 @@ def analyze_report(payload: dict[str, Any], *, replay_end_ts_ms: int | None = No
     else:
         end, end_source = None, None
     # 舊時序的成交時間戳是 K 線開盤時間，但成交模擬在收盤；結算前最後一根的出場或結束不會被標記。
-    exact = payload.get("stage1", {}).get("execution_timing") == "next_symbol_open"
+    execution_event_open = stage1.get("execution_timing") == "next_symbol_open"
     positions: dict[str, dict[str, Any]] = {}
     trades: list[dict[str, Any]] = []
     zero_reasons: Counter[str] = Counter()
@@ -139,6 +155,11 @@ def analyze_report(payload: dict[str, Any], *, replay_end_ts_ms: int | None = No
         raise ValueError("open positions require replay_end_ts_ms from last event, not last fill")
     if end is not None and end < max((timestamp(f) for _, f in indexed if f["qty"] > 0), default=end):
         raise ValueError("replay end precedes last execution")
+    # 只延長尚未平倉的持倉區間；先完成原始結束時間的衝突檢查，不改已平倉交易。
+    if positions and bar_duration_ms is not None:
+        end += bar_duration_ms
+        end_source += "_plus_bar_duration"
+    exact = execution_event_open and (not positions or bar_duration_ms is not None)
     unmatched = []
     for symbol, position in positions.items():
         lots = [{**lot, "crosses_funding": crosses_funding(lot["entry_ts_ms"], end, schedules.get(symbol, default_hours))}
@@ -174,5 +195,5 @@ def analyze_report(payload: dict[str, Any], *, replay_end_ts_ms: int | None = No
                         "funding_crossed": bool(closed_count or open_count),
                         "funding_settled": False,
                         "replay_end_ts_ms": end, "replay_end_source": end_source,
-                        "timestamp_basis": "execution_event_open" if exact else "bar_open_label",
+                        "timestamp_basis": "execution_event_open" if execution_event_open else "bar_open_label",
                         "crossing_check_exact": exact}}

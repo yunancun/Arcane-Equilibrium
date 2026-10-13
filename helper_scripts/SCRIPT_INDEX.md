@@ -1656,8 +1656,8 @@ fail-closed，total-miss + partial-miss 同歸此判，絕不誤報 PASS_CAPTURE
 | 腳本 | 用途 |
 |------|------|
 | `ci/check_stable_id_duplication.sh` | P2-N2-4 — 快速 grep guard；掃描 Rust source，若 canonical Agent Spine helper/caller 外出現 `format!("{}:{}:{}:{}"...` 且同檔含 stable-id-like 變數名，即 exit 1 並列出 offending file:line。已接入 GitHub Actions `stable_id duplication guard` job。 |
-| `ci/replay_runner_symbol_audit.sh` | REF-20 Wave 3 R20-P2b-S10 — `nm` symbol 稽核 `target/release/replay_runner` binary，驗 0 forbidden symbol class（Decision Lease / IPC / exchange pipeline / Bybit connector / live auth write / order placement / DB writer）。Darwin 用 `nm -gU`（BSD），Linux 用 `nm --extern-only --defined-only`（GNU）。Exit 0 PASS / 1 FAIL / 2 build / 3 nm-not-found / 4 binary-not-found。env：`SKIP_BUILD=1`（跳 cargo）/ `REPLAY_RUNNER_BIN=/path`（覆寫 binary path）。 |
-| `ci/test_replay_runner_symbol_audit.sh` | 上述 audit script 的 mock-based bash 測試套（5 cases：clean / forbidden hit / nm absent / binary missing / multi-class hit）。用 nm shim 避免真 cargo build (~30-60s)。 |
+| `ci/replay_runner_symbol_audit.sh` | REF-20 Wave 3 R20-P2b-S10 — 以 `nm --demangle` 稽核未剝除的 `target/debug/replay_runner` 的完整符號表，驗 0 forbidden symbol class（Decision Lease / IPC / exchange pipeline / Bybit connector / live auth write / order placement / DB writer）；比對前把泛型參數形式的路徑（`a..b`）正規化為 `a::b`。Exit 0 PASS / 1 FAIL / 2 build / 3 nm-not-found / 4 binary-not-found / 5 無法判定（空表、已剝除、未解碼、缺定位符號、樣式無法評估、無法確定產物位置）/ 64 參數錯誤。`--self-test` 為正向控制（逐類驗證樣式，不建置）。env：`SKIP_BUILD=1`（一律不建置）/ `REPLAY_RUNNER_BIN=/path`（覆寫 binary path）/ `CARGO_NET_OFFLINE=true`（離線建置）。尚未接進 CI。 |
+| `ci/test_replay_runner_symbol_audit.sh` | 上述 audit script 的 mock-based bash 測試套（28 cases：原 5 項，加上無法判定的各種符號表、兩個作業系統分支、cargo 輸出位置變數、參數錯誤、樣式錯誤、正向控制的各種失效、泛型參數形式）。用 nm shim，不做真正的 cargo build。 |
 | `ci/ibkr_g4_symbol_audit.sh` | IBKR B1 G4（ADR-0048 / AMD-2026-07-08-01）— `nm` symbol 稽核 **default DEBUG**（`cargo build`，無 `--release`、無 `--features`）的 `openclaw-engine` 引擎 artifact，斷言 IBKR B1 連接器符號 **absent**（`g4_operator_triggered_first_contact` / `ibkr_g4_first_contact` / 模塊級 `ibkr_readonly_tws_client`）。**主保證 = L1 feature-gate + 0-caller DCE**（整模塊在 default build 不進 artifact）；本 script 為 L3 回歸 gate（誤接 production caller → 符號現身 debug default → fail）。**審 debug 非 release**：`[profile.release] strip="symbols"` 會 strip release → nm 讀 0 符號 → 舊版 vacuous fail-open PASS（E4 抓）。**fail-closed on inconclusive**：binary stripped / symtab 空 / 缺 `openclaw_engine` anchor → exit 5（不報 PASS）。plain `nm`（全 symtab，跨平台）。cargo 解析 `$CARGO`→`~/.cargo/bin/cargo`→PATH。Exit 0 PASS / 1 FAIL / 2 build（含 cargo 缺席）/ 3 nm-not-found / 4 binary-not-found / 5 inconclusive。env：`SKIP_BUILD=1` / `IBKR_G4_AUDIT_BIN=/path`（正控指向 g4 bin 驗 pattern 有牙）/ `CARGO=/path`。 |
 | `ci/README.md` | 三層縱深防禦說明 + GitHub Actions / cron / pre-commit hook 整合範例。 |
 
@@ -1831,4 +1831,4 @@ fail-closed，total-miss + partial-miss 同歸此判，絕不誤報 PASS_CAPTURE
 
 | 路徑 | 用途 | 邊界 |
 |---|---|---|
-| `replay/replay_local.py` | `manifest` 從倉庫設定或呼叫者快照簽名；`analytics` 從回放 JSON 配對交易、對帳並標記跨結算點 | 純本機檔案；不取數、不連 DB/API、不產生金鑰；只交付已實現餘額曲線。用法見 `docs/runbooks/r8_stage1_replay_patches.md` |
+| `replay/replay_local.py` | `manifest` 從倉庫設定或呼叫者快照簽名；`analytics` 從回放 JSON 配對交易、對帳並標記跨結算點（`--bar-duration-ms` 讓未平倉部位算到最後一根 K 線的收盤） | 純本機檔案；不取數、不連 DB/API、不產生金鑰；只交付已實現餘額曲線。用法見 `docs/runbooks/r8_stage1_replay_patches.md` |

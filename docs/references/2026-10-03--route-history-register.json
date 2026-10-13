@@ -286,16 +286,32 @@
       "meaning": "stage 1 dispatch instruction kept as the record of what was instructed, with a dated note on how the unit ended (RH-20261011-01); not an authorization"
     },
     "r8-stage1-runbook": {
-      "kind": "recorded_file",
+      "kind": "git_blob",
+      "commit": "e87ed25df0ca96df5d37e60c977e742826af4cb9",
       "path": "docs/runbooks/r8_stage1_replay_patches.md",
+      "blob": "20c256b0fb4b78873aeab88fdce32d9fe4440478",
       "sha256": "51b27928f50386baad1c9601497e3a78662194480d8beafcbdbfce9f234df2f7",
-      "meaning": "design, independent review results, final local verification, usage requirements and known limits of the R8 stage 1 isolated-replay patches; local source evidence only, not runtime, Demo or trading attestation"
+      "meaning": "design, independent review results, final local verification, usage requirements and known limits of the R8 stage 1 isolated-replay patches; local source evidence only, not runtime, Demo or trading attestation; superseded as the current text by r8-stage1-runbook-r2 (RH-20261014-01)"
     },
     "r8-stage1-followup-dispatch": {
+      "kind": "git_blob",
+      "commit": "e87ed25df0ca96df5d37e60c977e742826af4cb9",
+      "path": "docs/execution_plan/2026-10-12--r8-stage1-followup-units-dispatch.md",
+      "blob": "2b5a7e6f40cff79472ea9288f071aad6403e03fe",
+      "sha256": "93273abc60c4ef3a528e86ebb1d089657d176af60be511e62c06bcfafc6d6d61",
+      "meaning": "dispatch instruction for six small, independent follow-up units to the R8 stage 1 replay patches (RH-20261012-01); not an authorization by itself; dispatch state is the TODO rows P1-R8-S1F-U1 to P2-R8-S1F-U6; superseded as the current text by r8-stage1-followup-dispatch-r2 (RH-20261014-01)"
+    },
+    "r8-stage1-runbook-r2": {
+      "kind": "recorded_file",
+      "path": "docs/runbooks/r8_stage1_replay_patches.md",
+      "sha256": "c6cd7d1433af814a25c53c2bf5d03830998f9cab300ecee310d9a94c99b9c2ee",
+      "meaning": "the stage 1 runbook with an added section on the six follow-up units (RH-20261014-01): what each unit delivers, independent review results, final local and hosted-Linux verification, updated usage requirements and known limits; earlier sections kept as written with two dated notes; source evidence only, not runtime, Demo or trading attestation"
+    },
+    "r8-stage1-followup-dispatch-r2": {
       "kind": "recorded_file",
       "path": "docs/execution_plan/2026-10-12--r8-stage1-followup-units-dispatch.md",
-      "sha256": "93273abc60c4ef3a528e86ebb1d089657d176af60be511e62c06bcfafc6d6d61",
-      "meaning": "dispatch instruction for six small, independent follow-up units to the R8 stage 1 replay patches (RH-20261012-01); not an authorization by itself; dispatch state is the TODO rows P1-R8-S1F-U1 to P2-R8-S1F-U6"
+      "sha256": "9f360d300f569462fc99d6b696ca46ef53594592c21f7658f56c73ce10d8d72e",
+      "meaning": "the follow-up units dispatch instruction kept as the record of what was instructed, with a dated status row and a section on how the units ended (RH-20261014-01); not an authorization"
     }
   },
   "routes": [
@@ -448,7 +464,9 @@
         "r8-stage1-dispatch-r4",
         "r8-stage1-dispatch-r5",
         "r8-stage1-runbook",
-        "r8-stage1-followup-dispatch"
+        "r8-stage1-followup-dispatch",
+        "r8-stage1-runbook-r2",
+        "r8-stage1-followup-dispatch-r2"
       ],
       "status_history": [
         {
@@ -523,6 +541,11 @@
           "recorded_on": "2026-10-12",
           "event": "RH-20261012-01",
           "note": "follow-up items split into six small units and dispatched to the implementing executor on Operator instruction; stage 2 on hold while the Linux host is offline; record_status unchanged"
+        },
+        {
+          "recorded_on": "2026-10-14",
+          "event": "RH-20261014-01",
+          "note": "the six follow-up units delivered after independent review and publication by another executor on Operator decision; replay tests now run on a hosted Linux runner; stage 2 awaits an Operator instruction; record_status unchanged"
         }
       ]
     }
@@ -1156,6 +1179,71 @@
         }
       },
       "meaning": "The Operator instructed that the stage 1 pull request be merged once its checks complete, stated that the Linux host is offline, and asked for the follow-up items to be split into small units and handed to the implementing executor in one go. The recorder split them into six independent units with disjoint files, each its own delivery and pull request. The content comes from the known limits in the runbook and from seven points raised by automated review of pull request 206; those points were judged valid and were not fixed inside that pull request. Three units must finish before stage 3: the analytics tool (end-of-replay settlement check, rejecting reports that did not complete), replay guards (verifying the signed fixture digest before execution, global time order in next_symbol_open, rejecting overrides without a strategy, plus four robustness items) and the manifest tool (data tier against fixture source, protection of input files by filesystem identity). Three can follow: tests through the replay_runner binary, a forbidden-symbol audit with real detection power, and running the replay tests in GitHub CI. One review point, schema validation of caller snapshots, is recorded as a known limit instead of a unit. The units are small because the governance tooling has two timers that cannot be recovered once they lapse. The executor does not edit TODO or documents; the recorder closes the rows after the pull requests merge. Stage 2 is on hold while the Linux host is offline. Dispatch of these six units is the only thing granted; no account, spend, Linux access, runtime, Demo or trading authority."
+    },
+    {
+      "id": "RH-20261014-01",
+      "recorded_on": "2026-10-14",
+      "event_type": "open_item_decided",
+      "route_ids": [
+        "R8"
+      ],
+      "follows": "RH-20261012-01",
+      "decision_ref": "docs/decisions/2026-10-08--r8-amendment-1-first-loop-on-native-replay.md",
+      "authority_source": "Operator selections in current chat on 2026-10-13 (Asia/Shanghai), in answer to three questions put by the recorder; the detailed terms come from the descriptions attached to the selected options and were set down by the recorder, not written verbatim by the Operator",
+      "operator_excerpt": [
+        "不批准,停掉這條線",
+        "由我這邊審查並發布",
+        "條件滿足就合併"
+      ],
+      "prior_record_identity": {
+        "dispatch": {
+          "commit": "e87ed25df0ca96df5d37e60c977e742826af4cb9",
+          "path": "docs/execution_plan/2026-10-12--r8-stage1-followup-units-dispatch.md",
+          "blob": "2b5a7e6f40cff79472ea9288f071aad6403e03fe",
+          "sha256": "93273abc60c4ef3a528e86ebb1d089657d176af60be511e62c06bcfafc6d6d61",
+          "availability": "main at recording time"
+        },
+        "todo": {
+          "commit": "e87ed25df0ca96df5d37e60c977e742826af4cb9",
+          "path": "TODO.md",
+          "blob": "e1213deed1e69b61a3fba6c864940e33ed601210",
+          "sha256": "44a0c37f2c5f924ca4ba17ae5019b080b06e75af1578110f6839b8f8dc8ebfd7",
+          "availability": "main at recording time"
+        },
+        "runbook": {
+          "commit": "e87ed25df0ca96df5d37e60c977e742826af4cb9",
+          "path": "docs/runbooks/r8_stage1_replay_patches.md",
+          "blob": "20c256b0fb4b78873aeab88fdce32d9fe4440478",
+          "sha256": "51b27928f50386baad1c9601497e3a78662194480d8beafcbdbfce9f234df2f7",
+          "availability": "main at recording time"
+        }
+      },
+      "engineering_commits": {
+        "unit_tip_commits": {
+          "U1": "ab8de782238add35a07d6a63a4c5cc842299d4e6",
+          "U2": "aaa5cd5cc2495fffecc798ce0ba1126d883c93fc",
+          "U3": "a605595beecbc57e7e082bef645b80605d71df42",
+          "U4": "4d8e7e7809ce9afc016dc113dedde78e6e843e9b",
+          "U5": "39f59b15d568bcacfd53c4b718408e4b252fca50",
+          "U6": "e53e3f2dd8148ac48de8aad8a1e2426ee4cdcadb"
+        },
+        "u6_review_fixes": [
+          "b6732971bc5874596f55c4a36d6458e9994ce14b",
+          "a27ca2b0e1662d5ce689a6e4e4a1ceda40e35c49"
+        ],
+        "u6_merge": "e87ed25df0ca96df5d37e60c977e742826af4cb9",
+        "u1_to_u5_review_fixes": [
+          "becfff4b6b75fd66fdc007314fac71f3810c913f",
+          "15b9c9c2d409f430267f4b3b52e2a3448f4ab4bb",
+          "225ce6eacf7df018b92a7a8d2e644fa96f34781c",
+          "beb4f119e4fb2f586a9be6f8a82380aa03bb92d9",
+          "1411297327bab2c17be028cfa28e61c03ce5b66e",
+          "081d6a5266d87e5eb5ee83f525ecea887a5d23f4"
+        ],
+        "verified_head": "4aa12e6f3405b76cd6d7396f1ad1951a866fe509",
+        "availability": "U6 commits are on main through merge commit e87ed25df; the others are on the head branch of pull request 210 and reach main only through its merge commit"
+      },
+      "meaning": "The implementing executor completed all six follow-up units on 2026-10-12, but only two passed its own process (tests through the replay_runner binary, and running the replay tests in hosted CI). The other four stopped before publication with their patches retained: one was admitted without a workflow delivery record so the controlled review tool refused it, one lost its code review to a killed review process that the rules did not allow to retry, and two passed code review but could not obtain test verification because that executor's verification channel cannot execute the replay Python tests, shell tests or offline cargo on the development machine. The executor then turned to maintaining the governance tooling under two Operator-approved one-time exceptions and stopped at a request for a third. The Operator declined that request and stopped that line, directed that the units be reviewed and published independently by another executor with small fixes made by that executor, and agreed that the pull requests be merged once checks are green, review threads are handled and independent review has passed. The recorder's dispatch instruction had not checked that the implementing executor's test-verification channel could run each unit's tests, although the same limit had been recorded during the stage 1 review. The CI unit was merged first as pull request 209 after one automated-review finding was fixed and independently reviewed; from then on the replay tests run on a hosted Linux runner on each pull request. The other five units were published together as pull request 210, which keeps the implementing executor's commits unrewritten, adds review fixes on top and supersedes pull request 208. Independent code review (two reviewers by language), security review and test verification returned three PASS_WITH_NOTES and one FAIL at first review; after fixes all four rechecks returned PASS_WITH_NOTES with nothing required before merge. One misuse guard (setting a nonzero latency after enabling next_symbol_open) remains unimplemented under the dispatch instruction's own exception and is recorded as a known limit. Evidence is source evidence only: local tests on one development machine run by the publishing executor, mutation checks of the tests, and the hosted Linux run of the replay tests; the forbidden-symbol audit is not yet wired into CI. The governance-tooling patch of the implementing executor is not part of these pull requests, and that executor's admission journal and review state were not changed by this work. Stage 2 awaits an Operator instruction. Review, publication and merge of these units is the only thing granted; no account, spend, Linux access, runtime, Demo or trading authority."
     }
   ],
   "external_provenance": [
@@ -1196,5 +1284,5 @@
       "portable_summary": "docs/decisions/2026-10-08--r8-amendment-1-first-loop-on-native-replay.md"
     }
   ],
-  "last_event_recorded_on": "2026-10-12"
+  "last_event_recorded_on": "2026-10-14"
 }

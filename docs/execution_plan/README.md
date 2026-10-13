@@ -12,7 +12,7 @@
 | 需要 | 先读 |
 |---|---|
 | 当前 active queue / owner / gate / runtime evidence | 根目录 `TODO.md` |
-| R8 階段 1 後續六個小單元的派工指令 | `2026-10-12--r8-stage1-followup-units-dispatch.md`；是否可派發以 TODO 的對應各列為準 |
+| R8 階段 1 後續六個小單元的派工指令 | `2026-10-12--r8-stage1-followup-units-dispatch.md`；已執行完畢，結果見該檔 §7，現況以 TODO 的對應各列為準 |
 | R8 階段 1 回放修補的派工指令與交接摘要 | `2026-10-09--r8-stage1-replay-patches-dispatch.md`；是否可派發回到 `TODO.md` 的 `P1-R8-STAGE1-REPLAY-PATCHES` |
 | 跨主题证据入口 | `docs/_indexes/initiative_index.md` |
 | L2 Advisory Mesh 当前尾巴 | `TODO.md` row `P1-L2-ADVISORY-MESH-TAILS`; 本目录 L2 文件只作 roadmap/reference |

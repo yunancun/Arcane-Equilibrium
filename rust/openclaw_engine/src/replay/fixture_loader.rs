@@ -384,6 +384,32 @@ pub fn load_fixtures(source: &FixtureSource) -> Result<Vec<MarketEvent>, Fixture
     Ok(envelope.events)
 }
 
+/// 從呼叫端已固定的同一份位元組解析；不重新開啟 fixture。
+pub fn load_fixture_bytes(source: &FixtureSource, bytes: &[u8]) -> Result<Vec<MarketEvent>, FixtureError> {
+    let path = source.path();
+    let envelope: FixtureEnvelope =
+        serde_json::from_slice(bytes).map_err(|e| FixtureError::FixtureFormat {
+            path: path.to_path_buf(),
+            reason: format!("serde_json: {}", e),
+        })?;
+
+    if envelope.schema_version != 1 {
+        return Err(FixtureError::FixtureFormat {
+            path: path.to_path_buf(),
+            reason: format!(
+                "schema_version mismatch: got {}, expected 1",
+                envelope.schema_version
+            ),
+        });
+    }
+    if envelope.events.is_empty() {
+        return Err(FixtureError::FixtureEmpty {
+            path: path.to_path_buf(),
+        });
+    }
+    Ok(envelope.events)
+}
+
 // ─────────────────────────────────────────────────────────────────────────
 // Module-internal unit tests / 模組內部 unit test
 // ─────────────────────────────────────────────────────────────────────────
