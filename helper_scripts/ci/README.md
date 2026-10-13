@@ -9,8 +9,8 @@ feature gates and runtime profile guards.
 | File | Purpose |
 |---|---|
 | `check_stable_id_duplication.sh` | W-D MAG-083 P1-1 follow-up — fast grep guard that fails CI if Rust source outside the canonical Agent Spine helper/caller files reintroduces literal `stable_id` seed formatting (`format!("{}:{}:{}:{}"...`) with stable-id-like variable names. |
-| `replay_runner_symbol_audit.sh` | REF-20 Wave 3 R20-P2b-S10 — `nm` / `objdump` symbol grep on `replay_runner` release binary; verifies zero forbidden symbol class (Decision Lease / IPC server / exchange pipeline / Bybit connector / live auth write / order placement / DB writer). Cross-platform (macOS BSD nm + Linux GNU nm). |
-| `test_replay_runner_symbol_audit.sh` | Mock-based bash test harness for the audit script (5 cases: clean / forbidden hit / nm absent / binary missing / multi-class hit). |
+| `replay_runner_symbol_audit.sh` | REF-20 Wave 3 R20-P2b-S10 — 以 `nm --demangle` 掃描未剝除的 `replay_runner` debug 產物的完整符號表，確認沒有任何一類禁用符號（Decision Lease / IPC server / exchange pipeline / Bybit connector / live auth write / order placement / DB writer）。Darwin 與 Linux 用同一組旗標。 |
+| `test_replay_runner_symbol_audit.sh` | 稽核腳本的模擬測試（28 項）。以替換 PATH 上的 `nm`、`uname`、`cargo` 來測，不做真正的建置。 |
 
 ## Three-Layer Defense
 
@@ -21,7 +21,7 @@ REF-20 V3 §3 G7/G8 mandates three independent isolation layers for the
 |---|---|---|---|
 | L1 compile-time | Cargo `replay_isolated` feature gate + `[[bin]] required-features` | `Cargo.toml` | Wave 1 R20-P0-T2 |
 | L2 runtime | `ReplayProfile::Isolated` enum guard + `enforce_isolated_or_panic()` | `rust/.../replay/profile.rs` | Wave 3 R20-P2b-S7 |
-| **L3 binary symbol** | **`nm` / `objdump` symbol grep on stripped release artifact** | **`replay_runner_symbol_audit.sh`** | **Wave 3 R20-P2b-S10 (this dir)** |
+| **L3 binary symbol** | **`nm` symbol scan of the unstripped debug artifact（release 產物已剝除符號，掃它沒有偵測力）** | **`replay_runner_symbol_audit.sh`** | **Wave 3 R20-P2b-S10 (this dir)** |
 
 Any single layer breach shall be rejected; **all three** must pass.
 
@@ -42,13 +42,19 @@ This check is wired into `.github/workflows/ci.yml` as
 ## `replay_runner_symbol_audit.sh` Usage
 
 ```bash
-# Default: build replay_runner --release --features replay_isolated, then audit
+# 預設：建置 replay_runner 的 debug 產物（--features replay_isolated，不剝除符號）後稽核
 bash helper_scripts/ci/replay_runner_symbol_audit.sh
 
-# Skip rebuild (use existing binary)
+# 離線建置（cargo 原生支援的環境變數）
+CARGO_NET_OFFLINE=true bash helper_scripts/ci/replay_runner_symbol_audit.sh
+
+# 正向控制：逐類確認禁用樣式能命中樣本；不建置，也不讀執行檔
+bash helper_scripts/ci/replay_runner_symbol_audit.sh --self-test
+
+# 不建置，稽核既有的執行檔（受審檔是否對應目前源碼由呼叫端負責）
 SKIP_BUILD=1 bash helper_scripts/ci/replay_runner_symbol_audit.sh
 
-# Override binary path (for CI matrix with prebuilt artifacts)
+# 指定受審檔
 REPLAY_RUNNER_BIN=/path/to/replay_runner \
     bash helper_scripts/ci/replay_runner_symbol_audit.sh
 ```
@@ -57,22 +63,24 @@ REPLAY_RUNNER_BIN=/path/to/replay_runner \
 
 | Code | Meaning |
 |---|---|
-| 0 | AUDIT PASS — no forbidden symbol detected |
-| 1 | AUDIT FAIL — at least one forbidden symbol class hit |
-| 2 | BUILD FAIL — `cargo build` returned non-zero |
-| 3 | NM NOT FOUND — `nm` toolchain absent on `$PATH` (or unsupported OS) |
-| 4 | BINARY NOT FOUND — expected `target/release/replay_runner` missing |
+| 0 | AUDIT PASS — 沒有禁用符號；`--self-test` 時代表正向控制成立 |
+| 1 | AUDIT FAIL — 至少一類禁用符號命中 |
+| 2 | BUILD FAIL — `cargo build` 失敗 |
+| 3 | NM NOT FOUND — `$PATH` 上沒有 `nm` |
+| 4 | BINARY NOT FOUND — 找不到 `target/debug/replay_runner`（或指定的受審檔） |
+| 5 | INCONCLUSIVE — 無法判定：空符號表、已剝除、未解碼、缺定位符號、樣式無法評估、樣式清單為空、不支援的作業系統，或設了會改變建置輸出位置的環境變數；`--self-test` 時代表正向控制不成立 |
+| 64 | USAGE — 不認得的參數 |
 
-### Cross-platform behavior (per Wave 2 dispatch §2 ambiguity #5)
+5 不是通過。空的或已剝除的符號表沒有任何證明力，所以不得回報 0。
 
-| OS | `uname -s` | nm flags | CI priority |
-|---|---|---|---|
-| macOS (aarch64-apple-darwin / Apple Silicon) | `Darwin` | `nm -gU` (BSD: external + defined only) | **primary** |
-| Linux (x86_64 / linux-arm64) | `Linux` | `nm --extern-only --defined-only` (GNU binutils) | secondary |
-| Other | other | exit 3 (fail-closed; no false-PASS) | n/a |
+### 掃描方式
 
-Apple llvm-nm also accepts GNU flags, but we use BSD-style on Darwin for
-compatibility with raw BSD nm shipped on classic macOS toolchains.
+Darwin 與 Linux 都用 `nm --demangle` 傾印完整符號表（含非對外與未定義符號）；其他作業系統回 5。
+
+- **定位符號**：符號表裡必須同時有 `openclaw_engine::` 與 `replay_runner::`，以原始輸出比對。未解碼的函式名稱不含 `::`，所以這也確認了解碼有生效。
+- **正規化**：`nm` 對泛型參數與 trait 實作裡的路徑輸出 `a..b..c`。樣式比對前先把 `..` 統一成 `::`，帶 `::` 的禁用樣式才不會漏掉只以這種形式出現的路徑。
+- **受審檔**：稽核訊息會印出受審檔的 SHA-256。設了 `CARGO_TARGET_DIR`、`CARGO_BUILD_TARGET_DIR` 或 `CARGO_BUILD_TARGET` 而沒有指定 `REPLAY_RUNNER_BIN` 時，
+  建置產物不在預設路徑，腳本在建置前回 5，不會去稽核預設路徑上的舊檔。cargo 設定檔裡的 target-dir 偵測不到。
 
 ### Forbidden symbol classes
 
@@ -91,32 +99,18 @@ place_order | cancel_order | amend_order  # single write entry §1
 canary_writer::write | database::writer   # DB writer channels
 ```
 
-Any hit ≥ 1 → exit 1 with sample log line per class (top-5).
+任何一類命中即回 1，並列出該類全部命中的符號。
 
-## CI Integration Examples
+這份清單是這層防線的政策；`--self-test` 為每一類各帶一筆樣本，新增或調整樣式時要同步更新樣本。
 
-### GitHub Actions
+## CI Integration
 
-```yaml
-name: replay_runner_symbol_audit
-on:
-  pull_request:
-    paths:
-      - 'rust/openclaw_engine/**'
-      - 'helper_scripts/ci/replay_runner_symbol_audit.sh'
+這支稽核**目前沒有接進** `.github/workflows/ci.yml`（接進去的只有另一條產品線的 `ibkr_g4_symbol_audit.sh`）。它與它的模擬測試只在本機執行過，Linux 分支只有模擬。
+接進 CI 時要注意：
 
-jobs:
-  audit:
-    strategy:
-      matrix:
-        os: [macos-14, ubuntu-22.04]   # macOS primary, Linux secondary
-    runs-on: ${{ matrix.os }}
-    steps:
-      - uses: actions/checkout@v4
-      - uses: dtolnay/rust-toolchain@stable
-      - name: Run replay_runner symbol audit
-        run: bash helper_scripts/ci/replay_runner_symbol_audit.sh
-```
+- 正向控制（`--self-test`）與實跑要在同一個工作裡都執行；實跑本身不要求先跑過正向控制。
+- 不要用 `SKIP_BUILD` 或 `REPLAY_RUNNER_BIN`，兩者都不驗證受審檔與目前源碼的關係。
+- 稽核的是 debug 產物、`replay_isolated` 這一組 feature；建置指令沒有 `--locked`。
 
 ### Cron / scheduled
 
@@ -143,23 +137,15 @@ fi
 bash helper_scripts/ci/test_replay_runner_symbol_audit.sh
 ```
 
-Expected output:
+每個案例印一行 `T<N> … PASS` 或 `FAIL`，最後是：
 
 ```
-=== replay_runner_symbol_audit.sh test harness ===
-T1 clean_symbols → exit 0 PASS
-T2 acquire_lease hit → exit 1 PASS
-T3 nm absent → exit 3 PASS
-T4 binary missing → exit 4 PASS
-T5 multi-class hit → exit 1 PASS
-PASS: 5 / FAIL: 0 / total: 5
+PASS: 28 / FAIL: 0 / total: 28
 ALL TESTS PASS
 ```
 
-The harness mocks `nm` via shim binary in a tmpdir, so it does **not**
-trigger the slow `cargo build --release` step (~30-60s on Mac M-series).
-Real binary verification belongs to the CI matrix; this harness only
-proves audit logic correctness for known symbol input fixtures.
+測試以暫存目錄裡的替身取代 `nm`、`uname` 與 `cargo`，不做真正的建置。它只證明稽核邏輯對已知的符號輸入是對的；
+對真實執行檔的驗證要另外實跑稽核。Linux 案例是在 macOS 上假造 `uname`，不是真的 GNU `nm`。
 
 ## Spec References
 

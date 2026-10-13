@@ -1,7 +1,7 @@
 # 玄衡 TODO - 活躍派發佇列
 
-**版本** v889 | **校準日期** 2026-10-01（v885–v889 於 2026-10-09 至 10-12 只新增並更新文末 R8 的兩節，其餘未重新校準） | **source 觀察基線** `52a884d93f774a5f625a7d2db4ebe6e2ec95b23a`（GitHub／Mac main 相同，包含 PR196／PR198；本次跳過 Linux，runtime 限制見 §0）。
-**當前狀態**：AIML／workflow 均零 ACTIVE；workflow 選定 source 已採用，見下方 CLOSED 紀錄；原總帳仍歸檔，W11 等待下一個 Operator 指定的真實產品功能。S2E=5/9、effect=0/6、authority=0/9，LW2 WAITING。R8 階段 1（回放修補）的 source 已交付並結案；後續六個小單元在文末為 ACTIVE；階段 2 因 Linux 離線暫不進行。
+**版本** v890 | **校準日期** 2026-10-01（v885–v890 於 2026-10-09 至 10-14 只新增並更新文末 R8 的兩節，其餘未重新校準） | **source 觀察基線** `52a884d93f774a5f625a7d2db4ebe6e2ec95b23a`（GitHub／Mac main 相同，包含 PR196／PR198；本次跳過 Linux，runtime 限制見 §0）。
+**當前狀態**：AIML／workflow 均零 ACTIVE；workflow 選定 source 已採用，見下方 CLOSED 紀錄；原總帳仍歸檔，W11 等待下一個 Operator 指定的真實產品功能。S2E=5/9、effect=0/6、authority=0/9，LW2 WAITING。R8 階段 1（回放修補）與其後續六個小單元的 source 已交付並結案；階段 2 在文末為 WAITING，等 Operator 指示。
 **證據與歷史**：當前 source／PR／runtime 限制見 §0；完整逐項 [audit](docs/references/2026-09-09--todo-workflow-freshness-audit.md)、[v880 快照](docs/archive/2026-09-09--todo-v880-pre-freshness-audit.md)、[版本日誌](docs/CLAUDE_CHANGELOG.md)。
 
 <details>
@@ -622,19 +622,33 @@ A 至 D 已實作並經獨立審查。本列與 source 由同一個 PR 進入 ma
 Linux 主機於 2026-10-11 離線（Operator 告知），階段 2 暫不進行。
 runbook「已知限制與後續項」所列各項與 PR #206 自動審查提出的各點，已拆成下一節的六個小單元；其中 U1、U2、U3 須在階段 3 使用增益閘門之前完成。
 
-## R8 階段 1 後續小單元（2026-10-12；ACTIVE）
+## R8 階段 1 後續小單元（2026-10-14；CLOSED）
 
 Operator 於 2026-10-11 指示把階段 1 的後續項拆成小單元，一次交給原實作的執行者（路線事件 `RH-20261012-01`）。
-六個單元互相獨立、檔案不重疊，各自一個交付、一個 PR；指令見 [後續小單元派工指令](docs/execution_plan/2026-10-12--r8-stage1-followup-units-dispatch.md)。
-執行者不改本檔；各列的證據更新與收尾由記錄者在各單元的 PR 合併之後處理。本節與派工指令由同一個 PR 進入 main，在 main 上出現之後才生效。
+實作者於 2026-10-12 完成六個單元；它自己的流程走完兩個（U4、U6），其餘四個卡在該流程的獨立測試驗證，補丁被保留。
+Operator 於 2026-10-13 裁決改由另一執行者獨立審查並發布，小修由該執行者處理，條件滿足即合併（路線事件 `RH-20261014-01`）。
+U6 已由 PR #209 進入 main（merge commit `e87ed25df`）。U1 至 U5 與本節由同一個 PR（#210）進入 main，合併之前不算交付；PR #208 由 PR #210 取代。
+實作者各交付的准入帳本與審查狀態沒有被更動。沒有 runtime、Linux 主機、資料庫、Demo 或交易效果。
 
-### ACTIVE
+證據（2026-10-14，提交 `4aa12e6f3`，乾淨工作樹）：本機 Mac 離線，回放單元 117、回放整合 85、執行檔單元 9、
+Python 工具 101、簽名相關 26、符號稽核模擬測試 28，皆 0 失敗；GitHub 代管的 Linux runner 在同一提交上執行回放測試（單元 117、整合 83、執行檔單元 9、Python 101），全數通過，與本機的差異見 runbook「最終驗證」。
+獨立審查：代碼審查與安全審查的初審皆為 PASS_WITH_NOTES，測試驗證的初審為 FAIL（2 項合併前必補）；修正後四份複核皆為 PASS_WITH_NOTES。指令見 [後續小單元派工指令](docs/execution_plan/2026-10-12--r8-stage1-followup-units-dispatch.md)；
+審查結果、驗證細節、使用要求與已知限制見 [runbook](docs/runbooks/r8_stage1_replay_patches.md)。
+
+### CLOSED
 
 | ID | 優先級 | 狀態 | Owner 路徑 | 驗收條件 | 最新證據 | 具名解除條件／下一步 |
 |---|---:|---|---|---|---|---|
-| `P1-R8-S1F-U1-ANALYTICS` | 1 | ACTIVE；`dispatchable=true`；work status=NOT_STARTED | 交付 `R8-S1F-ANALYTICS-20261012`；流程依當時的路由派生，不預填角色鏈 | 派工指令 §3 U1：分析工具以最後一根 K 線的收盤時間檢查未平倉部位是否跨結算點，收緊 `crossing_check_exact`，拒絕非完成狀態的報告。須在階段 3 之前完成 | 2026-10-11 Operator 指示（路線事件 `RH-20261012-01`）；尚無執行證據 | 依派工指令執行並開 PR |
-| `P1-R8-S1F-U2-REPLAY-GUARDS` | 1 | ACTIVE；`dispatchable=true`；work status=NOT_STARTED | 交付 `R8-S1F-REPLAY-GUARDS-20261012`；流程依當時的路由派生，不預填角色鏈 | 派工指令 §3 U2：執行前核對 fixture 雜湊、`next_symbol_open` 要求全域時間不遞減、帶覆寫而無策略即拒絕；另四項穩健性。須在階段 3 之前完成 | 2026-10-11 Operator 指示（路線事件 `RH-20261012-01`）；尚無執行證據 | 依派工指令執行並開 PR |
-| `P1-R8-S1F-U3-MANIFEST-TOOL` | 1 | ACTIVE；`dispatchable=true`；work status=NOT_STARTED | 交付 `R8-S1F-MANIFEST-TOOL-20261012`；流程依當時的路由派生，不預填角色鏈 | 派工指令 §3 U3：manifest 工具核對資料層與 fixture 來源、以檔案系統身分保護輸入檔。須在階段 3 之前完成 | 2026-10-11 Operator 指示（路線事件 `RH-20261012-01`）；尚無執行證據 | 依派工指令執行並開 PR |
-| `P2-R8-S1F-U4-BINARY-TESTS` | 2 | ACTIVE；`dispatchable=true`；work status=NOT_STARTED | 交付 `R8-S1F-BINARY-TESTS-20261012`；流程依當時的路由派生，不預填角色鏈 | 派工指令 §4 U4：經 `replay_runner` 的測試，只寫測試 | 2026-10-11 Operator 指示（路線事件 `RH-20261012-01`）；尚無執行證據 | 依派工指令執行並開 PR |
-| `P2-R8-S1F-U5-SYMBOL-AUDIT` | 2 | ACTIVE；`dispatchable=true`；work status=NOT_STARTED | 交付 `R8-S1F-SYMBOL-AUDIT-20261012`；流程依當時的路由派生，不預填角色鏈 | 派工指令 §4 U5：回放的禁用符號稽核改為稽核未剝除的產物，符號表無內容時不得回報通過 | 2026-10-11 Operator 指示（路線事件 `RH-20261012-01`）；尚無執行證據 | 依派工指令執行並開 PR |
-| `P2-R8-S1F-U6-CI-REPLAY` | 2 | ACTIVE；`dispatchable=true`；work status=NOT_STARTED | 交付 `R8-S1F-CI-REPLAY-20261012`；流程依當時的路由派生，不預填角色鏈 | 派工指令 §4 U6：GitHub CI 在回放相關路徑變動時執行回放測試，只用 Linux 標準 runner | 2026-10-11 Operator 指示（路線事件 `RH-20261012-01`）；尚無執行證據 | 依派工指令執行並開 PR |
+| `P1-R8-S1F-U1-ANALYTICS` | 1 | CLOSED；work status=DONE_WITH_CONCERNS（source 隨 PR #210 合併交付；沒有 runtime 採用；已知限制見 runbook） | 實作：交付 `R8-S1F-ANALYTICS-20261012`，准入時沒有建立交付記錄，未經該流程審查，補丁保留。獨立審查與發布：依 Operator 2026-10-13 的裁決由另一執行者完成（路線事件 `RH-20261014-01`） | 派工指令 §3 U1：分析工具以最後一根 K 線的收盤時間檢查未平倉部位是否跨結算點，收緊 `crossing_check_exact`，拒絕非完成狀態的報告 | 見本節上方與 [runbook](docs/runbooks/r8_stage1_replay_patches.md)「後續小單元」一節 | — |
+| `P1-R8-S1F-U2-REPLAY-GUARDS` | 1 | CLOSED；work status=DONE_WITH_CONCERNS（source 隨 PR #210 合併交付；沒有 runtime 採用；已知限制見 runbook） | 實作：交付 `R8-S1F-REPLAY-GUARDS-20261012`，代碼審查的程序中途被終止而無結論，補丁保留。獨立審查與發布：依 Operator 2026-10-13 的裁決由另一執行者完成（路線事件 `RH-20261014-01`） | 派工指令 §3 U2：執行前核對 fixture 雜湊、`next_symbol_open` 要求全域時間不遞減、帶覆寫而無策略即拒絕；另四項穩健性。其中「啟用擴充之後再設非零延遲」一種誤用依指令的但書列為未完成 | 見本節上方與 [runbook](docs/runbooks/r8_stage1_replay_patches.md)「後續小單元」一節 | — |
+| `P1-R8-S1F-U3-MANIFEST-TOOL` | 1 | CLOSED；work status=DONE_WITH_CONCERNS（source 隨 PR #210 合併交付；沒有 runtime 採用；已知限制見 runbook） | 實作：交付 `R8-S1F-MANIFEST-TOOL-20261012`，代碼審查通過，測試驗證在該流程無法執行，補丁保留。獨立審查與發布：依 Operator 2026-10-13 的裁決由另一執行者完成（路線事件 `RH-20261014-01`） | 派工指令 §3 U3：manifest 工具核對資料層與 fixture 來源、以檔案系統身分保護輸入檔 | 見本節上方與 [runbook](docs/runbooks/r8_stage1_replay_patches.md)「後續小單元」一節 | — |
+| `P2-R8-S1F-U4-BINARY-TESTS` | 2 | CLOSED；work status=DONE（source 隨 PR #210 合併交付；沒有 runtime 採用） | 實作：交付 `R8-S1F-BINARY-TESTS-20261012`，經該流程的代碼審查後以 PR #208 發布。PR #208 的自動審查留言與後續補強由另一執行者在 PR #210 處理，PR #208 由 PR #210 取代 | 派工指令 §4 U4：經 `replay_runner` 的測試，只寫測試 | 見本節上方與 [runbook](docs/runbooks/r8_stage1_replay_patches.md)「後續小單元」一節 | — |
+| `P2-R8-S1F-U5-SYMBOL-AUDIT` | 2 | CLOSED；work status=DONE_WITH_CONCERNS（source 隨 PR #210 合併交付；沒有 runtime 採用；已知限制見 runbook） | 實作：交付 `R8-S1F-SYMBOL-AUDIT-20261012`，代碼審查通過，測試驗證在該流程無法執行、安全審查未執行，補丁保留。獨立審查與發布：依 Operator 2026-10-13 的裁決由另一執行者完成（路線事件 `RH-20261014-01`） | 派工指令 §4 U5：回放的禁用符號稽核改為稽核未剝除的產物，符號表無內容時不得回報通過。稽核尚未接進 CI | 見本節上方與 [runbook](docs/runbooks/r8_stage1_replay_patches.md)「後續小單元」一節 | — |
+| `P2-R8-S1F-U6-CI-REPLAY` | 2 | CLOSED；work status=DONE（source 已交付；沒有 runtime 採用） | 實作：交付 `R8-S1F-CI-REPLAY-20261012`，經該流程的代碼審查與測試驗證後以 PR #209 發布。自動審查留言的修正與合併由另一執行者完成 | 派工指令 §4 U6：GitHub CI 在回放相關路徑變動時執行回放測試，只用 Linux 標準 runner | 見本節上方與 [runbook](docs/runbooks/r8_stage1_replay_patches.md)「後續小單元」一節 | — |
+
+### WAITING
+
+| ID | 優先級 | 狀態 | Owner 路徑 | 驗收條件 | 最新證據 | 具名解除條件／下一步 |
+|---|---:|---|---|---|---|---|
+| `P1-R8-STAGE2-INSTRUMENT-VALIDATION` | 1 | WAITING；`dispatchable=false` | Operator 決定；PM 拆單元並派工 | [R8 修訂一](docs/decisions/2026-10-08--r8-amendment-1-first-loop-on-native-replay.md) §5 階段 2（儀器驗證）。第一層的事件級檢查用本機 fixture 即可進行；第二層的 Demo 對帳需要 Linux 唯讀資料與運行環境的生效參數；第三層是獨立期間的成本壓力測試 | 2026-10-14：階段 1 與後續單元已交付；Linux 主機自 2026-10-11 離線（Operator 告知），本次未重新確認 | 等 Operator 指示開始；第二層另需 Operator 決定 Linux 唯讀存取的授權與路徑（修訂一列為未決）。記錄者另註，不是修訂一的條文：開發機上目前只有一日的公開行情，第三層所需的獨立期間資料要另行取得，取數是對外請求，記錄者認為應先取得 Operator 同意。不自動派發 |
+| `P2-R8-S1F-REVIEW-FOLLOWUPS` | 2 | DEFERRED；`dispatchable=false` | PM | runbook「後續小單元」一節「已知限制與後續項」所列各項，包含把符號稽核接進 CI、禁用樣式清單對現行模組的檢視、報告記錄實際執行的 fixture 雜湊 | 2026-10-14：四份獨立審查的註記，見 runbook | PM 在階段 2 派工時逐項決定是否排入。改動禁用樣式清單、為「啟用擴充之後再設延遲」新增公開錯誤型別兩項，須先由 Operator 決定 |
