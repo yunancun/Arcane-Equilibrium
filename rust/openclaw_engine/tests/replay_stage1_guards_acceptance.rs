@@ -114,6 +114,17 @@ fn binary_missing_fixture_keeps_typed_error_with_path() {
     rejected(&c, "fixture.json");
 }
 #[test]
+fn binary_non_string_fixture_hash_is_rejected() {
+    let c = BinaryCase::new(vec![event(1, "BTCUSDT")]);
+    for value in [json!(123), Value::Null, json!(["ab"])] {
+        let mut body = c.body();
+        body["strategy"] = json!("ma_crossover");
+        body["parameter_provenance"] = json!({"fixture":{"sha256":value}});
+        c.sign(body);
+        rejected(&c, "fixture sha256 must be a string");
+    }
+}
+#[test]
 fn binary_legacy_without_hash_still_runs() {
     let c = BinaryCase::new(vec![event(1, "BTCUSDT")]);
     c.sign(c.body());

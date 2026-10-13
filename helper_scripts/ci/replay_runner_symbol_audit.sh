@@ -69,8 +69,9 @@
 #                        或無法確定建置產物的位置
 #     64 USAGE — 不認得的參數（只接受 `--self-test`）
 #
-#   正向控制：`--self-test` 逐類確認每一條禁用樣式都能命中自己的樣本，並確認乾淨
-#   樣本不被命中；全部成立回 0，否則回 5。不建置、不讀執行檔。
+#   正向控制：`--self-test` 逐類確認每一條禁用樣式都能命中自己的樣本，確認乾淨
+#   樣本不被命中，並確認泛型參數形式（`a..b`）的禁用路徑也會被命中；全部成立回 0，
+#   否則回 5。不建置、不讀執行檔。
 #
 #   契約來源：見 EN 區段 Spec source 列。
 # ─────────────────────────────────────────────────────────────────────────────
@@ -138,10 +139,10 @@ build_binary() {
         return 0
     fi
 
-    # 這兩個變數會改變 cargo 的輸出位置；此時預設路徑上若留有舊產物，稽核它等於誤報通過。
-    # （.cargo/config 的 target-dir 設定偵測不到，屬已知限制。）
-    if [[ -z "${REPLAY_RUNNER_BIN:-}" && ( -n "${CARGO_TARGET_DIR:-}" || -n "${CARGO_BUILD_TARGET:-}" ) ]]; then
-        log "INCONCLUSIVE: CARGO_TARGET_DIR or CARGO_BUILD_TARGET is set; cannot locate the artifact this build produces"
+    # 這三個變數會改變 cargo 的輸出位置；此時預設路徑上若留有舊產物，稽核它等於誤報通過。
+    # （cargo 設定檔裡的 target-dir 偵測不到，屬已知限制。）
+    if [[ -z "${REPLAY_RUNNER_BIN:-}" && ( -n "${CARGO_TARGET_DIR:-}" || -n "${CARGO_BUILD_TARGET_DIR:-}" || -n "${CARGO_BUILD_TARGET:-}" ) ]]; then
+        log "INCONCLUSIVE: CARGO_TARGET_DIR, CARGO_BUILD_TARGET_DIR or CARGO_BUILD_TARGET is set; cannot locate the artifact this build produces"
         log "  hint: unset them, or point REPLAY_RUNNER_BIN at the artifact that was just built"
         exit 5
     fi
@@ -190,13 +191,14 @@ check_binary() {
     fi
     log "binary path: $BIN_PATH"
     # 記下受審檔的雜湊，事後才能對出稽核的是哪一份產物。
+    # 雜湊只供事後對照；算不出來時照實記錄並繼續，讀不到的檔案會在傾印符號時回 5。
     local digest="unavailable"
     if command -v sha256sum >/dev/null 2>&1; then
-        digest="$(sha256sum "$BIN_PATH" | cut -d' ' -f1)"
+        digest="$(sha256sum "$BIN_PATH" | cut -d' ' -f1)" || digest="unavailable"
     elif command -v shasum >/dev/null 2>&1; then
-        digest="$(shasum -a 256 "$BIN_PATH" | cut -d' ' -f1)"
+        digest="$(shasum -a 256 "$BIN_PATH" | cut -d' ' -f1)" || digest="unavailable"
     fi
-    log "binary sha256: $digest"
+    log "binary sha256: ${digest:-unavailable}"
 }
 
 # ──────────────────────────────────────────────────────────────────────
@@ -301,8 +303,17 @@ declare -a SELF_TEST_SAMPLES=(
     '0 t database::writer::flush'
 )
 
-# 定位符號：解碼後的引擎與入口命名空間。必須帶 `::`，未解碼的名稱不含它，
-# 因此這項檢查同時證明 `nm --demangle` 確實生效（否則帶 `::` 的禁用樣式會全部失效）。
+# 泛型參數形式的樣本。llvm-nm 對泛型參數與 trait 實作裡的路徑輸出 `a..b..c`（舊式編碼的
+# `..` 沒有被還原成 `::`），帶 `::` 的禁用樣式必須在正規化之後仍能命中這種形式。
+declare -a SELF_TEST_GENERIC_SAMPLES=(
+    '0 t core::ptr::drop_in_place$LT$openclaw_engine..ipc_server..Server$GT$::h0123456789abcdef'
+    '0 t core::ops::function::FnOnce::call_once$LT$openclaw_engine..canary_writer..write$GT$'
+    '0 t core::ptr::drop_in_place$LT$openclaw_engine..database..writer..Handle$GT$::h0123456789abcdef'
+)
+
+# 定位符號：解碼後的引擎與入口命名空間。必須帶 `::`；未解碼的函式名稱不含它，
+# 所以這項檢查能證明 `nm --demangle` 對一般函式名稱生效。它以原始輸出比對，不用正規化後的文字：
+# 未解碼的名稱在泛型參數裡同樣帶 `..`，正規化後會被誤認成已解碼。
 declare -a ANCHOR_SYMBOLS=('openclaw_engine::' 'replay_runner::')
 
 # ──────────────────────────────────────────────────────────────────────
@@ -313,6 +324,10 @@ audit_symbols() {
     # Dump symbols once, grep multiple times against same input
     # (avoid repeated nm invocations).
     local symbols
+    if [[ "${#FORBIDDEN_PATTERNS[@]}" -eq 0 ]]; then
+        log "INCONCLUSIVE: no forbidden pattern is defined"
+        exit 5
+    fi
     if [[ "$#" -gt 0 ]]; then
         symbols="$1"
     elif ! symbols="$(dump_symbols)"; then
@@ -336,6 +351,14 @@ audit_symbols() {
     done
     log "symbol count: $total_lines; anchors present"
 
+    # 樣式比對用正規化後的文字：把泛型參數與 trait 實作裡的 `..` 統一成 `::`，
+    # 否則只以這種形式出現的禁用路徑不會被帶 `::` 的樣式命中。
+    local normalised
+    if ! normalised="$(printf '%s\n' "$symbols" | sed 's/\.\./::/g')"; then
+        log "INCONCLUSIVE: could not normalise the symbol table"
+        exit 5
+    fi
+
     local fail_count=0
     local pattern label hits sample status
 
@@ -343,8 +366,9 @@ audit_symbols() {
         # grep 的結束碼：0 有命中、1 無命中、2 以上是樣式或讀取錯誤。
         # 錯誤不得當成「無命中」，否則壞掉的樣式會讓該類永遠乾淨。
         status=0
-        hits="$(grep -cE -- "$pattern" <<< "$symbols")" || status=$?
-        if [[ "$status" -ge 2 ]]; then
+        hits="$(grep -cE -- "$pattern" <<< "$normalised")" || status=$?
+        # 結束碼 1 而命中數不是 0，代表 grep 根本沒有正常執行（例如輸入重導向失敗）。
+        if [[ "$status" -ge 2 || ( "$status" -eq 1 && "$hits" != "0" ) ]]; then
             log "INCONCLUSIVE: pattern could not be evaluated (grep exit $status): $pattern"
             exit 5
         fi
@@ -353,7 +377,7 @@ audit_symbols() {
             label="$(printf '%s' "$pattern" | tr '|' ',' | head -c 60)"
             log "FORBIDDEN HIT [$label]: $hits symbol(s)"
             # 保留完整命中清單；不接 head，避免大符號表的 SIGPIPE 蓋掉 exit 1。
-            sample="$(grep -E -- "$pattern" <<< "$symbols" || true)"
+            sample="$(grep -E -- "$pattern" <<< "$normalised" || true)"
             printf '%s\n' "$sample" | while IFS= read -r line; do
                 log "  | $line"
             done
@@ -414,7 +438,16 @@ self_test() {
         log "INCONCLUSIVE: positive control was not detected (inner exit $control_exit)"
         exit 5
     fi
-    log "SELF-TEST PASS: ${#FORBIDDEN_PATTERNS[@]} classes detected their samples; clean control passed"
+    # 四、泛型參數形式的樣本逐筆走完整流程，各自必須判定失敗（確認正規化有效）。
+    for sample in "${SELF_TEST_GENERIC_SAMPLES[@]}"; do
+        control_exit=0
+        ( audit_symbols "$clean"$'\n'"$sample" ) || control_exit=$?
+        if [[ "$control_exit" -ne 1 ]]; then
+            log "INCONCLUSIVE: generic-argument form was not detected (inner exit $control_exit): $sample"
+            exit 5
+        fi
+    done
+    log "SELF-TEST PASS: ${#FORBIDDEN_PATTERNS[@]} classes detected their samples; clean control passed; ${#SELF_TEST_GENERIC_SAMPLES[@]} generic-argument forms detected"
     exit 0
 }
 

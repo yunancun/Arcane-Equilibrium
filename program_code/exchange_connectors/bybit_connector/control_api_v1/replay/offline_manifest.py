@@ -69,9 +69,12 @@ def build_signed_manifest(*, repo_root: Path, fixture: Path, key_file: Path, out
     # 覆寫保護使用來源的實際路徑與檔案身分，與本文的紀錄路徑分開保存。
     source_paths = []
     if snapshot is not None:
-        params = json.loads(snapshot.read_text())
-        sources.append(_source(snapshot))
-        source_paths.append(snapshot.resolve(strict=True))
+        # 與 fixture 相同：解析的內容與記錄的雜湊來自同一份位元組。
+        snapshot_path = snapshot.resolve(strict=True)
+        snapshot_bytes = snapshot_path.read_bytes()
+        params = json.loads(snapshot_bytes)
+        sources.append({"path": str(snapshot_path), "sha256": hashlib.sha256(snapshot_bytes).hexdigest()})
+        source_paths.append(snapshot_path)
         provenance_kind = "caller_snapshot"
     else:
         # 既有載入器以環境變數定位；僅在同步本機組裝期間覆寫並還原。

@@ -326,7 +326,7 @@ test_cargo_output_override_is_inconclusive() {
     # 模擬 cargo 一被呼叫就留下記號：防護必須在建置之前結束。
     printf '#!/bin/bash\n: > %q\nexit 0\n' "$tmpdir/cargo_was_called" >"$mock_path/cargo"
     chmod +x "$mock_path/cargo"
-    env -u REPLAY_RUNNER_BIN -u SKIP_BUILD -u CARGO_TARGET_DIR -u CARGO_BUILD_TARGET \
+    env -u REPLAY_RUNNER_BIN -u SKIP_BUILD -u CARGO_TARGET_DIR -u CARGO_BUILD_TARGET_DIR -u CARGO_BUILD_TARGET \
         "$variable=$tmpdir/elsewhere" PATH="$mock_path:$PATH" \
         bash "$AUDIT_SCRIPT" >/dev/null 2>&1 || actual_exit=$?
     [[ "$actual_exit" -eq 5 && ! -e "$tmpdir/cargo_was_called" ]]
@@ -370,6 +370,37 @@ test_self_test_requires_one_sample_per_class() {
     local actual_exit=0
     sourced_self_test_passes_unmodified || return 1
     ( source "$AUDIT_SCRIPT"; FORBIDDEN_PATTERNS+=('new_forbidden_class'); main --self-test ) >/dev/null 2>&1 || actual_exit=$?
+    [[ "$actual_exit" -eq 5 ]]
+}
+
+# 未解碼、但泛型參數裡帶 `..` 的符號表：正規化後會出現 `openclaw_engine::` 字樣，
+# 定位檢查必須仍以原始輸出判定為未解碼。
+MANGLED_GENERIC_SYMBOLS='0000000100001900 t __ZN4core3ptr70drop_in_place$LT$openclaw_engine..replay..runner..IsolatedPipeline$GT$17h0123456789abcdefE
+0000000100002000 T __ZN4core3ptr50drop_in_place$LT$replay_runner..cli..Args$GT$17h0123456789abcdefE'
+
+# 禁用路徑只以泛型參數形式出現（`a..b`）：必須命中。
+GENERIC_FORM_FORBIDDEN_SYMBOLS="$CLEAN_SYMBOLS"'
+0000000100099300 t core::ptr::drop_in_place$LT$openclaw_engine..ipc_server..Server$GT$::h0123456789abcdef'
+
+test_generic_form_is_detected() {
+    local tmpdir mock_path mock_bin
+    tmpdir="$(make_tmpdir)"
+    trap "rm -rf '$tmpdir'" RETURN
+    mock_path="$(make_mock_nm "$tmpdir" "$GENERIC_FORM_FORBIDDEN_SYMBOLS")"
+    mock_bin="$(make_mock_binary "$tmpdir")"
+    run_audit 1 "$mock_path" "$mock_bin"
+}
+test_empty_pattern_list_is_inconclusive() {
+    local actual_exit=0
+    sourced_audit_passes_unmodified || return 1
+    ( source "$AUDIT_SCRIPT"; FORBIDDEN_PATTERNS=(); audit_symbols "$CLEAN_SYMBOLS" ) >/dev/null 2>&1 || actual_exit=$?
+    [[ "$actual_exit" -eq 5 ]]
+}
+test_self_test_detects_ineffective_normalisation() {
+    local actual_exit=0
+    sourced_self_test_passes_unmodified || return 1
+    # 把 sed 換成原樣輸出：正規化失效時，泛型參數形式的樣本不再被命中。
+    ( source "$AUDIT_SCRIPT"; sed() { cat; }; main --self-test ) >/dev/null 2>&1 || actual_exit=$?
     [[ "$actual_exit" -eq 5 ]]
 }
 
@@ -440,10 +471,20 @@ main() {
     record_test "T22 self-test: over-broad class hits clean control → exit 5" "$outcome"
     outcome=0; ( test_self_test_requires_one_sample_per_class ) || outcome=$?
     record_test "T23 self-test: class without a sample → exit 5" "$outcome"
+    outcome=0; ( test_cargo_output_override_is_inconclusive CARGO_BUILD_TARGET_DIR ) || outcome=$?
+    record_test "T24 CARGO_BUILD_TARGET_DIR set → exit 5 before building" "$outcome"
+    outcome=0; ( test_generic_form_is_detected ) || outcome=$?
+    record_test "T25 forbidden path only in generic-argument form → exit 1" "$outcome"
+    outcome=0; ( test_symbol_table_rejected "$MANGLED_GENERIC_SYMBOLS" ) || outcome=$?
+    record_test "T26 mangled table with generic-argument paths → exit 5" "$outcome"
+    outcome=0; ( test_empty_pattern_list_is_inconclusive ) || outcome=$?
+    record_test "T27 empty pattern list → exit 5" "$outcome"
+    outcome=0; ( test_self_test_detects_ineffective_normalisation ) || outcome=$?
+    record_test "T28 self-test: normalisation ineffective → exit 5" "$outcome"
 
     # Summary / 結尾總結
     printf '\n--- summary ---\n'
-    printf 'PASS: %d / FAIL: %d / total: 23\n' \
+    printf 'PASS: %d / FAIL: %d / total: 28\n' \
         "$PASS_COUNT" "$FAIL_COUNT"
 
     if [[ "$FAIL_COUNT" -gt 0 ]]; then
