@@ -44,6 +44,7 @@ jobs:
       schema: ${{ steps.classify.outputs.schema }}
       stock_etf: ${{ steps.classify.outputs.stock_etf }}
       sealed_build: ${{ steps.classify.outputs.sealed_build }}
+      replay: ${{ steps.classify.outputs.replay }}
     steps:
       - uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5 # v4
         with:
@@ -580,6 +581,42 @@ jobs:
           POSTGRES_PASSWORD: contract_pass
           POSTGRES_DB: contract_db
         run: python3 helper_scripts/db/audit_migrations.py
+
+  # R8 階段 1：只在標準 Linux runner 執行離線回放測試，不接取數或符號稽核。
+  replay-tests:
+    name: replay isolated tests (linux)
+    needs: changes
+    if: github.event_name == 'pull_request' && needs.changes.outputs.replay == 'true'
+    runs-on: ubuntu-latest
+    timeout-minutes: 35
+    defaults:
+      run:
+        working-directory: rust
+    steps:
+      - uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5 # v4
+      - name: Install target
+        run: rustup target add x86_64-unknown-linux-gnu
+      - name: Cache Rust build artifacts
+        uses: Swatinem/rust-cache@e18b497796c12c097a38f9edb9d0641fb99eee32 # v2
+        with:
+          workspaces: rust
+      - name: Run replay unit tests
+        run: |
+          cargo test --locked -p openclaw_engine --features replay_isolated --lib replay::
+      - name: Run all replay integration tests
+        run: cargo test --locked -p openclaw_engine --features replay_isolated --test 'replay_*' --test m3_emitter_replay_forbidden
+      - name: Run replay runner unit tests
+        run: cargo test --locked -p openclaw_engine --features replay_isolated --bin replay_runner
+      - name: Set up Python
+        uses: actions/setup-python@a26af69be951a213d495a4c3e4e4022e16d87065 # v5
+        with:
+          python-version: '3.12'
+      - name: Install Python test dependencies
+        working-directory: .
+        run: pip install pytest pydantic
+      - name: Run stage1 Python tests
+        working-directory: .
+        run: python -m pytest -q program_code/exchange_connectors/bybit_connector/control_api_v1/tests/replay/test_stage1_*.py
 
   # stock_etf 靜態 guard（G0.5）：ADR-0048 IBKR lane 的 AST/檔案掃描層防線
   # （Python 唯讀邊界 / route GET-only / GUI 不寫 / surface coverage），原本只在

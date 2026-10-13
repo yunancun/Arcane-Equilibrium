@@ -58,6 +58,7 @@ def test_categories_are_narrow_but_cover_their_own_contracts() -> None:
             "program_code/exchange_connectors/bybit_connector/"
             "control_api_v1/tests/test_stock_etf_route_static_guard.py",
             "requirements-ml.lock",
+            "helper_scripts/replay/replay_local.py",
         ]
     )
     assert result == {
@@ -67,6 +68,7 @@ def test_categories_are_narrow_but_cover_their_own_contracts() -> None:
         "schema": True,
         "stock_etf": True,
         "sealed_build": True,
+        "replay": True,
     }
 
 
@@ -183,4 +185,86 @@ def test_cli_writes_nul_safe_github_outputs(tmp_path) -> None:
         "schema=true",
         "stock_etf=false",
         "sealed_build=false",
+        "replay=false",
     ]
+
+
+def test_replay_gate_covers_sources_tools_and_future_test_files() -> None:
+    control = "program_code/exchange_connectors/bybit_connector/control_api_v1/"
+    for path in (
+        "rust/openclaw_engine/src/replay/stage1.rs",
+        "rust/openclaw_engine/src/bin/replay_runner.rs",
+        "rust/openclaw_engine/src/bin/replay_runner/nested.rs",
+        "rust/openclaw_engine/tests/replay_future_acceptance.rs",
+        "rust/openclaw_engine/tests/m3_emitter_replay_forbidden.rs",
+        "helper_scripts/replay/replay_local.py",
+        control + "replay/offline_analytics.py",
+        control + "replay/offline_manifest.py",
+        control + "tests/replay/test_stage1_future.py",
+        # 階段 1 工具與測試直接載入的模組、共用 conftest 與 Demo 設定檔
+        control + "replay/__init__.py",
+        control + "replay/experiment_registry.py",
+        control + "replay/full_chain_fixture.py",
+        control + "replay/manifest_signer.py",
+        control + "replay/report_analytics.py",
+        control + "replay/route_helpers.py",
+        control + "tests/conftest.py",
+        # 目前不存在；一旦新增，pytest 會對這組測試自動載入
+        control + "tests/replay/conftest.py",
+        # 共用 conftest 在匯入期就載入的模組
+        control + "app/__init__.py",
+        control + "app/db_pool.py",
+        control + "app/error_sanitize.py",
+        "pytest.ini",
+        "settings/strategy_params_demo.toml",
+        "settings/risk_control_rules/risk_config_demo.toml",
+        "settings/risk_control_rules/scanner_config.toml",
+        "rust/Cargo.toml",
+        "rust/Cargo.lock",
+        "rust/openclaw_engine/Cargo.toml",
+    ):
+        assert classify_paths([path])["replay"] is True, path
+
+
+def test_replay_gate_does_not_select_unrelated_paths() -> None:
+    control = "program_code/exchange_connectors/bybit_connector/control_api_v1/"
+    for path in (
+        "docs/replay.md",
+        "rust/openclaw_engine/src/main.rs",
+        "rust/openclaw_engine/src/bin/replay_runner_extra.rs",
+        "rust/openclaw_engine/tests/other_replay.rs",
+        "helper_scripts/ci/replay_runner_symbol_audit.sh",
+        control + "replay/live.py",
+        control + "replay/run_route.py",
+        control + "tests/replay/test_other.py",
+        control + "app/main.py",
+        "settings/strategy_params_live.toml",
+        "settings/risk_control_rules/risk_config_live.toml",
+    ):
+        assert classify_paths([path])["replay"] is False, path
+
+
+def test_replay_gate_tracks_same_package_imports_of_the_offline_tools() -> None:
+    # 防止清單漂移：離線工具新增同套件相依卻沒有列進關卡時，這條測試會失敗。
+    import ast
+
+    control = "program_code/exchange_connectors/bybit_connector/control_api_v1/"
+    checked = 0
+    for name in ("offline_analytics.py", "offline_manifest.py"):
+        source = (REPO_ROOT / control / "replay" / name).read_text(encoding="utf-8")
+        for node in ast.walk(ast.parse(source)):
+            if not isinstance(node, ast.ImportFrom) or node.level != 1:
+                continue
+            modules = [node.module] if node.module else [alias.name for alias in node.names]
+            for module in modules:
+                path = control + "replay/" + module.split(".")[0] + ".py"
+                assert classify_paths([path])["replay"] is True, path
+                checked += 1
+    assert checked >= 5
+
+
+def test_replay_gate_preserves_other_gate_decisions() -> None:
+    assert classify_paths(["helper_scripts/replay/replay_local.py"]) == {
+        gate: gate == "replay" for gate in GATES
+    }
+    assert all(classify_paths([], force_all=True).values())
