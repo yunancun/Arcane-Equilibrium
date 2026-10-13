@@ -97,6 +97,7 @@ def test_ci_workflow_classifies_paths_before_expensive_jobs() -> None:
         "schema-contract": "schema",
         "stock-etf-static-guards": "stock_etf",
         "learning-runtime-sealed-build": "sealed_build",
+        "replay-tests": "replay",
     }
     for job_name, output_name in expected_gate.items():
         job = _job(job_name)
@@ -111,6 +112,32 @@ def test_ci_workflow_classifies_paths_before_expensive_jobs() -> None:
         assert f"{gate}: ${{{{ steps.classify.outputs.{gate} }}}}" in classifier_gate, gate
         assert f"needs.changes.outputs.{gate} == 'true'" in WORKFLOW, gate
     assert set(expected_gate.values()) == set(GATES)
+
+
+def test_replay_job_is_bounded_linux_pr_job_with_existing_rust_setup() -> None:
+    job = _job("replay-tests")
+    assert "if: github.event_name == 'pull_request' && needs.changes.outputs.replay == 'true'" in job
+    assert "runs-on: ubuntu-latest" in job
+    assert "timeout-minutes: 35" in job
+    assert "macos" not in job
+    assert "services:" not in job
+    assert "symbol_audit" not in job
+    assert "working-directory: rust" in job
+    assert "rustup target add x86_64-unknown-linux-gnu" in job
+    assert "Swatinem/rust-cache@e18b497796c12c097a38f9edb9d0641fb99eee32" in job
+    assert "workspaces: rust" in job
+
+
+def test_replay_job_selects_all_rust_and_python_stage1_suites() -> None:
+    job = _job("replay-tests")
+    assert "cargo test --locked -p openclaw_engine --features replay_isolated --lib replay::" in job
+    assert "cargo test --locked -p openclaw_engine --features replay_isolated --test 'replay_*' --test m3_emitter_replay_forbidden" in job
+    assert "cargo test --locked -p openclaw_engine --features replay_isolated --bin replay_runner" in job
+    assert "python-version: '3.12'" in job
+    assert "pip install pytest pydantic" in job
+    python_step = _workflow_step("\n" + job, "Run stage1 Python tests")
+    assert "working-directory: ." in python_step
+    assert "python -m pytest -q program_code/exchange_connectors/bybit_connector/control_api_v1/tests/replay/test_stage1_*.py" in python_step
 
 
 def test_development_agent_governance_suite_is_sharded_without_filtering() -> None:
