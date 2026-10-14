@@ -5,6 +5,7 @@ Operator 已採用 R1–R8 作為日誌分類；這是七個主要開發階段�
 不是八個正式產品 release，也不聲稱前七階段全部完成。期間是近似且重疊的開發重心。
 2026-10-07 起 R8 由候選轉為已採納方向（事件 `RH-20261007-01`）；2026-10-09 採納修訂一（事件 `RH-20261009-01`）。
 2026-10-11 階段 1 的回放修補經獨立審查後以 source 交付（事件 `RH-20261011-01`），只有本機 source 證據；回放對實際成交的對帳、平台准入、runtime 與效果仍未驗。
+2026-10-14 起草修訂二（事件 `RH-20261014-02`，提議中）：第一圈改為低頻假說搜尋，本機先行、平台後置；其中三項方向已由 Operator 決定，全文待裁決。
 
 [Git 記錄決策與查詢方法](../decisions/2026-10-03--route-history-versioning.md) ·
 [結構化登記簿](2026-10-03--route-history-register.json) ·
@@ -32,7 +33,7 @@ Operator 已採用 R1–R8 作為日誌分類；這是七個主要開發階段�
 - **R5**：[plan-changelog](../../CHANGELOG.md)、[alpha-amendment](../governance_dev/amendments/2026-05-31--AMD-2026-05-31-01-alpha-edge-evidence-governance.md)。歷史研究結果不能當今日候選／市場結論。
 - **R6**：[aiml-v2](../execution_plan/2026-07-19--ai_ml_long_lived_repair_and_landing_plan.md)、[aiml-ledger](../execution_plan/ai_ml_landing/PROGRESS.md)。PROGRAM_ADOPTED／S1_CLOSED 不等於完整學習或交易落地；狀態仍讀 TODO。
 - **R7**：[current-todo-snapshot](../../TODO.md)、[engineering-log](../CLAUDE_CHANGELOG.md)。H2 source 採用、D1.1 候選與 runtime 狀態分開；不是重開已關閉 workflow。
-- **R8**：[r8-portable](../decisions/2026-10-03--r8-hybrid-research-candidate.md)（候選原文，保留不改）、[r8-adoption](../decisions/2026-10-07--r8-adoption-agent-experiment-bench.md)、[r8-amendment-1](../decisions/2026-10-08--r8-amendment-1-first-loop-on-native-replay.md)（2026-10-09 採納）。方向與設計原則已採納；平台准入、訊號邊界 ADR、TODO 派工與 runtime 效果均未完成。
+- **R8**：[r8-portable](../decisions/2026-10-03--r8-hybrid-research-candidate.md)（候選原文，保留不改）、[r8-adoption](../decisions/2026-10-07--r8-adoption-agent-experiment-bench.md)、[r8-amendment-1](../decisions/2026-10-08--r8-amendment-1-first-loop-on-native-replay.md)（2026-10-09 採納）、[r8-amendment-2](../decisions/2026-10-14--r8-amendment-2-low-frequency-first-loop.md)（2026-10-14 提議）。方向與設計原則已採納；平台准入、訊號邊界 ADR、TODO 派工與 runtime 效果均未完成。
 
 以上連結方便閱讀工作樹；需要精確原文時使用登記簿的固定 Git commit/path/blob/sha256。
 原文中歷史數值、採用或運行敘述只屬原觀察期，本次沒有重驗其市場、主機或交易結果。
@@ -130,5 +131,9 @@ Route-Id 是本歷史命名空間。這些都不能互相當成完整產品版�
   小修由該執行者處理，條件滿足即合併。CI 加跑回放測試的單元先合併（PR #209），其餘五個由 PR #210 發布；測試驗證的初審為 FAIL（2 項合併前必補），修正後四份獨立複核（代碼審查兩份、安全審查、測試驗證）皆為 PASS_WITH_NOTES。
   回放測試自此由 GitHub 的 Linux runner 在 PR 上執行，不再只有本機證據。階段 2 待 Operator 指示。
   只授予這些單元的審查、發布與合併；不授予帳戶、支出、Linux 存取、runtime 或交易效果。
+- **RH-20261014-02／amendment_proposed**：[R8 修訂二](../decisions/2026-10-14--r8-amendment-2-low-frequency-first-loop.md)已起草，狀態為提議。
+  Operator 以快速盈利為前提，於 2026-10-14 決定三項方向：第一圈改為預登記的低頻假說搜尋；本機開發與平台配套都完成後才有限使用 QC；
+  儀器驗證第二層由歷史 Demo 對帳改為 Demo 前向對照。其餘條文是記錄者的展開，待 Operator 裁決。
+  源碼查核發現策略只收到 1 分鐘與可選的 5 分鐘指標；小時線、日線策略上 Demo 前須先補引擎支援。不授予派工、取數、帳戶、支出或任何效果。
 - 新路線、採納、撤回、取代及更正按 [決策規則](../decisions/2026-10-03--route-history-versioning.md)
   追加事件；現行派工及效果授權仍回 TODO 與既有 ADR/AMD。

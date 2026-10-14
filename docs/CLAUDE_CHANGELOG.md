@@ -1,9 +1,17 @@
 # CLAUDE_CHANGELOG.md — 開發歷史歸檔
 
 > 從 CLAUDE.md / TODO.md 遷出的 Wave/Sprint/Batch + TODO version-increment 歷史敘事。新 session 不需要讀此文件，僅供回顧歷史時查閱。
-> 最後更新：2026-10-14（R8 階段 1 後續小單元交付；TODO v890）
+> 最後更新：2026-10-14（R8 修訂二提議）
 
 ---
+
+## R8 修訂二提議 — 2026-10-14
+
+- 事件 `RH-20261014-02`：[R8 修訂二](decisions/2026-10-14--r8-amendment-2-low-frequency-first-loop.md)起草，狀態為提議。
+  Operator 同日決定三項方向：第一圈改為低頻假說搜尋；本機開發與平台配套完成後才有限使用 QC；第二層改為 Demo 前向對照。全文待裁決。
+- 依 Operator 同意的查核：`TickContext` 只提供 1 分鐘與可選的 5 分鐘指標快照；回放只有 1 分鐘；回放的公開資料客戶端不取資金費歷史；
+  抽查的既有研究腳本多數讀資料庫。
+- 沒有產品程式變更、TODO 派工、ADR、取數、帳戶、部署或 runtime 成果。
 
 ## R8 階段 1 後續小單元交付 — 2026-10-14
 
