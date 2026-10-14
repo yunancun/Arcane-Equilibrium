@@ -19,6 +19,9 @@
 >
 > **2026-10-09 註記**：R8 修訂一已由 Operator 採納（事件 `RH-20261009-01`）。被修訂的段落在原處以註記標出，原文保留；
 > 修訂後的內容以[修訂一](2026-10-08--r8-amendment-1-first-loop-on-native-replay.md)為準。
+>
+> **2026-10-14 註記**：[R8 修訂二](2026-10-14--r8-amendment-2-multi-strategy-first-loop.md)已由 Operator 採納（事件 `RH-20261014-03`）。經修訂一修改的 P1、P3 與 §8 的階段，再依修訂二修改：
+> 第一圈改為本機的多策略假說搜尋，平台在本機開發與配套完成之後才有限使用，儀器驗證的第二層改為 Demo 前向對照。原文保留。
 
 本文件依 [路線歷史記錄規則](2026-10-03--route-history-versioning.md) 撰寫。
 文中「平台」指 QuantConnect Cloud 與其開源引擎 LEAN；「實驗台」指 Agent 用來檢驗假說的

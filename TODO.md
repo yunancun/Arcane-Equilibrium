@@ -1,7 +1,7 @@
 # 玄衡 TODO - 活躍派發佇列
 
-**版本** v890 | **校準日期** 2026-10-01（v885–v890 於 2026-10-09 至 10-14 只新增並更新文末 R8 的兩節，其餘未重新校準） | **source 觀察基線** `52a884d93f774a5f625a7d2db4ebe6e2ec95b23a`（GitHub／Mac main 相同，包含 PR196／PR198；本次跳過 Linux，runtime 限制見 §0）。
-**當前狀態**：AIML／workflow 均零 ACTIVE；workflow 選定 source 已採用，見下方 CLOSED 紀錄；原總帳仍歸檔，W11 等待下一個 Operator 指定的真實產品功能。S2E=5/9、effect=0/6、authority=0/9，LW2 WAITING。R8 階段 1（回放修補）與其後續六個小單元的 source 已交付並結案；階段 2 在文末為 WAITING，等 Operator 指示。
+**版本** v891 | **校準日期** 2026-10-01（v885–v891 於 2026-10-09 至 10-14 只新增並更新文末 R8 各節，其餘未重新校準） | **source 觀察基線** `52a884d93f774a5f625a7d2db4ebe6e2ec95b23a`（GitHub／Mac main 相同，包含 PR196／PR198；本次跳過 Linux，runtime 限制見 §0）。
+**當前狀態**：AIML／workflow 均零 ACTIVE；workflow 選定 source 已採用，見下方 CLOSED 紀錄；原總帳仍歸檔，W11 等待下一個 Operator 指定的真實產品功能。S2E=5/9、effect=0/6、authority=0/9，LW2 WAITING。R8 階段 1（回放修補）與其後續六個小單元的 source 已交付並結案；2026-10-14 採納 R8 修訂二，第一圈改為本機的多策略假說搜尋，階段 2（本機研究能力）在文末為 ACTIVE，下一步是派工指令。
 **證據與歷史**：當前 source／PR／runtime 限制見 §0；完整逐項 [audit](docs/references/2026-09-09--todo-workflow-freshness-audit.md)、[v880 快照](docs/archive/2026-09-09--todo-v880-pre-freshness-audit.md)、[版本日誌](docs/CLAUDE_CHANGELOG.md)。
 
 <details>
@@ -620,6 +620,7 @@ A 至 D 已實作並經獨立審查。本列與 source 由同一個 PR 進入 ma
 
 階段 2 及以後不在本列範圍，本檔目前沒有對應的可派發列。階段 2 的 Demo 對帳需要 Linux 唯讀資料與運行環境的生效參數，須由 Operator 另行決定與授權；
 Linux 主機於 2026-10-11 離線（Operator 告知），階段 2 暫不進行。
+（2026-10-14：階段 2 已依 R8 修訂二改寫，見文末「R8 修訂二」一節；上兩句所述的 Demo 對帳與 Linux 前提不再適用。）
 runbook「已知限制與後續項」所列各項與 PR #206 自動審查提出的各點，已拆成下一節的六個小單元；其中 U1、U2、U3 須在階段 3 使用增益閘門之前完成。
 
 ## R8 階段 1 後續小單元（2026-10-14；CLOSED）
@@ -650,5 +651,22 @@ Python 工具 101、簽名相關 26、符號稽核模擬測試 28，皆 0 失敗
 
 | ID | 優先級 | 狀態 | Owner 路徑 | 驗收條件 | 最新證據 | 具名解除條件／下一步 |
 |---|---:|---|---|---|---|---|
-| `P1-R8-STAGE2-INSTRUMENT-VALIDATION` | 1 | WAITING；`dispatchable=false` | Operator 決定；PM 拆單元並派工 | [R8 修訂一](docs/decisions/2026-10-08--r8-amendment-1-first-loop-on-native-replay.md) §5 階段 2（儀器驗證）。第一層的事件級檢查用本機 fixture 即可進行；第二層的 Demo 對帳需要 Linux 唯讀資料與運行環境的生效參數；第三層是獨立期間的成本壓力測試 | 2026-10-14：階段 1 與後續單元已交付；Linux 主機自 2026-10-11 離線（Operator 告知），本次未重新確認 | 等 Operator 指示開始；第二層另需 Operator 決定 Linux 唯讀存取的授權與路徑（修訂一列為未決）。記錄者另註，不是修訂一的條文：開發機上目前只有一日的公開行情，第三層所需的獨立期間資料要另行取得，取數是對外請求，記錄者認為應先取得 Operator 同意。不自動派發 |
 | `P2-R8-S1F-REVIEW-FOLLOWUPS` | 2 | DEFERRED；`dispatchable=false` | PM | runbook「後續小單元」一節「已知限制與後續項」所列各項，包含把符號稽核接進 CI、禁用樣式清單對現行模組的檢視、報告記錄實際執行的 fixture 雜湊 | 2026-10-14：四份獨立審查的註記，見 runbook | PM 在階段 2 派工時逐項決定是否排入。改動禁用樣式清單、為「啟用擴充之後再設延遲」新增公開錯誤型別兩項，須先由 Operator 決定 |
+
+## R8 修訂二：階段 2 本機研究能力（2026-10-14）
+
+Operator 於 2026-10-14 採納 [R8 修訂二](docs/decisions/2026-10-14--r8-amendment-2-multi-strategy-first-loop.md)（路線事件 `RH-20261014-03`）：第一圈改為本機的多策略假說搜尋，週期秒級至日線；
+平台在本機開發與配套完成後才有限使用；儀器驗證第二層改為 Demo 前向對照。同時裁決：階段 2 至 3 的投入上限十個工作日，自 2026-10-14 起算，工時自同日起記帳；
+同意向 Bybit 公開來源取數，範圍以階段 2 派工指令為限；不作延遲實測，逐筆模擬以 300 毫秒為保守值，階段 2 不需要 Linux。
+
+### ACTIVE
+
+| ID | 優先級 | 狀態 | Owner 路徑 | 驗收條件 | 最新證據 | 下一步 |
+|---|---:|---|---|---|---|---|
+| `P1-R8-A2-STAGE2-LOCAL-RESEARCH` | 1 | ACTIVE；派工指令撰寫中 | PM 撰寫派工指令並拆單元；實作與獨立審查依派工指令 | 修訂二 §5 階段 2：選型查核（N2，一個工作日）、向公開來源取數並存為記雜湊的本機檔案（N3）、逐筆資料來源查核（N3 第 6 點）、悲觀成本含資金費、事件級檢查與成本壓力測試（N4）、統計治理（N3 第 5 點、N5）、假說預登記並經 Operator 覆閱（N1）；秒級假說以 300 毫秒的保守延遲評估後登記。不讀寫 Linux 資料庫。停止條件：選型查核一日內未定即採自建工具；事件級檢查不通過或資料不可重建則停止 | 2026-10-14：修訂二採納；投入上限十個工作日自同日起算，計實際投入的工時 | PM 撰寫階段 2 派工指令，經獨立文件審查後依單元拆成各自的 ACTIVE 列。逐筆資料改用 Linux 記錄器一項仍待 Operator 另行同意（修訂二 N3 第 6 點） |
+
+### CLOSED
+
+| ID | 優先級 | 狀態 | Owner 路徑 | 驗收條件 | 最新證據 | 具名解除條件／下一步 |
+|---|---:|---|---|---|---|---|
+| `P1-R8-STAGE2-INSTRUMENT-VALIDATION` | 1 | CLOSED；work status=SUPERSEDED（未開始；由修訂二取代；no-repeat） | — | [R8 修訂一](docs/decisions/2026-10-08--r8-amendment-1-first-loop-on-native-replay.md) §5 階段 2（儀器驗證；第二層原為以資料庫內記錄進行的歷史 Demo 對帳） | 2026-10-14：修訂二採納；儀器驗證改依修訂二 N4，第二層改為 Demo 前向對照 | — |

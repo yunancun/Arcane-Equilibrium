@@ -5,7 +5,7 @@ Operator 已採用 R1–R8 作為日誌分類；這是七個主要開發階段�
 不是八個正式產品 release，也不聲稱前七階段全部完成。期間是近似且重疊的開發重心。
 2026-10-07 起 R8 由候選轉為已採納方向（事件 `RH-20261007-01`）；2026-10-09 採納修訂一（事件 `RH-20261009-01`）。
 2026-10-11 階段 1 的回放修補經獨立審查後以 source 交付（事件 `RH-20261011-01`），只有本機 source 證據；回放對實際成交的對帳、平台准入、runtime 與效果仍未驗。
-2026-10-14 起草修訂二（事件 `RH-20261014-02`，提議中）：Operator 決定第一圈改為低頻假說搜尋、平台後置、第二層改為 Demo 前向對照；多策略與週期放寬到秒級是 Operator 的意見與記錄者的提議，全文待裁決。
+2026-10-14 起草並採納修訂二（事件 `RH-20261014-02`、`RH-20261014-03`）：第一圈改為本機的多策略假說搜尋（週期秒級至日線），平台在本機開發與配套完成後才有限使用，儀器驗證第二層改為 Demo 前向對照。
 
 [Git 記錄決策與查詢方法](../decisions/2026-10-03--route-history-versioning.md) ·
 [結構化登記簿](2026-10-03--route-history-register.json) ·
@@ -22,7 +22,7 @@ Operator 已採用 R1–R8 作為日誌分類；這是七個主要開發階段�
 | R5：Alpha 證據優先 | 2026-05-31 ～ 2026-06 起延續；`historical` | v5.9 凍結大部分自治 active-IMPL，先找可信成本後 alpha；M7 保留例外。 | 當時成本牆調查顯示候選優勢不足，先解策略證據缺口。 保留：自治設計與既有 Stage／風控；凍結並非全部取消。 |
 | R6：AI／ML 真實落地與證據修復 | 2026-07 ～ 2026-09 及未完成尾項；`historical_with_open_program` | AIML V2 要求合格資料、真實 fit、Rust 消費、自然第二代、恢復與運行證據。 | 修復 source／tests 與真正功能、部署及效果之間的差距。 保留：研究資料與模型零件、Rust 權威、資格與效果邊界。 |
 | R7：有限工程單元、可用功能優先 | 2026-09 下旬 ～ 截至 2026-10-03；`current_delivery_emphasis` | 先以有限單元驗證窄範圍功能；Bybit 修復與 D1.1 本機模型消費屬此分期。 | 避免把遠端正式環境證明前置為所有本機開發的阻塞。 保留：正式上線要求、舊契約與權限繼續有效；只調整交付節奏。 |
-| R8：以 QuantConnect 作 Agent 實驗台的有界融合 | 2026-10-03 提出、2026-10-07 方向採納；`accepted_direction` | 成熟平台作 Agent 進化閉環的實驗台；第一圈先用既有 Rust 回放（修訂一）；AE 保留自主決策、學習所有權、Rust 交易權威與本機運行。 | 進化閉環缺實驗引擎，檢驗「選擇」需要多年跨品種歷史；減少歷史自持負擔為次要收益。 保留：本機交易證據、策略／學習所有權、既有風控／採用閘門；Bybit 執行不外遷。 |
+| R8：以 QuantConnect 作 Agent 實驗台的有界融合 | 2026-10-03 提出、2026-10-07 方向採納；`accepted_direction` | 成熟平台作 Agent 進化閉環的實驗台；第一圈改為本機的多策略假說搜尋，平台後置（修訂二）；AE 保留自主決策、學習所有權、Rust 交易權威與本機運行。 | 進化閉環缺實驗引擎，檢驗「選擇」需要多年跨品種歷史；減少歷史自持負擔為次要收益。 保留：本機交易證據、策略／學習所有權、既有風控／採用閘門；Bybit 執行不外遷。 |
 
 ## 各期證據與限制
 
@@ -33,7 +33,7 @@ Operator 已採用 R1–R8 作為日誌分類；這是七個主要開發階段�
 - **R5**：[plan-changelog](../../CHANGELOG.md)、[alpha-amendment](../governance_dev/amendments/2026-05-31--AMD-2026-05-31-01-alpha-edge-evidence-governance.md)。歷史研究結果不能當今日候選／市場結論。
 - **R6**：[aiml-v2](../execution_plan/2026-07-19--ai_ml_long_lived_repair_and_landing_plan.md)、[aiml-ledger](../execution_plan/ai_ml_landing/PROGRESS.md)。PROGRAM_ADOPTED／S1_CLOSED 不等於完整學習或交易落地；狀態仍讀 TODO。
 - **R7**：[current-todo-snapshot](../../TODO.md)、[engineering-log](../CLAUDE_CHANGELOG.md)。H2 source 採用、D1.1 候選與 runtime 狀態分開；不是重開已關閉 workflow。
-- **R8**：[r8-portable](../decisions/2026-10-03--r8-hybrid-research-candidate.md)（候選原文，保留不改）、[r8-adoption](../decisions/2026-10-07--r8-adoption-agent-experiment-bench.md)、[r8-amendment-1](../decisions/2026-10-08--r8-amendment-1-first-loop-on-native-replay.md)（2026-10-09 採納）、[r8-amendment-2](../decisions/2026-10-14--r8-amendment-2-multi-strategy-first-loop.md)（2026-10-14 提議）。方向與設計原則已採納；平台准入、訊號邊界 ADR、TODO 派工與 runtime 效果均未完成。
+- **R8**：[r8-portable](../decisions/2026-10-03--r8-hybrid-research-candidate.md)（候選原文，保留不改）、[r8-adoption](../decisions/2026-10-07--r8-adoption-agent-experiment-bench.md)、[r8-amendment-1](../decisions/2026-10-08--r8-amendment-1-first-loop-on-native-replay.md)（2026-10-09 採納）、[r8-amendment-2](../decisions/2026-10-14--r8-amendment-2-multi-strategy-first-loop.md)（2026-10-14 採納）。方向與設計原則已採納；平台准入、訊號邊界 ADR、TODO 派工與 runtime 效果均未完成。
 
 以上連結方便閱讀工作樹；需要精確原文時使用登記簿的固定 Git commit/path/blob/sha256。
 原文中歷史數值、採用或運行敘述只屬原觀察期，本次沒有重驗其市場、主機或交易結果。
@@ -138,5 +138,9 @@ Route-Id 是本歷史命名空間。這些都不能互相當成完整產品版�
   記錄者據此提議把第一圈的週期放寬到秒級至日線；這一放寬與其餘條文都是記錄者的展開，待 Operator 裁決。
   源碼查核發現策略只收到 1 分鐘與可選的 5 分鐘指標；小時線、日線策略上 Demo 前須先補引擎支援。秒級假說要等延遲實測之後才登記。
   不授予派工、取數、Linux 存取、帳戶、支出或任何效果。
+- **RH-20261014-03／amendment_accepted**：Operator 整體採納 R8 修訂二，並裁決三項：階段 2 至 3 的投入上限十個工作日，自 2026-10-14 起算；
+  同意向 Bybit 公開來源取數，範圍以階段 2 派工指令為限；不作延遲實測（Operator 告知平時約 10 毫秒、波動時 100 至 300 毫秒），逐筆模擬以 300 毫秒為保守值，
+  階段 2 因此不需要 Linux。R8 決策與修訂一被修訂的段落以註記標出，原文保留，舊版本固定到 Git 物件。TODO v891 把階段 2 列為進行中，下一步是派工指令。
+  除取數之外，不授予派工、Linux 存取、帳戶、支出或任何效果。
 - 新路線、採納、撤回、取代及更正按 [決策規則](../decisions/2026-10-03--route-history-versioning.md)
   追加事件；現行派工及效果授權仍回 TODO 與既有 ADR/AMD。
