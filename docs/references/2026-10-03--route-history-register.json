@@ -212,8 +212,10 @@
       "meaning": "portable retrospective summary recorded in this history commit; not historical adoption attestation"
     },
     "r8-adoption": {
-      "kind": "recorded_file",
+      "kind": "git_blob",
       "path": "docs/decisions/2026-10-07--r8-adoption-agent-experiment-bench.md",
+      "commit": "b07df6daf13f428d5c37bd74211efd6657f797e1",
+      "blob": "397dd4bd714b6103c6bf9dba1ff2f333b110f2e1",
       "sha256": "70bd99144aca8632766218aa71f0db2f0b1e0cb192362086e846c1a1aad9d067",
       "meaning": "formal R8 direction-adoption decision document; revised in place under RH-20261007-02, annotated with factual corrections (RH-20261008-01) and with the passages amended by amendment 1 (RH-20261009-01); not platform, runtime or dispatch attestation"
     },
@@ -266,8 +268,10 @@
       "meaning": "stage 1 dispatch instruction with the Operator's reopening conditions and the corrected account of the earlier attempt (RH-20261009-05); not an authorization by itself; dispatch state is the TODO row P1-R8-STAGE1-REPLAY-PATCHES. Recorded digest unchanged; pinned to its Git object when a later version was recorded (RH-20261009-06). The commit is on a feature branch and reaches main only through a merge commit"
     },
     "r8-amendment-1-r4": {
-      "kind": "recorded_file",
+      "kind": "git_blob",
       "path": "docs/decisions/2026-10-08--r8-amendment-1-first-loop-on-native-replay.md",
+      "commit": "b07df6daf13f428d5c37bd74211efd6657f797e1",
+      "blob": "987ff503a6012427b66a9ba24a4128abb4b6a37a",
       "sha256": "2996eafb4e739117b7bd34cb8292e1783f7598536c4aed358ae0be2456a8dbc9",
       "meaning": "later version of the accepted amendment, adding the dated note that the reopening was replaced by a new delivery (RH-20261009-06); body AM1-AM12 unchanged; direction and contract only, not platform, runtime or dispatch attestation"
     },
@@ -312,6 +316,40 @@
       "path": "docs/execution_plan/2026-10-12--r8-stage1-followup-units-dispatch.md",
       "sha256": "9f360d300f569462fc99d6b696ca46ef53594592c21f7658f56c73ce10d8d72e",
       "meaning": "the follow-up units dispatch instruction kept as the record of what was instructed, with a dated status row and a section on how the units ended (RH-20261014-01); not an authorization"
+    },
+    "r8-amendment-2": {
+      "kind": "git_blob",
+      "path": "docs/decisions/2026-10-14--r8-amendment-2-multi-strategy-first-loop.md",
+      "commit": "8a8f473ff8688c82837b05bdd160cfa220c3f7bf",
+      "blob": "041d5e4a0ddbcb6c44893267219e46ea5eeeb6de",
+      "sha256": "acd1de75b7169504952be177f92f72e122d68e06e3a4689bbe17587344e91946",
+      "meaning": "R8 amendment 2 as proposed (RH-20261014-02), after it was revised the same day to fold in two Operator opinions; an earlier draft is at commit c32ee0703697ed89386355b857c160b7fcd61118 under docs/decisions/2026-10-14--r8-amendment-2-low-frequency-first-loop.md; feature-branch commit until the pull request is merged"
+    },
+    "r8-amendment-2-r2": {
+      "kind": "git_blob",
+      "path": "docs/decisions/2026-10-14--r8-amendment-2-multi-strategy-first-loop.md",
+      "commit": "a7d03754366e8e33012945a2229eb1c8b64c0f55",
+      "blob": "2018f95329f6326514bb75d16c446e29fe3688bd",
+      "sha256": "66b38ac99729ac6feab73df6c4d7ff264fc652e603007d723c15daf03b7ccea9",
+      "meaning": "R8 amendment 2 as accepted (RH-20261014-03): status, acceptance note and dated rulings on the ten-workday cap, data fetch consent and latency added; body N1-N9 unchanged; direction and contract only, not platform, runtime or dispatch attestation"
+    },
+    "r8-amendment-1-r5": {
+      "kind": "recorded_file",
+      "path": "docs/decisions/2026-10-08--r8-amendment-1-first-loop-on-native-replay.md",
+      "sha256": "e6938e6629eb3e3d723d5988cf95d45d3c60ffef8704029cda5ca59e620465ad",
+      "meaning": "amendment 1 with dated notes marking the passages amended or supplemented by amendment 2 (RH-20261014-03); body AM1-AM12 unchanged; direction and contract only, not platform, runtime or dispatch attestation"
+    },
+    "r8-adoption-r2": {
+      "kind": "recorded_file",
+      "path": "docs/decisions/2026-10-07--r8-adoption-agent-experiment-bench.md",
+      "sha256": "63b34616c27b26fc1b7669e9a507e9b616a0fd7c26a363d55794db87ad56f5d2",
+      "meaning": "R8 decision with a dated note that amendment 2 was accepted (RH-20261014-03) and further amends P1, P3 and the stages; decisions D1-D8 unchanged; not platform, runtime or dispatch attestation"
+    },
+    "r8-amendment-2-r3": {
+      "kind": "recorded_file",
+      "path": "docs/decisions/2026-10-14--r8-amendment-2-multi-strategy-first-loop.md",
+      "sha256": "94d41dda3bee82155621128c64f9eb0cc90e1f6075201380a48e938008a6754e",
+      "meaning": "accepted R8 amendment 2 with clarifications annotated after automated review (RH-20261014-04): request provenance for fetched data, point-in-time universes including delisted instruments for cross-sectional hypotheses, one never-used holdout segment per generation, each opened once, the cancelled latency measurement removed from the risk table and post-adoption list, and a DRIFT note on the strategy design skill; body N1-N9 and the Operator decisions unchanged"
     }
   },
   "routes": [
@@ -447,10 +485,10 @@
       "record_status": "accepted_direction",
       "change_type": "architecture_direction_accepted",
       "follows_in_retrospective": "R7",
-      "summary": "成熟平台作 Agent 進化閉環的實驗台；第一圈先用既有 Rust 回放（修訂一）；AE 保留自主決策、學習所有權、Rust 交易權威與本機運行。",
+      "summary": "成熟平台作 Agent 進化閉環的實驗台；第一圈改為本機的多策略假說搜尋，平台在本機開發與配套完成後才有限使用（修訂二）；AE 保留自主決策、學習所有權、Rust 交易權威與本機運行。",
       "reason": "進化閉環缺實驗引擎；檢驗「選擇」需要多年跨品種歷史；減少歷史自持負擔為次要收益。",
       "retained": "Rust 交易權威、風控／採用閘門、本機交易證據、策略與學習所有權；Bybit 執行不外遷。",
-      "limits": "只採納方向、設計原則與修訂一的工程契約；回放修補、儀器驗證、平台准入、訊號邊界 ADR、TODO 派工及 runtime 效果均未完成或授權。",
+      "limits": "只採納方向、設計原則與兩次修訂的工程契約；本機研究能力、平台准入、訊號邊界 ADR、TODO 派工及 runtime 效果均未完成或授權；取數的同意以階段 2 派工指令的範圍為限。",
       "source_refs": [
         "r8-portable",
         "r8-adoption",
@@ -466,7 +504,12 @@
         "r8-stage1-runbook",
         "r8-stage1-followup-dispatch",
         "r8-stage1-runbook-r2",
-        "r8-stage1-followup-dispatch-r2"
+        "r8-stage1-followup-dispatch-r2",
+        "r8-amendment-2",
+        "r8-amendment-2-r2",
+        "r8-amendment-1-r5",
+        "r8-adoption-r2",
+        "r8-amendment-2-r3"
       ],
       "status_history": [
         {
@@ -546,6 +589,21 @@
           "recorded_on": "2026-10-14",
           "event": "RH-20261014-01",
           "note": "the six follow-up units delivered after independent review and publication by another executor on Operator decision; replay tests now run on a hosted Linux runner; stage 2 awaits an Operator instruction; record_status unchanged"
+        },
+        {
+          "recorded_on": "2026-10-14",
+          "event": "RH-20261014-02",
+          "note": "amendment 2 proposed after the Operator decided three of its directions and added two opinions on the same day; record_status unchanged pending Operator ruling on the full text"
+        },
+        {
+          "recorded_on": "2026-10-14",
+          "event": "RH-20261014-03",
+          "note": "amendment 2 accepted with rulings on the ten-workday cap, data fetch consent and latency; record_status unchanged (accepted_direction)"
+        },
+        {
+          "recorded_on": "2026-10-14",
+          "event": "RH-20261014-04",
+          "note": "post-review clarifications annotated in amendment 2; Operator decisions and record_status unchanged"
         }
       ]
     }
@@ -1244,6 +1302,90 @@
         "availability": "U6 commits are on main through merge commit e87ed25df; the others are on the head branch of pull request 210 and reach main only through its merge commit"
       },
       "meaning": "The implementing executor completed all six follow-up units on 2026-10-12, but only two passed its own process (tests through the replay_runner binary, and running the replay tests in hosted CI). The other four stopped before publication with their patches retained: one was admitted without a workflow delivery record so the controlled review tool refused it, one lost its code review to a killed review process that the rules did not allow to retry, and two passed code review but could not obtain test verification because that executor's verification channel cannot execute the replay Python tests, shell tests or offline cargo on the development machine. The executor then turned to maintaining the governance tooling under two Operator-approved one-time exceptions and stopped at a request for a third. The Operator declined that request and stopped that line, directed that the units be reviewed and published independently by another executor with small fixes made by that executor, and agreed that the pull requests be merged once checks are green, review threads are handled and independent review has passed. The recorder's dispatch instruction had not checked that the implementing executor's test-verification channel could run each unit's tests, although the same limit had been recorded during the stage 1 review. The CI unit was merged first as pull request 209 after one automated-review finding was fixed and independently reviewed; from then on the replay tests run on a hosted Linux runner on each pull request. The other five units were published together as pull request 210, which keeps the implementing executor's commits unrewritten, adds review fixes on top and supersedes pull request 208. Independent code review (two reviewers by language), security review and test verification returned three PASS_WITH_NOTES and one FAIL at first review; after fixes all four rechecks returned PASS_WITH_NOTES with nothing required before merge. One misuse guard (setting a nonzero latency after enabling next_symbol_open) remains unimplemented under the dispatch instruction's own exception and is recorded as a known limit. Evidence is source evidence only: local tests on one development machine run by the publishing executor, mutation checks of the tests, and the hosted Linux run of the replay tests; the forbidden-symbol audit is not yet wired into CI. The governance-tooling patch of the implementing executor is not part of these pull requests, and that executor's admission journal and review state were not changed by this work. Stage 2 awaits an Operator instruction. Review, publication and merge of these units is the only thing granted; no account, spend, Linux access, runtime, Demo or trading authority."
+    },
+    {
+      "id": "RH-20261014-02",
+      "recorded_on": "2026-10-14",
+      "event_type": "amendment_proposed",
+      "route_ids": [
+        "R8"
+      ],
+      "amends": "RH-20261007-01",
+      "follows": "RH-20261014-01",
+      "decision_ref": "docs/decisions/2026-10-14--r8-amendment-2-multi-strategy-first-loop.md",
+      "authority_source": "Operator replies in current chat on 2026-10-14 (Asia/Shanghai) to four recommendations put by the recorder, and a later message the same day adding two opinions; the detailed terms are the recorder's expansion and await Operator ruling",
+      "operator_excerpt": [
+        "我同意你的建議1",
+        "關於建議2我希望我們能慎重，確定本地開發和QC配套的都完成後再有限適用QC以免QC繳費後我們本機程序開發未到位造成空轉浪費",
+        "3我同意",
+        "4我認為值得考察，另外關於Linux我隨時可以掛回來",
+        "另外我看見你舉得例子是MA-Crossover，是否其餘策略也能採用？我希望倒是能夠多策略，甚至複雜策略交易，而不是用常見策略，哪樣很容易被反向狙擊。另外關於最早我裁定的交易頻率問題，我的本意避免高頻交易指的是硬件要求很高，網速很高的超高速交易，一般機器秒級和分鐘級（如果你認為普通家用網絡和硬件足夠支撐）則可以考慮。"
+      ],
+      "status": "proposed",
+      "meaning": "Second amendment to R8, drafted after the Operator, on a fast-profit premise, decided three directions: the first loop becomes a low-frequency hypothesis search instead of the 1-minute ma_crossover stand-down comparison; QC is used only, and in a limited way, after local development and platform support work are complete; the second instrument-verification layer changes from historical Demo reconciliation to Demo forward comparison. The Operator then asked for multiple and complex strategies rather than common ones, and clarified that only ultra-high-speed trading needing special hardware and networking is excluded, so second- and minute-level trading may be considered if ordinary hardware and home networking suffice. On that basis the recorder proposes widening the first loop's horizon to seconds through days, pending Operator ruling. The recorder's terms add a one-day probe choosing between local open-source LEAN and a self-built research tool, research data fetched from public exchange sources into hashed local files without the database, pessimistic costs including funding, a research-stage candidate threshold that is not promotion evidence, a readiness checklist before any platform account, engine and replay support built only after a candidate qualifies, a proposed ten-workday cap with hour accounting, and a frequency boundary under which second-level hypotheses are registered only after a measured latency check and only if their edge does not depend on speed. Source inspection found that strategies receive only 1-minute and optional 5-minute indicator snapshots. Amendment 1 stays in force except where the Operator has already decided until the Operator rules; no dispatch, data fetch, Linux access, account, spend, runtime or trading authority is granted."
+    },
+    {
+      "id": "RH-20261014-03",
+      "recorded_on": "2026-10-14",
+      "event_type": "amendment_accepted",
+      "route_ids": [
+        "R8"
+      ],
+      "accepts": "RH-20261014-02",
+      "amends": "RH-20261007-01",
+      "decision_ref": "docs/decisions/2026-10-14--r8-amendment-2-multi-strategy-first-loop.md",
+      "authority_source": "Operator message in current chat on 2026-10-14 (Asia/Shanghai)",
+      "operator_excerpt": "採納修訂二，上限十個工作日，同意取數，延遲不用測了，我的網絡會波動，短的時候10ms但是一旦波動可能100-300ms不等，即便很少見，但必然會有影響。",
+      "prior_record_identity": {
+        "amendment": {
+          "commit": "8a8f473ff8688c82837b05bdd160cfa220c3f7bf",
+          "path": "docs/decisions/2026-10-14--r8-amendment-2-multi-strategy-first-loop.md",
+          "blob": "041d5e4a0ddbcb6c44893267219e46ea5eeeb6de",
+          "sha256": "acd1de75b7169504952be177f92f72e122d68e06e3a4689bbe17587344e91946",
+          "availability": "feature-branch commit; exists only on the feature branch until it is merged into main"
+        },
+        "amendment_1": {
+          "commit": "b07df6daf13f428d5c37bd74211efd6657f797e1",
+          "path": "docs/decisions/2026-10-08--r8-amendment-1-first-loop-on-native-replay.md",
+          "blob": "987ff503a6012427b66a9ba24a4128abb4b6a37a",
+          "sha256": "2996eafb4e739117b7bd34cb8292e1783f7598536c4aed358ae0be2456a8dbc9",
+          "availability": "main at recording time"
+        },
+        "decision": {
+          "commit": "b07df6daf13f428d5c37bd74211efd6657f797e1",
+          "path": "docs/decisions/2026-10-07--r8-adoption-agent-experiment-bench.md",
+          "blob": "397dd4bd714b6103c6bf9dba1ff2f333b110f2e1",
+          "sha256": "70bd99144aca8632766218aa71f0db2f0b1e0cb192362086e846c1a1aad9d067",
+          "availability": "main at recording time"
+        },
+        "todo": {
+          "commit": "b07df6daf13f428d5c37bd74211efd6657f797e1",
+          "path": "TODO.md",
+          "blob": "e510c95e9f3d2436b64122138bd0b0c860e4ca68",
+          "sha256": "462240d30071caac4ef6998f7e50891935f01921b0dfd5e041c11ec0e712ff09",
+          "availability": "main at recording time"
+        }
+      },
+      "meaning": "Operator accepted R8 amendment 2 as a whole and ruled on three items: a ten-workday cap for stages 2-3 counted from 2026-10-14 with hour accounting from the same day; consent to fetch data from Bybit public sources within the scope the stage 2 dispatch instruction lists; no latency measurement, because the Operator reports about 10 ms normally and 100-300 ms during rare fluctuations that will nevertheless occur, so tick-level simulation uses 300 ms as the conservative latency and stage 2 no longer needs Linux. The amended passages of the R8 decision and amendment 1 are annotated in place with original text kept; their previous versions are pinned as Git objects. TODO v891 closes the amendment 1 stage 2 row as superseded and adds an active row for the local research stage, whose next action is the stage 2 dispatch instruction. No dispatch, Linux access, account, spend, runtime or trading authority is granted beyond the data fetch consent."
+    },
+    {
+      "id": "RH-20261014-04",
+      "recorded_on": "2026-10-14",
+      "event_type": "record_corrected",
+      "route_ids": [
+        "R8"
+      ],
+      "corrects": "RH-20261014-03",
+      "decision_ref": "docs/decisions/2026-10-14--r8-amendment-2-multi-strategy-first-loop.md",
+      "authority_source": "automated pull request review of the accepted text; clarifications by the recorder, no new Operator decision",
+      "prior_record_identity": {
+        "commit": "a7d03754366e8e33012945a2229eb1c8b64c0f55",
+        "path": "docs/decisions/2026-10-14--r8-amendment-2-multi-strategy-first-loop.md",
+        "blob": "2018f95329f6326514bb75d16c446e29fe3688bd",
+        "sha256": "66b38ac99729ac6feab73df6c4d7ff264fc652e603007d723c15daf03b7ccea9",
+        "availability": "feature-branch commit; exists only on the feature branch until it is merged into main"
+      },
+      "meaning": "After automated review, clarifications were annotated in amendment 2 with original text kept. Fetched-data records must include request provenance (endpoints, parameters, page lineage, parser version and raw response digests). Under amendment 1 AM8, which is unchanged, cross-sectional or symbol-selected hypotheses need a point-in-time universe that includes delisted instruments, or proof that none existed; otherwise they cannot be recorded as qualified candidates. Fixed symbol lists for time-series hypotheses must follow a rule known at the start of the period, not survivors picked afterwards. Each generation uses its own never-used holdout segment, opened once: the first generation qualifies candidates on the first segment, so stage 4 may start, while the second generation learns only from training and validation results and is judged on a separate segment. The cancelled latency measurement is removed from the risk table and post-adoption list. The strategy design skill's rule rejecting edges with a half-life under one day conflicts with the second- and minute-level scope and is marked DRIFT pending a skill update. The accepted Operator decisions are unchanged; no dispatch or other authority is granted."
     }
   ],
   "external_provenance": [
