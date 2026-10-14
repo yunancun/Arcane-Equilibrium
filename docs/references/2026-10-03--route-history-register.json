@@ -350,6 +350,12 @@
       "path": "docs/decisions/2026-10-14--r8-amendment-2-multi-strategy-first-loop.md",
       "sha256": "94d41dda3bee82155621128c64f9eb0cc90e1f6075201380a48e938008a6754e",
       "meaning": "accepted R8 amendment 2 with clarifications annotated after automated review (RH-20261014-04): request provenance for fetched data, point-in-time universes including delisted instruments for cross-sectional hypotheses, one never-used holdout segment per generation, each opened once, the cancelled latency measurement removed from the risk table and post-adoption list, and a DRIFT note on the strategy design skill; body N1-N9 and the Operator decisions unchanged"
+    },
+    "r8-stage2-dispatch": {
+      "kind": "recorded_file",
+      "path": "docs/execution_plan/2026-10-14--r8-stage2-local-research-dispatch.md",
+      "sha256": "376bb2cd3afe3164fa21ef76f1ec1f259cea00c6ee9dc93ab1819bb19dc76778",
+      "meaning": "stage 2 dispatch instruction under amendment 2 (RH-20261014-05): three implementing-executor units (public data fetch tool, pre-registration and trial ledger, CI job for research tests), recorder tasks (engine selection probe with local open-source LEAN, tick data source check, the consented fetch, the research core addendum, hypothesis pre-registration), and the consented fetch scope; instruction only, not authorization, runtime or delivery evidence"
     }
   },
   "routes": [
@@ -509,7 +515,8 @@
         "r8-amendment-2-r2",
         "r8-amendment-1-r5",
         "r8-adoption-r2",
-        "r8-amendment-2-r3"
+        "r8-amendment-2-r3",
+        "r8-stage2-dispatch"
       ],
       "status_history": [
         {
@@ -604,6 +611,11 @@
           "recorded_on": "2026-10-14",
           "event": "RH-20261014-04",
           "note": "post-review clarifications annotated in amendment 2; Operator decisions and record_status unchanged"
+        },
+        {
+          "recorded_on": "2026-10-14",
+          "event": "RH-20261014-05",
+          "note": "Operator consented to downloading open-source LEAN for the engine probe and instructed the stage 2 dispatch; record_status unchanged"
         }
       ]
     }
@@ -1386,6 +1398,26 @@
         "availability": "feature-branch commit; exists only on the feature branch until it is merged into main"
       },
       "meaning": "After automated review, clarifications were annotated in amendment 2 with original text kept. Fetched-data records must include request provenance (endpoints, parameters, page lineage, parser version and raw response digests). Under amendment 1 AM8, which is unchanged, cross-sectional or symbol-selected hypotheses need a point-in-time universe that includes delisted instruments, or proof that none existed; otherwise they cannot be recorded as qualified candidates. Fixed symbol lists for time-series hypotheses must follow a rule known at the start of the period, not survivors picked afterwards. Each generation uses its own never-used holdout segment, opened once: the first generation qualifies candidates on the first segment, so stage 4 may start, while the second generation learns only from training and validation results and is judged on a separate segment. The cancelled latency measurement is removed from the risk table and post-adoption list. The strategy design skill's rule rejecting edges with a half-life under one day conflicts with the second- and minute-level scope and is marked DRIFT pending a skill update. The accepted Operator decisions are unchanged; no dispatch or other authority is granted."
+    },
+    {
+      "id": "RH-20261014-05",
+      "recorded_on": "2026-10-14",
+      "event_type": "open_item_decided",
+      "route_ids": [
+        "R8"
+      ],
+      "follows": "RH-20261014-04",
+      "decision_ref": "docs/decisions/2026-10-14--r8-amendment-2-multi-strategy-first-loop.md",
+      "authority_source": "Operator message in current chat on 2026-10-14 (Asia/Shanghai)",
+      "operator_excerpt": "同意下載LEAN，合併後開始寫派工指令",
+      "prior_record_identity": {
+        "commit": "d05d1dd41a43ad148184a7e3449477fbc3ff3f5a",
+        "path": "TODO.md",
+        "blob": "9a4f8938b1e2cb75db02621a158e4363d8a8735c",
+        "sha256": "70879400033eea4b0ebedc2d6924beba87e9a7e1e51a3f1bc7bbf06932cdd050",
+        "availability": "main at recording time"
+      },
+      "meaning": "The Operator consented to downloading open-source LEAN for the stage 2 engine selection probe and instructed the recorder to write the stage 2 dispatch after pull request 211 was merged. The dispatch instruction is added: three units for the implementing executor (a standard-library public data fetch tool with request provenance, a standard-library pre-registration, trial and holdout ledger, and a Linux CI job for research tests) and recorder tasks (the one-day LEAN probe without any platform account, a read-only check of public tick data sources, the consented fetch after independent review, a research core addendum after the probe, and hypothesis pre-registration for Operator review). It lists the consented fetch scope and the default split with one holdout segment per generation. TODO v892 splits the stage 2 row into these units and adds the deferred skill DRIFT cleanup. No Linux, database, account, spend, runtime or trading authority is granted."
     }
   ],
   "external_provenance": [

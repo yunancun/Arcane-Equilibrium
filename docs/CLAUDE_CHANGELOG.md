@@ -1,9 +1,16 @@
 # CLAUDE_CHANGELOG.md — 開發歷史歸檔
 
 > 從 CLAUDE.md / TODO.md 遷出的 Wave/Sprint/Batch + TODO version-increment 歷史敘事。新 session 不需要讀此文件，僅供回顧歷史時查閱。
-> 最後更新：2026-10-14（R8 修訂二採納；TODO v891）
+> 最後更新：2026-10-14（R8 階段 2 派工；TODO v892）
 
 ---
+
+## R8 階段 2 派工 — 2026-10-14
+
+- 事件 `RH-20261014-05`：Operator「同意下載LEAN，合併後開始寫派工指令」。PR #211 已合併（merge commit `d05d1dd41`）。
+- [階段 2 派工指令](execution_plan/2026-10-14--r8-stage2-local-research-dispatch.md)：實作者三個單元（U1 公開行情取數工具、U2 預登記與試驗帳、U3 研究工具測試的 CI），
+  記錄者自做 P1 選型查核（本機 LEAN，一個工作日）、P2 逐筆資料來源查核、P3 取數、P4 研究工具核心的補充指令、P5 假說預登記。
+- TODO v892：階段 2 列改為統籌列，下列 U1–U3、P1、P2 為 ACTIVE；P3–P5 與策略設計技能的 DRIFT 清理項為等待列。
 
 ## R8 修訂二提議與採納 — 2026-10-14
 
