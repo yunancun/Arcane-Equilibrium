@@ -326,8 +326,10 @@
       "meaning": "R8 amendment 2 as proposed (RH-20261014-02), after it was revised the same day to fold in two Operator opinions; an earlier draft is at commit c32ee0703697ed89386355b857c160b7fcd61118 under docs/decisions/2026-10-14--r8-amendment-2-low-frequency-first-loop.md; feature-branch commit until the pull request is merged"
     },
     "r8-amendment-2-r2": {
-      "kind": "recorded_file",
+      "kind": "git_blob",
       "path": "docs/decisions/2026-10-14--r8-amendment-2-multi-strategy-first-loop.md",
+      "commit": "a7d03754366e8e33012945a2229eb1c8b64c0f55",
+      "blob": "2018f95329f6326514bb75d16c446e29fe3688bd",
       "sha256": "66b38ac99729ac6feab73df6c4d7ff264fc652e603007d723c15daf03b7ccea9",
       "meaning": "R8 amendment 2 as accepted (RH-20261014-03): status, acceptance note and dated rulings on the ten-workday cap, data fetch consent and latency added; body N1-N9 unchanged; direction and contract only, not platform, runtime or dispatch attestation"
     },
@@ -342,6 +344,12 @@
       "path": "docs/decisions/2026-10-07--r8-adoption-agent-experiment-bench.md",
       "sha256": "63b34616c27b26fc1b7669e9a507e9b616a0fd7c26a363d55794db87ad56f5d2",
       "meaning": "R8 decision with a dated note that amendment 2 was accepted (RH-20261014-03) and further amends P1, P3 and the stages; decisions D1-D8 unchanged; not platform, runtime or dispatch attestation"
+    },
+    "r8-amendment-2-r3": {
+      "kind": "recorded_file",
+      "path": "docs/decisions/2026-10-14--r8-amendment-2-multi-strategy-first-loop.md",
+      "sha256": "94d41dda3bee82155621128c64f9eb0cc90e1f6075201380a48e938008a6754e",
+      "meaning": "accepted R8 amendment 2 with clarifications annotated after automated review (RH-20261014-04): request provenance for fetched data, point-in-time universes including delisted instruments for cross-sectional hypotheses, one never-used holdout segment per generation, each opened once, the cancelled latency measurement removed from the risk table and post-adoption list, and a DRIFT note on the strategy design skill; body N1-N9 and the Operator decisions unchanged"
     }
   },
   "routes": [
@@ -500,7 +508,8 @@
         "r8-amendment-2",
         "r8-amendment-2-r2",
         "r8-amendment-1-r5",
-        "r8-adoption-r2"
+        "r8-adoption-r2",
+        "r8-amendment-2-r3"
       ],
       "status_history": [
         {
@@ -590,6 +599,11 @@
           "recorded_on": "2026-10-14",
           "event": "RH-20261014-03",
           "note": "amendment 2 accepted with rulings on the ten-workday cap, data fetch consent and latency; record_status unchanged (accepted_direction)"
+        },
+        {
+          "recorded_on": "2026-10-14",
+          "event": "RH-20261014-04",
+          "note": "post-review clarifications annotated in amendment 2; Operator decisions and record_status unchanged"
         }
       ]
     }
@@ -1353,6 +1367,25 @@
         }
       },
       "meaning": "Operator accepted R8 amendment 2 as a whole and ruled on three items: a ten-workday cap for stages 2-3 counted from 2026-10-14 with hour accounting from the same day; consent to fetch data from Bybit public sources within the scope the stage 2 dispatch instruction lists; no latency measurement, because the Operator reports about 10 ms normally and 100-300 ms during rare fluctuations that will nevertheless occur, so tick-level simulation uses 300 ms as the conservative latency and stage 2 no longer needs Linux. The amended passages of the R8 decision and amendment 1 are annotated in place with original text kept; their previous versions are pinned as Git objects. TODO v891 closes the amendment 1 stage 2 row as superseded and adds an active row for the local research stage, whose next action is the stage 2 dispatch instruction. No dispatch, Linux access, account, spend, runtime or trading authority is granted beyond the data fetch consent."
+    },
+    {
+      "id": "RH-20261014-04",
+      "recorded_on": "2026-10-14",
+      "event_type": "record_corrected",
+      "route_ids": [
+        "R8"
+      ],
+      "corrects": "RH-20261014-03",
+      "decision_ref": "docs/decisions/2026-10-14--r8-amendment-2-multi-strategy-first-loop.md",
+      "authority_source": "automated pull request review of the accepted text; clarifications by the recorder, no new Operator decision",
+      "prior_record_identity": {
+        "commit": "a7d03754366e8e33012945a2229eb1c8b64c0f55",
+        "path": "docs/decisions/2026-10-14--r8-amendment-2-multi-strategy-first-loop.md",
+        "blob": "2018f95329f6326514bb75d16c446e29fe3688bd",
+        "sha256": "66b38ac99729ac6feab73df6c4d7ff264fc652e603007d723c15daf03b7ccea9",
+        "availability": "feature-branch commit; exists only on the feature branch until it is merged into main"
+      },
+      "meaning": "After automated review, clarifications were annotated in amendment 2 with original text kept. Fetched-data records must include request provenance (endpoints, parameters, page lineage, parser version and raw response digests). Under amendment 1 AM8, which is unchanged, cross-sectional or symbol-selected hypotheses need a point-in-time universe that includes delisted instruments, or proof that none existed; otherwise they cannot be recorded as qualified candidates. Fixed symbol lists for time-series hypotheses must follow a rule known at the start of the period, not survivors picked afterwards. Each generation uses its own never-used holdout segment, opened once: the first generation qualifies candidates on the first segment, so stage 4 may start, while the second generation learns only from training and validation results and is judged on a separate segment. The cancelled latency measurement is removed from the risk table and post-adoption list. The strategy design skill's rule rejecting edges with a half-life under one day conflicts with the second- and minute-level scope and is marked DRIFT pending a skill update. The accepted Operator decisions are unchanged; no dispatch or other authority is granted."
     }
   ],
   "external_provenance": [
