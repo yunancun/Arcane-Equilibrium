@@ -315,9 +315,9 @@
     },
     "r8-amendment-2": {
       "kind": "recorded_file",
-      "path": "docs/decisions/2026-10-14--r8-amendment-2-low-frequency-first-loop.md",
-      "sha256": "97c47231cd4c22da42dcef3285aff12c70d16782cf7bcac5ee1c0f680210a62a",
-      "meaning": "proposed second amendment to R8 (RH-20261014-02): the Operator decided three directions on 2026-10-14 (first loop becomes a pre-registered low-frequency hypothesis search; QC is used only, and in a limited way, after local development and platform support work are complete; the second instrument-verification layer becomes Demo forward comparison); the remaining terms N1-N8 are the recorder's expansion awaiting Operator ruling"
+      "path": "docs/decisions/2026-10-14--r8-amendment-2-multi-strategy-first-loop.md",
+      "sha256": "acd1de75b7169504952be177f92f72e122d68e06e3a4689bbe17587344e91946",
+      "meaning": "proposed second amendment to R8 (RH-20261014-02): on 2026-10-14 the Operator decided three directions (the first loop becomes a low-frequency hypothesis search; QC is used only, and in a limited way, after local development and platform support work are complete; the second instrument-verification layer becomes Demo forward comparison) and added two opinions (multiple and complex strategies rather than common ones; only ultra-high-speed trading is excluded, second- and minute-level trading may be considered if ordinary hardware and home networking suffice); widening the first loop beyond low frequency and the remaining terms N1-N9 are the recorder's expansion awaiting Operator ruling"
     }
   },
   "routes": [
@@ -557,7 +557,7 @@
         {
           "recorded_on": "2026-10-14",
           "event": "RH-20261014-02",
-          "note": "amendment 2 proposed after the Operator decided three of its directions on the same day; record_status unchanged pending Operator ruling on the full text"
+          "note": "amendment 2 proposed after the Operator decided three of its directions and added two opinions on the same day; record_status unchanged pending Operator ruling on the full text"
         }
       ]
     }
@@ -1266,16 +1266,17 @@
       ],
       "amends": "RH-20261007-01",
       "follows": "RH-20261014-01",
-      "decision_ref": "docs/decisions/2026-10-14--r8-amendment-2-low-frequency-first-loop.md",
-      "authority_source": "Operator replies in current chat on 2026-10-14 (Asia/Shanghai) to four recommendations put by the recorder; the detailed terms are the recorder's expansion and await Operator ruling",
+      "decision_ref": "docs/decisions/2026-10-14--r8-amendment-2-multi-strategy-first-loop.md",
+      "authority_source": "Operator replies in current chat on 2026-10-14 (Asia/Shanghai) to four recommendations put by the recorder, and a later message the same day adding two opinions; the detailed terms are the recorder's expansion and await Operator ruling",
       "operator_excerpt": [
         "我同意你的建議1",
         "關於建議2我希望我們能慎重，確定本地開發和QC配套的都完成後再有限適用QC以免QC繳費後我們本機程序開發未到位造成空轉浪費",
         "3我同意",
-        "4我認為值得考察，另外關於Linux我隨時可以掛回來"
+        "4我認為值得考察，另外關於Linux我隨時可以掛回來",
+        "另外我看見你舉得例子是MA-Crossover，是否其餘策略也能採用？我希望倒是能夠多策略，甚至複雜策略交易，而不是用常見策略，哪樣很容易被反向狙擊。另外關於最早我裁定的交易頻率問題，我的本意避免高頻交易指的是硬件要求很高，網速很高的超高速交易，一般機器秒級和分鐘級（如果你認為普通家用網絡和硬件足夠支撐）則可以考慮。"
       ],
       "status": "proposed",
-      "meaning": "Second amendment to R8, drafted after the Operator, on a fast-profit premise, decided three directions: the first loop becomes a pre-registered low-frequency (1h, 4h or daily) hypothesis search instead of the 1-minute ma_crossover stand-down comparison; QC is used only, and in a limited way, after local development and platform support work are complete; the second instrument-verification layer changes from historical Demo reconciliation to Demo forward comparison. The recorder's terms add a one-day probe choosing between local open-source LEAN and a self-built research tool, research data fetched from public exchange endpoints into hashed local files without the database, pessimistic costs including funding, a research-stage candidate threshold that is not promotion evidence, a readiness checklist before any platform account, engine and replay low-frequency support built only after a candidate qualifies, and a proposed ten-workday cap with hour accounting. Source inspection found that strategies receive only 1-minute and optional 5-minute indicator snapshots. Amendment 1 stays in force except for the three decided directions until the Operator rules; no dispatch, data fetch, account, spend, runtime or trading authority is granted."
+      "meaning": "Second amendment to R8, drafted after the Operator, on a fast-profit premise, decided three directions: the first loop becomes a low-frequency hypothesis search instead of the 1-minute ma_crossover stand-down comparison; QC is used only, and in a limited way, after local development and platform support work are complete; the second instrument-verification layer changes from historical Demo reconciliation to Demo forward comparison. The Operator then asked for multiple and complex strategies rather than common ones, and clarified that only ultra-high-speed trading needing special hardware and networking is excluded, so second- and minute-level trading may be considered if ordinary hardware and home networking suffice. On that basis the recorder proposes widening the first loop's horizon to seconds through days, pending Operator ruling. The recorder's terms add a one-day probe choosing between local open-source LEAN and a self-built research tool, research data fetched from public exchange sources into hashed local files without the database, pessimistic costs including funding, a research-stage candidate threshold that is not promotion evidence, a readiness checklist before any platform account, engine and replay support built only after a candidate qualifies, a proposed ten-workday cap with hour accounting, and a frequency boundary under which second-level hypotheses are registered only after a measured latency check and only if their edge does not depend on speed. Source inspection found that strategies receive only 1-minute and optional 5-minute indicator snapshots. Amendment 1 stays in force except where the Operator has already decided until the Operator rules; no dispatch, data fetch, Linux access, account, spend, runtime or trading authority is granted."
     }
   ],
   "external_provenance": [
