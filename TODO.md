@@ -1,7 +1,7 @@
 # 玄衡 TODO - 活躍派發佇列
 
-**版本** v891 | **校準日期** 2026-10-01（v885–v891 於 2026-10-09 至 10-14 只新增並更新文末 R8 各節，其餘未重新校準） | **source 觀察基線** `52a884d93f774a5f625a7d2db4ebe6e2ec95b23a`（GitHub／Mac main 相同，包含 PR196／PR198；本次跳過 Linux，runtime 限制見 §0）。
-**當前狀態**：AIML／workflow 均零 ACTIVE；workflow 選定 source 已採用，見下方 CLOSED 紀錄；原總帳仍歸檔，W11 等待下一個 Operator 指定的真實產品功能。S2E=5/9、effect=0/6、authority=0/9，LW2 WAITING。R8 階段 1（回放修補）與其後續六個小單元的 source 已交付並結案；2026-10-14 採納 R8 修訂二，第一圈改為本機的多策略假說搜尋，階段 2（本機研究能力）在文末為 ACTIVE，下一步是派工指令。
+**版本** v892 | **校準日期** 2026-10-01（v885–v892 於 2026-10-09 至 10-14 只新增並更新文末 R8 各節，其餘未重新校準） | **source 觀察基線** `52a884d93f774a5f625a7d2db4ebe6e2ec95b23a`（GitHub／Mac main 相同，包含 PR196／PR198；本次跳過 Linux，runtime 限制見 §0）。
+**當前狀態**：AIML／workflow 均零 ACTIVE；workflow 選定 source 已採用，見下方 CLOSED 紀錄；原總帳仍歸檔，W11 等待下一個 Operator 指定的真實產品功能。S2E=5/9、effect=0/6、authority=0/9，LW2 WAITING。R8 階段 1（回放修補）與其後續六個小單元的 source 已交付並結案；2026-10-14 採納 R8 修訂二，第一圈改為本機的多策略假說搜尋，階段 2（本機研究能力）已依派工指令拆成各單元，見文末。
 **證據與歷史**：當前 source／PR／runtime 限制見 §0；完整逐項 [audit](docs/references/2026-09-09--todo-workflow-freshness-audit.md)、[v880 快照](docs/archive/2026-09-09--todo-v880-pre-freshness-audit.md)、[版本日誌](docs/CLAUDE_CHANGELOG.md)。
 
 <details>
@@ -651,7 +651,7 @@ Python 工具 101、簽名相關 26、符號稽核模擬測試 28，皆 0 失敗
 
 | ID | 優先級 | 狀態 | Owner 路徑 | 驗收條件 | 最新證據 | 具名解除條件／下一步 |
 |---|---:|---|---|---|---|---|
-| `P2-R8-S1F-REVIEW-FOLLOWUPS` | 2 | DEFERRED；`dispatchable=false` | PM | runbook「後續小單元」一節「已知限制與後續項」所列各項，包含把符號稽核接進 CI、禁用樣式清單對現行模組的檢視、報告記錄實際執行的 fixture 雜湊 | 2026-10-14：四份獨立審查的註記，見 runbook | PM 在階段 2 派工時逐項決定是否排入。改動禁用樣式清單、為「啟用擴充之後再設延遲」新增公開錯誤型別兩項，須先由 Operator 決定 |
+| `P2-R8-S1F-REVIEW-FOLLOWUPS` | 2 | DEFERRED；`dispatchable=false` | PM | runbook「後續小單元」一節「已知限制與後續項」所列各項，包含把符號稽核接進 CI、禁用樣式清單對現行模組的檢視、報告記錄實際執行的 fixture 雜湊 | 2026-10-14：四份獨立審查的註記，見 runbook | 2026-10-14：階段 2 不排入（[階段 2 派工指令](docs/execution_plan/2026-10-14--r8-stage2-local-research-dispatch.md) §5 末段：這些都屬回放，第一圈的研究引擎不是回放）。階段 4 以回放作一致性核對之前，PM 逐項決定是否排入。改動禁用樣式清單、為「啟用擴充之後再設延遲」新增公開錯誤型別兩項，須先由 Operator 決定 |
 
 ## R8 修訂二：階段 2 本機研究能力（2026-10-14）
 
@@ -663,7 +663,22 @@ Operator 於 2026-10-14 採納 [R8 修訂二](docs/decisions/2026-10-14--r8-amen
 
 | ID | 優先級 | 狀態 | Owner 路徑 | 驗收條件 | 最新證據 | 下一步 |
 |---|---:|---|---|---|---|---|
-| `P1-R8-A2-STAGE2-LOCAL-RESEARCH` | 1 | ACTIVE；派工指令撰寫中 | PM 撰寫派工指令並拆單元；實作與獨立審查依派工指令 | 修訂二 §5 階段 2：選型查核（N2，一個工作日）、向公開來源取數並存為記雜湊的本機檔案（N3）、逐筆資料來源查核（N3 第 6 點）、悲觀成本含資金費、事件級檢查與成本壓力測試（N4）、統計治理（N3 第 5 點、N5）、假說預登記並經 Operator 覆閱（N1）；秒級假說以 300 毫秒的保守延遲評估後登記。不讀寫 Linux 資料庫。停止條件：選型查核一日內未定即採自建工具；事件級檢查不通過或資料不可重建則停止 | 2026-10-14：修訂二採納；投入上限十個工作日自同日起算，計實際投入的工時 | PM 撰寫階段 2 派工指令，經獨立文件審查後依單元拆成各自的 ACTIVE 列。逐筆資料改用 Linux 記錄器一項仍待 Operator 另行同意（修訂二 N3 第 6 點） |
+| `P1-R8-A2-STAGE2-LOCAL-RESEARCH` | 1 | ACTIVE；各單元見下列 | PM 統籌 | 修訂二 §5 階段 2：選型查核（N2，一個工作日）、向公開來源取數並存為記雜湊的本機檔案（N3）、逐筆資料來源查核（N3 第 6 點）、悲觀成本含資金費、事件級檢查與成本壓力測試（N4）、統計治理（N3 第 5 點、N5）、假說預登記並經 Operator 覆閱（N1）；秒級假說以 300 毫秒的保守延遲評估後登記。不讀寫 Linux 資料庫。停止條件：選型查核一日內未定即採自建工具；事件級檢查不通過或資料不可重建則停止。由下列各單元與 P3–P5 合起來達成 | 2026-10-14：[階段 2 派工指令](docs/execution_plan/2026-10-14--r8-stage2-local-research-dispatch.md) | 依下列各單元推進；全部完成後 PM 判定階段 2 驗收。逐筆資料改用 Linux 記錄器一項仍待 Operator 另行同意（修訂二 N3 第 6 點） |
+| `P1-R8-S2-U1-PUBLIC-DATA` | 1 | ACTIVE | 實作：實作者，交付 `R8-S2-PUBLIC-DATA-20261014`；獨立測試驗證與發布：記錄者 | 派工指令 §3 U1 | 2026-10-14：本派工指令 | 實作者依派工指令開工 |
+| `P1-R8-S2-U2-RESEARCH-LEDGER` | 1 | ACTIVE | 實作：實作者，交付 `R8-S2-RESEARCH-LEDGER-20261014`；獨立測試驗證與發布：記錄者 | 派工指令 §3 U2 | 同上 | 實作者依派工指令開工 |
+| `P2-R8-S2-U3-CI-RESEARCH` | 2 | ACTIVE | 實作：實作者，交付 `R8-S2-CI-RESEARCH-20261014`；發布：記錄者 | 派工指令 §3 U3 | 同上 | 實作者依派工指令開工 |
+| `P1-R8-S2-P1A-ENGINE-ENV` | 1 | ACTIVE | PM | 派工指令 §5 P1a：以 LEAN 自帶的範例在本機跑通，確認不需要帳戶；不取交易所資料 | 2026-10-16：Operator 確認四項依賴（事件 `RH-20261016-01`） | PM 執行 P1a，記下安裝方式、版本與投入工時 |
+| `P2-R8-S2-P2-TICK-DATA-CHECK` | 2 | ACTIVE | PM | 派工指令 §5 P2：交易所公開逐筆與盤口歷史的可得性、期間、格式與條件，只讀網頁 | 同上 | PM 查核並記錄 |
+
+### WAITING
+
+| ID | 優先級 | 狀態 | Owner 路徑 | 驗收條件 | 最新證據 | 具名解除條件／下一步 |
+|---|---:|---|---|---|---|---|
+| `P1-R8-S2-P1B-ENGINE-DATA` | 1 | WAITING；`dispatchable=false` | PM | 派工指令 §5 P1b：以 U1 格式的 BTCUSDT 訓練段 1 小時 K 線與實際資金費紀錄在 LEAN 執行，確認時間戳與成本計入；P1a 加 P1b 合計約一個工作日的投入，之後定案選型 | 2026-10-16：P1a 可執行 | U1 經獨立審查並合入 main 之後，PM 改列 ACTIVE |
+| `P1-R8-S2-P3-FETCH` | 1 | WAITING；`dispatchable=false` | PM | 派工指令 §5 P3：依 §4 取數，回報請求數、耗時、缺漏與 manifest 雜湊 | 2026-10-14：取數範圍已獲同意（修訂二 N3 的裁決） | U1 經獨立審查並合入 main 之後，PM 改列 ACTIVE |
+| `P1-R8-S2-P4-CORE-ADDENDUM` | 1 | WAITING；`dispatchable=false` | PM 撰寫補充指令，實作者執行 | 派工指令 §5 P4 | 同上 | P1b 完成、選型定案之後，PM 改列 ACTIVE |
+| `P1-R8-S2-P5-PREREGISTRATION` | 1 | WAITING；`dispatchable=false` | PM 起草；Operator 覆閱 | 派工指令 §5 P5；holdout 分段依 §4 的預設或預登記時另定 | 同上 | U2 經獨立審查並合入 main，且 P4 的補充指令合入 main 之後，PM 改列 ACTIVE |
+| `P2-R8-QC-SKILL-HALFLIFE-DRIFT` | 2 | DEFERRED；`dispatchable=false` | PM | 更新 `.claude/skills/quant-strategy-design/SKILL.md` 的半衰期判準，使其與修訂二 N9 的秒級、分鐘級範圍一致（修訂二 N9 的 DRIFT 註記） | 2026-10-14：修訂二 RH-20261014-04 的註記 | 第一個秒級或分鐘級假說登記之前，PM 改列 ACTIVE；更新屬代理工作流程變更，依該類變更的審查辦理 |
 
 ### CLOSED
 
