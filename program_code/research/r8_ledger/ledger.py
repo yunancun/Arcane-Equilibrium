@@ -287,14 +287,21 @@ class ResearchLedger:
                   "code_commit", "cost_model", "fill_model", "configuration", "configuration_sha256", "engine", "dependencies", "time_semantics",
                   "status", "result_summary", "started_at", "ended_at", "sharpe", "sharpe_frequency", "return_count", "skewness", "excess_kurtosis", "returns_sha256", "p_value")
         # 空變體與無外部相依是合法值，但鍵必須存在。
-        _required(record, tuple(x for x in fields if x not in ("variant_parameters", "dependencies")))
+        statistics = ("sharpe", "return_count", "skewness", "excess_kurtosis", "returns_sha256")
+        unavailable = record.get("status") in ("failed", "aborted") and any(record.get(k) is None for k in statistics)
+        allowed_empty = ("variant_parameters", "dependencies") + (statistics if unavailable else ())
+        _required(record, tuple(x for x in fields if x not in allowed_empty))
+        if unavailable:
+            if any(k not in record for k in statistics):
+                raise LedgerError("缺 DSR 輸入欄位")
+            _required(record, ("statistics_unavailable_reason",))
         for key in ("parent_trial_id", "random_seed", "variant_parameters", "dependencies"):
             if key not in record:
                 raise LedgerError("缺實驗身份: " + key)
         if not isinstance(record["variant_parameters"], dict) or not isinstance(record["dependencies"], dict):
             raise LedgerError("變體參數與相依版本須為物件")
         _integer(record["generation"], 1)
-        for key in ("manifest_sha256", "configuration_sha256", "returns_sha256"):
+        for key in ("manifest_sha256", "configuration_sha256"):
             _hash(record[key])
         if not isinstance(record["data_files"], dict) or not record["data_files"]:
             raise LedgerError("缺資料檔雜湊")
@@ -310,11 +317,15 @@ class ResearchLedger:
         _required(record["time_semantics"], ("known_at", "fill_at", "simulated_latency_ms"))
         _number(record["time_semantics"]["simulated_latency_ms"], 0)
         for key in ("sharpe", "skewness", "excess_kurtosis"):
-            _number(record[key])
+            if record[key] is not None or not unavailable:
+                _number(record[key])
+        if record["returns_sha256"] is not None or not unavailable:
+            _hash(record["returns_sha256"])
         _required(record["sharpe_frequency"], ("unit", "seconds", "annualized"))
         if record["sharpe_frequency"]["annualized"] is not False or _number(record["sharpe_frequency"]["seconds"], 0) == 0:
             raise LedgerError("Sharpe 必須是不年化且與報酬筆數同頻的每期值")
-        _integer(record["return_count"], 2)
+        if record["return_count"] is not None or not unavailable:
+            _integer(record["return_count"], 0 if unavailable else 2)
         _number(record["p_value"], 0, 1)
         if record["random_seed"] is not None:
             _integer(record["random_seed"])
@@ -337,7 +348,7 @@ class ResearchLedger:
             parent = record["parent_trial_id"]
             if record["generation"] > 1 and parent is None:
                 raise LedgerError("後代試驗必須引用親代")
-            if parent is not None and not any(t["trial_id"] == parent and t["generation"] < record["generation"] for t in trials):
+            if parent is not None and not any(t["trial_id"] == parent and t["generation"] < record["generation"] and t["family"] == reg["record"]["family"] for t in trials):
                 raise LedgerError("親代不存在或世代順序錯誤")
             return self._append("trials", {**record, "family": reg["record"]["family"], "preregistration_sha256": reg["record_sha256"]})
 
@@ -390,7 +401,7 @@ class ResearchLedger:
         keys = ("trial_id", "sharpe", "sharpe_frequency", "return_count", "skewness", "excess_kurtosis", "returns_sha256", "status")
         with self._lock():
             trials = [r["payload"] for r in self._read("trials") if r["payload"]["family"] == family]
-            return {"trial_count": len(trials), "trials": [{k: t[k] for k in keys} for t in trials]}
+            return {"trial_count": len(trials), "trials": [{**{k: t[k] for k in keys}, "statistics_unavailable_reason": t.get("statistics_unavailable_reason")} for t in trials]}
 
     def benjamini_hochberg(self, hypothesis_id, p_values, members_sha256, fdr):
         with self._lock():

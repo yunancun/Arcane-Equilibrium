@@ -286,5 +286,16 @@ def test_holdout_generations_must_follow_time_order():
 def test_failed_trial_without_observed_statistics_is_rejected_explicitly(book, trial):
     trial["status"] = "failed"
     trial["sharpe"] = None
-    with pytest.raises(mod.LedgerError, match="sharpe"):
+    with pytest.raises(mod.LedgerError, match="statistics_unavailable_reason"):
         book.record_trial(trial)
+
+
+def test_early_abort_remains_counted_without_inventing_statistics(book, trial):
+    trial.update(status="aborted", sharpe=None, return_count=0, skewness=None,
+                 excess_kurtosis=None, returns_sha256=None, p_value=1,
+                 statistics_unavailable_reason="引擎在產生報酬前失敗，無法計算統計量")
+    book.record_trial(trial)
+    result = book.dsr_inputs("carry")
+    assert result["trial_count"] == 1
+    assert result["trials"][0]["sharpe"] is None
+    assert result["trials"][0]["statistics_unavailable_reason"]
