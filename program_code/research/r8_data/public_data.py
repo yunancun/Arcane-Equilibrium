@@ -149,7 +149,11 @@ class Plan:
             scope = rule["symbols"]
             if scope != "universe" and (not isinstance(scope, list) or not scope or not all(isinstance(s, str) and re.fullmatch(r"[A-Z0-9]+", s) for s in scope)):
                 raise DataError("標的白名單格式錯誤")
-            intervals = rule.get("intervals", ["4h" if name == "open_interest" else "funding"])
+            if name != "kline" and "intervals" in rule:
+                raise DataError("只有 K 線可以指定 intervals")
+            intervals = rule["intervals"] if name == "kline" else [expected.get("intervalTime", "funding")]
+            if not isinstance(intervals, list) or not intervals or not all(isinstance(i, str) for i in intervals):
+                raise DataError("K 線週期須為非空字串清單")
             for interval in intervals:
                 if name == "kline" and (interval not in ("1", "60", "D") or interval == "1" and (scope == "universe" or not set(scope) <= {"BTCUSDT", "ETHUSDT"})):
                     raise DataError("K 線週期超出已授權範圍")
@@ -334,11 +338,19 @@ def parse_rows(name, records, *, symbol, start, end, interval, now_ms):
 
 
 def gaps(rows, start, end, period, *, funding=False):
-    """依 UTC 固定網格查缺；資金費另保留實際間隔不一致的觀察。"""
+    """K 線與持倉量依 UTC 網格；資金費僅用觀察到的結算相位。"""
     if period <= 0:
         raise DataError("缺漏間隔必須為正")
     timestamps = sorted({r[0] for r in rows})
-    first = ((start + period - 1) // period) * period
+    actual = [{"from": a, "to": b, "actual_interval_ms": b-a, "expected_interval_ms": period}
+              for a,b in zip(timestamps,timestamps[1:]) if b-a != period]
+    phases = {t % period for t in timestamps}
+    if funding and len(phases) != 1:
+        return {"missing_count": None, "missing_intervals": [], "off_grid_timestamps": [],
+                "observed_interval_mismatches": actual, "certainty": "UNKNOWN_SETTLEMENT_PHASE",
+                "basis": "沒有紀錄或實際結算相位不一致，不能確定缺漏數"}
+    phase = next(iter(phases)) if funding else 0
+    first = ((start - phase + period - 1) // period) * period + phase
     missing, intervals = 0, []
     cursor = first
     for stamp in timestamps + [end]:
@@ -350,11 +362,12 @@ def gaps(rows, start, end, period, *, funding=False):
                 missing += count
         if stamp < end:
             cursor = max(cursor, stamp + period)
-    actual = [{"from": a, "to": b, "actual_interval_ms": b-a, "expected_interval_ms": period}
-              for a,b in zip(timestamps,timestamps[1:]) if b-a != period]
     return {"missing_count": missing, "missing_intervals": intervals,
-            "off_grid_timestamps": [t for t in timestamps if t % period],
-            "observed_interval_mismatches": actual if funding else []}
+            "off_grid_timestamps": [t for t in timestamps if (t-phase) % period],
+            "observed_interval_mismatches": actual if funding else [],
+            "settlement_phase_ms": phase if funding else None,
+            "certainty": "INFERRED_FROM_OBSERVED_PHASE" if funding else "FIXED_INTERVAL",
+            "basis": "依已觀察結算相位與標的間隔外推；歷史間隔變更仍須查核" if funding else "UTC_INTERVAL_GRID"}
 
 
 class Collector:
@@ -484,7 +497,8 @@ class Collector:
             for symbol in sorted(self.universe):
                 if rule["symbols"] != "universe" and symbol not in rule["symbols"]:
                     continue
-                for interval in rule.get("intervals", ["4h" if rule["name"] == "open_interest" else "funding"]):
+                intervals = rule["intervals"] if rule["name"] == "kline" else [rule["params"].get("intervalTime", "funding")]
+                for interval in intervals:
                     start = max(self.plan.start, self.universe[symbol]["launch_time"])
                     if start < self.plan.end:
                         yield rule, symbol, interval, start

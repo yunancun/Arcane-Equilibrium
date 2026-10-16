@@ -360,3 +360,33 @@ def test_manifest_bound_request_prefix_tampering_rejected(plan_path, tmp_path):
     rows[0] = mod.encoded(row); c.client.log.write_bytes(b"\n".join(rows)+b"\n")
     with pytest.raises(mod.DataError, match="前綴"):
         collector(plan_path, tmp_path, universe_sender)
+
+
+def test_funding_gaps_follow_observed_one_hour_offset():
+    start = 1640995200000
+    period = 4*3600000
+    result = mod.gaps([(start+3600000, 0), (start+5*3600000, -.001)],
+                      start, start+8*3600000, period, funding=True)
+    assert result["missing_count"] == 0
+    assert result["missing_intervals"] == []
+    assert result["off_grid_timestamps"] == []
+    assert result["settlement_phase_ms"] == 3600000
+    assert result["certainty"] == "INFERRED_FROM_OBSERVED_PHASE"
+
+
+@pytest.mark.parametrize("offsets", [[], [3600000, 6*3600000]])
+def test_unknown_or_changed_funding_phase_does_not_invent_missing_count(offsets):
+    start = 1640995200000
+    result = mod.gaps([(start+x, 0) for x in offsets], start, start+86400000,
+                      4*3600000, funding=True)
+    assert result["missing_count"] is None
+    assert result["certainty"] == "UNKNOWN_SETTLEMENT_PHASE"
+
+
+@pytest.mark.parametrize("name,intervals", [("open_interest", ["1"]), ("open_interest", ["4h"]), ("funding", ["1"]), ("funding", [])])
+def test_non_kline_intervals_override_is_rejected(plan_path, name, intervals):
+    value = json.loads(plan_path.read_text())
+    next(r for r in value["datasets"] if r["name"] == name)["intervals"] = intervals
+    plan_path.write_bytes(mod.encoded(value))
+    with pytest.raises(mod.DataError, match="只有 K 線"):
+        mod.Plan(plan_path)
