@@ -667,16 +667,17 @@ Operator 於 2026-10-14 採納 [R8 修訂二](docs/decisions/2026-10-14--r8-amen
 | `P1-R8-S2-U1-PUBLIC-DATA` | 1 | ACTIVE | 實作：實作者，交付 `R8-S2-PUBLIC-DATA-20261014`；獨立測試驗證與發布：記錄者 | 派工指令 §3 U1 | 2026-10-14：本派工指令 | 實作者依派工指令開工 |
 | `P1-R8-S2-U2-RESEARCH-LEDGER` | 1 | ACTIVE | 實作：實作者，交付 `R8-S2-RESEARCH-LEDGER-20261014`；獨立測試驗證與發布：記錄者 | 派工指令 §3 U2 | 同上 | 實作者依派工指令開工 |
 | `P2-R8-S2-U3-CI-RESEARCH` | 2 | ACTIVE | 實作：實作者，交付 `R8-S2-CI-RESEARCH-20261014`；發布：記錄者 | 派工指令 §3 U3 | 同上 | 實作者依派工指令開工 |
-| `P1-R8-S2-P1-ENGINE-PROBE` | 1 | ACTIVE | PM | 派工指令 §5 P1：一個工作日內決定採 LEAN 或自建工具，留下執行記錄 | 2026-10-14：Operator 同意下載開源 LEAN | PM 執行選型查核 |
+| `P1-R8-S2-P1A-ENGINE-ENV` | 1 | ACTIVE | PM | 派工指令 §5 P1a：以 LEAN 自帶的範例在本機跑通，確認不需要帳戶；不取交易所資料 | 2026-10-16：Operator 確認四項依賴（事件 `RH-20261016-01`） | PM 執行 P1a，記下安裝方式、版本與投入工時 |
 | `P2-R8-S2-P2-TICK-DATA-CHECK` | 2 | ACTIVE | PM | 派工指令 §5 P2：交易所公開逐筆與盤口歷史的可得性、期間、格式與條件，只讀網頁 | 同上 | PM 查核並記錄 |
 
 ### WAITING
 
 | ID | 優先級 | 狀態 | Owner 路徑 | 驗收條件 | 最新證據 | 具名解除條件／下一步 |
 |---|---:|---|---|---|---|---|
+| `P1-R8-S2-P1B-ENGINE-DATA` | 1 | WAITING；`dispatchable=false` | PM | 派工指令 §5 P1b：以 U1 格式的 BTCUSDT 訓練段 1 小時 K 線與實際資金費紀錄在 LEAN 執行，確認時間戳與成本計入；P1a 加 P1b 合計約一個工作日的投入，之後定案選型 | 2026-10-16：P1a 可執行 | U1 經獨立審查並合入 main 之後，PM 改列 ACTIVE |
 | `P1-R8-S2-P3-FETCH` | 1 | WAITING；`dispatchable=false` | PM | 派工指令 §5 P3：依 §4 取數，回報請求數、耗時、缺漏與 manifest 雜湊 | 2026-10-14：取數範圍已獲同意（修訂二 N3 的裁決） | U1 經獨立審查並合入 main 之後，PM 改列 ACTIVE |
-| `P1-R8-S2-P4-CORE-ADDENDUM` | 1 | WAITING；`dispatchable=false` | PM 撰寫補充指令，實作者執行 | 派工指令 §5 P4 | 同上 | P1 選型查核定案之後，PM 改列 ACTIVE |
-| `P1-R8-S2-P5-PREREGISTRATION` | 1 | WAITING；`dispatchable=false` | PM 起草；Operator 覆閱 | 派工指令 §5 P5；holdout 分段依 §4 的預設或預登記時另定 | 同上 | U2 經獨立審查並合入 main 之後，PM 改列 ACTIVE |
+| `P1-R8-S2-P4-CORE-ADDENDUM` | 1 | WAITING；`dispatchable=false` | PM 撰寫補充指令，實作者執行 | 派工指令 §5 P4 | 同上 | P1b 完成、選型定案之後，PM 改列 ACTIVE |
+| `P1-R8-S2-P5-PREREGISTRATION` | 1 | WAITING；`dispatchable=false` | PM 起草；Operator 覆閱 | 派工指令 §5 P5；holdout 分段依 §4 的預設或預登記時另定 | 同上 | U2 經獨立審查並合入 main，且 P4 的補充指令合入 main 之後，PM 改列 ACTIVE |
 | `P2-R8-QC-SKILL-HALFLIFE-DRIFT` | 2 | DEFERRED；`dispatchable=false` | PM | 更新 `.claude/skills/quant-strategy-design/SKILL.md` 的半衰期判準，使其與修訂二 N9 的秒級、分鐘級範圍一致（修訂二 N9 的 DRIFT 註記） | 2026-10-14：修訂二 RH-20261014-04 的註記 | 第一個秒級或分鐘級假說登記之前，PM 改列 ACTIVE；更新屬代理工作流程變更，依該類變更的審查辦理 |
 
 ### CLOSED

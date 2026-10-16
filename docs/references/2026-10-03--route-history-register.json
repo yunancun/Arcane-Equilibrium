@@ -354,7 +354,7 @@
     "r8-stage2-dispatch": {
       "kind": "recorded_file",
       "path": "docs/execution_plan/2026-10-14--r8-stage2-local-research-dispatch.md",
-      "sha256": "376bb2cd3afe3164fa21ef76f1ec1f259cea00c6ee9dc93ab1819bb19dc76778",
+      "sha256": "bf953a95dce00c98e08153b5ec55390f57da6cf9fcab9e659db117e0eaa4d251",
       "meaning": "stage 2 dispatch instruction under amendment 2 (RH-20261014-05): three implementing-executor units (public data fetch tool, pre-registration and trial ledger, CI job for research tests), recorder tasks (engine selection probe with local open-source LEAN, tick data source check, the consented fetch, the research core addendum, hypothesis pre-registration), and the consented fetch scope; instruction only, not authorization, runtime or delivery evidence"
     }
   },
@@ -616,6 +616,11 @@
           "recorded_on": "2026-10-14",
           "event": "RH-20261014-05",
           "note": "Operator consented to downloading open-source LEAN for the engine probe and instructed the stage 2 dispatch; record_status unchanged"
+        },
+        {
+          "recorded_on": "2026-10-16",
+          "event": "RH-20261016-01",
+          "note": "Operator confirmed the four LEAN dependencies for the engine probe; record_status unchanged"
         }
       ]
     }
@@ -1418,6 +1423,26 @@
         "availability": "main at recording time"
       },
       "meaning": "The Operator consented to downloading open-source LEAN for the stage 2 engine selection probe and instructed the recorder to write the stage 2 dispatch after pull request 211 was merged. The dispatch instruction is added: three units for the implementing executor (a standard-library public data fetch tool with request provenance, a standard-library pre-registration, trial and holdout ledger, and a Linux CI job for research tests) and recorder tasks (the one-day LEAN probe without any platform account, a read-only check of public tick data sources, the consented fetch after independent review, a research core addendum after the probe, and hypothesis pre-registration for Operator review). It lists the consented fetch scope and the default split with one holdout segment per generation. TODO v892 splits the stage 2 row into these units and adds the deferred skill DRIFT cleanup. No Linux, database, account, spend, runtime or trading authority is granted."
+    },
+    {
+      "id": "RH-20261016-01",
+      "recorded_on": "2026-10-16",
+      "event_type": "open_item_decided",
+      "route_ids": [
+        "R8"
+      ],
+      "follows": "RH-20261014-05",
+      "decision_ref": "docs/decisions/2026-10-14--r8-amendment-2-multi-strategy-first-loop.md",
+      "authority_source": "Operator message in current chat on 2026-10-16 (Asia/Shanghai), answering the recorder's question listing four dependencies",
+      "operator_excerpt": "四項都同意，合併後我再貼給 Codex",
+      "prior_record_identity": {
+        "commit": "d44cd93ceb3751a1dc8a924cc441cc60cff4cf78",
+        "path": "docs/execution_plan/2026-10-14--r8-stage2-local-research-dispatch.md",
+        "blob": "be84c906766824bcb6bd0a8bd63ea4077e91407d",
+        "sha256": "376bb2cd3afe3164fa21ef76f1ec1f259cea00c6ee9dc93ab1819bb19dc76778",
+        "availability": "feature-branch commit; exists only on the feature branch until it is merged into main"
+      },
+      "meaning": "The automated review of pull request 212 noted that running LEAN needs dependencies beyond the consented download. The Operator confirmed all four listed by the recorder: the LEAN command-line tool in a dedicated Python virtual environment, starting the already-installed colima virtual machine, the LEAN Docker image, and as a fallback the .NET SDK with LEAN source. No platform account is opened; any login or payment prompt stops that path. In the same pull request the dispatch was revised for the automated review and an independent recheck. P1a may start once the dispatch is on main; P1b still waits for U1."
     }
   ],
   "external_provenance": [
@@ -1458,5 +1483,5 @@
       "portable_summary": "docs/decisions/2026-10-08--r8-amendment-1-first-loop-on-native-replay.md"
     }
   ],
-  "last_event_recorded_on": "2026-10-14"
+  "last_event_recorded_on": "2026-10-16"
 }
