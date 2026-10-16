@@ -93,7 +93,7 @@ def _range(value):
 
 def split_intervals(boundaries=DEFAULT_BOUNDARIES, *, generations=(1, 2),
                     label_period_seconds=0, max_holding_seconds=0,
-                    embargo_seconds=DEFAULT_EMBARGO_SECONDS):
+                    embargo_seconds=DEFAULT_EMBARGO_SECONDS, max_lookback_seconds=0):
     """空窗一律從後一段開頭扣除；回看資料由未來資料載入器另行限制。"""
     if len(boundaries) != len(generations) + 3 or not generations:
         raise LedgerError("切分日期與 holdout 世代數不符")
@@ -103,13 +103,14 @@ def split_intervals(boundaries=DEFAULT_BOUNDARIES, *, generations=(1, 2),
         _integer(generation, 1)
     gap = max(DEFAULT_EMBARGO_SECONDS, _number(label_period_seconds, 0),
               _number(max_holding_seconds, 0), _number(embargo_seconds, 0))
+    lookback = _number(max_lookback_seconds, 0)
     dates = [_time(x) for x in boundaries]
     if any(a >= b for a, b in zip(dates, dates[1:])):
         raise LedgerError("切分重疊或順序錯誤")
     result = []
     for i, (start, end) in enumerate(zip(dates, dates[1:])):
         if i:
-            start += timedelta(seconds=gap)
+            start += timedelta(seconds=max(gap, lookback) if i >= 3 else gap)
         if start >= end:
             raise LedgerError("扣除空窗後沒有可用資料")
         result.append({"id": ("train", "validation")[i] if i < 2 else "holdout-" + str(generations[i-2]),
@@ -138,7 +139,9 @@ def _splits(record):
         if start < data_start or end > data_end or previous is not None and start < previous:
             raise LedgerError("區間重疊、倒序或超出資料範圍")
         if previous is not None:
-            start = max(start, previous + timedelta(seconds=gap))
+            # 第二段以後的暖機不得回到上一代 holdout。
+            minimum_gap = max(gap, record["max_lookback_seconds"]) if i >= 3 else gap
+            start = max(start, previous + timedelta(seconds=minimum_gap))
         if start >= end:
             raise LedgerError("扣除空窗後沒有可用資料")
         if i >= 2:
@@ -287,7 +290,7 @@ class ResearchLedger:
                   "code_commit", "cost_model", "fill_model", "configuration", "configuration_sha256", "engine", "dependencies", "time_semantics",
                   "status", "result_summary", "started_at", "ended_at", "sharpe", "sharpe_frequency", "return_count", "skewness", "excess_kurtosis", "returns_sha256", "p_value")
         # 空變體與無外部相依是合法值，但鍵必須存在。
-        statistics = ("sharpe", "return_count", "skewness", "excess_kurtosis", "returns_sha256")
+        statistics = ("sharpe", "return_count", "skewness", "excess_kurtosis", "returns_sha256", "p_value")
         unavailable = record.get("status") in ("failed", "aborted") and any(record.get(k) is None for k in statistics)
         allowed_empty = ("variant_parameters", "dependencies") + (statistics if unavailable else ())
         _required(record, tuple(x for x in fields if x not in allowed_empty))
@@ -326,7 +329,8 @@ class ResearchLedger:
             raise LedgerError("Sharpe 必須是不年化且與報酬筆數同頻的每期值")
         if record["return_count"] is not None or not unavailable:
             _integer(record["return_count"], 0 if unavailable else 2)
-        _number(record["p_value"], 0, 1)
+        if record["p_value"] is not None or not unavailable:
+            _number(record["p_value"], 0, 1)
         if record["random_seed"] is not None:
             _integer(record["random_seed"])
         if record["status"] not in ("completed", "failed", "aborted"):
@@ -381,6 +385,8 @@ class ResearchLedger:
                 reason = "世代與登記不符"
             elif not any(e["action"] == "sealed" and e.get("interval") == identity and e["generation"] == generation for e in events):
                 reason = "資料段尚未封存"
+            elif any(e["action"] == "opened" and e["generation"] == generation for e in events):
+                reason = "同一世代已開啟過 holdout，禁止開啟另一段"
             # 不同假說改名或部分重疊都不能重新開啟已看過的時段。
             elif any(e["action"] == "opened" and _range(e["interval"])[0] < _range(identity)[1] and _range(identity)[0] < _range(e["interval"])[1] for e in events):
                 reason = "此 holdout 已開啟，禁止再次讀取"

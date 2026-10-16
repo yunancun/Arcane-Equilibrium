@@ -292,10 +292,46 @@ def test_failed_trial_without_observed_statistics_is_rejected_explicitly(book, t
 
 def test_early_abort_remains_counted_without_inventing_statistics(book, trial):
     trial.update(status="aborted", sharpe=None, return_count=0, skewness=None,
-                 excess_kurtosis=None, returns_sha256=None, p_value=1,
+                 excess_kurtosis=None, returns_sha256=None, p_value=None,
                  statistics_unavailable_reason="引擎在產生報酬前失敗，無法計算統計量")
     book.record_trial(trial)
     result = book.dsr_inputs("carry")
     assert result["trial_count"] == 1
     assert result["trials"][0]["sharpe"] is None
     assert result["trials"][0]["statistics_unavailable_reason"]
+
+
+def test_generation_cannot_open_another_disjoint_holdout(book, registration):
+    registration["hypothesis_id"] = "h2"
+    registration["time_splits"][-2]["start"] = "2026-03-08T00:00:00Z"
+    registration["time_splits"][-2]["end"] = "2026-04-01T00:00:00Z"
+    first = copy.deepcopy(registration)
+    # 使用另一帳本測試兩個不重疊的同代區間。
+    b = mod.ResearchLedger(book.out / "disjoint")
+    first["hypothesis_id"] = "h1"
+    first["time_splits"][-2]["start"] = "2026-01-08T00:00:00Z"
+    first["time_splits"][-2]["end"] = "2026-03-01T00:00:00Z"
+    b.preregister(first, "2026-10-16T00:00:00Z")
+    b.preregister(registration, "2026-10-16T00:00:00Z")
+    b.seal_holdout("h1", "holdout-1")
+    b.seal_holdout("h2", "holdout-1")
+    b.open_holdout("h1", "holdout-1", 1, "a"*64)
+    with pytest.raises(mod.HoldoutDenied, match="同一世代"):
+        b.open_holdout("h2", "holdout-1", 1, "b"*64)
+    denied = json.loads((b.out / "holdouts.jsonl").read_text().splitlines()[-1])["payload"]
+    assert denied["action"] == "denied" and "interval" not in denied
+
+
+def test_second_holdout_start_protects_prior_holdout_from_warmup(tmp_path, registration):
+    registration["max_lookback_seconds"] = 30*86400
+    b = mod.ResearchLedger(tmp_path)
+    b.preregister(registration, "2026-10-16T00:00:00Z")
+    b.seal_holdout("h1", "holdout-2")
+    assert b.open_holdout("h1", "holdout-2", 2, "a"*64)["start"] == "2026-06-14T00:00:00Z"
+    assert mod.split_intervals(max_lookback_seconds=30*86400)[-1]["start"] == "2026-06-14T00:00:00Z"
+
+
+def test_warmup_consuming_second_holdout_is_rejected(tmp_path, registration):
+    registration["max_lookback_seconds"] = 365*86400
+    with pytest.raises(mod.LedgerError):
+        mod.ResearchLedger(tmp_path).preregister(registration, "2026-10-16T00:00:00Z")
