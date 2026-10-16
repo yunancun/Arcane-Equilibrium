@@ -59,6 +59,7 @@ def test_categories_are_narrow_but_cover_their_own_contracts() -> None:
             "control_api_v1/tests/test_stock_etf_route_static_guard.py",
             "requirements-ml.lock",
             "helper_scripts/replay/replay_local.py",
+            "program_code/research/r8_data/public_data.py",
         ]
     )
     assert result == {
@@ -69,6 +70,7 @@ def test_categories_are_narrow_but_cover_their_own_contracts() -> None:
         "stock_etf": True,
         "sealed_build": True,
         "replay": True,
+        "research": True,
     }
 
 
@@ -186,6 +188,7 @@ def test_cli_writes_nul_safe_github_outputs(tmp_path) -> None:
         "stock_etf=false",
         "sealed_build=false",
         "replay=false",
+        "research=false",
     ]
 
 
@@ -268,3 +271,24 @@ def test_replay_gate_preserves_other_gate_decisions() -> None:
         gate: gate == "replay" for gate in GATES
     }
     assert all(classify_paths([], force_all=True).values())
+
+
+def test_research_gate_selects_only_research_sources_and_tests() -> None:
+    for path in (
+        "program_code/research/r8_data/public_data.py",
+        "program_code/research/r8_ledger/ledger.py",
+        "program_code/research/r8_future/nested/tool.py",
+        "program_code/research/tests/test_r8_public_data.py",
+        "program_code/research/tests/test_r8_future.py",
+    ):
+        assert classify_paths([path]) == {
+            gate: gate == "research" for gate in GATES
+        }, path
+    for path in (
+        "program_code/research/other.py",
+        "program_code/research/r8other/tool.py",
+        "program_code/research/tests/test_other.py",
+        "program_code/research/tests/nested/test_r8_future.py",
+        "docs/research/r8_data.md",
+    ):
+        assert classify_paths([path])["research"] is False, path

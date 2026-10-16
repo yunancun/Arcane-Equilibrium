@@ -98,6 +98,7 @@ def test_ci_workflow_classifies_paths_before_expensive_jobs() -> None:
         "stock-etf-static-guards": "stock_etf",
         "learning-runtime-sealed-build": "sealed_build",
         "replay-tests": "replay",
+        "research-tests": "research",
     }
     for job_name, output_name in expected_gate.items():
         job = _job(job_name)
@@ -366,3 +367,25 @@ def test_ci_workflow_runs_git_policy_tests_in_unconditional_cheap_gate() -> None
         "tests/ci/test_select_pytest_shard.py",
     ):
         assert path in policy
+
+
+def test_research_job_is_bounded_linux_pr_and_handles_no_tests() -> None:
+    job = _job("research-tests")
+    assert "name: research tests (linux)" in job
+    assert "needs: changes" in job
+    assert "if: github.event_name == 'pull_request' && needs.changes.outputs.research == 'true'" in job
+    assert "runs-on: ubuntu-latest" in job
+    assert "macos" not in job
+    assert "matrix:" not in job
+    assert re.search(r"timeout-minutes: [1-9][0-9]*", job)
+    assert "python-version: '3.12'" in job
+    assert "pip install pytest numpy pandas" in job
+    step = _workflow_step("\n" + job, "Run research Python tests")
+    assert "shell: bash" in step
+    assert "working-directory: ." in step
+    assert "shopt -s nullglob" in step
+    assert "tests=(program_code/research/tests/test_r8_*.py)" in step
+    assert "if (( ${#tests[@]} == 0 )); then" in step
+    assert "exit 0" in step
+    assert 'python -m pytest -q "${tests[@]}"' in step
+    assert step.index("exit 0") < step.index("python -m pytest")
