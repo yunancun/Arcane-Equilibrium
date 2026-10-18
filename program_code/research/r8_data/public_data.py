@@ -548,9 +548,34 @@ class Collector:
                 row = self.client.records[request_id-1]
                 if row["endpoint"] != INSTRUMENTS or row["params"].get("status") != "Closed":
                     raise IntegrityError("universe 失敗請求來源不符")
+            if failed and not self._probe_failure_evidenced(state, cursor, seen):
+                raise IntegrityError("下架探測的失敗狀態缺少可核對的失敗證據")
         except (KeyError, TypeError, IndexError) as exc:
             raise IntegrityError("universe checkpoint 格式不符") from exc
         return state
+
+    def _probe_failure_evidenced(self, state, cursor, seen):
+        # 失敗狀態必須能由已驗雜湊的原始頁與請求記錄重現，否則視為竄改；兩種證據：
+        # 頁數已達上限而 cursor 未清空，或接在最後一頁之後、實際失敗的探測請求。
+        if cursor and len(state["ids"]) >= self.plan.value["universe_max_pages"]:
+            return True
+        extra = [i for i in state.get("failure_request_ids", []) if i not in state["ids"]]
+        if not extra or (state["ids"] and min(extra) <= max(state["ids"])):
+            return False
+        row = self.client.records[extra[-1]-1]
+        parent = state["ids"][-1] if state["ids"] else None
+        if row["pagination"]["page"] != len(state["ids"]) + 1 or row["pagination"]["parent_request_id"] != parent:
+            return False
+        if row["network_error"] is not None or row["http_status"] != 200 or row["retCode"] != 0:
+            return True
+        try:
+            result = _json(self.out / "raw" / (str(extra[-1]) + ".json"))["result"]
+            following = result["nextPageCursor"]
+            if not isinstance(result["list"], list):
+                return True
+        except (KeyError, TypeError, ValueError):
+            return True
+        return not isinstance(following, str) or bool(following) and (not CURSOR.fullmatch(following) or following in seen)
 
     def fetch_universe(self):
         try:

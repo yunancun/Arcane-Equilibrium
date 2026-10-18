@@ -716,3 +716,37 @@ def test_universe_resume_rebuilds_exact_raw_members_and_completion(plan_path,tmp
         m['universe']['SOLUSDT']=dict(m['universe']['BTCUSDT']); mp.write_bytes(mod.encoded(m))
     with pytest.raises(mod.IntegrityError):
         with collector(plan_path,tmp_path,lambda *args:pytest.fail('unexpected network')) as r: r.fetch_universe()
+
+
+class Crash(BaseException):
+    """模擬程序在 manifest 完成前中斷；不被收集器當成請求失敗。"""
+
+
+@pytest.mark.parametrize('evidence', ['retcode', 'network', 'page_limit', 'forged', 'forged_ids'])
+def test_resumed_probe_failure_requires_verifiable_evidence(plan_path, tmp_path, evidence):
+    if evidence == 'page_limit':
+        p = json.loads(plan_path.read_text()); p['universe_max_pages'] = 1; plan_path.write_bytes(mod.encoded(p))
+    def send(endpoint, params):
+        if 'status' not in params: return response([instrument()])
+        if 'cursor' not in params: return response([instrument('OLDUSDT', 'Closed')], 'more')
+        if evidence == 'retcode': return response(code=10001)
+        if evidence == 'network': raise OSError('offline')
+        raise Crash()
+    c = collector(plan_path, tmp_path, send)
+    if evidence.startswith('forged'):
+        with pytest.raises(Crash): c.fetch_universe()
+        c.close()
+        cp = tmp_path/'out'/'delisted_probe_pages.json'; state = json.loads(cp.read_text())
+        assert state['ids'] == [2] and state['cursor'] == 'more' and not state['failed']
+        state.update(failed=True, complete=True)
+        if evidence == 'forged_ids': state['failure_request_ids'] = [2]
+        cp.write_bytes(mod.encoded(state))
+        with pytest.raises(mod.IntegrityError, match='失敗證據'):
+            with collector(plan_path, tmp_path, lambda *args: pytest.fail('unexpected network')) as r: r.fetch_universe()
+        return
+    c.fetch_universe(); c.close()
+    assert c.manifest['delistings']['probe_status'] == 'REQUEST_FAILED'
+    (tmp_path/'out'/'manifest.json').unlink()
+    with collector(plan_path, tmp_path, lambda *args: pytest.fail('unexpected network')) as r:
+        assert set(r.fetch_universe()) == {'BTCUSDT', 'OLDUSDT'}
+        assert r.manifest['delistings']['probe_status'] == 'REQUEST_FAILED'
