@@ -564,7 +564,7 @@ class Collector:
 
     def _probe_failure_evidenced(self, state, cursor, seen):
         # 失敗狀態必須能由已驗雜湊的原始頁與請求記錄重現，否則視為竄改；兩種證據：
-        # 頁數已達上限而 cursor 未清空，或最後一頁之後那一頁的完整嘗試序列以最終失敗結束、之後沒有再試。
+        # 頁數已達上限而 cursor 未清空，或最後一頁之後那一頁（同一父頁）的最後一次探測請求是最終失敗，並列在失敗清單中。
         ids, records = state["ids"], self.client.records
         if cursor and len(ids) >= self.plan.value["universe_max_pages"]:
             return True
@@ -572,25 +572,12 @@ class Collector:
         page, parent = len(ids) + 1, ids[-1] if ids else None
         tried = [row["request_id"] for row in records
                  if probe(row) and row["pagination"]["page"] == page and row["pagination"]["parent_request_id"] == parent]
-        extra = [i for i in state.get("failure_request_ids", []) if i not in ids]
-        current = [i for i in extra if records[i-1]["pagination"]["page"] == page]
-        if not current or current != tried[-len(current):] or current != list(range(current[0], current[-1] + 1)):
+        failures = state.get("failure_request_ids", [])
+        if not tried or tried[-1] not in failures:
             return False
-        if [records[i-1]["attempt"] for i in current] != list(range(1, len(current) + 1)):
-            return False
-        if any(probe(row) for row in records[current[-1]:]):
-            return False
-        for i in extra:
-            # 其餘只能是已入鏈頁面在成功之前的重試。
-            row = records[i-1]
-            if row["pagination"]["page"] == page:
-                continue
-            earlier = row["pagination"]["page"]
-            if (not probe(row) or not 1 <= earlier < page or i >= ids[earlier-1]
-                    or row["pagination"]["parent_request_id"] != records[ids[earlier-1]-1]["pagination"]["parent_request_id"]):
-                return False
-        last = records[current[-1]-1]
+        last = records[tried[-1]-1]
         if last["retryable"]:
+            # 客戶端只在前一次可重試時才送下一次，所以嘗試編號達上限即代表整串都失敗。
             return last["attempt"] >= self.plan.value["max_attempts"]
         if (last["network_error"] is not None or last["http_status"] != 200
                 or type(last["retCode"]) is not int or last["retCode"] != 0):

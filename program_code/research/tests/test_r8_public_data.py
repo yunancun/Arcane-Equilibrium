@@ -722,17 +722,27 @@ class Crash(BaseException):
     """模擬程序在 manifest 完成前中斷；不被收集器當成請求失敗。"""
 
 
-@pytest.mark.parametrize('evidence', ['retcode', 'network', 'page_limit', 'forged', 'forged_ids'])
+@pytest.mark.parametrize('evidence', ['retcode', 'network', 'page_limit', 'forged', 'forged_ids', 'dropped_ids'])
 def test_resumed_probe_failure_requires_verifiable_evidence(plan_path, tmp_path, evidence):
     if evidence == 'page_limit':
         p = json.loads(plan_path.read_text()); p['universe_max_pages'] = 1; plan_path.write_bytes(mod.encoded(p))
     def send(endpoint, params):
         if 'status' not in params: return response([instrument()])
         if 'cursor' not in params: return response([instrument('OLDUSDT', 'Closed')], 'more')
-        if evidence == 'retcode': return response(code=10001)
+        if evidence in ('retcode', 'dropped_ids'): return response(code=10001)
         if evidence == 'network': raise OSError('offline')
         raise Crash()
     c = collector(plan_path, tmp_path, send)
+    if evidence == 'dropped_ids':
+        # 真實的最終失敗，但狀態檔刪掉了失敗請求清單：來源紀錄不完整，同樣拒絕。
+        c.fetch_universe(); c.close()
+        cp = tmp_path/'out'/'delisted_probe_pages.json'; state = json.loads(cp.read_text())
+        assert state['failed'] and state['failure_request_ids']
+        state['failure_request_ids'] = []; cp.write_bytes(mod.encoded(state))
+        (tmp_path/'out'/'manifest.json').unlink()
+        with pytest.raises(mod.IntegrityError, match='失敗證據'):
+            with collector(plan_path, tmp_path, lambda *args: pytest.fail('unexpected network')) as r: r.fetch_universe()
+        return
     if evidence.startswith('forged'):
         with pytest.raises(Crash): c.fetch_universe()
         c.close()

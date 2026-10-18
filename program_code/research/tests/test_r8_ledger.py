@@ -696,7 +696,8 @@ def test_bartlett_lag_is_exact_at_integer_boundaries(n,q):
 
 
 def test_constant_nonzero_series_has_no_sharpe():
-    stats=mod.statistics_from_returns([0.1]*50,period_seconds=86400,independent_seconds=86400)
+    # 0.013 重複 50 期時，直接相減會留下約 1e-34 的平方和，得到約 7e15 的 SR。
+    stats=mod.statistics_from_returns([0.013]*50,period_seconds=86400,independent_seconds=86400)
     assert stats['sr'] is None and stats['skewness'] is None and stats['sample_std']==0
     assert mod._psr(stats)==0.0
 
