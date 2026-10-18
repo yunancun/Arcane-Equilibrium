@@ -1,6 +1,6 @@
 # 玄衡 TODO - 活躍派發佇列
 
-**版本** v892 | **校準日期** 2026-10-01（v885–v892 於 2026-10-09 至 10-14 只新增並更新文末 R8 各節，其餘未重新校準） | **source 觀察基線** `52a884d93f774a5f625a7d2db4ebe6e2ec95b23a`（GitHub／Mac main 相同，包含 PR196／PR198；本次跳過 Linux，runtime 限制見 §0）。
+**版本** v893 | **校準日期** 2026-10-01（v885–v893 於 2026-10-09 至 10-16 只新增並更新文末 R8 各節，其餘未重新校準） | **source 觀察基線** `52a884d93f774a5f625a7d2db4ebe6e2ec95b23a`（GitHub／Mac main 相同，包含 PR196／PR198；本次跳過 Linux，runtime 限制見 §0）。
 **當前狀態**：AIML／workflow 均零 ACTIVE；workflow 選定 source 已採用，見下方 CLOSED 紀錄；原總帳仍歸檔，W11 等待下一個 Operator 指定的真實產品功能。S2E=5/9、effect=0/6、authority=0/9，LW2 WAITING。R8 階段 1（回放修補）與其後續六個小單元的 source 已交付並結案；2026-10-14 採納 R8 修訂二，第一圈改為本機的多策略假說搜尋，階段 2（本機研究能力）已依派工指令拆成各單元，見文末。
 **證據與歷史**：當前 source／PR／runtime 限制見 §0；完整逐項 [audit](docs/references/2026-09-09--todo-workflow-freshness-audit.md)、[v880 快照](docs/archive/2026-09-09--todo-v880-pre-freshness-audit.md)、[版本日誌](docs/CLAUDE_CHANGELOG.md)。
 
@@ -664,9 +664,10 @@ Operator 於 2026-10-14 採納 [R8 修訂二](docs/decisions/2026-10-14--r8-amen
 | ID | 優先級 | 狀態 | Owner 路徑 | 驗收條件 | 最新證據 | 下一步 |
 |---|---:|---|---|---|---|---|
 | `P1-R8-A2-STAGE2-LOCAL-RESEARCH` | 1 | ACTIVE；各單元見下列 | PM 統籌 | 修訂二 §5 階段 2：選型查核（N2，一個工作日）、向公開來源取數並存為記雜湊的本機檔案（N3）、逐筆資料來源查核（N3 第 6 點）、悲觀成本含資金費、事件級檢查與成本壓力測試（N4）、統計治理（N3 第 5 點、N5）、假說預登記並經 Operator 覆閱（N1）；秒級假說以 300 毫秒的保守延遲評估後登記。不讀寫 Linux 資料庫。停止條件：選型查核一日內未定即採自建工具；事件級檢查不通過或資料不可重建則停止。由下列各單元與 P3–P5 合起來達成 | 2026-10-14：[階段 2 派工指令](docs/execution_plan/2026-10-14--r8-stage2-local-research-dispatch.md) | 依下列各單元推進；全部完成後 PM 判定階段 2 驗收。逐筆資料改用 Linux 記錄器一項仍待 Operator 另行同意（修訂二 N3 第 6 點） |
-| `P1-R8-S2-U1-PUBLIC-DATA` | 1 | ACTIVE | 實作：實作者，交付 `R8-S2-PUBLIC-DATA-20261014`；獨立測試驗證與發布：記錄者 | 派工指令 §3 U1 | 2026-10-14：本派工指令 | 實作者依派工指令開工 |
-| `P1-R8-S2-U2-RESEARCH-LEDGER` | 1 | ACTIVE | 實作：實作者，交付 `R8-S2-RESEARCH-LEDGER-20261014`；獨立測試驗證與發布：記錄者 | 派工指令 §3 U2 | 同上 | 實作者依派工指令開工 |
-| `P2-R8-S2-U3-CI-RESEARCH` | 2 | ACTIVE | 實作：實作者，交付 `R8-S2-CI-RESEARCH-20261014`；發布：記錄者 | 派工指令 §3 U3 | 同上 | 實作者依派工指令開工 |
+| `P1-R8-S2-U1-PUBLIC-DATA` | 1 | ACTIVE；修補派工 | 實作：實作者，交付 `R8-S2-PUBLIC-DATA-20261014`，修補交付 `R8-S2-PUBLIC-DATA-FIX-20261016`；獨立測試驗證與發布：記錄者 | 派工指令 §3 U1 與 §7.3 | 2026-10-16：實作者交回本機提交 `4555b1e19`（只在實作者本機分支）；記錄者直接執行 49 passed；代碼審查 FAIL（2 項必修），Bybit 介面與安全審查 PASS_WITH_NOTES；反向驗證另見 9 處測試缺口 | 實作者依 §7 開工修補；修補後由記錄者獨立驗證並發布 |
+| `P1-R8-S2-U2-RESEARCH-LEDGER` | 1 | ACTIVE；修補派工 | 實作：實作者，交付 `R8-S2-RESEARCH-LEDGER-20261014`，修補交付 `R8-S2-RESEARCH-LEDGER-FIX-20261016`；獨立測試驗證與發布：記錄者 | 派工指令 §3 U2 與 §7.4 | 2026-10-16：實作者交回本機提交 `2065a038b`（只在實作者本機分支）；記錄者直接執行 90 passed；代碼審查與量化方法論審查皆 FAIL（各 6 項必修）；Operator 裁決退回實作者修補、holdout 只作證偽（事件 `RH-20261016-02`） | 實作者依 §7 開工修補；修補後由記錄者獨立驗證並發布 |
+| `P2-R8-S2-U3-CI-RESEARCH` | 2 | ACTIVE；發布中 | 實作：實作者，交付 `R8-S2-CI-RESEARCH-20261014`；發布：記錄者 | 派工指令 §3 U3 | 2026-10-16：實作者交回 `866c873d0`；記錄者直接執行 `tests/ci` 98 passed、`ci.yml` 解析通過；已開 PR #213 發布，新 job 的「沒有測試檔」一支已在該 PR 通過 | 記錄者在 PR #213 的 CI 與自動審查處理完後合併 |
+| `P1-R8-DSR-GATE-SCALE-CHECK` | 1 | ACTIVE | PM 統籌；QC 或 MIT 唯讀查核 | 查明既有 `program_code/learning_engine/dsr_gate.py` 的預期最大 Sharpe 未乘試驗 Sharpe 標準差一事是否屬實，傳入 `trial_sharpes` 時以含被選試驗本身的樣本最大值作門檻、使 DSR 恆不大於 0.5 一事是否屬實，以及 `promotion_gate`、`residual_alpha_gate`、L2 顧問執行器傳入的 Sharpe 單位與受影響程度；只查核，修正另立 | 2026-10-16：U2 的量化方法論審查指出（派工指令 §7.5）；記錄者已讀源碼，確認 `_compute_expected_max_sharpe` 回傳標準常態單位 | 派一位 QC 或 MIT 唯讀查核並回報影響範圍 |
 | `P1-R8-S2-P1A-ENGINE-ENV` | 1 | ACTIVE | PM | 派工指令 §5 P1a：以 LEAN 自帶的範例在本機跑通，確認不需要帳戶；不取交易所資料 | 2026-10-16：Operator 確認四項依賴（事件 `RH-20261016-01`） | PM 執行 P1a，記下安裝方式、版本與投入工時 |
 | `P2-R8-S2-P2-TICK-DATA-CHECK` | 2 | ACTIVE | PM | 派工指令 §5 P2：交易所公開逐筆與盤口歷史的可得性、期間、格式與條件，只讀網頁 | 同上 | PM 查核並記錄 |
 

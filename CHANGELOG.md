@@ -7,6 +7,12 @@
 > 舊引言誤把 v5.6→v5.7 列為 thesis-shift，本次依下方正文校正為 engineering-only。
 > 舊主檔命名／路徑以固定來源登記為準；v5.9 起已改用 AEG packet。
 
+## [RH-20261016-02] — 2026-10-16 — R8 階段 2 的審查結果與修補派工
+
+實作者交回 U1–U3。U1、U2 獨立審查判 FAIL，修補清單見[派工指令](docs/execution_plan/2026-10-14--r8-stage2-local-research-dispatch.md) §7；U3 已開 PR #213 發布。
+Operator 裁決 holdout 只作證偽：顯著性（DSR、BH，全部試驗計入）改由 holdout 之前的走動式樣本外檢驗承擔（修訂二 N5 的裁決註記）。
+另列既有 DSR 閘門門檻尺度的查核。TODO v893。
+
 ## [RH-20261016-01] — 2026-10-16 — R8 選型查核的依賴範圍
 
 Operator 確認 LEAN 選型查核所需的四項依賴：專用虛擬環境中的 LEAN 命令列工具、啟動已安裝的 colima 虛擬機、LEAN 的 Docker 映像，以及退路的 .NET SDK 加原始碼。

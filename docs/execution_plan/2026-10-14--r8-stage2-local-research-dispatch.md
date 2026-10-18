@@ -3,8 +3,8 @@
 | 項目 | 內容 |
 |---|---|
 | 文件性質 | 階段 2 各單元的派工指令。不是授權文件；是否可派發以 [TODO](../../TODO.md) 的對應各列為準 |
-| 日期 | 2026-10-14 起草；2026-10-16 依 PR #212 的自動審查修訂（Asia/Shanghai） |
-| 依據 | [R8 修訂二](../decisions/2026-10-14--r8-amendment-2-multi-strategy-first-loop.md)（已採納，事件 `RH-20261014-03`）§5 階段 2、採納時的三項裁決與事件 `RH-20261014-04` 的釐清註記；Operator 同日同意下載開源 LEAN 作選型查核，並指示開始撰寫本指令（事件 `RH-20261014-05`）；2026-10-16 Operator 確認 LEAN 所需的四項依賴（事件 `RH-20261016-01`） |
+| 日期 | 2026-10-14 起草；2026-10-16 依 PR #212 的自動審查修訂；2026-10-16 加入 §7 修補派工（Asia/Shanghai） |
+| 依據 | [R8 修訂二](../decisions/2026-10-14--r8-amendment-2-multi-strategy-first-loop.md)（已採納，事件 `RH-20261014-03`）§5 階段 2、採納時的三項裁決與事件 `RH-20261014-04` 的釐清註記；Operator 同日同意下載開源 LEAN 作選型查核，並指示開始撰寫本指令（事件 `RH-20261014-05`）；2026-10-16 Operator 確認 LEAN 所需的四項依賴（事件 `RH-20261016-01`）；同日裁決 U2 退回實作者修補、holdout 只作證偽（事件 `RH-20261016-02`） |
 | 前提 | main 含修訂二的採納記錄（PR #211，merge commit `d05d1dd41`）。修訂二採納前的回放與分析工具見[階段 1 runbook](../runbooks/r8_stage1_replay_patches.md) |
 | 投入上限 | 階段 2 至 3 合計十個工作日，自 2026-10-14 起算，計依工時記帳的實際投入（修訂二 N8 與其裁決註記）。每個單元回報開始、結束時間與投入工時 |
 | 不在範圍 | 研究工具核心（N4 的事件級檢查、成本模型、成本壓力測試）的實作，待選型查核定案後以補充指令交代（P4）；階段 3 的研究圈；Linux、資料庫、Demo、live；任何交易效果 |
@@ -274,3 +274,281 @@ R8 階段 1 後續單元留下的審查後續項（TODO `P2-R8-S1F-REVIEW-FOLLOW
 - 固定的基線 commit。
 - 計時器：每個單元的租約到期時間、第一次審查呼叫的時間與審查時段的截止時間、實際完成時間。
 - 工時：每個單元的開始、結束時間（UTC）與投入工時。
+
+## 7. 修補派工（2026-10-16）
+
+本節與 §3、§4 衝突時，以本節為準。
+
+### 7.1 經過與裁決
+
+- 2026-10-16，實作者交回 U1、U2、U3，三者都停在本機提交，基線 `11b7b7e83`：
+  - U1：分支 `codex/r8-s2-public-data-20261016`，提交 `f3894e649`、`4555b1e19`；
+  - U2：分支 `codex/r8-s2-research-ledger-20261016`，提交 `4064d94bb`、`8e6af96d7`、`2065a038b`；
+  - U3：分支 `codex/r8-s2-ci-research-20261016`，提交 `866c873d0`。
+  - 這些提交只存在本機分支。
+- 記錄者以 Python 直接執行測試：U1 49 passed、U2 90 passed、U3（`tests/ci`）98 passed。
+- 獨立審查結果：
+
+  | 單元 | 審查 | 結論 |
+  |---|---|---|
+  | U1 | 代碼審查 | FAIL，2 項必修 |
+  | U1 | Bybit 介面審查 | PASS_WITH_NOTES |
+  | U1 | 安全審查 | PASS_WITH_NOTES |
+  | U2 | 代碼審查 | FAIL，6 項必修 |
+  | U2 | 量化方法論審查 | FAIL，6 項必修 |
+
+- 反向驗證：把被測行為逐一改壞共 44 處，其中 21 處既有測試沒有抓到。扣除等價改動後，U1、U2 各有 9 處是真正的測試缺口。
+- U3 經記錄者核對後，已開 PR #213 發布，合併由記錄者處理。
+- Operator 於 2026-10-16 裁決（事件 `RH-20261016-02`）：
+  - U2 退回實作者修補；
+  - holdout 只作證偽，不作顯著性檢定（見修訂二 N5 的裁決註記）。
+- 記錄者依同一分工，把 U1 的修補一併交回實作者。這是記錄者的安排；Operator 也可以改由記錄者直接修補 U1。
+
+### 7.2 共同規則
+
+1. 兩個修補交付：`R8-S2-PUBLIC-DATA-FIX-20261016` 與 `R8-S2-RESEARCH-LEDGER-FIX-20261016`，`work_item_id` 與 `lane_id` 都用這兩個名稱。
+   這是 §2.1 第 1、5 點「不得另立名稱」的例外：原交付已以 BLOCKED／UNVERIFIED 交回，修補由 Operator 的裁決與記錄者的安排發起，另立名稱使兩次交付的審查紀錄分開。
+2. 兩個修補交付都從**同一個**含本節的 main commit 開工，各開新的 worktree 與分支：`codex/r8-s2-public-data-fix-20261016`、`codex/r8-s2-research-ledger-fix-20261016`。
+   - 把 7.1 所列保留提交依序 cherry-pick 到新分支上，產生只有單一父提交的提交；不要 merge。
+     發布前檢查要求線性歷史，遇到 merge commit 會回 `NATIVE_COMMIT_RANGE_NONLINEAR_HISTORY`。
+   - 原分支保持不動。
+3. 開工之後 main 若前進，不要自行 rebase。在代碼審查通過後停止，把提交留在本機分支並回報；由記錄者重新准入、驗證並發布。
+4. §2 的其餘共同規則照舊適用：標準函式庫、測試不連網、清單外檔案不碰、計時器與交付方式。
+   - 可改檔案為各單元原有的檔案；U1 另可改 `stage2_plan.json`，但只能依 7.3 第 12 點調整限額。
+5. 程式必須與 Python 3.10 相容。本機測試在倉庫根目錄以 `/usr/local/bin/python3 -m pytest` 執行，這個 3.10.1 有 pytest，且測試檔使用絕對匯入。
+   Python 3.12 由 U3 的 CI 項目驗證；本機 Homebrew 的 3.12 沒有 pytest。
+6. 每一個修補項都要有對應的測試，並補上 7.3 第 13 點、7.4 第 13 點所列的缺口。
+
+### 7.3 U1 的修補（實際取數之前必須完成）
+
+1. **錯誤分為兩類。** 新增兩個 `DataError` 的子類：`IntegrityError`（中止）與 `ResponseInvalid`（工作層級失敗）；現有的拋出點依下列分類改用對應的子類。
+
+   **中止整個程序（往上拋）：**
+   - `Forbidden`（403）；
+   - 計畫或白名單違規，即 `Plan.authorize` 拋出的錯誤，包括它自己的 cursor 檢查（那是最後一道防線，正常情況不會觸發）；
+   - 續傳完整性錯誤：原始回應雜湊、checkpoint、計畫雜湊、請求記錄身份或 manifest 前綴不符；
+   - 拿不到輸出目錄的鎖；
+   - 403 冷卻未滿（第 5 點）；
+   - universe 階段的失敗：instruments-info 取數失敗、頁數超限、標的數超過上限（第 12 點）。
+     同屬 universe 階段的下架探測（一次 `status=Closed` 的全量掃描）照現行做法不中止，失敗時記 `probe_status: "REQUEST_FAILED"`，續傳依第 7 點處理。
+
+   **工作層級失敗（記錄後繼續）：** 一個資料集、標的、週期是一個工作。
+   - 單位以內的 `RequestFailed`：重試用完、HTTP 非 200、`retCode` 非 0、回應不是 JSON 等。
+   - 解析回應時的 `ResponseInvalid`：缺欄位、非有限數值、時點超出請求窗、標的不符、cursor 未前進、cursor 字元不合法（第 4 點，在解析回應時檢查）、資料集頁數超限、跨頁的同一時點資料不一致。
+
+   `Forbidden` 與 `IntegrityError` 要先於其他例外重新拋出。
+
+   **失敗紀錄：**
+   - manifest 新增 `failures` 物件，鍵與 `files` 相同（檔名）。值包含 `status`（`FAILED` 或 `FAILED_UNAVAILABLE`）、例外型別、訊息、相關的 request_id，以及 `attempts`。
+   - `attempts` 計的是工作的執行次數，不是 HTTP 重試次數；第一次失敗時為 1。
+   - 來源為下架探測的標的，在資料端點回 `retCode≠0` 時記為 `FAILED_UNAVAILABLE`，續傳時不再重試。
+   - `FAILED` 項在續傳時，若 `attempts` 小於 2 就重試一次並遞增；成功即移出 `failures`，寫入 `files`。
+   - 全部工作跑完後，若有 `FAILED` 項，以結束碼 3 結束並列出；只有 `FAILED_UNAVAILABLE` 項時照常以 0 結束，只在摘要中列出。
+2. **重試只限下列情況，次數上限與退避照舊：**
+   - `OSError`（含 `urllib.error.URLError` 與逾時）與 `http.client.HTTPException`；
+   - HTTP 429 與 5xx；
+   - HTTP 200 但 `retCode` 為 10006、10016 或 10018。
+
+   10006（IP 限流）列於參考文件的錯誤碼表。10016 與 10018 不在參考文件中，取自既有回放客戶端（`bybit_public_client.py` 的可重試集合），屬未驗證。
+3. **失敗也要留記錄。** 請求送出之後發生的任何例外，都先寫一行請求記錄（`network_error` 記例外型別），再依第 2 點處理：
+   - 在重試集合內的，照重試規則；
+   - 其餘（例如回應超過大小上限、`RecursionError`、`UnicodeEncodeError`）轉成 `ResponseInvalid`，不重試。
+4. **cursor 原樣送出。**
+   - cursor 必須符合 `^(?:[A-Za-z0-9_.~-]|%[0-9A-Fa-f]{2})+$`，否則該工作以 `ResponseInvalid` 失敗。不得自行放寬；P3 小樣本若遇到不符的真實 cursor，由記錄者另行處理。
+   - 組網址時 cursor 不再編碼，其他參數照常編碼。
+   - 參考文件中「不可重複編碼」的規定，寫在 `get_active_orders`、`get_positions` 與 `get_closed_pnl` 三個私有端點下（第 481、589、695 行）；
+     套用到持倉量與 instruments-info 屬類推，P3 取數時以小樣本確認。
+5. **403 冷卻。** 啟動時，若請求記錄的最後一筆是 403，且距今未滿 10 分鐘，即中止。
+6. **輸出目錄排他鎖。** 以 `fcntl.flock` 對 `<輸出目錄>/.collector.lock` 取非阻塞的排他鎖；拿不到即中止。
+7. **續傳時重新驗證。**
+   - 從 manifest 讀出的 universe 逐項重驗：標的符合 `^[A-Z0-9]{1,32}$`；`universe_request_ids` 每一個都是落在 1 到請求記錄筆數之間的整數。
+   - `raw_sha256` 為 null 的紀錄（網路錯誤）略過，且其原始檔不得存在。這修正了「下架探測遇到網路錯誤後再也無法續傳」的問題。
+8. **K 線起點對齊網格。**
+   - K 線請求的起點 = max(計畫起點, 向下對齊到週期網格的上市時間)。
+   - 白名單、解析視窗與 `coverage` 一律使用這個起點。
+   - 資金費與持倉量不對齊。
+9. **方向檢查（三個資料集都適用）。**
+   - 情形：一頁是滿頁（筆數等於 `limit`），又因「最舊時點 ≤ 起點」被判定完成，而該頁最新時點加一個週期仍早於本窗終點。
+     週期：K 線用其週期，資金費用該標的的間隔，持倉量用 4 小時。
+   - 處理：對 [最新時點 + 一個週期, 終點] 補一個請求，確認為空；不是空的，該工作以 `ResponseInvalid` 失敗。
+10. **缺漏計算。**
+    - 資金費：相鄰紀錄的實際間隔若不是現行間隔的整數倍，即「間隔不一致」，`missing_count` 記為 null，並保留不一致的清單；
+      若都是整數倍，倍數大於 1 的空檔照常計為缺漏。
+    - universe 另存 `deliveryTime`；值為 `"0"` 或缺少時，視為未下架。下架品種的缺漏只算到 `deliveryTime`。
+    - `period_contains_delistings`：取得至少一個 `deliveryTime` 落在期間內的下架品種時記為 true；一個都沒取得時維持 `"UNKNOWN"`，不得寫 false。
+11. **回應核對。** K 線與持倉量的回應中，`result` 若帶 `symbol` 或 `category`，必須與請求一致，否則該工作以 `ResponseInvalid` 失敗。
+12. **其他。**
+    - 明確傳入 `ssl.create_default_context()`；
+    - 標準輸出改用 `ensure_ascii=True`；
+    - 「輸出在倉庫之外」改為：從輸出目錄逐層向上，任何一層的 `.git` 存在即拒絕（以 `exists()` 判斷，因為 worktree 的 `.git` 是檔案）；
+    - AST 檢查另外拒絕對 `__import__` 與 `importlib.import_module` 的呼叫；
+    - 計畫檔的 `max_pages` 不得大於 5000；
+    - 新增 `max_symbols`，計畫值 1500，上限 2000，universe 超過時中止。
+13. **測試缺口（反向驗證）：**
+    - universe 的頁數上限，以不重複的 cursor 測；
+    - 資金費回應的標的不符；
+    - 回應時點超出請求窗；
+    - 輸出檔被竄改時，由原始頁重建；
+    - 輸出目錄在倉庫內時被拒；
+    - 計畫的下架探測次數與 1 分鐘範圍不得擴大；
+    - 回應中含不安全的標的名稱時被拒；
+    - cursor 必須來自父頁；
+    - 另外攔截 opener，斷言 `transport` 組出的網址沒有重複編碼 cursor。
+
+### 7.4 U2 的修補
+
+依 Operator 的裁決，holdout 只作證偽：顯著性（DSR 與 BH，全部試驗計入）由 holdout 之前的走動式樣本外檢驗承擔；
+holdout 只檢查成本後仍為正、方向一致、沒有明顯劣化。U2 依此調整如下。
+
+**單位與記號。**
+- Sharpe 一律以該假說的 `sharpe_frequency_seconds` 為一期，記錄未年化的每期值；年化只出現在報告中。
+- 試驗記錄的報酬序列一律是成本後的淨報酬（成本模型由 P4 預登記）。
+- T 為報酬筆數；γ3 為偏態；γ4 = 超額峰度 + 3。偏態與超額峰度採未做偏誤修正的樣本矩，「超額峰度 ≥ 偏態平方 − 2」對它成立，帳本據此檢查。
+- Φ 與 Φ⁻¹ 用標準函式庫的 `statistics.NormalDist`。
+- 標準化 JSON 為帳本既有的 `canonical`；在說明中註明以 Python 的實作為準。
+
+1. **帳本身份。**
+   - 建立帳本時寫入隨機的 `ledger_id`。
+   - 匯出鏈頭時一併匯出 `ledger_id`；`verify_heads` 必須核對 `ledger_id`。
+2. **時鐘。** 帳本以注入的時鐘（建構參數，預設為系統 UTC 時鐘）寫入每一筆紀錄的 `recorded_at`。
+   三本帳各自的 `recorded_at` 單調遞增，不得早於該帳的上一筆。任何公開函式與 CLI 都不再接受呼叫者提供的寫入時間。
+3. **預登記 `preregister(record)`。**
+   - 世代：必填 `generation`，為 1 或 2（本輪的共用邊界只有兩段 holdout）。
+     - 第 g 代的第一個試驗一開始，帳本即不再接受第 g 代的新預登記。
+     - 第 g 代開啟 holdout（第 9 點，包括空候選的開啟）之後，帳本拒收世代大於 g 的新預登記。
+       這落實修訂二 N5 的釐清：第二代只用訓練段、驗證段，以及第一代在這兩段上的結果。
+   - 共用邊界：全帳本共用同一組切分邊界（訓練、驗證、兩段 holdout 及其所屬世代），以第一筆預登記為準，之後的預登記必須相同。
+     各假說只依自己的空窗把各段起點往後移。§4「可在預登記時改」不再適用。
+   - 家族：
+     - 一個假說代號只屬於一個家族。若本假說已出現在任何既有登記的成員列中，家族名稱與多重檢驗綁定（方法、FDR 水準、成員雜湊）必須一致；本登記的成員若已登記過，同理。比對不看成員順序。
+     - 同一家族的成員必須同一世代、同一 `sharpe_frequency_seconds`；不符的預登記拒收。
+     - 方法為 `BH` 或 `BY`，由 P4 選定；FDR 水準必須在 (0, 0.5) 之內。
+     - 成員到第 g 代第一個試驗開始時仍未登記者，此後不得登記，在多重檢驗中視同撤回。
+   - `sharpe_frequency_seconds`：預登記的頂層必填欄位，為正整數。試驗既有的 `sharpe_frequency.seconds` 必須與它相同。
+   - 秒級、分鐘級：決策週期換算成秒數，小於 3600 秒即要求填寫 `non_speed_edge`。
+   - `oos_protocol` 必填，為結構化物件：
+     - 必含 `scheme`（`expanding` 或 `rolling`）、`initial_train_seconds`、`test_seconds`、`step_seconds`、`purge_seconds`、`embargo_seconds`，各為正數；
+     - `step_seconds` 不小於 `test_seconds`（各折的測試窗不重疊）；
+     - `initial_train_seconds` 加 `test_seconds` 不得超過樣本外範圍（第 4 點）的長度；
+     - `purge_seconds` 與 `embargo_seconds` 都不得短於該假說的空窗；
+     - 帳本計算並保存它的 SHA-256（`oos_protocol_sha256`）；具體數值由 P4 規定。
+   - `falsification_rule` 必填：`degradation_z`，介於 0.5 與 1.645 之間（含兩端），由 P4 規定。「成本後為正」與「方向一致」是固定規則，不設欄位（第 10 點）。
+   - 樣本量下限（由帳本計算，不由研究者自填）：
+     - 有效獨立期數 = 期間長度 ÷ max(決策週期, 最長持有期, 標籤期)；
+     - 對樣本外期間（第 4 點的範圍扣除 `initial_train_seconds`）與各段 holdout 分別計算，寫入登記紀錄；
+     - 樣本外少於 30 即拒絕，少於 100 時加 `sample_size_warning`；holdout 少於 30 時也加 `sample_size_warning`，但不拒絕。
+   - 可偵測的 Sharpe（由帳本計算，只作報告）：以年為單位的期間長度 Y，年化值 =（Φ⁻¹(1 − α) + Φ⁻¹(0.8)）÷ √Y。
+     對樣本外期間分別以 α = 0.05 與 α = FDR 水準 ÷ 成員數（BY 時再除以調和數 H_m）計算，對各段 holdout 以 α = 0.05 計算，寫入登記紀錄。
+4. **試驗分兩階段記錄。**
+   - `begin_trial(record)` 在計算之前寫入完整的實驗身份：修訂一 AM6 的各欄位、`evaluation_kind`、`role`、`fit_window` 與 `score_window`。
+     - 試驗的世代必須等於其假說登記時的世代；已撤回（第 7 點）的假說不得再開始試驗。
+     - 譜系親代 `parent_trial_id`：世代大於 1 的非 holdout 試驗必填，指向較早世代的任一試驗，可以跨家族。既有「親代須同一家族」的檢查移除。
+     - `out_of_sample` 與 `holdout_falsification` 試驗另須帶 `oos_protocol_sha256`，且必須與登記相同。
+   - `finish_trial(trial_id, result)` 只補上狀態、統計量、`result_summary` 與 `ended_at`，不得改動 `begin_trial` 寫入的欄位。
+     `ended_at` 不得早於開始的寫入時間，也不得晚於結束的寫入時間。
+   - 只開始、沒有結束的試驗，以 aborted 計入試驗數。
+   - **資料窗。** 樣本外範圍 = 從該假說調整後的訓練段起點，到驗證段終點的連續區間（中間的空窗包含在內，走動式的各折自有清除與空窗）。
+     - `in_sample` 與 `out_of_sample`：`fit_window` 與 `score_window` 都落在樣本外範圍內。
+     - `holdout_falsification`：`score_window` 落在本世代已開啟、且本假說在候選集合內的區間；`fit_window` 落在樣本外範圍內（重新擬合的方式依 P4 第 10 點）。
+   - **角色。** `role` 為 `primary_oos` 或 `exploratory`（預設）：
+     - 每個假說至多一個 `primary_oos`，必須是 `out_of_sample`，而且在 `begin_trial` 時指定，也就是結果出來之前；
+     - 它一開始，同一假說就不再接受新的 `in_sample` 或 `out_of_sample` 試驗；
+     - 它開始時，帳本保存 K 與 V 的快照（第 5 點）。
+   - **holdout 證偽試驗。** 每個候選至多一個 `holdout_falsification` 試驗：
+     - 以 `primary_trial_id` 指向該候選的 `primary_oos` 試驗（同一假說、同一世代），稱為主試驗；`parent_trial_id` 為 null；
+     - 參數變體雜湊、`oos_protocol_sha256` 與 `sharpe_frequency_seconds` 都必須與主試驗相同；
+     - 試驗紀錄照常寫入試驗帳，但不計入 K 與 V；判定結果寫入 holdout 帳（第 10 點）。
+   - 某世代開啟 holdout 之後，該世代不再接受 `in_sample` 或 `out_of_sample` 的新試驗。
+5. **K 與 V。**
+   - K：全帳本、本世代與所有前代的全部非 holdout 試驗，包括 `in_sample`、`out_of_sample`、failed、aborted，以及只開始沒有結束的試驗；計算 p 值一律用這個 K。
+     快照另存家族內的累計數，只作報告。
+   - V 的樣本：全帳本已完成的 `out_of_sample` 試驗中，`oos_protocol_sha256` 與 `sharpe_frequency_seconds` 都與本試驗相同者，其 Sharpe 的樣本變異數（ddof = 1）；
+     快照保存這個值與試驗數 n_V。
+   - 計算時採用的 V = max(樣本變異數, 1 ÷ (T − 1))，T 為本試驗的報酬筆數；n_V 少於 2 時，V = 1 ÷ (T − 1)。
+     T 要到試驗結束才知道，所以開始時只保存樣本變異數與 n_V，結束時再取下限。
+     下限是零假說下 Sharpe 估計量的變異數，防止只跑少數幾乎相同的樣本外變體把 V 壓到接近 0。
+6. **統計量全有或全無；p 值由帳本計算。**
+   - 統計量指 Sharpe、報酬筆數、偏態、超額峰度與報酬序列雜湊。
+   - 只有狀態是 failed 或 aborted、報酬筆數為 null 或小於 2、並附 `statistics_unavailable_reason` 時，才可以全無。
+   - 只要報酬筆數不少於 2，不論狀態如何，統計量都必須全部記錄。
+   - `primary_oos` 試驗完成時，帳本以開始時的快照（V 依第 5 點在結束時取下限）計算並寫入下列各值，研究者不得提供：
+     - E[max Z(K)] =（1 − γ）Φ⁻¹(1 − 1 ÷ K）+ γ Φ⁻¹(1 − 1 ÷（K·e）），γ = 0.5772156649015329；K = 1 時為 0；
+     - SR0 = √V × E[max Z(K)]；
+     - DSR = Φ（（SR − SR0）× √(T − 1) ÷ √(1 − γ3 × SR +（γ4 − 1）÷ 4 × SR²)）；分母不大於 0 時照常寫入，`p_value` 記 1 並註明原因；
+     - `p_value` = 1 − DSR；同時保存算法代號 `dsr_bailey_lopez_de_prado_v1` 與全部輸入。
+7. **撤回 `withdraw_hypothesis(hypothesis_id, reason)`。** 寫入預登記帳。撤回後該假說不得再開始試驗；在 BH 中以 p = 1 參與。
+8. **多重檢驗 `run_multiple_testing(family)`，每個家族只執行一次。**
+   - 前置條件：家族的每個成員，不是已有已結束（任何狀態）的 `primary_oos` 試驗，就是已撤回或視同撤回（第 3 點）。這防止過早執行而把未結束的成員永久鎖成 p = 1。
+   - p 值取自每個成員 `primary_oos` 試驗的 `p_value`；已撤回、視同撤回，或 `primary_oos` 狀態為 failed 或 aborted 者，以 p = 1 參與。家族大小固定為預登記的成員數。
+   - 方法依預登記：`BH`，或不能主張 PRDS 時的 `BY`。
+   - 結果寫入 holdout 帳，鍵為：`action`（`"multiple_testing_result"`）、`family`、`generation`、`members_sha256`、`method`、`fdr`、`p_values`（假說代號 → p）、`adjusted_p_values`（假說代號 → 校正後 p）、`accepted`（依字典序排序的假說代號列）。
+9. **開啟 holdout `open_holdout(generation, candidate_trial_ids)`。**
+   - 前置條件：
+     - 本世代的每個家族都已有 `multiple_testing_result`；
+     - 候選集合必須**恰好**等於本世代各家族 `accepted` 中各假說的 `primary_oos` 試驗，不得只取子集；可以為空；
+     - 每個候選的假說都已封存第 g 段；
+     - g = 2 時，第 1 段已開啟（包括空候選的開啟）。
+   - 集合雜湊 = SHA-256(`canonical`(依字典序排序的候選試驗代號列))，由帳本計算。
+   - 回傳 `{"intervals": {假說代號: 區間}, "candidates_sha256": …, "holdouts_head": …}`，區間依各假說的空窗調整；候選為空時 `intervals` 為空物件，該段仍記為已開啟。
+   - 同一世代只開啟一次；再次呼叫一律拒絕且不回傳區間，嘗試另記一筆。
+10. **證偽判定由帳本計算。** `holdout_falsification` 試驗完成時，帳本計算並以 `action: "falsification_result"` 寫入 holdout 帳：
+    - 記號：SR_h、T_h、γ3_h、γ4_h 為本試驗的統計量；SR_ref = 主試驗的 SR − 主試驗的 SR0；
+      SE_h = √((1 − γ3_h × SR_h +（γ4_h − 1）÷ 4 × SR_h²) ÷ (T_h − 1))。
+    - 三項檢查：
+      - 成本後為正：SR_h > 0（報酬已是成本後淨值）；
+      - 方向一致：SR_h 與主試驗的 SR 同號（FDR 水準小於 0.5，所以候選主試驗的 SR 必大於 SR0 ≥ 0，與上一項等價，仍分開記錄）；
+      - 沒有明顯劣化：SR_h ≥ SR_ref − `degradation_z` × SE_h。
+    - 內容：三項檢查的結果、`passed`（三項都成立）、上述各數值、主試驗與本試驗的代號。
+    - 試驗狀態為 failed 或 aborted、或統計量全無時，`passed` 為 false。
+11. **封存 `seal_holdout(hypothesis_id, segment_id)`。**
+    - 同一假說、同一段的重複封存，拒絕；假說只能封存其世代對應的那一段。
+    - 不同假說封存同一段，接受。
+    - 不同世代的段，區間不得重疊；在共用邊界下這自然成立，仍保留檢查。
+12. **欄位一致性與介面。**
+    - 最長持有期不小於預期持有期；標籤期不小於決策週期；
+    - 報酬筆數不大於「`score_window` 長度除以 Sharpe 頻率再加 1」；
+    - CLI 與公開函式隨上述調整；舊的 `record_trial`、舊簽章的 `open_holdout` 與 `benjamini_hochberg` 移除，不保留相容路徑。
+13. **測試缺口（反向驗證與代碼審查）：**
+    - 雜湊自洽、但前一筆鏈接錯誤的紀錄；
+    - 家族成員雜湊不符；
+    - 程式 commit 格式錯誤；
+    - completed 試驗缺統計量；
+    - 試驗資料窗超出允許範圍；
+    - 世代大於 1 的試驗缺譜系親代，以及跨家族的譜系親代被接受；
+    - 同一假說重複登記；
+    - 同族綁定不一致；
+    - 非標準化 JSON 行；
+    - `no_delistings_proof` 一支；
+    - `known_at_period_start` 晚於期間起點；
+    - 子欄位缺漏（例如 `cost_model.id`）；
+    - 上述 1 至 12 點每一項的正反案例；
+    - 第 6、10 點的數值，以手算的固定案例核對（例如 K = 1、K = 10，n_V 少於 2 與不少於 2）。
+
+### 7.5 不在修補範圍，由 P4 補充指令預登記
+
+- **既有 DSR 閘門。** `program_code/learning_engine/dsr_gate.py` 有兩個待查的問題：
+  - 預期最大 Sharpe 沒有乘上試驗 Sharpe 的標準差；
+  - 傳入 `trial_sharpes` 時以樣本最大值作門檻，而這個集合含被選中的試驗本身，DSR 因此恆不大於 0.5。
+
+  既有的晉級閘門也使用它，因此另列 TODO 查核，修補交付不得改動它。研究帳本依 7.4 第 6 點自行計算，不呼叫它。
+- **P4 須預登記：**
+  1. 走動式的折法：擴張或滾動、初始訓練長度、每折測試長度、步長，以及實際的樣本外總長度；
+  2. 折間的清除與空窗，以及超參數只在各折訓練窗內選擇；
+  3. 報酬序列的串接與 T 的取法：不重疊期數；持有期長於 Sharpe 頻率時，聚合成不重疊的期數；
+  4. 是否另報有效試驗數 N_eff（只作報告，p 值一律用全帳本的 K）；
+  5. 樣本外的 `oos_protocol` 是否全帳本共用一份，使 V 的樣本可以跨假說；
+  6. 多重檢驗用 BH 或 BY，以及能否主張 PRDS；
+  7. 基準（不交易、暴露相近的被動持有）、市場貝塔與逐折的行情標示；
+  8. 成本：雙邊吃單手續費、資金費在結算點計入、滑點壓力測試的倍數；
+  9. `degradation_z` 的值，以及以真實年化 Sharpe 1.5 估計的證偽誤殺率。
+     量化方法論審查的模擬（日頻、樣本外 2.9 年、holdout 127 天）：只看正負約 19%；z 為 1.0 至 1.645 時 19–25%；z 為 0.5 時 26–42%。
+     SR_ref 扣除 SR0 後仍偏高（勝者詛咒），z 越小誤殺越多；
+  10. 在 holdout 上評估哪一個模型：以凍結的超參數、用訓練段加驗證段重新擬合，或用最後一折的模型；
+  11. 每折的最少交易筆數，以及不足時的處理方式；
+  12. 第二代的預登記時點：帳本在第一代開啟 holdout 後拒收第二代的預登記（7.4 第 3 點），第二代須在此之前預登記完畢。
+      因此階段 4 的開始（第一代開啟 holdout）要等第二代預登記完畢；第二代的試驗仍可與階段 4 平行。
+- U3 已開 PR #213 發布，不在本節範圍。
+
+### 7.6 回報
+
+兩個修補交付處理完之後，依 §6 的格式一次回報，另附每一項修補對應的測試名稱。
