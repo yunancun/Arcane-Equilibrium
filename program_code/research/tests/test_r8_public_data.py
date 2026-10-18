@@ -689,3 +689,30 @@ def test_checkpoint_state_must_match_raw_pages(plan_path,tmp_path,field,value):
     cp=next((tmp_path/'out').glob('*.progress.json')); state=json.loads(cp.read_text()); state[field]=value; cp.write_bytes(mod.encoded(state))
     with collector(plan_path,tmp_path,send) as r:
         with pytest.raises(mod.IntegrityError,match='checkpoint'): r.collect()
+
+
+def test_non_json_failure_records_parser_exception(plan_path,tmp_path):
+    c=mod.Client(mod.Plan(plan_path),tmp_path/'out',send=lambda *args:(200,b'not json'))
+    with pytest.raises(mod.RequestFailed): c.request(mod.INSTRUMENTS,{'category':'linear','limit':1000})
+    assert len(c.records)==1
+    assert c.records[0]['network_error']=='JSONDecodeError'
+
+
+@pytest.mark.parametrize('tamper',['missing_page','delete_symbol','too_many_symbols'])
+def test_universe_resume_rebuilds_exact_raw_members_and_completion(plan_path,tmp_path,tamper):
+    p=json.loads(plan_path.read_text()); p['max_symbols']=2; plan_path.write_bytes(mod.encoded(p))
+    def send(endpoint,params):
+        if 'status' in params: return response()
+        return response([instrument('ETHUSDT')]) if 'cursor' in params else response([instrument()],'page2')
+    c=collector(plan_path,tmp_path,send); c.fetch_universe(); c.close()
+    mp=tmp_path/'out'/'manifest.json'; m=json.loads(mp.read_text())
+    if tamper=='missing_page':
+        mp.unlink()
+        cp=tmp_path/'out'/'instruments_pages.json'; state=json.loads(cp.read_text())
+        state.update(ids=[1],cursor='page2',complete=True); cp.write_bytes(mod.encoded(state))
+    elif tamper=='delete_symbol':
+        del m['universe']['ETHUSDT']; mp.write_bytes(mod.encoded(m))
+    else:
+        m['universe']['SOLUSDT']=dict(m['universe']['BTCUSDT']); mp.write_bytes(mod.encoded(m))
+    with pytest.raises(mod.IntegrityError):
+        with collector(plan_path,tmp_path,lambda *args:pytest.fail('unexpected network')) as r: r.fetch_universe()

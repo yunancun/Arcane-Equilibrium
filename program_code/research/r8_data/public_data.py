@@ -320,8 +320,8 @@ class Client:
                     raise ResponseInvalid("傳輸層須回傳原始 bytes")
                 try:
                     payload = json.loads(raw)
-                except (ValueError, UnicodeError):
-                    pass
+                except (ValueError, UnicodeError) as exc:
+                    error = type(exc).__name__
             except Exception as exc:
                 caught = exc
                 error = type(exc).__name__
@@ -503,6 +503,54 @@ class Collector:
                 continue
             if row["endpoint"] != INSTRUMENTS or digest((self.out / "raw" / (str(request_id) + ".json")).read_bytes()) != row["raw_sha256"]:
                 raise IntegrityError("標的清單原始回應證據不符")
+        if len(self.universe) > self.plan.value["max_symbols"]:
+            raise IntegrityError("續傳 universe 超過 max_symbols")
+        if self.manifest.get("universe_complete"):
+            self._fetch_universe(verify=True)
+
+    def _universe_state(self, key):
+        cache = self.out / (key + "_pages.json")
+        if not cache.exists():
+            return {"ids": [], "cursor": None, "complete": False, "failed": False}
+        state = _json(cache)
+        try:
+            cursor, parent, seen = None, None, set()
+            if not isinstance(state["ids"], list) or len(state["ids"]) > self.plan.value["universe_max_pages"]:
+                raise IntegrityError("universe checkpoint 頁數不符")
+            for page, request_id in enumerate(state["ids"], 1):
+                if type(request_id) is not int or not 1 <= request_id <= len(self.client.records):
+                    raise IntegrityError("universe checkpoint ID 不符")
+                row = self.client.records[request_id-1]
+                params = dict(self.plan.value[key]["params"])
+                if cursor:
+                    params["cursor"] = cursor
+                elif parent is not None:
+                    raise IntegrityError("universe 已完成卻仍有後續頁")
+                if (row["endpoint"] != INSTRUMENTS or row["params"] != params
+                        or row["http_status"] != 200 or row["retCode"] != 0
+                        or row["pagination"]["page"] != page or row["pagination"]["parent_request_id"] != parent):
+                    raise IntegrityError("universe checkpoint 分頁鏈不符")
+                cursor = _json(self.out / "raw" / (str(request_id)+".json"))["result"]["nextPageCursor"]
+                if not isinstance(cursor, str) or cursor and (not CURSOR.fullmatch(cursor) or cursor in seen):
+                    raise IntegrityError("universe checkpoint cursor 不合法")
+                if cursor:
+                    seen.add(cursor)
+                parent = request_id
+            failed = state["failed"]
+            if type(failed) is not bool or failed and key != "delisted_probe":
+                raise IntegrityError("universe checkpoint 失敗狀態不符")
+            complete = failed or bool(state["ids"]) and not cursor
+            if state["cursor"] != cursor or type(state["complete"]) is not bool or state["complete"] != complete:
+                raise IntegrityError("universe checkpoint 完成條件不符")
+            for request_id in state.get("failure_request_ids", []):
+                if type(request_id) is not int or not 1 <= request_id <= len(self.client.records):
+                    raise IntegrityError("universe 失敗請求 ID 不符")
+                row = self.client.records[request_id-1]
+                if row["endpoint"] != INSTRUMENTS or row["params"].get("status") != "Closed":
+                    raise IntegrityError("universe 失敗請求來源不符")
+        except (KeyError, TypeError, IndexError) as exc:
+            raise IntegrityError("universe checkpoint 格式不符") from exc
+        return state
 
     def fetch_universe(self):
         try:
@@ -512,14 +560,16 @@ class Collector:
         except (DataError, KeyError, TypeError, ValueError) as exc:
             raise IntegrityError("universe 階段失敗: " + str(exc)) from exc
 
-    def _fetch_universe(self):
-        if self.manifest.get("universe_complete"):
+    def _fetch_universe(self, verify=False):
+        if not verify and self.manifest.get("universe_complete"):
             return self.universe
         observed, request_ids, probe_status = [], [], "UNVERIFIED"
         for key in ("instruments", "delisted_probe"):
             # 已完成的探測可由原始頁重建，不重送同一個邏輯探測。
             cache = self.out / (key + "_pages.json")
-            state = _json(cache) if cache.exists() else {"ids": [], "cursor": None, "complete": False, "failed": False}
+            state = self._universe_state(key)
+            if verify and not state["complete"]:
+                raise IntegrityError("完整 universe 缺已完成的原始頁鏈")
             params = dict(self.plan.value[key]["params"])
             cursor, parent = state["cursor"], state["ids"][-1] if state["ids"] else None
             seen = set()
@@ -592,14 +642,19 @@ class Collector:
         if not universe:
             raise DataError("沒有可由原始回應確認的 USDT 永續合約")
         self.universe = dict(sorted(universe.items())); self.client.universe = self.universe
-        self.manifest.update(universe=self.universe, universe_request_ids=request_ids, universe_complete=True,
+        derived = dict(universe=self.universe, universe_request_ids=request_ids, universe_complete=True,
                              filtering={"rules": self.plan.value["instruments"]["filter_candidate"],
                                         "delisted_status_rule": "Closed", "observed_values": {k: sorted(v) for k,v in inventory.items()},
                                         "verified_from_raw_request_ids": request_ids},
                              delistings={"probe_status": probe_status, "obtained": sum(v["status"] == "Closed" for v in universe.values()),
                                          "period_contains_delistings": True if any(v["status"] == "Closed" and self.plan.start <= v["deliveryTime"] < self.plan.end for v in universe.values()) else "UNKNOWN", "point_in_time_universe_complete": False,
                                          "cross_sectional_candidate_allowed": False})
-        self._save()
+        if verify:
+            if any(self.manifest.get(k) != v for k,v in derived.items()):
+                raise IntegrityError("manifest universe 與原始頁重建結果不符")
+        else:
+            self.manifest.update(derived)
+            self._save()
         return self.universe
 
     def _jobs(self):
