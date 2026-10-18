@@ -183,7 +183,7 @@ def test_holdout_exact_candidates_and_computed_falsification(tmp_path,registrati
     assert result['cost_positive'] is (sum(values)>0)
     assert result['same_direction'] is (sum(values)>0)
     assert result['sr_ref']==settled['hypotheses']['h1']['sr']-settled['hypotheses']['h1']['sr0']
-    # 逐期交替、T=127；以下固定值由樣本矩與 Bartett q=4 計算，另有短序列手算檢查。
+    # 逐期交替、T=127；這裡只斷言判定的布林值，數值另以文末的偏態與自相關固定案例核對。
     assert result['not_degraded'] is expected
     with pytest.raises(mod.LedgerError): b.begin_trial({**h,'trial_id':'again'})
     assert b.family_trial_count('carry')==1
@@ -660,3 +660,60 @@ def test_falsification_recovers_from_ledger_alone_after_request_is_lost(tmp_path
     assert sum(e['action']=='falsification_result' for e in events)==1
     assert sum(e['action']=='opened' for e in events)==1
     with pytest.raises(mod.LedgerError): again.finish_trial('h',{'status':'completed','result_summary':{},'ended_at':clock.at.isoformat()})
+
+
+# 以下期望值由不引用帳本模組的獨立實作算出（statistics 模組與逐組暴力 CSCV）。
+SKEWED = [0.05,-0.01,-0.01,-0.01,0.02,-0.01,0.0,-0.01,0.03,-0.01,-0.02,0.01]
+SMOOTH = [0.01,0.012,0.011,0.009,0.004,-0.002,-0.005,-0.006,-0.001,0.003,0.006,0.008,0.007,0.002,-0.003,-0.004]
+
+
+def test_psr_uses_skew_and_kurtosis_in_the_denominator():
+    stats=mod.statistics_from_returns(SKEWED,period_seconds=86400,independent_seconds=86400)
+    assert stats['q']==2 and stats['t_eff']==12
+    assert stats['sr']==pytest.approx(0.11936793817107018,abs=1e-12)
+    assert stats['skewness']==pytest.approx(1.1433993216173997,abs=1e-12)
+    assert stats['kurtosis']==pytest.approx(3.1763805739751403,abs=1e-12)
+    assert mod._psr(stats)==pytest.approx(0.6642678086590735,abs=1e-12)
+    assert mod._psr(stats,0.1)==pytest.approx(0.5274328776394169,abs=1e-12)
+    # 偏態項正負號寫反時約為 0.6443，必須分得出來。
+    assert abs(mod._psr(stats)-0.6443481649522494)>0.01
+
+
+def test_bartlett_effective_sample_and_holding_cap():
+    stats=mod.statistics_from_returns(SMOOTH,period_seconds=86400,independent_seconds=86400)
+    assert stats['q']==2
+    assert stats['autocorrelations']==pytest.approx([0.742893709695667,0.24424425840027156],abs=1e-12)
+    assert stats['bartlett_factor']==pytest.approx(2.1533544518610706,abs=1e-12)
+    assert stats['t_eff']==pytest.approx(7.430267685922189,abs=1e-12)
+    capped=mod.statistics_from_returns(SMOOTH,period_seconds=86400,independent_seconds=4*86400)
+    assert capped['t_eff']==4
+
+
+@pytest.mark.parametrize('n,q',[(100,4),(1059,6),(51199,15),(51200,16)])
+def test_bartlett_lag_is_exact_at_integer_boundaries(n,q):
+    values=[(-1)**i*(1+i%7)/1000 for i in range(n)]
+    assert mod.statistics_from_returns(values,period_seconds=3600,independent_seconds=3600)['q']==q
+
+
+def test_constant_nonzero_series_has_no_sharpe():
+    stats=mod.statistics_from_returns([0.1]*50,period_seconds=86400,independent_seconds=86400)
+    assert stats['sr'] is None and stats['skewness'] is None and stats['sample_std']==0
+    assert mod._psr(stats)==0.0
+
+
+def test_cscv_pbo_with_remainder_block_matches_brute_force():
+    import random
+    rng=random.Random(7)
+    series={f's{i:02d}':[rng.gauss(0.001*i,0.01) for _ in range(37)] for i in range(10)}
+    assert mod.cscv_pbo(series)==pytest.approx(0.11577311577311578,abs=1e-12)
+
+
+def test_missing_series_blocks_recovery_with_a_ledger_error(tmp_path,registration,monkeypatch):
+    b,clock,result=pending_holdout(tmp_path,registration); append=b._append
+    def crash(name,payload,**kwargs):
+        if name=='holdouts' and payload['action']=='falsification_result': raise Crash()
+        return append(name,payload,**kwargs)
+    monkeypatch.setattr(b,'_append',crash)
+    with pytest.raises(Crash): b.finish_trial('h',result)
+    sha=b._trials()['h']['returns_sha256']; (b.out/'series'/(sha+'.json')).unlink()
+    with pytest.raises(mod.LedgerError,match='試驗 h'): mod.ResearchLedger(b.out,clock=clock).export_heads()

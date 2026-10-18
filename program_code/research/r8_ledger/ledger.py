@@ -378,6 +378,7 @@ class ResearchLedger:
     def _head(rows): return rows[-1]['hash'] if rows else GENESIS
 
     def export_heads(self):
+        # 匯出前會補上中斷遺留的證偽判定，因此可能追加 holdout 帳；只核對不寫入請用 verify_heads。
         with self._write_lock(): return {'ledger_id':self.ledger_id,**{name:self._head(self._read(name)) for name in LEDGERS}}
 
     def verify_heads(self, pinned):
@@ -549,7 +550,9 @@ class ResearchLedger:
         return period_grid(trial['score_window'],reg['sharpe_frequency_seconds'])
 
     def _series(self, sha):
-        _hash(sha); raw=(self.out/'series'/(sha+'.json')).read_bytes()
+        _hash(sha)
+        try: raw=(self.out/'series'/(sha+'.json')).read_bytes()
+        except OSError as exc: raise LedgerError('已存序列缺失或無法讀取：'+sha) from exc
         if hashlib.sha256(raw).hexdigest()!=sha: raise LedgerError('已存序列雜湊不符')
         return json.loads(raw)
 
@@ -581,6 +584,10 @@ class ResearchLedger:
             with temporary.open('wb') as stream:
                 stream.write(raw); stream.flush(); os.fsync(stream.fileno())
             os.replace(temporary,path)
+            # 序列目錄也要落盤，避免完成事件已落盤而序列檔遺失。
+            handle=os.open(directory,os.O_RDONLY)
+            try: os.fsync(handle)
+            finally: os.close(handle)
 
     def finish_trial(self, trial_id, result):
         result=json.loads(canonical(result))
@@ -636,7 +643,8 @@ class ResearchLedger:
         done={e['trial_id'] for e in self._events('holdouts') if e['action']=='falsification_result'}
         for trial in self._trials().values():
             if trial['evaluation_kind']=='holdout_falsification' and trial['finished'] and trial['trial_id'] not in done:
-                self._complete_falsification(trial,self._registration(trial['hypothesis_id'])['record'])
+                try: self._complete_falsification(trial,self._registration(trial['hypothesis_id'])['record'])
+                except LedgerError as exc: raise LedgerError('試驗 '+trial['trial_id']+' 的證偽判定無法補上：'+str(exc)) from exc
 
     def _complete_falsification(self, trial, reg):
         # trials 的完成事件是恢復點；重試不重新接受來源檔或呼叫者的統計量。
@@ -704,6 +712,7 @@ class ResearchLedger:
                 elif _denominator(stats)<=0: reason='nonpositive_denominator'
                 elif primary.get('filled_periods',0)>.05*stats['T']: reason='excess_filled_periods'
                 if stats and stats['t_eff']>1:
+                    # V 的樣本只取 SR 有定義的已完成樣本外試驗；K 與 V 依結算當下的全帳本內容決定。
                     pool={tid:t['statistics']['sr'] for tid,t in trials.items()
                           if t['evaluation_kind']=='out_of_sample' and t['finished'] and t['status']=='completed'
                           and t.get('oos_protocol_sha256')==primary.get('oos_protocol_sha256')
@@ -823,9 +832,14 @@ def statistics_from_returns(values, *, period_seconds, independent_seconds):
     if _number(independent_seconds,0)==0: raise LedgerError('獨立週期必須為正')
     x=[_number(v) for v in values]; n=len(x)
     if n<2: raise LedgerError('序列至少需要兩期')
-    mean=math.fsum(x)/n; centered=[v-mean for v in x]
+    mean=math.fsum(x)/n
+    # 各期相同時標準差視為 0；避免浮點殘差讓常數序列得到極大的 SR。
+    centered=[0.0]*n if max(x)==min(x) else [v-mean for v in x]
     squares=math.fsum(v*v for v in centered); m2=squares/n
     sd=math.sqrt(squares/(n-1)); q=math.floor(4*(n/100)**(2/9))
+    # 浮點在整數邊界可能差一；依 q^9·100^2 ≤ 4^9·n^2 的整數比較校正。
+    while (q+1)**9*10000<=262144*n*n: q+=1
+    while q>0 and q**9*10000>262144*n*n: q-=1
     correlations=[math.fsum(centered[t]*centered[t-k] for t in range(k,n))/squares if squares else 0 for k in range(1,q+1)]
     factor=1+2*math.fsum((1-k/(q+1))*rho for k,rho in enumerate(correlations,1))
     effective=min(n/max(factor,1),n*period_seconds/independent_seconds)
