@@ -5,7 +5,8 @@
   "end": "2026-10-01T00:00:00Z",
   "max_rps": 4,
   "max_attempts": 5,
-  "max_pages": 100000,
+  "max_pages": 5000,
+  "max_symbols": 1500,
   "universe_max_pages": 1000,
   "symbol_scope": "observed_usdt_linear_perpetuals",
   "instruments": {
