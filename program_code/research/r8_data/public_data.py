@@ -326,6 +326,8 @@ class Client:
                 caught = exc
                 error = type(exc).__name__
             received = self.now()
+            ret_code = payload.get("retCode") if isinstance(payload, dict) else None
+            retry = _retryable(caught, status, ret_code)
             request_id = len(self.records) + 1
             if raw is not None:
                 atomic_write(self.out / "raw" / (str(request_id) + ".json"), raw)
@@ -334,7 +336,8 @@ class Client:
                       "pagination": {"page": page, "parent_request_id": parent, "cursor": params.get("cursor"),
                                      "window": {k: params[k] for k in ("start", "end", "startTime", "endTime") if k in params}},
                       "attempt": attempt, "http_status": status, "retCode": payload.get("retCode") if isinstance(payload, dict) else None,
-                      "raw_sha256": digest(raw) if raw is not None else None, "received_at": received, "network_error": error}
+                      "raw_sha256": digest(raw) if raw is not None else None, "received_at": received, "network_error": error,
+                      "retryable": retry}
             with self.log.open("ab") as stream:
                 stream.write(encoded(record) + b"\n"); stream.flush(); os.fsync(stream.fileno())
             self.records.append(record)
@@ -345,8 +348,6 @@ class Client:
                 raise caught
             if caught is not None and not isinstance(caught, (OSError, http.client.HTTPException)):
                 raise ResponseInvalid("請求送出後回應失敗: " + error) from caught
-            ret_code = payload.get("retCode") if isinstance(payload, dict) else None
-            retry = caught is not None or status == 429 or status is not None and 500 <= status <= 599 or status == 200 and ret_code in (10006, 10016, 10018)
             if retry:
                 if attempt < self.plan.value["max_attempts"]:
                     self.sleep(min(2 ** (attempt-1), 16))
@@ -364,6 +365,13 @@ class Client:
                         raise ResponseInvalid("回應 " + key + " 與請求不符")
             return payload["result"], request_id
         raise AssertionError("不可到達")
+
+
+def _retryable(caught, status, ret_code):
+    # 請求迴圈與續傳時的失敗證據共用同一個重試判斷。
+    if caught is not None:
+        return isinstance(caught, (OSError, http.client.HTTPException))
+    return status == 429 or status is not None and 500 <= status <= 599 or status == 200 and ret_code in (10006, 10016, 10018)
 
 
 def parse_rows(name, records, *, symbol, start, end, interval, now_ms):
@@ -527,7 +535,7 @@ class Collector:
                 elif parent is not None:
                     raise IntegrityError("universe 已完成卻仍有後續頁")
                 if (row["endpoint"] != INSTRUMENTS or row["params"] != params
-                        or row["http_status"] != 200 or row["retCode"] != 0
+                        or row["http_status"] != 200 or type(row["retCode"]) is not int or row["retCode"] != 0
                         or row["pagination"]["page"] != page or row["pagination"]["parent_request_id"] != parent):
                     raise IntegrityError("universe checkpoint 分頁鏈不符")
                 cursor = _json(self.out / "raw" / (str(request_id)+".json"))["result"]["nextPageCursor"]
@@ -556,20 +564,39 @@ class Collector:
 
     def _probe_failure_evidenced(self, state, cursor, seen):
         # 失敗狀態必須能由已驗雜湊的原始頁與請求記錄重現，否則視為竄改；兩種證據：
-        # 頁數已達上限而 cursor 未清空，或接在最後一頁之後、實際失敗的探測請求。
-        if cursor and len(state["ids"]) >= self.plan.value["universe_max_pages"]:
+        # 頁數已達上限而 cursor 未清空，或最後一頁之後那一頁的完整嘗試序列以最終失敗結束、之後沒有再試。
+        ids, records = state["ids"], self.client.records
+        if cursor and len(ids) >= self.plan.value["universe_max_pages"]:
             return True
-        extra = [i for i in state.get("failure_request_ids", []) if i not in state["ids"]]
-        if not extra or (state["ids"] and min(extra) <= max(state["ids"])):
+        probe = lambda row: row["endpoint"] == INSTRUMENTS and row["params"].get("status") == "Closed"
+        page, parent = len(ids) + 1, ids[-1] if ids else None
+        tried = [row["request_id"] for row in records
+                 if probe(row) and row["pagination"]["page"] == page and row["pagination"]["parent_request_id"] == parent]
+        extra = [i for i in state.get("failure_request_ids", []) if i not in ids]
+        current = [i for i in extra if records[i-1]["pagination"]["page"] == page]
+        if not current or current != tried[-len(current):] or current != list(range(current[0], current[-1] + 1)):
             return False
-        row = self.client.records[extra[-1]-1]
-        parent = state["ids"][-1] if state["ids"] else None
-        if row["pagination"]["page"] != len(state["ids"]) + 1 or row["pagination"]["parent_request_id"] != parent:
+        if [records[i-1]["attempt"] for i in current] != list(range(1, len(current) + 1)):
             return False
-        if row["network_error"] is not None or row["http_status"] != 200 or row["retCode"] != 0:
+        if any(probe(row) for row in records[current[-1]:]):
+            return False
+        for i in extra:
+            # 其餘只能是已入鏈頁面在成功之前的重試。
+            row = records[i-1]
+            if row["pagination"]["page"] == page:
+                continue
+            earlier = row["pagination"]["page"]
+            if (not probe(row) or not 1 <= earlier < page or i >= ids[earlier-1]
+                    or row["pagination"]["parent_request_id"] != records[ids[earlier-1]-1]["pagination"]["parent_request_id"]):
+                return False
+        last = records[current[-1]-1]
+        if last["retryable"]:
+            return last["attempt"] >= self.plan.value["max_attempts"]
+        if (last["network_error"] is not None or last["http_status"] != 200
+                or type(last["retCode"]) is not int or last["retCode"] != 0):
             return True
         try:
-            result = _json(self.out / "raw" / (str(extra[-1]) + ".json"))["result"]
+            result = _json(self.out / "raw" / (str(last["request_id"]) + ".json"))["result"]
             following = result["nextPageCursor"]
             if not isinstance(result["list"], list):
                 return True
@@ -755,7 +782,7 @@ class Collector:
                 elif expected["complete"]:
                     raise IntegrityError("checkpoint 完成後仍有頁面")
                 if (record["params"] != params or record["endpoint"] != rule["endpoint"]
-                        or record["http_status"] != 200 or record["retCode"] != 0
+                        or record["http_status"] != 200 or type(record["retCode"]) is not int or record["retCode"] != 0
                         or record["pagination"]["page"] != page or record["pagination"]["parent_request_id"] != parent):
                     raise IntegrityError("checkpoint 分頁鏈不符")
                 payload = _json(self.out / "raw" / (str(request_id) + ".json"))["result"]

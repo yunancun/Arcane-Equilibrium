@@ -750,3 +750,45 @@ def test_resumed_probe_failure_requires_verifiable_evidence(plan_path, tmp_path,
     with collector(plan_path, tmp_path, lambda *args: pytest.fail('unexpected network')) as r:
         assert set(r.fetch_universe()) == {'BTCUSDT', 'OLDUSDT'}
         assert r.manifest['delistings']['probe_status'] == 'REQUEST_FAILED'
+
+
+@pytest.mark.parametrize('case', ['transient_500', 'rate_limited', 'retried_ok', 'retried_ok_all'])
+def test_forged_probe_failure_cannot_point_at_non_final_attempts(plan_path, tmp_path, monkeypatch, case):
+    # 審查反例：偽造的失敗只指向還能重試的嘗試，或指向之後重試成功的那一頁。
+    calls = []
+    def send(endpoint, params):
+        if 'status' not in params: return response([instrument()])
+        if 'cursor' not in params: return response([instrument('OLDUSDT', 'Closed')], 'more')
+        calls.append(1)
+        if len(calls) == 1:
+            return response(code=10006) if case == 'rate_limited' else (500, mod.encoded({}))
+        if case.startswith('retried_ok'): return response([instrument('NEWUSDT', 'Closed')])
+        raise Crash()
+    write = mod.atomic_write
+    def crash_before_checkpoint(path, data):
+        if Path(path).name == 'delisted_probe_pages.json' and json.loads(data)['ids'] == [2, 4]: raise Crash()
+        return write(path, data)
+    monkeypatch.setattr(mod, 'atomic_write', crash_before_checkpoint)
+    c = collector(plan_path, tmp_path, send)
+    with pytest.raises(Crash): c.fetch_universe()
+    c.close()
+    cp = tmp_path/'out'/'delisted_probe_pages.json'; state = json.loads(cp.read_text())
+    assert state['ids'] == [2] and state['cursor'] == 'more' and not state['failed']
+    assert c.client.records[2]['retryable'] is True and c.client.records[2]['attempt'] == 1
+    state.update(failed=True, complete=True, failure_request_ids=[3, 4] if case == 'retried_ok_all' else [3])
+    cp.write_bytes(mod.encoded(state))
+    with pytest.raises(mod.IntegrityError, match='失敗證據'):
+        with collector(plan_path, tmp_path, lambda *args: pytest.fail('unexpected network')) as r: r.fetch_universe()
+
+
+def test_float_zero_retcode_is_a_real_probe_failure_on_resume(plan_path, tmp_path):
+    # retCode 0.0 被客戶端判為失敗；續傳時同樣要承認這是真實失敗，而不是當成成功頁。
+    def send(endpoint, params):
+        if 'status' not in params: return response([instrument()])
+        if 'cursor' not in params: return response([instrument('OLDUSDT', 'Closed')], 'more')
+        return 200, mod.encoded({'retCode': 0.0, 'result': {'list': [], 'nextPageCursor': ''}})
+    c = collector(plan_path, tmp_path, send); c.fetch_universe(); c.close()
+    assert c.manifest['delistings']['probe_status'] == 'REQUEST_FAILED'
+    (tmp_path/'out'/'manifest.json').unlink()
+    with collector(plan_path, tmp_path, lambda *args: pytest.fail('unexpected network')) as r:
+        assert set(r.fetch_universe()) == {'BTCUSDT', 'OLDUSDT'}
