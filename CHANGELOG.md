@@ -7,6 +7,11 @@
 > 舊引言誤把 v5.6→v5.7 列為 thesis-shift，本次依下方正文校正為 engineering-only。
 > 舊主檔命名／路徑以固定來源登記為準；v5.9 起已改用 AEG packet。
 
+## [RH-20261018-01] — 2026-10-18 — R8 階段 2 的四項 Operator 裁決
+
+Operator 逐項裁決：取數期間延至各標的上市起（2020-01-01 起），訓練段起點提前；確認第二代不得看第一代 holdout 結果，階段 4 因此要等第二代預登記完畢；
+投入上限不變，到期時回報再決定；逐筆資料等 P2 查核結果再定。見[修訂二](docs/decisions/2026-10-14--r8-amendment-2-multi-strategy-first-loop.md) N3、N5、N8 的註記與[派工指令](docs/execution_plan/2026-10-14--r8-stage2-local-research-dispatch.md) §4 的註記。TODO v894。
+
 ## [RH-20261016-02] — 2026-10-16 — R8 階段 2 的審查結果與修補派工
 
 實作者交回 U1–U3。U1、U2 獨立審查判 FAIL，修補清單見[派工指令](docs/execution_plan/2026-10-14--r8-stage2-local-research-dispatch.md) §7；U3 已開 PR #213 發布。
