@@ -27,16 +27,21 @@ class Clock:
         return self.at
 
 
+# 固定案例的手算值依這組邊界（訓練段自 2022-01-01）；模組預設另由下方測試核對。
+BOUNDARIES = ("2022-01-01T00:00:00Z", "2025-07-01T00:00:00Z",
+              "2026-01-01T00:00:00Z", "2026-05-15T00:00:00Z", "2026-10-01T00:00:00Z")
+
+
 @pytest.fixture
 def registration():
     return {'hypothesis_id':'h1','generation':1,'family':'carry','economic_mechanism':'合成機制',
         'decision_period':{'unit':'day','value':1},'expected_holding_seconds':86400,
         'expected_turnover':1.0,'pessimistic_cost_ratio':0.5,
-        'data_range':{'start':mod.DEFAULT_BOUNDARIES[0],'end':mod.DEFAULT_BOUNDARIES[-1]},
-        'time_splits':mod.split_intervals(),'primary_metric':'after_cost_sharpe','candidate_thresholds':{'sharpe':1.0},
+        'data_range':{'start':BOUNDARIES[0],'end':BOUNDARIES[-1]},
+        'time_splits':mod.split_intervals(BOUNDARIES),'primary_metric':'after_cost_sharpe','candidate_thresholds':{'sharpe':1.0},
         'multiple_testing':{'method':'BH','fdr':0.05,'members':['h1'],'members_sha256':mod.sha256(['h1'])},
         'max_lookback_seconds':86400,'label_period_seconds':86400,'max_holding_seconds':86400,
-        'selection':{'type':'time_series','rule':'期初已知合約','known_at_period_start':mod.DEFAULT_BOUNDARIES[0]},
+        'selection':{'type':'time_series','rule':'期初已知合約','known_at_period_start':BOUNDARIES[0]},
         'previous_no_go':None,'split_rationale':'共用預設切分','sharpe_frequency_seconds':86400,
         'oos_protocol':{'scheme':'expanding','initial_train_seconds':365*86400,'test_seconds':30*86400,
                         'step_seconds':30*86400,'purge_seconds':7*86400,'embargo_seconds':7*86400},
@@ -718,3 +723,12 @@ def test_missing_series_blocks_recovery_with_a_ledger_error(tmp_path,registratio
     with pytest.raises(Crash): b.finish_trial('h',result)
     sha=b._trials()['h']['returns_sha256']; (b.out/'series'/(sha+'.json')).unlink()
     with pytest.raises(mod.LedgerError,match='試驗 h'): mod.ResearchLedger(b.out,clock=clock).export_heads()
+
+
+def test_default_training_segment_starts_at_extended_fetch_start():
+    # 2026-10-18 裁決（RH-20261018-01）：訓練段起點隨取數起點提前，驗證段與兩段 holdout 不變。
+    assert mod.DEFAULT_BOUNDARIES==("2020-01-01T00:00:00Z","2025-07-01T00:00:00Z",
+                                    "2026-01-01T00:00:00Z","2026-05-15T00:00:00Z","2026-10-01T00:00:00Z")
+    splits=mod.split_intervals()
+    assert splits[0]['start']=='2020-01-01T00:00:00Z'
+    assert [s['start'] for s in splits[1:]]==[s['start'] for s in mod.split_intervals(BOUNDARIES)[1:]]
