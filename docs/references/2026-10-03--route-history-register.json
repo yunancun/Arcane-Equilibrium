@@ -346,16 +346,32 @@
       "meaning": "R8 decision with a dated note that amendment 2 was accepted (RH-20261014-03) and further amends P1, P3 and the stages; decisions D1-D8 unchanged; not platform, runtime or dispatch attestation"
     },
     "r8-amendment-2-r3": {
-      "kind": "recorded_file",
+      "kind": "git_blob",
       "path": "docs/decisions/2026-10-14--r8-amendment-2-multi-strategy-first-loop.md",
+      "commit": "11b7b7e83e82a742323f625ccd1fc3366106db83",
+      "blob": "d9ad1f8dccc57475d9bb22c42e24825bd74abb8a",
       "sha256": "94d41dda3bee82155621128c64f9eb0cc90e1f6075201380a48e938008a6754e",
       "meaning": "accepted R8 amendment 2 with clarifications annotated after automated review (RH-20261014-04): request provenance for fetched data, point-in-time universes including delisted instruments for cross-sectional hypotheses, one never-used holdout segment per generation, each opened once, the cancelled latency measurement removed from the risk table and post-adoption list, and a DRIFT note on the strategy design skill; body N1-N9 and the Operator decisions unchanged"
     },
     "r8-stage2-dispatch": {
-      "kind": "recorded_file",
+      "kind": "git_blob",
       "path": "docs/execution_plan/2026-10-14--r8-stage2-local-research-dispatch.md",
+      "commit": "11b7b7e83e82a742323f625ccd1fc3366106db83",
+      "blob": "56803462f5606fe1b6fd3aa7085a1a324aef06aa",
       "sha256": "bf953a95dce00c98e08153b5ec55390f57da6cf9fcab9e659db117e0eaa4d251",
       "meaning": "stage 2 dispatch instruction under amendment 2 (RH-20261014-05): three implementing-executor units (public data fetch tool, pre-registration and trial ledger, CI job for research tests), recorder tasks (engine selection probe with local open-source LEAN, tick data source check, the consented fetch, the research core addendum, hypothesis pre-registration), and the consented fetch scope; instruction only, not authorization, runtime or delivery evidence"
+    },
+    "r8-amendment-2-r4": {
+      "kind": "recorded_file",
+      "path": "docs/decisions/2026-10-14--r8-amendment-2-multi-strategy-first-loop.md",
+      "sha256": "15373e226e84974220673a5a22db2999bf4e2d60d754207e4c748124bb13676b",
+      "meaning": "amendment 2 with the 2026-10-16 ruling note (RH-20261016-02) that the holdout is a falsification check only and significance moves to the walk-forward out-of-sample test; body N1-N9 unchanged"
+    },
+    "r8-stage2-dispatch-r2": {
+      "kind": "recorded_file",
+      "path": "docs/execution_plan/2026-10-14--r8-stage2-local-research-dispatch.md",
+      "sha256": "303ab4cdcc029a778eb7a2aa1306508de3c05355e173825bbeb81f7cdff3e748",
+      "meaning": "stage 2 dispatch with section 7 (RH-20261016-02): independent review results for U1-U3, repair deliveries for U1 and U2 with exact fix lists, and the holdout-as-falsification adjustment for U2; instruction only"
     }
   },
   "routes": [
@@ -516,7 +532,9 @@
         "r8-amendment-1-r5",
         "r8-adoption-r2",
         "r8-amendment-2-r3",
-        "r8-stage2-dispatch"
+        "r8-stage2-dispatch",
+        "r8-amendment-2-r4",
+        "r8-stage2-dispatch-r2"
       ],
       "status_history": [
         {
@@ -621,6 +639,11 @@
           "recorded_on": "2026-10-16",
           "event": "RH-20261016-01",
           "note": "Operator confirmed the four LEAN dependencies for the engine probe; record_status unchanged"
+        },
+        {
+          "recorded_on": "2026-10-16",
+          "event": "RH-20261016-02",
+          "note": "holdout made a falsification check only; U1 and U2 sent back to the implementing executor for repair; U3 published; record_status unchanged"
         }
       ]
     }
@@ -1443,6 +1466,51 @@
         "availability": "feature-branch commit; exists only on the feature branch until it is merged into main"
       },
       "meaning": "The automated review of pull request 212 noted that running LEAN needs dependencies beyond the consented download. The Operator confirmed all four listed by the recorder: the LEAN command-line tool in a dedicated Python virtual environment, starting the already-installed colima virtual machine, the LEAN Docker image, and as a fallback the .NET SDK with LEAN source. No platform account is opened; any login or payment prompt stops that path. In the same pull request the dispatch was revised for the automated review and an independent recheck. P1a may start once the dispatch is on main; P1b still waits for U1."
+    },
+    {
+      "id": "RH-20261016-02",
+      "recorded_on": "2026-10-16",
+      "event_type": "open_item_decided",
+      "route_ids": [
+        "R8"
+      ],
+      "follows": "RH-20261016-01",
+      "decision_ref": "docs/decisions/2026-10-14--r8-amendment-2-multi-strategy-first-loop.md",
+      "authority_source": "Operator selections in current chat on 2026-10-16 (Asia/Shanghai), in answer to two questions put by the recorder; the detailed terms come from the descriptions attached to the selected options and were set down by the recorder",
+      "operator_excerpt": [
+        "holdout 只作證偽 (Recommended)",
+        "退回 Codex"
+      ],
+      "prior_record_identity": {
+        "amendment": {
+          "commit": "11b7b7e83e82a742323f625ccd1fc3366106db83",
+          "path": "docs/decisions/2026-10-14--r8-amendment-2-multi-strategy-first-loop.md",
+          "blob": "d9ad1f8dccc57475d9bb22c42e24825bd74abb8a",
+          "sha256": "94d41dda3bee82155621128c64f9eb0cc90e1f6075201380a48e938008a6754e",
+          "availability": "main at recording time"
+        },
+        "dispatch": {
+          "commit": "11b7b7e83e82a742323f625ccd1fc3366106db83",
+          "path": "docs/execution_plan/2026-10-14--r8-stage2-local-research-dispatch.md",
+          "blob": "56803462f5606fe1b6fd3aa7085a1a324aef06aa",
+          "sha256": "bf953a95dce00c98e08153b5ec55390f57da6cf9fcab9e659db117e0eaa4d251",
+          "availability": "main at recording time"
+        },
+        "todo": {
+          "commit": "11b7b7e83e82a742323f625ccd1fc3366106db83",
+          "path": "TODO.md",
+          "blob": "47eea619484e00d212765e910592bde090fcf9b0",
+          "sha256": "88cc3244846853def714085e7e2f49f867b3dcc2e0b5c9d26b8d874fdeb55122",
+          "availability": "main at recording time"
+        }
+      },
+      "engineering_commits": {
+        "u1_retained": "4555b1e191ea",
+        "u2_retained": "2065a038bacb",
+        "u3_retained": "866c873d09e8",
+        "availability": "implementing-executor local branches; U3 is submitted for publication as pull request 213"
+      },
+      "meaning": "The implementing executor returned U1-U3 as retained local commits. Independent review: U1 code review FAIL (per-dataset failures abort the whole fetch; cursor double encoding), Bybit and security reviews PASS_WITH_NOTES; U2 code review and quantitative methodology review both FAIL (family bypass, trials reading unopened holdout, single-candidate holdout opening, hiding results by aborting, caller-supplied times, BH on caller-supplied p-values); mutation checking found nine genuine test gaps in each. The methodology review also showed that a 4.5-month holdout detects only annualised Sharpe of about 4.2 or more at 80% power (about 2.8 at 50% power). The Operator ruled that the holdout is a falsification check only, with significance borne by the walk-forward out-of-sample test before it, and that U2 goes back to the implementing executor; the recorder sent U1 back the same way. U3 is submitted for publication as pull request 213. A separate check of the existing DSR gate threshold scale is added. No Linux, database, account, spend, runtime or trading authority is granted."
     }
   ],
   "external_provenance": [
