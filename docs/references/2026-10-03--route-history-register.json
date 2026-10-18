@@ -370,7 +370,7 @@
     "r8-stage2-dispatch-r2": {
       "kind": "recorded_file",
       "path": "docs/execution_plan/2026-10-14--r8-stage2-local-research-dispatch.md",
-      "sha256": "3f9cc9ea65ab9efd0aa01ea20175224fb82787187a3f1676f011c1d366f325fc",
+      "sha256": "303ab4cdcc029a778eb7a2aa1306508de3c05355e173825bbeb81f7cdff3e748",
       "meaning": "stage 2 dispatch with section 7 (RH-20261016-02): independent review results for U1-U3, repair deliveries for U1 and U2 with exact fix lists, and the holdout-as-falsification adjustment for U2; instruction only"
     }
   },
