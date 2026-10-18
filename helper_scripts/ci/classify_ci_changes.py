@@ -22,6 +22,7 @@ GATES = (
     "stock_etf",
     "sealed_build",
     "replay",
+    "research",
 )
 
 _CONTROL_PLANE_PATHS = {
@@ -132,6 +133,13 @@ def classify_paths(paths: Iterable[str], *, force_all: bool = False) -> dict[str
             prefixes=("rust/openclaw_alr_fit_verifier/",),
         ):
             result["alr_fit_verifier"] = True
+
+        # 研究工具與其離線測試使用獨立的 Linux 關卡。
+        if path.startswith((
+            "program_code/research/r8_",
+            "program_code/research/tests/test_r8_",
+        )):
+            result["research"] = True
 
         if path.startswith("rust/"):
             result["rust"] = True
