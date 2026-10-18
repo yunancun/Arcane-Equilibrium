@@ -1,6 +1,6 @@
 # 玄衡 TODO - 活躍派發佇列
 
-**版本** v895 | **校準日期** 2026-10-01（v885–v895 於 2026-10-09 至 10-18 只新增並更新文末 R8 各節，其餘未重新校準） | **source 觀察基線** `52a884d93f774a5f625a7d2db4ebe6e2ec95b23a`（GitHub／Mac main 相同，包含 PR196／PR198；本次跳過 Linux，runtime 限制見 §0）。
+**版本** v896 | **校準日期** 2026-10-01（v885–v896 於 2026-10-09 至 10-18 只新增並更新文末 R8 各節，其餘未重新校準） | **source 觀察基線** `52a884d93f774a5f625a7d2db4ebe6e2ec95b23a`（GitHub／Mac main 相同，包含 PR196／PR198；本次跳過 Linux，runtime 限制見 §0）。
 **當前狀態**：AIML／workflow 均零 ACTIVE；workflow 選定 source 已採用，見下方 CLOSED 紀錄；原總帳仍歸檔，W11 等待下一個 Operator 指定的真實產品功能。S2E=5/9、effect=0/6、authority=0/9，LW2 WAITING。R8 階段 1（回放修補）與其後續六個小單元的 source 已交付並結案；2026-10-14 採納 R8 修訂二，第一圈改為本機的多策略假說搜尋，階段 2（本機研究能力）已依派工指令拆成各單元，見文末。
 **證據與歷史**：當前 source／PR／runtime 限制見 §0；完整逐項 [audit](docs/references/2026-09-09--todo-workflow-freshness-audit.md)、[v880 快照](docs/archive/2026-09-09--todo-v880-pre-freshness-audit.md)、[版本日誌](docs/CLAUDE_CHANGELOG.md)。
 
@@ -667,13 +667,13 @@ Operator 於 2026-10-14 採納 [R8 修訂二](docs/decisions/2026-10-14--r8-amen
 | `P1-R8-DSR-GATE-SCALE-CHECK` | 1 | ACTIVE | PM 統籌；QC 或 MIT 唯讀查核 | 查明既有 `program_code/learning_engine/dsr_gate.py` 的預期最大 Sharpe 未乘試驗 Sharpe 標準差一事是否屬實，傳入 `trial_sharpes` 時以含被選試驗本身的樣本最大值作門檻、使 DSR 恆不大於 0.5 一事是否屬實，以及 `promotion_gate`、`residual_alpha_gate`、L2 顧問執行器傳入的 Sharpe 單位與受影響程度；只查核，修正另立 | 2026-10-16：U2 的量化方法論審查指出（派工指令 §7.5）；記錄者已讀源碼，確認 `_compute_expected_max_sharpe` 回傳標準常態單位 | 派一位 QC 或 MIT 唯讀查核並回報影響範圍 |
 | `P1-R8-S2-P1A-ENGINE-ENV` | 1 | ACTIVE | PM | 派工指令 §5 P1a：以 LEAN 自帶的範例在本機跑通，確認不需要帳戶；不取交易所資料 | 2026-10-16：Operator 確認四項依賴（事件 `RH-20261016-01`） | PM 執行 P1a，記下安裝方式、版本與投入工時 |
 | `P1-R8-S2-P1B-ENGINE-DATA` | 1 | ACTIVE | PM | 派工指令 §5 P1b：以 U1 格式的 BTCUSDT 訓練段 1 小時 K 線與實際資金費紀錄在 LEAN 執行，確認時間戳與成本計入；P1a 加 P1b 合計約一個工作日的投入，之後定案選型 | 2026-10-16：P1a 可執行；2026-10-18：U1 隨 PR #217 合入 | PM 依 U1 縮小的計畫檔取 BTCUSDT 小樣本，在 LEAN 執行並記錄 |
-| `P1-R8-S2-P3-FETCH` | 1 | ACTIVE | PM | 派工指令 §5 P3：依 §4 取數，回報請求數、耗時、缺漏與 manifest 雜湊 | 2026-10-14：取數範圍已獲同意（修訂二 N3 的裁決）；2026-10-18：期間起點延至 2020-01-01，各標的自上市起（事件 `RH-20261018-01`） | PM 先依裁決修改計畫檔的日期並記錄（另一個 PR），再取數；2026-10-18 U1 隨 PR #217 合入 |
-| `P2-R8-S2-P2-TICK-DATA-CHECK` | 2 | ACTIVE | PM | 派工指令 §5 P2：交易所公開逐筆與盤口歷史的可得性、期間、格式與條件，只讀網頁 | 同上 | PM 查核並記錄；結果與下載規模帶回 Operator 決定逐筆資料的來源（事件 `RH-20261018-01`）。在那之前，依賴逐筆資料的秒級假說不進第一代預登記 |
+| `P1-R8-S2-P3-FETCH` | 1 | ACTIVE | PM | 派工指令 §5 P3：依 §4 取數，回報請求數、耗時、缺漏與 manifest 雜湊 | 2026-10-14：取數範圍已獲同意（修訂二 N3 的裁決）；2026-10-18：期間起點延至 2020-01-01，各標的自上市起（事件 `RH-20261018-01`）；同日計畫檔起點與程式的授權下限都改為 2020-01-01，計畫檔 SHA-256 `b2cfd873f808…`，P3 的 manifest 綁定此雜湊 | PM 先以小樣本確認 cursor 原樣送出與 10016、10018 的處理，再全量取數；回報請求數、耗時、缺漏與 manifest 雜湊 |
 
 ### WAITING
 
 | ID | 優先級 | 狀態 | Owner 路徑 | 驗收條件 | 最新證據 | 具名解除條件／下一步 |
 |---|---:|---|---|---|---|---|
+| `P2-R8-S2-P2-TICK-DATA-CHECK` | 2 | WAITING；`dispatchable=false` | PM | 派工指令 §5 P2：交易所公開逐筆與盤口歷史的可得性、期間、格式與條件，只讀網頁 | 2026-10-18 查核（只讀網頁，未下載）：`public.bybit.com/trading/` 有逐日成交壓縮檔（`<標的><YYYY-MM-DD>.csv.gz`），約 1,400 個標的目錄；BTCUSDT 自 2020-03-25 至 2026-10-17 逐日存在（後段逐日連續，前段未逐日核對）；單日 BTCUSDT 壓縮檔超過 10 MB；欄位格式未讀。API 近期成交端點每次最多 1000 筆、沒有歷史回看，官方文件指向歷史成交的下載頁。盤口歷史據第三方資料由官網 history-data 頁以瀏覽器提供，未經官方頁面核實；使用條款未查 | 逐筆成交有交易所公開來源，Linux 記錄器的資料不需要；下載超出 §4 已同意的清單，由 PM 提出標的、期間與估計容量，待 Operator 同意（事件 `RH-20261018-01`）。在那之前，依賴逐筆資料的秒級假說不進第一代預登記 |
 | `P1-R8-S2-P4-CORE-ADDENDUM` | 1 | WAITING；`dispatchable=false` | PM 撰寫補充指令，實作者執行 | 派工指令 §5 P4 | 同上 | P1b 完成、選型定案之後，PM 改列 ACTIVE |
 | `P1-R8-S2-P5-PREREGISTRATION` | 1 | WAITING；`dispatchable=false` | PM 起草；Operator 覆閱 | 派工指令 §5 P5；holdout 分段依 §4 的預設（訓練段起點依 2026-10-18 的裁決提前）；第二代須在第一代開啟 holdout 之前預登記並列妥試驗計畫（2026-10-18 Operator 確認） | 同上 | U2 經獨立審查並合入 main，且 P4 的補充指令合入 main 之後，PM 改列 ACTIVE |
 | `P2-R8-QC-SKILL-HALFLIFE-DRIFT` | 2 | DEFERRED；`dispatchable=false` | PM | 更新 `.claude/skills/quant-strategy-design/SKILL.md` 的半衰期判準，使其與修訂二 N9 的秒級、分鐘級範圍一致（修訂二 N9 的 DRIFT 註記） | 2026-10-14：修訂二 RH-20261014-04 的註記 | 第一個秒級或分鐘級假說登記之前，PM 改列 ACTIVE；更新屬代理工作流程變更，依該類變更的審查辦理 |
