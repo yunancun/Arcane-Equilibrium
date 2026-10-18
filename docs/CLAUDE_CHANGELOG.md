@@ -1,9 +1,15 @@
 # CLAUDE_CHANGELOG.md — 開發歷史歸檔
 
 > 從 CLAUDE.md / TODO.md 遷出的 Wave/Sprint/Batch + TODO version-increment 歷史敘事。新 session 不需要讀此文件，僅供回顧歷史時查閱。
-> 最後更新：2026-10-18（R8 階段 2 的四項 Operator 裁決；TODO v894）
+> 最後更新：2026-10-18（R8 階段 2 U1、U2 發布；TODO v895）
 
 ---
+
+## R8 階段 2 U1、U2 發布 — 2026-10-18
+
+- 實作者的兩個修補交付（U1 `4dd6665b0`、U2 `217bf7f9f`）各用完兩次代碼審查仍 FAIL，共殘留三項。記錄者依「小修由記錄者修改」的既有分工修補，保留實作者的提交身份，以 PR #217 發布。
+- 獨立驗證：代碼審查第一輪 FAIL（U1 的失敗證據可指向仍能重試的嘗試），修正後 PASS_WITH_NOTES；量化實作核對 PASS_WITH_NOTES；13 處反向驗證全數抓到；直接執行 278 passed。
+- TODO v895：U1、U2 結案（DONE_WITH_CONCERNS），P1b 與 P3 改列 ACTIVE；P3 取數前先改計畫檔的日期。
 
 ## R8 階段 2 的四項 Operator 裁決 — 2026-10-18
 

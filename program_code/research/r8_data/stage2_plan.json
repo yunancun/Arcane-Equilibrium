@@ -1,0 +1,32 @@
+{
+  "schema_version": 1,
+  "base_url": "https://api.bybit.com",
+  "start": "2022-01-01T00:00:00Z",
+  "end": "2026-10-01T00:00:00Z",
+  "max_rps": 4,
+  "max_attempts": 5,
+  "max_pages": 5000,
+  "max_symbols": 1500,
+  "universe_max_pages": 1000,
+  "symbol_scope": "observed_usdt_linear_perpetuals",
+  "instruments": {
+    "endpoint": "/v5/market/instruments-info",
+    "params": {"category": "linear", "limit": 1000},
+    "pagination_keys": ["cursor"],
+    "filter_candidate": {"contractType": "LinearPerpetual", "settleCoin": "USDT", "status": "Trading"},
+    "contract_status": "UNVERIFIED_UNTIL_RAW_RESPONSE"
+  },
+  "delisted_probe": {
+    "endpoint": "/v5/market/instruments-info",
+    "params": {"category": "linear", "limit": 1000, "status": "Closed"},
+    "pagination_keys": ["cursor"],
+    "logical_scans": 1,
+    "contract_status": "UNVERIFIED_PROBE_RECORD_RESPONSE"
+  },
+  "datasets": [
+    {"name": "kline", "endpoint": "/v5/market/kline", "params": {"category": "linear", "limit": 1000}, "intervals": ["60", "D"], "symbols": "universe", "window_keys": ["start", "end"]},
+    {"name": "kline", "endpoint": "/v5/market/kline", "params": {"category": "linear", "limit": 1000}, "intervals": ["1"], "symbols": ["BTCUSDT", "ETHUSDT"], "window_keys": ["start", "end"]},
+    {"name": "funding", "endpoint": "/v5/market/funding/history", "params": {"category": "linear", "limit": 200}, "symbols": "universe", "window_keys": ["startTime", "endTime"]},
+    {"name": "open_interest", "endpoint": "/v5/market/open-interest", "params": {"category": "linear", "limit": 200, "intervalTime": "4h"}, "symbols": "universe", "window_keys": ["startTime", "endTime"], "pagination_keys": ["cursor"]}
+  ]
+}
