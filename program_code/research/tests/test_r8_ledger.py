@@ -552,7 +552,7 @@ def test_holdout_failed_without_series_is_not_passed(tmp_path,registration):
     assert not result['passed'] and result['sr_h'] is None
 
 
-@pytest.mark.parametrize('candidates',[None,'t1',[None],[1],['']])
+@pytest.mark.parametrize('candidates',[None,'t1',[None],[1],[''],pytest.param(['\ud800'],id='lone_surrogate')])
 def test_repeat_holdout_with_invalid_candidates_is_audited(tmp_path,registration,candidates):
     b,_=registered(tmp_path,registration)
     b.withdraw_hypothesis('h1','test'); b.close_generation(1); b.open_holdout(1,[])
@@ -621,3 +621,42 @@ def test_holdout_finish_atomic_append_survives_publish_failure(tmp_path,registra
     b.verify_heads(b.export_heads())
     assert mod.ResearchLedger(b.out,clock=clock).finish_trial('h',result)['passed']
     assert sum(e['action']=='falsification_result' for e in b._events('holdouts'))==1
+
+
+def test_unencodable_candidates_are_denied_and_audited_before_opening(tmp_path,registration):
+    # 尚未開啟時傳入無法標準化的候選：照樣拒絕並留帳，帳本仍可完整讀回。
+    b,_=registered(tmp_path,registration)
+    b.withdraw_hypothesis('h1','test'); b.close_generation(1)
+    with pytest.raises(mod.HoldoutDenied,match='候選'): b.open_holdout(1,['t1','\ud800'])
+    event=mod.ResearchLedger(b.out)._events('holdouts')[-1]
+    assert event['action']=='denied' and event['candidate_input_valid'] is False
+    assert event['candidate_trial_ids'] is None and event['candidates_sha256'] is None and 'intervals' not in event
+    b.open_holdout(1,[])
+
+
+class Crash(BaseException):
+    """模擬程序在完成事件寫入後、證偽判定寫入前中斷。"""
+
+
+def test_falsification_recovers_from_ledger_alone_after_request_is_lost(tmp_path,registration,monkeypatch):
+    b,clock,result=pending_holdout(tmp_path,registration); append=b._append
+    def crash(name,payload,**kwargs):
+        if name=='holdouts' and payload['action']=='falsification_result': raise Crash()
+        return append(name,payload,**kwargs)
+    monkeypatch.setattr(b,'_append',crash)
+    with pytest.raises(Crash): b.finish_trial('h',result)
+    Path(result['returns']['path']).unlink(); del result
+    clock.at+=timedelta(seconds=10)
+    recovered=mod.ResearchLedger(b.out,clock=clock)
+    assert not any(e['action']=='falsification_result' for e in recovered._events('holdouts'))
+    heads=recovered.export_heads()
+    events=recovered._events('holdouts'); verdicts=[e for e in events if e['action']=='falsification_result']
+    assert len(verdicts)==1 and verdicts[0]['trial_id']=='h' and verdicts[0]['passed']
+    assert heads['holdouts']==recovered._head(recovered._read('holdouts'))
+    # 重啟與重複恢復都不再追加；其他寫入照常，holdout 不重開。
+    again=mod.ResearchLedger(b.out,clock=clock); again.export_heads()
+    with pytest.raises(mod.HoldoutDenied): again.open_holdout(1,['t1'])
+    events=again._events('holdouts')
+    assert sum(e['action']=='falsification_result' for e in events)==1
+    assert sum(e['action']=='opened' for e in events)==1
+    with pytest.raises(mod.LedgerError): again.finish_trial('h',{'status':'completed','result_summary':{},'ended_at':clock.at.isoformat()})

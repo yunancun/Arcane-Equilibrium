@@ -323,6 +323,13 @@ class ResearchLedger:
             try: yield
             finally: fcntl.flock(lock, fcntl.LOCK_UN)
 
+    @contextmanager
+    def _write_lock(self):
+        # 寫入或匯出鏈頭前，先補上中斷遺留的證偽判定；只用帳內的完成事件與序列，不需要原始的結束請求。
+        with self._lock():
+            self._recover_falsifications()
+            yield
+
     def _now(self):
         value = self.clock()
         return _iso(_time(value if isinstance(value,str) else _iso(value)))
@@ -371,7 +378,7 @@ class ResearchLedger:
     def _head(rows): return rows[-1]['hash'] if rows else GENESIS
 
     def export_heads(self):
-        with self._lock(): return {'ledger_id':self.ledger_id,**{name:self._head(self._read(name)) for name in LEDGERS}}
+        with self._write_lock(): return {'ledger_id':self.ledger_id,**{name:self._head(self._read(name)) for name in LEDGERS}}
 
     def verify_heads(self, pinned):
         if not isinstance(pinned,dict) or set(pinned)!={'ledger_id',*LEDGERS} or pinned['ledger_id']!=self.ledger_id:
@@ -397,7 +404,7 @@ class ResearchLedger:
         forbidden={'recorded_at','registered_at','oos_protocol_sha256','effective_independent_periods','detectable_sharpe','sample_size_warning','folds','shared_time_splits','power_estimate','sharpe','sr','dsr','p_value','passed','eligible'}
         if forbidden & set(record): raise LedgerError('不得提供帳本計算欄位或寫入時間')
         record=_prereg(json.loads(canonical(record)))
-        with self._lock():
+        with self._write_lock():
             regs=self._registrations(); g=record['generation']
             if record['hypothesis_id'] in regs: raise LedgerError('假說代號重複')
             if self._generation_result(g) or any(e['action']=='begin_trial' and e['record']['generation']==g for e in self._events('trials')):
@@ -416,7 +423,7 @@ class ResearchLedger:
 
     def withdraw_hypothesis(self, hypothesis_id, reason):
         if not isinstance(reason,str) or not reason.strip(): raise LedgerError('撤回需要理由')
-        with self._lock():
+        with self._write_lock():
             reg=self._registration(hypothesis_id)['record']
             if self._withdrawn(hypothesis_id) or self._generation_result(reg['generation']): raise LedgerError('已撤回或結算')
             return self._append('preregistrations',{'action':'withdrawn','hypothesis_id':hypothesis_id,'reason':reason})
@@ -442,7 +449,7 @@ class ResearchLedger:
                 and (hypothesis_id is None or e['hypothesis_id']==hypothesis_id) for p in e['planned_trials']]
 
     def commit_trial_plan(self, hypothesis_id, planned_trials):
-        with self._lock():
+        with self._write_lock():
             reg=self._registration(hypothesis_id)['record']
             if reg['generation']!=2 or self._withdrawn(hypothesis_id) or self._generation_result(2):
                 raise LedgerError('只有尚未撤回或結算的第二代可提交試驗計畫')
@@ -524,7 +531,7 @@ class ResearchLedger:
 
     def begin_trial(self, record):
         record=json.loads(canonical(record)); record.setdefault('role','exploratory')
-        with self._lock():
+        with self._write_lock():
             reg_event=self._registration(record.get('hypothesis_id')); reg=reg_event['record']; trials=self._trials()
             if self._withdrawn(record['hypothesis_id']): raise LedgerError('假說已撤回')
             self._validate_trial(record,reg,trials)
@@ -581,7 +588,7 @@ class ResearchLedger:
         if set(result)-allowed: raise LedgerError('結束紀錄不得改身份、統計量、判定或寫入時間')
         _required(result,('status','result_summary','ended_at'))
         if result['status'] not in ('completed','failed','aborted'): raise LedgerError('狀態不合法')
-        with self._lock():
+        with self._write_lock():
             trials=self._trials(); trial=trials.get(trial_id)
             if trial is None: raise LedgerError('試驗未開始')
             reg=self._registration(trial['hypothesis_id'])['record']; kind=trial['evaluation_kind']
@@ -624,6 +631,13 @@ class ResearchLedger:
                 return self._complete_falsification({**trial,**stored},reg)
             return stored
 
+    def _recover_falsifications(self):
+        # 完成事件已寫入、證偽判定尚未寫入時中斷：依完成事件補上判定，每筆試驗只補一次。
+        done={e['trial_id'] for e in self._events('holdouts') if e['action']=='falsification_result'}
+        for trial in self._trials().values():
+            if trial['evaluation_kind']=='holdout_falsification' and trial['finished'] and trial['trial_id'] not in done:
+                self._complete_falsification(trial,self._registration(trial['hypothesis_id'])['record'])
+
     def _complete_falsification(self, trial, reg):
         # trials 的完成事件是恢復點；重試不重新接受來源檔或呼叫者的統計量。
         previous=next((e for e in self._events('holdouts') if e['action']=='falsification_result' and e['trial_id']==trial['trial_id']),None)
@@ -665,7 +679,7 @@ class ResearchLedger:
 
     def close_generation(self, generation):
         if _integer(generation,1) not in (1,2): raise LedgerError('世代須為1或2')
-        with self._lock():
+        with self._write_lock():
             if self._generation_result(generation): raise LedgerError('每代只能結算一次')
             regs={h:e['record'] for h,e in self._registrations().items() if e['record']['generation']==generation}
             if not regs: raise LedgerError('世代沒有假說')
@@ -738,7 +752,7 @@ class ResearchLedger:
             return result
 
     def seal_holdout(self, hypothesis_id, segment_id):
-        with self._lock():
+        with self._write_lock():
             reg=self._registration(hypothesis_id)['record']
             segment=next((s for s in reg['time_splits'] if s['kind']=='holdout' and s['id']==segment_id),None)
             if segment is None or segment['generation']!=reg['generation']: raise HoldoutDenied('只能封存本假說世代的 holdout')
@@ -753,9 +767,13 @@ class ResearchLedger:
 
     def open_holdout(self, generation, candidate_trial_ids):
         if _integer(generation,1) not in (1,2): raise HoldoutDenied('世代不合法')
-        with self._lock():
+        with self._write_lock():
             events=self._events('holdouts'); result=self._generation_result(generation); reason=None
             valid=isinstance(candidate_trial_ids,list) and all(isinstance(x,str) and x for x in candidate_trial_ids)
+            if valid:
+                # 無法標準化的字串（例如孤立的 surrogate）同樣視為不合法輸入，拒絕事件只記型別，不記原值。
+                try: canonical(candidate_trial_ids)
+                except LedgerError: valid=False
             if any(e['action']=='opened' and e['generation']==generation for e in events): reason='同世代已開啟，不得再次讀取'
             elif not valid: reason='候選須為試驗代號清單'
             elif result is None: reason='本世代尚未結算'
