@@ -550,3 +550,74 @@ def test_holdout_failed_without_series_is_not_passed(tmp_path,registration):
     b.begin_trial(h)
     result=b.finish_trial('h',{'status':'failed','produced_periods':0,'result_summary':{'why':'failed'},'ended_at':clock.at.isoformat()})
     assert not result['passed'] and result['sr_h'] is None
+
+
+@pytest.mark.parametrize('candidates',[None,'t1',[None],[1],['']])
+def test_repeat_holdout_with_invalid_candidates_is_audited(tmp_path,registration,candidates):
+    b,_=registered(tmp_path,registration)
+    b.withdraw_hypothesis('h1','test'); b.close_generation(1); b.open_holdout(1,[])
+    previous=b._events('holdouts')
+    with pytest.raises(mod.HoldoutDenied): b.open_holdout(1,candidates)
+    events=b._events('holdouts')
+    assert events[:-1]==previous and len(events)==len(previous)+1
+    assert events[-1]['action']=='denied' and events[-1]['generation']==1
+    assert 'intervals' not in events[-1]
+
+
+def pending_holdout(tmp_path,registration):
+    b,clock=registered(tmp_path,registration); t=trial_record(registration)
+    b.begin_trial(t); b.finish_trial('t1',finish_result(tmp_path,t,clock)); b.close_generation(1)
+    b.seal_holdout('h1','holdout-1'); opened=b.open_holdout(1,['t1'])
+    h={**t,'trial_id':'h','evaluation_kind':'holdout_falsification','role':'exploratory','primary_trial_id':'t1',
+       'score_window':opened['intervals']['h1'],'data_window':registration['data_range']}; h.pop('folds')
+    b.begin_trial(h)
+    periods=mod.period_grid(h['score_window'],86400)
+    result={'status':'completed','returns':series_file(tmp_path,periods),
+            'result_summary':{'source':'synthetic'},'ended_at':clock.at.isoformat()}
+    return b,clock,result
+
+
+@pytest.mark.parametrize('failure',['before_append','after_append','clock_rollback','interrupt'])
+def test_holdout_finish_recovers_from_saved_trial_without_source_file(tmp_path,registration,monkeypatch,failure):
+    b,clock,result=pending_holdout(tmp_path,registration); append=b._append; saved_time=clock.at
+    def fail(name,payload,**kwargs):
+        if name=='holdouts' and payload['action']=='falsification_result':
+            if failure=='clock_rollback':
+                clock.at-=timedelta(days=1)
+                return append(name,payload,**kwargs)
+            if failure=='after_append': append(name,payload,**kwargs)
+            if failure=='interrupt': raise KeyboardInterrupt('simulated interruption')
+            raise OSError('simulated write failure')
+        return append(name,payload,**kwargs)
+    monkeypatch.setattr(b,'_append',fail)
+    with pytest.raises((OSError,mod.LedgerError,KeyboardInterrupt)): b.finish_trial('h',result)
+    assert b._trials()['h']['finished']
+    count=len(b._events('trials')); clock.at=saved_time+timedelta(seconds=10)
+    Path(result['returns']['path']).unlink()
+    recovered=mod.ResearchLedger(b.out,clock=clock)
+    with pytest.raises(mod.LedgerError): recovered.finish_trial('h',{**result,'status':'failed'})
+    verdict=recovered.finish_trial('h',result)
+    assert verdict['action']=='falsification_result' and verdict['passed']
+    assert recovered.finish_trial('h',result)==verdict
+    assert len(recovered._events('trials'))==count
+    events=recovered._events('holdouts')
+    assert sum(e['action']=='falsification_result' for e in events)==1
+    assert sum(e['action']=='opened' for e in events)==1
+
+
+@pytest.mark.parametrize('after_replace',[False,True])
+def test_holdout_finish_atomic_append_survives_publish_failure(tmp_path,registration,monkeypatch,after_replace):
+    b,clock,result=pending_holdout(tmp_path,registration)
+    original=(b.out/'holdouts.jsonl').read_bytes(); replace=mod.os.replace
+    def fail(source,destination):
+        if Path(destination)==b.out/'holdouts.jsonl':
+            if after_replace: replace(source,destination)
+            raise OSError('simulated publication failure')
+        return replace(source,destination)
+    with monkeypatch.context() as scoped:
+        scoped.setattr(mod.os,'replace',fail)
+        with pytest.raises(OSError): b.finish_trial('h',result)
+    assert (b.out/'holdouts.jsonl').read_bytes().startswith(original)
+    b.verify_heads(b.export_heads())
+    assert mod.ResearchLedger(b.out,clock=clock).finish_trial('h',result)['passed']
+    assert sum(e['action']=='falsification_result' for e in b._events('holdouts'))==1

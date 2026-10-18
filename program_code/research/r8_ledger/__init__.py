@@ -10,6 +10,11 @@ result_summary、ended_at，以及 produced_periods。failed/aborted 的 produce
 用以申報已產生的期數；不少於兩期時必須附序列。外部究竟是否曾產生未提交資料，
 本帳本無法觀察。已提交序列仍須精確覆蓋登記網格。
 
+holdout 的完成事件是證偽寫入的恢復點：中斷後以相同 result 重試 finish_trial，
+只用帳內已保存的試驗和序列補齊證偽紀錄；原始檔可已移除。已完成的相同請求
+回傳同一判定，改動請求則拒絕，不會再次開啟 holdout 或重複追加完成事件。
+每筆帳的追加以保留舊前綴的原子替換發布；跨帳操作仍可能暫時等待上述重試。
+
 returns 與各基準是 {path, sha256}，檔案格式為
 {period_seconds, filled_periods, returns: [[UTC期初秒數, 成本後淨報酬], ...]}。
 檔案必須逐位元組符合 Python canonical（無額外換行），內容驗證後按雜湊複製到

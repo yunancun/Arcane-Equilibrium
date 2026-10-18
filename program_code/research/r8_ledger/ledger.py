@@ -352,8 +352,19 @@ class ResearchLedger:
         if rows and _time(at)<_time(rows[-1]['payload']['recorded_at']): raise LedgerError('時鐘倒退')
         row={'sequence':len(rows)+1,'previous':self._head(rows),'payload':{**payload,'recorded_at':at}}
         row['hash']=sha256(row)
-        with (self.out/(name+'.jsonl')).open('ab') as stream:
-            stream.write(canonical(row)+b'\n'); stream.flush(); os.fsync(stream.fileno())
+        # 同一鎖內保留完整舊前綴，原子發布追加後的整本帳，避免中斷留下半行。
+        # replace 已成功但回報失敗時，重試仍可從完整的新鏈恢復。
+        temporary=self.out/('.'+name+'.'+uuid.uuid4().hex+'.tmp')
+        try:
+            with temporary.open('xb') as stream:
+                for previous in rows: stream.write(canonical(previous)+b'\n')
+                stream.write(canonical(row)+b'\n'); stream.flush(); os.fsync(stream.fileno())
+            os.replace(temporary,self.out/(name+'.jsonl'))
+            directory=os.open(self.out,os.O_RDONLY)
+            try: os.fsync(directory)
+            finally: os.close(directory)
+        finally:
+            temporary.unlink(missing_ok=True)
         return row['hash']
 
     @staticmethod
@@ -572,8 +583,12 @@ class ResearchLedger:
         if result['status'] not in ('completed','failed','aborted'): raise LedgerError('狀態不合法')
         with self._lock():
             trials=self._trials(); trial=trials.get(trial_id)
-            if trial is None or trial['finished']: raise LedgerError('試驗未開始或已結束')
+            if trial is None: raise LedgerError('試驗未開始')
             reg=self._registration(trial['hypothesis_id'])['record']; kind=trial['evaluation_kind']
+            if trial['finished']:
+                if kind!='holdout_falsification' or trial.get('completion_request_sha256')!=sha256(result):
+                    raise LedgerError('試驗已結束，不得修改結果')
+                return self._complete_falsification(trial,reg)
             if kind!='holdout_falsification' and self._generation_result(reg['generation']): raise LedgerError('世代已結算')
             at=self._now(); ended=_time(result['ended_at'])
             if not _time(trial['recorded_at'])<=ended<=_time(at): raise LedgerError('結束時間超出開始與結束寫入時間')
@@ -603,12 +618,23 @@ class ResearchLedger:
                                     raise LedgerError('策略無關基準在同世代同摺表必須相同')
                         stored['baseline_sha256'][key]=bs
             elif result.get('baselines'): raise LedgerError('無報酬序列時不得提供基準')
+            if kind=='holdout_falsification': stored['completion_request_sha256']=sha256(result)
             self._append('trials',stored,now=at)
             if kind=='holdout_falsification':
-                verdict=self._falsification({**trial,**stored},reg)
-                self._append('holdouts',verdict)
-                return verdict
+                return self._complete_falsification({**trial,**stored},reg)
             return stored
+
+    def _complete_falsification(self, trial, reg):
+        # trials 的完成事件是恢復點；重試不重新接受來源檔或呼叫者的統計量。
+        previous=next((e for e in self._events('holdouts') if e['action']=='falsification_result' and e['trial_id']==trial['trial_id']),None)
+        if previous is not None: return {k:v for k,v in previous.items() if k!='recorded_at'}
+        statistics=None
+        if trial.get('returns_sha256'):
+            series=self._series(trial['returns_sha256'])
+            statistics=statistics_from_returns([r[1] for r in series['returns']],period_seconds=reg['sharpe_frequency_seconds'],independent_seconds=_independence_seconds(reg))
+        verdict=self._falsification({**trial,'statistics':statistics},reg)
+        self._append('holdouts',verdict)
+        return verdict
 
     def _counts(self, trials):
         actual=[t for t in trials.values() if t['evaluation_kind']!='holdout_falsification']
@@ -727,13 +753,14 @@ class ResearchLedger:
 
     def open_holdout(self, generation, candidate_trial_ids):
         if _integer(generation,1) not in (1,2): raise HoldoutDenied('世代不合法')
-        if not isinstance(candidate_trial_ids,list) or any(not isinstance(x,str) or not x for x in candidate_trial_ids): raise HoldoutDenied('候選須為試驗代號清單')
         with self._lock():
             events=self._events('holdouts'); result=self._generation_result(generation); reason=None
+            valid=isinstance(candidate_trial_ids,list) and all(isinstance(x,str) and x for x in candidate_trial_ids)
             if any(e['action']=='opened' and e['generation']==generation for e in events): reason='同世代已開啟，不得再次讀取'
+            elif not valid: reason='候選須為試驗代號清單'
             elif result is None: reason='本世代尚未結算'
             elif generation==2 and not any(e['action']=='opened' and e['generation']==1 for e in events): reason='第一代尚未開啟'
-            candidates=sorted(candidate_trial_ids)
+            candidates=sorted(candidate_trial_ids) if valid else None
             if reason is None:
                 expected=sorted(result['hypotheses'][h]['primary_trial_id'] for h in result['eligible'])
                 if candidates!=expected: reason='候選必須恰好等於全部合格主試驗'
@@ -745,7 +772,8 @@ class ResearchLedger:
                     if not any(e['action']=='sealed' and e['hypothesis_id']==hid and e['segment_id']==segment['id'] for e in events):
                         reason='候選尚未封存'; break
                     intervals[hid]={k:segment[k] for k in ('start','end')}
-            event={'action':'denied' if reason else 'opened','generation':generation,'candidate_trial_ids':candidates,'candidates_sha256':sha256(candidates)}
+            event={'action':'denied' if reason else 'opened','generation':generation,'candidate_trial_ids':candidates,'candidates_sha256':sha256(candidates) if valid else None}
+            if not valid: event.update(candidate_input_valid=False,candidate_input_type=type(candidate_trial_ids).__name__)
             if reason:
                 self._append('holdouts',{**event,'reason':reason})
                 raise HoldoutDenied(reason)
