@@ -64,6 +64,7 @@ Client 創建：`MarketDataClient::new(client: Arc<BybitRestClient>)`
 - **★ 實測的窗口行為（2026-10-19，R8 P3；由取得的資料推得，參考文件未記載）**：同時傳 `start` 與 `end` 時，只回傳 `end` 往前約 `limit` 個週期之內的 K 線。
   `end` 晚於該品種最後一根 K 線超過 `limit` 個週期時（例如已下架的品種），回應是空列表，不代表 [`start`, `end`] 內沒有資料；把 `end` 設在 `deliveryTime` 之前即可取得下架品種的歷史。
   分頁時不得以空頁判定完成。依據與分界見 `docs/execution_plan/2026-10-14--r8-stage2-local-research-dispatch.md` §8.2。
+  官方頁面（https://bybit-exchange.github.io/docs/v5/market/kline）只說明 `start`／`end` 是時間戳、`limit` 為 [1, 1000]、結果依 startTime 倒序，沒有說明兩者的交互，也沒有分頁說明；上述行為未經官方保證。
 - **關聯程式**: `market_data_client.rs:313`
 
 ---
@@ -149,6 +150,7 @@ Client 創建：`MarketDataClient::new(client: Arc<BybitRestClient>)`
   OpenInterestRecord { open_interest: f64, timestamp: String }
   ```
 - **★ 實測的窗口行為（2026-10-19，R8 P3；由取得的資料推得）**：與 `get_klines` 相同，只回傳 `endTime` 往前約 `limit` × `intervalTime` 之內的資料（`limit=200`、`4h` 時約 800 小時）；`endTime` 晚於下架時間超過這段時，回空列表且沒有 `nextPageCursor`。
+  官方頁面（https://bybit-exchange.github.io/docs/v5/market/open-interest）唯一的時間限制說明是可查詢的最早時間為該品種的上市時間，與這裡的窗口行為不同；窗口行為未經官方保證。
 - **★ strict-parse（alpha 歷史回填用）**: `get_open_interest` 用 `parse_str_f64`（missing → 0.0），對「取最近快照」足夠但**不可用於歷史回填**（無法區分 missing-field vs 真實值）。回填走 `get_open_interest_raw`（回原始 `BybitResponse`）+ `funding_oi_backfill.rs::strict_parse_oi_list`：「欄位存在 AND finite」即收（不設數值 floor），只 reject missing/non-finite/壞 ts。
 - **關聯程式**: `market_data_client/mod.rs:184`（get_open_interest）、`market_data_client/mod.rs` get_open_interest_raw、`backfill/funding_oi_backfill.rs`、`bin/funding_oi_backfill.rs`
 
@@ -170,6 +172,7 @@ Client 創建：`MarketDataClient::new(client: Arc<BybitRestClient>)`
   ```
 - **★ 實測（2026-10-19，R8 P3）**：沒有 K 線與持倉量的窗口限制，`endTime` 遠晚於下架時間時仍回傳該品種的資料（310 個下架品種中 309 個取得）。
   18 個下架品種在 `deliveryTime` 恰有一筆結算（費率可達 2%）；LUNAUSDT、ANCUSDT、USTUSDT 在 `deliveryTime` 之後另有紀錄，至 2022-06-01。
+  官方頁面（https://bybit-exchange.github.io/docs/v5/market/history-fund-rate）寫明只傳 `endTime` 時回傳至 `endTime` 為止的 200 筆、只傳 `startTime` 會出錯，沒有提到下架品種；以上是觀察結果，未經官方保證。
 - **★ strict-parse（alpha 歷史回填用）**: `get_funding_history` 用 `parse_str_f64`（missing → 0.0）。但 `fundingRate` 合法為 0.0（低 premium regime）且合法為負（空付多），不可當 missing 簽名。回填走 `get_funding_history_raw`（回原始 `BybitResponse`）+ `funding_oi_backfill.rs::strict_parse_funding_list`：「欄位存在 AND finite」即收（含真 0.0 / 負，**無 >0 floor**），只 reject missing-field/non-finite/壞 ts。**禁從 history 樣本 max(fundingRate) 反推 cap**（cap SSOT 見下節 instruments-info `upperFundingRate`）。
 - **關聯程式**: `market_data_client/mod.rs:254`（get_funding_history）、`market_data_client/mod.rs` get_funding_history_raw、`backfill/funding_oi_backfill.rs`、`bin/funding_oi_backfill.rs`
 
