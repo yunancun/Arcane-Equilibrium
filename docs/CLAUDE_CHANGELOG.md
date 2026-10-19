@@ -1,9 +1,14 @@
 # CLAUDE_CHANGELOG.md — 開發歷史歸檔
 
 > 從 CLAUDE.md / TODO.md 遷出的 Wave/Sprint/Batch + TODO version-increment 歷史敘事。新 session 不需要讀此文件，僅供回顧歷史時查閱。
-> 最後更新：2026-10-18（R8 取數起點改為 2020、逐筆資料來源查核；TODO v896）
+> 最後更新：2026-10-19（R8 引擎環境查核與 DSR 閘門查核；TODO v897）
 
 ---
+
+## R8 引擎環境查核與 DSR 閘門查核 — 2026-10-19
+
+- P1a：LEAN 命令列工具初始化要求 QuantConnect 帳戶，依規定停止；改以引擎映像（`quantconnect/lean@sha256:2657ed33…`，arm64）離線、無帳戶跑完 C# 範例與自寫的 Python 演算法。
+- DSR 閘門查核：既有 `dsr_gate.py` 的兩個疑點都屬實；Demo 晉級的選擇偏差證據因此恆判 block。另列 `P1-DSR-GATE-FIX`，待 Operator 決定。TODO v897。
 
 ## R8 取數起點改為 2020、逐筆資料來源查核 — 2026-10-18
 
