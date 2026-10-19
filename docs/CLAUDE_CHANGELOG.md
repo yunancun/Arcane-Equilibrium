@@ -8,7 +8,7 @@
 ## R8 引擎環境查核與 DSR 閘門查核 — 2026-10-19
 
 - P1a：LEAN 命令列工具初始化要求 QuantConnect 帳戶，依規定停止；改以引擎映像（`quantconnect/lean@sha256:2657ed33…`，arm64）離線、無帳戶跑完 C# 範例與自寫的 Python 演算法。
-- DSR 閘門查核：既有 `dsr_gate.py` 的兩個疑點都屬實；Demo 晉級的選擇偏差證據因此恆判 block。另列 `P1-DSR-GATE-FIX`，待 Operator 決定。TODO v897。
+- DSR 閘門查核：既有 `dsr_gate.py` 的兩個疑點都屬實；Demo 晉級的選擇偏差證據因此恆判 block。Operator 決定現在修、與 R8 平行，只改源碼不部署；另列 `P1-DSR-GATE-FIX`（ACTIVE）。TODO v897。
 
 ## R8 取數起點改為 2020、逐筆資料來源查核 — 2026-10-18
 
