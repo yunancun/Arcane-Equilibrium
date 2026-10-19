@@ -856,3 +856,289 @@ def test_completed_manifest_from_before_never_opened_field_still_resumes(plan_pa
     mp.write_bytes(mod.encoded(m))
     with collector(plan_path, tmp_path, lambda *args: pytest.fail('unexpected network')) as r:
         assert set(r.fetch_universe()) == {'BTCUSDT', 'OLDUSDT'}
+
+
+class WindowMarket:
+    """合成交易所：K 線與持倉量只回傳請求終點前 limit 個週期。"""
+    start = 1640995200000
+
+    def __init__(self, name, interval, points, delivery=0, *, cursor_overlap=False, conflict=False):
+        self.name, self.interval = name, interval
+        self.period = 14400000 if name == 'funding' else mod.PERIODS[interval]
+        self.points, self.delivery = points, delivery
+        self.cursor_overlap, self.conflict = cursor_overlap, conflict
+        self.calls = []
+
+    def row(self, stamp, changed=False):
+        value = '2' if changed else '1'
+        if self.name == 'kline':
+            return kline(stamp, value)
+        if self.name == 'funding':
+            return {'symbol': 'BTCUSDT', 'fundingRateTimestamp': str(stamp), 'fundingRate': '-0.02'}
+        return {'timestamp': str(stamp), 'openInterest': value}
+
+    def __call__(self, endpoint, params):
+        if endpoint == mod.INSTRUMENTS:
+            closed = bool(self.delivery)
+            item = instrument(status='Closed' if closed else 'Trading')
+            if self.delivery is not None:
+                item['deliveryTime'] = str(self.delivery)
+            return response([item] if ('status' in params) == closed else [])
+        assert endpoint == mod.ENDPOINTS[self.name]
+        self.calls.append(dict(params))
+        a, b = ('start', 'end') if self.name == 'kline' else ('startTime', 'endTime')
+        lower = params[a] if self.name == 'funding' else max(params[a], params[b]-params['limit']*self.period+1)
+        points = sorted((t for t in self.points if lower <= t <= params[b]), reverse=True)[:params['limit']]
+        if self.cursor_overlap and points:
+            # cursor 續頁重送第一頁的同一時點，並帶出更早資料。
+            if not params.get('cursor'):
+                return response([self.row(points[0])], 'page-' + str(params[b]))
+            return response([self.row(t, self.conflict and i == 0) for i, t in enumerate(points)])
+        return response([self.row(t) for t in points])
+
+
+def window_plan(plan_path, market, end, *, max_pages=5000):
+    value = json.loads(plan_path.read_text())
+    rule = next(r for r in value['datasets'] if r['name'] == market.name)
+    if market.name == 'kline':
+        rule['intervals'] = [market.interval]
+        if market.interval == '1':
+            rule['symbols'] = ['BTCUSDT']
+    value.update(datasets=[rule], end=mod.datetime.fromtimestamp(end/1000, mod.timezone.utc).isoformat(), max_pages=max_pages)
+    plan_path.write_bytes(mod.encoded(value))
+
+
+def output_stamps(c):
+    entry = next(iter(c.manifest['files'].values()))
+    path = c.out / (entry['dataset'] + '_BTCUSDT_' + entry['interval'] + '.csv.gz')
+    return [int(line.split(',')[0]) for line in gzip.decompress(path.read_bytes()).decode().splitlines()[1:]]
+
+
+@pytest.mark.parametrize('name,interval', [('kline','1'), ('kline','60'), ('kline','D'), ('open_interest','4h')])
+def test_fix2_delisted_window_endpoint_coverage_and_resume(plan_path, tmp_path, name, interval):
+    period = mod.PERIODS[interval]; start = WindowMarket.start
+    delivery = start + 5*period + period//2
+    points = [start+i*period for i in range(6)]
+    market = WindowMarket(name, interval, points, delivery)
+    window_plan(plan_path, market, start+1020*period)
+    with collector(plan_path, tmp_path, market) as c:
+        m = c.collect()
+        assert m['failures'] == {}
+        assert market.calls[0]['end' if name == 'kline' else 'endTime'] == delivery-1
+        assert next(iter(m['files'].values()))['coverage'] == [start, delivery]
+        assert output_stamps(c) == points
+        files = copy.deepcopy(m['files'])
+    with collector(plan_path, tmp_path, lambda *args: pytest.fail('完成工作不得再請求')) as resumed:
+        assert resumed.collect()['files'] == files
+        # 刪去產物，強制由原始頁及新終點的 checkpoint 重建。
+        next(resumed.out.glob('*.csv.gz')).unlink()
+        assert resumed.collect()['files'] == files
+
+
+def test_fix2_funding_preserves_delisting_and_later_settlements(plan_path, tmp_path):
+    start = WindowMarket.start; period = 14400000
+    points = [start, start+period, start+2*period]
+    market = WindowMarket('funding', 'funding', points, start+period)
+    end = start+1000*period
+    window_plan(plan_path, market, end)
+    with collector(plan_path, tmp_path, market) as c:
+        m = c.collect()
+        assert m['failures'] == {}
+        assert market.calls[0]['endTime'] == end-1
+        assert next(iter(m['files'].values()))['coverage'] == [start, end]
+        assert output_stamps(c) == points
+        expected = 'timestamp,funding_rate\n' + ''.join(str(t)+',-0.02\n' for t in points)
+        assert (c.out/'funding_BTCUSDT_funding.csv.gz').read_bytes() == gzip.compress(expected.encode(), mtime=0)
+        files = copy.deepcopy(m['files'])
+    with collector(plan_path, tmp_path, lambda *args: pytest.fail('資金費續傳不得再請求')) as resumed:
+        assert resumed.collect()['files'] == files
+
+
+@pytest.mark.parametrize('name,interval,limit', [('kline','60',1000), ('open_interest','4h',200)])
+def test_fix2_empty_window_crosses_long_gap_and_keeps_overlap(plan_path, tmp_path, name, interval, limit):
+    start = WindowMarket.start; period = mod.PERIODS[interval]
+    points = [start, start+period, start+2*limit*period]
+    market = WindowMarket(name, interval, points)
+    window_plan(plan_path, market, start+(2*limit+2)*period)
+    with collector(plan_path, tmp_path, market) as c:
+        assert c.collect()['failures'] == {}
+        assert output_stamps(c) == points
+        end_key = 'end' if name == 'kline' else 'endTime'
+        ends = [p[end_key] for p in market.calls]
+        assert ends == [start+(2*limit+2)*period-1, start+2*limit*period-1,
+                        start+(limit+1)*period-1, start+period-1]
+
+
+@pytest.mark.parametrize('conflict', [False, True])
+def test_fix2_overlap_after_empty_window_on_oi_cursor_pages(plan_path, tmp_path, conflict):
+    start = WindowMarket.start; period = 14400000
+    points = [start, start+period]
+    market = WindowMarket('open_interest', '4h', points, cursor_overlap=True, conflict=conflict)
+    window_plan(plan_path, market, start+202*period)
+    with collector(plan_path, tmp_path, market) as c:
+        m = c.collect()
+        assert len(market.calls) == 3
+        assert market.calls[0]['endTime'] - market.calls[1]['endTime'] == 199*period
+        assert 'cursor' not in market.calls[1] and 'cursor' in market.calls[2]
+        if conflict:
+            assert next(iter(m['failures'].values()))['message'] == '跨頁重複資料衝突'
+            assert m['files'] == {}
+        else:
+            assert m['failures'] == {}
+            assert output_stamps(c) == points
+
+
+@pytest.mark.parametrize('name,interval,limit', [('kline','60',1000), ('open_interest','4h',200)])
+@pytest.mark.parametrize('conflict', [False, True])
+def test_fix2_overlap_point_duplicates_on_first_page(plan_path, tmp_path, name, interval, limit, conflict):
+    start = WindowMarket.start; period = mod.PERIODS[interval]
+    market = WindowMarket(name, interval, [start, start+period])
+    window_plan(plan_path, market, start+(limit+2)*period)
+    def send(endpoint, params):
+        status, raw = market(endpoint, params)
+        payload = json.loads(raw)
+        if endpoint != mod.INSTRUMENTS and payload['result']['list']:
+            payload['result']['list'].append(market.row(start+period, conflict))
+        return status, mod.encoded(payload)
+    with collector(plan_path, tmp_path, send) as c:
+        m = c.collect()
+        assert len(market.calls) == 2
+        if conflict:
+            assert next(iter(m['failures'].values()))['message'] == '同一時點的重複資料內容衝突'
+            assert m['files'] == {}
+        else:
+            assert m['failures'] == {}
+            assert output_stamps(c) == [start, start+period]
+
+
+@pytest.mark.parametrize('name,interval,limit', [('kline','60',1000), ('open_interest','4h',200)])
+@pytest.mark.parametrize('tamper', [None, 'end', 'missing_page'])
+def test_fix2_window_checkpoint_resume_and_tamper_rejection(plan_path, tmp_path, name, interval, limit, tamper):
+    start = WindowMarket.start; period = mod.PERIODS[interval]
+    market = WindowMarket(name, interval, [start, start+period])
+    end = start+(2*limit+1)*period
+    window_plan(plan_path, market, end)
+    seen = []
+    def interrupted(endpoint, params):
+        if endpoint != mod.INSTRUMENTS:
+            seen.append(dict(params))
+            if len(seen) == 3:
+                raise Crash('第三窗前中斷，前兩空窗已保存')
+        return market(endpoint, params)
+    with collector(plan_path, tmp_path, interrupted) as c:
+        with pytest.raises(Crash):
+            c.collect()
+    cp = next((tmp_path/'out').glob('*.progress.json'))
+    state = json.loads(cp.read_text())
+    assert len(state['request_ids']) == 2 and state['complete'] is False
+    assert state['end'] == end-1-2*(limit-1)*period
+    if tamper == 'end':
+        state['end'] -= 1
+    elif tamper == 'missing_page':
+        state['request_ids'].pop(0)
+    cp.write_bytes(mod.encoded(state))
+    market.calls.clear()
+    with collector(plan_path, tmp_path, market) as resumed:
+        if tamper:
+            with pytest.raises(mod.IntegrityError, match='checkpoint'):
+                resumed.collect()
+            assert market.calls == []
+        else:
+            assert resumed.collect()['failures'] == {}
+            assert output_stamps(resumed) == [start, start+period]
+            assert len(market.calls) == 1
+
+
+@pytest.mark.parametrize('name,interval,limit', [('kline','60',1000), ('open_interest','4h',200)])
+def test_fix2_empty_windows_count_toward_max_pages(plan_path, tmp_path, name, interval, limit):
+    start = WindowMarket.start; period = mod.PERIODS[interval]
+    market = WindowMarket(name, interval, [start])
+    window_plan(plan_path, market, start+3*limit*period, max_pages=2)
+    with collector(plan_path, tmp_path, market) as c:
+        m = c.collect()
+        assert len(market.calls) == 2 and m['files'] == {}
+        assert next(iter(m['failures'].values()))['message'] == '資料集頁數超出上限'
+
+
+@pytest.mark.parametrize('name,interval,limit', [('kline','60',1000), ('open_interest','4h',200), ('funding','funding',200)])
+def test_fix2_empty_window_terminates_at_start_and_funding_does_not_step(plan_path, tmp_path, name, interval, limit):
+    start = WindowMarket.start; period = 14400000 if name == 'funding' else mod.PERIODS[interval]
+    market = WindowMarket(name, interval, [])
+    window_plan(plan_path, market, start+2*limit*period)
+    with collector(plan_path, tmp_path, market) as c:
+        assert c.collect()['failures'] == {}
+        assert len(market.calls) == (1 if name == 'funding' else 3)
+        assert output_stamps(c) == []
+
+
+@pytest.mark.parametrize('name,interval,limit', [('kline','60',1000), ('open_interest','4h',200)])
+@pytest.mark.parametrize('offset,expected_requests', [(0,1), (1,1), (2,2)])
+def test_fix2_empty_window_next_end_must_be_strictly_after_start(plan_path, tmp_path, name, interval, limit, offset, expected_requests):
+    start = WindowMarket.start; period = mod.PERIODS[interval]
+    market = WindowMarket(name, interval, [])
+    window_plan(plan_path, market, start+(limit-1)*period+offset)
+    with collector(plan_path, tmp_path, market) as c:
+        assert c.collect()['failures'] == {}
+        assert len(market.calls) == expected_requests
+
+
+@pytest.mark.parametrize('delivery', [None, 0, WindowMarket.start+86400000*2])
+@pytest.mark.parametrize('name,interval', [('kline','60'), ('open_interest','4h')])
+def test_fix2_missing_zero_or_later_delivery_keeps_plan_end(plan_path, tmp_path, delivery, name, interval):
+    start = WindowMarket.start; end = start+86400000
+    market = WindowMarket(name, interval, [start], delivery)
+    window_plan(plan_path, market, end)
+    with collector(plan_path, tmp_path, market) as c:
+        assert c.collect()['failures'] == {}
+        assert market.calls[0]['end' if name == 'kline' else 'endTime'] == end-1
+        assert next(iter(c.manifest['files'].values()))['coverage'] == [start, end]
+
+
+@pytest.mark.parametrize('name,interval,expected', [('kline','60',2), ('open_interest','4h',2), ('funding','funding',7)])
+def test_fix2_dry_run_uses_delisting_endpoint_only_for_windowed_data(plan_path, tmp_path, name, interval, expected):
+    start = WindowMarket.start; period = 14400000 if name == 'funding' else mod.PERIODS[interval]
+    market = WindowMarket(name, interval, [], start+5*period)
+    window_plan(plan_path, market, start+1020*period)
+    with collector(plan_path, tmp_path, market) as c:
+        c.fetch_universe()
+        assert c.dry_run()['estimated_requests'] == expected
+        assert c.dry_run()['network_requests'] == 0 and market.calls == []
+
+
+@pytest.mark.parametrize('offset', [-1, 0])
+@pytest.mark.parametrize('name,interval', [('kline','60'), ('open_interest','4h'), ('funding','funding')])
+def test_fix2_delivery_not_after_start_skips_only_windowed_jobs(plan_path, tmp_path, offset, name, interval):
+    start = WindowMarket.start
+    market = WindowMarket(name, interval, [], start+offset)
+    window_plan(plan_path, market, start+86400000)
+    with collector(plan_path, tmp_path, market) as c:
+        assert c.collect()['failures'] == {}
+        assert bool(c.manifest['files']) == (name == 'funding')
+        assert bool(market.calls) == (name == 'funding')
+        assert c.dry_run()['estimated_requests'] == (2 if name == 'funding' else 0)
+
+
+@pytest.mark.parametrize('version', ['r8-public-data-1', 'unknown', None])
+def test_fix2_resume_rejects_other_tool_version_with_new_directory_message(plan_path, tmp_path, version):
+    with collector(plan_path, tmp_path, universe_sender) as c:
+        c.fetch_universe()
+        assert c.manifest['tool_version'] == 'r8-public-data-2'
+    path = tmp_path/'out'/'manifest.json'
+    manifest = json.loads(path.read_text())
+    if version is None:
+        manifest.pop('tool_version')
+    else:
+        manifest['tool_version'] = version
+    path.write_bytes(mod.encoded(manifest))
+    with pytest.raises(mod.IntegrityError, match='新的輸出目錄'):
+        collector(plan_path, tmp_path, lambda *args: pytest.fail('版本檢查不得請求'))
+
+
+def test_fix2_same_symbol_trading_and_delisted_conflicts(plan_path, tmp_path):
+    def send(endpoint, params):
+        assert endpoint == mod.INSTRUMENTS
+        return response([dict(instrument(status='Closed'), deliveryTime='1640995260000')]
+                        if 'status' in params else [instrument()])
+    with collector(plan_path, tmp_path, send) as c:
+        with pytest.raises(mod.IntegrityError, match='衝突'):
+            c.fetch_universe()
