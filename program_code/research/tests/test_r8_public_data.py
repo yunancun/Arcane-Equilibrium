@@ -988,27 +988,49 @@ def test_fix2_overlap_after_empty_window_on_oi_cursor_pages(plan_path, tmp_path,
             assert output_stamps(c) == points
 
 
-@pytest.mark.parametrize('name,interval,limit', [('kline','60',1000), ('open_interest','4h',200)])
 @pytest.mark.parametrize('conflict', [False, True])
-def test_fix2_overlap_point_duplicates_on_first_page(plan_path, tmp_path, name, interval, limit, conflict):
-    start = WindowMarket.start; period = mod.PERIODS[interval]
-    market = WindowMarket(name, interval, [start, start+period])
-    window_plan(plan_path, market, start+(limit+2)*period)
+def test_fix2_overlap_after_empty_window_first_page_is_compared_across_pages(plan_path, tmp_path, conflict):
+    start = WindowMarket.start; period = 14400000
+    market = WindowMarket('open_interest', '4h', [start, start+period], cursor_overlap=True)
+    window_plan(plan_path, market, start+202*period)
     def send(endpoint, params):
         status, raw = market(endpoint, params)
         payload = json.loads(raw)
-        if endpoint != mod.INSTRUMENTS and payload['result']['list']:
-            payload['result']['list'].append(market.row(start+period, conflict))
+        if endpoint != mod.INSTRUMENTS and payload['result']['list'] and not params.get('cursor'):
+            # 只改空窗後首頁的一筆；同頁沒有重複，衝突必須由後面的跨頁合併偵測。
+            payload['result']['list'] = [market.row(start+period, conflict)]
         return status, mod.encoded(payload)
     with collector(plan_path, tmp_path, send) as c:
         m = c.collect()
-        assert len(market.calls) == 2
+        assert len(market.calls) == 3
+        assert market.calls[0]['endTime']-market.calls[1]['endTime'] == 199*period
+        assert 'cursor' not in market.calls[1] and 'cursor' in market.calls[2]
         if conflict:
-            assert next(iter(m['failures'].values()))['message'] == '同一時點的重複資料內容衝突'
+            assert next(iter(m['failures'].values()))['message'] == '跨頁重複資料衝突'
             assert m['files'] == {}
         else:
             assert m['failures'] == {}
             assert output_stamps(c) == [start, start+period]
+
+
+@pytest.mark.parametrize('name,interval', [('kline','60'), ('open_interest','4h')])
+def test_fix2_first_page_repeat_across_nonempty_time_windows_is_out_of_range(plan_path, tmp_path, name, interval):
+    # 非空窗後 end = 最舊時點 - 1；跨時間窗再送同點必先違反請求窗。
+    # §8.5 的跨頁合併由上面首頁／cursor 各自改值的兩組案例落實，這裡保留更早的拒絕邊界。
+    start = WindowMarket.start; period = mod.PERIODS[interval]
+    market = WindowMarket(name, interval, [start+period])
+    window_plan(plan_path, market, start+3*period)
+    def send(endpoint, params):
+        status, raw = market(endpoint, params)
+        if endpoint != mod.INSTRUMENTS:
+            return response([market.row(start+period)])
+        return status, raw
+    with collector(plan_path, tmp_path, send) as c:
+        m = c.collect()
+        assert len(market.calls) == 2
+        assert market.calls[1]['end' if name == 'kline' else 'endTime'] == start+period-1
+        assert next(iter(m['failures'].values()))['message'] == '回應時點超出請求範圍'
+        assert m['files'] == {}
 
 
 @pytest.mark.parametrize('name,interval,limit', [('kline','60',1000), ('open_interest','4h',200)])
