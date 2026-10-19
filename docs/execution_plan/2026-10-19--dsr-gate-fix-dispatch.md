@@ -3,7 +3,7 @@
 | 項目 | 內容 |
 |---|---|
 | 文件性質 | 派工指令，不是授權文件。是否可派發，以 [TODO](../../TODO.md) 的 `P1-DSR-GATE-FIX` 列為準 |
-| 日期 | 2026-10-19 起草，同日依 QC 與 PA 的審查、PR #220 的自動審查修訂，並記入 Operator 對 receipt 處理方式的裁定；同日依單元 1 首次交付的回報，澄清 §4 `generated_at_utc` 的格式（Asia/Shanghai） |
+| 日期 | 2026-10-19 起草，同日依 QC 與 PA 的審查、PR #220 的自動審查修訂，並記入 Operator 對 receipt 處理方式的裁定；同日依單元 1 首次交付的回報、記錄者對該交付的初步審查與 PR #222 的自動審查，改定 §4 `generated_at_utc` 與 W5 時間值的取值，並更正 §3 第 4 點的扣帳規則（Asia/Shanghai） |
 | 依據 | Operator 2026-10-19 在對話中選擇「現在修，與 R8 平行」：只改源碼、不部署，部署到 Linux 與否另問。<br>TODO `P1-R8-DSR-GATE-SCALE-CHECK` 的查核結果。<br>QC 的修正規格與 PA 的身分路徑建議，收錄於本文 §2 至 §4 |
 | 交付 | `DSR-GATE-FIX-CORE-20261019`（`work_item_id` 與 `lane_id` 都用這個名稱） |
 | 不在範圍 | 部署、Linux、資料庫、runtime。<br>單元 2a：Demo 畢業證據改為配置層級，試驗家族的定義由 QC 或 MIT 先預登記。<br>單元 2b：L2 證據的單位契約。<br>單元 2c：殘差 alpha 路徑的呼叫端開始傳入頻率。這會讓殘差報告首次可能判 pass，影響 LG5 實盤候選審查等下游，須另經 Operator 決定。<br>倉庫內其他自行實作的 DSR，例如 `prepilot_gates`、`w2_paper_edge_metrics`。<br>DSR 閾值 0.95 不變 |
@@ -126,7 +126,9 @@ def compute_dsr(self, *, observed_sharpe: float, n_trials: int,
    - 執行器從 `gate_inputs` 讀取 `oos_sharpe_frequency_seconds`、`oos_skew`、`oos_excess_kurtosis` 三個鍵，原樣傳給 `compute_dsr`。
    - 任一鍵缺少時，DSR stage 判 DEFER，理由為 `oos_sharpe_unit_contract_missing`。
    - adapter 在單元 2b 才填這三個鍵；單元 1 的測試自行帶入，使既有「閾值經真 `compute_dsr` 生效」與「α 下溢會 raise」的突變對照仍有意義。
-   - 語意改變：DSR stage 判 DEFER 時，α-wealth 不扣帳（只有 pass 或 fail 才算「已進行」）。L2 目前休眠，影響為零，但這是 FDR 帳務語意的改變，在回報中說明。
+   - STAGE 4.5 的扣帳規則不改（MIT #3：overall 或 DSR stage 為 pass 或 fail 即扣帳）；`conducted` 的判定與既有的扣帳測試都不得修改。
+     單位契約缺失使 DSR 判 DEFER：overall 也是 DEFER 時，依既有的「純輸入缺失不扣帳」不扣；overall 因其他 stage 判 fail 時，照舊扣帳。
+     與現行相比，原本 DSR 判 pass 或 fail 而扣帳的評估，現在可能因 DEFER 而不扣帳；這是判定未進行的結果，不是規則的改變。L2 目前休眠，影響為零。
    - 完整的單位契約留給單元 2b。
 
 ## 4. 學習 runtime 身分：重新觀測
@@ -134,9 +136,10 @@ def compute_dsr(self, *, observed_sharpe: float, n_trials: int,
 `dsr_gate.py`、`promotion_gate.py` 與 `residual_alpha_gate.py` 都在 `program_code/ml_training/learning_runtime_manifest.py` 的凍結清單中，修改它們會移動 v1 與 v2 的身分摘要。
 依 PA 的建議，採「在原 schema 下重新觀測」：
 1. 用既有的 builder（`build_source_compatibility_receipt` 與其 v2 版本），在原路徑重新產生 `docs/execution_plan/ai_ml_landing/receipts/S2.2A-source-compatibility-receipt-v1.json` 與 `-v2.json`。
-   - `generated_at_utc` 寫 `<D>T00:00:00Z`：D 是重新產生當天的 UTC 日期，時間部分歸零，格式與舊值 `2026-07-24T00:00:00Z` 相同；不得沿用舊日期。
-     既有解析器要求時區，只寫日期（例如 `2026-10-19`）會被拒收，refresh builder 因而找不到觀測窗。
-     D 若因續辦而改變，第 3 點的全部時間值依新的 D 重算。
+   - `generated_at_utc` 寫實際產生 receipt 的時刻（下稱 G）：產生腳本在呼叫 builder 前從當下的 UTC 時鐘讀取一次，取到秒，格式為 `YYYY-MM-DDTHH:MM:SSZ`（與 builder 預設的格式相同），
+     v1 與 v2 傳入同一個 G，使兩份 receipt 與第 3 點的時鐘只有一個基準。
+     G 只能來自產生當下讀取的時鐘，不得改寫成當天零時或另選的時刻：receipt 聲稱 G 時源碼已是新的摘要，寫成較早的時刻就是倒填。舊 receipt 的 `2026-07-24T00:00:00Z` 屬舊做法，不沿用。
+     也不得只寫日期：既有解析器要求時區，純日期會被拒收，refresh builder 因而找不到觀測窗。
    - 模組沒有命令列入口：寫一次性的產生腳本，腳本不提交。
    - 序列化固定為 `json.dumps(value, ensure_ascii=False, indent=2, sort_keys=True) + "\n"`，與現有兩份一致。
    - `repo_source_head` 是遙測欄位，寫開工時的 main commit。
@@ -147,11 +150,12 @@ def compute_dsr(self, *, observed_sharpe: float, n_trials: int,
    - `program_code/ml_training/aiml_gate_receipt_wave_w5.py` 的 `NOW` 與 `REPRODUCED_AT`；
    - `tests/structure/test_agent_governance_s2_4_acceptance_matrix.py` 的固定時鐘，以及一份已過期 refresh 的 `expires_at`；
    - `tests/structure/test_agent_governance_s2_4_install_w5.py` 的固定時鐘，以及「把觀測窗往前推」的攻擊測試所用的時間值。
-   取值規則：
-   - 新 receipt 的到期時刻 = D 01:00Z（`generated_at` 加 3600 秒）；
-   - `REPRODUCED_AT` = D 01:05:00+00:00，必須嚴格晚於到期時刻；
+   取值規則（全部由 G 推算；receipt 重新產生、G 改變時全部重算）：
+   - 新 receipt 的到期時刻 E = G 加 3600 秒；
+   - `REPRODUCED_AT` = E 加 5 分鐘，必須嚴格晚於 E；
    - `NOW` = `REPRODUCED_AT` 加 5 分鐘，必須落在 refresh 的 900 秒有效期內；
-   - 往前推的觀測窗在新的 `NOW` 時仍須有效，攻擊測試才仍在驗證原本要驗證的情形。
+   - 往前推的觀測窗在新的 `NOW` 時仍須有效，攻擊測試才仍在驗證原本要驗證的情形；
+   - 這些是探針模擬「receipt 到期後重新產生」所用的固定時鐘，必然晚於 G，也可能晚於提交時刻，與 W5 原先的做法相同；任何時間值都不得早於 G。
 4. 不重新發布 W5 綁定，也不改 `TODO.md` 的 `W5-RECEIPT-BINDING` 標記或 `EXPECTED_SOURCE_HEAD`。這一行由記錄者另記。
    - S2.4 相關的測試以 HEAD 已提交的版本為準，必須在提交之後、工作樹乾淨時執行。提交之前轉紅屬預期，不得以倒填日期或改其他常數的方式消除。
    - 提交之後，若 `tests/structure/test_aiml_w5_receipt_binding_projection.py` 或 `tests/structure/test_aiml_uid_persisted_chain_acceptance.py` 轉紅，停止並回報，不得修改綁定。
@@ -254,7 +258,7 @@ E[max Z(K)] 的值：
 ### 6.2 行為
 
 - **Demo 畢業路徑**：DSR 組件判 `defer_data`，理由為 `sharpe_frequency_unavailable`；畢業結果不比現在寬鬆。
-- **L2**：DSR stage 判 DEFER，理由為 `oos_sharpe_unit_contract_missing`。
+- **L2**：DSR stage 判 DEFER，理由為 `oos_sharpe_unit_contract_missing`；扣帳依 §3 第 4 點，沿用既有規則。
 - **殘差 alpha 閘門**：本單元沒有呼叫端傳入頻率，DSR 不計算，報告判 fail，與現行同屬拒絕；PSR 照常計算。
   傳 `n_trials=1` 的呼叫端，今天 DSR 等於 PSR(0)、可能判 pass；本單元之後改判 fail，方向是更嚴。
   有頻率時依正確公式判定的程式路徑，以單元測試直接設定 protocol 驗證。
