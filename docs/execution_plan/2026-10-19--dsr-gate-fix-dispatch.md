@@ -309,7 +309,7 @@ E[max Z(K)] 的值：
 - 保留的提交是本機分支 `codex/dsr-gate-fix-core-20261019` 的 `40fcd0c91cc0`，基線 `c27d43a74`。
 - TODO v899 與同日交給實作者的續辦指令，要求以同一交付身分重新准入。依 `helper_scripts/maintenance_scripts/agent_governance_task_admission.py`，這做不到：
   - 已有准入紀錄的交付，只有在審查提出阻塞項而授權修補額度、且額度未用過時才能再准入，否則回 `DELIVERY_REPAIR_NOT_AUTHORIZED`；
-  - 凍結的目標寫明 main `c27d43a74`，task contract 改綁新的 main 時回 `DELIVERY_OBJECTIVE_CHANGED`。
+  - 信封檢查在修補額度檢查之前執行：task contract 的目標文字與凍結的不同時回 `DELIVERY_OBJECTIVE_CHANGED`。凍結的目標寫明 main `c27d43a74`，改綁新的 main 必然改動目標文字。
 - 2026-10-20 記錄者核對時，實作者尚未依那份續辦指令開工：該 worktree 的 HEAD 與帳本自 12:08 UTC 起沒有變動。
 - 記錄者提出續辦指令之前，沒有讀准入帳本與再准入的拒絕條件。
 
@@ -323,28 +323,30 @@ E[max Z(K)] 的值：
 
 ### 9.3 步驟
 
-1. 先 `git fetch origin`，確認 main 上的本文件含本節；沒有就停止並回報 `NEEDS_CONTEXT`。記下這個 main commit。
-2. 從這個 commit 開新的 worktree 與分支 `codex/dsr-gate-fix-core-r2-20261020`，把保留提交 `40fcd0c91cc0` cherry-pick 上去，產生只有單一父提交的提交，不要 merge。
-   - 兩者改的檔案不重疊；有衝突就停止並回報。
-   - 原分支與原 worktree 保持不動，也不動原交付在帳本中的紀錄。
-3. 取得准入：surfaces 須含 `agent_workflow`；租約取 86400 秒；task contract 與 context 都綁步驟 1 的 commit。receipt 的 `repo_source_head` 寫這個 commit。
-4. L2：
+0. §9.2 第 3 點寫明 Operator 已確認，才可開工；仍寫「待確認」時停止並回報 `NEEDS_CONTEXT`。
+1. 先 `git fetch origin`，確認 main 上的本文件含本節；沒有就停止並回報 `NEEDS_CONTEXT`。記下這個 main commit，下稱 M。
+2. 從 M 開新的 worktree 與分支 `codex/dsr-gate-fix-core-r2-20261020`。原分支與原 worktree 保持不動，也不動原交付在帳本中的紀錄。
+3. 在 M 的乾淨工作樹上取得准入：surfaces 須含 `agent_workflow`；租約取 86400 秒；task contract 與 context 都綁 M。
+   准入以當下的 HEAD 為基線，所以必須在 cherry-pick **之前**取得；之後的代碼審查與發布檢查都以 M 為起點。
+4. 把保留提交 `40fcd0c91cc0` cherry-pick 到這個分支上，產生只有單一父提交的提交，不要 merge。兩者改的檔案不重疊；有衝突就停止並回報。
+   receipt 的 `repo_source_head` 寫 M。
+5. L2：
    - `l2_ml_advisory_executor.py` 中 STAGE 4.5 的 conducted 判定、說明與註解恢復原樣：overall 或 DSR stage 為 pass 或 fail 即扣帳；
    - `test_l2_p4_online_fdr.py` 中 `test_overall_fail_without_dsr_render_still_debits` 恢復原名與原斷言；
    - 新增的 `test_missing_unit_contract_defers_without_debit` 保留：它的 overall 是 DEFER，在原規則下同樣不扣帳。
-5. receipt：
+6. receipt：
    - 產生腳本在呼叫 builder 之前，從當下的 UTC 時鐘讀一次 G（到秒，`YYYY-MM-DDTHH:MM:SSZ`），v1 與 v2 傳同一個 G；
    - 依 §4 第 3 點由 G 推算 E、`REPRODUCED_AT` 與 `NOW`；已過期 refresh 的 `expires_at`，以及往前推的攻擊測試所用的各時間值，維持它們與 `REPRODUCED_AT` 原本的相對間隔；
    - 提到舊日期的註解一併更新；
    - receipt 最後產生；審查要求修改三個凍結檔時，修完之後重新產生，並重算全部時間值。
-6. 機械核對依 §4 第 5 點：
+7. 機械核對依 §4 第 5 點：
    - `capture_contract_digest` 維持 `sha256:1e406a6e4d84e5cecebe565dc1314122f16fae1b13bd1bcf0b4c5cc4a8f397e7`；
    - 三個凍結檔與 `40fcd0c91cc0` 相同時，`learning_runtime_digest` 應與首次交付相同：v1 `sha256:a559d11e5a397173b4eae75aa6bdad7e1684176f0873e31d6542596a24486a11`，
      v2 `sha256:c86ce66ab06a398a0395984db6725ac86874dfac8f954f18b4e09f1bf63c35f9`；不同就停止並回報。
-7. 提交之後、工作樹乾淨時，跑 S2.4 相關測試與 §6.3 列出的全部測試，再跑 CI 治理分片的同一組指令。
+8. 提交之後、工作樹乾淨時，跑 S2.4 相關測試與 §6.3 列出的全部測試，再跑 CI 治理分片的同一組指令。
    - 下列兩項屬環境限制，不是停止條件：Python 3.10 沒有 `tomllib` 造成的收集錯誤；一次性測試資料庫在 initdb 階段失敗。記下數量與模組名稱，不改相關檔案，由記錄者以 CI 的 Python 3.12 補驗。
    - 其他失敗依原規則停止並回報。
-8. 依階段 2 派工指令 §2.4 啟動審查時段，做代碼審查。受控測試驗證無法執行時，代碼審查通過之後停止，提交留在本機分支並回報。
-9. 其餘限制不變：不連 Linux、資料庫、Demo、live；不部署；不 push；不改 `TODO.md`、§4 兩份 receipt 以外的 `docs/` 檔案與 `CHANGELOG.md`；
+9. 依階段 2 派工指令 §2.4 啟動審查時段，做代碼審查。受控測試驗證無法執行時，代碼審查通過之後停止，提交留在本機分支並回報。
+10. 其餘限制不變：不連 Linux、資料庫、Demo、live；不部署；不 push；不改 `TODO.md`、§4 兩份 receipt 以外的 `docs/` 檔案與 `CHANGELOG.md`；
    兩個已超過 2000 行的檔案不得變長；不重新發布 W5 綁定。
-10. 依 §8 一次用中文回報，並加列：cherry-pick 前後的 commit、G 與推算出的各時間值、L2 恢復的差異、環境限制造成的錯誤清單。
+11. 依 §8 一次用中文回報，並加列：cherry-pick 前後的 commit、G 與推算出的各時間值、L2 恢復的差異、環境限制造成的錯誤清單。
