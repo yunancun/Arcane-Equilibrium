@@ -160,5 +160,7 @@ Route-Id 是本歷史命名空間。這些都不能互相當成完整產品版�
   不授予 Linux、資料庫、帳戶、支出或任何效果。
 - **RH-20261018-02／open_item_decided**：P2 查核發現交易所有逐日成交的公開壓縮檔。Operator 決定第一代不做秒級，但先把前十大標的自上市起的逐筆成交下載到 NAS 的 SSD；
   排名、期間與下載工具的要求由記錄者寫在派工指令 §4。不授予 Linux、資料庫、帳戶、支出或任何效果。
+- **RH-20261019-01／open_item_decided**：P1 選型查核以不是假說試驗的簡單策略執行，與 N2 字面「對一個假說」不同；記錄者記為 DRIFT。Operator 接受此解讀，第一圈的實驗引擎定為 LEAN。
+  查核紀錄見 `docs/execution_plan/2026-10-19--r8-stage2-p1-engine-selection-record.md`。不授予 Linux、資料庫、帳戶、支出或任何效果。
 - 新路線、採納、撤回、取代及更正按 [決策規則](../decisions/2026-10-03--route-history-versioning.md)
   追加事件；現行派工及效果授權仍回 TODO 與既有 ADR/AMD。
