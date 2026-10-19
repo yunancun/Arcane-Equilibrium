@@ -804,3 +804,55 @@ def test_float_zero_retcode_is_a_real_probe_failure_on_resume(plan_path, tmp_pat
     (tmp_path/'out'/'manifest.json').unlink()
     with collector(plan_path, tmp_path, lambda *args: pytest.fail('unexpected network')) as r:
         assert set(r.fetch_universe()) == {'BTCUSDT', 'OLDUSDT'}
+
+
+def test_delisted_probe_excludes_never_opened_instruments_and_records_them(plan_path, tmp_path):
+    # 2026-10-19 實際取數時，下架探測回傳了狀態為 PendingOpen 的 USDT 永續（上市取消或改名的占位）。
+    def send(endpoint, params):
+        if 'status' not in params: return response([instrument()])
+        pending = dict(instrument('NEVERUSDT', 'PendingOpen'), deliveryTime='1640995260000')
+        return response([instrument('OLDUSDT', 'Closed'), pending])
+    c = collector(plan_path, tmp_path, send)
+    assert set(c.fetch_universe()) == {'BTCUSDT', 'OLDUSDT'}
+    excluded = c.manifest['delistings']['never_opened_excluded']
+    assert excluded == {'NEVERUSDT': {'launch_time': 1640995200000, 'deliveryTime': 1640995260000}}
+    c.close()
+    (tmp_path/'out'/'manifest.json').unlink()
+    with collector(plan_path, tmp_path, lambda *args: pytest.fail('unexpected network')) as r:
+        assert set(r.fetch_universe()) == {'BTCUSDT', 'OLDUSDT'}
+        assert r.manifest['delistings']['never_opened_excluded'] == excluded
+
+
+@pytest.mark.parametrize('source,status', [('probe', 'Settling'), ('probe', 'Trading'), ('instruments', 'PendingOpen')])
+def test_other_unexpected_statuses_still_stop_the_universe(plan_path, tmp_path, source, status):
+    def send(endpoint, params):
+        if 'status' not in params:
+            return response([instrument(), instrument('ODDUSDT', status)] if source == 'instruments' else [instrument()])
+        return response([instrument('ODDUSDT', status)] if source == 'probe' else [])
+    with pytest.raises(mod.IntegrityError, match='實際狀態'):
+        collector(plan_path, tmp_path, send).fetch_universe()
+
+
+
+@pytest.mark.parametrize('case', ['duplicate_pending', 'trading_and_pending'])
+def test_conflicting_never_opened_records_stop_the_universe(plan_path, tmp_path, case):
+    def send(endpoint, params):
+        if 'status' not in params:
+            return response([instrument(), instrument('DUALUSDT')] if case == 'trading_and_pending' else [instrument()])
+        pending = dict(instrument('DUALUSDT', 'PendingOpen'), deliveryTime='1640995260000')
+        if case == 'duplicate_pending':
+            return response([pending, dict(pending, deliveryTime='1640995320000')])
+        return response([pending])
+    with pytest.raises(mod.IntegrityError, match='衝突|同時'):
+        collector(plan_path, tmp_path, send).fetch_universe()
+
+
+def test_completed_manifest_from_before_never_opened_field_still_resumes(plan_path, tmp_path):
+    def send(endpoint, params):
+        return response([instrument('OLDUSDT', 'Closed')] if 'status' in params else [instrument()])
+    c = collector(plan_path, tmp_path, send); c.fetch_universe(); c.close()
+    mp = tmp_path/'out'/'manifest.json'; m = json.loads(mp.read_text())
+    assert m['delistings'].pop('never_opened_excluded') == {}
+    mp.write_bytes(mod.encoded(m))
+    with collector(plan_path, tmp_path, lambda *args: pytest.fail('unexpected network')) as r:
+        assert set(r.fetch_universe()) == {'BTCUSDT', 'OLDUSDT'}

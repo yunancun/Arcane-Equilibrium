@@ -652,6 +652,7 @@ class Collector:
                 payload = _json(self.out / "raw" / (str(request_id) + ".json"))
                 observed.extend((key, item) for item in payload["result"]["list"])
         universe, inventory = {}, {"contractType": set(), "settleCoin": set(), "status": set()}
+        never_opened = {}
         for source, item in observed:
             try:
                 for key in inventory:
@@ -661,6 +662,15 @@ class Collector:
                 if item["contractType"] != "LinearPerpetual" or item["settleCoin"] != "USDT":
                     continue
                 expected_status = "Trading" if source == "instruments" else "Closed"
+                if source == "delisted_probe" and item["status"] == "PendingOpen":
+                    # 下架探測也會回傳從未開盤的品種（上市取消或改名的占位），沒有交易歷史：
+                    # 不列入 universe，連同上市與交割時間記入 manifest；其他非預期狀態仍中止。
+                    if not isinstance(item["symbol"], str) or not SYMBOL.fullmatch(item["symbol"]):
+                        raise DataError("標的名稱不合法")
+                    value = {"launch_time": milliseconds(item["launchTime"]), "deliveryTime": milliseconds(item.get("deliveryTime", "0"))}
+                    if never_opened.setdefault(item["symbol"], value) != value:
+                        raise DataError("不同頁的標的資訊衝突")
+                    continue
                 if item["status"] != expected_status:
                     raise DataError("實際狀態與查詢候選值不符，須先查核原始回應")
                 symbol = item["symbol"]
@@ -677,6 +687,8 @@ class Collector:
                     universe[symbol] = value
             except (KeyError, TypeError) as exc:
                 raise DataError("原始回應尚不能確認合約篩選契約") from exc
+        if set(universe) & set(never_opened):
+            raise DataError("同一標的同時被列為可交易與從未開盤，須先查核原始回應")
         if len(universe) > self.plan.value["max_symbols"]:
             raise IntegrityError("universe 超過 max_symbols")
         if not universe:
@@ -688,9 +700,14 @@ class Collector:
                                         "verified_from_raw_request_ids": request_ids},
                              delistings={"probe_status": probe_status, "obtained": sum(v["status"] == "Closed" for v in universe.values()),
                                          "period_contains_delistings": True if any(v["status"] == "Closed" and self.plan.start <= v["deliveryTime"] < self.plan.end for v in universe.values()) else "UNKNOWN", "point_in_time_universe_complete": False,
-                                         "cross_sectional_candidate_allowed": False})
+                                         "cross_sectional_candidate_allowed": False,
+                                         "never_opened_excluded": dict(sorted(never_opened.items()))})
         if verify:
-            if any(self.manifest.get(k) != v for k,v in derived.items()):
+            stored = dict(self.manifest)
+            if isinstance(stored.get("delistings"), dict) and "never_opened_excluded" not in stored["delistings"]:
+                # 舊版 manifest 沒有這個欄位；舊版遇到 PendingOpen 會中止，所以已完成的舊 manifest 這一項必為空。
+                stored["delistings"] = {**stored["delistings"], "never_opened_excluded": {}}
+            if any(stored.get(k) != v for k,v in derived.items()):
                 raise IntegrityError("manifest universe 與原始頁重建結果不符")
         else:
             self.manifest.update(derived)
