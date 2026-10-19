@@ -804,3 +804,30 @@ def test_float_zero_retcode_is_a_real_probe_failure_on_resume(plan_path, tmp_pat
     (tmp_path/'out'/'manifest.json').unlink()
     with collector(plan_path, tmp_path, lambda *args: pytest.fail('unexpected network')) as r:
         assert set(r.fetch_universe()) == {'BTCUSDT', 'OLDUSDT'}
+
+
+def test_delisted_probe_excludes_never_opened_instruments_and_records_them(plan_path, tmp_path):
+    # 2026-10-19 實際取數時，下架探測回傳了狀態為 PendingOpen 的 USDT 永續（上市取消或改名的占位）。
+    def send(endpoint, params):
+        if 'status' not in params: return response([instrument()])
+        pending = dict(instrument('NEVERUSDT', 'PendingOpen'), deliveryTime='1640995260000')
+        return response([instrument('OLDUSDT', 'Closed'), pending])
+    c = collector(plan_path, tmp_path, send)
+    assert set(c.fetch_universe()) == {'BTCUSDT', 'OLDUSDT'}
+    excluded = c.manifest['delistings']['never_opened_excluded']
+    assert excluded == {'NEVERUSDT': {'launch_time': 1640995200000, 'deliveryTime': 1640995260000}}
+    c.close()
+    (tmp_path/'out'/'manifest.json').unlink()
+    with collector(plan_path, tmp_path, lambda *args: pytest.fail('unexpected network')) as r:
+        assert set(r.fetch_universe()) == {'BTCUSDT', 'OLDUSDT'}
+        assert r.manifest['delistings']['never_opened_excluded'] == excluded
+
+
+@pytest.mark.parametrize('source,status', [('probe', 'Settling'), ('probe', 'Trading'), ('instruments', 'PendingOpen')])
+def test_other_unexpected_statuses_still_stop_the_universe(plan_path, tmp_path, source, status):
+    def send(endpoint, params):
+        if 'status' not in params:
+            return response([instrument(), instrument('ODDUSDT', status)] if source == 'instruments' else [instrument()])
+        return response([instrument('ODDUSDT', status)] if source == 'probe' else [])
+    with pytest.raises(mod.IntegrityError, match='實際狀態'):
+        collector(plan_path, tmp_path, send).fetch_universe()
