@@ -15,6 +15,7 @@
 | DSR 閘門修正（單元 1：核心與凍結身分）的派工指令 | `2026-10-19--dsr-gate-fix-dispatch.md`；是否可派發以 TODO 的 `P1-DSR-GATE-FIX` 為準 |
 | R8 階段 2（本機研究能力）的派工指令 | `2026-10-14--r8-stage2-local-research-dispatch.md`；依 R8 修訂二 §5 階段 2，現況以 TODO 的對應各列為準 |
 | R8 階段 2 選型查核紀錄（P1a、P1b） | `2026-10-19--r8-stage2-p1-engine-selection-record.md`；選型定為 LEAN（N2 措辭的解讀經 Operator 接受，見 §1.1），§4.5 與 §5 是 P4 補充指令的輸入 |
+| R8 階段 2 P4 補充指令（研究工具核心：U4 資料物化、U5 LEAN 研究框架、U6 帳本序列與獨立重算、P4-D 事件級檢查、預登記的方法論參數） | `2026-10-20--r8-stage2-p4-research-core-addendum.md`；是否可派發以 TODO 的對應各列為準 |
 | R8 階段 1 後續六個小單元的派工指令 | `2026-10-12--r8-stage1-followup-units-dispatch.md`；已執行完畢，結果見該檔 §7，現況以 TODO 的對應各列為準 |
 | R8 階段 1 回放修補的派工指令與交接摘要 | `2026-10-09--r8-stage1-replay-patches-dispatch.md`；是否可派發回到 `TODO.md` 的 `P1-R8-STAGE1-REPLAY-PATCHES` |
 | 跨主题证据入口 | `docs/_indexes/initiative_index.md` |
