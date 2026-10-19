@@ -5,7 +5,7 @@
 | 文件性質 | 派工指令，不是授權文件。是否可派發，以 [TODO](../../TODO.md) 的 `P1-DSR-GATE-FIX` 列為準 |
 | 日期 | 2026-10-19 起草，同日依 QC 與 PA 的審查、PR #220 的自動審查修訂，並記入 Operator 對 receipt 處理方式的裁定；同日依單元 1 首次交付的回報、記錄者對該交付的初步審查與 PR #222 的自動審查，改定 §4 `generated_at_utc` 與 W5 時間值的取值，並更正 §3 第 4 點的扣帳規則；2026-10-20 加入 §9：首次交付已結案而無法以同一身分再准入，另立交付續辦（Asia/Shanghai） |
 | 依據 | Operator 2026-10-19 在對話中選擇「現在修，與 R8 平行」：只改源碼、不部署，部署到 Linux 與否另問。<br>TODO `P1-R8-DSR-GATE-SCALE-CHECK` 的查核結果。<br>QC 的修正規格與 PA 的身分路徑建議，收錄於本文 §2 至 §4 |
-| 交付 | `DSR-GATE-FIX-CORE-20261019`（`work_item_id` 與 `lane_id` 都用這個名稱）；已結案。續辦另立 `DSR-GATE-FIX-CORE-R2-20261020`，見 §9 |
+| 交付 | `DSR-GATE-FIX-CORE-20261019`（`work_item_id` 與 `lane_id` 都用這個名稱）；已結案。續辦另立 `DSR-GATE-FIX-CORE-R2-20261020`，見 §9；Operator 2026-10-20 未確認，暫緩 |
 | 不在範圍 | 部署、Linux、資料庫、runtime。<br>單元 2a：Demo 畢業證據改為配置層級，試驗家族的定義由 QC 或 MIT 先預登記。<br>單元 2b：L2 證據的單位契約。<br>單元 2c：殘差 alpha 路徑的呼叫端開始傳入頻率。這會讓殘差報告首次可能判 pass，影響 LG5 實盤候選審查等下游，須另經 Operator 決定。<br>倉庫內其他自行實作的 DSR，例如 `prepilot_gates`、`w2_paper_edge_metrics`。<br>DSR 閾值 0.95 不變 |
 
 ## 1. 問題與目標
@@ -318,7 +318,8 @@ E[max Z(K)] 的值：
 1. 另立交付 `DSR-GATE-FIX-CORE-R2-20261020`，`work_item_id` 與 `lane_id` 都用這個名稱。
 2. 這是 §7 第 1 點「只有一個交付」的例外，比照[階段 2 派工指令](2026-10-14--r8-stage2-local-research-dispatch.md) §7.2 第 1 點：
    原交付已結案，派工指令經 PR #222 改定之後另立名稱，使兩次交付的紀錄分開。
-3. 依 `AGENTS.md`，另立交付身分本身不構成授權，須 Operator 明示。Operator 的確認：待確認。
+3. 依 `AGENTS.md`，另立交付身分本身不構成授權，須 Operator 明示。Operator 的確認：2026-10-20 未確認；單元 1 暫緩，另議。
+   在 Operator 另行決定之前，本節的步驟不得執行（§9.3 第 0 點）。
 4. 目標、驗收與限制同本文 §1 至 §8，以含本節的 main 為準，不擴大範圍。
 
 ### 9.3 步驟

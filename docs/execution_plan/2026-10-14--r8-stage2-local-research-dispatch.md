@@ -687,7 +687,7 @@ holdout 只檢查成本後仍為正、方向一致、沒有明顯劣化。U2 依
 
 1. 交付 `R8-S2-PUBLIC-DATA-FIX2-20261020`，`work_item_id` 與 `lane_id` 都用這個名稱；開新的 worktree 與分支 `codex/r8-s2-public-data-fix2-20261020`。
    這是 §2.1 第 1、5 點「不得另立名稱」的例外，理由同 §7.2 第 1 點：原交付與第一次修補都已發布並結案，本次由 P3 的結果發起。
-   依 `AGENTS.md`，另立交付身分本身不構成授權，須 Operator 明示。Operator 的確認：待確認。這一行寫明已確認之前，不得開工；仍寫「待確認」時停止並回報 `NEEDS_CONTEXT`。
+   依 `AGENTS.md`，另立交付身分本身不構成授權，須 Operator 明示。Operator 的確認：2026-10-20 已確認（在對話中確認本交付）。
 2. 從含本節的 main commit 開工，把完整 commit 記下來，task contract 與 context 都綁它；main 上找不到本節就停止並回報 `NEEDS_CONTEXT`。
    task contract 的 surfaces 須含 `agent_workflow`。開工之後 main 若前進，不要自行 rebase（§7.2 第 3 點）。
 3. 可改檔案：`program_code/research/r8_data/public_data.py`、`program_code/research/tests/test_r8_public_data.py`。
