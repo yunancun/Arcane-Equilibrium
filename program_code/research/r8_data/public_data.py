@@ -136,7 +136,8 @@ class Plan:
         if p.get("schema_version") != 1 or p.get("base_url") != BASE_URL:
             raise IntegrityError("不允許的計畫版本或基底網址")
         self.start, self.end = iso_ms(p["start"]), iso_ms(p["end"])
-        if not iso_ms("2022-01-01T00:00:00Z") <= self.start < self.end <= iso_ms("2026-10-01T00:00:00Z"):
+        # 已授權期間：2026-10-18 Operator 把起點由 2022-01-01 延至 2020-01-01（事件 RH-20261018-01）。
+        if not iso_ms("2020-01-01T00:00:00Z") <= self.start < self.end <= iso_ms("2026-10-01T00:00:00Z"):
             raise IntegrityError("計畫超出已授權期間")
         if not 0 < finite(p["max_rps"]) <= 4:
             raise IntegrityError("計畫速率超出上限")

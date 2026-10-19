@@ -110,7 +110,7 @@ def test_probe_error_recorded_once_and_not_claimed_complete_history(plan_path, t
 
 @pytest.mark.parametrize("changes", [
     {"base_url": "https://example.com"}, {"max_rps": 5}, {"max_attempts": 6},
-    {"end": "2027-01-01T00:00:00Z"}, {"start": "2021-01-01T00:00:00Z"},
+    {"end": "2027-01-01T00:00:00Z"}, {"start": "2019-12-31T00:00:00Z"},
 ])
 def test_plan_cannot_expand_authorized_scope(plan_path, changes):
     value = json.loads(plan_path.read_text()); value.update(changes); plan_path.write_bytes(mod.encoded(value))
@@ -120,12 +120,14 @@ def test_plan_cannot_expand_authorized_scope(plan_path, changes):
 
 def test_whitelist_rejects_endpoint_auth_extra_params_and_scope(plan_path, tmp_path):
     c = collector(plan_path, tmp_path, universe_sender); c.fetch_universe()
-    base = {"category": "linear", "limit": 1000, "symbol": "BTCUSDT", "interval": "60", "start": c.plan.start, "end": c.plan.end-1}
+    # 請求起點是計畫起點與上市時間（對齊網格）兩者較晚者。
+    start = c.plan.job_start("kline", "BTCUSDT", "60", c.universe)
+    base = {"category": "linear", "limit": 1000, "symbol": "BTCUSDT", "interval": "60", "start": start, "end": c.plan.end-1}
     c.plan.authorize(mod.ENDPOINTS["kline"], base, c.universe)
     for endpoint, params in [
         ("/v5/order/create", base), (mod.ENDPOINTS["kline"], {**base, "api_key": "fake"}),
         (mod.ENDPOINTS["kline"], {**base, "limit": 200}), (mod.ENDPOINTS["kline"], {**base, "symbol": "UNKNOWN"}),
-        (mod.ENDPOINTS["kline"], {**base, "end": c.plan.end}), (mod.ENDPOINTS["kline"], {**base, "start": c.plan.start-1}),
+        (mod.ENDPOINTS["kline"], {**base, "end": c.plan.end}), (mod.ENDPOINTS["kline"], {**base, "start": start-1}),
         (mod.ENDPOINTS["kline"], {**base, "interval": "5"}),
     ]:
         with pytest.raises(mod.DataError):

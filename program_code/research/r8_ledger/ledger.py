@@ -23,8 +23,9 @@ import re
 GENESIS = "0" * 64
 DEFAULT_EMBARGO_SECONDS = 7 * 86400
 LEDGERS = ("preregistrations", "trials", "holdouts")
+# 訓練段起點依 2026-10-18 的裁決（事件 RH-20261018-01）與取數起點同步提前到 2020-01-01；驗證段與兩段 holdout 不變。
 DEFAULT_BOUNDARIES = (
-    "2022-01-01T00:00:00Z", "2025-07-01T00:00:00Z",
+    "2020-01-01T00:00:00Z", "2025-07-01T00:00:00Z",
     "2026-01-01T00:00:00Z", "2026-05-15T00:00:00Z", "2026-10-01T00:00:00Z",
 )
 
