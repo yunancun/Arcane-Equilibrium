@@ -7,7 +7,7 @@
 
 ## DSR 閘門修正單元 1 派工 — 2026-10-19
 
-- 依 Operator 的決定（現在修、與 R8 平行、只改源碼不部署），新增[派工指令](execution_plan/2026-10-19--dsr-gate-fix-dispatch.md)：核心公式 SR0 = √V × E[max Z(K)]、移除樣本最大值門檻、Sharpe 頻率與偏態峰度改為必填；呼叫端只做 fail-closed 的配合，不放寬任何判定；依 PA 的建議重新觀測學習 runtime 身分的 v1、v2 receipt，不重新發布 W5 綁定。單元 2a、2b 另行派工，2c（殘差路徑啟用頻率）須另經 Operator 決定。TODO v898。
+- 依 Operator 的決定（現在修、與 R8 平行、只改源碼不部署），新增[派工指令](execution_plan/2026-10-19--dsr-gate-fix-dispatch.md)：核心公式 SR0 = √V × E[max Z(K)]、移除樣本最大值門檻、Sharpe 頻率與偏態峰度改為必填；呼叫端只做 fail-closed 的配合，不放寬任何判定；依 PA 的建議與 Operator 的裁定，在原路徑重新觀測學習 runtime 身分的 v1、v2 receipt，不重新發布 W5 綁定；畢業判定拒收舊版 DSR 報告。單元 2a、2b 另行派工，2c（殘差路徑啟用頻率）須另經 Operator 決定。TODO v898。
 
 ## R8 引擎環境查核與 DSR 閘門查核 — 2026-10-19
 

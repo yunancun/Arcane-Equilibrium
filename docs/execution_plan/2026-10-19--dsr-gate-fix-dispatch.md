@@ -3,7 +3,7 @@
 | 項目 | 內容 |
 |---|---|
 | 文件性質 | 派工指令，不是授權文件。是否可派發，以 [TODO](../../TODO.md) 的 `P1-DSR-GATE-FIX` 列為準 |
-| 日期 | 2026-10-19 起草，同日依 QC 與 PA 的審查修訂（Asia/Shanghai） |
+| 日期 | 2026-10-19 起草，同日依 QC 與 PA 的審查、PR #220 的自動審查修訂，並記入 Operator 對 receipt 處理方式的裁定（Asia/Shanghai） |
 | 依據 | Operator 2026-10-19 在對話中選擇「現在修，與 R8 平行」：只改源碼、不部署，部署到 Linux 與否另問。<br>TODO `P1-R8-DSR-GATE-SCALE-CHECK` 的查核結果。<br>QC 的修正規格與 PA 的身分路徑建議，收錄於本文 §2 至 §4 |
 | 交付 | `DSR-GATE-FIX-CORE-20261019`（`work_item_id` 與 `lane_id` 都用這個名稱） |
 | 不在範圍 | 部署、Linux、資料庫、runtime。<br>單元 2a：Demo 畢業證據改為配置層級，試驗家族的定義由 QC 或 MIT 先預登記。<br>單元 2b：L2 證據的單位契約。<br>單元 2c：殘差 alpha 路徑的呼叫端開始傳入頻率。這會讓殘差報告首次可能判 pass，影響 LG5 實盤候選審查等下游，須另經 Operator 決定。<br>倉庫內其他自行實作的 DSR，例如 `prepilot_gates`、`w2_paper_edge_metrics`。<br>DSR 閾值 0.95 不變 |
@@ -107,6 +107,9 @@ def compute_dsr(self, *, observed_sharpe: float, n_trials: int,
    - 其餘複合判定邏輯不變。
 2. **`program_code/ml_training/promotion_evidence.py` 與 `control_api_v1/app/promotion_pipeline.py`（Demo 畢業路徑）**
    - 單元 1 傳 `sharpe_frequency_seconds=None`，所以 DSR 組件判 defer。畢業照舊不通過，但理由是誠實的。
+   - 畢業判定讀取已存的選擇偏差報告時（`promotion_pipeline.py` 的 `_check_demo_gates`），報告中的 DSR 結果若沒有 `dsr_method_version == "bldp2014_scaled_v2"`，
+     一律視為舊版、不可信，判不通過，理由為 `selection_bias:legacy_dsr_method`。這防止部署之後、每小時的證據刷新之前（或刷新失敗時），
+     以已知錯誤的公式產生、且頂層 `passes` 為 true 的舊報告被採用。
    - 時間分桶的日報酬、配置層級的 K 與試驗帳去重，留給單元 2a。
 3. **`program_code/learning_engine/residual_alpha_gate.py`**
    - `ResidualAlphaProtocol` 新增 `sharpe_frequency_seconds: float | None = None`；序列化沿用「有設定才輸出」的寫法，使舊報告的雜湊不變。
@@ -155,10 +158,11 @@ def compute_dsr(self, *, observed_sharpe: float, n_trials: int,
    - 除 `learning_code_digest` 外，其餘訓練組件的摘要一律不變；
    - `learning_code` 的輸入中，只有三個凍結檔的雜湊改變。
 
-**記錄者的裁定**（PM，未經 Operator 另行確認；記為 DRIFT，待 Operator 確認）：
-- `docs/execution_plan/ai_ml_landing/design/S2.4-install-source-seams.md` 中「Original source receipts are immutable and never have their timestamps rewritten」一句，解讀為禁止改寫既有 receipt 的時間戳、讓它看起來仍然新鮮。
-- 輸入改變後的重新觀測，是產生一份新的 receipt：新的自我摘要、誠實的日期，舊版本由 git 歷史保存。這是凍結機制設計中預期的做法（測試寫明「改了 allowlisted 檔卻沒重生 receipt」即紅燈）。
-  該文件是 Operator 合入的規範文件，§9.2 的措辭另行排程修改。
+**Operator 的裁定**（2026-10-19，在對話中從記錄者提出的選項中選擇「原路徑重新觀測」）：
+- 選項內容：用既有的 builder 在原路徑產生新的 receipt（新的摘要、當天的真實日期），舊版本由 git 歷史保存；
+  `docs/execution_plan/ai_ml_landing/design/S2.4-install-source-seams.md` 中「Original source receipts are immutable and never have their timestamps rewritten」一句，
+  解讀為不得竄改舊 receipt 的時間戳以假裝仍然新鮮，並另行修改 §9.2 的措辭。
+- 記錄者註：這是凍結機制設計中預期的做法（測試寫明「改了 allowlisted 檔卻沒重生 receipt」即紅燈）；§9.2 的措辭修改另行排程，不在本單元。
 - 本單元改到 W2 範圍的 `source_static` 測試與 W5 範圍的三個檔案，是綁定 head `6fd4ea73` 之後第一次動到這些範圍。
   S2.4@SOURCE_READY 仍只綁 `6fd4ea73`；任何 S2.4 effect（W6）開工之前，必須在確切的 head 上重新發布 W5 綁定。
 
@@ -242,6 +246,7 @@ E[max Z(K)] 的值：
 - 偏態或峰度傳 None 時，以 0 計算且 `moments_assumed_gaussian=True`；傳 0.0 時該旗標為 False。
 - `compute_psr`：與 `compute_dsr` 在 K = 1 時的 PSR(0) 一致；分母項不大於 0 時回傳 0.0；`n_observations` 低於門檻時回傳 None。
 - 殘差路徑在頻率為 None 時，PSR 照常算出、DSR 為 None、報告判 fail；理由集合中沒有新增 defer 項。
+- 回歸測試：已存的舊版選擇偏差報告（頂層 `passes` 為 true、DSR 結果沒有 `dsr_method_version`）在 `_check_demo_gates` 判不通過，理由為 `selection_bias:legacy_dsr_method`。
 - 寫一個說明型測試，證明年化值誤傳無法用數值擋下：K = 5、T = 60 時，年化 0.8 誤當每期值傳入，DSR 約 0.99999。
 
 ### 6.2 行為
