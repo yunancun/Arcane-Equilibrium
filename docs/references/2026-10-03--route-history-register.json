@@ -394,8 +394,10 @@
       "meaning": "stage 2 dispatch with the 2026-10-18 note in section 4 (RH-20261018-01): fetch period starts 2020-01-01 at each listing, training segment start moved earlier, validation and holdout segments unchanged; instruction only"
     },
     "r8-amendment-2-r6": {
-      "kind": "recorded_file",
+      "kind": "git_blob",
       "path": "docs/decisions/2026-10-14--r8-amendment-2-multi-strategy-first-loop.md",
+      "commit": "273ea5a34e7e85c124d85c267f219487c5695d03",
+      "blob": "2f9d3be251ca3b97ef3c3b88c1a3e1a3fb46e637",
       "sha256": "0b1f62f845141528d26c1ea69b264b6cd7a68d4ab8aa779987bb547d45334b34",
       "meaning": "amendment 2 with the second 2026-10-18 note in N3 (RH-20261018-02): tick trade archives of the top ten symbols since listing downloaded to NAS storage, not used by generation one; body N1-N9 unchanged"
     },
@@ -404,37 +406,49 @@
       "path": "docs/execution_plan/2026-10-14--r8-stage2-local-research-dispatch.md",
       "sha256": "553d6c40236451a7acf593ec8cf3e4c4f4d12c2b76fd261e1eb0d92bc22df9e2",
       "meaning": "stage 2 dispatch with the second 2026-10-18 note in section 4 (RH-20261018-02): consented tick archive download, top-ten ranking by trailing 365-day turnover, download tool requirements and preconditions; instruction only"
+    },
+    "r8-amendment-2-r7": {
+      "kind": "recorded_file",
+      "path": "docs/decisions/2026-10-14--r8-amendment-2-multi-strategy-first-loop.md",
+      "sha256": "f105f656fce41d4fccdd3a3d02059af38223e7acec234f6a27495a45bc70a465",
+      "meaning": "amendment 2 with the 2026-10-19 note in N2 (RH-20261019-01): the P1 selection check ran a simple non-hypothesis strategy as the stage 2 dispatch specified; the Operator accepted the recorder reading of the N2 wording and LEAN is selected; body N1-N9 unchanged"
+    },
+    "r8-stage2-p1-record": {
+      "kind": "recorded_file",
+      "path": "docs/execution_plan/2026-10-19--r8-stage2-p1-engine-selection-record.md",
+      "sha256": "b4ee55b8381962921342a86927127d3c4cab2507ca210dd36bab9f63e88e1760",
+      "meaning": "stage 2 P1 engine selection record: P1a environment and P1b data-contract check of LEAN on the BTCUSDT training segment, reconciliation against U1, independent E4 verification, four findings and two notes for P4, tick capability on synthetic ticks, timing, the N2 wording drift and the Operator ruling; check record only"
     }
   },
   "routes": [
     {
       "id": "R1",
-      "title": "受治理的 Bybit 自動交易系統",
-      "period_label": "2026-03 ～ 2026-04 初",
+      "title": "\u53d7\u6cbb\u7406\u7684 Bybit \u81ea\u52d5\u4ea4\u6613\u7cfb\u7d71",
+      "period_label": "2026-03 \uff5e 2026-04 \u521d",
       "period_precision": "retrospective_approximate_window",
       "record_status": "historical",
       "change_type": "initial_direction",
       "follows_in_retrospective": null,
-      "summary": "建立多策略、五 Agent、風控與 Decision Lease，當時以 Paper 穩定運行後準備 Live 為目標。",
-      "reason": "先把自動交易置於受控、可解釋的執行框架。",
-      "retained": "風控、執行與學習分離。",
-      "limits": "Paper promotion 是歷史路線，後續 Stage 0R／Demo 政策已改。",
+      "summary": "\u5efa\u7acb\u591a\u7b56\u7565\u3001\u4e94 Agent\u3001\u98a8\u63a7\u8207 Decision Lease\uff0c\u7576\u6642\u4ee5 Paper \u7a69\u5b9a\u904b\u884c\u5f8c\u6e96\u5099 Live \u70ba\u76ee\u6a19\u3002",
+      "reason": "\u5148\u628a\u81ea\u52d5\u4ea4\u6613\u7f6e\u65bc\u53d7\u63a7\u3001\u53ef\u89e3\u91cb\u7684\u57f7\u884c\u6846\u67b6\u3002",
+      "retained": "\u98a8\u63a7\u3001\u57f7\u884c\u8207\u5b78\u7fd2\u5206\u96e2\u3002",
+      "limits": "Paper promotion \u662f\u6b77\u53f2\u8def\u7dda\uff0c\u5f8c\u7e8c Stage 0R\uff0fDemo \u653f\u7b56\u5df2\u6539\u3002",
       "source_refs": [
         "march-roadmap"
       ]
     },
     {
       "id": "R2",
-      "title": "Rust 交易核心與研究基礎整合",
-      "period_label": "2026-04 ～ 2026-05 初",
+      "title": "Rust \u4ea4\u6613\u6838\u5fc3\u8207\u7814\u7a76\u57fa\u790e\u6574\u5408",
+      "period_label": "2026-04 \uff5e 2026-05 \u521d",
       "period_precision": "retrospective_approximate_window",
       "record_status": "historical",
       "change_type": "platform_consolidation",
       "follows_in_retrospective": "R1",
-      "summary": "Rust 單一交易權威、三模式引擎與 DB／ML／回放研究基礎整合。",
-      "reason": "消除 Python／Rust 雙權威漂移，建立共用交易與研究底座。",
-      "retained": "Python API／GUI／分析與既有治理能力。",
-      "limits": "融合方案的舊二十週排程只供歷史追溯。",
+      "summary": "Rust \u55ae\u4e00\u4ea4\u6613\u6b0a\u5a01\u3001\u4e09\u6a21\u5f0f\u5f15\u64ce\u8207 DB\uff0fML\uff0f\u56de\u653e\u7814\u7a76\u57fa\u790e\u6574\u5408\u3002",
+      "reason": "\u6d88\u9664 Python\uff0fRust \u96d9\u6b0a\u5a01\u6f02\u79fb\uff0c\u5efa\u7acb\u5171\u7528\u4ea4\u6613\u8207\u7814\u7a76\u5e95\u5ea7\u3002",
+      "retained": "Python API\uff0fGUI\uff0f\u5206\u6790\u8207\u65e2\u6709\u6cbb\u7406\u80fd\u529b\u3002",
+      "limits": "\u878d\u5408\u65b9\u6848\u7684\u820a\u4e8c\u5341\u9031\u6392\u7a0b\u53ea\u4f9b\u6b77\u53f2\u8ffd\u6eaf\u3002",
       "source_refs": [
         "rust-authority",
         "three-engine",
@@ -443,16 +457,16 @@
     },
     {
       "id": "R3",
-      "title": "產品定位與盈利路徑收斂",
-      "period_label": "2026-05-20 ～ 2026-05 下旬",
+      "title": "\u7522\u54c1\u5b9a\u4f4d\u8207\u76c8\u5229\u8def\u5f91\u6536\u6582",
+      "period_label": "2026-05-20 \uff5e 2026-05 \u4e0b\u65ec",
       "period_precision": "retrospective_approximate_window",
       "record_status": "historical",
       "change_type": "product_positioning",
       "follows_in_retrospective": "R2",
-      "summary": "同一審議週期比較策略工廠、直接 alpha、雙軌、商業驗證、Copy Trading，收斂為完整自營 quant bot。",
-      "reason": "校準產品定位、成本、資本規模與可驗證的盈利路徑。",
-      "retained": "自營主帳完整能力；Copy Trading 保留為有條件後續渠道。",
-      "limits": "本期含多個草案與否決；不是所有方案均實作或正式採納。",
+      "summary": "\u540c\u4e00\u5be9\u8b70\u9031\u671f\u6bd4\u8f03\u7b56\u7565\u5de5\u5ee0\u3001\u76f4\u63a5 alpha\u3001\u96d9\u8ecc\u3001\u5546\u696d\u9a57\u8b49\u3001Copy Trading\uff0c\u6536\u6582\u70ba\u5b8c\u6574\u81ea\u71df quant bot\u3002",
+      "reason": "\u6821\u6e96\u7522\u54c1\u5b9a\u4f4d\u3001\u6210\u672c\u3001\u8cc7\u672c\u898f\u6a21\u8207\u53ef\u9a57\u8b49\u7684\u76c8\u5229\u8def\u5f91\u3002",
+      "retained": "\u81ea\u71df\u4e3b\u5e33\u5b8c\u6574\u80fd\u529b\uff1bCopy Trading \u4fdd\u7559\u70ba\u6709\u689d\u4ef6\u5f8c\u7e8c\u6e20\u9053\u3002",
+      "limits": "\u672c\u671f\u542b\u591a\u500b\u8349\u6848\u8207\u5426\u6c7a\uff1b\u4e0d\u662f\u6240\u6709\u65b9\u6848\u5747\u5be6\u4f5c\u6216\u6b63\u5f0f\u63a1\u7d0d\u3002",
       "source_refs": [
         "may-v2",
         "may-v3",
@@ -465,16 +479,16 @@
     },
     {
       "id": "R4",
-      "title": "完整自治能力擴張",
-      "period_label": "2026-05-21 ～ 2026-05-31 起凍結大部分實作",
+      "title": "\u5b8c\u6574\u81ea\u6cbb\u80fd\u529b\u64f4\u5f35",
+      "period_label": "2026-05-21 \uff5e 2026-05-31 \u8d77\u51cd\u7d50\u5927\u90e8\u5206\u5be6\u4f5c",
       "period_precision": "retrospective_approximate_window",
       "record_status": "historical",
       "change_type": "scope_expansion",
       "follows_in_retrospective": "R3",
-      "summary": "v5.8 補充 M1–M13，自主選題、學習、監控、退役、配置與路由。",
-      "reason": "把長期自行迭代目標拆成具體自治能力。",
-      "retained": "v5.7 派工基線及交易權威。",
-      "limits": "十三模組入 scope 不等於全部已實作、採用或有效。",
+      "summary": "v5.8 \u88dc\u5145 M1\u2013M13\uff0c\u81ea\u4e3b\u9078\u984c\u3001\u5b78\u7fd2\u3001\u76e3\u63a7\u3001\u9000\u5f79\u3001\u914d\u7f6e\u8207\u8def\u7531\u3002",
+      "reason": "\u628a\u9577\u671f\u81ea\u884c\u8fed\u4ee3\u76ee\u6a19\u62c6\u6210\u5177\u9ad4\u81ea\u6cbb\u80fd\u529b\u3002",
+      "retained": "v5.7 \u6d3e\u5de5\u57fa\u7dda\u53ca\u4ea4\u6613\u6b0a\u5a01\u3002",
+      "limits": "\u5341\u4e09\u6a21\u7d44\u5165 scope \u4e0d\u7b49\u65bc\u5168\u90e8\u5df2\u5be6\u4f5c\u3001\u63a1\u7528\u6216\u6709\u6548\u3002",
       "source_refs": [
         "may-v5.8",
         "plan-changelog"
@@ -482,16 +496,16 @@
     },
     {
       "id": "R5",
-      "title": "Alpha 證據優先",
-      "period_label": "2026-05-31 ～ 2026-06 起延續",
+      "title": "Alpha \u8b49\u64da\u512a\u5148",
+      "period_label": "2026-05-31 \uff5e 2026-06 \u8d77\u5ef6\u7e8c",
       "period_precision": "retrospective_approximate_window",
       "record_status": "historical",
       "change_type": "priority_shift",
       "follows_in_retrospective": "R4",
-      "summary": "v5.9 凍結大部分自治 active-IMPL，先找可信成本後 alpha；M7 保留例外。",
-      "reason": "當時成本牆調查顯示候選優勢不足，先解策略證據缺口。",
-      "retained": "自治設計與既有 Stage／風控；凍結並非全部取消。",
-      "limits": "歷史研究結果不能當今日候選／市場結論。",
+      "summary": "v5.9 \u51cd\u7d50\u5927\u90e8\u5206\u81ea\u6cbb active-IMPL\uff0c\u5148\u627e\u53ef\u4fe1\u6210\u672c\u5f8c alpha\uff1bM7 \u4fdd\u7559\u4f8b\u5916\u3002",
+      "reason": "\u7576\u6642\u6210\u672c\u7246\u8abf\u67e5\u986f\u793a\u5019\u9078\u512a\u52e2\u4e0d\u8db3\uff0c\u5148\u89e3\u7b56\u7565\u8b49\u64da\u7f3a\u53e3\u3002",
+      "retained": "\u81ea\u6cbb\u8a2d\u8a08\u8207\u65e2\u6709 Stage\uff0f\u98a8\u63a7\uff1b\u51cd\u7d50\u4e26\u975e\u5168\u90e8\u53d6\u6d88\u3002",
+      "limits": "\u6b77\u53f2\u7814\u7a76\u7d50\u679c\u4e0d\u80fd\u7576\u4eca\u65e5\u5019\u9078\uff0f\u5e02\u5834\u7d50\u8ad6\u3002",
       "source_refs": [
         "plan-changelog",
         "alpha-amendment"
@@ -499,16 +513,16 @@
     },
     {
       "id": "R6",
-      "title": "AI／ML 真實落地與證據修復",
-      "period_label": "2026-07 ～ 2026-09 及未完成尾項",
+      "title": "AI\uff0fML \u771f\u5be6\u843d\u5730\u8207\u8b49\u64da\u4fee\u5fa9",
+      "period_label": "2026-07 \uff5e 2026-09 \u53ca\u672a\u5b8c\u6210\u5c3e\u9805",
       "period_precision": "retrospective_approximate_window",
       "record_status": "historical_with_open_program",
       "change_type": "operational_landing",
       "follows_in_retrospective": "R5",
-      "summary": "AIML V2 要求合格資料、真實 fit、Rust 消費、自然第二代、恢復與運行證據。",
-      "reason": "修復 source／tests 與真正功能、部署及效果之間的差距。",
-      "retained": "研究資料與模型零件、Rust 權威、資格與效果邊界。",
-      "limits": "PROGRAM_ADOPTED／S1_CLOSED 不等於完整學習或交易落地；狀態仍讀 TODO。",
+      "summary": "AIML V2 \u8981\u6c42\u5408\u683c\u8cc7\u6599\u3001\u771f\u5be6 fit\u3001Rust \u6d88\u8cbb\u3001\u81ea\u7136\u7b2c\u4e8c\u4ee3\u3001\u6062\u5fa9\u8207\u904b\u884c\u8b49\u64da\u3002",
+      "reason": "\u4fee\u5fa9 source\uff0ftests \u8207\u771f\u6b63\u529f\u80fd\u3001\u90e8\u7f72\u53ca\u6548\u679c\u4e4b\u9593\u7684\u5dee\u8ddd\u3002",
+      "retained": "\u7814\u7a76\u8cc7\u6599\u8207\u6a21\u578b\u96f6\u4ef6\u3001Rust \u6b0a\u5a01\u3001\u8cc7\u683c\u8207\u6548\u679c\u908a\u754c\u3002",
+      "limits": "PROGRAM_ADOPTED\uff0fS1_CLOSED \u4e0d\u7b49\u65bc\u5b8c\u6574\u5b78\u7fd2\u6216\u4ea4\u6613\u843d\u5730\uff1b\u72c0\u614b\u4ecd\u8b80 TODO\u3002",
       "source_refs": [
         "aiml-v2",
         "aiml-ledger"
@@ -516,16 +530,16 @@
     },
     {
       "id": "R7",
-      "title": "有限工程單元、可用功能優先",
-      "period_label": "2026-09 下旬 ～ 截至 2026-10-03",
+      "title": "\u6709\u9650\u5de5\u7a0b\u55ae\u5143\u3001\u53ef\u7528\u529f\u80fd\u512a\u5148",
+      "period_label": "2026-09 \u4e0b\u65ec \uff5e \u622a\u81f3 2026-10-03",
       "period_precision": "retrospective_approximate_window",
       "record_status": "current_delivery_emphasis",
       "change_type": "delivery_resequence",
       "follows_in_retrospective": "R6",
-      "summary": "先以有限單元驗證窄範圍功能；Bybit 修復與 D1.1 本機模型消費屬此分期。",
-      "reason": "避免把遠端正式環境證明前置為所有本機開發的阻塞。",
-      "retained": "正式上線要求、舊契約與權限繼續有效；只調整交付節奏。",
-      "limits": "H2 source 採用、D1.1 候選與 runtime 狀態分開；不是重開已關閉 workflow。",
+      "summary": "\u5148\u4ee5\u6709\u9650\u55ae\u5143\u9a57\u8b49\u7a84\u7bc4\u570d\u529f\u80fd\uff1bBybit \u4fee\u5fa9\u8207 D1.1 \u672c\u6a5f\u6a21\u578b\u6d88\u8cbb\u5c6c\u6b64\u5206\u671f\u3002",
+      "reason": "\u907f\u514d\u628a\u9060\u7aef\u6b63\u5f0f\u74b0\u5883\u8b49\u660e\u524d\u7f6e\u70ba\u6240\u6709\u672c\u6a5f\u958b\u767c\u7684\u963b\u585e\u3002",
+      "retained": "\u6b63\u5f0f\u4e0a\u7dda\u8981\u6c42\u3001\u820a\u5951\u7d04\u8207\u6b0a\u9650\u7e7c\u7e8c\u6709\u6548\uff1b\u53ea\u8abf\u6574\u4ea4\u4ed8\u7bc0\u594f\u3002",
+      "limits": "H2 source \u63a1\u7528\u3001D1.1 \u5019\u9078\u8207 runtime \u72c0\u614b\u5206\u958b\uff1b\u4e0d\u662f\u91cd\u958b\u5df2\u95dc\u9589 workflow\u3002",
       "source_refs": [
         "current-todo-snapshot",
         "engineering-log"
@@ -533,16 +547,16 @@
     },
     {
       "id": "R8",
-      "title": "以 QuantConnect 作 Agent 實驗台的有界融合",
-      "period_label": "2026-10-03 提出；2026-10-07 方向採納",
+      "title": "\u4ee5 QuantConnect \u4f5c Agent \u5be6\u9a57\u53f0\u7684\u6709\u754c\u878d\u5408",
+      "period_label": "2026-10-03 \u63d0\u51fa\uff1b2026-10-07 \u65b9\u5411\u63a1\u7d0d",
       "period_precision": "retrospective_approximate_window",
       "record_status": "accepted_direction",
       "change_type": "architecture_direction_accepted",
       "follows_in_retrospective": "R7",
-      "summary": "成熟平台作 Agent 進化閉環的實驗台；第一圈改為本機的多策略假說搜尋，平台在本機開發與配套完成後才有限使用（修訂二）；AE 保留自主決策、學習所有權、Rust 交易權威與本機運行。",
-      "reason": "進化閉環缺實驗引擎；檢驗「選擇」需要多年跨品種歷史；減少歷史自持負擔為次要收益。",
-      "retained": "Rust 交易權威、風控／採用閘門、本機交易證據、策略與學習所有權；Bybit 執行不外遷。",
-      "limits": "只採納方向、設計原則與兩次修訂的工程契約；本機研究能力、平台准入、訊號邊界 ADR、TODO 派工及 runtime 效果均未完成或授權；取數的同意以階段 2 派工指令的範圍為限。",
+      "summary": "\u6210\u719f\u5e73\u53f0\u4f5c Agent \u9032\u5316\u9589\u74b0\u7684\u5be6\u9a57\u53f0\uff1b\u7b2c\u4e00\u5708\u6539\u70ba\u672c\u6a5f\u7684\u591a\u7b56\u7565\u5047\u8aaa\u641c\u5c0b\uff0c\u5e73\u53f0\u5728\u672c\u6a5f\u958b\u767c\u8207\u914d\u5957\u5b8c\u6210\u5f8c\u624d\u6709\u9650\u4f7f\u7528\uff08\u4fee\u8a02\u4e8c\uff09\uff1bAE \u4fdd\u7559\u81ea\u4e3b\u6c7a\u7b56\u3001\u5b78\u7fd2\u6240\u6709\u6b0a\u3001Rust \u4ea4\u6613\u6b0a\u5a01\u8207\u672c\u6a5f\u904b\u884c\u3002",
+      "reason": "\u9032\u5316\u9589\u74b0\u7f3a\u5be6\u9a57\u5f15\u64ce\uff1b\u6aa2\u9a57\u300c\u9078\u64c7\u300d\u9700\u8981\u591a\u5e74\u8de8\u54c1\u7a2e\u6b77\u53f2\uff1b\u6e1b\u5c11\u6b77\u53f2\u81ea\u6301\u8ca0\u64d4\u70ba\u6b21\u8981\u6536\u76ca\u3002",
+      "retained": "Rust \u4ea4\u6613\u6b0a\u5a01\u3001\u98a8\u63a7\uff0f\u63a1\u7528\u9598\u9580\u3001\u672c\u6a5f\u4ea4\u6613\u8b49\u64da\u3001\u7b56\u7565\u8207\u5b78\u7fd2\u6240\u6709\u6b0a\uff1bBybit \u57f7\u884c\u4e0d\u5916\u9077\u3002",
+      "limits": "\u53ea\u63a1\u7d0d\u65b9\u5411\u3001\u8a2d\u8a08\u539f\u5247\u8207\u5169\u6b21\u4fee\u8a02\u7684\u5de5\u7a0b\u5951\u7d04\uff1b\u672c\u6a5f\u7814\u7a76\u80fd\u529b\u3001\u5e73\u53f0\u51c6\u5165\u3001\u8a0a\u865f\u908a\u754c ADR\u3001TODO \u6d3e\u5de5\u53ca runtime \u6548\u679c\u5747\u672a\u5b8c\u6210\u6216\u6388\u6b0a\uff1b\u53d6\u6578\u7684\u540c\u610f\u4ee5\u968e\u6bb5 2 \u6d3e\u5de5\u6307\u4ee4\u7684\u7bc4\u570d\u70ba\u9650\u3002",
       "source_refs": [
         "r8-portable",
         "r8-adoption",
@@ -570,7 +584,9 @@
         "r8-amendment-2-r5",
         "r8-stage2-dispatch-r3",
         "r8-amendment-2-r6",
-        "r8-stage2-dispatch-r4"
+        "r8-stage2-dispatch-r4",
+        "r8-amendment-2-r7",
+        "r8-stage2-p1-record"
       ],
       "status_history": [
         {
@@ -580,10 +596,10 @@
             "period_label": "2026-10-03",
             "record_status": "candidate",
             "change_type": "architecture_candidate",
-            "summary": "本機草擬、學習及交易，成熟平台提供歷史回測／評估，回傳有限結果。",
-            "reason": "減少全市場歷史自持與研究基礎設施維護負擔。",
-            "retained": "本機交易證據、策略／學習所有權與既有風控／採用閘門。",
-            "limits": "分類已採用，技術架構仍候選；QuantConnect 選型與遷移未驗收。"
+            "summary": "\u672c\u6a5f\u8349\u64ec\u3001\u5b78\u7fd2\u53ca\u4ea4\u6613\uff0c\u6210\u719f\u5e73\u53f0\u63d0\u4f9b\u6b77\u53f2\u56de\u6e2c\uff0f\u8a55\u4f30\uff0c\u56de\u50b3\u6709\u9650\u7d50\u679c\u3002",
+            "reason": "\u6e1b\u5c11\u5168\u5e02\u5834\u6b77\u53f2\u81ea\u6301\u8207\u7814\u7a76\u57fa\u790e\u8a2d\u65bd\u7dad\u8b77\u8ca0\u64d4\u3002",
+            "retained": "\u672c\u6a5f\u4ea4\u6613\u8b49\u64da\u3001\u7b56\u7565\uff0f\u5b78\u7fd2\u6240\u6709\u6b0a\u8207\u65e2\u6709\u98a8\u63a7\uff0f\u63a1\u7528\u9598\u9580\u3002",
+            "limits": "\u5206\u985e\u5df2\u63a1\u7528\uff0c\u6280\u8853\u67b6\u69cb\u4ecd\u5019\u9078\uff1bQuantConnect \u9078\u578b\u8207\u9077\u79fb\u672a\u9a57\u6536\u3002"
           }
         },
         {
@@ -690,6 +706,11 @@
           "recorded_on": "2026-10-18",
           "event": "RH-20261018-02",
           "note": "tick trade archives of the top ten symbols since listing consented for download to NAS storage after the P2 check; not used by generation one; record_status unchanged"
+        },
+        {
+          "recorded_on": "2026-10-19",
+          "event": "RH-20261019-01",
+          "note": "engine selection finalised as LEAN after the Operator accepted the recorder reading of the N2 wording; record_status unchanged"
         }
       ]
     }
@@ -705,7 +726,7 @@
       "previous_discussion_node": null,
       "relation_to_previous": "discussion_sequence_not_adoption_proof",
       "as_written_status": "DRAFT",
-      "summary": "策略與架構重設計；其中人工紀律執行層分支後被拒絕",
+      "summary": "\u7b56\u7565\u8207\u67b6\u69cb\u91cd\u8a2d\u8a08\uff1b\u5176\u4e2d\u4eba\u5de5\u7d00\u5f8b\u57f7\u884c\u5c64\u5206\u652f\u5f8c\u88ab\u62d2\u7d55",
       "source_refs": [
         "may-v1"
       ],
@@ -721,7 +742,7 @@
       "previous_discussion_node": "MAY26-v1",
       "relation_to_previous": "discussion_sequence_not_adoption_proof",
       "as_written_status": "DRAFT",
-      "summary": "ASDS：自主策略發現工廠，保留執行與治理底盤",
+      "summary": "ASDS\uff1a\u81ea\u4e3b\u7b56\u7565\u767c\u73fe\u5de5\u5ee0\uff0c\u4fdd\u7559\u57f7\u884c\u8207\u6cbb\u7406\u5e95\u76e4",
       "source_refs": [
         "may-v2"
       ],
@@ -737,7 +758,7 @@
       "previous_discussion_node": "MAY26-v2",
       "relation_to_previous": "discussion_sequence_not_adoption_proof",
       "as_written_status": "DRAFT",
-      "summary": "直接 alpha／短期現金流，策略工廠後置",
+      "summary": "\u76f4\u63a5 alpha\uff0f\u77ed\u671f\u73fe\u91d1\u6d41\uff0c\u7b56\u7565\u5de5\u5ee0\u5f8c\u7f6e",
       "source_refs": [
         "may-v3"
       ],
@@ -753,7 +774,7 @@
       "previous_discussion_node": "MAY26-v3",
       "relation_to_previous": "discussion_sequence_not_adoption_proof",
       "as_written_status": "DRAFT",
-      "summary": "短期 Direct Exploit＋長期 ASDS 雙軌",
+      "summary": "\u77ed\u671f Direct Exploit\uff0b\u9577\u671f ASDS \u96d9\u8ecc",
       "source_refs": [
         "may-v4"
       ],
@@ -769,7 +790,7 @@
       "previous_discussion_node": "MAY26-v4",
       "relation_to_previous": "discussion_sequence_not_adoption_proof",
       "as_written_status": "DRAFT",
-      "summary": "對齊真實 schema、資料與派工條件",
+      "summary": "\u5c0d\u9f4a\u771f\u5be6 schema\u3001\u8cc7\u6599\u8207\u6d3e\u5de5\u689d\u4ef6",
       "source_refs": [
         "may-v4.1"
       ],
@@ -785,7 +806,7 @@
       "previous_discussion_node": "MAY26-v4.1",
       "relation_to_previous": "discussion_sequence_not_adoption_proof",
       "as_written_status": "DRAFT",
-      "summary": "Track B 投入縮至零，收緊資料與 Demo 證據",
+      "summary": "Track B \u6295\u5165\u7e2e\u81f3\u96f6\uff0c\u6536\u7dca\u8cc7\u6599\u8207 Demo \u8b49\u64da",
       "source_refs": [
         "may-v4.2"
       ],
@@ -801,7 +822,7 @@
       "previous_discussion_node": "MAY26-v4.2",
       "relation_to_previous": "discussion_sequence_not_adoption_proof",
       "as_written_status": "DRAFT_WITH_RETRACTION",
-      "summary": "改為技術＋商業證據衝刺；IP sale 後被撤回",
+      "summary": "\u6539\u70ba\u6280\u8853\uff0b\u5546\u696d\u8b49\u64da\u885d\u523a\uff1bIP sale \u5f8c\u88ab\u64a4\u56de",
       "source_refs": [
         "may-v4.3"
       ],
@@ -817,7 +838,7 @@
       "previous_discussion_node": "MAY26-v4.3",
       "relation_to_previous": "discussion_sequence_not_adoption_proof",
       "as_written_status": "ACTIVE_AS_WRITTEN",
-      "summary": "放棄雙軌敘事及內容訂閱變現，重定資本／時間邊界",
+      "summary": "\u653e\u68c4\u96d9\u8ecc\u6558\u4e8b\u53ca\u5167\u5bb9\u8a02\u95b1\u8b8a\u73fe\uff0c\u91cd\u5b9a\u8cc7\u672c\uff0f\u6642\u9593\u908a\u754c",
       "source_refs": [
         "may-v4.4"
       ],
@@ -833,7 +854,7 @@
       "previous_discussion_node": "MAY26-v4.4",
       "relation_to_previous": "discussion_sequence_not_adoption_proof",
       "as_written_status": "DRAFT",
-      "summary": "放棄訂閱成本損益兩平敘事，候選回到資料驗證",
+      "summary": "\u653e\u68c4\u8a02\u95b1\u6210\u672c\u640d\u76ca\u5169\u5e73\u6558\u4e8b\uff0c\u5019\u9078\u56de\u5230\u8cc7\u6599\u9a57\u8b49",
       "source_refs": [
         "may-v5.0"
       ],
@@ -849,7 +870,7 @@
       "previous_discussion_node": "MAY26-v5.0",
       "relation_to_previous": "discussion_sequence_not_adoption_proof",
       "as_written_status": "REFERENCE_ONLY",
-      "summary": "僅在 v5.2 引用的 reviewer proposal；未找到獨立正文",
+      "summary": "\u50c5\u5728 v5.2 \u5f15\u7528\u7684 reviewer proposal\uff1b\u672a\u627e\u5230\u7368\u7acb\u6b63\u6587",
       "source_refs": [
         "may-v5.2"
       ],
@@ -865,7 +886,7 @@
       "previous_discussion_node": "MAY26-v5.1",
       "relation_to_previous": "discussion_sequence_not_adoption_proof",
       "as_written_status": "DRAFT",
-      "summary": "Adaptive Strategy Lab：生存底座＋動態 alpha＋配置",
+      "summary": "Adaptive Strategy Lab\uff1a\u751f\u5b58\u5e95\u5ea7\uff0b\u52d5\u614b alpha\uff0b\u914d\u7f6e",
       "source_refs": [
         "may-v5.2"
       ],
@@ -881,7 +902,7 @@
       "previous_discussion_node": "MAY26-v5.2",
       "relation_to_previous": "discussion_sequence_not_adoption_proof",
       "as_written_status": "DRAFT",
-      "summary": "Sensor-first／alpha-first，修正期權成本與開發順序",
+      "summary": "Sensor-first\uff0falpha-first\uff0c\u4fee\u6b63\u671f\u6b0a\u6210\u672c\u8207\u958b\u767c\u9806\u5e8f",
       "source_refs": [
         "may-v5.3"
       ],
@@ -897,7 +918,7 @@
       "previous_discussion_node": "MAY26-v5.3",
       "relation_to_previous": "discussion_sequence_not_adoption_proof",
       "as_written_status": "DRAFT",
-      "summary": "把 Master Trader Copy Trading 設為主要擴張途徑",
+      "summary": "\u628a Master Trader Copy Trading \u8a2d\u70ba\u4e3b\u8981\u64f4\u5f35\u9014\u5f91",
       "source_refs": [
         "may-v5.4"
       ],
@@ -913,7 +934,7 @@
       "previous_discussion_node": "MAY26-v5.4",
       "relation_to_previous": "discussion_sequence_not_adoption_proof",
       "as_written_status": "FINAL_DRAFT",
-      "summary": "完整自營 quant bot 單一產品；Copy Trading 有條件後置",
+      "summary": "\u5b8c\u6574\u81ea\u71df quant bot \u55ae\u4e00\u7522\u54c1\uff1bCopy Trading \u6709\u689d\u4ef6\u5f8c\u7f6e",
       "source_refs": [
         "may-v5.5"
       ],
@@ -929,7 +950,7 @@
       "previous_discussion_node": "MAY26-v5.5",
       "relation_to_previous": "discussion_sequence_not_adoption_proof",
       "as_written_status": "FINAL_PENDING_DISPATCH",
-      "summary": "加 Macro／On-chain／Earn，並修正策略建設順序",
+      "summary": "\u52a0 Macro\uff0fOn-chain\uff0fEarn\uff0c\u4e26\u4fee\u6b63\u7b56\u7565\u5efa\u8a2d\u9806\u5e8f",
       "source_refs": [
         "may-v5.6"
       ],
@@ -945,7 +966,7 @@
       "previous_discussion_node": "MAY26-v5.6",
       "relation_to_previous": "discussion_sequence_not_adoption_proof",
       "as_written_status": "HISTORICAL_DISPATCH_PACKET",
-      "summary": "Dispatch-Safe Patch；六項工程精度修正，thesis 不變",
+      "summary": "Dispatch-Safe Patch\uff1b\u516d\u9805\u5de5\u7a0b\u7cbe\u5ea6\u4fee\u6b63\uff0cthesis \u4e0d\u8b8a",
       "source_refs": [
         "may-v5.7"
       ],
@@ -961,7 +982,7 @@
       "previous_discussion_node": "MAY26-v5.7",
       "relation_to_previous": "supplements",
       "as_written_status": "HISTORICAL_FROZEN_AUTONOMY_TRACK",
-      "summary": "M1–M13 自治擴張，補充 v5.7 而非全面取代",
+      "summary": "M1\u2013M13 \u81ea\u6cbb\u64f4\u5f35\uff0c\u88dc\u5145 v5.7 \u800c\u975e\u5168\u9762\u53d6\u4ee3",
       "source_refs": [
         "may-v5.8"
       ],
@@ -977,7 +998,7 @@
       "previous_discussion_node": "MAY26-v5.8",
       "relation_to_previous": "freezes_active_implementation",
       "as_written_status": "THESIS_SHIFT_RECORDED",
-      "summary": "凍結大部分自治 active-IMPL，改為 Alpha-Edge 證據優先",
+      "summary": "\u51cd\u7d50\u5927\u90e8\u5206\u81ea\u6cbb active-IMPL\uff0c\u6539\u70ba Alpha-Edge \u8b49\u64da\u512a\u5148",
       "source_refs": [
         "plan-changelog"
       ],
@@ -1021,7 +1042,7 @@
       ],
       "decision_ref": "docs/decisions/2026-10-03--route-history-versioning.md",
       "authority_source": "Operator message in current chat",
-      "operator_excerpt": "按照你描述的R1-R8（我會採用）和版本變化歷史寫進git",
+      "operator_excerpt": "\u6309\u7167\u4f60\u63cf\u8ff0\u7684R1-R8\uff08\u6211\u6703\u63a1\u7528\uff09\u548c\u7248\u672c\u8b8a\u5316\u6b77\u53f2\u5beb\u9032git",
       "meaning": "Retrospective classification and recording convention; no historical commit rewrites or runtime effects."
     },
     {
@@ -1034,7 +1055,7 @@
       "decision_ref": "docs/decisions/2026-10-07--r8-adoption-agent-experiment-bench.md",
       "prior_record": "docs/decisions/2026-10-03--r8-hybrid-research-candidate.md",
       "authority_source": "Operator message in current chat",
-      "operator_excerpt": "三點都確認，把採納版寫成 R8 決策文件",
+      "operator_excerpt": "\u4e09\u9ede\u90fd\u78ba\u8a8d\uff0c\u628a\u63a1\u7d0d\u7248\u5beb\u6210 R8 \u6c7a\u7b56\u6587\u4ef6",
       "meaning": "R8 direction and design principles accepted. Platform admission, signal-boundary ADR, TODO dispatch and every runtime or trading effect remain separate and unverified."
     },
     {
@@ -1047,7 +1068,7 @@
       "corrects": "RH-20261007-01",
       "decision_ref": "docs/decisions/2026-10-07--r8-adoption-agent-experiment-bench.md",
       "authority_source": "Operator message in current chat",
-      "operator_excerpt": "你這份讀起來不像是決策文件而是一個你的簡記，我希望你給我一份正式的R8決策文件符合R標準。",
+      "operator_excerpt": "\u4f60\u9019\u4efd\u8b80\u8d77\u4f86\u4e0d\u50cf\u662f\u6c7a\u7b56\u6587\u4ef6\u800c\u662f\u4e00\u500b\u4f60\u7684\u7c21\u8a18\uff0c\u6211\u5e0c\u671b\u4f60\u7d66\u6211\u4e00\u4efd\u6b63\u5f0f\u7684R8\u6c7a\u7b56\u6587\u4ef6\u7b26\u5408R\u6a19\u6e96\u3002",
       "prior_record_identity": {
         "commit": "2daf98aade575c1fecd88aa7900a2c9fb332b97f",
         "path": "docs/decisions/2026-10-07--r8-adoption-agent-experiment-bench.md",
@@ -1086,7 +1107,7 @@
       "amends": "RH-20261007-01",
       "decision_ref": "docs/decisions/2026-10-08--r8-amendment-1-first-loop-on-native-replay.md",
       "authority_source": "Operator message in current chat",
-      "operator_excerpt": "寫修訂稿",
+      "operator_excerpt": "\u5beb\u4fee\u8a02\u7a3f",
       "status": "proposed",
       "meaning": "First amendment to R8 drafted at Operator request: first loop on the existing Rust replay, platform entry criteria, and closure of adversarial-review findings F1-F10. Not accepted. R8 decisions and phases stay in force as written until the Operator decides."
     },
@@ -1101,7 +1122,7 @@
       "amends": "RH-20261007-01",
       "decision_ref": "docs/decisions/2026-10-08--r8-amendment-1-first-loop-on-native-replay.md",
       "authority_source": "Operator message in current chat",
-      "operator_excerpt": "採納修訂一，開始階段 1，不要動代碼，給指令prompt",
+      "operator_excerpt": "\u63a1\u7d0d\u4fee\u8a02\u4e00\uff0c\u958b\u59cb\u968e\u6bb5 1\uff0c\u4e0d\u8981\u52d5\u4ee3\u78bc\uff0c\u7d66\u6307\u4ee4prompt",
       "prior_record_identity": {
         "amendment": {
           "commit": "94cb5198adcba2037e5ce0ed64abc13f320c6aee",
@@ -1149,7 +1170,7 @@
       "decides_open_item_of": "RH-20261009-02",
       "decision_ref": "docs/decisions/2026-10-08--r8-amendment-1-first-loop-on-native-replay.md",
       "authority_source": "Operator message in current chat",
-      "operator_excerpt": "不納入,合併",
+      "operator_excerpt": "\u4e0d\u7d0d\u5165,\u5408\u4f75",
       "prior_record_identity": {
         "commit": "49c05c6fdd70f2d9035184ab45ad53f12650a2c9",
         "path": "docs/decisions/2026-10-08--r8-amendment-1-first-loop-on-native-replay.md",
@@ -1199,8 +1220,8 @@
       "decision_ref": "docs/decisions/2026-10-08--r8-amendment-1-first-loop-on-native-replay.md",
       "authority_source": "Operator selections in current chat, in answer to two questions put by the recorder; the detailed terms come from the description attached to the selected option and were set down by the recorder, not written verbatim by the Operator",
       "operator_excerpt": [
-        "只交付已實現餘額曲線",
-        "重開同一交付並修訂驗收"
+        "\u53ea\u4ea4\u4ed8\u5df2\u5be6\u73fe\u9918\u984d\u66f2\u7dda",
+        "\u91cd\u958b\u540c\u4e00\u4ea4\u4ed8\u4e26\u4fee\u8a02\u9a57\u6536"
       ],
       "prior_record_identity": {
         "dispatch": {
@@ -1237,7 +1258,7 @@
       "supersedes_part_of": "RH-20261009-05",
       "decision_ref": "docs/decisions/2026-10-08--r8-amendment-1-first-loop-on-native-replay.md",
       "authority_source": "Operator selection in current chat, in answer to a question put by the recorder; the detailed terms come from the description attached to the selected option and were set down by the recorder, not written verbatim by the Operator",
-      "operator_excerpt": "明示另立新交付",
+      "operator_excerpt": "\u660e\u793a\u53e6\u7acb\u65b0\u4ea4\u4ed8",
       "prior_record_identity": {
         "dispatch": {
           "commit": "9aa31e7f886fda5faf3e2c6df8f683acd0494c42",
@@ -1274,8 +1295,8 @@
       "decision_ref": "docs/decisions/2026-10-08--r8-amendment-1-first-loop-on-native-replay.md",
       "authority_source": "Operator selections in current chat, in answer to two questions put by the recorder; the detailed terms come from the descriptions attached to the selected options and were set down by the recorder, not written verbatim by the Operator",
       "operator_excerpt": [
-        "由我這邊審查並發布",
-        "小修由我這邊改,大改先問你"
+        "\u7531\u6211\u9019\u908a\u5be9\u67e5\u4e26\u767c\u5e03",
+        "\u5c0f\u4fee\u7531\u6211\u9019\u908a\u6539,\u5927\u6539\u5148\u554f\u4f60"
       ],
       "prior_record_identity": {
         "dispatch": {
@@ -1312,7 +1333,7 @@
       "follows": "RH-20261011-01",
       "decision_ref": "docs/decisions/2026-10-08--r8-amendment-1-first-loop-on-native-replay.md",
       "authority_source": "Operator message in current chat on 2026-10-11; the split into units, their names and their scope were set down by the recorder, not written by the Operator",
-      "operator_excerpt": "等完成後合併，linux現在offline，你拆成小單元一次性給codex",
+      "operator_excerpt": "\u7b49\u5b8c\u6210\u5f8c\u5408\u4f75\uff0clinux\u73fe\u5728offline\uff0c\u4f60\u62c6\u6210\u5c0f\u55ae\u5143\u4e00\u6b21\u6027\u7d66codex",
       "prior_record_identity": {
         "todo": {
           "commit": "a71b3f5b6571805ef04b457178c30535f85fe21f",
@@ -1335,9 +1356,9 @@
       "decision_ref": "docs/decisions/2026-10-08--r8-amendment-1-first-loop-on-native-replay.md",
       "authority_source": "Operator selections in current chat on 2026-10-13 (Asia/Shanghai), in answer to three questions put by the recorder; the detailed terms come from the descriptions attached to the selected options and were set down by the recorder, not written verbatim by the Operator",
       "operator_excerpt": [
-        "不批准,停掉這條線",
-        "由我這邊審查並發布",
-        "條件滿足就合併"
+        "\u4e0d\u6279\u51c6,\u505c\u6389\u9019\u689d\u7dda",
+        "\u7531\u6211\u9019\u908a\u5be9\u67e5\u4e26\u767c\u5e03",
+        "\u689d\u4ef6\u6eff\u8db3\u5c31\u5408\u4f75"
       ],
       "prior_record_identity": {
         "dispatch": {
@@ -1401,11 +1422,11 @@
       "decision_ref": "docs/decisions/2026-10-14--r8-amendment-2-multi-strategy-first-loop.md",
       "authority_source": "Operator replies in current chat on 2026-10-14 (Asia/Shanghai) to four recommendations put by the recorder, and a later message the same day adding two opinions; the detailed terms are the recorder's expansion and await Operator ruling",
       "operator_excerpt": [
-        "我同意你的建議1",
-        "關於建議2我希望我們能慎重，確定本地開發和QC配套的都完成後再有限適用QC以免QC繳費後我們本機程序開發未到位造成空轉浪費",
-        "3我同意",
-        "4我認為值得考察，另外關於Linux我隨時可以掛回來",
-        "另外我看見你舉得例子是MA-Crossover，是否其餘策略也能採用？我希望倒是能夠多策略，甚至複雜策略交易，而不是用常見策略，哪樣很容易被反向狙擊。另外關於最早我裁定的交易頻率問題，我的本意避免高頻交易指的是硬件要求很高，網速很高的超高速交易，一般機器秒級和分鐘級（如果你認為普通家用網絡和硬件足夠支撐）則可以考慮。"
+        "\u6211\u540c\u610f\u4f60\u7684\u5efa\u8b701",
+        "\u95dc\u65bc\u5efa\u8b702\u6211\u5e0c\u671b\u6211\u5011\u80fd\u614e\u91cd\uff0c\u78ba\u5b9a\u672c\u5730\u958b\u767c\u548cQC\u914d\u5957\u7684\u90fd\u5b8c\u6210\u5f8c\u518d\u6709\u9650\u9069\u7528QC\u4ee5\u514dQC\u7e73\u8cbb\u5f8c\u6211\u5011\u672c\u6a5f\u7a0b\u5e8f\u958b\u767c\u672a\u5230\u4f4d\u9020\u6210\u7a7a\u8f49\u6d6a\u8cbb",
+        "3\u6211\u540c\u610f",
+        "4\u6211\u8a8d\u70ba\u503c\u5f97\u8003\u5bdf\uff0c\u53e6\u5916\u95dc\u65bcLinux\u6211\u96a8\u6642\u53ef\u4ee5\u639b\u56de\u4f86",
+        "\u53e6\u5916\u6211\u770b\u898b\u4f60\u8209\u5f97\u4f8b\u5b50\u662fMA-Crossover\uff0c\u662f\u5426\u5176\u9918\u7b56\u7565\u4e5f\u80fd\u63a1\u7528\uff1f\u6211\u5e0c\u671b\u5012\u662f\u80fd\u5920\u591a\u7b56\u7565\uff0c\u751a\u81f3\u8907\u96dc\u7b56\u7565\u4ea4\u6613\uff0c\u800c\u4e0d\u662f\u7528\u5e38\u898b\u7b56\u7565\uff0c\u54ea\u6a23\u5f88\u5bb9\u6613\u88ab\u53cd\u5411\u72d9\u64ca\u3002\u53e6\u5916\u95dc\u65bc\u6700\u65e9\u6211\u88c1\u5b9a\u7684\u4ea4\u6613\u983b\u7387\u554f\u984c\uff0c\u6211\u7684\u672c\u610f\u907f\u514d\u9ad8\u983b\u4ea4\u6613\u6307\u7684\u662f\u786c\u4ef6\u8981\u6c42\u5f88\u9ad8\uff0c\u7db2\u901f\u5f88\u9ad8\u7684\u8d85\u9ad8\u901f\u4ea4\u6613\uff0c\u4e00\u822c\u6a5f\u5668\u79d2\u7d1a\u548c\u5206\u9418\u7d1a\uff08\u5982\u679c\u4f60\u8a8d\u70ba\u666e\u901a\u5bb6\u7528\u7db2\u7d61\u548c\u786c\u4ef6\u8db3\u5920\u652f\u6490\uff09\u5247\u53ef\u4ee5\u8003\u616e\u3002"
       ],
       "status": "proposed",
       "meaning": "Second amendment to R8, drafted after the Operator, on a fast-profit premise, decided three directions: the first loop becomes a low-frequency hypothesis search instead of the 1-minute ma_crossover stand-down comparison; QC is used only, and in a limited way, after local development and platform support work are complete; the second instrument-verification layer changes from historical Demo reconciliation to Demo forward comparison. The Operator then asked for multiple and complex strategies rather than common ones, and clarified that only ultra-high-speed trading needing special hardware and networking is excluded, so second- and minute-level trading may be considered if ordinary hardware and home networking suffice. On that basis the recorder proposes widening the first loop's horizon to seconds through days, pending Operator ruling. The recorder's terms add a one-day probe choosing between local open-source LEAN and a self-built research tool, research data fetched from public exchange sources into hashed local files without the database, pessimistic costs including funding, a research-stage candidate threshold that is not promotion evidence, a readiness checklist before any platform account, engine and replay support built only after a candidate qualifies, a proposed ten-workday cap with hour accounting, and a frequency boundary under which second-level hypotheses are registered only after a measured latency check and only if their edge does not depend on speed. Source inspection found that strategies receive only 1-minute and optional 5-minute indicator snapshots. Amendment 1 stays in force except where the Operator has already decided until the Operator rules; no dispatch, data fetch, Linux access, account, spend, runtime or trading authority is granted."
@@ -1421,7 +1442,7 @@
       "amends": "RH-20261007-01",
       "decision_ref": "docs/decisions/2026-10-14--r8-amendment-2-multi-strategy-first-loop.md",
       "authority_source": "Operator message in current chat on 2026-10-14 (Asia/Shanghai)",
-      "operator_excerpt": "採納修訂二，上限十個工作日，同意取數，延遲不用測了，我的網絡會波動，短的時候10ms但是一旦波動可能100-300ms不等，即便很少見，但必然會有影響。",
+      "operator_excerpt": "\u63a1\u7d0d\u4fee\u8a02\u4e8c\uff0c\u4e0a\u9650\u5341\u500b\u5de5\u4f5c\u65e5\uff0c\u540c\u610f\u53d6\u6578\uff0c\u5ef6\u9072\u4e0d\u7528\u6e2c\u4e86\uff0c\u6211\u7684\u7db2\u7d61\u6703\u6ce2\u52d5\uff0c\u77ed\u7684\u6642\u501910ms\u4f46\u662f\u4e00\u65e6\u6ce2\u52d5\u53ef\u80fd100-300ms\u4e0d\u7b49\uff0c\u5373\u4fbf\u5f88\u5c11\u898b\uff0c\u4f46\u5fc5\u7136\u6703\u6709\u5f71\u97ff\u3002",
       "prior_record_identity": {
         "amendment": {
           "commit": "8a8f473ff8688c82837b05bdd160cfa220c3f7bf",
@@ -1483,7 +1504,7 @@
       "follows": "RH-20261014-04",
       "decision_ref": "docs/decisions/2026-10-14--r8-amendment-2-multi-strategy-first-loop.md",
       "authority_source": "Operator message in current chat on 2026-10-14 (Asia/Shanghai)",
-      "operator_excerpt": "同意下載LEAN，合併後開始寫派工指令",
+      "operator_excerpt": "\u540c\u610f\u4e0b\u8f09LEAN\uff0c\u5408\u4f75\u5f8c\u958b\u59cb\u5beb\u6d3e\u5de5\u6307\u4ee4",
       "prior_record_identity": {
         "commit": "d05d1dd41a43ad148184a7e3449477fbc3ff3f5a",
         "path": "TODO.md",
@@ -1503,7 +1524,7 @@
       "follows": "RH-20261014-05",
       "decision_ref": "docs/decisions/2026-10-14--r8-amendment-2-multi-strategy-first-loop.md",
       "authority_source": "Operator message in current chat on 2026-10-16 (Asia/Shanghai), answering the recorder's question listing four dependencies",
-      "operator_excerpt": "四項都同意，合併後我再貼給 Codex",
+      "operator_excerpt": "\u56db\u9805\u90fd\u540c\u610f\uff0c\u5408\u4f75\u5f8c\u6211\u518d\u8cbc\u7d66 Codex",
       "prior_record_identity": {
         "commit": "d44cd93ceb3751a1dc8a924cc441cc60cff4cf78",
         "path": "docs/execution_plan/2026-10-14--r8-stage2-local-research-dispatch.md",
@@ -1524,8 +1545,8 @@
       "decision_ref": "docs/decisions/2026-10-14--r8-amendment-2-multi-strategy-first-loop.md",
       "authority_source": "Operator selections in current chat on 2026-10-16 (Asia/Shanghai), in answer to two questions put by the recorder; the detailed terms come from the descriptions attached to the selected options and were set down by the recorder",
       "operator_excerpt": [
-        "holdout 只作證偽 (Recommended)",
-        "退回 Codex"
+        "holdout \u53ea\u4f5c\u8b49\u507d (Recommended)",
+        "\u9000\u56de Codex"
       ],
       "prior_record_identity": {
         "amendment": {
@@ -1569,10 +1590,10 @@
       "decision_ref": "docs/decisions/2026-10-14--r8-amendment-2-multi-strategy-first-loop.md",
       "authority_source": "Operator selections in current chat on 2026-10-18 (Asia/Shanghai), in answer to four questions put by the recorder one at a time; the detailed terms come from the descriptions attached to the selected options and were set down by the recorder",
       "operator_excerpt": [
-        "延到各標的上市起 (Recommended)",
-        "維持嚴格規則 (Recommended)",
-        "到期時回報再決定 (Recommended)",
-        "等 P2 結果再定 (Recommended)"
+        "\u5ef6\u5230\u5404\u6a19\u7684\u4e0a\u5e02\u8d77 (Recommended)",
+        "\u7dad\u6301\u56b4\u683c\u898f\u5247 (Recommended)",
+        "\u5230\u671f\u6642\u56de\u5831\u518d\u6c7a\u5b9a (Recommended)",
+        "\u7b49 P2 \u7d50\u679c\u518d\u5b9a (Recommended)"
       ],
       "prior_record_identity": {
         "amendment": {
@@ -1610,8 +1631,8 @@
       "decision_ref": "docs/decisions/2026-10-14--r8-amendment-2-multi-strategy-first-loop.md",
       "authority_source": "Operator replies in current chat on 2026-10-18 (Asia/Shanghai) to two recorder questions after the P2 read-only check: a free-text answer and a selected option; the ranking rule, period and tool requirements were set down by the recorder",
       "operator_excerpt": [
-        "第一代先不做秒級但是先提前下載後存好，可以存NAS的SSD上",
-        "前十大標的自上市起"
+        "\u7b2c\u4e00\u4ee3\u5148\u4e0d\u505a\u79d2\u7d1a\u4f46\u662f\u5148\u63d0\u524d\u4e0b\u8f09\u5f8c\u5b58\u597d\uff0c\u53ef\u4ee5\u5b58NAS\u7684SSD\u4e0a",
+        "\u524d\u5341\u5927\u6a19\u7684\u81ea\u4e0a\u5e02\u8d77"
       ],
       "prior_record_identity": {
         "amendment": {
@@ -1637,6 +1658,37 @@
         }
       },
       "meaning": "The P2 read-only check found daily public trade archives on the exchange. The Operator decided that generation one does not use second-level hypotheses, but tick trade archives are downloaded in advance and kept on NAS SSD storage, covering the top ten symbols since listing. Recorder implementation, not confirmed by the Operator: the source is the exchange archive found by P2; minute-level event hypotheses needing ticks also stay out of generation one; the recorder ranks the top ten USDT perpetuals by turnover over the last 365 days of the fetch window from the daily klines and records the ranking in the download manifest; the download needs a reviewed tool, a completed P3 fetch and mounted NAS storage. No Linux, database, account, spend, runtime or trading authority is granted."
+    },
+    {
+      "id": "RH-20261019-01",
+      "recorded_on": "2026-10-19",
+      "event_type": "open_item_decided",
+      "route_ids": [
+        "R8"
+      ],
+      "follows": "RH-20261018-02",
+      "decision_ref": "docs/decisions/2026-10-14--r8-amendment-2-multi-strategy-first-loop.md",
+      "authority_source": "Operator reply in current chat on 2026-10-19 (Asia/Shanghai) to the recorder question on the N2 wording drift recorded in the P1 selection record section 1.1; the reasoning and the P4 follow-up were set down by the recorder",
+      "operator_excerpt": [
+        "\u63a5\u53d7\u9019\u500b\u89e3\u8b80\uff0c\u9078\u578b\u5b9a\u6848 LEAN"
+      ],
+      "prior_record_identity": {
+        "amendment": {
+          "commit": "273ea5a34e7e85c124d85c267f219487c5695d03",
+          "path": "docs/decisions/2026-10-14--r8-amendment-2-multi-strategy-first-loop.md",
+          "blob": "2f9d3be251ca3b97ef3c3b88c1a3e1a3fb46e637",
+          "sha256": "0b1f62f845141528d26c1ea69b264b6cd7a68d4ab8aa779987bb547d45334b34",
+          "availability": "main at recording time"
+        },
+        "todo": {
+          "commit": "c1025b831df50ecda9a9a8ccef39c56701457a3e",
+          "path": "TODO.md",
+          "blob": "0547614d1c0602405dadf970f4c86e3b625deac2",
+          "sha256": "542c65fc58aab4160e371582d78ad5aee3c94a27750bb9658947b664762ecb93",
+          "availability": "main at recording time"
+        }
+      },
+      "meaning": "N2 says the one-day selection check runs open-source LEAN on one hypothesis with N3 data; the stage 2 dispatch implemented P1b as a simple strategy that is not a hypothesis trial and is not counted in the trial ledger. The recorder recorded this as drift, reasoning that running a real hypothesis before P5 preregistration would look at results before registering it. The Operator accepted this reading and the generation-one engine is LEAN (option B). Recorder implementation, not confirmed by the Operator: the hypothesis-related parts of the research path (indicator warm-up, decision after close with fill at the next open, holdout reads through the U2 open) are checked by the P4 event-level checks with constructed data before any hypothesis trial. No Linux, database, account, spend, runtime or trading authority is granted."
     }
   ],
   "external_provenance": [
@@ -1677,5 +1729,5 @@
       "portable_summary": "docs/decisions/2026-10-08--r8-amendment-1-first-loop-on-native-replay.md"
     }
   ],
-  "last_event_recorded_on": "2026-10-18"
+  "last_event_recorded_on": "2026-10-19"
 }

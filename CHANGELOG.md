@@ -7,6 +7,10 @@
 > 舊引言誤把 v5.6→v5.7 列為 thesis-shift，本次依下方正文校正為 engineering-only。
 > 舊主檔命名／路徑以固定來源登記為準；v5.9 起已改用 AEG packet。
 
+## [RH-20261019-01] — 2026-10-19 — R8 第一圈的實驗引擎定為 LEAN
+
+P1 選型查核依階段 2 派工指令，以不是假說試驗的簡單策略執行，沒有照修訂二 N2 的字面「對一個假說」跑通；記錄者把這一差異記為 DRIFT，理由是預登記之前執行假說等於先看結果再登記。Operator 接受此解讀，選型定為 LEAN。見[修訂二](docs/decisions/2026-10-14--r8-amendment-2-multi-strategy-first-loop.md) N2 的註記與[選型查核紀錄](docs/execution_plan/2026-10-19--r8-stage2-p1-engine-selection-record.md)。
+
 ## [RH-20261018-02] — 2026-10-18 — R8 逐筆資料的下載
 
 P2 查核發現交易所有逐日成交的公開壓縮檔。Operator 決定第一代不做秒級假說，但先把前十大標的自上市起的逐筆成交下載到 NAS 的 SSD。見[修訂二](docs/decisions/2026-10-14--r8-amendment-2-multi-strategy-first-loop.md) N3 與[派工指令](docs/execution_plan/2026-10-14--r8-stage2-local-research-dispatch.md) §4 的註記。
