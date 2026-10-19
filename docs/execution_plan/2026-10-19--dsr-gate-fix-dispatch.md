@@ -3,7 +3,7 @@
 | 項目 | 內容 |
 |---|---|
 | 文件性質 | 派工指令，不是授權文件。是否可派發，以 [TODO](../../TODO.md) 的 `P1-DSR-GATE-FIX` 列為準 |
-| 日期 | 2026-10-19 起草，同日依 QC 與 PA 的審查、PR #220 的自動審查修訂，並記入 Operator 對 receipt 處理方式的裁定（Asia/Shanghai） |
+| 日期 | 2026-10-19 起草，同日依 QC 與 PA 的審查、PR #220 的自動審查修訂，並記入 Operator 對 receipt 處理方式的裁定；同日依單元 1 首次交付的回報，澄清 §4 `generated_at_utc` 的格式（Asia/Shanghai） |
 | 依據 | Operator 2026-10-19 在對話中選擇「現在修，與 R8 平行」：只改源碼、不部署，部署到 Linux 與否另問。<br>TODO `P1-R8-DSR-GATE-SCALE-CHECK` 的查核結果。<br>QC 的修正規格與 PA 的身分路徑建議，收錄於本文 §2 至 §4 |
 | 交付 | `DSR-GATE-FIX-CORE-20261019`（`work_item_id` 與 `lane_id` 都用這個名稱） |
 | 不在範圍 | 部署、Linux、資料庫、runtime。<br>單元 2a：Demo 畢業證據改為配置層級，試驗家族的定義由 QC 或 MIT 先預登記。<br>單元 2b：L2 證據的單位契約。<br>單元 2c：殘差 alpha 路徑的呼叫端開始傳入頻率。這會讓殘差報告首次可能判 pass，影響 LG5 實盤候選審查等下游，須另經 Operator 決定。<br>倉庫內其他自行實作的 DSR，例如 `prepilot_gates`、`w2_paper_edge_metrics`。<br>DSR 閾值 0.95 不變 |
@@ -134,7 +134,9 @@ def compute_dsr(self, *, observed_sharpe: float, n_trials: int,
 `dsr_gate.py`、`promotion_gate.py` 與 `residual_alpha_gate.py` 都在 `program_code/ml_training/learning_runtime_manifest.py` 的凍結清單中，修改它們會移動 v1 與 v2 的身分摘要。
 依 PA 的建議，採「在原 schema 下重新觀測」：
 1. 用既有的 builder（`build_source_compatibility_receipt` 與其 v2 版本），在原路徑重新產生 `docs/execution_plan/ai_ml_landing/receipts/S2.2A-source-compatibility-receipt-v1.json` 與 `-v2.json`。
-   - `generated_at_utc` 寫重新產生當天（下稱 D）的 UTC 日期，沿用「只到日期」的慣例；不得沿用舊日期。
+   - `generated_at_utc` 寫 `<D>T00:00:00Z`：D 是重新產生當天的 UTC 日期，時間部分歸零，格式與舊值 `2026-07-24T00:00:00Z` 相同；不得沿用舊日期。
+     既有解析器要求時區，只寫日期（例如 `2026-10-19`）會被拒收，refresh builder 因而找不到觀測窗。
+     D 若因續辦而改變，第 3 點的全部時間值依新的 D 重算。
    - 模組沒有命令列入口：寫一次性的產生腳本，腳本不提交。
    - 序列化固定為 `json.dumps(value, ensure_ascii=False, indent=2, sort_keys=True) + "\n"`，與現有兩份一致。
    - `repo_source_head` 是遙測欄位，寫開工時的 main commit。

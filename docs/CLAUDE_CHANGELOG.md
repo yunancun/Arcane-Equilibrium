@@ -1,9 +1,14 @@
 # CLAUDE_CHANGELOG.md — 開發歷史歸檔
 
 > 從 CLAUDE.md / TODO.md 遷出的 Wave/Sprint/Batch + TODO version-increment 歷史敘事。新 session 不需要讀此文件，僅供回顧歷史時查閱。
-> 最後更新：2026-10-19（DSR 閘門修正單元 1 派工；TODO v898）
+> 最後更新：2026-10-19（DSR 閘門修正單元 1 續辦：receipt 日期格式澄清；TODO v899）
 
 ---
+
+## DSR 閘門修正單元 1 續辦、R8 從未開盤標的排除合入 — 2026-10-19
+
+- 單元 1 首次交付 BLOCKED／FAIL（提交留在實作者本機、未發布）：派工指令 §4 寫「只到日期」，receipt 依字面寫成純日期，既有解析器要求時區而拒收。記錄者把 §4 澄清為 `<D>T00:00:00Z`（與舊值 `2026-07-24T00:00:00Z` 格式相同），D 若因續辦而改變，W5 時間值依新的 D 重算；同一交付身分續辦。
+- PR #221 合入：下市探查回傳的從未開盤標的另列 `never_opened_excluded` 並排除，衝突時 fail-closed；P3 全量取數可開始。TODO v899。
 
 ## DSR 閘門修正單元 1 派工 — 2026-10-19
 
