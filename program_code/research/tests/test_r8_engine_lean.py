@@ -668,3 +668,248 @@ def test_e2_rules_strictly_standard_library():
     for node in ast.walk(tree):
         modules = [a.name for a in node.names] if isinstance(node, ast.Import) else [node.module] if isinstance(node, ast.ImportFrom) else []
         assert all(module.split(".")[0] in sys.stdlib_module_names for module in modules)
+
+
+def test_fix1_validation_without_folds_requires_materialized_window(inputs):
+    from program_code.research.r8_engine import lean_runner as runner
+    _, manifest, config, _ = inputs
+    config.update(mode="validation", trial_id=None, folds=[],
+                  algorithm={"path": runner.EXAMPLE, "class": "FixedSchedule"},
+                  score_windows=[manifest["window"]])
+    runner.validate_config(config, manifest)
+    for windows in ([], [{"start": 0, "end": DAY}], [manifest["window"]] * 2):
+        config["score_windows"] = windows
+        with pytest.raises(ValueError, match="score_windows"):
+            runner.validate_config(config, manifest)
+
+
+def test_fix1_run_sections_sorted_with_reduction_first(inputs):
+    from program_code.research.r8_engine import lean_runner as runner
+    config = inputs[2]
+    records = {
+        "orders": [{"order_id": 9, "_leg_index": 1, "quantity": "-50"},
+                   {"order_id": 3}, {"order_id": 9, "_leg_index": 0, "quantity": "-100"}],
+        "fills": [{"change_t": 10, "order_id": 9, "_leg_index": 1, "quantity": "-50"},
+                  {"change_t": 5, "order_id": 3},
+                  {"change_t": 10, "order_id": 9, "_leg_index": 0, "quantity": "-100"}],
+        "voided": [{"order_id": 9}, {"order_id": 3}],
+        "funding": [{"t": 10, "symbol": "B"}, {"t": 5, "symbol": "Z"}, {"t": 10, "symbol": "A"}],
+        "endpoint_funding": [{"t": 10, "symbol": "B"}, {"t": 10, "symbol": "A"}],
+        "decisions": [{"t": 10}, {"t": 5}], "steps": [{"t": 10}, {"t": 5}],
+        "fits": [{"fold": 2}, {"fold": 0}],
+    }
+    events = [{"section": section, "record": record} for section, rows in records.items() for record in rows]
+    result = runner.assemble_run(config, {}, [], "0" * 64, 0, 20, 0, b"", events)
+    assert [r["order_id"] for r in result["orders"]] == [3, 9, 9]
+    assert [r.get("quantity") for r in result["orders"]] == [None, "-100", "-50"]
+    assert [r.get("quantity") for r in result["fills"]] == [None, "-100", "-50"]
+    assert [r["order_id"] for r in result["voided"]] == [3, 9]
+    assert [(r["t"], r["symbol"]) for r in result["funding"]] == [(5, "Z"), (10, "A"), (10, "B")]
+    assert [r["symbol"] for r in result["endpoint_funding"]] == ["A", "B"]
+    assert [r["t"] for r in result["steps"]] == [5, 10]
+    assert [r["t"] for r in result["decisions"]] == [5, 10]
+    assert [r["fold"] for r in result["fits"]] == [0, 2]
+    assert all("_leg_index" not in r for key in records for r in result[key])
+
+
+@pytest.mark.parametrize("t", [2 * HOUR, DAY])
+def test_fix1_gap_symbols_hidden_until_current_hour_arrives(t):
+    info = {"strategy_symbols": ["X", "Y"], "first_bar": {"X": 0, "Y": 0}, "delistings": {}}
+    assert rules.decision_symbols(info, t, {"X": t, "Y": t - HOUR}) == ["X"]
+    assert rules.decision_symbols(info, t + HOUR, {"X": t + HOUR, "Y": t + HOUR}) == ["X", "Y"]
+    info["delistings"] = {"Y": {"deliveryTime": t}}
+    assert rules.decision_symbols(info, t, {"X": t, "Y": t}) == ["X"]
+
+
+def test_fix1_no_trade_flatten_is_not_a_decision():
+    targets = {"X": {"weight": "0"}}
+    assert rules.decision_record(HOUR, targets, "no_trade_flatten") is None
+    assert rules.decision_record(HOUR, targets, "strategy") == {"t": HOUR, "targets": targets}
+
+
+def test_fix1_zero_delta_cancellation_has_null_replacement(cost):
+    segments = rules.order_segments("1", "1", "100", "1", "1", "0", None, "5", "100000", cost)
+    assert segments == []
+    counter, replacement = rules.replacement_order(7, segments)
+    assert (counter, replacement) == (7, None)
+    assert rules.cancellation_record({"order_id": 6, "decision_t": 0, "symbol": "X", "quantity": "2", "order_kind": "strategy", "_leg_index": 0}, HOUR, "replaced", replacement) == {
+        "order_id": 6, "decision_t": 0, "symbol": "X", "quantity": "2", "_leg_index": 0,
+        "kind": "strategy", "status": "cancelled", "cancel_t": HOUR,
+        "cancel_reason": "replaced", "replaced_by": None}
+    assert rules.replacement_order(counter, [{"quantity": "1"}]) == (8, 8)
+
+
+def test_fix1_decimal_boundary_and_framework_equity():
+    class NetDecimal:
+        def GetType(self):
+            return type("NetType", (), {"FullName": "System.Decimal"})()
+        def ToString(self, format_spec, culture):
+            assert format_spec == "G29" and culture is invariant
+            return "99997.072904693755"
+    invariant = object()
+    cash = rules.lean_decimal(NetDecimal(), invariant)
+    assert cash == Decimal("99997.072904693755")
+    with pytest.raises(ValueError, match="NEEDS_CONTEXT"):
+        rules.lean_decimal(99997.07290469375, invariant)
+    assert rules.account_equity(cash, {"X": "0.123", "UNLISTED": "0"},
+                                {"X": "43268.2233"}, {"X": "43246.6"}) == Decimal("99994.413238793755")
+    assert rules.number(rules.fee("0.123", "43268.2233", "0.00055")) == "2.927095306245"
+    tree = ast.parse((ROOT / "program_code/research/r8_engine/lean_algo/framework.py").read_text())
+    assert not any(isinstance(n, ast.Call) and isinstance(n.func, ast.Name) and n.func.id == "float" for n in ast.walk(tree))
+
+
+@pytest.mark.parametrize("attribute", "gi_frame gi_code gi_yieldfrom cr_frame cr_await cr_code ag_frame ag_code f_back f_locals f_globals f_builtins f_code tb_frame tb_next".split())
+def test_fix1_static_check_rejects_frame_access(attribute):
+    from program_code.research.r8_engine import lean_runner as runner
+    with pytest.raises(ValueError):
+        runner.check_algorithm("def probe(x):\n    return x." + attribute)
+
+
+@pytest.mark.parametrize("default", ["[]", "{}", "{1}", "list()", "dict()", "set()", "([],)", "[x for x in ()]"])
+def test_fix1_static_check_rejects_mutable_defaults(default):
+    from program_code.research.r8_engine import lean_runner as runner
+    for signature in ("x=" + default, "*, x=" + default):
+        with pytest.raises(ValueError):
+            runner.check_algorithm("def probe(" + signature + "):\n    return x")
+
+
+@pytest.mark.parametrize("name", ["getcontext", "setcontext", "localcontext"])
+def test_fix1_static_check_rejects_decimal_context(name):
+    from program_code.research.r8_engine import lean_runner as runner
+    for source in (f"import decimal as d\ndef probe():\n    return d.{name}()",
+                   f"from decimal import {name} as c\ndef probe():\n    return c()"):
+        with pytest.raises(ValueError):
+            runner.check_algorithm(source)
+
+
+def test_fix1_indexed_view_scaling_and_readonly_prefix():
+    from timeit import repeat
+    datasets = []
+    for size in (1000, 100000):
+        data = {"X": {"kline_hour": [{"known_at": i, "t": i, "close": "1"} for i in range(size)]}}
+        # 舊實作沒有一次性索引；保留其原路徑以量出重現比值。
+        if hasattr(rules, "index_data"):
+            data = rules.index_data(data)
+        elapsed = min(repeat(lambda: rules.data_view(data, size), number=50, repeat=3))
+        datasets.append((data, elapsed))
+    assert datasets[1][1] / datasets[0][1] <= 10
+    view = rules.data_view(datasets[1][0], 3)["X"]["kline_hour"]
+    assert [r["t"] for r in view] == [0, 1, 2, 3]
+    assert [r["t"] for r in view[::-1]] == [3, 2, 1, 0]
+    with pytest.raises(TypeError):
+        view[0]["close"] = "2"
+    with pytest.raises(IndexError):
+        _ = view[4]
+    assert [r["t"] for r in rules.data_view(datasets[1][0], 3, strict=True)["X"]["kline_hour"]] == [0, 1, 2]
+
+
+def test_fix1_position_and_turnover_index_queries():
+    history = rules.PositionHistory()
+    for t, qty in [(10, "2"), (30, "-1"), (20, "-0.5"), (20, "1")]:
+        history.append({"symbol": "X", "change_t": t, "quantity": qty})
+    assert history.at("X", 20) == (Decimal("2"), Decimal("2.5"))
+    assert history.at("X", 30) == (Decimal("2.5"), Decimal("1.5"))
+    assert history.at("Y", 20) == (Decimal(0), Decimal(0))
+    rows = rules.KnownRows([{"known_at": 30, "value": "3"}, {"known_at": 10, "value": "1"}])
+    assert rules.turnover_at(rows, 20) == "0"
+    assert rules.turnover_at(rows, 30) == "3"
+    prefix = rows.prefix(30)
+    rows.append({"known_at": 40, "value": "4"})
+    assert len(prefix) == 2
+
+
+def test_fix1_score_end_gap_blocks_late_fill_and_uses_prior_close(cost):
+    assert rules.next_open(HOUR, 2 * HOUR, 3 * HOUR, score_end=2 * HOUR) is None
+    assert rules.next_open(HOUR, HOUR, 2 * HOUR, score_end=2 * HOUR) == HOUR
+    bars = [{"t": 0, "end": HOUR, "close": "100"},
+            {"t": 3 * HOUR, "end": 4 * HOUR, "close": "999"}]
+    assert rules.settlement_bars(bars, 2 * HOUR) == (bars[0], None)
+    last, _ = rules.settlement_bars(bars, 2 * HOUR)
+    assert rules.number(rules.score_end_price("1", last["close"], cost)) == "99.4"
+    events = rules.due_boundaries([{"start": 0, "end": 2 * HOUR}],
+                                  {"X": {"deliveryTime": 3 * HOUR}}, 4 * HOUR, set(), set())
+    assert events == [(2 * HOUR, "score_end", None), (3 * HOUR, "delivery", "X")]
+    assert rules.due_boundaries([{"start": 0, "end": 2 * HOUR}], {}, 2 * HOUR, set(), set()) == [(2 * HOUR, "score_end", None)]
+    assert rules.due_boundaries([{"start": 0, "end": 2 * HOUR}], {}, 4 * HOUR, {2 * HOUR}, set()) == []
+
+
+def test_fix1_asynchronous_exposure_checked_after_delisting():
+    # 同步回呼前 X 延後成交、Y 尚待下架結算；先結算 Y 後才判曝險。
+    with pytest.raises(ValueError, match="gross_exposure_cap"):
+        rules.exposure({"X": "6", "Y": "6"}, {"X": "100", "Y": "100"}, "1000", "1")
+    assert rules.exposure({"X": "6", "Y": "0"}, {"X": "100", "Y": "100"}, "1000", "1") == Decimal("0.6")
+    tree = ast.parse((ROOT / "program_code/research/r8_engine/lean_algo/framework.py").read_text())
+    method = next(n for n in ast.walk(tree) if isinstance(n, ast.FunctionDef) and n.name == "on_data")
+    calls = [n for n in ast.walk(method) if isinstance(n, ast.Call) and isinstance(n.func, ast.Attribute)]
+    boundary = next(n.lineno for n in calls if n.func.attr == "_boundaries")
+    exposure = next(n.lineno for n in calls if n.func.attr == "exposure")
+    assert boundary < exposure
+
+
+def test_fix1_trial_rejects_hypothesis_inside_engine(inputs):
+    from program_code.research.r8_engine import lean_runner as runner
+    _, manifest, config, query = inputs
+    config["algorithm"]["path"] = runner.EXAMPLE
+    # 保持帳本身份一致，證明拒絕來自引擎目錄界線。
+    query["record"]["configuration_sha256"] = runner.sha256(canonical(query["record"]["configuration"]))
+    with pytest.raises(ValueError, match="引擎目錄"):
+        runner.validate_config(config, manifest, lambda _: query)
+
+
+@pytest.mark.parametrize("value", [Decimal("1"), 1, 1.0, None, True])
+def test_fix1_score_requires_decimal_string(cost, value):
+    class Hypothesis(rules.R8Hypothesis):
+        def score(self, *args):
+            return value
+        def fit(self, *args):
+            return None
+    with pytest.raises(ValueError, match="invalid_decision"):
+        rules.fit_fold(Hypothesis, 1, {"start": 0, "end": 400 * DAY}, {}, strategy(["1"]), cost)
+
+
+def test_fix1_launcher_fixed_image_commented_algorithm_location(tmp_path):
+    from program_code.research.r8_engine import lean_runner as runner
+    # 記錄者 P4-D0 在固定映像讀出的第 9、12、15、18、19 行，保留原文。
+    # 映像 sha256:2657ed3355efb78d78bd0a5d4f126b01367a635e01bccd220b654d7742d182b6。
+    fragment = '''  "environment": "backtesting", // "live-paper", "backtesting", "live-interactive", "live-interactive-iqfeed"
+  "algorithm-type-name": "BasicTemplateFrameworkAlgorithm",
+  "algorithm-language": "CSharp",
+  "algorithm-location": "QuantConnect.Algorithm.CSharp.dll",
+  //"algorithm-location": "../../../Algorithm.Python/BasicTemplateFrameworkAlgorithm.py",
+'''
+    path = tmp_path / "config.json"
+    path.write_text(fragment)
+    # 只執行啟動器內的 Python 改寫片段；不執行 shell、dotnet 或 docker。
+    rewrite = runner.LAUNCH_SCRIPT.split("python3 - <<'PY'\n", 1)[1].split("\nPY\n", 1)[0]
+    completed = subprocess.run([sys.executable, "-c", rewrite], cwd=tmp_path, capture_output=True, text=True)
+    assert completed.returncode == 0, completed.stderr
+    rewritten = path.read_text()
+    assert '  //"algorithm-location": "../../../Algorithm.Python/BasicTemplateFrameworkAlgorithm.py",' in rewritten
+    assert '"algorithm-location": "/r8/src/program_code/research/r8_engine/lean_algo/framework.py"' in rewritten
+    assert '"algorithm-type-name": "R8Algorithm"' in rewritten
+    assert '"algorithm-language": "Python"' in rewritten
+    assert '"close-automatically": true' in rewritten
+    assert ' // "live-paper", "backtesting", "live-interactive", "live-interactive-iqfeed"' in rewritten
+
+
+def test_fix1_container_adapter_wires_host_rules_without_execution():
+    # 依 §2 容器模組不匯入、不執行；這裡只檢查接線，行為驗收仍是 P4-D0。
+    tree = ast.parse((ROOT / "program_code/research/r8_engine/lean_algo/framework.py").read_text())
+    methods = {n.name: n for n in ast.walk(tree) if isinstance(n, ast.FunctionDef)}
+    def calls(name):
+        return [n.func.attr for n in ast.walk(methods[name]) if isinstance(n, ast.Call) and isinstance(n.func, ast.Attribute)]
+    assert "decision_symbols" in calls("_visible")
+    assert "decision_record" in calls("_submit_targets")
+    assert "replacement_order" in calls("_submit_targets")
+    assert "cancellation_record" in calls("_cancel")
+    assert "KnownRows" in calls("_load_custom")
+    assert "turnover_at" in calls("_submit_targets")
+    assert "at" in calls("_funding") and "positions_at" not in calls("_funding")
+    assert "settlement_bars" in calls("_settle")
+    assert "_boundaries" in calls("on_end_of_algorithm")
+    assert "Parse" in calls("to_lean")
+    assert "lean_decimal" in calls("d")
+    assert "account_equity" in calls("_equity")
+    next_open = next(n for n in ast.walk(methods["market_fill"]) if isinstance(n, ast.Call)
+                     and isinstance(n.func, ast.Attribute) and n.func.attr == "next_open")
+    assert isinstance(next_open.args[-1], ast.Subscript) and next_open.args[-1].slice.value == "score_end"

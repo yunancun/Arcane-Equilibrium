@@ -24,7 +24,7 @@ IMAGE = "quantconnect/lean@" + rules.IMAGE_DIGEST
 ALGORITHM_MEMBERS = {
     "math": set("acos acosh asin asinh atan atan2 atanh ceil comb copysign cos cosh degrees dist e erf erfc exp expm1 fabs factorial floor fmod frexp fsum gamma gcd hypot inf isclose isfinite isinf isnan isqrt lcm ldexp lgamma log log10 log1p log2 modf nan nextafter perm pi pow prod radians remainder sin sinh sqrt tan tanh tau trunc ulp".split()),
     "statistics": set("mean fmean geometric_mean harmonic_mean median median_low median_high median_grouped mode multimode pstdev pvariance stdev variance quantiles".split()),
-    "decimal": set("Decimal Context localcontext getcontext ROUND_CEILING ROUND_DOWN ROUND_FLOOR ROUND_HALF_DOWN ROUND_HALF_EVEN ROUND_HALF_UP ROUND_UP ROUND_05UP InvalidOperation".split()),
+    "decimal": set("Decimal Context ROUND_CEILING ROUND_DOWN ROUND_FLOOR ROUND_HALF_DOWN ROUND_HALF_EVEN ROUND_HALF_UP ROUND_UP ROUND_05UP InvalidOperation".split()),
     "fractions": {"Fraction"},
     "random": {"Random"},
     ENGINE_ROOT.replace("/", ".") + ".lean_algo.rules": set(
@@ -46,6 +46,7 @@ def check_algorithm(source):
     denied_names = {"open", "exec", "eval", "compile", "__import__", "getattr", "setattr",
                     "delattr", "globals", "locals", "vars", "dir", "type", "object",
                     "input", "breakpoint", "help", "memoryview"}
+    denied_attributes = set("gi_frame gi_code gi_yieldfrom cr_frame cr_await cr_code ag_frame ag_code f_back f_locals f_globals f_builtins f_code tb_frame tb_next".split())
     order_names = {"order", "marketorder", "limitorder", "stopmarketorder", "stoplimitorder",
                    "setholdings", "liquidate", "buy", "sell", "calculateorderquantity"}
     for node in tree.body:
@@ -55,6 +56,12 @@ def check_algorithm(source):
                 and isinstance(node.value.value, str)):
             raise ValueError("禁止模組層級狀態或可執行敘述")
     for node in ast.walk(tree):
+        if isinstance(node, (ast.FunctionDef, ast.AsyncFunctionDef, ast.Lambda)):
+            defaults = node.args.defaults + [v for v in node.args.kw_defaults if v is not None]
+            if any(isinstance(child, (ast.List, ast.Dict, ast.Set, ast.Call,
+                                      ast.ListComp, ast.DictComp, ast.SetComp, ast.GeneratorExp))
+                   for value in defaults for child in ast.walk(value)):
+                raise ValueError("禁止可變或呼叫式預設參數")
         if isinstance(node, ast.ClassDef):
             class_names.add(node.name)
             if node.decorator_list:
@@ -87,7 +94,7 @@ def check_algorithm(source):
         if isinstance(node, (ast.Global, ast.Nonlocal)):
             raise ValueError("禁止 global/nonlocal")
         if isinstance(node, ast.Attribute):
-            if node.attr.startswith("_") or node.attr.replace("_", "").lower() in order_names:
+            if node.attr in denied_attributes or node.attr.startswith("_") or node.attr.replace("_", "").lower() in order_names:
                 raise ValueError("禁止底線屬性或下單介面")
             if isinstance(node.ctx, (ast.Store, ast.Del)) and not (
                     isinstance(node.value, ast.Name) and node.value.id == "self"):
@@ -252,7 +259,10 @@ def validate_config(config, materialization, query=None):
     if config["warmup"] != materialization["warmup"]:
         raise ValueError("暖機不符")
     score_windows = [normalized_window(w) for w in config["score_windows"]]
-    if score_windows != [normalized_window(f["score_window"]) for f in config["folds"]]:
+    expected_windows = ([normalized_window(materialization["window"])]
+                        if config["mode"] == "validation" and not config["folds"] else
+                        [normalized_window(f["score_window"]) for f in config["folds"]])
+    if score_windows != expected_windows:
         raise ValueError("score_windows 與摺表不符")
     rules.merge_windows(score_windows)
     window = normalized_window(materialization["window"])
@@ -261,6 +271,8 @@ def validate_config(config, materialization, query=None):
         if not window["start"] <= fit["start"] < fit["end"] <= score["start"] < score["end"] <= window["end"]:
             raise ValueError("摺表越出物化視窗")
     mode = config["mode"]
+    if mode == "trial" and PurePosixPath(config["algorithm"]["path"]).is_relative_to(ENGINE_ROOT):
+        raise ValueError("trial 假說不得位於引擎目錄")
     if config["model_artifact"] is not None and (config["folds"] or mode != "validation"):
         # 本版尚未啟用 holdout；外部模型只供無摺表的構造評分檢查。
         raise ValueError("外部模型不得跳過樣本外或擬合執行")
@@ -397,10 +409,10 @@ p = Path('config.json')
 s = p.read_text()
 import re
 for key, value in [('algorithm-type-name', 'R8Algorithm'), ('algorithm-language', 'Python'), ('algorithm-location', '/r8/src/program_code/research/r8_engine/lean_algo/framework.py')]:
-    s, n = re.subn(r'("' + key + r'"\\s*:\\s*")[^"]*(")', lambda m: m[1] + value + m[2], s)
+    s, n = re.subn(r'(^[ \t]*"' + key + r'"\\s*:\\s*")[^"]*(")', lambda m: m[1] + value + m[2], s, flags=re.MULTILINE)
     if n != 1:
         raise RuntimeError('launcher key mismatch: ' + key)
-s, n = re.subn(r'"environment"\\s*:\\s*"[^"]*"\\s*,', '"environment": "backtesting", "close-automatically": true,', s)
+s, n = re.subn(r'^[ \t]*"environment"\\s*:\\s*"[^"]*"\\s*,', '"environment": "backtesting", "close-automatically": true,', s, flags=re.MULTILINE)
 if n != 1:
     raise RuntimeError('launcher environment mismatch')
 p.write_text(s)
@@ -439,6 +451,13 @@ def assemble_run(config, hashes, argv, base_hash, started, ended, exit_code, log
     if finish["status"] not in ("completed", "failed") or finish["failure_reason"] not in (
             None, "fill_forward_bar", "gross_exposure_cap", "invalid_decision", "algorithm_exception", "lean_error"):
         raise ValueError("執行結尾不合法")
+    sort_keys = {"orders": ("order_id", "_leg_index"), "voided": ("order_id",),
+                 "fills": ("change_t", "order_id", "_leg_index"),
+                 "funding": ("t", "symbol"), "endpoint_funding": ("t", "symbol"),
+                 "decisions": ("t",), "steps": ("t",), "fits": ("fold",)}
+    for section, keys in sort_keys.items():
+        ordered = sorted(result[section], key=lambda r: tuple(r.get(k, 0) for k in keys))
+        result[section] = [{k: v for k, v in row.items() if k != "_leg_index"} for row in ordered]
     result.update({
         "schema_version": "r8_lean_run_v1", "materialization_sha256": config["materialization_sha256"],
         "run_config_sha256": sha256(canonical(config)), "run_config": config,

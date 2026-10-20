@@ -1,8 +1,11 @@
 """固定的 LEAN 轉接類別；只在容器內載入，P4-D0/P4-D 驗收。"""
 from AlgorithmImports import *
+from collections import deque
 import csv
 from datetime import datetime, timezone
 from decimal import Decimal
+from System import Decimal as SystemDecimal
+from System.Globalization import CultureInfo, NumberStyles
 import importlib.util
 import json
 from pathlib import Path
@@ -16,7 +19,13 @@ from program_code.research.r8_ledger.ledger import canonical
 
 
 def d(value):
-    return rules.decimal(str(value))
+    if isinstance(value, (str, Decimal)):
+        return rules.decimal(value)
+    return rules.lean_decimal(value, CultureInfo.InvariantCulture)
+
+
+def to_lean(value):
+    return SystemDecimal.Parse(rules.number(value), NumberStyles.Number, CultureInfo.InvariantCulture)
 
 
 class R8FillModel(FillModel):
@@ -40,16 +49,16 @@ class R8FillModel(FillModel):
                                                   "symbol": metadata["symbol"]})
             self.owner._fail("fill_forward_bar")
             return event
-        change_t = rules.next_open(order.time, bar.time, bar.end_time)
+        change_t = rules.next_open(order.time, bar.time, bar.end_time, metadata["score_end"])
         delivery = self.owner._info["delistings"].get(metadata["symbol"], {}).get("deliveryTime")
         if change_t is None or delivery is not None and change_t >= delivery:
             return event
         price = rules.fill_price(d(bar.open), metadata["quantity"], metadata["slippage_bps"])
         fee = rules.fee(metadata["quantity"], price, self.owner._config["cost"]["taker_fee_rate"])
         metadata["change_t"] = change_t
-        event.fill_price = float(price)
-        event.fill_quantity = float(d(metadata["quantity"]))
-        event.order_fee = OrderFee(CashAmount(float(fee), "USDT"))
+        event.fill_price = to_lean(price)
+        event.fill_quantity = to_lean(d(metadata["quantity"]))
+        event.order_fee = OrderFee(CashAmount(to_lean(fee), "USDT"))
         event.status = OrderStatus.FILLED
         return event
 
@@ -66,6 +75,7 @@ class R8Algorithm(QCAlgorithm):
         self._info = json.loads(Path("/r8/framework.json").read_bytes())
         self._legs, self._pending, self._fills = {}, {}, []
         self._symbols, self._data, self._bars = {}, {}, {}
+        self._position_history = rules.PositionHistory()
         self._counter = 0
         self._closed, self._delivered, self._funded = set(), set(), set()
         self._fitted, self._active_fold, self._instance, self._artifact = {}, None, None, None
@@ -73,11 +83,9 @@ class R8Algorithm(QCAlgorithm):
         self._account_positions, self._average = {}, {}
         self._expected_cash = d(self._config["initial_cash"])
         self._windows = rules.merge_windows(self._config["score_windows"])
-        if not self._windows and self._info["validation_example"]:
-            self._windows = [self._info["window"]]
         self.set_time_zone(TimeZones.UTC)
         self.set_account_currency("USDT")
-        self.set_cash(float(self._expected_cash))
+        self.set_cash(to_lean(self._expected_cash))
         start = datetime.fromtimestamp(self._info["warmup"]["start"] / 1000, timezone.utc)
         end = datetime.fromtimestamp(self._info["window"]["end"] / 1000, timezone.utc)
         self.set_start_date(start.year, start.month, start.day)
@@ -85,7 +93,7 @@ class R8Algorithm(QCAlgorithm):
         self._load_custom()
         for name in self._info["symbols"]:
             security = self.add_crypto_future(name, Resolution.HOUR, Market.BYBIT,
-                                              fill_forward=False, leverage=float(d(self._config["leverage"])))
+                                              fill_forward=False, leverage=to_lean(d(self._config["leverage"])))
             security.set_fee_model(ConstantFeeModel(0))
             security.set_margin_interest_rate_model(MarginInterestRateModel.NULL)
             security.set_fill_model(R8FillModel(self))
@@ -105,11 +113,11 @@ class R8Algorithm(QCAlgorithm):
             (Path("/r8/models") / model["path"]).read_bytes(), model["sha256"])
         self._funding_schedule = {}
         for name in self._info["symbols"]:
-            records = [{"t": r["t"], "rate": r["value"]} for r in self._data[name].get("funding", [])]
-            self._funding_schedule[name] = rules.funding_schedule(
+            records = [{"t": r["t"], "rate": r["value"]} for r in self._data[name]["funding"].prefix(self._info["window"]["end"])]
+            self._funding_schedule[name] = deque(rules.funding_schedule(
                 records, self._info["warmup"]["start"], self._info["window"]["end"],
                 self._info["funding_interval_ms"][name], self._config["cost"]["funding_blank_min_rate"],
-                delivery=self._info["delistings"].get(name, {}).get("deliveryTime"))
+                delivery=self._info["delistings"].get(name, {}).get("deliveryTime")))
 
     def _load_custom(self):
         for name in self._info["symbols"]:
@@ -125,8 +133,8 @@ class R8Algorithm(QCAlgorithm):
                         else:
                             value["value"] = row[2]
                         rows.append(value)
-                datasets[dataset] = rows
-            datasets["kline_hour"] = []
+                datasets[dataset] = rules.KnownRows(rows)
+            datasets["kline_hour"] = rules.KnownRows()
             self._data[name] = datasets
 
     def _emit(self, section, record):
@@ -138,10 +146,16 @@ class R8Algorithm(QCAlgorithm):
             self.quit(reason)
 
     def _positions(self):
-        return {s: rules.number(d(self.portfolio[symbol].quantity))
-                for s, symbol in self._symbols.items() if d(self.portfolio[symbol].quantity) != 0}
+        return {s: rules.number(q) for s, q in self._account_positions.items() if q != 0}
+
+    def _equity(self):
+        return rules.account_equity(self._expected_cash, self._account_positions, self._average,
+                                    {s: bars[-1]["close"] for s, bars in self._bars.items() if bars})
 
     def _visible(self, t, strict=False):
+        if not strict:
+            return rules.decision_symbols(
+                self._info, t, {s: bars[-1]["end"] for s, bars in self._bars.items() if bars})
         result = []
         for s in self._info["strategy_symbols"]:
             first = self._info["first_bar"].get(s)
@@ -152,7 +166,7 @@ class R8Algorithm(QCAlgorithm):
         return result
 
     def _cash_add(self, amount):
-        self.portfolio.cash_book["USDT"].add_amount(float(amount))
+        self.portfolio.cash_book["USDT"].add_amount(to_lean(amount))
         self._expected_cash += amount
 
     def _book_fill(self, fill):
@@ -163,6 +177,7 @@ class R8Algorithm(QCAlgorithm):
         self._account_positions[symbol], self._average[symbol] = new, new_average
         self._expected_cash += realized - d(fill["fee"])
         self._fills.append(fill)
+        self._position_history.append(fill)
         self._emit("fills", fill)
         return realized
 
@@ -177,11 +192,11 @@ class R8Algorithm(QCAlgorithm):
         if leg is None:
             self._fail("lean_error")
             return
-        fill = {k: leg[k] for k in ("order_id", "decision_t", "symbol", "quantity", "slippage_bps", "kind", "change_t")}
+        fill = {k: leg[k] for k in ("order_id", "decision_t", "symbol", "quantity", "slippage_bps", "kind", "change_t", "_leg_index")}
         fill.update(quantity=rules.number(d(event.fill_quantity)), price=rules.number(d(event.fill_price)),
                     fee=rules.number(d(event.order_fee.value.amount)))
         self._book_fill(fill)
-        self._emit("orders", {k: leg[k] for k in ("order_id", "decision_t", "symbol", "quantity")} |
+        self._emit("orders", {k: leg[k] for k in ("order_id", "decision_t", "symbol", "quantity", "_leg_index")} |
                    {"kind": leg["order_kind"], "status": "filled"})
         leg["done"] = True
 
@@ -194,23 +209,19 @@ class R8Algorithm(QCAlgorithm):
             if not response.is_success:
                 self._fail("lean_error")
                 return
-            record = {k: leg[k] for k in ("order_id", "decision_t", "symbol", "quantity")}
-            record.update(kind=leg["order_kind"], status="cancelled", cancel_t=self._t, cancel_reason=reason)
-            if replaced_by is not None:
-                record["replaced_by"] = replaced_by
+            record = rules.cancellation_record(leg, self._t, reason, replaced_by)
             self._emit("orders", record)
             leg["done"] = True
 
     def _settle(self, name, kind, change_t):
-        quantity = d(self.portfolio[self._symbols[name]].quantity)
+        quantity = self._account_positions.get(name, Decimal(0))
         if quantity == 0:
             return
         bars = self._bars[name]
         if not bars:
             raise ValueError("平倉缺價格")
         cost = self._config["cost"]
-        last = bars[-1]
-        previous = next((b for b in reversed(bars[:-1]) if b["end"] - b["t"] == rules.HOUR), None)
+        last, previous = rules.settlement_bars(bars, change_t)
         price = (rules.delisting_price(quantity, last, previous, cost["forced_reduce_penalty_bps"],
                                        cost["slippage_multiplier"]) if kind == "delisting_settlement"
                  else rules.score_end_price(quantity, last["close"], cost))
@@ -223,25 +234,23 @@ class R8Algorithm(QCAlgorithm):
                     slippage_bps=rules.number(d(cost["forced_reduce_penalty_bps"]) * d(cost["slippage_multiplier"])))
         realized = self._book_fill(fill)
         # 結算沒有下一根；同步改變 LEAN 現金與持倉，成本只扣一次。
-        self.portfolio.cash_book["USDT"].add_amount(float(realized - fee))
+        self.portfolio.cash_book["USDT"].add_amount(to_lean(realized - fee))
         self.portfolio[self._symbols[name]].set_holdings(0, 0)
         self._emit("orders", record)
 
     def _boundaries(self):
-        for name in sorted(self._info["delistings"]):
-            delivery = self._info["delistings"][name]["deliveryTime"]
-            if name not in self._delivered and delivery <= self._t:
+        for change_t, kind, name in rules.due_boundaries(
+                self._windows, self._info["delistings"], self._t, self._closed, self._delivered):
+            if kind == "delivery":
                 self._cancel(name, "delivery")
-                self._settle(name, "delisting_settlement", delivery)
+                self._settle(name, "delisting_settlement", change_t)
                 self._delivered.add(name)
-        for window in self._windows:
-            end = window["end"]
-            if end <= self._t and end not in self._closed:
-                for name in sorted(self._symbols):
-                    self._cancel(name, "score_end")
-                for name in sorted(self._symbols):
-                    self._settle(name, "score_end_liquidation", end)
-                self._closed.add(end)
+            else:
+                for symbol in sorted(self._symbols):
+                    self._cancel(symbol, "score_end")
+                for symbol in sorted(self._symbols):
+                    self._settle(symbol, "score_end_liquidation", change_t)
+                self._closed.add(change_t)
 
     def _fit_and_activate(self):
         folds = self._config["folds"]
@@ -290,7 +299,7 @@ class R8Algorithm(QCAlgorithm):
         if not isinstance(targets, dict) or set(targets) != set(visible):
             raise ValueError("invalid_decision")
         prices = {s: self._bars[s][-1]["close"] for s in visible}
-        equity = rules.number(d(self.portfolio.total_portfolio_value))
+        equity = rules.number(self._equity())
         proposed = self._positions()
         plans = []
         for name in sorted(targets):
@@ -302,11 +311,10 @@ class R8Algorithm(QCAlgorithm):
                 quantity = d(target["quantity"])
             else:
                 raise ValueError("invalid_decision")
-            current = d(self.portfolio[self._symbols[name]].quantity)
+            current = self._account_positions.get(name, Decimal(0))
             reason, bps = rules.liquidity(self._t, self._info["first_bar"][name],
                                           self._data[name]["turnover_day"], self._config["cost"])
-            hour = next((r["value"] for r in reversed(self._data[name]["turnover_hour"])
-                         if r["known_at"] == self._t), "0")
+            hour = rules.turnover_at(self._data[name]["turnover_hour"], self._t)
             segments = rules.order_segments(current, quantity, prices[name], props["qty_step"], props["min_qty"],
                                             self._info["min_notional"][name], reason, bps, hour, self._config["cost"])
             proposed[name] = rules.number(rules.effective_target(current, segments))
@@ -315,43 +323,43 @@ class R8Algorithm(QCAlgorithm):
         all_prices = {s: self._bars[s][-1]["close"] for s in proposed}
         all_prices.update(prices)
         # 失敗的目標也須保留，供 U6 重建觸發曝險上限的決策。
-        self._emit("decisions", {"t": self._t, "targets": targets})
+        decision = rules.decision_record(self._t, targets, kind)
+        if decision is not None:
+            self._emit("decisions", decision)
         rules.exposure(proposed, all_prices, equity, self._config["gross_exposure_cap"])
         self._last_decision_prices, self._last_decision_equity = all_prices, equity
         for name, segments in plans:
             if not segments and not any(not self._legs[tag].get("done") for tag in self._pending.get(name, [])):
                 continue
-            if not segments:
-                self._cancel(name, "replaced")
-                continue
-            self._counter += 1
-            order_id = self._counter
+            self._counter, order_id = rules.replacement_order(self._counter, segments)
             self._cancel(name, "replaced", order_id)
+            if order_id is None:
+                continue
             self._pending[name] = []
             for index, segment in enumerate(segments):
                 record = {"order_id": order_id, "decision_t": self._t, "symbol": name,
-                          "quantity": segment["quantity"]}
+                          "quantity": segment["quantity"], "_leg_index": index}
                 if segment["reason"] is not None:
                     self._emit("voided", record | {"reason": segment["reason"]})
                     self._emit("orders", record | {"kind": kind, "status": "voided"})
                     continue
                 tag = "r8:" + str(order_id) + ":" + str(index)
                 leg = record | {"slippage_bps": segment["slippage_bps"], "kind": segment["kind"], "order_kind": kind}
+                leg["score_end"] = next(w["end"] for w in self._windows
+                                         if w["start"] <= self._t < w["end"])
                 self._legs[tag] = leg
                 self._pending[name].append(tag)
-                leg["ticket"] = super().market_order(self._symbols[name], float(d(segment["quantity"])), True, tag)
+                leg["ticket"] = super().market_order(self._symbols[name], to_lean(d(segment["quantity"])), True, tag)
                 if leg["ticket"].status == OrderStatus.INVALID:
                     self._fail("lean_error")
 
     def _funding(self, endpoint=False):
         for name in sorted(self._symbols):
-            for record in self._funding_schedule[name]:
+            queue = self._funding_schedule[name]
+            while queue and (queue[0]["t"] <= self._t if endpoint else queue[0]["t"] < self._t):
+                record = queue.popleft()
                 t = record["t"]
-                key = (name, t)
-                if key in self._funded or (t != self._t if endpoint else t >= self._t):
-                    continue
-                before, after = rules.positions_at(self._fills, name, t)
-                self._funded.add(key)
+                before, after = self._position_history.at(name, t)
                 if before == 0 and after == 0:
                     continue
                 price, _ = rules.funding_price(self._bars[name], t)
@@ -386,10 +394,10 @@ class R8Algorithm(QCAlgorithm):
                 self._bars[name].append(record)
                 if delivery is None or rules.milliseconds(bar.end_time) <= delivery:
                     self._data[name]["kline_hour"].append(record)
+            self._boundaries()
             if self._last_decision_equity is not None:
                 rules.exposure(self._positions(), self._last_decision_prices, self._last_decision_equity,
                                self._config["gross_exposure_cap"])
-            self._boundaries()
             flatten = self._fit_and_activate()
             in_window = any(w["start"] <= self._t < w["end"] for w in self._windows)
             visible = self._visible(self._t)
@@ -407,8 +415,8 @@ class R8Algorithm(QCAlgorithm):
             residual = cash - self._expected_cash
             if residual != 0:
                 self._emit("cash_residual", {"t": self._t, "residual": rules.number(residual)})
-            self._emit("steps", {"t": self._t, "equity": rules.number(d(self.portfolio.total_portfolio_value)),
-                                 "cash": rules.number(cash), "positions": self._positions()})
+            self._emit("steps", {"t": self._t, "equity": rules.number(self._equity()),
+                                 "cash": rules.number(self._expected_cash), "positions": self._positions()})
         except ValueError as exc:
             self._fail("gross_exposure_cap" if "gross_exposure_cap" in str(exc) else "invalid_decision")
         except Exception:
@@ -417,7 +425,14 @@ class R8Algorithm(QCAlgorithm):
     def on_end_of_algorithm(self):
         if self._failure is None:
             try:
+                self._t = self._info["window"]["end"]
+                self._boundaries()
+                self._funding()
                 self._funding(endpoint=True)
+                cash = d(self.portfolio.cash_book["USDT"].amount)
+                residual = cash - self._expected_cash
+                if residual != 0:
+                    self._emit("cash_residual", {"t": self._t, "residual": rules.number(residual)})
                 if self._positions() or any(not leg.get("done") for leg in self._legs.values()):
                     self._fail("lean_error")
             except Exception:

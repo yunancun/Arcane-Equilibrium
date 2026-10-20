@@ -2,7 +2,8 @@
 from datetime import datetime, timezone
 from decimal import Decimal, InvalidOperation, ROUND_DOWN, ROUND_HALF_UP
 from statistics import median
-from collections.abc import Mapping
+from collections.abc import Mapping, Sequence
+from bisect import bisect_left, bisect_right
 from types import MappingProxyType
 
 HOUR = 3600000
@@ -132,10 +133,11 @@ def milliseconds(value):
     return delta.days * DAY + delta.seconds * 1000 + delta.microseconds // 1000
 
 
-def next_open(decision_t, bar_start, bar_end):
+def next_open(decision_t, bar_start, bar_end, score_end=None):
     """只在下一根送達時成交；缺漏自然延到第一根存在的開盤。"""
     decision, start, end = map(milliseconds, (decision_t, bar_start, bar_end))
-    return start if start >= decision and end > decision else None
+    return start if (start >= decision and end > decision
+                     and (score_end is None or start < milliseconds(score_end))) else None
 
 
 def decision_due(resolution, t):
@@ -165,7 +167,9 @@ def liquidity(t, first_bar, daily_turnover, cost):
     # 上市當日不完整時不計為完整日。
     if first_bar is None or end - ((milliseconds(first_bar) + DAY - 1) // DAY * DAY) < days * DAY:
         return "insufficient_history", fallback
-    values = {milliseconds(r["t"]): decimal(r["value"]) for r in daily_turnover
+    indexed = daily_turnover if isinstance(daily_turnover, KnownRows) else KnownRows(daily_turnover)
+    recent = indexed.between(end - (days - 1) * DAY, end)
+    values = {milliseconds(r["t"]): decimal(r["value"]) for r in recent
               if milliseconds(r["known_at"]) <= milliseconds(t)}
     mid = median([values.get(end - i * DAY, Decimal(0)) for i in range(1, days + 1)])
     if mid < decimal(cost["untradeable_below_turnover"]):
@@ -190,10 +194,10 @@ def positions_at(fills, symbol, t):
 
 
 def funding_price(bars, t):
-    available = [b for b in bars if milliseconds(b["end"]) <= t]
-    if not available:
+    index = bisect_right(bars, t, key=lambda b: milliseconds(b["end"]))
+    if index == 0:
         raise ValueError("資金費缺少可知計價")
-    last = max(available, key=lambda b: milliseconds(b["end"]))
+    last = bars[index - 1]
     return decimal(last["close"]), milliseconds(last["end"]) != t
 
 
@@ -296,19 +300,91 @@ def freeze(value):
     return value
 
 
+class RowSlice(Sequence):
+    """固定可見範圍的唯讀切片；切片和取前綴都不複製資料列。"""
+
+    def __init__(self, rows, indices):
+        self._rows, self._indices = rows, indices
+
+    def __len__(self):
+        return len(self._indices)
+
+    def __getitem__(self, index):
+        selected = self._indices[index]
+        return RowSlice(self._rows, selected) if isinstance(index, slice) else self._rows[selected]
+
+
+class KnownRows:
+    """靜態資料只排序與凍結一次；小時線依到達順序追加。"""
+
+    def __init__(self, rows=()):
+        ordered = sorted(rows, key=lambda r: milliseconds(r["known_at"]))
+        self._times = [milliseconds(r["known_at"]) for r in ordered]
+        self._rows = [freeze(r) for r in ordered]
+
+    def append(self, row):
+        t = milliseconds(row["known_at"])
+        if self._times and t < self._times[-1]:
+            raise ValueError("資料追加時刻倒退")
+        self._times.append(t)
+        self._rows.append(freeze(row))
+
+    def prefix(self, cutoff, strict=False):
+        end = (bisect_left if strict else bisect_right)(self._times, milliseconds(cutoff))
+        return RowSlice(self._rows, range(end))
+
+    def between(self, start, end):
+        return RowSlice(self._rows, range(bisect_left(self._times, milliseconds(start)),
+                                         bisect_right(self._times, milliseconds(end))))
+
+
+def index_data(data):
+    return {s: {name: rows if isinstance(rows, KnownRows) else KnownRows(rows)
+                for name, rows in datasets.items()} for s, datasets in data.items()}
+
+
 def data_view(data, cutoff, strict=False, symbols=None):
     cutoff = milliseconds(cutoff)
     visible = {}
     for symbol in (list(data) if symbols is None else symbols):
         datasets = {}
         for name, rows in data.get(symbol, {}).items():
-            selected = [r for r in rows if (milliseconds(r["known_at"]) < cutoff
-                                            if strict else milliseconds(r["known_at"]) <= cutoff)]
+            indexed = rows if isinstance(rows, KnownRows) else KnownRows(rows)
+            selected = indexed.prefix(cutoff, strict)
             if selected:
                 datasets[name] = selected
         if datasets:
-            visible[symbol] = datasets
-    return freeze(visible)
+            visible[symbol] = MappingProxyType(datasets)
+    return MappingProxyType(visible)
+
+
+class PositionHistory:
+    """每個標的按變動時刻保存累計部位，結算查詢不掃描成交史。"""
+
+    def __init__(self):
+        self._times, self._totals = {}, {}
+
+    def append(self, fill):
+        symbol, t, qty = fill["symbol"], fill["change_t"], decimal(fill["quantity"])
+        times, totals = self._times.setdefault(symbol, []), self._totals.setdefault(symbol, [])
+        index = bisect_right(times, t)
+        times.insert(index, t)
+        totals.insert(index, (totals[index - 1] if index else Decimal(0)) + qty)
+        # 延後記帳的結算可能回填歷史；正常依序成交只有常數追加成本。
+        for i in range(index + 1, len(totals)):
+            totals[i] += qty
+
+    def at(self, symbol, t):
+        times, totals = self._times.get(symbol, []), self._totals.get(symbol, [])
+        before, after = bisect_left(times, t), bisect_right(times, t)
+        return (totals[before - 1] if before else Decimal(0),
+                totals[after - 1] if after else Decimal(0))
+
+
+def turnover_at(rows, t):
+    indexed = rows if isinstance(rows, KnownRows) else KnownRows(rows)
+    selected = indexed.between(t, t)
+    return selected[-1]["value"] if selected else "0"
 
 
 class R8Hypothesis:
@@ -349,6 +425,8 @@ def fit_fold(hypothesis_class, seed, fit_window, data, strategy, cost):
     scores = [instance.score(freeze(params), freeze({"start": start, "end": train_end}),
                              freeze({"start": validation_start, "end": end}), view, freeze(cost))
               for params in grid]
+    if any(not isinstance(score, str) for score in scores):
+        raise ValueError("invalid_decision: score 須為十進位字串")
     selection = select_grid_point(scores, grid, strategy["neighborhood"])
     if selection["no_trade"]:
         return {"selection": selection, "artifact": None}
@@ -375,3 +453,62 @@ def apply_fill(position, average, quantity, price):
     realized = min(abs(position), abs(quantity)) * (price - average) * (1 if position > 0 else -1)
     new_average = Decimal(0) if new == 0 else price if new * position < 0 else average
     return new, new_average, realized
+
+
+def decision_symbols(info, t, bar_ends):
+    """小時與日線決策都只交出當步完整小時線已送達的標的。"""
+    return [s for s in info["strategy_symbols"]
+            if info["first_bar"].get(s) is not None
+            and info["first_bar"][s] + HOUR <= t and bar_ends.get(s) == t
+            and (info["delistings"].get(s, {}).get("deliveryTime") is None
+                 or t < info["delistings"][s]["deliveryTime"])]
+
+
+def decision_record(t, targets, kind):
+    """decisions 只保存假說輸出；框架的折界平倉另記 orders。"""
+    return {"t": t, "targets": targets} if kind == "strategy" else None
+
+
+def replacement_order(counter, segments):
+    """零差額只取消原單，不消耗訂單編號。"""
+    return (counter + 1, counter + 1) if segments else (counter, None)
+
+
+def cancellation_record(leg, t, reason, replaced_by=None):
+    record = {k: leg[k] for k in ("order_id", "decision_t", "symbol", "quantity", "_leg_index")}
+    record.update(kind=leg["order_kind"], status="cancelled", cancel_t=t, cancel_reason=reason)
+    if reason == "replaced":
+        record["replaced_by"] = replaced_by
+    return record
+
+
+def lean_decimal(value, invariant_culture):
+    """只接受 System.Decimal 的精確格式；自動轉成 float 時拒絕猜測。"""
+    if not hasattr(value, "GetType") or value.GetType().FullName != "System.Decimal":
+        raise ValueError("NEEDS_CONTEXT: LEAN 邊界未提供 System.Decimal")
+    return decimal(value.ToString("G29", invariant_culture))
+
+
+def account_equity(cash, positions, averages, prices):
+    """框架十進位現金加期貨未實現損益；零部位不需要價格。"""
+    return decimal(cash) + sum((decimal(q) * (decimal(prices[s]) - decimal(averages[s]))
+                                for s, q in positions.items() if decimal(q) != 0), Decimal(0))
+
+
+def settlement_bars(bars, end):
+    """終點只使用不晚於界線的價格，含下架時的最後不完整線。"""
+    index = bisect_right(bars, end, key=lambda b: b["end"])
+    if index == 0:
+        raise ValueError("平倉缺價格")
+    last = bars[index - 1]
+    previous = next((bars[i] for i in range(index - 2, -1, -1)
+                     if bars[i]["end"] - bars[i]["t"] == HOUR), None)
+    return last, previous
+
+
+def due_boundaries(windows, delistings, t, closed, delivered):
+    events = [(w["end"], "score_end", None) for w in windows
+              if w["end"] <= t and w["end"] not in closed]
+    events += [(value["deliveryTime"], "delivery", symbol) for symbol, value in delistings.items()
+               if value["deliveryTime"] <= t and symbol not in delivered]
+    return sorted(events, key=lambda event: (event[0], event[1], event[2] or ""))
