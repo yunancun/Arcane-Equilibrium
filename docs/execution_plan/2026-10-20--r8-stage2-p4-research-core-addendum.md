@@ -920,7 +920,7 @@ U6 `submit` 的 `provenance` 經記錄者核對與重算相符（§6 第 5 點�
 2. **驗證模式的計分窗**：`validation` 模式且 `folds` 為空時，`score_windows` 必須恰為物化的 `window`（一個元素），框架不得自行補上。U6 依 `run_config.score_windows` 處理。
 3. **`run.json` 各段的排列**：
    - `orders`、`voided` 依 `order_id` 排列；
-   - `fills` 依 (`change_t`, `order_id`) 排列；
+   - `fills` 依 (`change_t`, `order_id`) 排列；反手的複合訂單有兩段、`order_id` 與 `change_t` 相同，減少曝險的一段（部位移向 0 的那一段）排在前；
    - `funding`、`endpoint_funding` 依 (`t`, `symbol`) 排列；
    - `decisions`、`steps` 依 `t` 排列；`fits` 依 `fold` 排列。
    U5 組裝時排序；U6 依同一順序產生，逐位置比對。
@@ -947,10 +947,11 @@ U6 `submit` 的 `provenance` 經記錄者核對與重算相符（§6 第 5 點�
    - 資金費 T 前後的部位，以依部位變動時刻排序的累計部位查詢，不逐筆掃描全部成交；決策時的成交額查詢同理。
    - 測試以相對耗時驗證：10 萬列與 1 千列建立視圖的耗時比不超過 10 倍。不用絕對秒數。
 10. **失敗執行的重算**（U6）：
-    - 可由重算重現的失敗（`gross_exposure_cap` 的兩種情形、`invalid_decision`），U6 重算到 `failure_t`，必須在同一時間步重現同一失敗：`status`、`failure_reason`、`failure_t` 都相同。
-    - 由 LEAN 或假說程式本身造成、重算無從重現的失敗（`algorithm_exception`、`lean_error`、`fill_forward_bar`）：U6 只核對 `failure_t` 之前的重算沒有差異、也沒有更早的失敗。失敗原因本身由記錄者以 `verification` 模式重跑時重現（§6 第 5 點）。
+    - 可由重算重現的失敗只有 `gross_exposure_cap`（§6 的兩種情形）：U6 重算到 `failure_t`，必須在同一時間步重現同一失敗：`status`、`failure_reason`、`failure_t` 都相同。
+    - 由 LEAN 或假說程式本身造成、重算無從重現的失敗（`algorithm_exception`、`lean_error`、`fill_forward_bar`，以及 `invalid_decision`：它可能來自假說的 `score` 或決策輸出，U6 不執行假說程式）：U6 只核對 `failure_t` 之前的重算沒有差異、也沒有更早的失敗。失敗原因本身由記錄者以 `verification` 模式重跑時重現（§6 第 5 點）。
     - 重算在 `failure_t` 之前發現失敗或差異，即拒收、不寫入帳本。
     - 期數的處理：結束時刻早於 `failure_t` 的期數取重算的報酬；其餘（含結束恰為 `failure_t` 的那一期）填 0，並計入 `filled_periods`。
+    - `failure_t` 為 null 時（LEAN 異常結束而無法確定時刻）：不比對任何時間前綴，只做不依時間的核對（雜湊、設定、身份）；整個期數網格填 0，全部計入 `filled_periods`；結算與否依 §6 第 1 點，視同不早於第一個計分起點。
 11. **基準的權益**：計算 E_h 與 E⁻_h 時，只對有部位的標的計價。部位為 0 的標的不需要價格，尚未上市的標的不影響計算。
 12. **計分終點沒有 K 線**：
     - 自訂成交模型拒絕以開始時刻不早於 e 的 K 線成交；這些訂單在終點平倉之前，以 `score_end` 取消。
@@ -972,7 +973,7 @@ U4 的 5 項 MINOR 記在 PR #227，holdout 啟用時一併處理。其中最需
 | 交付 | 承接 | 可改檔案 | 內容 |
 |---|---|---|---|
 | `R8-S2-ENGINE-LEAN-FIX1-20261020` | U5 `6a126a072`、`540ac84fa` | §5 的六個檔案 | 12.2 第 1–9、12–14 點，以及第 3 點的排序 |
-| `R8-S2-ENGINE-SERIES-FIX1-20261020` | U6 `411b0a090`、`2c9078700`、`a19b12e99` | §6 的兩個檔案 | 12.2 第 2–6、10–12、15–18 點（第 12 點：依同一規則重建終點的取消、平倉價格與部位變動時刻） |
+| `R8-S2-ENGINE-SERIES-FIX1-20261020` | U6 `411b0a090`、`2c9078700`、`a19b12e99` | §6 的兩個檔案 | 12.2 第 2–6、10–13、15–18 點（第 12 點：依同一規則重建終點的取消、平倉價格與部位變動時刻；第 13 點：同一時間步有延後成交與下架結算時，曝險檢查在結算之後，測試涵蓋這一合併情形） |
 
 - Operator 的確認：2026-10-21 已確認兩個交付（在對話中）。原交付 `R8-S2-ENGINE-LEAN-20261020` 與 `R8-S2-ENGINE-SERIES-20261020` 的歷史、停止紀錄與審查嘗試保留，不重開、不重設額度。
 - 承接來源：原提交已推送到 origin 的同名分支 `codex/r8-s2-engine-lean-20261020`（`540ac84fa`）與 `codex/r8-s2-engine-series-20261020`（`a19b12e99`），只作承接來源，不開 PR。

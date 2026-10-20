@@ -440,7 +440,7 @@
     "r8-stage2-p4-addendum": {
       "kind": "recorded_file",
       "path": "docs/execution_plan/2026-10-20--r8-stage2-p4-research-core-addendum.md",
-      "sha256": "fba7a77504a34ac1a78f7fd6684c3012b4acf40cf2fb33a1b0496afcc67c50a1",
+      "sha256": "28684e52b9c1b14daaf5d0a6dae0923cb1735c701a64ab5b2f0e4d54eba62dd9",
       "meaning": "stage 2 P4 addendum: research core units U4-U6, recorder event checks, and the QC-drafted methodology parameters with the Operator rulings of 2026-10-20; instruction only"
     }
   },
