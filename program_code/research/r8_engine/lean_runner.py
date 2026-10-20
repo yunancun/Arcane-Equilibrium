@@ -21,6 +21,16 @@ LEDGER_ROOT = "program_code/research/r8_ledger"
 EXAMPLE = ENGINE_ROOT + "/lean_algo/examples/fixed_schedule.py"
 FRAMEWORK = ENGINE_ROOT + "/lean_algo/framework.py"
 IMAGE = "quantconnect/lean@" + rules.IMAGE_DIGEST
+ALGORITHM_MEMBERS = {
+    "math": set("acos acosh asin asinh atan atan2 atanh ceil comb copysign cos cosh degrees dist e erf erfc exp expm1 fabs factorial floor fmod frexp fsum gamma gcd hypot inf isclose isfinite isinf isnan isqrt lcm ldexp lgamma log log10 log1p log2 modf nan nextafter perm pi pow prod radians remainder sin sinh sqrt tan tanh tau trunc ulp".split()),
+    "statistics": set("mean fmean geometric_mean harmonic_mean median median_low median_high median_grouped mode multimode pstdev pvariance stdev variance quantiles".split()),
+    "decimal": set("Decimal Context localcontext getcontext ROUND_CEILING ROUND_DOWN ROUND_FLOOR ROUND_HALF_DOWN ROUND_HALF_EVEN ROUND_HALF_UP ROUND_UP ROUND_05UP InvalidOperation".split()),
+    "fractions": {"Fraction"},
+    "random": {"Random"},
+    ENGINE_ROOT.replace("/", ".") + ".lean_algo.rules": set(
+        "decimal number target_quantity fill_price fee funding_amount delisting_price order_segments effective_target milliseconds next_open decision_due exposure liquidity score_end_price positions_at funding_price funding_schedule merge_windows select_grid_point data_view R8Hypothesis apply_fill".split()),
+    ENGINE_ROOT.replace("/", ".") + ".lean_algo.framework": {"R8Hypothesis"},
+}
 
 
 def sha256(raw):
@@ -30,9 +40,8 @@ def sha256(raw):
 def check_algorithm(source):
     """靜態限制降低資訊外洩；不宣稱 Python 同程序隔離。"""
     tree = ast.parse(source)
-    allowed_modules = {"math", "statistics", "decimal", "fractions", "random",
-                       ENGINE_ROOT.replace("/", ".") + ".lean_algo.rules",
-                       ENGINE_ROOT.replace("/", ".") + ".lean_algo.framework"}
+    allowed_modules = set(ALGORITHM_MEMBERS)
+    parents = {child: node for node in ast.walk(tree) for child in ast.iter_child_nodes(node)}
     imports, random_classes, class_names = {}, set(), set()
     denied_names = {"open", "exec", "eval", "compile", "__import__", "getattr", "setattr",
                     "delattr", "globals", "locals", "vars", "dir", "type", "object",
@@ -60,7 +69,7 @@ def check_algorithm(source):
                 if node.level or node.module not in allowed_modules:
                     raise ValueError("不允許的匯入")
                 for alias in node.names:
-                    if alias.name.startswith("_") or alias.name == "*":
+                    if alias.name not in ALGORITHM_MEMBERS[node.module]:
                         raise ValueError("不允許的匯入名稱")
                     if node.module.endswith(".framework") and alias.name != "R8Hypothesis":
                         raise ValueError("只可匯入假說介面")
@@ -72,6 +81,8 @@ def check_algorithm(source):
                 for alias in node.names:
                     if alias.name not in allowed_modules or alias.name.endswith(".framework"):
                         raise ValueError("不允許的匯入")
+                    if "." in alias.name and not alias.asname:
+                        raise ValueError("規則模組須使用明確別名")
                     imports[alias.asname or alias.name.split(".")[0]] = alias.name
         if isinstance(node, (ast.Global, ast.Nonlocal)):
             raise ValueError("禁止 global/nonlocal")
@@ -84,6 +95,19 @@ def check_algorithm(source):
         if isinstance(node, ast.Name) and (
                 node.id in denied_names or node.id.startswith("__")):
             raise ValueError("禁止動態存取或檔案操作")
+        if isinstance(node, ast.Name) and node.id in imports:
+            parent = parents.get(node)
+            if not (isinstance(parent, ast.Attribute) and parent.value is node
+                    and parent.attr in ALGORITHM_MEMBERS[imports[node.id]]):
+                raise ValueError("禁止模組轉匯入或別名轉移")
+            if imports[node.id] == "random":
+                call = parents.get(parent)
+                if not isinstance(call, ast.Call) or call.func is not parent:
+                    raise ValueError("亂數建構函式不可轉交")
+        if isinstance(node, ast.Name) and node.id in random_classes:
+            parent = parents.get(node)
+            if not isinstance(parent, ast.Call) or parent.func is not node:
+                raise ValueError("亂數建構函式不可轉交")
         if isinstance(node, ast.Call):
             func = node.func
             random_call = isinstance(func, ast.Name) and func.id in random_classes
@@ -179,6 +203,23 @@ def algorithm_config(config):
     return canonical({k: v for k, v in config.items() if k != "mode"})
 
 
+def serialize_model(artifact):
+    """序列化集中於主機端；純規則不依賴帳本，canonical 仍只有一份。"""
+    if not isinstance(artifact, dict) or set(artifact) != {"params", "model"}:
+        raise ValueError("模型須含 params 與 model")
+    raw = canonical(artifact)
+    return raw, sha256(raw)
+
+
+def deserialize_model(raw, expected_sha256):
+    if sha256(raw) != expected_sha256:
+        raise ValueError("模型雜湊不符")
+    value = json.loads(raw)
+    if serialize_model(value)[0] != raw:
+        raise ValueError("模型非標準化 JSON")
+    return value
+
+
 def trial_lookup(ledger_directory):
     """先確認已有帳本，避免 ResearchLedger 建構函式建立新帳。"""
     root = Path(ledger_directory)
@@ -220,6 +261,9 @@ def validate_config(config, materialization, query=None):
         if not window["start"] <= fit["start"] < fit["end"] <= score["start"] < score["end"] <= window["end"]:
             raise ValueError("摺表越出物化視窗")
     mode = config["mode"]
+    if config["model_artifact"] is not None and (config["folds"] or mode != "validation"):
+        # 本版尚未啟用 holdout；外部模型只供無摺表的構造評分檢查。
+        raise ValueError("外部模型不得跳過樣本外或擬合執行")
     if mode == "validation":
         if config["trial_id"] is not None or config["algorithm"] != {"path": EXAMPLE, "class": "FixedSchedule"}:
             raise ValueError("validation 只允許固定範例且 trial_id 為 null")
@@ -442,7 +486,7 @@ def execute(config, materialization, out, *, repo, query=None, ledger=None,
     if config["model_artifact"] is not None:
         model = config["model_artifact"]
         raw = safe_file(model_root or repo, model["path"]).read_bytes()
-        rules.deserialize_model(raw, model["sha256"])
+        deserialize_model(raw, model["sha256"])
         write_identical(prepared / "models" / model["path"], raw)
     out.mkdir(parents=True)
     started = rules.milliseconds(datetime.now(timezone.utc))

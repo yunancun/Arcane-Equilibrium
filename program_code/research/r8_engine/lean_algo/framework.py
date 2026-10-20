@@ -11,6 +11,7 @@ import sys
 sys.path.insert(0, "/r8/src")
 from program_code.research.r8_engine.lean_algo import rules
 from program_code.research.r8_engine.lean_algo.rules import R8Hypothesis
+from program_code.research.r8_engine.lean_runner import serialize_model, deserialize_model
 from program_code.research.r8_ledger.ledger import canonical
 
 
@@ -98,7 +99,9 @@ class R8Algorithm(QCAlgorithm):
         if not issubclass(self._hypothesis_class, R8Hypothesis):
             raise ValueError("假說必須繼承 R8Hypothesis")
         model = self._config["model_artifact"]
-        self._loaded_model = None if model is None else rules.deserialize_model(
+        if model is not None and (self._config["folds"] or not self._info["validation_example"]):
+            raise ValueError("模型不得跳過逐折擬合")
+        self._loaded_model = None if model is None else deserialize_model(
             (Path("/r8/models") / model["path"]).read_bytes(), model["sha256"])
         self._funding_schedule = {}
         for name in self._info["symbols"]:
@@ -259,7 +262,7 @@ class R8Algorithm(QCAlgorithm):
                                             fold["fit_window"], fit_data, self._config["strategy"], self._config["cost"])
                     self._fitted[index] = result
                     artifact = result["artifact"]
-                    raw, digest = rules.serialize_model(artifact) if artifact is not None else (None, None)
+                    raw, digest = serialize_model(artifact) if artifact is not None else (None, None)
                     if raw is not None:
                         (self._output / "model.json").write_bytes(raw)
                     elif (self._output / "model.json").exists():
