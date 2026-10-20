@@ -10,6 +10,11 @@ import sys
 
 import pytest
 
+# 受控 pytest 不保留工作目錄；明確載入同一提交中的來源套件。
+REPO_ROOT = str(Path(__file__).resolve().parents[3])
+if REPO_ROOT not in sys.path:
+    sys.path.append(REPO_ROOT)
+
 from program_code.research.r8_data import public_data as mod
 
 
