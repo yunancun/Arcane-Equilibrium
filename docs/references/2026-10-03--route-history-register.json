@@ -402,14 +402,18 @@
       "meaning": "amendment 2 with the second 2026-10-18 note in N3 (RH-20261018-02): tick trade archives of the top ten symbols since listing downloaded to NAS storage, not used by generation one; body N1-N9 unchanged"
     },
     "r8-stage2-dispatch-r4": {
-      "kind": "recorded_file",
+      "kind": "git_blob",
       "path": "docs/execution_plan/2026-10-14--r8-stage2-local-research-dispatch.md",
+      "commit": "075439bbbed7a659b77108e9b43b055a1f5947f7",
+      "blob": "abfc3baa1b5d97149f8d1048db34d3d3778c9477",
       "sha256": "553d6c40236451a7acf593ec8cf3e4c4f4d12c2b76fd261e1eb0d92bc22df9e2",
       "meaning": "stage 2 dispatch with the second 2026-10-18 note in section 4 (RH-20261018-02): consented tick archive download, top-ten ranking by trailing 365-day turnover, download tool requirements and preconditions; instruction only"
     },
     "r8-amendment-2-r7": {
-      "kind": "recorded_file",
+      "kind": "git_blob",
       "path": "docs/decisions/2026-10-14--r8-amendment-2-multi-strategy-first-loop.md",
+      "commit": "ed51102676af85905b2f208c81762daafd0853ad",
+      "blob": "8c05b2e4dd6b2cee23f8cfc31edcf54c1316f07a",
       "sha256": "f105f656fce41d4fccdd3a3d02059af38223e7acec234f6a27495a45bc70a465",
       "meaning": "amendment 2 with the 2026-10-19 note in N2 (RH-20261019-01): the P1 selection check ran a simple non-hypothesis strategy as the stage 2 dispatch specified; the Operator accepted the recorder reading of the N2 wording and LEAN is selected; body N1-N9 unchanged"
     },
@@ -418,6 +422,26 @@
       "path": "docs/execution_plan/2026-10-19--r8-stage2-p1-engine-selection-record.md",
       "sha256": "b4ee55b8381962921342a86927127d3c4cab2507ca210dd36bab9f63e88e1760",
       "meaning": "stage 2 P1 engine selection record: P1a environment and P1b data-contract check of LEAN on the BTCUSDT training segment, reconciliation against U1, independent E4 verification, four findings and two notes for P4, tick capability on synthetic ticks, timing, the N2 wording drift and the Operator ruling; check record only"
+    },
+    "r8-stage2-dispatch-r5": {
+      "kind": "git_blob",
+      "path": "docs/execution_plan/2026-10-14--r8-stage2-local-research-dispatch.md",
+      "commit": "ed51102676af85905b2f208c81762daafd0853ad",
+      "blob": "0918711b9dfe2786bb1052fb110e40a95db65d65",
+      "sha256": "6541aa917aaed439f8d36190f01d27fbd314991e18a5d57c6ba2749667ee2a17",
+      "meaning": "stage 2 dispatch with section 8 (first P3 fetch results, delisted-symbol window defect, U1 second fix confirmed by the Operator on 2026-10-20) and section 8.7 (independent publication of the fix); instruction only"
+    },
+    "r8-amendment-2-r8": {
+      "kind": "recorded_file",
+      "path": "docs/decisions/2026-10-14--r8-amendment-2-multi-strategy-first-loop.md",
+      "sha256": "4a3f0cfb491959dd495f1a508cfdbd0a6f48e52946e2d0033ca05b6a14eb1b28",
+      "meaning": "amendment 2 with the 2026-10-20 notes in N3 and N5 (RH-20261020-01): directory-listing check of the delisted universe consented; in-fold automatic grid selection counted as one trial; BY at FDR 0.10; body N1-N9 unchanged"
+    },
+    "r8-stage2-p4-addendum": {
+      "kind": "recorded_file",
+      "path": "docs/execution_plan/2026-10-20--r8-stage2-p4-research-core-addendum.md",
+      "sha256": "2210378a894086a8bccc585565c2f0d14ee4ee714ad433ccabe338243cc9db4a",
+      "meaning": "stage 2 P4 addendum: research core units U4-U6, recorder event checks, and the QC-drafted methodology parameters with the Operator rulings of 2026-10-20; instruction only"
     }
   },
   "routes": [
@@ -586,7 +610,10 @@
         "r8-amendment-2-r6",
         "r8-stage2-dispatch-r4",
         "r8-amendment-2-r7",
-        "r8-stage2-p1-record"
+        "r8-stage2-p1-record",
+        "r8-stage2-dispatch-r5",
+        "r8-amendment-2-r8",
+        "r8-stage2-p4-addendum"
       ],
       "status_history": [
         {
@@ -711,6 +738,11 @@
           "recorded_on": "2026-10-19",
           "event": "RH-20261019-01",
           "note": "engine selection finalised as LEAN after the Operator accepted the recorder reading of the N2 wording; record_status unchanged"
+        },
+        {
+          "recorded_on": "2026-10-20",
+          "event": "RH-20261020-01",
+          "note": "P4 methodology rulings (in-fold grid selection counted as one trial, BY at FDR 0.10) and consent to check the delisted universe against the public trading directory listing; record_status unchanged"
         }
       ]
     }
@@ -1689,6 +1721,46 @@
         }
       },
       "meaning": "N2 says the one-day selection check runs open-source LEAN on one hypothesis with N3 data; the stage 2 dispatch implemented P1b as a simple strategy that is not a hypothesis trial and is not counted in the trial ledger. The recorder recorded this as drift, reasoning that running a real hypothesis before P5 preregistration would look at results before registering it. The Operator accepted this reading and the generation-one engine is LEAN (option B). Recorder implementation, not confirmed by the Operator: the hypothesis-related parts of the research path (indicator warm-up, decision after close with fill at the next open, holdout reads through the U2 open) are checked by the P4 event-level checks with constructed data before any hypothesis trial. No Linux, database, account, spend, runtime or trading authority is granted."
+    },
+    {
+      "id": "RH-20261020-01",
+      "recorded_on": "2026-10-20",
+      "event_type": "open_item_decided",
+      "route_ids": [
+        "R8"
+      ],
+      "follows": "RH-20261019-01",
+      "decision_ref": "docs/decisions/2026-10-14--r8-amendment-2-multi-strategy-first-loop.md",
+      "authority_source": "Operator selections in current chat on 2026-10-20 (Asia/Shanghai) among options drafted by QC and relayed by the recorder; the remaining P4 methodology parameters were drafted by QC and integrated by the recorder without separate Operator rulings",
+      "operator_excerpt": [
+        "接受 QC 解讀 (Recommended)",
+        "BY，FDR 0.10 (Recommended)",
+        "同意 (Recommended)"
+      ],
+      "prior_record_identity": {
+        "amendment": {
+          "commit": "ed51102676af85905b2f208c81762daafd0853ad",
+          "path": "docs/decisions/2026-10-14--r8-amendment-2-multi-strategy-first-loop.md",
+          "blob": "8c05b2e4dd6b2cee23f8cfc31edcf54c1316f07a",
+          "sha256": "f105f656fce41d4fccdd3a3d02059af38223e7acec234f6a27495a45bc70a465",
+          "availability": "main at recording time"
+        },
+        "dispatch": {
+          "commit": "ed51102676af85905b2f208c81762daafd0853ad",
+          "path": "docs/execution_plan/2026-10-14--r8-stage2-local-research-dispatch.md",
+          "blob": "0918711b9dfe2786bb1052fb110e40a95db65d65",
+          "sha256": "6541aa917aaed439f8d36190f01d27fbd314991e18a5d57c6ba2749667ee2a17",
+          "availability": "main at recording time"
+        },
+        "todo": {
+          "commit": "ed51102676af85905b2f208c81762daafd0853ad",
+          "path": "TODO.md",
+          "blob": "9367cdced763d33cf22394bbaa077c7f01a6058c",
+          "sha256": "5949473a691e9585ac8c49661ebef6062be9a68af219c3772ea3ea04119e99ca",
+          "availability": "main at recording time"
+        }
+      },
+      "meaning": "Three Operator selections for the P4 addendum: amendment 2 N5 \"every structural choice and parameter variant counts as a trial\" is implemented by counting one automatic in-fold grid selection (at most 20 variants, past data only) as one trial while every researcher-chosen grid, structure or procedure is a separate trial; multiple testing uses Benjamini-Yekutieli at FDR 0.10 without claiming PRDS; and the recorder may read the public trading directory listing, without downloading data files, to check the completeness of the delisted universe. Until that check passes, cross-sectional or symbol-screened hypotheses still cannot be recorded as candidates. No Linux, database, account, spend, runtime or trading authority is granted."
     }
   ],
   "external_provenance": [
@@ -1729,5 +1801,5 @@
       "portable_summary": "docs/decisions/2026-10-08--r8-amendment-1-first-loop-on-native-replay.md"
     }
   ],
-  "last_event_recorded_on": "2026-10-19"
+  "last_event_recorded_on": "2026-10-20"
 }

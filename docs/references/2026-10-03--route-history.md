@@ -162,5 +162,7 @@ Route-Id 是本歷史命名空間。這些都不能互相當成完整產品版�
   排名、期間與下載工具的要求由記錄者寫在派工指令 §4。不授予 Linux、資料庫、帳戶、支出或任何效果。
 - **RH-20261019-01／open_item_decided**：P1 選型查核以不是假說試驗的簡單策略執行，與 N2 字面「對一個假說」不同；記錄者記為 DRIFT。Operator 接受此解讀，第一圈的實驗引擎定為 LEAN。
   查核紀錄見 `docs/execution_plan/2026-10-19--r8-stage2-p1-engine-selection-record.md`。不授予 Linux、資料庫、帳戶、支出或任何效果。
+- **RH-20261020-01／open_item_decided**：P4 補充指令的兩項方法論裁決：折內自動網格選擇算一個試驗；多重檢驗採 BY、FDR 0.10。另同意讀取交易所逐筆成交的目錄清單，核對下架品種清單的完整性。
+  其餘參數由 QC 起草，見 `docs/execution_plan/2026-10-20--r8-stage2-p4-research-core-addendum.md` §9。不授予 Linux、資料庫、帳戶、支出或任何效果。
 - 新路線、採納、撤回、取代及更正按 [決策規則](../decisions/2026-10-03--route-history-versioning.md)
   追加事件；現行派工及效果授權仍回 TODO 與既有 ADR/AMD。
