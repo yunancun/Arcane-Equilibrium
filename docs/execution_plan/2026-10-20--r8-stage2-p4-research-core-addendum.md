@@ -264,7 +264,8 @@
    - 下架：在 `deliveryTime` 依 `rules.py` 平倉，記為下架結算；之後拒絕對該品種下單；
    - §3.8 的資訊限制與下單函式覆寫；
    - 子類別只實作 `on_fit(fit_window, data)` 與 `on_decision(time, data)`，後者回傳各標的的目標權重；框架負責換算、作廢判定與下單；
-   - 模型檔：擬合執行中，框架把最後一次 `on_fit` 的回傳值以標準化 JSON 寫成模型檔並記錄 SHA-256（`run_config` 的 `model_artifact`）；評分執行中，框架核對模型檔的 SHA-256，載入後交給子類別，不呼叫 `on_fit`。
+   - 模型檔：擬合執行中，框架把最後一次 `on_fit` 的回傳值以標準化 JSON 寫成模型檔並記錄 SHA-256；評分執行中，框架依 `run_config` 的 `model_artifact` 核對模型檔的 SHA-256，載入後交給子類別，不呼叫 `on_fit`。
+     模型檔是執行的產物，不屬於試驗身份（§7.0）；`on_fit` 必須是確定性的（給定資料、參數與 `random_seed`），使記錄者可以重跑擬合並得到同一個雜湊。
      假說的演算法本身不讀寫檔案（§3.8）；
    - 執行中寫出原始紀錄（JSON Lines）；`run.json` 由主機端的執行器組裝（第 4 點）。部位只記非零值。
 3. **範例演算法** `examples/fixed_schedule.py`：在設定指定的時刻設定指定的目標權重或固定數量（類似 P1b 的固定時點策略），供 §8 的檢查使用；不是假說。
@@ -310,7 +311,8 @@
    主試驗的物化視窗是整個樣本外範圍（§7.0），各折擬合窗都在其中；holdout 證偽試驗的擬合窗為 [訓練段起點, 驗證段終點)（§9.10），由擬合執行的物化提供。
 4. **成本壓力重算**（§9.8.2）：以同一次執行的決策與部位、部位不變，以壓力參數重算成本與淨報酬序列（結果是近似，部位不隨成本調整）；彙整各情境的淨結果、成本佔比與損益兩平的滑點倍數，供試驗紀錄的 `result_summary` 使用。
 5. **提交帳本。** `submit` 子命令是唯一的提交途徑：它重新核對物化 manifest、執行紀錄、獨立重算報告與序列檔的雜湊與彼此的綁定，確認重算報告為通過，然後才呼叫 `ResearchLedger.finish_trial`，
-   並在 `result_summary` 寫入 `provenance`：{`materialization_sha256`, `run_sha256`, `recompute_report_sha256`, `series_sha256`, `sidecar_sha256`, `recompute_passed`}。
+   `out_of_sample` 試驗另須傳入第 3 點產生的 `beta_matched_btc_v1` 序列：`submit` 核對它由同一份執行紀錄與物化產生（雜湊綁定記在旁註檔），以帳本要求的 `baselines` 參數傳給 `finish_trial`。
+   並在 `result_summary` 寫入 `provenance`：{`materialization_sha256`, `run_sha256`, `recompute_report_sha256`, `series_sha256`, `baseline_sha256`, `sidecar_sha256`, `model_artifact_sha256`（holdout 證偽試驗；其他為 null）, `recompute_passed`}。
    帳本本身不檢查這個欄位（不改 U2）；落實方式是：第一代各批試驗結束、提交帳本鏈頭時，記錄者逐一核對每個試驗的 `provenance`，並由保存的檔案重跑一次 `recompute`；缺 `provenance` 或重跑不符的試驗，在報告中判為無效，不得計為候選成立。
    因此執行紀錄、物化 manifest 與重算報告都以內容雜湊為檔名保存，供核對。
 6. 命令列：`python -m program_code.research.r8_engine.series <子命令>`，子命令與參數：
@@ -318,7 +320,7 @@
    - `series --materialization <檔> --run <run.json> --recompute <報告> --out <序列檔>`；
    - `baseline --materialization <檔> --run <run.json> --folds <摺表檔> --out <目錄>`；
    - `stress --materialization <檔> --run <run.json> --scenarios <設定檔> --out <摘要>`；
-   - `submit --ledger <帳本目錄> --trial <試驗代號> --materialization <檔> --run <run.json> --recompute <報告> --series <序列檔> --sidecar <旁註檔> [--status completed|failed|aborted]`。
+   - `submit --ledger <帳本目錄> --trial <試驗代號> --materialization <檔> --run <run.json> --recompute <報告> --series <序列檔> --sidecar <旁註檔> [--baseline <beta_matched_btc_v1 序列檔>] [--model-artifact <模型檔>] [--status completed|failed|aborted]`。
 
 **測試**（全部離線，以構造的物化輸出與執行紀錄）：
 - 第 0 點：任一檔案雜湊不符時拒絕；
@@ -326,7 +328,7 @@
 - 第 2 點：§3.9 的 G1 至 G8 逐位重現；改動執行紀錄中的一筆成交價、數量、手續費、作廢原因、一筆資金費或一個權益值，比對都能抓到；
 - 第 3 點：`btc_perp_hold_v1` 的輸出確定且雜湊穩定；`beta_matched_btc_v1` 的貝塔不使用測試窗的資料（以只在測試窗變動的資料驗證）；少於 90 個日觀測時取中位數；
 - 第 4 點：壓力重算的數值與損益兩平倍數；
-- 第 5 點：重算報告未通過、任一雜湊或綁定不符時拒絕提交且不寫入帳本；通過時寫入的 `provenance` 正確（以構造的帳本測試）；
+- 第 5 點：重算報告未通過、任一雜湊或綁定不符時拒絕提交且不寫入帳本；`out_of_sample` 試驗缺基準序列或基準不是由同一執行產生時拒絕；通過時寫入的 `provenance` 正確，且帳本接受提交（以構造的帳本，含已登記的 `beta_matched_btc_v1` 基準測試）；
 - 總曝險：執行紀錄中某一步超過 `gross_exposure_cap` 時拒絕產生序列；
 - AST 檢查。
 
@@ -347,14 +349,19 @@
   - `model_artifact`：擬合執行為 null；評分執行為 `{"path", "sha256"}`；
   - `strategy`：假說的參數（標準化後）。
 - 與帳本的對應：`run_config` 的 `cost` 對應試驗身份中 `configuration` 的 `cost_model_parameters`，`strategy` 對應 `strategy_parameters`；`time_semantics` 寫明可知時刻、成交時刻與 `simulated_latency_ms: 0`。
-- 物化：每次執行使用一份物化。主試驗與探索性樣本外試驗的物化視窗是整個樣本外範圍；holdout 證偽試驗分兩次執行：擬合執行物化 [訓練段起點, 驗證段終點)，輸出模型檔，其 SHA-256 寫入試驗的 `configuration`；評分執行物化該 holdout 區間（加暖機）。
+- 物化：每次執行使用一份物化。主試驗與探索性樣本外試驗的物化視窗是整個樣本外範圍；holdout 證偽試驗分兩次執行：擬合執行物化 [訓練段起點, 驗證段終點)，輸出模型檔；評分執行物化該 holdout 區間（加暖機）。
+- 試驗身份與執行產物分開：帳本在 `begin_trial` 時凍結試驗身份，`finish_trial` 不能修改。因此：
+  - `begin_trial` 必須在該試驗的任何執行（包括擬合執行）之前呼叫；
+  - 試驗身份的 `configuration` 只取 `run_config` 的 `strategy` 與 `cost`，不含 `materialization_sha256`、`model_artifact` 等執行期產物；
+  - 擬合執行輸出的模型檔雜湊與各次執行的雜湊，由 U6 的 `submit` 寫入 `result_summary.provenance`（§6 第 5 點）；
+  - 記錄者批次核對時重跑擬合，模型檔雜湊不符即判該試驗無效。
 
 ### 7.1 物化 manifest `materialization.json`（U4 產生；U5、U6 讀取）
 
 `schema_version`（`r8_materialization_v1`）、`u1_manifest_sha256`、`u1_tool_version`、`ledger_id`、`hypothesis_id`、`generation`、
 `window`（{`start`, `end`}）、`warmup`（{`start`, `end`}）、`readable`（§4 第 1 點的查詢結果）、`symbols`（清單）、
 `files`（相對路徑 → {`sha256`, `rows`, `first`, `last`, `source_file`, `source_sha256`}，含 `lean/`、`custom/` 與 `source/` 下的全部檔案）、
-`gaps`（標的 → 資料集 → 缺漏區間清單）、`first_bar`（標的 → 時刻或 null）、`delistings`（標的 → {`deliveryTime`, `partial_last_bar`}）、
+`gaps`（標的 → 資料集 → 缺漏區間清單）、`first_bar`（標的 → 時刻或 null）、`funding_interval_ms`（標的 → instruments-info 的現行間隔，供邊緣空白的估計）、`delistings`（標的 → {`deliveryTime`, `partial_last_bar`}）、
 `symbol_properties_overlay_sha256`、`limitations`（字串清單）、`created_at`。
 
 ### 7.2 執行紀錄 `run.json`（U5 的執行器組裝；U6 讀取）
@@ -595,6 +602,8 @@ EV-10 至 EV-12 只用訓練段的真實資料，以範例演算法的固定時�
 **9.8.7 資金費紀錄的空白**
 - 空白：相鄰兩筆資金費紀錄的間隔，大於前一段與後一段實際間隔中的較大者。只依可讀範圍內的紀錄判定；在可讀範圍的右緣只和前一段比較。
 - 在可讀範圍的左緣只和後一段比較。
+- 物化邊界：可讀範圍不含邊界外的紀錄，所以跨越邊界的空白只能單側估計。若可讀範圍起點到第一筆紀錄、或最後一筆紀錄到可讀範圍終點的距離，大於最近一段實際間隔（只有一筆紀錄時，用 instruments-info 的現行間隔，U4 記入 manifest、策略不可見），
+  這一段視為邊緣空白：以最近一段間隔推算估計的時刻，估計費率取最近一筆紀錄費率的絕對值，且不低於 0.01%，照常乘以 δ；該期計為填補期。沒有任何紀錄時，以 0.01% 與現行間隔估計。
 - 有部位跨過空白時，在空白中估計 n = max(1, round_half_up(間隔 ÷ min(前一段間隔, 後一段間隔)) − 1) 筆不利的資金費（四捨五入用 `ROUND_HALF_UP`，不用 Python 的 `round`），時刻為前一筆時刻加上 k × min(前一段間隔, 後一段間隔)（k = 1 至 n）；
   估計費率取空白前後兩筆紀錄費率絕對值的較大者，且不低於 0.01%，照常乘以 δ；該期依 9.14 計為填補期。
 
@@ -625,7 +634,7 @@ EV-10 至 EV-12 只用訓練段的真實資料，以範例演算法的固定時�
 ### 9.10 在 holdout 上評估哪一個模型（第 10 項）
 
 - 沿用主試驗的同一套程序（包括 9.2 的網格與選擇規則），不沿用最後一折選出的數值。
-- 擬合窗為整個樣本外範圍 [2020-01-01, 2026-01-01)，標籤終點不得晚於 2026-01-01；以此重新選擇、擬合一次（§7.0 的擬合執行），在 holdout 上評估；選出的數值與模型檔的 SHA-256 記入試驗紀錄。
+- 擬合窗為整個樣本外範圍 [2020-01-01, 2026-01-01)，標籤終點不得晚於 2026-01-01；在 `begin_trial` 之後以此重新選擇、擬合一次（§7.0 的擬合執行），在 holdout 上評估；選出的數值與模型檔的 SHA-256 記入試驗的 `result_summary`（不是試驗身份）。
 - 理由：這就是走動式的下一折，日後在 Demo 上運行的也是這套程序以最新資料擬合的模型；帳本要求 `holdout_falsification` 的變體參數雜湊與主試驗相同，程序寫在變體參數內，兩者一致。
 - 第二代的模型同樣只用到 2026-01-01 為止的資料，不得用第一段 holdout；它在第二段 holdout 評估時，模型已有約 4.5 個月的時差，回報時標示。
 
@@ -658,6 +667,9 @@ U6 `submit` 的 `provenance` 經記錄者核對與重算相符（§6 第 5 點�
    帳本在第一段開啟之後，對第二代的每一種試驗（包括 holdout 證偽）都只接受已列入計畫的身份（9.16 第 3 點），因此第二代主試驗的試驗代號要事先決定，並寫入證偽項的 `primary_trial_id`。
 3. 計畫在 `close_generation(1)` 之後提交，不影響第一代的 K；第二代結算時，K 含第一代全部試驗與第二代計畫中的全部非 holdout 項。
 4. 第一段開啟之後，第二代不能再作計畫外的搜尋；計畫的規模宜控制在每個假說 20 項以內。
+5. **前提（尚未滿足）**：帳本的 `commit_trial_plan` 只比對變體參數雜湊、`evaluation_kind`、`role`、譜系親代、資料窗與主試驗代號（`ledger.py` 的計畫欄位），不比對程式 commit、`configuration` 雜湊、成本／成交／引擎版本、manifest 與資料檔雜湊、相依套件與隨機種子。
+   看過第一段 holdout 之後，研究者可以在計畫允許的身份下改動這些欄位，資訊流規則因此不成立。
+   在帳本補上完整身份的比對之前，不得提交第二代的試驗計畫。補上比對是帳本（U2）的行為變更，另立單元，須 Operator 確認新的交付身分；在第一代主試驗結束之前完成。
 
 ### 9.13 區塊自助法（第 13 項）
 
@@ -692,7 +704,7 @@ U6 `submit` 的 `provenance` 經記錄者核對與重算相符（§6 第 5 點�
 
 1. 帳本只要求同世代的多重檢驗（含成員）、Sharpe 頻率與基準相同；不比對 `oos_protocol` 與 `falsification_rule`。9.5 的共用協定與 9.9 的共用 z，只能靠 P5 的覆閱落實。
 2. 某假說的主試驗一開始，帳本即拒收該假說新的 `in_sample` 與 `out_of_sample` 試驗；帳本的合格判定也不含壓力、行情、樣本量條件。因此壓力只能在主試驗結束之前以重算算出（9.8.2），附加條件在帳本之外判定（9.12）。
-3. 第一段開啟之後，計畫檢查適用於第二代的每一種試驗，包括 `holdout_falsification`；階段 2 派工指令 §7.4 第 4 點的文字沒有寫明這一後果（9.12）。
+3. 第一段開啟之後，計畫檢查適用於第二代的每一種試驗，包括 `holdout_falsification`；階段 2 派工指令 §7.4 第 4 點的文字沒有寫明這一後果（9.12）。計畫只比對部分身份欄位，是第二代的前提缺口（9.12 第 5 點）。
 4. T_eff 的上限與以 UTC 紀元對齊的期數網格，限制了頻率與邊界的選擇：週頻的期初是星期四；各折邊界不對齊時，每折頭尾不足一期的損益不進入序列，可能隱藏虧損。9.1 的邊界依此選定。
 5. 第二段 holdout 的起點後移 max(空窗, 最長回看)：回看不超過 13 日時仍有 18 週；30 日時剩 15 週；60 日時剩 11 週。
    §3.6 要求最長回看不小於 13 日（流動性分級），第二代宜把回看限在 13 日，或在預登記時寫明縮短後的長度。
