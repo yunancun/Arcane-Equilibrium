@@ -106,6 +106,7 @@
 - **時間步權益**：上述第 4 步記錄的值，用於 LEAN 與 U6 的逐步比對；U6 依同一順序（含「恰在 s 的資金費在下一步計入」）重建。
 - **期初權益 E(s)**：帳本序列用的值，由 U6 依時間戳計算：含部位變動時刻早於 s 的全部成交、結算時刻不晚於 s 的全部資金費，以結束於 s 的 K 線收盤價計價；以 s 的開盤價成交的那一筆（含其手續費與滑價）屬於從 s 開始的那一期。
   帳本序列只以 U6 計算的 E(s) 產生，不依賴 LEAN 在每個期初都有時間步（§6 第 1 點）。
+- 計分窗終點 e 的例外：E(e) 另含種類為 `score_end_liquidation`、部位變動時刻為 e 的成交（§3.5 的平倉成本），使它計入最後一期；測試涵蓋終點仍有部位的情形。
 - 結算時刻恰為執行終點的那一筆，LEAN 沒有下一個時間步可計入；它只進入 U6 依時間戳計算的 E(終點)，時間步權益與期末權益的比對都不含它，執行紀錄註明。
 - 決策時換算目標權重所用的權益（§3.7）是第 2 步時的時間步權益，不含恰在 s 的資金費；U6 依此重算。下架結算的成交，部位變動時刻記為 `deliveryTime`。
 
@@ -123,6 +124,7 @@
   否則 LEAN 的權益會先扣除一筆估計的平倉手續費，與重算不一致（PA 已確認）。
 - 滑價以基點表示，對買單加價、對賣單減價，作用在開盤價上；依決策時可知的流動性分級（§9.8.2）。成交價不取整到最小跳動單位。
 - 數量：由目標權重換算後向零取整到 `qtyStep`。變動量小於 `minOrderQty` 時作廢，原因 `min_qty`；全部平倉例外，一律執行。
+- 每個標的同時至多一筆未成交的訂單：新的決策到來時，先取消該標的尚未成交的訂單，再以實際部位（不含未成交的訂單）計算差額並下單；取消記入執行紀錄。U6 依同一規則重算。
 - 反手（部位跨過 0）拆成兩段：減少曝險的一段一律執行，增加曝險的一段依 §9.8.2 判定是否作廢。
 - 增加曝險的訂單依 §9.8.2 作廢；減少曝險的訂單在「不可開倉」等級或超過單筆上限時，以懲罰滑價成交，記為 `forced_reduce_penalty`。
 - LEAN 拒絕任何訂單（例如保證金不足），即視為該次執行失敗。
@@ -151,7 +153,8 @@
 - 策略以目標權重表示部位：權重 = 帶正負號的名目 ÷ 決策時的權益；換算以決策時最後一根已收盤 K 線的收盤價為準。
 - 初始資金 100,000 USDT（§9.0 第 2 點）；各標的槓桿設為 10 倍，使購買力在總曝險 1 倍以內不構成限制。
   各假說的總曝險上限在預登記時寫明，不得超過 1 倍；需要更高時另行說明並經量化方法論審查。
-- 總曝險上限以 `gross_exposure_cap` 傳入執行設定。每次決策後，框架以取整與作廢之後的目標部位計算總曝險 Σ|名目| ÷ 權益；超過上限即中止該次執行並標記失敗，不縮放、不部分執行。U6 以同一規則重算，執行紀錄中任何一步超過上限即拒絕產生序列。
+- 總曝險上限以 `gross_exposure_cap` 傳入執行設定。每次決策後，框架以取整與作廢之後的目標部位、**決策時的價格**（換算數量所用的收盤價）與決策時的權益計算總曝險 Σ|數量 × 決策價| ÷ 權益；超過上限即中止該次執行並標記失敗，不縮放、不部分執行。
+  U6 以同一規則、同樣的決策時價格重算。成交價與決策價的差異造成的實際曝險超出不構成失敗，只報告每一步的實際最大總曝險。
 - 觸發 LEAN 的追加保證金或強制平倉，即視為該次執行失敗。
 - 未實現損益以時點或之前最後一根已收盤 K 線的收盤價計價。一期的淨報酬 = E(期末) ÷ E(期初) − 1；手續費、滑價與資金費都已含在權益內。
 
@@ -190,7 +193,7 @@
 1. **帳本的唯讀查詢 `ResearchLedger.data_access(hypothesis_id)`。**
    - 與 `verify_heads` 相同，只取 `_lock` 並以 `_read` 驗證三本帳的鏈接；不呼叫 `_write_lock`，不寫入任何紀錄。
    - 呼叫者必須確認帳本目錄與 `ledger_id.json` 已存在，才建構 `ResearchLedger`（建構函式在兩者不存在時會建立它們）；不存在即拒絕。
-   - 回傳：該假說登記的世代；登記紀錄的 `time_splits`；樣本外範圍 [time_splits[0].start, time_splits[1].end)；`max_lookback_seconds`；
+   - 回傳：該假說登記的世代；登記紀錄的 `time_splits` 與 `selection`；樣本外範圍 [time_splits[0].start, time_splits[1].end)；`max_lookback_seconds`；
      本世代 holdout 的狀態：只有 holdout 帳中有本世代的 `opened` 事件、且其 `intervals` 含本假說時，回傳 `intervals[hypothesis_id]`，否則回傳 null。`denied` 事件一律不計。
    - 假說不存在或已撤回時拒絕。
    - 用途說明（寫入方法的註解）：`open_holdout` 的回傳只在開啟當下取得一次，物化需要可以重複查得同一區間，所以另設這個唯讀查詢；它不改變 `open_holdout` 的規則，也不構成第二次開啟。
@@ -198,7 +201,8 @@
 2. **輸入核對。**
    - `--u1 <U1 輸出目錄>` 與 `--u1-manifest-sha256 <雜湊>`：manifest 的 SHA-256 必須等於傳入值；用到的每一個資料檔，SHA-256 必須等於 manifest 的記錄；
    - manifest 的 `tool_version` 必須是 `r8-public-data-2`（P3b），否則拒絕；
-   - `--ledger <帳本目錄>`、`--hypothesis <假說代號>`、`--window <起點>,<終點>`（UTC，ISO 8601，半開區間）、`--symbols <標的清單檔>`、`--out <輸出目錄>`；
+   - `--ledger <帳本目錄>`、`--hypothesis <假說代號>`、`--window <起點>,<終點>`（UTC，ISO 8601，半開區間）、`--out <輸出目錄>`；
+   - 標的清單不由呼叫者指定：取自預登記紀錄的 `selection.symbols`（P5 規定預登記須在 `selection` 中列出明確的標的清單；橫截面假說列出全部候選標的，時點上的可交易性由框架依首根與下架時間判定）。`data_access` 一併回傳這份清單；預登記沒有 `selection.symbols` 時拒絕。BTCUSDT 另加，只供基準使用、不交給策略；
    - 每次都物化 1 小時 K 線、日線、持倉量、資金費與成交額。BTCUSDT 一律包含在內（基準與行情標示需要）。
 3. **可讀區間**（§3.6）：
    - 要求的視窗必須整段落在樣本外範圍之內，或整段落在本假說已開啟的 holdout 區間之內；否則拒絕，不輸出任何檔案；
@@ -226,7 +230,7 @@
 
 **測試**（全部離線，以構造的 U1 目錄與帳本）：
 - 第 1 點：holdout 未開啟、已開啟但不在候選、已開啟且在候選、只有 `denied` 事件四種情形；第二代查不到第一段；已撤回與不存在的假說被拒；帳本目錄或 `ledger_id.json` 不存在時拒絕且不建立；查詢前後三本帳的位元組不變；
-- 第 2 點：manifest 雜湊、檔案雜湊、工具版本任一不符即拒絕；
+- 第 2 點：manifest 雜湊、檔案雜湊、工具版本任一不符即拒絕；物化的標的等於預登記的 `selection.symbols`（加 BTCUSDT），預登記缺清單時拒絕；
 - 第 3 點：
   - 第 15 折的視窗（2025-07-03 至 2025-10-02，跨過訓練段與驗證段之間的空窗）可以物化；整個樣本外範圍 [2020-01-01, 2026-01-01) 可以物化，暖機落在資料起點之前的部分為空並記入限制；
   - 視窗跨入未開啟的 holdout、暖機跨入另一代的 holdout、`max_lookback_seconds` 小於 13 日，都拒絕且不輸出；
@@ -260,7 +264,7 @@
    - 依 §3.2 的順序：在 `on_data` 中決策、作廢判定、送出訂單、計入資金費（以 `Cash.AddAmount` 調整 USDT 現金；補計所有 T ≤ 現在而尚未計入者）、記錄時間步；
    - 自訂資料（日線、持倉量、資金費、成交額）由框架在初始化時讀入記憶體，依可知時刻提供給策略，不使用 `PythonData`（以免每列一次 Python 呼叫）；
    - 日線決策：LEAN 只訂閱 1 小時 K 線。以日線決策的假說，只在 00:00 UTC 的時間步收到前一日完成的日線並決策，訂單以當時那一根 1 小時 K 線的開盤價（即次日開盤）成交；`run_config` 的 `decision_resolution` 為 `hour` 或 `day`；
-   - 暖機、計分窗與第一代的訓練段規則依 §3.5；`run_config` 帶 `folds`，框架在每折擬合窗終點通知策略重新擬合，並拒絕計分窗外的訂單；
+   - 暖機、計分窗與第一代的訓練段規則依 §3.5；`run_config` 帶 `folds`，框架在每折擬合窗終點呼叫 `on_fit` 取得新模型，但保留到該折計分窗的起點才啟用；在那之前（前一折計分窗的最後 8 日）仍用前一折的模型；並拒絕計分窗外的訂單；
    - 下架：在 `deliveryTime` 依 `rules.py` 平倉，記為下架結算；之後拒絕對該品種下單；
    - §3.8 的資訊限制與下單函式覆寫；
    - 子類別只實作 `on_fit(fit_window, data)` 與 `on_decision(time, data)`，後者回傳各標的的目標權重；框架負責換算、作廢判定與下單；
@@ -299,7 +303,8 @@
 1. **帳本序列。** 由獨立重算的權益（第 2 點）產生階段 2 派工指令 §7.4 格式的序列檔：
    - 期初為計分窗在 Sharpe 頻率上的期數網格（階段 2 派工指令 §7.4 的定義），暖機不計；E(期初) 依 §3.2；
    - `filled_periods` 依 §9.14 計算；
-   - 獨立重算與執行紀錄的比對不通過、執行紀錄標記失敗、出現前值填補，或 `unexplained_cash_residual` 不為 0 時，拒絕產生序列並說明原因。
+   - 執行紀錄為 `completed` 時：獨立重算的比對不通過、出現前值填補，或 `unexplained_cash_residual` 不為 0，即拒絕產生序列並說明原因（這次執行應以失敗提交）。
+   - 執行紀錄為 `failed`、或上述比對不通過時：仍以獨立重算的權益，產生失敗之前已完整的期數的序列（帳本要求 failed 或 aborted 的樣本外試驗在已產生不少於 2 期時附上序列），並在旁註檔標明失敗原因與 `recompute_passed: false`。
 2. **獨立重算。** 自行實作 §3 與 §9.8 的規則，以 `decimal.Decimal` 由原字串計算，不匯入 `rules.py`，也不使用 LEAN 的任何數值；只用 U4 的輸出與執行紀錄中的決策（時刻、標的、目標權重或數量）：
    - 依 §3.2 的順序，重算每筆成交的價格、數量、手續費、作廢與原因、懲罰滑價，每次資金費結算的金額（含空白的判定與估計），下架結算，計分終點的平倉成本，以及每個時間步的現金與權益；
    - 與執行紀錄逐筆、逐步比對，容差依 §9.8.8；另比對期末權益與手續費、資金費的累計值；
@@ -311,8 +316,10 @@
    主試驗的物化視窗是整個樣本外範圍（§7.0），各折擬合窗都在其中；holdout 證偽試驗的擬合窗為 [訓練段起點, 驗證段終點)（§9.10），由擬合執行的物化提供。
 4. **成本壓力重算**（§9.8.2）：以同一次執行的決策與部位、部位不變，以壓力參數重算成本與淨報酬序列（結果是近似，部位不隨成本調整）；彙整各情境的淨結果、成本佔比與損益兩平的滑點倍數，供試驗紀錄的 `result_summary` 使用。
 5. **提交帳本。** `submit` 子命令是唯一的提交途徑：它重新核對物化 manifest、執行紀錄、獨立重算報告與序列檔的雜湊與彼此的綁定，確認重算報告為通過，然後才呼叫 `ResearchLedger.finish_trial`，
+   失敗的試驗同樣經 `submit` 提交：`--status failed` 或 `aborted`，綁定失敗的執行紀錄與物化 manifest，附上第 1 點的部分序列（不足 2 期時不附），不要求重算通過。
    `out_of_sample` 試驗另須傳入第 3 點產生的 `beta_matched_btc_v1` 序列：`submit` 核對它由同一份執行紀錄與物化產生（雜湊綁定記在旁註檔），以帳本要求的 `baselines` 參數傳給 `finish_trial`。
-   並在 `result_summary` 寫入 `provenance`：{`materialization_sha256`, `run_sha256`, `recompute_report_sha256`, `series_sha256`, `baseline_sha256`, `sidecar_sha256`, `model_artifact_sha256`（holdout 證偽試驗；其他為 null）, `recompute_passed`}。
+   完成的主試驗另須傳入第 4 點的壓力摘要：`submit` 核對它由同一份執行紀錄與物化產生，並把其中各情境的結果寫入 `result_summary.stress`（不接受呼叫者另填）。
+   並在 `result_summary` 寫入 `provenance`：{`materialization_sha256`, `run_sha256`, `recompute_report_sha256`, `series_sha256`, `baseline_sha256`, `stress_sha256`, `stress_scenarios`, `sidecar_sha256`, `model_artifact_sha256`（holdout 證偽試驗；其他為 null）, `recompute_passed`}。
    帳本本身不檢查這個欄位（不改 U2）；落實方式是：第一代各批試驗結束、提交帳本鏈頭時，記錄者逐一核對每個試驗的 `provenance`，並由保存的檔案重跑一次 `recompute`；缺 `provenance` 或重跑不符的試驗，在報告中判為無效，不得計為候選成立。
    因此執行紀錄、物化 manifest 與重算報告都以內容雜湊為檔名保存，供核對。
 6. 命令列：`python -m program_code.research.r8_engine.series <子命令>`，子命令與參數：
@@ -320,7 +327,8 @@
    - `series --materialization <檔> --run <run.json> --recompute <報告> --out <序列檔>`；
    - `baseline --materialization <檔> --run <run.json> --folds <摺表檔> --out <目錄>`；
    - `stress --materialization <檔> --run <run.json> --scenarios <設定檔> --out <摘要>`；
-   - `submit --ledger <帳本目錄> --trial <試驗代號> --materialization <檔> --run <run.json> --recompute <報告> --series <序列檔> --sidecar <旁註檔> [--baseline <beta_matched_btc_v1 序列檔>] [--model-artifact <模型檔>] [--status completed|failed|aborted]`。
+   - `submit --ledger <帳本目錄> --trial <試驗代號> --materialization <檔> --run <run.json> [--recompute <報告>] [--series <序列檔>] --sidecar <旁註檔> [--baseline <beta_matched_btc_v1 序列檔>] [--stress <壓力摘要>] [--model-artifact <模型檔>] [--status completed|failed|aborted]`；
+     `completed` 時 `--recompute` 與 `--series` 必填，主試驗另須 `--stress`。
 
 **測試**（全部離線，以構造的物化輸出與執行紀錄）：
 - 第 0 點：任一檔案雜湊不符時拒絕；
@@ -328,7 +336,7 @@
 - 第 2 點：§3.9 的 G1 至 G8 逐位重現；改動執行紀錄中的一筆成交價、數量、手續費、作廢原因、一筆資金費或一個權益值，比對都能抓到；
 - 第 3 點：`btc_perp_hold_v1` 的輸出確定且雜湊穩定；`beta_matched_btc_v1` 的貝塔不使用測試窗的資料（以只在測試窗變動的資料驗證）；少於 90 個日觀測時取中位數；
 - 第 4 點：壓力重算的數值與損益兩平倍數；
-- 第 5 點：重算報告未通過、任一雜湊或綁定不符時拒絕提交且不寫入帳本；`out_of_sample` 試驗缺基準序列或基準不是由同一執行產生時拒絕；通過時寫入的 `provenance` 正確，且帳本接受提交（以構造的帳本，含已登記的 `beta_matched_btc_v1` 基準測試）；
+- 第 5 點：失敗的執行以 `--status failed` 提交成功，附部分序列；完成的主試驗缺壓力摘要或摘要不是由同一執行產生時拒絕；執行紀錄的 `run_config` 與試驗身份不一致時拒絕；重算報告未通過、任一雜湊或綁定不符時拒絕以 `completed` 提交且不寫入帳本；`out_of_sample` 試驗缺基準序列或基準不是由同一執行產生時拒絕；通過時寫入的 `provenance` 正確，且帳本接受提交（以構造的帳本，含已登記的 `beta_matched_btc_v1` 基準測試）；
 - 總曝險：執行紀錄中某一步超過 `gross_exposure_cap` 時拒絕產生序列；
 - AST 檢查。
 
@@ -348,11 +356,17 @@
   - `folds`：帳本 `walk_forward_folds` 的輸出原樣傳入，每項為 `{"fit_window": {"start", "end"}, "score_window": {"start", "end"}}`（時刻為帳本的 ISO 8601 字串）；
   - `model_artifact`：擬合執行為 null；評分執行為 `{"path", "sha256"}`；
   - `strategy`：假說的參數（標準化後）。
-- 與帳本的對應：`run_config` 的 `cost` 對應試驗身份中 `configuration` 的 `cost_model_parameters`，`strategy` 對應 `strategy_parameters`；`time_semantics` 寫明可知時刻、成交時刻與 `simulated_latency_ms: 0`。
+- `random_seed`：整數或 null，與試驗身份的 `random_seed` 相同；擬合執行與評分執行都傳入，框架交給 `on_fit` 與 `on_decision`。
+- 與帳本的對應：試驗身份的 `configuration` 只能有 `strategy_parameters` 與 `cost_model_parameters` 兩個鍵（`ledger.py`）。
+  - `cost_model_parameters` = `run_config` 的 `cost`；
+  - `strategy_parameters` = {`run`: {`initial_cash`, `leverage`, `gross_exposure_cap`, `decision_resolution`, `sharpe_frequency_seconds`}, `strategy`: `run_config` 的 `strategy`}；
+  - 視窗與摺表對應試驗身份的 `data_window`、`fit_window`、`score_window` 與 `folds`；種子對應 `random_seed`；
+  - 不屬於試驗身份的只有執行期產物：`materialization_sha256` 與 `model_artifact`。標的清單由預登記決定（§4 第 2 點）；其餘會改變訂單或報酬的設定一律在試驗身份中。`submit` 核對執行紀錄中的 `run_config` 與試驗身份逐項一致，不一致即拒絕。
+  - `time_semantics` 寫明可知時刻、成交時刻與 `simulated_latency_ms: 0`。
 - 物化：每次執行使用一份物化。主試驗與探索性樣本外試驗的物化視窗是整個樣本外範圍；holdout 證偽試驗分兩次執行：擬合執行物化 [訓練段起點, 驗證段終點)，輸出模型檔；評分執行物化該 holdout 區間（加暖機）。
 - 試驗身份與執行產物分開：帳本在 `begin_trial` 時凍結試驗身份，`finish_trial` 不能修改。因此：
   - `begin_trial` 必須在該試驗的任何執行（包括擬合執行）之前呼叫；
-  - 試驗身份的 `configuration` 只取 `run_config` 的 `strategy` 與 `cost`，不含 `materialization_sha256`、`model_artifact` 等執行期產物；
+  - 試驗身份含全部會改變訂單或報酬的設定（上一點的對應），不含 `materialization_sha256`、`model_artifact` 等執行期產物；
   - 擬合執行輸出的模型檔雜湊與各次執行的雜湊，由 U6 的 `submit` 寫入 `result_summary.provenance`（§6 第 5 點）；
   - 記錄者批次核對時重跑擬合，模型檔雜湊不符即判該試驗無效。
 
@@ -413,9 +427,10 @@ EV-10 至 EV-12 只用訓練段的真實資料，以範例演算法的固定時�
 | EV-10 | 獨立重算 | BTCUSDT 與一個下架品種，成交、資金費與權益和 U6 的重算逐筆、逐步相符（容差見 §9.8.8）；`unexplained_cash_residual` 為 0 |
 | EV-11 | 成本壓力 | 以固定數量的時點策略，用「滑點 × 2、手續費 0.075%」執行 LEAN 一次，結果與 U6 的壓力重算相符 |
 | EV-12 | 執行時間 | 單一標的、100 個標的、全部標的各以小時線執行訓練段一次；另量 20 組網格 × 16 折的擬合執行；記錄耗時與記憶體，只量測 |
+| EV-14 | 模型的啟用時點 | 後一折的擬合窗終點落在前一折的計分窗內；新模型只在其計分窗起點才啟用，前一折計分窗的最後 8 日仍用舊模型 |
 | EV-13 | 缺漏跨期初 | 持有部位的標的在星期四期初前後有 K 線缺漏：沒有前值填補、缺漏內的期數損益為 0、價格跳動計入缺漏後第一期；`filled_periods` 依 §9.14 的三種情形與 U6 相同 |
 
-- EV-1 至 EV-11 與 EV-13 全部通過，P4-D 才算通過。任一項不通過，依修訂二 §5 階段 2 的停止條件停止並回報；修正的處理同 §8.1。
+- EV-1 至 EV-11、EV-13 與 EV-14 全部通過，P4-D 才算通過。任一項不通過，依修訂二 §5 階段 2 的停止條件停止並回報；修正的處理同 §8.1。
 - 檢查的資料、演算法設定、執行紀錄與結果寫入記錄者的檢查紀錄，逐檔記 SHA-256；檢查紀錄以文件提交到倉庫。
 - EV-12 的結果用於 P5：假說族的標的數與試驗數須使第一代能在投入上限內執行完畢。
 
@@ -718,7 +733,7 @@ U6 `submit` 的 `provenance` 經記錄者核對與重算相符（§6 第 5 點�
 | 以資金費為主要來源的候選，是否取標記價格 K 線（9.8.3） | 屆時另請 Operator 同意 |
 | 費率 0.055% 對應的帳戶等級與地區（9.8.1） | 依倉庫現行常數；帳戶費率未查詢 |
 | 統計力：真實 Sharpe 1.5 的策略約 8% 會在樣本外成立（9.1） | 已向 Operator 說明 |
-| 第一代限制：標籤期與最長持有期不超過 7 日；最長回看不小於 13 日；上市未滿約 12 日的標的不可開倉 | 寫入 P5 的預登記規則 |
+| 第一代限制：標籤期與最長持有期不超過 7 日；最長回看不小於 13 日；上市未滿約 12 日的標的不可開倉；預登記的 `selection` 須列出明確的標的清單（§4 第 2 點） | 寫入 P5 的預登記規則 |
 
 ### 9.18 資料品質前檢（記錄者依 PR #226 的自動審查補充，QC 複核修改）
 
