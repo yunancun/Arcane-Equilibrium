@@ -4,10 +4,6 @@ from decimal import Decimal, InvalidOperation, ROUND_DOWN, ROUND_HALF_UP
 from statistics import median
 from collections.abc import Mapping
 from types import MappingProxyType
-import hashlib
-import json
-
-from program_code.research.r8_ledger.ledger import canonical
 
 HOUR = 3600000
 DAY = 24 * HOUR
@@ -337,22 +333,6 @@ class R8Hypothesis:
         raise NotImplementedError
 
 
-def serialize_model(artifact):
-    if not isinstance(artifact, dict) or set(artifact) != {"params", "model"}:
-        raise ValueError("模型須含 params 與 model")
-    raw = canonical(artifact)
-    return raw, hashlib.sha256(raw).hexdigest()
-
-
-def deserialize_model(raw, expected_sha256):
-    if hashlib.sha256(raw).hexdigest() != expected_sha256:
-        raise ValueError("模型雜湊不符")
-    value = json.loads(raw)
-    if serialize_model(value)[0] != raw:
-        raise ValueError("模型非標準化 JSON")
-    return value
-
-
 def fit_fold(hypothesis_class, seed, fit_window, data, strategy, cost):
     start, end = milliseconds(fit_window["start"]), milliseconds(fit_window["end"])
     validation_days = strategy["internal_validation_days"]
@@ -375,7 +355,6 @@ def fit_fold(hypothesis_class, seed, fit_window, data, strategy, cost):
     params = grid[selection["selected"]]
     model = instance.fit(freeze(fit_window), view, freeze(params))
     artifact = {"params": params, "model": model}
-    serialize_model(artifact)
     return {"selection": selection, "artifact": artifact}
 
 
