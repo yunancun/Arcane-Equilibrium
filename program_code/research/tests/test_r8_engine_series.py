@@ -1312,3 +1312,19 @@ def test_fix1_10_unknown_failure_time_real_ledger_submission_requires_stop(tmp_p
     values=json.loads((f['book'].out/'series'/(result['returns_sha256']+'.json')).read_bytes())
     assert values['filled_periods']==32 and all(row[1]==0 for row in values['returns'])
     assert f['book'].trial_record('t1')['status']=='failed'
+
+
+@pytest.mark.parametrize('entry',['recompute','submit'])
+def test_fix1_10_gross_exposure_failure_requires_concrete_time_before_ledger_write(tmp_path,entry):
+    f=submit_fixture(tmp_path)
+    f['run'].update(status='failed',failure_reason='gross_exposure_cap',failure_t=None)
+    f['runpath'].write_bytes(canonical(f['run']))
+    before={p.relative_to(f['book'].out):p.read_bytes() for p in f['book'].out.rglob('*') if p.is_file()}
+    with pytest.raises(series.SeriesError,match='failure_t'):
+        if entry=='recompute':
+            series.recompute(f['path'],f['run'])
+        else:
+            series.submit(f['book'].out,'t1',tmp_path/'unread-u1',f['runpath'],
+                          materializer=f['materialize'],repo=f['repo'])
+    after={p.relative_to(f['book'].out):p.read_bytes() for p in f['book'].out.rglob('*') if p.is_file()}
+    assert after==before

@@ -549,6 +549,8 @@ def _check_config(data, run, *, _hold_folds=False):
     if run['status']=='failed' and (run['failure_reason'] not in FAILURES or
             run['failure_t'] is not None and type(run['failure_t']) is not int):
         raise SeriesError('失敗原因或時刻不合法')
+    if run['failure_reason']=='gross_exposure_cap' and run['failure_t'] is None:
+        raise SeriesError('曝險失敗必須提供可重現的 failure_t')
     if (run['materialization_sha256']!=data.sha256 or c['materialization_sha256']!=data.sha256 or
             run['run_config_sha256']!=digest(canonical(c))):
         raise SeriesError('執行／物化設定雜湊不符')
