@@ -920,7 +920,8 @@ U6 `submit` 的 `provenance` 經記錄者核對與重算相符（§6 第 5 點�
 2. **驗證模式的計分窗**：`validation` 模式且 `folds` 為空時，`score_windows` 必須恰為物化的 `window`（一個元素），框架不得自行補上。U6 依 `run_config.score_windows` 處理。
 3. **`run.json` 各段的排列**：
    - `orders`、`voided` 依 `order_id` 排列；
-   - `fills` 依 (`change_t`, `order_id`) 排列；反手的複合訂單有兩段、`order_id` 與 `change_t` 相同，減少曝險的一段（部位移向 0 的那一段）排在前；
+   - `fills` 依 (`change_t`, `order_id`) 排列；
+   - 反手的複合訂單有兩段，`order_id`（與成交時的 `change_t`）相同；在 `orders` 與 `fills` 中，減少曝險的一段（部位移向 0 的那一段）都排在前；
    - `funding`、`endpoint_funding` 依 (`t`, `symbol`) 排列；
    - `decisions`、`steps` 依 `t` 排列；`fits` 依 `fold` 排列。
    U5 組裝時排序；U6 依同一順序產生，逐位置比對。
