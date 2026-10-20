@@ -138,7 +138,8 @@
 
 - 每一個訂閱都關閉前值填補；回測中出現前值填補的 K 線，即視為該次執行失敗（選型查核紀錄 §4.5 第 3 點）。
 - `SetEndDate` 會延伸到當日結束；關閉前值填補之後，回測在最後一根資料的結束時刻結束（PA 已確認）。執行的結束時刻以最後一根資料為準。
-- 缺漏期間不前值填補、不內插：缺漏期間內的期數損益記 0，跨過缺漏的價格變動計入缺漏之後第一根所在的那一期（§9.14）。
+- 缺漏期間不前值填補、不內插：缺漏的標的在缺漏期間以缺漏前最後一根的收盤價計價（不產生新的 K 線，也不交給策略），它在缺漏期間的損益貢獻為 0，跨過缺漏的價格變動計入缺漏之後第一根所在的那一期（§9.14）。
+  同一期內其他標的的損益、手續費與資金費照常計入；每期報酬仍依 §3.7 以帳戶權益計算，不把整期記為 0。
 - 暖機由框架實作，不使用 LEAN 的 `SetWarmUp`：回測從暖機區間的起點開始，暖機期間不下單、不計分。
 - 計分區間以外（第一個計分起點之前、各計分窗之外）不得有部位：框架拒絕在計分窗外下單；第一個計分起點時部位必須為 0。
 - 相鄰的計分窗合併為一段連續計分區間（樣本外的 16 折首尾相接，合併為一段；holdout 是另一段）。相鄰計分窗之間不平倉：部位延續到下一折，新一折的第一次決策以實際延續的部位計算差額。
@@ -265,9 +266,10 @@
 
 1. **`rules.py`：全部規則的純函式。** 只用標準函式庫，以 `decimal.Decimal` 計算，輸入輸出皆為 `Decimal` 或字串，實作 §3 與 §9.8 的全部規則：
    - 下一根開盤成交的判定（含下一根缺漏）；
-   - 流動性分級、單筆上限、作廢與懲罰滑價（§3.4、§9.8.2）；依成交價的手續費；目標權重換算數量、向零取整與 `minOrderQty`；反手拆段；
+   - 流動性分級、單筆上限、作廢與懲罰滑價（§3.4、§9.8.2）；依成交價的手續費；目標權重換算數量、向零取整、`minOrderQty` 與 `minNotionalValue`；反手拆段；
    - 資金費：較不利者規則、δ、空白的判定與估計、下架時刻與之後的紀錄（§9.8.3、§9.8.4、§9.8.7）；
-   - 下架結算的價格（§9.8.6）與計分終點的平倉成本（§3.5）。
+   - 下架結算的價格（§9.8.6）與計分終點的平倉成本（§3.5）；
+   - 折內網格選擇 `select_grid_point`（§9.2 第 4 點：合格點、鄰域平均、同分取預登記順序在前者、不交易）。
    `framework.py` 只把這些函式接到 LEAN 的介面上，不另寫一份規則。U6 的獨立重算另寫一份，不匯入 `rules.py`。
 2. **`framework.py` 的基底類別 `R8Algorithm`。**
    - 由掛載的執行設定讀取 §7.0 的鍵；框架專用的資訊（完整標的清單、首根時刻、下架資訊）由執行器另以框架專用的檔案傳入；
@@ -281,6 +283,8 @@
    - 下架：在 `deliveryTime` 依 `rules.py` 平倉，記為下架結算；之後拒絕對該品種下單；
    - §3.8 的資訊限制與下單函式覆寫；
    - 子類別只實作 `on_fit(fit_window, data)` 與 `on_decision(time, data)`，後者回傳各標的的目標權重；框架負責換算、作廢判定與下單；
+     `on_fit` 回傳 {`model`, `selection`}：`selection` 是 §9.2 第 4 點要記錄的內容（`grid_scores`、`neighborhood_means`、`qualified`、`selected`、`selected_minus_neighborhood`、`no_trade`）。
+     框架以 `rules.select_grid_point`（依 §9.2 的合格點、鄰域平均與同分規則，由 `grid_scores` 與預登記的鄰域推出選中點與是否不交易）核對 `selected` 與 `no_trade`，不符即中止執行；每折的結果記入 `run.json` 的 `fits`（§7.2）；
      交給 `on_fit` 的 `data` 只含時間戳（可知時刻）早於 `fit_window.end` 的資料，交給 `on_decision` 的只含當時已可知的資料；兩者都是框架建立的唯讀視圖，不是框架持有的完整資料；
    - 模型檔：擬合執行中，框架把最後一次 `on_fit` 的回傳值以標準化 JSON 寫成模型檔並記錄 SHA-256；評分執行中，框架依 `run_config` 的 `model_artifact` 核對模型檔的 SHA-256，載入後交給子類別，不呼叫 `on_fit`。
      模型檔是執行的產物，不屬於試驗身份（§7.0）；`on_fit` 必須是確定性的（給定資料、參數與 `random_seed`），使記錄者可以重跑擬合並得到同一個雜湊。
@@ -292,12 +296,13 @@
    - 掛載逐目錄進行，不得覆蓋整個 `/Lean/Data`（否則 `market-hours` 與 `symbol-properties` 會被遮住而無法啟動）：
      U4 的 `lean/cryptofuture/bybit/hour` 以唯讀掛到 `/Lean/Data/cryptofuture/bybit/hour`；U4 的 `custom/`、演算法目錄、執行設定與框架專用檔案以唯讀掛到另外的路徑；另掛一個可寫的輸出目錄；
    - 合約屬性表：以映像內的屬性表為底（記錄其 SHA-256；PA 量得 `53072f5a…e236a`），對 U4 `symbol_properties_overlay.csv` 中的每個標的，**替換**同鍵（market、symbol、type）的列或新增，產生的單一檔案以唯讀掛載覆蓋映像內的屬性表；
-   - 啟動器的設定改寫沿用 P1b 已驗證的方式：在容器內 `/Lean/Launcher/bin/Debug/config.json` 中，把 `"algorithm-type-name"` 改為演算法類別名稱、`"algorithm-language"` 改為 `"Python"`、
-     `"algorithm-location"` 改為掛載進容器的演算法檔路徑，並在 `"environment": "backtesting",` 之後加入 `"close-automatically": true,`；然後在同一目錄執行 `dotnet QuantConnect.Lean.Launcher.dll`。
+   - 啟動器的設定改寫沿用 P1b 已驗證的方式：在容器內 `/Lean/Launcher/bin/Debug/config.json` 中，把 `"algorithm-type-name"` 改為 `run_config.algorithm.class`、`"algorithm-language"` 改為 `"Python"`、
+     `"algorithm-location"` 改為 `run_config.algorithm.path` 掛載進容器的路徑，並在 `"environment": "backtesting",` 之後加入 `"close-automatically": true,`；然後在同一目錄執行 `dotnet QuantConnect.Lean.Launcher.dll`。
      設定檔的 `"data-folder"` 是 `"../../../Data/"`（PA 已確認），不改；
    - 執行前：`run_config` 的 `code_commit` 必須是完整的 commit；被執行的每一個演算法檔（框架、`rules.py`、範例或假說的演算法），以及主機端的 `program_code/research/r8_engine/` 與 `program_code/research/r8_ledger/` 下的全部檔案（含執行器本身、`materialize.py`、`series.py`、`ledger.py`），
      必須與該 commit 中的同一路徑逐位元組相同，且工作樹中這些路徑沒有未提交的改動，否則拒絕執行；這些檔案的 SHA-256 全部記入 `algorithm_files`。假說的演算法檔因此必須先提交（位置由階段 3 的派工指令規定）；
-   - `run_config` 帶 `trial_id`：帳本中必須已有這個試驗、已 `begin_trial`、尚未結束，且其身份與 `run_config` 逐項一致（含 `manifest_sha256`）；否則拒絕執行。任何執行因此都對應一筆已計入 K 的試驗，探索不同的設定必須各自登記試驗。
+   - `mode` 為 `trial` 時，`run_config` 帶 `trial_id`：帳本中必須已有這個試驗、已 `begin_trial`、尚未結束，且其身份與 `run_config` 逐項一致（含 `manifest_sha256` 與 `algorithm`）；否則拒絕執行。任何假說的執行因此都對應一筆已計入 K 的試驗，探索不同的設定必須各自登記試驗。
+     `mode` 為 `validation` 時（只供 §8 的檢查）：`trial_id` 必須為 null，`algorithm` 只能是 `examples/fixed_schedule.py` 的固定類別，其他演算法一律拒絕；`run.json` 記 `mode: validation`，U6 的 `submit` 拒收。物化經 U4，使用另建的驗證用帳本，不是研究帳本；
      繞過執行器、私下執行未登記的變體，無法以程式完全防止；這是殘餘風險，回報時列明（§3.8 的同類限制）；
    - 核對 U4 的 `materialization.json` 的雜湊與執行設定中記錄的值相同；核對要掛載的 `lean/` 與 `custom/` 目錄中的檔案清單與 manifest 完全相同、每檔雜湊相符，有多出或缺少的檔案即拒絕；對假說的演算法檔執行 §3.8 的靜態檢查；
    - 執行後：由原始紀錄組裝 §7.2 的 `run.json`（以帳本的 `canonical` 寫出），記錄映像摘要、完整的 docker 參數、演算法檔與設定的雜湊、起訖時間、結束碼與 LEAN 日誌的雜湊；
@@ -306,8 +311,8 @@
 **測試**（主機端，全部離線）：
 - 視圖：改動 `fit_window.end` 之後的資料列不改變 `on_fit` 收到的內容（以不依賴 LEAN 的視圖建構函式測試）；
 - 模型檔：擬合執行寫出、評分執行載入的往返，以及 SHA-256 不符時拒絕（以不依賴 LEAN 的序列化函式測試）；
-- `rules.py`：§3.9 的 G1 至 G8 逐位重現；另以手算案例核對日線決策只在 00:00 UTC 且以次日開盤成交、總曝險超過上限即失敗、下一根缺漏、三個流動性等級、單筆上限、不足 12 個完整日、`min_qty`、全部平倉例外、懲罰滑價乘以壓力倍數、資金費空白的估計筆數與時刻、多空正負號；
-- `lean_runner.py`：帳本中沒有對應的已開始、未結束且身份相符的試驗時拒絕執行（以構造的帳本測試）；演算法檔與 `code_commit` 不符或有未提交的改動時拒絕執行（以構造的 git 倉庫測試）；組出的 docker 參數（以注入的執行函式攔截，不真的執行 docker）含 `--network none`、固定的映像摘要、逐目錄的唯讀掛載；屬性表合併是替換而非追加；`materialization.json` 雜湊不符、掛載目錄有 manifest 未列的檔案或缺少檔案，都拒絕；靜態檢查拒絕檔案存取、底線屬性與下單呼叫；輸出目錄在倉庫內被拒；`run.json` 的組裝；
+- `rules.py`：§3.9 的 G1 至 G8 逐位重現；另以手算案例核對日線決策只在 00:00 UTC 且以次日開盤成交、總曝險超過上限即失敗、下一根缺漏、三個流動性等級、單筆上限、不足 12 個完整日、`min_qty`、`min_notional`、全部平倉例外、`select_grid_point`（成績 [−1, 100, −1, −1] 不選第一點、全部不合格時不交易、同分取順序在前者）、懲罰滑價乘以壓力倍數、資金費空白的估計筆數與時刻、多空正負號；
+- `lean_runner.py`：`trial` 模式下帳本中沒有對應的已開始、未結束且身份相符（含入口）的試驗時拒絕執行（以構造的帳本測試）；`validation` 模式下以範例以外的演算法或帶 `trial_id` 時拒絕；演算法檔與 `code_commit` 不符或有未提交的改動時拒絕執行（以構造的 git 倉庫測試）；組出的 docker 參數（以注入的執行函式攔截，不真的執行 docker）含 `--network none`、固定的映像摘要、逐目錄的唯讀掛載；屬性表合併是替換而非追加；`materialization.json` 雜湊不符、掛載目錄有 manifest 未列的檔案或缺少檔案，都拒絕；靜態檢查拒絕檔案存取、底線屬性與下單呼叫；輸出目錄在倉庫內被拒；`run.json` 的組裝；
 - AST 檢查涵蓋 `rules.py`、`lean_runner.py` 與 `lean_algo/__init__.py`。
 
 ## 6. U6 `R8-S2-ENGINE-SERIES-20261020`：帳本序列、獨立重算與基準序列
@@ -338,31 +343,34 @@
    主試驗的物化視窗是整個樣本外範圍（§7.0），各折擬合窗都在其中；holdout 證偽試驗的擬合窗為 [訓練段起點, 驗證段終點)（§9.10），由擬合執行的物化提供。
 4. **成本壓力重算**（§9.8.2）：以同一次執行的決策與部位、部位不變，以壓力參數重算成本與淨報酬序列（結果是近似，部位不隨成本調整）；彙整各情境的淨結果、成本佔比與損益兩平的滑點倍數，供試驗紀錄的 `result_summary` 使用。
 5. **提交帳本。** `submit` 子命令是唯一的提交途徑，它自己產生所有寫入帳本的內容，不接受呼叫者提供的序列、基準、壓力摘要或旁註：
-   - 輸入只有：帳本目錄、試驗代號、U1 輸出目錄、執行紀錄（以及 holdout 啟用之後的模型檔）、狀態；
+   - 輸入只有：帳本目錄、試驗代號、U1 輸出目錄、執行紀錄（以及 holdout 啟用之後的模型檔）；
+   - 狀態不由呼叫者指定：執行紀錄須為 `mode: trial` 且 `run_config.trial_id` 等於試驗代號；帳本狀態取自 `run.json` 的 `status`（`completed` 或 `failed`，`failed` 時 `failure_reason` 須為 §7.2 列出的原因之一）；
+     `completed` 的執行重算不通過時拒絕提交、不寫入帳本，屬實作缺陷，由記錄者回報處理，不得改以 `failed` 提交；`submit` 不寫入 `aborted`；
    - 重新物化：以試驗身份的 `hypothesis_id` 與 `data_window`（回看長度取自帳本登記的 `max_lookback_seconds`）與 U1 輸出目錄執行 U4，產生的 manifest 必須與試驗身份的 `manifest_sha256` 與 `data_files` 逐位元組相同（U4 是確定性的；U1 manifest 的雜湊必須等於 P3b 的記錄）；
    - 核對：執行紀錄的 `run_config` 與試驗身份逐項一致；`algorithm_files` 中每一檔等於 `code_commit` 中同一路徑的內容，且 `submit` 執行當下 `r8_engine/` 與 `r8_ledger/` 沒有未提交的改動；
    - 產生：由執行紀錄與重新物化的輸出，依序執行第 2 點的重算、第 1 點的序列、第 3 點的 `beta_matched_btc_v1`、第 4 點的四個固定壓力情境，以及旁註檔；
-   - 寫入：完成的試驗須重算通過；失敗的試驗依第 1 點以完整網格提交，不要求重算通過。`out_of_sample` 試驗以帳本要求的 `baselines` 參數傳入基準序列；
+   - 寫入：完成的試驗須重算通過；失敗的試驗依第 1 點以完整網格提交，不要求重算通過。`result_summary` 另寫入 `fits`（取自執行紀錄，經第 2 點核對）。`out_of_sample` 試驗以帳本要求的 `baselines` 參數傳入基準序列；
      `result_summary` 寫入 `stress`（取自自行產生的壓力摘要）與 `provenance`：{`materialization_sha256`, `run_sha256`, `recompute_report_sha256`, `series_sha256`, `baseline_sha256`, `stress_sha256`, `stress_scenarios`, `sidecar_sha256`, `model_artifact_sha256`（holdout 證偽試驗；其他為 null）, `recompute_passed`}；
    - 本版的 `submit` 拒收 `holdout_falsification` 試驗（holdout 尚不能物化，見 §4 第 3 點）；holdout 證偽的提交與兩份物化的綁定，隨帳本單元另以補充指令規定。
    帳本本身不檢查 `provenance`（不改 U2）；記錄者在第一代各批試驗結束、提交帳本鏈頭時：
    - 對每個試驗，以保存的檔案重跑 `submit` 的「重新物化」與「產生」兩步（不寫入帳本），結果與帳本中的雜湊逐位元組相同；
-   - 對每個完成的主試驗，另以 `code_commit` 與同一份物化重跑 LEAN 執行，比對 `decisions`、`orders`、`fills`、`voided`、`funding` 與提交的執行紀錄完全相同，證明決策出自被釘住的程式，而不是事後編輯；
+   - 對每個已提交的試驗（主試驗與探索性試驗，完成與失敗都算；兩者都可能進入 PBO 與 V/SR0 的計算或影響 K），另以 `code_commit` 與同一份物化重跑 LEAN 執行，比對 `status`、`failure_reason`、`decisions`、`orders`、`fills`、`voided`、`funding`、`fits` 與提交的執行紀錄完全相同，證明決策出自被釘住的程式，而不是事後編輯；
+   - 呼叫 `close_generation` 之前，每個已開始的試驗都必須已經提交：帳本對未提交的試驗預設為 `aborted`，會把它排除在 PBO 與 V/SR0 之外。執行是確定性的，記錄者對已開始而未提交的試驗以其身份自行執行並經 `submit` 提交，並在報告中列出；
    - 任一不符的試驗，在報告中判為無效，不得計為候選成立。框架與假說的演算法因此必須是確定性的（給定設定與 `random_seed`）；執行紀錄、物化 manifest 與重算報告都以內容雜湊為檔名保存。
 6. 命令列：`python -m program_code.research.r8_engine.series <子命令>`，子命令與參數：
    - `recompute --materialization <檔> --run <run.json> --out <報告>`；
    - `series --materialization <檔> --run <run.json> --recompute <報告> --out <序列檔>`；
    - `baseline --materialization <檔> --run <run.json> --out <目錄>`（摺表取自執行紀錄 `run_config` 的 `folds`，不另收檔案）；
    - `stress --materialization <檔> --run <run.json> --out <摘要>`（情境不另收檔案：固定為滑點 ×1、×2、×3 配基準費率，以及滑點 ×2 配 `stress_fee_rate`；數值取自執行紀錄 `run_config` 的 `cost`）；
-   - `submit --ledger <帳本目錄> --trial <試驗代號> --u1 <U1 輸出目錄> --run <run.json> [--status completed|failed|aborted]`；前四個子命令供檢查與報告使用，提交只經 `submit`。
+   - `submit --ledger <帳本目錄> --trial <試驗代號> --u1 <U1 輸出目錄> --run <run.json>`；前四個子命令供檢查與報告使用，提交只經 `submit`。
 
 **測試**（全部離線，以構造的物化輸出與執行紀錄）：
 - 第 0 點：任一檔案雜湊不符時拒絕；
 - 第 1 點：期數網格（含未對齊的視窗端點與星期四期初）、暖機排除、`filled_periods`、各種拒絕；
-- 第 2 點：§3.9 的 G1 至 G8 逐位重現；改動執行紀錄中的一筆成交價、數量、手續費、作廢原因、一筆資金費或一個權益值，比對都能抓到；
+- 第 2 點：§3.9 的 G1 至 G8 逐位重現；`fits` 中每折的選中點與是否不交易，以本單元自行實作的 §9.2 規則由 `grid_scores` 重新推出，不符即判重算不通過（以成績 [−1, 100, −1, −1] 等案例測試）；改動執行紀錄中的一筆成交價、數量、手續費、作廢原因、一筆資金費或一個權益值，比對都能抓到；
 - 第 3 點：`btc_perp_hold_v1` 的輸出確定且雜湊穩定；`beta_matched_btc_v1` 的貝塔不使用測試窗的資料（以只在測試窗變動的資料驗證）；少於 90 個日觀測時取中位數；
 - 第 4 點：壓力重算的數值與損益兩平倍數；
-- 第 5 點：改動物化輸出中的任一資料列並重寫 manifest 時，重新物化的結果不同而拒絕；`submit` 自行產生的序列、基準與壓力摘要與單獨執行各子命令的結果逐位元組相同；演算法檔或主機端程式與 `code_commit` 中的內容不符時拒絕（以構造的 git 倉庫測試）；失敗的執行以 `--status failed` 提交、帳本接受（完整網格、失敗後填 0 並計入 `filled_periods`）；執行紀錄的 `run_config` 與試驗身份不一致時拒絕；重算未通過時拒絕以 `completed` 提交且不寫入帳本；`holdout_falsification` 試驗被拒；命令列不接受序列、基準、壓力摘要或旁註的檔案參數；通過時寫入的 `provenance` 與 `stress` 正確，`out_of_sample` 試驗附上基準序列，且帳本接受提交（以構造的帳本，含已登記的 `beta_matched_btc_v1` 基準測試）；
+- 第 5 點：狀態取自執行紀錄，命令列沒有狀態參數；`completed` 的執行重算不通過時不寫入帳本；`validation` 模式或 `trial_id` 不符的執行紀錄被拒；改動物化輸出中的任一資料列並重寫 manifest 時，重新物化的結果不同而拒絕；`submit` 自行產生的序列、基準與壓力摘要與單獨執行各子命令的結果逐位元組相同；演算法檔或主機端程式與 `code_commit` 中的內容不符時拒絕（以構造的 git 倉庫測試）；`failed` 的執行紀錄提交、帳本接受（完整網格、失敗後填 0 並計入 `filled_periods`）；執行紀錄的 `run_config` 與試驗身份不一致時拒絕；重算未通過時拒絕以 `completed` 提交且不寫入帳本；`holdout_falsification` 試驗被拒；命令列不接受序列、基準、壓力摘要或旁註的檔案參數；通過時寫入的 `provenance` 與 `stress` 正確，`out_of_sample` 試驗附上基準序列，且帳本接受提交（以構造的帳本，含已登記的 `beta_matched_btc_v1` 基準測試）；
 - 總曝險：執行紀錄中某一步超過 `gross_exposure_cap` 時拒絕產生序列；
 - AST 檢查。
 
@@ -382,13 +390,15 @@
   - `folds`：帳本 `walk_forward_folds` 的輸出原樣傳入，每項為 `{"fit_window": {"start", "end"}, "score_window": {"start", "end"}}`（時刻為帳本的 ISO 8601 字串）；
   - `model_artifact`：擬合執行為 null；評分執行為 `{"path", "sha256"}`；
   - `random_seed`：整數或 null，與試驗身份的 `random_seed` 相同（主試驗必須為整數，9.13）；擬合執行與評分執行都傳入，框架交給 `on_fit` 與 `on_decision`；
-  - `strategy`：假說的參數（標準化後）。
+  - `strategy`：假說的參數（標準化後）；
+  - `algorithm`：{`path`（倉庫內的相對路徑）, `class`（類別名稱）}，執行器只依此設定 `algorithm-location` 與 `algorithm-type-name`；
+  - `mode`：`trial` 或 `validation`（§5 第 4 點）。
 - 與帳本的對應：試驗身份的 `configuration` 只能有 `strategy_parameters` 與 `cost_model_parameters` 兩個鍵（`ledger.py`）。
   - `cost_model_parameters` = `run_config` 的 `cost`；
-  - `strategy_parameters` = {`run`: {`initial_cash`, `leverage`, `gross_exposure_cap`, `decision_resolution`, `sharpe_frequency_seconds`}, `strategy`: `run_config` 的 `strategy`}；
+  - `strategy_parameters` = {`run`: {`initial_cash`, `leverage`, `gross_exposure_cap`, `decision_resolution`, `sharpe_frequency_seconds`, `algorithm`}, `strategy`: `run_config` 的 `strategy`}；入口（檔案與類別）因此凍結在試驗身份中，同一 commit 中的其他演算法不能以同一試驗執行；
   - 視窗與摺表對應試驗身份的 `data_window`、`fit_window`、`score_window` 與 `folds`；種子對應 `random_seed`；
   - 物化在 `begin_trial` 之前完成，並納入試驗身份：`manifest_sha256` = 該試驗所用物化 manifest 的 SHA-256（holdout 證偽試驗有擬合與評分兩份物化時，取 `canonical`({"fit": …, "score": …}) 的 SHA-256），`data_files` = 物化 manifest 中各檔的 SHA-256（兩份時鍵前加 `fit/`、`score/`）。
-  - `trial_id` 是帳本的試驗代號，供執行器在執行前核對（§5 第 4 點）；不屬於試驗身份的只有 `model_artifact`（擬合執行在 `begin_trial` 之後才產生）。標的清單由預登記決定（§4 第 2 點）；其餘會改變訂單或報酬的設定一律在試驗身份中。
+  - `trial_id` 是帳本的試驗代號，供執行器在執行前核對（§5 第 4 點）；試驗的執行 `mode` 恆為 `trial`；除這兩個鍵外，不屬於試驗身份的只有 `model_artifact`（擬合執行在 `begin_trial` 之後才產生）。標的清單由預登記決定（§4 第 2 點）；其餘會改變訂單或報酬的設定一律在試驗身份中。
   - `submit` 核對執行紀錄中的 `run_config` 與試驗身份逐項一致、執行所用的物化等於身份中的 `manifest_sha256` 與 `data_files`，不一致即拒絕。
   - `time_semantics` 寫明可知時刻、成交時刻與 `simulated_latency_ms: 0`。
 - 物化：每次執行使用一份物化。主試驗與探索性樣本外試驗的物化視窗是整個樣本外範圍；holdout 證偽試驗分兩次執行：擬合執行物化 [訓練段起點, 驗證段終點)，輸出模型檔；評分執行物化該 holdout 區間（加暖機）。這一段描述的是日後的設計；本版不物化 holdout 區間（§4 第 3 點），holdout 的部分待帳本單元完成後另以補充指令啟用。
@@ -410,7 +420,7 @@
 
 `schema_version`（`r8_lean_run_v1`）、`materialization_sha256`、`run_config_sha256`、`run_config`、
 `image_digest`、`docker_argv`、`algorithm_files`（路徑 → SHA-256）、`base_symbol_properties_sha256`、`started_at`、`ended_at`、`exit_code`、`lean_log_sha256`、
-`status`（`completed` 或 `failed`）、`failure_reason`、
+`mode`（`trial` 或 `validation`）、`status`（`completed` 或 `failed`）、`failure_reason`（`completed` 時為 null；否則為 `fill_forward_bar`、`gross_exposure_cap`、`algorithm_exception`、`lean_error` 之一）、
 以及下列各段（鍵名以此為準；時刻為 UTC 毫秒整數，其餘數值依 §7.0 為十進位字串）：
 
 | 段 | 每筆的鍵 | 例 |
@@ -422,6 +432,7 @@
 | `voided` | `order_id`、`decision_t`、`symbol`、`quantity`、`reason`（`untradeable`、`insufficient_history`、`order_cap`、`min_qty`、`min_notional`、`outside_score_window`、`after_delivery`） | `{"decision_t": 1646096400000, "symbol": "XUSDT", "quantity": "120", "reason": "untradeable"}` |
 | `funding` | `t`、`symbol`、`q_before`、`q_after`、`price`、`rate`、`amount`、`estimated`（布林） | `{"t": 1646121600000, "symbol": "BTCUSDT", "q_before": "0.5", "q_after": "0.5", "price": "43510", "rate": "0.0001", "amount": "-2.21901", "estimated": false}` |
 | `unexplained_cash_residual` | `per_step`（`[{"t", "residual"}]`，只列非零）、`total` | `{"per_step": [], "total": "0"}` |
+| `fits` | `fold`（摺表序號，從 0 起）、`fit_window`、`selection`（§5 第 2 點）、`model_sha256`（該折 `model` 的標準化 JSON 的 SHA-256） | `{"fold": 0, "fit_window": {"start": "2020-01-01T00:00:00Z", "end": "2021-12-30T00:00:00Z"}, "selection": {…}, "model_sha256": "…"}` |
 
 `unexplained_cash_residual` = LEAN 現金 −（初始資金 + 已實現損益 − 手續費 + 框架的現金調整），每步都必須為 0。
 另有 `fill_forward_bars`：框架收到的每一根 `IsFillForward` 為真的 K 線（時刻、標的），應為空清單；不為空時框架照規則中止（§3.5），U6 據此拒絕產生序列。
@@ -441,7 +452,7 @@ U5 的代碼審查通過後、合入之前，由記錄者以構造的資料在�
 ### 8.2 P4-D 事件級檢查、成本壓力檢查與執行時間量測
 
 U4 至 U6 經獨立驗證並合入 main、P3b 完成之後執行。除 EV-10 至 EV-12 外都用構造的資料；構造的開盤價一律與前一根收盤價不同，使開盤成交與收盤成交可以區分。
-EV-10 至 EV-12 只用訓練段的真實資料，以範例演算法的固定時點策略執行，不是假說試驗，不計入試驗帳（與 P1b 相同）。
+EV-10 至 EV-12 只用訓練段的真實資料，以範例演算法的固定時點策略執行，不是假說試驗，不計入試驗帳（與 P1b 相同）。全部檢查以執行器的 `validation` 模式執行（§5 第 4 點），物化使用另建的驗證用帳本。
 
 | 編號 | 檢查 | 通過的條件 |
 |---|---|---|
@@ -450,7 +461,7 @@ EV-10 至 EV-12 只用訓練段的真實資料，以範例演算法的固定時�
 | EV-3 | 暖機與可讀範圍 | 暖機期間沒有下單、不計分；暖機需要不可讀區間的資料時 U4 拒絕；首根 1 小時 K 線收盤之前不能交易，上市時間不起作用 |
 | EV-4 | 資金費 | 8、4、1 小時與歷史上改變的間隔；§3.9 的 G3 至 G6；空白的估計；P_T 缺漏時取前一根收盤並計為填補期；下架之後不計；恰在 s 的結算在下一個時間步計入；下一根缺漏、訂單較晚成交時，T 後的部位不含該訂單 |
 | EV-5 | 狀態轉移 | 開倉、加倉、減倉、反手、平倉、下架結算與計分終點的平倉，每一步的部位與現金和 U6 的重算一致 |
-| EV-6 | 手續費、滑價與作廢 | 手續費依成交價、雙邊計入；三個流動性等級；不足 12 個完整日與單筆上限的作廢；`min_qty`；懲罰滑價 |
+| EV-6 | 手續費、滑價與作廢 | 手續費依成交價、雙邊計入；三個流動性等級；不足 12 個完整日與單筆上限的作廢；`min_qty` 與 `min_notional`；懲罰滑價 |
 | EV-7 | 前值填補與結束時刻 | 沒有前值填補的 K 線；回測在最後一根的結束時刻結束；下架品種最後一根不完整的 K 線沒有交給策略 |
 | EV-8 | 可讀範圍 | holdout 區間一律拒絕物化（本版）；`data_access` 只給候選假說本世代的區間、第二代查不到第一段；跨空窗的第 15 折可以物化 |
 | EV-9 | 數值格式 | 構造 1e-05 量級的資金費與小價格品種，結算金額正確 |
@@ -458,7 +469,7 @@ EV-10 至 EV-12 只用訓練段的真實資料，以範例演算法的固定時�
 | EV-11 | 成本壓力 | 以固定數量的時點策略，用「滑點 × 2、手續費 0.075%」執行 LEAN 一次，結果與 U6 的壓力重算相符 |
 | EV-12 | 執行時間 | 單一標的、100 個標的、全部標的各以小時線執行訓練段一次；另量 20 組網格 × 16 折的擬合執行；記錄耗時與記憶體，只量測 |
 | EV-14 | 模型的啟用時點與折的交界 | 後一折的擬合窗終點落在前一折的計分窗內；新模型只在其計分窗起點才啟用，前一折計分窗的最後 8 日仍用舊模型；相鄰兩折的交界不平倉，新一折的第一次決策以延續的部位計算差額 |
-| EV-13 | 缺漏跨期初 | 持有部位的標的在星期四期初前後有 K 線缺漏：沒有前值填補、缺漏內的期數損益為 0、價格跳動計入缺漏後第一期；`filled_periods` 依 §9.14 的四種情形（含下一根缺漏使訂單延後成交）逐一驗證，與 U6 相同 |
+| EV-13 | 缺漏跨期初 | 持有部位的標的在星期四期初前後有 K 線缺漏：沒有前值填補、缺漏標的在缺漏內的損益貢獻為 0 而同期另一個持有標的的損益與資金費照常計入、價格跳動計入缺漏後第一期；`filled_periods` 依 §9.14 的四種情形（含下一根缺漏使訂單延後成交）逐一驗證，與 U6 相同 |
 
 - EV-1 至 EV-11、EV-13 與 EV-14 全部通過，P4-D 才算通過。任一項不通過，依修訂二 §5 階段 2 的停止條件停止並回報；修正的處理同 §8.1。
 - 檢查的資料、演算法設定、執行紀錄與結果寫入記錄者的檢查紀錄，逐檔記 SHA-256；檢查紀錄以文件提交到倉庫。
@@ -748,7 +759,7 @@ U6 `submit` 的 `provenance` 經記錄者核對與重算相符（§6 第 5 點�
 4. 在 p 內，有訂單因下一根缺漏而以其後第一根的開盤成交（§3.1）。
 
 說明：
-- 缺漏期間內的期數損益記 0，跨過缺漏的價格變動計入缺漏之後第一根所在的那一期；兩者所在的期都計為填補期（§3.5）。
+- 缺漏的標的在缺漏期間內的損益貢獻為 0（以缺漏前最後一根的收盤價計價），跨過缺漏的價格變動計入缺漏之後第一根所在的那一期；兩者所在的期都計為填補期。其他標的的損益與現金流照常計入該期（§3.5）。
 - 不計入填補期：沒有部位的期；上市之前（首根 K 線之前）與 `deliveryTime` 之後的時段；持倉量缺漏（持倉量只是特徵，缺漏時策略不作新決策，由假說登記其處理方式）。
 - 帳本在 `filled_periods` 超過 T 的 5% 時記 p = 1；holdout 序列同樣報 `filled_periods`，超過 5% 時屬 9.12 的附加條件不符。
 - 帳本無法驗證此欄；EV-13 以構造的缺漏驗證算法，回報時仍列為未驗證項。
