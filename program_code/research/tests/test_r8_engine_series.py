@@ -492,7 +492,8 @@ def submit_fixture(tmp_path):
     path.write_bytes(canonical(m))
     run=run_for(path,windows=[{'start':START,'end':START+32*HOUR}]);cfg=run['run_config']
     cfg.update(mode='trial',trial_id='t1',code_commit=sha,engine_commit=sha,folds=folds,
-               algorithm={'path':'hypothesis.py','class':'Hypothesis'},strategy={'grid':[{'x':'1'}],'neighborhood':[[0]]})
+               algorithm={'path':'hypothesis.py','class':'Hypothesis'},
+               strategy={'grid':[{'x':'1'}],'neighborhood':{'numeric':{'x':['1']},'categorical':[]}})
     run.update(mode='trial',algorithm_files=files)
     run['fits']=[{'fold':0,'fit_window':folds[0]['fit_window'],'selection':{
         'grid_scores':['1'],'neighborhood_means':['1'],'qualified':[True],'selected':0,
@@ -935,3 +936,57 @@ def test_missing_daily_turnover_counts_zero_and_recent_listing_blocks_open(tmp_p
 @pytest.mark.parametrize('turnover,bps',[('100000000','5'),('10000000','10'),('1000000','20')])
 def test_three_liquidity_tiers(turnover,bps):
     assert series.order_segments('0','1','100','0.1','0',turnover,'10000000',True,cost_parameters())[0]['slippage_bps']==bps
+
+
+def test_nonhour_delisting_funding_uses_partial_close_not_previous_complete_close(tmp_path):
+    delivery=START+HOUR+HOUR//2
+    bars=[[t,'1','1.04','0.97','1','1000','10000000'] for t in range(START-13*DAY,START+HOUR,HOUR)]
+    bars.append([START+HOUR,'1','1.02','0.85','0.9','500','5000000'])
+    path=write_materialization(tmp_path,hourly={'BTCUSDT':bars},funding={'BTCUSDT':[[delivery,'0.02']]},
+        delistings={'BTCUSDT':{'deliveryTime':delivery,'partial_last_bar':True}})
+    run=run_for(path,decisions=[{'t':START,'targets':{'BTCUSDT':{'quantity':'502.5'}}}])
+    result=seal_observation(path,run)
+    assert result['funding'][-1]['price']=='0.9'
+    assert result['funding'][-1]['amount']=='-9.2259'
+    assert series.recompute(path,run)['recompute_passed']
+
+
+def test_hold_baseline_full_equity_is_independent_of_hypothesis_cap(tmp_path):
+    path=write_materialization(tmp_path);run=observed_fixed_run(path)
+    original=series.baselines(path,run)['btc_perp_hold_v1']
+    run['run_config']['gross_exposure_cap']='0.25';refresh_run_hashes(run)
+    assert series.baselines(path,run)['btc_perp_hold_v1']==original
+
+
+def test_arbitrary_neighbor_index_lists_cannot_make_isolated_peak_qualify():
+    grid=[{'x':i} for i in range(3)]
+    with pytest.raises(series.SeriesError,match='鄰域'):
+        series.select_grid_point(grid,[[0],[1],[2]],['-1','100','-1'])
+    declared={'numeric':{'x':[0,1,2]},'categorical':[]}
+    assert series.select_grid_point(grid,declared,['-1','100','-1'])['no_trade']
+
+
+def test_numeric_neighborhood_axes_must_be_ordered():
+    with pytest.raises(series.SeriesError,match='數值軸'):
+        series.select_grid_point([{'x':i} for i in range(3)],
+            {'numeric':{'x':[1,0,2]},'categorical':[]},['-1','100','-1'])
+
+
+def test_materialization_read_boundary_excludes_lean_custom_payloads(tmp_path,monkeypatch):
+    # §6.0 列明只讀 materialization.json、source/ 切片及 overlay；
+    # 「每個檔案」指此讀取範圍。§7.1 files 同時列出供 U5 掛載的 lean/custom，
+    # 其 payload 檢查屬 §5 U5；U6 僅在 submit 比對其身份雜湊，不讀這些 payload。
+    path=write_materialization(tmp_path);manifest=json.loads(path.read_bytes())
+    for name in ('lean/example.zip','custom/example.csv'):
+        manifest['files'][name]={'sha256':'f'*64,'rows':1,'first':START,'last':START,
+                                  'source_file':'synthetic','source_sha256':'e'*64}
+    path.write_bytes(canonical(manifest));read=Path.read_bytes;opened=[]
+    def bounded_read(file):
+        name=file.relative_to(path.parent).as_posix()
+        assert not name.startswith(('lean/','custom/'))
+        opened.append(name);return read(file)
+    monkeypatch.setattr(Path,'read_bytes',bounded_read)
+    series.Materialization(path)
+    assert set(opened)=={'materialization.json','symbol_properties_overlay.csv',
+        'source/kline_BTCUSDT_60.csv','source/kline_BTCUSDT_D.csv',
+        'source/funding_BTCUSDT_funding.csv','source/open_interest_BTCUSDT_4h.csv'}

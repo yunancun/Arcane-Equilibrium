@@ -286,6 +286,9 @@ class Materialization:
         for name, meta in m['files'].items():
             file = contained(self.path.parent, name)
             if not name.startswith('source/'):
+                # §6.0 限定 U6 讀取 source 與 overlay；§7.1 亦列出的
+                # lean/custom payload 由 §5 的 U5 檢查，這裡不得擴大讀取範圍。
+                # submit 仍核對完整 files 身份雜湊表與重新物化 manifest。
                 continue
             raw = file.read_bytes()
             if digest(raw) != meta['sha256']:
@@ -362,6 +365,17 @@ class Materialization:
 
     def close(self, symbol, t):
         return self.last_bar(symbol, t)[1]['close']
+
+    def funding_mark(self, symbol, t):
+        """資金費以 T 結束的末根計價，包含非整點下架的部分 K 線。"""
+        delivery=self.manifest['delistings'].get(symbol,{})
+        if delivery.get('deliveryTime')==t and delivery.get('partial_last_bar'):
+            index=bisect.bisect_left(self.times[symbol],t)-1
+            if index>=0:
+                start=self.times[symbol][index]
+                if start<t<start+HOUR:
+                    return self.hourly[symbol][start]['close'],False
+        return self.close(symbol,t),t-HOUR not in self.hourly[symbol]
 
     def opening(self, symbol, t):
         return self.hourly[symbol][t]['open'] if t in self.hourly[symbol] else self.close(symbol,t)
@@ -453,17 +467,19 @@ def select_grid_point(grid, neighborhood, scores):
     if not grid or len(grid)!=len(scores):
         raise SeriesError('網格與成績長度不符')
     values = [decimal_value(s) for s in scores]
-    # 鄰域可直接列預登記的索引鄰點，或以各軸排序表表達。
-    if isinstance(neighborhood, list):
-        neighbors = neighborhood
-        if len(neighbors)!=len(grid):
-            raise SeriesError('鄰域長度不符')
-    elif isinstance(neighborhood, dict) and set(neighborhood)=={'numeric','categorical'}:
+    # 只接受預登記的軸定義，鄰點由規則推導，不能由索引清單任意刪除。
+    if isinstance(neighborhood, dict) and set(neighborhood)=={'numeric','categorical'}:
         axes = neighborhood['numeric']; categories = neighborhood['categorical']
+        if not isinstance(axes,dict) or not isinstance(categories,list) or len(set(categories))!=len(categories):
+            raise SeriesError('鄰域軸定義不合法')
         if set(axes)&set(categories) or any(set(point)!=set(axes)|set(categories) for point in grid):
             raise SeriesError('鄰域軸與網格不符')
-        if any(len(vals)!=len(set(map(str,vals))) for vals in axes.values()):
-            raise SeriesError('數值軸重複')
+        for vals in axes.values():
+            if not isinstance(vals,list) or not vals:
+                raise SeriesError('數值軸必須有依序列出的取值')
+            parsed=[decimal_value(str(value)) for value in vals]
+            if any(a>=b for a,b in zip(parsed,parsed[1:])):
+                raise SeriesError('數值軸必須嚴格遞增且不重複')
         try:
             neighbors = [[j for j,other in enumerate(grid)
                           if all(abs(vals.index(point[k])-vals.index(other[k]))<=1 for k,vals in axes.items())
@@ -471,7 +487,7 @@ def select_grid_point(grid, neighborhood, scores):
         except ValueError as exc:
             raise SeriesError('網格值不在鄰域軸') from exc
     else:
-        raise SeriesError('鄰域須為預登記索引清單或數值／類別軸')
+        raise SeriesError('鄰域須為預登記的數值／類別軸，不接受索引清單')
     for i, group in enumerate(neighbors):
         if (not isinstance(group,list) or i not in group or len(set(group))!=len(group) or
                 any(type(j) is not int or not 0<=j<len(grid) for j in group)):
@@ -655,7 +671,7 @@ def replay(data, run, *, cost=None, stop_on_recorded_failure=True, _hold_folds=F
         after=position_values[s][right] if right>=0 else Decimal(0)
         if not before and not after:
             return
-        price=data.close(s,t)
+        price=data.funding_mark(s,t)[0]
         amount=funding_amount(before,after,price,event['rate'],cost['funding_delta'],estimated=event['estimated'])
         row={'t':t,'symbol':s,'q_before':decimal_text(before),'q_after':decimal_text(after),
              'price':decimal_text(price),'rate':event['rate'],'amount':decimal_text(amount),'estimated':event['estimated']}
@@ -924,7 +940,7 @@ def filled_periods(data,config,reconstructed,grid):
                 funding_gaps.add((ga,gb))
                 if before or after:
                     mark(t)
-            if (before or after) and t-HOUR not in data.hourly[s]:
+            if (before or after) and data.funding_mark(s,t)[1]:
                 mark(t)
         for ga,gb in funding_gaps:
             for p in overlapping(ga,gb):
@@ -1091,7 +1107,8 @@ def _matched_baseline(data,run,reconstructed):
 def _hold_baseline(data,run):
     # 同一 Decimal 記帳器，僅替換為固定逐折持有決策；邊界資金費只結算一次。
     cfg=copy.deepcopy(run['run_config']);cfg.update(symbols=['BTCUSDT'],mode='validation',
-        trial_id=None,folds=[],strategy={},model_artifact=None)
+        trial_id=None,folds=[],strategy={},model_artifact=None,gross_exposure_cap='1')
+    # §9.7 的全部權益持有定義為一倍；這是基準自身的部位，不受假說較低上限限制。
     fixture=copy.copy(data);fixture.manifest=copy.deepcopy(data.manifest)
     fixture.manifest['strategy_symbols']=['BTCUSDT']
     observed=copy.deepcopy(run);observed.update(run_config=cfg,mode='validation',status='completed',
