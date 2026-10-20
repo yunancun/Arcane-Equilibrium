@@ -387,6 +387,56 @@ class ResearchLedger:
             raise LedgerError('ledger_id 或三本帳鏈頭不符')
         with self._lock(): return {'ledger_id':self.ledger_id,**{name:self._head(self._read(name,pinned[name])) for name in LEDGERS}}
 
+    def data_access(self, hypothesis_id, trial_id=None):
+        """重複查得已開啟的區間，不改 open_holdout 規則，也不是第二次開啟。
+
+        呼叫者須先確認目錄與 ledger_id.json 存在才建構帳本。
+        本版 U4 拒絕物化 holdout；未來啟用時，每次物化的 manifest
+        雜湊必須記入試驗，才能追溯資料釋出。
+        """
+        with self._lock():
+            events = {name: [row['payload'] for row in self._read(name)] for name in LEDGERS}
+            registration = next((e['record'] for e in events['preregistrations']
+                                 if e['action'] == 'preregister'
+                                 and e['record']['hypothesis_id'] == hypothesis_id), None)
+            if registration is None:
+                raise LedgerError('假說必須先預登記')
+            if trial_id is not None:
+                if not any(e['action'] == 'begin_trial' and e['record']['trial_id'] == trial_id
+                           and e['record']['hypothesis_id'] == hypothesis_id for e in events['trials']):
+                    raise LedgerError('試驗不存在或不屬於本假說')
+            elif any(e['action'] == 'withdrawn' and e['hypothesis_id'] == hypothesis_id
+                     for e in events['preregistrations']):
+                raise LedgerError('已撤回假說須綁定已開始的試驗')
+            opening = next((e for e in events['holdouts'] if e['action'] == 'opened'
+                            and e['generation'] == registration['generation']), None)
+            return {
+                'generation': registration['generation'],
+                'time_splits': registration['time_splits'],
+                'selection': registration['selection'],
+                'out_of_sample': {'start': registration['time_splits'][0]['start'],
+                                  'end': registration['time_splits'][1]['end']},
+                'max_lookback_seconds': registration['max_lookback_seconds'],
+                'holdout': opening['intervals'].get(hypothesis_id) if opening else None,
+            }
+
+    def trial_record(self, trial_id):
+        """唯讀回傳 begin_trial 的完整身份及目前結束狀態，不觸發補寫。
+
+        呼叫者須先確認帳本目錄及 ledger_id.json 存在；未結束時保留
+        帳本既有的 aborted 預設狀態，以 finished 明確區分是否已結束。
+        """
+        with self._lock():
+            events = {name: [row['payload'] for row in self._read(name)] for name in LEDGERS}
+            record = next((e['record'] for e in events['trials']
+                           if e['action'] == 'begin_trial' and e['record']['trial_id'] == trial_id), None)
+            if record is None:
+                raise LedgerError('試驗未開始')
+            finish = next((e for e in reversed(events['trials'])
+                           if e['action'] == 'finish_trial' and e['trial_id'] == trial_id), None)
+            return {'record': record, 'finished': finish is not None,
+                    'status': finish['status'] if finish else 'aborted'}
+
     def _events(self, name): return [r['payload'] for r in self._read(name)]
 
     def _registrations(self):
