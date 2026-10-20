@@ -180,6 +180,7 @@ def test_grid_qualification_plateau_and_tie(scores, selected):
 
 
 def test_readonly_view_fit_isolation_selection_and_model_roundtrip(cost):
+    from program_code.research.r8_engine import lean_runner as runner
     calls = []
 
     class Fake(rules.R8Hypothesis):
@@ -211,10 +212,10 @@ def test_readonly_view_fit_isolation_selection_and_model_roundtrip(cost):
     assert all(c[1] is not original for c in calls)
     with pytest.raises(TypeError):
         calls[0][5]["X"]["kline_day"][0]["close"] = "3"
-    model, sha = rules.serialize_model(result["artifact"])
-    assert rules.deserialize_model(model, sha) == result["artifact"]
+    model, sha = runner.serialize_model(result["artifact"])
+    assert runner.deserialize_model(model, sha) == result["artifact"]
     with pytest.raises(ValueError, match="模型"):
-        rules.deserialize_model(model + b" ", sha)
+        runner.deserialize_model(model + b" ", sha)
     assert rules.decide(original, 400 * DAY, data, result["artifact"]) == {"X": {"weight": "2"}}
     data["X"]["kline_day"][1]["close"] = "12345"
     assert rules.fit_fold(Fake, 123, fit_window, data, strategy(["1", "2", "3"]), cost) == result
@@ -633,3 +634,37 @@ def test_grid_categorical_axis_and_limit():
     with pytest.raises(ValueError):
         rules.select_grid_point(["1"] * 21, [{"n": i} for i in range(21)],
                                 {"numeric": {"n": list(range(21))}, "categorical": {}})
+
+
+@pytest.mark.parametrize("mode", ["trial", "verification", "validation"])
+def test_e2_model_cannot_bypass_fold_fit(inputs, mode):
+    from program_code.research.r8_engine import lean_runner as runner
+    _, manifest, config, query = inputs
+    config["mode"] = mode
+    query["finished"] = mode == "verification"
+    if mode == "validation":
+        config.update(trial_id=None, algorithm={"path": runner.EXAMPLE, "class": "FixedSchedule"})
+    config["model_artifact"] = {"path": "arbitrary.json", "sha256": "1" * 64}
+    with pytest.raises(ValueError, match="模型"):
+        runner.validate_config(config, manifest, lambda t: query)
+
+
+@pytest.mark.parametrize("source", [
+    "from program_code.research.r8_engine.lean_algo.rules import datetime\nclass S:\n    def f(self):\n        return datetime.now()\n",
+    "import program_code.research.r8_engine.lean_algo.rules as r\nclass S:\n    def f(self):\n        return r.datetime.now()\n",
+    "from program_code.research.r8_engine.lean_algo.rules import canonical\n",
+    "import statistics as s\nclass S:\n    def f(self):\n        return s.sys\n",
+    "import random\nclass S:\n    def f(self):\n        alias = random\n        return alias.random()\n",
+    "import random\nclass S:\n    def f(self):\n        factory = random.Random\n        return factory()\n",
+])
+def test_e2_static_reexports_and_module_aliases_denied(source):
+    from program_code.research.r8_engine import lean_runner as runner
+    with pytest.raises(ValueError):
+        runner.check_algorithm(source)
+
+
+def test_e2_rules_strictly_standard_library():
+    tree = ast.parse((ROOT / "program_code/research/r8_engine/lean_algo/rules.py").read_text())
+    for node in ast.walk(tree):
+        modules = [a.name for a in node.names] if isinstance(node, ast.Import) else [node.module] if isinstance(node, ast.ImportFrom) else []
+        assert all(module.split(".")[0] in sys.stdlib_module_names for module in modules)
