@@ -98,7 +98,8 @@
 
 1. 決策時刻在 s − Δ、以 s − Δ 的開盤價成交的訂單入帳（LEAN 原生，`on_data` 之前）；
 2. 策略收到結束於 s 的 K 線，決策；框架完成作廢判定，送出將以 s 的開盤價成交的訂單；
-3. 結算時刻 T ≤ s 且尚未計入的資金費，依 §3.3 計入。T = s 時，「T 之後的部位」取第 2 步送出訂單之後的部位；
+3. 結算時刻 T ≤ s 且尚未計入的資金費，依 §3.3 計入。T = s 時，「T 之後的部位」取第 2 步送出訂單之後的部位；即使下一根缺漏、該訂單實際較晚成交，也照此計算。
+   補計 T < s 的資金費時（例如 LEAN 在 T 沒有時間步），T 前與 T 後的部位一律由成交紀錄依部位變動時刻重建：T 前 = 部位變動時刻早於 T 的成交累計，T 後 = 部位變動時刻不晚於 T 的成交累計，不取 LEAN 在 s 的持倉；
 4. 若 s 是 Sharpe 頻率網格的期初，記錄權益 E(s)。
 
 因此：E(s) 含部位變動時刻早於 s 的全部成交、結算時刻不晚於 s 的全部資金費，以結束於 s 的 K 線收盤價計價；以 s 的開盤價成交的那一筆（含其手續費與滑價）屬於從 s 開始的那一期。
@@ -129,7 +130,7 @@
 - 缺漏期間不前值填補、不內插：缺漏期間內的期數損益記 0，跨過缺漏的價格變動計入缺漏之後第一根所在的那一期（§9.14）。
 - 暖機由框架實作，不使用 LEAN 的 `SetWarmUp`：回測從暖機區間的起點開始，暖機期間不下單、不計分。
 - 計分區間以外（第一個計分起點之前、各計分窗之外）不得有部位：框架拒絕在計分窗外下單；第一個計分起點時部位必須為 0。
-- 計分區間結束時仍有的部位，以結束於終點的那根 K 線的收盤價、加 §9.8.2 的懲罰滑價與手續費，計算平倉成本，計入最後一期；不讀終點之後的資料。
+- 計分區間結束時仍有的部位，以結束於終點的那根 K 線的收盤價、加 §9.8.2 的懲罰滑價（60 bps 乘以壓力倍數，刻意不用該級滑價，屬保守取法）與手續費，計算平倉成本，計入最後一期；不讀終點之後的資料。
 
 ### 3.6 暖機與可讀範圍
 
@@ -158,7 +159,7 @@
 
 ### 3.9 固定案例（U5 與 U6 都必須逐位重現）
 
-以 `decimal.Decimal` 計算。費率 0.055%，δ = 2%，滑價依表內所註。
+以 `decimal.Decimal` 計算。費率 0.055%，δ = 2%，滑價依表內所註。「逐位重現」指數值相等；寫入 JSON 時，數值字串一律為 `format(d.normalize(), 'f')`（例如 `100.1`、`-5.176755`、`0.9443`、`100`），使兩個單元的輸出位元組相同。
 
 | 編號 | 情形 | 輸入 | 結果 |
 |---|---|---|---|
@@ -257,6 +258,8 @@
    - 下架：在 `deliveryTime` 依 `rules.py` 平倉，記為下架結算；之後拒絕對該品種下單；
    - §3.8 的資訊限制與下單函式覆寫；
    - 子類別只實作 `on_fit(fit_window, data)` 與 `on_decision(time, data)`，後者回傳各標的的目標權重；框架負責換算、作廢判定與下單；
+   - 模型檔：擬合執行中，框架把最後一次 `on_fit` 的回傳值以標準化 JSON 寫成模型檔並記錄 SHA-256（`run_config` 的 `model_artifact`）；評分執行中，框架核對模型檔的 SHA-256，載入後交給子類別，不呼叫 `on_fit`。
+     假說的演算法本身不讀寫檔案（§3.8）；
    - 執行中寫出原始紀錄（JSON Lines）；`run.json` 由主機端的執行器組裝（第 4 點）。部位只記非零值。
 3. **範例演算法** `examples/fixed_schedule.py`：在設定指定的時刻設定指定的目標權重或固定數量（類似 P1b 的固定時點策略），供 §8 的檢查使用；不是假說。
 4. **執行器** `lean_runner.py`（主機端）：
@@ -264,12 +267,15 @@
    - 掛載逐目錄進行，不得覆蓋整個 `/Lean/Data`（否則 `market-hours` 與 `symbol-properties` 會被遮住而無法啟動）：
      U4 的 `lean/cryptofuture/bybit/hour`（與 `daily`）以唯讀掛到 `/Lean/Data/cryptofuture/bybit/` 下的同名目錄；U4 的 `custom/`、演算法目錄、執行設定與框架專用檔案以唯讀掛到另外的路徑；另掛一個可寫的輸出目錄；
    - 合約屬性表：以映像內的屬性表為底（記錄其 SHA-256；PA 量得 `53072f5a…e236a`），對 U4 `symbol_properties_overlay.csv` 中的每個標的，**替換**同鍵（market、symbol、type）的列或新增，產生的單一檔案以唯讀掛載覆蓋映像內的屬性表；
-   - 啟動器的設定改寫沿用 P1b 已驗證的方式（演算法語言、位置、類別名稱、`close-automatically`）；
+   - 啟動器的設定改寫沿用 P1b 已驗證的方式：在容器內 `/Lean/Launcher/bin/Debug/config.json` 中，把 `"algorithm-type-name"` 改為演算法類別名稱、`"algorithm-language"` 改為 `"Python"`、
+     `"algorithm-location"` 改為掛載進容器的演算法檔路徑，並在 `"environment": "backtesting",` 之後加入 `"close-automatically": true,`；然後在同一目錄執行 `dotnet QuantConnect.Lean.Launcher.dll`。
+     設定檔的 `"data-folder"` 是 `"../../../Data/"`（PA 已確認），不改；
    - 執行前：核對 U4 的 `materialization.json` 的雜湊與執行設定中記錄的值相同；對假說的演算法檔執行 §3.8 的靜態檢查；
    - 執行後：由原始紀錄組裝 §7.2 的 `run.json`（以帳本的 `canonical` 寫出），記錄映像摘要、完整的 docker 參數、演算法檔與設定的雜湊、起訖時間、結束碼與 LEAN 日誌的雜湊；
    - 輸出目錄在倉庫內時拒絕。
 
 **測試**（主機端，全部離線）：
+- 模型檔：擬合執行寫出、評分執行載入的往返，以及 SHA-256 不符時拒絕（以不依賴 LEAN 的序列化函式測試）；
 - `rules.py`：§3.9 的 G1 至 G8 逐位重現；另以手算案例核對日線的下一根開盤、下一根缺漏、三個流動性等級、單筆上限、不足 12 個完整日、`min_qty`、全部平倉例外、懲罰滑價乘以壓力倍數、資金費空白的估計筆數與時刻、多空正負號；
 - `lean_runner.py`：組出的 docker 參數（以注入的執行函式攔截，不真的執行 docker）含 `--network none`、固定的映像摘要、逐目錄的唯讀掛載；屬性表合併是替換而非追加；`materialization.json` 雜湊不符即拒絕；靜態檢查拒絕檔案存取、底線屬性與下單呼叫；輸出目錄在倉庫內被拒；`run.json` 的組裝；
 - AST 檢查涵蓋 `rules.py`、`lean_runner.py` 與 `lean_algo/__init__.py`。
@@ -322,7 +328,10 @@
 - 執行設定 `run_config` 的鍵：
   - `materialization_sha256`、`symbols`、`initial_cash`（"100000"）、`leverage`（"10"）、`sharpe_frequency_seconds`；
   - `warmup`、`score_windows`（各計分窗的 {`start`, `end`}）、`folds`（帳本產生的摺表；擬合執行與 holdout 評分執行另以 `fit_window` 表示）；
-  - `cost`：`taker_fee_rate`、`stress_fee_rate`、`slippage_tiers_bps`（三個等級的門檻與基點）、`untradeable_below_turnover`、`order_cap_fraction`、`forced_reduce_penalty_bps`、`slippage_multiplier`、`funding_delta`、`funding_blank_min_rate`、`liquidity_window_days`；
+  - `cost`：`taker_fee_rate`、`stress_fee_rate`、`slippage_tiers_bps`、`untradeable_below_turnover`、`order_cap_fraction`、`forced_reduce_penalty_bps`、`slippage_multiplier`、`funding_delta`、`funding_blank_min_rate`、`liquidity_window_days`；
+    其中 `slippage_tiers_bps` 為依門檻遞減排列的清單 `[{"min_turnover": "100000000", "bps": "5"}, {"min_turnover": "10000000", "bps": "10"}, {"min_turnover": "1000000", "bps": "20"}]`；
+  - `folds`：帳本 `walk_forward_folds` 的輸出原樣傳入，每項為 `{"fit_window": {"start", "end"}, "score_window": {"start", "end"}}`（時刻為帳本的 ISO 8601 字串）；
+  - `model_artifact`：擬合執行為 null；評分執行為 `{"path", "sha256"}`；
   - `strategy`：假說的參數（標準化後）。
 - 與帳本的對應：`run_config` 的 `cost` 對應試驗身份中 `configuration` 的 `cost_model_parameters`，`strategy` 對應 `strategy_parameters`；`time_semantics` 寫明可知時刻、成交時刻與 `simulated_latency_ms: 0`。
 - 物化：每次執行使用一份物化。主試驗與探索性樣本外試驗的物化視窗是整個樣本外範圍；holdout 證偽試驗分兩次執行：擬合執行物化 [訓練段起點, 驗證段終點)，輸出模型檔，其 SHA-256 寫入試驗的 `configuration`；評分執行物化該 holdout 區間（加暖機）。
@@ -340,12 +349,18 @@
 `schema_version`（`r8_lean_run_v1`）、`materialization_sha256`、`run_config_sha256`、`run_config`、
 `image_digest`、`docker_argv`、`algorithm_files`（路徑 → SHA-256）、`base_symbol_properties_sha256`、`started_at`、`ended_at`、`exit_code`、`lean_log_sha256`、
 `status`（`completed` 或 `failed`）、`failure_reason`、
-`steps`（每個時間步：時刻、權益、USDT 現金、非零部位的數量）、
-`decisions`（每次決策：時刻、各標的的目標權重或數量）、
-`fills`（每筆：決策時刻、部位變動時刻、標的、數量、成交價、滑價基點、手續費、種類 `normal`、`forced_reduce_penalty`、`delisting_settlement` 或 `score_end_liquidation`）、
-`voided`（每筆作廢：決策時刻、標的、數量、原因）、
-`funding`（每筆：結算時刻、標的、T 前後的部位、所用價格、費率、金額、是否為空白期間的估計）、
-`unexplained_cash_residual`（每步與合計：LEAN 現金 −（初始資金 + 已實現損益 − 手續費 + 框架的現金調整）；必須為 0）。
+以及下列各段（鍵名以此為準；時刻為 UTC 毫秒整數，其餘數值依 §7.0 為十進位字串）：
+
+| 段 | 每筆的鍵 | 例 |
+|---|---|---|
+| `steps` | `t`、`equity`、`cash`、`positions`（標的 → 數量，只列非零） | `{"t": 1646096400000, "equity": "100012.5", "cash": "99987.2", "positions": {"BTCUSDT": "0.5"}}` |
+| `decisions` | `t`、`targets`（標的 → `{"weight": …}` 或 `{"quantity": …}`） | `{"t": 1646096400000, "targets": {"BTCUSDT": {"weight": "0.5"}}}` |
+| `fills` | `decision_t`、`change_t`、`symbol`、`quantity`（帶正負號）、`price`、`slippage_bps`、`fee`、`kind`（`normal`、`forced_reduce_penalty`、`delisting_settlement`、`score_end_liquidation`） | `{"decision_t": 1646096400000, "change_t": 1646096400000, "symbol": "BTCUSDT", "quantity": "0.5", "price": "43246.6125", "slippage_bps": "5", "fee": "11.8928184375", "kind": "normal"}` |
+| `voided` | `decision_t`、`symbol`、`quantity`、`reason`（`untradeable`、`insufficient_history`、`order_cap`、`min_qty`、`outside_score_window`、`after_delivery`） | `{"decision_t": 1646096400000, "symbol": "XUSDT", "quantity": "120", "reason": "untradeable"}` |
+| `funding` | `t`、`symbol`、`q_before`、`q_after`、`price`、`rate`、`amount`、`estimated`（布林） | `{"t": 1646121600000, "symbol": "BTCUSDT", "q_before": "0.5", "q_after": "0.5", "price": "43510", "rate": "0.0001", "amount": "-2.21901", "estimated": false}` |
+| `unexplained_cash_residual` | `per_step`（`[{"t", "residual"}]`，只列非零）、`total` | `{"per_step": [], "total": "0"}` |
+
+`unexplained_cash_residual` = LEAN 現金 −（初始資金 + 已實現損益 − 手續費 + 框架的現金調整），每步都必須為 0。
 
 ### 7.3 帳本序列
 
@@ -566,7 +581,8 @@ EV-10 至 EV-12 只用訓練段的真實資料，以範例演算法的固定時�
 
 **9.8.7 資金費紀錄的空白**
 - 空白：相鄰兩筆資金費紀錄的間隔，大於前一段與後一段實際間隔中的較大者。只依可讀範圍內的紀錄判定；在可讀範圍的右緣只和前一段比較。
-- 有部位跨過空白時，在空白中估計 n = max(1, round(間隔 ÷ min(前一段間隔, 後一段間隔)) − 1) 筆不利的資金費，時刻為前一筆時刻加上 k × min(前一段間隔, 後一段間隔)（k = 1 至 n）；
+- 在可讀範圍的左緣只和後一段比較。
+- 有部位跨過空白時，在空白中估計 n = max(1, round_half_up(間隔 ÷ min(前一段間隔, 後一段間隔)) − 1) 筆不利的資金費（四捨五入用 `ROUND_HALF_UP`，不用 Python 的 `round`），時刻為前一筆時刻加上 k × min(前一段間隔, 後一段間隔)（k = 1 至 n）；
   估計費率取空白前後兩筆紀錄費率絕對值的較大者，且不低於 0.01%，照常乘以 δ；該期依 9.14 計為填補期。
 
 **9.8.8 獨立重算的容差**
