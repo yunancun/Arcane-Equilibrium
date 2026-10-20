@@ -374,7 +374,7 @@
    - 輸入只有：帳本目錄、試驗代號、U1 輸出目錄、執行紀錄（以及 holdout 啟用之後的模型檔）；
    - 狀態不由呼叫者指定：執行紀錄須為 `mode: trial` 且 `run_config.trial_id` 等於試驗代號；帳本狀態取自 `run.json` 的 `status`（`completed` 或 `failed`，`failed` 時 `failure_reason` 須為 §7.2 列出的原因之一）；
      `completed` 的執行重算不通過時拒絕提交、不寫入帳本，屬實作缺陷，由記錄者回報處理，不得改以 `failed` 提交；`submit` 不寫入 `aborted`；
-   - 重新物化：以試驗身份的 `hypothesis_id` 與 `data_window`（回看長度取自帳本登記的 `max_lookback_seconds`）與 U1 輸出目錄執行 U4，並帶 `--trial`（假說在試驗開始後撤回時仍可完成，§4 第 1 點），產生的 manifest 必須與試驗身份的 `manifest_sha256` 與 `data_files` 逐位元組相同（U4 是確定性的；U1 manifest 的雜湊必須等於 `materialize.py` 中的 P3b 常數，`--u1` 只是檔案位置，不是信任來源）；
+   - 重新物化：以試驗身份的 `hypothesis_id` 與 `data_window`（回看長度取自帳本登記的 `max_lookback_seconds`）與 U1 輸出目錄執行 U4，並帶 `--trial`（假說在試驗開始後撤回時仍可完成，§4 第 1 點；以子程序執行 U4 的命令列，不匯入 `materialize.py`，使 U4 與 U6 可以平行開發；U6 的測試注入假的物化函式，與 U4 的實際整合在 P4-D 驗證），產生的 manifest 必須與試驗身份的 `manifest_sha256` 與 `data_files` 逐位元組相同（U4 是確定性的；U1 manifest 的雜湊必須等於 `materialize.py` 中的 P3b 常數，`--u1` 只是檔案位置，不是信任來源）；
    - 核對：執行紀錄的 `run_config` 與試驗身份逐項一致；`engine_commit` 依 §5 第 4 點的引擎規則核對；`algorithm_files` 中每一檔等於 `code_commit` 中同一路徑的內容，且 `submit` 執行當下 `r8_engine/` 與 `r8_ledger/` 沒有未提交的改動；
    - 產生：由執行紀錄與重新物化的輸出，依序執行第 2 點的重算、第 1 點的序列、第 3 點的 `beta_matched_btc_v1`、第 4 點的四個固定壓力情境，以及旁註檔；
    - 寫入：完成的試驗須重算通過；失敗的試驗依第 1 點以完整網格提交，不要求重算通過。`result_summary` 另寫入 `fits`（取自執行紀錄，經第 2 點核對）。`out_of_sample` 試驗以帳本要求的 `baselines` 參數傳入基準序列；
@@ -429,7 +429,7 @@
   - 物化在 `begin_trial` 之前完成，並納入試驗身份：`manifest_sha256` = 該試驗所用物化 manifest 的 SHA-256（holdout 證偽試驗有擬合與評分兩份物化時，取 `canonical`({"fit": …, "score": …}) 的 SHA-256），`data_files` = 物化 manifest 中各檔的 SHA-256（兩份時鍵前加 `fit/`、`score/`）。
   - `trial_id` 是帳本的試驗代號，供執行器在執行前核對（§5 第 4 點）；試驗的執行 `mode` 恆為 `trial`；除這兩個鍵外，不屬於試驗身份的只有 `model_artifact`（擬合執行在 `begin_trial` 之後才產生）。標的清單由預登記決定（§4 第 2 點）；其餘會改變訂單或報酬的設定一律在試驗身份中。
   - `submit` 核對執行紀錄中的 `run_config` 與試驗身份逐項一致、執行所用的物化等於身份中的 `manifest_sha256` 與 `data_files`，不一致即拒絕。
-  - 執行環境的身份欄位一律取固定值，寫成 `framework.py` 的常數 `RUNTIME_METADATA`（隨 `engine_commit` 釘住）：`cost_model` = {`id`: `r8_cost_rules`, `version`: `r8-p4-v1`}，`fill_model` = {`id`: `r8_next_open_fill`, `version`: `r8-p4-v1`}，
+  - 執行環境的身份欄位一律取固定值，寫成常數 `RUNTIME_METADATA`（隨 `engine_commit` 釘住；U5 寫在主機端可匯入的 `rules.py`，U6 在 `series.py` 自行寫一份，不匯入 `rules.py`；兩份都必須等於本點的值，各自以測試核對）：`cost_model` = {`id`: `r8_cost_rules`, `version`: `r8-p4-v1`}，`fill_model` = {`id`: `r8_next_open_fill`, `version`: `r8-p4-v1`}，
     `engine` = {`id`: `lean`, `version`: 映像摘要 `sha256:2657ed33…82b6` 的完整值}，`dependencies` = {`lean_image_digest`: 同上}，`time_semantics` = {`known_at`: `bar_end`, `fill_at`: `next_bar_open`, `simulated_latency_ms`: 0}。
     執行器在執行前、`submit` 在提交前核對試驗身份的這五個欄位與常數完全相同，`engine.version` 也與 `run.json` 的 `image_digest` 相同；不符即拒絕。規則改版時另以補充指令更新版本字串。
 - 物化：每次執行使用一份物化。主試驗與探索性樣本外試驗的物化視窗是整個樣本外範圍；holdout 證偽試驗分兩次執行：擬合執行物化 [訓練段起點, 驗證段終點)，輸出模型檔；評分執行物化該 holdout 區間（加暖機）。這一段描述的是日後的設計；本版不物化 holdout 區間（§4 第 3 點），holdout 的部分待帳本單元完成後另以補充指令啟用。
