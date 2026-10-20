@@ -1,9 +1,15 @@
 # CLAUDE_CHANGELOG.md — 開發歷史歸檔
 
 > 從 CLAUDE.md / TODO.md 遷出的 Wave/Sprint/Batch + TODO version-increment 歷史敘事。新 session 不需要讀此文件，僅供回顧歷史時查閱。
-> 最後更新：2026-10-20（R8 P3 第一次全量取數與 U1 第二次修補派工、DSR 單元 1 另立交付；TODO v901）
+> 最後更新：2026-10-20（R8 FIX2 獨立驗收與發布；TODO v902）
 
 ---
+
+## R8 FIX2 獨立驗收與發布 — 2026-10-20
+
+- 原 FIX2 在 `fc79781bb` 完成實作及 E2 複核，但 E4 因來源套件匯入錯誤而未執行測試；保留原 BLOCKED／UNVERIFIED 與釋放紀錄。
+- Operator 明示授權另立 `R8-S2-FIX2-INDEPENDENT-PUBLICATION-20261020`，承接原補丁、修正測試來源匯入並獨立驗收發布；不改治理工具或舊帳本。細節見階段 2 派工指令 §8.7。
+- TODO v902：FIX2 的 CLOSED 列與 source 同一 PR 合入後才生效，合併前須完成目前 head 的獨立審查與 CI。P3b 保持 WAITING，待 PM 核對合併 head 後另行派發；本次不取數，也不推進 P4、DSR 或 runtime。
 
 ## R8 P3 第一次全量取數、U1 第二次修補派工、DSR 單元 1 另立交付 — 2026-10-20
 

@@ -24,7 +24,7 @@ import urllib.request
 BASE_URL = "https://api.bybit.com"
 INSTRUMENTS = "/v5/market/instruments-info"
 ENDPOINTS = {"kline": "/v5/market/kline", "funding": "/v5/market/funding/history", "open_interest": "/v5/market/open-interest"}
-TOOL_VERSION = "r8-public-data-1"
+TOOL_VERSION = "r8-public-data-2"
 PARSER_VERSION = "r8-strict-2"
 CURSOR = re.compile(r"(?:[A-Za-z0-9_.~-]|%[0-9A-Fa-f]{2})+")
 SYMBOL = re.compile(r"[A-Z0-9]{1,32}")
@@ -462,6 +462,8 @@ class Collector:
         self.manifest_path = self.out / "manifest.json"
         self.manifest = _json(self.manifest_path) if self.manifest_path.exists() else {
             "tool_version": TOOL_VERSION, "parser_version": PARSER_VERSION, "plan_sha256": plan.sha256, "files": {}}
+        if self.manifest.get("tool_version") != TOOL_VERSION:
+            raise IntegrityError("續傳工具版本不符；請改用新的輸出目錄")
         if self.manifest.get("plan_sha256") != plan.sha256 or self.manifest.get("parser_version") != PARSER_VERSION:
             raise IntegrityError("續傳計畫或解析器版本不符")
         count = self.manifest.get("request_count", 0)
@@ -714,6 +716,28 @@ class Collector:
             self._save()
         return self.universe
 
+    def _job_end(self, name, symbol):
+        # 資金費保留下架時刻及之後的原始結算，只有窗口端點截到下架時間。
+        delivery = self.universe[symbol].get("deliveryTime", 0)
+        return min(self.plan.end, delivery) if name != "funding" and delivery else self.plan.end
+
+    @staticmethod
+    def _advance_window(state, rule, interval, start, stamps):
+        # 空窗只證明該窗無資料；重疊一個週期繼續向前，直到覆蓋起點。
+        if not stamps and rule["name"] != "funding":
+            new_end = state["end"] - (rule["params"]["limit"]-1)*PERIODS[interval]
+            if new_end > start:
+                state["end"] = new_end
+            else:
+                state["complete"] = True
+        elif not stamps or min(stamps) <= start:
+            state["complete"] = True
+        else:
+            new_end = min(stamps)-1
+            if new_end >= state["end"]:
+                raise ResponseInvalid("時間分頁未前進")
+            state["end"] = new_end
+
     def _jobs(self):
         for rule in self.plan.value["datasets"]:
             for symbol in sorted(self.universe):
@@ -722,7 +746,7 @@ class Collector:
                 intervals = rule["intervals"] if rule["name"] == "kline" else [rule["params"].get("intervalTime", "funding")]
                 for interval in intervals:
                     start = self.plan.job_start(rule["name"], symbol, interval, self.universe)
-                    if start < self.plan.end:
+                    if start < self._job_end(rule["name"], symbol):
                         yield rule, symbol, interval, start
 
     def dry_run(self, max_rps=4):
@@ -733,7 +757,7 @@ class Collector:
         requests = 0
         for rule, symbol, interval, start in self._jobs():
             period = self.universe[symbol]["funding_interval_ms"] if interval == "funding" else PERIODS[interval]
-            requests += math.ceil(math.ceil((self.plan.end-start)/period)/rule["params"]["limit"]) + 1
+            requests += math.ceil(math.ceil((self._job_end(rule["name"], symbol)-start)/period)/rule["params"]["limit"]) + 1
         return {"estimated_requests": requests, "minimum_seconds_at_max_rps": requests/max_rps,
                 "assumption": "依目前原始清單與固定間隔估計；不含重試，實際空頁與歷史覆蓋可能不同", "network_requests": 0}
 
@@ -766,7 +790,7 @@ class Collector:
 
     def _validate_checkpoint(self, state, rule, symbol, interval, start):
         """從已驗雜湊的原始頁重算進度，不信任可改寫的完成旗標。"""
-        expected = {"end": self.plan.end-1, "cursor": None, "complete": False}
+        expected = {"end": self._job_end(rule["name"], symbol)-1, "cursor": None, "complete": False}
         pending_probe = None
         window_stamps = []
         parent = None
@@ -807,10 +831,7 @@ class Collector:
                         expected["cursor"] = cursor
                     else:
                         expected["cursor"] = None
-                        if not window_stamps or min(window_stamps) <= start:
-                            expected["complete"] = True
-                        else:
-                            expected["end"] = min(window_stamps)-1
+                        self._advance_window(expected, rule, interval, start, window_stamps)
                         window_stamps = []
                     period = self.universe[symbol]["funding_interval_ms"] if name == "funding" else PERIODS[interval]
                     if (expected["complete"] and len(payload["list"]) == rule["params"]["limit"] and stamps
@@ -825,12 +846,13 @@ class Collector:
 
     def _dataset(self, rule, symbol, interval, start):
         name = rule["name"]; filename = name + "_" + symbol + "_" + interval + ".csv.gz"
+        end = self._job_end(name, symbol)
         target = self.out / filename
         old = self.manifest["files"].get(filename)
-        if old and old.get("coverage") == [start, self.plan.end] and target.exists() and digest(target.read_bytes()) == old["sha256"]:
+        if old and old.get("coverage") == [start, end] and target.exists() and digest(target.read_bytes()) == old["sha256"]:
             return
         checkpoint = self.out / (filename + ".progress.json")
-        state = _json(checkpoint) if checkpoint.exists() else {"plan_sha256": self.plan.sha256, "request_ids": [], "end": self.plan.end-1, "cursor": None, "complete": False}
+        state = _json(checkpoint) if checkpoint.exists() else {"plan_sha256": self.plan.sha256, "request_ids": [], "end": end-1, "cursor": None, "complete": False}
         if state["plan_sha256"] != self.plan.sha256:
             raise IntegrityError("續傳 checkpoint 計畫不符")
         for request_id in state["request_ids"]:
@@ -871,13 +893,7 @@ class Collector:
                         if prior["params"][b] == state["end"]:
                             stamps.extend(milliseconds(x["timestamp"]) for x in _json(self.out / "raw" / (str(prior_id) + ".json"))["result"]["list"])
                 state["cursor"] = None
-                if not stamps or min(stamps) <= start:
-                    state["complete"] = True
-                else:
-                    new_end = min(stamps)-1
-                    if new_end >= state["end"]:
-                        raise ResponseInvalid("時間分頁未前進")
-                    state["end"] = new_end
+                self._advance_window(state, rule, interval, start, stamps)
             state["request_ids"].append(request_id)
             period = self.universe[symbol]["funding_interval_ms"] if name == "funding" else PERIODS[interval]
             if (state["complete"] and len(result["list"]) == rule["params"]["limit"] and rows
@@ -899,7 +915,7 @@ class Collector:
             if digest(raw_path.read_bytes()) != record["raw_sha256"]:
                 raise IntegrityError("續傳原始回應雜湊不符")
             payload = _json(raw_path)
-            for row in parse_rows(name, payload["result"]["list"], symbol=symbol, start=start, end=self.plan.end, interval=interval, now_ms=iso_ms(self.client.now())):
+            for row in parse_rows(name, payload["result"]["list"], symbol=symbol, start=start, end=end, interval=interval, now_ms=iso_ms(self.client.now())):
                 if row[0] in all_rows and all_rows[row[0]] != row:
                     raise ResponseInvalid("跨頁重複資料衝突")
                 all_rows[row[0]] = row
@@ -919,7 +935,7 @@ class Collector:
                and (name != "kline" or r["params"].get("interval") == interval)]
         self.manifest["files"][filename] = {"dataset": name, "symbol": symbol, "interval": interval, "interval_ms": period,
                                           "first_timestamp": rows[0][0] if rows else None, "last_timestamp": rows[-1][0] if rows else None,
-                                          "count": len(rows), "coverage": [start, self.plan.end], "gaps": gaps(rows,start,gap_end,period,funding=name=="funding"),
+                                          "count": len(rows), "coverage": [start, end], "gaps": gaps(rows,start,gap_end,period,funding=name=="funding"),
                                           "sha256": digest(compressed), "bytes": len(compressed), "fetched_at": self.client.now(),
                                           "request_ids": ids, "source_request_ids": source_ids, "request_count": len(ids), "parser_version": PARSER_VERSION,
                                           "tool_version": TOOL_VERSION, "plan_sha256": self.plan.sha256}

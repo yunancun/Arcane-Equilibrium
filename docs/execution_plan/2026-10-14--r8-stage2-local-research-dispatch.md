@@ -759,3 +759,18 @@ holdout 只檢查成本後仍為正、方向一致、沒有明顯劣化。U2 依
 5. P4 的補充指令須規定：
    - 下架時間不在整點時，下架品種的最後一根 K 線只涵蓋部分時段（310 個下架品種中 27 個不在整點下架）；
    - 下架時刻的那一筆資金費如何計入，且下架時刻之後的紀錄不得計入。
+
+
+### 8.7 FIX2 獨立驗收與發布（2026-10-20）
+
+**生效邊界：**本節與 FIX2 source 隨同一 PR 合入 main；合併前仍為待驗收／待發布。只有目前 PR head 的獨立審查、研究測試與必要 CI 全部滿足，才合併並使 TODO 的 CLOSED 列生效。這不是 P3b 的完成紀錄。
+
+- 原實作交付 `R8-S2-PUBLIC-DATA-FIX2-20261020` 在 `fc79781bb972b63785169d50552bfe14da7953e0` 停止：直接 U1 測試 175 passed，E2 原問題複核 PASS；E4 受控 pytest 在收集階段因 `ModuleNotFoundError: program_code` 中止，0 passed／0 failed／0 skipped／1 error，沒有執行測試。原交付以 BLOCKED／UNVERIFIED 結束並釋放租約及准入；原 BB 與 hosted CI 未執行。這些歷史不改寫。
+- Operator 先指示繼續完成 FIX2；知悉原交付已釋放、無續辦額度與原審查期限已過後，於 2026-10-20 明示「授权」另立僅用於獨立驗收與發布的交付 `R8-S2-FIX2-INDEPENDENT-PUBLICATION-20261020`。原交付記錄與分支保留；不改治理工具、不重設舊帳本。
+- 新交付從已發布 main `d85d4f7b9931a144945502f08a85775d7f8140da` 准入後，fast-forward 承接原兩個提交 `500b64b7d`、`fc79781bb`。收尾範圍只有原兩個 source／test 檔，以及本文件、`TODO.md`、`docs/CLAUDE_CHANGELOG.md`；不擴大研究或取數範圍。
+- 獨立發布時只在 `test_r8_public_data.py` 的匯入處，依該檔位置把同一提交的倉庫根目錄追加到 `sys.path`。原因是受控 pytest 刻意移除工作目錄，並禁止載入專案 pytest 設定；此調整不改治理 bootstrap／白名單，也不改既有測試函式、fixture 與斷言。production 檔保持 `fc79781bb` 的版本；原 126 個測試保留，新增 49 個 FIX2 案例。
+- 主持方直接離線回歸涵蓋 U1 175 項、研究帳本 160 項，合計 335 passed／0 failed／0 skipped／0 error。直接測試不是受控擷取。發布交付的 E4 須另以 Context-bound `capture-command` 執行 U1，並核對 §8.5 的斷言及原有反向驗證；不能用原 E4 的收集失敗充當通過。
+- 合併前另需 E2 的正確性與範圍審查、BB 的公開端點與資金費邊界審查、R4 的文件／狀態一致性審查，以及 GitHub `research-tests`、必要檢查與目前 head 的自動審查。具體結論與執行紀錄保留在本次發布 PR 的 head 綁定證據中；本節不預填尚未產生的審查結果。
+- 計畫檔 SHA-256 維持 `b2cfd873f8084cc4336d7ded69f36db2cd6159ccadb7d7084363d31fe517ded7`，`PARSER_VERSION`、資金費請求／原始輸出、授權、重試與 cursor 規則不變。沒有實際取數、真實資料讀取、Linux／資料庫／Demo／live 或部署效果。
+
+**之後：**P3b 仍依 §8.6，待 PM 核對 FIX2 的合併 head 後另行派發，必須使用新輸出目錄。原 P3 資料未驗收；合成測試、source 合併或 CI 通過均不證明真實 API 窗口保證、下架歷史完整性或研究結果。
