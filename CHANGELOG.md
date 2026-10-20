@@ -7,6 +7,10 @@
 > 舊引言誤把 v5.6→v5.7 列為 thesis-shift，本次依下方正文校正為 engineering-only。
 > 舊主檔命名／路徑以固定來源登記為準；v5.9 起已改用 AEG packet。
 
+## [RH-20261020-01] — 2026-10-20 — R8 P4 的方法論裁決與下架清單核對
+
+Operator 在 P4 補充指令的 QC 選項中選擇：折內只用過去資料的自動網格選擇算一個試驗；多重檢驗採 BY、FDR 0.10；並同意讀取交易所逐筆成交的目錄清單，核對下架品種清單的完整性。見[修訂二](docs/decisions/2026-10-14--r8-amendment-2-multi-strategy-first-loop.md) N3、N5 的註記與 [P4 補充指令](docs/execution_plan/2026-10-20--r8-stage2-p4-research-core-addendum.md) §9。
+
 ## [RH-20261019-01] — 2026-10-19 — R8 第一圈的實驗引擎定為 LEAN
 
 P1 選型查核依階段 2 派工指令，以不是假說試驗的簡單策略執行，沒有照修訂二 N2 的字面「對一個假說」跑通；記錄者把這一差異記為 DRIFT，理由是預登記之前執行假說等於先看結果再登記。Operator 接受此解讀，選型定為 LEAN。見[修訂二](docs/decisions/2026-10-14--r8-amendment-2-multi-strategy-first-loop.md) N2 的註記與[選型查核紀錄](docs/execution_plan/2026-10-19--r8-stage2-p1-engine-selection-record.md)。
