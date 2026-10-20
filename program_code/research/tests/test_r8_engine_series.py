@@ -293,6 +293,14 @@ def run_for(path, *, decisions=None, windows=None):
          'cost':cost_parameters(),'model_artifact':None,'random_seed':1,
          'strategy':{},'algorithm':{'path':'program_code/research/r8_engine/lean_algo/examples/fixed_schedule.py','class':'FixedSchedule'},
          'mode':'validation'}
+    fits=[]
+    if windows and windows != [m['window']]:
+        cfg['folds']=[{'fit_window':m['warmup'],'score_window':w} for w in windows]
+        cfg['strategy']={'grid':[{'x':'1'}],'neighborhood':{'numeric':{'x':['1']},'categorical':[]}}
+        fits=[{'fold':i,'fit_window':m['warmup'],'params':{'x':'1'},'model_sha256':'f'*64,
+               'selection':{'grid_scores':['1'],'neighborhood_means':['1'],
+                            'qualified':[True],'selected':0,'selected_minus_neighborhood':'0','no_trade':False}}
+              for i in range(len(windows))]
     return {'schema_version':'r8_lean_run_v1','materialization_sha256':cfg['materialization_sha256'],
             'run_config_sha256':hashlib.sha256(canonical(cfg)).hexdigest(),'run_config':cfg,
             'image_digest':series.IMAGE_DIGEST,'docker_argv':[],
@@ -301,7 +309,7 @@ def run_for(path, *, decisions=None, windows=None):
             'started_at':0,'ended_at':1,'exit_code':0,'lean_log_sha256':'e'*64,
             'mode':'validation','status':'completed','failure_reason':None,'failure_t':None,
             'decisions':decisions or [],'steps':[],'orders':[],'fills':[],'voided':[],
-            'funding':[],'endpoint_funding':[],'fits':[], 'fill_forward_bars':[],
+            'funding':[],'endpoint_funding':[],'fits':fits, 'fill_forward_bars':[],
             'unexplained_cash_residual':{'per_step':[],'total':'0'}}
 
 
@@ -374,9 +382,9 @@ def test_failed_run_zero_pads_grid_and_records_actual_periods(tmp_path):
     report=series.recompute(path,run)
     values,sidecar=series.make_series(path,run,report)
     assert len(values['returns'])==4
-    assert values['returns'][2:]==[[START//1000+7200,0.0],[START//1000+10800,0.0]]
-    assert values['filled_periods']==2
-    assert sidecar['produced_periods']==2 and sidecar['recompute_passed'] is False
+    assert values['returns'][1:]==[[START//1000+i*3600,0.0] for i in range(1,4)]
+    assert values['filled_periods']==3
+    assert sidecar['produced_periods']==1 and sidecar['recompute_passed'] is False
 
 
 def test_beta_ols_includes_intercept_and_caps():
@@ -516,7 +524,9 @@ def submit_fixture(tmp_path):
     calls=[]
     def query(directory,trial):
         assert Path(directory)==book.out and trial=='t1'
-        return copy.deepcopy(query_record)
+        return {'record':copy.deepcopy({k:v for k,v in query_record.items()
+                                       if k not in ('finished','status')}),
+                'finished':query_record['finished'],'status':query_record['status']}
     def materialize(**kwargs):
         calls.append(kwargs)
         assert kwargs['trial']=='t1' and kwargs['hypothesis']=='h1'
@@ -551,6 +561,22 @@ def test_submit_generated_provenance_baseline_and_real_ledger_acceptance(tmp_pat
     assert f['calls'][0]['u1']==tmp_path/'unread-u1'
 
 
+def test_fix1_17_submit_reads_real_trial_record_envelope(tmp_path):
+    f = submit_fixture(tmp_path)
+    queried = f['book'].trial_record('t1')
+    assert set(queried) == {'record', 'finished', 'status'}
+    assert queried['record']['trial_id'] == 't1'
+    assert queried['finished'] is False and queried['status'] == 'aborted'
+    f['runpath'].write_bytes(canonical(f['run']))
+    result = series.submit(f['book'].out, 't1', tmp_path/'unread-u1', f['runpath'],
+                           materializer=f['materialize'], repo=f['repo'])
+    assert result['status'] == 'completed'
+    assert f['book'].trial_record('t1')['finished'] is True
+    with pytest.raises(series.SeriesError, match='已結束'):
+        series.submit(f['book'].out, 't1', tmp_path/'unread-u1', f['runpath'],
+                      materializer=f['materialize'], repo=f['repo'])
+
+
 @pytest.mark.parametrize('mutation',['validation','verification','trial_id','identity','manifest','code','engine','untracked','finished','holdout','recompute'])
 def test_submit_rejection_never_finishes_or_changes_ledger(tmp_path,mutation):
     f=submit_fixture(tmp_path);run=f['run'];cfg=run['run_config'];record=f['query_record']
@@ -579,10 +605,10 @@ def test_submit_failed_full_grid_is_accepted_and_requires_operator_stop(tmp_path
     result=f['submit']()
     assert result['status']=='failed' and result['produced_periods']==32
     summary=result['result_summary']
-    assert summary['produced_periods']==2 and summary['operator_stop_required'] is True
+    assert summary['produced_periods']==1 and summary['operator_stop_required'] is True
     assert summary['provenance']['recompute_passed'] is False
     values=json.loads((f['book'].out/'series'/(result['returns_sha256']+'.json')).read_bytes())
-    assert values['filled_periods']==30 and all(r[1]==0 for r in values['returns'][2:])
+    assert values['filled_periods']==31 and all(r[1]==0 for r in values['returns'][1:])
 
 
 def test_submit_parser_has_only_authorized_inputs_and_no_status():
@@ -703,7 +729,7 @@ def test_async_rotation_fails_after_increase_fills_before_delayed_reduce(tmp_pat
     assert result['failure_reason']=='gross_exposure_cap' and result['failure_t']==START+2*HOUR
     run.update(status='failed',failure_reason='gross_exposure_cap',failure_t=START+2*HOUR)
     values,sidecar=series.make_series(path,run,series.recompute(path,run))
-    assert sidecar['produced_periods']==2 and values['filled_periods']>=4
+    assert sidecar['produced_periods']==1 and values['filled_periods']>=5
 
 
 def test_fit_selection_and_params_rederived_and_no_trade_flatten(tmp_path):
@@ -893,8 +919,8 @@ def test_failed_baseline_padding_does_not_read_post_failure_prices(tmp_path):
     path=write_materialization(tmp_path);run=observed_fixed_run(path)
     run.update(status='failed',failure_reason='algorithm_exception',failure_t=START+2*HOUR)
     result=series.baselines(path,run)['beta_matched_btc_v1']
-    assert result['returns'][2:]==[[(START+2*HOUR)//1000,0.0],[(START+3*HOUR)//1000,0.0]]
-    assert result['filled_periods']==2
+    assert result['returns'][1:]==[[START//1000+i*3600,0.0] for i in range(1,4)]
+    assert result['filled_periods']==3
 
 
 def test_stress_full_path_hand_values_include_repriced_partial_reduce(tmp_path):
@@ -990,3 +1016,299 @@ def test_materialization_read_boundary_excludes_lean_custom_payloads(tmp_path,mo
     assert set(opened)=={'materialization.json','symbol_properties_overlay.csv',
         'source/kline_BTCUSDT_60.csv','source/kline_BTCUSDT_D.csv',
         'source/funding_BTCUSDT_funding.csv','source/open_interest_BTCUSDT_4h.csv'}
+
+
+@pytest.mark.parametrize('windows', [[], [{'start': START, 'end': START+2*HOUR}],
+    [{'start': START, 'end': START+2*HOUR}, {'start': START+2*HOUR, 'end': START+4*HOUR}]])
+def test_fix1_02_validation_without_folds_requires_materialized_window(tmp_path, windows):
+    path = write_materialization(tmp_path)
+    run = run_for(path)
+    run['run_config']['score_windows'] = windows
+    refresh_run_hashes(run)
+    with pytest.raises(series.SeriesError):
+        series.recompute(path, run)
+
+
+def test_fix1_02_validation_uses_explicit_full_window(tmp_path):
+    path = write_materialization(tmp_path)
+    run = observed_fixed_run(path)
+    assert run['run_config']['folds'] == []
+    assert series.recompute(path, run)['recompute_passed'] is True
+    assert len(series.make_series(path, run, series.recompute(path, run))[0]['returns']) == 4
+
+
+@pytest.mark.parametrize('resolution,decision_offset,recovery', [('hour', HOUR, 3*HOUR), ('day', DAY, DAY+HOUR)])
+def test_fix1_04_gap_keeps_pending_flat_symbol_and_resumes(tmp_path, resolution, decision_offset, recovery):
+    bars = [[t,'100','100','100','100','10000','10000000']
+            for t in range(START-13*DAY, START+recovery+2*HOUR, HOUR)
+            if t < START or t >= START+recovery]
+    path = write_materialization(tmp_path, hours=recovery//HOUR+2,
+                                 symbols=('BTCUSDT','XUSDT'), hourly={'XUSDT':bars})
+    run = run_for(path, decisions=[
+        {'t':START,'targets':{'BTCUSDT':{'quantity':'0'},'XUSDT':{'quantity':'1'}}},
+        {'t':START+decision_offset,'targets':{'BTCUSDT':{'quantity':'0'}}}])
+    run['run_config']['decision_resolution'] = resolution
+    result = seal_observation(path,run)
+    assert result['failure_reason'] is None
+    assert result['orders'][0]['status'] == 'filled'
+    assert result['fills'][0]['change_t'] == START+recovery
+    assert result['fills'][0]['quantity'] == '1'
+    assert not any(o.get('cancel_reason') == 'replaced' for o in result['orders'])
+    assert series.recompute(path,run)['recompute_passed']
+    run['decisions'][1]['targets']['XUSDT'] = {'quantity':'0'}
+    assert series.replay(series.Materialization(path),run)['failure_reason'] == 'invalid_decision'
+
+
+def test_fix1_03_sections_sorted_by_contract_and_reversal_reduce_first(tmp_path):
+    bars = [[t,'100','100','100','100','10000','10000000']
+            for t in range(START-13*DAY, START+5*HOUR, HOUR)
+            if t not in (START, START+HOUR)]
+    path = write_materialization(tmp_path, hours=5, symbols=('BTCUSDT','XUSDT'), hourly={'XUSDT':bars})
+    run = run_for(path, decisions=[
+        {'t':START,'targets':{'BTCUSDT':{'quantity':'0'},'XUSDT':{'quantity':'1'}}},
+        {'t':START+2*HOUR,'targets':{'BTCUSDT':{'quantity':'2'}}},
+        {'t':START+3*HOUR,'targets':{'BTCUSDT':{'quantity':'-1'},'XUSDT':{'quantity':'1'}}}])
+    result = seal_observation(path,run)
+    assert [(f['order_id'], f['quantity']) for f in result['fills'][:4]] == [(1,'1'),(2,'2'),(3,'-2'),(3,'-1')]
+    for key in ('orders','voided'):
+        assert result[key] == sorted(result[key],key=lambda r:r['order_id'])
+    for key in ('funding','endpoint_funding'):
+        assert result[key] == sorted(result[key],key=lambda r:(r['t'],r['symbol']))
+    assert series.recompute(path,run)['recompute_passed']
+    run['fills'][0],run['fills'][1] = run['fills'][1],run['fills'][0]
+    assert not series.recompute(path,run)['recompute_passed']
+
+
+def no_trade_gap_run(tmp_path):
+    bars = [[t,'100','100','100','100','10000','10000000']
+            for t in range(START-13*DAY, START+6*HOUR, HOUR)
+            if t < START or t >= START+3*HOUR]
+    path = write_materialization(tmp_path,hours=6,symbols=('BTCUSDT','XUSDT'),hourly={'BTCUSDT':bars})
+    run = run_for(path, windows=[{'start':START,'end':START+HOUR},
+        {'start':START+HOUR,'end':START+3*HOUR}, {'start':START+3*HOUR,'end':START+6*HOUR}],
+        decisions=[{'t':START,'targets':{'BTCUSDT':{'quantity':'1'},'XUSDT':{'quantity':'0'}}},
+                   {'t':START+4*HOUR,'targets':{'BTCUSDT':{'quantity':'1'},'XUSDT':{'quantity':'0'}}}])
+    run['fits'][1].update(params=None,model_sha256=None,selection={
+        'grid_scores':['-1'],'neighborhood_means':['-1'],'qualified':[False],
+        'selected':None,'selected_minus_neighborhood':None,'no_trade':True})
+    return path,run
+
+
+def test_fix1_05_no_trade_flatten_is_order_not_decision(tmp_path):
+    path = write_materialization(tmp_path)
+    run = run_for(path, windows=[{'start':START,'end':START+2*HOUR},
+        {'start':START+2*HOUR,'end':START+4*HOUR}],
+        decisions=[{'t':START,'targets':{'BTCUSDT':{'quantity':'1'}}}])
+    run['fits'][1].update(params=None,model_sha256=None,selection={
+        'grid_scores':['-1'],'neighborhood_means':['-1'],'qualified':[False],
+        'selected':None,'selected_minus_neighborhood':None,'no_trade':True})
+    decisions = copy.deepcopy(run['decisions'])
+    result = seal_observation(path,run)
+    assert run['decisions'] == decisions
+    assert result['orders'][1] == {'order_id':2,'kind':'no_trade_flatten',
+        'decision_t':START+2*HOUR,'symbol':'BTCUSDT','quantity':'-1','status':'filled'}
+    assert series.recompute(path,run)['recompute_passed']
+    run['decisions'].append({'t':START+2*HOUR,'targets':{'BTCUSDT':{'quantity':'0'}}})
+    assert not series.recompute(path,run)['recompute_passed']
+
+
+def test_fix1_06_zero_difference_replacement_cancels_without_order_id(tmp_path):
+    path,run = no_trade_gap_run(tmp_path)
+    result = seal_observation(path,run)
+    assert result['orders'][0] == {'order_id':1,'kind':'strategy','decision_t':START,
+        'symbol':'BTCUSDT','quantity':'1','status':'cancelled','cancel_t':START+HOUR,
+        'cancel_reason':'replaced','replaced_by':None}
+    assert [o['order_id'] for o in result['orders']] == [1,2,3]
+    assert result['voided'] == []
+    assert result['fills'][0]['order_id'] == 2
+    assert series.recompute(path,run)['recompute_passed']
+
+
+@pytest.mark.parametrize('reason', ['algorithm_exception','lean_error','fill_forward_bar','invalid_decision'])
+@pytest.mark.parametrize('corruption', ['earlier_cap','fill','step'])
+def test_fix1_10_failed_run_rejects_earlier_failure_or_prefix_difference(tmp_path, reason, corruption):
+    path = write_materialization(tmp_path)
+    run = observed_fixed_run(path)
+    run.update(status='failed',failure_reason=reason,failure_t=START+3*HOUR)
+    if corruption == 'earlier_cap':
+        run['decisions'][0]['targets']['BTCUSDT']['quantity'] = '1100'
+        run['run_config']['cost']['order_cap_fraction'] = '1'
+        refresh_run_hashes(run)
+    elif corruption == 'fill':
+        run['fills'][0]['fee'] = '1'
+    else:
+        run['steps'][13*24]['cash'] = '1'
+    with pytest.raises(series.SeriesError):
+        series.make_series(path,run,series.recompute(path,run))
+
+
+@pytest.mark.parametrize('reason', ['algorithm_exception','lean_error','fill_forward_bar','invalid_decision'])
+def test_fix1_10_external_failure_checks_strict_prefix_and_zeroes_boundary_period(tmp_path, reason):
+    path = write_materialization(tmp_path)
+    run = observed_fixed_run(path)
+    run.update(status='failed',failure_reason=reason,failure_t=START+2*HOUR)
+    run['decisions'].append({'t':START+2*HOUR,'targets':{'BTCUSDT':{'quantity':'9999'}}})
+    run['steps'][-1]['cash'] = '1'
+    if reason == 'fill_forward_bar':
+        run['fill_forward_bars'] = [{'t':START+2*HOUR,'symbol':'BTCUSDT'}]
+    report = series.recompute(path,run)
+    assert report['differences'] == []
+    assert report['recompute_passed'] is False
+    values,sidecar = series.make_series(path,run,report)
+    assert values['returns'][0][1] == pytest.approx(-0.00000155055, abs=1e-16)
+    assert values['returns'][1:] == [[START//1000+i*3600,0.0] for i in range(1,4)]
+    assert values['filled_periods'] == 3 and sidecar['produced_periods'] == 1
+
+
+def test_fix1_10_unknown_failure_time_skips_temporal_evidence_and_zeroes_grid(tmp_path):
+    path = write_materialization(tmp_path)
+    run = observed_fixed_run(path)
+    run.update(status='failed',failure_reason='lean_error',failure_t=None,
+               decisions=[{'t':START,'targets':{'BTCUSDT':{'quantity':'9999'}}}],
+               fits=[{'malformed':'unavailable time prefix'}])
+    run['steps'][0]['cash'] = '1'
+    report = series.recompute(path,run)
+    assert report['differences'] == []
+    values,sidecar = series.make_series(path,run,report)
+    assert values['returns'] == [[START//1000+i*3600,0.0] for i in range(4)]
+    assert values['filled_periods'] == 4 and sidecar['produced_periods'] == 0
+    run['run_config_sha256'] = '0'*64
+    with pytest.raises(series.SeriesError,match='雜湊'):
+        series.recompute(path,run)
+
+
+def test_fix1_11_baseline_does_not_price_unlisted_zero_position(tmp_path):
+    days = [[START-i*DAY,'100','100','100','100','1','20000000'] for i in range(103,0,-1)]
+    bars = [[START+i*HOUR,'100','100','100','100','1','10000000'] for i in range(2,4)]
+    path = write_materialization(tmp_path,symbols=('BTCUSDT','XUSDT'),
+        hourly={'XUSDT':bars},daily={'BTCUSDT':days,'XUSDT':[]})
+    manifest = json.loads(path.read_bytes())
+    manifest['warmup']['start'] = START-104*DAY
+    manifest['first_bar']['XUSDT'] = START+2*HOUR
+    path.write_bytes(canonical(manifest))
+    run = run_for(path)
+    result = series.baselines(path,run)
+    assert result['beta_matched_btc_v1']['returns'] == [[START//1000+i*3600,0.0] for i in range(4)]
+
+
+@pytest.mark.parametrize('later_step', [False,True])
+def test_fix1_12_missing_endpoint_cancels_and_liquidates_without_future_price(tmp_path, later_step):
+    bars = [[t,'100','100','100','100','10000','10000000']
+            for t in range(START-13*DAY, START+HOUR, HOUR)]
+    if later_step:
+        bars.append([START+5*HOUR,'900','900','900','900','10000','10000000'])
+    path = write_materialization(tmp_path,hours=8,hourly={'BTCUSDT':bars})
+    run = run_for(path,windows=[{'start':START,'end':START+4*HOUR}],decisions=[
+        {'t':START,'targets':{'BTCUSDT':{'quantity':'1'}}},
+        {'t':START+HOUR,'targets':{'BTCUSDT':{'quantity':'2'}}}])
+    result = seal_observation(path,run)
+    assert START+4*HOUR not in [s['t'] for s in result['steps']]
+    assert result['orders'][1] == {'order_id':2,'kind':'strategy','decision_t':START+HOUR,
+        'symbol':'BTCUSDT','quantity':'1','status':'cancelled',
+        'cancel_t':START+4*HOUR,'cancel_reason':'score_end'}
+    assert [(f['change_t'],f['price']) for f in result['fills']] == [(START,'100.1'),(START+4*HOUR,'99.4')]
+    assert result['fills'][-1]['kind'] == 'score_end_liquidation'
+    assert series.recompute(path,run)['recompute_passed']
+    values,_ = series.make_series(path,run,series.recompute(path,run))
+    assert values['filled_periods'] == 3
+
+
+def test_fix1_13_delayed_fill_exposure_checked_after_same_step_delisting(tmp_path):
+    base = [[t,'100','100','100','100','10000','10000000']
+            for t in range(START-13*DAY, START+6*HOUR, HOUR)]
+    path = write_materialization(tmp_path,hours=6,symbols=('BTCUSDT','XUSDT'),
+        hourly={'BTCUSDT':[r for r in base if r[0]!=START+HOUR],
+                'XUSDT':[r for r in base if r[0]<START+HOUR]},
+        delistings={'XUSDT':{'deliveryTime':START+3*HOUR,'partial_last_bar':False}})
+    run = run_for(path,decisions=[
+        {'t':START,'targets':{'BTCUSDT':{'quantity':'0'},'XUSDT':{'quantity':'750'}}},
+        {'t':START+HOUR,'targets':{'BTCUSDT':{'quantity':'750'},'XUSDT':{'quantity':'0'}}}])
+    result = seal_observation(path,run)
+    assert result['failure_reason'] is None
+    step = next(s for s in result['steps'] if s['t']==START+3*HOUR)
+    assert step['positions'] == {'BTCUSDT':'750'}
+    assert any(f['change_t']==START+2*HOUR and f['symbol']=='BTCUSDT' for f in result['fills'])
+    assert any(f['change_t']==START+3*HOUR and f['kind']=='delisting_settlement' for f in result['fills'])
+    assert series.recompute(path,run)['recompute_passed']
+
+
+@pytest.mark.parametrize('turnover,net', [('200000000',-.0021),('20000000',-.0031),('2000000',-.0051)])
+def test_fix1_15_btc_hold_fold_exit_uses_liquidity_tier_not_penalty(tmp_path, turnover, net):
+    daily = [[t,'100','100','100','100','1',turnover] for t in range(START-13*DAY,START,DAY)]
+    path = write_materialization(tmp_path,daily={'BTCUSDT':daily})
+    run = run_for(path)
+    result = series.baselines(path,run)['btc_perp_hold_v1']
+    product = Decimal(1)
+    for _,value in result['returns']:
+        product *= 1+Decimal(str(value))
+    assert float(product-1) == pytest.approx(net,abs=1e-15)
+    assert canonical(result) == canonical(series.baselines(path,run)['btc_perp_hold_v1'])
+
+
+def test_fix1_16_beta_includes_daily_bar_ending_at_fit_end(tmp_path):
+    days=[]
+    for i in range(91):
+        price = '100' if i%2 else '110'
+        days.append([START-(91-i)*DAY,price,price,price,price,'1','20000000'])
+    path = write_materialization(tmp_path,symbols=('BTCUSDT','XUSDT','YUSDT'),
+        daily={'BTCUSDT':days,'XUSDT':days,'YUSDT':[]})
+    m=json.loads(path.read_bytes());m['warmup']['start']=START-92*DAY;path.write_bytes(canonical(m))
+    data=series.Materialization(path)
+    expected={'BTCUSDT':'1','XUSDT':'1','YUSDT':'1'}
+    assert series.estimate_betas(data,{'start':START-92*DAY,'end':START}) == expected
+    data.daily['XUSDT'][START]={'close':Decimal('99999')}
+    assert series.estimate_betas(data,{'start':START-92*DAY,'end':START}) == expected
+
+
+def test_fix1_18_manifest_uses_u4_dataset_names_and_preserves_gap_semantics(tmp_path):
+    bars = [[t,'100','100','100','100','10000','10000000']
+            for t in range(START-13*DAY,START+4*HOUR,HOUR) if t!=START+HOUR]
+    gaps={'BTCUSDT':{'kline_hour':[{'start':START+HOUR,'end_exclusive':START+2*HOUR,'count':1}],
+                    'kline_day':[],'open_interest':[{'start':START,'end_exclusive':START+4*HOUR,'count':1}],
+                    'funding':[]}}
+    path=write_materialization(tmp_path,hourly={'BTCUSDT':bars},gaps=gaps)
+    run=run_for(path,decisions=[{'t':START,'targets':{'BTCUSDT':{'quantity':'1'}}}])
+    seal_observation(path,run)
+    assert series.Materialization(path).manifest['gaps']==gaps
+    values,_=series.make_series(path,run,series.recompute(path,run))
+    assert values['filled_periods']==2
+
+
+@pytest.mark.parametrize('legacy', ['kline_60','kline_D','hourly','daily'])
+def test_fix1_18_manifest_rejects_non_u4_dataset_names(tmp_path, legacy):
+    path=write_materialization(tmp_path,gaps={'BTCUSDT':{legacy:[]}})
+    with pytest.raises(series.SeriesError,match='gaps'):
+        series.Materialization(path)
+
+
+@pytest.mark.parametrize('corruption',['earlier_failure','prefix_fee','missing_fit'])
+def test_fix1_10_failed_submit_rejects_prefix_without_writing_ledger(tmp_path,corruption):
+    f=submit_fixture(tmp_path);run=f['run']
+    run.update(status='failed',failure_reason='lean_error',failure_t=START+3*HOUR)
+    if corruption=='earlier_failure':
+        run['decisions'][0]['targets']={'UNLISTED':{'weight':'0'}}
+    elif corruption=='prefix_fee':
+        run['fills'][0]['fee']='10'
+    else:
+        run['fits']=[]
+    refresh_run_hashes(run)
+    before={p.relative_to(f['book'].out):p.read_bytes() for p in f['book'].out.rglob('*') if p.is_file()}
+    with pytest.raises(series.SeriesError):
+        f['submit']()
+    after={p.relative_to(f['book'].out):p.read_bytes() for p in f['book'].out.rglob('*') if p.is_file()}
+    assert after==before
+
+
+def test_fix1_10_unknown_failure_time_real_ledger_submission_requires_stop(tmp_path):
+    f=submit_fixture(tmp_path)
+    f['run'].update(status='failed',failure_reason='lean_error',failure_t=None,
+                    fits=[],decisions=[{'t':START,'targets':{'BTCUSDT':{'weight':'9999'}}}])
+    f['runpath'].write_bytes(canonical(f['run']))
+    result=series.submit(f['book'].out,'t1',tmp_path/'unread-u1',f['runpath'],
+                         materializer=f['materialize'],repo=f['repo'])
+    assert result['status']=='failed'
+    assert result['result_summary']['operator_stop_required'] is True
+    assert result['result_summary']['produced_periods']==0
+    values=json.loads((f['book'].out/'series'/(result['returns_sha256']+'.json')).read_bytes())
+    assert values['filled_periods']==32 and all(row[1]==0 for row in values['returns'])
+    assert f['book'].trial_record('t1')['status']=='failed'

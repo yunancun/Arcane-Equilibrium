@@ -278,6 +278,11 @@ class Materialization:
         if (len(set(self.symbols)) != len(self.symbols) or
                 any(not re.fullmatch(r'[A-Z0-9]+', s) for s in self.symbols)):
             raise SeriesError('標的清單不合法')
+        if (not isinstance(m['gaps'],dict) or set(m['gaps'])-set(self.symbols) or
+                any(not isinstance(gaps,dict) or
+                    set(gaps)-{'kline_hour','kline_day','open_interest','funding'}
+                    for gaps in m['gaps'].values())):
+            raise SeriesError('gaps 資料集名稱必須沿用 U4 manifest')
         self.hourly = {s: {} for s in self.symbols}
         self.daily = {s: {} for s in self.symbols}
         self.funding = {s: {} for s in self.symbols}
@@ -518,7 +523,7 @@ def score_intervals(config):
     return merged
 
 
-def _check_config(data, run):
+def _check_config(data, run, *, _hold_folds=False):
     c=run['run_config'];m=data.manifest
     exact_keys(run,('schema_version','materialization_sha256','run_config_sha256','run_config',
         'image_digest','docker_argv','algorithm_config_sha256','algorithm_files','base_symbol_properties_sha256',
@@ -560,6 +565,9 @@ def _check_config(data, run):
     if not 0<decimal_value(c['gross_exposure_cap'])<=1 or decimal_value(c['initial_cash'])<=0:
         raise SeriesError('權益或曝險上限不合法')
     windows=score_intervals(c)
+    if (not _hold_folds and c['mode']=='validation' and not c['folds'] and
+            [interval(w) for w in c['score_windows']] != [(data.start,data.end)]):
+        raise SeriesError('validation 無摺表時計分窗必須恰為物化 window')
     if any(a<data.start or b>data.end for a,b in windows):
         raise SeriesError('計分窗超出物化範圍')
     if c['folds'] and [interval(f['score_window']) for f in c['folds']]!=[interval(w) for w in c['score_windows']]:
@@ -572,7 +580,7 @@ def _check_config(data, run):
 @precise
 def replay(data, run, *, cost=None, stop_on_recorded_failure=True, _hold_folds=False):
     """從來源列與決策重建，觀測到的成交／現金值不作計算輸入。"""
-    c=_check_config(data,run);cost=copy.deepcopy(cost or c['cost'])
+    c=_check_config(data,run,_hold_folds=_hold_folds);cost=copy.deepcopy(cost or c['cost'])
     windows=score_intervals(c);ends={b for a,b in windows};symbols=c['symbols']
     if _hold_folds:
         ends.update(interval(w)[1] for w in c['score_windows'])
@@ -580,8 +588,14 @@ def replay(data, run, *, cost=None, stop_on_recorded_failure=True, _hold_folds=F
     out={k:[] for k in ('orders','fills','voided','funding','endpoint_funding','steps')}
     out.update({'failure_reason':None,'failure_t':None,'fit_errors':[],
                 'max_actual_gross_exposure':'0','delayed_fills':[]})
+    if stop_on_recorded_failure and run['status']=='failed' and run['failure_t'] is None:
+        return out
     account=Account(c['initial_cash']);pending={};number=0;latest=None
     decision_rows=run['decisions']
+    external_failure=(stop_on_recorded_failure and run['status']=='failed' and
+                      run['failure_reason']!='gross_exposure_cap')
+    if external_failure:
+        decision_rows=[d for d in decision_rows if d['t']<run['failure_t']]
     if any(type(d['t']) is not int for d in decision_rows) or len({d['t'] for d in decision_rows})!=len(decision_rows):
         raise SeriesError('決策時間重複或不合法')
     if [d['t'] for d in decision_rows]!=sorted(d['t'] for d in decision_rows):
@@ -598,7 +612,13 @@ def replay(data, run, *, cost=None, stop_on_recorded_failure=True, _hold_folds=F
     if (len(run['fits'])>len(c['folds']) or
             run['status']=='completed' and len(run['fits'])!=len(c['folds'])):
         out['fit_errors'].append('fits.count')
+    if run['status']=='failed' and run['failure_t'] is not None:
+        required=sum(interval(f['score_window'])[0]<run['failure_t'] for f in c['folds'])
+        if len(run['fits'])<required:
+            out['fit_errors'].append('fits.count')
     for i,fold in enumerate(c['folds']):
+        if external_failure and interval(fold['score_window'])[0]>=run['failure_t']:
+            continue
         if i>=len(run['fits']):
             continue
         fit=run['fits'][i]
@@ -613,7 +633,8 @@ def replay(data, run, *, cost=None, stop_on_recorded_failure=True, _hold_folds=F
             out['fit_errors'].append('fits.'+str(i))
         if selected['no_trade']:
             no_trade.add(i)
-    times=sorted({t+HOUR for s in data.symbols for t in data.hourly[s]}|ends| (starts if _hold_folds else set()))
+    times=sorted({t+HOUR for s in data.symbols for t in data.hourly[s]}|
+                 (starts|ends if _hold_folds else set()))
     time_set=set(times)
     if any(t not in time_set for t in decisions):
         raise SeriesError('決策不在可送達時間步')
@@ -635,7 +656,7 @@ def replay(data, run, *, cost=None, stop_on_recorded_failure=True, _hold_folds=F
             return
         for order,leg,opening in pending.pop(symbol):
             order['status']='cancelled';order['cancel_t']=t;order['cancel_reason']=reason
-            if replaced_by is not None:
+            if reason=='replaced':
                 order['replaced_by']=replaced_by
     def fill(order,quantity,price,bps,fee,change_t,kind):
         account.fill(order['symbol'],quantity,price,fee);order['status']='filled'
@@ -652,6 +673,13 @@ def replay(data, run, *, cost=None, stop_on_recorded_failure=True, _hold_folds=F
         if not quantity:
             return
         bps=decimal_value(cost['forced_reduce_penalty_bps'])*decimal_value(cost['slippage_multiplier'])
+        if _hold_folds and kind=='score_end_liquidation':
+            median,_,_=data.liquidity(symbol,t,cost)
+            tier=next((item for item in cost['slippage_tiers_bps']
+                       if median>=decimal_value(item['min_turnover'])),None)
+            if tier is None:
+                raise SeriesError('BTC 持有基準缺少可用流動性分級')
+            bps=decimal_value(tier['bps'])*decimal_value(cost['slippage_multiplier'])
         if kind=='delisting_settlement':
             rows=[(x,data.hourly[symbol][x]) for x in data.times[symbol] if x<t]
             if len(rows)<2:
@@ -678,7 +706,26 @@ def replay(data, run, *, cost=None, stop_on_recorded_failure=True, _hold_folds=F
         out['endpoint_funding' if endpoint else 'funding'].append(row)
         if not endpoint:
             account.cash+=amount
+    settled_ends=set()
+    def settle(t, include_current_end):
+        # 沒有送達步的終點，於下一步或結束時處理，但仍以原終點的資料與時間入帳。
+        events=[(e,1,'') for e in ends-settled_ends if e<t or include_current_end and e==t]
+        for s in symbols:
+            delivery=data.manifest['delistings'].get(s,{}).get('deliveryTime')
+            if delivery is not None and delivery<=t and s not in delisted:
+                events.append((delivery,0,s))
+        for event_t,kind,s in sorted(events):
+            if kind==0:
+                cancel(s,t,'delivery');liquidate(s,event_t,'delisting_settlement');delisted.add(s)
+            else:
+                for symbol in sorted(list(pending)):
+                    cancel(symbol,event_t,'score_end')
+                for symbol in sorted(list(account.positions)):
+                    liquidate(symbol,event_t,'score_end_liquidation')
+                settled_ends.add(event_t)
     for t in times:
+        if external_failure and t>=run['failure_t']:
+            break
         if stop_on_recorded_failure and run['status']=='failed' and run['failure_t'] is not None and t>run['failure_t']:
             break
         # 下一根開盤的成交在下一個送達步驟才入帳。
@@ -692,20 +739,13 @@ def replay(data, run, *, cost=None, stop_on_recorded_failure=True, _hold_folds=F
                     if opening>order['decision_t']:
                         out['delayed_fills'].append({'symbol':s,'t':opening})
                 pending.pop(s)
-        for s in sorted(symbols):
-            delivery=data.manifest['delistings'].get(s,{}).get('deliveryTime')
-            if delivery is not None and delivery<=t and s not in delisted:
-                cancel(s,t,'delivery');liquidate(s,delivery,'delisting_settlement');delisted.add(s)
+        settle(t,False)
         if latest:
             lp,le=latest
             exposure=sum((abs(q*lp[s]) for s,q in account.positions.items()),Decimal(0))/le
             if exposure>decimal_value(c['gross_exposure_cap']):
                 fail('gross_exposure_cap',t);break
-        if t in ends:
-            for s in sorted(list(pending)):
-                cancel(s,t,'score_end')
-            for s in sorted(list(account.positions)):
-                liquidate(s,t,'score_end_liquidation')
+        settle(t,True)
         active_fold=next((i for i,f in enumerate(c['folds']) if interval(f['score_window'])[0]<=t<interval(f['score_window'])[1]),None)
         flatten=active_fold in no_trade and t==interval(c['folds'][active_fold]['score_window'])[0]
         targets=decisions.get(t)
@@ -722,7 +762,8 @@ def replay(data, run, *, cost=None, stop_on_recorded_failure=True, _hold_folds=F
                     not any(a<=t<b for a,b in windows)):
                 fail('invalid_decision',t);break
             equity=account.equity(prices(t))
-            decision_prices={s:data.close(s,t) for s in valid|set(account.positions)}
+            # 缺漏中的待成交標的雖不交給策略，仍須保留成交後曝險檢查的計價基礎。
+            decision_prices={s:data.close(s,t) for s in valid|set(account.positions)|set(pending)}
             if equity<=0:
                 fail('gross_exposure_cap',t);break
             desired=dict(account.positions)
@@ -734,10 +775,8 @@ def replay(data, run, *, cost=None, stop_on_recorded_failure=True, _hold_folds=F
                 legs=order_segments(account.positions.get(s,Decimal(0)),wanted,price,prop['min_qty'],
                                     prop['min_notional'],median,hourly,enough,cost)
                 if not legs:
-                    if s not in pending:
-                        continue
-                    # 零差額仍取代尚未成交的舊單；零量新單依最小量作廢。
-                    legs=[{'quantity':'0','reason':'min_qty'}]
+                    cancel(s,t,'replaced')
+                    continue
                 number+=1;cancel(s,t,'replaced',number)
                 pending[s]=[]
                 for leg in legs:
@@ -771,9 +810,17 @@ def replay(data, run, *, cost=None, stop_on_recorded_failure=True, _hold_folds=F
         if stop_on_recorded_failure and run['status']=='failed' and run['failure_t']==t:
             break
     if run['status']=='completed' or not stop_on_recorded_failure:
+        if out['failure_reason'] is None:
+            settle(data.end,True)
         for event in schedules:
             if event['t']==execution_end:
                 funding(event,True)
+    # 穩定排序保留同一複合訂單先減曝險、再增曝險的兩段順序。
+    for key in ('orders','voided'):
+        out[key].sort(key=lambda row:row['order_id'])
+    out['fills'].sort(key=lambda row:(row['change_t'],row['order_id']))
+    for key in ('funding','endpoint_funding'):
+        out[key].sort(key=lambda row:(row['t'],row['symbol']))
     return out
 
 
@@ -781,6 +828,42 @@ def _inputs(materialization, run):
     data=materialization if isinstance(materialization,Materialization) else Materialization(materialization)
     record=run if isinstance(run,dict) else load_json(run)[0]
     return data,record
+
+
+def _observed_prefix(data, run):
+    """外部失敗只比較失敗步之前已送達的事件與訂單狀態。"""
+    cutoff=run['failure_t'];prefix=copy.deepcopy(run)
+    times=sorted({t+HOUR for rows in data.hourly.values() for t in rows})
+    def received(t, strict=False):
+        i=(bisect.bisect_right if strict else bisect.bisect_left)(times,t)
+        return times[i] if i<len(times) else float('inf')
+    def fill_time(row):
+        t=row['change_t']
+        return received(t if row['kind'] in ('delisting_settlement','score_end_liquidation') else t+HOUR)
+    prefix['fills']=[r for r in run['fills'] if fill_time(r)<cutoff]
+    prefix['funding']=[r for r in run['funding'] if received(r['t'],True)<cutoff]
+    prefix['endpoint_funding']=[]
+    prefix['steps']=[r for r in run['steps'] if r['t']<cutoff]
+    prefix['voided']=[r for r in run['voided'] if r['decision_t']<cutoff]
+    prefix['orders']=[]
+    filled={(r['order_id'],r['quantity']) for r in prefix['fills']}
+    for raw in run['orders']:
+        created=(received(raw['decision_t']) if raw['kind'] in
+                 ('delisting_settlement','score_end_liquidation') else raw['decision_t'])
+        if created>=cutoff:
+            continue
+        order=copy.deepcopy(raw)
+        if order.get('cancel_t',-1)>=cutoff:
+            for field in ('cancel_t','cancel_reason','replaced_by'):
+                order.pop(field,None)
+        if order['status']=='filled' and (order['order_id'],order['quantity']) not in filled:
+            order['status']='cancelled'
+        prefix['orders'].append(order)
+    prefix['fill_forward_bars']=[r for r in run['fill_forward_bars'] if r['t']<cutoff]
+    prefix['unexplained_cash_residual']={
+        'per_step':[r for r in run['unexplained_cash_residual']['per_step'] if r['t']<cutoff],
+        'total':'0'}
+    return prefix
 
 
 def _compare(expected, actual, location, cash_tolerance, errors, stats):
@@ -814,26 +897,33 @@ def _compare(expected, actual, location, cash_tolerance, errors, stats):
 @precise
 def recompute(materialization, run):
     data,run=_inputs(materialization,run);expected=replay(data,run)
+    observed=run
+    if run['status']=='failed':
+        if run['failure_t'] is None:
+            observed={**run,**{key:[] for key in ('orders','fills','voided','funding','endpoint_funding','steps')},
+                      'fill_forward_bars':[], 'unexplained_cash_residual':{'per_step':[],'total':'0'}}
+        elif run['failure_reason']!='gross_exposure_cap':
+            observed=_observed_prefix(data,run)
     errors=list(expected['fit_errors']);stats={'max_difference':Decimal(0),'max_location':None}
     counts={};cash_tol=decimal_value(run['run_config']['initial_cash'])*EQUITY_FRACTION_TOL
     for key in ('orders','fills','voided','funding','endpoint_funding','steps'):
-        counts[key]=len(expected[key]);_compare(expected[key],run[key],key,cash_tol,errors,stats)
-    if run['fill_forward_bars']:
+        counts[key]=len(expected[key]);_compare(expected[key],observed[key],key,cash_tol,errors,stats)
+    if observed['fill_forward_bars']:
         errors.append('fill_forward_bars')
-    residual=run['unexplained_cash_residual']
+    residual=observed['unexplained_cash_residual']
     if decimal_value(residual['total']) or any(decimal_value(x['residual']) for x in residual['per_step']):
         errors.append('unexplained_cash_residual')
     if expected['failure_reason'] is not None:
         if run['status']!='failed' or (run['failure_reason'],run['failure_t'])!=(expected['failure_reason'],expected['failure_t']):
             errors.append('failure_reason/failure_t')
-    elif run['failure_reason']=='gross_exposure_cap':
+    elif run['failure_reason']=='gross_exposure_cap' and run['failure_t'] is not None:
         errors.append('gross_exposure_cap:not_reproduced')
     totals={}
     for name,key,field in [('fees','fills','fee'),('funding','funding','amount'),('endpoint_funding','endpoint_funding','amount')]:
         exp=sum((decimal_value(row[field]) for row in expected[key]),Decimal(0))
-        observed=sum((decimal_value(row[field]) for row in run[key]),Decimal(0))
-        totals[name]={'expected':decimal_text(exp),'observed':decimal_text(observed)}
-        _compare(decimal_text(exp),decimal_text(observed),'totals.'+field,cash_tol,errors,stats)
+        amount=sum((decimal_value(row[field]) for row in observed[key]),Decimal(0))
+        totals[name]={'expected':decimal_text(exp),'observed':decimal_text(amount)}
+        _compare(decimal_text(exp),decimal_text(amount),'totals.'+field,cash_tol,errors,stats)
     return {'schema_version':'r8_recompute_report_v1','materialization_sha256':data.sha256,
             'run_sha256':digest(canonical(run)),'recompute_passed':not errors and run['status']=='completed',
             'counts':counts,'max_difference':decimal_text(stats['max_difference']),
@@ -955,6 +1045,9 @@ def filled_periods(data,config,reconstructed,grid):
 @precise
 def _series_values(data,run,reconstructed):
     config=run['run_config'];grid=periods(config);f=config['sharpe_frequency_seconds']*1000
+    if run['status']=='failed' and run['failure_t'] is None:
+        return {'period_seconds':config['sharpe_frequency_seconds'],'filled_periods':len(grid),
+                'returns':[[p,0.0] for p in grid]},0
     flagged=filled_periods(data,config,reconstructed,grid)
     failure=run['failure_t'] if run['status']=='failed' else None
     if run['status']=='failed' and failure is None:
@@ -962,12 +1055,14 @@ def _series_values(data,run,reconstructed):
     ends={b for a,b in score_intervals(config)}
     history=History(config,reconstructed);equities={};produced=0
     for t in sorted({p*1000+offset for p in grid for offset in (0,f)}):
+        if failure is not None and t>=failure:
+            continue
         account=history.advance(t,endpoint=t in ends)
         equities[t]=account.equity({s:data.close(s,t) for s in account.positions})
     rows=[]
     for p in grid:
         a=p*1000;b=a+f
-        if failure is not None and b>failure:
+        if failure is not None and b>=failure:
             value=Decimal(0);flagged.add(p)
         else:
             if equities[a]<=0:
@@ -994,9 +1089,11 @@ def make_series(materialization, run, report):
     reconstructed=replay(data,run)
     if reconstructed['fit_errors']:
         raise SeriesError('fits 選擇或參數與獨立重推不符')
-    if run['failure_reason']=='gross_exposure_cap' and (
+    if run['failure_reason']=='gross_exposure_cap' and run['failure_t'] is not None and (
             reconstructed['failure_reason']!='gross_exposure_cap' or reconstructed['failure_t']!=run['failure_t']):
         raise SeriesError('曝險失敗未重現')
+    if actual['differences']:
+        raise SeriesError('失敗前綴重算有差異或更早失敗')
     values,produced=_series_values(data,run,reconstructed)
     return values,{'schema_version':'r8_series_sidecar_v1','run_sha256':digest(canonical(run)),
                    'materialization_sha256':data.sha256,'recompute_report_sha256':digest(canonical(report)),
@@ -1026,7 +1123,7 @@ def estimate_betas(data, fit_window):
     returns={}
     for s,rows in data.daily.items():
         returns[s]={t:row['close']/rows[t-DAY]['close']-1 for t,row in rows.items()
-                    if t-DAY in rows and t-DAY>=start and t+DAY<end}
+                    if t-DAY in rows and t-DAY>=start and t+DAY<=end}
     btc=returns.get('BTCUSDT',{});result={'BTCUSDT':Decimal(1)};qualified=[]
     if len(btc)>=BETA_MIN_OBSERVATIONS:
         qualified.append(Decimal(1))
@@ -1056,6 +1153,9 @@ def _matched_baseline(data,run,reconstructed):
     cfg=run['run_config'];grid=periods(cfg);width=cfg['sharpe_frequency_seconds']*1000
     if 'BTCUSDT' not in data.symbols:
         raise SeriesError('基準缺少 BTCUSDT')
+    if run['status']=='failed' and run['failure_t'] is None:
+        return {'period_seconds':cfg['sharpe_frequency_seconds'],'filled_periods':len(grid),
+                'returns':[[p,0.0] for p in grid]}
     folds=_folds(cfg)
     betas=[{s:decimal_value(v) for s,v in estimate_betas(data,f['fit_window']).items()} for f in folds]
     history=History(cfg,reconstructed);rows=[];flagged=set()
@@ -1070,7 +1170,7 @@ def _matched_baseline(data,run,reconstructed):
         hour=f['t']//HOUR*HOUR
         fund_by_hour[hour]=fund_by_hour.get(hour,Decimal(0))+decimal_value(f['rate'])
     for p in grid:
-        if failure is not None and p*1000+width>failure:
+        if failure is not None and p*1000+width>=failure:
             rows.append([p,0.0]);flagged.add(p);continue
         product=Decimal(1)
         for h in range(p*1000,p*1000+width,HOUR):
@@ -1078,12 +1178,13 @@ def _matched_baseline(data,run,reconstructed):
             if i is None:
                 raise SeriesError('基準時刻不在摺表中')
             before=history.advance(h)
-            opening={s:data.opening(s,h) for s in cfg['symbols']}
+            opening={s:data.opening(s,h) for s in before.positions}
             equity=before.equity(opening)
             if equity<=0:
                 raise SeriesError('基準曝險的權益不為正')
             bminus=sum((q*opening[s]*betas[i][s] for s,q in before.positions.items()),Decimal(0))/equity
             after=history.advance(h,after=True)
+            opening.update({s:data.opening(s,h) for s in after.positions if s not in opening})
             equity=after.equity(opening)
             if equity<=0:
                 raise SeriesError('成交後基準權益不為正')
@@ -1336,8 +1437,10 @@ def submit(ledger, trial, u1, run, *, trial_query=None, materializer=None, repo=
     record=load_json(run)[0]
     if record['mode']!='trial' or record['run_config']['mode']!='trial' or record['run_config']['trial_id']!=trial:
         raise SeriesError('submit 只接受同一試驗的 trial 執行')
-    identity=(trial_query or _trial_query)(ledger,trial)
-    if not identity or identity['trial_id']!=trial or identity['finished'] is not False:
+    queried=(trial_query or _trial_query)(ledger,trial)
+    exact_keys(queried, ('record','finished','status'))
+    identity=queried['record']
+    if not identity or identity['trial_id']!=trial or queried['finished'] is not False:
         raise SeriesError('試驗不存在或已結束')
     if identity['evaluation_kind']=='holdout_falsification':
         raise SeriesError('本版拒收 holdout_falsification')
@@ -1371,7 +1474,7 @@ def submit(ledger, trial, u1, run, *, trial_query=None, materializer=None, repo=
                  'operator_stop_required':stop,'btc_perp_hold_sha256':digest(canonical(artifacts['btc_perp_hold']))}
         # 所有拒絕檢查與計算完成後才持久化；第二次檢查避免長時間計算中來源被改動。
         verify_code(repo,record)
-        if (trial_query or _trial_query)(ledger,trial)!=identity:
+        if (trial_query or _trial_query)(ledger,trial)!=queried:
             raise SeriesError('產物計算期間試驗身份或狀態已改變')
         output=contained(ledger,'u6_artifacts');output.mkdir(exist_ok=True)
         for value in artifacts.values():
