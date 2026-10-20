@@ -283,7 +283,8 @@
    - 啟動器的設定改寫沿用 P1b 已驗證的方式：在容器內 `/Lean/Launcher/bin/Debug/config.json` 中，把 `"algorithm-type-name"` 改為演算法類別名稱、`"algorithm-language"` 改為 `"Python"`、
      `"algorithm-location"` 改為掛載進容器的演算法檔路徑，並在 `"environment": "backtesting",` 之後加入 `"close-automatically": true,`；然後在同一目錄執行 `dotnet QuantConnect.Lean.Launcher.dll`。
      設定檔的 `"data-folder"` 是 `"../../../Data/"`（PA 已確認），不改；
-   - 執行前：`run_config` 的 `code_commit` 必須是完整的 commit；被執行的每一個演算法檔（框架、`rules.py`、範例或假說的演算法）必須與該 commit 中的同一路徑逐位元組相同，且工作樹中這些路徑沒有未提交的改動，否則拒絕執行。假說的演算法檔因此必須先提交（位置由階段 3 的派工指令規定）；
+   - 執行前：`run_config` 的 `code_commit` 必須是完整的 commit；被執行的每一個演算法檔（框架、`rules.py`、範例或假說的演算法），以及主機端的 `program_code/research/r8_engine/` 與 `program_code/research/r8_ledger/` 下的全部檔案（含執行器本身、`materialize.py`、`series.py`、`ledger.py`），
+     必須與該 commit 中的同一路徑逐位元組相同，且工作樹中這些路徑沒有未提交的改動，否則拒絕執行；這些檔案的 SHA-256 全部記入 `algorithm_files`。假說的演算法檔因此必須先提交（位置由階段 3 的派工指令規定）；
    - 核對 U4 的 `materialization.json` 的雜湊與執行設定中記錄的值相同；核對要掛載的 `lean/` 與 `custom/` 目錄中的檔案清單與 manifest 完全相同、每檔雜湊相符，有多出或缺少的檔案即拒絕；對假說的演算法檔執行 §3.8 的靜態檢查；
    - 執行後：由原始紀錄組裝 §7.2 的 `run.json`（以帳本的 `canonical` 寫出），記錄映像摘要、完整的 docker 參數、演算法檔與設定的雜湊、起訖時間、結束碼與 LEAN 日誌的雜湊；
    - 輸出目錄在倉庫內時拒絕。
@@ -306,8 +307,11 @@
 1. **帳本序列。** 由獨立重算的權益（第 2 點）產生階段 2 派工指令 §7.4 格式的序列檔：
    - 期初為計分窗在 Sharpe 頻率上的期數網格（階段 2 派工指令 §7.4 的定義），暖機不計；E(期初) 依 §3.2；
    - `filled_periods` 依 §9.14 計算；
-   - 執行紀錄為 `completed` 時：獨立重算的比對不通過、出現前值填補，或 `unexplained_cash_residual` 不為 0，即拒絕產生序列並說明原因（這次執行應以失敗提交）。
-   - 執行紀錄為 `failed`、或上述比對不通過時：仍以獨立重算的權益，產生失敗之前已完整的期數的序列（帳本要求 failed 或 aborted 的樣本外試驗在已產生不少於 2 期時附上序列），並在旁註檔標明失敗原因與 `recompute_passed: false`。
+   - 執行紀錄為 `completed` 時：獨立重算的比對不通過、`fill_forward_bars` 不為空，或 `unexplained_cash_residual` 不為 0，即拒絕產生序列並說明原因（這次執行應以失敗提交）。
+   - 執行紀錄為 `failed`、或上述比對不通過時：帳本不接受部分序列（附序列時必須涵蓋完整的期數網格，且產出期數等於網格長度；`ledger.py` 的 `_store_series` 與 `finish_trial`），
+     而失敗的樣本外試驗在已產生不少於 2 期時又必須附序列。因此以完整網格提交：失敗之前已完整的期數取獨立重算的報酬，失敗之後的期數填 0，並全部計入 `filled_periods`；
+     實際產生的期數、失敗原因與 `recompute_passed: false` 寫入旁註檔與 `result_summary`。依帳本規則，主試驗失敗時 p 值記 1；V 與 PBO 只用已完成的試驗，不受影響。
+     帳本接受部分序列屬帳本（U2）的行為變更，併入 TODO `P1-R8-S2-LEDGER-FIXES`。
 2. **獨立重算。** 自行實作 §3 與 §9.8 的規則，以 `decimal.Decimal` 由原字串計算，不匯入 `rules.py`，也不使用 LEAN 的任何數值；只用 U4 的輸出與執行紀錄中的決策（時刻、標的、目標權重或數量）：
    - 依 §3.2 的順序，重算每筆成交的價格、數量、手續費、作廢與原因、懲罰滑價，每次資金費結算的金額（含空白的判定與估計），下架結算，計分終點的平倉成本，以及每個時間步的現金與權益；
    - 與執行紀錄逐筆、逐步比對，容差依 §9.8.8；另比對期末權益與手續費、資金費的累計值；
@@ -319,9 +323,9 @@
    主試驗的物化視窗是整個樣本外範圍（§7.0），各折擬合窗都在其中；holdout 證偽試驗的擬合窗為 [訓練段起點, 驗證段終點)（§9.10），由擬合執行的物化提供。
 4. **成本壓力重算**（§9.8.2）：以同一次執行的決策與部位、部位不變，以壓力參數重算成本與淨報酬序列（結果是近似，部位不隨成本調整）；彙整各情境的淨結果、成本佔比與損益兩平的滑點倍數，供試驗紀錄的 `result_summary` 使用。
 5. **提交帳本。** `submit` 子命令是唯一的提交途徑：它重新核對物化 manifest、執行紀錄、獨立重算報告與序列檔的雜湊與彼此的綁定，確認重算報告為通過，然後才呼叫 `ResearchLedger.finish_trial`，
-   失敗的試驗同樣經 `submit` 提交：`--status failed` 或 `aborted`，綁定失敗的執行紀錄與物化 manifest，附上第 1 點的部分序列（不足 2 期時不附），不要求重算通過。
+   失敗的試驗同樣經 `submit` 提交：`--status failed` 或 `aborted`，綁定失敗的執行紀錄與物化 manifest，附上第 1 點的完整網格序列（失敗前不足 2 期時不附），不要求重算通過。
    `out_of_sample` 試驗另須傳入第 3 點產生的 `beta_matched_btc_v1` 序列：`submit` 核對它由同一份執行紀錄與物化產生（雜湊綁定記在旁註檔），以帳本要求的 `baselines` 參數傳給 `finish_trial`。
-   `submit` 另核對執行紀錄的 `algorithm_files` 中每一檔的 SHA-256，等於試驗身份 `code_commit` 中同一路徑的內容；不符即拒絕。
+   `submit` 另核對執行紀錄的 `algorithm_files` 中每一檔的 SHA-256，等於試驗身份 `code_commit` 中同一路徑的內容，並以同一規則核對 `submit` 執行當下的 `series.py`、`ledger.py` 與上述目錄沒有未提交的改動；不符即拒絕。
    完成的主試驗另須傳入第 4 點的壓力摘要：`submit` 核對它由同一份執行紀錄與物化產生，並把其中各情境的結果寫入 `result_summary.stress`（不接受呼叫者另填）。
    並在 `result_summary` 寫入 `provenance`：{`materialization_sha256`, `run_sha256`, `recompute_report_sha256`, `series_sha256`, `baseline_sha256`, `stress_sha256`, `stress_scenarios`, `sidecar_sha256`, `model_artifact_sha256`（holdout 證偽試驗；其他為 null）, `recompute_passed`}。
    帳本本身不檢查這個欄位（不改 U2）；落實方式是：第一代各批試驗結束、提交帳本鏈頭時，記錄者逐一核對每個試驗的 `provenance`，並由保存的檔案重跑一次 `recompute`；缺 `provenance` 或重跑不符的試驗，在報告中判為無效，不得計為候選成立。
@@ -340,7 +344,7 @@
 - 第 2 點：§3.9 的 G1 至 G8 逐位重現；改動執行紀錄中的一筆成交價、數量、手續費、作廢原因、一筆資金費或一個權益值，比對都能抓到；
 - 第 3 點：`btc_perp_hold_v1` 的輸出確定且雜湊穩定；`beta_matched_btc_v1` 的貝塔不使用測試窗的資料（以只在測試窗變動的資料驗證）；少於 90 個日觀測時取中位數；
 - 第 4 點：壓力重算的數值與損益兩平倍數；
-- 第 5 點：演算法檔與 `code_commit` 中的內容不符時拒絕（以構造的 git 倉庫測試）；失敗的執行以 `--status failed` 提交成功，附部分序列；完成的主試驗缺壓力摘要或摘要不是由同一執行產生時拒絕；執行紀錄的 `run_config` 與試驗身份不一致時拒絕；重算報告未通過、任一雜湊或綁定不符時拒絕以 `completed` 提交且不寫入帳本；`out_of_sample` 試驗缺基準序列或基準不是由同一執行產生時拒絕；通過時寫入的 `provenance` 正確，且帳本接受提交（以構造的帳本，含已登記的 `beta_matched_btc_v1` 基準測試）；
+- 第 5 點：演算法檔或主機端程式與 `code_commit` 中的內容不符時拒絕（以構造的 git 倉庫測試）；物化與身份中的 `manifest_sha256` 不符時拒絕；失敗的執行以 `--status failed` 提交、帳本接受（完整網格、失敗後填 0 並計入 `filled_periods`）；完成的主試驗缺壓力摘要或摘要不是由同一執行產生時拒絕；執行紀錄的 `run_config` 與試驗身份不一致時拒絕；重算報告未通過、任一雜湊或綁定不符時拒絕以 `completed` 提交且不寫入帳本；`out_of_sample` 試驗缺基準序列或基準不是由同一執行產生時拒絕；通過時寫入的 `provenance` 正確，且帳本接受提交（以構造的帳本，含已登記的 `beta_matched_btc_v1` 基準測試）；
 - 總曝險：執行紀錄中某一步超過 `gross_exposure_cap` 時拒絕產生序列；
 - AST 檢查。
 
@@ -365,12 +369,14 @@
   - `cost_model_parameters` = `run_config` 的 `cost`；
   - `strategy_parameters` = {`run`: {`initial_cash`, `leverage`, `gross_exposure_cap`, `decision_resolution`, `sharpe_frequency_seconds`}, `strategy`: `run_config` 的 `strategy`}；
   - 視窗與摺表對應試驗身份的 `data_window`、`fit_window`、`score_window` 與 `folds`；種子對應 `random_seed`；
-  - 不屬於試驗身份的只有執行期產物：`materialization_sha256` 與 `model_artifact`。標的清單由預登記決定（§4 第 2 點）；其餘會改變訂單或報酬的設定一律在試驗身份中。`submit` 核對執行紀錄中的 `run_config` 與試驗身份逐項一致，不一致即拒絕。
+  - 物化在 `begin_trial` 之前完成，並納入試驗身份：`manifest_sha256` = 該試驗所用物化 manifest 的 SHA-256（holdout 證偽試驗有擬合與評分兩份物化時，取 `canonical`({"fit": …, "score": …}) 的 SHA-256），`data_files` = 物化 manifest 中各檔的 SHA-256（兩份時鍵前加 `fit/`、`score/`）。
+  - 不屬於試驗身份的只有 `model_artifact`（擬合執行在 `begin_trial` 之後才產生）。標的清單由預登記決定（§4 第 2 點）；其餘會改變訂單或報酬的設定一律在試驗身份中。
+  - `submit` 核對執行紀錄中的 `run_config` 與試驗身份逐項一致、執行所用的物化等於身份中的 `manifest_sha256` 與 `data_files`，不一致即拒絕。
   - `time_semantics` 寫明可知時刻、成交時刻與 `simulated_latency_ms: 0`。
 - 物化：每次執行使用一份物化。主試驗與探索性樣本外試驗的物化視窗是整個樣本外範圍；holdout 證偽試驗分兩次執行：擬合執行物化 [訓練段起點, 驗證段終點)，輸出模型檔；評分執行物化該 holdout 區間（加暖機）。
 - 試驗身份與執行產物分開：帳本在 `begin_trial` 時凍結試驗身份，`finish_trial` 不能修改。因此：
-  - `begin_trial` 必須在該試驗的任何執行（包括擬合執行）之前呼叫；
-  - 試驗身份含全部會改變訂單或報酬的設定（上一點的對應），不含 `materialization_sha256`、`model_artifact` 等執行期產物；
+  - 順序為：物化 → `begin_trial`（身份含物化的雜湊）→ 執行（含擬合執行）→ `submit`；`begin_trial` 必須在該試驗的任何執行之前呼叫；
+  - 試驗身份含全部會改變訂單或報酬的設定與所用物化的雜湊（上一點的對應），不含 `model_artifact`；
   - 擬合執行輸出的模型檔雜湊與各次執行的雜湊，由 U6 的 `submit` 寫入 `result_summary.provenance`（§6 第 5 點）；
   - 記錄者批次核對時重跑擬合，模型檔雜湊不符即判該試驗無效。
 
@@ -400,6 +406,7 @@
 | `unexplained_cash_residual` | `per_step`（`[{"t", "residual"}]`，只列非零）、`total` | `{"per_step": [], "total": "0"}` |
 
 `unexplained_cash_residual` = LEAN 現金 −（初始資金 + 已實現損益 − 手續費 + 框架的現金調整），每步都必須為 0。
+另有 `fill_forward_bars`：框架收到的每一根 `IsFillForward` 為真的 K 線（時刻、標的），應為空清單；不為空時框架照規則中止（§3.5），U6 據此拒絕產生序列。
 
 ### 7.3 帳本序列
 
@@ -698,11 +705,11 @@ U6 `submit` 的 `provenance` 經記錄者核對與重算相符（§6 第 5 點�
 4. 第一段開啟之後，第二代不能再作計畫外的搜尋；計畫的規模宜控制在每個假說 20 項以內。
 5. **前提（尚未滿足）**：帳本的 `commit_trial_plan` 只比對變體參數雜湊、`evaluation_kind`、`role`、譜系親代、資料窗與主試驗代號（`ledger.py` 的計畫欄位），不比對程式 commit、`configuration` 雜湊、成本／成交／引擎版本、manifest 與資料檔雜湊、相依套件與隨機種子。
    看過第一段 holdout 之後，研究者可以在計畫允許的身份下改動這些欄位，資訊流規則因此不成立。
-   在帳本補上完整身份的比對之前，不得提交第二代的試驗計畫。補上比對是帳本（U2）的行為變更，另立單元，須 Operator 確認新的交付身分；在第一代主試驗結束之前完成。
+   在帳本補上完整身份的比對之前，不得提交第二代的試驗計畫。補上比對是帳本（U2）的行為變更，另立單元（TODO `P1-R8-S2-LEDGER-FIXES`，與接受部分序列一併處理），須 Operator 確認新的交付身分；在第一代主試驗結束之前完成。
 
 ### 9.13 區塊自助法（第 13 項）
 
-對主試驗的樣本外淨報酬序列作平穩自助法（Politis–Romano）：平均區塊長度 max(4, ⌈T^(1/3)⌉) 期（T = 208 時為 6 週）；重抽 10,000 次；種子取該試驗的 `random_seed`。每個試驗只計算一次，不得更換種子、區塊長度或重抽次數重算。
+對主試驗的樣本外淨報酬序列作平穩自助法（Politis–Romano）：平均區塊長度 max(4, ⌈T^(1/3)⌉) 期（T = 208 時為 6 週）；重抽 10,000 次；種子取該試驗的 `random_seed`。主試驗的 `random_seed` 因此必須為整數，不得為 null（P5 的預登記規則）。每個試驗只計算一次，不得更換種子、區塊長度或重抽次數重算。
 1. 年化 Sharpe：報告點估計與 95% 百分位區間（2.5% 與 97.5% 分位數），以及重抽 Sharpe 不大於 0 的比例。
 2. 最大回撤：每次重抽以淨報酬連乘得權益路徑，計算最大回撤（峰值到其後谷值的跌幅比例）；報告點估計與 95% 百分位區間。只作報告，不作判定（回撤依各假說登記的曝險而定，沒有與其無關的門檻）。
 3. 判定（9.12 的附加條件）：年化 Sharpe 95% 區間的下界必須大於 0；否則不得記為候選成立。
@@ -751,7 +758,7 @@ U6 `submit` 的 `provenance` 經記錄者核對與重算相符（§6 第 5 點�
 | 以資金費為主要來源的候選，是否取標記價格 K 線（9.8.3） | 屆時另請 Operator 同意 |
 | 費率 0.055% 對應的帳戶等級與地區（9.8.1） | 依倉庫現行常數；帳戶費率未查詢 |
 | 統計力：真實 Sharpe 1.5 的策略約 8% 會在樣本外成立（9.1） | 已向 Operator 說明 |
-| 第一代限制：標籤期與最長持有期不超過 7 日；最長回看不小於 13 日；上市未滿約 12 日的標的不可開倉；預登記的 `selection` 須列出明確的標的清單（§4 第 2 點） | 寫入 P5 的預登記規則 |
+| 第一代限制：標籤期與最長持有期不超過 7 日；最長回看不小於 13 日；上市未滿約 12 日的標的不可開倉；預登記的 `selection` 須列出明確的標的清單（§4 第 2 點）；主試驗的 `random_seed` 必須為整數（9.13） | 寫入 P5 的預登記規則 |
 
 ### 9.18 資料品質前檢（記錄者依 PR #226 的自動審查補充，QC 複核修改）
 
