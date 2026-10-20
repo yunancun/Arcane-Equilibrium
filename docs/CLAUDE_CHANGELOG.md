@@ -1,9 +1,20 @@
 # CLAUDE_CHANGELOG.md — 開發歷史歸檔
 
 > 從 CLAUDE.md / TODO.md 遷出的 Wave/Sprint/Batch + TODO version-increment 歷史敘事。新 session 不需要讀此文件，僅供回顧歷史時查閱。
-> 最後更新：2026-10-20（R8 P4 補充指令、事件 RH-20261020-01、P3 結案；TODO v904）
+> 最後更新：2026-10-21（R8 U4–U6 交回、P4-D0 診斷與修補契約；TODO v905）
 
 ---
+
+## R8 U4–U6 交回、P4-D0 診斷與修補契約 — 2026-10-21
+
+- 三個單元都只改了允許的檔案，在 main `33fd730f5` 上完成本機提交（U4 `3f77a8483`、U5 `540ac84fa`、U6 `a19b12e99`）。Codex 的受控審查都沒有完成：E2 逾時、E4 未執行或 UNVERIFIED，U6 的 E2 複核 FAIL。
+- P4-D0 第一次在固定映像的啟動器失敗。記錄者查明 `config.json` 另有一行註解的 `algorithm-location`；只修正這一點後，4 組構造案例在真實 LEAN 上全部符合預期、現金殘差為 0。
+  把這些執行交給 U6 重算，發現驗證模式的計分窗與 `orders` 的排列兩處介面不一致；在副本上排除之後，差異為 0。
+- 記錄者另派三位 E2 獨立審查。U4 為 PASS_WITH_NOTES，由記錄者發布（PR #227，Operator 同意）。U5、U6 為 FAIL，問題包括：
+  - U5：現金以浮點讀回、靜態檢查可經 frame 繞過、資料視圖為平方成本；
+  - U6：讀錯 `trial_record` 的格式、與 U5 的缺漏可見性相反、失敗執行沒有核對重算。
+- 補充指令新增 §12（18 點契約補充）與兩個修補交付 `R8-S2-ENGINE-LEAN-FIX1-20261020`、`R8-S2-ENGINE-SERIES-FIX1-20261020`（Operator 2026-10-21 確認）。
+- 治理工具分支 `codex/governance-operator-reopen-20261020` 依 Operator 指示擱置，記為 `P2-GOV-OPERATOR-REOPEN`（DEFERRED）。TODO v905。
 
 ## R8 P4 補充指令（研究工具核心）— 2026-10-20
 
