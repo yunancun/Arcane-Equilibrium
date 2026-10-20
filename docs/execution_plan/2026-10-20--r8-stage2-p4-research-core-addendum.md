@@ -285,19 +285,21 @@
    - 自訂資料（日線、持倉量、資金費、成交額）由框架在初始化時讀入記憶體，依可知時刻提供給策略，不使用 `PythonData`（以免每列一次 Python 呼叫）；
    - 日線決策：LEAN 只訂閱 1 小時 K 線。以日線決策的假說，只在 00:00 UTC 的時間步收到前一日完成的日線並決策，訂單以當時那一根 1 小時 K 線的開盤價（即次日開盤）成交；`run_config` 的 `decision_resolution` 為 `hour` 或 `day`；
    - 選中結果為不交易（`no_trade`）的折，依 §9.2 第 4 點：框架在該折計分窗起點的時間步以目標權重 0 平掉延續的部位，該折其餘時間不呼叫 `on_decision`；
-   - 暖機、計分窗與第一代的訓練段規則依 §3.5；`run_config` 帶 `folds`，框架在每折擬合窗終點呼叫 `on_fit` 取得新模型，但保留到該折計分窗的起點才啟用；在那之前（前一折計分窗的最後 8 日）仍用前一折的模型；並拒絕計分窗外的訂單；
+   - 暖機、計分窗與第一代的訓練段規則依 §3.5；`run_config` 帶 `folds`，框架在每折擬合窗終點執行該折的擬合（下述）取得新模型，但保留到該折計分窗的起點才啟用；在那之前（前一折計分窗的最後 8 日）仍用前一折的模型；並拒絕計分窗外的訂單；
    - 下架：在 `deliveryTime` 之後（含恰等於）的第一個時間步處理，也就是最後一根 K 線送達的時間步（不在整點下架時，那一根不完整的 K 線依 §3.1 在其所屬整點結束時才送達）；順序依 §3.2 第 1 步：
      先取消該品種所有尚未成交的訂單（`orders` 記為 `cancelled`、`cancel_reason` 為 `delivery`），再依 `rules.py` 平倉，記為下架結算，部位變動時刻記為 `deliveryTime`；之後拒絕對該品種下單；
    - §3.8 的資訊限制與下單函式覆寫；
-   - 子類別只實作 `on_fit(fit_window, data)` 與 `on_decision(time, data)`，後者回傳各標的的目標權重；框架負責換算、作廢判定與下單；
-     `on_fit` 回傳 {`model`, `selection`}：`selection` 是 §9.2 第 4 點要記錄的內容（`grid_scores`、`neighborhood_means`、`qualified`、`selected`、`selected_minus_neighborhood`、`no_trade`）。
-     框架以 `rules.select_grid_point`（依 §9.2 的合格點、鄰域平均與同分規則，由 `grid_scores` 與預登記的鄰域推出完整的 `selection`）核對：除 `grid_scores` 之外的每一個欄位（`neighborhood_means`、`qualified`、`selected`、`selected_minus_neighborhood`、`no_trade`）都必須與推出的結果相同，不符即中止執行；每折的結果記入 `run.json` 的 `fits`（§7.2）；
-     交給 `on_fit` 的 `data` 只含時間戳（可知時刻）早於 `fit_window.end` 的資料，交給 `on_decision` 的只含當時已可知的資料；兩者都是框架建立的唯讀視圖，不是框架持有的完整資料；
-   - 模型檔：擬合執行中，框架把最後一次 `on_fit` 的回傳值以標準化 JSON 寫成模型檔並記錄 SHA-256；評分執行中，框架依 `run_config` 的 `model_artifact` 核對模型檔的 SHA-256，載入後交給子類別，不呼叫 `on_fit`。
-     模型檔是執行的產物，不屬於試驗身份（§7.0）；`on_fit` 必須是確定性的（給定資料、參數與 `random_seed`），使記錄者可以重跑擬合並得到同一個雜湊。
+   - 子類別實作 `grid_scores(fit_window, data)`、`fit(fit_window, data, params)` 與 `on_decision(time, data, model, params)`，最後一個回傳各標的的目標權重；框架負責換算、作廢判定與下單。每折的擬合由框架執行，選擇不由子類別決定：
+     - 先呼叫 `grid_scores`，取得預登記的每個網格點（變體參數清單，依序）在內部驗證段的成績（§9.2 第 4 點）；
+     - 框架以 `rules.select_grid_point`（§9.2 的合格點、鄰域平均與同分規則）由成績與預登記的鄰域推出完整的 `selection`（`grid_scores`、`neighborhood_means`、`qualified`、`selected`、`selected_minus_neighborhood`、`no_trade`）；
+     - 不交易時不呼叫 `fit`；否則以選中點的參數呼叫 `fit`，該折的模型為 {`params`: 選中點的參數, `model`: `fit` 的回傳值}；計分時框架把同一組 `params` 與 `model` 交給 `on_decision`；
+     - 每折的結果記入 `run.json` 的 `fits`（§7.2）。子類別的程式若不依 `params` 擬合或決策，屬假說程式的缺陷，由階段 3 的代碼審查把關，列為殘餘風險；
+     交給 `grid_scores` 與 `fit` 的 `data` 只含時間戳（可知時刻）早於 `fit_window.end` 的資料，交給 `on_decision` 的只含當時已可知的資料；兩者都是框架建立的唯讀視圖，不是框架持有的完整資料；
+   - 模型檔：擬合執行中，框架把最後一折的模型（{`params`, `model`}）以標準化 JSON 寫成模型檔並記錄 SHA-256；評分執行中，框架依 `run_config` 的 `model_artifact` 核對模型檔的 SHA-256，載入後交給子類別，不呼叫 `grid_scores` 與 `fit`。
+     模型檔是執行的產物，不屬於試驗身份（§7.0）；`grid_scores` 與 `fit` 必須是確定性的（給定資料、參數與 `random_seed`），使記錄者可以重跑擬合並得到同一個雜湊。
      假說的演算法本身不讀寫檔案（§3.8）；
    - 執行中寫出原始紀錄（JSON Lines）；`run.json` 由主機端的執行器組裝（第 4 點）。部位只記非零值。
-3. **範例演算法** `examples/fixed_schedule.py`：在設定指定的時刻設定指定的目標權重或固定數量（類似 P1b 的固定時點策略），供 §8 的檢查使用；不是假說。
+3. **範例演算法** `examples/fixed_schedule.py`：在設定指定的時刻設定指定的目標權重或固定數量（類似 P1b 的固定時點策略），供 §8 的檢查使用；不是假說。它的 `grid_scores` 回傳設定中指定的成績（使檢查可以構造合格、不合格與不交易的折），`fit` 回傳 {`fit_end`: 擬合窗終點}（使 EV-14 可以看出啟用的是哪一折的模型）；`folds` 為空清單時框架不擬合，`params` 為 `run_config.strategy`、`model` 為 null。
 4. **執行器** `lean_runner.py`（主機端）：
    - 映像固定為 `quantconnect/lean@sha256:2657ed3355efb78d78bd0a5d4f126b01367a635e01bccd220b654d7742d182b6`，以 `docker run --rm --network none` 執行；
    - 掛載逐目錄進行，不得覆蓋整個 `/Lean/Data`（否則 `market-hours` 與 `symbol-properties` 會被遮住而無法啟動）：
@@ -317,16 +319,18 @@
      `run.json` 記錄容器設定檔的 SHA-256 `algorithm_config_sha256`，記錄者的重跑比對包含它。假說的演算法因此無從得知自己是在重跑；其他可能的偵測途徑（例如讀取時鐘）由 §3.8 的靜態檢查阻擋，殘餘風險同 §3.8；
      `mode` 為 `validation` 時（只供 §8 的檢查）：`trial_id` 必須為 null，`algorithm` 只能是 `examples/fixed_schedule.py` 的固定類別，其他演算法一律拒絕；`run.json` 記 `mode: validation`，U6 的 `submit` 拒收。物化經 U4，使用另建的驗證用帳本，不是研究帳本；
      繞過執行器、私下執行未登記的變體，無法以程式完全防止；這是殘餘風險，回報時列明（§3.8 的同類限制）；
+   - `run_config.symbols` 必須等於物化 manifest 的 `strategy_symbols`（依序），框架只把這些標的交給策略；
    - `run_config.warmup` 必須等於物化 manifest 的 `warmup`，`score_windows` 必須等於 `folds` 中各折的 `score_window`（依序）；不符即拒絕。暖機與計分窗因此由已納入試驗身份的物化與摺表決定，不能在同一試驗中改變；
    - 核對 U4 的 `materialization.json` 的雜湊與執行設定中記錄的值相同；核對要掛載的 `lean/` 與 `custom/` 目錄中的檔案清單與 manifest 完全相同、每檔雜湊相符，有多出或缺少的檔案即拒絕；對假說的演算法檔執行 §3.8 的靜態檢查；
    - 執行後：由原始紀錄組裝 §7.2 的 `run.json`（以帳本的 `canonical` 寫出），記錄映像摘要、完整的 docker 參數、演算法檔與設定的雜湊、起訖時間、結束碼與 LEAN 日誌的雜湊；
    - 輸出目錄在倉庫內時拒絕。
 
 **測試**（主機端，全部離線）：
-- 視圖：改動 `fit_window.end` 之後的資料列不改變 `on_fit` 收到的內容（以不依賴 LEAN 的視圖建構函式測試）；
+- 視圖：改動 `fit_window.end` 之後的資料列不改變 `grid_scores` 與 `fit` 收到的內容（以不依賴 LEAN 的視圖建構函式測試）；
+- 擬合：框架以 `select_grid_point` 選出的參數呼叫 `fit`，並把同一組參數交給 `on_decision`；不交易時不呼叫 `fit`（以記錄呼叫參數的假子類別測試，不依賴 LEAN）；
 - 模型檔：擬合執行寫出、評分執行載入的往返，以及 SHA-256 不符時拒絕（以不依賴 LEAN 的序列化函式測試）；
 - `rules.py`：§3.9 的 G1 至 G8 逐位重現；另以手算案例核對日線決策只在 00:00 UTC 且以次日開盤成交、總曝險超過上限即失敗、下一根缺漏、三個流動性等級、單筆上限、不足 12 個完整日、`min_qty`、`min_notional`、全部平倉例外、`select_grid_point`（成績 [−1, 100, −1, −1] 不選第一點、[100, −1, −1] 不合格而不交易、全部不合格時不交易、同分取順序在前者）、懲罰滑價乘以壓力倍數、資金費空白的估計筆數與時刻、多空正負號；
-- `lean_runner.py`：`trial` 與 `verification` 模式拒絕 `purpose: "validation"` 的物化；`run_config.warmup` 或 `score_windows` 與物化、摺表不符時拒絕；引擎目錄的內容與 `engine_commit` 不同、或 `engine_commit` 不是 `origin/main` 的祖先時拒絕（以構造的 git 倉庫測試）；`trial` 模式下帳本中沒有對應的已開始、未結束且身份相符（含入口）的試驗時拒絕執行（以構造的帳本測試）；`verification` 模式下試驗尚未結束或身份不符時拒絕；同一試驗的 `trial` 與 `verification` 執行寫入容器的設定檔逐位元組相同、不含 `mode`；`validation` 模式下以範例以外的演算法或帶 `trial_id` 時拒絕；演算法檔與 `code_commit` 不符或有未提交的改動時拒絕執行（以構造的 git 倉庫測試）；組出的 docker 參數（以注入的執行函式攔截，不真的執行 docker）含 `--network none`、固定的映像摘要、逐目錄的唯讀掛載；屬性表合併是替換而非追加；`materialization.json` 雜湊不符、掛載目錄有 manifest 未列的檔案或缺少檔案，都拒絕；靜態檢查拒絕檔案存取、底線屬性與下單呼叫；輸出目錄在倉庫內被拒；`run.json` 的組裝；
+- `lean_runner.py`：`trial` 與 `verification` 模式拒絕 `purpose: "validation"` 的物化；`run_config.symbols`、`warmup` 或 `score_windows` 與物化、摺表不符時拒絕；引擎目錄的內容與 `engine_commit` 不同、或 `engine_commit` 不是 `origin/main` 的祖先時拒絕（以構造的 git 倉庫測試）；`trial` 模式下帳本中沒有對應的已開始、未結束且身份相符（含入口）的試驗時拒絕執行（以構造的帳本測試）；`verification` 模式下試驗尚未結束或身份不符時拒絕；同一試驗的 `trial` 與 `verification` 執行寫入容器的設定檔逐位元組相同、不含 `mode`；`validation` 模式下以範例以外的演算法或帶 `trial_id` 時拒絕；演算法檔與 `code_commit` 不符或有未提交的改動時拒絕執行（以構造的 git 倉庫測試）；組出的 docker 參數（以注入的執行函式攔截，不真的執行 docker）含 `--network none`、固定的映像摘要、逐目錄的唯讀掛載；屬性表合併是替換而非追加；`materialization.json` 雜湊不符、掛載目錄有 manifest 未列的檔案或缺少檔案，都拒絕；靜態檢查拒絕檔案存取、底線屬性與下單呼叫；輸出目錄在倉庫內被拒；`run.json` 的組裝；
 - AST 檢查涵蓋 `rules.py`、`lean_runner.py` 與 `lean_algo/__init__.py`。
 
 ## 6. U6 `R8-S2-ENGINE-SERIES-20261020`：帳本序列、獨立重算與基準序列
@@ -357,7 +361,8 @@
    - `btc_perp_hold_v1`（確定性，只作報告，不登記為帳本基準）：以同一份物化的 BTCUSDT 資料產生，同樣輸入必須產生同樣位元組；
    - `no_trade` 由帳本自行產生，本單元不產生。
    主試驗的物化視窗是整個樣本外範圍（§7.0），各折擬合窗都在其中；holdout 證偽試驗的擬合窗為 [訓練段起點, 驗證段終點)（§9.10），由擬合執行的物化提供。
-4. **成本壓力重算**（§9.8.2）：以同一次執行的決策與部位、部位不變，以壓力參數重算成本與淨報酬序列（結果是近似，部位不隨成本調整）；彙整各情境的淨結果、成本佔比與損益兩平的滑點倍數，供試驗紀錄的 `result_summary` 使用。
+4. **成本壓力重算**（§9.8.2）：以同一次執行記錄的目標權重（決策不變），在壓力參數下的現金與權益路徑重新換算數量，重做取整、作廢（含流動性分級與單筆上限）、總曝險檢查與成交，計算成本與淨報酬序列；某情境中曝險超過上限時，該情境記為失敗並照實報告。
+   決策不變是近似：假說的決策若依賴自身部位或權益，壓力下的決策可能不同；這只影響這類假說，報告註明；彙整各情境的淨結果、成本佔比與損益兩平的滑點倍數，供試驗紀錄的 `result_summary` 使用。
 5. **提交帳本。** `submit` 子命令是唯一的提交途徑，它自己產生所有寫入帳本的內容，不接受呼叫者提供的序列、基準、壓力摘要或旁註：
    - 輸入只有：帳本目錄、試驗代號、U1 輸出目錄、執行紀錄（以及 holdout 啟用之後的模型檔）；
    - 狀態不由呼叫者指定：執行紀錄須為 `mode: trial` 且 `run_config.trial_id` 等於試驗代號；帳本狀態取自 `run.json` 的 `status`（`completed` 或 `failed`，`failed` 時 `failure_reason` 須為 §7.2 列出的原因之一）；
@@ -384,7 +389,7 @@
 **測試**（全部離線，以構造的物化輸出與執行紀錄）：
 - 第 0 點：任一檔案雜湊不符時拒絕；
 - 第 1 點：期數網格（含未對齊的視窗端點與星期四期初）、暖機排除、`filled_periods`（§9.14 的五種情形，含缺漏恰在星期四 00:00 UTC 結束時，跨缺漏的價格變動所在的新一期計為填補期）、各種拒絕；
-- 第 2 點：§3.9 的 G1 至 G8 逐位重現；下架結算與計分終點平倉的訂單紀錄（`kind`、`order_id`、`decision_t`）依 §7.2 的規則重建，與執行紀錄相同；`trial` 模式的執行紀錄中出現 `quantity` 目標時拒絕；`fits` 中每折 `selection` 除 `grid_scores` 外的全部欄位，以本單元自行實作的 §9.2 規則由 `grid_scores` 重新推出，任一欄位不符即判重算不通過（以成績 [−1, 100, −1, −1] 等案例測試）；改動執行紀錄中的一筆成交價、數量、手續費、作廢原因、一筆資金費或一個權益值，比對都能抓到；
+- 第 2 點：§3.9 的 G1 至 G8 逐位重現；下架結算與計分終點平倉的訂單紀錄（`kind`、`order_id`、`decision_t`）依 §7.2 的規則重建，與執行紀錄相同；`trial` 模式的執行紀錄中出現 `quantity` 目標時拒絕；`fits` 中每折 `selection` 除 `grid_scores` 外的全部欄位，以本單元自行實作的 §9.2 規則由 `grid_scores` 重新推出，`params` 等於選中點的預登記參數，任一不符即判重算不通過（以成績 [−1, 100, −1, −1] 等案例測試）；改動執行紀錄中的一筆成交價、數量、手續費、作廢原因、一筆資金費或一個權益值，比對都能抓到；
 - 第 3 點：`btc_perp_hold_v1` 的輸出確定且雜湊穩定；`beta_matched_btc_v1` 的貝塔不使用測試窗的資料（以只在測試窗變動的資料驗證）；少於 90 個日觀測時取中位數；
 - 第 4 點：壓力重算的數值與損益兩平倍數；
 - 第 5 點：狀態取自執行紀錄，命令列沒有狀態參數；`completed` 的執行重算不通過時不寫入帳本；`validation` 或 `verification` 模式、或 `trial_id` 不符的執行紀錄被拒；改動物化輸出中的任一資料列並重寫 manifest 時，重新物化的結果不同而拒絕；`submit` 自行產生的序列、基準與壓力摘要與單獨執行各子命令的結果逐位元組相同；演算法檔或主機端程式與 `code_commit` 中的內容不符時拒絕（以構造的 git 倉庫測試）；`failed` 的執行紀錄提交、帳本接受（完整網格、失敗後填 0 並計入 `filled_periods`）；執行紀錄的 `run_config` 與試驗身份不一致時拒絕；重算未通過時拒絕以 `completed` 提交且不寫入帳本；`holdout_falsification` 試驗被拒；命令列不接受序列、基準、壓力摘要或旁註的檔案參數；通過時寫入的 `provenance` 與 `stress` 正確，`out_of_sample` 試驗附上基準序列，且帳本接受提交（以構造的帳本，含已登記的 `beta_matched_btc_v1` 基準測試）；
@@ -406,7 +411,7 @@
     其中 `slippage_tiers_bps` 為依門檻遞減排列的清單 `[{"min_turnover": "100000000", "bps": "5"}, {"min_turnover": "10000000", "bps": "10"}, {"min_turnover": "1000000", "bps": "20"}]`；
   - `folds`：帳本 `walk_forward_folds` 的輸出原樣傳入，每項為 `{"fit_window": {"start", "end"}, "score_window": {"start", "end"}}`（時刻為帳本的 ISO 8601 字串）；
   - `model_artifact`：擬合執行為 null；評分執行為 `{"path", "sha256"}`；
-  - `random_seed`：整數或 null，與試驗身份的 `random_seed` 相同（主試驗必須為整數，9.13）；擬合執行與評分執行都傳入，框架交給 `on_fit` 與 `on_decision`；
+  - `random_seed`：整數或 null，與試驗身份的 `random_seed` 相同（主試驗必須為整數，9.13）；擬合執行與評分執行都傳入，框架交給 `grid_scores`、`fit` 與 `on_decision`；
   - `strategy`：假說的參數（標準化後）；
   - `algorithm`：{`path`（倉庫內的相對路徑）, `class`（類別名稱）}，執行器只依此設定 `algorithm-location` 與 `algorithm-type-name`；
   - `mode`：`trial`、`verification` 或 `validation`（§5 第 4 點）。
@@ -428,7 +433,7 @@
 ### 7.1 物化 manifest `materialization.json`（U4 產生；U5、U6 讀取）
 
 `schema_version`（`r8_materialization_v1`）、`u1_manifest_sha256`、`u1_tool_version`、`ledger_id`、`hypothesis_id`、`generation`、
-`purpose`（`research` 或 `validation`，§4 第 2 點）、`window`（{`start`, `end`}）、`warmup`（{`start`, `end`}）、`readable`（§4 第 1 點的查詢結果）、`symbols`（清單）、
+`purpose`（`research` 或 `validation`，§4 第 2 點）、`window`（{`start`, `end`}）、`warmup`（{`start`, `end`}）、`readable`（§4 第 1 點的查詢結果）、`symbols`（物化的全部標的）、`strategy_symbols`（預登記的 `selection.symbols`，交給策略的標的；只為基準加入的 BTCUSDT 不在其中）、
 `files`（相對路徑 → {`sha256`, `rows`, `first`, `last`, `source_file`, `source_sha256`}，含 `lean/`、`custom/` 與 `source/` 下的全部檔案）、
 `gaps`（標的 → 資料集 → 缺漏區間清單）、`first_bar`（標的 → 時刻或 null）、`min_notional`（標的 → 十進位字串）、`funding_interval_ms`（標的 → instruments-info 的現行間隔，供邊緣空白的估計）、`delistings`（標的 → {`deliveryTime`, `partial_last_bar`}）、
 `symbol_properties_overlay_sha256`、`limitations`（字串清單）。不記產生時刻：同樣的輸入必須產生逐位元組相同的輸出（含 `materialization.json` 與壓縮檔），U6 的 `submit` 依此重新物化核對（§6 第 5 點）。
@@ -450,7 +455,7 @@
 | `voided` | `order_id`、`decision_t`、`symbol`、`quantity`、`reason`（`untradeable`、`insufficient_history`、`order_cap`、`min_qty`、`min_notional`、`outside_score_window`、`after_delivery`） | `{"decision_t": 1646096400000, "symbol": "XUSDT", "quantity": "120", "reason": "untradeable"}` |
 | `funding` | `t`、`symbol`、`q_before`、`q_after`、`price`、`rate`、`amount`、`estimated`（布林） | `{"t": 1646121600000, "symbol": "BTCUSDT", "q_before": "0.5", "q_after": "0.5", "price": "43510", "rate": "0.0001", "amount": "-2.21901", "estimated": false}` |
 | `unexplained_cash_residual` | `per_step`（`[{"t", "residual"}]`，只列非零）、`total` | `{"per_step": [], "total": "0"}` |
-| `fits` | `fold`（摺表序號，從 0 起）、`fit_window`、`selection`（§5 第 2 點）、`model_sha256`（該折 `model` 的標準化 JSON 的 SHA-256） | `{"fold": 0, "fit_window": {"start": "2020-01-01T00:00:00Z", "end": "2021-12-30T00:00:00Z"}, "selection": {…}, "model_sha256": "…"}` |
+| `fits` | `fold`（摺表序號，從 0 起）、`fit_window`、`selection`（§5 第 2 點，框架推出）、`params`（選中點的參數；不交易時為 null）、`model_sha256`（該折模型 {`params`, `model`} 的標準化 JSON 的 SHA-256；不交易時為 null） | `{"fold": 0, "fit_window": {"start": "2020-01-01T00:00:00Z", "end": "2021-12-30T00:00:00Z"}, "selection": {…}, "model_sha256": "…"}` |
 
 下架結算與計分終點平倉由框架產生，不來自策略的決策；框架為每一筆建立一筆訂單：`kind` 為 `delisting_settlement` 或 `score_end_liquidation`，`decision_t` 等於部位變動時刻（`deliveryTime` 或 e），`status` 為 `filled`；
 `order_id` 接續框架的序號，同一時刻有多筆時依標的代號的字典序指派。成交紀錄以這個 `order_id` 對應。U6 依同一規則重建，兩者必須相同。
@@ -487,7 +492,7 @@ EV-10 至 EV-12 只用訓練段的真實資料，以範例演算法的固定時�
 | EV-8 | 可讀範圍 | holdout 區間一律拒絕物化（本版）；`data_access` 只給候選假說本世代的區間、第二代查不到第一段；跨空窗的第 15 折可以物化 |
 | EV-9 | 數值格式 | 構造 1e-05 量級的資金費與小價格品種，結算金額正確 |
 | EV-10 | 獨立重算 | BTCUSDT 與一個下架品種，成交、資金費與權益和 U6 的重算逐筆、逐步相符（容差見 §9.8.8）；`unexplained_cash_residual` 為 0 |
-| EV-11 | 成本壓力 | 以固定數量的時點策略，用「滑點 × 2、手續費 0.075%」執行 LEAN 一次，結果與 U6 的壓力重算相符 |
+| EV-11 | 成本壓力 | 以固定目標權重的時點策略（不用固定數量，使數量隨壓力下的權益改變），用「滑點 × 2、手續費 0.075%」執行 LEAN 一次，結果與 U6 的壓力重算相符 |
 | EV-12 | 執行時間 | 單一標的、100 個標的、全部標的各以小時線執行訓練段一次；另量 20 組網格 × 16 折的擬合執行；記錄耗時與記憶體，只量測 |
 | EV-14 | 模型的啟用時點與折的交界 | 後一折的擬合窗終點落在前一折的計分窗內；新模型只在其計分窗起點才啟用，前一折計分窗的最後 8 日仍用舊模型；相鄰兩折的交界不平倉，新一折的第一次決策以延續的部位計算差額 |
 | EV-13 | 缺漏跨期初 | 持有部位的標的在星期四期初前後有 K 線缺漏：沒有前值填補、缺漏標的在缺漏內的損益貢獻為 0 而同期另一個持有標的的損益與資金費照常計入、價格跳動計入缺漏後第一期；`filled_periods` 依 §9.14 的五種情形（含下一根缺漏使訂單延後成交、缺漏恰在星期四 00:00 UTC 結束）逐一驗證，與 U6 相同 |
@@ -617,13 +622,14 @@ EV-10 至 EV-12 只用訓練段的真實資料，以範例演算法的固定時�
    - 每小時 h：b_h = Σ_i w_{i,h} × β̂_i，w_{i,h} = q_{i,h} × P_{i,h} ÷ E_h：
      q_{i,h} 是 h 開盤的成交入帳之後的部位（部位變動時刻不晚於 h 的成交累計，作廢的不計）；P_{i,h} 是開始於 h 的 K 線的開盤價（該根缺漏時取 h 之前最後一根的收盤價）；
      E_h = 現金（含部位變動時刻不晚於 h 的全部成交及其手續費與滑價、結算時刻早於 h 的資金費）+ Σ_i q_{i,h} × P_{i,h}，即以同一組開盤價計價、含 h 開盤調整的權益。
-     測試以既有部位加上 h 開盤的調整、開盤價與前一根收盤不同的案例驗證。
+     測試以既有部位加上 h 開盤的調整、開盤價與前一根收盤不同的案例驗證：跳空依調整前的曝險、盤中依調整後的曝險計入（依 PR #226 的自動審查修改）。
    - β̂_i 是標的 i 的日報酬對 BTCUSDT 日報酬的最小平方法係數，只用該折擬合窗的最後 365 日估計（相鄰兩根都存在的日報酬）。
      日報酬為簡單報酬 y_d = C_d ÷ C_{d−1} − 1（C 為日線收盤價，d 與 d − 1 兩根日線都存在，且標的 i 與 BTCUSDT 在 d 都有報酬才納入）；含截距的最小平方法：β̂ = Σ(x − x̄)(y − ȳ) ÷ Σ(x − x̄)²，x 為 BTCUSDT、y 為標的 i；
      分母為 0 時視同觀測不足；以 `Decimal` 計算。U6 的測試以平均不為 0 的手算案例驗證（含截距與不含截距結果不同的例子）；少於 90 個日觀測時，取同一物化中至少有 90 個觀測的其他標的 β̂ 的中位數。
      BTCUSDT 本身為 1；β̂ 截在 [0, 3]。holdout 證偽試驗以 [訓練段起點, 驗證段終點) 的最後 365 日估計（9.10）。
-   - 基準每期報酬 = Π_{h∈p}(1 + b_h × r_h − b_h × f_h) − 1：r_h = C_h ÷ C_{h−1} − 1，C_h 是開始於 h 的 BTCUSDT 1 小時 K 線的收盤價、C_{h−1} 是前一根存在的 K 線的收盤價（收盤到收盤，前一根收盤到本根開盤的跳空歸本小時的曝險 b_h）；
-     BTCUSDT 某一小時缺漏時，該小時 r_h = 0，跳動計入其後第一根存在的 K 線；f_h 是結算時刻落在 [h, h + 1 小時) 的資金費率，沒有結算時為 0。測試以開盤價與前一根收盤不同的資料驗證這一約定。
+   - 跳空與盤中分開計算，使新部位不承擔它存在之前的價格變動：b⁻_h 依「每小時 h」一點的公式，但 q 改用 h 開盤成交之前的部位（部位變動時刻早於 h 的成交累計），E 改用這些成交之前的權益（同一組開盤價計價）；b_h 即該點的 b_h（含 h 開盤的調整）。
+   - 基準每期報酬 = Π_{h∈p}(1 + b⁻_h × g_h) × (1 + b_h × i_h − b_h × f_h) − 1：g_h = O_h ÷ C_prev − 1 是跳空（O_h 是開始於 h 的 BTCUSDT 1 小時 K 線的開盤價，C_prev 是前一根存在的 K 線的收盤價），i_h = C_h ÷ O_h − 1 是盤中（C_h 為該根收盤價）；
+     BTCUSDT 某一小時缺漏時，該小時 g_h = i_h = 0，跳動計入其後第一根存在的 K 線的 g_h；f_h 是結算時刻落在 [h, h + 1 小時) 的資金費率，沒有結算時為 0。
      資金費以帶號曝險計入：b_h > 0 且費率為正時支付，b_h < 0 且費率為正時收取。
    - 基準不計手續費與滑點，使基準較強、比較偏保守。
    - 超額序列 = 策略 − 基準，近似扣除市場貝塔之後的結果，對應修訂二 N5 第三項。帳本無法驗證這個序列，回報時列為未驗證項。
