@@ -111,7 +111,7 @@
 - 連續計分區間終點 e 的例外：e 之後沒有下一期，所以 E(e) 另含部位變動時刻為 e、種類為 `score_end_liquidation` 或 `delisting_settlement` 的成交（§3.5 的平倉成本、恰在 e 的下架結算），以及結算時刻恰為 e 的資金費，使它們計入最後一期；
   測試涵蓋終點仍有部位、恰在終點下架、期界恰為資金費結算時刻，以及相鄰計分窗之間部位延續、不平倉的情形。
 - 連續計分區間的起點 s₀ 依上述一般規則處理：起點之前部位為 0（§3.5），E(s₀) 就是當時的現金，s₀ 的開倉成交與恰在 s₀ 的資金費都計入第一期。
-- 結算時刻恰為執行終點的那一筆，LEAN 沒有下一個時間步可計入；它只進入 U6 依時間戳計算的 E(終點)，時間步權益與期末權益的比對都不含它，執行紀錄註明。
+- 結算時刻恰為執行終點的那一筆，LEAN 沒有下一個時間步可計入；它只進入 U6 依時間戳計算的 E(終點)，時間步權益與期末權益的比對都不含它；框架把它寫入 `run.json` 的 `endpoint_funding` 段（格式同 `funding`，未計入 LEAN 現金），U6 據此比對。
 - 決策時換算目標權重所用的權益（§3.7）是第 2 步時的時間步權益，不含恰在 s 的資金費；U6 依此重算。下架結算的成交，部位變動時刻記為 `deliveryTime`。
 
 ### 3.3 資金費
@@ -164,6 +164,8 @@
   各假說的總曝險上限在預登記時寫明，不得超過 1 倍；需要更高時另行說明並經量化方法論審查。
 - 總曝險上限以 `gross_exposure_cap` 傳入執行設定。每次決策後，框架以取整與作廢之後的目標部位、**決策時的價格**（換算數量所用的收盤價）與決策時的權益計算總曝險 Σ|數量 × 決策價| ÷ 權益；超過上限即中止該次執行並標記失敗，不縮放、不部分執行。
   U6 以同一規則、同樣的決策時價格重算。成交價與決策價的差異造成的實際曝險超出不構成失敗，只報告每一步的實際最大總曝險。
+  成交不同步也要檢查：每個時間步的成交入帳之後，框架以實際部位、最近一次決策的決策價與決策時的權益計算 Σ|實際數量 × 決策價| ÷ 權益（以決策價計價，排除價格漂移）；
+  例如輪動時減倉的標的下一根缺漏、加倉的標的照常成交，實際部位暫時超過上限，即中止並標記 `gross_exposure_cap` 失敗（失敗的處理見 §6 第 1 點）。預登記時，總曝險貼近上限的輪動設計應保留餘裕。
 - 觸發 LEAN 的追加保證金或強制平倉，即視為該次執行失敗。
 - 未實現損益以時點或之前最後一根已收盤 K 線的收盤價計價。一期的淨報酬 = E(期末) ÷ E(期初) − 1；手續費、滑價與資金費都已含在權益內。
 
@@ -172,7 +174,7 @@
 - 策略只看得到首根 1 小時 K 線已收盤、且尚未過 `deliveryTime` 的標的；完整的標的清單、首根時刻與下架資訊只有框架可見（§9.0 第 4、5 點）。
 - 框架覆寫下單函式，只允許框架內部呼叫；策略直接下單即中止。
 - 執行器在執行前以靜態檢查審核假說的演算法檔：只允許匯入框架、`rules.py` 與標準函式庫中的數學類模組；不得有檔案或網路存取、不得存取底線開頭的屬性、不得呼叫下單函式；
-  不得有 `global`、`nonlocal`，不得對模組層級的名稱或類別屬性賦值（使不同實例之間無法經由模組或類別共用狀態，§5 第 2 點）。以程式無法完全排除的共用途徑，列為殘餘風險。
+  不得呼叫 `random` 模組層級的函式（只能用 `random.Random(self.random_seed)`）；不得有 `global`、`nonlocal`，不得對模組層級的名稱或類別屬性賦值（使不同實例之間無法經由模組或類別共用狀態，§5 第 2 點）。以程式無法完全排除的共用途徑，列為殘餘風險。
 - Python 無法在同一程序內隔離資訊；靜態檢查與覆寫之外的殘留風險，回報時列明。
 
 ### 3.9 固定案例（U5 與 U6 都必須逐位重現）
@@ -282,7 +284,7 @@
    - 每個標的：`AddCryptoFuture(標的, Resolution.HOUR, Market.BYBIT, fillForward=False, leverage=10)`；手續費模型 `ConstantFeeModel(0)`；資金費模型 `MarginInterestRateModel.NULL`；自訂成交模型（下列）；
    - 自訂成交模型：`market_fill` 在下單的時間步回傳不成交的事件，使訂單保持 SUBMITTED；在下一根送達的時間步，以 `rules.py` 計算成交價與手續費，設定 `FillPrice`、`FillQuantity`、`Status` 與 `OrderFee`。
      比較時間前先統一時區：`order.time` 帶 UTC 時區，K 線的時間不帶（PA 已確認）；
-   - 依 §3.2 的順序：在 `on_data` 中決策、作廢判定、送出訂單、計入資金費（以 `Cash.AddAmount` 調整 USDT 現金；補計所有 T ≤ 現在而尚未計入者）、記錄時間步；
+   - 依 §3.2 的順序：在 `on_data` 中決策、作廢判定、送出訂單、計入資金費（以 `Cash.AddAmount` 調整 USDT 現金；補計所有 T < 現在而尚未計入者；T 恰為現在者留到下一個時間步，§3.2 第 3 步）、記錄時間步；
    - 自訂資料（日線、持倉量、資金費、成交額）由框架在初始化時讀入記憶體，依可知時刻提供給策略，不使用 `PythonData`（以免每列一次 Python 呼叫）；
    - 日線決策：LEAN 只訂閱 1 小時 K 線。以日線決策的假說，只在 00:00 UTC 的時間步收到前一日完成的日線並決策，訂單以當時那一根 1 小時 K 線的開盤價（即次日開盤）成交；`run_config` 的 `decision_resolution` 為 `hour` 或 `day`；
    - 選中結果為不交易（`no_trade`）的折，依 §9.2 第 4 點：框架在該折計分窗起點的時間步以目標權重 0 平掉延續的部位，該折其餘時間不呼叫 `on_decision`；
@@ -416,7 +418,7 @@
     其中 `slippage_tiers_bps` 為依門檻遞減排列的清單 `[{"min_turnover": "100000000", "bps": "5"}, {"min_turnover": "10000000", "bps": "10"}, {"min_turnover": "1000000", "bps": "20"}]`；
   - `folds`：帳本 `walk_forward_folds` 的輸出原樣傳入，每項為 `{"fit_window": {"start", "end"}, "score_window": {"start", "end"}}`（時刻為帳本的 ISO 8601 字串）；
   - `model_artifact`：擬合執行為 null；評分執行為 `{"path", "sha256"}`；
-  - `random_seed`：整數或 null，與試驗身份的 `random_seed` 相同（主試驗必須為整數，9.13）；擬合執行與評分執行都傳入，框架交給 `grid_scores`、`fit` 與 `on_decision`；
+  - `random_seed`：整數或 null，與試驗身份的 `random_seed` 相同（主試驗必須為整數，9.13）；擬合執行與評分執行都傳入；框架建立每個假說實例時以 `R8Hypothesis(random_seed)` 傳入，子類別以唯讀屬性 `self.random_seed` 取得，供 `grid_scores`、`fit` 與 `on_decision` 使用（亂數只能來自 `random.Random(self.random_seed)`，§3.8 的靜態檢查拒絕 `random` 模組層級的函式）；
   - `strategy`：假說的參數（標準化後）；
   - `algorithm`：{`path`（倉庫內的相對路徑）, `class`（假說類別名稱）}，框架只依此載入假說類別；
   - `mode`：`trial`、`verification` 或 `validation`（§5 第 4 點）。
@@ -427,7 +429,9 @@
   - 物化在 `begin_trial` 之前完成，並納入試驗身份：`manifest_sha256` = 該試驗所用物化 manifest 的 SHA-256（holdout 證偽試驗有擬合與評分兩份物化時，取 `canonical`({"fit": …, "score": …}) 的 SHA-256），`data_files` = 物化 manifest 中各檔的 SHA-256（兩份時鍵前加 `fit/`、`score/`）。
   - `trial_id` 是帳本的試驗代號，供執行器在執行前核對（§5 第 4 點）；試驗的執行 `mode` 恆為 `trial`；除這兩個鍵外，不屬於試驗身份的只有 `model_artifact`（擬合執行在 `begin_trial` 之後才產生）。標的清單由預登記決定（§4 第 2 點）；其餘會改變訂單或報酬的設定一律在試驗身份中。
   - `submit` 核對執行紀錄中的 `run_config` 與試驗身份逐項一致、執行所用的物化等於身份中的 `manifest_sha256` 與 `data_files`，不一致即拒絕。
-  - `time_semantics` 寫明可知時刻、成交時刻與 `simulated_latency_ms: 0`。
+  - 執行環境的身份欄位一律取固定值，寫成 `framework.py` 的常數 `RUNTIME_METADATA`（隨 `engine_commit` 釘住）：`cost_model` = {`id`: `r8_cost_rules`, `version`: `r8-p4-v1`}，`fill_model` = {`id`: `r8_next_open_fill`, `version`: `r8-p4-v1`}，
+    `engine` = {`id`: `lean`, `version`: 映像摘要 `sha256:2657ed33…82b6` 的完整值}，`dependencies` = {`lean_image_digest`: 同上}，`time_semantics` = {`known_at`: `bar_end`, `fill_at`: `next_bar_open`, `simulated_latency_ms`: 0}。
+    執行器在執行前、`submit` 在提交前核對試驗身份的這五個欄位與常數完全相同，`engine.version` 也與 `run.json` 的 `image_digest` 相同；不符即拒絕。規則改版時另以補充指令更新版本字串。
 - 物化：每次執行使用一份物化。主試驗與探索性樣本外試驗的物化視窗是整個樣本外範圍；holdout 證偽試驗分兩次執行：擬合執行物化 [訓練段起點, 驗證段終點)，輸出模型檔；評分執行物化該 holdout 區間（加暖機）。這一段描述的是日後的設計；本版不物化 holdout 區間（§4 第 3 點），holdout 的部分待帳本單元完成後另以補充指令啟用。
 - 試驗身份與執行產物分開：帳本在 `begin_trial` 時凍結試驗身份，`finish_trial` 不能修改。因此：
   - 順序為：物化 → `begin_trial`（身份含物化的雜湊）→ 執行（含擬合執行）→ `submit`；`begin_trial` 必須在該試驗的任何執行之前呼叫；
@@ -459,11 +463,13 @@
 | `fills` | `order_id`（下架結算與計分終點平倉也有，見表後說明）、`decision_t`、`change_t`、`symbol`、`quantity`（帶正負號）、`price`、`slippage_bps`、`fee`、`kind`（`normal`、`forced_reduce_penalty`、`delisting_settlement`、`score_end_liquidation`） | `{"decision_t": 1646096400000, "change_t": 1646096400000, "symbol": "BTCUSDT", "quantity": "0.5", "price": "43246.6125", "slippage_bps": "5", "fee": "11.8928184375", "kind": "normal"}` |
 | `voided` | `order_id`、`decision_t`、`symbol`、`quantity`、`reason`（`untradeable`、`insufficient_history`、`order_cap`、`min_qty`、`min_notional`、`outside_score_window`、`after_delivery`） | `{"decision_t": 1646096400000, "symbol": "XUSDT", "quantity": "120", "reason": "untradeable"}` |
 | `funding` | `t`、`symbol`、`q_before`、`q_after`、`price`、`rate`、`amount`、`estimated`（布林） | `{"t": 1646121600000, "symbol": "BTCUSDT", "q_before": "0.5", "q_after": "0.5", "price": "43510", "rate": "0.0001", "amount": "-2.21901", "estimated": false}` |
+| `endpoint_funding` | 同 `funding`；只列結算時刻恰為執行終點、未計入 LEAN 現金的那幾筆（§3.2） | `{"t": 1767225600000, "symbol": "BTCUSDT", "q_before": "0.5", "q_after": "0.5", "price": "93000", "rate": "0.0001", "amount": "-4.743", "estimated": false}` |
 | `unexplained_cash_residual` | `per_step`（`[{"t", "residual"}]`，只列非零）、`total` | `{"per_step": [], "total": "0"}` |
 | `fits` | `fold`（摺表序號，從 0 起）、`fit_window`、`selection`（§5 第 2 點，框架推出）、`params`（選中點的參數；不交易時為 null）、`model_sha256`（該折模型 {`params`, `model`} 的標準化 JSON 的 SHA-256；不交易時為 null） | `{"fold": 0, "fit_window": {"start": "2020-01-01T00:00:00Z", "end": "2021-12-30T00:00:00Z"}, "selection": {…}, "model_sha256": "…"}` |
 
 下架結算與計分終點平倉由框架產生，不來自策略的決策；框架為每一筆建立一筆訂單：`kind` 為 `delisting_settlement` 或 `score_end_liquidation`，`decision_t` 等於部位變動時刻（`deliveryTime` 或 e），`status` 為 `filled`；
 `order_id` 接續框架的序號，同一時刻有多筆時依標的代號的字典序指派。成交紀錄以這個 `order_id` 對應。U6 依同一規則重建，兩者必須相同。
+全部訂單（含策略的訂單）的 `order_id` 依產生順序指派：同一時間步內，先是 §3.2 第 1 步的下架結算，再是第 2 步的訂單（策略的訂單或 `no_trade_flatten`）；同一步、同一類之內依標的代號的字典序。反手的複合訂單算一筆。
 
 `unexplained_cash_residual` = LEAN 現金 −（初始資金 + 已實現損益 − 手續費 + 框架的現金調整），每步都必須為 0。
 另有 `fill_forward_bars`：框架收到的每一根 `IsFillForward` 為真的 K 線（時刻、標的），應為空清單；不為空時框架照規則中止（§3.5），U6 據此拒絕產生序列。
@@ -561,7 +567,8 @@ EV-10 至 EV-12 只用訓練段的真實資料，以範例演算法的固定時�
 4. 超參數只在各折的擬合窗內選擇：
    - 擬合窗的最後 182 日（26 週）作為內部驗證；其前留 8 日的內部空窗，再往前是內部訓練；
    - 候選網格寫入變體參數，至多 20 組；每個數值軸在預登記時列出依大小排列的取值，類別軸列出取值。
-   - 每個網格點的內部驗證成績 = 成本後淨 Sharpe（基準成本，9.8，以 `rules.py` 的成本函式計算）。
+   - 每個網格點的內部驗證成績 = 成本後淨 Sharpe（基準成本，9.8，以 `rules.py` 的成本函式計算）：內部驗證段週頻淨報酬的平均 ÷ 樣本標準差（ddof = 1），不年化；期數少於 2 或標準差為 0 時記 0（因此不合格）。
+     成績以十進位字串回傳，不得為非有限值；框架拒收格式不符或非有限的成績，該次執行以 `invalid_decision` 失敗。
    - 鄰域：一個網格點與所有「各數值軸的取值序號相差不超過 1、類別軸取值相同」的網格點（含自身）；位於邊緣的點只含實際存在的鄰點。鄰域定義在預登記時寫明，不得事後更改。
    - 合格點：自身成績大於 0，且其鄰域中成績大於 0 的點多於鄰域點數的一半（嚴格過半；鄰域只有自身時即自身為正）；孤立的高點因鄰點虧損而不合格，緊鄰高點但自身虧損的點也不合格。
      位於邊緣的點同樣適用：成績 [100, −1, −1] 時，第一點的鄰域只有兩點、只有一點為正，不過半，不合格（記錄者依 PR #226 的自動審查把「不少於一半」改為嚴格過半，比 QC 的原規則更保守，原則不變；QC 2026-10-20 對 `f597cdeea` 之後方法論改動的累積複核（PASS_WITH_NOTES）接受。代價：數值軸只有兩個取值時要求鄰域全部為正，小網格較易判為不交易，損失的是統計力，不是有效性，預登記時須知悉）。
@@ -713,7 +720,7 @@ EV-10 至 EV-12 只用訓練段的真實資料，以範例演算法的固定時�
   只看紀錄無法區分「缺一筆」與「間隔真的改變」，而 Bybit 縮短間隔常在費率觸及上限時，這筆估計可能很大。因此：P5 之前，記錄者由 P3b 的資金費歷史統計各標的的間隔改變次數（與假說結果無關），寫入 9.18 的資料品質前檢紀錄；
   報告另列「交界估計」的成本與填補期數，評估是否逼近 9.14 的 5% 門檻（QC 2026-10-20 對 `f597cdeea` 之後方法論改動的累積複核（PASS_WITH_NOTES）的要求）。
 - 在可讀範圍的左緣只和後一段比較。
-- 物化邊界：可讀範圍不含邊界外的紀錄，所以跨越邊界的空白只能單側估計。若可讀範圍起點到第一筆紀錄、或最後一筆紀錄到可讀範圍終點的距離，大於最近一段實際間隔（只有一筆紀錄時，用 instruments-info 的現行間隔，U4 記入 manifest、策略不可見），
+- 物化邊界：可讀範圍不含邊界外的紀錄，所以跨越邊界的空白只能單側估計。若可讀範圍起點到第一筆紀錄、或最後一筆紀錄到可讀範圍終點的距離，不小於最近一段實際間隔（依觀測到的相位，邊界之內還應有至少一筆結算，含恰在邊界上者；只有一筆紀錄時，用 instruments-info 的現行間隔，U4 記入 manifest、策略不可見），
   這一段視為邊緣空白：以最近一段間隔推算估計的時刻，估計費率取最近一筆紀錄費率的絕對值，且不低於 0.01%；金額依本節末的「估計的金額」；該期計為填補期。沒有任何紀錄時，以 0.01% 與現行間隔估計。
   估計的時刻（Δ 為上述的間隔）：
   - 左緣：第一筆紀錄的時刻減 k × Δ（k = 1, 2, …），取不早於可讀範圍起點者；
