@@ -106,7 +106,8 @@
 - **時間步權益**：上述第 4 步記錄的值，用於 LEAN 與 U6 的逐步比對；U6 依同一順序（含「恰在 s 的資金費在下一步計入」）重建。
 - **期初權益 E(s)**：帳本序列用的值，由 U6 依時間戳計算：含部位變動時刻早於 s 的全部成交、結算時刻不晚於 s 的全部資金費，以結束於 s 的 K 線收盤價計價；以 s 的開盤價成交的那一筆（含其手續費與滑價）屬於從 s 開始的那一期。
   帳本序列只以 U6 計算的 E(s) 產生，不依賴 LEAN 在每個期初都有時間步（§6 第 1 點）。
-- 連續計分區間終點 e 的例外：E(e) 另含種類為 `score_end_liquidation`、部位變動時刻為 e 的成交（§3.5 的平倉成本），使它計入最後一期；測試涵蓋終點仍有部位，以及相鄰計分窗之間部位延續、不平倉的情形。
+- 連續計分區間終點 e 的例外：E(e) 另含部位變動時刻為 e、種類為 `score_end_liquidation` 或 `delisting_settlement` 的成交（§3.5 的平倉成本、恰在 e 的下架結算），使它們計入最後一期；測試涵蓋終點仍有部位、恰在終點下架，以及相鄰計分窗之間部位延續、不平倉的情形。
+- 連續計分區間起點 s₀ 的例外：E(s₀) 不含結算時刻恰為 s₀ 的資金費；這一筆（以 s₀ 開倉時依 T 後部位計算）歸入第一期，與以 s₀ 開盤價成交的那一筆一起計入。起點之前部位為 0（§3.5），所以 E(s₀) 就是當時的現金。
 - 結算時刻恰為執行終點的那一筆，LEAN 沒有下一個時間步可計入；它只進入 U6 依時間戳計算的 E(終點)，時間步權益與期末權益的比對都不含它，執行紀錄註明。
 - 決策時換算目標權重所用的權益（§3.7）是第 2 步時的時間步權益，不含恰在 s 的資金費；U6 依此重算。下架結算的成交，部位變動時刻記為 `deliveryTime`。
 
@@ -331,15 +332,17 @@
    失敗的試驗同樣經 `submit` 提交：`--status failed` 或 `aborted`，綁定失敗的執行紀錄與物化 manifest，附上第 1 點的完整網格序列（失敗前不足 2 期時不附），不要求重算通過。
    `out_of_sample` 試驗另須傳入第 3 點產生的 `beta_matched_btc_v1` 序列：`submit` 核對它由同一份執行紀錄與物化產生（雜湊綁定記在旁註檔），以帳本要求的 `baselines` 參數傳給 `finish_trial`。
    `submit` 另核對執行紀錄的 `algorithm_files` 中每一檔的 SHA-256，等於試驗身份 `code_commit` 中同一路徑的內容，並以同一規則核對 `submit` 執行當下的 `series.py`、`ledger.py` 與上述目錄沒有未提交的改動；不符即拒絕。
-   完成的主試驗另須傳入第 4 點的壓力摘要：`submit` 核對它由同一份執行紀錄與物化產生，並把其中各情境的結果寫入 `result_summary.stress`（不接受呼叫者另填）。
+   完成的主試驗另須傳入第 4 點的壓力摘要：`submit` 核對它由同一份執行紀錄與物化產生、含上述四個固定情境且數值等於凍結的 `cost`，並把其中各情境的結果寫入 `result_summary.stress`（不接受呼叫者另填）。
    並在 `result_summary` 寫入 `provenance`：{`materialization_sha256`, `run_sha256`, `recompute_report_sha256`, `series_sha256`, `baseline_sha256`, `stress_sha256`, `stress_scenarios`, `sidecar_sha256`, `model_artifact_sha256`（holdout 證偽試驗；其他為 null）, `recompute_passed`}。
-   帳本本身不檢查這個欄位（不改 U2）；落實方式是：第一代各批試驗結束、提交帳本鏈頭時，記錄者逐一核對每個試驗的 `provenance`，並由保存的檔案重跑一次 `recompute`；缺 `provenance` 或重跑不符的試驗，在報告中判為無效，不得計為候選成立。
+   帳本本身不檢查這個欄位（不改 U2）；落實方式是：第一代各批試驗結束、提交帳本鏈頭時，記錄者逐一核對每個試驗的 `provenance`，並由保存的檔案重跑一次 `recompute`；
+   對每個完成的主試驗，記錄者另以 `code_commit` 與同一份物化重跑 LEAN 執行，比對決策、訂單與成交的紀錄（`decisions`、`orders`、`fills`、`voided`、`funding`）與提交的執行紀錄完全相同，證明決策出自被釘住的程式，而不是事後編輯。
+   缺 `provenance`、重算不符或重跑不符的試驗，在報告中判為無效，不得計為候選成立。框架與假說的演算法因此必須是確定性的（給定設定與 `random_seed`）。
    因此執行紀錄、物化 manifest 與重算報告都以內容雜湊為檔名保存，供核對。
 6. 命令列：`python -m program_code.research.r8_engine.series <子命令>`，子命令與參數：
    - `recompute --materialization <檔> --run <run.json> --out <報告>`；
    - `series --materialization <檔> --run <run.json> --recompute <報告> --out <序列檔>`；
-   - `baseline --materialization <檔> --run <run.json> --folds <摺表檔> --out <目錄>`；
-   - `stress --materialization <檔> --run <run.json> --scenarios <設定檔> --out <摘要>`；
+   - `baseline --materialization <檔> --run <run.json> --out <目錄>`（摺表取自執行紀錄 `run_config` 的 `folds`，不另收檔案）；
+   - `stress --materialization <檔> --run <run.json> --out <摘要>`（情境不另收檔案：固定為滑點 ×1、×2、×3 配基準費率，以及滑點 ×2 配 `stress_fee_rate`；數值取自執行紀錄 `run_config` 的 `cost`）；
    - 本版的 `submit` 拒收 `holdout_falsification` 試驗（holdout 尚不能物化，見 §4 第 3 點）；holdout 證偽的提交與兩份物化的綁定，隨帳本單元另以補充指令規定。
    - `submit --ledger <帳本目錄> --trial <試驗代號> --materialization <檔> --run <run.json> [--recompute <報告>] [--series <序列檔>] --sidecar <旁註檔> [--baseline <beta_matched_btc_v1 序列檔>] [--stress <壓力摘要>] [--model-artifact <模型檔>] [--status completed|failed|aborted]`；
      `completed` 時 `--recompute` 與 `--series` 必填，主試驗另須 `--stress`。
@@ -509,8 +512,10 @@ EV-10 至 EV-12 只用訓練段的真實資料，以範例演算法的固定時�
    - 候選網格寫入變體參數，至多 20 組；每個數值軸在預登記時列出依大小排列的取值，類別軸列出取值。
    - 每個網格點的內部驗證成績 = 成本後淨 Sharpe（基準成本，9.8，以 `rules.py` 的成本函式計算）。
    - 鄰域：一個網格點與所有「各數值軸的取值序號相差不超過 1、類別軸取值相同」的網格點（含自身）；位於邊緣的點只含實際存在的鄰點。鄰域定義在預登記時寫明，不得事後更改。
-   - 選擇：取鄰域平均成績最高的網格點；同分時取預登記時列在前面的那一組。網格只有一組時，鄰域就是它自己。
-   - 不交易：選中點的鄰域平均成績不大於 0 時，該折不交易，報酬記 0；這一條適用於所有假說（包括網格只有一組者），依 9.11 第 1 點照實計入，並計入 9.11 第 2 點的折數下限。
+   - 合格點：自身成績大於 0，且其鄰域中成績大於 0 的點不少於鄰域點數的一半（向上取整）；孤立的高點因鄰點虧損而不合格，緊鄰高點但自身虧損的點也不合格。
+   - 選擇：在合格點中取鄰域平均成績最高者；同分時取預登記時列在前面的那一組。網格只有一組時，鄰域就是它自己。
+   - 不交易：沒有合格點，或選中點的鄰域平均成績不大於 0 時，該折不交易，報酬記 0；這一條適用於所有假說（包括網格只有一組者），依 9.11 第 1 點照實計入，並計入 9.11 第 2 點的折數下限。
+     「合格點」一條由記錄者依 PR #226 的自動審查補充（例：成績 [−1, 100, −1, −1] 時，只看鄰域平均會選中自身虧損的第一點），比 QC 的鄰域平均規則更保守，原則不變。
    - 選定之後，以整個擬合窗重新擬合，再用於該折的測試窗。
    - 記錄：每折把全部網格點的成績、各點的鄰域平均、選中的點、選中點的成績減其鄰域平均，以及是否不交易，寫入 `result_summary`（熱圖的資料）。
    - holdout 證偽的重新擬合（9.10）依同一規則。
