@@ -203,11 +203,14 @@
 2. **輸入核對。**
    - `--u1 <U1 輸出目錄>` 與 `--u1-manifest-sha256 <雜湊>`：manifest 的 SHA-256 必須等於傳入值；用到的每一個資料檔，SHA-256 必須等於 manifest 的記錄；
    - manifest 的 `tool_version` 必須是 `r8-public-data-2`（P3b），否則拒絕；
+   - 建合約屬性（第 5 點）之前，核對請求記錄 `requests.jsonl` 的 SHA-256 等於 manifest 的 `request_log_sha256`，且 `universe_request_ids` 所指的每一個原始頁 `raw/<id>.json` 的 SHA-256 等於請求記錄中該筆的 `raw_sha256`；任一不符即拒絕；
    - `--ledger <帳本目錄>`、`--hypothesis <假說代號>`、`--window <起點>,<終點>`（UTC，ISO 8601，半開區間）、`--out <輸出目錄>`；
    - 標的清單不由呼叫者指定：取自預登記紀錄的 `selection.symbols`（P5 規定預登記須在 `selection` 中列出明確的標的清單；橫截面假說列出全部候選標的，時點上的可交易性由框架依首根與下架時間判定）。`data_access` 一併回傳這份清單；預登記沒有 `selection.symbols` 時拒絕。BTCUSDT 另加，只供基準使用、不交給策略；
    - 每次都物化 1 小時 K 線、日線、持倉量、資金費與成交額。BTCUSDT 一律包含在內（基準與行情標示需要）。
 3. **可讀區間**（§3.6）：
-   - 要求的視窗必須整段落在樣本外範圍之內，或整段落在本假說已開啟的 holdout 區間之內；否則拒絕，不輸出任何檔案；
+   - 要求的視窗必須整段落在樣本外範圍之內；否則拒絕，不輸出任何檔案。
+   - **本版不物化 holdout 區間**，即使 holdout 已開啟、本假說在候選之中也一律拒絕。理由：holdout 開啟之後 `data_access` 可以重複查得同一區間，而物化發生在 `begin_trial` 之前，研究者可以在登記試驗之前反覆物化並查看 holdout 資料，帳本無從察覺。
+     holdout 的物化要等帳本補上「先保留試驗、再釋出資料、每次物化都記入帳本」之後才啟用（TODO `P1-R8-S2-LEDGER-FIXES`），屆時另以補充指令規定；在那之前，holdout 證偽試驗無法執行。holdout 要到第一代主試驗結束、第二代計畫列妥之後才開啟，不影響之前的步驟；
    - 暖機區間 = [視窗起點 − `max_lookback_seconds`, 視窗起點)，只可落在 §3.6 允許的部分；`max_lookback_seconds` 小於 13 日時拒絕；
    - 只寫出暖機區間加視窗之內的資料列。資金費另含結算時刻恰等於視窗終點的那一筆（§3.2 的第 3 步計入 T ≤ s 的資金費）。
 4. **輸出格式**（PA 2026-10-20 在映像中確認的部分標明「已確認」，其餘標明「未驗證」，由 §8 的檢查確認）：
@@ -225,7 +228,8 @@
 6. **缺漏與下架**（只依可讀的資料列計算，不讀暖機加視窗以外的資料）：
    - 依 U1 manifest 的 `gaps`，把暖機區間加視窗之內的缺漏區間逐檔寫入輸出 manifest；
    - `first_bar`：各標的第一根 1 小時 K 線的時刻（不在可讀範圍內者記 null）；
-   - `delistings`：只記 `deliveryTime` 落在暖機加視窗之內的標的，含 `deliveryTime` 與最後一根是否只涵蓋部分時段。
+   - `delistings`：只記 `deliveryTime` 落在暖機區間起點到視窗終點之間（含恰等於視窗終點者，與資金費的端點規則相同）的標的，含 `deliveryTime` 與最後一根是否只涵蓋部分時段。
+     `deliveryTime` 恰等於計分終點時，下架結算（§9.8.6）優先，不再另計 `score_end_liquidation`。
    這些資訊只寫在輸出 manifest，不寫進 `lean/` 與 `custom/`（§3.8）。
 7. **原子發布。** `--out` 必須不存在。全部檔案與 §7.1 的 `materialization.json` 先寫到同一檔案系統上的新暫存目錄，完成後以一次 rename 發布為 `--out`；中途失敗時刪除暫存目錄，不留下部分輸出。輸出目錄在倉庫內時拒絕（沿用 U1 的檢查方式）。
 8. 命令列：`python -m program_code.research.r8_engine.materialize <參數>`。
@@ -234,11 +238,12 @@
 - 第 1 點：holdout 未開啟、已開啟但不在候選、已開啟且在候選、只有 `denied` 事件四種情形；第二代查不到第一段；已撤回與不存在的假說被拒；帳本目錄或 `ledger_id.json` 不存在時拒絕且不建立；查詢前後三本帳的位元組不變；
 - 第 2 點：manifest 雜湊、檔案雜湊、工具版本任一不符即拒絕；物化的標的等於預登記的 `selection.symbols`（加 BTCUSDT），預登記缺清單時拒絕；
 - 第 3 點：
+  - holdout 區間（不論是否已開啟、是否在候選之中）一律拒絕物化；
   - 第 15 折的視窗（2025-07-03 至 2025-10-02，跨過訓練段與驗證段之間的空窗）可以物化；整個樣本外範圍 [2020-01-01, 2026-01-01) 可以物化，暖機落在資料起點之前的部分為空並記入限制；
   - 視窗跨入未開啟的 holdout、暖機跨入另一代的 holdout、`max_lookback_seconds` 小於 13 日，都拒絕且不輸出；
   - 只寫出暖機加視窗之內的資料列，資金費含結算時刻等於視窗終點的那一筆；
 - 第 4 點：以 `9.464e-05` 等科學記號的輸入，輸出為一般小數且數值相等；時間格式與檔名；持倉量的可知時刻為時間戳加 4 小時；下架時刻之後的資金費不寫；原始切片逐字保留；
-- 第 5 點：屬性列取自原始回應；缺欄位拒絕；
+- 第 5 點：屬性列取自原始回應；缺欄位拒絕；請求記錄或原始頁的雜湊被改動時拒絕；
 - 第 6、7 點：缺漏、首根與下架資訊只依可讀列計算（改動可讀範圍外的資料列不影響輸出），且不出現在 `lean/` 與 `custom/`；manifest 的雜湊與檔案一致；`--out` 已存在時拒絕；中途失敗不留下部分輸出；輸出目錄在倉庫內被拒；
 - AST 檢查。
 
@@ -335,6 +340,7 @@
    - `series --materialization <檔> --run <run.json> --recompute <報告> --out <序列檔>`；
    - `baseline --materialization <檔> --run <run.json> --folds <摺表檔> --out <目錄>`；
    - `stress --materialization <檔> --run <run.json> --scenarios <設定檔> --out <摘要>`；
+   - 本版的 `submit` 拒收 `holdout_falsification` 試驗（holdout 尚不能物化，見 §4 第 3 點）；holdout 證偽的提交與兩份物化的綁定，隨帳本單元另以補充指令規定。
    - `submit --ledger <帳本目錄> --trial <試驗代號> --materialization <檔> --run <run.json> [--recompute <報告>] [--series <序列檔>] --sidecar <旁註檔> [--baseline <beta_matched_btc_v1 序列檔>] [--stress <壓力摘要>] [--model-artifact <模型檔>] [--status completed|failed|aborted]`；
      `completed` 時 `--recompute` 與 `--series` 必填，主試驗另須 `--stress`。
 
@@ -363,8 +369,8 @@
     其中 `slippage_tiers_bps` 為依門檻遞減排列的清單 `[{"min_turnover": "100000000", "bps": "5"}, {"min_turnover": "10000000", "bps": "10"}, {"min_turnover": "1000000", "bps": "20"}]`；
   - `folds`：帳本 `walk_forward_folds` 的輸出原樣傳入，每項為 `{"fit_window": {"start", "end"}, "score_window": {"start", "end"}}`（時刻為帳本的 ISO 8601 字串）；
   - `model_artifact`：擬合執行為 null；評分執行為 `{"path", "sha256"}`；
+  - `random_seed`：整數或 null，與試驗身份的 `random_seed` 相同（主試驗必須為整數，9.13）；擬合執行與評分執行都傳入，框架交給 `on_fit` 與 `on_decision`；
   - `strategy`：假說的參數（標準化後）。
-- `random_seed`：整數或 null，與試驗身份的 `random_seed` 相同；擬合執行與評分執行都傳入，框架交給 `on_fit` 與 `on_decision`。
 - 與帳本的對應：試驗身份的 `configuration` 只能有 `strategy_parameters` 與 `cost_model_parameters` 兩個鍵（`ledger.py`）。
   - `cost_model_parameters` = `run_config` 的 `cost`；
   - `strategy_parameters` = {`run`: {`initial_cash`, `leverage`, `gross_exposure_cap`, `decision_resolution`, `sharpe_frequency_seconds`}, `strategy`: `run_config` 的 `strategy`}；
@@ -373,7 +379,7 @@
   - 不屬於試驗身份的只有 `model_artifact`（擬合執行在 `begin_trial` 之後才產生）。標的清單由預登記決定（§4 第 2 點）；其餘會改變訂單或報酬的設定一律在試驗身份中。
   - `submit` 核對執行紀錄中的 `run_config` 與試驗身份逐項一致、執行所用的物化等於身份中的 `manifest_sha256` 與 `data_files`，不一致即拒絕。
   - `time_semantics` 寫明可知時刻、成交時刻與 `simulated_latency_ms: 0`。
-- 物化：每次執行使用一份物化。主試驗與探索性樣本外試驗的物化視窗是整個樣本外範圍；holdout 證偽試驗分兩次執行：擬合執行物化 [訓練段起點, 驗證段終點)，輸出模型檔；評分執行物化該 holdout 區間（加暖機）。
+- 物化：每次執行使用一份物化。主試驗與探索性樣本外試驗的物化視窗是整個樣本外範圍；holdout 證偽試驗分兩次執行：擬合執行物化 [訓練段起點, 驗證段終點)，輸出模型檔；評分執行物化該 holdout 區間（加暖機）。這一段描述的是日後的設計；本版不物化 holdout 區間（§4 第 3 點），holdout 的部分待帳本單元完成後另以補充指令啟用。
 - 試驗身份與執行產物分開：帳本在 `begin_trial` 時凍結試驗身份，`finish_trial` 不能修改。因此：
   - 順序為：物化 → `begin_trial`（身份含物化的雜湊）→ 執行（含擬合執行）→ `submit`；`begin_trial` 必須在該試驗的任何執行之前呼叫；
   - 試驗身份含全部會改變訂單或報酬的設定與所用物化的雜湊（上一點的對應），不含 `model_artifact`；
@@ -434,7 +440,7 @@ EV-10 至 EV-12 只用訓練段的真實資料，以範例演算法的固定時�
 | EV-5 | 狀態轉移 | 開倉、加倉、減倉、反手、平倉、下架結算與計分終點的平倉，每一步的部位與現金和 U6 的重算一致 |
 | EV-6 | 手續費、滑價與作廢 | 手續費依成交價、雙邊計入；三個流動性等級；不足 12 個完整日與單筆上限的作廢；`min_qty`；懲罰滑價 |
 | EV-7 | 前值填補與結束時刻 | 沒有前值填補的 K 線；回測在最後一根的結束時刻結束；下架品種最後一根不完整的 K 線沒有交給策略 |
-| EV-8 | holdout 閘門 | 未開啟時拒絕物化 holdout 區間；開啟後只給候選假說本世代的區間；第二代讀不到第一段；跨空窗的第 15 折可以物化 |
+| EV-8 | 可讀範圍 | holdout 區間一律拒絕物化（本版）；`data_access` 只給候選假說本世代的區間、第二代查不到第一段；跨空窗的第 15 折可以物化 |
 | EV-9 | 數值格式 | 構造 1e-05 量級的資金費與小價格品種，結算金額正確 |
 | EV-10 | 獨立重算 | BTCUSDT 與一個下架品種，成交、資金費與權益和 U6 的重算逐筆、逐步相符（容差見 §9.8.8）；`unexplained_cash_residual` 為 0 |
 | EV-11 | 成本壓力 | 以固定數量的時點策略，用「滑點 × 2、手續費 0.075%」執行 LEAN 一次，結果與 U6 的壓力重算相符 |
