@@ -1,9 +1,20 @@
 # CLAUDE_CHANGELOG.md — 開發歷史歸檔
 
 > 從 CLAUDE.md / TODO.md 遷出的 Wave/Sprint/Batch + TODO version-increment 歷史敘事。新 session 不需要讀此文件，僅供回顧歷史時查閱。
-> 最後更新：2026-10-21（R8 FIX1 交回、LEAN 十進位邊界與第二輪修補契約；TODO v906）
+> 最後更新：2026-10-21（R8 FIX2 驗證、折界與鄰域契約及 U5-FIX3 派工；TODO v907）
 
 ---
+
+## R8 FIX2 驗證、折界與鄰域契約及 U5-FIX3 派工 — 2026-10-21
+
+- Operator 指示 Claude Code 擔任 conductor，只檢查與最終把關；記錄者的執行由 Codex 負責，conductor 獨立核對。
+- U5-FIX2 `6bb60cf3f`（E2 唯一複核 PASS）、U6-FIX2 `bfa151375`（E2 PASS）交回，E4 均未執行，准入與租約已釋放。兩個分支原樣推送到 origin，保留歷史、只作承接與發布來源。
+- 記錄者合併樹回歸：U5 `6bb60cf3f` 版 U5/U6/全部 R8 為 166/171/732 passed；`eb669cd3c` 版為 164/171/730。首輪完整目錄收集失敗的紀錄保留。
+- P4-D0 九案例 × 兩版本：H/G/D/L/P/Q 相符、殘差與原 U6 重算差異皆 0；N/E 兩版相符、殘差 0，但原 U6 對 N/E/B 均在事件重建前拒絕鄰域格式。N/B 使用明示驗證 fixture；診斷轉接的結果不作 U6 驗收。
+- B 的 `6bb60cf3f` 版在成交模型內提前啟用不交易折，把應先成交的 X 取消並以 `lean_error` 失敗；`eb669cd3c` 版 X 先成交、Y 取消、X 再平倉，最終現金 `100007.88950275` 與預期逐位相符。原代碼審查把 §13.2 第 3 點誤讀為先於原生成交，停止與審查歷史保留。
+- [P4 補充指令](execution_plan/2026-10-20--r8-stage2-p4-research-core-addendum.md) 新增 §14：補明 §3.2 第 1 步先入帳、鄰域採 U6 形狀、零部位標的恢復可見不再產生平倉決策，以及驗證範例的 `no_trade_at`。§13.2 第 1、2、5、7 點既有實作與測試、G1–G8、§7 欄位及 U6 兩檔不改。
+- Operator 確認另立 `R8-S2-ENGINE-LEAN-FIX3-20261021`，依序承接至 `eb669cd3c`，不承接 `6bb60cf3f`；U6-FIX2 不另修，兩者一同驗證與發布。§14 經 conductor 審過、CI 與自動審查無阻塞並合入 main 後，實作者才取得准入開工；記錄者之後不加轉接重跑九案例。
+- TODO v907；路線事件 `RH-20261021-01` 記入 Operator 的兩個選擇與分工，更新補充指令 SHA-256。本次為文件提交，不是 FIX3 實作或 P4-D0 驗收通過。
 
 ## R8 FIX1 交回、LEAN 十進位邊界與第二輪修補 — 2026-10-21
 
