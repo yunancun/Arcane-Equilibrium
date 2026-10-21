@@ -442,6 +442,12 @@
       "path": "docs/execution_plan/2026-10-20--r8-stage2-p4-research-core-addendum.md",
       "sha256": "c59639bba283b22c1a8d664b6c9252c52749d908e0ad3893cec0bf13b27e9461",
       "meaning": "stage 2 P4 addendum: research core units U4-U6, recorder event checks, and the QC-drafted methodology parameters with the Operator rulings of 2026-10-20; instruction only"
+    },
+    "r8-stage2-p4-d0-record": {
+      "kind": "recorded_file",
+      "path": "docs/execution_plan/2026-10-21--r8-stage2-p4-d0-check-record.md",
+      "sha256": "3aba75f7fe67784d16ec7a4730a10750af88fb49253b7c1102003054692eecc1",
+      "meaning": "stage 2 P4-D0 check record: original launcher failure, FIX1 decimal boundary failure, FIX2 dual-version fold and neighborhood diagnostics, and accepted U5 FIX3 plus unmodified U6 FIX2 nine-case verification with per-file evidence hashes; source publication only, not P4-D completion or research results"
     }
   },
   "routes": [
@@ -613,7 +619,8 @@
         "r8-stage2-p1-record",
         "r8-stage2-dispatch-r5",
         "r8-amendment-2-r8",
-        "r8-stage2-p4-addendum"
+        "r8-stage2-p4-addendum",
+        "r8-stage2-p4-d0-record"
       ],
       "status_history": [
         {
