@@ -768,7 +768,7 @@
         {
           "recorded_on": "2026-10-22",
           "event": "RH-20261022-01",
-          "note": "Operator extended development by five days; conductor interpretation records a fifteen-working-day stage 2-3 cap ending 2026-11-03, with start date and effort accounting unchanged; record_status unchanged"
+          "note": "Operator extended development by five days; conductor interpretation records a fifteen-working-day stage 2-3 cap based on actual logged effort under N8. November 3, 2026 is the earliest estimated expiry only with full effort on every working day; actual expiry and consumed effort follow the ledger, with start date and accounting unchanged; record_status unchanged"
         }
       ]
     }
@@ -1881,7 +1881,7 @@
       ],
       "follows": "RH-20261021-03",
       "decision_ref": "docs/decisions/2026-10-14--r8-amendment-2-multi-strategy-first-loop.md",
-      "authority_source": "Operator instruction in the conversation on 2026-10-22, quoted verbatim: \"\u5f00\u53d1\u65f6\u95f4\u5148\u5ef6\u957f5\u5929\". The conductor interprets this as extending the R8 amendment 2 stage 2-3 effort cap from 10 to 15 working days, with the 2026-10-14 (Wednesday) start unchanged. The conductor counts that start as day 1 and excludes weekends: 2026-10-22 is day 7, the original day 10 is 2026-10-27 (Tuesday), and the new day 15 is 2026-11-03 (Tuesday). Effort accounting is unchanged. The recorder records the Operator wording separately from this interpretation and date calculation, as instructed by the conductor.",
+      "authority_source": "Operator instruction in the conversation on 2026-10-22, quoted verbatim: \"\u5f00\u53d1\u65f6\u95f4\u5148\u5ef6\u957f5\u5929\". The conductor interpretation is recorded separately in meaning.",
       "operator_excerpt": [
         "开发时间先延长5天"
       ],
@@ -1908,7 +1908,7 @@
           "availability": "main at recording time"
         }
       },
-      "meaning": "The stage 2-3 effort cap is extended by five working days to fifteen, expiring on 2026-11-03 under the conductor date calculation. This supersedes only the ten-working-day cap retained in RH-20261018-01 item 3; the 2026-10-14 start, effort accounting and PM report at expiry remain unchanged. The extension is recorded in this register and TODO, retaining the amendment and addendum text as written. It does not declare stage 2 complete or remove the remaining data-quality precheck, preregistration or pending Operator decision on invalid exchange rows."
+      "meaning": "The conductor interprets the Operator instruction as extending the stage 2-3 effort cap from ten to fifteen working days of actual logged effort under amendment 2 N8: a management cap, not a schedule commitment. The 2026-10-14 start and effort accounting remain unchanged; consumed effort is determined by the effort ledger, not elapsed calendar working days. Assuming full effort on every working day from that start, 2026-10-27 was the earliest estimated expiry of the ten-day cap and 2026-11-03 is the earliest estimated expiry of the fifteen-day cap. Actual expiry is determined by the effort ledger and may be later; November 3 is not a fixed deadline. This supersedes only the ten-working-day cap retained in RH-20261018-01 item 3; the PM report when actual logged effort reaches the cap remains required. The conductor accepted the P2 review correction as an error in its prior recording instruction, not a change to N8 or the accounting rule. The extension is recorded in this register and TODO, retaining the amendment and addendum text as written. It does not declare stage 2 complete or remove the remaining data-quality precheck, preregistration or pending Operator decision on invalid exchange rows."
     }
   ],
   "external_provenance": [
