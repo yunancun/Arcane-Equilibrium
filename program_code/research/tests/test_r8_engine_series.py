@@ -1117,7 +1117,7 @@ def test_fix1_06_zero_difference_replacement_cancels_without_order_id(tmp_path):
     result = seal_observation(path,run)
     assert result['orders'][0] == {'order_id':1,'kind':'strategy','decision_t':START,
         'symbol':'BTCUSDT','quantity':'1','status':'cancelled','cancel_t':START+HOUR,
-        'cancel_reason':'replaced','replaced_by':None}
+        'cancel_reason':'no_trade'}
     assert [o['order_id'] for o in result['orders']] == [1,2,3]
     assert result['voided'] == []
     assert result['fills'][0]['order_id'] == 2
@@ -1205,7 +1205,7 @@ def test_fix1_12_missing_endpoint_cancels_and_liquidates_without_future_price(tm
     assert START+4*HOUR not in [s['t'] for s in result['steps']]
     assert result['orders'][1] == {'order_id':2,'kind':'strategy','decision_t':START+HOUR,
         'symbol':'BTCUSDT','quantity':'1','status':'cancelled',
-        'cancel_t':START+4*HOUR,'cancel_reason':'score_end'}
+        'cancel_t':START+(6 if later_step else 8)*HOUR,'cancel_reason':'score_end'}
     assert [(f['change_t'],f['price']) for f in result['fills']] == [(START,'100.1'),(START+4*HOUR,'99.4')]
     assert result['fills'][-1]['kind'] == 'score_end_liquidation'
     assert series.recompute(path,run)['recompute_passed']
@@ -1328,3 +1328,223 @@ def test_fix1_10_gross_exposure_failure_requires_concrete_time_before_ledger_wri
                           materializer=f['materialize'],repo=f['repo'])
     after={p.relative_to(f['book'].out):p.read_bytes() for p in f['book'].out.rglob('*') if p.is_file()}
     assert after==before
+
+
+# FIX2 的觀測值獨立寫定，對照 U5 framework.py 的事件與 lean_runner.py 的排序；
+# 不以 replay／seal_observation 產生 orders、fills、funding 或 steps。
+def u5_step(hour, positions=None, cash='100000', equity=None):
+    return {'t':START+hour*HOUR, 'cash':cash, 'equity':equity or cash,
+            'positions':positions or {}}
+
+
+def u5_order(number, hour, symbol, quantity, *, kind='strategy', status='filled', **extra):
+    return {'order_id':number, 'kind':kind, 'decision_t':START+hour*HOUR,
+            'symbol':symbol, 'quantity':quantity, 'status':status, **extra}
+
+
+def u5_fill(number, decision_hour, change_hour, symbol, quantity, *, kind='normal',
+            price='100', bps='0', fee='0'):
+    return {'order_id':number, 'decision_t':START+decision_hour*HOUR,
+            'change_t':START+change_hour*HOUR, 'symbol':symbol, 'quantity':quantity,
+            'price':price, 'slippage_bps':bps, 'fee':fee, 'kind':kind}
+
+
+def u5_case(tmp_path, bar_hours, *, hours=6, decisions=None, windows=None, funding=None):
+    # 固定 100 元、無成交成本的構造案例，隔離事件順序；G1–G8 另驗精確成本。
+    bars={s:[[START+h*HOUR,'100','100','100','100','10000','10000000'] for h in hs]
+          for s,hs in bar_hours.items()}
+    path=write_materialization(tmp_path,hours=hours,symbols=tuple(bar_hours),hourly=bars,
+        funding=funding or {s:[[START-HOUR,'0']] for s in bar_hours})
+    run=run_for(path,decisions=decisions,windows=windows)
+    cost=run['run_config']['cost']
+    cost.update(taker_fee_rate='0',forced_reduce_penalty_bps='0',order_cap_fraction='1')
+    for tier in cost['slippage_tiers_bps']:
+        tier['bps']='0'
+    refresh_run_hashes(run)
+    return path,run
+
+
+@pytest.mark.parametrize('pending', [False, True])
+def test_fix2_04_u5_failure_omits_pending_and_rejected_decision_orders(tmp_path, pending):
+    decisions=[{'t':START,'targets':{'BTCUSDT':{'quantity':'1'}}}]
+    if not pending:
+        decisions += [{'t':START+HOUR,'targets':{'BTCUSDT':{'quantity':'1100'}}}]
+    path,run=u5_case(tmp_path,{'BTCUSDT':[-1,0,3]},decisions=decisions)
+    if pending:
+        # 首筆尚未成交，失敗前不應憑空出現 cancelled 訂單。
+        run['decisions'][0]['t']=START+HOUR
+        run.update(status='failed',failure_reason='algorithm_exception',failure_t=START+2*HOUR)
+        run['steps']=[u5_step(0),u5_step(1)]
+    else:
+        run.update(status='failed',failure_reason='gross_exposure_cap',failure_t=START+HOUR)
+        run['orders']=[u5_order(1,0,'BTCUSDT','1')]
+        run['fills']=[u5_fill(1,0,0,'BTCUSDT','1')]
+        run['steps']=[u5_step(0)]
+    refresh_run_hashes(run)
+    report=series.recompute(path,run)
+    assert report['differences']==[]
+    assert report['recompute_passed'] is False
+    values,sidecar=series.make_series(path,run,report)
+    assert len(values['returns'])==6 and sidecar['recompute_passed'] is False
+
+
+@pytest.mark.parametrize('last_step', [1,2])
+def test_fix2_05_u5_tail_funding_uses_materialized_end(tmp_path,last_step):
+    funds=[[START-2*HOUR,'0'],[START,'0'],[START+2*HOUR,'0.01'],[START+4*HOUR,'0.02']]
+    path,run=u5_case(tmp_path,{'BTCUSDT':list(range(-1,last_step))},hours=4,
+        decisions=[{'t':START,'targets':{'BTCUSDT':{'quantity':'1'}}}],funding={'BTCUSDT':funds})
+    run['orders']=[u5_order(1,0,'BTCUSDT','1'),u5_order(2,4,'BTCUSDT','-1',kind='score_end_liquidation')]
+    run['fills']=[u5_fill(1,0,0,'BTCUSDT','1'),u5_fill(2,4,4,'BTCUSDT','-1',kind='score_end_liquidation')]
+    run['steps']=[u5_step(0)]+[u5_step(h,{'BTCUSDT':'1'}) for h in range(1,last_step+1)]
+    run['funding']=[{'t':START,'symbol':'BTCUSDT','q_before':'0','q_after':'1','price':'100',
+                     'rate':'0','amount':'0','estimated':False},
+                    {'t':START+2*HOUR,'symbol':'BTCUSDT','q_before':'1','q_after':'1','price':'100',
+                     'rate':'0.01','amount':'-1.02','estimated':False}]
+    run['endpoint_funding']=[{'t':START+4*HOUR,'symbol':'BTCUSDT','q_before':'1','q_after':'0','price':'100',
+                             'rate':'0.02','amount':'-2.04','estimated':False}]
+    report=series.recompute(path,run)
+    assert report['recompute_passed'], report['differences']
+    assert report['max_difference']=='0'
+    values,_=series.make_series(path,run,report)
+    assert values['returns'][-1][1]==pytest.approx(-2.04/99998.98,abs=1e-16)
+    assert values['returns'][2][1]==pytest.approx(-1.02/100000,abs=1e-16)
+
+
+@pytest.mark.parametrize('later_step', [False,True])
+def test_fix2_06_u5_missing_score_end_cancels_at_processing_time(tmp_path,later_step):
+    path,run=u5_case(tmp_path,{'BTCUSDT':[-1,0]+([5] if later_step else [])},hours=8,
+        windows=[{'start':START,'end':START+4*HOUR}],decisions=[
+            {'t':START,'targets':{'BTCUSDT':{'quantity':'1'}}},
+            {'t':START+HOUR,'targets':{'BTCUSDT':{'quantity':'2'}}}])
+    run['orders']=[u5_order(1,0,'BTCUSDT','1'),
+        u5_order(2,1,'BTCUSDT','1',status='cancelled',cancel_t=START+(6 if later_step else 8)*HOUR,cancel_reason='score_end'),
+        u5_order(3,4,'BTCUSDT','-1',kind='score_end_liquidation')]
+    run['fills']=[u5_fill(1,0,0,'BTCUSDT','1'),u5_fill(3,4,4,'BTCUSDT','-1',kind='score_end_liquidation')]
+    run['steps']=[u5_step(0),u5_step(1,{'BTCUSDT':'1'})]+([u5_step(6)] if later_step else [])
+    report=series.recompute(path,run)
+    assert report['recompute_passed'],report['differences']
+    assert report['max_difference']=='0'
+
+
+def test_fix2_06_u5_equal_score_end_settles_before_exposure(tmp_path):
+    path,run=u5_case(tmp_path,{'BTCUSDT':[-1,0,2],'XUSDT':[-1,0,4]},
+        windows=[{'start':START,'end':START+3*HOUR}],decisions=[
+            {'t':START,'targets':{'BTCUSDT':{'quantity':'0'},'XUSDT':{'quantity':'750'}}},
+            {'t':START+HOUR,'targets':{'BTCUSDT':{'quantity':'750'},'XUSDT':{'quantity':'0'}}}])
+    run['orders']=[u5_order(1,0,'XUSDT','750'),u5_order(2,1,'BTCUSDT','750'),
+        u5_order(3,1,'XUSDT','-750',status='cancelled',cancel_t=START+3*HOUR,cancel_reason='score_end'),
+        u5_order(4,3,'BTCUSDT','-750',kind='score_end_liquidation'),
+        u5_order(5,3,'XUSDT','-750',kind='score_end_liquidation')]
+    run['fills']=[u5_fill(1,0,0,'XUSDT','750'),u5_fill(2,1,2,'BTCUSDT','750'),
+        u5_fill(4,3,3,'BTCUSDT','-750',kind='score_end_liquidation'),
+        u5_fill(5,3,3,'XUSDT','-750',kind='score_end_liquidation')]
+    run['steps']=[u5_step(0),u5_step(1,{'XUSDT':'750'}),u5_step(3),u5_step(5)]
+    report=series.recompute(path,run)
+    assert report['recompute_passed'],report['differences']
+    assert report['max_difference']=='0'
+
+
+@pytest.mark.parametrize('all_invisible', [False,True])
+def test_fix2_03_u5_no_trade_cancels_all_and_flattens_on_visibility(tmp_path,all_invisible):
+    path,run=u5_case(tmp_path,{'BTCUSDT':list(range(-1,6)),'XUSDT':[-1,0,3,4,5]},
+        windows=[{'start':START,'end':START+2*HOUR},{'start':START+2*HOUR,'end':START+6*HOUR}],
+        decisions=[{'t':START,'targets':{'BTCUSDT':{'quantity':'0'},'XUSDT':{'quantity':'1'}}},
+                   {'t':START+HOUR,'targets':{'BTCUSDT':{'quantity':'0'},'XUSDT':{'quantity':'2'}}}])
+    if all_invisible:
+        # BTC 只作基準訂閱；它產生時間步，該步策略標的集合仍為空。
+        manifest=json.loads(path.read_bytes());manifest['strategy_symbols']=['XUSDT']
+        path.write_bytes(canonical(manifest))
+        run['materialization_sha256']=hashlib.sha256(path.read_bytes()).hexdigest()
+        run['run_config']['materialization_sha256']=run['materialization_sha256']
+        run['run_config']['symbols']=['XUSDT']
+        for decision in run['decisions']:
+            decision['targets'].pop('BTCUSDT')
+    run['fits'][1].update(params=None,model_sha256=None,selection={
+        'grid_scores':['-1'],'neighborhood_means':['-1'],'qualified':[False],
+        'selected':None,'selected_minus_neighborhood':None,'no_trade':True})
+    refresh_run_hashes(run)
+    run['orders']=[u5_order(1,0,'XUSDT','1'),
+        u5_order(2,1,'XUSDT','1',status='cancelled',cancel_t=START+2*HOUR,cancel_reason='no_trade'),
+        u5_order(3,4,'XUSDT','-1',kind='no_trade_flatten')]
+    run['fills']=[u5_fill(1,0,0,'XUSDT','1'),u5_fill(3,4,4,'XUSDT','-1')]
+    run['steps']=[u5_step(0)]+[u5_step(h,{'XUSDT':'1'}) for h in range(1,5)]+[u5_step(5),u5_step(6)]
+    report=series.recompute(path,run)
+    assert report['recompute_passed'],report['differences']
+    assert report['max_difference']=='0'
+
+
+@pytest.mark.parametrize('quantity,failed', [('200',False),('750',True)])
+def test_fix2_02_u5_gap_pending_keeps_last_decision_price(tmp_path,quantity,failed):
+    path,run=u5_case(tmp_path,{'BTCUSDT':list(range(-1,6)),'XUSDT':[-1,3,4,5]},decisions=[
+        {'t':START,'targets':{'BTCUSDT':{'quantity':'0'},'XUSDT':{'quantity':quantity}}},
+        {'t':START+HOUR,'targets':{'BTCUSDT':{'quantity':'750'}}}])
+    # 缺漏後成交價跳至 900；曝險仍以最近決策時已知的 100 計算。
+    source=path.parent/'source/kline_XUSDT_60.csv'
+    rows=list(csv.reader(io.StringIO(source.read_text())))
+    for row in rows[2:]:
+        row[1:5]=['900']*4
+    buf=io.StringIO(newline='');csv.writer(buf).writerows(rows);source.write_text(buf.getvalue())
+    manifest=json.loads(path.read_bytes())
+    manifest['files']['source/kline_XUSDT_60.csv']['sha256']=hashlib.sha256(source.read_bytes()).hexdigest()
+    path.write_bytes(canonical(manifest))
+    run['materialization_sha256']=hashlib.sha256(path.read_bytes()).hexdigest()
+    run['run_config']['materialization_sha256']=run['materialization_sha256'];refresh_run_hashes(run)
+    run['orders']=[u5_order(1,0,'XUSDT',quantity),u5_order(2,1,'BTCUSDT','750')]
+    run['fills']=[u5_fill(2,1,1,'BTCUSDT','750'),u5_fill(1,0,3,'XUSDT',quantity,price='900')]
+    run['steps']=[u5_step(0),u5_step(1),u5_step(2,{'BTCUSDT':'750'}),u5_step(3,{'BTCUSDT':'750'})]
+    if failed:
+        run.update(status='failed',failure_reason='gross_exposure_cap',failure_t=START+4*HOUR)
+    else:
+        run['orders'] += [u5_order(3,6,'BTCUSDT','-750',kind='score_end_liquidation'),
+                          u5_order(4,6,'XUSDT','-200',kind='score_end_liquidation')]
+        run['fills'] += [u5_fill(3,6,6,'BTCUSDT','-750',kind='score_end_liquidation'),
+                        u5_fill(4,6,6,'XUSDT','-200',kind='score_end_liquidation',price='900')]
+        run['steps'] += [u5_step(4,{'BTCUSDT':'750','XUSDT':'200'}),u5_step(5,{'BTCUSDT':'750','XUSDT':'200'}),u5_step(6)]
+    report=series.recompute(path,run)
+    assert report['differences']==[]
+    assert report['max_difference']=='0'
+    assert report['recompute_passed'] is not failed
+
+
+@pytest.mark.parametrize('section,field,value', [('orders','decision_t',START),('fills','price','101'),
+    ('steps','cash','99999')])
+def test_fix2_08_u5_independent_observation_tampering_is_detected(tmp_path,section,field,value):
+    path,run=u5_case(tmp_path,{'BTCUSDT':[-1,0,1]},hours=2,
+        decisions=[{'t':START,'targets':{'BTCUSDT':{'quantity':'1'}}}])
+    run['orders']=[u5_order(1,0,'BTCUSDT','1'),u5_order(2,2,'BTCUSDT','-1',kind='score_end_liquidation')]
+    run['fills']=[u5_fill(1,0,0,'BTCUSDT','1'),u5_fill(2,2,2,'BTCUSDT','-1',kind='score_end_liquidation')]
+    run['steps']=[u5_step(0),u5_step(1,{'BTCUSDT':'1'}),u5_step(2)]
+    assert series.recompute(path,run)['recompute_passed']
+    run[section][-1][field]=value
+    report=series.recompute(path,run)
+    assert report['recompute_passed'] is False
+    assert any(d.startswith(section+'.') for d in report['differences'])
+
+
+@pytest.mark.parametrize('resolution', ['hour','day'])
+def test_fix2_03_u5_visible_zero_targets_do_not_replace_pending_flatten(tmp_path,resolution):
+    path,run=u5_case(tmp_path,{'BTCUSDT':[-1,0,1,4,5],'XUSDT':[-1,0,3,4,5]},
+        windows=[{'start':START,'end':START+2*HOUR},{'start':START+2*HOUR,'end':START+6*HOUR}],
+        decisions=[{'t':START,'targets':{'BTCUSDT':{'quantity':'1'},'XUSDT':{'quantity':'1'}}}])
+    run['run_config']['decision_resolution']=resolution
+    run['fits'][1].update(params=None,model_sha256=None,selection={
+        'grid_scores':['-1'],'neighborhood_means':['-1'],'qualified':[False],
+        'selected':None,'selected_minus_neighborhood':None,'no_trade':True})
+    refresh_run_hashes(run)
+    run['orders']=[u5_order(1,0,'BTCUSDT','1'),u5_order(2,0,'XUSDT','1'),
+        u5_order(3,2,'BTCUSDT','-1',kind='no_trade_flatten'),u5_order(4,4,'XUSDT','-1',kind='no_trade_flatten')]
+    run['fills']=[u5_fill(1,0,0,'BTCUSDT','1'),u5_fill(2,0,0,'XUSDT','1'),
+        u5_fill(3,2,4,'BTCUSDT','-1'),u5_fill(4,4,4,'XUSDT','-1')]
+    run['steps']=[u5_step(0)]+[u5_step(h,{'BTCUSDT':'1','XUSDT':'1'}) for h in (1,2,4)]+[u5_step(5),u5_step(6)]
+    report=series.recompute(path,run)
+    assert report['recompute_passed'],report['differences']
+    assert report['max_difference']=='0'
+
+
+def test_fix2_04_u5_rejected_batch_emits_no_voided_leg(tmp_path):
+    path,run=u5_case(tmp_path,{'BTCUSDT':[-1,0],'XUSDT':[-1,0]},hours=2,
+        decisions=[{'t':START,'targets':{'BTCUSDT':{'quantity':'0.05'},'XUSDT':{'quantity':'1100'}}}])
+    run.update(status='failed',failure_reason='gross_exposure_cap',failure_t=START)
+    report=series.recompute(path,run)
+    assert report['differences']==[]
+    assert report['counts']=={'orders':0,'fills':0,'voided':0,'funding':0,'endpoint_funding':0,'steps':0}

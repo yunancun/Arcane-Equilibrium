@@ -610,7 +610,7 @@ def replay(data, run, *, cost=None, stop_on_recorded_failure=True, _hold_folds=F
             if 'quantity' in target and c['mode']!='validation':
                 raise SeriesError('只有 validation 允許 quantity 目標')
             decimal_value(next(iter(target.values())))
-    no_trade=set()
+    no_trade=set();flatten_waiting={}
     if (len(run['fits'])>len(c['folds']) or
             run['status']=='completed' and len(run['fits'])!=len(c['folds'])):
         out['fit_errors'].append('fits.count')
@@ -640,7 +640,7 @@ def replay(data, run, *, cost=None, stop_on_recorded_failure=True, _hold_folds=F
     time_set=set(times)
     if any(t not in time_set for t in decisions):
         raise SeriesError('決策不在可送達時間步')
-    execution_end=max(t+HOUR for s in data.symbols for t in data.hourly[s])
+    execution_end=data.end
     schedules=[]
     for symbol in symbols:
         delivery=data.manifest['delistings'].get(symbol,{}).get('deliveryTime',data.end)
@@ -721,7 +721,7 @@ def replay(data, run, *, cost=None, stop_on_recorded_failure=True, _hold_folds=F
                 cancel(s,t,'delivery');liquidate(s,event_t,'delisting_settlement');delisted.add(s)
             else:
                 for symbol in sorted(list(pending)):
-                    cancel(symbol,event_t,'score_end')
+                    cancel(symbol,t,'score_end')
                 for symbol in sorted(list(account.positions)):
                     liquidate(symbol,event_t,'score_end_liquidation')
                 settled_ends.add(event_t)
@@ -741,25 +741,34 @@ def replay(data, run, *, cost=None, stop_on_recorded_failure=True, _hold_folds=F
                     if opening>order['decision_t']:
                         out['delayed_fills'].append({'symbol':s,'t':opening})
                 pending.pop(s)
-        settle(t,False)
+        settle(t,True)
         if latest:
             lp,le=latest
             exposure=sum((abs(q*lp[s]) for s,q in account.positions.items()),Decimal(0))/le
             if exposure>decimal_value(c['gross_exposure_cap']):
                 fail('gross_exposure_cap',t);break
-        settle(t,True)
         active_fold=next((i for i,f in enumerate(c['folds']) if interval(f['score_window'])[0]<=t<interval(f['score_window'])[1]),None)
-        flatten=active_fold in no_trade and t==interval(c['folds'][active_fold]['score_window'])[0]
+        valid={s for s in symbols if s not in delisted and data.manifest['first_bar'][s] is not None
+               and data.manifest['first_bar'][s]+HOUR<=t and
+               (_hold_folds or t-HOUR in data.hourly[s])}
+        flatten=active_fold in no_trade
         targets=decisions.get(t)
-        if active_fold in no_trade:
+        if flatten:
             if targets is not None:
                 fail('invalid_decision',t);break
-            targets={s:{'weight':'0'} for s in symbols if s not in delisted} if flatten else None
+            if active_fold not in flatten_waiting:
+                # 折啟用時先取消所有待成交訂單，連不可見標的也不能保留。
+                for s in sorted(list(pending)):
+                    cancel(s,t,'no_trade')
+                flatten_waiting[active_fold]=set(symbols)-valid
+            else:
+                # 缺漏部位只在恢復可見的第一步平倉；不替換已送出的平倉單。
+                recovered=flatten_waiting[active_fold]&valid
+                flatten_waiting[active_fold]-=recovered
+                valid={s for s in recovered if account.positions.get(s,Decimal(0))}
+            targets={s:{'weight':'0'} for s in valid} if valid else None
         if targets is not None:
-            valid={s for s in symbols if s not in delisted and data.manifest['first_bar'][s] is not None
-                   and data.manifest['first_bar'][s]+HOUR<=t and
-                   (flatten or _hold_folds or t-HOUR in data.hourly[s])}
-            if (set(targets)!=valid or c['decision_resolution']=='day' and t%DAY or
+            if (set(targets)!=valid or not flatten and c['decision_resolution']=='day' and t%DAY or
                     t in ends and not (_hold_folds and t in starts) or
                     not any(a<=t<b for a,b in windows)):
                 fail('invalid_decision',t);break
@@ -768,7 +777,7 @@ def replay(data, run, *, cost=None, stop_on_recorded_failure=True, _hold_folds=F
             decision_prices={s:data.close(s,t) for s in valid|set(account.positions)|set(pending)}
             if equity<=0:
                 fail('gross_exposure_cap',t);break
-            desired=dict(account.positions)
+            desired=dict(account.positions);plans=[]
             for s in sorted(targets):
                 target=targets[s];price=decision_prices[s];prop=data.properties[s]
                 wanted=(target_quantity(equity,target['weight'],price,prop['qty_step']) if 'weight' in target
@@ -776,6 +785,16 @@ def replay(data, run, *, cost=None, stop_on_recorded_failure=True, _hold_folds=F
                 median,hourly,enough=data.liquidity(s,t,cost)
                 legs=order_segments(account.positions.get(s,Decimal(0)),wanted,price,prop['min_qty'],
                                     prop['min_notional'],median,hourly,enough,cost)
+                plans.append((s,legs))
+                for leg in legs:
+                    if 'reason' not in leg:
+                        desired[s]=desired.get(s,Decimal(0))+decimal_value(leg['quantity'])
+            # 先檢查整批目標；拒絕的決策不得取消既有訂單或產生任何訂單事件。
+            gross=sum((abs(q*decision_prices[s]) for s,q in desired.items() if q),Decimal(0))/equity
+            if gross>decimal_value(c['gross_exposure_cap']):
+                fail('gross_exposure_cap',t);break
+            latest=(decision_prices,equity)
+            for s,legs in plans:
                 if not legs:
                     cancel(s,t,'replaced')
                     continue
@@ -784,12 +803,11 @@ def replay(data, run, *, cost=None, stop_on_recorded_failure=True, _hold_folds=F
                 for leg in legs:
                     order={'order_id':number,'kind':'no_trade_flatten' if flatten else 'strategy',
                            'decision_t':t,'symbol':s,'quantity':leg['quantity'],
-                           'status':'voided' if 'reason' in leg else 'cancelled'}
+                           'status':'voided' if 'reason' in leg else 'pending'}
                     out['orders'].append(order)
                     if 'reason' in leg:
                         out['voided'].append({k:order[k] for k in ('order_id','decision_t','symbol','quantity')}|{'reason':leg['reason']})
                     else:
-                        desired[s]=desired.get(s,Decimal(0))+decimal_value(leg['quantity'])
                         index=bisect.bisect_left(data.times[s],t)
                         opening=data.times[s][index] if index<len(data.times[s]) else None
                         if opening is not None and (opening>=next(b for a,b in windows if a<=t<b) or
@@ -798,10 +816,6 @@ def replay(data, run, *, cost=None, stop_on_recorded_failure=True, _hold_folds=F
                         pending[s].append((order,leg,opening))
                 if not pending[s]:
                     pending.pop(s)
-            latest=(decision_prices,equity)
-            gross=sum((abs(q*decision_prices[s]) for s,q in desired.items() if q),Decimal(0))/equity
-            if gross>decimal_value(c['gross_exposure_cap']):
-                fail('gross_exposure_cap',t);break
         while funding_cursor<len(schedules) and schedules[funding_cursor]['t']<t:
             funding(schedules[funding_cursor]);funding_cursor+=1
         eq=account.equity(prices(t))
@@ -814,9 +828,12 @@ def replay(data, run, *, cost=None, stop_on_recorded_failure=True, _hold_folds=F
     if run['status']=='completed' or not stop_on_recorded_failure:
         if out['failure_reason'] is None:
             settle(data.end,True)
-        for event in schedules:
-            if event['t']==execution_end:
-                funding(event,True)
+            # 結束回呼先補記最後時間步之後的資金費；只有 window.end 屬 endpoint。
+            while funding_cursor<len(schedules) and schedules[funding_cursor]['t']<=execution_end:
+                event=schedules[funding_cursor]
+                funding(event,event['t']==execution_end);funding_cursor+=1
+    # U5 只輸出已終結的訂單腿；失敗時仍待成交的腿沒有觀測事件。
+    out['orders']=[o for o in out['orders'] if o['status']!='pending']
     # 穩定排序保留同一複合訂單先減曝險、再增曝險的兩段順序。
     for key in ('orders','voided'):
         out[key].sort(key=lambda row:row['order_id'])
@@ -856,10 +873,9 @@ def _observed_prefix(data, run):
             continue
         order=copy.deepcopy(raw)
         if order.get('cancel_t',-1)>=cutoff:
-            for field in ('cancel_t','cancel_reason','replaced_by'):
-                order.pop(field,None)
+            continue
         if order['status']=='filled' and (order['order_id'],order['quantity']) not in filled:
-            order['status']='cancelled'
+            continue
         prefix['orders'].append(order)
     prefix['fill_forward_bars']=[r for r in run['fill_forward_bars'] if r['t']<cutoff]
     prefix['unexplained_cash_residual']={
