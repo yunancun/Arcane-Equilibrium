@@ -1716,3 +1716,146 @@ def test_sci_observed_run_numbers_remain_strict(tmp_path, section, field, value)
     report=series.recompute(path,run)
     assert not report['recompute_passed']
     assert section+'.0.'+field+':decimal' in report['differences']
+
+
+# §16：觀測值沿用手寫的 U5-shaped record；不以 replay/recompute 的輸出製造觀測值。
+@pytest.mark.parametrize('residual,passed,ulps', [
+    (Decimal('0'), True, '0'),
+    (Decimal('1e-21'), True, '100'),
+    (Decimal('1.01e-21'), False, '101'),
+    (Decimal('-1e-21'), True, '100'),
+    (Decimal('-1.01e-21'), False, '101'),
+], ids=['zero', 'exactly_100_ulp', '101_ulp', 'negative_100_ulp', 'negative_101_ulp'])
+def test_fix3_cash_residual_boundary(tmp_path, residual, passed, ulps):
+    path=write_materialization(tmp_path);run=observed_fixed_run(path)
+    # 此步 cash=99999.944945，e=4；ulp=10^(4-27)=1e-23，100 ulp=1e-21。
+    ulp=Decimal('1e-23');limit=Decimal('1e-21')
+    assert limit == 100*ulp
+    assert (abs(residual)<=limit) is passed
+    t=START+HOUR
+    run['unexplained_cash_residual']={
+        'per_step':[{'t':t,'residual':format(residual,'f')}] if residual else [],
+        'total':format(residual,'f')}
+    before=copy.deepcopy(run)
+    report=series.recompute(path,run)
+    assert report['recompute_passed'] is passed
+    assert report['differences'] == ([] if passed else ['unexplained_cash_residual'])
+    assert report['max_cash_residual_ulps'] == ulps
+    assert report['first_unexplained_cash_residual_t'] == (None if passed else t)
+    assert run == before
+
+
+@pytest.mark.parametrize('residual,passed,ulps', [
+    (Decimal('1e-21'), True, '100'),
+    (Decimal('1.01e-21'), False, '101'),
+])
+def test_fix3_end_residual_uses_last_recorded_step_cash(tmp_path, residual, passed, ulps):
+    path,run=u5_case(tmp_path,{'BTCUSDT':[-1,0]},hours=4)
+    # 最後一步是 hour 1（end=hour 4 無 step）；記錄 cash<1e5，e=4。
+    # initial/replay cash=100000 的 e=5 不能取代它。差 1e-23 在 §9.8.8 內。
+    last_cash='99999.9999999999999999999999999'
+    run['steps']=[u5_step(0),u5_step(1,cash=last_cash)]
+    ulp=Decimal('1e-23');limit=Decimal('1e-21')
+    assert limit == 100*ulp
+    assert (abs(residual)<=limit) is passed
+    t=START+4*HOUR
+    run['unexplained_cash_residual']={
+        'per_step':[{'t':t,'residual':format(residual,'f')}], 'total':format(residual,'f')}
+    report=series.recompute(path,run)
+    assert report['recompute_passed'] is passed
+    assert report['differences'] == ([] if passed else ['unexplained_cash_residual'])
+    assert report['max_cash_residual_ulps'] == ulps
+    assert report['first_unexplained_cash_residual_t'] == (None if passed else t)
+
+
+@pytest.mark.parametrize('cash,initial,ulp,limit,passed,ulps', [
+    ('99999.9999999999999999999999999', '100000', Decimal('1e-23'), Decimal('1e-21'), False, '101'),
+    ('100000', '99999.9999999999999999999999999', Decimal('1e-22'), Decimal('1e-20'), True, '10.1'),
+], ids=['below_100000', 'at_100000'])
+def test_fix3_cash_magnitude_uses_recorded_adjusted_exponent(tmp_path,cash,initial,ulp,limit,passed,ulps):
+    path,run=u5_case(tmp_path,{'BTCUSDT':[-1,0]},hours=1)
+    run['run_config']['initial_cash']=initial;refresh_run_hashes(run)
+    run['steps']=[u5_step(0,cash=cash),u5_step(1,cash=cash)]
+    # e=4 -> 1e-23 ulp；e=5 -> 1e-22 ulp。同一殘差分別為 101 與 10.1 ulp。
+    # 記錄／重播值分處 1e5 兩側，相差 1e-23，仍在既有現金比較容差內。
+    residual=Decimal('1.01e-21')
+    assert limit == 100*ulp
+    assert (residual<=limit) is passed
+    run['unexplained_cash_residual']={
+        'per_step':[{'t':START,'residual':format(residual,'f')}], 'total':format(residual,'f')}
+    report=series.recompute(path,run)
+    assert report['recompute_passed'] is passed
+    assert report['differences'] == ([] if passed else ['unexplained_cash_residual'])
+    assert report['max_cash_residual_ulps'] == ulps
+
+
+@pytest.mark.parametrize('residual,passed,ulps', [
+    (Decimal('1e-26'), True, '100'),
+    (Decimal('1.01e-26'), False, '101'),
+    (Decimal('-1e-26'), True, '100'),
+])
+def test_fix3_zero_cash_uses_decimal_floor(tmp_path,residual,passed,ulps):
+    path,run=u5_case(tmp_path,{'BTCUSDT':[-1,0,1,2,3]},hours=4,
+        decisions=[{'t':START,'targets':{'BTCUSDT':{'quantity':'1'}}}],
+        funding={'BTCUSDT':[[START,'1000']]})
+    run['run_config']['cost']['funding_delta']='0';refresh_run_hashes(run)
+    # 人工帳務：初始 100000，1 BTC x 100 x 1000 資金費 = -100000，現金歸零。
+    run['orders']=[u5_order(1,0,'BTCUSDT','1'),u5_order(2,4,'BTCUSDT','-1',kind='score_end_liquidation')]
+    run['fills']=[u5_fill(1,0,0,'BTCUSDT','1'),u5_fill(2,4,4,'BTCUSDT','-1',kind='score_end_liquidation')]
+    run['funding']=[{'t':START,'symbol':'BTCUSDT','q_before':'0','q_after':'1','price':'100',
+                    'rate':'1000','amount':'-100000','estimated':False}]
+    run['steps']=[u5_step(0)]+[u5_step(h,{'BTCUSDT':'1'},cash='0') for h in (1,2,3)]+[u5_step(4,cash='0')]
+    # cash=0 特例：ulp=1e-28（不是 adjusted(0)-27 的 1e-27）；100 ulp=1e-26。
+    ulp=Decimal('1e-28');limit=Decimal('1e-26')
+    assert limit == 100*ulp
+    assert (abs(residual)<=limit) is passed
+    t=START+HOUR
+    run['unexplained_cash_residual']={
+        'per_step':[{'t':t,'residual':format(residual,'f')}], 'total':format(residual,'f')}
+    report=series.recompute(path,run)
+    assert report['recompute_passed'] is passed
+    assert report['differences'] == ([] if passed else ['unexplained_cash_residual'])
+    assert report['max_cash_residual_ulps'] == ulps
+
+
+@pytest.mark.parametrize('failed', [False,True], ids=['completed', 'u5_failed_at_first_unexplained'])
+def test_fix3_first_unexplained_follows_representation_errors(tmp_path,failed):
+    path=write_materialization(tmp_path);run=observed_fixed_run(path)
+    # 起始 cash=100000：100 ulp=1e-20；之後 cash=99999.944945：100 ulp=1e-21。
+    # 第一筆絕對金額最大（1e-20）但僅 100 ulp；第三筆才是 101 ulp。
+    high_limit=Decimal('1e-20');low_limit=Decimal('1e-21');unexplained=Decimal('1.01e-21')
+    assert high_limit == 100*Decimal('1e-22')
+    assert low_limit == 100*Decimal('1e-23') < unexplained
+    first=START+3*HOUR
+    run['unexplained_cash_residual']={'per_step':[
+        {'t':START,'residual':format(high_limit,'f')},
+        {'t':START+HOUR,'residual':format(-low_limit,'f')},
+        {'t':first,'residual':format(unexplained,'f')},
+        {'t':START+4*HOUR,'residual':format(Decimal('1e-23'),'f')}],
+        'total':format(Decimal('1.002e-20'),'f')}
+    if failed:
+        run.update(status='failed',failure_reason='lean_error',failure_t=first)
+    before=copy.deepcopy(run)
+    report=series.recompute(path,run)
+    assert report['recompute_passed'] is False
+    assert report['differences'] == ['unexplained_cash_residual']
+    assert report['first_unexplained_cash_residual_t'] == first
+    assert report['max_cash_residual_ulps'] == '101'
+    assert run == before
+
+
+def test_fix3_representation_errors_total_does_not_become_a_boundary(tmp_path):
+    path=write_materialization(tmp_path);run=observed_fixed_run(path)
+    # 4 筆（最後同時刻含 end callback）各 100 ulp，total=400 ulp 也不構成失敗。
+    limit=Decimal('1e-21')
+    assert limit == 100*Decimal('1e-23')
+    run['unexplained_cash_residual']={'per_step':[
+        {'t':START+h*HOUR,'residual':format(limit,'f')} for h in (1,2,4,4)],
+        'total':format(Decimal('4e-21'),'f')}
+    before=copy.deepcopy(run)
+    report=series.recompute(path,run)
+    assert report['recompute_passed'] is True
+    assert report['differences'] == []
+    assert report['max_cash_residual_ulps'] == '100'
+    assert report['first_unexplained_cash_residual_t'] is None
+    assert run == before

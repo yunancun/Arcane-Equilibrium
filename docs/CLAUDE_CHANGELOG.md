@@ -1,9 +1,18 @@
 # CLAUDE_CHANGELOG.md — 開發歷史歸檔
 
 > 從 CLAUDE.md / TODO.md 遷出的 Wave/Sprint/Batch + TODO version-increment 歷史敘事。新 session 不需要讀此文件，僅供回顧歷史時查閱。
-> 最後更新：2026-10-21（R8 現金殘差精度容差與 U5-FIX5／U6-FIX3 派工；TODO v912）
+> 最後更新：2026-10-22（R8 U5-FIX5／U6-FIX3 發布、B 段紀錄與 P4-D 結案；TODO v913）
 
 ---
+
+## R8 現金精度修補發布與 P4-D 結案 — 2026-10-22
+
+- 依 [P4 補充指令](execution_plan/2026-10-20--r8-stage2-p4-research-core-addendum.md) §16.3、§8.2，conductor 已核對 EV-10 原始檔並續派記錄者發布。基線 main `17345cf08` 已含 PR #236 精度契約及 PR #235 的 U4 minNotionalValue 小修；U5-FIX5 `722c66f3f`、U6-FIX3 `4638af48d` 原樣推送後依序以 `--no-ff` 合入（`a141bcf38`、`46c494960`），保留原提交，program_code/ 與驗收樹 `ffaf8d196` 完全相同。
+- [P4-D 檢查紀錄](execution_plan/2026-10-21--r8-stage2-p4-d-check-record.md) 新增 §9 B 段正式紀錄，保留 EV-10 第一次因零殘差規則失敗、conductor 原「相同設定 SHA」指令造成來源綁定拒絕，以及其後只准更新 code_commit／engine_commit 的核准。原物化、其餘設定與全部事件內容不變。
+- 最終 EV-10 completed，48 筆原始殘差均為 1 ulp、全部保留、沒有未解釋殘差；U6 true、differences=[]，數值 max_difference 約 4.47e-24 在 §9.8.8 容差內，不稱數值精確為零。36 份歷史重算所有原欄位與數值相同，只增加兩個殘差報告欄位。stress 四情境完成，stress_passed=false 與損益兩平 multiplier=0 原樣記錄，不作事件級失敗或研究結論。
+- EV-11 壓力數值核對通過；EV-12 單一、100、20×16 已取得完成量測，1,087 標的因 Docker VM 記憶體保護停止，exit143、oom_kill=0，僅部分量測。記錄 PR #235 的22個空 minNotionalValue 記0、BCHUSDT 2020-12-14 日線零價僅為量測排除；正式處理仍待 Operator 裁決。100 標的 Python 關閉逾時亦保留，不稱無異常完成。
+- EV-1～EV-11、EV-13、EV-14 共13項全部通過，§8.2 的 P4-D 通過條件已滿足；EV-12 只量測，不作通過門檻。TODO v913 把 P4-D 移至 CLOSED／DONE_WITH_CONCERNS，與 source 同 PR 合入後生效；REPORT-TOOLS 前置已滿足但仍 WAITING，下一步為 §9.18 派工及 Operator 的異常資料規則裁決。§10 入口索引與核心 runbook 新增 PM 的 WAITING／dispatchable 待辦，本 PR 不實作，其餘列不動。
+- 倉庫外收尾證據 `audits/2026-10-22-r8-p4d-b-closure/`，REPORT SHA-256 `ed1c52eaa194b46e4552843f819a62ccf56bcf2dd1b85d20a6adaa4fa9edead2`；B 段各輪 REPORT／manifest、設定、run／recompute、量測與歷史比對雜湊詳檢查紀錄。路線登記簿更新該紀錄雜湊與說明，沒有新 Operator 裁決，不新增 RH 事件。沒有假說研究、獲利、部署或交易效果結論；conductor 把關後合併，Codex 不合併。
 
 ## R8 現金殘差表示精度容差與 U5-FIX5／U6-FIX3 派工 — 2026-10-21
 

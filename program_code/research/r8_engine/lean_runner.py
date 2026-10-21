@@ -450,8 +450,6 @@ def assemble_run(config, hashes, argv, base_hash, started, ended, exit_code, log
     if result["fill_forward_bars"]:
         finish = {"status": "failed", "failure_reason": "fill_forward_bar",
                   "failure_t": result["fill_forward_bars"][0]["t"]}
-    if residuals and finish["status"] == "completed":
-        finish = {"status": "failed", "failure_reason": "lean_error", "failure_t": residuals[0]["t"]}
     if finish["status"] not in ("completed", "failed") or finish["failure_reason"] not in (
             None, "fill_forward_bar", "gross_exposure_cap", "invalid_decision", "algorithm_exception", "lean_error"):
         raise ValueError("執行結尾不合法")
@@ -462,6 +460,23 @@ def assemble_run(config, hashes, argv, base_hash, started, ended, exit_code, log
     for section, keys in sort_keys.items():
         ordered = sorted(result[section], key=lambda r: tuple(r.get(k, 0) for k in keys))
         result[section] = [{k: v for k, v in row.items() if k != "_leg_index"} for row in ordered]
+    if residuals and finish["status"] == "completed":
+        steps_by_t = {step["t"]: step for step in result["steps"]}
+        last_step = result["steps"][-1] if result["steps"] else None
+        for residual in sorted(residuals, key=lambda row: row["t"]):
+            step = steps_by_t.get(residual["t"])
+            # 結束殘差沒有新增 step；§16.2 指定沿用最後一步的框架現金。
+            if step is None and last_step is not None and residual["t"] > last_step["t"]:
+                step = last_step
+            if step is not None:
+                cash = rules.decimal(step["cash"])
+                exponent = max(cash.adjusted() - 27, -28) if cash else -28
+                ulp = rules.decimal(f"1e{exponent}")
+                if rules.decimal(residual["residual"]).copy_abs() <= 100 * ulp:
+                    continue
+            # 缺少可核對的現金也不可把非零殘差解釋成表示誤差。
+            finish = {"status": "failed", "failure_reason": "lean_error", "failure_t": residual["t"]}
+            break
     result.update({
         "schema_version": "r8_lean_run_v1", "materialization_sha256": config["materialization_sha256"],
         "run_config_sha256": sha256(canonical(config)), "run_config": config,

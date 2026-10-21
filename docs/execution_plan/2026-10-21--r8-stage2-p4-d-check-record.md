@@ -1,4 +1,8 @@
-# R8 階段 2 P4-D 檢查紀錄：A 段（2026-10-21）
+# R8 階段 2 P4-D 檢查紀錄（2026-10-21～2026-10-22）
+
+> **目前狀態（2026-10-22）**：§9 已補齊 B 段，§8.2 要求的 13 項全部通過，P4-D 通過條件已滿足；與本次修補 source 同 PR 合入後結案生效。EV-12 的 1,087 標的仍為部分量測，BCHUSDT 正式資料處理待 Operator 裁決。
+>
+> 本頁原標題為「R8 階段 2 P4-D 檢查紀錄：A 段（2026-10-21）」。§1～§8 保留當時記載，包括尚未執行、未完成與失敗狀態；目前結論及證據以 §9 為準，原歷史不覆寫。
 
 ## 1. 目的、依據與判定
 
@@ -342,3 +346,164 @@ EV-3暖機越界與EV-8存取拒絕不產生run；原可見性探針在啟動前
 | `runs/EV10-v3/recompute.json` | `11da3ab676a1c3500961bed50cb06ec25089d25aaad339933ea8bbb044a2fe93` |
 | `runs/EV11-v3/out/run.json` | `3632cf0255b9f4059814fdc9852ed0055cae0bd83b7b8836fbd7d39bc8074031` |
 | `runs/EV11-v3/recompute.json` | `48cf9c8715293839fbc9a04f20bf9b7118240cbbca53b417a839850be13dac23` |
+
+## 9. B 段驗收、執行時間量測與 P4-D 結案（2026-10-22）
+
+### 9.1 依據、來源與執行界線
+
+- 本節依補充指令 §8.2、§16.3 追加 B 段結果，與本紀錄的 A 段及 §8 更正共同構成 P4-D 檢查紀錄；先前失敗、尚未執行與待核准文字保留為各次觀察，不回寫歷史。
+- 驗收合併樹為 `ffaf8d1966db5950d8ee0c02c0bdcbbb88c0977e`：main `17345cf08e3c88d2aac1dd9d5b7707e890ad2632` ＋ U5-FIX5 `722c66f3f2290a79f5e405e0190a1f17e4277a2c` ＋ U6-FIX3 `4638af48d0a004e9315fda1de04751b29015d081`。main 已含精度契約 PR #236 與 U4 小修 PR #235；conductor 已核對 EV-10 原始檔。發布分支依序以 `--no-ff` 保留兩份原提交，`program_code/` 與驗收樹相同（tree `4b21823614c9df5831a9fcd438deaaffda126c93`）。
+- 固定映像為 `quantconnect/lean@sha256:2657ed3355efb78d78bd0a5d4f126b01367a635e01bccd220b654d7742d182b6`，Docker 執行皆 `--network none`，使用正式 `FixedSchedule`、執行器 `validation` 模式及 `trial_id=null`，沒有轉接。
+- B 段使用 P3b 的真實訓練資料，manifest SHA-256 `b6519a7b2f5eae4759612690790ddb6680db62aa4e723427f51c21a7d6257006`。U4 不帶 `--validation`，資料窗限制在 `[2020-01-01T00:00:00Z,2025-07-01T00:00:00Z)`；暖機早於起點的部分為空，恰在 `window.end` 的資金費依 §4.3 保留，沒有更晚市場數值。整檔位元組只用於雜湊，範圍外只掃時間戳。另建的驗證 fixture 帳本僅供 `data_access`，前後雜湊不變，不是正式研究帳本，沒有假說預登記或試驗 API 呼叫。
+- 收尾驗證 UTC 為 `2026-10-21T22:28:19Z`～`22:36:49.644117Z`；EV-10 核准續跑為 `22:38:13Z`～`22:40:23.538597Z`。章節與交付日期採本地 2026-10-22，UTC 時刻照原始證據記載。
+
+### 9.2 EV-10：獨立重算與精度修補
+
+**構造與第一次失敗**：§8.2 要求 BTCUSDT 與一個下架品種。BTCUSDT 為指定基準；BENDOGUSDT 從訓練段下架候選中，按 ASCII 代號選取小時線無缺漏的第一個標的，選取只看資料覆蓋與生命週期，不看報酬。其可用小時線自 `2024-06-03T09:00:00Z` 至 `2025-01-30T08:00:00Z`，下架時刻為 `2025-01-30T09:00:00Z`。本例在下架前的 2024-07-01～04 每日 01:00 UTC，BTC 權重依序為 `0.10`、`0.15`、`0.05`、`0`；BENDOG 為 `0.0005`、`0.001`、`0.00025`、`0`，構造開倉、加倉、減倉與平倉。
+
+- 舊 v1 物化未含首根資料，沒有可見標的、成交或資金費；v2 的 BENDOG 目標超過單筆上限，只有 BTC 事件，兩者均為 NOT_EXERCISED。v3 保留含首根的物化並縮小 BENDOG 目標，各設定與預期先凍結再執行，沒有依報酬選擇設定。
+- v3 產生 8 筆成交、18 筆資金費、37,502 步，卻自 `2024-07-03T02:00:00Z` 起每步現金差 `1e-23`；當時現金 `99833.46012581705203930431319`，差額為 1 ulp、不累積。容器 `finished=completed`，組裝器按原零殘差條件標為 `failed`／`lean_error`，正式重算為 false。原始失敗與診斷見 §8，不因後續修補刪除。
+- Operator 選定精度容差，PR #236 的 §16 明定 `ulp=max(10^(e−27),10^−28)`，e 取框架預期現金 `steps[].cash` 的 `Decimal.adjusted()`，零現金取 `10^−28`；絕對殘差不大於 100 ulp 為表示誤差，結束時以最後一步現金計算。仍記錄所有非零殘差，`total` 不作判定。U5-FIX5 在組裝時採此判定，U6-FIX3 獨立採同一界限；§9.8.8 的數值比對容差不變。
+
+**設定來源綁定的更正**：conductor 原指令要求「同一份設定、相同 SHA」，但舊設定的 `code_commit`／`engine_commit` 仍綁 `ca5a543f9`，與修補後來源不相容，屬指令錯誤。記錄者實際呼叫在 `verify_source` 被拒：`來源與 code_commit 不符: program_code/research/r8_engine/lean_algo/examples/fixed_schedule.py`，沒有啟動 Docker，也沒有繞過來源驗證。conductor 隨後核准只把這兩欄改成驗收合併樹 `ffaf8d1966db5950d8ee0c02c0bdcbbb88c0977e`，其餘欄位逐值相同，沿用原物化及經濟設定。舊設定 SHA-256 `98b9a71f1205d2d89f470f5f055f4e403c3b8a2c66d258e3427437fb9cadd7aa`；核准設定 `c3b31951e81c93ae9242f0a8a23bb167eca1c60c1fe7e66a9d376852ae1226de`；原物化 manifest `205fc6aa30b47a73bf6a639d21153df93472c33fbf9302eaa85bf776735bf086`。核准與重新凍結另存，提案中的 PENDING、原拒絕與前版報告均保留。
+
+**最終結果**：
+
+| 指標 | 結果 |
+|---|---|
+| LEAN／組裝狀態 | `completed`；`failure_reason=null`、`failure_t=null` |
+| 原始現金殘差 | 48 筆，各 `1e-23`，含演算法結束時另記的一筆；總和 `4.8e-22`，不作失敗判定 |
+| 獨立 Decimal 核對 | precision=80；48 筆均為 1 ulp，沒有超過 100 ulp 的未解釋殘差 |
+| U6 | `recompute_passed=true`、`differences=[]`（0 筆） |
+| U6 殘差報告 | `max_cash_residual_ulps="1"`、`first_unexplained_cash_residual_t=null` |
+| 數值最大差 | `4.472101636863276116134e-24`，位置 `steps.37455.cash`；在 §9.8.8 容差內，並非數值精確為 0 |
+| 最終現金 | `99619.331486333096364` |
+| 來源綁定 | run 的兩個 commit 欄位為核准 head；10 個 algorithm_files 雜湊均與驗收樹相符 |
+
+與舊 v3 逐筆比對：orders 8、fills 8、funding 18、endpoint_funding 0、steps 37,502、decisions 4、voided 0、fits 0，這八個陣列與原始殘差紀錄全部相同。兩標的各 4 筆成交、9 筆資金費；改變的是來源提交綁定與殘差分類後的完成狀態，沒有改事件內容。EV-10 結論為通過。
+
+U6 stress 原始輸出如下，只作事件級核對與記錄：
+
+| 滑點倍數 | 費率 | 狀態 | fees | funding | slippage | net_return |
+|---:|---:|---|---:|---:|---:|---:|
+| 1 | 0.00055 | completed | 16.388718748193 | 0.327631101289364 | 14.99496602 | -0.00380668513666903636 |
+| 2 | 0.00055 | completed | 16.388818645386 | 0.327631101289364 | 29.98993204 | -0.00395663579584096636 |
+| 3 | 0.00055 | completed | 16.388918542579 | 0.327631101289364 | 44.98489806 | -0.00410658645501289636 |
+| 2 | 0.00075 | completed | 22.34838906189 | 0.327631101289364 | 29.98993204 | -0.00401623150000600636 |
+
+損益兩平回傳 `multiplier="0"`、`status="nonpositive_without_slippage"`，lower／upper 及兩端 net_return 均為 null；方法原值 `bracketed_repricing; discrete quantities can create multiple crossings`。`stress_passed=false` 原樣保留，依本次驗收指令只記錄，不是 §8.2 事件級檢查的失敗條件，不作策略優劣、研究或獲利結論。
+
+### 9.3 EV-11：成本壓力
+
+- 以固定目標權重、滑點 ×2、費率 `0.00075`（0.075%）執行原 EV11-v3，數量隨壓力後權益改變。LEAN `completed`，8 筆成交、18 筆資金費、37,502 步、現金殘差 0；U6 重算 true、`differences=[]`，最大差 `3.122386395316420407026e-24` 在 §9.8.8 容差內。
+- 費用 `22.34838906189`、資金費 `0.327631101289364`、滑點金額 `29.98993204`、最終現金 `99598.376849999399364` 與壓力重算相符。修補後 EV-10 的 stress 第四情境亦為相同成本與淨報酬，原事件與 1,647 期序列的核對證據保留。
+- 本輪不重跑 EV-11 的 LEAN，只用新 U6 重算原 run；原欄位及數值均不變。EV-11 結論為通過，與 `stress_passed` 的研究指標判定分開。
+
+### 9.4 EV-12：選取、資料修補與量測限制
+
+**選取與執行方法**：單一標的為 BTCUSDT；100 標的為 BTC 加上訓練段有小時線的其他標的按 ASCII 排序前 99 個，BTC 已含在 100 個內。原完整集合為 P3b 的 1,088 個，本輪只為量測排除 BCHUSDT，成為 1,087 個；其中 450 個在訓練段沒有小時資料，保留空輸入、對策略不可見。100 清單不含 BCHUSDT，前後不變。固定時點策略對 BTC 使用 EV-10 的四個權重，其他標的為 0；沒有按報酬篩選。
+
+20×16 量測使用 BTC、正式 FixedSchedule、20 個 numeric index 網格點、score 固定為 1、空 schedule，全部軸依 §14.2 宣告。16 個量測折全在訓練段：初始擬合 728 日，其後每 84 日一折，擬合終點從 2021-12-29 至 2025-06-11；內部驗證 182 日／間隔 8 日，計分槽在擬合終點後 8 日、長 1 日。這是供量測的折表，不是 §9.1 每 91 日的正式研究折表；輸出 16 筆 fits、各 20 個 score，共 320 個結果。牆鐘含資料推進，未單獨量測 callback CPU 耗時。
+
+**U4 `minNotionalValue` 小修**：初次 100／1,088 物化都在空字串屬性被拒，沒有啟動 LEAN。conductor 依 §4.5「缺少時記為 0」授權 PR #235 小修：缺鍵、None、空字串或僅空白記為字串 `"0"`，limitations 區分原因；其他無效、負值、非有限值與非字串數字仍拒絕，tickSize／qtyStep／minOrderQty 檢查不變。該修正已隨 main `17345cf08` 合入，本發布不另改 U4。
+
+本輪 1,087 標的物化中，以下 22 個標的的 `minNotionalValue` 原為空字串，已實際記為 0 並列入 limitations：1000000VINUUSDT、ANCUSDT、BITUSDT、BTTUSDT、BUSDUSDT、COCOSUSDT、CREAMUSDT、FTTUSDT、GSTUSDT、IGUUSDT、KEEPUSDT、LUNAUSDT、MCUSDT、MULTIUSDT、RAYUSDT、SRMUSDT、STRAXUSDT、TOMOUSDT、USTUSDT、WSMUSDT、YFIIUSDT、ZBCUSDT。100 清單中有前兩個。PR #235 當時的 1,088 物化因另一資料問題失敗，沒有成功輸出的 limitations；本輪成功物化的 22 個紀錄不回填成舊輪成功。
+
+**BCHUSDT 排除**：`kline_BCHUSDT_D.csv.gz` 第 2 列，`2020-12-14T00:00:00Z`（1607904000000），`open=0.0`、`low=0.0`，不符 U4 OHLC >0。原始檔 SHA-256 `a1e9e370499251f3abb5f03ddd8bab2d132f6d55effe9f57e8a76d4655e86183`。本輪依核准僅為量測排除此標的，未改原始資料、U4 或正式處理規則；正式資料前檢及 BCHUSDT 等異常列處理仍待 Operator 裁決。訓練段掃描覆蓋 1,088 標的、4,352 來源檔、13,093,816 列，沒有另發現 U4 數值／結構／合約屬性拒絕項。
+
+**量測表**：秒為牆鐘，MiB／GiB 採 1024 進位。單一與 20×16 沿用先前 EV12 證據；100 與 1,087 為本輪驗收合併樹上的量測。
+
+| 案例 | LEAN 容器秒 | runner 秒 | 容器觀測峰值 MiB | wrapper 峰值 MiB | VM RSS 峰值 GiB | Mac 全機已用峰值 GiB | 物化 MiB | 結果 |
+|---|---:|---:|---:|---:|---:|---:|---:|---|
+| 1 標的 BTC | 12.021 | 12.443 | 669.30 | 112.78 | 3.334 | 55.672 | 8.62 | completed，46,166 steps |
+| 100 標的 | 60.706 | 61.179 | 3,820.87（3.731 GiB） | 121.344 | 6.446 | 56.472 | 267.756 | completed，46,166 steps、4 fills |
+| 1,087 標的 | 38.469（至停止） | 39.694（至停止） | 7,469.44（7.294 GiB） | 87.891 | 9.661 | 57.564 | 1,626.163 | 初始化時保護停止，部分量測；0 steps |
+| 1 標的、20×16 擬合 | 10.868 | 11.237 | 623.62 | 111.62 | 3.371 | 56.008 | 8.62（共用） | completed，16 fits／320 scores、46,166 steps |
+
+| U4 物化 | 牆鐘秒 | 主機程序峰值 MiB | 邏輯 bytes |
+|---|---:|---:|---:|
+| 單一／20×16 共用 | 0.954 | 800.47 | 9,038,014 |
+| 100 標的 | 10.772 | 800.156 | 280,762,324 |
+| 1,087 標的 | 66.626 | 800.516 | 1,705,155,779 |
+
+- 單一與擬合共用準備成本，不重複加總；這兩案及 100 標的完成時現金殘差皆 0。全訓練窗指請求窗內全部可用資料，BTC 首根為 2020-03-25 10:00 UTC，之前不補 K 線。100 標的日誌在 Python 關閉階段另有 10 秒 `Execution Security Error: Operation timed out`；finished 與 run 均 completed、Docker exit 0，保留異常，不稱為無異常完成。
+- 1,087 標的初始化期間，7.74 GiB、4 CPU 的 Docker VM 可用記憶體連續兩次低於預設 256 MiB 保護線，最後為 78,164 KiB（約 76.33 MiB），依條件 `docker stop`，exit 143。cgroup 的 oom／oom_kill 均為 0；Mac 尚約有 70 GiB 可用。因此是 Docker VM 記憶體壓力觸發保護停止，沒有觀測到 OOM kill。events 為空、沒有 finished，組裝結果 failed／lean_error；38.469 秒只到停止，不能當成完整訓練段耗時。本輪未加資源或重試。
+- 容器記憶體約每秒讀 cgroup v2 memory.peak，最後採樣到退出間未保存，為觀測峰值／可能的實際峰值下界。wrapper 用 ru_maxrss；VM RSS 與 Mac 總量由 ps／vm_stat 取樣，包含原有 VM 與其他程序，不能全歸因本任務。監控成本含在牆鐘；兩個 LEAN 執行未並行，但全部物化與 100 標的關閉階段少量重疊。四列分屬兩輪、來源不同，不作嚴格擴展性基準比較。
+
+### 9.5 歷史執行重算與發布驗證
+
+- 修正後 U6 對 36 份原 run 重算：P4-D0 九個、A 段 22 個（EV-9 對照 PR #232 修正後報告）、FIX4 四個可見性探針、B 段 EV11-v3 一個。沒有重跑這些 LEAN 執行。
+- 36／36 的所有原有 key/value 逐值相同，含判定、differences、max_difference、counts 與 totals；不只是旗標相同。新報告恰新增 `max_cash_residual_ulps="0"`、`first_unexplained_cash_residual_t=null`，所以不稱整份新舊 JSON 位元組相同。全部 true、differences=[]；EV-11 原本容差內的非零 max_difference 亦原樣保留。
+- 驗收樹既有回歸為全部 R8 911、U4 63、U5 269、U6 226 passed，均 0 failed／skipped／error；這是驗收紀錄，不替代發布分支的提交前測試與 hosted CI。發布分支另跑結構測試與全部 R8，結果隨 PR 回報。
+
+### 9.6 證據索引與 SHA-256
+
+以下證據位於倉庫外，唯讀引用。B 包含最初 EV-10／EV-11 與首次 EV-12；U 為 PR #235 小修；C 為本輪收尾與核准續跑。B 的 `EV12/REPORT.md` 使用 B 根目錄 manifest，不另虛構子目錄 manifest。各表 SHA-256 綁定本次讀取的檔案；其餘指令、來源、監控採樣及 36 份逐檔新舊重算雜湊由相應 manifest 與 historical/results 索引。
+
+| 代號 | 目錄 |
+|---|---|
+| B | `/Users/ncyu/Projects/TradeBot/audits/2026-10-21-r8-p4d-b/` |
+| U | `/Users/ncyu/Projects/TradeBot/audits/2026-10-21-r8-u4-minnotional-fix/` |
+| C | `/Users/ncyu/Projects/TradeBot/audits/2026-10-22-r8-p4d-b-closure/` |
+
+| 目錄 | 相對檔案 | SHA-256 |
+|---|---|---|
+| B | `REPORT.md` | `33c24087fab442a351816234511eb45b65bfd1ed69e28b6d1d23696048bfd2c1` |
+| B | `manifest.json` | `bd58fe78ecc82982142eb00774449b810250dd2b237092edf39397a7a65c878c` |
+| B | `symbol-selection.json` | `df18d036b949bed23172e798869b1c5dba60ada038c723ed559d9af07440542f` |
+| B | `cases/EV10-v3/config.json` | `98b9a71f1205d2d89f470f5f055f4e403c3b8a2c66d258e3427437fb9cadd7aa` |
+| B | `cases/EV11-v3/config.json` | `6b479226863c402cc0959df6547061883fee10b4fb3e866eac8213eafa537708` |
+| B | `inputs/ev10-11-v2/materialization/materialization.json` | `205fc6aa30b47a73bf6a639d21153df93472c33fbf9302eaa85bf776735bf086` |
+| B | `runs/EV10-v3/out/run.json` | `45477fbe813db39607b34a2bc5a37eb1509dd08ec0bbbdb3b4ba502020113ecd` |
+| B | `runs/EV10-v3/recompute.json` | `11da3ab676a1c3500961bed50cb06ec25089d25aaad339933ea8bbb044a2fe93` |
+| B | `runs/EV11-v3/out/run.json` | `3632cf0255b9f4059814fdc9852ed0055cae0bd83b7b8836fbd7d39bc8074031` |
+| B | `runs/EV11-v3/recompute.json` | `48cf9c8715293839fbc9a04f20bf9b7118240cbbca53b417a839850be13dac23` |
+| B | `EV12/REPORT.md` | `c37488d97106b17f208848daa87c3c5630d8fd2d90e23729207790cf01e8628a` |
+| B | `EV12/measurement-plan.json` | `263ddd86df53c5d297d2d8336ca05270735a346631ea760c37be7eaf4c505d03` |
+| B | `EV12/plan-freeze.json` | `4a8dacd82823ed20892404af7ce871888ad35885c6e91efe10be07cc7cca21c5` |
+| B | `EV12/measurement-results.json` | `26d6b529a4b683138744586d18d286c37aac44eaf95ff2241b235ab0154f76ee` |
+| B | `EV12/cases/single/config.json` | `c89c576395466b0b1aabf36750e53246f36947a7bdbd33469290bd3cbfaa506a` |
+| B | `EV12/cases/fit20x16/config.json` | `30f5fba9a451de2673cbaa07a9c34f511b5391b0284b966756007517c48691a3` |
+| B | `EV12/runs/single/out/run.json` | `00e6bd9f515d60db84f04ddd5564291148c4f63d5e12afe59609d379a5b95c03` |
+| B | `EV12/runs/fit20x16/out/run.json` | `c8b74f764384d77089713ff4d4c3a416a3c3e7c35bc2a46815861cc2a5465beb` |
+| U | `REPORT.md` | `708ffa0a96b63d3899a962e8047b1c242d0e8d9772ad99016e7465179d865161` |
+| U | `manifest.json` | `cfc2656ba9bb74d374f18fc1829f21a59c7ff2f9ac28fae209447e0fb78932da` |
+| U | `instrument-attributes.json` | `5f33fe3c2968133dc101008e68d956402308c5f4ba8ae2a3fe06428fedbdfae1` |
+| U | `hundred/result.json` | `aa677b02e96443525f18579289df9a5d2862f0a181cb463d4b5dc18b412c7665` |
+| U | `all-rejection.json` | `1c3e3f648f2f03675aa8662a3ccc2853aa5312f2af8acb9750f09ffe259355d8` |
+| C | `REPORT.md` | `ed1c52eaa194b46e4552843f819a62ccf56bcf2dd1b85d20a6adaa4fa9edead2` |
+| C | `manifest.json` | `0ed2fb666a80fd674917d75fd4b314627e44c82ad206e263265e037ca316b77a` |
+| C | `EV10/prior-closure-report/REPORT.md` | `ce973cafa1fdd49bef9c310e81638dc6b17723ea9846628b648287e0d9b53eab` |
+| C | `EV10/proposed-config-diff.json` | `9ebc5a9ca1b7df30c3256f7772dda9384b0f1db6189d46a4a489a3acf9fba407` |
+| C | `EV10/proposed-config.json` | `c3b31951e81c93ae9242f0a8a23bb167eca1c60c1fe7e66a9d376852ae1226de` |
+| C | `EV10/conditions.json` | `31a5680a72923e8e851e07c6bc54b23a693c3008c20ed4e546d0a236f54c7f84` |
+| C | `EV10/conditions-freeze.json` | `31d996d301c79e1e76c002e286b795fed6cc85b2416588d4991de7211b9cc16f` |
+| C | `EV10/approved/authorization-and-freeze.json` | `fe42f1330572d5fe2f095af509410c4ee8b9aed0956881a6c70128e3bc093ee4` |
+| C | `EV10/approved/out/run.json` | `fede386fb1b8e1d1bb3b46ea0eea271617ab063dae9349f9c7ae5f3ead642f32` |
+| C | `EV10/approved/recompute.json` | `e912e9046b6af3ff3dd6ff47c50d12243f25f1ca6d1a73df32fdbfb26b0db91e` |
+| C | `EV10/approved/stress.json` | `630a75f194bdbe12a4530a05d9be7513d25b18e32ed1075393e0256971ecb39c` |
+| C | `EV10/approved/independent-ulp-check.json` | `f9b1d4314c666df49bf86a8c9b674f6d34d7f3e3b1ae4fd70a219334958f91e3` |
+| C | `EV10/approved/v3-comparison.json` | `d5e14887ad44b04d73446e3e0d07e0bfe7abd742cd879d5b4d544c050eb1946b` |
+| C | `EV10/approved/source-bindings-check.json` | `fd0efb3a6fdbaccb0df51823826a98468381609d88c3db5dc91d573886cec5b9` |
+| C | `historical/inputs-freeze.json` | `34e43e055a11b8e91e87e7b95434bb90abd43220326f6b68e4f86b39e2ea85ad` |
+| C | `historical/results.json` | `0e263c8a796d17aef1730c59e2cd8f894e198f5c3a18d01484f7b14945da0dae` |
+| C | `EV12/scan/result.json` | `10acc25bb0a4790832da0a9c56a736921b9f33ef64e79c30780a8555d808d1f2` |
+| C | `EV12/scan/bad-rows.jsonl` | `dec2f0f6231b6c3a8abdb2d7cafd02abd154b1af0db02aca392ac7a34130ab1a` |
+| C | `EV12/cases/hundred/config.json` | `b6cb9654cc5cac93df99a2ca5584e6c729c6e3ba170fb1ed4b2b41c7e99fc903` |
+| C | `EV12/cases/all/config.json` | `3c9a084fd267ca6688052e73e73b8d5f73fc8a1d811ea19524449e91df087251` |
+| C | `EV12/inputs/hundred/materialization/materialization.json` | `1acb194385a249d48f57794197bfafb8ad3b2f4ba101b20e7a79545fcd91ae18` |
+| C | `EV12/inputs/all/materialization/materialization.json` | `84a4d49a76c0c82348644d7268f7033992fc7147d8878332a6fcb57a6d7942f0` |
+| C | `EV12/inputs/hundred/materialization-measurement.json` | `ba93211f93d0ee8c966c21f6621f0f96ab97b942088aeabe3097d52013ffcc40` |
+| C | `EV12/inputs/all/materialization-measurement.json` | `b270e5ea2fc136693a6d7394d6767b6ea54ec3f18b918c1fcd109d82bd2c13e7` |
+| C | `EV12/runs/hundred/out/run.json` | `3512f5d7e33a5d5e731b54df989c00dba39f7ba9d8d5a214fb8139e77eefd5f5` |
+| C | `EV12/runs/all/out/run.json` | `9b5bdf9d565a8d82c99b13fa85fd118edf1fd6c1141875451534061ee6fcabc1` |
+| C | `measurements/hundred/summary.json` | `946e5730d75212705baf169db7c6adbbb7e56204ea2d1175f53c0f233b18be61` |
+| C | `measurements/all/summary.json` | `0b3fe12ab45fcc4329bc5e3ab96768f0fa5889663e52c383a64f322f7876b41f` |
+
+### 9.7 P4-D 結論與後續
+
+- A 段 EV-1～EV-9、EV-13、EV-14 共 11 項已依本紀錄 §1～§7 通過；EV-9 的 PR #232 小修、EV-1／EV-2 的 FIX4 探針及原失敗歷史均保留。本節 EV-10 經 §16、FIX5／U6-FIX3 通過，EV-11 通過，合計 §8.2 要求的 13 項全部通過，**P4-D 通過條件已滿足**。
+- EV-12 只量測、不作通過門檻：單一、100 與 20×16 已取得完成量測，1,087 標的只有記憶體保護停止前的部分量測；不能聲稱已完成全標的全訓練窗。BCHUSDT 排除僅供此次量測，正式處理仍待 Operator 裁決。這兩項限制隨 DONE_WITH_CONCERNS 結案保留。
+- 本列與本次修補 source 同一 PR 合入後，TODO 的 P4-D CLOSED 才生效。沒有新 Operator 規則裁決，不新增 RH 事件；既有 §16 與 PR #235 的授權均照原紀錄引用。
+- §10 的 U4–U6 命令列入口索引與研究工具核心 runbook 另列 PM 的 WAITING 待辦；報告工具的補充指令／P3b 前置已滿足，仍 WAITING，待 PM 撰寫 §9.18 派工並合入；BCHUSDT 等交易所異常列規則先由 Operator 裁決。P5 還須資料品質前檢，不由本次結案自動開工。
+- B 段使用真實訓練資料，但只驗證儀器與量測固定範例；沒有假說研究、獲利、Demo／live、部署或交易效果結論。
