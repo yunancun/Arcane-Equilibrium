@@ -19,6 +19,113 @@ from program_code.research.r8_engine.lean_algo import rules
 from program_code.research.r8_ledger.ledger import canonical
 
 
+def assemble_cash_residuals(config, cash_steps, residuals, *, finish=None, exit_code=0):
+    """以手寫 U5 事件測 assemble_run；現金與殘差均不由受測實作推算。"""
+    from program_code.research.r8_engine import lean_runner as runner
+    steps = [{"t": t, "cash": cash, "equity": "1000000000", "positions": {}}
+             for t, cash in cash_steps]
+    events = [{"section": "steps", "record": step} for step in steps]
+    events += [{"section": "cash_residual", "record": row} for row in residuals]
+    events.append({"section": "finished", "record": finish or {
+        "status": "completed", "failure_reason": None, "failure_t": None}})
+    return runner.assemble_run(config, {}, [], "0" * 64, 0, 10, exit_code, b"", events)
+
+
+@pytest.mark.parametrize("cash,ulp", [
+    pytest.param("99999.99", Decimal("1e-23"), id="e4"),
+    pytest.param("100000", Decimal("1e-22"), id="e5"),
+    pytest.param("0", Decimal("1e-28"), id="zero-cash"),
+    pytest.param("0.00001", Decimal("1e-28"), id="ulp-floor"),
+    pytest.param("-100000", Decimal("1e-22"), id="negative-cash"),
+])
+@pytest.mark.parametrize("multiple,status", [
+    (0, "completed"), (100, "completed"), (101, "failed"),
+    (-100, "completed"), (-101, "failed"),
+])
+def test_fix5_cash_residual_100_ulp_boundary(inputs, cash, ulp, multiple, status):
+    # §16.2 手算：e=4 -> 10^(4-27)=1e-23，界限1e-21；
+    # e=5（含負現金）-> 1e-22，界限1e-20；零現金及e=-5
+    # 取下限1e-28，界限1e-26。101 ulp分別為1.01e-21/1.01e-20/1.01e-26。
+    residual = format(Decimal(multiple) * ulp, "f")
+    row = {"t": 1, "residual": residual}
+    run = assemble_cash_residuals(inputs[2], [(1, cash)], [row])
+    assert run["status"] == status
+    assert run["failure_reason"] == ("lean_error" if status == "failed" else None)
+    assert run["failure_t"] == (1 if status == "failed" else None)
+    assert run["unexplained_cash_residual"] == {
+        "per_step": [row] if multiple else [],
+        "total": format((Decimal(multiple) * ulp).normalize(), "f") if multiple else "0"}
+
+
+def test_fix5_cash_residual_uses_recorded_cash_before_magnitude_crossing(inputs):
+    # 框架cash的e=4，100 ulp=1e-21；加1e-20後LEAN cash會跨1e5，
+    # 但不得改用LEAN cash、equity或最後一步(e=5)的1e-20界限。
+    cash = "99999.9999999999999999999999999"
+    row = {"t": 1, "residual": format(Decimal("1e-20"), "f")}
+    run = assemble_cash_residuals(inputs[2], [(1, cash), (2, "100000")], [row])
+    assert (run["status"], run["failure_reason"], run["failure_t"]) == ("failed", "lean_error", 1)
+    assert run["steps"][0]["cash"] == cash
+
+
+@pytest.mark.parametrize("last_cash,residual,status", [
+    ("100000", Decimal("1e-20"), "completed"),
+    ("99999.99", Decimal("1.01e-21"), "failed"),
+    ("0", Decimal("1e-26"), "completed"),
+])
+def test_fix5_cash_residual_at_end_uses_last_chronological_step(inputs, last_cash, residual, status):
+    # 最後一步e=5界限1e-20、e=4界限1e-21、零現金界限1e-26。
+    # 結束事件t=3沒有同時刻step；傳入steps逆序，必須取時間上最後的t=2。
+    row = {"t": 3, "residual": format(residual, "f")}
+    run = assemble_cash_residuals(inputs[2], [(2, last_cash), (1, "0.1")], [row])
+    assert run["status"] == status
+    assert run["failure_t"] == (3 if status == "failed" else None)
+    assert run["unexplained_cash_residual"] == {"per_step": [row], "total": row["residual"]}
+
+
+def test_fix5_cash_residual_failure_t_skips_representation_errors(inputs):
+    # t=1/2/3: e=4界限1e-21；t=4: e=5界限1e-20，1.01e-20才失敗。
+    rows = [{"t": t, "residual": format(Decimal(value), "f")}
+            for t, value in [(1, "1e-21"), (2, "-1e-21"), (3, "1e-23"),
+                             (4, "1.01e-20"), (5, "2e-20")]]
+    run = assemble_cash_residuals(inputs[2], [
+        (1, "99999"), (2, "99999"), (3, "99999"), (4, "100000"), (5, "100000")], rows)
+    assert (run["status"], run["failure_reason"], run["failure_t"]) == ("failed", "lean_error", 4)
+    assert run["unexplained_cash_residual"]["per_step"] == rows
+    assert Decimal(run["unexplained_cash_residual"]["total"]) == Decimal("3.011e-20")
+
+
+def test_fix5_cash_residual_total_is_not_a_failure_threshold(inputs):
+    # e=4每筆界限1e-21；逐筆加總4e-21不作判定，t=3結束重複記錄仍保留。
+    rows = [{"t": t, "residual": format(Decimal("1e-21"), "f")} for t in (1, 2, 3, 3)]
+    run = assemble_cash_residuals(inputs[2], [(t, "99999") for t in (1, 2, 3)], rows)
+    assert (run["status"], run["failure_reason"], run["failure_t"]) == ("completed", None, None)
+    assert run["unexplained_cash_residual"] == {
+        "per_step": rows, "total": format(Decimal("4e-21"), "f")}
+
+
+def test_fix5_cash_residual_cancellation_does_not_hide_failure(inputs):
+    # e=4界限1e-21；兩筆±101 ulp相消為0仍應在t=1失敗。
+    rows = [{"t": 1, "residual": format(Decimal("1.01e-21"), "f")},
+            {"t": 2, "residual": format(Decimal("-1.01e-21"), "f")}]
+    run = assemble_cash_residuals(inputs[2], [(1, "99999"), (2, "99999")], rows)
+    assert (run["status"], run["failure_t"]) == ("failed", 1)
+    assert run["unexplained_cash_residual"] == {"per_step": rows, "total": "0"}
+
+
+@pytest.mark.parametrize("finish,exit_code,reason", [
+    ({"status": "failed", "failure_reason": "algorithm_exception", "failure_t": 2},
+     0, "algorithm_exception"),
+    ({"status": "completed", "failure_reason": None, "failure_t": None}, 1, "lean_error"),
+])
+def test_fix5_cash_residual_within_tolerance_keeps_container_failure(inputs, finish, exit_code, reason):
+    # e=4界限1e-21；100 ulp不可把容器的失敗改為completed。
+    row = {"t": 1, "residual": format(Decimal("1e-21"), "f")}
+    run = assemble_cash_residuals(inputs[2], [(1, "99999")], [row], finish=finish, exit_code=exit_code)
+    assert run["status"] == "failed"
+    assert run["failure_reason"] == reason
+    assert run["failure_t"] == finish["failure_t"]
+
+
 @pytest.fixture(autouse=True)
 def no_network(monkeypatch):
     def denied(*args, **kwargs):
