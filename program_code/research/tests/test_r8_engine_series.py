@@ -1548,3 +1548,54 @@ def test_fix2_04_u5_rejected_batch_emits_no_voided_leg(tmp_path):
     report=series.recompute(path,run)
     assert report['differences']==[]
     assert report['counts']=={'orders':0,'fills':0,'voided':0,'funding':0,'endpoint_funding':0,'steps':0}
+
+
+@pytest.mark.parametrize('quantity', ['1.05', '-1.05', '1', '-1'])
+def test_recorder_quantity_targets_match_u5_step_rounding(tmp_path, quantity):
+    path=write_materialization(tmp_path)
+    # U5 形狀的觀測值由手算寫定；不以 U6 replay 產生觀測輸出。
+    run=observed_fixed_run(path)
+    run['decisions'][0]['targets']['BTCUSDT']['quantity']=quantity
+    if quantity.startswith('-'):
+        run['orders']=[u5_order(1,0,'BTCUSDT','-1'),
+            u5_order(2,4,'BTCUSDT','1',kind='score_end_liquidation')]
+        run['fills']=[u5_fill(1,0,0,'BTCUSDT','-1',price='99.9',bps='10',fee='0.054945'),
+            u5_fill(2,4,4,'BTCUSDT','1',kind='score_end_liquidation',
+                    price='100.6',bps='60',fee='0.05533')]
+        run['steps']=[u5_step(h) for h in range(-13*24+1,1)]
+        run['steps'] += [u5_step(h,{'BTCUSDT':'-1'},cash='99999.945055',
+                               equity='99999.845055') for h in (1,2,3)]
+        run['steps'] += [u5_step(4,cash='99999.189725')]
+        run['funding']=[{'t':START,'symbol':'BTCUSDT','q_before':'0','q_after':'-1',
+                        'price':'100','rate':'0','amount':'0','estimated':False}]
+    report=series.recompute(path,run)
+    assert report['recompute_passed'],report['differences']
+    assert report['max_difference']=='0'
+    assert report['counts']['orders']==2
+
+
+@pytest.mark.parametrize('entry,exit_price,crossing', [
+    ('85','115','150'), ('99','101','10'), ('80','120',None)])
+def test_recorder_stress_breakeven_search_covers_valid_range(tmp_path, entry, exit_price, crossing):
+    # 兩筆固定數量成交、零手續費、10 bps 基礎滑價；獨立手算淨損益：
+    # 85 -> 115: 30 - 0.2*m，根為 150（128 與 10000/60 之間）。
+    # 99 -> 101: 2 - 0.2*m，根為 10；80 -> 120 的根為 200，在有效範圍外。
+    bars=[]
+    for t in range(START-13*DAY,START+4*HOUR,HOUR):
+        price=exit_price if t>=START+2*HOUR else entry
+        bars.append([t,price,price,price,price,'10000','10000000'])
+    path=write_materialization(tmp_path,hourly={'BTCUSDT':bars})
+    run=run_for(path,decisions=[{'t':START,'targets':{'BTCUSDT':{'quantity':'1'}}},
+        {'t':START+2*HOUR,'targets':{'BTCUSDT':{'quantity':'0'}}}])
+    run['run_config']['cost']['taker_fee_rate']='0'
+    refresh_run_hashes(run)
+    result=series.stress(path,run)['breakeven']
+    if crossing is None:
+        assert result['status']=='no_crossing_in_valid_slippage_range'
+    else:
+        assert result['status']=='bracketed'
+        lower,upper=Decimal(result['lower']),Decimal(result['upper'])
+        assert lower<Decimal(crossing)<=upper
+        assert upper-lower<Decimal('0.000000001')
+        assert Decimal(result['lower_net_return'])>0
+        assert Decimal(result['upper_net_return'])<=0

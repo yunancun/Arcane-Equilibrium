@@ -8,11 +8,12 @@
 ## R8 U5-FIX3／U6-FIX2 來源發布與 P4-D0 檢查紀錄 — 2026-10-21
 
 - 依補充指令 §14.3、§12.4，由 Codex 記錄者發布 U5-FIX3 `cac86b744` 與原版 U6-FIX2 `bfa151375`；conductor 已確認 FIX3 程式審查通過，並獨立重讀九案例的執行／重算及預期值雜湊。沒有新增 Operator 裁決，不新增路線事件。
-- 從 main `ad50ab78a` 建立發布分支，依序以 `git merge --no-ff` 合入兩份交付並保留原提交；U5-FIX3 原樣推送到 origin 同名分支。八個程式／測試檔未另修改，`program_code/` 與驗收樹 `1ddbdce8f` 完全相同。
+- 從 main `ad50ab78a` 建立發布分支，依序以 `git merge --no-ff` 合入兩份交付並保留原提交；U5-FIX3 原樣推送到 origin 同名分支。首次發布 head `194bbac0b` 的八個程式／測試檔未另修改，當時 `program_code/` 與驗收樹 `1ddbdce8f` 完全相同。
 - 新增 [P4-D0 檢查紀錄](execution_plan/2026-10-21--r8-stage2-p4-d0-check-record.md)：保留 2026-10-20 啟動器失敗、FIX1 十進位暖機失敗、FIX2 回歸收集停止與雙版本折界／鄰域診斷，以及 FIX3 最終九案例與逐檔 SHA-256。早期目錄沒有 REPORT／manifest 的事實照實列明。
 - FIX3 固定映像、`--network none`，H/G/D/L/P/Q/N/E/B 全部逐位相符，現金殘差 0、原版 U6 recompute_passed=true、差異 0；驗收樹 U5/U6/全部 R8 為 222/171/788 passed。六案空網格在啟動前拒絕、另存單一空參數點後才執行，預期值保持原樣。
 - TODO v908：U5／U6 移入 CLOSED（DONE_WITH_CONCERNS），P4-D 移入 ACTIVE、dispatchable；均註明與 source 及檢查紀錄同一 PR 合入後生效。P3b 已完成，U4 已合入；§10 入口索引與研究核心 runbook 留待 P4-D 期間收尾，本 PR 不做。其他列不動。
 - 路線登記簿新增檢查紀錄來源及 SHA-256，掛入 R8 的 source_refs；既有事件與最後事件日期不變。
+- conductor 隨後確認 PR #231 的兩則自動審查 P2 為 U6 原有缺陷，依 §8.1 授權同 PR 記錄者小修：固定 quantity 依 qty_step 向零取整、損益兩平搜尋補探有效上限內最後一點；只改 U6 兩檔，U5 不動。數量紅 2 failed／2 passed → 綠 4 passed，損益兩平紅 1 failed／3 passed → 綠 4 passed；全部 R8 795 passed，既有九案例只重跑 U6 recompute，全部通過、差異 0；檢查紀錄 §8 追加證據雜湊，登記簿同步雜湊，不新增路線事件。
 - D 的策略端日線可見性直接證據仍 UNVERIFIED；P4-D 尚未執行，沒有真實資料、假說研究、獲利、Demo／live 或部署結論。PR 經 CI 與自動審查無阻塞後由 conductor 合併，記錄者不合併。
 
 ## R8 FIX2 驗證、折界與鄰域契約及 U5-FIX3 派工 — 2026-10-21

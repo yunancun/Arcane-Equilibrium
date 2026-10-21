@@ -446,7 +446,7 @@
     "r8-stage2-p4-d0-record": {
       "kind": "recorded_file",
       "path": "docs/execution_plan/2026-10-21--r8-stage2-p4-d0-check-record.md",
-      "sha256": "b941f1a3a333f976fd1c8f0dd5fb5e818560654836ddd957a6afa42f0e359aff",
+      "sha256": "3aba75f7fe67784d16ec7a4730a10750af88fb49253b7c1102003054692eecc1",
       "meaning": "stage 2 P4-D0 check record: original launcher failure, FIX1 decimal boundary failure, FIX2 dual-version fold and neighborhood diagnostics, and accepted U5 FIX3 plus unmodified U6 FIX2 nine-case verification with per-file evidence hashes; source publication only, not P4-D completion or research results"
     }
   },

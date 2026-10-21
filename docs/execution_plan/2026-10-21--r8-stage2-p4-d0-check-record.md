@@ -12,14 +12,14 @@
 |---|---|
 | 發布基線 | `ad50ab78a6be007d9cb3746ebe8a05e786fdbc48`（PR #230）；發布開工 fetch 後 origin/main 未前進 |
 | U5 | `R8-S2-ENGINE-LEAN-FIX3-20261021`；`codex/r8-s2-engine-lean-fix3-20261021`；`cac86b74423290e62389eb1370b22b4c5896a9a9` |
-| U6 | `R8-S2-ENGINE-SERIES-FIX2-20261021`；`codex/r8-s2-engine-series-fix2-20261021`；`bfa151375c5b640602dbbc4fd71e655db1080a69`；原版未改 |
+| U6 | `R8-S2-ENGINE-SERIES-FIX2-20261021`；`codex/r8-s2-engine-series-fix2-20261021`；`bfa151375c5b640602dbbc4fd71e655db1080a69`；固定映像驗收使用原版，發布小修見 §8 |
 | 驗收合併樹 | `1ddbdce8ff72abc7d9d262c12434471fa17a3b4c`；整樹 `abff2fc72715941e262c0538f310065088c53197` |
-| 程式樹 | 發布分支依序以 `git merge --no-ff` 合入 U5、U6，保留原提交；`git diff 1ddbdce8f -- program_code/` 為空，兩者 `program_code` tree 均為 `f937adce10c9b1ebf637cff486eca08f779a4c85` |
+| 首次發布程式樹（`194bbac0b`，小修前） | 發布分支依序以 `git merge --no-ff` 合入 U5、U6，保留原提交；`git diff 1ddbdce8f -- program_code/` 為空，兩者 `program_code` tree 均為 `f937adce10c9b1ebf637cff486eca08f779a4c85` |
 | 固定映像 | `quantconnect/lean@sha256:2657ed3355efb78d78bd0a5d4f126b01367a635e01bccd220b654d7742d182b6` |
 | 隔離與資料 | 本機合成資料，U4 `--validation` 物化；最終 9 次 LEAN 與 9 次準備讀取的 Docker 命令全部 `--network none`；輸入掛載在 `/Users` 下 |
 | 執行來源 | 正式 `FixedSchedule`；`fixed_schedule.py` SHA-256 `905d8c065eb27dcfeb343cdb8c854ec4cb4f499f0154d10f78bb8edf58dfcb9b`；U6 `series.py` SHA-256 `1b83f74575fb270fc5ae81abb003e1662ba61c1585ac5790218ae67f149fa5fc`；沒有診斷轉接 |
 
-FIX3 依 §14.3 承接 U5-FIX2 至 `eb669cd3c`，排除 `6bb60cf3f`；FIX2 的停止與審查歷史保留。最終驗收的設定與 `run.json` 綁定驗收樹 `1ddbdce8f`，沒有為發布提交改寫歷史輸出。發布只新增本紀錄與狀態文件，不改八個程式／測試檔。
+FIX3 依 §14.3 承接 U5-FIX2 至 `eb669cd3c`，排除 `6bb60cf3f`；FIX2 的停止與審查歷史保留。最終驗收的設定與 `run.json` 綁定驗收樹 `1ddbdce8f`，沒有為發布提交改寫歷史輸出。首次發布 head `194bbac0b` 只新增本紀錄與狀態文件，沒有改八個程式／測試檔；其後 conductor 授權的 U6 記錄者小修與新重算證據見 §8。
 
 ## 3. 經過與失敗紀錄
 
@@ -156,3 +156,25 @@ FIX2 各輪 manifest 已保存逐檔清單及先前證據綁定；最終 manifes
 - U4 已隨 PR #227 合入，P3b 已完成；本 PR 把 U5／U6 來源與本紀錄合入後，P4-D 的解除條件才全部成立。PM 依 §8.2 派記錄者執行 EV-1 至 EV-14（EV-12 只量測）；不是本次發布工作的續跑授權。
 - §10 的記錄者收尾列為 P4-D 期間待辦：在 `helper_scripts/SCRIPT_INDEX.md` 登記 U4–U6 命令列入口，並撰寫研究工具核心 runbook。本 PR 不實作這兩項。
 - 最終固定映像驗證時段：`2026-10-21T19:53:08Z` 至 `2026-10-21T19:58:54.799619Z`。本次發布的提交前測試、CI、自動審查與 UTC 起訖另隨 PR 回報，不覆寫驗收時段。
+
+## 8. PR #231 的 U6 記錄者小修（2026-10-21）
+
+- conductor 對照程式確認自動審查的兩則 P2 皆屬實，且為 U6 原有缺陷、非 FIX2 引入；依 §8.1 裁定在同一 PR 以記錄者小修處理，不另立交付、不改規則或介面。只改 `series.py` 與 `test_r8_engine_series.py`，U5 六檔與驗收樹完全相同；此後不再聲稱整個 `program_code/` 與 `1ddbdce8f` 相同。
+- [數量步長意見](https://github.com/yunancun/Arcane-Equilibrium/pull/231#discussion_r4341519642)：驗證模式的固定 quantity 在訂單分段前依 qty_step 向零取整，權重目標維持既有處理。人工寫定 U5 形狀的訂單、成交、手續費、部位與現金；`±1.05`（step=0.1）修正前兩例失敗、已對齊兩例通過，修正後四例全通過，未用 U6 輸出生成觀測值。
+- [損益兩平意見](https://github.com/yunancun/Arcane-Equilibrium/pull/231#discussion_r4341519651)：倍增至有效上限前一個可表示 Decimal 值，若乘回最大 bps 捨入至 10000 就再退一格，確保仍在有效範圍；最後一點非正才沿用 40 次二分。獨立手算交叉點 150 位於 128 與 10000/60 之間，修正前錯報無交叉、修正後 bracketed 且區間含 150；另驗交叉點 10、有效範圍內無交叉，並保留既有較早交叉回歸。該組紅為 1 failed／3 passed，綠為 4 passed。
+- 修正後在 PR 分支根目錄執行全部 `test_r8_*.py`：795 passed、0 failed/error/skipped（2 個既有未知 asyncio 設定警告）。九案例只用修正後 U6 對 §6.2 的原 run.json 再執行 recompute，全部 exit 0、recompute_passed=true、max_difference=0、differences=[]；原輸入雜湊不變，未重跑 LEAN。原版 U6 的驗收輸出仍保留，新結果另存，不覆寫歷史。
+
+新增證據子目錄：`/Users/ncyu/Projects/TradeBot/audits/2026-10-21-r8-s2-engine-fix3-publish/u6-recorder-repair/`。以下是新重算檔的 SHA-256，路徑相對此目錄；重算來源綁小修前 head `194bbac0ba271cf10c323e6deeb328caf37fde6c` 加上修正後 `series.py` SHA-256 `6b8ab3c124773383e60591b251b6c4a939b0e8c2f38597e2160dd6abb58ceb57`。
+`recompute-summary.json` SHA-256 `1e7dadf1a68dfbd60cd8ac27f4f6cd456568d1fbc82c577637b479677801ecdc`；`recompute/manifest.json` SHA-256 `48601d75d83c4cd2fcdb826b91c19aa19eea85eb31bf1fb2b73e3279988edbae`（含每次命令、輸出與來源綁定）。紅綠命令與完整輸出為同目錄的 `quantity-red/green.*`、`breakeven-red/green.*`，全部 R8 為 `r8-all.*`。
+
+| 案例 | 新重算檔 | SHA-256 |
+|---|---|---|
+| H | `recompute/H.json` | `a22d164893f98fc1a89faf79cd0288c553b741f0803c86d853c516762e646404` |
+| G | `recompute/G.json` | `d8750771628e1567fe9d7be5b922fdcffe944d06c3c7ceee265155d04234cd20` |
+| D | `recompute/D.json` | `3a96d813551da2136f565b771c8fd76b4198b626732c7eba30a2b2c0e9ab78ee` |
+| L | `recompute/L.json` | `135fc4ca298beaa2fefe798e4727034fc2efe37ed6de34208e8d0f8f6424a8f4` |
+| P | `recompute/P.json` | `7e00b3ed9f567590d49741a72df8349d457d68ca5371cfab097678e66076b98c` |
+| Q | `recompute/Q.json` | `a8b23fd29ae3f593a7a032bd7da4d0d39c165753f617ac5abb3c2d132f839038` |
+| N | `recompute/N.json` | `a668fedb350f1a743a14cf0e4d3c5014c6aba1b34fecbed70bd758e19a065cf9` |
+| E | `recompute/E.json` | `8f5b1ba270637c6777e9b22b646041998e53af2a7951a4c93c3d95e14a00aef5` |
+| B | `recompute/B.json` | `6c10954e2f5b587b72dbb2f744dc4d14cb69348a39b29babb7efc2480ba9d036` |

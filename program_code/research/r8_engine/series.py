@@ -782,6 +782,10 @@ def replay(data, run, *, cost=None, stop_on_recorded_failure=True, _hold_folds=F
                 target=targets[s];price=decision_prices[s];prop=data.properties[s]
                 wanted=(target_quantity(equity,target['weight'],price,prop['qty_step']) if 'weight' in target
                         else decimal_value(target['quantity']))
+                if 'quantity' in target:
+                    # 驗證模式的固定數量與 U5 相同，分段前依步長向零取整。
+                    step=decimal_value(prop['qty_step'])
+                    wanted=(wanted/step).to_integral_value(rounding=ROUND_DOWN)*step
                 median,hourly,enough=data.liquidity(s,t,cost)
                 legs=order_segments(account.positions.get(s,Decimal(0)),wanted,price,prop['min_qty'],
                                     prop['min_notional'],median,hourly,enough,cost)
@@ -1304,7 +1308,13 @@ def stress(materialization,run):
         else:
             largest=max([decimal_value(x['bps']) for x in base['slippage_tiers_bps']]+[decimal_value(base['forced_reduce_penalty_bps'])])
             bound=Decimal(10000)/largest if largest else None
-            upper=Decimal(1)
+            # 最後探測點取目前 Decimal 精度下 bound 的前一個可表示值。
+            # 除法／乘法可能捨入；乘回最大 bps 若仍達 10000，再退一格，
+            # 保證最後一點及其內的二分探測均維持有效滑價 < 10000 bps。
+            last=bound.next_minus() if bound is not None else None
+            while last is not None and largest*last>=10000:
+                last=last.next_minus()
+            upper=min(Decimal(1),last) if last is not None else Decimal(1)
             while bound is not None and upper<bound:
                 probe=scenario(upper,base['taker_fee_rate'])
                 if probe['net_return'] is None:
@@ -1327,7 +1337,10 @@ def stress(materialization,run):
                                          lower=decimal_text(lower),upper=decimal_text(upper),
                                          lower_net_return=decimal_text(lo_net),upper_net_return=decimal_text(hi_net))
                     break
-                lower,lo_net=upper,hi_net;upper*=2
+                lower,lo_net=upper,hi_net
+                if upper==last:
+                    breakeven['status']='no_crossing_in_valid_slippage_range';break
+                upper=min(upper*2,last)
             else:
                 breakeven['status']='no_crossing_in_valid_slippage_range'
     return {'schema_version':'r8_stress_v1','run_sha256':digest(canonical(run)),
