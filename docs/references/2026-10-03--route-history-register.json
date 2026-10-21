@@ -452,8 +452,8 @@
     "r8-stage2-p4-d-record": {
       "kind": "recorded_file",
       "path": "docs/execution_plan/2026-10-21--r8-stage2-p4-d-check-record.md",
-      "sha256": "3e2d615d2b9005ba2d006dd81ade61a3017d78bfd6098ff5725a6e252ebad4a7",
-      "meaning": "stage 2 P4-D section A check record: eleven synthetic-data events accepted after PR #232 and FIX4, closing the P4-D0 case D strategy-side visibility limitation; append-only section B correction preserves EV-10 failure, EV-11 pressure numeric pass and the EV-12 measurement status reported at section 16 dispatch; full section B record and EV-10 acceptance remain pending, no research or profit conclusion"
+      "sha256": "b251ac02fa5600d27eae4f70883ae9efd246afac32caf67b7d854a7346f42c1e",
+      "meaning": "stage 2 P4-D event-check record: section A accepted after PR #232 and FIX4; section B records the accepted EV-10 rerun with U5 FIX5 and U6 FIX3, EV-11 pressure comparison, unchanged historical recomputation fields and EV-12 measurements. The section 8.2 pass conditions are satisfied; the 1087-symbol memory-protection stop remains partial and formal BCHUSDT abnormal-data handling awaits an Operator decision. Closure takes effect with source publication; no research or profit conclusion."
     }
   },
   "routes": [
