@@ -755,7 +755,10 @@ def test_fix1_decimal_boundary_and_framework_equity():
                                 {"X": "43268.2233"}, {"X": "43246.6"}) == Decimal("99994.413238793755")
     assert rules.number(rules.fee("0.123", "43268.2233", "0.00055")) == "2.927095306245"
     tree = ast.parse((ROOT / "program_code/research/r8_engine/lean_algo/framework.py").read_text())
-    assert not any(isinstance(n, ast.Call) and isinstance(n.func, ast.Name) and n.func.id == "float" for n in ast.walk(tree))
+    # §13 允許把物化價轉為浮點作一致性比對；現金與成交不得讀回浮點。
+    assert not any(isinstance(n, ast.Attribute) and n.attr in {"fill_price", "fill_quantity", "order_fee"}
+                   and isinstance(n.ctx, ast.Load) and isinstance(n.value, ast.Name)
+                   and n.value.id == "event" for n in ast.walk(tree))
 
 
 @pytest.mark.parametrize("attribute", "gi_frame gi_code gi_yieldfrom cr_frame cr_await cr_code ag_frame ag_code f_back f_locals f_globals f_builtins f_code tb_frame tb_next".split())
@@ -893,7 +896,7 @@ def test_fix1_launcher_fixed_image_commented_algorithm_location(tmp_path):
 
 
 def test_fix1_container_adapter_wires_host_rules_without_execution():
-    # 依 §2 容器模組不匯入、不執行；這裡只檢查接線，行為驗收仍是 P4-D0。
+    # 保留 FIX1 的接線檢查；§13 另以假 LEAN 流程驗收，不取代 P4-D0。
     tree = ast.parse((ROOT / "program_code/research/r8_engine/lean_algo/framework.py").read_text())
     methods = {n.name: n for n in ast.walk(tree) if isinstance(n, ast.FunctionDef)}
     def calls(name):
@@ -910,6 +913,412 @@ def test_fix1_container_adapter_wires_host_rules_without_execution():
     assert "Parse" in calls("to_lean")
     assert "lean_decimal" in calls("d")
     assert "account_equity" in calls("_equity")
-    next_open = next(n for n in ast.walk(methods["market_fill"]) if isinstance(n, ast.Call)
+    next_open = next(n for n in ast.walk(methods["_market_fill"]) if isinstance(n, ast.Call)
                      and isinstance(n.func, ast.Attribute) and n.func.attr == "next_open")
     assert isinstance(next_open.args[-1], ast.Subscript) and next_open.args[-1].slice.value == "score_end"
+
+
+@pytest.mark.parametrize('attribute', ['format', 'format_map'])
+def test_fix2_static_check_rejects_format_attribute_escape(attribute):
+    from program_code.research.r8_engine import lean_runner as runner
+    with pytest.raises(ValueError):
+        runner.check_algorithm('def probe(data):\n    access = "{0._rows}".' + attribute + '\n    return access(data)')
+
+
+@pytest.mark.parametrize('name', 'getattr setattr delattr vars dir globals locals eval exec compile __import__ open'.split())
+def test_fix2_static_check_rejects_dynamic_builtins_even_when_aliased(name):
+    from program_code.research.r8_engine import lean_runner as runner
+    with pytest.raises(ValueError):
+        runner.check_algorithm('def probe(data):\n    access = ' + name + '\n    return access(data)')
+
+
+def test_fix2_view_public_operations_cannot_read_future_rows():
+    rows = rules.KnownRows([{'t': t, 'known_at': t, 'close': str(t)} for t in range(6)])
+    view = rules.data_view({'X': {'kline_hour': rows}}, 2)['X']['kline_hour']
+    rows.append({'t': 6, 'known_at': 6, 'close': '6'})
+    assert [r['t'] for r in view] == [0, 1, 2]
+    assert [r['t'] for r in view[::-1][:100]] == [2, 1, 0]
+    assert view.count({'t': 3, 'known_at': 3, 'close': '3'}) == 0
+    with pytest.raises(ValueError):
+        view.index({'t': 3, 'known_at': 3, 'close': '3'})
+    assert all(name in {'index', 'count'} for name in dir(view) if not name.startswith('_'))
+
+
+@pytest.fixture
+def fake_lean(monkeypatch, tmp_path, cost):
+    """只替換 LEAN/.NET 與掛載邊界；真正驅動 initialize、成交、on_data 與結束。"""
+    import importlib.util
+    import types
+    import csv
+    import io
+    import zipfile
+    from datetime import datetime, timezone
+    ns = types.SimpleNamespace
+
+    class Cash:
+        def __init__(self, value):
+            self.exact = Decimal(value)
+        @property
+        def amount(self):
+            return float(self.exact)
+        def add_amount(self, value):
+            assert isinstance(value, Decimal)
+            self.exact += value
+
+    class Portfolio:
+        def __init__(self):
+            self.cash_book = {'USDT': Cash('0')}
+            self.holdings = {}
+        def __getitem__(self, symbol):
+            if symbol not in self.holdings:
+                holding = ns(quantity=Decimal(0), average=Decimal(0))
+                def set_holdings(average, quantity):
+                    holding.average, holding.quantity = Decimal(average), Decimal(quantity)
+                holding.set_holdings = set_holdings
+                self.holdings[symbol] = holding
+            return self.holdings[symbol]
+
+    class TradeBar:
+        def __init__(self, t, values):
+            self.time = datetime.fromtimestamp(t / 1000, timezone.utc).replace(tzinfo=None)
+            self.end_time = datetime.fromtimestamp((t + HOUR) / 1000, timezone.utc).replace(tzinfo=None)
+            self.is_fill_forward = False
+            for key, value in zip(('open', 'high', 'low', 'close', 'volume'), values):
+                setattr(self, key, float(value))
+
+    class OrderEvent:
+        def __init__(self, order, now, fee):
+            self.order_id, self.status, self.order_fee = order.id, 'submitted', fee
+
+    class QCAlgorithm:
+        def __init__(self):
+            self.portfolio = Portfolio()
+            self.orders, self.securities, self.stops = {}, {}, []
+            self.transactions = ns(get_order_by_id=self.orders.__getitem__)
+        def set_time_zone(self, *args): pass
+        def set_account_currency(self, *args): pass
+        def set_start_date(self, *args): pass
+        def set_end_date(self, *args): pass
+        def set_cash(self, value): self.portfolio.cash_book['USDT'] = Cash(value)
+        def quit(self, reason): self.stops.append(reason)
+        def add_crypto_future(self, name, *args, **kwargs):
+            security = ns(symbol=name, bar=None)
+            security.set_fee_model = lambda value: None
+            security.set_margin_interest_rate_model = lambda value: None
+            security.set_fill_model = lambda value: setattr(security, 'fill_model', value)
+            security.get_last_data = lambda: security.bar
+            self.securities[name] = security
+            return security
+        def market_order(self, symbol, quantity, asynchronous, tag):
+            order = ns(id=len(self.orders) + 1, symbol=symbol, quantity=quantity,
+                       time=self.utc_time, tag=tag, status='submitted')
+            def cancel(reason):
+                order.status = 'cancelled'
+                return ns(is_success=True)
+            order.cancel = cancel
+            self.orders[order.id] = order
+            return order
+
+    imports = types.ModuleType('AlgorithmImports')
+    for name, value in dict(QCAlgorithm=QCAlgorithm, FillModel=object, TradeBar=TradeBar,
+                            OrderEvent=OrderEvent, OrderStatus=ns(FILLED='filled', INVALID='invalid'),
+                            OrderFee=lambda value: ns(value=value),
+                            CashAmount=lambda amount, currency: ns(amount=amount),
+                            TimeZones=ns(UTC='UTC'), Resolution=ns(HOUR='hour'), Market=ns(BYBIT='bybit'),
+                            ConstantFeeModel=lambda value: value,
+                            MarginInterestRateModel=ns(NULL=None)).items():
+        setattr(imports, name, value)
+    system = types.ModuleType('System')
+    system.Decimal = ns(Parse=lambda value, *args: Decimal(value))
+    culture = types.ModuleType('System.Globalization')
+    culture.CultureInfo, culture.NumberStyles = ns(InvariantCulture=object()), ns(Number=object())
+    json_net = types.ModuleType('Newtonsoft.Json')
+    json_net.JsonConvert = ns(SerializeObject=lambda cash: '{"Amount":' + str(cash.exact) + '}')
+    for name, module in [('AlgorithmImports', imports), ('System', system),
+                         ('System.Globalization', culture), ('Newtonsoft.Json', json_net)]:
+        monkeypatch.setitem(sys.modules, name, module)
+    module_name = 'program_code.research.r8_engine.lean_algo.framework'
+    spec = importlib.util.spec_from_file_location(module_name, ROOT / 'program_code/research/r8_engine/lean_algo/framework.py')
+    framework = importlib.util.module_from_spec(spec)
+    monkeypatch.setitem(sys.modules, module_name, framework)
+    monkeypatch.setattr(sys, 'path', list(sys.path))
+    spec.loader.exec_module(framework)
+    mount = tmp_path / 'mount'
+    def mounted(value):
+        path = Path(value)
+        if str(path).startswith(('/r8', '/Lean/Data')):
+            return mount / str(path).lstrip('/')
+        return path
+    monkeypatch.setattr(framework, 'Path', mounted)
+    base_t = 20 * DAY
+
+    class Driver:
+        def __init__(self, bars, schedule=(), folds=(), strategy_config=None, end=None, funding=None, initial='100000', hypothesis_source=None):
+            self.bars = bars
+            self.algorithm = framework.R8Algorithm()
+            self.t0 = base_t
+            names = sorted(bars)
+            end = end if end is not None else base_t + 6 * HOUR
+            config = {'initial_cash': initial, 'leverage': '10', 'cost': cost,
+                      'score_windows': [f['score_window'] for f in folds] if folds else [{'start': base_t, 'end': end}],
+                      'folds': list(folds), 'model_artifact': None, 'random_seed': 1,
+                      'algorithm': {'path': 'hypothesis.py', 'class': 'FixedSchedule'},
+                      'strategy': strategy_config or {'schedule': list(schedule)},
+                      'decision_resolution': 'hour', 'gross_exposure_cap': '1'}
+            info = {'symbols': names, 'strategy_symbols': names, 'first_bar': {s: 0 for s in names},
+                    'delistings': {}, 'warmup': {'start': base_t - HOUR, 'end': base_t},
+                    'window': {'start': base_t, 'end': end}, 'validation_example': True,
+                    'properties': {s: {'qty_step': '0.001', 'min_qty': '0.001'} for s in names},
+                    'min_notional': {s: '0' for s in names}, 'funding_interval_ms': {s: 8 * HOUR for s in names}}
+            mounted('/r8/output').mkdir(parents=True)
+            for file, obj in [('algorithm_config.json', config), ('framework.json', info)]:
+                mounted('/r8/' + file).write_bytes(canonical(obj))
+            path = mounted('/r8/src/hypothesis.py')
+            path.parent.mkdir(parents=True)
+            source = (ROOT / 'program_code/research/r8_engine/lean_algo/examples/fixed_schedule.py').read_text()
+            # 構造相鄰折，一折合格、一折不交易；其餘沿用正式範例的介面。
+            source = source.replace('return params["score"]',
+                                    'return "-1" if validation_window["end"] >= params.get("no_trade_at", 10**20) else params["score"]')
+            path.write_text(hypothesis_source or source)
+            for name, rows in bars.items():
+                datasets = {'kline_day': [], 'funding': (funding or {}).get(name, []), 'open_interest': [],
+                            'turnover_hour': [[t + HOUR, t, '100000000'] for t in rows],
+                            'turnover_day': [[i * DAY, (i - 1) * DAY, '100000000'] for i in range(1, 23)]}
+                for dataset, values in datasets.items():
+                    file = mounted('/r8/custom') / dataset / (name.lower() + '.csv')
+                    file.parent.mkdir(parents=True, exist_ok=True)
+                    with file.open('w') as stream:
+                        csv.writer(stream).writerows(values)
+                output = io.StringIO()
+                csv.writer(output).writerows([[datetime.fromtimestamp(t / 1000, timezone.utc).strftime('%Y%m%d %H:%M'), *v]
+                                             for t, v in sorted(rows.items())])
+                file = mounted('/Lean/Data/cryptofuture/bybit/hour') / (name.lower() + '_trade.zip')
+                file.parent.mkdir(parents=True, exist_ok=True)
+                with zipfile.ZipFile(file, 'w') as archive:
+                    archive.writestr(name.lower() + '_trade_perp.csv', output.getvalue())
+            self.algorithm.initialize()
+        def step(self, t, visible=None, corrupt=None, poison_event=False):
+            algo = self.algorithm
+            algo.utc_time = datetime.fromtimestamp(t / 1000, timezone.utc)
+            delivered = {}
+            for name, rows in self.bars.items():
+                if t - HOUR in rows and (visible is None or name in visible):
+                    delivered[name] = TradeBar(t - HOUR, rows[t - HOUR])
+                    if corrupt:
+                        setattr(delivered[name], *corrupt)
+                    algo.securities[name].bar = delivered[name]
+            # 模擬原生順序：先成交回呼，再進 on_data。
+            for order in list(algo.orders.values()):
+                if order.status != 'submitted' or order.symbol not in delivered:
+                    continue
+                event = algo.securities[order.symbol].fill_model.market_fill(algo.securities[order.symbol], order)
+                if event.status != 'filled':
+                    continue
+                holding = algo.portfolio[order.symbol]
+                qty, price, fee = event.fill_quantity, event.fill_price, event.order_fee.value.amount
+                old = holding.quantity
+                if old * qty < 0:
+                    realized = min(abs(old), abs(qty)) * (price - holding.average) * (1 if old > 0 else -1)
+                else:
+                    realized = Decimal(0)
+                if old == 0 or old * qty > 0:
+                    holding.average = (abs(old) * holding.average + abs(qty) * price) / abs(old + qty)
+                elif old + qty == 0:
+                    holding.average = Decimal(0)
+                holding.quantity += qty
+                algo.portfolio.cash_book['USDT'].add_amount(realized - fee)
+                order.status = 'filled'
+                # pythonnet 讀回浮點數；極端污染值證明框架沒有讀回它們。
+                event.fill_quantity = float(qty) if not poison_event else 987.0
+                event.fill_price = float(price) if not poison_event else 999.0
+                event.order_fee.value.amount = float(fee) if not poison_event else 999.0
+                algo.on_order_event(event)
+            algo.on_data(ns(bars=delivered))
+        def records(self, section):
+            return [r['record'] for r in map(json.loads, mounted('/r8/output/events.jsonl').read_bytes().splitlines())
+                    if r['section'] == section]
+        def finish(self):
+            self.algorithm.on_end_of_algorithm()
+    return ns(Driver=Driver, t0=base_t, framework=framework, json_net=json_net, mounted=mounted)
+
+
+def test_fix2_framework_cash_json_preserves_exact_decimal(fake_lean):
+    t = fake_lean.t0
+    driver = fake_lean.Driver({'X': {t - HOUR: ['100', '100', '100', '100', '1']}}, initial='99997.072904693755')
+    driver.step(t)
+    assert driver.algorithm.stops == []
+    assert driver.records('cash_residual') == []
+    assert driver.records('steps')[0]['cash'] == '99997.072904693755'
+
+
+def test_fix2_framework_materialized_prices_and_owned_fill_precision(fake_lean):
+    t = fake_lean.t0
+    bars = {'X': {t - HOUR: ['43246.6'] * 4 + ['1'], t: ['43246.6'] * 4 + ['1']}}
+    driver = fake_lean.Driver(bars, [{'t': t, 'targets': {'X': {'quantity': '0.123'}}}],
+                              funding={'X': [[t, t, '0']]})
+    driver.step(t)
+    driver.step(t + HOUR, poison_event=True)
+    assert driver.algorithm.stops == []
+    fill = driver.records('fills')[0]
+    assert (fill['quantity'], fill['price'], fill['fee']) == ('0.123', '43268.2233', '2.927095306245')
+    assert driver.records('steps')[-1]['cash'] == '99997.072904693755'
+    assert driver.records('cash_residual') == []
+
+
+@pytest.mark.parametrize('corrupt', [('close', 101.0), ('open', float('nan'))])
+def test_fix2_framework_price_mismatch_is_lean_error(fake_lean, corrupt):
+    t = fake_lean.t0
+    driver = fake_lean.Driver({'X': {t - HOUR: ['100'] * 4 + ['1']}})
+    driver.step(t, corrupt=corrupt)
+    assert driver.algorithm.stops == ['lean_error']
+
+
+def test_fix2_framework_cash_read_failure_is_lean_error(fake_lean):
+    t = fake_lean.t0
+    driver = fake_lean.Driver({'X': {t - HOUR: ['100'] * 4 + ['1']}})
+    fake_lean.json_net.JsonConvert.SerializeObject = lambda cash: '{"Amount":"invalid"}'
+    driver.step(t)
+    assert driver.algorithm.stops == ['lean_error']
+
+
+def test_fix2_framework_missing_materialized_bar_is_lean_error(fake_lean):
+    t = fake_lean.t0
+    driver = fake_lean.Driver({'X': {t - HOUR: ['100'] * 4 + ['1']}})
+    # LEAN 送達一根不在物化檔案裡的線。
+    driver.bars['X'][t] = ['100'] * 4 + ['1']
+    driver.step(t + HOUR)
+    assert driver.algorithm.stops == ['lean_error']
+
+
+@pytest.mark.parametrize('pending_quantity,expected', [('100', []), ('800', ['gross_exposure_cap'])])
+def test_fix2_framework_delayed_fill_exposure_keeps_missing_pending_price(fake_lean, pending_quantity, expected):
+    t = fake_lean.t0
+    bar = ['100'] * 4 + ['1']
+    driver = fake_lean.Driver({'X': {t - HOUR: bar, t: bar, t + HOUR: bar},
+                               'Y': {t - HOUR: bar, t + HOUR: ['200'] * 4 + ['1']}},
+                              [{'t': t, 'targets': {'X': {'quantity': '0'}, 'Y': {'quantity': pending_quantity}}},
+                               {'t': t + HOUR, 'targets': {'X': {'quantity': '500'}}}],
+                              funding={'X': [[t, t, '0']], 'Y': [[t, t, '0']]})
+    driver.step(t)
+    driver.step(t + HOUR)
+    driver.step(t + 2 * HOUR)
+    assert driver.algorithm.stops == expected
+    assert [(r['symbol'], r['quantity']) for r in driver.records('fills')] == [('Y', pending_quantity), ('X', '500')]
+    assert driver.records('cash_residual') == []
+
+
+@pytest.mark.parametrize('all_invisible', [False, True])
+def test_fix2_framework_no_trade_cancels_all_and_flattens_on_first_visibility(fake_lean, all_invisible):
+    t = fake_lean.t0
+    bar = ['100'] * 4 + ['1']
+    schedule = [{'t': t, 'targets': {s: {'quantity': q} for s, q in [('X', '1'), ('Y', '2'), ('Z', '3'), ('W', '0')]}}]
+    config = strategy(['1'])
+    config['grid'][0].update(schedule=schedule, no_trade_at=t + HOUR)
+    folds = [{'fit_window': {'start': -400 * DAY, 'end': t - HOUR},
+              'score_window': {'start': t, 'end': t + 2 * HOUR}},
+             {'fit_window': {'start': -400 * DAY, 'end': t + HOUR},
+              'score_window': {'start': t + 2 * HOUR, 'end': t + 6 * HOUR}}]
+    bars = {'X': {t + i * HOUR: bar for i in [-1, 0, 1, 3, 4]},
+            'Y': {t + i * HOUR: bar for i in [-1, 0, 2, 3, 4]},
+            'Z': {t - HOUR: bar},
+            'W': {t + i * HOUR: bar for i in [-1, 0, 1, 2, 3, 4]}}
+    driver = fake_lean.Driver(bars, folds=folds, strategy_config=config,
+                              funding={s: [[t, t, '0']] for s in bars})
+    driver.step(t)
+    driver.step(t + HOUR)
+    driver.step(t + 2 * HOUR, visible=[] if all_invisible else None)
+    cancelled = [r for r in driver.records('orders') if r['status'] == 'cancelled']
+    assert [(r['symbol'], r['cancel_reason'], r['cancel_t']) for r in cancelled] == [('Z', 'no_trade', t + 2 * HOUR)]
+    for step in (3, 4, 5):
+        driver.step(t + step * HOUR)
+    driver.finish()
+    assert driver.algorithm.stops == []
+    flattened = [r for r in driver.records('orders') if r['kind'] == 'no_trade_flatten']
+    assert sorted((r['symbol'], r['quantity']) for r in flattened) == [('X', '-1'), ('Y', '-2')]
+    by_symbol = {r['symbol']: r for r in flattened}
+    assert by_symbol['X']['decision_t'] == t + (4 if all_invisible else 2) * HOUR
+    assert by_symbol['Y']['decision_t'] == t + 3 * HOUR
+    assert len(driver.records('decisions')) == 1
+    assert driver.records('steps')[-1]['positions'] == {}
+    assert driver.records('cash_residual') == []
+    assert driver.records('finished') == [{'status': 'completed', 'failure_reason': None, 'failure_t': None}]
+
+
+def test_fix2_framework_window_end_funding_after_last_step_and_exact_endpoint(fake_lean):
+    t = fake_lean.t0
+    end = t + 4 * HOUR
+    driver = fake_lean.Driver({'X': {t - HOUR: ['100'] * 4 + ['1'], t: ['100'] * 4 + ['1']}},
+                              [{'t': t, 'targets': {'X': {'quantity': '2'}}}], end=end,
+                              funding={'X': [[t, t, '0'], [t + 2 * HOUR, t + 2 * HOUR, '0.001'],
+                                             [end, end, '0.002']]})
+    driver.step(t)
+    driver.step(t + HOUR)
+    driver.finish()
+    assert driver.algorithm.stops == []
+    assert [(r['t'], r['amount']) for r in driver.records('funding')] == [(t, '0'), (t + 2 * HOUR, '-0.204')]
+    assert [(r['t'], r['amount']) for r in driver.records('endpoint_funding')] == [(end, '-0.408')]
+    assert driver.algorithm.portfolio.cash_book['USDT'].exact == Decimal('99998.276605')
+    assert driver.records('fills')[-1]['kind'] == 'score_end_liquidation'
+    assert driver.records('fills')[-1]['change_t'] == end
+    assert driver.records('steps')[-1]['t'] == t + HOUR
+    assert driver.records('cash_residual') == []
+
+
+@pytest.mark.parametrize('targets', [[], {'Y': {'weight': '0'}}, {'X': None}, {'X': {'weight': 0.5}},
+                                     {'X': {'weight': 'NaN'}}, {'X': {'quantity': 'bad'}}])
+def test_fix2_framework_invalid_targets_are_decision_errors(fake_lean, targets):
+    t = fake_lean.t0
+    source = ('from program_code.research.r8_engine.lean_algo.rules import R8Hypothesis\n'
+              'class FixedSchedule(R8Hypothesis):\n'
+              '    def on_decision(self, *args):\n'
+              '        return ' + repr(targets) + '\n')
+    driver = fake_lean.Driver({'X': {t - HOUR: ['100'] * 4 + ['1']}}, hypothesis_source=source)
+    driver.step(t)
+    assert driver.algorithm.stops == ['invalid_decision']
+    assert driver.records('orders') == []
+
+
+def test_fix2_framework_malformed_score_is_decision_error(fake_lean):
+    t = fake_lean.t0
+    driver = fake_lean.Driver({'X': {t - HOUR: ['100'] * 4 + ['1']}},
+                              folds=[{'fit_window': {'start': -400 * DAY, 'end': t - HOUR},
+                                      'score_window': {'start': t, 'end': t + 6 * HOUR}}],
+                              strategy_config=strategy(['not-a-number']))
+    driver.step(t)
+    assert driver.algorithm.stops == ['invalid_decision']
+
+
+def test_fix2_framework_hypothesis_exception_is_not_a_boundary_or_decision_error(fake_lean):
+    t = fake_lean.t0
+    source = ('from program_code.research.r8_engine.lean_algo.rules import R8Hypothesis\n'
+              'class FixedSchedule(R8Hypothesis):\n'
+              '    def on_decision(self, *args):\n'
+              '        raise ValueError("hypothesis bug")\n')
+    driver = fake_lean.Driver({'X': {t - HOUR: ['100'] * 4 + ['1']}}, hypothesis_source=source)
+    driver.step(t)
+    assert driver.algorithm.stops == ['algorithm_exception']
+
+
+def test_fix2_framework_fill_boundary_failure_has_current_time(fake_lean):
+    t = fake_lean.t0
+    driver = fake_lean.Driver({'X': {t - HOUR: ['100'] * 4 + ['1'], t: ['100'] * 4 + ['1']}},
+                              [{'t': t, 'targets': {'X': {'quantity': '1'}}}])
+    driver.step(t)
+    driver.step(t + HOUR, corrupt=('open', 101.0))
+    driver.finish()
+    assert driver.records('finished') == [{'status': 'failed', 'failure_reason': 'lean_error', 'failure_t': t + HOUR}]
+    assert driver.records('fills') == []
+
+
+def test_fix2_framework_cash_write_failure_is_lean_error(fake_lean):
+    t = fake_lean.t0
+    driver = fake_lean.Driver({'X': {t + i * HOUR: ['100'] * 4 + ['1'] for i in range(-1, 3)}},
+                              [{'t': t, 'targets': {'X': {'quantity': '1'}}}],
+                              funding={'X': [[t, t, '0'], [t + 2 * HOUR, t + 2 * HOUR, '0.001']]})
+    driver.step(t)
+    driver.step(t + HOUR)
+    def reject(value):
+        raise RuntimeError('fake LEAN cash write error')
+    driver.algorithm.portfolio.cash_book['USDT'].add_amount = reject
+    driver.step(t + 3 * HOUR)
+    assert driver.algorithm.stops == ['lean_error']

@@ -387,6 +387,10 @@ def turnover_at(rows, t):
     return selected[-1]["value"] if selected else "0"
 
 
+class HypothesisError(RuntimeError):
+    """假說回呼本身的例外；不與 LEAN 邊界或輸出格式混淆。"""
+
+
 class R8Hypothesis:
     """假說只取得種子、唯讀資料、模型與參數。"""
 
@@ -422,23 +426,37 @@ def fit_fold(hypothesis_class, seed, fit_window, data, strategy, cost):
     instance = hypothesis_class(seed)
     view = data_view(data, end, strict=True)
     grid = strategy["grid"]
-    scores = [instance.score(freeze(params), freeze({"start": start, "end": train_end}),
-                             freeze({"start": validation_start, "end": end}), view, freeze(cost))
-              for params in grid]
+    try:
+        scores = [instance.score(freeze(params), freeze({"start": start, "end": train_end}),
+                                 freeze({"start": validation_start, "end": end}), view, freeze(cost))
+                  for params in grid]
+    except Exception as exc:
+        raise HypothesisError("假說 score 執行失敗") from exc
     if any(not isinstance(score, str) for score in scores):
         raise ValueError("invalid_decision: score 須為十進位字串")
+    try:
+        for score in scores:
+            decimal(score)
+    except ValueError as exc:
+        raise ValueError("invalid_decision: score 須為有限十進位字串") from exc
     selection = select_grid_point(scores, grid, strategy["neighborhood"])
     if selection["no_trade"]:
         return {"selection": selection, "artifact": None}
     params = grid[selection["selected"]]
-    model = instance.fit(freeze(fit_window), view, freeze(params))
+    try:
+        model = instance.fit(freeze(fit_window), view, freeze(params))
+    except Exception as exc:
+        raise HypothesisError("假說 fit 執行失敗") from exc
     artifact = {"params": params, "model": model}
     return {"selection": selection, "artifact": artifact}
 
 
 def decide(instance, t, data, artifact, symbols=None):
-    return instance.on_decision(t, data_view(data, t, symbols=symbols),
-                                freeze(artifact["model"]), freeze(artifact["params"]))
+    view = data_view(data, t, symbols=symbols)
+    try:
+        return instance.on_decision(t, view, freeze(artifact["model"]), freeze(artifact["params"]))
+    except Exception as exc:
+        raise HypothesisError("假說 on_decision 執行失敗") from exc
 
 
 def apply_fill(position, average, quantity, price):

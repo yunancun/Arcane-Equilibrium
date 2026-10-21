@@ -46,7 +46,7 @@ def check_algorithm(source):
     denied_names = {"open", "exec", "eval", "compile", "__import__", "getattr", "setattr",
                     "delattr", "globals", "locals", "vars", "dir", "type", "object",
                     "input", "breakpoint", "help", "memoryview"}
-    denied_attributes = set("gi_frame gi_code gi_yieldfrom cr_frame cr_await cr_code ag_frame ag_code f_back f_locals f_globals f_builtins f_code tb_frame tb_next".split())
+    denied_attributes = set("format format_map gi_frame gi_code gi_yieldfrom cr_frame cr_await cr_code ag_frame ag_code f_back f_locals f_globals f_builtins f_code tb_frame tb_next".split())
     order_names = {"order", "marketorder", "limitorder", "stopmarketorder", "stoplimitorder",
                    "setholdings", "liquidate", "buy", "sell", "calculateorderquantity"}
     for node in tree.body:

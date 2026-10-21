@@ -1,4 +1,4 @@
-"""固定的 LEAN 轉接類別；只在容器內載入，P4-D0/P4-D 驗收。"""
+"""固定的 LEAN 轉接類別；假 LEAN 流程回歸，固定映像由 P4-D0/P4-D 驗收。"""
 from AlgorithmImports import *
 from collections import deque
 import csv
@@ -6,10 +6,13 @@ from datetime import datetime, timezone
 from decimal import Decimal
 from System import Decimal as SystemDecimal
 from System.Globalization import CultureInfo, NumberStyles
+from Newtonsoft.Json import JsonConvert
 import importlib.util
 import json
+from math import isfinite
 from pathlib import Path
 import sys
+import zipfile
 
 sys.path.insert(0, "/r8/src")
 from program_code.research.r8_engine.lean_algo import rules
@@ -24,8 +27,15 @@ def d(value):
     return rules.lean_decimal(value, CultureInfo.InvariantCulture)
 
 
+class LeanBoundaryError(RuntimeError):
+    """LEAN 讀取或轉換失敗，與假說決策格式錯誤區分。"""
+
+
 def to_lean(value):
-    return SystemDecimal.Parse(rules.number(value), NumberStyles.Number, CultureInfo.InvariantCulture)
+    try:
+        return SystemDecimal.Parse(rules.number(value), NumberStyles.Number, CultureInfo.InvariantCulture)
+    except Exception as exc:
+        raise LeanBoundaryError("LEAN 寫入失敗") from exc
 
 
 class R8FillModel(FillModel):
@@ -36,6 +46,14 @@ class R8FillModel(FillModel):
         self.owner = owner
 
     def market_fill(self, asset, order):
+        try:
+            self.owner._t = rules.milliseconds(self.owner.utc_time)
+            return self._market_fill(asset, order)
+        except Exception:
+            self.owner._fail("lean_error")
+            return OrderEvent(order, self.owner.utc_time, OrderFee(CashAmount(0, "USDT")))
+
+    def _market_fill(self, asset, order):
         event = OrderEvent(order, self.owner.utc_time, OrderFee(CashAmount(0, "USDT")))
         metadata = self.owner._legs.get(order.tag)
         if metadata is None:
@@ -53,9 +71,10 @@ class R8FillModel(FillModel):
         delivery = self.owner._info["delistings"].get(metadata["symbol"], {}).get("deliveryTime")
         if change_t is None or delivery is not None and change_t >= delivery:
             return event
-        price = rules.fill_price(d(bar.open), metadata["quantity"], metadata["slippage_bps"])
+        source = self.owner._materialized_bar(metadata["symbol"], bar)
+        price = rules.fill_price(source["open"], metadata["quantity"], metadata["slippage_bps"])
         fee = rules.fee(metadata["quantity"], price, self.owner._config["cost"]["taker_fee_rate"])
-        metadata["change_t"] = change_t
+        metadata.update(change_t=change_t, price=rules.number(price), fee=rules.number(fee))
         event.fill_price = to_lean(price)
         event.fill_quantity = to_lean(d(metadata["quantity"]))
         event.order_fee = OrderFee(CashAmount(to_lean(fee), "USDT"))
@@ -67,6 +86,13 @@ class R8Algorithm(QCAlgorithm):
     """LEAN 物件不傳給假說；策略只回傳目標，所有下單由框架處理。"""
 
     def initialize(self):
+        self._failure, self._t = None, None
+        try:
+            self._initialize()
+        except Exception:
+            self._fail("lean_error")
+
+    def _initialize(self):
         self._output = Path("/r8/output")
         self._events = (self._output / "events.jsonl").open("ab", buffering=0)
         self._failure = None
@@ -79,6 +105,7 @@ class R8Algorithm(QCAlgorithm):
         self._counter = 0
         self._closed, self._delivered, self._funded = set(), set(), set()
         self._fitted, self._active_fold, self._instance, self._artifact = {}, None, None, None
+        self._no_trade_waiting = set()
         self._last_decision_prices, self._last_decision_equity = {}, None
         self._account_positions, self._average = {}, {}
         self._expected_cash = d(self._config["initial_cash"])
@@ -91,6 +118,7 @@ class R8Algorithm(QCAlgorithm):
         self.set_start_date(start.year, start.month, start.day)
         self.set_end_date(end.year, end.month, end.day)
         self._load_custom()
+        self._load_materialized()
         for name in self._info["symbols"]:
             security = self.add_crypto_future(name, Resolution.HOUR, Market.BYBIT,
                                               fill_forward=False, leverage=to_lean(d(self._config["leverage"])))
@@ -137,6 +165,53 @@ class R8Algorithm(QCAlgorithm):
             datasets["kline_hour"] = rules.KnownRows()
             self._data[name] = datasets
 
+    def _load_materialized(self):
+        """以開始時刻索引 U4 的原始十進位字串，不經 pythonnet 讀回價格。"""
+        self._materialized = {}
+        for name in self._info["symbols"]:
+            rows = {}
+            path = Path("/Lean/Data/cryptofuture/bybit/hour") / (name.lower() + "_trade.zip")
+            with zipfile.ZipFile(path) as archive:
+                raw = archive.read(name.lower() + "_trade_perp.csv").decode("utf-8")
+            for row in csv.reader(raw.splitlines()):
+                if len(row) != 6:
+                    raise LeanBoundaryError("物化 K 線欄位不符")
+                t = rules.milliseconds(datetime.strptime(row[0], "%Y%m%d %H:%M"))
+                if t in rows:
+                    raise LeanBoundaryError("物化 K 線開始時刻重複")
+                rows[t] = {"t": t, "end": t + rules.HOUR, "known_at": t + rules.HOUR,
+                           **{key: rules.number(value) for key, value in
+                              zip(("open", "high", "low", "close", "volume"), row[1:])}}
+            self._materialized[name] = rows
+
+    def _materialized_bar(self, name, bar):
+        try:
+            record = self._materialized[name][rules.milliseconds(bar.time)]
+            if record["known_at"] != rules.milliseconds(bar.end_time):
+                raise ValueError("LEAN K 線結束時刻不符")
+            for key in ("open", "high", "low", "close", "volume"):
+                actual, expected = getattr(bar, key), d(record[key])
+                # 浮點只作一致性檢查，絕不成為計價或記帳來源。
+                if isinstance(actual, float):
+                    matches = isfinite(actual) and actual == float(expected)
+                else:
+                    matches = d(actual) == expected
+                if not matches:
+                    raise ValueError("LEAN 與物化數值不符")
+            return dict(record)
+        except Exception as exc:
+            raise LeanBoundaryError("LEAN K 線讀取失敗") from exc
+
+    def _cash(self):
+        try:
+            raw = JsonConvert.SerializeObject(self.portfolio.cash_book["USDT"])
+            amount = json.loads(str(raw), parse_float=Decimal, parse_int=Decimal)["Amount"]
+            if not isinstance(amount, Decimal):
+                raise ValueError("Amount 須為 JSON 數值")
+            return d(amount)
+        except Exception as exc:
+            raise LeanBoundaryError("LEAN 現金讀取失敗") from exc
+
     def _emit(self, section, record):
         self._events.write(canonical({"section": section, "record": record}) + b"\n")
 
@@ -182,6 +257,12 @@ class R8Algorithm(QCAlgorithm):
         return realized
 
     def on_order_event(self, event):
+        try:
+            self._on_order_event(event)
+        except Exception:
+            self._fail("lean_error")
+
+    def _on_order_event(self, event):
         self._t = rules.milliseconds(self.utc_time)
         if event.status == OrderStatus.INVALID:
             self._fail("lean_error")
@@ -193,8 +274,7 @@ class R8Algorithm(QCAlgorithm):
             self._fail("lean_error")
             return
         fill = {k: leg[k] for k in ("order_id", "decision_t", "symbol", "quantity", "slippage_bps", "kind", "change_t", "_leg_index")}
-        fill.update(quantity=rules.number(d(event.fill_quantity)), price=rules.number(d(event.fill_price)),
-                    fee=rules.number(d(event.order_fee.value.amount)))
+        fill.update(price=leg["price"], fee=leg["fee"])
         self._book_fill(fill)
         self._emit("orders", {k: leg[k] for k in ("order_id", "decision_t", "symbol", "quantity", "_leg_index")} |
                    {"kind": leg["order_kind"], "status": "filled"})
@@ -292,6 +372,12 @@ class R8Algorithm(QCAlgorithm):
             self._active_fold = active
             self._instance = self._hypothesis_class(self._config["random_seed"])
             self._artifact = self._fitted[active]["artifact"]
+            self._no_trade_waiting = set()
+            if self._artifact is None:
+                # 折界即取消全部舊單，不依賴當步是否有標的可見。
+                for symbol in sorted(self._symbols):
+                    self._cancel(symbol, "no_trade")
+                self._no_trade_waiting = set(self._info["strategy_symbols"])
             return self._artifact is None
         return False
 
@@ -303,8 +389,21 @@ class R8Algorithm(QCAlgorithm):
         proposed = self._positions()
         plans = []
         for name in sorted(targets):
+            if kind == "no_trade_flatten" and name not in self._no_trade_waiting:
+                continue
             target = targets[name]
             props = self._info["properties"][name]
+            if (not isinstance(target, dict) or
+                    set(target) not in ({"weight"}, {"quantity"}) or
+                    "quantity" in target and not self._info["validation_example"]):
+                raise ValueError("invalid_decision")
+            try:
+                value = next(iter(target.values()))
+                if not isinstance(value, str):
+                    raise ValueError("目標須為十進位字串")
+                d(value)
+            except ValueError as exc:
+                raise ValueError("invalid_decision") from exc
             if set(target) == {"weight"}:
                 quantity = rules.target_quantity(target["weight"], equity, prices[name], props["qty_step"])
             elif set(target) == {"quantity"} and self._info["validation_example"]:
@@ -319,8 +418,10 @@ class R8Algorithm(QCAlgorithm):
                                             self._info["min_notional"][name], reason, bps, hour, self._config["cost"])
             proposed[name] = rules.number(rules.effective_target(current, segments))
             plans.append((name, segments))
-        # 未交給策略但仍有部位的標的也納入檢查。
-        all_prices = {s: self._bars[s][-1]["close"] for s in proposed}
+        # 缺漏中尚未成交的標的也保留當次決策價，供延後成交後檢查。
+        pending_symbols = {s for s, tags in self._pending.items()
+                           if any(not self._legs[tag].get("done") for tag in tags)}
+        all_prices = {s: self._bars[s][-1]["close"] for s in set(proposed) | pending_symbols}
         all_prices.update(prices)
         # 失敗的目標也須保留，供 U6 重建觸發曝險上限的決策。
         decision = rules.decision_record(self._t, targets, kind)
@@ -386,9 +487,7 @@ class R8Algorithm(QCAlgorithm):
                     self._fail("fill_forward_bar")
                     return
                 delivery = self._info["delistings"].get(name, {}).get("deliveryTime")
-                record = {"t": rules.milliseconds(bar.time), "end": rules.milliseconds(bar.end_time),
-                          "known_at": rules.milliseconds(bar.end_time),
-                          **{key: rules.number(d(getattr(bar, key))) for key in ("open", "high", "low", "close", "volume")}}
+                record = self._materialized_bar(name, bar)
                 if delivery is not None and record["t"] < delivery < record["end"]:
                     record["end"] = delivery
                 self._bars[name].append(record)
@@ -398,9 +497,10 @@ class R8Algorithm(QCAlgorithm):
             if self._last_decision_equity is not None:
                 rules.exposure(self._positions(), self._last_decision_prices, self._last_decision_equity,
                                self._config["gross_exposure_cap"])
-            flatten = self._fit_and_activate()
+            self._fit_and_activate()
             in_window = any(w["start"] <= self._t < w["end"] for w in self._windows)
             visible = self._visible(self._t)
+            flatten = self._artifact is None and bool(self._no_trade_waiting.intersection(visible))
             if in_window and visible and (flatten or rules.decision_due(self._config["decision_resolution"], self._t)):
                 if flatten:
                     targets = {s: {"weight": "0"} for s in visible}
@@ -410,17 +510,22 @@ class R8Algorithm(QCAlgorithm):
                     targets = None
                 if targets is not None:
                     self._submit_targets(targets, visible, "no_trade_flatten" if flatten else "strategy")
+                    if flatten:
+                        self._no_trade_waiting.difference_update(visible)
             self._funding()
-            cash = d(self.portfolio.cash_book["USDT"].amount)
+            cash = self._cash()
             residual = cash - self._expected_cash
             if residual != 0:
                 self._emit("cash_residual", {"t": self._t, "residual": rules.number(residual)})
             self._emit("steps", {"t": self._t, "equity": rules.number(self._equity()),
                                  "cash": rules.number(self._expected_cash), "positions": self._positions()})
-        except ValueError as exc:
-            self._fail("gross_exposure_cap" if "gross_exposure_cap" in str(exc) else "invalid_decision")
-        except Exception:
+        except rules.HypothesisError:
             self._fail("algorithm_exception")
+        except ValueError as exc:
+            reason = str(exc).split(":", 1)[0]
+            self._fail(reason if reason in ("gross_exposure_cap", "invalid_decision") else "lean_error")
+        except Exception:
+            self._fail("lean_error")
 
     def on_end_of_algorithm(self):
         if self._failure is None:
@@ -429,14 +534,14 @@ class R8Algorithm(QCAlgorithm):
                 self._boundaries()
                 self._funding()
                 self._funding(endpoint=True)
-                cash = d(self.portfolio.cash_book["USDT"].amount)
+                cash = self._cash()
                 residual = cash - self._expected_cash
                 if residual != 0:
                     self._emit("cash_residual", {"t": self._t, "residual": rules.number(residual)})
                 if self._positions() or any(not leg.get("done") for leg in self._legs.values()):
                     self._fail("lean_error")
             except Exception:
-                self._fail("algorithm_exception")
+                self._fail("lean_error")
         self._emit("finished", self._failure or {"status": "completed", "failure_reason": None, "failure_t": None})
         self._events.close()
 
