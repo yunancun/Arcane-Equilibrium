@@ -1,9 +1,17 @@
 # CLAUDE_CHANGELOG.md — 開發歷史歸檔
 
 > 從 CLAUDE.md / TODO.md 遷出的 Wave/Sprint/Batch + TODO version-increment 歷史敘事。新 session 不需要讀此文件，僅供回顧歷史時查閱。
-> 最後更新：2026-10-22（R8 U5-FIX5／U6-FIX3 發布、B 段紀錄與 P4-D 結案；TODO v913）
+> 最後更新：2026-10-22（R8 研究工具核心入口索引與 runbook 收尾；TODO v914）
 
 ---
+
+## R8 研究工具核心文件收尾 — 2026-10-22
+
+- 依 [P4 補充指令](execution_plan/2026-10-20--r8-stage2-p4-research-core-addendum.md) §10，由 conductor 派發 `P1-R8-S2-CORE-DOC-CLOSEOUT`，Codex 執行記錄者文件工作。基線 main `bddd96d56` 已含 P4-D 結案 PR #237；本次不修改 `program_code/`，也不重跑 LEAN 或實際提交研究帳本。
+- `helper_scripts/SCRIPT_INDEX.md` 登記 U4 materialize、U5 lean_runner、U6 recompute／series／baseline／stress／submit 的用途、參數、輸入輸出與禁止事項；U4、U5、U6 頂層及五個子命令、帳本共九次 --help 均成功，並逐項對照來源的 parser、模式、來源核對與寫入邏輯。
+- 新增 [研究工具核心 runbook](runbooks/r8_research_core.md)：P3b／研究與驗證帳本、可讀範圍與物化、固定映像與禁網路、Colima 的 /Users 掛載與 TMPDIR、來源提交綁定、U6 獨立重算及 submit 流程；明列 U5 接物化目錄、U6 接 manifest 檔，CLI 成功退出不等於 recompute_passed，submit 不接既成序列／壓力檔。
+- 驗收章節保留預期先凍結、§16 的 100 ulp 界限與所有非零殘差、§9.8.8 的獨立比對容差；限制章節列 EV-12 的 100 標的量測與1,087標的未完成初始化、22個 minNotionalValue 記0、BCHUSDT 零價日線待 Operator 裁決、visibility_probe 僅供驗證。既有證據指向 P4-D0／P4-D 檢查紀錄，沒有研究或獲利結論。
+- TODO v914 只把 CORE-DOC-CLOSEOUT 移入 CLOSED／DONE，與文件同一 PR 合入後生效；其餘列不動。路線登記簿新增 runbook 的來源與 SHA-256，掛入 R8 source_refs，不新增 RH 事件。conductor 在 CI 與自動審查無阻塞後把關合併，Codex 不合併。
 
 ## R8 現金精度修補發布與 P4-D 結案 — 2026-10-22
 

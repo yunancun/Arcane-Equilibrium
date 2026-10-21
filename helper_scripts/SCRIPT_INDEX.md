@@ -1832,3 +1832,19 @@ fail-closed，total-miss + partial-miss 同歸此判，絕不誤報 PASS_CAPTURE
 | 路徑 | 用途 | 邊界 |
 |---|---|---|
 | `replay/replay_local.py` | `manifest` 從倉庫設定或呼叫者快照簽名；`analytics` 從回放 JSON 配對交易、對帳並標記跨結算點（`--bar-duration-ms` 讓未平倉部位算到最後一根 K 線的收盤） | 純本機檔案；不取數、不連 DB/API、不產生金鑰；只交付已實現餘額曲線。用法見 `docs/runbooks/r8_stage1_replay_patches.md` |
+
+
+### R8 階段 2 研究工具核心（2026-10-22）
+
+下列為 repository 根目錄的 Python 模組入口，均以 `python3 -m` 呼叫（不在 `helper_scripts/` 內）。
+命令與限制依 main `bddd96d56` 的 `--help` 及來源核對；完整步驟、Colima 設定與已知限制見 [研究工具核心 runbook](../docs/runbooks/r8_research_core.md)。
+
+| 路徑／入口 | 用途、主要參數與輸入輸出 | 邊界 |
+|---|---|---|
+| `program_code.research.r8_engine.materialize`（U4；`program_code/research/r8_engine/materialize.py`） | 必填 `--u1`、`--u1-manifest-sha256`、`--ledger`、`--hypothesis`、`--window`、`--out`；選填 `--trial`、`--validation`。依既有帳本的可讀範圍切片 U1，輸出 `materialization.json`、`lean/`、`custom/`、`source/`、`symbol_properties_overlay.csv` | P3b 固定 manifest／逐檔 SHA 核對；`--validation` 只供構造資料、輸出 purpose=validation，不能用於 trial／verification。holdout 一律拒絕；輸出須為倉庫外尚不存在目錄。`--trial` 時視窗須等於已開始試驗的 data_window |
+| `program_code.research.r8_engine.lean_runner`（U5；`program_code/research/r8_engine/lean_runner.py`） | 必填 `--config`、`--materialization`（目錄）、`--out`；選填 `--ledger`（trial／verification 需要）、`--model-root`。固定映像離線執行，寫 `run.json`、`lean.log`，容器寫 `events.jsonl`（啟動失敗可能缺失） | mode 在 JSON，沒有 `--mode`；validation 只准 FixedSchedule、trial_id=null；trial 為未結束試驗，verification 為已結束試驗重跑。來源提交／檔案須相符，`--network none`；Colima 主機掛載及 TMPDIR 放 `/Users` 內；輸出不得在 repo 內且須尚不存在 |
+| `program_code.research.r8_engine.series recompute`（U6；`program_code/research/r8_engine/series.py`） | 必填 `--materialization`（materialization.json 檔）、`--run`、`--out`（檔）；從 U4 原始切片獨立重建事件，寫重算報告與殘差 ulp 倍數 | 不寫帳本；退出碼 0 只表示報告寫出，須讀 recompute_passed／differences；§16 容差內殘差仍保留 |
+| `program_code.research.r8_engine.series series`（U6） | 上述三個檔案參數另加必填 `--recompute`；寫指定序列檔及 `<out檔名>.sidecar.json` | 自行再重算並核對報告，不接受改寫 PASS；failed run 保留前綴與補零規則，不冒充成功 |
+| `program_code.research.r8_engine.series baseline`（U6） | 必填 `--materialization`（檔）、`--run`、`--out`（目錄）；寫 `beta_matched_btc_v1.json`、`btc_perp_hold_v1.json` | 只讀 U4 與 run；基準產出不代替重算驗收或研究裁決 |
+| `program_code.research.r8_engine.series stress`（U6） | 必填 `--materialization`（檔）、`--run`、`--out`（檔）；寫四個成本情境、損益兩平搜尋與 stress_passed | 決策固定的重定價近似，不重跑策略；無情境覆寫 CLI，不據此宣稱獲利 |
+| `program_code.research.r8_engine.series submit`（U6） | 必填 `--ledger`、`--trial`、`--u1`、`--run`；自行呼叫 U4 重新物化、重算並產生序列／基準／壓力／旁註，寫 `<ledger>/u6_artifacts/<sha256>`、finish_trial，stdout 回傳 JSON | 唯一研究結果提交路徑；只收同一未結束 trial，拒 validation／verification／holdout。不收既成序列、壓力檔、`--status` 或 `--out`；核對來源與帳本身份，不建立帳本 |
