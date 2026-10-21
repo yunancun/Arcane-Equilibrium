@@ -440,7 +440,7 @@
     "r8-stage2-p4-addendum": {
       "kind": "recorded_file",
       "path": "docs/execution_plan/2026-10-20--r8-stage2-p4-research-core-addendum.md",
-      "sha256": "caa4160c8ec29be78695dc623275e650cfe347c9750976dd388232ba8f42115d",
+      "sha256": "67957204fbc5e6c3ef70ab9a21169547ad2e081cb9fd94d0b88d2fc0bae425fb",
       "meaning": "stage 2 P4 addendum: research core units U4-U6, recorder event checks, and the QC-drafted methodology parameters with the Operator rulings of 2026-10-20; instruction only"
     },
     "r8-stage2-p4-d0-record": {
@@ -452,8 +452,8 @@
     "r8-stage2-p4-d-record": {
       "kind": "recorded_file",
       "path": "docs/execution_plan/2026-10-21--r8-stage2-p4-d-check-record.md",
-      "sha256": "f15fddf9a2aeae4f275de28c219ef1fb032e2d2d56eb5eae39780311f9505543",
-      "meaning": "stage 2 P4-D section A check record: eleven synthetic-data events accepted after the PR #232 U6 scientific-notation repair and FIX4 strategy-visible daily/open-interest probes; preserves initial failures and per-file evidence hashes, closes the P4-D0 case D strategy-side visibility limitation; section B EV-10 through EV-12 not run, no real-data or research conclusion"
+      "sha256": "3e2d615d2b9005ba2d006dd81ade61a3017d78bfd6098ff5725a6e252ebad4a7",
+      "meaning": "stage 2 P4-D section A check record: eleven synthetic-data events accepted after PR #232 and FIX4, closing the P4-D0 case D strategy-side visibility limitation; append-only section B correction preserves EV-10 failure, EV-11 pressure numeric pass and the EV-12 measurement status reported at section 16 dispatch; full section B record and EV-10 acceptance remain pending, no research or profit conclusion"
     }
   },
   "routes": [
@@ -1831,6 +1831,34 @@
         }
       },
       "meaning": "Section 15 resolves the validation-example conflict with strategy-side visibility checks by specifying visibility_probe on the existing public data view and dispatching U5-FIX4. U4, U6 and the fixed-class runner restriction remain unchanged. The A-section history and PR #232 EV-9 repair remain evidence-bounded; this event does not claim FIX4 implementation, EV-1/EV-2 acceptance or closure of the P4-D0 case D limitation."
+    },
+    {
+      "id": "RH-20261021-03",
+      "recorded_on": "2026-10-21",
+      "event_type": "open_item_decided",
+      "route_ids": [
+        "R8"
+      ],
+      "follows": "RH-20261021-02",
+      "decision_ref": "docs/execution_plan/2026-10-20--r8-stage2-p4-research-core-addendum.md",
+      "authority_source": "Operator decision confirmed by an option reply in the 2026-10-21 conversation and relayed by the conductor in the section 16 recorder instruction: add precision tolerance for cash residuals and confirm R8-S2-ENGINE-LEAN-FIX5-20261021 and R8-S2-ENGINE-SERIES-FIX3-20261021. Both units use the same 100 ulp boundary while retaining every nonzero residual. Merge section 16 before implementation; the deliveries have non-overlapping owned files and may run in parallel after admission. The conductor reviews and performs the final merge after CI and automatic review have no blockers; Codex executes recorder documentation and does not merge.",
+      "prior_record_identity": {
+        "addendum": {
+          "commit": "e431dcdc1fd3b661da91b9f3f5244872e1401e5c",
+          "path": "docs/execution_plan/2026-10-20--r8-stage2-p4-research-core-addendum.md",
+          "blob": "1c8cba62ed647ca3a454437a5ed53ac1df97d602",
+          "sha256": "caa4160c8ec29be78695dc623275e650cfe347c9750976dd388232ba8f42115d",
+          "availability": "main at recording time"
+        },
+        "todo": {
+          "commit": "e431dcdc1fd3b661da91b9f3f5244872e1401e5c",
+          "path": "TODO.md",
+          "blob": "ff4505fd2d1a5679c3c64bf2c5acb54f51c4c533",
+          "sha256": "c8905bba5fde283bb44fdeb890b66b6d19040352f8e9eca7eb123bc2384ec8ff",
+          "availability": "main at recording time"
+        }
+      },
+      "meaning": "Section 16 defines representation error versus unexplained cash residual using framework expected cash, preserves all nonzero residual records and dispatches separate U5 and U6 repairs. G1-G8, section 9.8.8 tolerance, other run.json fields and U4 remain unchanged. This event records the Operator decision and does not claim implementation, an EV-10 rerun pass or completion of section B."
     }
   ],
   "external_provenance": [

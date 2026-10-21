@@ -1,9 +1,18 @@
 # CLAUDE_CHANGELOG.md — 開發歷史歸檔
 
 > 從 CLAUDE.md / TODO.md 遷出的 Wave/Sprint/Batch + TODO version-increment 歷史敘事。新 session 不需要讀此文件，僅供回顧歷史時查閱。
-> 最後更新：2026-10-21（R8 U5-FIX4發布與P4-D A段11項通過；TODO v911）
+> 最後更新：2026-10-21（R8 現金殘差精度容差與 U5-FIX5／U6-FIX3 派工；TODO v912）
 
 ---
+
+## R8 現金殘差表示精度容差與 U5-FIX5／U6-FIX3 派工 — 2026-10-21
+
+- 基線 main `e431dcdc1` 已含 FIX4 發布 PR #234。B 段 EV-10 的 BTCUSDT＋BENDOGUSDT 在加減倉後出現每步 `1e-23` 現金差，自 `2024-07-03T02:00:00Z` 起不累積；容器完成，原 `assemble_run` 依零殘差規則失敗。完整路徑診斷重播的 8 筆成交、18 筆資金費、37,502 步均在 §9.8.8 容差內，最大差約 `4.47e-24`，不取代原正式 `recompute_passed=false`。
+- Operator 2026-10-21 選定「加精度容差」並確認兩個交付；[P4 補充指令](execution_plan/2026-10-20--r8-stage2-p4-research-core-addendum.md) 新增 §16，以框架預期現金計算 ulp，每步絕對殘差不超過 100 ulp 作表示誤差，所有非零殘差照常記錄、total 不作判定；U5 與 U6 使用相同規則，U6 另報最大殘差的 ulp 倍數。G1–G8、§9.8.8 容差、run.json 其他欄位與 U4 不改。
+- `R8-S2-ENGINE-LEAN-FIX5-20261021` 只改 lean_runner.py 與 U5 測試；`R8-S2-ENGINE-SERIES-FIX3-20261021` 只改 series.py 與 U6 測試。檔案不重疊，§16 合入 main、各自取得准入後可平行開工；測試涵蓋 0／100／101 ulp、現金數量級、零現金、負殘差及第一個未解釋殘差的 failure_t。代碼審查附 §16.2 原文並核對一致判定，受控測試不可執行時停止於本機分支。
+- [P4-D 檢查紀錄](execution_plan/2026-10-21--r8-stage2-p4-d-check-record.md) §8 以追加方式更正 PR #234 的 B 段未執行記載：EV-10 失敗、EV-11 壓力數值核對通過；本次派工時 EV-12 量測進行中，完整 B 段紀錄待 EV-10 重跑與 EV-12 完成後補。原報告與當時狀態保留，EV-10 基準失敗所阻擋的正式 stress／損益兩平未成立；沒有研究或獲利結論。
+- TODO v912 只更新表頭與 P4-D 列，下一步為 §16 合入後 U5-FIX5／U6-FIX3 平行開工、驗收後重跑 EV-10；§10 入口索引與 runbook 仍列 P4-D 待辦。路線事件 `RH-20261021-03` 記入 Operator 選擇及兩個交付確認，更新 addendum 與 P4-D 紀錄雜湊。
+- 證據目錄 `audits/2026-10-21-r8-p4d-b/`，REPORT SHA-256 `33c24087fab442a351816234511eb45b65bfd1ed69e28b6d1d23696048bfd2c1`。本次只改文件，不宣稱修補已實作或 EV-10 通過；conductor 在 CI 與自動審查無阻塞後把關合併，記錄者不合併。
 
 ## R8 U5-FIX4 發布與 P4-D A 段檢查紀錄 — 2026-10-21
 
