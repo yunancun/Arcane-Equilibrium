@@ -280,8 +280,14 @@ def validate_grid(grid, neighborhood):
         numbers = [decimal(str(x)) for x in options]
         if any(a >= b for a, b in zip(numbers, numbers[1:])):
             raise ValueError("數值軸須遞增且無重複")
-        if any(point[axis] not in options for point in grid):
-            raise ValueError("網格未落在預登記軸")
+        for point in grid:
+            value = point[axis]
+            # bool 與 0/1 相等，須在清單成員比較之前拒絕。
+            if isinstance(value, bool) or not isinstance(value, (str, int, float, Decimal)):
+                raise ValueError("數值軸的網格值須為數值")
+            decimal(str(value))
+            if value not in options:
+                raise ValueError("網格未落在預登記軸")
     return numeric, categorical
 
 

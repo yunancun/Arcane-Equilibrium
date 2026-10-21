@@ -1379,7 +1379,8 @@ def test_fix3_neighborhood_rejects_invalid_shape(neighborhood, grid):
 
 @pytest.mark.parametrize('mode', ['validation', 'trial', 'verification'])
 @pytest.mark.parametrize('with_folds', [False, True])
-@pytest.mark.parametrize('invalid', ['empty_neighborhood', 'categorical_mapping', 'undeclared_key'])
+@pytest.mark.parametrize('invalid', ['empty_neighborhood', 'categorical_mapping', 'undeclared_key',
+                                    'bool_true', 'bool_false'])
 def test_fix3_runner_rejects_neighborhood_before_lean(inputs, git_fixture, tmp_path, mode, with_folds, invalid):
     from program_code.research.r8_engine import lean_runner as runner
     materialization, manifest, config, query = inputs
@@ -1394,6 +1395,10 @@ def test_fix3_runner_rejects_neighborhood_before_lean(inputs, git_fixture, tmp_p
         config['strategy']['neighborhood'] = {}
     elif invalid == 'categorical_mapping':
         config['strategy']['neighborhood']['categorical'] = {'n': [0], 'score': ['1']}
+    elif invalid in ('bool_true', 'bool_false'):
+        value = invalid == 'bool_true'
+        config['strategy']['neighborhood'] = {'numeric': {'n': [int(value)]}, 'categorical': ['score']}
+        config['strategy']['grid'][0]['n'] = value
     else:
         config['strategy']['grid'][0]['undeclared'] = 'extra'
     # 試驗身份與來源皆有效，使拒絕只來自鄰域檢查。
@@ -1412,6 +1417,12 @@ def test_fix3_runner_rejects_neighborhood_before_lean(inputs, git_fixture, tmp_p
     assert calls == []
     assert not out.exists()
     assert not (out / 'run.json').exists()
+
+
+@pytest.mark.parametrize('value,option', [(True, 1), (False, 0)])
+def test_fix3_numeric_grid_rejects_boolean_alias(value, option):
+    with pytest.raises(ValueError, match='數值軸'):
+        rules.select_grid_point(['1'], [{'n': value}], {'numeric': {'n': [option]}, 'categorical': []})
 
 
 @pytest.mark.parametrize('offset,expected', [(-HOUR, False), (0, True), (HOUR, True)])
