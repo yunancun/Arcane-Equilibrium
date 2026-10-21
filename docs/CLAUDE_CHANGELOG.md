@@ -1,9 +1,18 @@
 # CLAUDE_CHANGELOG.md — 開發歷史歸檔
 
 > 從 CLAUDE.md / TODO.md 遷出的 Wave/Sprint/Batch + TODO version-increment 歷史敘事。新 session 不需要讀此文件，僅供回顧歷史時查閱。
-> 最後更新：2026-10-21（R8 §15 驗證範例可見性探針與 U5-FIX4 派工；TODO v910）
+> 最後更新：2026-10-21（R8 U5-FIX4發布與P4-D A段11項通過；TODO v911）
 
 ---
+
+## R8 U5-FIX4 發布與 P4-D A 段檢查紀錄 — 2026-10-21
+
+- 依[P4補充指令](execution_plan/2026-10-20--r8-stage2-p4-research-core-addendum.md) §15.3，conductor已獨立核對四個固定映像探針的run／recompute、凍結預期與演算法綁定，授權記錄者發布FIX4；不新增Operator裁決或RH事件。合併由conductor把關後執行，Codex不合併。
+- 基線main `ca5a543f9`（PR #233）；FIX4 `5e452d487` 原樣推送到同名origin分支，發布分支以`--no-ff`合入並保留原提交（合併提交 `3a48cb08a`）。program_code/與驗收樹`b4e66d18b`相同，只有正式FixedSchedule與U5測試相對main有變更。
+- 新增[P4-D A段檢查紀錄](execution_plan/2026-10-21--r8-stage2-p4-d-check-record.md)：EV-1～EV-9、EV-13、EV-14共11項通過，逐項記條件、構造、預期／實際、殘差與U6結果，保留原25次執行與三個舊設定失敗。EV-9由PR #232修正後以原run重算true、差異0；其他30份重算輸出逐位相同。
+- 四探針DAY-INTRADAY／DAY-BOUNDARY／OI-BEFORE／OI-BOUNDARY均逐字串及型別符合凍結預期、殘差0、U6 true／0／[]，量10／20分辨前日／新完成日線及OI的T−4h／T列；反例僅Decimal推導，未故意執行前視框架。證據目錄`audits/2026-10-21-r8-p4d-a-ev12-probe/`，REPORT SHA-256 `4f95794dedc04f310c0e3f2a5ff597f343b84f8434422bcfafa8d2c342d41235`。
+- P4-D0紀錄§7追加更正，關閉D的策略端日線可見性UNVERIFIED，原文留作歷史。新紀錄列三個證據目錄的REPORT／manifest與各案例設定、預期、run及recompute SHA-256；原A段Decimal數值相等與探針逐字串相符的比對方式分開記載。
+- TODO v911只更新P4-D列與表頭，不新增FIX4列；下一步B段EV-10～EV-12。路線登記簿登記新檢查紀錄、更新P4-D0雜湊，不新增事件。B段尚未執行，§10入口索引與runbook仍為P4-D期間待辦；沒有真實資料、研究或獲利結論。
 
 ## R8 驗證範例可見性探針契約與 U5-FIX4 派工 — 2026-10-21
 

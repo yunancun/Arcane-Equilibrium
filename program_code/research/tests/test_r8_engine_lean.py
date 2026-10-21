@@ -1530,3 +1530,144 @@ def test_fix3_fold_boundary_fills_previous_bar_before_no_trade(fake_lean, fit_at
     assert driver.records('steps')[-1]['cash'] == '100007.88950275'
     assert driver.records('cash_residual') == []
     assert driver.records('finished') == [{'status': 'completed', 'failure_reason': None, 'failure_t': None}]
+
+
+@pytest.fixture
+def fix4_driver(fake_lean, monkeypatch):
+    """保留 FIX3 驅動器；只在掛載邊界提供構造 CSV，走原框架的載入與視圖。"""
+    import csv
+
+    initialize = fake_lean.framework.R8Algorithm.initialize
+
+    def create(dataset, rows, probe, schedule=(), folds=()):
+        def initialize_with_custom_rows(algorithm):
+            path = fake_lean.mounted('/r8/custom') / dataset / 'x.csv'
+            with path.open('w') as stream:
+                csv.writer(stream).writerows(rows)
+            initialize(algorithm)
+
+        monkeypatch.setattr(fake_lean.framework.R8Algorithm, 'initialize', initialize_with_custom_rows)
+        params = {'score': '1', 'schedule': list(schedule)}
+        categorical = ['score', 'schedule']
+        if probe is not None:
+            params['visibility_probe'] = probe
+            # §15.2：探針是整個 JSON 值的類別軸，不是數值鄰域。
+            categorical.append('visibility_probe')
+        config = {**params, 'grid': [params],
+                  'neighborhood': {'numeric': {}, 'categorical': categorical}}
+        if folds:
+            config.update(internal_validation_days=2, internal_gap_days=1)
+        t = fake_lean.t0
+        bars = {s: {t + i * HOUR: ['100'] * 4 + ['1'] for i in range(-1, 7)}
+                for s in ('X', 'Y', 'Z')}
+        return fake_lean.Driver(bars, strategy_config=config, folds=folds)
+
+    return create
+
+
+@pytest.mark.parametrize('dataset,field,offset,lookahead,scheduled,expected', [
+    ('kline_day', 'close', HOUR, False, True, '2'),
+    ('kline_day', 'close', HOUR, True, True, '7'),
+    ('open_interest', 'value', HOUR, False, False, '2'),
+    ('open_interest', 'value', HOUR, True, False, '7'),
+    ('open_interest', 'value', 4 * HOUR, False, False, '7'),
+], ids=['daily_visible', 'daily_lookahead_control', 'oi_visible',
+        'oi_lookahead_control', 'oi_exact_four_hour_boundary'])
+def test_fix4_visibility_probe_observes_framework_view(
+        fake_lean, fix4_driver, dataset, field, offset, lookahead, scheduled, expected):
+    t, probe_t = fake_lean.t0, fake_lean.t0 + offset
+    # 日線：前日完成於 T、當日完成於 T+1d；OI：T-4h、T，分別於 T、T+4h 可見。
+    delay = DAY if dataset == 'kline_day' else 4 * HOUR
+    values = [['10', '40', '5', '100', '1'], ['20', '80', '6', '900', '1']] if field == 'close' else [['100'], ['900']]
+    rows = [[t, t - delay, *values[0]], [t + delay, t, *values[1]]]
+    if lookahead:
+        # 故意提早公開第二列的反例；若視圖前視，策略必須輸出另一數量。
+        rows[1][0] = probe_t
+    probe = {'t': probe_t, 'symbol': 'X', 'dataset': dataset, 'field': field,
+             'map': {'100': '2', '900': '7'}}
+    schedule = [{'t': probe_t, 'targets': {'X': {'quantity': '99'}, 'Y': {'quantity': '3'}}}] if scheduled else []
+    driver = fix4_driver(dataset, rows, probe, schedule)
+    for now in range(t, probe_t + 2 * HOUR, HOUR):
+        driver.step(now)
+    targets = {'X': {'quantity': expected},
+               'Y': {'quantity': '3'} if scheduled else {'weight': '0'}, 'Z': {'weight': '0'}}
+    assert driver.algorithm.stops == []
+    assert driver.records('decisions') == [{'t': probe_t, 'targets': targets}]
+    assert [(r['quantity'], r['change_t']) for r in driver.records('fills') if r['symbol'] == 'X'] == [(expected, probe_t)]
+    driver.finish()
+    assert driver.records('cash_residual') == []
+    assert driver.records('finished') == [{'status': 'completed', 'failure_reason': None, 'failure_t': None}]
+
+
+@pytest.mark.parametrize('dataset,field', [('kline_day', 'close'), ('open_interest', 'value')])
+@pytest.mark.parametrize('failure', ['unmapped_value', 'no_visible_row'])
+def test_fix4_visibility_probe_missing_lookup_is_algorithm_exception(
+        fake_lean, fix4_driver, dataset, field, failure):
+    from program_code.research.r8_engine.lean_algo.examples.fixed_schedule import FixedSchedule
+
+    t = fake_lean.t0
+    # 無可見列的檔案仍含未來資料，不能繞過視圖去取檔案的最後一列。
+    known_at = t if failure == 'unmapped_value' else t + DAY
+    values = ['100'] * 4 + ['1'] if field == 'close' else ['100']
+    rows = [[known_at, t - DAY, *values]]
+    probe = {'t': t, 'symbol': 'X', 'dataset': dataset, 'field': field, 'map': {'900': '7'}}
+    driver = fix4_driver(dataset, rows, probe)
+    view = rules.data_view({'X': {dataset: [{'known_at': known_at, 't': t - DAY, field: '100'}]}}, t)
+    with pytest.raises((KeyError, IndexError, ValueError)):
+        FixedSchedule(1).on_decision(t, view, None, {'visibility_probe': probe})
+    driver.step(t)
+    driver.finish()
+    assert driver.algorithm.stops == ['algorithm_exception']
+    assert driver.records('decisions') == []
+    assert driver.records('orders') == []
+    assert driver.records('fills') == []
+    assert driver.records('finished') == [
+        {'status': 'failed', 'failure_reason': 'algorithm_exception', 'failure_t': t}]
+
+
+def test_fix4_visibility_probe_categorical_grid_reaches_decision(fake_lean, fix4_driver):
+    t = fake_lean.t0
+    probe = {'t': t, 'symbol': 'X', 'dataset': 'open_interest', 'field': 'value',
+             'map': {'100': '2', '900': '7'}}
+    folds = [{'fit_window': {'start': 0, 'end': t - HOUR},
+              'score_window': {'start': t, 'end': t + 6 * HOUR}}]
+    driver = fix4_driver('open_interest', [[t, t - 4 * HOUR, '100']], probe, folds=folds)
+    driver.step(t)
+    driver.step(t + HOUR)
+    driver.finish()
+    assert driver.algorithm.stops == []
+    fit, = driver.records('fits')
+    assert fit['selection']['selected'] == 0
+    assert fit['params']['visibility_probe'] == probe
+    assert driver.records('decisions') == [
+        {'t': t, 'targets': {'X': {'quantity': '2'}, 'Y': {'weight': '0'}, 'Z': {'weight': '0'}}}]
+    assert driver.records('fills')[0]['quantity'] == '2'
+    assert driver.records('finished') == [{'status': 'completed', 'failure_reason': None, 'failure_t': None}]
+
+
+@pytest.mark.parametrize('with_probe', [False, True], ids=['without_probe', 'outside_probe_time'])
+def test_fix4_schedule_behavior_unchanged(fake_lean, fix4_driver, with_probe):
+    t = fake_lean.t0
+    probe = {'t': t + 5 * HOUR, 'symbol': 'X', 'dataset': 'open_interest', 'field': 'value',
+             'map': {}} if with_probe else None
+    schedule = [
+        {'t': t, 'targets': {'X': {'quantity': '3'}, 'Y': {'quantity': '1'}, 'NOT_VISIBLE': {'quantity': '9'}}},
+        {'t': t, 'targets': {'X': {'quantity': '99'}}},
+        {'t': t + 2 * HOUR, 'targets': {'X': {'quantity': '0'}, 'Y': {'quantity': '0'}}}]
+    driver = fix4_driver('open_interest', [], probe, schedule)
+    for now in range(t, t + 4 * HOUR, HOUR):
+        driver.step(now)
+    driver.finish()
+    assert driver.algorithm.stops == []
+    assert driver.records('decisions') == [
+        {'t': t, 'targets': {'X': {'quantity': '3'}, 'Y': {'quantity': '1'}, 'Z': {'weight': '0'}}},
+        {'t': t + 2 * HOUR, 'targets': {'X': {'quantity': '0'}, 'Y': {'quantity': '0'}, 'Z': {'weight': '0'}}}]
+    assert [(r['symbol'], r['quantity']) for r in driver.records('fills')] == [
+        ('X', '3'), ('Y', '1'), ('X', '-3'), ('Y', '-1')]
+    assert driver.records('finished') == [{'status': 'completed', 'failure_reason': None, 'failure_t': None}]
+
+
+def test_fix4_example_passes_runner_static_check():
+    from program_code.research.r8_engine.lean_runner import EXAMPLE, check_algorithm
+
+    check_algorithm((ROOT / EXAMPLE).read_text())

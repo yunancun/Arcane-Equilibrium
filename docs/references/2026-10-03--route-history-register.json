@@ -446,8 +446,14 @@
     "r8-stage2-p4-d0-record": {
       "kind": "recorded_file",
       "path": "docs/execution_plan/2026-10-21--r8-stage2-p4-d0-check-record.md",
-      "sha256": "3aba75f7fe67784d16ec7a4730a10750af88fb49253b7c1102003054692eecc1",
+      "sha256": "c3fa7d7da07b843e889aab073ef454f50c32653731d45cdbf18a8850f3bb35ed",
       "meaning": "stage 2 P4-D0 check record: original launcher failure, FIX1 decimal boundary failure, FIX2 dual-version fold and neighborhood diagnostics, and accepted U5 FIX3 plus unmodified U6 FIX2 nine-case verification with per-file evidence hashes; source publication only, not P4-D completion or research results"
+    },
+    "r8-stage2-p4-d-record": {
+      "kind": "recorded_file",
+      "path": "docs/execution_plan/2026-10-21--r8-stage2-p4-d-check-record.md",
+      "sha256": "f15fddf9a2aeae4f275de28c219ef1fb032e2d2d56eb5eae39780311f9505543",
+      "meaning": "stage 2 P4-D section A check record: eleven synthetic-data events accepted after the PR #232 U6 scientific-notation repair and FIX4 strategy-visible daily/open-interest probes; preserves initial failures and per-file evidence hashes, closes the P4-D0 case D strategy-side visibility limitation; section B EV-10 through EV-12 not run, no real-data or research conclusion"
     }
   },
   "routes": [
@@ -620,7 +626,8 @@
         "r8-stage2-dispatch-r5",
         "r8-amendment-2-r8",
         "r8-stage2-p4-addendum",
-        "r8-stage2-p4-d0-record"
+        "r8-stage2-p4-d0-record",
+        "r8-stage2-p4-d-record"
       ],
       "status_history": [
         {
