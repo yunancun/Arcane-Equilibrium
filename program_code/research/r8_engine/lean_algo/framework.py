@@ -374,10 +374,13 @@ class R8Algorithm(QCAlgorithm):
             self._artifact = self._fitted[active]["artifact"]
             self._no_trade_waiting = set()
             if self._artifact is None:
-                # 折界即取消全部舊單，不依賴當步是否有標的可見。
+                # on_data 前的原生成交已入帳；此處只取消其後仍未成交的單。
                 for symbol in sorted(self._symbols):
                     self._cancel(symbol, "no_trade")
-                self._no_trade_waiting = set(self._info["strategy_symbols"])
+                # 起點的可見集合含零部位；缺漏標的只保留仍有部位者。
+                self._no_trade_waiting = set(self._visible(self._t)) | {
+                    s for s in self._info["strategy_symbols"]
+                    if self._account_positions.get(s, Decimal(0)) != 0}
             return self._artifact is None
         return False
 

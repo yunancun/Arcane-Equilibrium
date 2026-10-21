@@ -163,7 +163,7 @@ def test_positions_funding_price_and_contiguous_windows():
 
 def strategy(scores):
     return {"grid": [{"n": i, "score": s} for i, s in enumerate(scores)],
-            "neighborhood": {"numeric": {"n": list(range(len(scores)))}, "categorical": {}},
+            "neighborhood": {"numeric": {}, "categorical": ["n", "score"]},
             "internal_validation_days": 182, "internal_gap_days": 8}
 
 
@@ -171,7 +171,8 @@ def strategy(scores):
     (["-1", "100", "-1", "-1"], None), (["100", "-1", "-1"], None),
     (["-1", "-2"], None), (["1", "1", "1"], 0), (["1", "2", "3"], 2)])
 def test_grid_qualification_plateau_and_tie(scores, selected):
-    s = strategy(scores)
+    s = {"grid": [{"n": i} for i in range(len(scores))],
+         "neighborhood": {"numeric": {"n": list(range(len(scores)))}, "categorical": []}}
     result = rules.select_grid_point(scores, s["grid"], s["neighborhood"])
     assert result["selected"] == selected
     assert result["no_trade"] == (selected is None)
@@ -230,7 +231,7 @@ def test_readonly_view_fit_isolation_selection_and_model_roundtrip(cost):
 @pytest.mark.parametrize("value", [None, 1.2, "NaN", "Infinity", "not-a-number"])
 def test_grid_score_rejects_invalid(value):
     with pytest.raises(ValueError):
-        rules.select_grid_point([value], [{"n": 1}], {"numeric": {}, "categorical": {}})
+        rules.select_grid_point([value], [{"n": 1}], {"numeric": {}, "categorical": ["n"]})
 
 
 @pytest.mark.parametrize("body", [
@@ -629,11 +630,11 @@ def test_future_and_unlisted_symbols_absent_from_view():
 def test_grid_categorical_axis_and_limit():
     grid = [{"n": 1, "type": "A"}, {"n": 2, "type": "A"}, {"n": 1, "type": "B"}]
     result = rules.select_grid_point(["-1", "-1", "1"], grid,
-                                    {"numeric": {"n": [1, 2]}, "categorical": {"type": ["A", "B"]}})
+                                    {"numeric": {"n": [1, 2]}, "categorical": ["type"]})
     assert result["qualified"] == [False, False, True] and result["selected"] == 2
     with pytest.raises(ValueError):
         rules.select_grid_point(["1"] * 21, [{"n": i} for i in range(21)],
-                                {"numeric": {"n": list(range(21))}, "categorical": {}})
+                                {"numeric": {"n": list(range(21))}, "categorical": []})
 
 
 @pytest.mark.parametrize("mode", ["trial", "verification", "validation"])
@@ -1063,7 +1064,9 @@ def fake_lean(monkeypatch, tmp_path, cost):
                       'score_windows': [f['score_window'] for f in folds] if folds else [{'start': base_t, 'end': end}],
                       'folds': list(folds), 'model_artifact': None, 'random_seed': 1,
                       'algorithm': {'path': 'hypothesis.py', 'class': 'FixedSchedule'},
-                      'strategy': strategy_config or {'schedule': list(schedule)},
+                      'strategy': strategy_config or {
+                          'schedule': list(schedule), 'grid': [{'schedule': list(schedule)}],
+                          'neighborhood': {'numeric': {}, 'categorical': ['schedule']}},
                       'decision_resolution': 'hour', 'gross_exposure_cap': '1'}
             info = {'symbols': names, 'strategy_symbols': names, 'first_bar': {s: 0 for s in names},
                     'delistings': {}, 'warmup': {'start': base_t - HOUR, 'end': base_t},
@@ -1076,9 +1079,6 @@ def fake_lean(monkeypatch, tmp_path, cost):
             path = mounted('/r8/src/hypothesis.py')
             path.parent.mkdir(parents=True)
             source = (ROOT / 'program_code/research/r8_engine/lean_algo/examples/fixed_schedule.py').read_text()
-            # 構造相鄰折，一折合格、一折不交易；其餘沿用正式範例的介面。
-            source = source.replace('return params["score"]',
-                                    'return "-1" if validation_window["end"] >= params.get("no_trade_at", 10**20) else params["score"]')
             path.write_text(hypothesis_source or source)
             for name, rows in bars.items():
                 datasets = {'kline_day': [], 'funding': (funding or {}).get(name, []), 'open_interest': [],
@@ -1214,6 +1214,7 @@ def test_fix2_framework_no_trade_cancels_all_and_flattens_on_first_visibility(fa
     schedule = [{'t': t, 'targets': {s: {'quantity': q} for s, q in [('X', '1'), ('Y', '2'), ('Z', '3'), ('W', '0')]}}]
     config = strategy(['1'])
     config['grid'][0].update(schedule=schedule, no_trade_at=t + HOUR)
+    config['neighborhood']['categorical'] = ['n', 'score', 'schedule', 'no_trade_at']
     folds = [{'fit_window': {'start': -400 * DAY, 'end': t - HOUR},
               'score_window': {'start': t, 'end': t + 2 * HOUR}},
              {'fit_window': {'start': -400 * DAY, 'end': t + HOUR},
@@ -1322,3 +1323,199 @@ def test_fix2_framework_cash_write_failure_is_lean_error(fake_lean):
     driver.algorithm.portfolio.cash_book['USDT'].add_amount = reject
     driver.step(t + 3 * HOUR)
     assert driver.algorithm.stops == ['lean_error']
+
+
+# §14.2 第 2 點的 JSON 原文，不另行生成軸或網格。
+FIX3_STRATEGY_JSON = """
+{
+  "neighborhood": {
+    "numeric": {"lookback": ["10", "20"]},
+    "categorical": ["mode"]
+  },
+  "grid": [
+    {"lookback": "10", "mode": "trend"},
+    {"lookback": "20", "mode": "trend"},
+    {"lookback": "10", "mode": "revert"},
+    {"lookback": "20", "mode": "revert"}
+  ]
+}
+"""
+
+
+def test_fix3_neighborhood_contract_json_selection():
+    config = json.loads(FIX3_STRATEGY_JSON)
+    assert rules.select_grid_point(['1', '3', '2', '8'], config['grid'], config['neighborhood']) == {
+        'grid_scores': ['1', '3', '2', '8'], 'neighborhood_means': ['2', '2', '5', '5'],
+        'qualified': [True, True, True, True], 'selected': 2,
+        'selected_minus_neighborhood': '-3', 'no_trade': False}
+
+
+@pytest.mark.parametrize('neighborhood,grid', [
+    ({'numeric': {}, 'categorical': {'mode': ['trend']}}, [{'mode': 'trend'}]),
+    ({'numeric': {}, 'categorical': []}, [{'undeclared': 'value'}]),
+    ({'numeric': {'n': ['1']}, 'categorical': ['n']}, [{'n': '1'}]),
+    ({'numeric': {'n': ['2', '1']}, 'categorical': []}, [{'n': '1'}]),
+    ({'numeric': {'n': ['1', '1.0']}, 'categorical': []}, [{'n': '1'}]),
+    ({'numeric': {'n': []}, 'categorical': []}, [{'n': '1'}]),
+    ({'numeric': {'n': '12'}, 'categorical': []}, [{'n': '1'}]),
+    ({'numeric': {'n': ['1']}, 'categorical': []}, [{'n': '2'}]),
+    ({'numeric': {}, 'categorical': ['mode']}, [{}]),
+    ({'numeric': {}, 'categorical': ['mode', 'mode']}, [{'mode': 'trend'}]),
+    ({'numeric': {}, 'categorical': [], 'extra': []}, [{}]),
+    ({'numeric': {}}, [{}]),
+    ({'categorical': []}, [{}]),
+    ({}, [{}]),
+    (None, [{}]),
+    ({'numeric': [], 'categorical': []}, [{}]),
+    ({'numeric': {}, 'categorical': [None]}, [{}]),
+], ids=['categorical_mapping', 'undeclared_key', 'overlap', 'descending', 'decimal_duplicate',
+        'empty_numeric', 'numeric_not_list', 'unlisted_value', 'missing_axis', 'duplicate_category',
+        'extra_section', 'missing_categorical', 'missing_numeric', 'empty_neighborhood',
+        'null_neighborhood', 'numeric_not_mapping', 'invalid_axis_name'])
+def test_fix3_neighborhood_rejects_invalid_shape(neighborhood, grid):
+    with pytest.raises(ValueError):
+        rules.select_grid_point(['1'] * len(grid), grid, neighborhood)
+
+
+@pytest.mark.parametrize('mode', ['validation', 'trial', 'verification'])
+@pytest.mark.parametrize('with_folds', [False, True])
+@pytest.mark.parametrize('invalid', ['empty_neighborhood', 'categorical_mapping', 'undeclared_key'])
+def test_fix3_runner_rejects_neighborhood_before_lean(inputs, git_fixture, tmp_path, mode, with_folds, invalid):
+    from program_code.research.r8_engine import lean_runner as runner
+    materialization, manifest, config, query = inputs
+    repo, _, head = git_fixture
+    config.update(mode=mode, code_commit=head, engine_commit=head)
+    if mode == 'validation':
+        config.update(trial_id=None, algorithm={'path': runner.EXAMPLE, 'class': 'FixedSchedule'})
+    if not with_folds:
+        config.update(folds=[], fit_window={'start': 0, 'end': 392 * DAY},
+                      score_windows=[manifest['window']] if mode == 'validation' else [])
+    if invalid == 'empty_neighborhood':
+        config['strategy']['neighborhood'] = {}
+    elif invalid == 'categorical_mapping':
+        config['strategy']['neighborhood']['categorical'] = {'n': [0], 'score': ['1']}
+    else:
+        config['strategy']['grid'][0]['undeclared'] = 'extra'
+    # 試驗身份與來源皆有效，使拒絕只來自鄰域檢查。
+    record = query['record']
+    record.update(code_commit=head, folds=config['folds'])
+    record['configuration']['strategy_parameters']['run']['engine_commit'] = head
+    record['configuration_sha256'] = runner.sha256(canonical(record['configuration']))
+    query['finished'] = mode == 'verification'
+    out = tmp_path / 'invalid-run'
+    calls = []
+    def process(*args, **kwargs):
+        calls.append(args)
+        pytest.fail('無效鄰域不得啟動 LEAN')
+    with pytest.raises(ValueError, match='鄰域|網格'):
+        runner.execute(config, materialization, out, repo=repo, query=lambda _: query, process=process)
+    assert calls == []
+    assert not out.exists()
+    assert not (out / 'run.json').exists()
+
+
+@pytest.mark.parametrize('offset,expected', [(-HOUR, False), (0, True), (HOUR, True)])
+def test_fix3_example_no_trade_at_selects_by_validation_end(fake_lean, cost, offset, expected):
+    from program_code.research.r8_engine.lean_algo.examples.fixed_schedule import FixedSchedule
+    config = strategy(['1'])
+    config['grid'][0]['no_trade_at'] = 400 * DAY
+    config['neighborhood']['categorical'] = ['n', 'score', 'no_trade_at']
+    result = rules.fit_fold(FixedSchedule, 1, {'start': 0, 'end': 400 * DAY + offset}, {}, config, cost)
+    assert result['selection']['grid_scores'] == ['-1' if expected else '1']
+    assert result['selection']['no_trade'] is expected
+    assert (result['artifact'] is None) is expected
+
+
+def test_fix3_example_without_no_trade_at_keeps_score(fake_lean, cost):
+    from program_code.research.r8_engine.lean_algo.examples.fixed_schedule import FixedSchedule
+    config = strategy(['2'])
+    result = rules.fit_fold(FixedSchedule, 1, {'start': 0, 'end': 400 * DAY}, {}, config, cost)
+    assert result['selection']['grid_scores'] == ['2']
+    assert result['selection']['no_trade'] is False
+
+
+@pytest.mark.parametrize('all_invisible', [False, True])
+def test_fix3_no_trade_zero_position_reappearance_preserves_exposure_reference(fake_lean, all_invisible):
+    t = fake_lean.t0
+    bar = ['100'] * 4 + ['1']
+    config = strategy(['1'])
+    config['grid'][0].update(no_trade_at=t + HOUR, schedule=[
+        {'t': t, 'targets': {'X': {'quantity': '1'}, 'Y': {'quantity': '0'}}}])
+    config['neighborhood']['categorical'] = ['n', 'score', 'schedule', 'no_trade_at']
+    folds = [{'fit_window': {'start': -400 * DAY, 'end': t - HOUR},
+              'score_window': {'start': t, 'end': t + 2 * HOUR}},
+             {'fit_window': {'start': -400 * DAY, 'end': t + HOUR},
+              'score_window': {'start': t + 2 * HOUR, 'end': t + 6 * HOUR}}]
+    bars = {'X': {t + i * HOUR: bar for i in [-1, 0, 1, 3, 4]},
+            'Y': {t - HOUR: bar, **{t + i * HOUR: ['200'] * 4 + ['1'] for i in [2, 3, 4]}}}
+    driver = fake_lean.Driver(bars, folds=folds, strategy_config=config,
+                              funding={'X': [[t, t, '0'], [t + HOUR, t + HOUR, '0.001']]})
+    driver.step(t)
+    driver.step(t + HOUR)
+    driver.step(t + 2 * HOUR, visible=[] if all_invisible else None)
+    prices = dict(driver.algorithm._last_decision_prices)
+    equity = driver.algorithm._last_decision_equity
+    decisions = driver.records('decisions')
+    orders = driver.records('orders')
+    # 只有零部位的 Y 恢復可見；不得形成新的平倉決策或更新曝險參照。
+    driver.step(t + 3 * HOUR)
+    assert driver.records('decisions') == decisions
+    assert driver.records('orders') == orders
+    assert driver.algorithm._last_decision_prices == prices
+    assert driver.algorithm._last_decision_equity == equity
+    assert len(driver.algorithm.orders) == (1 if all_invisible else 2)
+    for step in (4, 5):
+        driver.step(t + step * HOUR)
+    driver.finish()
+    assert driver.algorithm.stops == []
+    flattened = [r for r in driver.records('orders') if r['kind'] == 'no_trade_flatten']
+    assert [(r['symbol'], r['quantity'], r['decision_t']) for r in flattened] == [
+        ('X', '-1', t + (4 if all_invisible else 2) * HOUR)]
+    assert driver.records('steps')[-1]['positions'] == {}
+
+
+@pytest.mark.parametrize('fit_at_boundary', [False, True])
+def test_fix3_fold_boundary_fills_previous_bar_before_no_trade(fake_lean, fit_at_boundary):
+    t = fake_lean.t0
+    s = t + 2 * HOUR
+    fit_end = s if fit_at_boundary else s - HOUR
+    config = strategy(['1'])
+    config['grid'][0].update(no_trade_at=fit_end, schedule=[
+        {'t': s - HOUR, 'targets': {'X': {'quantity': '10'}, 'Y': {'quantity': '3'}}}])
+    config['neighborhood']['categorical'] = ['n', 'score', 'schedule', 'no_trade_at']
+    folds = [{'fit_window': {'start': -400 * DAY, 'end': t - HOUR},
+              'score_window': {'start': t, 'end': s}},
+             {'fit_window': {'start': -400 * DAY, 'end': fit_end},
+              'score_window': {'start': s, 'end': s + 2 * HOUR}}]
+    bar = ['100'] * 4 + ['1']
+    bars = {'X': {t - HOUR: bar, t: bar, s - HOUR: bar, s: ['101'] * 4 + ['1']},
+            'Y': {t - HOUR: bar, t: bar, s: bar}}
+    driver = fake_lean.Driver(bars, folds=folds, strategy_config=config, end=s + 2 * HOUR,
+                              funding={name: [[t, t, '0']] for name in bars})
+    driver.step(t)
+    driver.step(s - HOUR)
+    assert driver.records('fills') == []
+    driver.step(s)
+    assert driver.algorithm.stops == []
+    fills = driver.records('fills')
+    assert [(r['symbol'], r['quantity'], r['change_t'], r['price']) for r in fills] == [
+        ('X', '10', s - HOUR, '100.05')]
+    cancelled = [r for r in driver.records('orders') if r['status'] == 'cancelled']
+    assert [(r['symbol'], r['cancel_reason'], r['cancel_t']) for r in cancelled] == [('Y', 'no_trade', s)]
+    # X 已入帳，折界才下平倉單；Y 的下一根開始於 s，仍未成交而取消。
+    assert driver.records('steps')[-1]['positions'] == {'X': '10'}
+    assert [r['selection']['no_trade'] for r in driver.records('fits')] == [False, True]
+    driver.step(s + HOUR)
+    driver.finish()
+    assert driver.algorithm.stops == []
+    assert [(r['symbol'], r['quantity'], r['change_t'], r['price']) for r in driver.records('fills')] == [
+        ('X', '10', s - HOUR, '100.05'), ('X', '-10', s, '100.9495')]
+    flatten = [r for r in driver.records('orders') if r['kind'] == 'no_trade_flatten']
+    assert [(r['symbol'], r['decision_t'], r['quantity'], r['status']) for r in flatten] == [
+        ('X', s, '-10', 'filled')]
+    assert driver.records('decisions') == [
+        {'t': s - HOUR, 'targets': {'X': {'quantity': '10'}, 'Y': {'quantity': '3'}}}]
+    assert driver.records('steps')[-1]['positions'] == {}
+    assert driver.records('steps')[-1]['cash'] == '100007.88950275'
+    assert driver.records('cash_residual') == []
+    assert driver.records('finished') == [{'status': 'completed', 'failure_reason': None, 'failure_t': None}]

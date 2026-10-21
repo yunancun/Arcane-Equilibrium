@@ -259,19 +259,38 @@ def merge_windows(windows):
     return result
 
 
+def validate_grid(grid, neighborhood):
+    """執行前與折內選擇共用同一份預登記軸檢查。"""
+    if not isinstance(grid, list) or not 1 <= len(grid) <= 20:
+        raise ValueError("網格數目不合法")
+    if not isinstance(neighborhood, dict) or set(neighborhood) != {"numeric", "categorical"}:
+        raise ValueError("鄰域須含且只含 numeric、categorical")
+    numeric, categorical = neighborhood["numeric"], neighborhood["categorical"]
+    if (not isinstance(numeric, dict) or not isinstance(categorical, list)
+            or any(not isinstance(axis, str) for axis in [*numeric, *categorical])):
+        raise ValueError("鄰域軸定義不合法")
+    if len(set(categorical)) != len(categorical) or set(numeric).intersection(categorical):
+        raise ValueError("鄰域軸名重複或重疊")
+    axes = set(numeric) | set(categorical)
+    if any(not isinstance(point, dict) or set(point) != axes for point in grid):
+        raise ValueError("網格須恰含全部已宣告的軸")
+    for axis, options in numeric.items():
+        if not isinstance(options, list) or not options:
+            raise ValueError("數值軸須為非空清單")
+        numbers = [decimal(str(x)) for x in options]
+        if any(a >= b for a, b in zip(numbers, numbers[1:])):
+            raise ValueError("數值軸須遞增且無重複")
+        if any(point[axis] not in options for point in grid):
+            raise ValueError("網格未落在預登記軸")
+    return numeric, categorical
+
+
 def select_grid_point(scores, grid, neighborhood):
     """鄰域以預登記的數值軸序號與類別軸取值計算。"""
-    if not 1 <= len(grid) <= 20 or len(scores) != len(grid):
+    numeric, categorical = validate_grid(grid, neighborhood)
+    if len(scores) != len(grid):
         raise ValueError("網格或成績數目不合法")
     values = [decimal(s) for s in scores]
-    numeric, categorical = neighborhood["numeric"], neighborhood["categorical"]
-    for axis, options in numeric.items():
-        numbers = [decimal(str(x)) for x in options]
-        if numbers != sorted(set(numbers)):
-            raise ValueError("數值軸須遞增且無重複")
-    for axis, options in {**numeric, **categorical}.items():
-        if not options or any(point[axis] not in options for point in grid):
-            raise ValueError("網格未落在預登記軸")
     means, qualified = [], []
     for i, point in enumerate(grid):
         neighbors = [j for j, other in enumerate(grid)

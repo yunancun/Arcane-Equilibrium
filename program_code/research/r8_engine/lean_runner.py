@@ -243,6 +243,10 @@ def validate_config(config, materialization, query=None):
                 "random_seed", "strategy", "algorithm", "mode", "cost"}
     if not required <= set(config) or set(config) - required - {"fit_window"}:
         raise ValueError("run_config 欄位不符")
+    strategy = config["strategy"]
+    if not isinstance(strategy, dict) or not {"grid", "neighborhood"} <= set(strategy):
+        raise ValueError("strategy 缺少網格或鄰域")
+    rules.validate_grid(strategy["grid"], strategy["neighborhood"])
     if type(config["random_seed"]) is not int:
         raise ValueError("random_seed 須為整數")
     for key in ("code_commit", "engine_commit"):
