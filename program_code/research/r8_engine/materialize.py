@@ -261,9 +261,18 @@ def materialize(*, u1, u1_manifest_sha256, ledger, hypothesis, window, out,
             lot = item['lotSizeFilter']
             step = _decimal(lot['qtyStep'], positive=True)
             minimum = _decimal(lot['minOrderQty'], positive=True)
+            notional = lot.get('minNotionalValue')
+            missing_reason = None
             if 'minNotionalValue' not in lot:
-                limitations.append(symbol+': 缺 minNotionalValue，記為 0。')
-            result['min_notional'][symbol] = _decimal(lot.get('minNotionalValue', '0'), nonnegative=True)
+                missing_reason = '鍵不存在'
+            elif notional is None:
+                missing_reason = '值為 None'
+            elif isinstance(notional, str) and not notional.strip():
+                missing_reason = '值為空字串' if notional == '' else '值僅含空白'
+            if missing_reason is not None:
+                limitations.append(f'{symbol}: 缺 minNotionalValue（{missing_reason}），記為 0。')
+                notional = '0'
+            result['min_notional'][symbol] = _decimal(notional, nonnegative=True)
             interval = _integer(item['fundingInterval']) * 60000
             if interval <= 0:
                 raise MaterializationError('資金費間隔須為正')
