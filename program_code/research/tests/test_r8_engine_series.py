@@ -1599,3 +1599,120 @@ def test_recorder_stress_breakeven_search_covers_valid_range(tmp_path, entry, ex
         assert upper-lower<Decimal('0.000000001')
         assert Decimal(result['lower_net_return'])>0
         assert Decimal(result['upper_net_return'])<=0
+
+
+@pytest.mark.parametrize('raw_rate', ['1e-05', '-1.2E-4'])
+@pytest.mark.parametrize('raw_price', ['100', '1.01e-4'])
+def test_sci_source_funding_and_small_prices_match_manual_u5_record(tmp_path, raw_rate, raw_price):
+    from decimal import localcontext
+    bars=[[t,raw_price,raw_price,raw_price,raw_price,'10000','10000000']
+          for t in range(START-13*DAY,START+4*HOUR,HOUR)]
+    days=[[t,raw_price,raw_price,raw_price,raw_price,'1000000','20000000']
+          for t in range(START-13*DAY,START,DAY)]
+    funds=[[t,raw_rate if t==START+HOUR else '0']
+           for t in range(START-13*DAY,START+4*HOUR+1,HOUR)]
+    path=write_materialization(tmp_path,hourly={'BTCUSDT':bars},
+        daily={'BTCUSDT':days},funding={'BTCUSDT':funds})
+    run=observed_fixed_run(path)
+    # 觀測值以 U5 形狀與 Decimal 手算構造；不呼叫 U6 replay／成交／資金費函式。
+    with localcontext() as ctx:
+        ctx.prec=50
+        price,rate=Decimal(raw_price),Decimal(raw_rate)
+        entry,exit_price=price*Decimal('1.001'),price*Decimal('0.994')
+        entry_fee,exit_fee=entry*Decimal('0.00055'),exit_price*Decimal('0.00055')
+        amount=-price*rate*(Decimal('1.02') if rate>0 else Decimal('0.98'))
+        cash=Decimal('100000')-entry_fee
+        final=cash+amount+exit_price-entry-exit_fee
+        text=lambda value:format(value,'f')
+        run['fills']=[u5_fill(1,0,0,'BTCUSDT','1',price=text(entry),bps='10',fee=text(entry_fee)),
+            u5_fill(2,4,4,'BTCUSDT','-1',kind='score_end_liquidation',
+                    price=text(exit_price),bps='60',fee=text(exit_fee))]
+        run['steps']=[u5_step(h) for h in range(-13*24+1,1)]
+        run['steps'] += [u5_step(h,{'BTCUSDT':'1'},cash=text(cash+(amount if h>=2 else 0)),
+            equity=text(cash+(amount if h>=2 else 0)+price-entry)) for h in (1,2,3)]
+        run['steps'].append(u5_step(4,cash=text(final)))
+        run['funding']=[{'t':START+h*HOUR,'symbol':'BTCUSDT',
+            'q_before':'0' if h==0 else '1','q_after':'1','price':text(price),
+            'rate':text(rate) if h==1 else '0','amount':text(amount) if h==1 else '0',
+            'estimated':False} for h in range(4)]
+        run['endpoint_funding']=[{'t':START+4*HOUR,'symbol':'BTCUSDT','q_before':'1',
+            'q_after':'0','price':text(price),'rate':'0','amount':'0','estimated':False}]
+    report=series.recompute(path,run)
+    assert report['recompute_passed'],report['differences']
+    assert report['max_difference']=='0'
+    assert Decimal(report['totals']['funding']['expected'])==amount
+    assert Decimal(run['steps'][-1]['cash'])==final
+
+
+def replace_source_numbers(path, name, **values):
+    source=path.parent/'source'/name
+    reader=csv.DictReader(io.StringIO(source.read_text()));fields=reader.fieldnames
+    rows=list(reader)
+    if not rows:
+        rows=[{'timestamp':str(START),**values}]
+    else:
+        for row in rows:row.update(values)
+    buf=io.StringIO(newline='');writer=csv.DictWriter(buf,fieldnames=fields)
+    writer.writeheader();writer.writerows(rows);raw=buf.getvalue().encode();source.write_bytes(raw)
+    m=json.loads(path.read_bytes());meta=m['files']['source/'+name]
+    meta.update(sha256=hashlib.sha256(raw).hexdigest(),rows=len(rows),
+                first=int(rows[0]['timestamp']),last=int(rows[-1]['timestamp']))
+    path.write_bytes(canonical(m))
+
+
+def test_sci_source_volume_turnover_and_open_interest(tmp_path):
+    path=write_materialization(tmp_path)
+    replace_source_numbers(path,'kline_BTCUSDT_60.csv',volume='1.234567890123456789e+4',turnover='1E7')
+    replace_source_numbers(path,'kline_BTCUSDT_D.csv',volume='1E6',turnover='2e7')
+    replace_source_numbers(path,'open_interest_BTCUSDT_4h.csv',open_interest='1.234567890123456789E-7')
+    data=series.Materialization(path)
+    assert data.hourly['BTCUSDT'][START]['volume']==Decimal('12345.67890123456789')
+    assert data.daily['BTCUSDT'][START-DAY]['volume']==Decimal('1000000')
+    assert data.liquidity('BTCUSDT',START,cost_parameters())==(Decimal('20000000'),Decimal('10000000'),True)
+    assert series.recompute(path,observed_fixed_run(path))['recompute_passed']
+
+
+def test_sci_instrument_properties_stay_exact(tmp_path):
+    path=write_materialization(tmp_path)
+    overlay=path.parent/'symbol_properties_overlay.csv'
+    overlay.write_text('bybit,BTCUSDT,cryptofuture,BTCUSDT,USDT,1,1e-8,1e-1,BTCUSDT,1E-1,\n')
+    m=json.loads(path.read_bytes());m['symbol_properties_overlay_sha256']=hashlib.sha256(overlay.read_bytes()).hexdigest()
+    m['min_notional']['BTCUSDT']='5e-4';path.write_bytes(canonical(m))
+    data=series.Materialization(path)
+    assert data.properties['BTCUSDT']=={'tick_size':Decimal('0.00000001'),
+        'qty_step':Decimal('0.1'),'min_qty':Decimal('0.1'),'min_notional':Decimal('0.0005')}
+    assert series.recompute(path,observed_fixed_run(path))['recompute_passed']
+
+
+@pytest.mark.parametrize('value', ['nan', 'inf', '-Infinity', 'bad', '1e'])
+@pytest.mark.parametrize('source', ['funding', 'price', 'open_interest', 'min_notional'])
+def test_sci_exchange_fields_reject_nonfinite_and_invalid(tmp_path, source, value):
+    path=write_materialization(tmp_path)
+    if source=='min_notional':
+        m=json.loads(path.read_bytes());m['min_notional']['BTCUSDT']=value;path.write_bytes(canonical(m))
+    else:
+        name,field={'funding':('funding_BTCUSDT_funding.csv','funding_rate'),
+            'price':('kline_BTCUSDT_60.csv','open'),
+            'open_interest':('open_interest_BTCUSDT_4h.csv','open_interest')}[source]
+        replace_source_numbers(path,name,**{field:value})
+    with pytest.raises(series.SeriesError):series.Materialization(path)
+
+
+@pytest.mark.parametrize('field', ['initial_cash','cost','quantity','weight'])
+def test_sci_config_and_targets_remain_strict(tmp_path, field):
+    path=write_materialization(tmp_path);run=observed_fixed_run(path)
+    if field=='initial_cash':run['run_config']['initial_cash']='1e5'
+    elif field=='cost':run['run_config']['cost']['taker_fee_rate']='5.5e-4'
+    else:run['decisions'][0]['targets']['BTCUSDT']={field:'1e0'}
+    refresh_run_hashes(run)
+    with pytest.raises(series.SeriesError,match='科學記號'):series.recompute(path,run)
+
+
+@pytest.mark.parametrize('section,field,value', [
+    ('fills','price','1.001e2'),('funding','rate','0e0'),('steps','cash','1e5')])
+def test_sci_observed_run_numbers_remain_strict(tmp_path, section, field, value):
+    path=write_materialization(tmp_path);run=observed_fixed_run(path)
+    run[section][0][field]=value
+    report=series.recompute(path,run)
+    assert not report['recompute_passed']
+    assert section+'.0.'+field+':decimal' in report['differences']
