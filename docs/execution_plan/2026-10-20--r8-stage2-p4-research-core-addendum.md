@@ -462,7 +462,7 @@
 |---|---|---|
 | `steps` | `t`、`equity`、`cash`、`positions`（標的 → 數量，只列非零） | `{"t": 1646096400000, "equity": "100012.5", "cash": "99987.2", "positions": {"BTCUSDT": "0.5"}}` |
 | `decisions` | `t`、`targets`（必須含當時交給策略的每一個標的，不得含其他標的；缺少或多出即中止執行，`failure_reason` 為 `invalid_decision`；`on_decision` 回傳 null 表示這一步不決策、不下單，不寫入本段；標的 → `{"weight": …}`；`{"quantity": …}` 只限 `validation` 模式的範例演算法，`trial` 與 `verification` 模式中出現即中止執行，U6 也拒絕） | `{"t": 1646096400000, "targets": {"BTCUSDT": {"weight": "0.5"}}}` |
-| `orders` | `order_id`（框架依序指派的整數）、`kind`（`strategy`、`no_trade_flatten`、`delisting_settlement`、`score_end_liquidation`）、`decision_t`、`symbol`、`quantity`（帶正負號）、`status`（`filled`、`cancelled`、`voided`）、`cancel_t` 與 `cancel_reason`（`replaced`、`score_end` 或 `delivery`，被取消時）、`replaced_by`（被新決策取代時的新 `order_id`） | `{"order_id": 7, "decision_t": 1646096400000, "symbol": "XUSDT", "quantity": "120", "status": "cancelled", "cancel_t": 1646100000000, "replaced_by": 9}` |
+| `orders` | `order_id`（框架依序指派的整數）、`kind`（`strategy`、`no_trade_flatten`、`delisting_settlement`、`score_end_liquidation`）、`decision_t`、`symbol`、`quantity`（帶正負號）、`status`（`filled`、`cancelled`、`voided`）、`cancel_t` 與 `cancel_reason`（`replaced`、`score_end`、`delivery` 或 `no_trade`，被取消時；`no_trade` 見 13.2 第 3 點）、`replaced_by`（被新決策取代時的新 `order_id`） | `{"order_id": 7, "decision_t": 1646096400000, "symbol": "XUSDT", "quantity": "120", "status": "cancelled", "cancel_t": 1646100000000, "replaced_by": 9}` |
 | `fills` | `order_id`（下架結算與計分終點平倉也有，見表後說明）、`decision_t`、`change_t`、`symbol`、`quantity`（帶正負號）、`price`、`slippage_bps`、`fee`、`kind`（`normal`、`forced_reduce_penalty`、`delisting_settlement`、`score_end_liquidation`） | `{"decision_t": 1646096400000, "change_t": 1646096400000, "symbol": "BTCUSDT", "quantity": "0.5", "price": "43246.6125", "slippage_bps": "5", "fee": "11.8928184375", "kind": "normal"}` |
 | `voided` | `order_id`、`decision_t`、`symbol`、`quantity`、`reason`（`untradeable`、`insufficient_history`、`order_cap`、`min_qty`、`min_notional`、`outside_score_window`、`after_delivery`） | `{"decision_t": 1646096400000, "symbol": "XUSDT", "quantity": "120", "reason": "untradeable"}` |
 | `funding` | `t`、`symbol`、`q_before`、`q_after`、`price`、`rate`、`amount`、`estimated`（布林） | `{"t": 1646121600000, "symbol": "BTCUSDT", "q_before": "0.5", "q_after": "0.5", "price": "43510", "rate": "0.0001", "amount": "-2.21901", "estimated": false}` |
@@ -993,3 +993,76 @@ U4 的 5 項 MINOR 記在 PR #227，holdout 啟用時一併處理。其中最需
 
 - P4-D0 通過之後，記錄者把檢查紀錄（含第一次的啟動器失敗）合入 main，再依 §8.2 執行 P4-D。
 - 治理工具分支 `codex/governance-operator-reopen-20261020`（新增 `operator-reopen` 入口，E4 未執行）依 Operator 2026-10-21 的指示擱置，不合入。
+
+## 13. FIX1 之後的修補（2026-10-21）
+
+### 13.1 經過
+
+- 兩個 FIX1 交付都只改了允許的檔案，在 main `851127b2d` 上完成本機提交：
+  - U5-FIX1 `4aada352f`（128 passed）。Codex 的 E2 在 300 秒上限到期、沒有判定。
+  - U6-FIX1 `60310c74f`（154 passed）。
+  - 兩者都已推送到 origin 的同名分支，只作承接來源。
+- 記錄者在乾淨的 checkout 重跑全部 R8 測試：U5-FIX1 為 523 passed，U6-FIX1 為 549 passed。
+- P4-D0 重跑（記錄者，固定映像），用 H、G、D、L 加上精度案例 P：
+  - **第一次失敗**：五個案例都在暖機的第一個時間步失敗，記為 `invalid_decision`。
+  - **探針證實**：在固定映像中，pythonnet 把 LEAN 的 `System.Decimal` 一律轉成 Python 浮點數。直接讀屬性、或經反射讀取都一樣，例如 99997.0729046937550 讀回 99997.07290469376。
+    - 寫入方向可行：以 `System.Decimal` 呼叫 `add_amount`。
+    - 唯一精確的讀回途徑：在 .NET 端以 `Newtonsoft.Json.JsonConvert.SerializeObject` 序列化 `Cash`，取得 `"Amount":99997.072904693755`。
+    - U5-FIX1 依 12.2 第 7 點拒收浮點數，但這個錯誤被歸為 `invalid_decision`，而不是邊界錯誤。
+  - **修正後的結果**：在副本上改以上述 JSON 途徑讀現金，其他 LEAN 數值以浮點數的 `repr` 轉換，限 15 位有效數字之內。五個案例全部符合預期、現金殘差為 0。
+    - 案例 P 的成交價 43268.2233、手續費 2.927095306245、資金費 -0.667420464474 都逐位相符，最終現金 99988.7886242630335。
+    - U6-FIX1 的 `recompute` 對這五次執行的差異全部為 0。
+- 記錄者另派的 E2 審查兩者都判 FAIL：
+  - U5-FIX1：1 個 BLOCKER、2 個 MAJOR；
+  - U6-FIX1：1 個 BLOCKER、3 個 MAJOR。
+  多數是兩個單元在第 12 節沒有寫死的細節上做法不同。13.2 一律以 U5 的做法為準寫定，兩個單元都要照做。
+
+### 13.2 契約補充（與前文、第 12 節不一致時以本節為準）
+
+1. **LEAN 邊界**（U5）：
+   - 現金：以 .NET 端的 `JsonConvert.SerializeObject` 序列化 `cash_book["USDT"]`，再以 `Decimal` 解析 `Amount`。
+   - 價格：一律取自框架自己讀入的物化資料（`lean/` 的十進位字串），以 K 線開始時刻對應；LEAN 的 K 線只用於判斷時刻與是否存在。兩者不一致（缺列、或 LEAN 的浮點值與字串不符）即以 `lean_error` 失敗。
+   - 成交：價格、數量、手續費由框架自己計算並記錄，不從 LEAN 的成交事件讀回。
+   - 邊界轉換或讀取的錯誤一律記為 `lean_error`；`invalid_decision` 只用於決策本身不合規定（目標的標的集合或格式、`score` 的格式）。
+2. **曝險檢查的價格表**（U5、U6）：含所有有部位或有未成交訂單的標的。不在該次決策中的標的（例如缺漏中），取決策時刻之前最後一根的收盤價。
+3. **不交易的折**（U5、U6）：
+   - 在該折計分窗起點的時間步，先取消所有標的的未成交訂單（`cancel_reason` 新增 `no_trade`）；
+   - 再對該步可見的標的下目標權重 0（`no_trade_flatten`）。目標集合就是可見集合，含部位為 0 的標的；差額為 0 的不產生訂單。
+   - 起點時不可見、且仍有部位的標的，在該折內第一次恢復可見的時間步平倉；起點那一步全部標的都不可見時同理。
+   - 該折內不再有其他訂單。
+4. **失敗執行的 `orders`**（U6 依 U5 的做法）：
+   - `orders` 只記已成交、已取消或已作廢的訂單；執行失敗時仍未成交的訂單不記。
+   - 決策時的曝險檢查在建立訂單、取消與作廢之前執行；超過上限時，該次決策不產生任何訂單紀錄。
+5. **執行終點**（U5、U6）：
+   - 執行終點等於物化的 `window.end`。
+   - 結算時刻晚於最後一個時間步、早於 `window.end` 的資金費，在演算法結束時照常計入 `funding` 與 LEAN 現金；恰在 `window.end` 的計入 `endpoint_funding`。
+   - 本點取代 §3.5「執行的結束時刻以最後一根資料為準」中有關資金費的部分。
+6. **計分終點的時刻與先後**（U6 依 U5 的做法）：
+   - 以 `score_end` 取消的訂單，`cancel_t` 為實際處理的時刻：e 之後的第一個時間步，或演算法結束時的 `window.end`。
+   - 時刻等於 e 的時間步，先處理全部界線（下架結算、終點平倉），再做曝險檢查。
+7. **靜態檢查**（U5）另拒絕：
+   - 屬性 `format`、`format_map`；
+   - 內建函式 `getattr`、`setattr`、`delattr`、`vars`、`dir`、`globals`、`locals`、`eval`、`exec`、`compile`、`__import__`、`open`。
+   資料視圖不得經由任何公開屬性取得可知時刻之後的列。
+8. **測試**：
+   - U5 須有以假 LEAN 驅動 `framework.py` 流程的測試，涵蓋第 2、3 點的情形（缺漏標的延後成交後的曝險檢查；不交易折起點有缺漏標的、有未成交訂單、全部不可見）。
+   - U6 的回歸測試須以 U5 形狀的執行紀錄為輸入，不可只用 U6 自己重算的結果當觀測值。
+
+### 13.3 修補交付
+
+| 交付 | 承接 | 可改檔案 | 內容 |
+|---|---|---|---|
+| `R8-S2-ENGINE-LEAN-FIX2-20261021` | U5-FIX1 `f81010cce`、`2c3b25b14`、`4aada352f` | §5 的六個檔案 | 13.2 第 1、2、3、5、7、8 點 |
+| `R8-S2-ENGINE-SERIES-FIX2-20261021` | U6-FIX1 `a978ae158`、`a9113d73c`、`6f6b13751`、`c086bb301`、`60310c74f` | §6 的兩個檔案 | 13.2 第 2、3、4、5、6、8 點 |
+
+- Operator 的確認：2026-10-21 已確認兩個交付（在對話中）。FIX1 交付的歷史、停止紀錄與審查嘗試保留，不重開。
+- 承接來源：origin 的 `codex/r8-s2-engine-lean-fix1-20261020` 與 `codex/r8-s2-engine-series-fix1-20261020`。
+- 先後與規則同 12.3：本節合入 main 之後才開工；在乾淨的 main 上先取得准入，再 cherry-pick。兩個交付的檔案不重疊，可以同時派。
+- 驗收：
+  - 各自的測試全部通過，並逐位重現 §3.9 的 G1–G8；
+  - 記錄者重跑 P4-D0，案例為 H、G、D、L、P，另加三個案例：
+    - Q：缺漏標的有未成交訂單，延後成交；
+    - N：不交易的折，起點有缺漏標的；
+    - E：e 沒有 K 線；
+  - 這些執行交給 U6-FIX2 的 `recompute`，差異必須為 0；
+  - 之後由記錄者獨立驗證並發布。
