@@ -931,6 +931,29 @@ def _compare(expected, actual, location, cash_tolerance, errors, stats):
         errors.append(location)
 
 
+def _cash_residual_summary(run, end):
+    """§16：獨立使用紀錄中的框架現金；total 僅作記錄，不參與判定。"""
+    cash_by_time={row['t']:row['cash'] for row in run['steps']}
+    maximum=Decimal(0);first=None
+    for row in run['unexplained_cash_residual']['per_step']:
+        residual=decimal_value(row['residual']).copy_abs()
+        if not residual:
+            continue
+        cash_text=cash_by_time.get(row['t'])
+        if row['t']==end and cash_by_time:
+            # on_end_of_algorithm 可在沒有新 step 時另記一筆殘差。
+            cash_text=cash_by_time[max(cash_by_time)]
+        if cash_text is None:
+            raise SeriesError('現金殘差缺少對應時間步')
+        cash=decimal_value(cash_text)
+        exponent=max(cash.adjusted()-27,-28) if cash else -28
+        ulp=Decimal(1).scaleb(exponent)
+        maximum=max(maximum,residual/ulp)
+        if residual>100*ulp and (first is None or row['t']<first):
+            first=row['t']
+    return maximum,first
+
+
 @precise
 def recompute(materialization, run):
     data,run=_inputs(materialization,run);expected=replay(data,run)
@@ -947,8 +970,9 @@ def recompute(materialization, run):
         counts[key]=len(expected[key]);_compare(expected[key],observed[key],key,cash_tol,errors,stats)
     if observed['fill_forward_bars']:
         errors.append('fill_forward_bars')
-    residual=observed['unexplained_cash_residual']
-    if decimal_value(residual['total']) or any(decimal_value(x['residual']) for x in residual['per_step']):
+    # 外部失敗的事件重播只比對前綴，殘差判定仍涵蓋整份 run（含失敗步）。
+    max_residual_ulps,first_residual_t=_cash_residual_summary(run,data.end)
+    if first_residual_t is not None:
         errors.append('unexplained_cash_residual')
     if expected['failure_reason'] is not None:
         if run['status']!='failed' or (run['failure_reason'],run['failure_t'])!=(expected['failure_reason'],expected['failure_t']):
@@ -965,6 +989,8 @@ def recompute(materialization, run):
             'run_sha256':digest(canonical(run)),'recompute_passed':not errors and run['status']=='completed',
             'counts':counts,'max_difference':decimal_text(stats['max_difference']),
             'max_location':stats['max_location'],'differences':errors,'totals':totals,
+            'max_cash_residual_ulps':decimal_text(max_residual_ulps),
+            'first_unexplained_cash_residual_t':first_residual_t,
             'max_actual_gross_exposure':expected['max_actual_gross_exposure']}
 
 
