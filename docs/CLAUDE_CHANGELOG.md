@@ -1,9 +1,19 @@
 # CLAUDE_CHANGELOG.md — 開發歷史歸檔
 
 > 從 CLAUDE.md / TODO.md 遷出的 Wave/Sprint/Batch + TODO version-increment 歷史敘事。新 session 不需要讀此文件，僅供回顧歷史時查閱。
-> 最後更新：2026-10-21（R8 U5-FIX3／U6-FIX2 來源發布與 P4-D0 檢查紀錄；TODO v908）
+> 最後更新：2026-10-21（R8 U6 科學記號來源解析小修與 P4-D A 段狀態；TODO v909）
 
 ---
+
+## R8 U6 科學記號來源解析小修與 P4-D A 段狀態 — 2026-10-21
+
+- conductor 判定 EV-9 為 U6 未正確讀取 U4 輸出的實作缺陷，依 [P4 補充指令](execution_plan/2026-10-20--r8-stage2-p4-research-core-addendum.md) §8.2 末段與 §8.1 由記錄者小修，不另立交付、不改規則或介面；conductor 審查後合併，Codex 不合併。
+- 基線 main `9fae470f5`（PR #231 已合入）。EV-9 的 `source/funding_BTCUSDT_funding.csv` 第一列 `1641081600000,1e-05`，在原 `series.py:328` 呼叫 `decimal_value`（第 33 行）時拒絕；U4 依 §4 保留原字串，沒有物化錯誤。
+- 程式提交 `9dcec96d3` 只改 U6 `series.py` 與其測試：source 小時／日 K 線 OHLC、volume、turnover、funding_rate、open_interest，以及 instruments-info 衍生的 tick_size、qty_step、min_qty、min_notional 直接以 Decimal 精確解析科學記號，不經浮點。U4 目前已把合約屬性轉一般小數；這些欄位仍限定為交易所來源。時刻保持整數／UTC 檢查；run.json、研究／成本設定、目標與帳本的嚴格一般小數解析不變；非有限與無法解析的字串仍拒絕。
+- 紅綠：33 個新增案例先為 6 failed／27 passed，修正後 33 passed。以人工構造的 U5 形狀紀錄與 Decimal 手算核對 `1e-05`、`-1.2E-4` 資金費與 `1.01e-4` 小價格，沒有用 U6 自己的輸出作觀測值；全部 R8 828 passed。
+- 原 EV-9 run.json 重算通過，recompute_passed=true、max_difference=0、differences=[]；現金 `99999.997344083420302`。其餘 A 段 21 個有效執行及 P4-D0 九案例共 30 個新重算檔與原檔逐位相同，原輸入雜湊未變；沒有重跑 LEAN。新證據：`/Users/ncyu/Projects/TradeBot/audits/2026-10-21-r8-u6-sci-notation-fix/`；EV-9 重算 SHA-256 `ca4bf34f158b71a34f5845a9f6ef58cb1079375dd5ee4f3b993348703dde4480`；`recompute-manifest.json` SHA-256 `ff89c81c3f913924cb5447db6665ec65b30e7261833f956957507ac8a04b3c12`。
+- TODO v909 只在 P4-D 列最新證據追加 A 段摘要：EV-3、4、5、6、7、8、13、14 共 8 PASS，EV-9 經本 PR 修正後重算通過；EV-1／EV-2 因 §5 第 4 點與 §8.2 衝突待 Operator 裁決，策略端直接證據仍不足。EV-10～EV-12 尚未執行，P4-D 尚未完成；不構成真實資料試驗、研究或獲利結論。
+- U4、U5、P4-D0 檢查紀錄與路線登記簿均未改；沒有新增 Operator 裁決或 RH 事件。原 A 段失敗紀錄保留，修正後證據另存，不覆寫歷史。
 
 ## R8 U5-FIX3／U6-FIX2 來源發布與 P4-D0 檢查紀錄 — 2026-10-21
 

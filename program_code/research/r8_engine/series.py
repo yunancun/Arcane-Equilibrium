@@ -40,6 +40,16 @@ def decimal_value(value):
     return result
 
 
+def _exchange_decimal(value):
+    """僅供 U4 的交易所來源數值；十進位科學記號直接轉 Decimal，不經浮點。"""
+    if not isinstance(value,str) or not re.fullmatch(r'-?[0-9]+(?:\.[0-9]+)?(?:[eE][+-]?[0-9]+)?',value):
+        raise SeriesError('交易所來源數值須為十進位字串，可含科學記號')
+    try:
+        return decimal_value(Decimal(value))
+    except InvalidOperation as exc:
+        raise SeriesError('無效交易所來源十進位數值') from exc
+
+
 def decimal_text(value):
     """依 §3.9 輸出一般小數，零統一為 0。"""
     value = decimal_value(value)
@@ -325,7 +335,10 @@ class Materialization:
                         t > self.end or (kind != 'funding' and t == self.end)):
                     raise SeriesError('原始切片時間超界或不遞增')
                 previous = t
-                parsed = {k: decimal_value(v) for k, v in row.items()}
+                # §4 的 source 保留原字串：小時／日 K 線 OHLC、volume、turnover，
+                # funding_rate 與 open_interest 都可能含科學記號；時刻仍走整數檢查。
+                # run、設定、目標及帳本不是來源資料，仍只使用嚴格的 decimal_value。
+                parsed = {k: _exchange_decimal(v) for k, v in row.items()}
                 if kind == 'kline':
                     if resolution not in ('60', 'D'):
                         raise SeriesError('U6 只讀一小時與日線')
@@ -352,8 +365,10 @@ class Materialization:
             s = row[1]
             if s not in self.symbols or s in self.properties:
                 raise SeriesError('屬性標的缺漏或重複')
-            prop = {'qty_step': decimal_value(row[7]), 'min_qty': decimal_value(row[9]),
-                    'tick_size': decimal_value(row[6]), 'min_notional': decimal_value(m['min_notional'][s])}
+            # 這四欄來自 instruments-info。U4 目前已輸出一般小數，仍按交易所
+            # 來源邊界解析；不把此入口用於 run.json 或任何研究／成本設定。
+            prop = {'qty_step': _exchange_decimal(row[7]), 'min_qty': _exchange_decimal(row[9]),
+                    'tick_size': _exchange_decimal(row[6]), 'min_notional': _exchange_decimal(m['min_notional'][s])}
             if min(prop.values()) < 0 or prop['qty_step'] <= 0 or prop['tick_size'] <= 0:
                 raise SeriesError('合約屬性不合法')
             self.properties[s] = prop
