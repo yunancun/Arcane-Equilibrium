@@ -440,7 +440,7 @@
     "r8-stage2-p4-addendum": {
       "kind": "recorded_file",
       "path": "docs/execution_plan/2026-10-20--r8-stage2-p4-research-core-addendum.md",
-      "sha256": "c59639bba283b22c1a8d664b6c9252c52749d908e0ad3893cec0bf13b27e9461",
+      "sha256": "caa4160c8ec29be78695dc623275e650cfe347c9750976dd388232ba8f42115d",
       "meaning": "stage 2 P4 addendum: research core units U4-U6, recorder event checks, and the QC-drafted methodology parameters with the Operator rulings of 2026-10-20; instruction only"
     },
     "r8-stage2-p4-d0-record": {
@@ -1796,6 +1796,34 @@
         }
       },
       "meaning": "Section 14 records the FIX2 hand-back and the nine-case, two-version P4-D0 findings, preserves the released FIX2 deliveries and review attempts, and defines the U5-only FIX3 contract: book prior-bar fills before fold activation, adopt U6 neighborhood shape, flatten recovering symbols only while still positioned, and add no_trade_at to the validation example. U6-FIX2 bfa151375 is unchanged and will be verified and published with U5-FIX3. The diagnostic shim is not acceptance evidence. Implementation starts only after this document is merged by the conductor following review and unblocked CI/automated review, then clean-main admission and ordered cherry-picks. The recorder must rerun all nine cases without a shim and obtain zero U6 differences before independent verification/publication; no FIX3 implementation or P4-D0 acceptance is claimed here."
+    },
+    {
+      "id": "RH-20261021-02",
+      "recorded_on": "2026-10-21",
+      "event_type": "open_item_decided",
+      "route_ids": [
+        "R8"
+      ],
+      "follows": "RH-20261021-01",
+      "decision_ref": "docs/execution_plan/2026-10-20--r8-stage2-p4-research-core-addendum.md",
+      "authority_source": "Operator decision confirmed by an option reply in the 2026-10-21 conversation and relayed by the conductor in the section 15 recorder instruction: add a visibility probe to the official validation example and confirm R8-S2-ENGINE-LEAN-FIX4-20261021, limited to the example and its tests. Merge the section 15 contract supplement before implementation, then rerun EV-1 and EV-2 in real LEAN; this also supplies the evidence needed to close the P4-D0 case D strategy-side daily-visibility limitation. The conductor reviews and performs the final merge after CI and automatic review have no blockers; Codex executes the recorder documentation work and does not merge.",
+      "prior_record_identity": {
+        "addendum": {
+          "commit": "4e86c9f76b85fa0f3039c876cfda1fbbe2ce9946",
+          "path": "docs/execution_plan/2026-10-20--r8-stage2-p4-research-core-addendum.md",
+          "blob": "3d9e037588fce5bdcecf114f09928f90f8683f49",
+          "sha256": "c59639bba283b22c1a8d664b6c9252c52749d908e0ad3893cec0bf13b27e9461",
+          "availability": "main at recording time"
+        },
+        "todo": {
+          "commit": "4e86c9f76b85fa0f3039c876cfda1fbbe2ce9946",
+          "path": "TODO.md",
+          "blob": "f7722074695cade405ef3b9d8e6dc4d7061be2ff",
+          "sha256": "fdfce0b7e70ad6b0fc6b99c2c44494da667484a3c0121198cc591d0214bde73e",
+          "availability": "main at recording time"
+        }
+      },
+      "meaning": "Section 15 resolves the validation-example conflict with strategy-side visibility checks by specifying visibility_probe on the existing public data view and dispatching U5-FIX4. U4, U6 and the fixed-class runner restriction remain unchanged. The A-section history and PR #232 EV-9 repair remain evidence-bounded; this event does not claim FIX4 implementation, EV-1/EV-2 acceptance or closure of the P4-D0 case D limitation."
     }
   ],
   "external_provenance": [

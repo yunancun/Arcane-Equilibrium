@@ -1,9 +1,18 @@
 # CLAUDE_CHANGELOG.md — 開發歷史歸檔
 
 > 從 CLAUDE.md / TODO.md 遷出的 Wave/Sprint/Batch + TODO version-increment 歷史敘事。新 session 不需要讀此文件，僅供回顧歷史時查閱。
-> 最後更新：2026-10-21（R8 U6 科學記號來源解析小修與 P4-D A 段狀態；TODO v909）
+> 最後更新：2026-10-21（R8 §15 驗證範例可見性探針與 U5-FIX4 派工；TODO v910）
 
 ---
+
+## R8 驗證範例可見性探針契約與 U5-FIX4 派工 — 2026-10-21
+
+- 基線 main `4e86c9f76` 已含 U6 科學記號小修 PR #232。P4-D A 段 11 項原有 8 PASS；EV-9 修正後以原 run.json 重算通過、差異 0，另 30 個既有執行重算輸出逐位相同。EV-1／EV-2 因 §5 第 4 點的固定類別限制與 §8.2 的策略實收證據要求衝突，尚無日線／持倉量的策略端直接證據。
+- Operator 2026-10-21 在對話中以選項回覆選定「在正式驗證範例加可見性探針」，並確認另立 `R8-S2-ENGINE-LEAN-FIX4-20261021`。先合入文件，再准入實作，之後由記錄者在固定映像重跑 EV-1／EV-2。
+- [P4 補充指令](execution_plan/2026-10-20--r8-stage2-p4-research-core-addendum.md) 新增 §15：`FixedSchedule` 可用類別軸 `visibility_probe`，從框架給策略的同一公開資料視圖取最後可見列，以欄位值映射數量；日線名稱為 `kline_day`（可用 `close`），持倉量為 `open_interest`／`value`。未映射或無可見列須以 `algorithm_exception` 失敗；其餘時刻沿用 schedule。U4、U6 與執行器固定類別限制不改。
+- FIX4 只改正式範例與 U5 測試，不改框架、規則、執行器、G1–G8 或 FIX3 既有測試；代碼審查須附 §15.2 原文，受控測試不能執行時按 §15.3 停在本機分支。驗收預期先凍結，再核對 LEAN、殘差與 U6 重算。
+- TODO v910 只更新 P4-D 列的最新證據與下一步，不新增列；§10 的入口索引與研究核心 runbook 仍為 P4-D 期間待辦。路線事件 `RH-20261021-02` 記入 Operator 的選擇與 FIX4 確認，並更新補充指令 SHA-256。
+- A 段與 U6 小修的倉庫外證據目錄、REPORT SHA-256 詳列 §15.1；原失敗歷史保留。本次只提交文件，FIX4 尚未實作，EV-1／EV-2 與 P4-D0 D 的策略端可見性仍待驗收，EV-10～EV-12 尚未執行。conductor 把關後合併，記錄者不合併。
 
 ## R8 U6 科學記號來源解析小修與 P4-D A 段狀態 — 2026-10-21
 
