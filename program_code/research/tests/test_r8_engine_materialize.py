@@ -255,12 +255,49 @@ def test_bad_instrument_fields_rejected(setup, field, value):
     assert not list(args['out'].parent.glob('.result-*'))
 
 
-def test_missing_min_notional_is_zero_and_disclosed(setup):
+@pytest.mark.parametrize('case,value,reason', [
+    ('missing', None, '鍵不存在'),
+    ('null', None, '值為 None'),
+    ('empty', '', '值為空字串'),
+    ('whitespace', '  ', '值僅含空白'),
+])
+def test_missing_min_notional_is_zero_and_disclosed(setup, case, value, reason):
     _, args = setup
-    update_page(args, lambda item: item['lotSizeFilter'].pop('minNotionalValue'))
+    def change(item):
+        if case == 'missing':
+            item['lotSizeFilter'].pop('minNotionalValue')
+        else:
+            item['lotSizeFilter']['minNotionalValue'] = value
+    update_page(args, change)
     result = mod.materialize(**args)
-    assert result['min_notional']['XUSDT'] == '0'
-    assert 'XUSDT: 缺 minNotionalValue，記為 0。' in result['limitations']
+    assert result['min_notional'] == {'BTCUSDT': '5', 'XUSDT': '0'}
+    assert [s for s in result['limitations'] if 'minNotionalValue' in s] == [
+        f'XUSDT: 缺 minNotionalValue（{reason}），記為 0。']
+    assert json.loads((args['out']/'materialization.json').read_bytes()) == result
+
+
+@pytest.mark.parametrize('value', ['abc', '-1', 'nan', 'NaN', 'inf', '-inf', 'Infinity', 0, False])
+def test_invalid_min_notional_rejected_without_output(setup, value):
+    _, args = setup
+    update_page(args, lambda item: item['lotSizeFilter'].update(minNotionalValue=value))
+    with pytest.raises(mod.MaterializationError):
+        mod.materialize(**args)
+    assert not args['out'].exists()
+    assert not list(args['out'].parent.glob('.result-*'))
+
+
+@pytest.mark.parametrize('field', ['tickSize', 'qtyStep', 'minOrderQty'])
+@pytest.mark.parametrize('value', [None, '', '  '])
+def test_other_missing_numeric_attributes_still_rejected(setup, field, value):
+    _, args = setup
+    def change(item):
+        target = item['priceFilter'] if field == 'tickSize' else item['lotSizeFilter']
+        target[field] = value
+    update_page(args, change)
+    with pytest.raises(mod.MaterializationError):
+        mod.materialize(**args)
+    assert not args['out'].exists()
+    assert not list(args['out'].parent.glob('.result-*'))
 
 
 def test_delisting_endpoint_partial_bar_and_funding_cutoff(setup):
