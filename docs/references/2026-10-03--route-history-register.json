@@ -454,6 +454,12 @@
       "path": "docs/execution_plan/2026-10-21--r8-stage2-p4-d-check-record.md",
       "sha256": "b251ac02fa5600d27eae4f70883ae9efd246afac32caf67b7d854a7346f42c1e",
       "meaning": "stage 2 P4-D event-check record: section A accepted after PR #232 and FIX4; section B records the accepted EV-10 rerun with U5 FIX5 and U6 FIX3, EV-11 pressure comparison, unchanged historical recomputation fields and EV-12 measurements. The section 8.2 pass conditions are satisfied; the 1087-symbol memory-protection stop remains partial and formal BCHUSDT abnormal-data handling awaits an Operator decision. Closure takes effect with source publication; no research or profit conclusion."
+    },
+    "r8-stage2-research-core-runbook": {
+      "kind": "recorded_file",
+      "path": "docs/runbooks/r8_research_core.md",
+      "sha256": "fe30e131471a9b9f4dbe0a3191b2b55de76df56fc2d81f82b4c3ef60656c3b6b",
+      "meaning": "R8 stage 2 core usage runbook verified against main bddd96d56: U4 materialization, U5 fixed-image LEAN execution and U6 recomputation, series, baselines, stress and ledger submission; section 10 documentation closeout, preserving mode boundaries, source binding, precision tolerance and known measurement/data limits; no new research or runtime authority."
     }
   },
   "routes": [
@@ -627,7 +633,8 @@
         "r8-amendment-2-r8",
         "r8-stage2-p4-addendum",
         "r8-stage2-p4-d0-record",
-        "r8-stage2-p4-d-record"
+        "r8-stage2-p4-d-record",
+        "r8-stage2-research-core-runbook"
       ],
       "status_history": [
         {
