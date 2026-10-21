@@ -764,6 +764,11 @@
           "recorded_on": "2026-10-20",
           "event": "RH-20261020-01",
           "note": "P4 methodology rulings (in-fold grid selection counted as one trial, BY at FDR 0.10) and consent to check the delisted universe against the public trading directory listing; record_status unchanged"
+        },
+        {
+          "recorded_on": "2026-10-22",
+          "event": "RH-20261022-01",
+          "note": "Operator extended development by five days; conductor interpretation records a fifteen-working-day stage 2-3 cap based on actual logged effort under N8. November 3, 2026 is the earliest estimated expiry only with full effort on every working day; actual expiry and consumed effort follow the ledger, with start date and accounting unchanged; record_status unchanged"
         }
       ]
     }
@@ -1866,6 +1871,44 @@
         }
       },
       "meaning": "Section 16 defines representation error versus unexplained cash residual using framework expected cash, preserves all nonzero residual records and dispatches separate U5 and U6 repairs. G1-G8, section 9.8.8 tolerance, other run.json fields and U4 remain unchanged. This event records the Operator decision and does not claim implementation, an EV-10 rerun pass or completion of section B."
+    },
+    {
+      "id": "RH-20261022-01",
+      "recorded_on": "2026-10-22",
+      "event_type": "open_item_decided",
+      "route_ids": [
+        "R8"
+      ],
+      "follows": "RH-20261021-03",
+      "decision_ref": "docs/decisions/2026-10-14--r8-amendment-2-multi-strategy-first-loop.md",
+      "authority_source": "Operator instruction in the conversation on 2026-10-22, quoted verbatim: \"\u5f00\u53d1\u65f6\u95f4\u5148\u5ef6\u957f5\u5929\". The conductor interpretation is recorded separately in meaning.",
+      "operator_excerpt": [
+        "开发时间先延长5天"
+      ],
+      "prior_record_identity": {
+        "amendment": {
+          "commit": "6c96b8806cc472bcb9da39241f495930cea3d8a8",
+          "path": "docs/decisions/2026-10-14--r8-amendment-2-multi-strategy-first-loop.md",
+          "blob": "3fb849beb5218fbbf14dbcdbb951ba057d66e54b",
+          "sha256": "4a3f0cfb491959dd495f1a508cfdbd0a6f48e52946e2d0033ca05b6a14eb1b28",
+          "availability": "main at recording time"
+        },
+        "dispatch": {
+          "commit": "6c96b8806cc472bcb9da39241f495930cea3d8a8",
+          "path": "docs/execution_plan/2026-10-14--r8-stage2-local-research-dispatch.md",
+          "blob": "dd5445f710bbd28818ac413224b9b684036521f2",
+          "sha256": "2e49a946e63edab92ebc98d3ce3e89290cc9005f5f38fb2f8d193c578fc62c3b",
+          "availability": "main at recording time"
+        },
+        "todo": {
+          "commit": "6c96b8806cc472bcb9da39241f495930cea3d8a8",
+          "path": "TODO.md",
+          "blob": "41924263a48a05ba56110d85947e7b6b99744f17",
+          "sha256": "0a3e054e03c521f42a234f40024c80f8fab79b3ecdf9a39cddf4b3b0e5ccc2dd",
+          "availability": "main at recording time"
+        }
+      },
+      "meaning": "The conductor interprets the Operator instruction as extending the stage 2-3 effort cap from ten to fifteen working days of actual logged effort under amendment 2 N8: a management cap, not a schedule commitment. The 2026-10-14 start and effort accounting remain unchanged; consumed effort is determined by the effort ledger, not elapsed calendar working days. Assuming full effort on every working day from that start, 2026-10-27 was the earliest estimated expiry of the ten-day cap and 2026-11-03 is the earliest estimated expiry of the fifteen-day cap. Actual expiry is determined by the effort ledger and may be later; November 3 is not a fixed deadline. This supersedes only the ten-working-day cap retained in RH-20261018-01 item 3; the PM report when actual logged effort reaches the cap remains required. The conductor accepted the P2 review correction as an error in its prior recording instruction, not a change to N8 or the accounting rule. The extension is recorded in this register and TODO, retaining the amendment and addendum text as written. It does not declare stage 2 complete or remove the remaining data-quality precheck, preregistration or pending Operator decision on invalid exchange rows."
     }
   ],
   "external_provenance": [
@@ -1906,5 +1949,5 @@
       "portable_summary": "docs/decisions/2026-10-08--r8-amendment-1-first-loop-on-native-replay.md"
     }
   ],
-  "last_event_recorded_on": "2026-10-21"
+  "last_event_recorded_on": "2026-10-22"
 }
