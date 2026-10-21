@@ -1,9 +1,21 @@
 # CLAUDE_CHANGELOG.md — 開發歷史歸檔
 
 > 從 CLAUDE.md / TODO.md 遷出的 Wave/Sprint/Batch + TODO version-increment 歷史敘事。新 session 不需要讀此文件，僅供回顧歷史時查閱。
-> 最後更新：2026-10-21（R8 U4–U6 交回、P4-D0 診斷與修補契約；TODO v905）
+> 最後更新：2026-10-21（R8 FIX1 交回、LEAN 十進位邊界與第二輪修補契約；TODO v906）
 
 ---
+
+## R8 FIX1 交回、LEAN 十進位邊界與第二輪修補 — 2026-10-21
+
+- U5-FIX1 `4aada352f`、U6-FIX1 `60310c74f` 只改允許的檔案。記錄者重跑全部 R8 測試：523 與 549 passed。
+- P4-D0 重跑（H、G、D、L 加精度案例 P）在暖機第一步失敗。探針證實：固定映像中 pythonnet 把 LEAN 的 `System.Decimal` 一律轉成浮點數，唯一精確的讀回途徑是 .NET 端的 `JsonConvert` 序列化。
+  以此在副本上修正後，五個案例全部符合預期、殘差為 0，案例 P 逐位相符；U6-FIX1 重算差異為 0。
+- 記錄者另派 E2：兩者都 FAIL，多為兩個單元在第 12 節未寫死的細節上做法不同。補充指令新增 §13，以 U5 的做法為準寫定，涵蓋：
+  - LEAN 邊界：JSON 讀現金、價格取物化字串、成交不讀回、錯誤歸 `lean_error`；
+  - 曝險價格表、不交易折的取消與延後平倉；
+  - 失敗執行只記已結束的訂單、執行終點、終點的取消時刻與先後；
+  - 靜態檢查另擋 `format` 與反射類內建函式。
+- 開出 `R8-S2-ENGINE-LEAN-FIX2-20261021`、`R8-S2-ENGINE-SERIES-FIX2-20261021`（Operator 確認），驗收另加 P4-D0 案例 Q、N、E。TODO v906。
 
 ## R8 U4–U6 交回、P4-D0 診斷與修補契約 — 2026-10-21
 
