@@ -49,8 +49,11 @@ class R8FillModel(FillModel):
         try:
             self.owner._t = rules.milliseconds(self.owner.utc_time)
             return self._market_fill(asset, order)
-        except Exception:
-            self.owner._fail("lean_error")
+        except Exception as exc:
+            reason = str(exc).split(":", 1)[0]
+            self.owner._fail("algorithm_exception" if isinstance(exc, rules.HypothesisError)
+                             else "invalid_decision" if isinstance(exc, ValueError) and reason == "invalid_decision"
+                             else "lean_error")
             return OrderEvent(order, self.owner.utc_time, OrderFee(CashAmount(0, "USDT")))
 
     def _market_fill(self, asset, order):
@@ -58,6 +61,15 @@ class R8FillModel(FillModel):
         metadata = self.owner._legs.get(order.tag)
         if metadata is None:
             self.owner._fail("lean_error")
+            return event
+        # LEAN 在 on_data 前成交；新折必須先啟用，讓不交易折取消全部舊單。
+        # fit 的視圖嚴格早於 fit_window.end，因此不依賴當步尚未送入的 K 線。
+        if any(index != self.owner._active_fold and
+               rules.milliseconds(fold["score_window"]["start"]) <= self.owner._t <
+               rules.milliseconds(fold["score_window"]["end"])
+               for index, fold in enumerate(self.owner._config["folds"])):
+            self.owner._fit_and_activate()
+        if self.owner._failure is not None or metadata.get("done"):
             return event
         bar = asset.get_last_data()
         if bar is None or not isinstance(bar, TradeBar):

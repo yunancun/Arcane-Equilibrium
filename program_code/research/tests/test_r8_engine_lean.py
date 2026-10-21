@@ -1322,3 +1322,31 @@ def test_fix2_framework_cash_write_failure_is_lean_error(fake_lean):
     driver.algorithm.portfolio.cash_book['USDT'].add_amount = reject
     driver.step(t + 3 * HOUR)
     assert driver.algorithm.stops == ['lean_error']
+
+
+@pytest.mark.parametrize('fit_at_boundary', [False, True])
+def test_fix2_framework_no_trade_boundary_cancels_before_native_fill(fake_lean, fit_at_boundary):
+    t = fake_lean.t0
+    bar = ['100'] * 4 + ['1']
+    fit_end = t + (2 if fit_at_boundary else 1) * HOUR
+    config = strategy(['1'])
+    config['grid'][0].update(no_trade_at=fit_end, schedule=[
+        {'t': t + HOUR, 'targets': {'X': {'quantity': '1'}, 'Y': {'quantity': '2'}}}])
+    folds = [{'fit_window': {'start': -400 * DAY, 'end': t - HOUR},
+              'score_window': {'start': t, 'end': t + 2 * HOUR}},
+             {'fit_window': {'start': -400 * DAY, 'end': fit_end},
+              'score_window': {'start': t + 2 * HOUR, 'end': t + 6 * HOUR}}]
+    driver = fake_lean.Driver({'X': {t + i * HOUR: bar for i in (-1, 0, 1, 2)},
+                               'Y': {t + i * HOUR: bar for i in (-1, 0, 2)}},
+                              folds=folds, strategy_config=config,
+                              funding={s: [[t, t, '0']] for s in ('X', 'Y')})
+    for step in (0, 1, 2, 3):
+        driver.step(t + step * HOUR)
+    driver.finish()
+    assert driver.algorithm.stops == []
+    assert driver.records('fills') == []
+    assert [(r['symbol'], r['status'], r['cancel_reason'], r['cancel_t'])
+            for r in driver.records('orders')] == [
+                ('X', 'cancelled', 'no_trade', t + 2 * HOUR),
+                ('Y', 'cancelled', 'no_trade', t + 2 * HOUR)]
+    assert driver.records('cash_residual') == []
