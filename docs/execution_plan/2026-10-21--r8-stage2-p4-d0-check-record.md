@@ -157,6 +157,9 @@ FIX2 各輪 manifest 已保存逐檔清單及先前證據綁定；最終 manifes
 - §10 的記錄者收尾列為 P4-D 期間待辦：在 `helper_scripts/SCRIPT_INDEX.md` 登記 U4–U6 命令列入口，並撰寫研究工具核心 runbook。本 PR 不實作這兩項。
 - 最終固定映像驗證時段：`2026-10-21T19:53:08Z` 至 `2026-10-21T19:58:54.799619Z`。本次發布的提交前測試、CI、自動審查與 UTC 起訖另隨 PR 回報，不覆寫驗收時段。
 
+
+**2026-10-21 追加更正（FIX4 發布）**：上列及§4案例D的UNVERIFIED為原P4-D0驗收時的狀態，原文保留。現由[P4-D A段檢查紀錄](2026-10-21--r8-stage2-p4-d-check-record.md) §4.1、§4.2的EV-1日線探針取得策略端直接證據：盤中目標10唯一對應前一日close111，次日00:00目標20唯一對應新完成日線close222；LEAN與凍結預期相符、殘差0、U6重算true且差異0，conductor已獨立核對演算法綁定及預期雜湊。因此 **D的策略端日線可見性UNVERIFIED已關閉**。證據目錄 `/Users/ncyu/Projects/TradeBot/audits/2026-10-21-r8-p4d-a-ev12-probe/`，REPORT.md SHA-256 `4f95794dedc04f310c0e3f2a5ff597f343b84f8434422bcfafa8d2c342d41235`；manifest.json SHA-256 `6e28ce96ab71d4d6201de000d797de1b83f86416d4c7e5847344a1f2282838ba`。本更正不代表B段EV-10～EV-12已執行或整體P4-D通過。
+
 ## 8. PR #231 的 U6 記錄者小修（2026-10-21）
 
 - conductor 對照程式確認自動審查的兩則 P2 皆屬實，且為 U6 原有缺陷、非 FIX2 引入；依 §8.1 裁定在同一 PR 以記錄者小修處理，不另立交付、不改規則或介面。只改 `series.py` 與 `test_r8_engine_series.py`，U5 六檔與驗收樹完全相同；此後不再聲稱整個 `program_code/` 與 `1ddbdce8f` 相同。
