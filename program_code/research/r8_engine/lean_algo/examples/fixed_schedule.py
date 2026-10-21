@@ -12,8 +12,20 @@ class FixedSchedule(R8Hypothesis):
         return {"fit_end": fit_window["end"]}
 
     def on_decision(self, time, data, model, params):
+        targets = None
         for item in params.get("schedule", ()):
             if item["t"] == time:
-                return {symbol: dict(item["targets"].get(symbol, {"weight": "0"}))
-                        for symbol in data}
-        return None
+                targets = {symbol: dict(item["targets"].get(symbol, {"weight": "0"}))
+                           for symbol in data}
+                break
+        # visibility_probe 須宣告為 neighborhood.categorical 的類別軸。
+        probe = params.get("visibility_probe")
+        if probe is not None and probe["t"] == time:
+            # 僅讀 on_decision 的公開視圖；缺列、欄位或 map 值直接拋例外。
+            row = data[probe["symbol"]][probe["dataset"]][-1]
+            quantity = probe["map"][row[probe["field"]]]
+            # 其他可見標的照原 schedule；該時刻未排程者目標 0，完整涵蓋 §7。
+            if targets is None:
+                targets = {symbol: {"weight": "0"} for symbol in data}
+            targets[probe["symbol"]] = {"quantity": quantity}
+        return targets
