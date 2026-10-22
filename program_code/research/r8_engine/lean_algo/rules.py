@@ -368,17 +368,39 @@ def index_data(data):
                 for name, rows in datasets.items()} for s, datasets in data.items()}
 
 
-def data_view(data, cutoff, strict=False, symbols=None):
+def data_view(data, cutoff, strict=False, symbols=None, *, family=None):
     cutoff = milliseconds(cutoff)
+    if family not in (None, "ordinary", "listing"):
+        raise ValueError("HYPOTHESIS_BINDING_INVALID")
     visible = {}
     for symbol in (list(data) if symbols is None else symbols):
         datasets = {}
-        for name, rows in data.get(symbol, {}).items():
+        source = data.get(symbol, {})
+        regimes = source.get("listing_regime", ())
+        regimes = regimes if isinstance(regimes, KnownRows) else KnownRows(regimes)
+        known = regimes.prefix(cutoff, strict)
+        current_day = (cutoff - (1 if strict else 0)) // DAY * DAY
+        if family is not None and known and known[-1]["day_start"] != current_day:
+            raise ValueError("LISTING_CURRENT_DAY_MISSING")
+        ordinary = next((r for r in known if r["stage"] == "ordinary"), None) if family == "ordinary" else None
+        for name, rows in source.items():
+            if family is not None and name not in {
+                    "kline_hour", "kline_day", "turnover_hour", "turnover_day",
+                    "funding", "open_interest", "listing_regime"}:
+                continue
             indexed = rows if isinstance(rows, KnownRows) else KnownRows(rows)
             selected = indexed.prefix(cutoff, strict)
+            if family is not None and name == "listing_regime":
+                selected = tuple(freeze({k: row[k] for k in
+                    ("known_at", "day_start", "stage", "reason_code", "cooling")}) for row in known)
+            elif family == "ordinary" and name in {
+                    "kline_hour", "kline_day", "turnover_hour", "turnover_day"}:
+                # Use the bar's own UTC day, never the new phase learned at its close.
+                selected = tuple(row for row in selected if ordinary is not None
+                    and ordinary["day_start"] <= row["t"] and ordinary["known_at"] <= row["known_at"])
             if selected:
                 datasets[name] = selected
-        if datasets:
+        if datasets or family is not None:
             visible[symbol] = MappingProxyType(datasets)
     return MappingProxyType(visible)
 
@@ -438,7 +460,7 @@ class R8Hypothesis:
         raise NotImplementedError
 
 
-def fit_fold(hypothesis_class, seed, fit_window, data, strategy, cost):
+def fit_fold(hypothesis_class, seed, fit_window, data, strategy, cost, *, family=None):
     start, end = milliseconds(fit_window["start"]), milliseconds(fit_window["end"])
     validation_days = strategy["internal_validation_days"]
     gap_days = strategy["internal_gap_days"]
@@ -449,7 +471,7 @@ def fit_fold(hypothesis_class, seed, fit_window, data, strategy, cost):
     if start >= train_end:
         raise ValueError("內部訓練窗為空")
     instance = hypothesis_class(seed)
-    view = data_view(data, end, strict=True)
+    view = data_view(data, end, strict=True, family=family)
     grid = strategy["grid"]
     try:
         scores = [instance.score(freeze(params), freeze({"start": start, "end": train_end}),
@@ -476,8 +498,8 @@ def fit_fold(hypothesis_class, seed, fit_window, data, strategy, cost):
     return {"selection": selection, "artifact": artifact}
 
 
-def decide(instance, t, data, artifact, symbols=None):
-    view = data_view(data, t, symbols=symbols)
+def decide(instance, t, data, artifact, symbols=None, *, family=None):
+    view = data_view(data, t, symbols=symbols, family=family)
     try:
         return instance.on_decision(t, view, freeze(artifact["model"]), freeze(artifact["params"]))
     except Exception as exc:
@@ -555,3 +577,88 @@ def due_boundaries(windows, delistings, t, closed, delivered):
     events += [(value["deliveryTime"], "delivery", symbol) for symbol, value in delistings.items()
                if value["deliveryTime"] <= t and symbol not in delivered]
     return sorted(events, key=lambda event: (event[0], event[1], event[2] or ""))
+
+
+def turnover_liquidity(row, t, first_bar, cost):
+    """DV5 independent §6.2 consumer; no U6 imports and no hypothesis access."""
+    from fractions import Fraction
+    keys = set('schema_version symbol decision_utc_day known_at policy_sha256 history_sufficient inputs m_d m_e m_h tier_d tier_e tier_h triggered selected_source selected_median selected_tier status reason_codes'.split())
+    input_keys = set('day_start exchange_reported effective_reported sum_hourly_reported daily_status hourly_status source_refs'.split())
+    def reject():
+        raise ValueError('TURNOVER_DECISION_INVALID')
+    def amount(value):
+        if not isinstance(value, str):
+            reject()
+        try:
+            parsed = decimal(value)
+            if parsed < 0:
+                reject()
+            return Fraction(parsed)
+        except (ValueError, ArithmeticError):
+            reject()
+    def tier(value):
+        return next((name for threshold, name in (
+            (100000000, 'GE_100M'), (10000000, 'GE_10M'), (1000000, 'GE_1M'))
+            if value >= threshold), 'NO_OPEN')
+    if not isinstance(row, dict) or set(row) != keys:
+        reject()
+    day = milliseconds(t) // DAY * DAY
+    sufficient = first_bar is not None and day - ((milliseconds(first_bar)+DAY-1)//DAY*DAY) >= 12*DAY
+    if (row['schema_version'] != 'r8_turnover_decision_v1'
+            or type(row['decision_utc_day']) is not int or row['decision_utc_day'] != day
+            or type(row['known_at']) is not int or row['known_at'] != day
+            or type(row['history_sufficient']) is not bool or row['history_sufficient'] != sufficient
+            or type(row['triggered']) is not bool
+            or not isinstance(row['inputs'], list) or len(row['inputs']) != 12
+            or row['status'] not in ('READY', 'BLOCKED')
+            or not isinstance(row['reason_codes'], list)
+            or any(not isinstance(r, str) or not r for r in row['reason_codes'])
+            or row['reason_codes'] != sorted(set(row['reason_codes']))):
+        reject()
+    values = {key: [] for key in ('exchange_reported', 'effective_reported', 'sum_hourly_reported')}
+    for i, source in enumerate(row['inputs']):
+        if (not isinstance(source, dict) or set(source) != input_keys
+                or type(source['day_start']) is not int or source['day_start'] != day-(12-i)*DAY
+                or not isinstance(source['source_refs'], list)):
+            reject()
+        for key, status in (('exchange_reported','daily_status'), ('effective_reported','daily_status'),
+                            ('sum_hourly_reported','hourly_status')):
+            state, value = source[status], source[key]
+            if state not in ('VALID','MISSING','INVALID','NOT_EVALUATED'):
+                reject()
+            if key == 'sum_hourly_reported' and state == 'NOT_EVALUATED' and not row['triggered']:
+                if value is not None:
+                    reject()
+                continue
+            if state == 'NOT_EVALUATED' or (key != 'exchange_reported' and state == 'VALID' and value is None):
+                reject()
+            # Original amount can survive isolation of the effective row.
+            if key == 'effective_reported' and state != 'VALID' and value is not None:
+                reject()
+            if key == 'sum_hourly_reported' and state != 'VALID' and value is not None:
+                reject()
+            values[key].append(Fraction(0) if value is None else amount(value))
+    md, me = (median(values[k]) for k in ('exchange_reported','effective_reported'))
+    trigger = any(abs(me-threshold)*20 <= threshold for threshold in (1000000,10000000,100000000))
+    mh = median(values['sum_hourly_reported']) if len(values['sum_hourly_reported']) == 12 else None
+    if row['triggered'] != trigger:
+        reject()
+    for suffix, value in (('d',md),('e',me),('h',mh)):
+        if value is None:
+            if row['m_'+suffix] is not None or row['tier_'+suffix] is not None:
+                reject()
+        elif amount(row['m_'+suffix]) != value or row['tier_'+suffix] != tier(value):
+            reject()
+    selected = mh if trigger and tier(mh) != tier(me) else me
+    selected_source = 'hourly_sum' if trigger and tier(mh) != tier(me) else 'effective_daily'
+    if row['status'] == 'BLOCKED':
+        if not row['reason_codes'] or any(row[k] is not None for k in ('selected_source','selected_median','selected_tier')):
+            reject()
+        raise ValueError('TURNOVER_DECISION_BLOCKED')
+    selected_tier = tier(selected) if sufficient else 'NO_OPEN'
+    if (row['selected_source'] != selected_source or amount(row['selected_median']) != selected
+            or row['selected_tier'] != selected_tier):
+        reject()
+    reason = 'insufficient_history' if not sufficient else ('untradeable' if selected_tier == 'NO_OPEN' else None)
+    bps = {'GE_100M':'5','GE_10M':'10','GE_1M':'20','NO_OPEN':'20'}[selected_tier]
+    return reason, decimal(bps)
