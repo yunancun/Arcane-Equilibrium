@@ -1112,7 +1112,7 @@ def _materialize(*, u1, u1_manifest_sha256, ledger, hypothesis, window, out,
                 _fail('LISTING_ORIGIN_UNKNOWN')
             first = None
             for t, n in sorted(original_hours.items()):
-                if n is None:
+                if n is None or t % HOUR or _number(n[4]) < 0:
                     _fail('LISTING_ORIGIN_UNKNOWN')
                 if _number(n[4]) > 0:
                     first = t

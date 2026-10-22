@@ -558,7 +558,6 @@ class TurnoverVerification:
         for symbol in data.symbols:
             if any(t % HOUR for t in data.hourly[symbol]) or any(t % DAY for t in data.daily[symbol]):
                 raise SeriesError('TURNOVER_SOURCE_GRID')
-            self.original[symbol] = self.original_days(symbol)
             for t, volume in self.original_days(symbol, '60', 'volume').items():
                 if volume is None:
                     raise SeriesError('TURNOVER_ORIGIN_UNKNOWN')
@@ -567,6 +566,7 @@ class TurnoverVerification:
                     break
             if symbol not in self.origins:
                 raise SeriesError('TURNOVER_ORIGIN_UNKNOWN')
+            self.original[symbol] = self.original_days(symbol)
         name = 'verification/turnover_decisions.jsonl'
         if name not in self.raw:
             raise SeriesError('TURNOVER_TABLE_MISSING')
@@ -653,32 +653,53 @@ class TurnoverVerification:
             raise SeriesError('VERIFICATION_JSON_OBJECT')
         return result
 
+    def isolated_original(self, symbol, resolution, timestamp, source, line):
+        if not hasattr(self,'quarantines'):
+            indexes = []
+            for name, identity in [('findings.jsonl','finding_id'),('corrections.jsonl','correction_id')]:
+                keys = set()
+                for raw in self.raw['verification/'+name].splitlines(keepends=True):
+                    row = self.decode(raw)
+                    relevant = (row.get('rule_id')=='DV-L1' and row.get('reason_code')=='OFF_GRID_TIMESTAMP' and row.get('field')=='timestamp'
+                        if identity=='finding_id' else row.get('decision')=='UNRESOLVED' and row.get('row_action')=='missing'
+                        and row.get('policy_sha256')==self.policy_sha and row.get('field') in ('open','high','low','close','volume','turnover'))
+                    if not relevant: continue
+                    if digest(canonical({k:v for k,v in row.items() if k!=identity})+b'\n') != row.get(identity): raise SeriesError('TURNOVER_QUARANTINE_IDENTITY')
+                    self.refs(row['source_refs'],[row['reason_code']])
+                    keys.update((row['symbol'],row['interval'],row['timestamp'],row['dataset'],r['relative_path'],r['sha256'],r['line_sha256'])
+                                for r in row['source_refs'] if r['kind']=='csv')
+                indexes.append(keys)
+            self.quarantines = indexes[0].intersection(indexes[1])
+        return (symbol,resolution,timestamp,'kline_day' if resolution=='D' else 'kline_hour',
+                source['source_file'],source['source_sha256'],digest(line)) in self.quarantines
+
     def original_days(self, symbol, interval='D', field='turnover'):
         name = 'verification/original/kline_'+symbol+'_'+interval+'.csv'
-        if name not in self.raw:
-            raise SeriesError('TURNOVER_ORIGINAL_MISSING')
+        if name not in self.raw: raise SeriesError('TURNOVER_ORIGINAL_MISSING')
         effective = self.files.get('source/kline_'+symbol+'_'+interval+'.csv', {})
-        if any(self.files[name][k] != effective.get(k) for k in ('source_file','source_sha256')):
-            raise SeriesError('TURNOVER_ORIGINAL_IDENTITY')
+        if any(self.files[name][k] != effective.get(k) for k in ('source_file','source_sha256')): raise SeriesError('TURNOVER_ORIGINAL_IDENTITY')
         reader = csv.DictReader(io.StringIO(self.raw[name].decode('utf-8')))
-        if reader.fieldnames != ['timestamp','open','high','low','close','volume','turnover']:
-            raise SeriesError('TURNOVER_ORIGINAL_HEADER')
-        result, times = {}, []
-        for row in reader:
+        if reader.fieldnames != ['timestamp','open','high','low','close','volume','turnover']: raise SeriesError('TURNOVER_ORIGINAL_HEADER')
+        result, times, origin, lines = {}, [], None, self.raw[name].splitlines(keepends=True)
+        for index, row in enumerate(reader,1):
             try:
                 t = int(row['timestamp'])
             except (ValueError, TypeError) as exc:
                 raise SeriesError('TURNOVER_ORIGINAL_TIME') from exc
-            if t % (DAY if interval == 'D' else HOUR) or not self.scope[0] <= t < self.scope[1] or times and t < times[-1]:
+            offgrid = t % (DAY if interval=='D' else HOUR)
+            known_origin = origin if interval=='60' else self.origins.get(symbol)
+            if (not self.scope[0] <= t < self.scope[1] or times and t < times[-1]
+                    or offgrid and (known_origin is None or t <= known_origin
+                        or not self.isolated_original(symbol,interval,t,self.files[name],lines[index]))):
                 raise SeriesError('TURNOVER_ORIGINAL_SCOPE')
             # 時刻／標的／範圍先於市場值；無法用的原額保留 null 比較及零中位數輸入。
             try:
+                if offgrid: raise SeriesError('TURNOVER_ORIGINAL_AMOUNT')
                 value = _exchange_decimal(row[field])
-                if value < 0:
-                    value = None
-            except SeriesError:
-                value = None
+                if value < 0: value = None
+            except SeriesError: value = None
             result[t] = value if t not in result else None
+            if interval=='60' and field=='volume' and origin is None and result[t] is not None and result[t]>0: origin = t
             times.append(t)
         meta = self.files[name]
         if (meta['rows'] != len(times) or meta['first'] != (min(times) if times else None) or

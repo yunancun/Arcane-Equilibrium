@@ -1,9 +1,17 @@
 # CLAUDE_CHANGELOG.md — 開發歷史歸檔
 
 > 從 CLAUDE.md / TODO.md 遷出的 Wave/Sprint/Batch + TODO version-increment 歷史敘事。新 session 不需要讀此文件，僅供回顧歷史時查閱。
-> 最後更新：2026-10-22（R8 DV256 記錄者 R2 審查修正；TODO v926）
+> 最後更新：2026-10-22（R8 DV256 記錄者 R3 原始隔離證據修正；TODO v927）
 
 ---
+
+## R8 DV256 記錄者 R3：隔離的非整點原件與五類缺陷核對 — 2026-10-22
+
+- conductor確認 [PR #246 第六項P2](https://github.com/yunancun/Arcane-Equilibrium/pull/246#discussion_r4352694649) 屬實，明示授權 `R8-DV256-RECORDER-FIX-R3-20261022` 新准入／租約，自 `071e922f13922e177fcf57052c153059f0003453` 在同PR續修，限1.5小時、不合併。原發布、R1、R2及DV2-R1／DV5／DV6停止與E2／E4歷史保留；R2相同head CI補跑偏差保留，本輪明定不得重跑未變更head。
+- 真實DV1→帳本→U4先重現U5 `TURNOVER_SOURCE_ORDER` 與U6 `TURNOVER_ORIGINAL_SCOPE`。矩陣逐一涵蓋原始日成交額／小時量的重複戳、非整點、負值、NaN／Infinity、格式錯誤（bad／空白／底線）；修前10 failed／26 passed，另確認U5錯接收空白／底線數字，以及U4忽略起點前負量／接受非整點首列兩類同範圍差異。
+- U5／U6各自從已綁定findings／corrections建立隔離交集，必須有相同標的、間隔、資料集、時刻、來源檔SHA及原列SHA的L1非整點發現與missing／UNRESOLVED更正，並核對紀錄ID與政策。只在各自已從原始小時量確立上市起點之後接受這類隔離列，值記不可用；未隔離、錯綁或起點之前仍拒絕。不共用U4／U5／U6函式，不更改實際知悉時刻或規範。
+- 同類修正：U5原始數值拒絕空白／底線格式並記不可用，與U4／U6一致；U4在獨立起點確立之前遇負量或非整點時拒絕物化。有效來源整點、唯一性與倒序檢查保持嚴格。66項聚焦測試通過，含v1／v2真實隔離案例、缺失或錯綁證據、未隔離原件、起點前資料與有效來源非整點／重複拒絕。中途14項guard fixture用了錯誤manifest編碼，已修fixture並保留失敗日誌，不當作產品紅燈。
+- 實際變更為三個產品檔 `materialize.py`／`lean_runner.py`／`series.py`、共用真實物化測試檔、TODO v927、changelog及登記簿文件SHA；規範、政策pin、DV1／DV3與framework／rules未改，不新增RH事件。完整R8（含8項真實Colima互通）、指定兩個structure檔、26日v1的78份bytes／v2 §13.7／雙政策報表與42歷史回歸於固定head重跑，結果及UTC／SHA列於同PR及 `audits/2026-10-22-r8-data-verify-dv256-fix-r3/`。CI若超時只回報conductor；新程式審查意見原文回報，不擅改。不取數、不碰遠端Linux／資料庫／Demo／live、不更新Wiki。
 
 ## R8 DV256 記錄者 R2：修正 PR #246 五項整合邊界 — 2026-10-22
 

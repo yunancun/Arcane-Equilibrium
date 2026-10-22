@@ -44,7 +44,7 @@ def dv_read(root, name):
 class VerifiedCase:
     def __init__(self, root, monkeypatch, *, days=40, version=1, first_hour=0,
                  quantities=None, amounts=None, daily_amounts=None, suffix=False,
-                 missing=(), registration_change=None, instrument_change=None, poison_outside=False, end_offset=0, daily_open='10', sampling=False, daily_transform=None, symbols=('BTCUSDT','XUSDT')):
+                 missing=(), registration_change=None, instrument_change=None, poison_outside=False, end_offset=0, daily_open='10', sampling=False, daily_transform=None, hourly_transform=None, symbols=('BTCUSDT','XUSDT')):
         self.root, self.monkeypatch = root, monkeypatch
         root.mkdir(parents=True, exist_ok=True)
         self.u1 = root/'u1'; self.u1.mkdir()
@@ -82,6 +82,8 @@ class VerifiedCase:
                     byte_count=len(data), relative_path=name, sha256=digest(data), status='AVAILABLE', reason_code=None))
             if daily_transform:
                 daily_transform(daily)
+            if hourly_transform:
+                hourly_transform(hours)
             for interval, rows in [('60', hours), ('D', daily)]:
                 self._market(symbol, 'kline', interval, ['timestamp', *DV_FIELDS], rows)
             funding=[[str(DV_T), '0']]
@@ -1175,3 +1177,123 @@ def test_recorder_r2_market_order_guard_remains_strict(tmp_path, monkeypatch, or
     manifest['files'][name].update(sha256=digest(raw),rows=len(lines)-1)
     with pytest.raises(ValueError,match='TURNOVER_SOURCE_ORDER'):
         lean_runner.verification_bundle(case.args['out'],manifest)
+
+
+def r3_case(tmp_path, monkeypatch, interval, defect, *, version=1, index=None):
+    def change(rows):
+        i = (5 if interval == 'D' else 5*24+7) if index is None else index
+        if defect == 'duplicate': rows.insert(i, list(rows[i]))
+        elif defect == 'offgrid': rows[i][0] = str(int(rows[i][0])+1)
+        else: rows[i][-1 if interval == 'D' else -2] = {
+            'negative':'-1', 'nan':'NaN', 'infinite':'Infinity', 'malformed':'bad',
+            'whitespace':' 10 ', 'underscore':'1_0'}[defect]
+    return VerifiedCase(tmp_path, monkeypatch, days=16, version=version,
+        **{('daily_transform' if interval == 'D' else 'hourly_transform'):change})
+
+
+@pytest.mark.parametrize('consumer',['U5','U6'])
+@pytest.mark.parametrize('version',[1,2])
+def test_recorder_r3_offgrid_original_after_origin(tmp_path, monkeypatch, consumer, version):
+    from program_code.research.r8_engine import lean_runner, series
+    case = r3_case(tmp_path,monkeypatch,'60','offgrid',version=version)
+    manifest = mod.materialize(**case.args)
+    stamp = DV_T+(5*24+7)*DV_HOUR+1
+    assert any(f['timestamp']==stamp and f['rule_id']=='DV-L1' and f['reason_code']=='OFF_GRID_TIMESTAMP'
+               for f in dv_read(case.bundle,'findings.jsonl'))
+    assert any(c['timestamp']==stamp and c['decision']=='UNRESOLVED' and c['row_action']=='missing'
+               for c in dv_read(case.bundle,'corrections.jsonl'))
+    if consumer == 'U5': lean_runner.verification_bundle(case.args['out'],manifest)
+    else:
+        data = series.Materialization(case.args['out']/'materialization.json')
+        assert all(data.turnover.original_days(s,'60','volume')[stamp] is None for s in data.symbols)
+
+
+@pytest.mark.parametrize('consumer',['U5','U6'])
+@pytest.mark.parametrize('interval',['D','60'])
+@pytest.mark.parametrize('defect',['duplicate','offgrid','negative','nan','infinite','malformed','whitespace','underscore'])
+def test_recorder_r3_original_defect_matrix(tmp_path, monkeypatch, consumer, interval, defect):
+    from program_code.research.r8_engine import lean_runner, series
+    case = r3_case(tmp_path,monkeypatch,interval,defect)
+    manifest = mod.materialize(**case.args)
+    if consumer == 'U5': lean_runner.verification_bundle(case.args['out'],manifest)
+    else:
+        data = series.Materialization(case.args['out']/'materialization.json')
+        stamp = DV_T+(5*DV_DAY if interval=='D' else (5*24+7)*DV_HOUR)+(defect=='offgrid')
+        assert all(data.turnover.original_days(s,interval,'turnover' if interval=='D' else 'volume')[stamp] is None
+                   for s in data.symbols)
+
+
+@pytest.mark.parametrize('defect',['negative','offgrid'])
+def test_recorder_r3_origin_cannot_follow_invalid_first_observation(tmp_path, monkeypatch, defect):
+    case = r3_case(tmp_path,monkeypatch,'60',defect,index=0)
+    with pytest.raises(mod.MaterializationError,match='LISTING_ORIGIN_UNKNOWN'):
+        mod.materialize(**case.args)
+
+
+def r3_write(case, manifest, name, raw):
+    (case.args['out']/name).write_bytes(raw)
+    if name.endswith('.jsonl'):
+        rows = [json.loads(line) for line in raw.splitlines()]
+        times = [r.get('known_at',r.get('timestamp')) for r in rows if r.get('known_at',r.get('timestamp')) is not None]
+    elif name.endswith('.csv'):
+        rows = list(csv.DictReader(io.StringIO(raw.decode()))); times = [int(r['timestamp']) for r in rows]
+    else: rows, times = [json.loads(raw)], []
+    manifest['files'][name].update(sha256=digest(raw),rows=len(rows),first=min(times) if times else None,last=max(times) if times else None)
+    if name in ('verification/findings.jsonl','verification/corrections.jsonl'):
+        report = dv_read(case.args['out'],'verification/verification.json')
+        report['files'][name.split('/')[-1]] = dict(sha256=digest(raw),rows=len(rows))
+        r3_write(case,manifest,'verification/verification.json',dv_encode(report))
+    (case.args['out']/'materialization.json').write_bytes(canonical(manifest))
+
+
+@pytest.mark.parametrize('consumer',['U5','U6'])
+@pytest.mark.parametrize('mutation',['finding_missing','correction_missing','wrong_line','wrong_source','wrong_symbol','wrong_field','not_missing','not_unresolved','bad_id','before_origin'])
+def test_recorder_r3_unproven_offgrid_original_rejected(tmp_path, monkeypatch, consumer, mutation):
+    from program_code.research.r8_engine import lean_runner, series
+    case = r3_case(tmp_path,monkeypatch,'60','offgrid')
+    manifest = mod.materialize(**case.args); stamp = DV_T+(5*24+7)*DV_HOUR+1
+    if mutation == 'before_origin':
+        for symbol in manifest['symbols']:
+            name = 'verification/original/kline_'+symbol+'_60.csv'
+            rows = list(csv.reader(io.StringIO((case.args['out']/name).read_text())))
+            for row in rows[1:]:
+                if int(row[0]) < stamp: row[5]='0'
+            out=io.StringIO();csv.writer(out,lineterminator='\n').writerows(rows)
+            r3_write(case,manifest,name,out.getvalue().encode())
+    else:
+        name = 'verification/'+('findings.jsonl' if mutation=='finding_missing' else 'corrections.jsonl')
+        identity = 'finding_id' if mutation=='finding_missing' else 'correction_id'
+        rows = dv_read(case.args['out'],name)
+        if mutation.endswith('_missing'): rows=[r for r in rows if r['timestamp']!=stamp]
+        else:
+            for row in rows:
+                if row['timestamp']!=stamp: continue
+                if mutation in ('wrong_line','wrong_source'):
+                    for ref in row['source_refs']:
+                        if ref['kind']=='csv': ref['line_sha256' if mutation=='wrong_line' else 'sha256']='0'*64
+                if mutation=='wrong_symbol': row['symbol']='OTHERUSDT'
+                if mutation=='wrong_field': row['field']='not_a_market_field'
+                if mutation=='not_missing': row['row_action']='include'
+                if mutation=='not_unresolved': row['decision']='KEEP'
+                row[identity]=digest(dv_encode({k:v for k,v in row.items() if k!=identity})) if mutation!='bad_id' else '0'*64
+        r3_write(case,manifest,name,b''.join(dv_encode(r) for r in rows))
+    with pytest.raises(ValueError,match='TURNOVER_SOURCE_ORDER|TURNOVER_ORIGINAL_SCOPE|TURNOVER_QUARANTINE_IDENTITY|VERIFICATION_SOURCE_IDENTITY'):
+        if consumer=='U5': lean_runner.verification_bundle(case.args['out'],manifest)
+        else: series.Materialization(case.args['out']/'materialization.json')
+
+
+@pytest.mark.parametrize('consumer',['U5','U6'])
+@pytest.mark.parametrize('interval',['D','60'])
+@pytest.mark.parametrize('mutation',['offgrid','duplicate'])
+def test_recorder_r3_effective_grid_and_uniqueness_strict(tmp_path, monkeypatch, consumer, interval, mutation):
+    from program_code.research.r8_engine import lean_runner, series
+    case=VerifiedCase(tmp_path,monkeypatch,days=16);manifest=mod.materialize(**case.args)
+    name='source/kline_XUSDT_'+interval+'.csv'
+    rows=list(csv.reader(io.StringIO((case.args['out']/name).read_text())))
+    if mutation=='offgrid':rows[6][0]=str(int(rows[6][0])+1)
+    else:rows.insert(6,list(rows[6]))
+    out=io.StringIO();csv.writer(out,lineterminator='\n').writerows(rows)
+    r3_write(case,manifest,name,out.getvalue().encode())
+    with pytest.raises(ValueError,match='TURNOVER_SOURCE_ORDER|TURNOVER_SOURCE_GRID|不遞增'):
+        if consumer=='U5':lean_runner.verification_bundle(case.args['out'],manifest)
+        else:series.Materialization(case.args['out']/'materialization.json')

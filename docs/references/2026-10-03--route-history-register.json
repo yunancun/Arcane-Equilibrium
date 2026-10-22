@@ -676,6 +676,18 @@
       "path": "docs/CLAUDE_CHANGELOG.md",
       "sha256": "2d1cadb10126d47aa409d954bed7d8058196288eb90cc550d923f4caea0410d4",
       "meaning": "Conductor-authorized recorder R2 repairs for five confirmed PR246 findings. Both earlier recorder rounds and original stopped delivery review histories retained. No standard or rule change, no new RH decision, no merge."
+    },
+    "r8-dv256-r3-todo-v927": {
+      "kind": "recorded_file",
+      "path": "TODO.md",
+      "sha256": "fc287a255ddd445449c57fc2198caff66944740da7194ba2fe8d4c726a54d3a2",
+      "meaning": "Conductor-authorized recorder R3 repairs quarantined off-grid originals and five original-defect classes on PR246. Prior recorder and delivery histories retained. No standard or pin change, no new RH decision, no unchanged-head CI retry, no merge."
+    },
+    "r8-dv256-r3-changelog": {
+      "kind": "recorded_file",
+      "path": "docs/CLAUDE_CHANGELOG.md",
+      "sha256": "8e268c7116e97a296c925b34d3921122d4a34cbc9841ba88e75d0e955a294e5c",
+      "meaning": "Conductor-authorized recorder R3 repairs quarantined off-grid originals and five original-defect classes on PR246. Prior recorder and delivery histories retained. No standard or pin change, no new RH decision, no unchanged-head CI retry, no merge."
     }
   },
   "routes": [
