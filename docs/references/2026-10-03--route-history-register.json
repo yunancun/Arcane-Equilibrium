@@ -530,6 +530,18 @@
       "path": "docs/execution_plan/2026-10-22--r8-stage2-data-verification-standard.md",
       "sha256": "ba65fbca3b9230ad1807b82c923e9e60ab870edbe5c1e0d5090ebce99b06f6d0",
       "meaning": "Conductor-dispatched PR #242 follow-up after merging reviewed main 1ea85a9a: implementation mapping for frozen expansion reports, partial-day diagnostics, L2 turnover flags and per-day L3 evidence counting; supplied background URLs transcribed without online verification. No rule or RH event changed; source edits remain the standard pin only relative to merged main, with v2 awaiting DV7."
+    },
+    "r8-dv7-publish-todo-v922": {
+      "kind": "recorded_file",
+      "path": "TODO.md",
+      "sha256": "61eef702f09d4eda70e416da076ddec46516a5ea24128ee3767fb685d229ed71",
+      "meaning": "Conductor-authorized DV7 recorder publication PR #243 and narrow denominator/label repair; original stopped E2 FAIL and E4 NOT_RUN retained. Publication candidate only, no new RH event or data/runtime acceptance."
+    },
+    "r8-dv7-publish-changelog": {
+      "kind": "recorded_file",
+      "path": "docs/CLAUDE_CHANGELOG.md",
+      "sha256": "99fa4203c6b0298df3e271b6ac779f670014c50a7221e1e44e7f7dfb77f0233e",
+      "meaning": "Conductor-authorized DV7 recorder publication PR #243 and narrow denominator/label repair; original stopped E2 FAIL and E4 NOT_RUN retained. Publication candidate only, no new RH event or data/runtime acceptance."
     }
   },
   "routes": [
@@ -713,7 +725,9 @@
         "r8-stage2-data-verification-standard-r3",
         "r8-stage2-data-verification-standard-erratum-1",
         "r8-stage2-data-verification-standard-v2-volume",
-        "r8-stage2-data-verification-standard-v2-erratum-2"
+        "r8-stage2-data-verification-standard-v2-erratum-2",
+        "r8-dv7-publish-todo-v922",
+        "r8-dv7-publish-changelog"
       ],
       "status_history": [
         {
