@@ -36,7 +36,8 @@ SEED = 20261022
 TIERS = ('GE_100M', 'GE_10M', 'GE_1M', 'NO_OPEN')
 STANDARD = 'docs/execution_plan/2026-10-22--r8-stage2-data-verification-standard.md'
 V2 = 'v2-terminal-suffix-20261022'
-_V1_STANDARDS=('ba65fbca3b9230ad1807b82c923e9e60ab870edbe5c1e0d5090ebce99b06f6d0',
+_V1_STANDARDS=('d0fbf9ff02d080027d575eb6488f2c552c3a583485b8c685166fe0ef94b2af98',
+               'ba65fbca3b9230ad1807b82c923e9e60ab870edbe5c1e0d5090ebce99b06f6d0',
                '125901d0341487bd058be70e7cc2ed27be7c3be270a45d05587e471104b7cacf',
                'ad80220cd6dc3f8dc5c451c6281aa9f1b2acf7fbb47bc80ed21eb3905710110c')
 

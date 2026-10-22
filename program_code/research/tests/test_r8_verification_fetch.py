@@ -1076,3 +1076,15 @@ def test_dual_policy_semantic_row_access_is_linear(tmp_path, monkeypatch, record
     for name in result['files']:
         assert (tmp_path/'measured'/name).read_bytes() == (tmp_path/'plain'/name).read_bytes()
     assert counts['symbol_reads'] <= 20*counts['rows'], counts
+
+
+def test_frozen_main_v1_policy_survives_standard_document_update(tmp_path):
+    from program_code.research.tests.test_r8_data_verification import real_dv13_flow, dv7_reverify
+    root = tmp_path/'real'
+    flow = real_dv13_flow(root, frozen_standard='d0fbf9ff02d080027d575eb6488f2c552c3a583485b8c685166fe0ef94b2af98')
+    assert flow['summary']['primary_file'] == 'sample_report.txt'
+    before = (root/'plan/sample_plan.json').read_bytes()
+    assert dv7_reverify(root,flow)['status'] == 'READY'
+    result = v.summarize_policies(root/'plan',[root/'bundle'],[root/'bundle-v2'],tmp_path/'dual')
+    assert result['primary_file'] == 'sample_report.txt', result
+    assert (root/'plan/sample_plan.json').read_bytes() == before

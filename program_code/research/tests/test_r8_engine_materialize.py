@@ -966,7 +966,7 @@ def real_peer_run(real_peer_materialization):
     head = subprocess.check_output(['git','-C',str(repo),'rev-parse','HEAD'],text=True).strip()
     key = (str(root),head)
     if key not in _PEER_RUNS:
-        manifest = output['manifest']; t = manifest['window']['start']+DV_HOUR
+        manifest = output['manifest']; t = manifest['first_bar']['BCHUSDT']+DV_HOUR
         config = dict(trial_id=None,materialization_sha256=digest(canonical(manifest)),
             code_commit=head,engine_commit=head,symbols=manifest['strategy_symbols'],initial_cash='100000',
             leverage='10',gross_exposure_cap='1',decision_resolution='hour',sharpe_frequency_seconds=3600,
@@ -980,8 +980,9 @@ def real_peer_run(real_peer_materialization):
         with pytest.MonkeyPatch.context() as local_tmp:
             local_tmp.setattr(tempfile,'tempdir',str(tmp))
             result = lean_runner.execute(config,root,out,repo=repo)
-        assert result['status'] == 'completed', (result['failure_reason'],str(out/'lean.log'))
-        assert result['decisions'] and result['voided']
-        assert result['docker_argv'][result['docker_argv'].index('--network')+1] == 'none'
         _PEER_RUNS[key] = dict(materialization=root/'materialization.json',run=out/'run.json',result=result)
+    result = _PEER_RUNS[key]['result']
+    assert result['status'] == 'completed', (result['failure_reason'],str(_PEER_RUNS[key]['run']))
+    assert result['decisions'] and result['voided']
+    assert result['docker_argv'][result['docker_argv'].index('--network')+1] == 'none'
     return _PEER_RUNS[key]
