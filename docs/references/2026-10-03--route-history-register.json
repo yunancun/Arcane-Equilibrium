@@ -480,16 +480,32 @@
       "blob": "10bb95b2c83b8e71da0bd2fb695bf502e7118d52"
     },
     "r8-stage2-p4-addendum-r3": {
-      "kind": "recorded_file",
+      "kind": "git_blob",
       "path": "docs/execution_plan/2026-10-20--r8-stage2-p4-research-core-addendum.md",
       "sha256": "a4667e7a921914195ebff6c152f4ecc342a25a18e7430180a43e79b314c5227a",
-      "meaning": "Section 17 points to the Operator-decision revision; sections 1-16 unchanged, complete standard still ineffective before formal approval."
+      "meaning": "Section 17 points to the Operator-decision revision; sections 1-16 unchanged, complete standard still ineffective before formal approval.",
+      "commit": "7517eac3aa5e057417fb4e715c553762c6c5adc2",
+      "blob": "f89a6f9742e373f0062d8b619688c3576a9c79fe"
     },
     "r8-stage2-data-verification-standard-r2": {
-      "kind": "recorded_file",
+      "kind": "git_blob",
       "path": "docs/execution_plan/2026-10-22--r8-stage2-data-verification-standard.md",
       "sha256": "76b4779292a883e6688d764f9c8b9ce91ebf25da70e6960ff8a40a4b0da34389",
-      "meaning": "Operator-decided exchange open, reported-turnover selection without tick gate, provisional assurance and causal listing direction. Listing thresholds and recorder implementation details remain unconfirmed; no corrections or code executed."
+      "meaning": "Operator-decided exchange open, reported-turnover selection without tick gate, provisional assurance and causal listing direction. Listing thresholds and recorder implementation details remain unconfirmed; no corrections or code executed.",
+      "commit": "7517eac3aa5e057417fb4e715c553762c6c5adc2",
+      "blob": "f8b0c9c216083685fff1239bd06044382c132dc4"
+    },
+    "r8-stage2-p4-addendum-r4": {
+      "kind": "recorded_file",
+      "path": "docs/execution_plan/2026-10-20--r8-stage2-p4-research-core-addendum.md",
+      "sha256": "edfa2d4f56413238357d675b6cd4a39ffa2924860533bae69da969e44d05ab0b",
+      "meaning": "Section 17 records full approval effective when PR #240 merges into main; sections 1-16 unchanged."
+    },
+    "r8-stage2-data-verification-standard-r3": {
+      "kind": "recorded_file",
+      "path": "docs/execution_plan/2026-10-22--r8-stage2-data-verification-standard.md",
+      "sha256": "125901d0341487bd058be70e7cc2ed27be7c3be270a45d05587e471104b7cacf",
+      "meaning": "Operator approved X=50%, Y=20%, Z=20%, W=7 days, quantity A and mean-relative-difference formula, enabled DV6, approved the 300/900 sampling plan and entire standard. Six bounded delivery identities and fixed cross-unit contracts; effective on merge, no implementation or data acceptance claimed."
     }
   },
   "routes": [
@@ -668,7 +684,9 @@
         "r8-stage2-p4-addendum-r2",
         "r8-stage2-data-verification-standard",
         "r8-stage2-p4-addendum-r3",
-        "r8-stage2-data-verification-standard-r2"
+        "r8-stage2-data-verification-standard-r2",
+        "r8-stage2-p4-addendum-r4",
+        "r8-stage2-data-verification-standard-r3"
       ],
       "status_history": [
         {
@@ -813,6 +831,11 @@
           "recorded_on": "2026-10-22",
           "event": "RH-20261022-03",
           "note": "Records verbatim Operator decisions and agreed causal listing direction. Formal standard approval, listing thresholds and implementation confirmation remain pending; route record_status unchanged."
+        },
+        {
+          "recorded_on": "2026-10-22",
+          "event": "RH-20261022-04",
+          "note": "Operator approved all remaining parameters and the full standard; methodology review recorded complete by conductor instruction. Six deliveries become dispatchable on PR #240 merge. Implementation/acceptance remain outstanding; old-year A/B treatment awaits frozen audit. Route record_status unchanged."
         }
       ]
     }
@@ -2016,6 +2039,41 @@
         }
       },
       "meaning": "Records decided D1 exchange-open semantics, D2 exchange-reported amounts for general days with hourly sums for suspect days and trigger direction, provisional D4 assurance, and D3 causal volume-adaptive listing direction. X/Y/Z, cooling period, volume definition, precise algorithms/interfaces and whole-standard approval remain pending. Turnover does not require G or cause tick downloads; price/quantity still use strict G. BCH candidate open 272.95 and low 265.15 are not applied. U4 listing timeline and U5 family view are proposed; U6 is unchanged for visibility-only listing, while decision-dependent turnover interface compatibility must be established before implementation. DATA-VERIFY remains WAITING/non-dispatchable until formal approval and merge; downstream gates require implementation/acceptance. No runtime, data or research success claimed."
+    },
+    {
+      "id": "RH-20261022-04",
+      "recorded_on": "2026-10-22",
+      "event_type": "amendment_accepted",
+      "route_ids": [
+        "R8"
+      ],
+      "follows": "RH-20261022-03",
+      "decision_ref": "docs/execution_plan/2026-10-22--r8-stage2-data-verification-standard.md",
+      "authority_source": "Operator 2026-10-22 conversation option replies, verbatim as supplied by the conductor: (1) 「中間值 (Recommended)」; (2) 「啟動 DV6 (Recommended)」; (3) 「每層 300，可擴到 900 (Recommended)」; (4) 「核准並開始實作 (Recommended)」. The conductor maps these replies to X=50%, Y=20%, Z=20%, W=7 days, quantity option A (hourly mean base-coin volume, actual required first-day boxes), the section 6.3 mean-relative-difference formula, enabled DV6, and the entire section 4.5 plan (seed 20261022, 300 per stratum, one expansion to 900, conservative 95% upper bound <=2.5%) including download and effort estimates, and whole-standard approval. The conductor explicitly instructs recording its completed methodology review and effectiveness when this PR merges into main. The conductor will review this final recording commit and merge; Codex must not merge, change code, fetch market data or update Wiki.",
+      "prior_record_identity": {
+        "standard": {
+          "commit": "7517eac3aa5e057417fb4e715c553762c6c5adc2",
+          "path": "docs/execution_plan/2026-10-22--r8-stage2-data-verification-standard.md",
+          "blob": "f8b0c9c216083685fff1239bd06044382c132dc4",
+          "sha256": "76b4779292a883e6688d764f9c8b9ce91ebf25da70e6960ff8a40a4b0da34389",
+          "availability": "PR #240 head before the final Operator-approval continuation"
+        },
+        "addendum": {
+          "commit": "7517eac3aa5e057417fb4e715c553762c6c5adc2",
+          "path": "docs/execution_plan/2026-10-20--r8-stage2-p4-research-core-addendum.md",
+          "blob": "f89a6f9742e373f0062d8b619688c3576a9c79fe",
+          "sha256": "a4667e7a921914195ebff6c152f4ecc342a25a18e7430180a43e79b314c5227a",
+          "availability": "PR #240 head before the final Operator-approval continuation"
+        },
+        "todo": {
+          "commit": "7517eac3aa5e057417fb4e715c553762c6c5adc2",
+          "path": "TODO.md",
+          "blob": "d840bd2a3327dd071e6815513c7d779ad911fc44",
+          "sha256": "ac847b1717437acebd56c5443022ae945dd29690852670556e26d795a7deb653",
+          "availability": "PR #240 head before the final Operator-approval continuation"
+        }
+      },
+      "meaning": "Records complete standard approval and fixed remaining parameters. DATA-VERIFY becomes ACTIVE/dispatchable only when the same PR merges into main. DV1 and DV3 may proceed in parallel; DV2 depends on DV1 interface; DV5 and enabled DV6 depend on DV2 artifacts; DV4 integrates last. Each bounded delivery requires at least one real-counterpart integration test under the fixed formats. The 15-workday overall cap is unchanged. Old-year unresolved treatment A/B remains reserved for Operator after frozen audit results; strict current isolation/stopping rules remain. No code, data correction, sampling, runtime, research success or merge has occurred in this recording task."
     }
   ],
   "external_provenance": [

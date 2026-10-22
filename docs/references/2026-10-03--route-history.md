@@ -170,5 +170,8 @@ Route-Id 是本歷史命名空間。這些都不能互相當成完整產品版�
 - **RH-20261022-03／amendment_proposed**（續接 RH-20261022-02）：同一 PR 逐字記錄 Operator 裁決：open 保留交易所語義；一般日成交額保留並列限制、疑點日用小時和，增加門檻雙算方向；驗收標準暫行同意；上市訊號與一般市場分離，三階段因果自適應方向同意。原文見 JSON `authority_source` 及[規範 §2／§6](../execution_plan/2026-10-22--r8-stage2-data-verification-standard.md)。
   門檻 X／Y／Z、冷卻期間、量定義、精確公式與介面仍未經 Operator 確認；conductor 指示成交額不套逐筆 G，價格／量仍嚴格對帳，揭露2020–2021可能大量未決的後果與15工作日投入限制。
   §17 仍待整份規範核准；TODO v917 的 DATA-VERIFY 保持 WAITING／不可派發，REPORT-TOOLS／P5 依賴其實作與驗收。舊文件雜湊固定至前一 PR head，新版本另列；未改程式、未取數、未套 BCH 候選、未合併。
+- **RH-20261022-04／amendment_accepted**（續接 RH-20261022-03）：Operator 以四項選項回覆核准剩餘參數與整份規範，原文逐字保存在 JSON `authority_source` 及[規範 §2.1／§6.4／§12](../execution_plan/2026-10-22--r8-stage2-data-verification-standard.md)：X=50%、Y=20%、Z=20%、W=7日、量A及均量相對差公式；啟動DV6；種子20261022、每層300可一次擴900、保守95%上界≤2.5%，連同下載／工時估計。
+  conductor方法論審查完成，規範與TODO v918的DATA-VERIFY ACTIVE／可派發列自PR #240合入main生效；DV1∥DV3、DV2依DV1介面、DV5∥DV6依DV2產物、DV4最後，六個交付的唯一身分／檔案與真實互通測試見§9，跨單元格式見§8.4。15工作日總上限不變。
+  舊年大量未決仍嚴格隔離／停止，待凍結稽核結果再由Operator決定A或B，不預選；實作與驗收尚未完成。舊文件身份固定至前一head，新雜湊另列；本輪不改程式、不取數、不套BCH候選、不更新Wiki、不合併，由conductor審查本輪提交並合併。
 - 新路線、採納、撤回、取代及更正按 [決策規則](../decisions/2026-10-03--route-history-versioning.md)
   追加事件；現行派工及效果授權仍回 TODO 與既有 ADR/AMD。

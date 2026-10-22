@@ -3,25 +3,25 @@
 | 欄位 | 內容 |
 |---|---|
 | 文件日期／時區 | 2026-10-22／Europe/Madrid；資料時間一律 UTC |
-| Route-Id／事件 | R8／起草 `RH-20261022-02`；裁決續錄 `RH-20261022-03` |
-| 狀態／效力 | **DRAFT — 待 conductor 方法論審查及 Operator 核准；核准前不生效** |
+| Route-Id／事件 | R8／起草 `RH-20261022-02`；方向裁決 `RH-20261022-03`；整份核准 `RH-20261022-04` |
+| 狀態／效力 | **APPROVED — Operator 2026-10-22 已核准；自 PR #240 合入 main 時生效** |
 | 記錄者／把關 | Codex 執行記錄者工作；Claude Code 擔任 conductor（Operator 2026-10-21 分工） |
 | 起草／整合基線 | 起草 main `6c96b8806cc472bcb9da39241f495930cea3d8a8`；整合 main `ea3cdae1dc767e2c4766199e599698d60640092c`（PR #239，研究核心程式未變） |
-| 工作項目 | `P1-R8-S2-DATA-VERIFY`；WAITING、`dispatchable=false` |
+| 工作項目 | `P1-R8-S2-DATA-VERIFY`；ACTIVE、`dispatchable=true`（本列與規範同一 PR 合入後生效） |
 | 本次交付 | 文件 PR；不改程式、不取數、不更動 P3b／帳本、不更新 Wiki、不合併 |
-| 起草與批准的區分 | Operator 已裁決 open、成交額處理及暫行驗收方向，同意上市期因果分類方向（§2.1、§6）；精確算法、X／Y／Z、冷卻期間、量的定義、介面配置與工作量仍為**記錄者展開，未經 Operator 確認**。方向裁決不等於整份規範核准 |
+| 核准與實作的區分 | Operator 以四項選項回覆核准剩餘參數、DV6、抽樣計畫及整份規範（§2.1、§6.4、§12）；conductor 方法論審查完成。核准不等於已合入、工具完成或資料驗收通過；舊資料未決後續 A／B 處置仍待凍結稽核結果 |
 
 ## 1. 目的、範圍與效力
 
 建立從發現、旁證、逐筆裁決、版本化更正，到物化與失敗記錄的同一條可重現流程，避免把「來源已保存」「週期相符」「逐筆檔可重建」混稱為資料絕對正確。
 適用於 R8 Bybit USDT 線性永續的研究 K 線 O/H/L/C、volume、turnover；資金費、持倉量的可讀範圍、來源與缺漏規則沿用既有契約，本規範不創造其新數值。
 
-本文件須經 Operator 核准、conductor 審查並合入 main 後，才可作後續實作的規則來源；實作仍另經派工、准入、驗收。文件合入不代表工具或更正檔已完成，更不代表 BCH 候選已套用。
+本文件已由 Operator 核准，conductor 方法論審查完成；自 PR #240 合入 main 時生效，作為 §9 六個交付的實作規則來源。各交付仍依指定身分、依賴及現行准入／驗收程序執行；本輪只完成核准登錄，由 conductor 審查本輪提交並合併。文件合入不代表工具或更正檔已完成，更不代表 BCH 候選已套用。
 本文件與 [P4 補充指令](2026-10-20--r8-stage2-p4-research-core-addendum.md) 的關係如下：
 
 - 保留 §3、§9.0 的 UTC、可知時刻、成交順序、策略可見性；保留 §9.8 的成本／作廢算法、§9.14 缺漏與填補期、§9.15 橫截面完整性閘門、§9.18 五項前檢及 §§12–16 的驗收／精度規則。
-- **只有核准後**，§4 第 4 點中 `source/`「原始切片」對被裁決列改為本文件 §8 的有效資料視圖；原字串另存，原 P3b 不動。§9.18 第 2 點「資料錯誤以 U1 修補交付處理」對本規範所涉已凍結 P3b K 線改走更正檔，不覆寫 U1。§9.18 的五項資料品質前檢只用一般市場階段，§6.3 明定上市族與一般族的視圖；交易規則本身不因階段改變。其餘不改。
-- §6 已裁決方向不得由實作者、假說程式或命令列另選舊方案；仍待裁決的參數與實施細節在核准前阻擋交付，不設暗含預設值。
+- **自本 PR 合入生效後**，§4 第 4 點中 `source/`「原始切片」對被裁決列改為本文件 §8 的有效資料視圖；原字串另存，原 P3b 不動。§9.18 第 2 點「資料錯誤以 U1 修補交付處理」對本規範所涉已凍結 P3b K 線改走更正檔，不覆寫 U1。§9.18 的五項資料品質前檢只用一般市場階段，§6.3 明定上市族與一般族的視圖；交易規則本身不因階段改變。其餘不改。
+- §6 已裁決參數、公式與介面不得由實作者、假說程式或命令列另選舊方案；變更須另經裁決／版本化，依規定計入試驗數。舊資料未決後的 A／B 處置不因本次核准預先選定。
 - holdout 的自動驗證是將來啟用條件；現行 U4 一律拒絕 holdout，仍受 `P1-R8-S2-LEDGER-FIXES` 的先保留試驗、再釋出、記錄每次物化及單次限制約束。本文件不提前打開 holdout。
 
 ## 2. 背景、授權來源與實證
@@ -54,11 +54,29 @@ Operator 2026-10-22 在對話中指示（本次 conductor 派工轉引）：
 
 > 「同意方向」
 
-這些是已裁決方向；具體門檻、公式及工程展開不是逐項批准。conductor 同輪要求成交額不套 G、揭露舊年未決風險、以上市期設計取代原 D3，並補工時與投入上限；這四項是方法論指示，不冒稱 Operator 原文。整份規範的正式簽核仍留在 §12。
+在 RH-20261022-03 記錄時，上述只裁決方向，具體門檻、公式與工程展開尚未逐項批准。conductor 同輪要求成交額不套 G、揭露舊年未決風險、以上市期設計取代原 D3，並補工時與投入上限；這四項是方法論指示，不冒稱 Operator 原文。
+
+本輪 conductor 續派轉錄 Operator 2026-10-22 的四項選項回覆，保存於 `RH-20261022-04`（follows=`RH-20261022-03`）：
+
+> 「中間值 (Recommended)」
+
+對應 X=50%、Y=20%、Z=20%、W=7日；q 採選項 A（每小時平均基礎幣成交量，首日按實有箱數），相對變異採 §6.3 均量相對差公式。
+
+> 「啟動 DV6 (Recommended)」
+
+對應 §6.2 第5點的 U6 決策輸入表介面與 §9 的 DV6，已啟動，不再是條件單元。
+
+> 「每層 300，可擴到 900 (Recommended)」
+
+對應 §4.5 全計畫：種子20261022、每層300、一次擴到900、保守95%上界≤2.5%，連同下載與工時估計。
+
+> 「核准並開始實作 (Recommended)」
+
+對應整份規範核准；依 conductor 本輪指示記錄方法論審查完成，規範與 ACTIVE 派工列自本 PR 合入 main 時生效。此處不代替合併事實或宣稱程式已開始執行；簽核見 §12。
 
 ### 2.2 固定實證來源
 
-以下簡稱 I、C、T；所有**市場觀測數字與來源證據雜湊**均引自這三份報告，不作本輪重新取數或獨立資料驗證的聲稱。§4、§6、§9 的設計數值／估算另明標為提議或由報告數字推算；本文件與 Git 基線的身份不屬市場觀測。
+以下簡稱 I、C、T；所有**市場觀測數字與來源證據雜湊**均引自這三份報告，不作本輪重新取數或獨立資料驗證的聲稱。§4、§6、§9 的設計數值已依本輪裁決固定，估算仍明標為規模情境或由報告數字推算；本文件與 Git 基線的身份不屬市場觀測。
 
 | 簡稱 | 本機來源（倉庫外，未隨本 PR 發布） | 引用內容 |
 |---|---|---|
@@ -81,7 +99,7 @@ P3b manifest：I §1 的 `b6519a7b2f5eae4759612690790ddb6680db62aa4e723427f51c21
 
 ## 3. 原則與共同資料契約
 
-本節的機械表示為**記錄者展開，未經 Operator 確認**。
+本節的機械表示隨整份規範獲核准，實作須遵循 §8.4 的固定資料格式。
 
 1. **原件不可變**：P3b raw bytes、requests、manifest、CSV 永不覆寫；新規則、新證據、新裁決均產生新版本，不在原件刪列、改字串或重新壓縮。
 2. **旁證不填值**：Binance／OKX 只作 L4 篩檢與 limitations；不得以外所數值填補、平均、投票或取代 Bybit。D/H/M 無無條件優先級；更多來源一致不等於正確。
@@ -113,7 +131,7 @@ P3b manifest：I §1 的 `b6519a7b2f5eae4759612690790ddb6680db62aa4e723427f51c21
 
 ## 4. 檢查層與統計抽樣
 
-以下精確定義與門檻均為**記錄者展開，未經 Operator 確認**；固定之後才能取數、執行或看結果。
+以下精確定義與門檻已隨整份規範核准；執行前須固定政策／計畫身份，不得看結果後調整。
 
 ### 4.1 L1：全部列的硬性有效性（DV-L1）
 
@@ -159,15 +177,15 @@ P3b manifest：I §1 的 `b6519a7b2f5eae4759612690790ddb6680db62aa4e723427f51c21
 
 ### 4.5 統計抽樣稽核（DV-SAMPLE）
 
-**提議計畫，未經 Operator 確認；本輪未抽樣、未下載。** 目的為估計「完整標的－日」依本規範可證實的錯誤及未決比例，不宣稱逐筆、逐列或全市場絕對錯誤率；沒有獨立市場真值時，本上界不能保證未被任何來源揭露的共同錯誤率。
+**已核准計畫（Operator 2026-10-22，選項「每層 300，可擴到 900 (Recommended)」）；本輪未抽樣、未下載。** 目的為估計「完整標的－日」依本規範可證實的錯誤及未決比例，不宣稱逐筆、逐列或全市場絕對錯誤率；沒有獨立市場真值時，本上界不能保證未被任何來源揭露的共同錯誤率。
 
 1. 母集合：當次可讀範圍內日界完整、原 CSV 已出現 UTC 00 至23時全部24個應有小時鍵、且無已知開／停市截短時窗的標的－日。這裡只以時間網格判完整，**不以 L1 通過或 L2 FULL 為抽樣資格**；價格／量／額錯誤、重複或額外列、L1/L2/L4 命中仍留在母集合，避免先排錯誤再估錯誤率。不可定位的壞時間戳使母集合無法可靠封存時停止抽樣，不悄悄剔除該資料集。部分／缺漏日另報，不能把本上界推到它們、未收錄標的或未開啟 holdout。訓練段固定 `[2020-01-01,2025-07-01)`；I 的 378,425 日只作候選量級，實際 N 由未來工具依本定義封存。
 2. 分層：UTC 年份 × 決策日 00:00 的流動性等級，使用 P4 §9.8.2 的四級（≥1億、≥1千萬且<1億、≥1百萬且<1千萬、不可開倉）。分類只用此前可讀的 12 完整日；歷史不足或無法形成該分級歸「不可開倉」，另記原因。為避免更正後重抽，**抽樣分層只用凍結原 P3b 值**，缺日以既有規則作 0；它不是正式交易的分級結果。訓練段最多 6 年×4級=24 層。
-3. 種子 `20261022`；排序規範與演算法釘為 Python 3.12 `random.Random(seed).sample`：層按 `(year,tier)` 排序，各層母集合按 `(symbol,YYYY-MM-DD)` ASCII 排序，以同一 RNG 依序抽出 `min(900,N_h)` 的不放回有序序列，先封存整個序列 SHA，前 `min(300,N_h)` 為基礎樣本。**每層 300、最多 7,200 日**；小層全查。新合法可讀範圍各自使用相同算法與種子，不能因此重開同一 holdout。
+3. 種子 `20261022`；排序規範與演算法釘為 Python 3.12 `random.Random(seed).sample`：層按年份遞增、tier按 §8.4 固定列舉順序排序，各層母集合按 `(symbol,YYYY-MM-DD)` ASCII 排序，以同一 RNG 依序抽出 `min(900,N_h)` 的不放回有序序列，先封存整個序列 SHA，前 `min(300,N_h)` 為基礎樣本。**每層 300、最多 7,200 日**；小層全查。新合法可讀範圍各自使用相同算法與種子，不能因此重開同一 holdout。
 4. 每個抽中日取得 Bybit 日逐筆、重建 D 及所有小時的六欄，走 C1–C5 與 §5。抽中但無檔、涵蓋矛盾、同戳多價或未完成者不替換樣本，記未決；下載中止時已凍結的未完成樣本仍在分母並計保守失敗。
 5. 逐層記 `N_h,n_h,e_h,u_h,s_h`：e=確認錯誤的日數（任一欄），u=尚未決的日數（與 e 去重；同日已確認錯誤歸 e），s=已選語義可解釋而保留的日數；另列各欄差異與原因。主報告為更正前 e/n 與保守 `(e+u)/n`，不能以更正後一致把已發現錯誤抹成零。
 6. 95% 上界使用**分層、不放回抽樣的超幾何反演**：H 為非空層數，α_h=0.05/H；對 x=e（另算 x=e+u），令 `M_h` 為 `[0,N_h]` 內滿足 `Pr[X≤x | X~Hypergeom(N_h,M_h,n_h)] ≥ α_h` 的最大整數，`U_h=M_h/N_h`；全查層直接用 x/N。全體估計 `Σ(N_h/N)(x_h/n_h)`、聯合至少 95% 的上界 `Σ(N_h/N)U_h`。每層另列單獨 95% 上界但不冒稱它們聯合 95%。抽樣隨機性以預登記 PRNG 設計為前提，關聯的行情數值不作 IID ticks 假設。
-7. 提議驗收：保守全體 95% 上界 **≤2.5%**；任何必要層未抽、規則無法執行或結果未封存，不得 PASS。24 大層各 300 且零錯誤／未決時，二項近似的保守設計值 `1−(0.05/24)^(1/300)≈2.037%`，實際必報上式有限母體結果；不是把 7,200 日當單一簡單隨機樣本套「零錯誤法則」。Operator 已暫同意此類驗收標準；具體抽樣參數及成本仍須隨規範正式核准（§6 D4）。
+7. 已核准驗收：保守全體 95% 上界 **≤2.5%**；任何必要層未抽、規則無法執行或結果未封存，不得 PASS。24 大層各 300 且零錯誤／未決時，二項近似的保守設計值 `1−(0.05/24)^(1/300)≈2.037%`，實際必報上式有限母體結果；不是把 7,200 日當單一簡單隨機樣本套「零錯誤法則」。Operator 已核准本計畫、精確參數與估計成本；同意驗收規則不等於已有通過結果（§6 D4）。
 8. **擴大規則先寫死**：基礎樣本任一 e>0 或 u>0，該層延伸至已凍結序列的 `min(900,N_h)`，最多合計 21,600 日，只擴一次；同一根因的一切已知命中按 L1–L3 處理。擴樣仍有新錯誤／未決即停止該層驗收、交 conductor／Operator，不無限下載或改門檻。擴大樣本為診斷，不用結果依賴的擴樣分母取代基礎樣本的主信心上界；更正後再驗作回歸，不能降低原錯誤率。未通過須另定新版本計畫，保留本次失敗。
 
 ### 4.6 下載量與執行預算估計
@@ -184,7 +202,7 @@ C §1 的 26 個壓縮逐筆檔共 **36,944,407 bytes**，均值約 **1.421 MB�
 
 ## 5. 逐欄裁決規則表
 
-本表的機械展開為**未經 Operator 確認**；D1／D2 的方向已裁決。先決條件 G = 目標時窗 C1–C5 全通過、所有來源身份／單位可核對、沒有同戳多價／涵蓋矛盾。**G 只適用 O/H/L/C 與 volume 的逐筆裁決，不適用 DV-A 成交額選擇。** 價格／量未決仍使整列 missing；DV-A 不得以成功選額掩蓋它。表中 T 是合格 Bybit 逐筆重建值，不是外所值。
+本表的機械展開已隨整份規範核准；D1／D2 的已裁決方向保持不變。先決條件 G = 目標時窗 C1–C5 全通過、所有來源身份／單位可核對、沒有同戳多價／涵蓋矛盾。**G 只適用 O/H/L/C 與 volume 的逐筆裁決，不適用 DV-A 成交額選擇。** 價格／量未決仍使整列 missing；DV-A 不得以成功選額掩蓋它。表中 T 是合格 Bybit 逐筆重建值，不是外所值。
 
 | 規則／欄位 | 證據組合 | 裁決與採值 | 保留／未決界線 |
 |---|---|---|---|
@@ -200,31 +218,31 @@ C §1 的 26 個壓縮逐筆檔共 **36,944,407 bytes**，均值約 **1.421 MB�
 量／額的 raw 與 CSV 浮點轉換差異另列 `SOURCE_REPRESENTATION_DIFFERENCE`；它不自動證明任一來源較正確，只有依本表具名裁決才改有效值。H/M 等新取來源也逐列 L1，不能把新的壞列當支持票。
 全列重跑後，L2 仍不同者必須逐差異有 KEEP 語義裁決或未決／缺漏，不能以更正檔存在即 PASS；證據支援有限欄位時不宣稱整根修好。
 
-## 6. 已裁決事項、上市期條文與尚待裁決
+## 6. 已裁決事項、上市期條文與舊資料後續處置
 
 ### 6.1 已裁決方向與原選項背景
 
-下列方向經 Operator 裁決；**記錄者展開的實施細節仍未經 Operator 確認**。正式核准須連同 §4 的抽樣／門檻、§5 的未決分支及 §8 來源視圖一起確認。
+下列方向及 §6.4 的剩餘參數已由 Operator 裁決；§4 抽樣／門檻、§5 未決分支及 §8 介面隨整份規範核准。原選項留作背景，實作不得自行重選。
 
 | ID／事項 | 已裁決 | 原選項背景與未採用部分 |
 |---|---|---|
 | D1／open | **選 A：保留交易所 K 線 open 語義**（可能延續前一根收盤），不以當根第一筆取代；只有原 O 違反 L1 時依 G／DV-O 證據更正 | 原 A 如左；原 B 為全部改第一筆成交，會改成交／訊號並需更廣逐筆證據。B 未採用；保留語義不等於已證明交易所歷史內部算法 |
 | D2／成交額 | **A 為一般日，B 限疑點日及門檻觸發雙算**；近似列限制，疑點日用小時加總與原值比對。增加觸發條件方向已同意，精確 ±5% 算法見 §6.2 | 原 A 全部保留原值；B 全部日額換小時和；C 疑點日／小時改逐筆 Σprice×size。Operator 採 A＋限定 B，未採全面 B 或 C。舊草案套 G／要求逐筆的限制由 conductor 明示撤除；單筆上限仍用原小時額 |
-| D3／部分交易日 | **由 §6.3 的三階段上市期設計取代**：觀測上市首日的部分日屬上市初期訊號，與一般市場分類分離；其餘因資料起訖／缺漏而部分的日，日頻訊號依缺漏規則處理 | 原 A 排除部分日日頻訊號、B 保留並預登記。Operator 選分類處理，並非無條件 A 或 B；尚未確認 X／Y／Z、冷卻期間與量的定義，不把資料起點當已證明真實上市 |
-| D4／可達驗收 | **暫行同意 A：L1–L3 全覆蓋＋預登記抽樣錯誤率的95%上界**；L1 全列、L2 全日、L3 全價格／量候選有裁決或未決終態（僅額選擇依 DV-A）。明認無法對全部列逐筆證明 | 原 A 含每層300／最多900、保守上界≤2.5%的提議；B 另定更嚴上界／樣本；C 全列逐筆證明（現階段不可達）。方向暫同意不等於抽樣已通過；具體參數、成本仍標未經 Operator 確認，不能事後放寬 |
+| D3／部分交易日 | **由 §6.3 的三階段上市期設計取代**：觀測上市首日的部分日屬上市初期訊號，與一般市場分類分離；其餘因資料起訖／缺漏而部分的日，日頻訊號依缺漏規則處理 | 原 A 排除部分日日頻訊號、B 保留並預登記。Operator 選分類處理，並非無條件 A 或 B；本輪已固定 X=50%、Y=20%、Z=20%、W=7日及選項 A 的量定義，不把資料起點當已證明真實上市 |
+| D4／可達驗收 | **已核准 A（沿用暫行驗收標準）：L1–L3 全覆蓋＋預登記抽樣錯誤率的95%上界**；L1 全列、L2 全日、L3 全價格／量候選有裁決或未決終態（僅額選擇依 DV-A）。明認無法對全部列逐筆證明 | 原 A 含每層300／最多900、保守上界≤2.5%的提議；B 另定更嚴上界／樣本；C 全列逐筆證明（現階段不可達）。本輪已核准具體抽樣參數與估計成本，仍不等於抽樣已通過，不能事後放寬 |
 
 ### 6.2 成交額：自報值選擇與雙算（DV-A）
 
 1. 一般日保留有效非負有限原值 `exchange_reported`，揭露 2020–2021 年近似及 T 的4個分級翻轉；疑點日為 L1／L2／L3／L4 標記日的聯集（含抽樣新發現），日額改為當日小時 turnover 加總 `sum_hourly_reported`，保存原值、差值、相對差（原值0則未定義）、小時鍵與來源 SHA。只選交易所自報彙總，**不過 G、不因此下載逐筆**；同日原有價格／量疑點仍照 L3 執行。
-2. **小時網格條件（記錄者展開，未經 Operator 確認）**：完整 UTC 日須24個唯一對齊小時，每個 turnover 有限且≥0；不因小時量與逐筆不合而否定這個自報額加總。價格／量未決仍依 §3.3 隔離所涉列，不能靠額選擇救回整列。觀測上市首日只可加上市首箱至23時的全部已閉合箱，標記 `PARTIAL`、記箱數，不外推24小時且不列為流動性完整日；其餘不完整日走缺漏，不把殘缺和冒稱完整日額。缺必要小時、重複、非法額則 `TURNOVER_INPUT_INCOMPLETE`／未決，依既有缺日為0的計算規則處理。
-3. **觸發規則（記錄者展開，未經 Operator 確認）**：在決策 t，只取 P4 §9.8.2 的此前12個完整曆日；不足12日仍不可開倉，缺日仍依既有規則為0。令 `M_D` 為原生日額中位數（12筆排序後第6、7平均，供對照），`M_E` 為疑點日選額後、實際供分級的同一窗口中位數；M_E 對任一 `T∈{1,000,000;10,000,000;100,000,000} USDT` 滿足 `abs(M−T)/T ≤ 0.05`（含邊界）即雙算。觸發以實際供分級的 M_E 為準，另保留 M_D 作原值比較；不能先看雙算結果再選觸發基準。
+2. **小時網格條件（已隨規範核准）**：完整 UTC 日須24個唯一對齊小時，每個 turnover 有限且≥0；不因小時量與逐筆不合而否定這個自報額加總。價格／量未決仍依 §3.3 隔離所涉列，不能靠額選擇救回整列。觀測上市首日只可加上市首箱至23時的全部已閉合箱，標記 `PARTIAL`、記箱數，不外推24小時且不列為流動性完整日；其餘不完整日走缺漏，不把殘缺和冒稱完整日額。缺必要小時、重複、非法額則 `TURNOVER_INPUT_INCOMPLETE`／未決，依既有缺日為0的計算規則處理。
+3. **觸發規則（已隨規範核准）**：在決策 t，只取 P4 §9.8.2 的此前12個完整曆日；不足12日仍不可開倉，缺日仍依既有規則為0。令 `M_D` 為原生日額中位數（12筆排序後第6、7平均，供對照），`M_E` 為疑點日選額後、實際供分級的同一窗口中位數；M_E 對任一 `T∈{1,000,000;10,000,000;100,000,000} USDT` 滿足 `abs(M_E−T)/T ≤ 0.05`（含邊界）即雙算。觸發以實際供分級的 M_E 為準，另保留 M_D 作原值比較；不能先看雙算結果再選觸發基準。
 4. 雙算須在同一12日窗口另求每個完整日的小時和，再求 `M_H`；原／有效日額與小時和的值、分級、已選來源逐項記錄。與 M_E 的分級不同時，以 M_H 對應的流動性級為準；若原 M_D 與 M_H 不同也必記錄。級別相同時保留疑點日替換後的既有選額。**±5% 是觸發雙算範圍，不是允許5%誤差**；沒有資料支持未來不會在帶外翻級。
-5. **決策輸入介面提議（未經 Operator 確認）**：疑點日的固定日額選擇由更正檔表達；觸發雙算則由 U4 另產生 `verification/turnover_decisions.jsonl`，以 `(symbol,decision_utc_day,policy_sha256)` 為鍵，逐日保存12個輸入日／來源、M_D／M_E／M_H、各級別、選用級別／中位數及原因、known_at／不完整狀態，SHA 寫入 manifest。這是決策輸入，不把它偽裝成某一日 K 線的靜態更正，也不因後來觸發追溯改寫先前日額。必要小時缺漏時不使用殘缺和；該輸入日按既有缺日為0處理並保留原因，不回退為未檢查原值。U5/U6 須對同一表及來源獨立核對規則；現行 U6 只由 `source/` 日額算中位數、不讀此表，因此這個具體方案需要 §9 的 DV6 對稱介面提案，由 conductor 確認後另派。上市階段只改可見性仍不需 U6 改動；不能把兩個原因混為一談。若改提現有 source 的相容方案，必須先證明每個 t 的因果性與選級一致，不能用全面改日額取代 Operator 的限定雙算。
+5. **決策輸入介面（已核准；DV6 已啟動）**：疑點日的固定日額選擇由更正檔表達；觸發雙算則由 U4 另產生 `verification/turnover_decisions.jsonl`，以 `(symbol,decision_utc_day,policy_sha256)` 為鍵，逐日保存12個輸入日／來源、M_D／M_E／M_H、各級別、選用級別／中位數及原因、known_at／不完整狀態，SHA 寫入 manifest。這是決策輸入，不把它偽裝成某一日 K 線的靜態更正，也不因後來觸發追溯改寫先前日額。必要小時缺漏時不使用殘缺和；該輸入日按既有缺日為0處理並保留原因，不回退為未檢查原值。U5/U6 須對同一表及來源獨立核對規則；現行 U6 只由 `source/` 日額算中位數、不讀此表，因此依 Operator「啟動 DV6 (Recommended)」，由 §9 的 DV6 交付實作此對稱介面，格式固定於 §8.4。上市階段只改可見性仍不需 U6 改動；不能把兩個原因混為一談。不得自行取消 DV6、改用追溯日額回寫或全面改日額取代已核准的限定雙算。
 6. 單筆上限始終取個別小時線的原 turnover；不因日額換和而改變。小時 close×volume 近似仍列 limitation，不能由日和較接近逐筆推論每小時精確。DV1／DV2 記選額與差異；DV4 驗4個已知翻轉、0跨不可開倉界線與0單筆上限變更的原分析案例，不把歷史觀測當未來保證。
 
 ### 6.3 上市期：三階段、成交量自適應與因果分類
 
-**方向經 Operator 同意；以下精確表示、公式、樣本估算與介面為記錄者展開，未經 Operator 確認。** 本分類不是「上市後走勢能預測報酬」的先驗結論；該問題只可作上市族研究假說。
+**Operator 已核准方向、精確表示、公式與介面；X=50%、Y=20%、Z=20%、W=7日，q 採選項 A。** 樣本量推算仍是估計，不升格為已觀測。 本分類不是「上市後走勢能預測報酬」的先驗結論；該問題只可作上市族研究假說。
 
 **觀測起點與時鐘。** `observed_listing_at` 為 P3b 中該標的第一根 volume>0 的小時箱起點，只在該箱收盤後可知；一併保存 instruments 的 `launchTime` 及來源身份，兩者絕對差>86,400,000毫秒標 `LISTING_TIME_MISMATCH`。conductor 提供的例子為 BCHUSDT／LINK／LTC／XTZ 的 launchTime=2018-01-01；本輪不另讀市場檔核實。觀測起點可能只是保存起點，不能改寫 launchTime，也不據其較早值虛構上市前資料。若真正首根位於不可讀範圍，記 `LISTING_ORIGIN_UNKNOWN`，不跨範圍尋找；未能以已合法保存的前綴狀態還原者阻擋階段發布。
 
@@ -233,11 +251,11 @@ C §1 的 26 個壓縮逐筆檔共 **36,944,407 bytes**，均值約 **1.421 MB�
 | 階段 | 允許結束日（自觀測首日計） | 在範圍內提前結束的條件；未滿足則至上限強制結束 |
 |---|---|---|
 | 初期 `initial` | 第1–3日 | `q_d / max(q_1,…,q_d) ≤ X/100`；分母為當時已知峰值。有效 q 不足／峰值0時不提前，至第3日結束 |
-| 中期 `middle` | 第7–15日 | 最近3日與7日 q 的相對變異收斂：提議 `abs(mean(q[d−2:d])−mean(q[d−6:d])) / mean(q[d−6:d]) ≤ Y/100`；須7個連續有效日，分母>0。不把此平均差指標冒稱標準差／CV；定義待裁決 |
+| 中期 `middle` | 第7–15日 | 最近3日與7日 q 的相對變異收斂：`abs(mean(q[d−2:d])−mean(q[d−6:d])) / mean(q[d−6:d]) ≤ Y/100`；須7個連續有效日，分母>0。已選此均量相對差，不把它冒稱標準差／CV |
 | 穩定過渡 `stabilizing` | 第15–30日 | `abs(median(q[d−6:d])−median(q[d−13:d])) / median(q[d−13:d]) ≤ Z/100`，須14個連續有效日、分母>0，且滿既有12完整日歷史要求 |
 | 一般市場 `ordinary` | 穩定過渡結束後 | 非新的可開倉保證；原流動性、缺漏、暖機與交易閘門全部保留 |
 
-**量與部分日提議。** q 為單一標的的「每個觀測小時箱平均基礎幣成交量」：`q_d=Σvolume_hour/m_d`。完整日 m=24；觀測上市首日 m 為首箱至23時應有箱數，全部箱須存在，零量箱也計分母，不以只計正量箱抬高平均、不外推補24箱。首箱可能在箱內才上市，這種整箱平均偏差單列 limitation。之後缺任一應有小時／量未決則該日 q 未定義，不刪去缺口縮短回看；只時鐘前進、不得以缺資料作「已冷卻」。日線／小時自報量差照 L3 處理，不因階段需求放寬 C3。
+**量與部分日（已選 A）。** q 為單一標的的「每個觀測小時箱平均基礎幣成交量」：`q_d=Σvolume_hour/m_d`。完整日 m=24；觀測上市首日 m 為首箱至23時應有箱數，全部箱須存在，零量箱也計分母，不以只計正量箱抬高平均、不外推補24箱。首箱可能在箱內才上市，這種整箱平均偏差單列 limitation。之後缺任一應有小時／量未決則該日 q 未定義，不刪去缺口縮短回看；只時鐘前進、不得以缺資料作「已冷卻」。日線／小時自報量差照 L3 處理，不因階段需求放寬 C3。
 
 **上限與歷史閘門。** 既有12完整日要求沿用 §9.8.2：自原首根小時線起經過12個完整曆日，缺日成交額仍按0計，不能改成「必須12個無缺漏觀測日」。因此已知起點的第30日強制結束與該歷史要求沒有衝突；階段標為一般仍不保證流動性／暖機／有效資料合格。起點不可知時依前述拒絕發布，不用推測階段通過交易閘門。
 
@@ -249,25 +267,27 @@ C §1 的 26 個壓縮逐筆檔共 **36,944,407 bytes**，均值約 **1.421 MB�
 
 **樣本數估計與未知。** I／T 只有638個訓練有資料標的，沒有經核實的上市事件清單；故本設計至多638個「觀測起點事件」，真實訓練段上市事件數／各階段可用量均 **UNVERIFIED**，不能把378,531個決策日當獨立上市樣本。若638事件全有三階段，且僅分冷卻／非冷卻兩類，平衡情境每階段每格約319事件；實際各格可為0–638，未知另列，同一事件跨階段非獨立。再細分6年×4流動性級×2狀態時，每階段48格，平均最多約13.3事件／格，屬上限量級推算而非觀測。第一代建議先只分上市族／一般族，上市族以三階段為描述、不再把冷卻交叉切成大量獨立假說；DV2／DV4 在既有可讀範圍內交付事件去重、各格 n、缺失與每假說樣本不足標記，未達技能硬門檻則停止該假說。
 
-### 6.4 仍待 Operator 裁決（選項、影響與記錄者建議）
+### 6.4 已裁決參數、介面與抽樣計畫
 
-以下全部**未經 Operator 確認**，建議不是執行預設：
+Operator 2026-10-22 的四項選項回覆與含義見 §2.1；以下已固定，原選項保留作背景。最後一列的舊年處置仍須等待實際凍結稽核結果。
 
-| 項目 | 選項及影響 | 記錄者建議 |
+| 項目 | 原選項背景 | 已裁決／後續處置 |
 |---|---|---|
-| X：初期峰值比 | 25%／50%／75%；小值較難提前退出，多待至第3日；大值較早退出 | 50%，作中間候選，不聲稱經資料最佳化 |
-| Y：3／7日相對變異 | 10%／20%／30%；小值較嚴、更多至第15日強制轉換；亦可改用 CV 收斂，但須另固定完整公式 | 20%，採 §6.3 明確的均量相對差；若 Operator 所指是 CV，先裁定定義再實作 |
-| Z：7／14日中位數差 | 10%／20%／30%；小值較嚴、更多留至第30日 | 20%，仍需14日有效量與既有12日歷史 |
-| W：冷卻期間 | 3／7／14個連續完整日；短窗敏感但易短暫觸發，長窗延遲且樣本少 | 7日；不足／缺漏記 unknown |
-| q 的量與頻率 | A 小時基礎幣 volume 的日均（首日按實有箱數）；B 小時 USDT turnover 的日均；C 只用完整日 volume 總量、首日不判量條件。A 較不受價格直接影響；B 跨標的金額可比但受價格與近似影響；C 簡單但首日訊號失去量判定 | A；階段只在同一標的內比較，冷卻另用日 USDT 額，不把兩種量混用 |
-| 成交額實施／抽樣 | 確認 ±5% 雙算、M_E 觸發及原 M_D 對照的來源身份；確認每層300、最多900、保守上界≤2.5%、下載與工時；或核准前另定版本 | 保留所列提議，先解決 §6.2 第5點的介面可表達性，不以全面日額替換迴避 |
-| 舊資料未決時的處置 | A 若實際稽核大量未決，2020–2021 年整體不納研究並揭露限制；B 另定成交量語義、重新驗證且保留原失敗；C 維持逐列隔離、上界不過就停止研究准入 | 目前維持 C，不預放寬；看到凍結稽核結果後由 Operator 決定 A 或 B，不能事後調容差後稱原標準通過 |
+| X：初期峰值比 | 25%／50%／75% | **50%**，選「中間值 (Recommended)」；不是以資料結果最佳化 |
+| Y：3／7日相對變異 | 10%／20%／30%；另議 CV | **20%**，採 §6.3 均量相對差公式，不採 CV |
+| Z：7／14日中位數差 | 10%／20%／30% | **20%**，保留14日有效量與既有12完整日歷史條件 |
+| W：冷卻期間 | 3／7／14完整日 | **7個連續完整日**；不足／缺漏記 unknown |
+| q 的量與頻率 | A 小時基礎幣 volume 日均；B 小時 USDT turnover 日均；C 只用完整日 volume 總量 | **A**：每小時平均基礎幣成交量，首日按實有應有箱數；冷卻另用日 USDT 額，公式見 §6.3 |
+| 成交額觸發雙算介面 | 原 DV6 為需確認的條件單元 | **「啟動 DV6 (Recommended)」**；保留 ±5% 觸發、M_E／M_D 對照及逐決策日輸入表，U6 獨立讀取與重算，不全面改日額 |
+| 抽樣計畫及估計成本 | 每層300／最多900或另定強度 | **「每層 300，可擴到 900 (Recommended)」**：核准 §4.5 全計畫、種子20261022、一次擴大、保守95%上界≤2.5%，連同下載與工時估計；估計不延長15工作日總上限 |
+| 整份規範 | 核准或繼續修訂 | **「核准並開始實作 (Recommended)」**；自 PR #240 合入 main 時生效，依 §9 身分派工 |
+| 舊資料未決時的處置 | A 若實際大量未決，2020–2021整年不納研究並揭露限制；B 另定成交量語義後重驗；C 維持逐列隔離、上界不過停止研究准入 | **目前維持 C，不預放寬；看到凍結稽核結果後由 Operator 決定 A 或 B**。本輪沒有預先選定 A／B，不能事後改容差後稱原標準通過 |
 
 舊年風險的可據範圍：C §6 的 BCH 2021-02-18 小時量總和較逐筆 Σsize **−0.68 BCH**，已足以證明至少一小時不可能逐位相等；相近差異在多個2020–2021疑點日出現。T 的完整日分母為2020年511日、2021年8,694日，共 **9,205個標的－日（約佔378,373完整日的2.43%）**，是可能受影響的年份範圍，**不是已證實9,205日全錯或全未決**。嚴格 C3 可能使早年層大量 `COVERAGE_CONFLICT`，抽樣擴大／停止，保守95%上界可能無法≤2.5%，大量列將依規則視缺漏；加權上界是否不過仍須實測，不能把2.43%當抽樣錯誤率。不能在本規範預先放寬 C3。
 
 ## 7. 第一筆更正候選：BCHUSDT 2020-12-14
 
-**第一筆候選，未套用；規範正式核准後由驗證工具依涵蓋／同戳檢查產生更正檔，不手動改資料。** 報告目前足以支持兩個候選價格，不足以把 §4.3 全部新條件標成通過。
+**第一筆候選，未套用；本規範已核准，合入生效且工具完成後由驗證工具依涵蓋／同戳檢查產生更正檔，不手動改資料。** 報告目前足以支持兩個候選價格，不足以把 §4.3 全部新條件標成通過。
 
 | 項目 | 原件／證據（I §1、C §3） |
 |---|---|
@@ -286,7 +306,7 @@ C §1 的 26 個壓縮逐筆檔共 **36,944,407 bytes**，均值約 **1.421 MB�
 
 ## 8. U4 物化、U5 資料視圖、U6 消費與失敗記錄
 
-本節為**記錄者展開，未經 Operator 確認**；是實作契約提議，尚非已支援介面。
+本節為已核准的實作契約；新介面仍須 DV1–DV6 實作與驗收，核准不等於現行程式已支援。
 
 ### 8.1 現行來源查核與 U6 不改的條件
 
@@ -295,23 +315,23 @@ C §1 的 26 個壓縮逐筆檔共 **36,944,407 bytes**，均值約 **1.421 MB�
 | 現行來源 | 已確認行為 | 對設計的約束 |
 |---|---|---|
 | `program_code/research/r8_engine/series.py`：`Materialization.__init__`（277–361） | manifest 用 `exact_keys`；只解析 `source/` 的 K 線／funding／OI CSV，K 線只收 60／D；驗切片 SHA、列數、時間、L1；讀 `symbol_properties_overlay.csv` | **不能新增 manifest 頂層鍵而聲稱 U6 自動相容**；有效 K 線須在同名 source 檔，不可只修 lean/custom |
-| 同檔 `liquidity`（403–414） | 日分級取 source 日線 `turnover`；單筆上限取 source 小時 `turnover` | 疑點日的日額須同步進 U5／U6；小時額保留。決策日觸發雙算的12日輸入若不能以現有 source 因果表達，須另派兩側對稱介面，不能只改 custom |
+| 同檔 `liquidity`（403–414） | 日分級取 source 日線 `turnover`；單筆上限取 source 小時 `turnover` | 疑點日的日額須同步進 U5／U6；小時額保留。決策日觸發雙算的12日輸入由已啟動 DV5／DV6 讀同一 DV2 表，兩側獨立核對，不能只改 custom |
 | 同檔 `rematerialize`、`_verify_identity`、`submit`（1460–1545） | `--u1` 只傳 U4 子程序，U6 不開原 U1；重新物化須與帳本 manifest SHA 及完整 `files` SHA 表相等 | U4 重跑須自動解析同一釘住的更正版本；不能需要 U6 尚未傳入的新 CLI 選項或依賴可變 latest |
 | `materialize.py`：`materialize`（238–325） | 同一來源列產生 source、lean、custom，`files` 記輸出與來源 SHA；原子發布 | 在此處統一疊加裁決／缺漏；不要讓三種視圖各用不同更正邏輯 |
 | `lean_runner.py`：`read_materialization`（178–197） | 核對 manifest SHA、lean/custom 檔案集合及雜湊、overlay；正式身份比對 files 表 | 證據檔放其他前綴，不掛為策略資料；U5/U6 一致不等於市場真值 |
 | `lean_algo/framework.py`：`_load_custom`、`_visible`；`lean_algo/rules.py`：`KnownRows`／`data_view`／`fit_fold`／`decide` | 目前載入日／小時及量額資料，依 known_at 截前綴；沒有上市階段／族別遮蔽 | **U5 必須改視圖**，涵蓋 score／fit／on_decision；目前階段依 known_at 截取。不能只在決策入口遮蔽而讓 fit 洩漏 |
 
 **結論分開記錄：上市階段若只改假說資料可見性，U6 不需改；U5 視圖必須改。** 保留完整有效 source 給市場成交／成本重算，上市族遮蔽不刪市場 source，不改訂單集合、成本／成交或可交易規則；假說仍回傳既有完整標的目標結構。若日後讓階段影響交易規則，U6 必須獨立實作同一算法，並以 U5／U6 **對方真實實作**交叉測試，不能用假替身或共用被驗函式冒充獨立重算。
-一般更正疊加與固定疑點日選額可沿用現有 U6；**門檻雙算的具體提案需新增 U6 對 U4 決策輸入的受控讀取**（§6.2.5／DV6，待 conductor 確認派工），不得籠統宣稱所有成交額新規則 U6 一概免改。若須新鍵、CLI、消費語義或交易規則，先交 conductor 調整派工與相互獨立檔案範圍；本 PR 不改任何程式。
+一般更正疊加與固定疑點日選額可沿用現有 U6；**門檻雙算已啟動 DV6，新增 U6 對 U4 決策輸入的受控讀取**（§6.2.5／§8.4），不得籠統宣稱所有成交額新規則 U6 一概免改。若須新鍵、CLI、消費語義或交易規則，先交 conductor 調整派工與相互獨立檔案範圍；本 PR 不改任何程式。
 
 ### 8.2 相容的疊加方案
 
-1. U4 用 P3b 固定 SHA＋已合入 `code_commit` 的政策／更正集索引選唯一核准版本；禁止 caller 自選其他值或 `latest`。提議核准 bundle 放 `--u1` 父目錄的 `verification-bundles/<bundle_sha256>/`，位於原 P3b 目錄之外；相對位置只是定位，信任以程式釘住的 digest 為準。重新物化不需要 U6 新參數；找不到或 hash 不符拒絕，不退回未驗資料。 此靜態索引方案只適用已合法可讀、可先驗證的範圍。holdout 不得預先產出更正集或假裝已知其 digest：未來須先承諾政策／工具／原來源身份，合法開啟後由同一固定流程自動產生唯一 bundle，再把結果 manifest SHA 綁定已保留的試驗並記帳，不讓人挑更正值。這種延後綁定須由 LEDGER-FIXES 及其 holdout 啟用派工另驗；尚未完成就保持拒絕。本節免改 U6 的結論不替尚未啟用的 holdout 介面背書。
+1. U4 用 P3b 固定 SHA＋已合入 `code_commit` 的政策／更正集索引選唯一核准版本；禁止 caller 自選其他值或 `latest`。核准 bundle 放 `--u1` 父目錄的 `verification-bundles/<bundle_sha256>/`，位於原 P3b 目錄之外；相對位置只是定位，信任以程式釘住的 digest 為準。重新物化不需要 U6 新參數；找不到或 hash 不符拒絕，不退回未驗資料。 此靜態索引方案只適用已合法可讀、可先驗證的範圍。holdout 不得預先產出更正集或假裝已知其 digest：未來須先承諾政策／工具／原來源身份，合法開啟後由同一固定流程自動產生唯一 bundle，再把結果 manifest SHA 綁定已保留的試驗並記帳，不讓人挑更正值。這種延後綁定須由 LEDGER-FIXES 及其 holdout 啟用派工另驗；尚未完成就保持拒絕。本節免改 U6 的結論不替尚未啟用的 holdout 介面背書。
 2. bundle 索引只綁版本與分片位置／digest，不含範圍外市場值或統計；U4 只解碼可讀範圍的裁決。先驗原值／原列定位再套用，按有效視圖產生同名 `source/kline_<symbol>_{D,60}.csv`、lean 與 custom；保留現有標頭與未改欄位原字串，改值以一般十進位字串寫出。
 3. 原 P3b 永不改；另把本視窗原字串切片存 `verification/original/<原檔名去掉.gz>`。裁決、品質結果與政策的可讀切片存 `verification/corrections.jsonl`、`verification/verification.json`、`verification/policy.json`；均加入既有 manifest `files`，用現有 `sha256,rows,first,last,source_file,source_sha256` 形狀。更正檔本身 SHA 必須實際寫入 files，limitations 摘要不可代替雜湊。
 4. 保留 `r8_materialization_v1` 的頂層鍵；更正版本、規範 SHA、原值與有效值關係放上述 evidence 檔，`limitations` 列未決、語義、外所覆蓋不足與近似。`source_file/source_sha256` 仍明指 P3b 的原檔身份，verification 證據另解釋衍生關係，不能把有效列冒稱原位元組。
 5. missing 列自 source、lean、相關 custom 一致移除，和原 gaps 取聯集、合併重疊且不雙計 count；沿用資料集鍵 `kline_hour/kline_day/open_interest/funding`。保留可讀範圍內原 `first_bar` 以區分上市前與資料隔離，不因首列被移除而把整個後續歷史變成未知上市；策略的實際可見性仍須有合格已收盤小時列。資金費與 OI 不被無關日線裁決移除。
-6. U4 依政策逐日產生 `verification/listing_regimes.jsonl`（標的、觀測起點／launchTime身份、known_at、當時階段、觸發原因、q輸入範圍／缺失、冷卻旗標），另輸出同內容的框架用 `custom/listing_regime/<symbol>.csv`；兩者 SHA 寫入既有 `files`，不增 manifest 頂層鍵。U5 應逐 t 截前綴，原始完整時間軸只在框架內；假說取得的是目前／過去階段及依族別已遮蔽的資料。預登記族別／政策 digest 在 U4 核對 hypothesis_id 的既有預登記記錄後寫入框架證據，不能由假說任選族別；缺綁定拒絕發布。現有精確 schema 若容不下必要綁定，先停並另派介面，不能把身份偷偷塞入策略可改參數。
+6. U4 依政策逐日產生 `verification/listing_regimes.jsonl`（標的、觀測起點／launchTime身份、known_at、當時階段、觸發原因、q輸入範圍／缺失、冷卻旗標），另輸出同一時間軸的框架必要投影 `custom/listing_regime/<symbol.lower()>.csv`（固定格式見 §8.4）；兩者 SHA 寫入既有 `files`，不增 manifest 頂層鍵。U5 應逐 t 截前綴，原始完整時間軸只在框架內；假說取得的是目前／過去階段及依族別已遮蔽的資料。預登記族別／政策 digest 在 U4 核對 hypothesis_id 的既有預登記記錄後寫入 §8.4 的 `verification/hypothesis_binding.json`，不能由假說任選族別；缺綁定拒絕發布。現有精確 schema 若容不下必要綁定，先停並另派介面，不能把身份偷偷塞入策略可改參數。
 7. 本 bundle 是框架的資料品質依據，不是策略特徵；不交出更正旗標、原值、外所值、來源清單或未來日的品質摘要。假說只看 §3.8 已可知且依 §6.3 族別過濾的有效資料與當時階段。現有 Python 同程序與靜態檢查不是完整隔離，保留殘餘風險，不宣稱程式絕無繞過可能。
 8. 同一版本／範圍須逐位元組重現，含 gzip、JSON、排序；更正版產生新的 manifest 及 trial 身份，不能覆蓋已開始／已提交試驗的輸入。舊 P4-D0／P4-D 物化與 run 只作歷史回歸，不能因舊檔未帶新證據而重寫歷史。
 
@@ -322,26 +342,66 @@ C §1 的 26 個壓縮逐筆檔共 **36,944,407 bytes**，均值約 **1.421 MB�
 - 已 begin_trial 後重新物化不符、驗證失敗或證據缺失：submit 拒絕；保留該 trial 與失敗證據，停止世代結算交 conductor，不裸用 finish_trial、刪掉 trial 或把它自動改為不計 K 的成功。帳本沒有新的 `data_quality` failure reason 時，不捏造已接受的狀態。
 - 現有帳本的 `result_summary/provenance`、manifest 身份與已知失敗途徑可引用上述證據；**它不自行驗證更正檔、filled_periods 或新增前置失敗語義**。計分開始後失敗、作廢／V/PBO 及 holdout 保留試驗缺口仍由 `LEDGER-FIXES` 管理。本規範不能把尚缺的帳本執法聲稱為已完成。
 
-## 9. 實作單元、檔案範圍與工作量提議
+### 8.4 跨單元資料格式與回傳形狀（固定契約）
 
-**全部為未來派工、未經 Operator 確認；本次不改程式。** 範圍互不重疊；各單元可讀他方介面，不得順手修改他方檔案。數值是人工作日的規模參考，不是必須等待的曆日或 Codex 計時承諾。
+以下新增介面由本規範寫死，實作者不得各自發明欄位、排序、包裝層或成功回傳值；缺欄、未知欄、重複鍵、錯誤型別／版本均拒絕並保留原因。既有 P4 `run_config`、`run.json`、帳本 `trial_record` 與 manifest 介面仍以補充指令 §§4、7 及其真實實作為準，不新增不相容包裝。
 
-| 單元 | 唯一可改檔案範圍（提議） | 交付／依賴 | 人工作日 |
+**共同型別與編碼。** 新 JSON／JSONL 使用 UTF-8、無 BOM，物件鍵字典序、分隔符 `,`／`:` 無額外空白、禁 NaN／Infinity，每物件後一個 LF；JSONL 每行一個完整物件。既有 `materialization.json` 繼續使用現行 canonical 編碼。市場量值為來源字串或一般十進位字串，時間為 UTC 毫秒整數，未知為 null，不拿空字串／0冒充未知。來源價格／量／額計算精確；q 的均量與相對差用整數縮放／有理數交叉相乘比較，不因重複小數捨入跨門檻。SHA-256 為64位小寫十六進位字串。路徑為安全相對路徑、禁止 symlink／`..`／絕對路徑；證據不跨可讀範圍。
+
+共同 `SourceRef` 物件的鍵固定為 `{kind,relative_path,url,sha256,row,request_id,list_index,byte_start,byte_end,trade_id,line_sha256}`。kind 為 `raw|csv|trade|instruments|policy|plan|report`；row 為原解壓檔含標頭的1起算行號，list_index／byte_start／byte_end為0起算（byte_end不含），request_id／trade_id為字串；不適用欄位 null，不可省略。已取得原件的 relative_path、sha256 必填，未取得者兩者 null 且上層 reason_code 必填；url 保存實際來源，離線產物可 null。source_refs 依 `(kind,relative_path或空字串,row或−1,list_index或−1,byte_start或−1)` 排序，不藉排序捏造逐筆撮合次序。
+
+| 產物／生產者→消費者 | 固定鍵／形狀、排序與狀態 |
+|---|---|
+| `policy.json`／規範固定、DV2封裝→各單元 | `{schema_version,standard_sha256,approval_event,p3b_manifest_sha256,listing,sampling,turnover,l4_price_threshold_pct}`；schema=`r8_data_verification_policy_v1`、approval_event=`RH-20261022-04`。listing=`{x_pct:"50",y_pct:"20",z_pct:"20",cooling_days:7,quantity:"hourly_base_volume_daily_mean",variation:"mean_relative_difference",stage_end_ranges:[[1,3],[7,15],[15,30]]}`；sampling=`{seed:20261022,base_per_stratum:300,max_per_stratum:900,max_expansions:1,confidence:"0.95",upper_limit:"0.025"}`；turnover=`{window_days:12,thresholds:["1000000","10000000","100000000"],trigger_pct:"5",general:"exchange_reported",suspect:"sum_hourly_reported"}`；L4門檻字串`"1"`。其餘演算法由 standard_sha256 固定；DV1／DV3可直接依本規範產生相同政策位元組作啟動輸入，不依賴DV2程式完成；DV2封裝時必核對同一SHA |
+| `sample_plan.json`／DV3→DV1、DV4 | `{schema_version,policy_sha256,p3b_manifest_sha256,readable,seed,strata}`；schema=`r8_verification_sample_plan_v1`；readable=`{start,end}`半開。strata逐項=`{year,tier,population_size,base_size,max_size,draws}`，按 `(year,tier)`；draws逐項=`{rank,symbol,day_start}`，rank從1開始，**保留抽樣順序**，先封存最多900序列，前base_size為基礎。tier固定 `GE_100M\|GE_10M\|GE_1M\|NO_OPEN`，排序按此列舉順序 |
+| `download_inventory.jsonl`／DV3→DV1 | 每列 `{schema_version,request_id,symbol,day_start,interval,source_kind,url,started_at,finished_at,http_status,api_status,byte_count,relative_path,sha256,status,reason_code}`；schema=`r8_verification_download_v1`，source_kind=`bybit_trade\|bybit_minute\|binance_hour\|okx_hour`，interval為`trade\|1\|60`字串；status=`AVAILABLE\|UNAVAILABLE\|SCOPE_INCOMPLETE\|SIZE_BLOCKED`。按 `(symbol,day_start,source_kind,interval,request_id)`；失敗仍一列、不替換抽樣，未回應欄位 null；相同SHA原件可重用但請求列保留 |
+| `findings.jsonl`／DV1→DV2、DV3、DV4 | 每列 `{schema_version,finding_id,symbol,dataset,interval,timestamp,field,rule_id,reason_code,source_refs,details}`；schema=`r8_data_finding_v1`；details固定為`[{name,value}]`，name唯一按字典序，value為字串或null。按 `(timestamp或−1,symbol,dataset,interval,field,finding_id)`；壞時刻不猜值，以SourceRef定位 |
+| `corrections.jsonl`／DV1→DV2、DV4 | 每列 `{schema_version,correction_id,symbol,dataset,interval,timestamp,field,original_value,candidate_value,corrected_value,unit,formula,evidence_kind,source_refs,coverage_status,order_status,rule_ids,decision,reason_code,row_action,policy_sha256,approval_event,supersedes}`；schema=`r8_data_correction_v1`，按 `(timestamp或−1,symbol,dataset,interval,field,correction_id)`；rule_ids去重字典序，supersedes為前版correction_id或null。decision／row_action與值限制沿§3.1；coverage_status=`PASS\|CONFLICT\|UNAVAILABLE\|NOT_APPLICABLE`，order_status=`UNIQUE\|TIMESTAMP_MULTI_PRICE\|UNAVAILABLE\|NOT_APPLICABLE`。DV-A不需逐筆，兩狀態可NOT_APPLICABLE，不能由此冒稱G通過 |
+| `verification.json`／DV1→DV2、DV3、DV4 | `{schema_version,status,policy_sha256,p3b_manifest_sha256,sample_plan_sha256,previous_corrections_sha256,review_refs,tool_commit,readable,counts,files,reason_codes}`；schema=`r8_data_verification_v1`，status=`READY\|BLOCKED`；readable同上，review_refs為排序的SourceRef陣列。非抽樣批次的sample_plan_sha256、首版previous_corrections_sha256可null，覆核尚未完成則review_refs=[]並記原因，不冒稱已覆核。counts固定為`{input_rows,checked_days,flagged_days,corrected_fields,unresolved_rows}`非負整數；files為相對檔名→`{sha256,rows}`，只含本bundle產物、不含自身避免循環；reason_codes去重字典序。READY只指本次驗證產物可交接，不等於抽樣或研究驗收通過 |
+| `verification/hypothesis_binding.json`／DV2→DV5、DV6 | `{schema_version,hypothesis_id,policy_sha256,family,registration_sha256}`；schema=`r8_verification_hypothesis_binding_v1`；family=`ordinary\|listing`，綁既有登記的身份／內容雜湊；不由策略選擇。不改帳本trial_record回傳形狀；無匹配登記拒絕發布 |
+| `verification/listing_regimes.jsonl`／DV2→DV5、DV4 | 每列 `{schema_version,symbol,day_start,known_at,observed_listing_at,launch_time,listing_time_mismatch,origin_refs,stage,reason_code,cooling,quantity_inputs,policy_sha256}`；schema=`r8_listing_regime_v1`，按 `(known_at,symbol)`；stage=`initial\|middle\|stabilizing\|ordinary`，cooling為true／false／null；origin_refs為觀測首箱及instruments身份的SourceRef陣列。quantity_inputs按day_start遞增，每項`{day_start,volume_sum,hour_count,status,source_refs}`，status=`FULL\|PARTIAL\|MISSING`；量未知時volume_sum=null、hour_count保留應有數。known_at為階段首次可知時刻；初期首筆為首箱結束，後續每日午夜依已閉合前綴寫當日階段，缺未來轉換欄位 |
+| `custom/listing_regime/<symbol.lower()>.csv`／DV2→DV5 | UTF-8／LF、**含標頭**，欄位次序固定`known_at,day_start,stage,reason_code,cooling,policy_sha256`；行按known_at遞增；cooling字面值`true\|false\|null`。只投影上列欄位，不在策略視圖暴露完整檔或未來時刻；不要套用現有無標頭custom檔的解析假設 |
+| `verification/turnover_decisions.jsonl`／DV2→DV5、DV6、DV4 | 每列 `{schema_version,symbol,decision_utc_day,known_at,policy_sha256,history_sufficient,inputs,m_d,m_e,m_h,tier_d,tier_e,tier_h,triggered,selected_source,selected_median,selected_tier,status,reason_codes}`；schema=`r8_turnover_decision_v1`，按 `(decision_utc_day,symbol)`，known_at=decision_utc_day午夜。inputs正好12項按日遞增，每項`{day_start,exchange_reported,effective_reported,sum_hourly_reported,daily_status,hourly_status,source_refs}`；各status=`VALID\|MISSING\|INVALID\|NOT_EVALUATED`。金額原值未知用null，僅求中位數時按既有缺日規則映射0；未觸發可不求小時和，hourly_status=NOT_EVALUATED，m_h／tier_h=null。tier用上述四級；selected_source=`effective_daily\|hourly_sum`。status=`READY\|BLOCKED`；BLOCKED時selected_*為null、reason_codes必填；READY且歷史不足仍selected_tier=NO_OPEN。same-key不同內容拒絕，不能把後來觸發反寫較早列 |
+
+新檔案均進既有 manifest `files`，metadata鍵仍是 `{sha256,rows,first,last,source_file,source_sha256}`；新JSONL的rows為物件數、first／last為已知UTC時刻最小／最大值（沒有時刻則null），單一JSON物件rows=1、first／last=null，CSV列數不含標頭。單一原檔衍生沿用其身份；多來源證據的source_file=`manifest.json`、source_sha256=原P3b manifest SHA，詳細來源列在檔內，不假稱由單一行情列產生。U5由runner驗證並將決策表作框架專用唯讀掛載；不交假說路徑或檔案內容。U6由DV6新增受控讀取；原日額從manifest已綁定的`verification/original/`可讀切片取得，有效日額／小時額從`source/`取得，不為核對而越界讀P3b；同時獨立用這些輸入與政策重算，拒絕偽造selected_*；不得匯入U5選級函式。
+
+**交接回傳形狀。** DV1驗證及DV3計畫／取數工具的新公開交接回傳值一律為 `{schema_version:"r8_verification_handoff_v1",status:"READY"或"BLOCKED",artifact_root,primary_file,primary_sha256,files,reason_codes}`；files映射相對檔名→`{sha256,rows}`，primary_file必須在files且SHA相同。若連主產物也未生成，primary_file／primary_sha256=null且status=BLOCKED；不得回true、tuple或另一層`result`包裝。artifact_root為呼叫者已指定的輸出根（不寫入可重現內容雜湊），其餘都可由產物驗證。U4 `materialize(...)`仍**直接回傳 manifest dict**，同時寫`materialization.json`；U5／U6的既有run／recompute回傳形狀不變，整合驗收直接讀真實結果的`recompute_passed`及`differences`，不能自行假設tuple／record包裝。
+
+## 9. 實作單元、交付身分、檔案範圍與工作量
+
+**六個單元均已獲准派工，DV6 已啟動；自本 PR 合入 main 時生效。本次仍只改文件。** 每個交付使用下列唯一身分，不能換ID重置審查額度。程式／測試／紀錄寫入範圍互不重疊，可唯讀他方介面；額外必改檔案先交 conductor，不順手擴檔。
+
+| 單元／交付身分 | 唯一可改檔案 | 交付內容與依賴 | 人工作日 |
 |---|---|---|---|
-| DV1 驗證與裁決工具 | 新增 `program_code/research/r8_data/verification.py`、`program_code/research/tests/test_r8_data_verification.py` | L1–L4、G 價格／量、DV-A 無 G 選額與雙算發現、逐欄證據／終態；消費 DV3 原件，不任意取數 | 3–5 |
-| DV2 U4 疊加及上市時間軸 | `program_code/research/r8_engine/materialize.py`、`program_code/research/tests/test_r8_engine_materialize.py`；新增 `program_code/research/r8_engine/data_verification_policy.json` | 更正疊加、manifest、逐日因果階段／觸發原因／族別綁定；來源與框架視圖一致。先釐清 §6.2.5 雙算介面；DV1、已裁決參數與預登記為前置 | 3–4 |
-| DV3 抽樣計畫與取數 | 新增 `program_code/research/r8_data/verification_fetch.py`、`program_code/research/tests/test_r8_verification_fetch.py` | 凍結清單／種子／分層／上界、有限下載與來源身份、大小預檢、一次擴大；下載授權另綁清單與限額 | 2–3；下載／解壓另計 |
-| DV4 記錄者整合驗收 | 新增 `docs/execution_plan/2026-10-22--r8-stage2-data-verification-check-record.md`；倉庫外日期 evidence 目錄 | 26日、4翻級、上市前綴／各格樣本量、全訓練 L1、抽樣與 P4 歷史重算；固定獨立預期，不改其他單元程式 | 1–2 |
-| DV5 U5 假說資料視圖 | `program_code/research/r8_engine/lean_algo/framework.py`、`program_code/research/r8_engine/lean_algo/rules.py`、`program_code/research/r8_engine/lean_runner.py`、`program_code/research/tests/test_r8_engine_lean.py` | 讀 DV2 階段／族別身份，score／fit／決策一致遮蔽，提供 t 的階段且不洩漏未來；不改成本、成交與交易規則 | 2–3 |
-| DV6 U6 對稱介面（條件單元） | 僅另派獲准後：`program_code/research/r8_engine/series.py`、`program_code/research/tests/test_r8_engine_series.py` | 上市視圖本身不需要本單元；§6.2.5 的決策時點額選擇提案需要此介面，U6 讀同一 U4 證據並獨立重算，與 DV5 真實實作交叉測試，不能共用選級函式。若證明現有 source 足夠則不啟動 | 額外1–2；待介面派工確認 |
+| DV1 驗證與裁決工具；`R8-S2-DATA-VERIFY-DV1-20261022` | 新增 `program_code/research/r8_data/verification.py`、`program_code/research/tests/test_r8_data_verification.py` | L1–L4、G價格／量、無G的DV-A、findings／corrections／verification及固定回傳；依本規範格式開工，可與DV3平行，消費其原件 | 3–5 |
+| DV2 U4 疊加、上市時間軸與成交額決策輸入表；`R8-S2-DATA-VERIFY-DV2-20261022` | `program_code/research/r8_engine/materialize.py`、`program_code/research/tests/test_r8_engine_materialize.py`；新增 `program_code/research/r8_engine/data_verification_policy.json` | **依DV1介面**：疊加裁決、manifest、listing_regimes、hypothesis_binding及turnover_decisions；政策按本規範固定，生產與消費資料逐位一致 | 3–4 |
+| DV3 抽樣計畫與取數工具；`R8-S2-DATA-VERIFY-DV3-20261022` | 新增 `program_code/research/r8_data/verification_fetch.py`、`program_code/research/tests/test_r8_verification_fetch.py` | 固定計畫／種子／分層／統計、有限取數及清單／大小預檢、一次擴大；**可與DV1平行**。真正取數另依已生效規範與派工的清單、可讀範圍及限額執行 | 2–3；下載／解壓另計 |
+| DV4 記錄者整合驗收；`R8-S2-DATA-VERIFY-DV4-20261022` | 新增 `docs/execution_plan/2026-10-22--r8-stage2-data-verification-check-record.md`；倉庫外本交付專屬 evidence 目錄 | **最後，依DV1–DV3、DV5、DV6**：26日、4翻級、上市前綴／樣本格數、全訓練L1、抽樣及P4歷史重算；不改其他單元程式來通過驗收 | 1–2 |
+| DV5 U5 資料視圖及決策輸入讀取；`R8-S2-DATA-VERIFY-DV5-20261022` | `program_code/research/r8_engine/lean_algo/framework.py`、`program_code/research/r8_engine/lean_algo/rules.py`、`program_code/research/r8_engine/lean_runner.py`、`program_code/research/tests/test_r8_engine_lean.py` | **依DV2產物**：t的階段、族別三入口遮蔽、讀取turnover_decisions並核對選級；不改單筆上限／成交規則 | 2–3 |
+| DV6 U6 讀取決策輸入表、獨立重算；`R8-S2-DATA-VERIFY-DV6-20261022` | `program_code/research/r8_engine/series.py`、`program_code/research/tests/test_r8_engine_series.py` | **已啟動，依DV2產物**：獨立核對12日原／有效／小時輸入與選級、身份及重物化一致；與DV5真實實作交叉測試，不匯入其選級函式。上市可見性本身仍不新增U6交易規則 | 1–2 |
 
-DV1–DV5 合計 **11–17人工作日**的規模參考；若啟動 DV6 為 **12–19人工作日**（大量下載另計），DV1／DV3 可在介面固定後並行，DV2→DV5→DV4 有依賴；不是延長投入上限授權。REPORT-TOOLS 保持另單元且只用一般市場階段；holdout 啟用仍待 LEDGER-FIXES。
+**依賴順序固定：** 本規範格式 → DV1 ∥ DV3；DV1介面 → DV2；DV2產物 → DV5 ∥ DV6；全部可用後 → DV4。平行是實作可同時開始，不免除跨單元真實互通測試；測試對方尚不可用時記待整合，保留同一交付身分，不以假函式充數。資料政策的事前固定由本規範／policy完成，不以尚未開工的P5假說預登記作工具開發前置；validation測試沿既有測試登記介面建立合法身份，不提前開holdout。
 
-**Codex 執行時間粗估（未經 Operator 確認）。** 現場參考：C 的整輪調查／取數／報告為約12分30秒（23:37:01–23:49:31 UTC），T 的全訓練成交額離線分析／報告為7分47秒；兩者都不是正式驗證工具的開發／獨立驗收時間。[P4-D §9](2026-10-21--r8-stage2-p4-d-check-record.md#9-b-段驗收執行時間量測與-p4-d-結案2026-10-22) U4 的1／100／1,087標的物化為0.954／10.772／66.626秒；100標的 runner 61.179秒，1,087標的因記憶體保護停止，38.469秒不能外推完成時間。
+**每單元至少一個真實對方測試（交付驗收硬條件）。** 依本機倉庫記憶 `memory/reference_codex_delivery_timers.md` 的2026-10-21補記：各自測試全綠不代表互通；資料格式、排列及回傳形狀須固定，至少一個測試使用對方真實實作。該記憶是本機來源，未隨本PR發布；以下把可攜要求完整寫入規範：
 
-依此只作排程情境：DV1 2–4小時、DV2 3–5小時、DV3程式／小型檢查1–2小時、DV5 2–4小時、DV4整合／凍結回歸／報告2–4小時，合計 **10–19個 Codex 執行小時**（可分派，不等於10–19人工小時；DV6 若啟動粗留1–3小時，總11–22小時；獨立審查排隊、CI等待與介面返工另計）。正式抽樣計算的吞吐尚未量測，先以100日的已核准前綴作資源量測，再報全量 ETA，不能用上述小案例保證完成。
+| 單元 | 最少一個必需的真實整合測試 |
+|---|---|
+| DV1 | 真正呼叫DV3產生sample_plan／inventory／保存原件，再由DV1解析與裁決；可用本機固定檔來源測傳輸邊界，不能假造DV3回傳物件取代其實作 |
+| DV3 | 以DV1真實verification／findings產物執行錯誤／未決計數及一次擴樣判定；同時把自身計畫／原件交給真實DV1驗收，不能各自假設schema |
+| DV2 | 消費DV1真實更正bundle，呼叫現有真實帳本登記／trial_record與U4 materialize，核對實際manifest dict及三種資料輸出；不以假ledger回傳格式過關 |
+| DV5 | 讀DV2真實物化、listing及turnover表，經真實U5視圖驗score／fit／決策遮蔽與前綴不變；至少一例將自身run交給DV6真實recompute作交叉核對 |
+| DV6 | 讀DV2真實物化及DV5真實run，獨立重算並核對`recompute_passed=true`、`differences=[]`；篡改選級／身份另須拒絕，不以假U5或共用規則生成唯一預期 |
+| DV4 | 將DV3→DV1→DV2實際產物接到固定映像U5→U6，按§10凍結獨立預期逐案比對；保留P4-D0／P4-D重算與所有非零殘差，不以模型自算預期代替證據 |
 
-下載另外估：10.23／30.69 GB 若有效速度10 MB/s，純payload約17／51分鐘；1 MB/s約2.84／8.53小時。另加7,200／21,600請求的限流、延遲、重試與其他L3／L4來源，實際可更長。解壓／逐筆解析沒有獨立吞吐證據，提議預留基礎1–4小時、擴大3–12小時作容量情境，**不是量測或完成上限**；先量測再派發。本輪未取數、未做該100日預檢。
+對方真實實作指受派單元的實際程式及其輸出，需記commit／檔案SHA、呼叫入口、輸入／輸出SHA與執行結果；抄一份對方算法、手工拼同形JSON、monkeypatch成lambda或只驗假物件都不算。單元內isolated測試仍可用固定fixture，但不能替代上述至少一例。DV4實跑輸入放共享的`/Users`路徑，不能假設`/private/tmp`已掛入Docker。執行者先依現場公開工具確認租約、有限審查時段與命令可用度；無可執行通道如實記未驗，交conductor處理，不改治理工具或另取身分繞過限額。
+
+DV1–DV6 合計 **12–19人工作日**的規模參考（大量下載另計）；不是延長15工作日投入上限的授權。REPORT-TOOLS保持另單元且只用一般市場階段；holdout啟用仍待LEDGER-FIXES。
+
+**Codex 執行時間粗估（隨計畫核准，仍非工期保證）。** 現場參考：C 的整輪調查／取數／報告為約12分30秒（23:37:01–23:49:31 UTC），T 的全訓練成交額離線分析／報告為7分47秒；兩者都不是正式驗證工具的開發／獨立驗收時間。[P4-D §9](2026-10-21--r8-stage2-p4-d-check-record.md#9-b-段驗收執行時間量測與-p4-d-結案2026-10-22) U4 的1／100／1,087標的物化為0.954／10.772／66.626秒；100標的 runner 61.179秒，1,087標的因記憶體保護停止，38.469秒不能外推完成時間。
+
+依此只作排程情境：DV1 2–4小時、DV2 3–5小時、DV3程式／小型檢查1–2小時、DV5 2–4小時、DV4整合／凍結回歸／報告2–4小時，DV1–DV5小計10–19小時，已啟動DV6另計1–3小時，合計 **11–22個 Codex 執行小時**（可分派，不等於人工工時；獨立審查排隊、CI等待與介面返工另計）。正式抽樣計算的吞吐尚未量測，先以100日的已核准前綴作資源量測，再報全量 ETA，不能用上述小案例保證完成。
+
+下載另外估：10.23／30.69 GB 若有效速度10 MB/s，純payload約17／51分鐘；1 MB/s約2.84／8.53小時。另加7,200／21,600請求的限流、延遲、重試與其他L3／L4來源，實際可更長。解壓／逐筆解析沒有獨立吞吐證據，計畫預留基礎1–4小時、擴大3–12小時作容量情境，**不是量測或完成上限**；先量測再派發。本輪未取數、未做該100日預檢。
 
 ## 10. 驗收與方法論自檢
 
@@ -370,11 +430,11 @@ DV1–DV5 合計 **11–17人工作日**的規模參考；若啟動 DV6 為 **12
 | `time-series-cv-protocol`：時序不 shuffle、purge／embargo、樣本與 per-fold 檢查 | **保留** P4 §9.1／§9.2／§9.11；DV-SAMPLE 的無放回資料品質抽樣不是訓練／測試切分，不可搬成 KFold。通用技能的 rolling 建議不覆蓋 R8 已採的 expanding 契約 |
 | `feature-engineering-protocol`：六類 leakage | **涵蓋邊界**：known_at／閉合 bar；不以品質或收益結果選模型／全期標準化；holdout／target 隔離；保留已下架標的與 §9.15 false；UTC 與重採樣界線；上市階段／族別視圖與部分日 D3。特徵本身的 shift(1)、target window 與逐特徵稽核仍由假說驗收執行 |
 | `crypto-microstructure-knowledge`：Bybit 邊界、funding 不固定8h、非零成本 | **保留**：外所只旁證、無跨所交易；歷史資金費時刻與 §9.8 成本照舊，D2 只改經核准的金額輸入，不查私人費率、不改現行交易風控 |
-| `doc-cross-reference`：正本、狀態與歷史分離 | **本文件交付檢查**：TODO WAITING、§17 不生效指向、JSON／人類路線事件、文件 hash、changelog 同步；簽核空白，不聲稱獨立方法論 PASS |
+| `doc-cross-reference`：正本、狀態與歷史分離 | **本文件交付檢查**：TODO ACTIVE（合入後生效）、§17 已核准指向、JSON／人類路線事件、文件 hash、changelog 同步；簽核依Operator選項回覆與conductor明示指令記錄，不冒稱本輪執行了獨立E2/E4驗證 |
 
 三項自問的答案：
 
-1. **每條規則能否機械執行？** L1–L4、C1–C5、取樣／上界／擴大、逐欄裁決均有輸入、精確比較與終態；D1／D2／D4 方向已裁決；上市參數、量定義與雙算介面尚未確認，屬明示阻擋，不讓實作者自行補決定。來源不足產生未決，不以人工「看起來正常」放行；決策輸入介面未實作則 `TURNOVER_POLICY_INTERFACE_UNSUPPORTED`／前置 BLOCKED，不能交付半套雙算。
+1. **每條規則能否機械執行？** L1–L4、C1–C5、取樣／上界／擴大、逐欄裁決均有輸入、精確比較與終態；D1–D4、上市參數／量定義、抽樣與雙算介面已固定，跨單元格式及至少一個真實對方測試由§8.4／§9寫死，實作者不得自行改約。來源不足產生未決，不以人工「看起來正常」放行；決策輸入介面未實作則 `TURNOVER_POLICY_INTERFACE_UNSUPPORTED`／前置 BLOCKED，不能交付半套雙算。
 2. **假說程式能否觀察或繞過它？** 驗證在 U4 前完成，政策由 code_commit／manifest 綁住，假說只能見依族別過濾、已可知的有效資料與當時階段，不能讀未來轉換時刻；原件／更正旗標／旁證不作特徵。現有靜態檢查與同程序模型仍有殘餘風險，不能回答為已證明絕無繞過；V5 需具體拒絕證據。
 3. **更正檔與帳本能否表達失敗？** 更正檔可表達每欄 KEEP／CORRECT／UNRESOLVED 及整列 missing，驗證報告可表達前置 BLOCKED；manifest／trial 身份可綁 evidence。帳本未實作的前置失敗原因與 holdout 路徑不能偽造，依 §8.3 停止並保留 trial／K，LEDGER-FIXES 未被繞過。
 
@@ -383,21 +443,22 @@ DV1–DV5 合計 **11–17人工作日**的規模參考；若啟動 DV6 為 **12
 - 無法對全部列逐筆證明；公開檔可能與 K 線共享錯誤，也可能不完整。雜湊證明版本一致，不是交易所簽章／撮合完整性認證；抽樣上界只約束定義的母集合與錯誤判準。
 - **2020–2021 大量未決風險**：C3 每小時量逐位相等，C 的 BCH 2021-02-18 已有小時總量−0.68；T 的這兩年9,205個完整標的－日（約2.43%完整日分母）只是可能影響範圍，不是錯誤率。多個舊年抽樣層可能大量 COVERAGE_CONFLICT、擴樣停止、保守95%上界無法≤2.5%，大量資料視缺漏。屆時可由 Operator 選整年不納入並列限制，或另定量語義後重驗；本規範不預放寬。C4 同戳多價的保守條件另可能擴大未決；缺漏改變研究樣本須揭露。
 - 來源同意與歷史期間不等於當時資訊：修正是事後修復研究資料，不證明當年可即時取得相同修正版；已完成 bar 的 known_at 保持，事後品質判斷不可變成新訊號。
-- 已裁決方向不列回未決；仍待確認的是 X／Y／Z／W、量與相對變異定義、觸發細節／雙算介面、抽樣及預算。全量外部覆蓋、逐筆完整性／同戳排序、歷史 tick、交易所內部 open 定義仍未驗；T 在所分析2022–2025H1完整日觀測D/H無差異，不證明逐筆真值或未來相同。
-- **投入上限**：R8 階段2–3合計上限為15個工作日，以實際工時記帳；本規範11–17人工作日的規模參考及抽樣將占相當部分，且不含其他R8工作，DV6啟動另增1–2人工作日。Operator 核准時須一併考量範圍、並行、實際剩餘工時與停止條件，不因Codex較快或下載等待而默認無成本／延長上限。
-- §8 是經來源查核的相容設計提議，尚未實作驗證；U5/U6 相符只驗引擎一致，不再驗一次更正真值。獨立方法論審查由 conductor 把關，本文自檢不替代。
+- 已核准的參數、量定義、公式、DV6、抽樣及估計成本不列回未決；舊年未決後A／B處置仍須凍結稽核結果再裁定。全量外部覆蓋、逐筆完整性／同戳排序、歷史 tick、交易所內部 open 定義仍未驗；T 在所分析2022–2025H1完整日觀測D/H無差異，不證明逐筆真值或未來相同。
+- **投入上限**：R8 階段2–3合計上限為15個工作日，以實際工時記帳；本規範含DV6的12–19人工作日規模參考及抽樣將占相當部分，且不含其他R8工作。Operator已連同估計核准；PM執行時仍須依實際剩餘工時與停止條件記帳、達上限回報，不因Codex較快或下載等待而默認無成本／延長上限。
+- §8 是經來源查核、已核准的介面契約，尚未實作驗證；U5/U6 相符只驗引擎一致，不再驗一次更正真值。獨立方法論審查由 conductor 把關，本文自檢不替代。
 - 全市場訓練物化、抽樣、擴樣、26日新規則回歸、P4 重算、holdout 自動流程本輪均 **NOT_RUN**；沒有資料修復、研究成功、模型可用、收益或交易效果結論。
 
-## 12. 簽核
+## 12. 簽核與生效
 
-以下正式簽核全部留空；已裁決方向及原文另在 §2／§6 和 RH-20261022-03 留痕，不將方向同意冒充整份規範批准。
+Operator 2026-10-22 以選項回覆核准，依本輪 conductor 續派轉錄；不捏造紙本簽名或新的審查報告。conductor 方法論審查完成依同輪明示指令登錄，本輪核准登錄提交的最終審查／合併仍由 conductor 執行。
 
-| 簽核／裁決 | 選項或結論 | 簽核人 | 日期／證據 |
+| 簽核／裁決 | 選項或結論 | 簽核人／權威來源 | 日期／證據 |
 |---|---|---|---|
-| conductor 方法論審查 | | | |
-| D1 open 語義 | | | |
-| D2 成交額 | | | |
-| D3 上市參數、量定義與邊界 | | | |
-| D4 驗收強度、抽樣與預算 | | | |
-| Operator 規範核准（含記錄者展開） | | | |
-| 生效版本／合入 main | | | |
+| conductor 方法論審查 | 完成；核准登錄後由 conductor 審查本輪提交並合併 | Claude Code／conductor 本輪指示 | 2026-10-22；RH-20261022-04、§2.1 |
+| D1 open 語義 | 保留交易所定義，僅L1失敗按證據更正 | Operator 原文裁決 | 2026-10-22；RH-20261022-03 |
+| D2 成交額與U6介面 | 一般日原值、疑點日小時和、觸發雙算；**啟動DV6** | Operator「啟動 DV6 (Recommended)」及前輪裁決 | 2026-10-22；RH-20261022-03／04 |
+| D3 上市參數、量定義與公式 | **X=50%、Y=20%、Z=20%、W=7日；量A、均量相對差公式** | Operator「中間值 (Recommended)」，對應內容由conductor逐項轉錄 | 2026-10-22；RH-20261022-04 |
+| D4 驗收、抽樣及估計成本 | **種子20261022、每層300、一次擴至900、保守95%上界≤2.5%**，連同下載與工時估計 | Operator「每層 300，可擴到 900 (Recommended)」 | 2026-10-22；RH-20261022-04；不延長15工作日總上限 |
+| Operator 整份規範核准 | **核准並開始實作**；依§9六個交付身分執行 | Operator「核准並開始實作 (Recommended)」 | 2026-10-22；RH-20261022-04 |
+| 生效版本／合入main | **自PR #240合入main時生效**；本輪未合併，合併commit及時刻由Git記錄 | conductor負責合併；不是Codex合併授權 | 待實際合併記錄，不預填合併SHA／時刻 |
+| 舊年未決後續A／B | 尚未選定；維持C，看到凍結稽核結果後再裁決 | Operator | 待凍結稽核結果 |
