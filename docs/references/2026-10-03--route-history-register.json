@@ -464,16 +464,32 @@
       "meaning": "R8 stage 2 core usage runbook verified against main bddd96d56: U4 materialization, U5 fixed-image LEAN execution and U6 recomputation, series, baselines, stress and ledger submission; section 10 documentation closeout, preserving mode boundaries, source binding, precision tolerance and known measurement/data limits; no new research or runtime authority."
     },
     "r8-stage2-p4-addendum-r2": {
-      "kind": "recorded_file",
+      "kind": "git_blob",
       "path": "docs/execution_plan/2026-10-20--r8-stage2-p4-research-core-addendum.md",
       "sha256": "d076d76a117a0c178e2c9b10431c989deed84ef1c9065b3b538e4d89db5c9e09",
-      "meaning": "Existing P4 addendum with section 17 pointing to the proposed data-verification standard; sections 1-16 unchanged, section 17 explicitly ineffective before Operator approval."
+      "meaning": "Existing P4 addendum with section 17 pointing to the proposed data-verification standard; sections 1-16 unchanged, section 17 explicitly ineffective before Operator approval. Historical proposed version preserved at PR #240 head before RH-20261022-03.",
+      "commit": "d3ae2b11e9ce2a9eaae96f76ca5523827b3a3b68",
+      "blob": "cf311d309dc163575d2a648b863cac3230b51d7e"
     },
     "r8-stage2-data-verification-standard": {
-      "kind": "recorded_file",
+      "kind": "git_blob",
       "path": "docs/execution_plan/2026-10-22--r8-stage2-data-verification-standard.md",
       "sha256": "b8c49ab78cb2658ea56ccd8a423667cfb9d9d6218bf5dd6e9e41e5baa0a7afbf",
-      "meaning": "Draft R8 research data verification and correction standard requested by the Operator and expanded by the recorder; immutable P3b, evidence-based corrections, L1-L4 and sampling, four pending rulings, disjoint implementation units and future acceptance. Pending conductor review and Operator approval; no data fetched, corrections applied or implementation accepted."
+      "meaning": "Draft R8 research data verification and correction standard requested by the Operator and expanded by the recorder; immutable P3b, evidence-based corrections, L1-L4 and sampling, four pending rulings, disjoint implementation units and future acceptance. Pending conductor review and Operator approval; no data fetched, corrections applied or implementation accepted. Historical proposed version preserved at PR #240 head before RH-20261022-03.",
+      "commit": "d3ae2b11e9ce2a9eaae96f76ca5523827b3a3b68",
+      "blob": "10bb95b2c83b8e71da0bd2fb695bf502e7118d52"
+    },
+    "r8-stage2-p4-addendum-r3": {
+      "kind": "recorded_file",
+      "path": "docs/execution_plan/2026-10-20--r8-stage2-p4-research-core-addendum.md",
+      "sha256": "a4667e7a921914195ebff6c152f4ecc342a25a18e7430180a43e79b314c5227a",
+      "meaning": "Section 17 points to the Operator-decision revision; sections 1-16 unchanged, complete standard still ineffective before formal approval."
+    },
+    "r8-stage2-data-verification-standard-r2": {
+      "kind": "recorded_file",
+      "path": "docs/execution_plan/2026-10-22--r8-stage2-data-verification-standard.md",
+      "sha256": "76b4779292a883e6688d764f9c8b9ce91ebf25da70e6960ff8a40a4b0da34389",
+      "meaning": "Operator-decided exchange open, reported-turnover selection without tick gate, provisional assurance and causal listing direction. Listing thresholds and recorder implementation details remain unconfirmed; no corrections or code executed."
     }
   },
   "routes": [
@@ -650,7 +666,9 @@
         "r8-stage2-p4-d-record",
         "r8-stage2-research-core-runbook",
         "r8-stage2-p4-addendum-r2",
-        "r8-stage2-data-verification-standard"
+        "r8-stage2-data-verification-standard",
+        "r8-stage2-p4-addendum-r3",
+        "r8-stage2-data-verification-standard-r2"
       ],
       "status_history": [
         {
@@ -790,6 +808,11 @@
           "recorded_on": "2026-10-22",
           "event": "RH-20261022-02",
           "note": "Operator requested cross-exchange evidence and a verification/correction standard; draft recorded pending conductor review and Operator approval. No approval of the proposed rules or correction values; record_status unchanged."
+        },
+        {
+          "recorded_on": "2026-10-22",
+          "event": "RH-20261022-03",
+          "note": "Records verbatim Operator decisions and agreed causal listing direction. Formal standard approval, listing thresholds and implementation confirmation remain pending; route record_status unchanged."
         }
       ]
     }
@@ -1958,6 +1981,41 @@
         }
       },
       "meaning": "Records the request and proposed standard, not approval of its rules. D1 open semantics, D2 turnover, D3 partial days and D4 attainable assurance/sampling remain pending; recorder expansions are explicitly unconfirmed. BCH open 272.95 and low 265.15 remain evidence-backed candidates, subject to approval and coverage checks. TODO DATA-VERIFY is WAITING and non-dispatchable until the approved standard is merged; downstream REPORT-TOOLS and P5 require implementation and acceptance completion, not merely the document merge. No implementation, data correction, holdout opening, runtime or trading effect is claimed."
+    },
+    {
+      "id": "RH-20261022-03",
+      "recorded_on": "2026-10-22",
+      "event_type": "amendment_proposed",
+      "route_ids": [
+        "R8"
+      ],
+      "follows": "RH-20261022-02",
+      "decision_ref": "docs/execution_plan/2026-10-22--r8-stage2-data-verification-standard.md",
+      "authority_source": "Operator 2026-10-22 conversation, verbatim as supplied in the conductor continuation: 「K线按照你建议的采取交易所定义」；「成交额我们先看我们具体需要这个数值多么准确再酌情照原值用并列为限制，疑点日采取小时成交额加总并比对原值。」；「上市日需要被记录为讯号，但必须要和其余市场信号做出明确分类上的区分，一定周期内应该被视为特殊。」；「验收标准暂时同意。」；「同意添加触发条件」；「上市期分三个阶段，初期1-3天中期7-15天。稳定15天到30天后。我认为有必要基于交易量判断时常。有的新币只是昙花一现，有的现象级但是很快冷却。所以我认为时常应该分类对待」；「同意方向」. The fifth quote agrees to adding turnover triggers after the accuracy analysis; the final quote agrees to the conductor causal three-stage listing direction. Conductor instructions A-D exempt reported turnover selection from G, disclose old-year quantity coverage risk, replace D3 with listing regimes, and require person-day/Codex estimates and the 15-workday budget warning. Those instructions and recorder expansions are distinct from Operator quotations. Same PR, no merge, no code changes, no market data fetching, no Wiki updates.",
+      "prior_record_identity": {
+        "standard": {
+          "commit": "d3ae2b11e9ce2a9eaae96f76ca5523827b3a3b68",
+          "path": "docs/execution_plan/2026-10-22--r8-stage2-data-verification-standard.md",
+          "blob": "10bb95b2c83b8e71da0bd2fb695bf502e7118d52",
+          "sha256": "b8c49ab78cb2658ea56ccd8a423667cfb9d9d6218bf5dd6e9e41e5baa0a7afbf",
+          "availability": "PR #240 head before the Operator-decision continuation"
+        },
+        "addendum": {
+          "commit": "d3ae2b11e9ce2a9eaae96f76ca5523827b3a3b68",
+          "path": "docs/execution_plan/2026-10-20--r8-stage2-p4-research-core-addendum.md",
+          "blob": "cf311d309dc163575d2a648b863cac3230b51d7e",
+          "sha256": "d076d76a117a0c178e2c9b10431c989deed84ef1c9065b3b538e4d89db5c9e09",
+          "availability": "PR #240 head before the Operator-decision continuation"
+        },
+        "todo": {
+          "commit": "d3ae2b11e9ce2a9eaae96f76ca5523827b3a3b68",
+          "path": "TODO.md",
+          "blob": "a77df483a9b46498e81a1107ca8aa99eeb14f9e3",
+          "sha256": "cca2b015361ad736317ee25e458fad5dbd252c06591dab1d457ad0080286b90a",
+          "availability": "PR #240 head before the Operator-decision continuation"
+        }
+      },
+      "meaning": "Records decided D1 exchange-open semantics, D2 exchange-reported amounts for general days with hourly sums for suspect days and trigger direction, provisional D4 assurance, and D3 causal volume-adaptive listing direction. X/Y/Z, cooling period, volume definition, precise algorithms/interfaces and whole-standard approval remain pending. Turnover does not require G or cause tick downloads; price/quantity still use strict G. BCH candidate open 272.95 and low 265.15 are not applied. U4 listing timeline and U5 family view are proposed; U6 is unchanged for visibility-only listing, while decision-dependent turnover interface compatibility must be established before implementation. DATA-VERIFY remains WAITING/non-dispatchable until formal approval and merge; downstream gates require implementation/acceptance. No runtime, data or research success claimed."
     }
   ],
   "external_provenance": [

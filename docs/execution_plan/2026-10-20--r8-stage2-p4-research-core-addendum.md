@@ -1240,4 +1240,4 @@ U4 的 5 項 MINOR 記在 PR #227，holdout 啟用時一併處理。其中最需
 
 ## 17. 研究資料驗證與更正規範（2026-10-22，待 Operator 核准）
 
-見[〈R8 研究資料驗證與更正規範〉](2026-10-22--r8-stage2-data-verification-standard.md)。**核准前不生效。**
+見[〈R8 研究資料驗證與更正規範〉](2026-10-22--r8-stage2-data-verification-standard.md) §6：已記錄 Operator 的 open、成交額、暫行驗收及上市期方向裁決；上市門檻與實施細節仍待確認。**整份規範核准前不生效。**
