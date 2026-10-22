@@ -83,7 +83,15 @@ v5.8 **補充** v5.7，v5.9 **凍結大部分實作並重排優先級**；不能
 |---|---|---|
 | R7／Bybit H2 | `52a884d93f774a5f625a7d2db4ebe6e2ec95b23a`，PR200 merge | 本次基線的 ancestor，source 已整合；不證明 Linux／PG／真 venue recovery |
 | R7／D1.1 | `4b5b6b0079b2b4614692b7df2e0185f6b4923d45`，feature checkpoint | 本次基線的非 ancestor 候選；不表示完整 D1.1、独立 review、main 採用或 serving 已完成 |
-| R8／Agent 實驗台融合 | [採納決策](../decisions/2026-10-07--r8-adoption-agent-experiment-bench.md)；[候選紀錄](../decisions/2026-10-03--r8-hybrid-research-candidate.md) | 方向採納與設計原則；尚無工程交付錨點，平台准入未驗收 |
+| R8／Agent 實驗台融合 | [採納決策](../decisions/2026-10-07--r8-adoption-agent-experiment-bench.md)；[候選紀錄](../decisions/2026-10-03--r8-hybrid-research-candidate.md) | 原記「方向採納與設計原則；尚無工程交付錨點，平台准入未驗收」；2026-10-22 依下列已合入 PR 補記 source 交付；平台准入仍未驗收 |
+| R8／階段 1 回放修補 | `a71b3f5b6571805ef04b457178c30535f85fe21f`，[PR #206](https://github.com/yunancun/Arcane-Equilibrium/pull/206) merge | 2026-10-22 補記：本次 main `c6610398a` 的 ancestor，source 已整合；不證明 runtime、Demo 或平台准入 |
+| R8／階段 1 後續 U6 CI | `e87ed25df0ca96df5d37e60c977e742826af4cb9`，[PR #209](https://github.com/yunancun/Arcane-Equilibrium/pull/209) merge | 2026-10-22 補記：本次 main `c6610398a` 的 ancestor，source 已整合；不證明 runtime、Demo 或平台准入 |
+| R8／階段 1 後續 U1–U5 | `b07df6daf13f428d5c37bd74211efd6657f797e1`，[PR #210](https://github.com/yunancun/Arcane-Equilibrium/pull/210) merge | 2026-10-22 補記：本次 main `c6610398a` 的 ancestor，source 已整合；不證明 runtime、Demo 或平台准入 |
+| R8／階段 2 研究核心 P4-D 結案 | `bddd96d56f86e07e6000a9e26f0bd8a93f66079a`，[PR #237](https://github.com/yunancun/Arcane-Equilibrium/pull/237) merge | 2026-10-22 補記：本次 main `c6610398a` 的 ancestor，source 已整合；不證明 runtime、Demo 或平台准入 |
+| R8／資料驗證 DV1／DV3 工具 | `1ea85a9a2128e2aaf9f70bf5bc462fd5c82a3527`，[PR #241](https://github.com/yunancun/Arcane-Equilibrium/pull/241) merge | 2026-10-22 補記：本次 main `c6610398a` 的 ancestor，source 已整合；不證明 runtime、Demo 或平台准入，亦非 DATA-VERIFY 全鏈／資料驗收 |
+| R8／資料驗證 DV7 v2 工具 | `c6610398a0046210c946b363631099c51c4a398a`，[PR #243](https://github.com/yunancun/Arcane-Equilibrium/pull/243) merge | 2026-10-22 補記：本次 main `c6610398a` 的 ancestor，source 已整合；不證明 runtime、Demo 或平台准入，亦非 DATA-VERIFY 全鏈／資料驗收 |
+
+2026-10-22 工程錨點補記（上述 PR）：登記簿 `source_adoption` 仍相對頁首固定的歷史來源觀察基線 `af12fc9e` 判定；這六筆晚於該基線，故沿既有值 `not_ancestor_of_recording_baseline`。本表另明列它們已是本次 main `c6610398a` 的 ancestor；不移動歷史基線，也不把文件同步 PR 算作工程交付。
 
 H1/H2、D1.1 是工程單元；AIML V2 是子計畫；TODO／PROGRESS 版號是帳本修訂；
 Route-Id 是本歷史命名空間。這些都不能互相當成完整產品版本。

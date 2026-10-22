@@ -1,9 +1,18 @@
 # CLAUDE_CHANGELOG.md — 開發歷史歸檔
 
 > 從 CLAUDE.md / TODO.md 遷出的 Wave/Sprint/Batch + TODO version-increment 歷史敘事。新 session 不需要讀此文件，僅供回顧歷史時查閱。
-> 最後更新：2026-10-22（PR #243 三項 P2 記錄者修正；TODO v923）
+> 最後更新：2026-10-22（R8 文件同步 A／B；TODO v924）
 
 ---
+
+## R8 文件同步 A／B：既有事件、工程錨點與現行佇列 — 2026-10-22
+
+- **A 部分已合入**：[PR #244](https://github.com/yunancun/Arcane-Equilibrium/pull/244)，merge `dc60260cf6f17427249f7d25f67d3e79fa2951fe`（2026-10-22 16:09:36 UTC），reviewed head `6ce3a4a6955dfb917754518994c429371fec70a1`。七檔為 `README.md`（階段 2 入口）、`docs/README.md`（archive 索引）、候選頁 `docs/decisions/2026-10-03--r8-hybrid-research-candidate.md`（採納註記）、階段 2 派工指令 `docs/execution_plan/2026-10-14--r8-stage2-local-research-dispatch.md`（表頭投入上限註記）、`docs/execution_plan/README.md`（P4-D0／P4-D／資料驗證規範索引）、可讀歷程 `docs/references/2026-10-03--route-history.md`、`docs/runbooks/README.md`（研究核心 runbook 索引）。可讀版補齊既有 `RH-20261021-01`／`02`／`03`、`RH-20261022-01`／`05`，與登記簿 32／32 事件對應；沒有新裁決。
+- **A 部分保留原文的修正**：依 `RH-20261022-01` 原句「The extension is recorded in this register and TODO, retaining the amendment and addendum text as written.」，修訂二及 P4 補充指令的投入上限註記已於 `6ce3a4a69` 撤回，兩檔保持 main 原文；保留階段 2 派工表頭註記。這兩檔不列入 A 的七檔，也不在 B 追加新版身分。
+- **A 部分驗證與審查**：只跑 `test_file_line_policy_static.py`（10 passed）與 `test_docs_readme_index_static.py`（7 passed），共 17 passed、0 failed；archive 索引項從基線 1 failed 轉為通過。測試期間工作樹未變。最終 head 八項必要 CI 全 SUCCESS，[CI run 39810933170](https://github.com/yunancun/Arcane-Equilibrium/actions/runs/39810933170) 成功；research／Rust／schema 等依路徑略過的工作仍為 SKIPPED。2026-10-22 16:07:27 UTC 的[自動審查回執](https://github.com/yunancun/Arcane-Equilibrium/pull/244#issuecomment-6345391321)為「Codex Review: Didn't find any major issues. Keep it up!」，無 findings／未解 thread；不是本次 B 重跑結果。
+- **B 部分（本 PR）**：以已含 #243／#244 的 `origin/main c6610398a0046210c946b363631099c51c4a398a` 同步四檔。TODO v923→v924：更新 R8 階段 2 現況、將 BCHUSDT 調查接回規範 §7／`RH-20261022-02`～`04`，補 DATA-VERIFY 與 DV7 全鏈依賴；規範核准及 P3b 前置標為已滿足；U5／U6、U1-FIX2、P4-D、§10 文件結案列追加實際合併註記（#231／#234／#237／#225／#238）。原文與歷史失敗保留；DATA-VERIFY 列、非 R8 各節、校準日期及來源觀察基線不動，驗收條件實質不變。
+- **B 部分工程與文件身分**：可讀表及登記簿新增 #206／#209／#210／#237／#241／#243 六筆 R8 merge 錨點，以 `gh pr view` 及 main ancestry 核對。`source_adoption` 沿既有 2026-10-03 `source_baseline=af12fc9e` 語義，六筆皆為 `not_ancestor_of_recording_baseline`，其已整合至本次 main 的事實另列；不把文件同步算作工程里程碑。A 七檔固定到 merge `dc60260cf` 的 commit／path／blob／SHA-256；保留候選頁與 #243 TODO／changelog 舊身分，追加本次 TODO、changelog、可讀表的 `recorded_file` 身分。沿 [Git 記錄方式](decisions/2026-10-03--route-history-versioning.md) 第 3–5 點及 #243 慣例，不新增 RH 事件、不改 `last_event_recorded_on`。
+- B 的指定兩檔結構測試、工作樹凍結、登記簿自檢、CI 及自動審查結果見本 PR 與倉庫外 `audits/2026-10-22-r8-docs-sync-b/`。本次只是文件同步，不是研究、runtime、Demo、平台准入或交易成果；不取數、不碰 Linux／資料庫／Demo／live、不更新 Wiki，由 conductor 審查及決定合併。
 
 ## R8 DV7 PR #243：三項 P2 記錄者續修 — 2026-10-22
 
