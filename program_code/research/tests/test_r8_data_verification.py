@@ -1082,7 +1082,7 @@ def dv7_main_verifier():
     import subprocess,types
     from program_code.research.r8_data import verification as current
     source=subprocess.check_output(['git','show',
-        '55586c1e919958bcac12437404ed7c164832a7fe:program_code/research/r8_data/verification.py'],cwd=SPEC.parents[2])
+        'a892fea5a171dd1b7fda421e7b2d4c3bf9c1de13:program_code/research/r8_data/verification.py'],cwd=SPEC.parents[2])
     module=types.ModuleType('_dv7_reviewed_main');module.__file__=current.__file__
     sys.modules[module.__name__]=module
     exec(compile(source,current.__file__,'exec'),module.__dict__)
@@ -1363,6 +1363,7 @@ def test_v2_frozen_sample_policy_mismatch_is_not_blanket_exempt(case):
 
 
 @pytest.mark.parametrize('standard',[
+ 'd0fbf9ff02d080027d575eb6488f2c552c3a583485b8c685166fe0ef94b2af98',
  'ba65fbca3b9230ad1807b82c923e9e60ab870edbe5c1e0d5090ebce99b06f6d0',
  'ad80220cd6dc3f8dc5c451c6281aa9f1b2acf7fbb47bc80ed21eb3905710110c',
  '125901d0341487bd058be70e7cc2ed27be7c3be270a45d05587e471104b7cacf'])

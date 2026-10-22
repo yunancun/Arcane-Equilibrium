@@ -1043,3 +1043,47 @@ def test_undetermined_partial_subset_is_consumed_as_unresolved(tmp_path):
     report=(tmp_path/'dual/sample_report.txt').read_text()
     assert 'n_error_policy=0 n_unresolved_policy=1 n_semantics_policy=0' in report
     assert 'PARTIAL_SUBSET_UNDETERMINED' in report
+
+
+@pytest.mark.parametrize('days', [32, 64])
+def test_dual_policy_semantic_row_access_is_linear(tmp_path, monkeypatch, record_property, days):
+    from program_code.research.tests.test_r8_data_verification import T, HOUR, bar
+    def configure(case):
+        case.readable = {'start': T, 'end': T+days*D}
+        # 首日提供真實抽樣層，其餘部分日擴大語義列而不增加原件包裝成本。
+        case.daily = [bar(T+d*D, volume='24' if d == 0 else '2',
+                          turnover='240' if d == 0 else '10') for d in range(days)]
+        case.hours = [bar(T+h*HOUR) for h in range(24)]+[bar(T+d*D) for d in range(1, days)]
+    root = tmp_path/'real'; v2_integration(root, configure)
+    original = v._VolumeEvidence.__init__
+    counts = {'calls': 0, 'rows': 0, 'symbol_reads': 0}
+    class CountedRow(dict):
+        def __getitem__(self, key):
+            if key == 'symbol': counts['symbol_reads'] += 1
+            return super().__getitem__(key)
+    def observe(self, sources, findings, report_sha, rows, *args, **kwargs):
+        counts['calls'] += 1; counts['rows'] += len(rows)
+        return original(self, sources, findings, report_sha,
+                        [CountedRow(r) for r in rows], *args, **kwargs)
+    monkeypatch.setattr(v._VolumeEvidence, '__init__', observe)
+    result = v.summarize_policies(root/'plan', [root/'bundle'], [root/'bundle-v2'], tmp_path/'measured')
+    assert result['primary_file'] == 'sample_report.txt', result
+    assert counts['calls'] == 2  # 主報表與巢狀 summarize_sample 均經真實消費端。
+    for key, value in counts.items(): record_property('semantic_'+key, value)
+    # The two sizes still fail the former quadratic implementation. Preserve
+    # both real consumer paths; whole-report bytes have a separate 26-day oracle.
+    assert counts['rows'] == 48*days
+    assert (tmp_path/'measured/sample_report.txt').read_bytes().count(b'\nmigration ') == days
+    assert counts['symbol_reads'] <= 20*counts['rows'], counts
+
+
+def test_frozen_main_v1_policy_survives_standard_document_update(tmp_path):
+    from program_code.research.tests.test_r8_data_verification import real_dv13_flow, dv7_reverify
+    root = tmp_path/'real'
+    flow = real_dv13_flow(root, frozen_standard='d0fbf9ff02d080027d575eb6488f2c552c3a583485b8c685166fe0ef94b2af98')
+    assert flow['summary']['primary_file'] == 'sample_report.txt'
+    before = (root/'plan/sample_plan.json').read_bytes()
+    assert dv7_reverify(root,flow)['status'] == 'READY'
+    result = v.summarize_policies(root/'plan',[root/'bundle'],[root/'bundle-v2'],tmp_path/'dual')
+    assert result['primary_file'] == 'sample_report.txt', result
+    assert (root/'plan/sample_plan.json').read_bytes() == before

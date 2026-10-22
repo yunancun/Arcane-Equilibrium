@@ -646,6 +646,48 @@
       "path": "docs/references/2026-10-03--route-history.md",
       "sha256": "450f60deabea4943e20f05df5a61c863224b4c032f91886315cf91fa79e5d84f",
       "meaning": "Conductor-assigned part B documentation synchronization of existing R8 source deliveries, TODO dependencies and A/B history; original decisions, source baseline and RH events retained. No new data acceptance, runtime or trading claim."
+    },
+    "r8-dv256-standard-erratum-4": {
+      "kind": "recorded_file",
+      "path": "docs/execution_plan/2026-10-22--r8-stage2-data-verification-standard.md",
+      "sha256": "afcb87578676c998b4ce7529c6e1c09d5214cfe7e8af53ad03d120781c696931",
+      "meaning": "Conductor-authorized DV2-R1/DV5/DV6 recorder publication and erratum four. Original stopped deliveries, E2/E4 states and original publication stop retained; R1 separately admitted without deadline reset. No merge or full training data acceptance claimed."
+    },
+    "r8-dv256-publish-todo-v925": {
+      "kind": "recorded_file",
+      "path": "TODO.md",
+      "sha256": "66ee3a9febfd08dcdd860f18b3c8804626e83ccfb1c2bf35e9bac3d38507f211",
+      "meaning": "Conductor-authorized DV2-R1/DV5/DV6 recorder publication and erratum four. Original stopped deliveries, E2/E4 states and original publication stop retained; R1 separately admitted without deadline reset. No merge or full training data acceptance claimed."
+    },
+    "r8-dv256-publish-changelog": {
+      "kind": "recorded_file",
+      "path": "docs/CLAUDE_CHANGELOG.md",
+      "sha256": "9ff04eee940631046dc064b97e4edf819f7d6c6ef6fe39f807d6a292ad0398b9",
+      "meaning": "Conductor-authorized DV2-R1/DV5/DV6 recorder publication and erratum four. Original stopped deliveries, E2/E4 states and original publication stop retained; R1 separately admitted without deadline reset. No merge or full training data acceptance claimed."
+    },
+    "r8-dv256-r2-todo-v926": {
+      "kind": "recorded_file",
+      "path": "TODO.md",
+      "sha256": "189f05ebb4e9ef7fa3370482f76cc1f5212daaf5ad59d7809c64a180ac4d28a2",
+      "meaning": "Conductor-authorized recorder R2 repairs for five confirmed PR246 findings. Both earlier recorder rounds and original stopped delivery review histories retained. No standard or rule change, no new RH decision, no merge."
+    },
+    "r8-dv256-r2-changelog": {
+      "kind": "recorded_file",
+      "path": "docs/CLAUDE_CHANGELOG.md",
+      "sha256": "2d1cadb10126d47aa409d954bed7d8058196288eb90cc550d923f4caea0410d4",
+      "meaning": "Conductor-authorized recorder R2 repairs for five confirmed PR246 findings. Both earlier recorder rounds and original stopped delivery review histories retained. No standard or rule change, no new RH decision, no merge."
+    },
+    "r8-dv256-r3-todo-v927": {
+      "kind": "recorded_file",
+      "path": "TODO.md",
+      "sha256": "fc287a255ddd445449c57fc2198caff66944740da7194ba2fe8d4c726a54d3a2",
+      "meaning": "Conductor-authorized recorder R3 repairs quarantined off-grid originals and five original-defect classes on PR246. Prior recorder and delivery histories retained. No standard or pin change, no new RH decision, no unchanged-head CI retry, no merge."
+    },
+    "r8-dv256-r3-changelog": {
+      "kind": "recorded_file",
+      "path": "docs/CLAUDE_CHANGELOG.md",
+      "sha256": "8e268c7116e97a296c925b34d3921122d4a34cbc9841ba88e75d0e955a294e5c",
+      "meaning": "Conductor-authorized recorder R3 repairs quarantined off-grid originals and five original-defect classes on PR246. Prior recorder and delivery histories retained. No standard or pin change, no new RH decision, no unchanged-head CI retry, no merge."
     }
   },
   "routes": [
@@ -2320,6 +2362,21 @@
         }
       },
       "meaning": "Records conductor-transcribed Operator B/e decisions, not market truth or implementation acceptance. Policy v2-terminal-suffix-20261022 permits multiple exact complete timestamp suffixes in one day; O retains v1/D1 and A retains DV-A; outside e, original unresolved/missing persists without b/b+D1 fallback. V1 evidence and section 4.5 remain unchanged; corrections count as pre-correction errors. DV7 is a bounded successor after merged #241, followed by DV2 and DV5/DV6, with DV4 last running frozen v1 then v2. Acceptance estimand remains for Operator after frozen results without a default. Document becomes effective on conductor merge; the pin-only source change remains v1-strict until DV7 merges. No v2 data correction, sampling, runtime, holdout or trading effects claimed."
+    },
+    {
+      "id": "RH-20261022-06",
+      "recorded_on": "2026-10-22",
+      "event_type": "open_item_decided",
+      "route_ids": [
+        "R8"
+      ],
+      "follows": "RH-20261022-05",
+      "decision_ref": "docs/execution_plan/2026-10-22--r8-stage2-data-verification-standard.md",
+      "authority_source": "Operator 2026-10-22 以選項回覆「批准新身分續作 (Recommended)」。conductor 本次派工要求照錄 DV2-R1 續作批准；原 DV2 在規範輸入缺口處停止、未使用任何審查額度，停止歷史保留。",
+      "operator_excerpt": [
+        "批准新身分續作 (Recommended)"
+      ],
+      "meaning": "Records the original Operator authorization for DV2 successor R8-S2-DATA-VERIFY-DV2-R1-20261022. Does not reopen stopped DV2-R1, DV5 or DV6, reset review budgets, or declare data acceptance. Recorder publication R1 is separately admitted under explicit conductor authorization and the unchanged original deadline."
     }
   ],
   "external_provenance": [
