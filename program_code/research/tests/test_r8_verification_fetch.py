@@ -874,6 +874,8 @@ def test_v2_partial_only_batch_reports_availability_without_random_sample_claim(
     report=(tmp_path/'dual/sample_report.txt').read_text()
     assert 'level=full_batch day_denominator=1' in report
     assert 'sampling_population=EMPTY_POPULATION' in report
+    assert 'batch_kind=purposive sampling=nonrandom upper_bound=NOT_APPLICABLE acceptance=NOT_APPLICABLE' in report
+    assert 'base denominator only' not in report
     assert 'level=base_stratum' not in report and 'conservative_upper=' not in report
     assert 'n_terminal_source_selected_days=1' in report
     assert 'ACCEPTANCE_TARGET_PENDING' in result['reason_codes']
@@ -927,3 +929,36 @@ def test_e2_004_both_missing_bundles_still_use_frozen_full_batch(tmp_path):
     assert 'day_denominator=2' in section
     assert 'n_error_v1=0 n_unresolved_v1=2 n_semantics_v1=0' in section
     assert 'n_error_policy=0 n_unresolved_policy=2 n_semantics_policy=0' in section
+
+
+def test_e2_004_extra_verified_day_is_only_a_separate_diagnostic(tmp_path):
+    from program_code.research.tests.test_r8_data_verification import T as start,HOUR,bar
+    def configure(case):
+        # C is a partial day outside the frozen full-day population; A and B
+        # are complete base days. Both real policy bundles still contain C.
+        case.first=start+6*HOUR
+        case.readable={'start':start,'end':start+3*D}
+        case.daily=[bar(start,volume='18.5',turnover='180'),
+                    bar(start+D,volume='24',turnover='240'),
+                    bar(start+2*D,volume='24',turnover='240')]
+        case.hours=[bar(start+i*HOUR) for i in range(6,72)]
+        case.trades=case.trades[6:]
+        case.trades.insert(1,dict(case.trades[0],timestamp='1609482600.0000002',size='0.5',trdMatchID='tail'))
+    root=tmp_path/'real';v2_integration(root,configure)
+    frozen=(root/'plan/sample_plan.json').read_bytes()
+    assert {d['day_start'] for s in json.loads(frozen)['strata'] for d in s['draws'][:s['base_size']]}=={start+D,start+2*D}
+    result=v.summarize_policies(root/'plan',[root/'bundle'],[root/'bundle-v2'],tmp_path/'dual')
+    assert result['primary_file']=='sample_report.txt',result
+    report=(tmp_path/'dual/sample_report.txt').read_text()
+    main=report.split('level=full_batch ')[1].split('level=base_stratum')[0]
+    assert main.startswith('day_denominator=2\n')
+    assert 'n_error_policy=0 n_unresolved_policy=2 n_semantics_policy=0' in main
+    assert 'n_terminal_source_selected_days=0' in main
+    diagnostic=report.split('level=verified_outside_base ')[1].split('field_evidence policy=')[0]
+    assert diagnostic.startswith('day_denominator=1\n')
+    assert 'main_denominator=excluded sampling=nonrandom upper_bound=NOT_APPLICABLE acceptance=NOT_APPLICABLE' in diagnostic
+    assert 'verified_days=[["TESTUSDT",1609459200000]]' in diagnostic
+    assert 'n_error_policy=1 n_unresolved_policy=0 n_semantics_policy=0' in diagnostic
+    assert 'n_terminal_source_selected_days=1' in diagnostic
+    assert (root/'plan/sample_plan.json').read_bytes()==frozen
+    assert 'acceptance_target=PENDING_OPERATOR_DECISION' in report

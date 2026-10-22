@@ -1111,7 +1111,9 @@ def summarize_policies(plan_root,v1_verification_roots,v2_verification_roots,art
                 bundles[version].append((root,detail['verification']))
             all_outcomes[version]=outcomes;all_rows[version]=rows;all_semantics[version]=semantics
         if set(all_outcomes['v1-strict'])!=set(all_outcomes[V2]):raise InvalidInput('FROZEN_SAMPLE_PAIR_MISMATCH')
-        lines=['sample_plan_sha256='+plan_sha,'base denominator only; expansion is diagnostic',
+        lines=['sample_plan_sha256='+plan_sha,
+               'base denominator only; expansion is diagnostic' if p['strata'] else
+               'batch_kind=purposive sampling=nonrandom upper_bound=NOT_APPLICABLE acceptance=NOT_APPLICABLE',
                'acceptance_target=PENDING_OPERATOR_DECISION']
         reasons=['ACCEPTANCE_TARGET_PENDING'];files={}
         if not p['strata']:
@@ -1125,13 +1127,19 @@ def summarize_policies(plan_root,v1_verification_roots,v2_verification_roots,art
             for name,meta in report['files'].items():files[folder+'/'+name]=meta
             lines += ['policy='+version,(Path(report['artifact_root'])/report['primary_file']).read_text().rstrip('\n')]
         frozen_base={(d['symbol'],d['day_start']) for s in p['strata'] for d in s['draws'][:s['base_size']]}
-        full_batch=frozen_base|set(all_outcomes['v1-strict'])
+        verified_days=set(all_outcomes['v1-strict'])
+        full_batch=frozen_base if p['strata'] else verified_days
         groups=[('full_batch',full_batch)]
         for s in p['strata']:
             groups.append((f"base_stratum year={s['year']} tier={s['tier']} N={s['population_size']}",
                 {(d['symbol'],d['day_start']) for d in s['draws'][:s['base_size']]}))
+        if p['strata'] and verified_days-frozen_base:
+            groups.append(('verified_outside_base',verified_days-frozen_base))
         for level,days in groups:
             lines.append(f'level={level} day_denominator={len(days)}')
+            if level=='verified_outside_base':
+                lines += ['main_denominator=excluded sampling=nonrandom upper_bound=NOT_APPLICABLE acceptance=NOT_APPLICABLE',
+                          'verified_days='+encoded(sorted([list(k) for k in days])).decode().strip()]
             for version,suffix in (('v1-strict','v1'),(V2,'policy')):
                 values=[all_outcomes[version].get(key,'u') for key in days]
                 lines.append(f'n_error_{suffix}={values.count("e")} n_unresolved_{suffix}={values.count("u")} n_semantics_{suffix}={values.count("s")}')
@@ -1170,7 +1178,7 @@ def summarize_policies(plan_root,v1_verification_roots,v2_verification_roots,art
                 detail={k:r[k] for k in ('symbol','interval','timestamp','field','decision','row_action','original_value','candidate_value','corrected_value','reason_code','source_refs')}
                 detail['reason_codes']=r.get('reason_codes',[r['reason_code']])
                 lines.append('field_evidence policy='+version+' '+encoded(detail).decode().strip())
-        for key in sorted(full_batch):
+        for key in sorted(frozen_base|verified_days):
             lines.append('migration '+encoded(dict(symbol=key[0],day_start=key[1],v1=all_outcomes['v1-strict'].get(key,'u'),v2=all_outcomes[V2].get(key,'u'),reason_codes=sorted({c for r in all_rows[V2] if (r['symbol'],r['timestamp']//DAY*DAY)==key for c in r['reason_codes']}))).decode().strip())
         data=('\n'.join(lines)+'\n').encode()
         return _emit(artifact_root,'sample_report.txt',data,len(data.splitlines()),reasons,files)
