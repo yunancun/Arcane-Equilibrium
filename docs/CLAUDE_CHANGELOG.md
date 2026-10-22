@@ -1,9 +1,17 @@
 # CLAUDE_CHANGELOG.md — 開發歷史歸檔
 
 > 從 CLAUDE.md / TODO.md 遷出的 Wave/Sprint/Batch + TODO version-increment 歷史敘事。新 session 不需要讀此文件，僅供回顧歷史時查閱。
-> 最後更新：2026-10-22（R8 成交量語義版本二裁決與 DV7 契約；TODO v920）
+> 最後更新：2026-10-22（PR #242 合入已審 main、勘誤二與來源補記；TODO v921）
 
 ---
+
+## R8 規範 PR #242：合入已審 main、勘誤二與來源補記 — 2026-10-22
+
+- 依 conductor 續派，將 PR #241 已審 main `1ea85a9a2128e2aaf9f70bf5bc462fd5c82a3527`（reviewed head `2b198b34c51f4d295177940dd15a2a37fa9fe30a`）以 merge 納入同一分支／PR #242，無衝突、不 rebase／force push。四筆既有程式修正與兩測試檔由 main 帶入；本輪自主程式修改仍只有 `verification.py:33` 的規範 SHA，其餘位元組與指定 main 相同。
+- [規範末尾勘誤二](execution_plan/2026-10-22--r8-stage2-data-verification-standard.md#勘誤二2026-10-22conductor-依-241-審查補記實作對應)依實際程式補記：DV3 既有 sample_report 交接原凍結擴樣前綴並進 L3、部分日起點的 DV-L2／DV-L4 診斷與 details、L2 涵蓋發現進成交額疑點日而不單獨進逐筆裁決日、DV3 缺證據按實際評估日保存且已認證 CORRECT 優先計 e。§8.4補可選文字報告及 files SHA；§4.5、§8.4.1及§13規則不改，v2仍待DV7實作。
+- §13.1照錄 conductor 2026-10-22 提供的 Bybit／pybit／Tardis／CoinAPI／Coinpaprika／Mobula 來源連結，全部只作一般性背景；沒有一則回報 Bybit 尾段漏計或首日 open=0，記錄者本輪未自行連網核對，根因仍為推論。
+- 登記簿將初稿 v2 文件凍結為 `7cf0ff1b` 的 Git 物件，另錄勘誤二的最終文件 SHA；保留所有 RH 事件、裁決及 `last_event_recorded_on=2026-10-22`。TODO v920→v921：因本輪更新 DATA-VERIFY 的 #241 已合入／#242 已整合狀態，版本加一；只改版本行與該列，其餘列不動。
+- 三個舊審查 thread 依 #241 實際修正提交回覆並 resolve；擴樣主修在 `256dcd4c6`，`fb89a9ccd` 為缺失原件的未決補正，部分日修正為 `2b198b34c`。指定兩個結構檔、DV1／DV3／全部 R8 的固定工作樹驗證、目前 head CI 與新審查結果見同一 PR 及倉庫外 `audits/2026-10-22-r8-data-verify-v2-main-followup/`。不取數、不碰 Linux／資料庫／Demo／live、不開 holdout、不更新 Wiki、不合併 PR。
 
 ## R8 資料驗證規範版本二：尾段補入、逐筆為準 — 2026-10-22
 

@@ -362,6 +362,7 @@ Operator 2026-10-22 的四項選項回覆與含義見 §2.1；以下已固定，
 |---|---|
 | `policy.json`／規範固定、DV2封裝→各單元 | `{schema_version,standard_sha256,approval_event,p3b_manifest_sha256,listing,sampling,turnover,l4_price_threshold_pct}`；schema=`r8_data_verification_policy_v1`、approval_event=`RH-20261022-04`。listing=`{x_pct:"50",y_pct:"20",z_pct:"20",cooling_days:7,quantity:"hourly_base_volume_daily_mean",variation:"mean_relative_difference",stage_end_ranges:[[1,3],[7,15],[15,30]]}`；sampling=`{seed:20261022,base_per_stratum:300,max_per_stratum:900,max_expansions:1,confidence:"0.95",upper_limit:"0.025"}`；turnover=`{window_days:12,thresholds:["1000000","10000000","100000000"],trigger_pct:"5",general:"exchange_reported",suspect:"sum_hourly_reported"}`；L4門檻字串`"1"`。其餘演算法由 standard_sha256 固定；DV1／DV3可直接依本規範產生相同政策位元組作啟動輸入，不依賴DV2程式完成；DV2封裝時必核對同一SHA |
 | `sample_plan.json`／DV3→DV1、DV4 | `{schema_version,policy_sha256,p3b_manifest_sha256,readable,seed,strata}`；schema=`r8_verification_sample_plan_v1`；readable=`{start,end}`半開。strata逐項=`{year,tier,population_size,base_size,max_size,draws}`，按 `(year,tier)`；draws逐項=`{rank,symbol,day_start}`，rank從1開始，**保留抽樣順序**，先封存最多900序列，前base_size為基礎。tier固定 `GE_100M\|GE_10M\|GE_1M\|NO_OPEN`，排序按此列舉順序 |
+| `sample_report.txt`（可選）／DV3→DV1 | DV3 既有 UTF-8／LF 文字報告；首行 `sample_plan_sha256=<原凍結計畫 SHA>`，第二行 `base denominator only; expansion is diagnostic`。有 e 或 u 的層宣告 `required_prefix=<該層 max_size> max_expansions=1`；DV1 經 `verify(..., sample_report_path=...)` 驗證計畫／分層身分，將該層 `draws[base_size:max_size]` 納入 L3。交接成功時原報告 bytes 一併存入 bundle，`verification.json.files` 及 handoff `files` 均以 `sample_report.txt`→`{sha256,rows}` 綁定（rows 為文字行數）；無此輸入則不產生此可選檔。這是 §4.5 第8點的實作對應，詳末尾勘誤二，不改主分母或抽樣規則 |
 | `download_inventory.jsonl`／DV3→DV1 | 每列 `{schema_version,request_id,symbol,day_start,interval,source_kind,url,started_at,finished_at,http_status,api_status,byte_count,relative_path,sha256,status,reason_code}`；schema=`r8_verification_download_v1`，source_kind=`bybit_trade\|bybit_minute\|binance_hour\|okx_hour`，interval為`trade\|1\|60`字串；status=`AVAILABLE\|UNAVAILABLE\|SCOPE_INCOMPLETE\|SIZE_BLOCKED`。按 `(symbol,day_start,source_kind,interval,request_id)`；失敗仍一列、不替換抽樣，未回應欄位 null；相同SHA原件可重用但請求列保留 |
 | `findings.jsonl`／DV1→DV2、DV3、DV4 | 每列 `{schema_version,finding_id,symbol,dataset,interval,timestamp,field,rule_id,reason_code,source_refs,details}`；schema=`r8_data_finding_v1`；details固定為`[{name,value}]`，name唯一按字典序，value為字串或null。按 `(timestamp或−1,symbol,dataset,interval,field,finding_id)`；壞時刻不猜值，以SourceRef定位 |
 | `corrections.jsonl`／DV1→DV2、DV4 | 每列 `{schema_version,correction_id,symbol,dataset,interval,timestamp,field,original_value,candidate_value,corrected_value,unit,formula,evidence_kind,source_refs,coverage_status,order_status,rule_ids,decision,reason_code,row_action,policy_sha256,approval_event,supersedes}`；schema=`r8_data_correction_v1`，按 `(timestamp或−1,symbol,dataset,interval,field,correction_id)`；rule_ids去重字典序，supersedes為前版correction_id或null。decision／row_action與值限制沿§3.1；coverage_status=`PASS\|CONFLICT\|UNAVAILABLE\|NOT_APPLICABLE`，order_status=`UNIQUE\|TIMESTAMP_MULTI_PRICE\|UNAVAILABLE\|NOT_APPLICABLE`。DV-A不需逐筆，兩狀態可NOT_APPLICABLE，不能由此冒稱G通過 |
@@ -573,6 +574,18 @@ V §3.3：24個負差小時有23個完整尾段精確見證，13日、55筆。**
 
 **conductor 2026-10-22 網路搜尋背景（轉錄，記錄者本輪未連網搜尋）**：公開社群、GitHub issue、資料商文件中未找到 Bybit K 線漏計尾段成交、首日 open=0 的回報或官方說明；業界一般做法是由逐筆重建 OHLCV（Coinpaprika、Mobula），資料商亦說明交易所 K 線與逐筆可能不一致（CoinAPI）。此為背景，不是根因證明；「原 K 可能在最後若干成交前停止更新」仍只是推論，沒有官方內部成因證明。未提供逐頁 URL／搜尋封存，本文不捏造引用或將「未找到」寫成不存在。
 
+**搜尋背景來源補記（conductor 2026-10-22 網路搜尋；本次續派提供）**：上段「未提供逐頁 URL」保留為初稿記錄，以下補列 conductor 提供的來源；記錄者本輪未自行連網核對。
+
+- [Bybit V5 Get Kline](https://bybit-exchange.github.io/docs/v5/market/kline)。
+- [Bybit FAQ（成交額計價幣）](https://bybit-exchange.github.io/docs/zh-TW/faq)。
+- [pybit issue #266（volume／turnover 回傳對調，結案不處理）](https://github.com/bybit-exchange/pybit/issues/266)。
+- [Tardis.dev Bybit Derivatives](https://docs.tardis.dev/historical-data-details/bybit)；[Tardis.dev FAQ](https://docs.tardis.dev/faq/data)。
+- [CoinAPI（交易所 K 線與逐筆不一致的原因）](https://www.coinapi.io/blog/crypto-candles-not-matching-ohlcv-explained)。
+- [Coinpaprika（由逐筆重建 OHLCV、邊界慣例）](https://coinpaprika.com/education/ohlcv-data-crypto-chart/)。
+- [Mobula changelog 2026-03-17](https://docs.mobula.io/changelog/2026-03-17)。
+
+以上均為一般性背景，沒有任何一則回報 Bybit 尾段漏計或首日 open=0；此句依 conductor 搜尋結果轉錄，不是記錄者另行查證，亦不改變根因仍為「推論」的界線。
+
 ### 13.2 每小時唯一分類與日適用域
 
 輸入固定為原件 SHA、合約／單位、授權 UTC 半開小時箱、**未更正 P3b CSV 的原 H.V** 與箱內完整已保存逐筆 T_h；raw 保留作對照。沿 §3 精確 Decimal／整數縮放，不用 binary64、容差、移時、刪筆或跨箱補筆。先驗 C1／C2、身分與可讀界線；缺原小時、身分不確定、跨界、C1 無效或 C2 衝突全部不放行。
@@ -683,3 +696,14 @@ DV7 的 DV3 統計輸出依 V §15 固定五個分項，分母與層級（全批
 總計 v1 **7 include／19 missing**，v2 **15 include／11 missing**；(e) 適用13日、23小時、55尾筆。13適用日的日 V 為8K／5R、C為7K／4R／2U、H及L各13K、O為10K／3U（K含D1）；A的13R全部沿 v1。23候選尾段小時僅19根價格與量全可決、4根仍缺漏；日線15 include 不能代替完整有效小時網格、暖機、上市 q 或其他下游可用性驗收。
 
 DV7 測試另覆蓋：同日多尾段、跨多戳尾段、部分同戳子集／正差／空前綴拒絕、C2衝突、首末同戳多價、保留O後L1失敗、日量已含尾段仍KEEP、域外不回退(b)、未知信心證據不改判詞、原C3永久留存、同日錯誤優先及雙政策同一凍結樣本。原件 SHA、具體候選值與逐筆見證依 V manifest 定位；本表不能取代實際來源驗證。DV4仍須在DV7與下游完成後依§9最後整合。
+
+## 勘誤二（2026-10-22，conductor 依 #241 審查補記實作對應）
+
+本補記依已合入 main 的 PR #241 merge commit `1ea85a9a2128e2aaf9f70bf5bc462fd5c82a3527`（reviewed head `2b198b34c51f4d295177940dd15a2a37fa9fe30a`）實際程式核對；下列行號固定指該 main 版本。原規則、勘誤一及 §13 全部保留，本節只補 §8.4 與已核准規則的實作對應。PR #242 依續派以 merge 納入此 main，沒有 rebase；§13.1 初稿「其餘位元組不變」的比較基線隨此次授權更新為 `1ea85a9a`：本 PR 自行修改的程式仍只有 `STANDARD_SHA256` 一行，其他程式／測試差異均由 #241 合入。
+
+1. **擴樣交接（§4.5 第8點、§8.4）**：DV1 `verify(..., sample_report_path=...)` 讀 DV3 既有 `sample_report.txt`；先驗原 `sample_plan_sha256`，逐層核對 year／tier／population_size／base_size。僅報告中 e 或 u 非零、且明列 `required_prefix=<該層 max_size> max_expansions=1` 的層，納入原凍結 `draws[base_size:max_size]`；與 base draws 聯集後進入 L3，不換樣、不改原 plan SHA 或主分母。報告須符合既有完整文字形狀；無額外 draws 時回 `EXPANSION_NOT_REQUESTED`。成功 bundle 可選含原 bytes 的 `sample_report.txt`，由 `verification.json.files` 與 handoff `files` 的 SHA／rows 綁定；DV3 消費時核對 files 中實際 bytes SHA。對應 `verification.py:738–800,956–964,994–1008,1029,1054–1067`；`verification_fetch.py:776–788,917–940`。擴樣入口與封存由 `256dcd4c6` 引入；`fb89a9ccd` 補缺失逐筆原件的未決證據處理，不另改擴樣規則。
+2. **部分日診斷時間戳（§8.4 findings）**：可讀起點落在某 UTC 日內，而 DV-L2／DV-L4 日級 finding 原時間為該日午夜時，`timestamp` 改為可讀起點；既有 `details` 保存 `day_start=原日界`、`scope_start=可讀起點`、`scope_end=min(次日界,可讀終點)`，value 沿既有字串型別，不增頂層鍵。共用 finding 入口同樣涵蓋 POST_L2 診斷；不改 correction 的列身分，也不授權讀取午夜至可讀起點的行情。對應 `verification.py:243–251,917–948`；修正提交 `2b198b34c`。
+3. **L2 涵蓋發現與成交額疑點日（§6.2.1–2）**：`PARTIAL`、`SCOPE_INCOMPLETE`、`MISSING_COUNTERPART`、`INVALID_INPUT`、`GAPPED` 及 `NO_VALID_HOURLY` 將所屬日納入 `flagged`，供疑點日的 DV-A 成交額選擇；這些涵蓋發現本身不加入 `price_days`，不單獨觸發逐筆裁決。該日若另有既有價格／量差異或屬實際抽樣 draws，仍按原入口進 L3。只有 flagged 而無 price_days 的日按原分支保留 L1 欄並執行 `_turnover(..., suspect=True)`。對應 `verification.py:468–502,1008–1033`；提交 `256dcd4c6`。未改價格／量／額的裁決條件。
+4. **DV3 證據與統計（§4.5 第5點）**：完成的非 UNRESOLVED 逐筆裁決，除純 `L1_VALID`／`DV-L1` KEEP 且 coverage／order 皆 NOT_APPLICABLE 外，須有 L3 證據；完成裁決的原列綁定仍須成立。L3 缺證據時把 `EVIDENCE_INCOMPLETE` 按 `(symbol,UTC day)` 保存，不擴散至其他日；統計只納入實際評估的凍結 draws（base，以及 base e 或 u 非零時的已凍結擴樣序列）。同日已有認證完整的 CORRECT 優先計 e，否則證據不完整計 u；即使 e 優先，所屬已評估日的 `EVIDENCE_INCOMPLETE` 原因仍保留。原件缺失含 SourceRef 的 path／SHA 皆 null 表示法，不把該日移出分母。對應 `verification_fetch.py:436–469,718–755,812–853,884–889,918–940`；提交 `256dcd4c6`、`fb89a9ccd`、`9248ac79d`。這是既有錯誤優先及證據要求的實作，不新增抽樣門檻。
+
+**與 §8.4.1／§13 的相容界線。** 可選文字報告沿既有 files 雜湊表，部分日資訊沿 findings.details，沒有新頂層鍵；涵蓋標記不新增逐筆來源選擇權；按日證據及 e 優先與 §13.6 一致。原凍結 plan／draws 不改，符合雙政策同一樣本的要求。main 的 v1 消費者仍核對 plan 與驗證政策相等，僅接受 v1 schema／嚴格 C3 證據；§8.4.1 已明定的 v1 計畫對 v2 驗證政策連結、v2 分類及證據驗證，由 DV7 實作，不能把本補記或 pin 更新當作現行工具已支援 v2。此次核對未發現須改動既有規則的契約衝突。

@@ -518,10 +518,18 @@
       "blob": "597bcf3996c59d8cb45da6c1f888cce68b219bd6"
     },
     "r8-stage2-data-verification-standard-v2-volume": {
-      "kind": "recorded_file",
+      "kind": "git_blob",
       "path": "docs/execution_plan/2026-10-22--r8-stage2-data-verification-standard.md",
       "sha256": "d7c1c884f7f5c3da68fef5889fabf363d589f10cabb90d44e8a264e41de9ca07",
-      "meaning": "Operator B and option e adopted: terminal-suffix trade-sourced volume policy, fixed v2 schema, preserved v1 and sampling contract, DV7 dependency and independent 26-day expectation. Document approval/merge is not v2 implementation; updated source pin still supports v1-strict only until DV7 merges."
+      "meaning": "Operator B and option e adopted: terminal-suffix trade-sourced volume policy, fixed v2 schema, preserved v1 and sampling contract, DV7 dependency and independent 26-day expectation. Document approval/merge is not v2 implementation; updated source pin still supports v1-strict only until DV7 merges.",
+      "commit": "7cf0ff1bebd038a28d1cb23b2e2d5d7376e225d1",
+      "blob": "072088b48bd4dfc0380e545d6a0538d4f8e27f3f"
+    },
+    "r8-stage2-data-verification-standard-v2-erratum-2": {
+      "kind": "recorded_file",
+      "path": "docs/execution_plan/2026-10-22--r8-stage2-data-verification-standard.md",
+      "sha256": "ba65fbca3b9230ad1807b82c923e9e60ab870edbe5c1e0d5090ebce99b06f6d0",
+      "meaning": "Conductor-dispatched PR #242 follow-up after merging reviewed main 1ea85a9a: implementation mapping for frozen expansion reports, partial-day diagnostics, L2 turnover flags and per-day L3 evidence counting; supplied background URLs transcribed without online verification. No rule or RH event changed; source edits remain the standard pin only relative to merged main, with v2 awaiting DV7."
     }
   },
   "routes": [
@@ -704,7 +712,8 @@
         "r8-stage2-p4-addendum-r4",
         "r8-stage2-data-verification-standard-r3",
         "r8-stage2-data-verification-standard-erratum-1",
-        "r8-stage2-data-verification-standard-v2-volume"
+        "r8-stage2-data-verification-standard-v2-volume",
+        "r8-stage2-data-verification-standard-v2-erratum-2"
       ],
       "status_history": [
         {
