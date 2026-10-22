@@ -7,6 +7,7 @@ supplies frozen source identities and the dispatched scope, URL list and limits.
 """
 from __future__ import annotations
 
+import csv
 from dataclasses import dataclass
 from datetime import datetime, timezone
 from decimal import Decimal, InvalidOperation
@@ -257,13 +258,17 @@ def build_sample_plan(source_root, artifact_root, sources, *, readable,
             window=manifest['universe'].get(source.symbol)
             if not isinstance(window,dict):
                 raise InvalidInput('MISSING_MARKET_WINDOW')
-            windows[source.symbol]=tuple(int(window[k]) for k in ('launchTime','deliveryTime'))
-            for stamp in (window.get('launchTime'),window.get('deliveryTime')):
+            launch=window.get('launch_time',window.get('launchTime'))
+            if 'launch_time' in window and 'launchTime' in window and str(window['launch_time'])!=str(window['launchTime']):
+                raise InvalidInput('CONFLICTING_MARKET_WINDOW')
+            stamps=[]
+            for stamp in (launch,window.get('deliveryTime')):
                 if type(stamp) is str and re.fullmatch('[0-9]+',stamp):
                     stamp=int(stamp)
-                _integer(stamp)
+                _integer(stamp);stamps.append(stamp)
                 if stamp and stamp%DAY:
                     truncated.add((source.symbol,stamp//DAY*DAY))
+            windows[source.symbol]=tuple(stamps)
             key=(source.symbol,source.interval)
             if key in seen:
                 raise InvalidInput('DUPLICATE_SOURCE')
@@ -469,6 +474,185 @@ def _refs(refs, evidence_root, verified):
         raise InvalidInput('INVALID_SOURCE_REF_ORDER')
 
 
+
+def _raw_spans(data):
+    """Locate native list entries without decoding out-of-scope market values."""
+    matches=list(re.finditer(rb'"list"\s*:\s*\[',data))
+    if len(matches)!=1:
+        raise InvalidInput('SOURCE_ROW_SCHEMA')
+    start=matches[0].end(); depth=0; quoted=False; escaped=False; item=None; spans=[]
+    for i in range(start,len(data)):
+        c=data[i]
+        if quoted:
+            if escaped: escaped=False
+            elif c==92: escaped=True
+            elif c==34: quoted=False
+        elif c==34: quoted=True
+        elif c in (91,123): depth+=1
+        elif c in (93,125):
+            if c==93 and depth==0:
+                if item is not None: spans.append((item,i))
+                return spans,json.loads(data[:start]+data[i:])
+            depth-=1
+        if item is None and c not in b' \t\r\n,': item=i
+        if not quoted and depth==0 and c==44:
+            if item is None: raise InvalidInput('SOURCE_ROW_SCHEMA')
+            spans.append((item,i));item=None
+    raise InvalidInput('SOURCE_ROW_SCHEMA')
+
+
+class _SourceRows:
+    """Bind completed decisions to immutable originals, keeping source bytes opaque
+    until the referenced identity and timestamp are inside the admitted window.
+    Recorder packaging copies originals plus their pinned manifest/request log
+    into the bundle; it does not rewrite SourceRefs or the original manifest.
+    """
+    def __init__(self,root,plan):
+        self.root=root;self.plan=plan;self.cache={};self.manifest=None
+
+    def data(self,ref):
+        key=ref['relative_path']
+        if key not in self.cache:
+            self.cache[key]=_path(self.root,key).read_bytes()
+        return self.cache[key]
+
+    def load_manifest(self):
+        if self.manifest is None:
+            try: data=_path(self.root,'manifest.json').read_bytes()
+            except OSError: raise InvalidInput('SOURCE_MANIFEST_UNAVAILABLE') from None
+            if sha(data)!=self.plan['p3b_manifest_sha256']:
+                raise InvalidInput('SOURCE_MANIFEST_HASH_MISMATCH')
+            self.manifest=json.loads(data)
+        return self.manifest
+
+    def csv_meta(self,ref):
+        meta=self.load_manifest()['files'].get(ref['relative_path'],{})
+        if meta.get('sha256')!=ref['sha256'] or meta.get('dataset')!='kline':
+            raise InvalidInput('SOURCE_ROW_IDENTITY_MISMATCH')
+        return meta
+
+    def raw_identity(self,ref,query):
+        manifest=self.load_manifest()
+        if ref['relative_path']==f"raw/{ref['request_id']}.json":
+            if 'requests' not in self.cache:
+                data=_path(self.root,'requests.jsonl').read_bytes()
+                if sha(data)!=manifest.get('request_log_sha256'):
+                    raise InvalidInput('SOURCE_REQUEST_LOG_HASH_MISMATCH')
+                requests=[json.loads(line) for line in data.splitlines()]
+                if len({r['request_id'] for r in requests})!=len(requests):
+                    raise InvalidInput('SOURCE_ROW_IDENTITY_MISMATCH')
+                self.cache['requests']={str(r['request_id']):r for r in requests}
+            r=self.cache['requests'].get(ref['request_id'],{})
+            params={k:str(v) for k,v in r.get('params',{}).items()}
+            if (r.get('raw_sha256')!=ref['sha256'] or r.get('endpoint')!='/v5/market/kline'
+                or params!=query or r.get('http_status')!=200 or r.get('retCode')!=0):
+                raise InvalidInput('SOURCE_ROW_IDENTITY_MISMATCH')
+            metas=[m for m in manifest['files'].values() if m.get('symbol')==query['symbol']
+                   and m.get('dataset')=='kline' and m.get('interval')==query['interval']]
+            if not any(r['request_id'] in m.get('source_request_ids',m.get('request_ids',[])) for m in metas):
+                raise InvalidInput('SOURCE_ROW_IDENTITY_MISMATCH')
+        else:
+            if 'inventory' not in self.cache:
+                data=_path(self.root,'download_inventory.jsonl').read_bytes()
+                self.cache['inventory']=[_json(line) for line in data.splitlines(keepends=True)]
+            matches=[r for r in self.cache['inventory'] if r['request_id']==ref['request_id']]
+            if len(matches)!=1:
+                raise InvalidInput('SOURCE_ROW_IDENTITY_MISMATCH')
+            r=matches[0]
+            if (any(r[k]!=ref[k] for k in ('url','sha256','relative_path')) or r['status']!='AVAILABLE'
+                or r['source_kind']!='bybit_minute' or r['symbol']!=query['symbol'] or r['interval']!=query['interval']):
+                raise InvalidInput('SOURCE_ROW_IDENTITY_MISMATCH')
+
+    def bind(self,row):
+        delta={'D':DAY,'60':HOUR,'1':60000}[row['interval']]
+        start=row['timestamp'];end=start+delta; original_found=False
+        for ref in row['source_refs']:
+            kind=ref['kind']
+            if kind not in ('csv','raw','trade'):
+                continue
+            if ref['relative_path'] is None:
+                raise InvalidInput('SOURCE_ROW_UNAVAILABLE')
+            data=self.data(ref)
+            if kind=='raw':
+                url=urlsplit(ref['url'] or ''); q=dict(parse_qsl(url.query))
+                if (url.scheme!='https' or url.hostname!='api.bybit.com' or url.path!='/v5/market/kline'
+                    or q.get('category')!='linear' or q.get('symbol')!=row['symbol']
+                    or q.get('interval') not in ('D','60','1')):
+                    raise InvalidInput('SOURCE_ROW_IDENTITY_MISMATCH')
+                self.raw_identity(ref,q)
+                source_interval=q['interval']
+                cache_key=('spans',ref['relative_path'])
+                if cache_key not in self.cache: self.cache[cache_key]=_raw_spans(data)
+                spans,header=self.cache[cache_key]
+                index=ref['list_index']
+                if index is None or index>=len(spans) or tuple(spans[index])!=(ref['byte_start'],ref['byte_end']):
+                    raise InvalidInput('SOURCE_ROW_POSITION_MISMATCH')
+                a,z=spans[index];line=data[a:z]
+                if (ref['row']!=data[:a].count(b'\n')+1 or header.get('retCode')!=0
+                    or header.get('result',{}).get('symbol')!=row['symbol']
+                    or header['result'].get('category')!='linear'):
+                    raise InvalidInput('SOURCE_ROW_IDENTITY_MISMATCH')
+                match=re.match(rb'\s*\[\s*"([0-9]+)"\s*,',line)
+                if not match: raise InvalidInput('SOURCE_ROW_TIMESTAMP_MISMATCH')
+                stamp=int(match[1])
+            else:
+                cache_key=('lines',ref['relative_path'])
+                if cache_key not in self.cache:
+                    decoded=gzip.decompress(data) if data.startswith(b'\x1f\x8b') else data
+                    self.cache[cache_key]=decoded.splitlines(keepends=True)
+                lines=self.cache[cache_key]
+                if kind=='trade':
+                    date=datetime.fromtimestamp(start//1000,timezone.utc).strftime('%Y-%m-%d')
+                    if ref['url']!=f'https://public.bybit.com/trading/{row["symbol"]}/{row["symbol"]}{date}.csv.gz':
+                        raise InvalidInput('SOURCE_ROW_IDENTITY_MISMATCH')
+                    # The full-file reference accompanies individual witnesses.
+                    if ref['row'] is None:
+                        if ref['line_sha256'] is not None: raise InvalidInput('SOURCE_ROW_POSITION_MISMATCH')
+                        continue
+                number=ref['row']
+                if number is None or number<2 or number>len(lines):
+                    raise InvalidInput('SOURCE_ROW_UNAVAILABLE')
+                line=lines[number-1];fields=line.rstrip(b'\r\n').split(b',')
+                if kind=='csv':
+                    if lines[0].rstrip(b'\r\n')!=b'timestamp,open,high,low,close,volume,turnover':
+                        raise InvalidInput('SOURCE_ROW_SCHEMA')
+                    meta=self.csv_meta(ref);source_interval=meta.get('interval')
+                    if meta.get('symbol')!=row['symbol'] or source_interval not in ('D','60','1'):
+                        raise InvalidInput('SOURCE_ROW_IDENTITY_MISMATCH')
+                    if not re.fullmatch(rb'[0-9]+',fields[0]): raise InvalidInput('SOURCE_ROW_TIMESTAMP_MISMATCH')
+                    stamp=int(fields[0])
+                else:
+                    header=next(csv.reader([lines[0].decode('utf-8')]))
+                    if len(set(header))!=len(header) or not {'timestamp','symbol','trdMatchID'}<=set(header) or len(fields)!=len(header):
+                        raise InvalidInput('SOURCE_ROW_SCHEMA')
+                    if fields[header.index('symbol')].decode('ascii')!=row['symbol']:
+                        raise InvalidInput('SOURCE_ROW_IDENTITY_MISMATCH')
+                    stamp=Fraction(_decimal(fields[header.index('timestamp')].decode('ascii')))*1000
+                    source_interval=None
+            if ref['line_sha256'] is None or sha(line)!=ref['line_sha256']:
+                raise InvalidInput('SOURCE_LINE_HASH_MISMATCH')
+            if not self.plan['readable']['start']<=stamp<self.plan['readable']['end'] or not start<=stamp<end:
+                raise InvalidInput('SOURCE_ROW_TIMESTAMP_MISMATCH')
+            if source_interval is not None:
+                source_delta={'D':DAY,'60':HOUR,'1':60000}[source_interval]
+                if source_delta>delta or stamp%source_delta or stamp+source_delta>end:
+                    raise InvalidInput('SOURCE_ROW_IDENTITY_MISMATCH')
+                values=json.loads(line) if kind=='raw' else next(csv.reader([line.decode('utf-8')]))
+                if len(values)!=7 or any(not isinstance(v,str) for v in values):
+                    raise InvalidInput('SOURCE_ROW_SCHEMA')
+                if source_interval==row['interval']:
+                    if stamp!=start: raise InvalidInput('SOURCE_ROW_TIMESTAMP_MISMATCH')
+                    # CSV is the original adjudicated value. Raw may retain a
+                    # documented representation difference; minute bars are raw.
+                    if kind=='csv' or row['interval']=='1':
+                        if values[1+_FIELDS.index(row['field'])]!=row['original_value']:
+                            raise InvalidInput('SOURCE_ORIGINAL_VALUE_MISMATCH')
+                        original_found=True
+            elif next(csv.reader([line.decode('utf-8')]))[header.index('trdMatchID')]!=ref['trade_id']:
+                raise InvalidInput('SOURCE_TRADE_ID_MISMATCH')
+        if not original_found:
+            raise InvalidInput('SOURCE_ORIGINAL_ROW_MISSING')
+
 def _bundle_outcomes(root,p,plan_sha):
     verification=_json(_path(root,'verification.json').read_bytes())
     _keys(verification,_VERIFICATION_KEYS)
@@ -479,7 +663,7 @@ def _bundle_outcomes(root,p,plan_sha):
     _keys(verification['counts'],'input_rows checked_days flagged_days corrected_fields unresolved_rows')
     for value in verification['counts'].values():
         _integer(value)
-    verified=set()
+    verified=set(); source_rows=_SourceRows(root,p)
     _refs(verification['review_refs'],root,verified)
     if not re.fullmatch('[0-9a-f]{40}',str(verification['tool_commit'])):
         raise InvalidInput('INVALID_TOOL_COMMIT')
@@ -514,7 +698,7 @@ def _bundle_outcomes(root,p,plan_sha):
             raise InvalidInput('CORRECTION_BINDING_MISMATCH')
         _symbol(row['symbol'])
         t=_integer(row['timestamp']); start,end=_readable(p['readable'])
-        if row['dataset']!='kline' or row['interval'] not in ('D','60','1') or not start<=t<end or row['field'] not in _FIELDS:
+        if row['interval'] not in ('D','60','1') or row['dataset']!={'D':'kline_day','60':'kline_hour','1':'kline_minute'}[row['interval']] or not start<=t<end or row['field'] not in _FIELDS:
             raise InvalidInput('CORRECTION_SCOPE_MISMATCH')
         if row['decision'] not in ('CORRECT','KEEP','UNRESOLVED') or row['row_action'] not in ('include','missing'):
             raise InvalidInput('INVALID_CORRECTION')
@@ -525,13 +709,20 @@ def _bundle_outcomes(root,p,plan_sha):
         if row['decision']!='UNRESOLVED':
             if not any(ref['relative_path'] is not None for ref in row['source_refs']) or row['original_value'] is None:
                 raise InvalidInput('MISSING_EVIDENCE')
-            if row['evidence_kind']=='trade_adjudication' and (row['coverage_status']!='PASS' or row['order_status']!='UNIQUE'):
+            if row['evidence_kind']=='trade_adjudication' and (
+                row['coverage_status']!='PASS' or row['order_status'] not in (('UNIQUE',) if row['field'] in ('open','close') else ('UNIQUE','NOT_APPLICABLE'))
+            ) and not (row['decision']=='KEEP' and row['reason_code']=='L1_VALID' and row['rule_ids']==['DV-L1']
+                       and row['coverage_status']==row['order_status']=='NOT_APPLICABLE'):
                 raise InvalidInput('INVALID_ADJUDICATION')
             if row['evidence_kind']=='reported_turnover_selection' and row['field']!='turnover':
                 raise InvalidInput('INVALID_ADJUDICATION')
+        if row['decision']!='UNRESOLVED':
+            source_rows.bind(row)
         if (row['decision']=='CORRECT') != (row['corrected_value'] is not None) or (row['decision']=='UNRESOLVED' and row['row_action']!='missing'):
             raise InvalidInput('INVALID_CORRECTION')
-        for name in ('original_value','candidate_value','corrected_value'):
+        if row['original_value'] is not None and not isinstance(row['original_value'],str):
+            raise InvalidInput('INVALID_CORRECTION')
+        for name in ('candidate_value','corrected_value'):
             if row[name] is not None:
                 _decimal(row[name])
         key=(row['symbol'],row['dataset'],row['interval'],t,row['field'])
@@ -587,8 +778,10 @@ def summarize_sample(plan_root, verification_roots, artifact_root):
     """Consume DV1 bundles. Missing/incomplete sampled days always count as u.
 
     SourceRef paths must resolve to original, hash-matching files within each
-    supplied bundle root; unavailable external references fail closed. The
-    recorder must package the approved opaque originals for this handoff.
+    supplied bundle root. The recorder packages opaque originals, the pinned
+    P3b manifest/request log and DV3 inventory without rewriting references.
+    Completed decisions require actual row SHA, identity, time and original
+    value bindings; unavailable or mismatched evidence fails closed.
     Human-readable report keeps statistical diagnostics outside the fixed JSON
     contracts. It never substitutes the expanded denominator for the base one.
     """
@@ -635,7 +828,7 @@ def summarize_sample(plan_root, verification_roots, artifact_root):
             reasons.append('VERIFICATION_NOT_ARCHIVED')
         lines.append('status='+('BLOCKED' if reasons else 'READY'))
         return _emit(artifact_root,'sample_report.txt', ('\n'.join(lines)+'\n').encode(),len(lines),reasons)
-    except (InvalidInput,OSError,TypeError,KeyError,ValueError) as exc:
+    except (InvalidInput,OSError,EOFError,TypeError,KeyError,IndexError,ValueError) as exc:
         return _handoff(artifact_root,reasons=(str(exc) if isinstance(exc,InvalidInput) else 'INVALID_EVIDENCE',))
 
 

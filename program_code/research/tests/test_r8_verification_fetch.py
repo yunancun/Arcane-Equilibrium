@@ -28,13 +28,14 @@ def no_network(monkeypatch):
     monkeypatch.setattr(socket, 'create_connection', deny)
 
 
-def source(tmp, symbol='AUSDT', days=14, *, extra=(), turnover='1e8'):
+def source(tmp, symbol='AUSDT', days=14, *, extra=(), turnover='1e8', valid=False):
     inputs = []
     for interval in ('60', 'D'):
         rows = ['timestamp,open,high,low,close,volume,turnover']
         for day in range(days):
             for hour in (range(24) if interval == '60' else (0,)):
-                rows.append(f'{T+day*D+hour*H},BAD,0,-1,NaN,-2,{turnover}')
+                values='1,1,1,1,1' if valid else 'BAD,0,-1,NaN,-2'
+                rows.append(f'{T+day*D+hour*H},{values},{turnover}')
         if interval == '60':
             rows.extend(extra)
         p = tmp / f'{symbol}_{interval}.csv.gz'
@@ -137,9 +138,22 @@ def test_missing_samples_remain_unresolved_and_full_census_bound_is_exact(tmp_pa
     assert 'conservative_upper=1/1' in text
 
 
-@pytest.mark.skip(reason='DV1 actual implementation absent on accepted main d6b162092; requires real bundle and bidirectional handoff in DV4 integration')
-def test_pending_real_dv1_bundle_counts_expansion_and_dv3_artifacts_consumed():
-    pass
+def test_pending_real_dv1_bundle_counts_expansion_and_dv3_artifacts_consumed(tmp_path):
+    from program_code.research.tests.test_r8_data_verification import real_dv13_flow
+    local=Path('/Users/ncyu/Projects/TradeBot/r8-research/crosscheck-20261022').exists()
+    result=real_dv13_flow(tmp_path,3 if local else None)
+    summary=result['summary']
+    assert summary['primary_file']=='sample_report.txt',summary
+    text=Path(summary['artifact_root'],summary['primary_file']).read_text()
+    if local:
+        assert summary['status']=='BLOCKED'
+        assert 'N=1 n=1 e=1 u=0 s=0' in text
+        assert 'required_prefix=1 max_expansions=1' in text
+        assert summary['reason_codes']==['CENSUS_FAILURE_REFER_CONDUCTOR','UPPER_LIMIT_EXCEEDED']
+    else:
+        assert summary['status']=='READY',summary
+        assert 'N=1 n=1 e=0 u=0 s=1' in text
+        assert 'conservative_upper=0/1' in text
 
 
 class Clock:
@@ -293,7 +307,7 @@ def test_api_only_status_decoded_never_market_numbers(tmp_path,monkeypatch):
     assert rows[0]['status']=='AVAILABLE' and rows[0]['api_status']==0
 
 
-def dv1_fixture(tmp,p,days,*,error=False,unresolved=False,semantic=False):
+def unbound_dv1_fixture(tmp,p,days,*,error=False,unresolved=False,semantic=False):
     """Isolated fixed-format fixture, expressly NOT the required real DV1 test."""
     root=tmp/'dv1'; root.mkdir()
     original=b'timestamp,open,high,low,close,volume,turnover\n1577836800000,1,1,1,1,1,1\n'
@@ -307,7 +321,7 @@ def dv1_fixture(tmp,p,days,*,error=False,unresolved=False,semantic=False):
                 for field in ('open','high','low','close','volume','turnover'):
                     changed=error and interval=='D' and field=='close'
                     pending=unresolved and field=='volume'
-                    rows.append(dict(schema_version='r8_data_correction_v1',correction_id=f'{interval}-{t}-{field}',symbol='AUSDT',dataset='kline',interval=interval,timestamp=t,field=field,original_value='1',candidate_value='2' if changed else '1',corrected_value='2' if changed else None,unit='USDT',formula='fixed fixture',evidence_kind='reported_turnover_selection' if semantic and field=='turnover' else 'trade_adjudication',source_refs=[ref],coverage_status='PASS',order_status='UNIQUE',rule_ids=['C5_REBUILD'],decision='CORRECT' if changed else 'UNRESOLVED' if pending else 'KEEP',reason_code='FIXTURE_UNRESOLVED' if pending else 'FIXTURE',row_action='missing' if pending else 'include',policy_sha256=p['policy_sha256'],approval_event='RH-20261022-04',supersedes=None))
+                    rows.append(dict(schema_version='r8_data_correction_v1',correction_id=f'{interval}-{t}-{field}',symbol='AUSDT',dataset='kline_day' if interval=='D' else 'kline_hour',interval=interval,timestamp=t,field=field,original_value='1',candidate_value='2' if changed else '1',corrected_value='2' if changed else None,unit='USDT',formula='fixed fixture',evidence_kind='reported_turnover_selection' if semantic and field=='turnover' else 'trade_adjudication',source_refs=[ref],coverage_status='PASS',order_status='UNIQUE',rule_ids=['C5_REBUILD'],decision='CORRECT' if changed else 'UNRESOLVED' if pending else 'KEEP',reason_code='FIXTURE_UNRESOLVED' if pending else 'FIXTURE',row_action='missing' if pending else 'include',policy_sha256=p['policy_sha256'],approval_event='RH-20261022-04',supersedes=None))
     rows.sort(key=lambda r:(r['timestamp'],r['symbol'],r['dataset'],r['interval'],r['field'],r['correction_id']))
     data=b''.join(v.encoded(x) for x in rows)
     (root/'corrections.jsonl').write_bytes(data); (root/'findings.jsonl').write_bytes(b'')
@@ -316,15 +330,45 @@ def dv1_fixture(tmp,p,days,*,error=False,unresolved=False,semantic=False):
     return root
 
 
+
+def dv1_fixture(tmp,p,days,**kw):
+    """Statistical fixtures bind actual original rows from the plan manifest."""
+    root=unbound_dv1_fixture(tmp,p,days,**kw)
+    manifest=json.loads((tmp/'manifest.json').read_bytes())
+    (root/'manifest.json').write_bytes((tmp/'manifest.json').read_bytes())
+    refs={}
+    for name,meta in manifest['files'].items():
+        data=(tmp/name).read_bytes();(root/name).write_bytes(data)
+        for number,line in enumerate(gzip.decompress(data).splitlines(keepends=True)[1:],2):
+            values=line.decode().rstrip('\r\n').split(',')
+            ref={key:None for key in v._SOURCE_KEYS.split()}
+            ref.update(kind='csv',relative_path=name,sha256=meta['sha256'],row=number,line_sha256=hashlib.sha256(line).hexdigest())
+            refs[(meta['interval'],int(values[0]))]=(ref,values)
+    path=root/'corrections.jsonl';rows=[json.loads(line) for line in path.read_bytes().splitlines()]
+    for row in rows:
+        ref,values=refs[(row['interval'],row['timestamp'])]
+        row['source_refs']=[ref]
+        row['original_value']=values[1+v._FIELDS.index(row['field'])]
+        if row['decision']=='KEEP':row['candidate_value']=row['original_value']
+    rewrite_corrections(root,rows)
+    return root
+
+
+def rewrite_corrections(root,rows):
+    data=b''.join(v.encoded(row) for row in rows);(root/'corrections.jsonl').write_bytes(data)
+    info=json.loads((root/'verification.json').read_bytes())
+    info['files']['corrections.jsonl']={'sha256':hashlib.sha256(data).hexdigest(),'rows':len(rows)}
+    (root/'verification.json').write_bytes(v.encoded(info))
+
 def test_error_deduplicates_unresolved_same_day_and_semantics_kept(tmp_path):
-    p=artifact(plan(tmp_path,source(tmp_path,days=1),end=T+D))
+    p=artifact(plan(tmp_path,source(tmp_path,days=1,valid=True),end=T+D))
     root=dv1_fixture(tmp_path,p,[T],error=True,unresolved=True)
     r=v.summarize_sample(tmp_path/'out',[root],tmp_path/'summary')
     assert 'N=1 n=1 e=1 u=0 s=0' in Path(r['artifact_root'],r['primary_file']).read_text()
 
 
 def test_complete_census_keep_semantic_has_zero_bound(tmp_path):
-    p=artifact(plan(tmp_path,source(tmp_path,days=1),end=T+D))
+    p=artifact(plan(tmp_path,source(tmp_path,days=1,valid=True),end=T+D))
     root=dv1_fixture(tmp_path,p,[T],semantic=True)
     r=v.summarize_sample(tmp_path/'out',[root],tmp_path/'summary')
     assert r['status']=='READY'
@@ -334,7 +378,7 @@ def test_complete_census_keep_semantic_has_zero_bound(tmp_path):
 
 
 def test_expansion_only_frozen_prefix_and_base_denominator_unchanged(tmp_path):
-    inputs=source(tmp_path,days=365)
+    inputs=source(tmp_path,days=365,valid=True)
     p=artifact(plan(tmp_path,inputs,end=T+365*D))
     s=p['strata'][0]
     assert (s['population_size'],s['base_size'],s['max_size'])==(353,300,353)
@@ -349,7 +393,7 @@ def test_expansion_only_frozen_prefix_and_base_denominator_unchanged(tmp_path):
 
 @pytest.mark.parametrize('mutation',['unknown','duplicate','hash','wrong_policy','invalid_type'])
 def test_strict_fixed_bundle_rejects_invalid_schema_or_hash(tmp_path,mutation):
-    p=artifact(plan(tmp_path,source(tmp_path,days=1),end=T+D))
+    p=artifact(plan(tmp_path,source(tmp_path,days=1,valid=True),end=T+D))
     root=dv1_fixture(tmp_path,p,[T]); path=root/'verification.json'; value=json.loads(path.read_bytes())
     if mutation=='unknown': value['result']={}
     if mutation=='hash': value['files']['corrections.jsonl']['sha256']='0'*64
@@ -371,7 +415,7 @@ def test_plan_unknown_field_rejected_even_with_matching_seal(tmp_path):
 
 
 def test_missing_evidence_cannot_become_successful_complete_day(tmp_path):
-    p=artifact(plan(tmp_path,source(tmp_path,days=1),end=T+D))
+    p=artifact(plan(tmp_path,source(tmp_path,days=1,valid=True),end=T+D))
     root=dv1_fixture(tmp_path,p,[T]); path=root/'corrections.jsonl'
     rows=[json.loads(x) for x in path.read_bytes().splitlines()]
     for row in rows: row['source_refs']=[]
@@ -467,9 +511,9 @@ def test_e2_manifest_population_cannot_be_narrowed_by_omitting_symbol(tmp_path):
 
 
 def test_e2_nonexistent_referenced_evidence_blocks_summary(tmp_path):
-    p=artifact(plan(tmp_path,source(tmp_path,days=1),end=T+D))
+    p=artifact(plan(tmp_path,source(tmp_path,days=1,valid=True),end=T+D))
     root=dv1_fixture(tmp_path,p,[T])
-    referenced=root/'source.csv'
+    referenced=root/'AUSDT_60.csv.gz'
     if referenced.exists(): referenced.unlink()
     r=v.summarize_sample(tmp_path/'out',[root],tmp_path/'summary')
     assert r['status']=='BLOCKED' and r['primary_file'] is None
@@ -477,8 +521,8 @@ def test_e2_nonexistent_referenced_evidence_blocks_summary(tmp_path):
 
 
 def test_e2_referenced_evidence_hash_mismatch_blocks_summary(tmp_path):
-    p=artifact(plan(tmp_path,source(tmp_path,days=1),end=T+D))
-    root=dv1_fixture(tmp_path,p,[T]); (root/'source.csv').write_bytes(b'tampered')
+    p=artifact(plan(tmp_path,source(tmp_path,days=1,valid=True),end=T+D))
+    root=dv1_fixture(tmp_path,p,[T]); (root/'AUSDT_60.csv.gz').write_bytes(b'tampered')
     r=v.summarize_sample(tmp_path/'out',[root],tmp_path/'summary')
     assert r['status']=='BLOCKED' and r['reason_codes']==['SOURCE_EVIDENCE_HASH_MISMATCH']
 
@@ -503,3 +547,96 @@ def test_e2_head_transport_error_prevents_any_get(tmp_path):
     r=v.fetch_downloads(tmp_path/'out',[a,b],approved_urls=[a.url,b.url],readable={'start':T,'end':T+D},max_total_bytes=10,max_file_bytes=10,transport=send,clock=c,sleep=c.sleep,now=lambda:T)
     assert r['status']=='BLOCKED' and not any(method=='GET' for method,url in calls)
     assert len(calls)==1
+
+
+def test_e2_single_source_row_cannot_support_25_bar_identities(tmp_path):
+    p=artifact(plan(tmp_path,source(tmp_path,days=1,valid=True),end=T+D))
+    root=unbound_dv1_fixture(tmp_path,p,[T],semantic=True)
+    path=root/'corrections.jsonl'
+    rows=[json.loads(line) for line in path.read_bytes().splitlines()]
+    original=(root/'source.csv').read_bytes().splitlines(keepends=True)[1]
+    for row in rows:
+        row['source_refs'][0]['line_sha256']=hashlib.sha256(original).hexdigest()
+    data=b''.join(v.encoded(row) for row in rows);path.write_bytes(data)
+    info=json.loads((root/'verification.json').read_bytes())
+    info['files']['corrections.jsonl']['sha256']=hashlib.sha256(data).hexdigest()
+    (root/'verification.json').write_bytes(v.encoded(info))
+    result=v.summarize_sample(tmp_path/'out',[root],tmp_path/'summary')
+    assert result['status']=='BLOCKED', result
+    assert result['reason_codes'], result
+
+
+@pytest.mark.parametrize('mutation,reason',[
+    ('row','SOURCE_ROW_UNAVAILABLE'),('line_hash','SOURCE_LINE_HASH_MISMATCH'),
+    ('timestamp','SOURCE_ROW_TIMESTAMP_MISMATCH'),('symbol','SOURCE_ROW_IDENTITY_MISMATCH'),
+    ('interval','SOURCE_ROW_IDENTITY_MISMATCH'),('original','SOURCE_ORIGINAL_VALUE_MISMATCH')])
+def test_completed_correction_binds_original_identity(tmp_path,mutation,reason):
+    p=artifact(plan(tmp_path,source(tmp_path,days=1,valid=True),end=T+D))
+    root=dv1_fixture(tmp_path,p,[T])
+    rows=[json.loads(line) for line in (root/'corrections.jsonl').read_bytes().splitlines()]
+    target=next(row for row in rows if row['interval']=='60' and row['timestamp']==T+H)
+    ref=target['source_refs'][0]
+    if mutation=='row':ref['row']=999
+    if mutation=='line_hash':ref['line_sha256']='0'*64
+    if mutation=='timestamp':
+        ref['row']=2
+        ref['line_sha256']=hashlib.sha256(gzip.decompress((root/ref['relative_path']).read_bytes()).splitlines(keepends=True)[1]).hexdigest()
+    if mutation=='symbol':target['symbol']='BUSDT'
+    if mutation=='interval':target.update(interval='1',dataset='kline_minute')
+    if mutation=='original':target['original_value']='999'
+    rewrite_corrections(root,rows)
+    result=v.summarize_sample(tmp_path/'out',[root],tmp_path/'summary')
+    assert result['status']=='BLOCKED' and result['reason_codes']==[reason],result
+
+
+def test_real_bundle_raw_interval_cannot_be_relabelled(tmp_path):
+    from program_code.research.tests.test_r8_data_verification import real_dv13_flow
+    real_dv13_flow(tmp_path)
+    root=tmp_path/'bundle';rows=[json.loads(line) for line in (root/'corrections.jsonl').read_bytes().splitlines()]
+    row=next(r for r in rows if r['interval']=='60' and r['field']=='close')
+    ref=next(r for r in row['source_refs'] if r['kind']=='raw')
+    ref['url']=ref['url'].replace('interval=60','interval=1')
+    rewrite_corrections(root,rows)
+    result=v.summarize_sample(tmp_path/'plan',[root],tmp_path/'tampered-summary')
+    assert result['status']=='BLOCKED' and result['reason_codes']==['SOURCE_ROW_IDENTITY_MISMATCH'],result
+
+
+def test_portable_real_peers_preserve_zero_error_census(tmp_path):
+    from program_code.research.tests.test_r8_data_verification import real_dv13_flow
+    result=real_dv13_flow(tmp_path)
+    assert result['summary']['status']=='READY',result['summary']
+    assert 'N=1 n=1 e=0 u=0 s=1' in (tmp_path/'summary/sample_report.txt').read_text()
+
+
+@pytest.mark.parametrize('status',['UNAVAILABLE','SIZE_BLOCKED','SCOPE_INCOMPLETE'])
+def test_real_peer_failure_inventory_retains_sample_as_unresolved(tmp_path,status):
+    from program_code.research.tests.test_r8_data_verification import real_dv13_flow
+    result=real_dv13_flow(tmp_path,fetch_failure=status)
+    inventory=[json.loads(line) for line in (tmp_path/'downloads/download_inventory.jsonl').read_bytes().splitlines()]
+    assert len(inventory)==1 and inventory[0]['status']==status
+    assert result['verification']['status']=='READY'
+    assert result['summary']['status']=='BLOCKED'
+    assert 'N=1 n=1 e=0 u=1 s=0' in (tmp_path/'summary/sample_report.txt').read_text()
+    assert result['summary']['reason_codes']==['CENSUS_FAILURE_REFER_CONDUCTOR','UPPER_LIMIT_EXCEEDED']
+    assert not any(method=='GET' for method,url in result['transport_calls'])
+
+
+@pytest.mark.parametrize('mutation,reason',[
+    ('list_index','SOURCE_ROW_POSITION_MISMATCH'),('byte_end','SOURCE_ROW_POSITION_MISMATCH'),
+    ('row','SOURCE_ROW_IDENTITY_MISMATCH'),('line_sha256','SOURCE_LINE_HASH_MISMATCH'),
+    ('request_id','SOURCE_ROW_IDENTITY_MISMATCH'),('trade_id','SOURCE_TRADE_ID_MISMATCH')])
+def test_real_bundle_rejects_forged_row_positions(tmp_path,mutation,reason):
+    from program_code.research.tests.test_r8_data_verification import real_dv13_flow
+    real_dv13_flow(tmp_path)
+    root=tmp_path/'bundle';rows=[json.loads(line) for line in (root/'corrections.jsonl').read_bytes().splitlines()]
+    row=next(r for r in rows if r['interval']=='60' and r['field']=='close')
+    if mutation=='trade_id':
+        ref=next(r for r in row['source_refs'] if r['kind']=='trade' and r['row'] is not None)
+    else:
+        ref=next(r for r in row['source_refs'] if r['kind']=='raw')
+    if mutation in ('list_index','byte_end','row'):ref[mutation]+=1
+    elif mutation=='line_sha256':ref[mutation]='0'*64
+    else:ref[mutation]='forged'
+    rewrite_corrections(root,rows)
+    result=v.summarize_sample(tmp_path/'plan',[root],tmp_path/'tampered-summary')
+    assert result['status']=='BLOCKED' and result['reason_codes']==[reason],result

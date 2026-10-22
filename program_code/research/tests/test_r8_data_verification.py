@@ -1,6 +1,6 @@
 """Independent §3–§8.4 examples. No expected values are computed by DV1.
 
-DV3 real integration is explicitly pending. The 26-day oracle below was frozen
+DV3 integration uses real implementations with an offline transport. The oracle was frozen
 from report C and a separate timestamp-set audit before verification.py existed.
 """
 from pathlib import Path
@@ -312,9 +312,21 @@ CROSSCHECK = [
  ('LTCUSDT','2021-03-17',939),('LTCUSDT','2021-04-08',901),('LTCUSDT','2021-04-10',1541),('PUMPBTCUSDT','2025-06-03',6229),('XEMUSDT','2021-11-30',218),('XTZUSDT','2020-10-21',3),('XTZUSDT','2021-03-24',1276)]
 
 
-@pytest.mark.skip(reason='PENDING_INTEGRATION: call real DV3 sample_plan/inventory/local transport then DV1; pin peer commit, file and input/output SHA (§9).')
-def test_dv3_real_plan_inventory_originals_into_dv1():
-    pass
+def test_dv3_real_plan_inventory_originals_into_dv1(tmp_path,monkeypatch):
+    import socket
+    monkeypatch.setattr(socket.socket,'connect',lambda *a,**k: pytest.fail('network forbidden'))
+    local=Path('/Users/ncyu/Projects/TradeBot/r8-research/crosscheck-20261022').exists()
+    result=real_dv13_flow(tmp_path,3 if local else None)
+    assert result['verification']['status']=='READY',result['verification']
+    assert result['fetch']['status']=='READY',result['fetch']
+    daily=[c for c in read(tmp_path/'bundle','corrections.jsonl') if c['interval']=='D']
+    if local:
+        assert {c['field']:c['decision'] for c in daily}==dict(zip(FIELDS,['KEEP','KEEP','KEEP','CORRECT','CORRECT','CORRECT']))
+        assert next(c for c in daily if c['field']=='close')['corrected_value']=='521.2'
+    else:
+        assert len(daily)==6 and all(c['decision']=='KEEP' for c in daily)
+    for r in read(tmp_path/'downloads','download_inventory.jsonl'):
+        assert sha((tmp_path/'downloads'/r['relative_path']).read_bytes())==r['sha256']
 
 
 def external(case, *, price='10.1', wrong_contract=False, partial=False):
@@ -635,3 +647,103 @@ def test_previous_correction_rejects_wrong_types_enums_or_identity(case,field,va
 def test_tool_commit_identity_cannot_be_spoofed(case):
     a,*_=case.run(tool_commit='0'*40)
     assert a['status']=='BLOCKED' and 'TOOL_COMMIT_MISMATCH' in a['reason_codes']
+
+
+class OfflineArchiveTransport:
+    """Only the HTTP boundary is replaced; response bytes are never normalized."""
+    def __init__(self,payloads,unavailable=False):
+        self.payloads=payloads;self.calls=[];self.t=0;self.unavailable=unavailable
+    def clock(self):return self.t
+    def sleep(self,delay):self.t+=delay
+    def __call__(self,method,url):
+        from program_code.research.r8_data import verification_fetch as fetch
+        assert method in ('HEAD','GET') and url in self.payloads
+        self.calls.append((method,url));data=self.payloads[url]
+        return fetch.Response(404 if self.unavailable else 200,{'Content-Length':str(len(data))},io.BytesIO(data if method=='GET' else b''))
+
+
+def real_dv13_flow(root,index=None,fetch_failure=None):
+    """Real plan -> local byte transport -> real verifier -> real statistics.
+
+    Local archives use a one-symbol fixture manifest to bound the population;
+    its original CSV/raw bytes and metadata are copied without alteration. The
+    original full P3b manifest is immutable and its SHA is retained in provenance.
+    CI runs the same APIs on the portable fixed-value fixture when archives are
+    unavailable; the two named integration tests never skip or mock a peer API.
+    """
+    from datetime import datetime,timezone
+    import shutil
+    from program_code.research.r8_data import verification_fetch as fetch
+    root=Path(root);root.mkdir(exist_ok=True,parents=True);p3b=root/'p3b';payloads={};requests=[]
+    if index is None:
+        case=Case(root);case.write();symbol='TESTUSDT';t=T
+        # Case's source directory is immutable after this fixture preparation.
+        m=json.loads((p3b/'manifest.json').read_bytes())
+        m['universe'][symbol]['launch_time']=case.first
+        (p3b/'manifest.json').write_bytes(enc(m))
+        for r in read(case.dl,'download_inventory.jsonl'):
+            payloads[r['url']]=(case.dl/r['relative_path']).read_bytes()
+            requests.append(fetch.DownloadRequest(r['request_id'],symbol,t,r['interval'],r['source_kind'],r['url']))
+        # Fetch outputs have their own immutable root.
+        shutil.move(str(case.dl),str(root/'fixture-download-source'))
+        full_sha=None;mode='portable_fixed_values'
+    else:
+        base=Path('/Users/ncyu/Projects/TradeBot');original=base/'r8-research/data/p3b-20261020'
+        archive=base/'r8-research/crosscheck-20261022'
+        symbol,date,_=CROSSCHECK[index];t=int(datetime.fromisoformat(date).replace(tzinfo=timezone.utc).timestamp())*1000
+        full=(original/'manifest.json').read_bytes();full_sha=sha(full)
+        assert full_sha=='b6519a7b2f5eae4759612690790ddb6680db62aa4e723427f51c21a7d6257006'
+        m=json.loads(full);m['files']={n:x for n,x in m['files'].items() if x.get('symbol')==symbol and x.get('dataset')=='kline' and x.get('interval') in ('D','60')}
+        m['universe']={symbol:m['universe'][symbol]};p3b.mkdir()
+        ids=set(m['universe_request_ids'])
+        for name,meta in m['files'].items():
+            shutil.copyfile(original/name,p3b/name);assert sha((p3b/name).read_bytes())==meta['sha256']
+            ids.update(meta['source_request_ids'])
+        log=[]
+        for line in (original/'requests.jsonl').read_bytes().splitlines(keepends=True):
+            r=json.loads(line)
+            if r['request_id'] in ids:
+                log.append(line);name=f"raw/{r['request_id']}.json"
+                (p3b/'raw').mkdir(exist_ok=True);shutil.copyfile(original/name,p3b/name)
+        data=b''.join(log);(p3b/'requests.jsonl').write_bytes(data);m['request_log_sha256']=sha(data)
+        (p3b/'manifest.json').write_bytes(enc(m))
+        for line in (archive/'requests.jsonl').read_bytes().splitlines():
+            r=json.loads(line)
+            if r['metadata'].get('symbol')!=symbol or r['metadata'].get('date_utc')!=date:continue
+            kind={'bybit_trade_file':'bybit_trade','bybit_1m':'bybit_minute'}.get(r['kind'])
+            if kind is None:continue
+            data=(archive/r['path']).read_bytes();assert sha(data)==r['sha256']
+            payloads[r['url']]=data
+            requests.append(fetch.DownloadRequest(str(r['request_id']),symbol,t,'trade' if kind=='bybit_trade' else '1',kind,r['url']))
+        mode='local_original_bytes'
+    scope={'start':t,'end':t+DAY};manifest_sha=sha((p3b/'manifest.json').read_bytes())
+    sources=[fetch.CSVSource(x['symbol'],x['dataset'],x['interval'],n,x['sha256']) for n,x in m['files'].items()]
+    plan=fetch.build_sample_plan(p3b,root/'plan',sources,readable=scope,p3b_manifest_sha256=manifest_sha)
+    assert plan['primary_file']=='sample_plan.json',plan
+    transport=OfflineArchiveTransport(payloads,fetch_failure=='UNAVAILABLE')
+    downloaded=fetch.fetch_downloads(root/'downloads',requests,approved_urls=list(payloads),readable={'start':t+HOUR,'end':t+DAY} if fetch_failure=='SCOPE_INCOMPLETE' else scope,
+        max_total_bytes=0 if fetch_failure=='SIZE_BLOCKED' else sum(map(len,payloads.values())),max_file_bytes=max(map(len,payloads.values())),
+        flagged_days=[(symbol,t)],transport=transport,clock=transport.clock,sleep=transport.sleep,now=lambda:t)
+    assert downloaded['status']==('BLOCKED' if fetch_failure else 'READY'),downloaded
+    output=verify(p3b_root=p3b,download_root=root/'downloads',inventory_path=root/'downloads'/'download_inventory.jsonl',
+        output_root=root/'bundle',policy_path=root/'plan'/'policy.json',readable=scope,symbols=[symbol],sample_plan_path=root/'plan'/'sample_plan.json')
+    assert output['status']=='READY',output
+    bundle=root/'bundle'
+    # Package original namespaces without rewriting a reference or market byte.
+    for name in ('manifest.json','requests.jsonl'):shutil.copyfile(p3b/name,bundle/name)
+    shutil.copyfile(root/'downloads/download_inventory.jsonl',bundle/'download_inventory.jsonl')
+    refs=[r for name in ('corrections.jsonl','findings.jsonl') for row in read(bundle,name) for r in row['source_refs']]
+    for ref in refs:
+        name=ref['relative_path']
+        if name is None:continue
+        target=bundle/name
+        if target.exists():assert sha(target.read_bytes())==ref['sha256'];continue
+        candidates=[x/name for x in (p3b,root/'downloads') if (x/name).is_file() and sha((x/name).read_bytes())==ref['sha256']]
+        assert candidates,ref
+        target.parent.mkdir(parents=True,exist_ok=True);shutil.copyfile(candidates[0],target)
+    summary=fetch.summarize_sample(root/'plan',[bundle],root/'summary')
+    provenance={'mode':mode,'symbol':symbol,'day_start':t,'original_p3b_manifest_sha256':full_sha,
+        'fixture_manifest_sha256':manifest_sha,'transport_calls':transport.calls,'network_requests':0,
+        'plan':plan,'fetch':downloaded,'verification':output,'summary':summary}
+    (root/'integration.json').write_bytes(enc(provenance))
+    return provenance

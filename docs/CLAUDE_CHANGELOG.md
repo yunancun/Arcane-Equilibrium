@@ -1,9 +1,18 @@
 # CLAUDE_CHANGELOG.md — 開發歷史歸檔
 
 > 從 CLAUDE.md / TODO.md 遷出的 Wave/Sprint/Batch + TODO version-increment 歷史敘事。新 session 不需要讀此文件，僅供回顧歷史時查閱。
-> 最後更新：2026-10-22（R8 資料規範整份核准與 DV1–DV6 派工；TODO v918）
+> 最後更新：2026-10-22（R8 DV1／DV3 記錄者小修與發布候選；TODO v919）
 
 ---
+
+## R8 DV1／DV3 整合與記錄者發布候選 — 2026-10-22
+
+- 發布分支 `codex/r8-data-verify-dv13-publish-20261022`（草稿 PR 待建立）：從 `origin/main d6b162092` 建立 linked worktree；先原樣推送 DV1 `f22a377ea157c599955bdc1c8a3b7bcef234651c` 與 DV3 `f1d7ce78c321f238603738030d93a8bf51a5934b`，依序以 no-ff 合入，保留五筆原提交。原 DV1 E2 到期 UNVERIFIED／E4 NOT_RUN、DV3 E2 初審與唯一複核 FAIL／E4 NOT_RUN 均保留；本次為 conductor 明示授權的記錄者小修與發布，不重開原交付，不冒充 DV4 全鏈驗收。
+- SourceRef 修補：對完成裁決核對實際解壓列／JSON 原列片段、line SHA、來源 manifest／request 身分、標的、資料集、週期、時窗與原字串；不一致或無法核對即 BLOCKED。單列支撐25根日／小時裁決的 E2 反例由錯放 READY 轉為 BLOCKED；另外拒絕來源行／時刻／原值及 raw 週期冒稱。來源打包保留不可變原件、manifest、requests 與 download inventory，不改寫 SourceRef。
+- 兩個原待整合 skip 已替換為真實 DV3 `build_sample_plan`／`fetch_downloads` → DV1 `verify` → DV3 `summarize_sample`。本機傳輸層回應 crosscheck 原件位元組，網路請求0；CI 使用固定數值 fixture 執行相同真實程式，不冒稱 CI 擁有本機26日原件。UNAVAILABLE／SIZE_BLOCKED／SCOPE_INCOMPLETE 真實交接保留樣本分母並計未決。DV3 同步使用 P3b 既有 `launch_time` 及 DV1 的 `kline_day/hour/minute`、逐欄順序狀態；公開介面與規則不變。
+- 26日固定原件整合：1,092個逐欄值／狀態與52個首末歧義旗標和 DV1 封存明細逐格一致，日列 include 7／missing 19。BCH 2020-12-14：O CORRECT 272.95、L CORRECT 265.15、C KEEP、A CORRECT 2954180.78（小時自報額加總）。為有界互通使用單標的 fixture manifest；原 P3b manifest／CSV／raw 未改，原件 SHA 留存。8個部分日不進完整日母體；其餘18個單日 census 各 e=1、u=0、s=0（錯誤與未決去重）、上界1，停止交 conductor。這不是全訓練段抽樣結論。
+- [規範末尾勘誤一](execution_plan/2026-10-22--r8-stage2-data-verification-standard.md#勘誤一2026-10-22conductor-依規範既有定義澄清)保留原文，按 C5 既有定義澄清 C4／G 只在 O／C 的首末時間戳判同戳多價，H／L／V／A 不因同戳順序未決，窗內多價仍記 findings。`verification.py` 唯一更動是規範 SHA 常數：真實 DV3 政策交接先因舊 digest 回傳 POLICY_MISMATCH，更新至附勘誤的文件 SHA 後通過；裁決邏輯未改。
+- 本機證據：`/Users/ncyu/Projects/TradeBot/audits/2026-10-22-r8-data-verify-dv13-publish/` 的 REPORT、紅綠紀錄、26日產物、測試／CI與SHA索引；最終 exact-head 數字及自動審查意見以該報告與 PR 為準。TODO v919 僅補本工作結果與下一責任；路線登記簿追加文件版本雜湊、原版本固定 Git 物件，不新增 RH 事件。不取數、不碰 Linux／資料庫／Demo／live，不開 holdout，不更新 Wiki，不合併。
 
 ## R8 資料規範整份核准與 DV1–DV6 派工 — 2026-10-22
 
