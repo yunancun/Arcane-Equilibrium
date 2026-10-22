@@ -646,6 +646,18 @@
       "path": "docs/references/2026-10-03--route-history.md",
       "sha256": "450f60deabea4943e20f05df5a61c863224b4c032f91886315cf91fa79e5d84f",
       "meaning": "Conductor-assigned part B documentation synchronization of existing R8 source deliveries, TODO dependencies and A/B history; original decisions, source baseline and RH events retained. No new data acceptance, runtime or trading claim."
+    },
+    "r8-sample-freeze-todo-v925": {
+      "kind": "recorded_file",
+      "path": "TODO.md",
+      "sha256": "3167ba1dff7714ce9e89222fd7a72432d08a619aef13ee813b1c62a28b9bff92",
+      "meaning": "Conductor-dispatched DV4 acquisition preparation: frozen v1 sample identity, exact HTTP preflight, Operator capacity exceptions, downloaded originals and inventory-only hash loading. No market verification, statistical acceptance or runtime claim. Git history fixes these new recording bytes after publication."
+    },
+    "r8-sample-freeze-changelog": {
+      "kind": "recorded_file",
+      "path": "docs/CLAUDE_CHANGELOG.md",
+      "sha256": "7d3e905031b9adfb642ed02a5d543bf80c0eec9bd97a7ca200a249a6d289dd47",
+      "meaning": "Conductor-dispatched DV4 acquisition preparation: frozen v1 sample identity, exact HTTP preflight, Operator capacity exceptions, downloaded originals and inventory-only hash loading. No market verification, statistical acceptance or runtime claim. Git history fixes these new recording bytes after publication."
     }
   },
   "routes": [
@@ -2320,6 +2332,184 @@
         }
       },
       "meaning": "Records conductor-transcribed Operator B/e decisions, not market truth or implementation acceptance. Policy v2-terminal-suffix-20261022 permits multiple exact complete timestamp suffixes in one day; O retains v1/D1 and A retains DV-A; outside e, original unresolved/missing persists without b/b+D1 fallback. V1 evidence and section 4.5 remain unchanged; corrections count as pre-correction errors. DV7 is a bounded successor after merged #241, followed by DV2 and DV5/DV6, with DV4 last running frozen v1 then v2. Acceptance estimand remains for Operator after frozen results without a default. Document becomes effective on conductor merge; the pin-only source change remains v1-strict until DV7 merges. No v2 data correction, sampling, runtime, holdout or trading effects claimed."
+    },
+    {
+      "id": "RH-20261023-01",
+      "recorded_on": "2026-10-23",
+      "recorded_at_utc": "2026-10-22T21:11:32.331785+00:00",
+      "event_type": "open_item_decided",
+      "route_ids": [
+        "R8"
+      ],
+      "follows": "RH-20261022-05",
+      "decision_ref": "docs/execution_plan/2026-10-22--r8-stage2-data-verification-standard.md",
+      "authority_source": "Operator 2026-10-22 對話選項（conductor 轉錄，原文照錄）：\n1. 加速措施：「抽樣下載提前開跑 (Recommended)」、「DV5／DV6 與 DV2 同時開工」。\n2. 下載總量上限：「100 GB」。\nOperator 補充裁決（2026-10-22，對話原文照錄）：「BTCUSDT作為最重要的交易對之一我允許你按照需要擴容不要受限於容量」。\n其後補充（對話原文照錄）：「再補充個ETH作為例外」。\nConductor 的執行解讀：100 GB是壓縮payload累計上限，涵蓋基礎與日後可能擴樣；僅symbol恰為BTCUSDT或ETHUSDT的三種來源豁免此累計及1 GB單檔上限，其餘不變。磁碟低於100 GiB仍立即停止。OKX的200無長度依規範§4.6本輪不下載，逐URL由原工具留下正式受阻列，不阻擋Bybit／Binance。允許以系統CA環境變數修正執行環境，原工具分批且不改速率／重試／403或429停止規則。上述解讀與取數授權不是統計政策或資料驗收。原抽樣計畫核准沿RH-20261022-04；本次只做DV4取數前置、文件PR不合併。",
+      "operator_excerpt": [
+        "抽樣下載提前開跑 (Recommended)",
+        "DV5／DV6 與 DV2 同時開工",
+        "100 GB",
+        "BTCUSDT作為最重要的交易對之一我允許你按照需要擴容不要受限於容量",
+        "再補充個ETH作為例外"
+      ],
+      "execution_record": {
+        "tool_commit": "55586c1e919958bcac12437404ed7c164832a7fe",
+        "sample_plan_sha256": "e1fd54aebed26230b4a4a89de4633aba569cf2e2bfd9feb1c0e630c567ced38f",
+        "policy_sha256": "dac560bbf7318431815933280bb9afc8b4673dcc8b2d8e8e5be6ea90ff57d3fc",
+        "p3b_manifest_sha256": "b6519a7b2f5eae4759612690790ddb6680db62aa4e723427f51c21a7d6257006",
+        "seed": 20261022,
+        "readable": {
+          "end": 1751328000000,
+          "start": 1577836800000
+        },
+        "strata": 24,
+        "population_size": 378425,
+        "base_size": 6511,
+        "max_size": 18511,
+        "approved_requests": 19533,
+        "by_source_kind": {
+          "binance_hour": {
+            "available_bytes": 7499267,
+            "http_status_counts": {
+              "200": 5471,
+              "404": 1040
+            },
+            "max_available_file_bytes": 1675,
+            "observed_body_bytes": 7499267,
+            "reason_counts": {
+              "HTTP_UNAVAILABLE": 1040
+            },
+            "requests": 6511,
+            "status_counts": {
+              "AVAILABLE": 5471,
+              "UNAVAILABLE": 1040
+            }
+          },
+          "bybit_trade": {
+            "available_bytes": 40906797888,
+            "http_status_counts": {
+              "200": 6510,
+              "404": 1
+            },
+            "max_available_file_bytes": 461140608,
+            "observed_body_bytes": 40906797888,
+            "reason_counts": {
+              "HTTP_UNAVAILABLE": 1
+            },
+            "requests": 6511,
+            "status_counts": {
+              "AVAILABLE": 6510,
+              "UNAVAILABLE": 1
+            }
+          },
+          "okx_hour": {
+            "available_bytes": 0,
+            "http_status_counts": {
+              "200": 6511
+            },
+            "max_available_file_bytes": 0,
+            "observed_body_bytes": 0,
+            "reason_counts": {
+              "UNKNOWN_LENGTH": 6511
+            },
+            "requests": 6511,
+            "status_counts": {
+              "SIZE_BLOCKED": 6511
+            }
+          }
+        },
+        "by_budget_class": {
+          "BTCUSDT": {
+            "available_bytes": 4817443167,
+            "http_status_counts": {
+              "200": 1422
+            },
+            "max_available_file_bytes": 311242935,
+            "observed_body_bytes": 4817443167,
+            "reason_counts": {
+              "UNKNOWN_LENGTH": 474
+            },
+            "requests": 1422,
+            "status_counts": {
+              "AVAILABLE": 948,
+              "SIZE_BLOCKED": 474
+            }
+          },
+          "ETHUSDT": {
+            "available_bytes": 3272960620,
+            "http_status_counts": {
+              "200": 531
+            },
+            "max_available_file_bytes": 119886496,
+            "observed_body_bytes": 3272960620,
+            "reason_counts": {
+              "UNKNOWN_LENGTH": 177
+            },
+            "requests": 531,
+            "status_counts": {
+              "AVAILABLE": 354,
+              "SIZE_BLOCKED": 177
+            }
+          },
+          "OTHER": {
+            "available_bytes": 32823893368,
+            "http_status_counts": {
+              "200": 16539,
+              "404": 1041
+            },
+            "max_available_file_bytes": 461140608,
+            "observed_body_bytes": 32823893368,
+            "reason_counts": {
+              "HTTP_UNAVAILABLE": 1041,
+              "UNKNOWN_LENGTH": 5860
+            },
+            "requests": 17580,
+            "status_counts": {
+              "AVAILABLE": 10679,
+              "SIZE_BLOCKED": 5860,
+              "UNAVAILABLE": 1041
+            }
+          }
+        },
+        "downloaded_bytes": 40914297155,
+        "non_exempt_cumulative_bytes": 32823893368,
+        "non_exempt_remaining_bytes": 67176106632,
+        "maximum_known_file_bytes": 461140608,
+        "head_non_200": {
+          "404": 1041
+        },
+        "head_200_unknown_length": {
+          "okx_hour": 6511
+        },
+        "preflight_difference_events": 0,
+        "http_403_429_events": 0,
+        "stopped_hosts": [],
+        "reuse": 0,
+        "started_at_utc": "2026-10-22T17:16:22+00:00",
+        "download_launched_at_utc": "2026-10-22T17:21:45.726637+00:00",
+        "download_finished_at_utc": "2026-10-22T21:07:35.537432+00:00",
+        "inventory_sha256": "abe1f0ff83500ed258d93507fb77c1dad68e030f15039d5a4c58379d755f9992",
+        "inventory_rows": 19533,
+        "inventory_load_check": "PASS: _load_inventory and _payload only; 11981 SHA/byte_count checks; verify NOT_RUN",
+        "originals_root": "/Users/ncyu/Projects/TradeBot/r8-research/sample-20261022/",
+        "inventory_relative_path": "run-03/download_inventory.jsonl",
+        "evidence_root": "/Users/ncyu/Projects/TradeBot/audits/2026-10-22-r8-sample-download/run-03/",
+        "evidence_manifest_sha256": "d583fde7d62e5d259bdd05979c38681989a314ef11e085a0b69790addea78949",
+        "evidence_sha256sums_sha256": "f5595b7ec6572d97a1b1dd8d1275b30fd6093127a4c60c2dc7db542a9daf404f",
+        "originals_sha256sums_sha256": "bc0e87e7ab238e0d17b15431310ea3492f8f74f056d4a3ef82c8e6be33f85e39",
+        "report_sha256": "58080859e67c9cd8dc55d5171d4a95a761c5f13e9ce34f3193413a88b2c55ace",
+        "preserved_history": "run-01 CA-related TRANSPORT_ERROR and run-02 full HEAD stop remain unchanged; no redraw, replacement or expansion",
+        "known_limitations": [
+          "python.org Python3.10.1 had no default CA bundle; verified TLS uses SSL_CERT_FILE=/etc/ssl/cert.pem",
+          "A single non-200 HEAD blocks its whole fetch_downloads batch; isolated singleton failure rows and homogeneous known-length batches use the unmodified tool",
+          "OKX 6511 HTTP200 responses have unknown length: SIZE_BLOCKED/UNKNOWN_LENGTH, GET=0, size estimate UNAVAILABLE",
+          "Minute requests=0 without flagged-day verification; external contract and window comparability not verified"
+        ]
+      },
+      "source_refs": [
+        "r8-sample-freeze-todo-v925",
+        "r8-sample-freeze-changelog"
+      ],
+      "meaning": "Records conductor-transcribed acceleration, cumulative-cap and exact BTCUSDT/ETHUSDT exceptions, the unchanged v1 sampling identity, completed base acquisition and inventory-only hash loading. It does not change the standard or statistical policy, read OOS/holdout values, run DV1 verify, calculate e/u, accept DV4/DATA-VERIFY, unlock REPORT-TOOLS/P5, or claim runtime/trading success. Full DV4 verification follows the dispatched DV2/DV5/DV6/DV7 dependencies. The document PR is not merged by Codex."
     }
   ],
   "external_provenance": [
@@ -2360,5 +2550,5 @@
       "portable_summary": "docs/decisions/2026-10-08--r8-amendment-1-first-loop-on-native-replay.md"
     }
   ],
-  "last_event_recorded_on": "2026-10-22"
+  "last_event_recorded_on": "2026-10-23"
 }

@@ -1,9 +1,20 @@
 # CLAUDE_CHANGELOG.md — 開發歷史歸檔
 
 > 從 CLAUDE.md / TODO.md 遷出的 Wave/Sprint/Batch + TODO version-increment 歷史敘事。新 session 不需要讀此文件，僅供回顧歷史時查閱。
-> 最後更新：2026-10-22（R8 文件同步 A／B；TODO v924）
+> 最後更新：2026-10-22 UTC（DV4 取數前置；TODO v925）
 
 ---
+
+## R8 DV4 取數前置：凍結計畫與基礎下載 — 2026-10-22 UTC
+
+- **記錄範圍**：依 conductor 續派及 Operator 原文完成取數前置；事件 `RH-20261023-01` follows `RH-20261022-05`。登記簿時區為 Asia/Shanghai，實際記錄日為 2026-10-23；Operator 對話與取數 UTC 日期仍為 2026-10-22。TODO 依最新 main `a892fea5a171dd1b7fda421e7b2d4c3bf9c1de13` 的 v924 升為 v925，僅在 `P1-R8-S2-DATA-VERIFY` 補本次紀錄。只改登記簿、TODO、changelog 三檔，規範未改。
+- **凍結身分**：只產生一次 v1 `sample_plan.json`，SHA-256 `e1fd54aebed26230b4a4a89de4633aba569cf2e2bfd9feb1c0e630c567ced38f`；policy SHA `dac560bbf7318431815933280bb9afc8b4673dcc8b2d8e8e5be6ea90ff57d3fc`；P3b manifest SHA `b6519a7b2f5eae4759612690790ddb6680db62aa4e723427f51c21a7d6257006`。來源為同 DV3 runbook／整合測試的 `r8-research/data/p3b-20261020/`；seed 20261022、訓練段 `[2020-01-01,2025-07-01)`，24 層、N=378,425、base=6,511、max=18,511（2020 四層全查，其餘每層300／900）。沒有重抽、替換或擴樣，也未讀樣本外／holdout 市場值。
+- **工具與請求依據**：工具固定 main `55586c1e919958bcac12437404ed7c164832a7fe` 原檔；凍結時 #243 尚未合入，指定 `build_sample_plan`／`fetch_downloads` 與 #243 head `dd3b85d888d142383e15c4616b1bf3db3d626279` 逐位元組相同，`_policy` helper 有差異，整份模組不宣稱相同。每層 draws[:base_size] 機械產生三種來源各6,511 URL：逐筆依§4.3／§4.5，小時線依§4.4及DV1 `_l4`；分鐘線需疑點日標記，本任務不跑驗證，請求0。沒有他所／別名替換；原件存在不表示外所合約／時窗可比性通過。
+- **全量預檢與授權**：Bybit 6,510×200／40,906,797,888 bytes、404×1（BTTUSDT 2021-12-31）；Binance 5,471×200／7,499,267 bytes、404×1,040；OKX 6,511×200 全部無 Content-Length，依§4.6及conductor裁決本輪不GET，大小估計 UNAVAILABLE。最大已知檔461,140,608 bytes。Operator 的加速、100 GB、BTCUSDT及ETH例外原文照錄於事件；豁免僅精確 BTCUSDT／ETHUSDT，其他標的仍受累計100 GB（含未來擴樣）及單檔1 GB，磁碟低於100 GiB停止。
+- **CA 根因與已知工具限制**：第一輪 python.org Python3.10.1 缺預設CA，conductor診斷 HTTPS `CERTIFICATE_VERIFY_FAILED`；後續固定 `SSL_CERT_FILE=/etc/ssl/cert.pem`，TLS驗證保持開啟。原 `fetch_downloads` 同批任一非200會阻擋整批，未改工具；200有長度者按來源／年份／額度類別最多25筆分批，非200及OKX各以單一URL批次留下正式列。使用原transport、每主機4次/秒、403/429停止及無重試策略；倉庫外呼叫腳本只加範圍／磁碟／時限防護及HTTP中繼資料記錄。
+- **下載結果**：19,533列恰一列／請求，AVAILABLE 11,981、UNAVAILABLE 1,041（皆404）、SIZE_BLOCKED 6,511（皆OKX UNKNOWN_LENGTH）；保存40,914,297,155 bytes。BTCUSDT 1,422總請求／948成功，4,817,443,167 bytes、最大311,242,935；ETHUSDT 531總請求／354成功，3,272,960,620 bytes、最大119,886,496；各另含474／177筆OKX受阻。其他標的計費32,823,893,368 bytes，含未來擴樣餘額67,176,106,632 bytes；未知body預留0，reuse=0。新舊預檢差異0，403/429=0，停止主機0。UTC本輪17:16:22開始，批次工具21:07:35.537結束；完整起訖、逐批上限及24層N/n/max見封存報告。
+- **合併與載入**：合併清單按§8.4固定欄位／字面值／排序保存，僅把原批次relative_path加上輸出根下的批次前綴，指向同一原件；原批次清單及前兩輪失敗證據保持不變。inventory SHA `abe1f0ff83500ed258d93507fb77c1dad68e030f15039d5a4c58379d755f9992`；DV1 `_load_inventory`載入19,533列，`_payload`只核對11,981個原件的SHA及byte_count，21:08:17.508 UTC PASS。未呼叫 `verify`、未計e/u、未作DV4驗證或資料驗收；DATA-VERIFY、REPORT-TOOLS及P5依賴未因此解除。
+- **證據與發布**：原件根 `/Users/ncyu/Projects/TradeBot/r8-research/sample-20261022/`；合併清單為其 `run-03/download_inventory.jsonl`，載入時 download_root 仍為上述原件根。倉庫外封存 `/Users/ncyu/Projects/TradeBot/audits/2026-10-22-r8-sample-download/run-03/`：`SHA256SUMS` SHA `f5595b7ec6572d97a1b1dd8d1275b30fd6093127a4c60c2dc7db542a9daf404f`、manifest SHA `d583fde7d62e5d259bdd05979c38681989a314ef11e085a0b69790addea78949`、原件SHA清單 SHA `bc0e87e7ab238e0d17b15431310ea3492f8f74f056d4a3ef82c8e6be33f85e39`。文件PR先草稿，必要檢查通過後轉正式；指定兩個結構測試、exact-head CI與自動審查回執另存 `publication/`，不改動封存清單。本次不合併、不更新Wiki，不涉及Linux／資料庫／Demo／live。
 
 ## R8 文件同步 A／B：既有事件、工程錨點與現行佇列 — 2026-10-22
 
