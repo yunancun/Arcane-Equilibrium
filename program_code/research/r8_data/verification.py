@@ -419,15 +419,16 @@ def _trade_file(r,root,run):
         if len(set(header))!=len(header) or not {'timestamp','symbol','price','size','trdMatchID','side'}<=set(header):_fail('TRADE_HEADER')
         ti=header.index('timestamp');si=header.index('symbol')
         for rownum,line in enumerate(stream,2):
+            row_ref=_ref('trade',r['relative_path'],r['sha256'],url=r['url'],request_id=r['request_id'],row=rownum,line_sha256=_sha(line))
             # 先判斷身份與精確秒數，再解碼價格／數量。
             pieces=line.rstrip(b'\r\n').split(b',')
-            if len(pieces)!=len(header):out.errors.add('C1_ID_TIME');continue
+            if len(pieces)!=len(header):out.errors.add('C1_ID_TIME');out.refs.append(row_ref);continue
             try:
                 stamp=_number(pieces[ti].decode('ascii'))*1000
-                if pieces[si].decode('ascii')!=symbol or not day<=stamp<day+DAY or not run.start<=stamp<run.end:out.errors.add('C1_ID_TIME');continue
+                if pieces[si].decode('ascii')!=symbol or not day<=stamp<day+DAY or not run.start<=stamp<run.end:out.errors.add('C1_ID_TIME');out.refs.append(row_ref);continue
                 row=dict(zip(header,next(csv.reader([line.decode('utf-8')]))))
                 price,size=_number(row['price']),_number(row['size'])
-                if price<=0 or size<=0 or not row['trdMatchID'] or row['trdMatchID'] in seen or row['side'] not in ('Buy','Sell'):out.errors.add('C1_ID_TIME');continue
+                if price<=0 or size<=0 or not row['trdMatchID'] or row['trdMatchID'] in seen or row['side'] not in ('Buy','Sell'):out.errors.add('C1_ID_TIME');out.refs.append(row_ref);continue
                 seen.add(row['trdMatchID'])
                 if previous is not None and previous!=stamp:directions.add(1 if stamp>previous else -1)
                 previous=stamp
@@ -435,7 +436,7 @@ def _trade_file(r,root,run):
                 group=out.groups.setdefault(stamp,{'prices':set(),'volume':Fraction(0),'turnover':Fraction(0),'refs':[]})
                 group['prices'].add(price);group['volume']+=size;group['turnover']+=price*size
                 group['refs'].append(ref)
-            except (ValueError,UnicodeError):out.errors.add('C1_ID_TIME')
+            except (ValueError,UnicodeError):out.errors.add('C1_ID_TIME');out.refs.append(row_ref)
     if len(directions)>1:out.errors.add('C1_ID_TIME')
     return out
 
@@ -590,7 +591,7 @@ def _adjudicate(run,sym,day,ds,hs,trades,meta,instrument,minutes=()):
                     if support:decision='CORRECT';reason='TRADE_ADJUDICATION';refs=refs+supports[0].refs
                     else:decision='UNRESOLVED';reason='NATIVE_OPEN_SUPPORT_MISSING'
             else:decision='KEEP' if b.nums.get(f)==candidate else 'CORRECT';reason='MATCH' if decision=='KEEP' else 'TRADE_ADJUDICATION'
-            row.append(_correction(run,b,f,decision,reason,candidate,refs,coverage,order,[rule]+sorted(errors)+(['C4_ORDER'] if order=='TIMESTAMP_MULTI_PRICE' else []),formula))
+            row.append(_correction(run,b,f,decision,reason,candidate,refs,coverage,order,[rule]+sorted(e for e in errors if e.startswith('C') and e[1:2].isdigit())+(['C4_ORDER'] if order=='TIMESTAMP_MULTI_PRICE' else []),formula))
         row.append(_turnover(run,b,hs,meta,True))
         _finish_row(run,b,row)
 
@@ -808,7 +809,17 @@ def _previous(path,run):
         t=identity.get('timestamp')
         if type(t) is not int or not run.start<=t<run.end or identity.get('symbol') not in run.symbols:_fail('PREVIOUS_SCOPE')
         c=_json(line);_keys(c,CORRECTION_KEYS)
-        if c['schema_version']!='r8_data_correction_v1' or c['approval_event']!='RH-20261022-04':_fail('PREVIOUS_CORRECTION_SCHEMA')
+        if c['schema_version']!='r8_data_correction_v1' or c['approval_event']!='RH-20261022-04' or c['policy_sha256']!=run.policy_sha:_fail('PREVIOUS_CORRECTION_SCHEMA')
+        if c['interval'] not in DELTA or c['dataset']!={'D':'kline_day','60':'kline_hour','1':'kline_minute'}[c['interval']] or c['field'] not in FIELDS:_fail('PREVIOUS_CORRECTION_SCHEMA')
+        if c['coverage_status'] not in ('PASS','CONFLICT','UNAVAILABLE','NOT_APPLICABLE') or c['order_status'] not in ('UNIQUE','TIMESTAMP_MULTI_PRICE','UNAVAILABLE','NOT_APPLICABLE'):_fail('PREVIOUS_CORRECTION_SCHEMA')
+        if c['evidence_kind'] not in ('trade_adjudication','reported_turnover_selection'):_fail('PREVIOUS_CORRECTION_SCHEMA')
+        for name in ('original_value','candidate_value','corrected_value'):
+            if c[name] is not None and not isinstance(c[name],str):_fail('PREVIOUS_CORRECTION_SCHEMA')
+        for name in ('unit','formula','reason_code'):
+            if not isinstance(c[name],str) or not c[name]:_fail('PREVIOUS_CORRECTION_SCHEMA')
+        if not isinstance(c['rule_ids'],list) or not c['rule_ids'] or any(not isinstance(x,str) or not x for x in c['rule_ids']) or c['rule_ids']!=sorted(set(c['rule_ids'])):_fail('PREVIOUS_CORRECTION_SCHEMA')
+        _digest_string(c['correction_id'])
+        if c['supersedes'] is not None:_digest_string(c['supersedes'])
         if c['timestamp'] is None or type(c['timestamp']) is not int or not run.start<=c['timestamp']<run.end:_fail('PREVIOUS_SCOPE')
         for ref in c['source_refs']:_check_ref(ref)
         if not c['source_refs']:_fail('MISSING_EVIDENCE')
@@ -823,7 +834,28 @@ def _previous(path,run):
         while p is not None and p in ids:
             if p in seen:_fail('SUPERSEDES_CYCLE')
             seen.add(p);p=ids[p]['supersedes']
+    for c in ids.values():
+        if _sha(_encoded({k:v for k,v in c.items() if k!='correction_id'}))!=c['correction_id']:_fail('CORRECTION_ID_MISMATCH')
     return _sha(raw),by_key
+
+
+
+def _coalesce_conflicts(corrections):
+    """重複來源列一起隔離；同一裁決鍵只輸出一列並保存所有原位置。"""
+    groups={}
+    for c in corrections:
+        k=tuple(c[x] for x in ('symbol','dataset','interval','timestamp','field'))
+        # 無法定位的時間不捏造共同市場鍵，仍按原檔／原列定位。
+        if c['timestamp'] is None:k+=(_encoded([r for r in c['source_refs'] if r['kind']=='csv']),)
+        groups.setdefault(k,[]).append(c)
+    result=[]
+    for rows in groups.values():
+        c=rows[0]
+        if len(rows)>1:
+            values={r['original_value'] for r in rows}
+            c.update(original_value=next(iter(values)) if len(values)==1 else None,candidate_value=None,corrected_value=None,decision='UNRESOLVED',reason_code='DUPLICATE_KEY',row_action='missing',source_refs=_refs([ref for r in rows for ref in r['source_refs']]),rule_ids=sorted(set(['DV-L1']+[rule for r in rows for rule in r['rule_ids']])))
+        result.append(c)
+    return result
 
 
 def _post_l2(run,bars):
@@ -944,6 +976,7 @@ def verify(*,p3b_root,download_root,inventory_path,output_root,policy_path,reada
                 cs=[_correction(run,b,f,'UNRESOLVED','INVALID_TIMESTAMP',None,[],'UNAVAILABLE','UNAVAILABLE',['DV-L1'],'unavailable') for f in FIELDS]
                 _finish_row(run,b,cs)
         _post_l2(run,bars)
+        run.corrections=_coalesce_conflicts(run.corrections)
         run.findings.sort(key=_sort_record)
         coverage_sha=_sha(b''.join(_encoded(f) for f in run.findings))
         for c in run.corrections:

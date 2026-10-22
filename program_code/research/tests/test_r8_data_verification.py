@@ -610,3 +610,28 @@ def test_sample_plan_cannot_change_scope_identity_or_draw_rank(case,mode,reason)
     path=case.root/'plan.json';path.write_bytes(enc(plan))
     a,*_=case.run(sample_plan_path=path)
     assert a['status']=='BLOCKED' and reason in a['reason_codes']
+
+
+def test_duplicate_source_rows_produce_one_unresolved_correction_per_key(case):
+    case.daily.append(dict(case.daily[0],open='9',low='9'))
+    _,_,cs,v=case.run()
+    keys=[(c['symbol'],c['dataset'],c['interval'],c['timestamp'],c['field']) for c in cs]
+    assert len(keys)==len(set(keys))
+    c=correction(cs,'open')
+    assert c['decision']=='UNRESOLVED' and c['original_value'] is None
+    assert len([r for r in c['source_refs'] if r['kind']=='csv'])>=2
+    assert v['counts']['unresolved_rows']>=2
+
+
+@pytest.mark.parametrize('field,value',[('coverage_status','PASSISH'),('order_status',True),('candidate_value',10),('policy_sha256','0'*64),('correction_id','0'*64),('supersedes',42)])
+def test_previous_correction_rejects_wrong_types_enums_or_identity(case,field,value):
+    case.daily[0]['volume']='23';_,_,cs,_=case.run()
+    cs[0][field]=value
+    p=case.root/'prior-invalid.jsonl';p.write_bytes(b''.join(enc(c) for c in cs))
+    a,*_=case.run(previous_corrections_path=p)
+    assert a['status']=='BLOCKED'
+
+
+def test_tool_commit_identity_cannot_be_spoofed(case):
+    a,*_=case.run(tool_commit='0'*40)
+    assert a['status']=='BLOCKED' and 'TOOL_COMMIT_MISMATCH' in a['reason_codes']
