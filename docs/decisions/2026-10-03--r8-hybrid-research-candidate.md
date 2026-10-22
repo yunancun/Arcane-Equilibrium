@@ -3,6 +3,8 @@
 記錄日期：2026-10-03（Asia/Shanghai）。歷史 ID：`R8`。
 狀態：`CANDIDATE`；R1–R8 分期命名已由 Operator 採用，平台選型、介面與遷移仍待驗證。
 
+> **2026-10-07 採納註記（事件 `RH-20261007-01`）**：R8 自該日起轉為已採納方向，見[採納決策](2026-10-07--r8-adoption-agent-experiment-bench.md)；其後於 2026-10-09 採納[修訂一](2026-10-08--r8-amendment-1-first-loop-on-native-replay.md)（`RH-20261009-01`），於 2026-10-14 採納[修訂二](2026-10-14--r8-amendment-2-multi-strategy-first-loop.md)（`RH-20261014-03`）。本頁保留候選時的原文。
+
 ## 需求與理由
 
 Operator 希望減少本地長期保存全市場行情造成的磁碟負擔，使用成熟平台既有歷史資料。

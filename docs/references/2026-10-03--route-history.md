@@ -6,6 +6,8 @@ Operator 已採用 R1–R8 作為日誌分類；這是七個主要開發階段�
 2026-10-07 起 R8 由候選轉為已採納方向（事件 `RH-20261007-01`）；2026-10-09 採納修訂一（事件 `RH-20261009-01`）。
 2026-10-11 階段 1 的回放修補經獨立審查後以 source 交付（事件 `RH-20261011-01`），只有本機 source 證據；回放對實際成交的對帳、平台准入、runtime 與效果仍未驗。
 2026-10-14 起草並採納修訂二（事件 `RH-20261014-02`、`RH-20261014-03`）：第一圈改為本機的多策略假說搜尋（週期秒級至日線），平台在本機開發與配套完成後才有限使用，儀器驗證第二層改為 Demo 前向對照。
+2026-10-21 的 P4 補充裁決分別記錄 U5-FIX3 的契約、正式驗證範例的可見性探針及現金殘差的表示精度界線（事件 `RH-20261021-01`、`RH-20261021-02`、`RH-20261021-03`）。
+2026-10-22 將階段 2 至 3 的實際投入上限延為十五個工作日（事件 `RH-20261022-01`），核准研究資料驗證與更正規範（事件 `RH-20261022-04`），並選定成交量 v2 的逐筆為準規則（事件 `RH-20261022-05`）。
 
 [Git 記錄決策與查詢方法](../decisions/2026-10-03--route-history-versioning.md) ·
 [結構化登記簿](2026-10-03--route-history-register.json) ·
@@ -164,6 +166,14 @@ Route-Id 是本歷史命名空間。這些都不能互相當成完整產品版�
   查核紀錄見 `docs/execution_plan/2026-10-19--r8-stage2-p1-engine-selection-record.md`。不授予 Linux、資料庫、帳戶、支出或任何效果。
 - **RH-20261020-01／open_item_decided**：P4 補充指令的兩項方法論裁決：折內自動網格選擇算一個試驗；多重檢驗採 BY、FDR 0.10。另同意讀取交易所逐筆成交的目錄清單，核對下架品種清單的完整性。
   其餘參數由 QC 起草，見 `docs/execution_plan/2026-10-20--r8-stage2-p4-research-core-addendum.md` §9。不授予 Linux、資料庫、帳戶、支出或任何效果。
+- **RH-20261021-01／open_item_decided**：Operator 選定沿用 U6 的鄰域格式、只改 U5，另立 U5-FIX3；[P4 補充指令 §14](../execution_plan/2026-10-20--r8-stage2-p4-research-core-addendum.md)記錄 FIX2 交回、九案例雙版本查核與修補契約，保留已釋放交付及審查歷史。
+  U5 須先入帳前一根成交再啟用折界、採 U6 鄰域格式、只對仍持倉的恢復標的平倉，並補驗證範例的 `no_trade_at`；U6-FIX2 不變。文件合入後才准入實作，記錄者須以無診斷轉接的九案例重跑及 U6 零差異，再交獨立驗證與發布；本事件不表示實作或 P4-D0 驗收完成。
+- **RH-20261021-02／open_item_decided**：Operator 決定在正式驗證範例加入 `visibility_probe`，確認 U5-FIX4；[P4 補充指令 §15](../execution_plan/2026-10-20--r8-stage2-p4-research-core-addendum.md)以既有公開資料視圖的探針處理驗證範例與策略端可見性檢查的衝突。
+  只改範例與測試，U4、U6 及固定類別執行限制不變；文件先合入，再於真實 LEAN 重跑 EV-1、EV-2。本事件不表示 FIX4 實作、EV-1／EV-2 驗收或 P4-D0 案例 D 的限制已關閉。
+- **RH-20261021-03／open_item_decided**：Operator 選定現金殘差的精度容差，確認 U5-FIX5 與 U6-FIX3；[P4 補充指令 §16](../execution_plan/2026-10-20--r8-stage2-p4-research-core-addendum.md)以框架預期現金及共同的 100 ulp 界線區分表示精度差與未解釋殘差，所有非零殘差仍保留。
+  文件合入後，兩個檔案範圍不重疊的單元可各自准入並行；G1–G8、§9.8.8 容差、其餘 `run.json` 欄位與 U4 不變。本事件不表示實作、EV-10 重跑通過或 B 段完成。
+- **RH-20261022-01／open_item_decided**：Operator 原文「开发时间先延长5天」；conductor 依[修訂二 N8](../decisions/2026-10-14--r8-amendment-2-multi-strategy-first-loop.md)解讀為階段 2 至 3 的投入上限由十個工作日延為十五個工作日，以工時帳的實際投入計，屬管理上限，不是工期承諾。
+  起算日仍為 2026-10-14，記帳方式不變；只取代 `RH-20261018-01` 保留的十日上限，實際投入達上限時 PM 仍須回報。2026-11-03 僅為每個工作日都滿額投入時的最早估計到期日，實際到期以工時帳為準；不表示階段 2 完成，也不解除資料品質前檢、預登記或當時待決的異常列處理。
 - **RH-20261022-02／amendment_proposed**：Operator 要求交叉比對 BCHUSDT 零價及日／時分歧，並預先設計驗證與後續處理規範；原文保存在 JSON `authority_source` 及[規範草案](../execution_plan/2026-10-22--r8-stage2-data-verification-standard.md) §2。
   本次只起草：原件不可覆寫、外所只旁證、逐筆涵蓋優先、未決視缺漏、L1–L4 與預登記抽樣；open、成交額、部分日與驗收強度四項仍待裁決，BCH 兩個候選價格未套用。
   待 conductor 審查與 Operator 核准，不合併；§17 核准前不生效。TODO DATA-VERIFY 為 WAITING／不可派發，核准並合入只解除實作前置；REPORT-TOOLS／P5 另須其實作與驗收完成。不授予本輪取數、程式改動、holdout 開啟或交易效果。
@@ -173,5 +183,7 @@ Route-Id 是本歷史命名空間。這些都不能互相當成完整產品版�
 - **RH-20261022-04／amendment_accepted**（續接 RH-20261022-03）：Operator 以四項選項回覆核准剩餘參數與整份規範，原文逐字保存在 JSON `authority_source` 及[規範 §2.1／§6.4／§12](../execution_plan/2026-10-22--r8-stage2-data-verification-standard.md)：X=50%、Y=20%、Z=20%、W=7日、量A及均量相對差公式；啟動DV6；種子20261022、每層300可一次擴900、保守95%上界≤2.5%，連同下載／工時估計。
   conductor方法論審查完成，規範與TODO v918的DATA-VERIFY ACTIVE／可派發列自PR #240合入main生效；DV1∥DV3、DV2依DV1介面、DV5∥DV6依DV2產物、DV4最後，六個交付的唯一身分／檔案與真實互通測試見§9，跨單元格式見§8.4。15工作日總上限不變。
   舊年大量未決仍嚴格隔離／停止，待凍結稽核結果再由Operator決定A或B，不預選；實作與驗收尚未完成。舊文件身份固定至前一head，新雜湊另列；本輪不改程式、不取數、不套BCH候選、不更新Wiki、不合併，由conductor審查本輪提交並合併。
+- **RH-20261022-05／open_item_decided**：Operator 選擇「B」（另訂成交量規則後重新驗證）及「(e) 逐筆為準 (Recommended)」，不採 (b)／(b)+D1 後備；見[資料驗證規範 §13](../execution_plan/2026-10-22--r8-stage2-data-verification-standard.md)。v2 允許同日多個精確完整的時間戳後綴，O 保留 v1／D1，A 保留 DV-A；不符合 (e) 的 C3 失敗日維持原有未決／缺失。
+  v1 證據與 §4.5 不變，更正仍計為更正前錯誤；DV7 接續已合入的 #241，之後依序為 DV2、DV5／DV6，DV4 最後先跑凍結 v1 再以 v2 重驗。驗收衡量目標待 Operator 看到凍結結果後裁決，不預設；文件由 conductor 合併生效，單行 pin 更新的工具在 DV7 合入前仍為 v1-strict。本事件不表示 v2 資料更正、抽樣、runtime、holdout 或交易效果已完成。
 - 新路線、採納、撤回、取代及更正按 [決策規則](../decisions/2026-10-03--route-history-versioning.md)
   追加事件；現行派工及效果授權仍回 TODO 與既有 ADR/AMD。
