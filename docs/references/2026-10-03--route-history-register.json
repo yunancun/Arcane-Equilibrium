@@ -206,10 +206,12 @@
       "sha256": "953a1a3a12e95433590032888d3d8dc4a284adb0fb3223ebedb9a6172987d81a"
     },
     "r8-portable": {
-      "kind": "recorded_file",
+      "kind": "git_blob",
       "path": "docs/decisions/2026-10-03--r8-hybrid-research-candidate.md",
       "sha256": "f3d793c27b62d180d8a1dc1555994d2a8243c450223431ea3ce4a926caeb7ac1",
-      "meaning": "portable retrospective summary recorded in this history commit; not historical adoption attestation"
+      "meaning": "portable retrospective summary recorded in this history commit; not historical adoption attestation",
+      "commit": "55586c1e919958bcac12437404ed7c164832a7fe",
+      "blob": "20ed2fc0f7714fa2b2bd4cc6c5f02538d467ec10"
     },
     "r8-adoption": {
       "kind": "git_blob",
@@ -556,16 +558,94 @@
       "meaning": "Conductor-authorized PR #243 P2 follow-up: bounded rejection-only subset diagnosis and erratum three, linear migration indexing, aligned semantic keys preserving malformed originals. Original stopped DV7 history retained; no new RH event, merge, data or runtime acceptance."
     },
     "r8-dv7-p2-todo-v923": {
-      "kind": "recorded_file",
+      "kind": "git_blob",
       "path": "TODO.md",
       "sha256": "468c670074e5a0ba3f94032a97f4d86f2987795759485bc874cc0828cd03fab4",
-      "meaning": "Conductor-authorized PR #243 P2 follow-up: bounded rejection-only subset diagnosis and erratum three, linear migration indexing, aligned semantic keys preserving malformed originals. Original stopped DV7 history retained; no new RH event, merge, data or runtime acceptance."
+      "meaning": "Conductor-authorized PR #243 P2 follow-up: bounded rejection-only subset diagnosis and erratum three, linear migration indexing, aligned semantic keys preserving malformed originals. Original stopped DV7 history retained; no new RH event, merge, data or runtime acceptance.",
+      "commit": "c6610398a0046210c946b363631099c51c4a398a",
+      "blob": "710ad93614b3c20295090626650df75bd585caf8"
     },
     "r8-dv7-p2-changelog": {
-      "kind": "recorded_file",
+      "kind": "git_blob",
       "path": "docs/CLAUDE_CHANGELOG.md",
       "sha256": "500195cb33d1904df209639a8bcfbbcfb4773c3629d67aee174f9e722cfdaf06",
-      "meaning": "Conductor-authorized PR #243 P2 follow-up: bounded rejection-only subset diagnosis and erratum three, linear migration indexing, aligned semantic keys preserving malformed originals. Original stopped DV7 history retained; no new RH event, merge, data or runtime acceptance."
+      "meaning": "Conductor-authorized PR #243 P2 follow-up: bounded rejection-only subset diagnosis and erratum three, linear migration indexing, aligned semantic keys preserving malformed originals. Original stopped DV7 history retained; no new RH event, merge, data or runtime acceptance.",
+      "commit": "c6610398a0046210c946b363631099c51c4a398a",
+      "blob": "3e7d1b19160d23e56938066e5f9f059c60dbe784"
+    },
+    "r8-docs-sync-a-readme": {
+      "kind": "git_blob",
+      "path": "README.md",
+      "commit": "dc60260cf6f17427249f7d25f67d3e79fa2951fe",
+      "blob": "dbaf5f8dd778fcfaa013f69d5f51ff34d47c7c19",
+      "sha256": "849ef089931d223f9ed39d1cac7ccd6501ae7ab138c2cacb9d73c1df0ad9a2c7",
+      "meaning": "PR #244 merged part A documentation synchronization: existing events, adoption/budget annotations and navigation only; no new ruling or research/runtime evidence."
+    },
+    "r8-docs-sync-a-docs-index": {
+      "kind": "git_blob",
+      "path": "docs/README.md",
+      "commit": "dc60260cf6f17427249f7d25f67d3e79fa2951fe",
+      "blob": "fca68a59e1191e498b7b6ce863e350424add5029",
+      "sha256": "fcfa607906a6a1c65273a5520c8cdf1502d8b5122689de4f7c2061fc1a7db436",
+      "meaning": "PR #244 merged part A documentation synchronization: existing events, adoption/budget annotations and navigation only; no new ruling or research/runtime evidence."
+    },
+    "r8-docs-sync-a-candidate": {
+      "kind": "git_blob",
+      "path": "docs/decisions/2026-10-03--r8-hybrid-research-candidate.md",
+      "commit": "dc60260cf6f17427249f7d25f67d3e79fa2951fe",
+      "blob": "f482dc4fd16c15e2103530cc69b3a8c9f01a5fe6",
+      "sha256": "cacfca5138a38275d1a99dfa7357bc8fa8d9314e9da2e308100bb861dffaa323",
+      "meaning": "PR #244 merged part A documentation synchronization: existing events, adoption/budget annotations and navigation only; no new ruling or research/runtime evidence."
+    },
+    "r8-docs-sync-a-stage2-dispatch": {
+      "kind": "git_blob",
+      "path": "docs/execution_plan/2026-10-14--r8-stage2-local-research-dispatch.md",
+      "commit": "dc60260cf6f17427249f7d25f67d3e79fa2951fe",
+      "blob": "9aeb0b46e7e32d7b446b2d392c5da7918fd7c770",
+      "sha256": "17c6a6940d5e274ef8c2ff210edc3e015fd61c708fa2df4573577cc96a0ab795",
+      "meaning": "PR #244 merged part A documentation synchronization: existing events, adoption/budget annotations and navigation only; no new ruling or research/runtime evidence."
+    },
+    "r8-docs-sync-a-execution-plan-index": {
+      "kind": "git_blob",
+      "path": "docs/execution_plan/README.md",
+      "commit": "dc60260cf6f17427249f7d25f67d3e79fa2951fe",
+      "blob": "fabdb4d53d1276239f914a61254f0066a0a332ba",
+      "sha256": "ba91f1addd583907807fd715914812d2eaa2af72f599de51945223c7b67095f3",
+      "meaning": "PR #244 merged part A documentation synchronization: existing events, adoption/budget annotations and navigation only; no new ruling or research/runtime evidence."
+    },
+    "r8-docs-sync-a-readable-history": {
+      "kind": "git_blob",
+      "path": "docs/references/2026-10-03--route-history.md",
+      "commit": "dc60260cf6f17427249f7d25f67d3e79fa2951fe",
+      "blob": "c8b1fa201fcc9ea410a2b96a1fc1f50f4598ffb2",
+      "sha256": "b7ce1b4571a6efd3c5fab89e0e151ec5906941d6794f89bc9b1ed8108a11b49f",
+      "meaning": "PR #244 merged part A documentation synchronization: existing events, adoption/budget annotations and navigation only; no new ruling or research/runtime evidence."
+    },
+    "r8-docs-sync-a-runbook-index": {
+      "kind": "git_blob",
+      "path": "docs/runbooks/README.md",
+      "commit": "dc60260cf6f17427249f7d25f67d3e79fa2951fe",
+      "blob": "d16d2da408bcbf2adfbe4e29150cbb96a43986be",
+      "sha256": "aa9dac619b54d05a5f01aa9a2daae408139a7184c107a122dbd0c315b57a1028",
+      "meaning": "PR #244 merged part A documentation synchronization: existing events, adoption/budget annotations and navigation only; no new ruling or research/runtime evidence."
+    },
+    "r8-docs-sync-b-todo-v924": {
+      "kind": "recorded_file",
+      "path": "TODO.md",
+      "sha256": "9f2b7a41c13d8eb39cfc4a5b35e35d1493eb6571699b73f46039ebabd12fedb2",
+      "meaning": "Conductor-assigned part B documentation synchronization of existing R8 source deliveries, TODO dependencies and A/B history; original decisions, source baseline and RH events retained. No new data acceptance, runtime or trading claim."
+    },
+    "r8-docs-sync-b-changelog": {
+      "kind": "recorded_file",
+      "path": "docs/CLAUDE_CHANGELOG.md",
+      "sha256": "0b3feb82d2d9698f7f9c8f1ec07f8088c9cfceab0c8ad6a88dafb02a490c501e",
+      "meaning": "Conductor-assigned part B documentation synchronization of existing R8 source deliveries, TODO dependencies and A/B history; original decisions, source baseline and RH events retained. No new data acceptance, runtime or trading claim."
+    },
+    "r8-docs-sync-b-readable-history": {
+      "kind": "recorded_file",
+      "path": "docs/references/2026-10-03--route-history.md",
+      "sha256": "450f60deabea4943e20f05df5a61c863224b4c032f91886315cf91fa79e5d84f",
+      "meaning": "Conductor-assigned part B documentation synchronization of existing R8 source deliveries, TODO dependencies and A/B history; original decisions, source baseline and RH events retained. No new data acceptance, runtime or trading claim."
     }
   },
   "routes": [
@@ -751,7 +831,17 @@
         "r8-stage2-data-verification-standard-v2-volume",
         "r8-stage2-data-verification-standard-v2-erratum-2",
         "r8-dv7-publish-todo-v922",
-        "r8-dv7-publish-changelog"
+        "r8-dv7-publish-changelog",
+        "r8-docs-sync-a-readme",
+        "r8-docs-sync-a-docs-index",
+        "r8-docs-sync-a-candidate",
+        "r8-docs-sync-a-stage2-dispatch",
+        "r8-docs-sync-a-execution-plan-index",
+        "r8-docs-sync-a-readable-history",
+        "r8-docs-sync-a-runbook-index",
+        "r8-docs-sync-b-todo-v924",
+        "r8-docs-sync-b-changelog",
+        "r8-docs-sync-b-readable-history"
       ],
       "status_history": [
         {
@@ -1218,6 +1308,60 @@
       "source_adoption": "not_ancestor_of_recording_baseline",
       "runtime": "not_verified_by_this_record",
       "note": "Commit identity is an optional cross-branch anchor; core history uses portable records and does not require this feature branch to be fetched."
+    },
+    {
+      "route_id": "R8",
+      "delivery": "stage 1 replay patches",
+      "commit": "a71b3f5b6571805ef04b457178c30535f85fe21f",
+      "role": "main_merge_commit",
+      "source_adoption": "not_ancestor_of_recording_baseline",
+      "runtime": "not_verified_by_this_record",
+      "pull_request": 206
+    },
+    {
+      "route_id": "R8",
+      "delivery": "stage 1 follow-up U6 replay CI",
+      "commit": "e87ed25df0ca96df5d37e60c977e742826af4cb9",
+      "role": "main_merge_commit",
+      "source_adoption": "not_ancestor_of_recording_baseline",
+      "runtime": "not_verified_by_this_record",
+      "pull_request": 209
+    },
+    {
+      "route_id": "R8",
+      "delivery": "stage 1 follow-up U1-U5",
+      "commit": "b07df6daf13f428d5c37bd74211efd6657f797e1",
+      "role": "main_merge_commit",
+      "source_adoption": "not_ancestor_of_recording_baseline",
+      "runtime": "not_verified_by_this_record",
+      "pull_request": 210
+    },
+    {
+      "route_id": "R8",
+      "delivery": "stage 2 research core P4-D closeout",
+      "commit": "bddd96d56f86e07e6000a9e26f0bd8a93f66079a",
+      "role": "main_merge_commit",
+      "source_adoption": "not_ancestor_of_recording_baseline",
+      "runtime": "not_verified_by_this_record",
+      "pull_request": 237
+    },
+    {
+      "route_id": "R8",
+      "delivery": "data verification DV1 and DV3 tools",
+      "commit": "1ea85a9a2128e2aaf9f70bf5bc462fd5c82a3527",
+      "role": "main_merge_commit",
+      "source_adoption": "not_ancestor_of_recording_baseline",
+      "runtime": "not_verified_by_this_record",
+      "pull_request": 241
+    },
+    {
+      "route_id": "R8",
+      "delivery": "data verification DV7 v2 tools",
+      "commit": "c6610398a0046210c946b363631099c51c4a398a",
+      "role": "main_merge_commit",
+      "source_adoption": "not_ancestor_of_recording_baseline",
+      "runtime": "not_verified_by_this_record",
+      "pull_request": 243
     }
   ],
   "events": [
