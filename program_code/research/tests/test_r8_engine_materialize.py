@@ -44,7 +44,7 @@ def dv_read(root, name):
 class VerifiedCase:
     def __init__(self, root, monkeypatch, *, days=40, version=1, first_hour=0,
                  quantities=None, amounts=None, daily_amounts=None, suffix=False,
-                 missing=(), registration_change=None, instrument_change=None, poison_outside=False, end_offset=0, daily_open='10'):
+                 missing=(), registration_change=None, instrument_change=None, poison_outside=False, end_offset=0, daily_open='10', sampling=False):
         self.root, self.monkeypatch = root, monkeypatch
         root.mkdir(parents=True, exist_ok=True)
         self.u1 = root/'u1'; self.u1.mkdir()
@@ -96,7 +96,7 @@ class VerifiedCase:
         request_bytes = b''.join(dv_encode(r) for r in self.requests)
         (self.u1/'requests.jsonl').write_bytes(request_bytes)
         manifest = dict(tool_version='r8-public-data-2', files=self.files, request_log_sha256=digest(request_bytes),
-                        universe_request_ids=[rid], universe={s:{'deliveryTime':0} for s in ('BTCUSDT','XUSDT')})
+                        universe_request_ids=[rid], universe={s:{'deliveryTime':0,'launch_time':self.first} for s in ('BTCUSDT','XUSDT')})
         (self.u1/'manifest.json').write_bytes(dv_encode(manifest))
         self.manifest_sha = digest(dv_encode(manifest))
         spec = Path(__file__).resolve().parents[3]/'docs/execution_plan/2026-10-22--r8-stage2-data-verification-standard.md'
@@ -109,8 +109,15 @@ class VerifiedCase:
         (root/'policy.json').write_bytes(dv_encode(self.policy))
         self.inventory.sort(key=lambda r:(r['symbol'],r['day_start'],r['source_kind'],r['interval'],r['request_id']))
         (root/'inventory.jsonl').write_bytes(b''.join(dv_encode(r) for r in self.inventory))
+        plan=None
+        if sampling:
+            from program_code.research.r8_data import verification_fetch as fetch
+            sources=[fetch.CSVSource(m['symbol'],m['dataset'],m['interval'],n,m['sha256']) for n,m in self.files.items() if m['dataset']=='kline']
+            handoff=fetch.build_sample_plan(self.u1,root/'plan',sources,readable={'start':self.start,'end':self.end},p3b_manifest_sha256=self.manifest_sha)
+            assert handoff['status']=='READY',handoff
+            plan=root/'plan/sample_plan.json'
         result = verifier.verify(p3b_root=self.u1, download_root=self.downloads, inventory_path=root/'inventory.jsonl',
-            output_root=root/'bundle', policy_path=root/'policy.json', readable={'start':self.start,'end':self.end}, symbols=['BTCUSDT','XUSDT'])
+            output_root=root/'bundle', policy_path=root/'policy.json', readable={'start':self.start,'end':self.end}, symbols=['BTCUSDT','XUSDT'],sample_plan_path=plan)
         assert result['status'] == 'READY', result
         self.bundle_sha = result['primary_sha256']
         self.bundle = root/'verification-bundles'/self.bundle_sha
@@ -854,3 +861,30 @@ def test_bundle_scope_escape_rejected_without_decoding_or_copying_future_values(
     with pytest.raises(mod.MaterializationError,match='SCOPE'):mod.materialize(**case.args)
     for p in (tmp_path/'result.blocked').rglob('*'):
         if p.is_file():assert b'FUTURE_MUST_NOT_BE_DECODED' not in p.read_bytes()
+
+
+@pytest.mark.parametrize('version',[1,2])
+def test_real_frozen_v1_sample_plan_preserved_in_both_policy_versions(tmp_path,monkeypatch,version):
+    case=VerifiedCase(tmp_path,monkeypatch,version=version,sampling=True)
+    result=mod.materialize(**case.args)
+    assert (case.args['out']/'verification/sample_plan.json').read_bytes()==(tmp_path/'plan/sample_plan.json').read_bytes()
+    report=dv_read(case.args['out'],'verification/verification.json');plan=dv_read(tmp_path/'plan','sample_plan.json')
+    assert report['sample_plan_sha256']==result['files']['verification/sample_plan.json']['sha256']
+    assert (plan['policy_sha256']==case.policy_sha) is (version==1)
+
+
+@pytest.mark.parametrize('mutation',['report_sha','unknown_key','foreign_policy','scope','rank'])
+def test_sample_plan_identity_and_schema_rejected(tmp_path,monkeypatch,mutation):
+    case=VerifiedCase(tmp_path,monkeypatch,version=2,sampling=True)
+    if mutation=='report_sha':mutate_bundle(case,'verification.json',lambda r:r.update(sample_plan_sha256='a'*64))
+    else:
+        def change(p):
+            if mutation=='unknown_key':p['extra']='not permitted'
+            elif mutation=='foreign_policy':p['policy_sha256']='b'*64
+            elif mutation=='scope':p['readable']['end']+=DV_DAY
+            else:p['strata'][0]['draws'][0]['rank']=2
+        mutate_bundle(case,'sample_plan.json',change)
+        # Bind the new bytes as a negative consumer test, not an altered producer.
+        mutate_bundle(case,'verification.json',lambda r:r.update(sample_plan_sha256=digest((case.bundle/'sample_plan.json').read_bytes())))
+    with pytest.raises(mod.MaterializationError,match='SAMPLE'):mod.materialize(**case.args)
+    assert dv_read(tmp_path/'result.blocked','verification.json')['status']=='BLOCKED'

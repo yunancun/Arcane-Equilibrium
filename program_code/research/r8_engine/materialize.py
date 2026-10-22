@@ -211,12 +211,71 @@ class _Bundle:
         if self.version == 2 and (report['volume_semantics_policy'] != V2 or report['standard_sha256'] != STANDARD_SHA256):
             _fail('POLICY_MISMATCH')
         self.valid_policy = self.raw['policy.json']
+        self._sample_plan()
         self.start, self.end, self.symbols = start, end, symbols
         self.source_root, self.verified_refs = root, set()
         self.check_refs(report['review_refs'])
         self.corrections = self._corrections()
         self.findings = self._findings()
         self.semantics = self._semantics() if self.version == 2 else []
+
+    def _sample_plan(self):
+        raw = self.raw.get('sample_plan.json')
+        if self.report['sample_plan_sha256'] != (_digest(raw) if raw is not None else None):
+            _fail('SAMPLE_PLAN_DIGEST')
+        if raw is None:
+            if 'sample_report.txt' in self.raw:
+                _fail('SAMPLE_REPORT_WITHOUT_PLAN')
+            return
+        plan = _json(raw)
+        expected_keys = {'schema_version', 'policy_sha256', 'p3b_manifest_sha256', 'readable', 'seed', 'strata'}
+        if not isinstance(plan, dict) or set(plan) != expected_keys:
+            _fail('SAMPLE_PLAN_SCHEMA')
+        if (plan['schema_version'] != 'r8_verification_sample_plan_v1' or plan['seed'] != 20261022
+                or plan['readable'] != self.report['readable'] or plan['p3b_manifest_sha256'] != self.manifest_sha):
+            _fail('SAMPLE_PLAN_IDENTITY')
+        accepted = {self.policy_sha} if self.version == 1 else set()
+        if self.version == 2:
+            original = dict(self.policy)
+            original.pop('volume_semantics_policy')
+            original.update(schema_version='r8_data_verification_policy_v1', approval_event='RH-20261022-04')
+            for standard in V1_STANDARDS:
+                original['standard_sha256'] = standard
+                accepted.add(_digest(_encoded(original)))
+        if plan['policy_sha256'] not in accepted:
+            _fail('SAMPLE_PLAN_POLICY')
+        tiers = ('GE_100M', 'GE_10M', 'GE_1M', 'NO_OPEN')
+        if not isinstance(plan['strata'], list):
+            _fail('SAMPLE_PLAN_STRATA')
+        order, seen = [], set()
+        for stratum in plan['strata']:
+            if not isinstance(stratum, dict) or set(stratum) != {'year','tier','population_size','base_size','max_size','draws'}:
+                _fail('SAMPLE_PLAN_STRATUM_SCHEMA')
+            if any(type(stratum[k]) is not int or stratum[k] < 0 for k in ('year','population_size','base_size','max_size')) or stratum['tier'] not in tiers:
+                _fail('SAMPLE_PLAN_STRATUM_TYPE')
+            population = stratum['population_size']
+            if (stratum['base_size'] != min(300, population) or stratum['max_size'] != min(900, population)
+                    or not isinstance(stratum['draws'], list) or len(stratum['draws']) != stratum['max_size']):
+                _fail('SAMPLE_PLAN_SAMPLE_SIZE')
+            order.append((stratum['year'], tiers.index(stratum['tier'])))
+            for rank, draw in enumerate(stratum['draws'], 1):
+                if not isinstance(draw, dict) or set(draw) != {'rank','symbol','day_start'}:
+                    _fail('SAMPLE_PLAN_DRAW_SCHEMA')
+                if type(draw['rank']) is not int or draw['rank'] != rank or type(draw['day_start']) is not int:
+                    _fail('SAMPLE_PLAN_RANK')
+                day = draw['day_start']
+                if draw['symbol'] not in self.symbols or day % DAY or not self.start <= day < day+DAY <= self.end or _date(day).year != stratum['year']:
+                    _fail('SAMPLE_PLAN_DRAW_SCOPE')
+                key = (draw['symbol'], day)
+                if key in seen:
+                    _fail('SAMPLE_PLAN_DUPLICATE_DRAW')
+                seen.add(key)
+        if order != sorted(set(order)):
+            _fail('SAMPLE_PLAN_STRATUM_ORDER')
+        if 'sample_report.txt' in self.raw:
+            lines = self.raw['sample_report.txt'].splitlines()
+            if lines[:2] != [('sample_plan_sha256='+_digest(raw)).encode(), b'base denominator only; expansion is diagnostic']:
+                _fail('SAMPLE_REPORT_IDENTITY')
 
     def scoped(self, name):
         selected = []
