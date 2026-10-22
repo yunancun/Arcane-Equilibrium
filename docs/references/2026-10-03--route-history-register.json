@@ -558,13 +558,13 @@
     "r8-dv7-p2-todo-v923": {
       "kind": "recorded_file",
       "path": "TODO.md",
-      "sha256": "c6f246fab4071953f77b8f890b807aab56730d52739c71757f693d2abe67a1fb",
+      "sha256": "468c670074e5a0ba3f94032a97f4d86f2987795759485bc874cc0828cd03fab4",
       "meaning": "Conductor-authorized PR #243 P2 follow-up: bounded rejection-only subset diagnosis and erratum three, linear migration indexing, aligned semantic keys preserving malformed originals. Original stopped DV7 history retained; no new RH event, merge, data or runtime acceptance."
     },
     "r8-dv7-p2-changelog": {
       "kind": "recorded_file",
       "path": "docs/CLAUDE_CHANGELOG.md",
-      "sha256": "d36e7c929caec54fead7cb9736683d33249975f6618f9cb95dbeb3bf13d69a1d",
+      "sha256": "500195cb33d1904df209639a8bcfbbcfb4773c3629d67aee174f9e722cfdaf06",
       "meaning": "Conductor-authorized PR #243 P2 follow-up: bounded rejection-only subset diagnosis and erratum three, linear migration indexing, aligned semantic keys preserving malformed originals. Original stopped DV7 history retained; no new RH event, merge, data or runtime acceptance."
     }
   },

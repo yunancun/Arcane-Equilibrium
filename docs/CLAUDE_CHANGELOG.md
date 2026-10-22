@@ -12,6 +12,7 @@
 - 遷移原因碼：一次建 `(symbol,day_start)`→原因碼集合後查表；64／128個合成部分日的真實雙政策報表原先均超出線性存取預算，修後2 passed，768／1,536 correction列分別5,312／10,624次symbol讀取。以相同封存輸入對照修前實作，26／26主報表及內嵌單政策報表bytes全同；此比較隔離效能修正，於勘誤三pin變更前完成。
 - 非整點原列：findings／corrections保存原始整點加1毫秒；語義列只用整點鍵。缺真正整點原列按既有順序記 `MISSING_ORIGINAL_HOUR` 並保存 `C1_INVALID` 原因；整點與異常列並存則記 `C1_INVALID`。兩個真實DV1→DV3案例從兩個summarizer中止到正常產出，該日v1／v2均為u，2 passed。
 - 規範僅末尾追加「勘誤三（2026-10-22，conductor 依 #243 審查）」；新 `STANDARD_SHA256=d0fbf9ff02d080027d575eb6488f2c552c3a583485b8c685166fe0ef94b2af98`。保留ba65fbca規範的v1歷史政策身分，測試在消費前準備此歷史pin的fixture，與固定main原實作比78份完整bytes；v2使用新pin，舊bundle不回寫。§13.7、採值與可用性、§4.5／§13.6與驗收目標待決均不變。
+- `c9650fddc` 的 hosted research run `39816584641`／job `119956704414` 為1 failed、1185 passed、52 skipped：新增記憶體斷言讀到Linux生命週期RSS 1,393,569,792 bytes。Linux exec會保留被替換位址空間的高水位，不能當作此次子集診斷配置量；僅將測試改用驗證呼叫前啟動的tracemalloc峰值，256 MiB門檻與5秒逾時不變，RSS仍記錄。聚焦GREEN 1 passed，約0.300秒、配置峰值5,567,053 bytes；產品程式／分類／規範不改。固定新head完整回歸與CI仍須重跑，保留原失敗收據。新head自動審查另提 [語義列按日索引P2](https://github.com/yunancun/Arcane-Equilibrium/pull/243#discussion_r4351071691)，依續派原文交conductor，未修未resolve；原三則已於c965回覆修正提交並resolve。
 - 修改限定兩程式、兩測試、規範末尾與pin、TODO v922→v923、changelog及登記簿文件雜湊；不新增RH事件。PR分支根目錄DV1／DV3／全部R8、僅兩個指定structure檔、工作樹不變快照、26日逐格及雙政策報表的最終結果見倉庫外 `audits/2026-10-22-r8-data-verify-dv7-p2/REPORT.md`、XML及SHA256SUMS；既存archive索引失敗單列。推送後回覆並resolve原三則thread，再請新head自動審查；新程式意見原文交conductor，不自行續修。不取數、不碰Linux runtime／資料庫／Demo／live、不更新Wiki、不合併。
 
 ## R8 DV7 記錄者小修與發布候選 — 2026-10-22

@@ -1280,7 +1280,7 @@ def test_v2_large_partial_subset_diagnosis_is_resource_bounded(tmp_path,record_p
     # Isolate the historical exponential search so RED cannot exhaust the runner.
     import subprocess,time
     script = '''
-import json,resource,sys,time
+import json,resource,sys,time,tracemalloc
 from pathlib import Path
 from fractions import Fraction
 from program_code.research.tests.test_r8_data_verification import Case,T,v2_policy,read,correction
@@ -1291,10 +1291,10 @@ case.trades=case.trades[1:]+[dict(timestamp=str(T//1000+1800),symbol='TESTUSDT',
 case.trades.sort(key=lambda r:Fraction(r['timestamp']))
 case.hours[0]['volume']=str(sum(sizes)-need)
 case.daily[0]['volume']=str(sum(sizes)+23)
-start=time.monotonic();result,_,cs,_=case.run()
+tracemalloc.start();start=time.monotonic();result,_,cs,_=case.run()
 assert result['status']=='READY',result
 row=next(r for r in read(Path(result['artifact_root']),'volume_semantics.jsonl') if r['timestamp']==T)
-print(json.dumps(dict(classification=row['hour_classification'],applicable=row['day_applicable'],decision=correction(cs,'volume')['decision'],seconds=time.monotonic()-start,peak_rss=resource.getrusage(resource.RUSAGE_SELF).ru_maxrss)))
+print(json.dumps(dict(classification=row['hour_classification'],applicable=row['day_applicable'],decision=correction(cs,'volume')['decision'],seconds=time.monotonic()-start,peak_traced_bytes=tracemalloc.get_traced_memory()[1],peak_rss=resource.getrusage(resource.RUSAGE_SELF).ru_maxrss)))
 '''
     started=time.monotonic()
     try:
@@ -1308,9 +1308,12 @@ print(json.dumps(dict(classification=row['hour_classification'],applicable=row['
     from program_code.research.r8_data import verification as v
     assert (v.MAX_PARTIAL_SUBSET_BITS,v.MAX_PARTIAL_SUBSET_ITEMS,v.MAX_PARTIAL_SCALE_BITS)==(1048576,4096,4096)
     peak_bytes=result['peak_rss']*(1 if sys.platform=='darwin' else 1024)
-    assert peak_bytes<256*1024*1024
+    # Linux lifetime RSS can retain the pre-exec parent's high-water mark.
+    # Bound allocations made by this verification call; retain RSS diagnostically.
+    assert result['peak_traced_bytes']<256*1024*1024
     record_property('partial_subset_wall_seconds',time.monotonic()-started)
-    record_property('partial_subset_peak_bytes',peak_bytes)
+    record_property('partial_subset_peak_traced_bytes',result['peak_traced_bytes'])
+    record_property('partial_subset_peak_rss_bytes',peak_bytes)
 
 
 def test_v2_no_next_day_or_outside_readable_market_decode(case):
