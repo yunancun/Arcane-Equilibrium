@@ -329,7 +329,7 @@ done
 
 ## 参考文件
 
-路線／版本沿革：[R1–R8 歷史總覽](docs/references/2026-10-03--route-history.md)（分期已採用；R8 於 2026-10-07 轉為已採納方向，平台准入與效果未驗）。新增路線決策或追溯舊版時，依 [Git 記錄方式](docs/decisions/2026-10-03--route-history-versioning.md) 查詢與更新。
+路線／版本沿革：[R1–R8 歷史總覽](docs/references/2026-10-03--route-history.md)（分期已採用；R8 於 2026-10-07 轉為已採納方向，平台准入與效果未驗；目前在階段 2（本機研究能力），現況以 TODO 的 R8 各節為準）。新增路線決策或追溯舊版時，依 [Git 記錄方式](docs/decisions/2026-10-03--route-history-versioning.md) 查詢與更新。
 
 | 类别 | 位置 |
 |------|------|
