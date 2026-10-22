@@ -179,6 +179,11 @@ DAY = 24 * HOUR
 START = 1641427200000  # 2022-01-06 星期四 UTC
 
 
+def historical_materialization(path):
+    # 舊 P4 合成回歸明示歷史讀取；run 另綁固定基線的真實 U6 來源 SHA。
+    return series.Materialization(path, historical=True)
+
+
 def write_materialization(tmp_path, *, hours=4, symbols=('BTCUSDT',), hourly=None,
                           daily=None, funding=None, gaps=None, delistings=None):
     root = tmp_path / 'materialized'
@@ -230,13 +235,13 @@ def write_materialization(tmp_path, *, hours=4, symbols=('BTCUSDT',), hourly=Non
 
 def test_materialization_reads_only_source_slices_and_checks_hashes(tmp_path):
     path = write_materialization(tmp_path)
-    data = series.Materialization(path)
+    data = historical_materialization(path)
     assert data.hourly['BTCUSDT'][START]['close'] == Decimal('100')
     assert data.properties['BTCUSDT']['qty_step'] == Decimal('0.1')
     source = path.parent/'source/kline_BTCUSDT_60.csv'
     source.write_bytes(source.read_bytes().replace(b'100,100', b'101,100', 1))
     with pytest.raises(series.SeriesError, match='SHA'):
-        series.Materialization(path)
+        historical_materialization(path)
 
 
 def test_materialization_overlay_hash_and_path_escape(tmp_path):
@@ -244,11 +249,11 @@ def test_materialization_overlay_hash_and_path_escape(tmp_path):
     overlay = path.parent/'symbol_properties_overlay.csv'
     overlay.write_bytes(overlay.read_bytes()+b'\n')
     with pytest.raises(series.SeriesError, match='SHA'):
-        series.Materialization(path)
+        historical_materialization(path)
     manifest=json.loads(path.read_bytes());manifest['files']['source/../../outside'] = {}
     path.write_bytes(canonical(manifest))
     with pytest.raises(series.SeriesError):
-        series.Materialization(path)
+        historical_materialization(path)
 
 
 def test_funding_schedule_interior_and_unaligned_edges():
@@ -305,7 +310,7 @@ def run_for(path, *, decisions=None, windows=None):
             'run_config_sha256':hashlib.sha256(canonical(cfg)).hexdigest(),'run_config':cfg,
             'image_digest':series.IMAGE_DIGEST,'docker_argv':[],
             'algorithm_config_sha256':hashlib.sha256(canonical({k:v for k,v in cfg.items() if k!='mode'})).hexdigest(),
-            'algorithm_files':{},'base_symbol_properties_sha256':'d'*64,
+            'algorithm_files':{'program_code/research/r8_engine/series.py':'a91e604d52b13bdd6a2acb4f4b706ae78147856d6af2c20ca7528c129639dbe4'},'base_symbol_properties_sha256':'d'*64,
             'started_at':0,'ended_at':1,'exit_code':0,'lean_log_sha256':'e'*64,
             'mode':'validation','status':'completed','failure_reason':None,'failure_t':None,
             'decisions':decisions or [],'steps':[],'orders':[],'fills':[],'voided':[],
@@ -316,7 +321,7 @@ def run_for(path, *, decisions=None, windows=None):
 def test_replay_next_open_and_score_end_costs_from_source(tmp_path):
     path=write_materialization(tmp_path)
     run=run_for(path,decisions=[{'t':START,'targets':{'BTCUSDT':{'quantity':'1'}}}])
-    actual=series.replay(series.Materialization(path),run)
+    actual=series.replay(historical_materialization(path),run)
     assert actual['fills']==[
         {'order_id':1,'decision_t':START,'change_t':START,'symbol':'BTCUSDT',
          'quantity':'1','price':'100.1','slippage_bps':'10','fee':'0.055055','kind':'normal'},
@@ -410,7 +415,7 @@ def test_beta_only_uses_fit_data_and_median_for_short_history(tmp_path):
                 q=str(prices[s]);daily[s].append([START-(103-i)*DAY,q,q,q,q,'1','20000000'])
     path=write_materialization(tmp_path,symbols=symbols,daily=daily)
     m=json.loads(path.read_bytes());m['warmup']['start']=START-104*DAY;path.write_bytes(canonical(m))
-    data=series.Materialization(path)
+    data=historical_materialization(path)
     betas=series.estimate_betas(data,{'start':START-104*DAY,'end':START})
     assert abs(Decimal(betas['XUSDT'])-2)<Decimal('1e-45')
     assert abs(Decimal(betas['YUSDT'])-Decimal('1.5'))<Decimal('1e-45')
@@ -467,6 +472,9 @@ def synthetic_repo(tmp_path):
            'program_code/research/r8_ledger/ledger.py','hypothesis.py']
     for name in names:
         path=root/name;path.parent.mkdir(parents=True,exist_ok=True);path.write_text('# synthetic source '+name+'\n')
+        if name=='program_code/research/r8_engine/series.py':
+            path.write_bytes(subprocess.run(['git','-C',str(Path(series.__file__).resolve().parents[3]),
+                'show','55586c1e919958bcac12437404ed7c164832a7fe:'+name],check=True,capture_output=True).stdout)
     git('add','.');git('-c','core.hooksPath=/dev/null','commit','-qm','synthetic engine')
     sha=git('rev-parse','HEAD');git('update-ref','refs/remotes/origin/main',sha)
     return root,sha,{n:series.digest((root/n).read_bytes()) for n in names},git
@@ -533,7 +541,7 @@ def submit_fixture(tmp_path):
         assert kwargs['window']==record['data_window']
         shutil.copytree(path.parent,kwargs['out'])
         return Path(kwargs['out'])/'materialization.json'
-    rebuilt=series.replay(series.Materialization(path),run)
+    rebuilt=series.replay(historical_materialization(path),run)
     for key in ('orders','fills','voided','funding','endpoint_funding','steps'):
         run[key]=rebuilt[key]
     runpath=tmp_path/'run.json'
@@ -634,7 +642,7 @@ def test_u4_subprocess_contract_does_not_read_u1_or_run_docker(tmp_path,monkeypa
 
 def seal_observation(path,run):
     refresh_run_hashes(run)
-    result=series.replay(series.Materialization(path),run)
+    result=series.replay(historical_materialization(path),run)
     for key in ('orders','fills','voided','funding','endpoint_funding','steps'):
         run[key]=copy.deepcopy(result[key])
     return result
@@ -675,7 +683,7 @@ def test_noop_decision_does_not_consume_order_id(tmp_path):
     path=write_materialization(tmp_path)
     run=run_for(path,decisions=[{'t':START,'targets':{'BTCUSDT':{'weight':'0'}}},
                                 {'t':START+HOUR,'targets':{'BTCUSDT':{'quantity':'1'}}}])
-    result=series.replay(series.Materialization(path),run)
+    result=series.replay(historical_materialization(path),run)
     assert [o['order_id'] for o in result['orders']]==[1,2]
 
 
@@ -688,12 +696,12 @@ def test_gap_symbol_not_visible_and_pending_replacement_uses_real_position(tmp_p
         {'t':START+HOUR,'targets':{'BTCUSDT':{'quantity':'0'},'XUSDT':{'quantity':'2'}}},
         {'t':START+2*HOUR,'targets':{'BTCUSDT':{'quantity':'0'}}},
         {'t':START+3*HOUR,'targets':{'BTCUSDT':{'quantity':'0'},'XUSDT':{'quantity':'3'}}}])
-    result=series.replay(series.Materialization(path),run)
+    result=series.replay(historical_materialization(path),run)
     assert result['failure_reason'] is None
     assert [(f['change_t'],f['quantity']) for f in result['fills'] if f['kind']=='normal']==[
         (START,'1'),(START+2*HOUR,'1'),(START+3*HOUR,'1')]
     assert result['delayed_fills']==[{'symbol':'XUSDT','t':START+2*HOUR}]
-    assert series.filled_periods(series.Materialization(path),run['run_config'],result,series.periods(run['run_config']))=={(START+HOUR)//1000,(START+2*HOUR)//1000}
+    assert series.filled_periods(historical_materialization(path),run['run_config'],result,series.periods(run['run_config']))=={(START+HOUR)//1000,(START+2*HOUR)//1000}
 
 
 def test_actual_price_exposure_drift_is_report_only(tmp_path):
@@ -767,7 +775,7 @@ def test_completed_run_cannot_hide_forward_fill_or_cash_residual(tmp_path,field)
 
 
 def test_filled_gap_ending_exactly_thursday_marks_recovery_week(tmp_path):
-    path=write_materialization(tmp_path,hours=7*24+1);data=series.Materialization(path)
+    path=write_materialization(tmp_path,hours=7*24+1);data=historical_materialization(path)
     # 構造部位與可讀切片的缺漏，不以真實行情作測試。
     gap=START-HOUR;data.hourly['BTCUSDT'].pop(gap);data.times['BTCUSDT'].remove(gap)
     cfg=run_for(path,windows=[{'start':START-7*DAY,'end':START+7*DAY}])['run_config'];cfg['sharpe_frequency_seconds']=7*86400
@@ -777,7 +785,7 @@ def test_filled_gap_ending_exactly_thursday_marks_recovery_week(tmp_path):
 
 def test_filled_funding_blank_stale_price_delay_and_no_position_exclusions(tmp_path):
     path=write_materialization(tmp_path,hours=24,funding={'BTCUSDT':[[START,'0.001'],[START+16*HOUR,'0.001'],[START+24*HOUR,'0.001']]})
-    data=series.Materialization(path);cfg=run_for(path)['run_config']
+    data=historical_materialization(path);cfg=run_for(path)['run_config']
     record={'fills':[{'symbol':'BTCUSDT','change_t':START,'quantity':'1'}],'delayed_fills':[]}
     flags=series.filled_periods(data,cfg,record,series.periods(cfg))
     assert set(range(START//1000,START//1000+16*3600,3600))<=flags
@@ -852,7 +860,7 @@ def test_daily_decision_only_midnight_and_next_day_open(tmp_path):
     run=run_for(path,decisions=[{'t':START+DAY,'targets':{'BTCUSDT':{'quantity':'1'}}}])
     run['run_config']['decision_resolution']='day';result=seal_observation(path,run)
     assert result['fills'][0]['change_t']==START+DAY and result['fills'][0]['price']=='100.1'
-    run['decisions'][0]['t']+=HOUR;result=series.replay(series.Materialization(path),run)
+    run['decisions'][0]['t']+=HOUR;result=series.replay(historical_materialization(path),run)
     assert result['failure_reason']=='invalid_decision'
 
 
@@ -860,7 +868,7 @@ def test_pending_replacement_zero_difference_and_score_end_cancellation(tmp_path
     bars=[[t,'100','100','100','100','1000','10000000'] for t in range(START-13*DAY,START,HOUR)]
     path=write_materialization(tmp_path,hours=4,symbols=('BTCUSDT','XUSDT'),hourly={'XUSDT':bars})
     run=run_for(path,decisions=[{'t':START,'targets':{'BTCUSDT':{'quantity':'0'},'XUSDT':{'quantity':'1'}}}])
-    result=series.replay(series.Materialization(path),run)
+    result=series.replay(historical_materialization(path),run)
     assert result['orders']==[{'order_id':1,'kind':'strategy','decision_t':START,'symbol':'XUSDT',
         'quantity':'1','status':'cancelled','cancel_t':START+4*HOUR,'cancel_reason':'score_end'}]
     assert not result['fills']
@@ -952,7 +960,7 @@ def test_submit_rejects_execution_before_trial_began(tmp_path):
 
 
 def test_missing_daily_turnover_counts_zero_and_recent_listing_blocks_open(tmp_path):
-    path=write_materialization(tmp_path);data=series.Materialization(path);cost=cost_parameters()
+    path=write_materialization(tmp_path);data=historical_materialization(path);cost=cost_parameters()
     for t in list(data.daily['BTCUSDT'])[-7:]:data.daily['BTCUSDT'].pop(t)
     assert data.liquidity('BTCUSDT',START,cost)==(Decimal(0),Decimal('10000000'),True)
     data.manifest['first_bar']['BTCUSDT']=START-11*DAY
@@ -1012,7 +1020,7 @@ def test_materialization_read_boundary_excludes_lean_custom_payloads(tmp_path,mo
         assert not name.startswith(('lean/','custom/'))
         opened.append(name);return read(file)
     monkeypatch.setattr(Path,'read_bytes',bounded_read)
-    series.Materialization(path)
+    historical_materialization(path)
     assert set(opened)=={'materialization.json','symbol_properties_overlay.csv',
         'source/kline_BTCUSDT_60.csv','source/kline_BTCUSDT_D.csv',
         'source/funding_BTCUSDT_funding.csv','source/open_interest_BTCUSDT_4h.csv'}
@@ -1056,7 +1064,7 @@ def test_fix1_04_gap_keeps_pending_flat_symbol_and_resumes(tmp_path, resolution,
     assert not any(o.get('cancel_reason') == 'replaced' for o in result['orders'])
     assert series.recompute(path,run)['recompute_passed']
     run['decisions'][1]['targets']['XUSDT'] = {'quantity':'0'}
-    assert series.replay(series.Materialization(path),run)['failure_reason'] == 'invalid_decision'
+    assert series.replay(historical_materialization(path),run)['failure_reason'] == 'invalid_decision'
 
 
 def test_fix1_03_sections_sorted_by_contract_and_reversal_reduce_first(tmp_path):
@@ -1253,7 +1261,7 @@ def test_fix1_16_beta_includes_daily_bar_ending_at_fit_end(tmp_path):
     path = write_materialization(tmp_path,symbols=('BTCUSDT','XUSDT','YUSDT'),
         daily={'BTCUSDT':days,'XUSDT':days,'YUSDT':[]})
     m=json.loads(path.read_bytes());m['warmup']['start']=START-92*DAY;path.write_bytes(canonical(m))
-    data=series.Materialization(path)
+    data=historical_materialization(path)
     expected={'BTCUSDT':'1','XUSDT':'1','YUSDT':'1'}
     assert series.estimate_betas(data,{'start':START-92*DAY,'end':START}) == expected
     data.daily['XUSDT'][START]={'close':Decimal('99999')}
@@ -1269,7 +1277,7 @@ def test_fix1_18_manifest_uses_u4_dataset_names_and_preserves_gap_semantics(tmp_
     path=write_materialization(tmp_path,hourly={'BTCUSDT':bars},gaps=gaps)
     run=run_for(path,decisions=[{'t':START,'targets':{'BTCUSDT':{'quantity':'1'}}}])
     seal_observation(path,run)
-    assert series.Materialization(path).manifest['gaps']==gaps
+    assert historical_materialization(path).manifest['gaps']==gaps
     values,_=series.make_series(path,run,series.recompute(path,run))
     assert values['filled_periods']==2
 
@@ -1278,7 +1286,7 @@ def test_fix1_18_manifest_uses_u4_dataset_names_and_preserves_gap_semantics(tmp_
 def test_fix1_18_manifest_rejects_non_u4_dataset_names(tmp_path, legacy):
     path=write_materialization(tmp_path,gaps={'BTCUSDT':{legacy:[]}})
     with pytest.raises(series.SeriesError,match='gaps'):
-        series.Materialization(path)
+        historical_materialization(path)
 
 
 @pytest.mark.parametrize('corruption',['earlier_failure','prefix_fee','missing_fit'])
@@ -1665,7 +1673,7 @@ def test_sci_source_volume_turnover_and_open_interest(tmp_path):
     replace_source_numbers(path,'kline_BTCUSDT_60.csv',volume='1.234567890123456789e+4',turnover='1E7')
     replace_source_numbers(path,'kline_BTCUSDT_D.csv',volume='1E6',turnover='2e7')
     replace_source_numbers(path,'open_interest_BTCUSDT_4h.csv',open_interest='1.234567890123456789E-7')
-    data=series.Materialization(path)
+    data=historical_materialization(path)
     assert data.hourly['BTCUSDT'][START]['volume']==Decimal('12345.67890123456789')
     assert data.daily['BTCUSDT'][START-DAY]['volume']==Decimal('1000000')
     assert data.liquidity('BTCUSDT',START,cost_parameters())==(Decimal('20000000'),Decimal('10000000'),True)
@@ -1678,7 +1686,7 @@ def test_sci_instrument_properties_stay_exact(tmp_path):
     overlay.write_text('bybit,BTCUSDT,cryptofuture,BTCUSDT,USDT,1,1e-8,1e-1,BTCUSDT,1E-1,\n')
     m=json.loads(path.read_bytes());m['symbol_properties_overlay_sha256']=hashlib.sha256(overlay.read_bytes()).hexdigest()
     m['min_notional']['BTCUSDT']='5e-4';path.write_bytes(canonical(m))
-    data=series.Materialization(path)
+    data=historical_materialization(path)
     assert data.properties['BTCUSDT']=={'tick_size':Decimal('0.00000001'),
         'qty_step':Decimal('0.1'),'min_qty':Decimal('0.1'),'min_notional':Decimal('0.0005')}
     assert series.recompute(path,observed_fixed_run(path))['recompute_passed']
@@ -1695,7 +1703,7 @@ def test_sci_exchange_fields_reject_nonfinite_and_invalid(tmp_path, source, valu
             'price':('kline_BTCUSDT_60.csv','open'),
             'open_interest':('open_interest_BTCUSDT_4h.csv','open_interest')}[source]
         replace_source_numbers(path,name,**{field:value})
-    with pytest.raises(series.SeriesError):series.Materialization(path)
+    with pytest.raises(series.SeriesError):historical_materialization(path)
 
 
 @pytest.mark.parametrize('field', ['initial_cash','cost','quantity','weight'])
@@ -2216,3 +2224,52 @@ def test_dv6_exact_source_decimals_are_not_cash_tolerances(tmp_path):
     assert series.Materialization(path).liquidity('BTCUSDT',START,cost_parameters())[0]==Decimal(total)
     row['selected_median']='12000000';dv6_table(path,[row])
     with pytest.raises(series.SeriesError,match='AMOUNT'):series.Materialization(path)
+
+
+def test_dv6_review_missing_entire_evidence_set_is_rejected(tmp_path):
+    path,row=dv6_fixture(tmp_path);m=json.loads(path.read_bytes())
+    m['files']={k:v for k,v in m['files'].items() if not k.startswith('verification/')};path.write_bytes(canonical(m))
+    with pytest.raises(series.SeriesError,match='VERIFICATION'):series.Materialization(path)
+
+
+def test_dv6_review_current_engine_cannot_recompute_stripped_evidence_as_legacy(tmp_path):
+    path,row=dv6_fixture(tmp_path,original='20000000',effective='20000000',md='20000000',me='20000000',
+        td='GE_10M',te='GE_10M',triggered=False,selected='effective_daily',median='20000000')
+    m=json.loads(path.read_bytes());m['files']={k:v for k,v in m['files'].items() if not k.startswith('verification/')}
+    path.write_bytes(canonical(m));run=observed_fixed_run(path)
+    run['algorithm_files']={'program_code/research/r8_engine/series.py':hashlib.sha256(Path(series.__file__).read_bytes()).hexdigest()}
+    with pytest.raises(series.SeriesError,match='VERIFICATION'):series.recompute(path,run)
+
+
+def test_dv6_review_unbound_source_reference_is_rejected(tmp_path):
+    path,row=dv6_fixture(tmp_path);row['inputs'][0]['source_refs'][0].update(relative_path='nonexistent.csv',sha256='f'*64)
+    dv6_table(path,[row])
+    with pytest.raises(series.SeriesError,match='SOURCE_IDENTITY'):series.Materialization(path)
+
+
+def test_dv6_review_historical_object_cannot_bypass_current_run_gate(tmp_path):
+    path=write_materialization(tmp_path);run=observed_fixed_run(path)
+    data=series.Materialization(path,historical=True)
+    run['algorithm_files']={'program_code/research/r8_engine/series.py':hashlib.sha256(Path(series.__file__).read_bytes()).hexdigest()}
+    with pytest.raises(series.SeriesError,match='VERIFICATION'):series.recompute(data,run)
+    with pytest.raises(series.SeriesError,match='VERIFICATION'):series.replay(data,run)
+
+
+def test_dv6_review_historical_source_identities_are_frozen_real_blobs():
+    root=Path(series.__file__).resolve().parents[3];base='55586c1e919958bcac12437404ed7c164832a7fe';name='program_code/research/r8_engine/series.py'
+    commits=subprocess.run(['git','-C',str(root),'log','--format=%H',base,'--',name],check=True,capture_output=True,text=True).stdout.splitlines()
+    shas={hashlib.sha256(subprocess.run(['git','-C',str(root),'show',c+':'+name],check=True,capture_output=True).stdout).hexdigest() for c in commits}
+    assert series.HISTORICAL_SERIES_SHAS==shas
+    assert hashlib.sha256(Path(series.__file__).read_bytes()).hexdigest() not in shas
+
+
+def test_dv6_review_new_engine_submit_requires_entire_evidence_before_writes(tmp_path):
+    f=submit_fixture(tmp_path);name='program_code/research/r8_engine/series.py';raw=Path(series.__file__).read_bytes()
+    (f['repo']/name).write_bytes(raw);f['git']('add',name);f['git']('-c','core.hooksPath=/dev/null','commit','-qm','current DV6 engine')
+    sha=f['git']('rev-parse','HEAD');f['git']('update-ref','refs/remotes/origin/main',sha)
+    f['run']['run_config'].update(code_commit=sha,engine_commit=sha);f['run']['algorithm_files'][name]=hashlib.sha256(raw).hexdigest()
+    refresh_run_hashes(f['run'])
+    before={p.relative_to(f['book'].out):p.read_bytes() for p in f['book'].out.rglob('*') if p.is_file()}
+    with pytest.raises(series.SeriesError,match='VERIFICATION'):f['submit']()
+    after={p.relative_to(f['book'].out):p.read_bytes() for p in f['book'].out.rglob('*') if p.is_file()}
+    assert before==after

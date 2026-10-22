@@ -187,6 +187,23 @@ RUNTIME_METADATA = {
 }
 FAILURES = {'fill_forward_bar', 'gross_exposure_cap', 'invalid_decision',
             'algorithm_exception', 'lean_error'}
+# 固定於 55586c1e 的 U6 歷史來源；只供原 P4 run 回歸，不讓新引擎缺證據降級。
+HISTORICAL_SERIES_SHAS = frozenset({
+    'a91e604d52b13bdd6a2acb4f4b706ae78147856d6af2c20ca7528c129639dbe4',
+    'dd2ec8bef1168263610151916d240d23dd1ba69122ae31c5e3453a3c6ed27e53',
+    '6b8ab3c124773383e60591b251b6c4a939b0e8c2f38597e2160dd6abb58ceb57',
+    '1b83f74575fb270fc5ae81abb003e1662ba61c1585ac5790218ae67f149fa5fc',
+    '45f8a70f93d6e6343c12d507e64bab171481881a9df5522b6c872aa58c9c0f75',
+    '6ecb67fb44fc30b9fa5ee7dea86562b54e5a81f48d605038faad0cf46a36e9b4',
+    'fadd1526bb21a282259039b997af4e3ce35b0c4b5371dbc989cd4c4a877af41c',
+    '258ab408fa0a61eb94459a996e304b2c9c9a526681d709800de4e2cbeb4b7455',
+    '154eebed4c71683ff1fce7dc7769fba82935f1ca3ea8375b343314de84accc3a',
+})
+
+
+def _historical_run(run):
+    files = run.get('algorithm_files')
+    return isinstance(files, dict) and files.get('program_code/research/r8_engine/series.py') in HISTORICAL_SERIES_SHAS
 
 
 def precise(function):
@@ -267,7 +284,7 @@ def contained(root, name):
 class Materialization:
     """唯讀 U4 市場切片、屬性與 manifest 綁定的 DV6 驗證證據。"""
 
-    def __init__(self, path):
+    def __init__(self, path, *, historical=False):
         if Path(path).is_symlink():
             raise SeriesError('manifest 不接受 symlink')
         self.path = Path(path).resolve()
@@ -285,6 +302,8 @@ class Materialization:
         if warm_end != self.start:
             raise SeriesError('暖機終點不符')
         verified = any(name.startswith('verification/') for name in m['files'])
+        if not verified and not historical:
+            raise SeriesError('VERIFICATION_EVIDENCE_REQUIRED')
         read_start = self.warm_start
         if verified:
             read_start = TurnoverVerification.access(m, self.warm_start, self.start, self.end)
@@ -572,7 +591,7 @@ class TurnoverVerification:
                 value != sorted(set(value))):
             raise SeriesError('VERIFICATION_REASON_CODES')
 
-    def refs(self, refs, reasons):
+    def refs(self, refs, reasons, *, bound=False):
         if not isinstance(refs, list):
             raise SeriesError('VERIFICATION_SOURCE_REFS')
         keys = []
@@ -587,7 +606,7 @@ class TurnoverVerification:
                 contained(self.data.path.parent, ref['relative_path']); self.sha(ref['sha256'])
                 # 若引用具名切片／原檔，SHA 必須與 manifest 已綁定的身份相同。
                 matches = self.source_shas.get(ref['relative_path'], set())
-                if matches and ref['sha256'] not in matches:
+                if (bound or matches) and ref['sha256'] not in matches:
                     raise SeriesError('VERIFICATION_SOURCE_IDENTITY')
             for key in ('row','list_index','byte_start','byte_end'):
                 if ref[key] is not None and (type(ref[key]) is not int or ref[key] < (1 if key=='row' else 0)):
@@ -698,7 +717,7 @@ class TurnoverVerification:
             if type(item['day_start']) is not int or item['day_start'] != t:
                 raise SeriesError('TURNOVER_WINDOW')
             d = self.original[symbol].get(t); e = data.daily[symbol].get(t, {}).get('turnover')
-            self.refs(item['source_refs'], row['reason_codes'])
+            self.refs(item['source_refs'], row['reason_codes'], bound=True)
             if (d is not None or e is not None or item['sum_hourly_reported'] is not None) and not item['source_refs']:
                 raise SeriesError('TURNOVER_SOURCE_REFS_MISSING')
             self.same_amount(item['exchange_reported'], d); self.same_amount(item['effective_reported'], e)
@@ -872,6 +891,8 @@ def score_intervals(config):
 
 def _check_config(data, run, *, _hold_folds=False):
     c=run['run_config'];m=data.manifest
+    if data.turnover is None and not _historical_run(run):
+        raise SeriesError('VERIFICATION_EVIDENCE_REQUIRED')
     exact_keys(run,('schema_version','materialization_sha256','run_config_sha256','run_config',
         'image_digest','docker_argv','algorithm_config_sha256','algorithm_files','base_symbol_properties_sha256',
         'started_at','ended_at','exit_code','lean_log_sha256','mode','status','failure_reason','failure_t',
@@ -1195,8 +1216,9 @@ def replay(data, run, *, cost=None, stop_on_recorded_failure=True, _hold_folds=F
 
 
 def _inputs(materialization, run):
-    data=materialization if isinstance(materialization,Materialization) else Materialization(materialization)
     record=run if isinstance(run,dict) else load_json(run)[0]
+    data=materialization if isinstance(materialization,Materialization) else Materialization(
+        materialization, historical=_historical_run(record))
     return data,record
 
 
@@ -1859,7 +1881,7 @@ def submit(ledger, trial, u1, run, *, trial_query=None, materializer=None, repo=
         path=(materializer or rematerialize)(u1=Path(u1),ledger=ledger,
               hypothesis=identity['hypothesis_id'],window=identity['data_window'],trial=trial,
               out=Path(temporary)/'materialized',repo=repo)
-        data=Materialization(path)
+        data=Materialization(path, historical=_historical_run(record))
         ledger_id=load_json(ledger/'ledger_id.json')[0]['ledger_id']
         _verify_identity(data,record,identity,ledger_id)
         report=recompute(data,record)
