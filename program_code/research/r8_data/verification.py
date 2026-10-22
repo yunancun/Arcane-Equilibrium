@@ -31,7 +31,7 @@ DAY = 86400000
 HOUR = 3600000
 TRAIN_START = 1577836800000
 TRAIN_END = 1751328000000
-STANDARD_SHA256 = 'd0fbf9ff02d080027d575eb6488f2c552c3a583485b8c685166fe0ef94b2af98'
+STANDARD_SHA256 = 'afcb87578676c998b4ce7529c6e1c09d5214cfe7e8af53ad03d120781c696931'
 FIELDS = ('open', 'high', 'low', 'close', 'volume', 'turnover')
 DELTA = {'D': DAY, '60': HOUR, '1': 60000}
 REF_KEYS = set('kind relative_path url sha256 row request_id list_index byte_start byte_end trade_id line_sha256'.split())
@@ -42,7 +42,7 @@ MAX_PARTIAL_SUBSET_BITS = 1048576
 MAX_PARTIAL_SUBSET_ITEMS = 4096
 MAX_PARTIAL_SCALE_BITS = 4096
 # Approved v1 document bytes at PR240 and PR241, retained by frozen plans.
-V1_STANDARDS = (STANDARD_SHA256,'ba65fbca3b9230ad1807b82c923e9e60ab870edbe5c1e0d5090ebce99b06f6d0',
+V1_STANDARDS = (STANDARD_SHA256,'d0fbf9ff02d080027d575eb6488f2c552c3a583485b8c685166fe0ef94b2af98','ba65fbca3b9230ad1807b82c923e9e60ab870edbe5c1e0d5090ebce99b06f6d0',
                 '125901d0341487bd058be70e7cc2ed27be7c3be270a45d05587e471104b7cacf',
                 'ad80220cd6dc3f8dc5c451c6281aa9f1b2acf7fbb47bc80ed21eb3905710110c')
 

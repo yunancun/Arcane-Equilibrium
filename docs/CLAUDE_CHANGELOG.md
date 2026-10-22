@@ -1,13 +1,19 @@
 # CLAUDE_CHANGELOG.md — 開發歷史歸檔
 
 > 從 CLAUDE.md / TODO.md 遷出的 Wave/Sprint/Batch + TODO version-increment 歷史敘事。新 session 不需要讀此文件，僅供回顧歷史時查閱。
-> 最後更新：2026-10-22 UTC（DV4 取數前置；TODO v925）
+> 最後更新：2026-10-22 UTC（DV4 記錄者 R2 合入 #246；TODO v928）
 
 ---
 
+## R8 DV4 記錄者 R2：合入 #246 並接回凍結紀錄 — 2026-10-22 UTC
+
+- conductor 明示以 `R8-SAMPLE-FREEZE-RECORDER-R2-20261022` 取得新准入及租約，在同一 [PR #248](https://github.com/yunancun/Arcane-Equilibrium/pull/248) 將 main `400b3c0dd769e8bf46f1faa749294aeb8e005fa3` 合入原分支；main 包含 21:34:55 UTC 合併的 #246。保留原提交，不 rebase、不 force push、不合併 PR。
+- TODO 依 main v927 升為 v928，保留 DV2／DV5／DV6 與 DV4 取數前置內容；本檔保留雙方小節。登記簿既有事件不改，`RH-20261023-01` 改接 main 最新 `RH-20261022-06`；保留原事件記錄時間、Operator `authority_source` 與 `operator_excerpt` 原文，新增 R2 文件雜湊來源並保留首次發布來源。
+- 手動處理僅 TODO、changelog、登記簿；其餘合入檔案逐位元組對齊 main，未另改程式或規範。僅執行指定兩個結構測試；發布檢查、exact-head CI 與自動審查結果另存倉庫外 `audits/2026-10-22-r8-sample-download/recorder-r2-20261022/`，未完成者不宣稱通過。沒有重抽、下載、資料驗證、e/u、驗收、Wiki 或 runtime 操作。
+
 ## R8 DV4 取數前置：凍結計畫與基礎下載 — 2026-10-22 UTC
 
-- **記錄範圍**：依 conductor 續派及 Operator 原文完成取數前置；事件 `RH-20261023-01` follows `RH-20261022-05`。登記簿時區為 Asia/Shanghai，實際記錄日為 2026-10-23；Operator 對話與取數 UTC 日期仍為 2026-10-22。TODO 依最新 main `a892fea5a171dd1b7fda421e7b2d4c3bf9c1de13` 的 v924 升為 v925，僅在 `P1-R8-S2-DATA-VERIFY` 補本次紀錄。只改登記簿、TODO、changelog 三檔，規範未改。
+- **記錄範圍**：依 conductor 續派及 Operator 原文完成取數前置；事件 `RH-20261023-01` 原 follows `RH-20261022-05`，R2 合入 #246 後接為 `RH-20261022-06`。登記簿時區為 Asia/Shanghai，實際記錄日為 2026-10-23；Operator 對話與取數 UTC 日期仍為 2026-10-22。首次發布時 TODO 依當時 main `a892fea5a171dd1b7fda421e7b2d4c3bf9c1de13` 的 v924 升為 v925，僅在 `P1-R8-S2-DATA-VERIFY` 補本次紀錄。只改登記簿、TODO、changelog 三檔，規範未改。
 - **凍結身分**：只產生一次 v1 `sample_plan.json`，SHA-256 `e1fd54aebed26230b4a4a89de4633aba569cf2e2bfd9feb1c0e630c567ced38f`；policy SHA `dac560bbf7318431815933280bb9afc8b4673dcc8b2d8e8e5be6ea90ff57d3fc`；P3b manifest SHA `b6519a7b2f5eae4759612690790ddb6680db62aa4e723427f51c21a7d6257006`。來源為同 DV3 runbook／整合測試的 `r8-research/data/p3b-20261020/`；seed 20261022、訓練段 `[2020-01-01,2025-07-01)`，24 層、N=378,425、base=6,511、max=18,511（2020 四層全查，其餘每層300／900）。沒有重抽、替換或擴樣，也未讀樣本外／holdout 市場值。
 - **工具與請求依據**：工具固定 main `55586c1e919958bcac12437404ed7c164832a7fe` 原檔；凍結時 #243 尚未合入，指定 `build_sample_plan`／`fetch_downloads` 與 #243 head `dd3b85d888d142383e15c4616b1bf3db3d626279` 逐位元組相同，`_policy` helper 有差異，整份模組不宣稱相同。每層 draws[:base_size] 機械產生三種來源各6,511 URL：逐筆依§4.3／§4.5，小時線依§4.4及DV1 `_l4`；分鐘線需疑點日標記，本任務不跑驗證，請求0。沒有他所／別名替換；原件存在不表示外所合約／時窗可比性通過。
 - **全量預檢與授權**：Bybit 6,510×200／40,906,797,888 bytes、404×1（BTTUSDT 2021-12-31）；Binance 5,471×200／7,499,267 bytes、404×1,040；OKX 6,511×200 全部無 Content-Length，依§4.6及conductor裁決本輪不GET，大小估計 UNAVAILABLE。最大已知檔461,140,608 bytes。Operator 的加速、100 GB、BTCUSDT及ETH例外原文照錄於事件；豁免僅精確 BTCUSDT／ETHUSDT，其他標的仍受累計100 GB（含未來擴樣）及單檔1 GB，磁碟低於100 GiB停止。
@@ -15,6 +21,36 @@
 - **下載結果**：19,533列恰一列／請求，AVAILABLE 11,981、UNAVAILABLE 1,041（皆404）、SIZE_BLOCKED 6,511（皆OKX UNKNOWN_LENGTH）；保存40,914,297,155 bytes。BTCUSDT 1,422總請求／948成功，4,817,443,167 bytes、最大311,242,935；ETHUSDT 531總請求／354成功，3,272,960,620 bytes、最大119,886,496；各另含474／177筆OKX受阻。其他標的計費32,823,893,368 bytes，含未來擴樣餘額67,176,106,632 bytes；未知body預留0，reuse=0。新舊預檢差異0，403/429=0，停止主機0。UTC本輪17:16:22開始，批次工具21:07:35.537結束；完整起訖、逐批上限及24層N/n/max見封存報告。
 - **合併與載入**：合併清單按§8.4固定欄位／字面值／排序保存，僅把原批次relative_path加上輸出根下的批次前綴，指向同一原件；原批次清單及前兩輪失敗證據保持不變。inventory SHA `abe1f0ff83500ed258d93507fb77c1dad68e030f15039d5a4c58379d755f9992`；DV1 `_load_inventory`載入19,533列，`_payload`只核對11,981個原件的SHA及byte_count，21:08:17.508 UTC PASS。未呼叫 `verify`、未計e/u、未作DV4驗證或資料驗收；DATA-VERIFY、REPORT-TOOLS及P5依賴未因此解除。
 - **證據與發布**：原件根 `/Users/ncyu/Projects/TradeBot/r8-research/sample-20261022/`；合併清單為其 `run-03/download_inventory.jsonl`，載入時 download_root 仍為上述原件根。倉庫外封存 `/Users/ncyu/Projects/TradeBot/audits/2026-10-22-r8-sample-download/run-03/`：`SHA256SUMS` SHA `f5595b7ec6572d97a1b1dd8d1275b30fd6093127a4c60c2dc7db542a9daf404f`、manifest SHA `d583fde7d62e5d259bdd05979c38681989a314ef11e085a0b69790addea78949`、原件SHA清單 SHA `bc0e87e7ab238e0d17b15431310ea3492f8f74f056d4a3ef82c8e6be33f85e39`。文件PR先草稿，必要檢查通過後轉正式；指定兩個結構測試、exact-head CI與自動審查回執另存 `publication/`，不改動封存清單。本次不合併、不更新Wiki，不涉及Linux／資料庫／Demo／live。
+
+## R8 DV256 記錄者 R3：隔離的非整點原件與五類缺陷核對 — 2026-10-22
+
+- conductor確認 [PR #246 第六項P2](https://github.com/yunancun/Arcane-Equilibrium/pull/246#discussion_r4352694649) 屬實，明示授權 `R8-DV256-RECORDER-FIX-R3-20261022` 新准入／租約，自 `071e922f13922e177fcf57052c153059f0003453` 在同PR續修，限1.5小時、不合併。原發布、R1、R2及DV2-R1／DV5／DV6停止與E2／E4歷史保留；R2相同head CI補跑偏差保留，本輪明定不得重跑未變更head。
+- 真實DV1→帳本→U4先重現U5 `TURNOVER_SOURCE_ORDER` 與U6 `TURNOVER_ORIGINAL_SCOPE`。矩陣逐一涵蓋原始日成交額／小時量的重複戳、非整點、負值、NaN／Infinity、格式錯誤（bad／空白／底線）；修前10 failed／26 passed，另確認U5錯接收空白／底線數字，以及U4忽略起點前負量／接受非整點首列兩類同範圍差異。
+- U5／U6各自從已綁定findings／corrections建立隔離交集，必須有相同標的、間隔、資料集、時刻、來源檔SHA及原列SHA的L1非整點發現與missing／UNRESOLVED更正，並核對紀錄ID與政策。只在各自已從原始小時量確立上市起點之後接受這類隔離列，值記不可用；未隔離、錯綁或起點之前仍拒絕。不共用U4／U5／U6函式，不更改實際知悉時刻或規範。
+- 同類修正：U5原始數值拒絕空白／底線格式並記不可用，與U4／U6一致；U4在獨立起點確立之前遇負量或非整點時拒絕物化。有效來源整點、唯一性與倒序檢查保持嚴格。66項聚焦測試通過，含v1／v2真實隔離案例、缺失或錯綁證據、未隔離原件、起點前資料與有效來源非整點／重複拒絕。中途14項guard fixture用了錯誤manifest編碼，已修fixture並保留失敗日誌，不當作產品紅燈。
+- 實際變更為三個產品檔 `materialize.py`／`lean_runner.py`／`series.py`、共用真實物化測試檔、TODO v927、changelog及登記簿文件SHA；規範、政策pin、DV1／DV3與framework／rules未改，不新增RH事件。完整R8（含8項真實Colima互通）、指定兩個structure檔、26日v1的78份bytes／v2 §13.7／雙政策報表與42歷史回歸於固定head重跑，結果及UTC／SHA列於同PR及 `audits/2026-10-22-r8-data-verify-dv256-fix-r3/`。CI若超時只回報conductor；新程式審查意見原文回報，不擅改。不取數、不碰遠端Linux／資料庫／Demo／live、不更新Wiki。
+
+## R8 DV256 記錄者 R2：修正 PR #246 五項整合邊界 — 2026-10-22
+
+- conductor 逐項確認自動審查1 P1／4 P2屬實，明示授權 `R8-DV256-RECORDER-FIX-R2-20261022` 新准入與同範圍租約，在 `64c2952553` 上續作同一 [PR #246](https://github.com/yunancun/Arcane-Equilibrium/pull/246)。原 `R8-DV256-RECORDER-PUBLISH-20261022` 停止及 `R8-DV256-RECORDER-PUBLISH-R1-20261022` 發布／審查紀錄保留；原DV2-R1／DV5／DV6的E2／E4與停止歷史不變。R2限兩小時，不合併。
+- 六項核心測試先取得正確紅燈：終點流動性與真實submit基準計算均 `TURNOVER_DECISION_MISSING`；首個部分日 `TURNOVER_DECISION_INVALID`；隔離重複日原件 `TURNOVER_SOURCE_ORDER`；負原額 `TURNOVER_AMOUNT_MISMATCH`；午夜上市 `LISTING_REGIME_ORDER`。測試前置設定失敗另存，不冒充缺陷紅燈。
+- U4從起點所在UTC日產生決策列，午夜終點亦有 `decision_utc_day=known_at=end`，各列只取前12個完整日。23:00首箱閉合與日更新同時可知時，只保留同一known_at的完整日更新，保留起點、來源與首箱數量，不改實際知悉時間或嚴格排序鍵。U5接受這個首筆日更新。
+- U5把原始日證據的重複戳記為金額不可用；有效來源仍嚴格唯一，兩者倒序均拒絕。U6把負原額記為不可用。新增終點在真實BCH原件暴露上市首個不完整日比對缺口：U5／U6各自從manifest綁定原始小時量重建首個正量時刻，將其之前的非完整日排除；保留原始首根bar的歷史充分性時鐘。三方未共用計算函式，沒有改規範、政策或pin。
+- 實際程式僅 `materialize.py`、`lean_runner.py`、`series.py`；對應三個測試檔補真實verify／帳本／U4／U5／U6消費與完整submit、因果截點、防退化案例，原合成消費fixture補既有U4格式的原始小時證據。11個邊界及既有歷史時鐘檢查通過；submit以合成無交易觀測驅動真實重物化、兩個基準與finish_trial，BTC持有基準有非零部位成本，不冒稱該合成run是LEAN執行。
+- 全部R8、原件三方互通8項（真實Colima network none）、26日v1 78份bytes／v2 §13.7／雙政策報表及42項歷史回歸、指定兩個結構靜態檔、CI與新head自動審查，見PR與 `audits/2026-10-22-r8-data-verify-dv256-fix-r2/` 的固定head證據。測試期間不改工作樹；不取數、不碰遠端Linux／資料庫／Demo／live、不更新Wiki。TODO v925→v926，追加文件hash身分，不新增RH事件或規範裁決。
+
+## R8 DV2-R1／DV5／DV6 記錄者整合發布 — 2026-10-22
+
+- [PR #246](https://github.com/yunancun/Arcane-Equilibrium/pull/246)：自最新 `origin/main a892fea5a` 建立發布分支，原樣推送三個停止交付，再依序 no-ff 合入 DV2-R1 `7ef69333d`、DV5 `f318e5372`、DV6 `60d553d77`，整合 head `823c45327`；三次無衝突，原提交保留。conductor 已接受 DV5／DV6 核心，DV2-R1 由 conductor 另審。
+- 原 DV2-R1 E2 因提示超限83 bytes未啟動、UNVERIFIED；DV5 E2 DEADLINE／UNVERIFIED；DV6 初審兩項 HIGH 已修、唯一複核 DEADLINE／UNVERIFIED；三者 E4 NOT_RUN、不重開。原記錄者 `R8-DV256-RECORDER-PUBLISH-20261022` 因 BLOCKED 語義待澄清停止並釋放；同身分再准入遭 `DELIVERY_REPAIR_NOT_AUTHORIZED` 拒絕，原報告與准入紀錄保留。Operator 依既有記錄者先例明示授權 `R8-DV256-RECORDER-PUBLISH-R1-20261022` 另取得准入及同範圍租約；這是記錄者發布輪次，不是規範§9交付重開，也不重置審查額度或原三小時上限。
+- 勘誤四保留原文，補記帳本頂層 `data_family`／`data_policy_sha256`、DV2-R1 Operator原話「批准新身分續作 (Recommended)」、U4只產生READY決策列與整體失敗的BLOCKED證據分流、U5／U6缺列或BLOCKED均fail-closed，以及正式全訓練bundle待DV4與conductor另PR登記。規範 SHA `afcb87578676c998b4ce7529c6e1c09d5214cfe7e8af53ad03d120781c696931` 同步 DV1／U4／U6，保留歷史v1身分；U4加入勘誤三 `PARTIAL_SUBSET_UNDETERMINED`。真實原件先證明舊pin拒絕為POLICY_MISMATCH／POLICY_STANDARD與VERIFICATION_POLICY_MISMATCH，再更新。
+- #243遺留P2：語義列按 `(symbol,day_start)` 一次分組，主報表與巢狀單政策報表共用同一實作；合成64／128日紅燈分別208,944／811,056次symbol存取，修後受線性預算約束並保留完整bytes比對。兩政策的真實verify→帳本預登記→U4→U5三入口族別遮蔽／上市因果前綴與U6獨立成交額選級，取代待整合skip；LEAN真實run→U6重算使用本機Colima固定映像、network none及/Users輸入。
+- 有限 bundle 由同一 `actual_bch_bundle` 程序、相同P3b／crosscheck原件與生產提交 `b23913fbb` 重產；舊 `559fa16475e7321e2051ab04b97beea975769da0c4f699dd043157760b13ab0c` → 新 `58fd0d224de878e42c78f0a0e1132683dbd0fc3fe9fc5e7d13c95a28d20258b0`。v2政策 `9694993d89c52e766fa219e46ecfbbf2f667b6100c990221508f51c1e209d05e` → `c46fa9e892b62c1b1dabd5d30886883297064fc473427f0136fb06e3f9378637`；範圍不變。P2 GREEN為12,336／24,624次存取，26／26主報表與巢狀報表bytes對main全同。
+- 必要測試整合小修：DV3凍結v1政策白名單加入#243的d0fbf9ff規範身分（真實公開流程先POLICY_MISMATCH、後READY）；DV6歷史測試改封存原固定Git blob的壓縮bytes，SHA仍為經審a91e604d，不增加歷史白名單，解決hosted research淺層checkout沒有舊Git物件的問題（紅燈exit128、綠燈保留同SHA）。兩項聚焦2 passed。首次完整單元1,123 passed／4 errors，後者是測試把LEAN排程放在BCH首根有效線之前而無決策，以及同一失敗fixture再建目錄；兩次原run皆completed但不作互通通過證據。測試改用首根有效線閉合時刻，保存失敗產物並重跑，不改引擎行為。
+- 歷史P4-D0／P4-D共42份重算報告逐bytes全同，12,986輸入檔未改；其中40個原completed保持通過，原EV10及全標的失敗run仍維持失敗，不提升為成功。首輪指定兩個structure檔17 passed。26日v1的78份bytes對最新main全同，v2逐格符合§13.7；BCH有效O=272.95、L=265.15、C=276.95保留、A=2954180.78。
+- 真實互通修後8 passed：v1／v2各自通過U5兩族別三入口遮蔽／上市因果前綴、U6獨立成交額核對，以及U5實際Colima run→U6重算雙向測試。每個run為completed、6,323步、1個決策訂單因上市初期歷史不足作廢、0成交；U6 `recompute_passed=true`、`differences=[]`，不冒稱有成交的回歸。另使用正式固定bundle pin而非測試注入，ordinary／listing兩種真實帳本預登記、物化、U5／U6讀取與trial重播均通過。
+- PR head `274ceac20` 本機全部R8為1,483 passed、兩個structure檔17 passed，測試期間追蹤檔不變。hosted research run `39832333637`／job `120012147892` 於10分鐘上限取消，取消前第995項出現F；依相同收集順序與無歷史repo紅燈，定位另一個直接git log固定base的九SHA稽核。缺歷史物件時明示skip，完整本機歷史仍逐blob核對九個SHA，不增加白名單。新增規模測試改32／64日、移除第二次未計數的重複報表呼叫；保留兩個真實消費路徑、每日日數對應完整語義列及20倍線性預算。以main舊消費類別重跑仍2 failed（55,344／208,944次），修後6,192／12,336次；連同完整歷史稽核3 passed。原64／128日紅綠及26日bytes證據保留，產品程式與規範完全未動；不延長CI時限、不重跑相同失敗head。新head完整回歸與CI另記。
+- 完整DV1／DV3／U4／U5／U6與全部R8、指定兩個structure檔、26日v1的78份bytes對main／v2逐格／雙政策報表、舊P4歷史重算、固定head CI及自動審查結果，見本次PR與倉庫外 `audits/2026-10-22-r8-data-verify-dv256-publish/`。原始失敗與尚未執行層級分列；不以單元測試冒充原E2／E4通過，不宣稱DV4全訓練資料驗收。TODO v924→v925；新增RH-20261022-06追隨05並保存Operator原文。不取數、不碰Linux runtime／資料庫／Demo／live，不更新Wiki、不合併。
 
 ## R8 文件同步 A／B：既有事件、工程錨點與現行佇列 — 2026-10-22
 

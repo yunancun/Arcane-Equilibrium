@@ -715,3 +715,15 @@ DV7 測試另覆蓋：同日多尾段、跨多戳尾段、部分同戳子集／�
 此值與其他拒絕分類同樣不放行，不採該子集、不挑同戳先後，不改變任何採值或可用性結果；不得把未判定冒稱為 `NO_COMPLETE_SUFFIX` 或 `PARTIAL_TIMESTAMP_SUBSET`。
 
 本次部分同戳子集診斷採精確整數縮放、最大公因數約分及位元集合動態規劃，固定資源上限為：狀態位元寬度 1,048,576（`MAX_PARTIAL_SUBSET_BITS`）、同戳群 4,096 筆（`MAX_PARTIAL_SUBSET_ITEMS`），以及輸入分子／分母與最小公倍分母各 4,096 位元（`MAX_PARTIAL_SCALE_BITS`）。任何一項超限即記上述未判定分類；這些上限只約束部分同戳子集的拒絕診斷，不約束已完整匹配的同戳群尾段。
+
+## 勘誤四（2026-10-22，conductor 裁決）
+
+原規範、勘誤一至三及停止歷史全部保留。以下補記預登記綁定、DV2 續作身分與現行生產／消費行為，不新增交易、選級或資料裁決規則。
+
+1. **預登記綁定欄位。** 帳本預登記 `record` 頂層必填 `data_family` 與 `data_policy_sha256`。`data_family` 僅允許 `ordinary`／`listing`，對應 `hypothesis_binding.json` 的 `family`；`data_policy_sha256` 為 U4 所選 bundle 的 `verification/policy.json` 完整 bytes SHA-256，對應 `policy_sha256`。缺欄、值不合法或不相等即拒絕發布。既有 `family` 維持多重檢驗／DSR 計數用的假說族名稱，不得限縮；`registration_sha256` 取帳本已保存的 record 雜湊。`data_access`／`trial_record` 回傳形狀不變。P5 預登記必須填這兩欄。
+2. **§9 交付身分補記。** `R8-S2-DATA-VERIFY-DV2-R1-20261022` 為 DV2 的續作身分；Operator 2026-10-22 以選項回覆「批准新身分續作 (Recommended)」（原文照錄）。原 DV2 在規範輸入缺口處停止、未使用任何審查額度，其停止歷史保留。本次整合發布不重開 DV2-R1、DV5、DV6，也不重置各交付的審查額度。
+3. **決策列狀態、整體物化失敗與消費端拒絕分開記錄。**
+   - 決策列 `status`：§8.4 的 `turnover_decisions.jsonl` 格式允許 `READY|BLOCKED`；現行 U4 只產生 `READY` 決策列。缺日依既有規則按 0 計並保留原因（`DAILY_INPUT_MISSING`、`TURNOVER_INPUT_INCOMPLETE` 等），不構成 BLOCKED。`BLOCKED` 決策列值保留為格式，現行不產生。對應 `materialize.py::_turnover`、`_check_decisions`。
+   - 整體物化失敗：U4 無法計算決策、或政策／身分／綁定等任何驗證失敗時，整個物化失敗、不產生可用物化，失敗證據另寫 `<out>.blocked/verification.json`（`status=BLOCKED`，依 §8.3）。這與決策列的 status 是兩件事，不得混稱。對應 `materialize.py::_Bundle.blocked` 與 `materialize` 的失敗處理。
+   - U5／U6 消費端：遇到 `status=BLOCKED` 的決策列，或缺少當日決策列時，一律 fail-closed（該 run／重算失敗），不推定、不降級為舊分級。U5 對應 `lean_runner.py::verification_inputs`、`lean_algo/rules.py::turnover_liquidity` 與 `lean_algo/framework.py` 的決策表查找／失敗處理；BLOCKED 拋 `TURNOVER_DECISION_BLOCKED`，缺列傳入 `None` 後拒絕為 `TURNOVER_DECISION_INVALID`。U6 對應 `series.py::TurnoverVerification.check`、`TurnoverVerification.at` 與 `Materialization.liquidity`；分別拒絕為 `TURNOVER_BLOCKED`、`TURNOVER_DECISION_MISSING`。這些失敗不進入舊分級後備路徑。
+4. **有限 bundle 釘選與正式研究界線。** 現行 `VERIFICATION_BUNDLES` 僅保留 conductor 已審的 BCH／BTC 有限訓練前綴（2020-03-25 至 2020-12-15 半開範圍，來源為既有 crosscheck）。政策／規範 SHA 改變時，僅可用同一來源與同一程序重新產生並更新該釘選，不擴大範圍。正式研究所需的全訓練段 bundle 釘選，須待 DV4 產出並經 conductor 審查後，另以 PR 登記；現行 U4 對其他範圍一律拒絕。

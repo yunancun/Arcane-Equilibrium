@@ -187,6 +187,23 @@ RUNTIME_METADATA = {
 }
 FAILURES = {'fill_forward_bar', 'gross_exposure_cap', 'invalid_decision',
             'algorithm_exception', 'lean_error'}
+# 固定於 55586c1e 的 U6 歷史來源；只供原 P4 run 回歸，不讓新引擎缺證據降級。
+HISTORICAL_SERIES_SHAS = frozenset({
+    'a91e604d52b13bdd6a2acb4f4b706ae78147856d6af2c20ca7528c129639dbe4',
+    'dd2ec8bef1168263610151916d240d23dd1ba69122ae31c5e3453a3c6ed27e53',
+    '6b8ab3c124773383e60591b251b6c4a939b0e8c2f38597e2160dd6abb58ceb57',
+    '1b83f74575fb270fc5ae81abb003e1662ba61c1585ac5790218ae67f149fa5fc',
+    '45f8a70f93d6e6343c12d507e64bab171481881a9df5522b6c872aa58c9c0f75',
+    '6ecb67fb44fc30b9fa5ee7dea86562b54e5a81f48d605038faad0cf46a36e9b4',
+    'fadd1526bb21a282259039b997af4e3ce35b0c4b5371dbc989cd4c4a877af41c',
+    '258ab408fa0a61eb94459a996e304b2c9c9a526681d709800de4e2cbeb4b7455',
+    '154eebed4c71683ff1fce7dc7769fba82935f1ca3ea8375b343314de84accc3a',
+})
+
+
+def _historical_run(run):
+    files = run.get('algorithm_files')
+    return isinstance(files, dict) and files.get('program_code/research/r8_engine/series.py') in HISTORICAL_SERIES_SHAS
 
 
 def precise(function):
@@ -265,9 +282,9 @@ def contained(root, name):
 
 
 class Materialization:
-    """只讀 U4 的 manifest、source 切片與屬性覆蓋檔。"""
+    """唯讀 U4 市場切片、屬性與 manifest 綁定的 DV6 驗證證據。"""
 
-    def __init__(self, path):
+    def __init__(self, path, *, historical=False):
         if Path(path).is_symlink():
             raise SeriesError('manifest 不接受 symlink')
         self.path = Path(path).resolve()
@@ -284,6 +301,12 @@ class Materialization:
         self.warm_start, warm_end = interval(m['warmup'])
         if warm_end != self.start:
             raise SeriesError('暖機終點不符')
+        verified = any(name.startswith('verification/') for name in m['files'])
+        if not verified and not historical:
+            raise SeriesError('VERIFICATION_EVIDENCE_REQUIRED')
+        read_start = self.warm_start
+        if verified:
+            read_start = TurnoverVerification.access(m, self.warm_start, self.start, self.end)
         self.symbols = m['symbols']
         if (len(set(self.symbols)) != len(self.symbols) or
                 any(not re.fullmatch(r'[A-Z0-9]+', s) for s in self.symbols)):
@@ -301,9 +324,8 @@ class Materialization:
         for name, meta in m['files'].items():
             file = contained(self.path.parent, name)
             if not name.startswith('source/'):
-                # §6.0 限定 U6 讀取 source 與 overlay；§7.1 亦列出的
-                # lean/custom payload 由 §5 的 U5 檢查，這裡不得擴大讀取範圍。
-                # submit 仍核對完整 files 身份雜湊表與重新物化 manifest。
+                # 市場資料只解析 source；verification 證據由下方 DV6 邊界核對。
+                # lean/custom payload 仍由 U5 檢查；submit 核對完整 files 身份。
                 continue
             raw = file.read_bytes()
             if digest(raw) != meta['sha256']:
@@ -331,7 +353,7 @@ class Materialization:
                     t = int(row.pop('timestamp'))
                 except (ValueError, TypeError) as exc:
                     raise SeriesError('無效切片時刻') from exc
-                if (previous is not None and t <= previous or t < self.warm_start or
+                if (previous is not None and t <= previous or t < read_start or
                         t > self.end or (kind != 'funding' and t == self.end)):
                     raise SeriesError('原始切片時間超界或不遞增')
                 previous = t
@@ -375,6 +397,12 @@ class Materialization:
         if set(self.properties) != set(self.symbols):
             raise SeriesError('缺少合約屬性')
         self.times = {s: sorted(self.hourly[s]) for s in self.symbols}
+        try:
+            self.turnover = TurnoverVerification(self) if verified else None
+        except SeriesError:
+            raise
+        except (OSError, ValueError, TypeError, KeyError) as exc:
+            raise SeriesError('VERIFICATION_MALFORMED') from exc
 
     def last_bar(self, symbol, t):
         index = bisect.bisect_right(self.times[symbol], t-HOUR)-1
@@ -404,6 +432,14 @@ class Materialization:
         days = cost['liquidity_window_days']
         if type(days) is not int or days <= 0:
             raise SeriesError('流動性回看天數須為正整數')
+        if self.turnover is not None:
+            if (days != 12 or decimal_value(cost['untradeable_below_turnover']) != 1000000 or
+                    decimal_value(cost['order_cap_fraction']) != Decimal('0.01') or
+                    [(decimal_value(v['min_turnover']),decimal_value(v['bps'])) for v in cost['slippage_tiers_bps']]
+                    != [(100000000,5),(10000000,10),(1000000,20)]):
+                raise SeriesError('TURNOVER_POLICY_MISMATCH')
+            median, enough = self.turnover.at(symbol, t)
+            return median, self.hourly[symbol].get(t-HOUR, {}).get('turnover', Decimal(0)), enough
         midnight = t//DAY*DAY
         first = self.manifest['first_bar'][symbol]
         complete_start = ((first+DAY-1)//DAY)*DAY if first is not None else midnight
@@ -412,6 +448,354 @@ class Materialization:
                   for i in range(1, days+1)]
         hourly = self.hourly[symbol].get(t-HOUR, {}).get('turnover', Decimal(0))
         return statistics.median(values), hourly, enough
+
+
+class TurnoverVerification:
+    """DV6：只驗 manifest 綁定切片；與 U4／U5 的生產及選級程式相互獨立。"""
+
+    STANDARD = 'afcb87578676c998b4ce7529c6e1c09d5214cfe7e8af53ad03d120781c696931'
+    ROW_KEYS = ('schema_version symbol decision_utc_day known_at policy_sha256 history_sufficient '
+                'inputs m_d m_e m_h tier_d tier_e tier_h triggered selected_source selected_median '
+                'selected_tier status reason_codes').split()
+
+    @staticmethod
+    def access(m, warm_start, start, end):
+        try:
+            access = m['readable']
+            exact_keys(access, ('generation time_splits selection out_of_sample max_lookback_seconds holdout').split())
+            lo, hi = interval(access['out_of_sample'])
+            if (access['generation'] != m['generation'] or not lo <= start < end <= hi or
+                    any(s['kind']=='holdout' and warm_start < interval(s)[1] and interval(s)[0] < end
+                        for s in access['time_splits'])):
+                raise SeriesError('VERIFICATION_ACCESS_SCOPE')
+            return max(warm_start, lo)
+        except (ValueError, TypeError, KeyError) as exc:
+            raise SeriesError('VERIFICATION_ACCESS_SCOPE') from exc
+
+    def __init__(self, data):
+        self.data, self.rows, self.original, self.origins = data, {}, {}, {}
+        self.files = data.manifest['files']; self.raw = {}; self.source_shas = {}
+        for name, meta in self.files.items():
+            self.source_shas.setdefault(meta['source_file'], set()).add(meta['source_sha256'])
+            self.source_shas.setdefault(name, set()).add(meta['sha256'])
+        for name, meta in self.files.items():
+            if not name.startswith('verification/'):
+                continue
+            exact_keys(meta, ('sha256 rows first last source_file source_sha256').split())
+            self.sha(meta['sha256']); self.sha(meta['source_sha256'])
+            contained(data.path.parent, meta['source_file'])  # 只檢查路徑，不開 P3b。
+            if type(meta['rows']) is not int or meta['rows'] < 0:
+                raise SeriesError('VERIFICATION_METADATA')
+            if any(meta[k] is not None and type(meta[k]) is not int for k in ('first','last')):
+                raise SeriesError('VERIFICATION_METADATA')
+            raw = contained(data.path.parent, name).read_bytes()
+            if digest(raw) != meta['sha256']:
+                raise SeriesError('VERIFICATION_SHA_MISMATCH')
+            self.raw[name] = raw
+        policy = self.json('policy.json'); version = policy.get('schema_version')
+        v2 = version == 'r8_data_verification_policy_v2'
+        expected = dict(schema_version='r8_data_verification_policy_v2' if v2 else 'r8_data_verification_policy_v1',
+            standard_sha256=self.STANDARD, approval_event='RH-20261022-05' if v2 else 'RH-20261022-04',
+            p3b_manifest_sha256=data.manifest['u1_manifest_sha256'],
+            listing=dict(x_pct='50', y_pct='20', z_pct='20', cooling_days=7,
+                quantity='hourly_base_volume_daily_mean', variation='mean_relative_difference',
+                stage_end_ranges=[[1,3],[7,15],[15,30]]),
+            sampling=dict(seed=20261022, base_per_stratum=300, max_per_stratum=900,
+                max_expansions=1, confidence='0.95', upper_limit='0.025'),
+            turnover=dict(window_days=12, thresholds=['1000000','10000000','100000000'],
+                trigger_pct='5', general='exchange_reported', suspect='sum_hourly_reported'),
+            l4_price_threshold_pct='1')
+        if v2:
+            expected['volume_semantics_policy'] = 'v2-terminal-suffix-20261022'
+        if canonical(policy) != canonical(expected):
+            raise SeriesError('VERIFICATION_POLICY_MISMATCH')
+        self.policy_sha = digest(self.raw['verification/policy.json'])
+        binding = self.json('hypothesis_binding.json')
+        self.binding = binding
+        exact_keys(binding, ('schema_version hypothesis_id policy_sha256 family registration_sha256').split())
+        self.sha(binding['registration_sha256'])
+        if (binding['schema_version'] != 'r8_verification_hypothesis_binding_v1' or
+                binding['hypothesis_id'] != data.manifest['hypothesis_id'] or
+                binding['policy_sha256'] != self.policy_sha or binding['family'] not in ('ordinary','listing')):
+            raise SeriesError('VERIFICATION_HYPOTHESIS_MISMATCH')
+        report = self.json('verification.json')
+        exact_keys(report, ('schema_version status policy_sha256 p3b_manifest_sha256 sample_plan_sha256 '
+            'previous_corrections_sha256 review_refs tool_commit readable counts files reason_codes').split() +
+            (['standard_sha256','volume_semantics_policy'] if v2 else []))
+        if (report['schema_version'] != ('r8_data_verification_v2' if v2 else 'r8_data_verification_v1') or
+                report['policy_sha256'] != self.policy_sha or
+                report['p3b_manifest_sha256'] != data.manifest['u1_manifest_sha256'] or
+                v2 and (report['standard_sha256'] != self.STANDARD or
+                        report['volume_semantics_policy'] != expected['volume_semantics_policy'])):
+            raise SeriesError('VERIFICATION_IDENTITY_MISMATCH')
+        if report['status'] != 'READY':
+            raise SeriesError('VERIFICATION_BLOCKED')
+        exact_keys(report['readable'], ('start','end'))
+        if any(type(v) is not int for v in report['readable'].values()):
+            raise SeriesError('VERIFICATION_SCOPE_MISMATCH')
+        self.scope = interval(report['readable'])
+        if not self.scope[0] <= data.start < data.end <= self.scope[1]:
+            raise SeriesError('VERIFICATION_SCOPE_MISMATCH')
+        self.scope = (max(self.scope[0],data.warm_start), min(self.scope[1],data.end))
+        self.reasons(report['reason_codes']); self.refs(report['review_refs'], report['reason_codes'])
+        for key in ('sample_plan_sha256','previous_corrections_sha256'):
+            if report[key] is not None:
+                self.sha(report[key])
+        if not isinstance(report['tool_commit'], str) or re.fullmatch('[0-9a-f]{40}', report['tool_commit']) is None:
+            raise SeriesError('VERIFICATION_TOOL_IDENTITY')
+        exact_keys(report['counts'], ('input_rows checked_days flagged_days corrected_fields unresolved_rows').split())
+        if any(type(v) is not int or v < 0 for v in report['counts'].values()):
+            raise SeriesError('VERIFICATION_COUNTS')
+        for name, meta in report['files'].items():
+            contained(data.path.parent, name); exact_keys(meta, ('sha256','rows')); self.sha(meta['sha256'])
+            if type(meta['rows']) is not int or meta['rows'] < 0:
+                raise SeriesError('VERIFICATION_FILES_MISMATCH')
+        for name in ['policy.json','corrections.jsonl','findings.jsonl'] + (['volume_semantics.jsonl'] if v2 else []):
+            meta = self.files.get('verification/'+name)
+            if meta is None or report['files'].get(name) != {k:meta[k] for k in ('sha256','rows')}:
+                raise SeriesError('VERIFICATION_FILES_MISMATCH')
+        # 信心證據／上市階段不成為 U6 交易閘門；僅以上述 files 身份綁定。
+        for symbol in data.symbols:
+            if any(t % HOUR for t in data.hourly[symbol]) or any(t % DAY for t in data.daily[symbol]):
+                raise SeriesError('TURNOVER_SOURCE_GRID')
+            for t, volume in self.original_days(symbol, '60', 'volume').items():
+                if volume is None:
+                    raise SeriesError('TURNOVER_ORIGIN_UNKNOWN')
+                if volume > 0:
+                    self.origins[symbol] = t
+                    break
+            if symbol not in self.origins:
+                raise SeriesError('TURNOVER_ORIGIN_UNKNOWN')
+            self.original[symbol] = self.original_days(symbol)
+        name = 'verification/turnover_decisions.jsonl'
+        if name not in self.raw:
+            raise SeriesError('TURNOVER_TABLE_MISSING')
+        lines = self.raw[name].splitlines(keepends=True); previous = None; times = []
+        for line in lines:
+            row = self.decode(line); exact_keys(row, self.ROW_KEYS)
+            day, symbol = row['decision_utc_day'], row['symbol']
+            if (type(day) is not int or day % DAY or symbol not in data.symbols or
+                    day < data.warm_start//DAY*DAY or day > data.end or
+                    type(row['known_at']) is not int or row['known_at'] != day):
+                raise SeriesError('TURNOVER_TIME_OR_SYMBOL')
+            key = (day, symbol)
+            if previous is not None and key <= previous:
+                raise SeriesError('TURNOVER_DUPLICATE_OR_ORDER')
+            previous = key; times.append(day)
+            self.rows[key] = self.check(row)
+        meta = self.files[name]
+        if (meta['rows'] != len(lines) or meta['first'] != (min(times) if times else None) or
+                meta['last'] != (max(times) if times else None)):
+            raise SeriesError('TURNOVER_METADATA')
+
+    @staticmethod
+    def sha(value):
+        if not isinstance(value, str) or re.fullmatch('[0-9a-f]{64}', value) is None:
+            raise SeriesError('VERIFICATION_SHA_FORMAT')
+
+    @staticmethod
+    def reasons(value):
+        if (not isinstance(value, list) or any(not isinstance(v,str) or not v for v in value) or
+                value != sorted(set(value))):
+            raise SeriesError('VERIFICATION_REASON_CODES')
+
+    def refs(self, refs, reasons, *, bound=False):
+        if not isinstance(refs, list):
+            raise SeriesError('VERIFICATION_SOURCE_REFS')
+        keys = []
+        for ref in refs:
+            exact_keys(ref, ('kind relative_path url sha256 row request_id list_index byte_start byte_end trade_id line_sha256').split())
+            if ref['kind'] not in ('raw','csv','trade','instruments','policy','plan','report'):
+                raise SeriesError('VERIFICATION_SOURCE_REFS')
+            if ref['relative_path'] is None:
+                if ref['sha256'] is not None or not reasons:
+                    raise SeriesError('VERIFICATION_SOURCE_REFS')
+            else:
+                contained(self.data.path.parent, ref['relative_path']); self.sha(ref['sha256'])
+                # 若引用具名切片／原檔，SHA 必須與 manifest 已綁定的身份相同。
+                matches = self.source_shas.get(ref['relative_path'], set())
+                if (bound or matches) and ref['sha256'] not in matches:
+                    raise SeriesError('VERIFICATION_SOURCE_IDENTITY')
+            for key in ('row','list_index','byte_start','byte_end'):
+                if ref[key] is not None and (type(ref[key]) is not int or ref[key] < (1 if key=='row' else 0)):
+                    raise SeriesError('VERIFICATION_SOURCE_REFS')
+            for key in ('url','request_id','trade_id'):
+                if ref[key] is not None and not isinstance(ref[key], str):
+                    raise SeriesError('VERIFICATION_SOURCE_REFS')
+            if ref['line_sha256'] is not None:
+                self.sha(ref['line_sha256'])
+            if ref['byte_start'] is not None and ref['byte_end'] is not None and ref['byte_start']>ref['byte_end']:
+                raise SeriesError('VERIFICATION_SOURCE_REFS')
+            keys.append((ref['kind'],ref['relative_path'] or '', *[ref[k] if ref[k] is not None else -1
+                         for k in ('row','list_index','byte_start')]))
+        if keys != sorted(keys):
+            raise SeriesError('VERIFICATION_SOURCE_REFS_ORDER')
+
+    @staticmethod
+    def decode(raw):
+        try:
+            value = json.loads(raw, parse_constant=lambda _: None)
+            if canonical(value)+b'\n' != raw:
+                raise ValueError()
+            return value
+        except (ValueError, UnicodeError) as exc:
+            raise SeriesError('VERIFICATION_JSON_ENCODING') from exc
+
+    def json(self, name):
+        name = 'verification/'+name
+        if name not in self.raw:
+            raise SeriesError('VERIFICATION_FILE_MISSING')
+        meta = self.files[name]
+        if meta['rows'] != 1 or meta['first'] is not None or meta['last'] is not None:
+            raise SeriesError('VERIFICATION_JSON_METADATA')
+        result = self.decode(self.raw[name])
+        if not isinstance(result, dict):
+            raise SeriesError('VERIFICATION_JSON_OBJECT')
+        return result
+
+    def isolated_original(self, symbol, resolution, timestamp, source, line):
+        if not hasattr(self,'quarantines'):
+            indexes = []
+            for name, identity in [('findings.jsonl','finding_id'),('corrections.jsonl','correction_id')]:
+                keys = set()
+                for raw in self.raw['verification/'+name].splitlines(keepends=True):
+                    row = self.decode(raw)
+                    relevant = (row.get('rule_id')=='DV-L1' and row.get('reason_code')=='OFF_GRID_TIMESTAMP' and row.get('field')=='timestamp'
+                        if identity=='finding_id' else row.get('decision')=='UNRESOLVED' and row.get('row_action')=='missing'
+                        and row.get('policy_sha256')==self.policy_sha and row.get('field') in ('open','high','low','close','volume','turnover'))
+                    if not relevant: continue
+                    if digest(canonical({k:v for k,v in row.items() if k!=identity})+b'\n') != row.get(identity): raise SeriesError('TURNOVER_QUARANTINE_IDENTITY')
+                    self.refs(row['source_refs'],[row['reason_code']])
+                    keys.update((row['symbol'],row['interval'],row['timestamp'],row['dataset'],r['relative_path'],r['sha256'],r['line_sha256'])
+                                for r in row['source_refs'] if r['kind']=='csv')
+                indexes.append(keys)
+            self.quarantines = indexes[0].intersection(indexes[1])
+        return (symbol,resolution,timestamp,'kline_day' if resolution=='D' else 'kline_hour',
+                source['source_file'],source['source_sha256'],digest(line)) in self.quarantines
+
+    def original_days(self, symbol, interval='D', field='turnover'):
+        name = 'verification/original/kline_'+symbol+'_'+interval+'.csv'
+        if name not in self.raw: raise SeriesError('TURNOVER_ORIGINAL_MISSING')
+        effective = self.files.get('source/kline_'+symbol+'_'+interval+'.csv', {})
+        if any(self.files[name][k] != effective.get(k) for k in ('source_file','source_sha256')): raise SeriesError('TURNOVER_ORIGINAL_IDENTITY')
+        reader = csv.DictReader(io.StringIO(self.raw[name].decode('utf-8')))
+        if reader.fieldnames != ['timestamp','open','high','low','close','volume','turnover']: raise SeriesError('TURNOVER_ORIGINAL_HEADER')
+        result, times, origin, lines = {}, [], None, self.raw[name].splitlines(keepends=True)
+        for index, row in enumerate(reader,1):
+            try:
+                t = int(row['timestamp'])
+            except (ValueError, TypeError) as exc:
+                raise SeriesError('TURNOVER_ORIGINAL_TIME') from exc
+            offgrid = t % (DAY if interval=='D' else HOUR)
+            known_origin = origin if interval=='60' else self.origins.get(symbol)
+            if (not self.scope[0] <= t < self.scope[1] or times and t < times[-1]
+                    or offgrid and (known_origin is None or t <= known_origin
+                        or not self.isolated_original(symbol,interval,t,self.files[name],lines[index]))):
+                raise SeriesError('TURNOVER_ORIGINAL_SCOPE')
+            # 時刻／標的／範圍先於市場值；無法用的原額保留 null 比較及零中位數輸入。
+            try:
+                if offgrid: raise SeriesError('TURNOVER_ORIGINAL_AMOUNT')
+                value = _exchange_decimal(row[field])
+                if value < 0: value = None
+            except SeriesError: value = None
+            result[t] = value if t not in result else None
+            if interval=='60' and field=='volume' and origin is None and result[t] is not None and result[t]>0: origin = t
+            times.append(t)
+        meta = self.files[name]
+        if (meta['rows'] != len(times) or meta['first'] != (min(times) if times else None) or
+                meta['last'] != (max(times) if times else None)):
+            raise SeriesError('TURNOVER_ORIGINAL_METADATA')
+        return result
+
+    @staticmethod
+    def total(values, divisor=1):
+        # 保留任意來源小數尾數，不能用重算現金容差或固定精度比較市場額。
+        with localcontext() as ctx:
+            ctx.prec = max(50, max(v.adjusted() for v in values)-min(v.as_tuple().exponent for v in values)+10)
+            return sum(values, Decimal(0))/divisor
+
+    @classmethod
+    def median(cls, values):
+        ordered = sorted(v if v is not None and v >= 0 else Decimal(0) for v in values)
+        return cls.total(ordered[5:7], 2)
+
+    @staticmethod
+    def tier(value):
+        return next((name for threshold, name in [(100000000,'GE_100M'),(10000000,'GE_10M'),
+                    (1000000,'GE_1M')] if value >= threshold), 'NO_OPEN')
+
+    @staticmethod
+    def same_amount(actual, expected):
+        if (actual is None) != (expected is None) or actual is not None and _exchange_decimal(actual) != expected:
+            raise SeriesError('TURNOVER_AMOUNT_MISMATCH')
+
+    def check(self, row):
+        day, symbol = row['decision_utc_day'], row['symbol']; data = self.data
+        if row['schema_version'] != 'r8_turnover_decision_v1' or row['policy_sha256'] != self.policy_sha:
+            raise SeriesError('TURNOVER_POLICY_MISMATCH')
+        if row['status'] != 'READY':
+            raise SeriesError('TURNOVER_BLOCKED')
+        self.reasons(row['reason_codes'])
+        if type(row['triggered']) is not bool or type(row['history_sufficient']) is not bool:
+            raise SeriesError('TURNOVER_BOOLEAN')
+        if not isinstance(row['inputs'], list) or len(row['inputs']) != 12:
+            raise SeriesError('TURNOVER_WINDOW')
+        original, effective, hourly = [], [], []
+        for index, item in enumerate(row['inputs']):
+            exact_keys(item, ('day_start exchange_reported effective_reported sum_hourly_reported '
+                             'daily_status hourly_status source_refs').split())
+            t = day-(12-index)*DAY
+            if type(item['day_start']) is not int or item['day_start'] != t:
+                raise SeriesError('TURNOVER_WINDOW')
+            d = self.original[symbol].get(t); e = data.daily[symbol].get(t, {}).get('turnover')
+            if t < self.origins[symbol]:
+                d = e = None  # A partial listing day is not a complete daily input.
+            self.refs(item['source_refs'], row['reason_codes'], bound=True)
+            if (d is not None or e is not None or item['sum_hourly_reported'] is not None) and not item['source_refs']:
+                raise SeriesError('TURNOVER_SOURCE_REFS_MISSING')
+            self.same_amount(item['exchange_reported'], d); self.same_amount(item['effective_reported'], e)
+            if item['daily_status'] not in (('VALID',) if e is not None else ('MISSING','INVALID')):
+                raise SeriesError('TURNOVER_DAILY_STATUS')
+            original.append(d); effective.append(e)
+            h = None; status = item['hourly_status']
+            if status != 'NOT_EVALUATED':
+                hours = [data.hourly[symbol].get(t+i*HOUR, {}).get('turnover') for i in range(24)]
+                first = max(self.origins[symbol], data.manifest['first_bar'][symbol])
+                delivery = data.manifest['delistings'].get(symbol, {}).get('deliveryTime')
+                if (first is not None and first <= t and (delivery is None or delivery >= t+DAY) and
+                        self.scope[0] <= t and t+DAY <= self.scope[1] and all(v is not None for v in hours)):
+                    h = self.total(hours)
+                if status not in (('VALID',) if h is not None else ('MISSING','INVALID')):
+                    raise SeriesError('TURNOVER_HOURLY_STATUS')
+            self.same_amount(item['sum_hourly_reported'], h); hourly.append(h)
+        md, me = self.median(original), self.median(effective)
+        triggered = any(Decimal(t)*Decimal('0.95') <= me <= Decimal(t)*Decimal('1.05')
+                        for t in (1000000,10000000,100000000))
+        if (any(v is None for v in effective) or triggered and any(v is None for v in hourly)) and not row['reason_codes']:
+            raise SeriesError('TURNOVER_INCOMPLETE_REASON_MISSING')
+        if row['triggered'] != triggered or triggered and any(i['hourly_status']=='NOT_EVALUATED' for i in row['inputs']):
+            raise SeriesError('TURNOVER_TRIGGER_MISMATCH')
+        evaluated = all(i['hourly_status'] != 'NOT_EVALUATED' for i in row['inputs'])
+        mh = self.median(hourly) if evaluated else None
+        for suffix, amount in [('d',md),('e',me),('h',mh)]:
+            self.same_amount(row['m_'+suffix], amount)
+            if row['tier_'+suffix] != (self.tier(amount) if amount is not None else None):
+                raise SeriesError('TURNOVER_TIER_MISMATCH')
+        first = data.manifest['first_bar'][symbol]
+        enough = first is not None and day-((first+DAY-1)//DAY)*DAY >= 12*DAY
+        chosen = mh if triggered and self.tier(mh) != self.tier(me) else me
+        source = 'hourly_sum' if triggered and self.tier(mh) != self.tier(me) else 'effective_daily'
+        self.same_amount(row['selected_median'], chosen)
+        if (row['selected_source'] != source or row['selected_tier'] != (self.tier(chosen) if enough else 'NO_OPEN') or
+                row['history_sufficient'] != enough):
+            raise SeriesError('TURNOVER_SELECTION_MISMATCH')
+        return chosen, enough
+
+    def at(self, symbol, t):
+        key = (t//DAY*DAY, symbol)
+        if key not in self.rows:
+            raise SeriesError('TURNOVER_DECISION_MISSING')
+        return self.rows[key]
 
 
 @precise
@@ -540,6 +924,8 @@ def score_intervals(config):
 
 def _check_config(data, run, *, _hold_folds=False):
     c=run['run_config'];m=data.manifest
+    if data.turnover is None and not _historical_run(run):
+        raise SeriesError('VERIFICATION_EVIDENCE_REQUIRED')
     exact_keys(run,('schema_version','materialization_sha256','run_config_sha256','run_config',
         'image_digest','docker_argv','algorithm_config_sha256','algorithm_files','base_symbol_properties_sha256',
         'started_at','ended_at','exit_code','lean_log_sha256','mode','status','failure_reason','failure_t',
@@ -863,8 +1249,9 @@ def replay(data, run, *, cost=None, stop_on_recorded_failure=True, _hold_folds=F
 
 
 def _inputs(materialization, run):
-    data=materialization if isinstance(materialization,Materialization) else Materialization(materialization)
     record=run if isinstance(run,dict) else load_json(run)[0]
+    data=materialization if isinstance(materialization,Materialization) else Materialization(
+        materialization, historical=_historical_run(record))
     return data,record
 
 
@@ -1471,6 +1858,8 @@ def rematerialize(*, u1, ledger, hypothesis, window, trial, out, repo):
 
 def _verify_identity(data, run, record, ledger_id):
     cfg=_check_config(data,run);m=data.manifest
+    if data.turnover is not None and data.turnover.binding['registration_sha256'] != record.get('preregistration_sha256'):
+        raise SeriesError('驗證綁定與帳本預登記身份不符')
     configuration={'strategy_parameters':{'run':{k:cfg[k] for k in IDENTITY_RUN_KEYS},
                                           'strategy':cfg['strategy']},
                    'cost_model_parameters':cfg['cost']}
@@ -1525,7 +1914,7 @@ def submit(ledger, trial, u1, run, *, trial_query=None, materializer=None, repo=
         path=(materializer or rematerialize)(u1=Path(u1),ledger=ledger,
               hypothesis=identity['hypothesis_id'],window=identity['data_window'],trial=trial,
               out=Path(temporary)/'materialized',repo=repo)
-        data=Materialization(path)
+        data=Materialization(path, historical=_historical_run(record))
         ledger_id=load_json(ledger/'ledger_id.json')[0]['ledger_id']
         _verify_identity(data,record,identity,ledger_id)
         report=recompute(data,record)

@@ -148,6 +148,16 @@ class R8Algorithm(QCAlgorithm):
                 delivery=self._info["delistings"].get(name, {}).get("deliveryTime")))
 
     def _load_custom(self):
+        verification = self._info.get("verification")
+        self._turnover_decisions = {}
+        if verification is not None:
+            path = Path("/r8/framework-inputs/turnover_decisions.jsonl")
+            for line in path.read_text().splitlines():
+                row = json.loads(line)
+                key = (row["symbol"], row["decision_utc_day"])
+                if key in self._turnover_decisions or row["policy_sha256"] != verification["policy_sha256"]:
+                    raise ValueError("TURNOVER_IDENTITY")
+                self._turnover_decisions[key] = row
         for name in self._info["symbols"]:
             datasets = {}
             for dataset in ("kline_day", "funding", "open_interest", "turnover_hour", "turnover_day"):
@@ -162,6 +172,20 @@ class R8Algorithm(QCAlgorithm):
                             value["value"] = row[2]
                         rows.append(value)
                 datasets[dataset] = rules.KnownRows(rows)
+            if verification is not None:
+                path = Path("/r8/custom/listing_regime") / (name.lower() + ".csv")
+                with path.open() as stream:
+                    reader = csv.DictReader(stream)
+                    if reader.fieldnames != ["known_at", "day_start", "stage", "reason_code", "cooling", "policy_sha256"]:
+                        raise ValueError("LISTING_HEADER")
+                    regimes = []
+                    for row in reader:
+                        if row["policy_sha256"] != verification["policy_sha256"]:
+                            raise ValueError("LISTING_POLICY")
+                        regimes.append({"known_at": int(row["known_at"]), "day_start": int(row["day_start"]),
+                                        "stage": row["stage"], "reason_code": row["reason_code"],
+                                        "cooling": {"true": True, "false": False, "null": None}[row["cooling"]]})
+                datasets["listing_regime"] = rules.KnownRows(regimes)
             datasets["kline_hour"] = rules.KnownRows()
             self._data[name] = datasets
 
@@ -348,7 +372,8 @@ class R8Algorithm(QCAlgorithm):
                     visible = self._visible(end, strict=True)
                     fit_data = {s: self._data[s] for s in visible}
                     result = rules.fit_fold(self._hypothesis_class, self._config["random_seed"],
-                                            fold["fit_window"], fit_data, self._config["strategy"], self._config["cost"])
+                                            fold["fit_window"], fit_data, self._config["strategy"], self._config["cost"],
+                                            family=self._info.get("verification", {}).get("family"))
                     self._fitted[index] = result
                     artifact = result["artifact"]
                     raw, digest = serialize_model(artifact) if artifact is not None else (None, None)
@@ -414,8 +439,12 @@ class R8Algorithm(QCAlgorithm):
             else:
                 raise ValueError("invalid_decision")
             current = self._account_positions.get(name, Decimal(0))
-            reason, bps = rules.liquidity(self._t, self._info["first_bar"][name],
-                                          self._data[name]["turnover_day"], self._config["cost"])
+            if self._info.get("verification") is not None:
+                row = self._turnover_decisions.get((name, self._t // rules.DAY * rules.DAY))
+                reason, bps = rules.turnover_liquidity(row, self._t, self._info["first_bar"][name], self._config["cost"])
+            else:
+                reason, bps = rules.liquidity(self._t, self._info["first_bar"][name],
+                                              self._data[name]["turnover_day"], self._config["cost"])
             hour = rules.turnover_at(self._data[name]["turnover_hour"], self._t)
             segments = rules.order_segments(current, quantity, prices[name], props["qty_step"], props["min_qty"],
                                             self._info["min_notional"][name], reason, bps, hour, self._config["cost"])
@@ -508,7 +537,8 @@ class R8Algorithm(QCAlgorithm):
                 if flatten:
                     targets = {s: {"weight": "0"} for s in visible}
                 elif self._artifact is not None:
-                    targets = rules.decide(self._instance, self._t, self._data, self._artifact, visible)
+                    targets = rules.decide(self._instance, self._t, self._data, self._artifact, visible,
+                                           family=self._info.get("verification", {}).get("family"))
                 else:
                     targets = None
                 if targets is not None:

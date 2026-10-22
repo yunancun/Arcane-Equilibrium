@@ -686,7 +686,10 @@ def test_default_query_does_not_create_ledger(tmp_path):
 
 def test_trial_verification_container_inputs_and_arguments_identical(inputs, git_fixture, tmp_path):
     from program_code.research.r8_engine import lean_runner as runner
-    path, _, config, query = inputs
+    path, manifest, config, query = inputs
+    config['materialization_sha256'], _ = dv5_materialization(path, manifest)
+    query['record'].update(manifest_sha256=config['materialization_sha256'],
+        data_files={k:v['sha256'] for k,v in manifest['files'].items()}, preregistration_sha256='c'*64)
     repo, _, head = git_fixture
     config.update(code_commit=head, engine_commit=head)
     query["record"]["code_commit"] = head
@@ -707,6 +710,10 @@ def test_trial_verification_container_inputs_and_arguments_identical(inputs, git
     config["mode"], query["finished"], query["status"] = "verification", True, "completed"
     verification = runner.execute(config, path, tmp_path / "verification", repo=repo, query=lambda t: query, process=process)
     assert seen[0][1] == seen[1][1]
+    assert b'turnover_decisions' not in seen[0][1] and b'family' not in seen[0][1]
+    mounts = [seen[0][0][i+1] for i, arg in enumerate(seen[0][0][:-1]) if arg=='--mount']
+    assert any('dst=/r8/framework-inputs,readonly' in m for m in mounts)
+    assert not any('dst=/r8/verification' in m or 'dst=/r8/source' in m for m in mounts)
     def without_output(argv):
         return [arg if "dst=/r8/output" not in arg else "output-mount" for arg in argv]
     assert without_output(seen[0][0]) == without_output(seen[1][0])
@@ -1161,7 +1168,7 @@ def fake_lean(monkeypatch, tmp_path, cost):
     base_t = 20 * DAY
 
     class Driver:
-        def __init__(self, bars, schedule=(), folds=(), strategy_config=None, end=None, funding=None, initial='100000', hypothesis_source=None):
+        def __init__(self, bars, schedule=(), folds=(), strategy_config=None, end=None, funding=None, initial='100000', hypothesis_source=None, verification=None):
             self.bars = bars
             self.algorithm = framework.R8Algorithm()
             self.t0 = base_t
@@ -1180,6 +1187,15 @@ def fake_lean(monkeypatch, tmp_path, cost):
                     'window': {'start': base_t, 'end': end}, 'validation_example': True,
                     'properties': {s: {'qty_step': '0.001', 'min_qty': '0.001'} for s in names},
                     'min_notional': {s: '0' for s in names}, 'funding_interval_ms': {s: 8 * HOUR for s in names}}
+            if verification is not None:
+                info['verification'] = {'family': verification['family'], 'policy_sha256':'a'*64}
+                table_path = mounted('/r8/framework-inputs/turnover_decisions.jsonl')
+                table_path.parent.mkdir(parents=True)
+                table_path.write_text(json.dumps(verification['turnover'])+'\n')
+                for name in names:
+                    listing_path = mounted('/r8/custom/listing_regime')/(name.lower()+'.csv')
+                    listing_path.parent.mkdir(parents=True, exist_ok=True)
+                    listing_path.write_text('known_at,day_start,stage,reason_code,cooling,policy_sha256\n'+verification['listing'])
             mounted('/r8/output').mkdir(parents=True)
             for file, obj in [('algorithm_config.json', config), ('framework.json', info)]:
                 mounted('/r8/' + file).write_bytes(canonical(obj))
@@ -1778,3 +1794,424 @@ def test_fix4_example_passes_runner_static_check():
     from program_code.research.r8_engine.lean_runner import EXAMPLE, check_algorithm
 
     check_algorithm((ROOT / EXAMPLE).read_text())
+
+# DV5: literal §8.4 consumer fixtures, not DV2/DV6 interoperability evidence.
+def dv5_data(future=True):
+    stages = [(HOUR if i==0 else i*DAY, i*DAY,
+               'initial' if i<3 else 'middle' if i<15 else 'stabilizing' if i<30 else 'ordinary',
+               None if i<15 else i<30) for i in range(401 if future else 15)]
+    listing = [dict(known_at=k, day_start=t, stage=s, reason_code='BOUNDARY', cooling=c,
+                    policy_sha256='a'*64) for k, t, s, c in stages]
+    bars = [dict(t=t, known_at=t+HOUR, close='1', volume='2') for t in (0, 2*DAY, 14*DAY, 29*DAY, 30*DAY)]
+    return {'X': {'listing_regime': listing, 'kline_hour': bars,
+                  'kline_day': [dict(t=r['t'], known_at=r['t']+DAY, close='1') for r in bars],
+                  'turnover_hour': [dict(t=r['t'], known_at=r['known_at'], value='3') for r in bars],
+                  'turnover_day': [dict(t=r['t'], known_at=r['t']+DAY, value='3') for r in bars]}}
+
+
+@pytest.mark.parametrize('cutoff,stage,cooling', [(HOUR-1,None,None), (HOUR,'initial',None),
+    (3*DAY-1,'initial',None), (3*DAY,'middle',None), (15*DAY,'stabilizing',True), (30*DAY,'ordinary',False)])
+def test_dv5_listing_closed_prefix_and_boundaries(cutoff, stage, cooling):
+    view = rules.data_view(dv5_data(), cutoff, family='listing')
+    rows = view.get('X', {}).get('listing_regime', ())
+    assert (rows[-1]['stage'] if rows else None) == stage
+    assert (rows[-1]['cooling'] if rows else None) == cooling
+    assert all(set(r) == {'known_at','day_start','stage','reason_code','cooling'} for r in rows)
+    if cutoff < 15*DAY:
+        shorter = rules.data_view(dv5_data(False), cutoff, family='listing')
+        assert {s: {k: list(v) for k,v in ds.items()} for s,ds in view.items()} == {s: {k: list(v) for k,v in ds.items()} for s,ds in shorter.items()}
+
+
+def test_dv5_three_entry_mask_keeps_targets_and_never_restores_listing_history(cost):
+    class Probe(rules.R8Hypothesis):
+        def score(self, params, train_window, validation_window, data, cost):
+            self.inspect(data); return '1'
+        def fit(self, fit_window, data, params):
+            self.inspect(data); return 'fitted'
+        def on_decision(self, time, data, model, params):
+            self.inspect(data); return {s: {'weight':'0'} for s in data}
+        def inspect(self, data):
+            assert list(data) == ['X']
+            for name in ('kline_hour','kline_day','turnover_hour','turnover_day'):
+                assert [r['t'] for r in data['X'][name]] == [30*DAY]
+            assert data['X']['listing_regime'][-1]['stage'] == 'ordinary'
+    result = rules.fit_fold(Probe, 1, {'start':0,'end':400*DAY}, dv5_data(), strategy(['1']), cost, family='ordinary')
+    assert result['artifact']['model'] == 'fitted'
+    assert rules.decide(Probe(1), 400*DAY, dv5_data(), result['artifact'], ['X'], family='ordinary') == {'X': {'weight':'0'}}
+    view = rules.data_view(dv5_data(), 2*HOUR, family='ordinary')
+    assert list(view) == ['X'] and 'kline_hour' not in view['X']
+    assert len(dv5_data()['X']['kline_hour']) == 5
+
+
+from program_code.research.tests.test_r8_engine_materialize import (
+    real_peer_materialization, real_peer_run, peer_view_rows)
+
+
+def test_dv5_real_dv2_materialization_views(real_peer_materialization, cost, record_property):
+    from program_code.research.r8_engine import lean_runner
+    peer = real_peer_materialization
+    for family, output in peer['outputs'].items():
+        root, manifest = output['root'], output['manifest']
+        binding = lean_runner.verification_bundle(root,manifest)
+        assert binding['family'] == family
+        data = peer_view_rows(root); calls = []
+        class Probe(rules.R8Hypothesis):
+            def inspect(self, view, name):
+                calls.append(name)
+                assert list(view) == ['BCHUSDT']
+                assert view['BCHUSDT']['listing_regime'][-1]['stage'] == 'initial'
+                if family == 'ordinary':
+                    assert not any(k in view['BCHUSDT'] for k in ('kline_hour','kline_day','turnover_hour','turnover_day'))
+                else:
+                    assert view['BCHUSDT']['kline_hour']
+            def score(self, params, train_window, validation_window, data, cost):
+                self.inspect(data,'score'); return '1'
+            def fit(self, fit_window, data, params):
+                self.inspect(data,'fit'); return 'real-u4-view'
+            def on_decision(self, time, data, model, params):
+                self.inspect(data,'decision'); return {s:{'weight':'0'} for s in data}
+        window = dict(start=manifest['warmup']['start'],end=manifest['window']['end'])
+        fit = rules.fit_fold(Probe,1,window,data,strategy(['1']),cost,family=family)
+        t = manifest['window']['end']-HOUR
+        assert rules.decide(Probe(1),t,data,fit['artifact'],['BCHUSDT'],family=family) == {'BCHUSDT':{'weight':'0'}}
+        assert calls == ['score','fit','decision']
+        short = {s:{k:rules.KnownRows(rows.prefix(t)) for k,rows in ds.items()} for s,ds in data.items()}
+        snapshot = lambda source: {s:{k:list(rows) for k,rows in ds.items()}
+                                   for s,ds in rules.data_view(source,t,family=family).items()}
+        assert snapshot(data) == snapshot(short)
+        record_property('real_view',json.dumps(dict(version=peer['version'],family=family,
+            materialization=str(root/'materialization.json'),calls=calls,policy_sha256=binding['policy_sha256'])))
+
+
+def test_dv5_real_dv6_recompute(real_peer_run, record_property):
+    from program_code.research.r8_engine import series
+    result = series.recompute(real_peer_run['materialization'],real_peer_run['run'])
+    assert result['recompute_passed'] is True and result['differences'] == []
+    record_property('real_recompute',json.dumps(result))
+
+
+def dv5_turnover(value='10000000', hourly='9000000', triggered=True, sufficient=True):
+    return dict(schema_version='r8_turnover_decision_v1',symbol='X',decision_utc_day=20*DAY,
+        known_at=20*DAY,policy_sha256='a'*64,history_sufficient=sufficient,
+        inputs=[dict(day_start=i*DAY,exchange_reported=value,effective_reported=value,
+            sum_hourly_reported=hourly if triggered else None,daily_status='VALID',
+            hourly_status='VALID' if triggered else 'NOT_EVALUATED',source_refs=[]) for i in range(8,20)],
+        m_d=value,m_e=value,m_h=hourly if triggered else None,tier_d='GE_10M',tier_e='GE_10M',
+        tier_h='GE_1M' if triggered else None,triggered=triggered,
+        selected_source='hourly_sum' if triggered else 'effective_daily',selected_median=hourly if triggered else value,
+        selected_tier=('GE_1M' if triggered else 'GE_10M') if sufficient else 'NO_OPEN',status='READY',reason_codes=[])
+
+
+@pytest.mark.parametrize('sufficient', [True,False])
+def test_dv5_turnover_independent_selection_and_history(cost, sufficient):
+    row = dv5_turnover(sufficient=sufficient)
+    first = 0 if sufficient else 15*DAY
+    assert rules.turnover_liquidity(row, 20*DAY+HOUR, first, cost) == ((None if sufficient else 'insufficient_history'), Decimal('20'))
+    row['selected_tier'] = 'GE_100M'
+    with pytest.raises(ValueError, match='TURNOVER'):
+        rules.turnover_liquidity(row, 20*DAY, first, cost)
+
+
+@pytest.mark.parametrize('amount,trigger', [('9500000',True),('10500000',True),('10500000.0001',False)])
+def test_dv5_turnover_trigger_inclusive_and_same_tier(cost, amount, trigger):
+    row=dv5_turnover(amount,amount,trigger)
+    tier='GE_1M' if amount=='9500000' else 'GE_10M'
+    row.update(tier_d=tier,tier_e=tier,tier_h=tier if trigger else None,
+               selected_source='effective_daily',selected_median=amount,selected_tier=tier)
+    assert rules.turnover_liquidity(row,20*DAY,0,cost) == (None,Decimal('20' if tier=='GE_1M' else '10'))
+
+
+@pytest.mark.parametrize('mutation', ['blocked','future','duplicate','wrong_median','missing_hours','bool_time','unknown_key'])
+def test_dv5_turnover_rejects_untrusted_rows(cost, mutation):
+    row=dv5_turnover()
+    if mutation=='blocked': row.update(status='BLOCKED',selected_source=None,selected_median=None,selected_tier=None,reason_codes=['TURNOVER_INPUT_INCOMPLETE'])
+    if mutation=='future': row['known_at']+=DAY
+    if mutation=='duplicate': row['inputs'][1]=row['inputs'][0]
+    if mutation=='wrong_median': row['m_h']='1'
+    if mutation=='missing_hours': row['inputs'][0]['hourly_status']='NOT_EVALUATED'
+    if mutation=='bool_time': row['known_at']=True
+    if mutation=='unknown_key': row['tail_count']=1
+    with pytest.raises(ValueError, match='TURNOVER'):
+        rules.turnover_liquidity(row,20*DAY,0,cost)
+
+
+def dv5_materialization(path, manifest, family='ordinary', v2=False, wrong_type=None):
+    """Hand-authored §8.4 files; real DV2 integration remains explicitly skipped."""
+    from program_code.research.r8_engine import lean_runner as runner
+    def put(name, raw, rows=1, first=None, last=None):
+        target=path/name; target.parent.mkdir(parents=True,exist_ok=True); target.write_bytes(raw)
+        manifest['files'][name]=dict(sha256=runner.sha256(raw),rows=rows,first=first,last=last,
+            source_file='manifest.json',source_sha256=manifest['u1_manifest_sha256'])
+    def wire(obj): return json.dumps(obj,sort_keys=True,separators=(',',':'),ensure_ascii=False).encode()+b'\n'
+    policy=dict(schema_version='r8_data_verification_policy_v1',standard_sha256='b'*64,
+        approval_event='RH-20261022-04',p3b_manifest_sha256=manifest['u1_manifest_sha256'],
+        listing=dict(x_pct='50',y_pct='20',z_pct='20',cooling_days=7,quantity='hourly_base_volume_daily_mean',
+                     variation='mean_relative_difference',stage_end_ranges=[[1,3],[7,15],[15,30]]),
+        sampling=dict(seed=20261022,base_per_stratum=300,max_per_stratum=900,max_expansions=1,confidence='0.95',upper_limit='0.025'),
+        turnover=dict(window_days=12,thresholds=['1000000','10000000','100000000'],trigger_pct='5',general='exchange_reported',suspect='sum_hourly_reported'),l4_price_threshold_pct='1')
+    if v2:
+        policy.update(schema_version='r8_data_verification_policy_v2', approval_event='RH-20261022-05',
+                      volume_semantics_policy='v2-terminal-suffix-20261022')
+    if wrong_type == 'bool': policy['listing']['stage_end_ranges'][0][0]=True
+    if wrong_type == 'float': policy['listing']['cooling_days']=7.0
+    put('verification/policy.json',wire(policy)); digest=runner.sha256(wire(policy))
+    verification=dict(schema_version='r8_data_verification_v2' if v2 else 'r8_data_verification_v1',
+        status='READY',policy_sha256=digest,p3b_manifest_sha256=manifest['u1_manifest_sha256'],
+        sample_plan_sha256=None,previous_corrections_sha256=None,review_refs=[],tool_commit='a'*40,
+        readable=manifest['window'],counts=dict(input_rows=0,checked_days=0,flagged_days=0,corrected_fields=0,unresolved_rows=0),
+        files={},reason_codes=[])
+    if v2:
+        verification.update(standard_sha256=policy['standard_sha256'],volume_semantics_policy=policy['volume_semantics_policy'])
+        put('verification/volume_semantics.jsonl',b'',0)
+        verification['files']['volume_semantics.jsonl']=dict(sha256=runner.sha256(b''),rows=0)
+    put('verification/verification.json',wire(verification))
+    binding=dict(schema_version='r8_verification_hypothesis_binding_v1',hypothesis_id=manifest['hypothesis_id'],
+                 policy_sha256=digest,family=family,registration_sha256='c'*64)
+    put('verification/hypothesis_binding.json',wire(binding))
+    listing=dict(schema_version='r8_listing_regime_v1',symbol='X',day_start=0,known_at=HOUR,
+        observed_listing_at=0,launch_time=0,listing_time_mismatch=False,origin_refs=[],stage='initial',
+        reason_code='OBSERVED_LISTING',cooling=None,quantity_inputs=[],policy_sha256=digest)
+    put('verification/listing_regimes.jsonl',wire(listing),first=HOUR,last=HOUR)
+    put('custom/listing_regime/x.csv',f'known_at,day_start,stage,reason_code,cooling,policy_sha256\n{HOUR},0,initial,OBSERVED_LISTING,null,{digest}\n'.encode(),first=HOUR,last=HOUR)
+    row=dv5_turnover(); row['policy_sha256']=digest
+    put('verification/turnover_decisions.jsonl',wire(row),first=20*DAY,last=20*DAY)
+    header='timestamp,open,high,low,close,volume,turnover\n'
+    daily=header+''.join(f'{i*DAY},1,1,1,1,24,10000000\n' for i in range(8,20))
+    hourly=header+''.join(f'{i*HOUR},1,1,1,1,1,375000\n' for i in range(8*24,20*24))
+    for prefix in ('source','verification/original'):
+        put(prefix+'/kline_X_D.csv',daily.encode(),12,8*DAY,19*DAY)
+    put('source/kline_X_60.csv',hourly.encode(),288,8*DAY,20*DAY-HOUR)
+    put('verification/original/kline_X_60.csv',hourly.encode(),288,8*DAY,20*DAY-HOUR)
+    for resolution, count, step, start, amount in [('day',12,DAY,8*DAY,'10000000'),('hour',288,HOUR,8*DAY,'375000')]:
+        raw=''.join(f'{start+(i+1)*step},{start+i*step},{amount}\n' for i in range(count)).encode()
+        put('custom/turnover_'+resolution+'/x.csv',raw,count,start,start+(count-1)*step)
+    raw=canonical(manifest); (path/'materialization.json').write_bytes(raw)
+    return runner.sha256(raw),binding
+
+
+@pytest.mark.parametrize('mutation', ['valid','missing_binding','wrong_hypothesis','wrong_policy','wrong_registration',
+    'missing_table','forged_tier','forged_input','projection','unknown_key','v2_leak'])
+def test_dv5_runner_validates_binding_sources_and_projection(inputs, mutation):
+    from program_code.research.r8_engine import lean_runner as runner
+    path,manifest,config,query=inputs
+    digest,binding=dv5_materialization(path,manifest)
+    target=None
+    if mutation=='missing_binding':
+        del manifest['files']['verification/hypothesis_binding.json']; (path/'verification/hypothesis_binding.json').unlink()
+    if mutation in ('wrong_hypothesis','wrong_policy','wrong_registration'):
+        binding[{'wrong_hypothesis':'hypothesis_id','wrong_policy':'policy_sha256','wrong_registration':'registration_sha256'}[mutation]]='d'*64
+        target='verification/hypothesis_binding.json'; raw=json.dumps(binding,sort_keys=True,separators=(',',':')).encode()+b'\n'
+    if mutation=='missing_table':
+        del manifest['files']['verification/turnover_decisions.jsonl']; (path/'verification/turnover_decisions.jsonl').unlink()
+    if mutation in ('forged_tier','forged_input','unknown_key','v2_leak'):
+        target='verification/turnover_decisions.jsonl'; row=json.loads((path/target).read_bytes())
+        if mutation=='forged_tier': row['selected_tier']='GE_100M'
+        if mutation=='forged_input': row['inputs'][0]['exchange_reported']='999'
+        if mutation in ('unknown_key','v2_leak'): row['tail_count']=1
+        raw=json.dumps(row,sort_keys=True,separators=(',',':')).encode()+b'\n'
+    if mutation=='projection':
+        target='custom/listing_regime/x.csv'; raw=(path/target).read_bytes().replace(b'initial',b'ordinary')
+    if target:
+        (path/target).write_bytes(raw); manifest['files'][target]['sha256']=runner.sha256(raw)
+    raw=canonical(manifest); (path/'materialization.json').write_bytes(raw)
+    config['materialization_sha256']=runner.sha256(raw)
+    query['record']['manifest_sha256']=config['materialization_sha256']
+    query['record']['data_files']={k:v['sha256'] for k,v in manifest['files'].items()}
+    query['record']['preregistration_sha256']='c'*64
+    if mutation=='valid':
+        assert runner.read_materialization(path,config['materialization_sha256'])==manifest
+        runner.validate_config(config,manifest,lambda _:query)
+        assert runner.verification_inputs(path,manifest,config,lambda _:query)['family']=='ordinary'
+    else:
+        with pytest.raises(ValueError):
+            checked=runner.read_materialization(path,config['materialization_sha256'])
+            runner.verification_inputs(path,checked,config,lambda _:query)
+
+
+@pytest.mark.parametrize('family', ['ordinary','listing'])
+def test_dv5_framework_loads_header_masks_and_uses_private_decisions(fake_lean, family):
+    source = """from program_code.research.r8_engine.lean_algo.rules import R8Hypothesis
+class FixedSchedule(R8Hypothesis):
+    def on_decision(self,time,data,model,params):
+        assert set(data['X']) <= {'kline_hour','kline_day','turnover_hour','turnover_day','funding','open_interest','listing_regime'}
+        assert data['X']['listing_regime'][-1]['stage']=='stabilizing'
+        assert 'policy_sha256' not in data['X']['listing_regime'][-1]
+        assert ('kline_hour' in data['X']) == LISTING
+        return {'X':{'weight':'0.001'}}
+""".replace('LISTING',str(family=='listing'))
+    row=dv5_turnover(); t=20*DAY
+    listing=dv5_listing_csv()
+    driver=fake_lean.Driver({'X':{t:['100','101','99','100','1'],t+HOUR:['100','101','99','100','1']}}, hypothesis_source=source,
+                           verification=dict(family=family,listing=listing,turnover=row))
+    driver.step(t+HOUR)
+    assert driver.algorithm._failure is None
+    driver.step(t+2*HOUR)
+    assert driver.algorithm._failure is None
+    fills=driver.records('fills')
+    assert fills and fills[0]['slippage_bps']=='20'
+    assert fills[0]['price']=='100.2'
+
+
+@pytest.mark.parametrize('path', ['/r8/framework-inputs/turnover_decisions.jsonl',
+    '/r8/custom/listing_regime/x.csv','/r8/verification/volume_semantics.jsonl'])
+def test_dv5_hypothesis_file_bypass_rejected(path):
+    from program_code.research.r8_engine import lean_runner as runner
+    with pytest.raises(ValueError):
+        runner.check_algorithm(f'def probe():\n    return open({path!r}).read()\n')
+
+
+def test_dv5_legacy_artifact_read_only_regression_not_new_trial(inputs):
+    from program_code.research.r8_engine import lean_runner as runner
+    path,manifest,config,query=inputs
+    with pytest.raises(ValueError,match='VERIFICATION_MISSING'):
+        runner.verification_inputs(path,manifest,config,lambda _:query)
+    config['mode']='verification'
+    assert runner.verification_inputs(path,manifest,config,lambda _:query) is None
+
+
+def test_dv5_missing_days_zero_and_missing_hour_no_fallback(cost):
+    row=dv5_turnover('0','0',False)
+    row.update(tier_d='NO_OPEN',tier_e='NO_OPEN',selected_tier='NO_OPEN')
+    for item in row['inputs']:
+        item.update(exchange_reported=None,effective_reported=None,daily_status='MISSING')
+    assert rules.turnover_liquidity(row,20*DAY,0,cost)==('untradeable',Decimal('20'))
+    row=dv5_turnover()
+    row['inputs'][0].update(sum_hourly_reported=None,hourly_status='MISSING')
+    row['reason_codes']=['TURNOVER_INPUT_INCOMPLETE']
+    assert rules.turnover_liquidity(row,20*DAY,0,cost)==(None,Decimal('20'))
+
+
+@pytest.mark.parametrize('mutation',['stage_regression','future_quantity','duplicate_key','no_header','unknown_binding','bad_meta','empty_table'])
+def test_dv5_runner_strict_schema_and_causal_listing(inputs,mutation):
+    from program_code.research.r8_engine import lean_runner as runner
+    path,manifest,config,query=inputs; dv5_materialization(path,manifest)
+    query['record']['preregistration_sha256']='c'*64
+    runner.verification_inputs(path,manifest,config,lambda _:query)
+    target='verification/listing_regimes.jsonl'; row=json.loads((path/target).read_bytes())
+    if mutation=='stage_regression':
+        row.update(stage='ordinary')
+        raw=json.dumps(row,sort_keys=True,separators=(',',':')).encode()+b'\n'
+        (path/'custom/listing_regime/x.csv').write_bytes((path/'custom/listing_regime/x.csv').read_bytes().replace(b'initial',b'ordinary'))
+        manifest['files']['custom/listing_regime/x.csv']['sha256']=runner.sha256((path/'custom/listing_regime/x.csv').read_bytes())
+    if mutation=='future_quantity':
+        row['quantity_inputs']=[dict(day_start=0,volume_sum='24',hour_count=24,status='FULL',source_refs=[])]
+        raw=json.dumps(row,sort_keys=True,separators=(',',':')).encode()+b'\n'
+    if mutation=='duplicate_key': raw=(path/target).read_bytes().replace(b'"stage":"initial"',b'"stage":"initial","stage":"initial"')
+    if mutation=='no_header': target='custom/listing_regime/x.csv'; raw=(path/target).read_bytes().split(b'\n',1)[1]
+    if mutation=='unknown_binding':
+        target='verification/hypothesis_binding.json'; obj=json.loads((path/target).read_bytes());obj['tail_count']=2
+        raw=json.dumps(obj,sort_keys=True,separators=(',',':')).encode()+b'\n'
+    if mutation=='bad_meta': manifest['files'][target]['rows']=999; raw=(path/target).read_bytes()
+    if mutation=='empty_table': target='verification/turnover_decisions.jsonl'; raw=b''; manifest['files'][target].update(rows=0,first=None,last=None)
+    (path/target).write_bytes(raw);manifest['files'][target]['sha256']=runner.sha256(raw)
+    with pytest.raises(ValueError): runner.verification_inputs(path,manifest,config,lambda _:query)
+
+
+@pytest.mark.parametrize('family',['ordinary','listing'])
+def test_dv5_framework_score_and_fit_share_mask(fake_lean,family):
+    t=20*DAY
+    source="""from program_code.research.r8_engine.lean_algo.rules import R8Hypothesis
+class FixedSchedule(R8Hypothesis):
+    def inspect(self,data):
+        assert ('kline_hour' in data['X']) == LISTING
+        assert data['X']['listing_regime'][-1]['stage']=='stabilizing'
+    def score(self,params,train_window,validation_window,data,cost):
+        self.inspect(data); return '1'
+    def fit(self,fit_window,data,params):
+        self.inspect(data); return 'MASK_CHECKED'
+    def on_decision(self,time,data,model,params):
+        return {'X':{'weight':'0'}}
+""".replace('LISTING',str(family=='listing'))
+    listing=dv5_listing_csv()
+    strat=strategy(['1']);strat.update(internal_validation_days=1,internal_gap_days=1)
+    folds=[dict(fit_window=dict(start=16*DAY,end=t+2*HOUR),score_window=dict(start=t+3*HOUR,end=t+5*HOUR))]
+    driver=fake_lean.Driver({'X':{t:['100','101','99','100','1'],t+HOUR:['100','101','99','100','1']}},
+        folds=folds,strategy_config=strat,hypothesis_source=source,
+        verification=dict(family=family,listing=listing,turnover=dv5_turnover()))
+    driver.step(t+HOUR);driver.step(t+2*HOUR)
+    assert driver.algorithm._failure is None
+    assert driver.records('fits')[0]['model_sha256'] is not None
+    assert b'MASK_CHECKED' in fake_lean.mounted('/r8/output/model.json').read_bytes()
+
+
+@pytest.mark.parametrize('mutation',['valid','missing_evidence','schema_downgrade','wrong_policy'])
+def test_dv5_v2_evidence_identity_remains_private(inputs,mutation):
+    from program_code.research.r8_engine import lean_runner as runner
+    path,manifest,config,query=inputs;dv5_materialization(path,manifest,v2=True)
+    query['record']['preregistration_sha256']='c'*64
+    target='verification/verification.json';obj=json.loads((path/target).read_bytes())
+    if mutation=='missing_evidence':
+        del manifest['files']['verification/volume_semantics.jsonl'];(path/'verification/volume_semantics.jsonl').unlink()
+    if mutation=='schema_downgrade': obj['schema_version']='r8_data_verification_v1'
+    if mutation=='wrong_policy': obj['volume_semantics_policy']='v1-strict'
+    raw=json.dumps(obj,sort_keys=True,separators=(',',':')).encode()+b'\n'
+    (path/target).write_bytes(raw);manifest['files'][target]['sha256']=runner.sha256(raw)
+    if mutation=='valid':
+        assert runner.verification_inputs(path,manifest,config,lambda _:query)['family']=='ordinary'
+    else:
+        with pytest.raises(ValueError): runner.verification_inputs(path,manifest,config,lambda _:query)
+
+
+def test_dv5_unknown_stage_keeps_complete_target_symbols():
+    data={'X':{'kline_hour':[dict(t=0,known_at=HOUR,close='1')]}}
+    class Empty(rules.R8Hypothesis):
+        def on_decision(self,t,data,model,params):
+            assert dict(data['X']) == {}
+            return {symbol:{'weight':'0'} for symbol in data}
+    assert rules.decide(Empty(1),HOUR,data,dict(model=None,params={}),['X'],family='ordinary') == {'X':{'weight':'0'}}
+
+
+@pytest.mark.parametrize('resolution',['day','hour'])
+def test_dv5_runner_binds_custom_amounts_to_independent_source(inputs,resolution):
+    from program_code.research.r8_engine import lean_runner as runner
+    path,manifest,config,query=inputs;dv5_materialization(path,manifest)
+    query['record']['preregistration_sha256']='c'*64
+    runner.verification_inputs(path,manifest,config,lambda _:query)
+    target='custom/turnover_'+resolution+'/x.csv'
+    raw=(path/target).read_bytes().replace(b',10000000\n',b',1\n').replace(b',375000\n',b',1\n')
+    (path/target).write_bytes(raw);manifest['files'][target]['sha256']=runner.sha256(raw)
+    with pytest.raises(ValueError,match='TURNOVER'):
+        runner.verification_inputs(path,manifest,config,lambda _:query)
+
+
+def test_dv5_unknown_original_with_valid_effective_day(cost,inputs):
+    from program_code.research.r8_engine import lean_runner as runner
+    path,manifest,config,query=inputs;dv5_materialization(path,manifest)
+    query['record']['preregistration_sha256']='c'*64
+    target='verification/turnover_decisions.jsonl';row=json.loads((path/target).read_bytes())
+    for item in row['inputs']: item['exchange_reported']=None
+    row.update(m_d='0',tier_d='NO_OPEN')
+    assert rules.turnover_liquidity(row,20*DAY,0,cost)==(None,Decimal('20'))
+    raw=json.dumps(row,sort_keys=True,separators=(',',':')).encode()+b'\n'
+    (path/target).write_bytes(raw);manifest['files'][target]['sha256']=runner.sha256(raw)
+    target='verification/original/kline_X_D.csv'
+    raw=(path/target).read_bytes().replace(b',10000000\n',b',NaN\n')
+    (path/target).write_bytes(raw);manifest['files'][target]['sha256']=runner.sha256(raw)
+    assert runner.verification_inputs(path,manifest,config,lambda _:query)['family']=='ordinary'
+
+
+def test_dv5_untriggered_hourly_comparison_does_not_change_selection(cost):
+    row=dv5_turnover('20000000','9000000',True)
+    row.update(triggered=False,selected_source='effective_daily',selected_median='20000000',selected_tier='GE_10M')
+    assert rules.turnover_liquidity(row,20*DAY,0,cost)==(None,Decimal('10'))
+
+
+def test_dv5_missing_current_listing_day_cannot_reuse_old_cooling():
+    data=dv5_data()
+    data['X']['listing_regime']=[r for r in data['X']['listing_regime'] if r['day_start']<15*DAY]
+    with pytest.raises(ValueError,match='LISTING'):
+        rules.data_view(data,20*DAY,family='listing')
+
+
+def dv5_listing_csv():
+    return ''.join(f"{r['known_at']},{r['day_start']},{r['stage']},{r['reason_code']},{str(r['cooling']).lower() if r['cooling'] is not None else 'null'},{r['policy_sha256']}\n"
+                   for r in dv5_data()['X']['listing_regime'])
+
+
+@pytest.mark.parametrize('kind',['bool','float'])
+def test_dv5_policy_rejects_numeric_type_aliases(inputs,kind):
+    from program_code.research.r8_engine import lean_runner as runner
+    path,manifest,config,query=inputs;dv5_materialization(path,manifest,wrong_type=kind)
+    query['record']['preregistration_sha256']='c'*64
+    with pytest.raises(ValueError,match='POLICY'):
+        runner.verification_inputs(path,manifest,config,lambda _:query)

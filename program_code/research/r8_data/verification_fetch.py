@@ -36,7 +36,8 @@ SEED = 20261022
 TIERS = ('GE_100M', 'GE_10M', 'GE_1M', 'NO_OPEN')
 STANDARD = 'docs/execution_plan/2026-10-22--r8-stage2-data-verification-standard.md'
 V2 = 'v2-terminal-suffix-20261022'
-_V1_STANDARDS=('ba65fbca3b9230ad1807b82c923e9e60ab870edbe5c1e0d5090ebce99b06f6d0',
+_V1_STANDARDS=('d0fbf9ff02d080027d575eb6488f2c552c3a583485b8c685166fe0ef94b2af98',
+               'ba65fbca3b9230ad1807b82c923e9e60ab870edbe5c1e0d5090ebce99b06f6d0',
                '125901d0341487bd058be70e7cc2ed27be7c3be270a45d05587e471104b7cacf',
                'ad80220cd6dc3f8dc5c451c6281aa9f1b2acf7fbb47bc80ed21eb3905710110c')
 
@@ -776,7 +777,7 @@ class _VolumeEvidence(_AdjudicationEvidence):
     """Independently authenticate complete-group suffixes against original bytes."""
     def __init__(self,sources,findings,report_sha,rows,policy_sha,verified,missing_trades,correction_days):
         super().__init__(sources,findings,report_sha)
-        self.semantics={};self.valid_hours=set();self.selected_days=set();self.incomplete_days=set();order=[]
+        self.semantics={};self.valid_hours=set();self.selected_days=set();self.incomplete_days=set();order=[];by_day={}
         for r in rows:
             _keys(r,_VOLUME_KEYS);_symbol(r['symbol'])
             day=_integer(r['day_start']);t=_integer(r['timestamp'])
@@ -787,6 +788,7 @@ class _VolumeEvidence(_AdjudicationEvidence):
             key=(r['symbol'],t)
             if key in self.semantics:raise InvalidInput('VOLUME_SEMANTICS_EVIDENCE_MISMATCH')
             self.semantics[key]=r;order.append((day,r['symbol'],t))
+            by_day.setdefault((r['symbol'],day),[]).append(r)
             _refs(r['source_refs'],sources.root,verified,missing_trades)
             if r['reason_codes']!=sorted(set(r['reason_codes'])) or any(not isinstance(x,str) for x in r['reason_codes']):raise InvalidInput('INVALID_REASON_CODES')
             if r['volume_source'] not in (None,'v1_strict','trade_reconstructed_terminal_suffix'):raise InvalidInput('VOLUME_SEMANTICS_EVIDENCE_MISMATCH')
@@ -812,8 +814,8 @@ class _VolumeEvidence(_AdjudicationEvidence):
                     if not self.authenticate(r):raise InvalidInput('VOLUME_SEMANTICS_EVIDENCE_MISMATCH')
                     self.valid_hours.add(key)
         if order!=sorted(order):raise InvalidInput('VOLUME_SEMANTICS_EVIDENCE_MISMATCH')
-        for symbol,day in correction_days|{(r['symbol'],r['day_start']) for r in rows}:
-            ds=[r for r in rows if (r['symbol'],r['day_start'])==(symbol,day)]
+        for symbol,day in correction_days|set(by_day):
+            ds=by_day.get((symbol,day),[])
             applicable=all((symbol,r['timestamp']) in self.valid_hours for r in ds) and any(r['hour_classification']=='TERMINAL_SUFFIX_EXACT' for r in ds)
             manifest=sources.load_manifest()
             first=min((m.get('first_timestamp',day) for m in manifest['files'].values() if m.get('symbol')==symbol and m.get('interval')=='60'),default=day)
