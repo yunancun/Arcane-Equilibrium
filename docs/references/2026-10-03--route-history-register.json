@@ -510,10 +510,26 @@
       "blob": "f14cb6b80e0331df85f64dfa60bb470a023ac6d1"
     },
     "r8-stage2-data-verification-standard-erratum-1": {
-      "kind": "recorded_file",
+      "kind": "git_blob",
       "path": "docs/execution_plan/2026-10-22--r8-stage2-data-verification-standard.md",
       "sha256": "ad80220cd6dc3f8dc5c451c6281aa9f1b2acf7fbb47bc80ed21eb3905710110c",
-      "meaning": "Conductor clarification of existing C5 definitions: C4/G is field-specific at opening/closing timestamps; H/L/V/A are independent of within-timestamp order. Original text and DV1 historical review limits retained; 26-day report cited. No new rule or RH event."
+      "meaning": "Conductor clarification of existing C5 definitions: C4/G is field-specific at opening/closing timestamps; H/L/V/A are independent of within-timestamp order. Original text and DV1 historical review limits retained; 26-day report cited. No new rule or RH event.",
+      "commit": "4b92cdae731c28cefe95505bb11921482b9600e4",
+      "blob": "597bcf3996c59d8cb45da6c1f888cce68b219bd6"
+    },
+    "r8-stage2-data-verification-standard-v2-volume": {
+      "kind": "git_blob",
+      "path": "docs/execution_plan/2026-10-22--r8-stage2-data-verification-standard.md",
+      "sha256": "d7c1c884f7f5c3da68fef5889fabf363d589f10cabb90d44e8a264e41de9ca07",
+      "meaning": "Operator B and option e adopted: terminal-suffix trade-sourced volume policy, fixed v2 schema, preserved v1 and sampling contract, DV7 dependency and independent 26-day expectation. Document approval/merge is not v2 implementation; updated source pin still supports v1-strict only until DV7 merges.",
+      "commit": "7cf0ff1bebd038a28d1cb23b2e2d5d7376e225d1",
+      "blob": "072088b48bd4dfc0380e545d6a0538d4f8e27f3f"
+    },
+    "r8-stage2-data-verification-standard-v2-erratum-2": {
+      "kind": "recorded_file",
+      "path": "docs/execution_plan/2026-10-22--r8-stage2-data-verification-standard.md",
+      "sha256": "ba65fbca3b9230ad1807b82c923e9e60ab870edbe5c1e0d5090ebce99b06f6d0",
+      "meaning": "Conductor-dispatched PR #242 follow-up after merging reviewed main 1ea85a9a: implementation mapping for frozen expansion reports, partial-day diagnostics, L2 turnover flags and per-day L3 evidence counting; supplied background URLs transcribed without online verification. No rule or RH event changed; source edits remain the standard pin only relative to merged main, with v2 awaiting DV7."
     }
   },
   "routes": [
@@ -695,7 +711,9 @@
         "r8-stage2-data-verification-standard-r2",
         "r8-stage2-p4-addendum-r4",
         "r8-stage2-data-verification-standard-r3",
-        "r8-stage2-data-verification-standard-erratum-1"
+        "r8-stage2-data-verification-standard-erratum-1",
+        "r8-stage2-data-verification-standard-v2-volume",
+        "r8-stage2-data-verification-standard-v2-erratum-2"
       ],
       "status_history": [
         {
@@ -845,6 +863,11 @@
           "recorded_on": "2026-10-22",
           "event": "RH-20261022-04",
           "note": "Operator approved all remaining parameters and the full standard; methodology review recorded complete by conductor instruction. Six deliveries become dispatchable on PR #240 merge. Implementation/acceptance remain outstanding; old-year A/B treatment awaits frozen audit. Route record_status unchanged."
+        },
+        {
+          "recorded_on": "2026-10-22",
+          "event": "RH-20261022-05",
+          "note": "Operator chose B and e only, with no b/b+D1 fallback. DV7 follows merged #241, DV2 follows DV7, DV4 last with frozen v1 then v2. Final acceptance estimand awaits Operator after frozen results; route record_status unchanged."
         }
       ]
     }
@@ -2083,6 +2106,38 @@
         }
       },
       "meaning": "Records complete standard approval and fixed remaining parameters. DATA-VERIFY becomes ACTIVE/dispatchable only when the same PR merges into main. DV1 and DV3 may proceed in parallel; DV2 depends on DV1 interface; DV5 and enabled DV6 depend on DV2 artifacts; DV4 integrates last. Each bounded delivery requires at least one real-counterpart integration test under the fixed formats. The 15-workday overall cap is unchanged. Old-year unresolved treatment A/B remains reserved for Operator after frozen audit results; strict current isolation/stopping rules remain. No code, data correction, sampling, runtime, research success or merge has occurred in this recording task."
+    },
+    {
+      "id": "RH-20261022-05",
+      "recorded_on": "2026-10-22",
+      "event_type": "open_item_decided",
+      "route_ids": [
+        "R8"
+      ],
+      "follows": "RH-20261022-04",
+      "decision_ref": "docs/execution_plan/2026-10-22--r8-stage2-data-verification-standard.md",
+      "authority_source": "1. 對 conductor 所列「A：這兩年不納入研究；B：另訂成交量規則後重新驗證」，Operator 2026-10-22 回覆：「B」。\n2. 對成交量規則選項，Operator 2026-10-22 以選項回覆：「(e) 逐筆為準 (Recommended)」。conductor 呈報的選項為：(e) 逐筆為準（15/26）、(b)+D1 價格分離（12/26，Codex 建議）、(e) 優先其餘 (b)+D1、維持原標準（7/26）。Operator 選定 (e)，不採 (b)／(b)+D1 作為後備：不符合 (e) 的 C3 失敗日維持 v1 的未決／缺失。",
+      "operator_excerpt": [
+        "B",
+        "(e) 逐筆為準 (Recommended)"
+      ],
+      "prior_record_identity": {
+        "standard": {
+          "commit": "4b92cdae731c28cefe95505bb11921482b9600e4",
+          "path": "docs/execution_plan/2026-10-22--r8-stage2-data-verification-standard.md",
+          "blob": "597bcf3996c59d8cb45da6c1f888cce68b219bd6",
+          "sha256": "ad80220cd6dc3f8dc5c451c6281aa9f1b2acf7fbb47bc80ed21eb3905710110c",
+          "availability": "pinned PR #241 head before v2 recorder work; not claimed merged"
+        },
+        "todo": {
+          "commit": "4b92cdae731c28cefe95505bb11921482b9600e4",
+          "path": "TODO.md",
+          "blob": "8078d4ba193095086ff8a89677f4bd8667d662b7",
+          "sha256": "2dba797350b513920c92aad93a1f285acdfdcf4a0fe69d67b3cb36195ef36669",
+          "availability": "pinned PR #241 head before v2 recorder work; not claimed merged"
+        }
+      },
+      "meaning": "Records conductor-transcribed Operator B/e decisions, not market truth or implementation acceptance. Policy v2-terminal-suffix-20261022 permits multiple exact complete timestamp suffixes in one day; O retains v1/D1 and A retains DV-A; outside e, original unresolved/missing persists without b/b+D1 fallback. V1 evidence and section 4.5 remain unchanged; corrections count as pre-correction errors. DV7 is a bounded successor after merged #241, followed by DV2 and DV5/DV6, with DV4 last running frozen v1 then v2. Acceptance estimand remains for Operator after frozen results without a default. Document becomes effective on conductor merge; the pin-only source change remains v1-strict until DV7 merges. No v2 data correction, sampling, runtime, holdout or trading effects claimed."
     }
   ],
   "external_provenance": [

@@ -1,9 +1,26 @@
 # CLAUDE_CHANGELOG.md — 開發歷史歸檔
 
 > 從 CLAUDE.md / TODO.md 遷出的 Wave/Sprint/Batch + TODO version-increment 歷史敘事。新 session 不需要讀此文件，僅供回顧歷史時查閱。
-> 最後更新：2026-10-22（R8 DV1／DV3 記錄者小修與發布候選；TODO v919）
+> 最後更新：2026-10-22（PR #242 合入已審 main、勘誤二與來源補記；TODO v921）
 
 ---
+
+## R8 規範 PR #242：合入已審 main、勘誤二與來源補記 — 2026-10-22
+
+- 依 conductor 續派，將 PR #241 已審 main `1ea85a9a2128e2aaf9f70bf5bc462fd5c82a3527`（reviewed head `2b198b34c51f4d295177940dd15a2a37fa9fe30a`）以 merge 納入同一分支／PR #242，無衝突、不 rebase／force push。四筆既有程式修正與兩測試檔由 main 帶入；本輪自主程式修改仍只有 `verification.py:33` 的規範 SHA，其餘位元組與指定 main 相同。
+- [規範末尾勘誤二](execution_plan/2026-10-22--r8-stage2-data-verification-standard.md#勘誤二2026-10-22conductor-依-241-審查補記實作對應)依實際程式補記：DV3 既有 sample_report 交接原凍結擴樣前綴並進 L3、部分日起點的 DV-L2／DV-L4 診斷與 details、L2 涵蓋發現進成交額疑點日而不單獨進逐筆裁決日、DV3 缺證據按實際評估日保存且已認證 CORRECT 優先計 e。§8.4補可選文字報告及 files SHA；§4.5、§8.4.1及§13規則不改，v2仍待DV7實作。
+- §13.1照錄 conductor 2026-10-22 提供的 Bybit／pybit／Tardis／CoinAPI／Coinpaprika／Mobula 來源連結，全部只作一般性背景；沒有一則回報 Bybit 尾段漏計或首日 open=0，記錄者本輪未自行連網核對，根因仍為推論。
+- 登記簿將初稿 v2 文件凍結為 `7cf0ff1b` 的 Git 物件，另錄勘誤二的最終文件 SHA；保留所有 RH 事件、裁決及 `last_event_recorded_on=2026-10-22`。TODO v920→v921：因本輪更新 DATA-VERIFY 的 #241 已合入／#242 已整合狀態，版本加一；只改版本行與該列，其餘列不動。
+- 三個舊審查 thread 依 #241 實際修正提交回覆並 resolve；擴樣主修在 `256dcd4c6`，`fb89a9ccd` 為缺失原件的未決補正，部分日修正為 `2b198b34c`。指定兩個結構檔、DV1／DV3／全部 R8 的固定工作樹驗證、目前 head CI 與新審查結果見同一 PR 及倉庫外 `audits/2026-10-22-r8-data-verify-v2-main-followup/`。不取數、不碰 Linux／資料庫／Demo／live、不開 holdout、不更新 Wiki、不合併 PR。
+
+## R8 資料驗證規範版本二：尾段補入、逐筆為準 — 2026-10-22
+
+- 依 conductor 派工，以 PR #241 head `4b92cdae731c28cefe95505bb11921482b9600e4` 建獨立 linked worktree／分支；PR base=main，等待 #241 合入後 conductor 續派才合入 origin/main，不提前 rebase／合入。Operator「B」及「(e) 逐筆為準 (Recommended)」照錄於[規範 §13](execution_plan/2026-10-22--r8-stage2-data-verification-standard.md#13-版本二成交量語義尾段補入逐筆為準dv-v2)與 RH-20261022-05；不採(b)／(b)+D1後備。
+- 原文及勘誤一保留；§4.3／5／6.4／10／11／12 加明確修訂註記。§13 固定完整時間戳尾段算法、同日可多尾段、完整逐筆 V/H/L/C、O沿v1/D1、A沿DV-A、C4／改後L1／L2、永久原C3失敗、來源真值風險及假說隔離；沒有新增時間寬度門檻。信心證據只記錄，conductor 網路搜尋只作轉錄背景、根因仍推論。
+- §8.4.1 固定 v2 policy／correction／verification、逐小時 volume_semantics、來源列舉與原因碼；沿既有 manifest files 綁規範及政策SHA，v1 bytes／歷史結果不覆寫。唯一程式變更為 verification.py 的 STANDARD_SHA256 單行；DV7合入前此pin仍只實作v1-strict、只輸出v1，v2分類不可用。
+- §9 新增 DV7，唯一四檔為 verification.py／verification_fetch.py 及各自測試，依#241合入的DV1／DV3；DV2排其後以消費真實v2 bundle，DV5∥DV6再接，DV4最後。雙方各至少一個真實對方測試，原停止交付與審查歷史不變。
+- §4.5逐位元組保留；§13.6要求同一凍結樣本雙政策五分項、尾段CORRECT仍計更正前n_error，不轉s／歸零。驗收目標針對更正前錯誤率或更正後可用率待Operator看到凍結結果後裁決，沒有預設。§13.7逐格引用26日v1/e表：7→15 include、19→11 missing，13日／23小時／55筆；這是DV7固定預期，非本PR已跑v2。
+- 調查REPORT／manifest雜湊與26日表由本機來源核對；TODO v920只更新版本與DATA-VERIFY列；登記簿續接04新增05、保留舊文件Git身份並加v2 SHA。本次限定結構測試、DV1／DV3／全部R8及exact-head CI／自動審查結果見PR與倉庫外 `audits/2026-10-22-r8-data-verify-v2-volume/`。不取數、不碰Linux／資料庫／Demo／live、不開holdout、不寫Wiki、不合併。
 
 ## R8 DV1／DV3 整合與記錄者發布候選 — 2026-10-22
 
