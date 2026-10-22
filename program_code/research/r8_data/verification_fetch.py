@@ -1,0 +1,1001 @@
+"""DV3 recorder tools for the approved 2026-10-22 verification standard.
+
+Recorder-only API; never import into a hypothesis. No automatic fetch, credentials,
+holdout activation, sampling replacement, or write to the P3b source. Public
+artifact-producing entry points return the exact section 8.4 handoff. The caller
+supplies frozen source identities and the dispatched scope, URL list and limits.
+"""
+from __future__ import annotations
+
+from dataclasses import dataclass
+from datetime import datetime, timezone
+from decimal import Decimal, InvalidOperation
+from fractions import Fraction
+import gzip
+import hashlib
+import io
+import json
+import math
+from pathlib import Path
+import random
+import re
+import sys
+import ssl
+import time
+import threading
+from urllib.parse import urlsplit, parse_qsl
+from urllib.request import build_opener, ProxyHandler, HTTPSHandler, HTTPRedirectHandler, Request
+from urllib.error import HTTPError
+
+DAY = 86_400_000
+HOUR = 3_600_000
+TRAIN_START = 1577836800000
+TRAIN_END = 1751328000000
+SEED = 20261022
+TIERS = ('GE_100M', 'GE_10M', 'GE_1M', 'NO_OPEN')
+STANDARD = 'docs/execution_plan/2026-10-22--r8-stage2-data-verification-standard.md'
+
+
+class InvalidInput(ValueError):
+    """Only a fixed reason code, never source values, in errors."""
+
+
+def encoded(value):
+    return (json.dumps(value, ensure_ascii=False, sort_keys=True,
+                       separators=(',', ':'), allow_nan=False)+'\n').encode('utf-8')
+
+
+def sha(data):
+    return hashlib.sha256(data).hexdigest()
+
+
+def _keys(value, keys):
+    if not isinstance(value, dict) or set(value) != set(keys.split()):
+        raise InvalidInput('INVALID_FIELDS')
+
+
+def _integer(value, minimum=0):
+    if type(value) is not int or value < minimum:
+        raise InvalidInput('INVALID_INTEGER')
+    return value
+
+
+def _hash(value):
+    if not isinstance(value, str) or not re.fullmatch('[0-9a-f]{64}', value):
+        raise InvalidInput('INVALID_SHA256')
+    return value
+
+
+def _symbol(value):
+    if not isinstance(value, str) or not re.fullmatch('[A-Z0-9]+USDT', value):
+        raise InvalidInput('INVALID_SYMBOL')
+    return value
+
+
+def _readable(value):
+    _keys(value, 'start end')
+    start, end = _integer(value['start']), _integer(value['end'])
+    # No host proof exists here to activate holdout or a new generation.
+    if not TRAIN_START <= start < end <= TRAIN_END:
+        raise InvalidInput('SCOPE_NOT_AUTHORIZED')
+    return start, end
+
+
+def _path(root, name):
+    root = Path(root).absolute()
+    if not isinstance(name, str) or not name or '\\' in name:
+        raise InvalidInput('UNSAFE_PATH')
+    p = Path(name)
+    if p.is_absolute() or any(x in ('', '.', '..') for x in name.split('/')):
+        raise InvalidInput('UNSAFE_PATH')
+    target = root / p
+    if any(x.is_symlink() for x in (target, *target.parents)):
+        raise InvalidInput('UNSAFE_PATH')
+    return target
+
+
+def _write(root, name, data):
+    p = _path(root, name)
+    p.parent.mkdir(parents=True, exist_ok=True)
+    with p.open('xb') as f:
+        f.write(data)
+        f.flush()
+        import os
+        os.fsync(f.fileno())
+
+
+def _handoff(root, primary=None, files=None, reasons=()):
+    files = files or {}
+    return dict(schema_version='r8_verification_handoff_v1',
+                status='BLOCKED' if reasons or primary is None else 'READY',
+                artifact_root=str(root), primary_file=primary,
+                primary_sha256=files[primary]['sha256'] if primary else None,
+                files=files, reason_codes=sorted(set(reasons)))
+
+
+def _emit(root, name, data, rows, reasons=(), extras=None):
+    files = dict(extras or {})
+    _write(root, name, data)
+    files[name] = dict(sha256=sha(data), rows=rows)
+    return _handoff(root, name, files, reasons)
+
+
+def _decimal(text):
+    if not isinstance(text, str) or not re.fullmatch(r'[+-]?(?:\d+(?:\.\d*)?|\.\d+)(?:[eE][+-]?\d+)?',text):
+        raise InvalidInput('INVALID_DECIMAL')
+    try:
+        n = Decimal(text)
+    except InvalidOperation:
+        raise InvalidInput('INVALID_DECIMAL') from None
+    if not n.is_finite():
+        raise InvalidInput('INVALID_DECIMAL')
+    return n
+
+
+def _policy(manifest):
+    standard = Path(__file__).resolve().parents[3] / STANDARD
+    return dict(schema_version='r8_data_verification_policy_v1',
+                standard_sha256=sha(standard.read_bytes()), approval_event='RH-20261022-04',
+                p3b_manifest_sha256=_hash(manifest),
+                listing=dict(x_pct='50',y_pct='20',z_pct='20',cooling_days=7,
+                             quantity='hourly_base_volume_daily_mean',variation='mean_relative_difference',
+                             stage_end_ranges=[[1,3],[7,15],[15,30]]),
+                sampling=dict(seed=SEED,base_per_stratum=300,max_per_stratum=900,
+                              max_expansions=1,confidence='0.95',upper_limit='0.025'),
+                turnover=dict(window_days=12,thresholds=['1000000','10000000','100000000'],
+                              trigger_pct='5',general='exchange_reported',suspect='sum_hourly_reported'),
+                l4_price_threshold_pct='1')
+
+
+@dataclass(frozen=True)
+class CSVSource:
+    symbol: str
+    dataset: str
+    interval: str
+    relative_path: str
+    sha256: str
+
+
+def _sample312(rng,population,k):
+    """CPython 3.12 Random.sample's counts=None algorithm, frozen locally.
+
+    Uses the same MT19937 integer seed/getrandbits and both pool/set branches;
+    avoids changing draws with the host Python's future sample implementation.
+    Algorithm source: Python 3.12 Lib/random.py (PSF license).
+    """
+    n=len(population); result=[None]*k; setsize=21
+    if k>5:
+        setsize+=4**math.ceil(math.log(k*3,4))
+    if n<=setsize:
+        pool=list(population)
+        for i in range(k):
+            j=rng._randbelow(n-i)
+            result[i]=pool[j]; pool[j]=pool[n-i-1]
+    else:
+        selected=set()
+        for i in range(k):
+            j=rng._randbelow(n)
+            while j in selected:
+                j=rng._randbelow(n)
+            selected.add(j); result[i]=population[j]
+    return result
+
+
+def _rows(root, source, start, end):
+    data = _path(root, source.relative_path).read_bytes()
+    if sha(data) != _hash(source.sha256):
+        raise InvalidInput('SOURCE_HASH_MISMATCH')
+    stream = gzip.GzipFile(fileobj=io.BytesIO(data)) if source.relative_path.endswith('.gz') else io.BytesIO(data)
+    with stream:
+        if stream.readline().rstrip(b'\r\n') != b'timestamp,open,high,low,close,volume,turnover':
+            raise InvalidInput('INVALID_CSV_HEADER')
+        for raw in stream:
+            # Opaque bytes first: no market-column decoding outside readable.
+            stamp, separator, rest = raw.partition(b',')
+            if not separator or not re.fullmatch(rb'[0-9]+', stamp):
+                raise InvalidInput('INVALID_TIMESTAMP')
+            t = int(stamp)
+            if start <= t < end:
+                yield t, rest
+
+
+def build_sample_plan(source_root, artifact_root, sources, *, readable,
+                      p3b_manifest_sha256, truncated_days=()):
+    """Freeze a whole draw sequence before publishing sample_plan.json.
+
+    ``sources`` are recorder-selected frozen original CSVs, not corrected views.
+    ``truncated_days`` contains (symbol, UTC day start) from known market windows.
+    Only timestamp metadata and prior readable daily turnover are inspected.
+    """
+    try:
+        start,end = _readable(readable)
+        if Path(artifact_root).resolve().is_relative_to(Path(source_root).resolve()):
+            # A sibling output is recommended; a separate child directory is
+            # permitted for constructed fixtures but never an existing source.
+            if Path(artifact_root).resolve()==Path(source_root).resolve():
+                raise InvalidInput('OUTPUT_OVERLAPS_SOURCE')
+        manifest_bytes=_path(source_root,'manifest.json').read_bytes()
+        if sha(manifest_bytes)!=_hash(p3b_manifest_sha256):
+            raise InvalidInput('MANIFEST_HASH_MISMATCH')
+        manifest=json.loads(manifest_bytes)
+        if not isinstance(manifest.get('files'),dict) or not isinstance(manifest.get('universe'),dict):
+            raise InvalidInput('INVALID_MANIFEST')
+        sources=list(sources)
+        required_sources=set()
+        for name,meta in manifest['files'].items():
+            if not isinstance(meta,dict):
+                raise InvalidInput('INVALID_MANIFEST')
+            if meta.get('dataset')!='kline' or meta.get('interval') not in ('D','60'):
+                continue
+            _path(source_root,name)
+            coverage=meta.get('coverage')
+            if coverage is not None:
+                if not isinstance(coverage,list) or len(coverage)!=2:
+                    raise InvalidInput('INVALID_MANIFEST_COVERAGE')
+                a,b=(_integer(t) for t in coverage)
+                if a>=b:
+                    raise InvalidInput('INVALID_MANIFEST_COVERAGE')
+                if b<=start or a>=end:
+                    continue
+            required_sources.add(name)
+        if not required_sources <= {s.relative_path for s in sources}:
+            raise InvalidInput('INCOMPLETE_MANIFEST_SOURCES')
+        policy = encoded(_policy(p3b_manifest_sha256))
+        hourly, daily, first, seen, windows = {}, {}, {}, set(), {}
+        truncated = set(truncated_days)
+        for symbol,day in truncated:
+            _symbol(symbol)
+            if _integer(day) % DAY:
+                raise InvalidInput('INVALID_DAY')
+        for source in sources:
+            _symbol(source.symbol)
+            if source.dataset != 'kline' or source.interval not in ('60','D'):
+                raise InvalidInput('INVALID_DATASET')
+            meta=manifest['files'].get(source.relative_path,{})
+            if any(meta.get(k)!=getattr(source,k) for k in ('symbol','dataset','interval','sha256')):
+                raise InvalidInput('SOURCE_NOT_IN_FROZEN_MANIFEST')
+            window=manifest['universe'].get(source.symbol)
+            if not isinstance(window,dict):
+                raise InvalidInput('MISSING_MARKET_WINDOW')
+            windows[source.symbol]=tuple(int(window[k]) for k in ('launchTime','deliveryTime'))
+            for stamp in (window.get('launchTime'),window.get('deliveryTime')):
+                if type(stamp) is str and re.fullmatch('[0-9]+',stamp):
+                    stamp=int(stamp)
+                _integer(stamp)
+                if stamp and stamp%DAY:
+                    truncated.add((source.symbol,stamp//DAY*DAY))
+            key=(source.symbol,source.interval)
+            if key in seen:
+                raise InvalidInput('DUPLICATE_SOURCE')
+            seen.add(key)
+            for t, raw in _rows(source_root,source,start,end):
+                day=t//DAY*DAY
+                if source.interval=='60':
+                    first[source.symbol]=min(first.get(source.symbol,t),t)
+                    hourly.setdefault((source.symbol,day),set()).add(t)
+                elif t % DAY==0 and t+DAY<=end:
+                    # Preserve duplicates as invalid history, never choose first.
+                    daily.setdefault((source.symbol,t),[]).append(raw)
+        strata={}
+        reasons=set()
+        for (symbol,day),grid in sorted(hourly.items()):
+            if day<start or day+DAY>end:
+                reasons.add('SCOPE_INCOMPLETE'); continue
+            launch,delivery=windows[symbol]
+            if day+DAY<=launch or delivery and day>=delivery or (symbol,day) in truncated or not set(range(day,day+DAY,HOUR)) <= grid:
+                reasons.add('PARTIAL_OR_GAPPED'); continue
+            tier='NO_OPEN'
+            origin=max(first[symbol],launch)
+            first_full=(origin+DAY-1)//DAY*DAY
+            if day-12*DAY>=max(first_full,start):
+                amounts=[]
+                for previous in range(day-12*DAY,day,DAY):
+                    rows=daily.get((symbol,previous),[])
+                    if not rows:
+                        amounts.append(Fraction(0)); continue
+                    if len(rows)!=1:
+                        break
+                    fields=rows[0].rstrip(b'\r\n').split(b',')
+                    if len(fields)!=6:
+                        break
+                    try:
+                        n=_decimal(fields[-1].decode('ascii'))
+                    except (InvalidInput,UnicodeError):
+                        break
+                    if n<0:
+                        break
+                    amounts.append(Fraction(n))
+                if len(amounts)==12:
+                    amounts.sort()
+                    median=(amounts[5]+amounts[6])/2
+                    tier=next((name for name,threshold in zip(TIERS,(100000000,10000000,1000000)) if median>=threshold),'NO_OPEN')
+                else:
+                    reasons.add('UNCLASSIFIABLE_HISTORY')
+            else:
+                reasons.add('INSUFFICIENT_HISTORY')
+            year=datetime.fromtimestamp(day//1000,timezone.utc).year
+            strata.setdefault((year,tier),[]).append((symbol,day))
+        rng=random.Random(SEED)
+        plan=dict(schema_version='r8_verification_sample_plan_v1',policy_sha256=sha(policy),
+                  p3b_manifest_sha256=p3b_manifest_sha256,readable=dict(readable),seed=SEED,strata=[])
+        for (year,tier),population in sorted(strata.items(),key=lambda p:(p[0][0],TIERS.index(p[0][1]))):
+            population.sort()
+            draws=_sample312(rng,population,min(900,len(population)))
+            plan['strata'].append(dict(year=year,tier=tier,population_size=len(population),
+                                      base_size=min(300,len(population)),max_size=min(900,len(population)),
+                                      draws=[dict(rank=i,symbol=s,day_start=d) for i,(s,d) in enumerate(draws,1)]))
+        data=encoded(plan)
+        # Exclusive, durable seal is written before any sample is released.
+        _write(artifact_root,'sample_plan.sha256',(sha(data)+'\n').encode())
+        _write(artifact_root,'policy.json',policy)
+        # Nonfatal population exclusions/history reasons are retained separately;
+        # they do not purport to be a sampling acceptance verdict.
+        note=('\n'.join(sorted(reasons))+'\n').encode()
+        _write(artifact_root,'population_notes.txt',note)
+        extras={'policy.json':dict(sha256=sha(policy),rows=1),
+                'sample_plan.sha256':dict(sha256=sha((sha(data)+'\n').encode()),rows=1),
+                'population_notes.txt':dict(sha256=sha(note),rows=len(reasons))}
+        return _emit(artifact_root,'sample_plan.json',data,1,() if strata else ('EMPTY_POPULATION',),extras)
+    except (InvalidInput,OSError,EOFError,ValueError,TypeError,AttributeError) as exc:
+        return _handoff(artifact_root,reasons=(str(exc) if isinstance(exc,InvalidInput) else 'IO_ERROR',))
+
+
+def hypergeometric_upper(N, n, x, alpha):
+    """Exact numerical primitive, not an artifact handoff; returns a rational."""
+    for value in (N,n,x):
+        _integer(value)
+    if not 0 < n <= N or x > n or not isinstance(alpha,Fraction) or not 0 < alpha < 1:
+        raise InvalidInput('INVALID_STATISTICS')
+    if n==N:
+        return Fraction(x,N)
+    denominator=math.comb(N,n)
+    def admissible(M):
+        numerator=sum(math.comb(M,k)*math.comb(N-M,n-k)
+                      for k in range(max(0,n-(N-M)), min(x,M,n)+1))
+        return numerator*alpha.denominator >= denominator*alpha.numerator
+    lo,hi=x,N
+    while lo<hi:
+        mid=(lo+hi+1)//2
+        if admissible(mid):
+            lo=mid
+        else:
+            hi=mid-1
+    return Fraction(lo,N)
+
+
+def _json(data):
+    def pairs(items):
+        obj={}
+        for key,value in items:
+            if key in obj:
+                raise InvalidInput('DUPLICATE_KEY')
+            obj[key]=value
+        return obj
+    def bad(_):
+        raise InvalidInput('INVALID_JSON_NUMBER')
+    try:
+        value=json.loads(data.decode('utf-8'),object_pairs_hook=pairs,parse_constant=bad)
+    except (ValueError,UnicodeError):
+        raise InvalidInput('INVALID_JSON') from None
+    if encoded(value)!=data:
+        raise InvalidInput('NONCANONICAL_JSON')
+    return value
+
+
+def _load_plan(root):
+    data=_path(root,'sample_plan.json').read_bytes()
+    if _path(root,'sample_plan.sha256').read_bytes() != (sha(data)+'\n').encode():
+        raise InvalidInput('PLAN_SEAL_MISMATCH')
+    p=_json(data)
+    _keys(p,'schema_version policy_sha256 p3b_manifest_sha256 readable seed strata')
+    if p['schema_version']!='r8_verification_sample_plan_v1' or type(p['seed']) is not int or p['seed']!=SEED:
+        raise InvalidInput('INVALID_PLAN')
+    start,end=_readable(p['readable'])
+    policy=_path(root,'policy.json').read_bytes()
+    if sha(policy)!=_hash(p['policy_sha256']) or policy!=encoded(_policy(p['p3b_manifest_sha256'])):
+        raise InvalidInput('POLICY_MISMATCH')
+    if not isinstance(p['strata'],list) or not p['strata']:
+        raise InvalidInput('EMPTY_POPULATION')
+    seen=set(); prior=None
+    for s in p['strata']:
+        _keys(s,'year tier population_size base_size max_size draws')
+        year=_integer(s['year'])
+        if s['tier'] not in TIERS:
+            raise InvalidInput('INVALID_TIER')
+        order=(year,TIERS.index(s['tier']))
+        if prior is not None and order<=prior:
+            raise InvalidInput('INVALID_STRATA_ORDER')
+        prior=order
+        N=_integer(s['population_size'],1)
+        if _integer(s['base_size'])!=min(300,N) or _integer(s['max_size'])!=min(900,N):
+            raise InvalidInput('INVALID_SAMPLE_SIZE')
+        if not isinstance(s['draws'],list) or len(s['draws'])!=s['max_size']:
+            raise InvalidInput('INVALID_DRAWS')
+        for rank,d in enumerate(s['draws'],1):
+            _keys(d,'rank symbol day_start')
+            _symbol(d['symbol']); day=_integer(d['day_start'])
+            key=(d['symbol'],day)
+            if _integer(d['rank'],1)!=rank or key in seen or day%DAY or not start<=day<day+DAY<=end or datetime.fromtimestamp(day//1000,timezone.utc).year!=year:
+                raise InvalidInput('INVALID_DRAW')
+            seen.add(key)
+    return p,sha(data)
+
+
+_CORRECTION_KEYS='schema_version correction_id symbol dataset interval timestamp field original_value candidate_value corrected_value unit formula evidence_kind source_refs coverage_status order_status rule_ids decision reason_code row_action policy_sha256 approval_event supersedes'
+_FINDING_KEYS='schema_version finding_id symbol dataset interval timestamp field rule_id reason_code source_refs details'
+_VERIFICATION_KEYS='schema_version status policy_sha256 p3b_manifest_sha256 sample_plan_sha256 previous_corrections_sha256 review_refs tool_commit readable counts files reason_codes'
+_SOURCE_KEYS='kind relative_path url sha256 row request_id list_index byte_start byte_end trade_id line_sha256'
+_FIELDS=('open','high','low','close','volume','turnover')
+
+
+def _refs(refs, evidence_root, verified):
+    if not isinstance(refs,list):
+        raise InvalidInput('INVALID_SOURCE_REFS')
+    orders=[]
+    for ref in refs:
+        _keys(ref,_SOURCE_KEYS)
+        if ref['kind'] not in ('raw','csv','trade','instruments','policy','plan','report'):
+            raise InvalidInput('INVALID_SOURCE_KIND')
+        if ref['relative_path'] is not None:
+            path=_path(evidence_root,ref['relative_path']); digest=_hash(ref['sha256'])
+            identity=(path,digest)
+            if identity not in verified:
+                try:
+                    # Cross-range sources are opaque: verify bytes, never decode
+                    # market fields to authenticate a source identity.
+                    with path.open('rb') as source:
+                        actual=hashlib.sha256()
+                        for chunk in iter(lambda:source.read(1024*1024),b''):
+                            actual.update(chunk)
+                except OSError:
+                    raise InvalidInput('SOURCE_EVIDENCE_UNAVAILABLE') from None
+                if actual.hexdigest()!=digest:
+                    raise InvalidInput('SOURCE_EVIDENCE_HASH_MISMATCH')
+                verified.add(identity)
+        elif ref['sha256'] is not None:
+            raise InvalidInput('INVALID_SOURCE_REF')
+        for name in ('row','list_index','byte_start','byte_end'):
+            if ref[name] is not None:
+                _integer(ref[name],1 if name=='row' else 0)
+        for name in ('url','request_id','trade_id'):
+            if ref[name] is not None and not isinstance(ref[name],str):
+                raise InvalidInput('INVALID_SOURCE_REF')
+        if ref['line_sha256'] is not None:
+            _hash(ref['line_sha256'])
+        if ref['byte_start'] is not None and ref['byte_end'] is not None and ref['byte_end']<ref['byte_start']:
+            raise InvalidInput('INVALID_SOURCE_REF')
+        orders.append((ref['kind'],ref['relative_path'] or '',*(ref[k] if ref[k] is not None else -1 for k in ('row','list_index','byte_start'))))
+    if orders!=sorted(orders):
+        raise InvalidInput('INVALID_SOURCE_REF_ORDER')
+
+
+def _bundle_outcomes(root,p,plan_sha):
+    verification=_json(_path(root,'verification.json').read_bytes())
+    _keys(verification,_VERIFICATION_KEYS)
+    if (verification['schema_version']!='r8_data_verification_v1' or verification['status'] not in ('READY','BLOCKED')
+        or verification['policy_sha256']!=p['policy_sha256'] or verification['p3b_manifest_sha256']!=p['p3b_manifest_sha256']
+        or verification['sample_plan_sha256']!=plan_sha or verification['readable']!=p['readable']):
+        raise InvalidInput('VERIFICATION_BINDING_MISMATCH')
+    _keys(verification['counts'],'input_rows checked_days flagged_days corrected_fields unresolved_rows')
+    for value in verification['counts'].values():
+        _integer(value)
+    verified=set()
+    _refs(verification['review_refs'],root,verified)
+    if not re.fullmatch('[0-9a-f]{40}',str(verification['tool_commit'])):
+        raise InvalidInput('INVALID_TOOL_COMMIT')
+    if verification['previous_corrections_sha256'] is not None:
+        _hash(verification['previous_corrections_sha256'])
+    if not isinstance(verification['reason_codes'],list) or any(not isinstance(x,str) for x in verification['reason_codes']) or verification['reason_codes']!=sorted(set(verification['reason_codes'])):
+        raise InvalidInput('INVALID_REASON_CODES')
+    if not isinstance(verification['files'],dict) or not {'findings.jsonl','corrections.jsonl'}<=set(verification['files']):
+        raise InvalidInput('MISSING_EVIDENCE')
+    contents={}
+    for name,meta in verification['files'].items():
+        _keys(meta,'sha256 rows'); _integer(meta['rows'])
+        data=_path(root,name).read_bytes()
+        if sha(data)!=_hash(meta['sha256']):
+            raise InvalidInput('EVIDENCE_HASH_MISMATCH')
+        if name in ('findings.jsonl','corrections.jsonl'):
+            rows=[_json(line) for line in data.splitlines(keepends=True)]
+            if len(rows)!=meta['rows']:
+                raise InvalidInput('EVIDENCE_ROW_COUNT_MISMATCH')
+            contents[name]=rows
+    days={}; ids=set(); keys=set(); order=[]
+    for row in contents['corrections.jsonl']:
+        _keys(row,_CORRECTION_KEYS); _refs(row['source_refs'],root,verified)
+        for name in ('correction_id','unit','formula','reason_code'):
+            if not isinstance(row[name],str) or not row[name]:
+                raise InvalidInput('INVALID_CORRECTION')
+        if not isinstance(row['rule_ids'],list) or any(not isinstance(x,str) or not x for x in row['rule_ids']) or row['rule_ids']!=sorted(set(row['rule_ids'])):
+            raise InvalidInput('INVALID_RULE_IDS')
+        if row['supersedes'] is not None and (not isinstance(row['supersedes'],str) or not row['supersedes'] or row['supersedes']==row['correction_id']):
+            raise InvalidInput('INVALID_SUPERSEDES')
+        if row['schema_version']!='r8_data_correction_v1' or row['policy_sha256']!=p['policy_sha256'] or row['approval_event']!='RH-20261022-04':
+            raise InvalidInput('CORRECTION_BINDING_MISMATCH')
+        _symbol(row['symbol'])
+        t=_integer(row['timestamp']); start,end=_readable(p['readable'])
+        if row['dataset']!='kline' or row['interval'] not in ('D','60','1') or not start<=t<end or row['field'] not in _FIELDS:
+            raise InvalidInput('CORRECTION_SCOPE_MISMATCH')
+        if row['decision'] not in ('CORRECT','KEEP','UNRESOLVED') or row['row_action'] not in ('include','missing'):
+            raise InvalidInput('INVALID_CORRECTION')
+        if row['coverage_status'] not in ('PASS','CONFLICT','UNAVAILABLE','NOT_APPLICABLE') or row['order_status'] not in ('UNIQUE','TIMESTAMP_MULTI_PRICE','UNAVAILABLE','NOT_APPLICABLE'):
+            raise InvalidInput('INVALID_CORRECTION_STATUS')
+        if row['evidence_kind'] not in ('trade_adjudication','reported_turnover_selection'):
+            raise InvalidInput('INVALID_EVIDENCE_KIND')
+        if row['decision']!='UNRESOLVED':
+            if not any(ref['relative_path'] is not None for ref in row['source_refs']) or row['original_value'] is None:
+                raise InvalidInput('MISSING_EVIDENCE')
+            if row['evidence_kind']=='trade_adjudication' and (row['coverage_status']!='PASS' or row['order_status']!='UNIQUE'):
+                raise InvalidInput('INVALID_ADJUDICATION')
+            if row['evidence_kind']=='reported_turnover_selection' and row['field']!='turnover':
+                raise InvalidInput('INVALID_ADJUDICATION')
+        if (row['decision']=='CORRECT') != (row['corrected_value'] is not None) or (row['decision']=='UNRESOLVED' and row['row_action']!='missing'):
+            raise InvalidInput('INVALID_CORRECTION')
+        for name in ('original_value','candidate_value','corrected_value'):
+            if row[name] is not None:
+                _decimal(row[name])
+        key=(row['symbol'],row['dataset'],row['interval'],t,row['field'])
+        if key in keys or row['correction_id'] in ids:
+            raise InvalidInput('DUPLICATE_CORRECTION')
+        keys.add(key); ids.add(row['correction_id'])
+        order.append((t,row['symbol'],row['dataset'],row['interval'],row['field'],row['correction_id']))
+        day=t//DAY*DAY
+        state=days.setdefault((row['symbol'],day),dict(error=False,unresolved=False,semantic=False,covered=set()))
+        state['error'] |= row['decision']=='CORRECT'
+        state['unresolved'] |= row['decision']=='UNRESOLVED' or row['row_action']=='missing'
+        state['semantic'] |= row['decision']=='KEEP' and row['evidence_kind']=='reported_turnover_selection'
+        state['covered'].add((row['interval'],t,row['field']))
+    if order!=sorted(order):
+        raise InvalidInput('INVALID_CORRECTION_ORDER')
+    links={r['correction_id']:r['supersedes'] for r in contents['corrections.jsonl']}
+    for identity in links:
+        visited=set(); current=identity
+        while current in links:
+            if current in visited:
+                raise InvalidInput('CYCLIC_SUPERSEDES')
+            visited.add(current); current=links[current]
+    finding_order=[]; ids=set()
+    for row in contents['findings.jsonl']:
+        _keys(row,_FINDING_KEYS); _refs(row['source_refs'],root,verified); _symbol(row['symbol'])
+        if row['schema_version']!='r8_data_finding_v1' or row['finding_id'] in ids:
+            raise InvalidInput('INVALID_FINDING')
+        ids.add(row['finding_id'])
+        if row['timestamp'] is not None:
+            t=_integer(row['timestamp'])
+            if not p['readable']['start']<=t<p['readable']['end']:
+                raise InvalidInput('FINDING_SCOPE_MISMATCH')
+        names=[]
+        for detail in row['details']:
+            _keys(detail,'name value')
+            if not isinstance(detail['name'],str) or detail['value'] is not None and not isinstance(detail['value'],str):
+                raise InvalidInput('INVALID_DETAIL')
+            names.append(detail['name'])
+        if names!=sorted(set(names)):
+            raise InvalidInput('INVALID_DETAIL_ORDER')
+        finding_order.append((row['timestamp'] if row['timestamp'] is not None else -1,row['symbol'],row['dataset'],row['interval'],row['field'],row['finding_id']))
+    if finding_order!=sorted(finding_order):
+        raise InvalidInput('INVALID_FINDING_ORDER')
+    result={}
+    for (symbol,day),state in days.items():
+        required={(interval,t,field) for interval,times in (('D',[day]),('60',range(day,day+DAY,HOUR))) for t in times for field in _FIELDS}
+        unresolved=state['unresolved'] or verification['status']=='BLOCKED' or not required<=state['covered']
+        result[(symbol,day)]=('e' if state['error'] else 'u' if unresolved else 's' if state['semantic'] else 'ok')
+    return result
+
+
+def summarize_sample(plan_root, verification_roots, artifact_root):
+    """Consume DV1 bundles. Missing/incomplete sampled days always count as u.
+
+    SourceRef paths must resolve to original, hash-matching files within each
+    supplied bundle root; unavailable external references fail closed. The
+    recorder must package the approved opaque originals for this handoff.
+    Human-readable report keeps statistical diagnostics outside the fixed JSON
+    contracts. It never substitutes the expanded denominator for the base one.
+    """
+    try:
+        p,plan_sha=_load_plan(plan_root)
+        outcomes={}
+        for root in verification_roots:
+            for key,value in _bundle_outcomes(root,p,plan_sha).items():
+                if key in outcomes:
+                    raise InvalidInput('OVERLAPPING_VERIFICATION')
+                outcomes[key]=value
+        H=len(p['strata']); total=sum(s['population_size'] for s in p['strata'])
+        estimates=[Fraction(0),Fraction(0)]; uppers=[Fraction(0),Fraction(0)]
+        lines=['sample_plan_sha256='+plan_sha,'base denominator only; expansion is diagnostic']
+        reasons=[]
+        for s in p['strata']:
+            N,n=s['population_size'],s['base_size']
+            values=[outcomes.get((d['symbol'],d['day_start']),'u') for d in s['draws']]
+            base=values[:n]; e,u,semantic=(base.count(x) for x in ('e','u','s'))
+            lines.append(f"{s['year']} {s['tier']} N={N} n={n} e={e} u={u} s={semantic}")
+            for i,x in enumerate((e,e+u)):
+                upper=hypergeometric_upper(N,n,x,Fraction(1,20*H))
+                solo=hypergeometric_upper(N,n,x,Fraction(1,20))
+                estimates[i]+=Fraction(N,total)*Fraction(x,n)
+                uppers[i]+=Fraction(N,total)*upper
+                lines.append(f'{("error","conservative")[i]} simultaneous_upper={upper.numerator}/{upper.denominator} standalone95={solo.numerator}/{solo.denominator}')
+            if e or u:
+                lines.append(f"required_prefix={s['max_size']} max_expansions=1")
+                if n<s['max_size']:
+                    extra=s['draws'][n:]
+                    observed=[outcomes.get((d['symbol'],d['day_start'])) for d in extra]
+                    if any(x in ('e','u') for x in observed):
+                        reasons.append('EXPANSION_FAILED_REFER_CONDUCTOR')
+                    elif any(x is None for x in observed):
+                        reasons.append('EXPANSION_REQUIRED')
+                else:
+                    reasons.append('CENSUS_FAILURE_REFER_CONDUCTOR')
+        for i,name in enumerate(('error','conservative')):
+            for label,value in (('estimate',estimates[i]),('upper',uppers[i])):
+                lines.append(f'{name}_{label}={value.numerator}/{value.denominator}')
+        if uppers[1]>Fraction(1,40):
+            reasons.append('UPPER_LIMIT_EXCEEDED')
+        if not verification_roots:
+            reasons.append('VERIFICATION_NOT_ARCHIVED')
+        lines.append('status='+('BLOCKED' if reasons else 'READY'))
+        return _emit(artifact_root,'sample_report.txt', ('\n'.join(lines)+'\n').encode(),len(lines),reasons)
+    except (InvalidInput,OSError,TypeError,KeyError,ValueError) as exc:
+        return _handoff(artifact_root,reasons=(str(exc) if isinstance(exc,InvalidInput) else 'INVALID_EVIDENCE',))
+
+
+@dataclass(frozen=True)
+class DownloadRequest:
+    request_id: str
+    symbol: str
+    day_start: int
+    interval: str
+    source_kind: str
+    url: str
+
+
+@dataclass
+class Response:
+    status: int
+    headers: object
+    body: object  # Binary file-like; caller always closes it, including HEAD/errors.
+
+
+class _NoRedirect(HTTPRedirectHandler):
+    def redirect_request(self,*args,**kwargs):
+        return None
+
+
+def _transport(method,url):
+    # No ambient proxies, cookies, netrc, auth, redirect or caller headers.
+    opener=build_opener(ProxyHandler({}),HTTPSHandler(context=ssl.create_default_context()),_NoRedirect())
+    req=Request(url,method=method,headers={'User-Agent':'r8-verification-dv3-v1','Accept-Encoding':'identity'})
+    try:
+        response=opener.open(req,timeout=30)
+    except HTTPError as exc:
+        response=exc
+    return Response(response.code,response.headers,response)
+
+
+def _url(request, approved, flagged):
+    _symbol(request.symbol); day=_integer(request.day_start)
+    if day%DAY:
+        raise InvalidInput('INVALID_DAY')
+    if not isinstance(request.request_id,str) or not re.fullmatch('[A-Za-z0-9_-]+',request.request_id):
+        raise InvalidInput('INVALID_REQUEST_ID')
+    if not isinstance(request.url,str) or request.url not in approved:
+        raise InvalidInput('URL_NOT_APPROVED')
+    u=urlsplit(request.url)
+    if (u.scheme!='https' or u.username is not None or u.password is not None or u.port is not None
+        or u.fragment or '%' in request.url or '\\' in request.url or any(c.isspace() for c in request.url)
+        or u.netloc!=u.hostname):
+        raise InvalidInput('INVALID_URL')
+    pairs=parse_qsl(u.query,keep_blank_values=True,strict_parsing=True) if u.query else []
+    q=dict(pairs)
+    if len(q)!=len(pairs):
+        raise InvalidInput('DUPLICATE_QUERY')
+    date=datetime.fromtimestamp(day//1000,timezone.utc).strftime('%Y-%m-%d')
+    symbol=request.symbol
+    if request.source_kind=='bybit_trade':
+        if request.interval!='trade' or u.hostname!='public.bybit.com' or q or u.path!=f'/trading/{symbol}/{symbol}{date}.csv.gz':
+            raise InvalidInput('INVALID_URL')
+    elif request.source_kind=='bybit_minute':
+        if request.interval!='1' or u.hostname!='api.bybit.com' or u.path!='/v5/market/kline' or set(q)!={'category','symbol','interval','start','end','limit'}:
+            raise InvalidInput('INVALID_URL')
+        if q['category']!='linear' or q['symbol']!=symbol or q['interval']!='1' or not all(re.fullmatch('[0-9]+',q[k]) for k in ('start','end','limit')):
+            raise InvalidInput('INVALID_URL')
+        if not day<=int(q['start'])<=int(q['end'])<day+DAY or int(q['start'])%60000 or not 1<=int(q['limit'])<=1000:
+            raise InvalidInput('INVALID_URL')
+        if (symbol,day) not in flagged:
+            raise InvalidInput('MINUTE_REQUIRES_FLAGGED_DAY')
+    elif request.source_kind=='binance_hour':
+        if request.interval!='60' or u.hostname!='data.binance.vision' or q or u.path!=f'/data/futures/um/daily/klines/{symbol}/1h/{symbol}-1h-{date}.zip':
+            raise InvalidInput('INVALID_URL')
+    elif request.source_kind=='okx_hour':
+        if request.interval!='60' or u.hostname!='www.okx.com' or u.path!='/api/v5/market/history-candles' or set(q)!={'instId','bar','before','after','limit'}:
+            raise InvalidInput('INVALID_URL')
+        if q['instId']!=symbol[:-4]+'-USDT-SWAP' or q['bar']!='1H' or not all(re.fullmatch('[0-9]+',q[k]) for k in ('before','after','limit')):
+            raise InvalidInput('INVALID_URL')
+        # OKX bounds are exclusive; only the dispatched UTC day may be returned.
+        if int(q['before'])!=day-1 or int(q['after'])!=day+DAY or not 1<=int(q['limit'])<=100:
+            raise InvalidInput('INVALID_URL')
+    else:
+        raise InvalidInput('INVALID_SOURCE_KIND')
+    return u.hostname
+
+
+_RATE_LOCK=threading.Lock()
+_RATE_LAST={}
+_STOPPED_HOSTS=set()
+
+
+def _api_status(data,name):
+    """Scan top-level JSON spans without decoding any candle value."""
+    whitespace=b' \r\n\t'
+    def skip(i):
+        while i<len(data) and data[i] in whitespace:
+            i+=1
+        return i
+    def string_end(i):
+        if data[i]!=34:
+            raise InvalidInput('INVALID_API_RESPONSE')
+        i+=1
+        while i<len(data):
+            if data[i]==92:
+                i+=2
+            elif data[i]==34:
+                return i+1
+            else:
+                i+=1
+        raise InvalidInput('INVALID_API_RESPONSE')
+    i=skip(0)
+    if i>=len(data) or data[i]!=123:
+        raise InvalidInput('INVALID_API_RESPONSE')
+    i=skip(i+1); found=None; keys=set()
+    while i<len(data) and data[i]!=125:
+        key_end=string_end(i)
+        key=json.loads(data[i:key_end])
+        if key in keys:
+            raise InvalidInput('INVALID_API_RESPONSE')
+        keys.add(key); i=skip(key_end)
+        if i>=len(data) or data[i]!=58:
+            raise InvalidInput('INVALID_API_RESPONSE')
+        i=skip(i+1); begin=i; stack=[]
+        while i<len(data):
+            c=data[i]
+            if c==34:
+                i=string_end(i); continue
+            if c in (123,91):
+                stack.append(c)
+            elif c in (125,93):
+                if not stack:
+                    break
+                if stack.pop()!={125:123,93:91}[c]:
+                    raise InvalidInput('INVALID_API_RESPONSE')
+            elif c==44 and not stack:
+                break
+            i+=1
+        if stack or begin==i:
+            raise InvalidInput('INVALID_API_RESPONSE')
+        if key==name:
+            raw=data[begin:i].strip()
+            if not re.fullmatch(rb'(?:[0-9]+|"[0-9]+")',raw):
+                raise InvalidInput('INVALID_API_RESPONSE')
+            found=json.loads(raw)
+        i=skip(i)
+        if i<len(data) and data[i]==44:
+            i=skip(i+1)
+            if i>=len(data) or data[i]==125:
+                raise InvalidInput('INVALID_API_RESPONSE')
+        else:
+            break
+    if i>=len(data) or data[i]!=125 or skip(i+1)!=len(data) or found is None:
+        raise InvalidInput('INVALID_API_RESPONSE')
+    return found
+
+
+def _limited_send(transport,method,url,host,clock,sleep,stopped):
+    if host in stopped:
+        raise InvalidInput('HOST_STOPPED')
+    # Shared by batches using the same clock, including all HEAD and GET calls.
+    # Serial lock also prevents concurrent batches from acquiring a rate slot twice.
+    with _RATE_LOCK:
+        key=(clock,host)
+        now=clock()
+        delay=_RATE_LAST.get(key,now-.25)+.25-now
+        if delay>0:
+            sleep(delay)
+        _RATE_LAST[key]=clock()
+    response=transport(method,url)
+    if type(response.status) is not int:
+        response.body.close()
+        raise InvalidInput('INVALID_HTTP_STATUS')
+    if response.status in (403,429):
+        stopped.add(host)
+    return response
+
+
+def _length(headers):
+    values=[v for k,v in headers.items() if k.lower()=='content-length']
+    if len(values)!=1 or not isinstance(values[0],str) or not re.fullmatch('[0-9]+',values[0]):
+        raise InvalidInput('UNKNOWN_LENGTH')
+    if any(k.lower() in ('transfer-encoding','content-encoding') and str(v).lower() not in ('','identity') for k,v in headers.items()):
+        raise InvalidInput('UNSUPPORTED_ENCODING')
+    return int(values[0])
+
+
+def _utc_ms():
+    return time.time_ns()//1_000_000
+
+
+def fetch_downloads(artifact_root, requests, *, approved_urls, readable,
+                    max_total_bytes, max_file_bytes, flagged_days=(), reuse=None,
+                    transport=None, clock=time.monotonic, sleep=time.sleep, now=_utc_ms):
+    """Finite recorder batch. Preflight every unique URL before the first GET.
+
+    ``reuse`` maps an exact approved URL to (local original path, expected SHA).
+    Reuse is opaque and hash checked. Transport injection is for offline tests;
+    production uses the fixed verified-TLS/no-auth/no-redirect transport above.
+    Budgets are compressed payload bytes, with no hidden retry or pagination.
+    """
+    rows=[]; reasons=[]; files={}; stopped=_STOPPED_HOSTS if transport is None else set(); responses={}; lengths={}; originals={}
+    try:
+        start,end=_readable(readable)
+        _integer(max_total_bytes); _integer(max_file_bytes)
+        if not isinstance(approved_urls,(list,tuple,set,frozenset)) or any(not isinstance(x,str) for x in approved_urls):
+            raise InvalidInput('INVALID_APPROVED_LIST')
+        approved=set(approved_urls); flagged=set(flagged_days)
+        requests=list(requests); send=transport or _transport; reuse=reuse or {}
+        if not requests:
+            raise InvalidInput('EMPTY_REQUEST_LIST')
+        seen=set(); hosts={}; invalid=False
+        for request in requests:
+            row=dict(schema_version='r8_verification_download_v1',request_id=request.request_id,
+                     symbol=request.symbol,day_start=request.day_start,interval=request.interval,
+                     source_kind=request.source_kind,url=request.url,started_at=None,finished_at=None,
+                     http_status=None,api_status=None,byte_count=None,relative_path=None,sha256=None,
+                     status='UNAVAILABLE',reason_code=None)
+            rows.append(row)
+            try:
+                if request.request_id in seen:
+                    raise InvalidInput('DUPLICATE_REQUEST_ID')
+                seen.add(request.request_id)
+                hosts[request.url]=_url(request,approved,flagged)
+                if not start<=request.day_start<request.day_start+DAY<=end:
+                    row.update(status='SCOPE_INCOMPLETE',reason_code='SCOPE_INCOMPLETE'); invalid=True
+            except (InvalidInput,ValueError) as exc:
+                row['reason_code']=str(exc) if isinstance(exc,InvalidInput) else 'INVALID_URL'; invalid=True
+        rows.sort(key=lambda r:(r['symbol'],r['day_start'],r['source_kind'],r['interval'],r['request_id']))
+        if invalid:
+            for row in rows:
+                if row['reason_code'] is None:
+                    row['reason_code']='PREFLIGHT_BLOCKED'
+        else:
+            # All HEAD responses are closed without reading a body or market values.
+            blocked_size=None; preflight_incomplete=False
+            for row in rows:
+                url=row['url']; host=hosts[url]
+                if url in responses:
+                    continue
+                row['started_at']=_integer(now())
+                try:
+                    if url in reuse:
+                        path,digest=reuse[url]
+                        path=Path(path).absolute()
+                        if any(p.is_symlink() for p in (path,*path.parents)):
+                            raise InvalidInput('UNSAFE_PATH')
+                        data=path.read_bytes()
+                        if sha(data)!=_hash(digest):
+                            raise InvalidInput('REUSE_HASH_MISMATCH')
+                        originals[url]=data
+                        row['reason_code']='REUSED'
+                        lengths[url]=0
+                    else:
+                        response=_limited_send(send,'HEAD',url,host,clock,sleep,stopped)
+                        try:
+                            row['http_status']=response.status
+                            if response.status!=200:
+                                raise InvalidInput('HTTP_UNAVAILABLE')
+                            length=_length(response.headers)
+                            lengths[url]=length
+                            if length>max_file_bytes:
+                                raise InvalidInput('SIZE_LIMIT')
+                        finally:
+                            response.body.close()
+                except (InvalidInput,OSError) as exc:
+                    reason=str(exc) if isinstance(exc,InvalidInput) else 'TRANSPORT_ERROR'
+                    row['reason_code']=reason
+                    preflight_incomplete=True
+                    if reason in ('UNKNOWN_LENGTH','SIZE_LIMIT','UNSUPPORTED_ENCODING'):
+                        blocked_size=reason
+                finally:
+                    row['finished_at']=_integer(now())
+                    responses[url]=row
+                if sum(lengths.values())>max_total_bytes:
+                    blocked_size='SIZE_LIMIT'
+                if blocked_size or preflight_incomplete:
+                    break
+            if sum(lengths.values())>max_total_bytes:
+                blocked_size='SIZE_LIMIT'
+            preflight=[f'max_total_bytes={max_total_bytes}',f'max_file_bytes={max_file_bytes}',
+                       f'known_download_bytes={sum(lengths.values())}',
+                       f'unknown_or_unavailable_urls={len(set(hosts)-set(lengths))}',
+                       'storage_bytes_upper_estimate='+str(sum(lengths.values())+sum(len(b) for b in originals.values())),
+                       'storage_estimate_excludes_unknown_lengths=true',
+                       'elapsed_transfer_time_estimate=UNKNOWN',
+                       'minimum_request_spacing_seconds_per_host=0.25']
+            for kind in ('bybit_trade','bybit_minute','binance_hour','okx_hour'):
+                selected={r['url'] for r in rows if r['source_kind']==kind}
+                preflight.append(f'{kind} request_rows={sum(r["source_kind"]==kind for r in rows)} unique_urls={len(selected)} planned_gets={len(selected-set(originals))} known_download_bytes={sum(lengths.get(u,0) for u in selected)}')
+            preflight_bytes=('\n'.join(preflight)+'\n').encode()
+            _write(artifact_root,'download_preflight.txt',preflight_bytes)
+            files['download_preflight.txt']=dict(sha256=sha(preflight_bytes),rows=len(preflight))
+            if blocked_size:
+                for row in rows:
+                    row.update(status='SIZE_BLOCKED',reason_code=blocked_size)
+            elif preflight_incomplete or set(hosts)-set(lengths):
+                # An HTTP/transport failure has no usable length either. Keep
+                # its own failure, and block otherwise successful peers before
+                # any GET so the total never silently excludes failed URLs.
+                for row in rows:
+                    original=responses.get(row['url'],row)
+                    if row is not original:
+                        identity=row['request_id']; row.update(original); row['request_id']=identity
+                    if row['reason_code'] in (None,'REUSED'):
+                        if hosts[row['url']] in stopped:
+                            row.update(status='UNAVAILABLE',reason_code='HOST_STOPPED')
+                        else:
+                            row.update(status='SIZE_BLOCKED',reason_code='PREFLIGHT_INCOMPLETE')
+            else:
+                remaining=max_total_bytes
+                batch_stopped=False
+                for url,row in responses.items():
+                    if batch_stopped:
+                        row.update(status='SIZE_BLOCKED',reason_code='PREFLIGHT_BLOCKED')
+                        continue
+                    if row['reason_code'] not in (None,'REUSED'):
+                        continue
+                    try:
+                        data=originals.get(url)
+                        if data is None:
+                            response=_limited_send(send,'GET',url,hosts[url],clock,sleep,stopped)
+                            try:
+                                row['http_status']=response.status
+                                if response.status!=200:
+                                    raise InvalidInput('HTTP_UNAVAILABLE')
+                                length=_length(response.headers)
+                                if length!=lengths[url] or length>remaining or length>max_file_bytes:
+                                    raise InvalidInput('SIZE_CHANGED')
+                                data=response.body.read(length+1)
+                                row['byte_count']=len(data)
+                                remaining-=len(data)
+                                if len(data)!=length:
+                                    raise InvalidInput('BODY_LENGTH_MISMATCH')
+                            finally:
+                                response.body.close()
+                        row['byte_count']=len(data)
+                        if row['source_kind'] in ('bybit_minute','okx_hour'):
+                            # Only status metadata is decoded, never numerical candles.
+                            try:
+                                status=_api_status(data,'retCode' if row['source_kind']=='bybit_minute' else 'code')
+                                row['api_status']=status
+                            except (ValueError,KeyError,TypeError):
+                                raise InvalidInput('INVALID_API_RESPONSE') from None
+                            if status not in (0,'0'):
+                                raise InvalidInput('API_UNAVAILABLE')
+                        digest=sha(data); name='originals/'+digest+'.bin'
+                        if name not in files:
+                            _write(artifact_root,name,data)
+                            files[name]=dict(sha256=digest,rows=0)
+                        row.update(status='AVAILABLE',relative_path=name,sha256=digest)
+                    except (InvalidInput,OSError) as exc:
+                        reason=str(exc) if isinstance(exc,InvalidInput) else 'TRANSPORT_ERROR'
+                        row.update(status='SIZE_BLOCKED' if reason in ('UNKNOWN_LENGTH','SIZE_CHANGED','BODY_LENGTH_MISMATCH') else 'UNAVAILABLE',reason_code=reason)
+                        if row['status']=='SIZE_BLOCKED':
+                            batch_stopped=True
+                    finally:
+                        row['finished_at']=_integer(now())
+                for row in rows:
+                    original=responses[row['url']]
+                    if row is not original:
+                        request_id=row['request_id']
+                        row.update(original); row['request_id']=request_id
+        reasons=[row['reason_code'] or 'UNAVAILABLE' for row in rows if row['status']!='AVAILABLE']
+        return _emit(artifact_root,'download_inventory.jsonl',b''.join(encoded(row) for row in rows),len(rows),reasons,files)
+    except (InvalidInput,OSError,TypeError,ValueError,AttributeError) as exc:
+        return _handoff(artifact_root,reasons=(str(exc) if isinstance(exc,InvalidInput) else 'INVALID_DOWNLOAD_INPUT',))
