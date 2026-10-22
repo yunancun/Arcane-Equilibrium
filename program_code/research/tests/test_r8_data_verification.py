@@ -1066,6 +1066,8 @@ def dv7_reverify(root,flow,*,previous=True):
 def dv7_main_verifier():
     # Differential byte oracle is immutable reviewed main source, run with the
     # same actual tool identity. No tool_commit byte is masked or rewritten.
+    if not Path('/Users/ncyu/Projects/TradeBot/r8-research/crosscheck-20261022').exists():
+        pytest.skip('frozen local originals unavailable')
     import subprocess,types
     from program_code.research.r8_data import verification as current
     source=subprocess.check_output(['git','show',
