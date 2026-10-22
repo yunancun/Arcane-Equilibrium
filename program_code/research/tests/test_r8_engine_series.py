@@ -1859,3 +1859,360 @@ def test_fix3_representation_errors_total_does_not_become_a_boundary(tmp_path):
     assert report['max_cash_residual_ulps'] == '100'
     assert report['first_unexplained_cash_residual_t'] is None
     assert run == before
+
+# DV6 固定規格物化；只代表 isolated contract fixture，非 DV2／DV5 真實互通。
+def dv6_json(value):
+    return (json.dumps(value, ensure_ascii=False, sort_keys=True, separators=(',', ':'), allow_nan=False)+'\n').encode()
+
+
+def dv6_write(path, name, value, *, jsonl=False, times=()):
+    m=json.loads(path.read_bytes());raw=b''.join(dv6_json(v) for v in value) if jsonl else dv6_json(value)
+    target=path.parent/name;target.parent.mkdir(parents=True,exist_ok=True);target.write_bytes(raw)
+    m['files'][name]={'sha256':hashlib.sha256(raw).hexdigest(),'rows':len(value) if jsonl else 1,
+        'first':min(times) if times else None,'last':max(times) if times else None,
+        'source_file':'manifest.json','source_sha256':m['u1_manifest_sha256']}
+    path.write_bytes(canonical(m))
+
+
+def dv6_fixture(tmp_path, *, original='9900000', effective='9900000', hourly='500000',
+                md='9900000', me='9900000', mh='12000000', td='GE_1M', te='GE_1M', th='GE_10M',
+                triggered=True, selected='hourly_sum', median='12000000', tier='GE_10M', version=2):
+    originals=original if isinstance(original,list) else [original]*12
+    effectives=effective if isinstance(effective,list) else [effective]*12
+    days=list(range(START-12*DAY,START,DAY))
+    bars=[[t,'100','100','100','100','10000',hourly] for t in range(START-13*DAY,START+4*HOUR,HOUR)]
+    daily=[[t,'100','100','100','100','1000000',v] for t,v in zip(days,effectives) if v is not None]
+    path=write_materialization(tmp_path,hourly={'BTCUSDT':bars},daily={'BTCUSDT':daily})
+    m=json.loads(path.read_bytes());m['readable']=dv6_access()
+    raw='timestamp,open,high,low,close,volume,turnover\n'+''.join(
+        f'{t},100,100,100,100,1000000,{v}\n' for t,v in zip(days,originals) if v is not None)
+    name='verification/original/kline_BTCUSDT_D.csv';target=path.parent/name;target.parent.mkdir(parents=True);target.write_text(raw)
+    m['files'][name]={'sha256':hashlib.sha256(raw.encode()).hexdigest(),'rows':sum(v is not None for v in originals),
+        'first':days[0],'last':days[-1],'source_file':'kline_BTCUSDT_D.csv.gz','source_sha256':'b'*64}
+    path.write_bytes(canonical(m))
+    policy={'schema_version':f'r8_data_verification_policy_v{version}','standard_sha256':'ba65fbca3b9230ad1807b82c923e9e60ab870edbe5c1e0d5090ebce99b06f6d0',
+        'approval_event':'RH-20261022-05' if version==2 else 'RH-20261022-04','p3b_manifest_sha256':'a'*64,
+        'listing':{'x_pct':'50','y_pct':'20','z_pct':'20','cooling_days':7,'quantity':'hourly_base_volume_daily_mean',
+                   'variation':'mean_relative_difference','stage_end_ranges':[[1,3],[7,15],[15,30]]},
+        'sampling':{'seed':20261022,'base_per_stratum':300,'max_per_stratum':900,'max_expansions':1,'confidence':'0.95','upper_limit':'0.025'},
+        'turnover':{'window_days':12,'thresholds':['1000000','10000000','100000000'],'trigger_pct':'5',
+                    'general':'exchange_reported','suspect':'sum_hourly_reported'},'l4_price_threshold_pct':'1'}
+    if version==2:policy['volume_semantics_policy']='v2-terminal-suffix-20261022'
+    dv6_write(path,'verification/policy.json',policy);ph=hashlib.sha256(dv6_json(policy)).hexdigest()
+    dv6_write(path,'verification/hypothesis_binding.json',{'schema_version':'r8_verification_hypothesis_binding_v1',
+        'hypothesis_id':'h1','policy_sha256':ph,'family':'ordinary','registration_sha256':'e'*64})
+    for name in ('corrections','findings','listing_regimes')+ (('volume_semantics',) if version==2 else ()):
+        dv6_write(path,'verification/'+name+'.jsonl',[],jsonl=True)
+    report={'schema_version':f'r8_data_verification_v{version}','status':'READY','policy_sha256':ph,
+        'p3b_manifest_sha256':'a'*64,'sample_plan_sha256':None,'previous_corrections_sha256':None,'review_refs':[],
+        'tool_commit':'c'*40,'readable':{'start':START-13*DAY,'end':START+4*HOUR},'counts':dict(input_rows=12,checked_days=12,flagged_days=0,corrected_fields=0,unresolved_rows=0),
+        'files':{n: {'sha256':meta['sha256'],'rows':meta['rows']} for n,meta in json.loads(path.read_bytes())['files'].items()
+                 if n in ('verification/policy.json','verification/corrections.jsonl','verification/findings.jsonl','verification/volume_semantics.jsonl')},'reason_codes':[]}
+    report['files']={k.removeprefix('verification/'):v for k,v in report['files'].items()}
+    if version==2:report.update(standard_sha256=policy['standard_sha256'],volume_semantics_policy=policy['volume_semantics_policy'])
+    dv6_write(path,'verification/verification.json',report)
+    refs=[{'kind':'csv','relative_path':'kline_BTCUSDT_D.csv.gz','sha256':'b'*64,'row':i+2,
+           **dict.fromkeys(('url','request_id','list_index','byte_start','byte_end','trade_id','line_sha256'))} for i in range(12)]
+    row={'schema_version':'r8_turnover_decision_v1','symbol':'BTCUSDT','decision_utc_day':START,'known_at':START,
+        'policy_sha256':ph,'history_sufficient':True,'inputs':[
+            {'day_start':t,'exchange_reported':o,'effective_reported':e,'sum_hourly_reported':mh if triggered else None,
+             'daily_status':'VALID' if e is not None else 'MISSING','hourly_status':'VALID' if triggered else 'NOT_EVALUATED',
+             'source_refs':[ref]} for t,o,e,ref in zip(days,originals,effectives,refs)],
+        'm_d':md,'m_e':me,'m_h':mh if triggered else None,'tier_d':td,'tier_e':te,'tier_h':th if triggered else None,
+        'triggered':triggered,'selected_source':selected,'selected_median':median,'selected_tier':tier,'status':'READY','reason_codes':[]}
+    dv6_write(path,'verification/turnover_decisions.jsonl',[row],jsonl=True,times=[START])
+    return path,row
+
+
+def test_dv6_dual_calculation_controls_replay_and_keeps_hourly_order_cap(tmp_path):
+    path,row=dv6_fixture(tmp_path)
+    data=series.Materialization(path)
+    assert data.liquidity('BTCUSDT',START,cost_parameters())==(Decimal('12000000'),Decimal('500000'),True)
+    run=run_for(path,decisions=[{'t':START,'targets':{'BTCUSDT':{'quantity':'1'}}}])
+    assert series.replay(data,run)['fills'][0]['slippage_bps']=='10'
+    run['decisions'][0]['targets']['BTCUSDT']['quantity']='51'
+    assert series.replay(data,run)['voided'][0]['reason']=='order_cap'
+
+
+@pytest.mark.skip(reason='待 DV2／DV5 真實實作：DV2 真實物化與 turnover_decisions 表尚待整合')
+def test_dv6_integration_real_dv2_materialization():
+    pass
+
+
+@pytest.mark.skip(reason='待 DV2／DV5 真實實作：DV5 真實 run 交本單元 recompute 尚待整合')
+def test_dv6_integration_real_dv5_run_recompute():
+    pass
+
+
+def dv6_table(path, rows):
+    dv6_write(path,'verification/turnover_decisions.jsonl',rows,jsonl=True,times=[r['decision_utc_day'] for r in rows])
+
+
+@pytest.mark.parametrize('change',[
+    {'selected_median':'9900000'}, {'selected_tier':'GE_100M'}, {'selected_source':'effective_daily'},
+    {'m_d':'9900000.00000000000000000000000000000000000000001'}, {'m_e':'12000000'},
+    {'m_h':'11999999'}, {'tier_d':'GE_10M'}, {'tier_e':'NO_OPEN'}, {'tier_h':'NO_OPEN'},
+    {'triggered':False}, {'history_sufficient':False}, {'policy_sha256':'f'*64},
+    {'known_at':START+HOUR}, {'schema_version':'r8_turnover_decision_v2'}, {'extra':1},
+    {'status':'BLOCKED','selected_source':None,'selected_median':None,'selected_tier':None,'reason_codes':['INPUT_BLOCKED']},
+    {'reason_codes':['Z','A']}, {'reason_codes':[1]}, {'reason_codes':'BAD'},
+])
+def test_dv6_rejects_forged_decision_and_blocked(tmp_path,change):
+    path,row=dv6_fixture(tmp_path);row.update(change);dv6_table(path,[row])
+    with pytest.raises(series.SeriesError):series.Materialization(path)
+
+
+@pytest.mark.parametrize('change',[
+    {'exchange_reported':'1'},{'effective_reported':'1'},{'sum_hourly_reported':'1'},
+    {'day_start':START},{'daily_status':'NOT_EVALUATED'},{'hourly_status':'NOT_EVALUATED'},
+    {'source_refs':[]},{'source_refs':[{'kind':'csv'}]},
+])
+def test_dv6_rejects_forged_twelve_day_inputs(tmp_path,change):
+    path,row=dv6_fixture(tmp_path);row['inputs'][0].update(change);dv6_table(path,[row])
+    with pytest.raises(series.SeriesError):series.Materialization(path)
+
+
+@pytest.mark.parametrize('amount,tier,bps', [('500000','NO_OPEN',None),('2000000','GE_1M','20'),
+    ('20000000','GE_10M','10'),('200000000','GE_100M','5')])
+def test_dv6_four_tiers_and_nontriggered_daily_selection(tmp_path,amount,tier,bps):
+    path,row=dv6_fixture(tmp_path,original=amount,effective=amount,md=amount,me=amount,
+        td=tier,te=tier,triggered=False,selected='effective_daily',median=amount,tier=tier)
+    data=series.Materialization(path)
+    assert data.liquidity('BTCUSDT',START,cost_parameters())==(Decimal(amount),Decimal('500000'),True)
+    legs=series.order_segments('0','1','100','0.1','0',amount,'500000',True,cost_parameters())
+    assert legs[0].get('slippage_bps')==bps
+    if bps is None:assert legs[0]['reason']=='untradeable'
+
+
+@pytest.mark.parametrize('threshold',['1000000','10000000','100000000'])
+@pytest.mark.parametrize('side',['0.95','1.05'])
+def test_dv6_trigger_boundaries_are_inclusive(tmp_path,threshold,side):
+    value=str(Decimal(threshold)*Decimal(side));tier={'1000000':'GE_1M','10000000':'GE_10M','100000000':'GE_100M'}[threshold]
+    below={'GE_1M':'NO_OPEN','GE_10M':'GE_1M','GE_100M':'GE_10M'}[tier]
+    dt=below if side=='0.95' else tier
+    path,row=dv6_fixture(tmp_path,original=value,effective=value,md=value,me=value,td=dt,te=dt)
+    # 小時和固定 12M，預期由例子直接指定，不呼叫任何選級實作產生預期。
+    selected='effective_daily' if dt=='GE_10M' else 'hourly_sum'
+    row.update(selected_source=selected,selected_median=value if selected=='effective_daily' else '12000000',
+               selected_tier=dt if selected=='effective_daily' else 'GE_10M');dv6_table(path,[row])
+    assert series.Materialization(path).liquidity('BTCUSDT',START,cost_parameters())[0]==Decimal(row['selected_median'])
+
+
+def test_dv6_median_sixth_seventh_missing_zero_and_suspect_effective_source(tmp_path):
+    # 排序後原值中位數 9.9M；有效額第6/7是8M/12M，非平均數，未知日只在計算時映射0。
+    values=[None,'50000000','12000000','1000000','30000000','8000000','6000000','14000000','4000000','16000000','2000000','18000000']
+    path,row=dv6_fixture(tmp_path,effective=values,me='10000000',te='GE_10M',selected='effective_daily',median='10000000')
+    row['reason_codes']=['TURNOVER_INPUT_INCOMPLETE'];dv6_table(path,[row])
+    data=series.Materialization(path)
+    assert data.liquidity('BTCUSDT',START,cost_parameters())[0]==Decimal('10000000')
+    assert START-12*DAY not in data.daily['BTCUSDT']
+
+
+def test_dv6_trigger_uses_effective_not_original_median(tmp_path):
+    path,row=dv6_fixture(tmp_path,effective='20000000',me='20000000',te='GE_10M',
+        triggered=False,selected='effective_daily',median='20000000')
+    assert series.Materialization(path).liquidity('BTCUSDT',START,cost_parameters())[0]==Decimal('20000000')
+
+
+def test_dv6_history_insufficient_and_listing_visibility_do_not_change_trade_rules(tmp_path):
+    path,row=dv6_fixture(tmp_path);m=json.loads(path.read_bytes());m['first_bar']['BTCUSDT']=START-11*DAY
+    path.write_bytes(canonical(m));row.update(history_sufficient=False,selected_tier='NO_OPEN')
+    row['inputs'][0].update(hourly_status='MISSING',sum_hourly_reported=None)
+    row['reason_codes']=['TURNOVER_INPUT_INCOMPLETE'];dv6_table(path,[row])
+    median,hourly,enough=series.Materialization(path).liquidity('BTCUSDT',START,cost_parameters())
+    assert (median,hourly,enough)==(Decimal('12000000'),Decimal('500000'),False)
+    assert series.order_segments('0','1','100','0.1','0',median,hourly,enough,cost_parameters())==[
+        {'quantity':'1','reason':'insufficient_history'}]
+
+
+def test_dv6_same_key_different_content_is_rejected(tmp_path):
+    path,row=dv6_fixture(tmp_path);dv6_table(path,[row,{**row,'selected_tier':'GE_100M'}])
+    with pytest.raises(series.SeriesError,match='DUPLICATE'):series.Materialization(path)
+
+
+@pytest.mark.parametrize('name', ['verification/policy.json','verification/hypothesis_binding.json',
+    'verification/verification.json','verification/turnover_decisions.jsonl','verification/original/kline_BTCUSDT_D.csv',
+    'verification/volume_semantics.jsonl'])
+def test_dv6_missing_or_tampered_manifest_bound_evidence_rejected(tmp_path,name):
+    path,row=dv6_fixture(tmp_path);target=path.parent/name;target.write_bytes(target.read_bytes()+b' ')
+    with pytest.raises(series.SeriesError,match='SHA'):series.Materialization(path)
+
+
+@pytest.mark.parametrize('version',[1,2])
+def test_dv6_schema_versions_and_read_boundary(tmp_path,monkeypatch,version):
+    path,row=dv6_fixture(tmp_path,version=version);opened=[];read=Path.read_bytes
+    def bounded(file):
+        assert file.is_relative_to(path.parent)
+        name=file.relative_to(path.parent).as_posix();assert not name.startswith(('lean/','custom/'))
+        opened.append(name);return read(file)
+    monkeypatch.setattr(Path,'read_bytes',bounded)
+    assert series.Materialization(path).liquidity('BTCUSDT',START,cost_parameters())[0]==Decimal('12000000')
+    assert 'verification/original/kline_BTCUSDT_D.csv' in opened
+
+
+def test_dv6_sources_are_checked_before_out_of_scope_values_are_decoded(tmp_path):
+    path,row=dv6_fixture(tmp_path);name='verification/original/kline_BTCUSDT_D.csv'
+    target=path.parent/name;raw=target.read_bytes().replace(str(START-12*DAY).encode(),str(START+DAY).encode(),1)
+    raw=raw.replace(b'9900000',b'not-a-market-value',1);target.write_bytes(raw)
+    m=json.loads(path.read_bytes());m['files'][name]['sha256']=hashlib.sha256(raw).hexdigest();path.write_bytes(canonical(m))
+    with pytest.raises(series.SeriesError,match='SCOPE'):series.Materialization(path)
+
+
+def test_dv6_missing_decision_and_policy_window_are_not_silently_legacy(tmp_path):
+    path,row=dv6_fixture(tmp_path);data=series.Materialization(path)
+    with pytest.raises(series.SeriesError,match='MISSING'):data.liquidity('BTCUSDT',START+DAY,cost_parameters())
+    with pytest.raises(series.SeriesError,match='POLICY'):data.liquidity('BTCUSDT',START,{**cost_parameters(),'liquidity_window_days':11})
+
+
+def dv6_access():
+    return {'generation':1,'time_splits':[{'id':'train','kind':'train','start':START-13*DAY,'end':START},
+        {'id':'oos','kind':'out_of_sample','start':START,'end':START+4*HOUR},
+        {'id':'holdout','kind':'holdout','start':START+DAY,'end':START+2*DAY}],
+        'selection':{'symbols':['BTCUSDT']},'out_of_sample':{'start':START-13*DAY,'end':START+4*HOUR},
+        'max_lookback_seconds':13*86400,'holdout':None}
+
+
+def test_dv6_preserves_real_u4_readable_access_shape(tmp_path):
+    path,row=dv6_fixture(tmp_path);m=json.loads(path.read_bytes());m['readable']=dv6_access();path.write_bytes(canonical(m))
+    assert series.Materialization(path).liquidity('BTCUSDT',START,cost_parameters())[0]==Decimal('12000000')
+
+
+def dv6_csv(path,name,change):
+    target=path.parent/name;reader=csv.DictReader(io.StringIO(target.read_text()));fields=reader.fieldnames
+    rows=change(list(reader));buf=io.StringIO(newline='');writer=csv.DictWriter(buf,fieldnames=fields,lineterminator='\n')
+    writer.writeheader();writer.writerows(rows);raw=buf.getvalue().encode();target.write_bytes(raw)
+    m=json.loads(path.read_bytes());times=[int(r['timestamp']) for r in rows]
+    m['files'][name].update(sha256=hashlib.sha256(raw).hexdigest(),rows=len(rows),first=min(times) if times else None,last=max(times) if times else None)
+    path.write_bytes(canonical(m))
+
+
+def test_dv6_incomplete_hourly_days_are_zero_not_partial_or_daily_fallback(tmp_path):
+    path,row=dv6_fixture(tmp_path)
+    absent={START-i*DAY for i in range(6,13)}
+    dv6_csv(path,'source/kline_BTCUSDT_60.csv',lambda rows:[r for r in rows if int(r['timestamp']) not in absent])
+    for item in row['inputs']:
+        if item['day_start'] in absent:item.update(hourly_status='MISSING',sum_hourly_reported=None)
+    row.update(m_h='0',tier_h='NO_OPEN',selected_median='0',selected_tier='NO_OPEN',reason_codes=['TURNOVER_INPUT_INCOMPLETE'])
+    dv6_table(path,[row]);data=series.Materialization(path)
+    assert data.liquidity('BTCUSDT',START,cost_parameters())==(Decimal('0'),Decimal('500000'),True)
+    row['reason_codes']=[];dv6_table(path,[row])
+    with pytest.raises(series.SeriesError,match='REASON'):series.Materialization(path)
+
+
+def test_dv6_original_and_effective_keep_same_p3b_identity(tmp_path):
+    path,row=dv6_fixture(tmp_path);m=json.loads(path.read_bytes())
+    m['files']['verification/original/kline_BTCUSDT_D.csv']['source_sha256']='f'*64
+    path.write_bytes(canonical(m))
+    with pytest.raises(series.SeriesError,match='IDENTITY'):series.Materialization(path)
+
+
+def test_dv6_fixed_independent_run_recomputes_without_u5_helpers(tmp_path):
+    path,row=dv6_fixture(tmp_path);run=observed_fixed_run(path)
+    report=series.recompute(path,run)
+    assert report['recompute_passed'] is True and report['differences']==[]
+    run['fills'][0]['slippage_bps']='20'
+    report=series.recompute(path,run)
+    assert report['recompute_passed'] is False and report['differences']
+
+
+@pytest.mark.parametrize('name', ['policy.json','hypothesis_binding.json','verification.json'])
+def test_dv6_unknown_evidence_fields_rejected(tmp_path,name):
+    path,row=dv6_fixture(tmp_path);value=json.loads((path.parent/'verification'/name).read_bytes());value['surprise']='x'
+    dv6_write(path,'verification/'+name,value)
+    with pytest.raises(series.SeriesError):series.Materialization(path)
+
+
+@pytest.mark.parametrize('name,change', [
+    ('policy.json',{'volume_semantics_policy':'v1-strict'}),('policy.json',{'standard_sha256':'f'*64}),
+    ('hypothesis_binding.json',{'hypothesis_id':'other'}),('hypothesis_binding.json',{'policy_sha256':'f'*64}),
+    ('verification.json',{'status':'BLOCKED','reason_codes':['NO_PUBLISH']}),
+    ('verification.json',{'volume_semantics_policy':'v1-strict'}),('verification.json',{'policy_sha256':'f'*64}),
+    ('verification.json',{'p3b_manifest_sha256':'f'*64}),
+])
+def test_dv6_policy_binding_and_blocked_bundle_rejected(tmp_path,name,change):
+    path,row=dv6_fixture(tmp_path);value=json.loads((path.parent/'verification'/name).read_bytes());value.update(change)
+    dv6_write(path,'verification/'+name,value)
+    with pytest.raises(series.SeriesError):series.Materialization(path)
+
+
+def test_dv6_v2_confidence_is_bound_but_not_a_trade_gate(tmp_path):
+    path,row=dv6_fixture(tmp_path);before=series.Materialization(path).liquidity('BTCUSDT',START,cost_parameters())
+    # U6 不讀信心語義作交易條件；此處僅測不透明 bytes 的身份綁定，不代表 DV7 產物驗收。
+    dv6_write(path,'verification/volume_semantics.jsonl',[{'confidence_evidence':{'prefix_hlc':{'status':'CONTRADICTS'}}}],jsonl=True)
+    report=json.loads((path.parent/'verification/verification.json').read_bytes());meta=json.loads(path.read_bytes())['files']['verification/volume_semantics.jsonl']
+    report['files']['volume_semantics.jsonl']={k:meta[k] for k in ('sha256','rows')};dv6_write(path,'verification/verification.json',report)
+    assert series.Materialization(path).liquidity('BTCUSDT',START,cost_parameters())==before
+
+
+@pytest.mark.parametrize('tamper',['extra_evidence','omitted_source','changed_source','manifest_sha'])
+def test_dv6_submit_retains_complete_files_and_manifest_identity(tmp_path,tamper):
+    f=submit_fixture(tmp_path);record=f['query_record']
+    if tamper=='extra_evidence':record['data_files']['verification/turnover_decisions.jsonl']='f'*64
+    elif tamper=='omitted_source':record['data_files'].pop('source/kline_BTCUSDT_D.csv')
+    elif tamper=='changed_source':record['data_files']['source/kline_BTCUSDT_D.csv']='f'*64
+    else:record['manifest_sha256']='f'*64
+    before={p.relative_to(f['book'].out):p.read_bytes() for p in f['book'].out.rglob('*') if p.is_file()}
+    with pytest.raises(series.SeriesError,match='身份'):f['submit']()
+    after={p.relative_to(f['book'].out):p.read_bytes() for p in f['book'].out.rglob('*') if p.is_file()}
+    assert before==after
+
+
+def test_dv6_holdout_scope_is_rejected_before_source_value_decode(tmp_path,monkeypatch):
+    path,row=dv6_fixture(tmp_path);m=json.loads(path.read_bytes())
+    m['readable']['time_splits'][-1].update(start=START-HOUR,end=START+HOUR);path.write_bytes(canonical(m))
+    read=Path.read_bytes
+    def bounded(file):
+        assert 'source' not in file.relative_to(path.parent).parts
+        return read(file)
+    monkeypatch.setattr(Path,'read_bytes',bounded)
+    with pytest.raises(series.SeriesError,match='ACCESS_SCOPE'):series.Materialization(path)
+
+
+@pytest.mark.parametrize('change',[lambda rows:rows+rows[-1:],lambda rows:[{**rows[0],'timestamp':str(START-13*DAY+1)}]+rows[1:],
+    lambda rows:[{**rows[0],'turnover':'NaN'}]+rows[1:]])
+def test_dv6_bad_hourly_grid_cannot_be_a_valid_sum(tmp_path,change):
+    path,row=dv6_fixture(tmp_path);dv6_csv(path,'source/kline_BTCUSDT_60.csv',change)
+    with pytest.raises(series.SeriesError):series.Materialization(path)
+
+
+@pytest.mark.parametrize('encoding',['duplicate_json_key','bom','no_lf','nan','extra_blank'])
+def test_dv6_decision_encoding_is_exact(tmp_path,encoding):
+    path,row=dv6_fixture(tmp_path);name='verification/turnover_decisions.jsonl';raw=(path.parent/name).read_bytes()
+    if encoding=='duplicate_json_key':raw=raw.replace(b'"known_at":',b'"known_at":0,"known_at":')
+    elif encoding=='bom':raw=b'\xef\xbb\xbf'+raw
+    elif encoding=='no_lf':raw=raw[:-1]
+    elif encoding=='nan':raw=raw.replace(b'"m_d":"9900000"',b'"m_d":NaN')
+    else:raw+=b'\n'
+    (path.parent/name).write_bytes(raw);m=json.loads(path.read_bytes());m['files'][name]['sha256']=hashlib.sha256(raw).hexdigest();path.write_bytes(canonical(m))
+    with pytest.raises(series.SeriesError):series.Materialization(path)
+
+
+@pytest.mark.parametrize('change',[{'untradeable_below_turnover':'999999'},{'order_cap_fraction':'0.02'},
+    {'slippage_tiers_bps':[{'min_turnover':'200000000','bps':'5'},{'min_turnover':'10000000','bps':'10'},{'min_turnover':'1000000','bps':'20'}]}])
+def test_dv6_cost_cannot_reinterpret_policy_tiers_or_order_cap(tmp_path,change):
+    path,row=dv6_fixture(tmp_path)
+    with pytest.raises(series.SeriesError,match='POLICY'):
+        series.Materialization(path).liquidity('BTCUSDT',START,{**cost_parameters(),**change})
+
+
+def test_dv6_trial_binding_matches_real_ledger_registration_field(tmp_path):
+    path,row=dv6_fixture(tmp_path);m=json.loads(path.read_bytes());m['purpose']='research';path.write_bytes(canonical(m))
+    run=run_for(path);cfg=run['run_config'];data=series.Materialization(path)
+    configuration={'strategy_parameters':{'run':{k:cfg[k] for k in series.IDENTITY_RUN_KEYS},'strategy':cfg['strategy']},'cost_model_parameters':cfg['cost']}
+    record={'configuration':configuration,'configuration_sha256':hashlib.sha256(canonical(configuration)).hexdigest(),
+        'code_commit':cfg['code_commit'],'random_seed':1,'sharpe_frequency':{'seconds':3600,'annualized':False},
+        **series.RUNTIME_METADATA,'hypothesis_id':'h1','generation':1,'data_window':m['window'],
+        'manifest_sha256':data.sha256,'data_files':{k:v['sha256'] for k,v in m['files'].items()},
+        'folds':[],'evaluation_kind':'out_of_sample','preregistration_sha256':'e'*64}
+    record['evaluation_kind']='in_sample';record['score_window']=m['window']
+    series._verify_identity(data,run,record,'test-ledger')
+    record['preregistration_sha256']='f'*64
+    with pytest.raises(series.SeriesError,match='登記'):series._verify_identity(data,run,record,'test-ledger')
+
+
+def test_dv6_exact_source_decimals_are_not_cash_tolerances(tmp_path):
+    hourly='500000.'+'0'*59+'1';total='12000000.'+'0'*58+'24'
+    path,row=dv6_fixture(tmp_path,original='9.9e6',hourly=hourly,mh=total,median=total)
+    assert series.Materialization(path).liquidity('BTCUSDT',START,cost_parameters())[0]==Decimal(total)
+    row['selected_median']='12000000';dv6_table(path,[row])
+    with pytest.raises(series.SeriesError,match='AMOUNT'):series.Materialization(path)
