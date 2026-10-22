@@ -182,7 +182,8 @@ def read_materialization(directory, expected):
     value = json.loads(raw)
     if canonical(value) != raw or value["schema_version"] != "r8_materialization_v1":
         raise ValueError("物化 schema 或標準化 JSON 不符")
-    for prefix in ("lean", "custom"):
+    verified = any(p.startswith("verification/") for p in value["files"])
+    for prefix in (("lean", "custom", "source", "verification") if verified else ("lean", "custom")):
         expected_files = {p for p in value["files"] if p.startswith(prefix + "/")}
         actual = {p.relative_to(root).as_posix() for p in (root / prefix).rglob("*")
                   if p.is_file() or p.is_symlink()}
@@ -195,6 +196,286 @@ def read_materialization(directory, expected):
     if sha256(overlay) != value["symbol_properties_overlay_sha256"]:
         raise ValueError("合約屬性雜湊不符")
     return value
+
+
+def verification_json(raw, *, lines=False):
+    """The new evidence wire format is canonical JSON plus exactly one LF."""
+    def pairs(items):
+        result = {}
+        for key, value in items:
+            if key in result:
+                raise ValueError("VERIFICATION_DUPLICATE_KEY")
+            result[key] = value
+        return result
+    def one(line):
+        value = json.loads(line, object_pairs_hook=pairs,
+                           parse_constant=lambda _: (_ for _ in ()).throw(ValueError("VERIFICATION_NUMBER")))
+        encoded = json.dumps(value, ensure_ascii=False, sort_keys=True, separators=(",", ":"), allow_nan=False).encode() + b"\n"
+        if encoded != line:
+            raise ValueError("VERIFICATION_ENCODING")
+        return value
+    return [one(line) for line in raw.splitlines(keepends=True)] if lines else one(raw)
+
+
+def verification_keys(value, keys, schema=None):
+    if not isinstance(value, dict) or set(value) != set(keys.split()) or (
+            schema is not None and value['schema_version'] != schema):
+        raise ValueError("VERIFICATION_SCHEMA")
+
+
+def verification_refs(refs):
+    if not isinstance(refs, list):
+        raise ValueError("VERIFICATION_SOURCE_REF")
+    order = []
+    for ref in refs:
+        verification_keys(ref, 'kind relative_path url sha256 row request_id list_index byte_start byte_end trade_id line_sha256')
+        if ref['kind'] not in ('raw','csv','trade','instruments','policy','plan','report'):
+            raise ValueError("VERIFICATION_SOURCE_REF")
+        for key in ('row','list_index','byte_start','byte_end'):
+            if ref[key] is not None and (type(ref[key]) is not int or ref[key] < (1 if key == 'row' else 0)):
+                raise ValueError("VERIFICATION_SOURCE_REF")
+        for key in ('sha256','line_sha256'):
+            if ref[key] is not None and not re.fullmatch('[0-9a-f]{64}', str(ref[key])):
+                raise ValueError("VERIFICATION_SOURCE_REF")
+        path = ref['relative_path']
+        if path is not None and (not isinstance(path,str) or PurePosixPath(path).is_absolute()
+                or any(p in ('','.','..') for p in path.split('/')) or ref['sha256'] is None):
+            raise ValueError("VERIFICATION_SOURCE_REF")
+        order.append((ref['kind'],path or '',ref['row'] or -1,
+                      ref['list_index'] if ref['list_index'] is not None else -1,
+                      ref['byte_start'] if ref['byte_start'] is not None else -1))
+    if order != sorted(order):
+        raise ValueError("VERIFICATION_SOURCE_REF_ORDER")
+
+
+def verification_bundle(root, manifest):
+    """Validate framework inputs, keeping all evidence out of hypothesis parameters."""
+    files = manifest['files']
+    def raw(name):
+        if name not in files:
+            raise ValueError('VERIFICATION_MISSING: ' + name)
+        result = safe_file(root,name).read_bytes()
+        meta = files[name]
+        verification_keys(meta, 'sha256 rows first last source_file source_sha256')
+        if sha256(result) != meta['sha256']:
+            raise ValueError('VERIFICATION_HASH: ' + name)
+        if type(meta['rows']) is not int or meta['rows'] < 0:
+            raise ValueError('VERIFICATION_METADATA')
+        if name.endswith('.json'):
+            count, times = 1, []
+        elif name.endswith('.jsonl'):
+            objects = verification_json(result, lines=True)
+            count = len(objects)
+            times = [r.get('known_at',r.get('timestamp')) for r in objects
+                     if r.get('known_at',r.get('timestamp')) is not None]
+        elif name.startswith('custom/turnover_'):
+            records = list(csv.reader(io.StringIO(result.decode('utf-8'))))
+            count = len(records)
+            times = [int(r[1]) for r in records]
+        else:
+            records = list(csv.reader(io.StringIO(result.decode('utf-8'))))
+            count = max(0, len(records)-1)
+            times = [int(r[0]) for r in records[1:]]
+        if (meta['rows'] != count or meta['first'] != (min(times) if times else None)
+                or meta['last'] != (max(times) if times else None)):
+            raise ValueError('VERIFICATION_METADATA')
+        return result
+    policy_raw = raw('verification/policy.json')
+    policy = verification_json(policy_raw)
+    v2 = policy.get('schema_version') == 'r8_data_verification_policy_v2'
+    verification_keys(policy, 'schema_version standard_sha256 approval_event p3b_manifest_sha256 listing sampling turnover l4_price_threshold_pct'
+                      + (' volume_semantics_policy' if v2 else ''), 'r8_data_verification_policy_v2' if v2 else 'r8_data_verification_policy_v1')
+    if (policy['approval_event'] != ('RH-20261022-05' if v2 else 'RH-20261022-04')
+            or v2 and policy['volume_semantics_policy'] != 'v2-terminal-suffix-20261022'
+            or not re.fullmatch('[0-9a-f]{64}', str(policy['standard_sha256']))
+            or policy['p3b_manifest_sha256'] != manifest['u1_manifest_sha256']
+            or policy['listing'] != dict(x_pct='50',y_pct='20',z_pct='20',cooling_days=7,
+                quantity='hourly_base_volume_daily_mean',variation='mean_relative_difference',stage_end_ranges=[[1,3],[7,15],[15,30]])
+            or policy['sampling'] != dict(seed=20261022,base_per_stratum=300,max_per_stratum=900,
+                max_expansions=1,confidence='0.95',upper_limit='0.025')
+            or policy['turnover'] != dict(window_days=12,thresholds=['1000000','10000000','100000000'],
+                trigger_pct='5',general='exchange_reported',suspect='sum_hourly_reported')
+            or policy['l4_price_threshold_pct'] != '1'
+            or type(policy['listing']['cooling_days']) is not int
+            or any(type(v) is not int for pair in policy['listing']['stage_end_ranges'] for v in pair)
+            or any(type(policy['sampling'][k]) is not int for k in
+                   ('seed','base_per_stratum','max_per_stratum','max_expansions'))
+            or type(policy['turnover']['window_days']) is not int):
+        raise ValueError('VERIFICATION_POLICY')
+    digest = sha256(policy_raw)
+    evidence = verification_json(raw('verification/verification.json'))
+    verification_keys(evidence, 'schema_version status policy_sha256 p3b_manifest_sha256 sample_plan_sha256 previous_corrections_sha256 review_refs tool_commit readable counts files reason_codes'
+                      + (' standard_sha256 volume_semantics_policy' if v2 else ''),
+                      'r8_data_verification_v2' if v2 else 'r8_data_verification_v1')
+    if (evidence['status'] != 'READY' or evidence['policy_sha256'] != digest
+            or evidence['p3b_manifest_sha256'] != manifest['u1_manifest_sha256']
+            or v2 and (evidence['standard_sha256'] != policy['standard_sha256']
+                or evidence['volume_semantics_policy'] != policy['volume_semantics_policy'])):
+        raise ValueError('VERIFICATION_IDENTITY')
+    verification_refs(evidence['review_refs'])
+    if v2:
+        volume = raw('verification/volume_semantics.jsonl')
+        if evidence['files'].get('volume_semantics.jsonl') != {
+                'sha256': sha256(volume), 'rows': len(volume.splitlines())}:
+            raise ValueError('VERIFICATION_VOLUME_IDENTITY')
+    binding = verification_json(raw('verification/hypothesis_binding.json'))
+    verification_keys(binding,'schema_version hypothesis_id policy_sha256 family registration_sha256','r8_verification_hypothesis_binding_v1')
+    if (binding['hypothesis_id'] != manifest['hypothesis_id'] or binding['policy_sha256'] != digest
+            or binding['family'] not in ('ordinary','listing')
+            or not re.fullmatch('[0-9a-f]{64}',str(binding['registration_sha256']))):
+        raise ValueError('HYPOTHESIS_BINDING_INVALID')
+    listing = verification_json(raw('verification/listing_regimes.jsonl'),lines=True)
+    grouped = {s: [] for s in manifest['symbols']}
+    previous = None
+    for row in listing:
+        verification_keys(row,'schema_version symbol day_start known_at observed_listing_at launch_time listing_time_mismatch origin_refs stage reason_code cooling quantity_inputs policy_sha256','r8_listing_regime_v1')
+        if (row['symbol'] not in grouped or row['policy_sha256'] != digest
+                or any(type(row[k]) is not int for k in ('day_start','known_at','observed_listing_at'))
+                or row['day_start'] % rules.DAY or row['observed_listing_at'] % rules.HOUR
+                or row['stage'] not in ('initial','middle','stabilizing','ordinary')
+                or row['cooling'] is not None and type(row['cooling']) is not bool
+                or type(row['listing_time_mismatch']) is not bool
+                or row['launch_time'] is not None and type(row['launch_time']) is not int
+                or not isinstance(row['reason_code'],str) or not row['reason_code']):
+            raise ValueError('LISTING_REGIME_INVALID')
+        key = (row['known_at'],row['symbol'])
+        if previous is not None and key <= previous:
+            raise ValueError('LISTING_REGIME_ORDER')
+        previous = key
+        known = row['observed_listing_at'] + rules.HOUR if not grouped[row['symbol']] else row['day_start']
+        if row['known_at'] != known or row['day_start'] > row['known_at']:
+            raise ValueError('LISTING_KNOWN_AT')
+        earlier = grouped[row['symbol']]
+        stage_index = ('initial','middle','stabilizing','ordinary').index(row['stage'])
+        age = (row['day_start']-row['observed_listing_at']//rules.DAY*rules.DAY)//rules.DAY+1
+        if (not earlier and (row['stage'] != 'initial' or age != 1)
+                or not (1,2,8,16)[stage_index] <= age
+                or stage_index < 3 and age > (3,15,30)[stage_index]):
+            raise ValueError('LISTING_STAGE_BOUNDARY')
+        if earlier:
+            prev = earlier[-1]
+            previous_stage = ('initial','middle','stabilizing','ordinary').index(prev['stage'])
+            if (stage_index not in (previous_stage,previous_stage+1)
+                    or row['day_start'] != prev['day_start']+rules.DAY
+                    or any(row[k] != prev[k] for k in ('observed_listing_at','launch_time','listing_time_mismatch'))):
+                raise ValueError('LISTING_STAGE_ORDER')
+        if row['launch_time'] is not None and row['listing_time_mismatch'] != (abs(row['observed_listing_at']-row['launch_time']) > rules.DAY):
+            raise ValueError('LISTING_TIME_MISMATCH')
+        verification_refs(row['origin_refs'])
+        if not isinstance(row['quantity_inputs'],list):
+            raise ValueError('LISTING_QUANTITY')
+        last_day = None
+        for q in row['quantity_inputs']:
+            verification_keys(q,'day_start volume_sum hour_count status source_refs')
+            if (type(q['day_start']) is not int or q['day_start'] % rules.DAY
+                    or q['day_start'] + rules.DAY > row['known_at']
+                    or last_day is not None and q['day_start'] <= last_day
+                    or type(q['hour_count']) is not int or not 1 <= q['hour_count'] <= 24
+                    or q['status'] not in ('FULL','PARTIAL','MISSING')
+                    or (q['volume_sum'] is None) != (q['status']=='MISSING')):
+                raise ValueError('LISTING_QUANTITY')
+            if q['volume_sum'] is not None and rules.decimal(q['volume_sum']) < 0:
+                raise ValueError('LISTING_QUANTITY')
+            verification_refs(q['source_refs']); last_day = q['day_start']
+        grouped[row['symbol']].append(row)
+    for symbol, rows in grouped.items():
+        projection = raw('custom/listing_regime/'+symbol.lower()+'.csv')
+        output = io.StringIO(); writer = csv.writer(output,lineterminator='\n')
+        writer.writerow(['known_at','day_start','stage','reason_code','cooling','policy_sha256'])
+        for row in rows:
+            writer.writerow([row['known_at'],row['day_start'],row['stage'],row['reason_code'],
+                             {True:'true',False:'false',None:'null'}[row['cooling']],digest])
+        if projection != output.getvalue().encode():
+            raise ValueError('LISTING_PROJECTION_MISMATCH')
+        if manifest['first_bar'].get(symbol) is not None and not rows:
+            raise ValueError('LISTING_ORIGIN_UNKNOWN')
+    # Independently bind every 12-day input to manifest-bound, in-scope CSV bytes.
+    from fractions import Fraction
+    cache = {}
+    def market(symbol, interval, original=False):
+        name = ('verification/original/' if original else 'source/') + 'kline_'+symbol+'_'+interval+'.csv'
+        if name not in cache:
+            records = {}; reader = csv.DictReader(io.StringIO(raw(name).decode('utf-8')))
+            if reader.fieldnames != ['timestamp','open','high','low','close','volume','turnover']:
+                raise ValueError('TURNOVER_SOURCE_SCHEMA')
+            previous_t = None
+            for item in reader:
+                stamp = int(item['timestamp'])
+                if stamp % (rules.DAY if interval=='D' else rules.HOUR) or previous_t is not None and stamp <= previous_t:
+                    raise ValueError('TURNOVER_SOURCE_ORDER')
+                if not rules.milliseconds(manifest['warmup']['start']) <= stamp < rules.milliseconds(manifest['window']['end']):
+                    raise ValueError('TURNOVER_SOURCE_OUT_OF_SCOPE')
+                try:
+                    value = rules.decimal(item['turnover'])
+                    if value < 0:
+                        raise ValueError('TURNOVER_SOURCE_AMOUNT')
+                    value = Fraction(value)
+                except ValueError:
+                    if not original:
+                        raise
+                    value = None  # Invalid original evidence is not a usable amount.
+                records[stamp] = value; previous_t = stamp
+            cache[name] = records
+        return cache[name]
+    table = verification_json(raw('verification/turnover_decisions.jsonl'),lines=True)
+    if not table and any(t is not None for t in manifest['first_bar'].values()):
+        raise ValueError('TURNOVER_INPUT_INCOMPLETE')
+    previous = None
+    for row in table:
+        symbol = row.get('symbol')
+        if symbol not in grouped or row.get('policy_sha256') != digest:
+            raise ValueError('TURNOVER_IDENTITY')
+        rules.turnover_liquidity(row,row['decision_utc_day'],manifest['first_bar'].get(symbol),{})
+        key = (row['decision_utc_day'],symbol)
+        if previous is not None and key <= previous:
+            raise ValueError('TURNOVER_ORDER')
+        previous = key
+        for item in row['inputs']:
+            verification_refs(item['source_refs'])
+            day = item['day_start']
+            for field, original in (('exchange_reported',True),('effective_reported',False)):
+                value = market(symbol,'D',original).get(day)
+                supplied = None if item[field] is None else Fraction(rules.decimal(item[field]))
+                if value != supplied or field=='effective_reported' and ((value is not None) != (item['daily_status']=='VALID')):
+                    raise ValueError('TURNOVER_SOURCE_MISMATCH')
+            if item['hourly_status'] != 'NOT_EVALUATED':
+                hours = market(symbol,'60')
+                full = all(day+i*rules.HOUR in hours for i in range(24))
+                value = sum((hours[day+i*rules.HOUR] for i in range(24)),Fraction(0)) if full else None
+                supplied = None if item['sum_hourly_reported'] is None else Fraction(rules.decimal(item['sum_hourly_reported']))
+                if value != supplied or full != (item['hourly_status']=='VALID'):
+                    raise ValueError('TURNOVER_SOURCE_MISMATCH')
+    for symbol in manifest['symbols']:
+        for interval, resolution, step in (('D','day',rules.DAY),('60','hour',rules.HOUR)):
+            records = market(symbol, interval)
+            content = raw('custom/turnover_'+resolution+'/'+symbol.lower()+'.csv')
+            rows = list(csv.reader(io.StringIO(content.decode('utf-8'))))
+            seen = {}
+            for item in rows:
+                if len(item) != 3:
+                    raise ValueError('TURNOVER_CUSTOM_SCHEMA')
+                known, stamp = int(item[0]), int(item[1])
+                if known != stamp+step or stamp in seen:
+                    raise ValueError('TURNOVER_CUSTOM_TIME')
+                seen[stamp] = Fraction(rules.decimal(item[2]))
+            if seen != records:
+                raise ValueError('TURNOVER_CUSTOM_SOURCE_MISMATCH')
+    return binding
+
+
+def verification_inputs(root, manifest, config, query=None):
+    present = any(p.startswith(('verification/','custom/listing_regime/')) for p in manifest['files'])
+    if not present:
+        # Old artifacts are readable for historical regression only, never a new trial.
+        if config['mode'] == 'trial':
+            raise ValueError('VERIFICATION_MISSING')
+        return None
+    binding = verification_bundle(root,manifest)
+    if config['mode'] != 'validation':
+        found = query(config['trial_id']) if query else None
+        if not found or found['record'].get('preregistration_sha256') != binding['registration_sha256']:
+            raise ValueError('HYPOTHESIS_BINDING_REGISTRATION_MISMATCH')
+    return binding
 
 
 def normalized_window(window):
@@ -503,12 +784,15 @@ def execute(config, materialization, out, *, repo, query=None, ledger=None,
     if config["mode"] != "validation" and query is None:
         query = trial_lookup(ledger)
     validate_config(config, manifest, query)
+    binding = verification_inputs(materialization, manifest, config, query)
     hashes = verify_source(repo, config)
     check_algorithm(safe_file(repo, config["algorithm"]["path"]).read_text())
     # 使用提交中的快照，避免核對後來源被其他程序改動。
     sources = tree_files(repo, config["code_commit"], [ENGINE_ROOT, LEDGER_ROOT, config["algorithm"]["path"]])
     info = {k: manifest[k] for k in ("symbols", "strategy_symbols", "first_bar", "delistings",
                                     "min_notional", "funding_interval_ms", "window", "warmup")}
+    if binding is not None:
+        info["verification"] = {k: binding[k] for k in ("family", "policy_sha256")}
     info["properties"] = {}
     overlay = safe_file(materialization, "symbol_properties_overlay.csv").read_bytes()
     for row in csv.reader(io.StringIO(overlay.decode())):
@@ -519,6 +803,12 @@ def execute(config, materialization, out, *, repo, query=None, ledger=None,
     prepared = Path(tempfile.gettempdir()) / "r8-lean-inputs" / snapshot_key
     write_identical(prepared / "algorithm_config.json", algorithm_config(config))
     write_identical(prepared / "framework.json", canonical(info))
+    if binding is not None:
+        relative = "verification/turnover_decisions.jsonl"
+        table = safe_file(materialization, relative).read_bytes()
+        if sha256(table) != manifest["files"][relative]["sha256"]:
+            raise ValueError("TURNOVER_HASH")
+        write_identical(prepared / "framework-inputs/turnover_decisions.jsonl", table)
     for name, raw in sources.items():
         write_identical(prepared / "src" / name, raw)
     if config["model_artifact"] is not None:
@@ -545,6 +835,8 @@ def execute(config, materialization, out, *, repo, query=None, ledger=None,
         (out, "/r8/output", False),
     ):
         argv += mount(source, destination, readonly)
+    if binding is not None:
+        argv += mount(prepared / "framework-inputs", "/r8/framework-inputs")
     if config["model_artifact"] is not None:
         argv += mount(prepared / "models", "/r8/models")
     argv += ["--env", "PYTHONPATH=/r8/src", "--entrypoint", "/bin/bash", IMAGE, "-c", LAUNCH_SCRIPT]
