@@ -662,7 +662,7 @@
     "r8-dv256-publish-changelog": {
       "kind": "recorded_file",
       "path": "docs/CLAUDE_CHANGELOG.md",
-      "sha256": "8a2f9e97af0be80fa0a95cd370232883e98c00f0d954df1729d7a1575e8754b2",
+      "sha256": "9ff04eee940631046dc064b97e4edf819f7d6c6ef6fe39f807d6a292ad0398b9",
       "meaning": "Conductor-authorized DV2-R1/DV5/DV6 recorder publication and erratum four. Original stopped deliveries, E2/E4 states and original publication stop retained; R1 separately admitted without deadline reset. No merge or full training data acceptance claimed."
     }
   },

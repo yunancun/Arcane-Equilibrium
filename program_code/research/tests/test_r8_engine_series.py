@@ -2277,6 +2277,9 @@ def test_dv6_review_historical_object_cannot_bypass_current_run_gate(tmp_path):
 
 def test_dv6_review_historical_source_identities_are_frozen_real_blobs():
     root=Path(series.__file__).resolve().parents[3];base='55586c1e919958bcac12437404ed7c164832a7fe';name='program_code/research/r8_engine/series.py'
+    if subprocess.run(['git','-C',str(root),'cat-file','-e',base],
+                      stdout=subprocess.DEVNULL,stderr=subprocess.DEVNULL).returncode:
+        pytest.skip('frozen historical Git objects unavailable in shallow checkout')
     commits=subprocess.run(['git','-C',str(root),'log','--format=%H',base,'--',name],check=True,capture_output=True,text=True).stdout.splitlines()
     shas={hashlib.sha256(subprocess.run(['git','-C',str(root),'show',c+':'+name],check=True,capture_output=True).stdout).hexdigest() for c in commits}
     assert series.HISTORICAL_SERIES_SHAS==shas

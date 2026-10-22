@@ -15,6 +15,7 @@
 - 必要測試整合小修：DV3凍結v1政策白名單加入#243的d0fbf9ff規範身分（真實公開流程先POLICY_MISMATCH、後READY）；DV6歷史測試改封存原固定Git blob的壓縮bytes，SHA仍為經審a91e604d，不增加歷史白名單，解決hosted research淺層checkout沒有舊Git物件的問題（紅燈exit128、綠燈保留同SHA）。兩項聚焦2 passed。首次完整單元1,123 passed／4 errors，後者是測試把LEAN排程放在BCH首根有效線之前而無決策，以及同一失敗fixture再建目錄；兩次原run皆completed但不作互通通過證據。測試改用首根有效線閉合時刻，保存失敗產物並重跑，不改引擎行為。
 - 歷史P4-D0／P4-D共42份重算報告逐bytes全同，12,986輸入檔未改；其中40個原completed保持通過，原EV10及全標的失敗run仍維持失敗，不提升為成功。首輪指定兩個structure檔17 passed。26日v1的78份bytes對最新main全同，v2逐格符合§13.7；BCH有效O=272.95、L=265.15、C=276.95保留、A=2954180.78。
 - 真實互通修後8 passed：v1／v2各自通過U5兩族別三入口遮蔽／上市因果前綴、U6獨立成交額核對，以及U5實際Colima run→U6重算雙向測試。每個run為completed、6,323步、1個決策訂單因上市初期歷史不足作廢、0成交；U6 `recompute_passed=true`、`differences=[]`，不冒稱有成交的回歸。另使用正式固定bundle pin而非測試注入，ordinary／listing兩種真實帳本預登記、物化、U5／U6讀取與trial重播均通過。
+- PR head `274ceac20` 本機全部R8為1,483 passed、兩個structure檔17 passed，測試期間追蹤檔不變。hosted research run `39832333637`／job `120012147892` 於10分鐘上限取消，取消前第995項出現F；依相同收集順序與無歷史repo紅燈，定位另一個直接git log固定base的九SHA稽核。缺歷史物件時明示skip，完整本機歷史仍逐blob核對九個SHA，不增加白名單。新增規模測試改32／64日、移除第二次未計數的重複報表呼叫；保留兩個真實消費路徑、每日日數對應完整語義列及20倍線性預算。以main舊消費類別重跑仍2 failed（55,344／208,944次），修後6,192／12,336次；連同完整歷史稽核3 passed。原64／128日紅綠及26日bytes證據保留，產品程式與規範完全未動；不延長CI時限、不重跑相同失敗head。新head完整回歸與CI另記。
 - 完整DV1／DV3／U4／U5／U6與全部R8、指定兩個structure檔、26日v1的78份bytes對main／v2逐格／雙政策報表、舊P4歷史重算、固定head CI及自動審查結果，見本次PR與倉庫外 `audits/2026-10-22-r8-data-verify-dv256-publish/`。原始失敗與尚未執行層級分列；不以單元測試冒充原E2／E4通過，不宣稱DV4全訓練資料驗收。TODO v924→v925；新增RH-20261022-06追隨05並保存Operator原文。不取數、不碰Linux runtime／資料庫／Demo／live，不更新Wiki、不合併。
 
 ## R8 文件同步 A／B：既有事件、工程錨點與現行佇列 — 2026-10-22
