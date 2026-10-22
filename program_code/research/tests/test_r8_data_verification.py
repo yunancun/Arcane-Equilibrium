@@ -106,6 +106,46 @@ def correction(cs,field,interval='D',timestamp=T):
     return next(c for c in cs if c['interval']==interval and c['timestamp']==timestamp and c['field']==field)
 
 
+V2 = 'v2-terminal-suffix-20261022'
+
+
+def v2_policy(p):
+    p.update(schema_version='r8_data_verification_policy_v2',
+             approval_event='RH-20261022-05',volume_semantics_policy=V2)
+
+
+def suffix_case(case):
+    # Fixed independent example: 24 original units plus a half-unit tail.
+    # The daily original already includes the tail. No width cutoff is allowed.
+    case.policy_change=v2_policy
+    case.daily[0]['volume']='24.5'
+    case.trades.insert(1,dict(timestamp=str(T//1000+1800)+'.0000002',
+        symbol='TESTUSDT',side='Sell',size='0.5',price='10',trdMatchID='tail'))
+
+
+def test_v2_complete_suffix_daily_already_contains_tail_keeps_volume(case):
+    suffix_case(case)
+    result,findings,cs,v=case.run()
+    assert result['status']=='READY',result
+    assert v['schema_version']=='r8_data_verification_v2'
+    assert v['volume_semantics_policy']==V2
+    rows=read(Path(result['artifact_root']),'volume_semantics.jsonl')
+    assert len(rows)==24
+    h=rows[0]
+    assert (h['hour_classification'],h['day_applicable'])==('TERMINAL_SUFFIX_EXACT',True)
+    assert (h['tail_count'],h['tail_group_count'],h['tail_volume'])==(1,1,'0.5')
+    assert h['tail_first_timestamp']==h['tail_last_timestamp']=='1609461000.0000002'
+    assert h['prefix_first_timestamp']=='1609459200.0000001' and h['prefix_count']==1
+    assert (h['original_volume'],h['trade_volume'],h['volume_delta'])==('1','1.5','-0.5')
+    assert correction(cs,'volume')['decision']=='KEEP'
+    assert correction(cs,'volume','60')['corrected_value']=='1.5'
+    assert correction(cs,'volume')['volume_source']=='trade_reconstructed_terminal_suffix'
+    assert correction(cs,'volume','60',T+HOUR)['volume_source']=='v1_strict'
+    assert {'C3_ORIGINAL_FAIL','TERMINAL_SUFFIX_SOURCE_SELECTED','SOURCE_TRUTH_UNVERIFIED'}<=set(h['reason_codes'])
+    assert any(f['rule_id']=='C3_QUANTITY' and f['reason_code']=='COVERAGE_CONFLICT' for f in findings)
+    assert all(c['row_action']=='include' for c in cs)
+
+
 @pytest.fixture
 def case(tmp_path):return Case(tmp_path)
 
@@ -977,3 +1017,340 @@ def test_l2_coverage_only_turnover_worklist(case,mode):
     else:
         assert (amount['decision'],amount['candidate_value'],amount['formula'])==('KEEP','180','sum_hourly_reported')
     assert not any(f['rule_id'] in ('DV-L3','C3_QUANTITY','C5_REBUILD') for f in findings)
+
+
+# §13.7 transcribed literals: independent of both verification implementations.
+V2_DAILY = [
+ 'R/K/R/K/K/R','U/K/K/K/K/R','Ks/K/K/K/K/R','K/K/K/R/R/R',
+ 'Ks/K/K/K/K/R','K/K/R/K/K/R','K/K/K/U/R/R','Ks/K/K/R/R/R',
+ 'K/K/K/R/R/R','U/K/K/K/K/R','U/K/K/R/R/U','U/U/U/U/U/R',
+ 'Ks/K/K/K/K/R','Ks/K/K/K/K/R','K/K/R/K/K/R','Ks/K/K/U/K/R',
+ 'U/K/K/R/R/R','K/K/R/K/K/R','U/K/K/U/R/R','U/K/K/R/R/R',
+ 'K/K/K/R/R/R','K/K/K/R/R/R','U/U/U/U/U/U','U/U/U/U/U/R',
+ 'K/K/R/K/K/R','Ks/K/K/K/K/R']
+
+
+def dv7_reverify(root,flow,*,previous=True):
+    """DV1 consumes real DV3 plan/originals, keeping its v1 sample bytes frozen."""
+    import shutil
+    root=Path(root);plan=read(root/'plan','sample_plan.json')
+    p=read(root/'plan','policy.json');v2_policy(p)
+    (root/'policy-v2.json').write_bytes(enc(p))
+    out=root/'bundle-v2'
+    kwargs=dict(p3b_root=root/'p3b',download_root=root/'downloads',
+        inventory_path=root/'downloads/download_inventory.jsonl',output_root=out,
+        policy_path=root/'policy-v2.json',readable=plan['readable'],symbols=[flow['symbol']],
+        sample_plan_path=root/'plan/sample_plan.json')
+    if previous:kwargs['previous_corrections_path']=root/'bundle/corrections.jsonl'
+    result=verify(**kwargs)
+    assert result['status']=='READY',result
+    assert (out/'sample_plan.json').read_bytes()==(root/'plan/sample_plan.json').read_bytes()
+    for name in ('manifest.json','requests.jsonl','download_inventory.jsonl'):
+        shutil.copyfile(root/'bundle'/name,out/name)
+    refs=[r for name in ('findings.jsonl','corrections.jsonl','volume_semantics.jsonl')
+          for item in read(out,name) for r in item['source_refs']]
+    refs += [r for item in read(out,'volume_semantics.jsonl')
+             for e in item['confidence_evidence'].values() for r in e['source_refs']]
+    for ref in refs:
+        name=ref['relative_path']
+        if name is None:continue
+        target=out/name
+        if target.exists():assert sha(target.read_bytes())==ref['sha256'];continue
+        source=next(p/name for p in (root/'p3b',root/'downloads',root/'bundle')
+                    if (p/name).is_file() and sha((p/name).read_bytes())==ref['sha256'])
+        target.parent.mkdir(parents=True,exist_ok=True);shutil.copyfile(source,target)
+    return result
+
+
+@pytest.fixture(scope='session')
+def dv7_main_verifier():
+    # Differential byte oracle is immutable reviewed main source, run with the
+    # same actual tool identity. No tool_commit byte is masked or rewritten.
+    import subprocess,types
+    from program_code.research.r8_data import verification as current
+    source=subprocess.check_output(['git','show',
+        '55586c1e919958bcac12437404ed7c164832a7fe:program_code/research/r8_data/verification.py'],cwd=SPEC.parents[2])
+    module=types.ModuleType('_dv7_reviewed_main');module.__file__=current.__file__
+    sys.modules[module.__name__]=module
+    exec(compile(source,current.__file__,'exec'),module.__dict__)
+    return module.verify
+
+
+@pytest.mark.parametrize('index',range(26),ids=[s+'-'+d for s,d,_ in CROSSCHECK])
+def test_dv7_26_days_spec_cells_tail_witnesses_and_v1_bytes(tmp_path,index,dv7_main_verifier,record_property):
+    base=Path('/Users/ncyu/Projects/TradeBot')
+    if not (base/'r8-research/crosscheck-20261022').exists():pytest.skip('frozen local originals unavailable')
+    root=tmp_path/'integration';flow=real_dv13_flow(root,index)
+    plan=read(root/'plan','sample_plan.json')
+    oracle=dv7_main_verifier(p3b_root=root/'p3b',download_root=root/'downloads',
+        inventory_path=root/'downloads/download_inventory.jsonl',output_root=root/'main-bundle',
+        policy_path=root/'plan/policy.json',readable=plan['readable'],symbols=[flow['symbol']],
+        sample_plan_path=root/'plan/sample_plan.json')
+    assert oracle['status']=='READY',oracle
+    hashes={}
+    for name in ('findings.jsonl','corrections.jsonl','verification.json'):
+        actual=(root/'bundle'/name).read_bytes();expected=(root/'main-bundle'/name).read_bytes()
+        assert actual==expected,name
+        hashes[name]=sha(actual)
+    legacy=read(root/'bundle','corrections.jsonl');t=flow['day_start']
+    prior=read(base/'audits/2026-10-22-r8-data-verify-dv1','26-day-results.json')[index]
+    for f in FIELDS:
+        c=correction(legacy,f,timestamp=t)
+        for key,value in prior['decisions'][f].items():assert c[key]==value,(f,key)
+    for f,ambiguous in zip(('open','close'),BOUNDARY_MULTI[index]):
+        assert (correction(legacy,f,timestamp=t)['order_status']=='TIMESTAMP_MULTI_PRICE')==ambiguous
+    result=dv7_reverify(root,flow)
+    cs=read(root/'bundle-v2','corrections.jsonl');rows=read(root/'bundle-v2','volume_semantics.jsonl')
+    expected=V2_DAILY[index].split('/')
+    for f,s in zip(FIELDS,expected):
+        c=correction(cs,f,timestamp=t)
+        assert c['decision']=={'K':'KEEP','Ks':'KEEP','R':'CORRECT','U':'UNRESOLVED'}[s],(f,c)
+        assert c['row_action']==('missing' if 'U' in expected else 'include')
+        if s=='Ks':assert c['reason_code']=='EXCHANGE_OPEN_SEMANTICS'
+        assert c['supersedes']==correction(legacy,f,timestamp=t)['correction_id']
+    tails=[r for r in rows if r['hour_classification']=='TERMINAL_SUFFIX_EXACT' and r['day_applicable']]
+    witnesses=[x for x in V2_TAIL_WITNESSES if x[0]==CROSSCHECK[index][0] and x[1]==CROSSCHECK[index][1]]
+    assert len(tails)==len(witnesses)
+    for symbol,date,hour,count,volume,first,tail_first,tail_last,groups,prefix_count in witnesses:
+        row=next(r for r in tails if r['timestamp']==t+hour*HOUR)
+        assert (row['tail_count'],row['tail_volume'],row['prefix_first_timestamp'])==(count,volume,first)
+        assert (row['tail_first_timestamp'],row['tail_last_timestamp'],row['tail_group_count'],row['prefix_count'])==(tail_first,tail_last,groups,prefix_count)
+        assert {'C3_ORIGINAL_FAIL','SOURCE_TRUTH_UNVERIFIED'}<=set(row['reason_codes'])
+    # §8.4.1 emits evidence only; the six effective scalar values carry none of it.
+    assert set(result['files'])=={'policy.json','findings.jsonl','corrections.jsonl','verification.json','sample_plan.json','volume_semantics.jsonl'}
+    effective=[{f:next(c['corrected_value'] if c['decision']=='CORRECT' else c['original_value']
+        for c in cs if (c['interval'],c['timestamp'],c['field'])==(interval,stamp,f)) for f in FIELDS}
+        for interval,stamp in sorted({(c['interval'],c['timestamp']) for c in cs if c['row_action']=='include'})]
+    assert all(set(row)==set(FIELDS) and all(isinstance(v,str) for v in row.values()) for row in effective)
+    record_property('dv7',json.dumps(dict(symbol=flow['symbol'],date=CROSSCHECK[index][1],v1_sha256=hashes,
+        field_cells=42,boundary_flags=2,v2_daily=expected,selected_hours=len(tails),tail_count=sum(r['tail_count'] for r in tails),bundle=str(root/'bundle-v2')),sort_keys=True))
+
+
+@pytest.mark.parametrize('mutation,classification',[
+ ('subset','PARTIAL_TIMESTAMP_SUBSET'),('no_suffix','NO_COMPLETE_SUFFIX'),
+ ('positive','POSITIVE_VOLUME_DELTA'),('empty','EMPTY_PREFIX'),
+ ('c2','C2_CONFLICT'),('missing','MISSING_ORIGINAL_HOUR'),('c1','C1_INVALID')])
+def test_v2_rejects_incomplete_or_invalid_day_without_fallback(case,mutation,classification):
+    suffix_case(case)
+    if mutation in ('subset','no_suffix'):
+        case.trades.insert(2,dict(case.trades[1],size='0.7',trdMatchID='same-time'))
+        case.hours[0]['volume']='1.8' if mutation=='no_suffix' else '1.7'
+    elif mutation=='positive':case.hours[0]['volume']='2'
+    elif mutation=='empty':case.hours[0]['volume']='0'
+    elif mutation=='c2':case.trades=[x for x in case.trades if x['trdMatchID']!='1']
+    elif mutation=='missing':case.hours.pop(0)
+    elif mutation=='c1':case.trades[1]['trdMatchID']='0'
+    a,fs,cs,_=case.run();assert a['status']=='READY',a
+    rows=read(Path(a['artifact_root']),'volume_semantics.jsonl')
+    target=T+HOUR if mutation=='c2' else T
+    assert next(r for r in rows if r['timestamp']==target)['hour_classification']==classification
+    assert not any(r['day_applicable'] for r in rows)
+    assert correction(cs,'volume')['decision']=='UNRESOLVED'
+    assert not any('TERMINAL_SUFFIX_SOURCE_SELECTED' in c['reason_codes'] for c in cs)
+
+
+def test_v2_multiple_hours_multiple_numeric_timestamp_groups(case):
+    suffix_case(case)
+    case.trades.insert(2,dict(case.trades[1],timestamp='1609461001.0000002',size='0.25',trdMatchID='tail2'))
+    case.trades.insert(4,dict(case.trades[1],timestamp='1609466400',size='0.5',trdMatchID='later'))
+    # 1609466400 is the next box: use an interior time for the second tail.
+    case.trades[4]['timestamp']='1609466399.9999999'
+    case.daily[0]['volume']='25.25'
+    a,_,cs,_=case.run();assert a['status']=='READY'
+    rows=read(Path(a['artifact_root']),'volume_semantics.jsonl')
+    assert [(r['tail_count'],r['tail_group_count'],r['tail_volume']) for r in rows[:2]]==[(2,2,'0.75'),(1,1,'0.5')]
+    assert all(r['day_applicable'] for r in rows)
+    assert correction(cs,'volume')['decision']=='KEEP'
+
+
+@pytest.mark.parametrize('boundary',['open','close'])
+def test_v2_boundary_mult_price_blocks_only_affected_field(case,boundary):
+    suffix_case(case)
+    i=0 if boundary=='open' else 1
+    case.trades.insert(i+1,dict(case.trades[i],price='11',size='0.1',trdMatchID='ambiguous'))
+    case.daily[0]['volume']='24.6'
+    if boundary=='open':case.hours[0]['volume']='1.1'
+    a,_,cs,_=case.run();assert a['status']=='READY'
+    c=correction(cs,boundary,'60')
+    assert c['decision']=='UNRESOLVED' and c['reason_code']=='TIMESTAMP_MULTI_PRICE'
+    assert c['row_action']=='missing'
+    assert correction(cs,'volume','60')['decision']=='CORRECT'
+
+
+def test_v2_post_l1_failure_preserves_selected_volume_and_original_c3(case):
+    suffix_case(case);case.hours[0].update(open='11',high='11')
+    a,fs,cs,_=case.run();assert a['status']=='READY'
+    assert all(c['row_action']=='missing' for c in cs if c['interval']=='60' and c['timestamp']==T)
+    assert correction(cs,'volume','60')['corrected_value']=='1.5'
+    assert 'POST_CORRECTION_L1_FAIL' in correction(cs,'high','60')['reason_codes']
+    assert any(f['reason_code']=='POST_CORRECTION_L1_FAIL' for f in fs)
+    assert any(f['rule_id']=='C3_QUANTITY' and f['reason_code']=='COVERAGE_CONFLICT' for f in fs)
+    assert not any(f['reason_code']=='C3_STRICT_PASS' for f in fs)
+
+
+def test_v2_invalid_open_does_not_gain_new_correction_authority(case):
+    suffix_case(case);case.daily[0]['open']='0'
+    a,_,cs,_=case.run();assert a['status']=='READY'
+    assert correction(cs,'open')['decision']=='UNRESOLVED'
+    assert correction(cs,'volume')['decision']=='KEEP'
+
+
+@pytest.mark.parametrize('change',[
+ lambda p:p.pop('schema_version'),lambda p:p.pop('volume_semantics_policy'),
+ lambda p:p.update(volume_semantics_policy='unknown'),lambda p:p.update(volume_semantics_policy='v1-strict'),
+ lambda p:p.update(schema_version='r8_data_verification_policy_v1'),lambda p:p.update(approval_event='RH-20261022-04'),
+ lambda p:p.update(extra=True)])
+def test_v2_policy_missing_unknown_or_inconsistent_rejected(case,change):
+    def invalid(p):v2_policy(p);change(p)
+    case.policy_change=invalid
+    a,*_=case.run();assert a['status']=='BLOCKED' and 'POLICY_MISMATCH' in a['reason_codes']
+
+
+# Independent investigation E_23_HOUR_TABLE.md / e-hour-rebuilds.json witnesses.
+V2_TAIL_WITNESSES = [
+    ('BCHUSDT', '2021-02-18', 12, 2, '0.58', '1613649600.1464', '1613653193.6058', '1613653193.7813', 2, 1907),
+    ('BCHUSDT', '2021-02-18', 23, 1, '0.1', '1613689236.8757', '1613692796.5758', '1613692796.5758', 1, 776),
+    ('BCHUSDT', '2021-02-28', 23, 1, '1.99', '1614553221.5927', '1614556798.7559', '1614556798.7559', 1, 878),
+    ('BCHUSDT', '2021-04-02', 8, 2, '0.81', '1617350411.4117', '1617353998.4274', '1617353998.7136', 2, 703),
+    ('BCHUSDT', '2021-04-02', 23, 1, '0.04', '1617404424.2353', '1617407997.2861', '1617407997.2861', 1, 435),
+    ('BTCUSDT', '2021-02-12', 12, 4, '0.423', '1613131204.5969', '1613134793.9543', '1613134799.6303', 3, 4178),
+    ('BTCUSDT', '2021-02-12', 17, 1, '0.001', '1613149201.529', '1613152796.5575', '1613152796.5575', 1, 3823),
+    ('BTCUSDT', '2021-02-12', 21, 2, '3', '1613163602.888', '1613167199.359', '1613167199.359', 1, 3450),
+    ('BTCUSDT', '2021-02-13', 8, 2, '0.033', '1613203200.231', '1613206799.1439', '1613206799.1772', 2, 6524),
+    ('BTCUSDT', '2021-02-13', 17, 2, '0.013', '1613235603.7484', '1613239199.5159', '1613239199.5599', 2, 2806),
+    ('BTCUSDT', '2021-02-14', 15, 3, '0.02', '1613314801.6059', '1613318398.4869', '1613318398.7442', 3, 6390),
+    ('BTCUSDT', '2021-02-14', 16, 2, '0.079', '1613318400.4643', '1613321997.5258', '1613321999.9987', 2, 3945),
+    ('BTCUSDT', '2021-02-27', 23, 4, '0.333', '1614466800.1404', '1614470397.8247', '1614470398.4796', 4, 12139),
+    ('ETHUSDT', '2021-04-01', 23, 2, '1.93', '1617318003.3117', '1617321596.0894', '1617321596.0903', 2, 734),
+    ('ETHUSDT', '2021-04-07', 10, 3, '0.17', '1617789601.0343', '1617793199.4473', '1617793199.6229', 3, 2542),
+    ('ETHUSDT', '2021-04-07', 16, 2, '3.61', '1617811202.8834', '1617814799.3476', '1617814799.9548', 2, 2439),
+    ('ETHUSDT', '2021-04-07', 23, 1, '0.69', '1617836403.9464', '1617839996.5873', '1617839996.5873', 1, 1496),
+    ('LINKUSDT', '2021-03-03', 10, 2, '92.4', '1614765600.285', '1614769187.7426', '1614769188.1207', 2, 683),
+    ('LINKUSDT', '2021-03-03', 14, 1, '37.7', '1614780012.5234', '1614783589.7446', '1614783589.7446', 1, 1122),
+    ('LINKUSDT', '2021-03-03', 23, 7, '199', '1614812405.4653', '1614815997.383', '1614815997.3833', 2, 676),
+    ('LTCUSDT', '2021-03-17', 9, 2, '2.2', '1615971610.8684', '1615975173.7629', '1615975173.9742', 2, 966),
+    ('LTCUSDT', '2021-04-10', 12, 7, '81.3', '1618056000.4971', '1618059589.5184', '1618059589.5839', 7, 1153),
+    ('XTZUSDT', '2021-03-24', 23, 1, '0.1', '1616626807.2922', '1616630395.8748', '1616630395.8748', 1, 672),
+]
+
+
+def test_v2_confidence_unknown_and_contradiction_never_change_selected_verdict(case):
+    suffix_case(case)
+    a,_,first,_=case.run()
+    semantics=read(Path(a['artifact_root']),'volume_semantics.jsonl')
+    assert semantics[0]['confidence_evidence']['tail_minute']['status']=='UNAVAILABLE'
+    assert semantics[0]['confidence_evidence']['next_hour_open']['status']=='SUPPORTS'
+    case.hours[1].update(open='11',high='11')
+    b,_,second,_=case.run()
+    semantics=read(Path(b['artifact_root']),'volume_semantics.jsonl')
+    assert semantics[0]['confidence_evidence']['next_hour_open']['status']=='CONTRADICTS'
+    for interval in ('D','60'):
+        for f in FIELDS:
+            x=correction(first,f,interval);y=correction(second,f,interval)
+            assert tuple(x[k] for k in ('decision','corrected_value','row_action'))==tuple(y[k] for k in ('decision','corrected_value','row_action'))
+
+
+def test_v2_numeric_timestamp_grouping_no_partial_equal_stamp_selection(case):
+    suffix_case(case)
+    case.trades[1]['timestamp']='1609461000.00000020'
+    case.trades.insert(2,dict(case.trades[1],timestamp='1.6094610000000002e9',size='0.5',trdMatchID='equal_numeric'))
+    case.hours[0]['volume']='1.5' # only half of the indivisible last stamp group
+    case.daily[0]['volume']='25'
+    a,_,cs,_=case.run();assert a['status']=='READY'
+    rows=read(Path(a['artifact_root']),'volume_semantics.jsonl')
+    assert rows[0]['hour_classification']=='PARTIAL_TIMESTAMP_SUBSET'
+    assert correction(cs,'volume')['decision']=='UNRESOLVED'
+
+
+def test_v2_no_next_day_or_outside_readable_market_decode(case):
+    suffix_case(case)
+    # Move the tail to 23:00; no following-day price may be read for confidence.
+    tail=case.trades.pop(1);tail['timestamp']='1609545599.123456789';case.trades.append(tail)
+    case.hours.append(bar(T+DAY,open='POISON',high='POISON',low='POISON',close='POISON',volume='POISON',turnover='POISON'))
+    a,_,cs,_=case.run();assert a['status']=='READY'
+    rows=read(Path(a['artifact_root']),'volume_semantics.jsonl')
+    assert rows[-1]['hour_classification']=='TERMINAL_SUFFIX_EXACT'
+    assert rows[-1]['confidence_evidence']['next_hour_open']['status']=='UNAVAILABLE'
+    assert b'POISON' not in b''.join((Path(a['artifact_root'])/n).read_bytes() for n in a['files'])
+    case.readable['end']=T+12*HOUR
+    b,_,cs,_=case.run();assert b['status']=='READY'
+    rows=read(Path(b['artifact_root']),'volume_semantics.jsonl')
+    assert rows and all(r['hour_classification']=='OUT_OF_SCOPE' and not r['day_applicable'] for r in rows)
+    assert not any('TRADE_SOURCE_SELECTED_BY_E' in c['reason_codes'] for c in cs)
+
+
+def test_v2_real_dv3_plan_and_originals_and_evidence_only_handoff(tmp_path):
+    root=tmp_path/'actual';flow=real_dv13_flow(root,configure=suffix_case)
+    result=dv7_reverify(root,flow)
+    assert flow['network_requests']==0
+    p=read(root/'bundle-v2','policy.json');v=read(root/'bundle-v2','verification.json')
+    assert v['standard_sha256']==sha(SPEC.read_bytes())
+    assert v['policy_sha256']==sha(enc(p))
+    assert v['sample_plan_sha256']==flow['plan']['primary_sha256']
+    assert all(name in {'policy.json','verification.json','findings.jsonl','corrections.jsonl','volume_semantics.jsonl','sample_plan.json'} for name in result['files'])
+    cs=read(root/'bundle-v2','corrections.jsonl')
+    for c in cs:
+        assert not {'tail_count','confidence_evidence','hour_classification'}&set(c)
+        if c['decision']=='KEEP':assert c['corrected_value'] is None
+    # No effective-value file is emitted by DV1: DV2 owns the U4 writer.
+    assert not (root/'bundle-v2/source').exists()
+
+
+def test_v2_frozen_sample_policy_mismatch_is_not_blanket_exempt(case):
+    suffix_case(case);case.write()
+    p=policy(sha((case.p3b/'manifest.json').read_bytes()))
+    plan=dict(schema_version='r8_verification_sample_plan_v1',policy_sha256='a'*64,
+        p3b_manifest_sha256=p['p3b_manifest_sha256'],readable=case.readable,seed=20261022,
+        strata=[dict(year=2021,tier='NO_OPEN',population_size=1,base_size=1,max_size=1,
+            draws=[dict(rank=1,symbol='TESTUSDT',day_start=T)])])
+    path=case.root/'sample_plan.json';path.write_bytes(enc(plan))
+    a,*_=case.run(sample_plan_path=path)
+    assert a['status']=='BLOCKED' and 'SAMPLE_IDENTITY' in a['reason_codes']
+
+
+@pytest.mark.parametrize('standard',[
+ 'ad80220cd6dc3f8dc5c451c6281aa9f1b2acf7fbb47bc80ed21eb3905710110c',
+ '125901d0341487bd058be70e7cc2ed27be7c3be270a45d05587e471104b7cacf'])
+def test_v2_historical_v1_frozen_policy_identity_is_retained(case,standard):
+    suffix_case(case);case.write()
+    manifest=sha((case.p3b/'manifest.json').read_bytes())
+    p=policy(manifest);p['standard_sha256']=standard
+    plan=dict(schema_version='r8_verification_sample_plan_v1',policy_sha256=sha(enc(p)),
+        p3b_manifest_sha256=manifest,readable=case.readable,seed=20261022,
+        strata=[dict(year=2021,tier='NO_OPEN',population_size=1,base_size=1,max_size=1,
+            draws=[dict(rank=1,symbol='TESTUSDT',day_start=T)])])
+    path=case.root/'sample_plan.json';path.write_bytes(enc(plan));before=path.read_bytes()
+    a,_,cs,v=case.run(sample_plan_path=path)
+    assert a['status']=='READY',a
+    assert v['sample_plan_sha256']==sha(before)
+    assert (Path(a['artifact_root'])/'sample_plan.json').read_bytes()==before
+    assert correction(cs,'volume','60')['corrected_value']=='1.5'
+
+
+def test_v2_identity_precedes_c1_and_retains_all_input_failures(case):
+    suffix_case(case)
+    case.trades[1].update(symbol='WRONGUSDT',price='UNREADABLE_OTHER_SYMBOL',size='UNREADABLE_OTHER_SYMBOL')
+    a,_,cs,_=case.run();assert a['status']=='READY'
+    rows=read(Path(a['artifact_root']),'volume_semantics.jsonl')
+    assert rows[0]['hour_classification']=='IDENTITY_UNCERTAIN'
+    assert {'IDENTITY_UNCERTAIN','C1_INVALID'}<=set(rows[0]['reason_codes'])
+    assert not any(r['day_applicable'] for r in rows)
+    assert b'UNREADABLE_OTHER_SYMBOL' not in b''.join((Path(a['artifact_root'])/n).read_bytes() for n in a['files'])
+
+
+def test_v2_no_suffix_day_retains_v1_post_l1_unresolved_decisions(case):
+    case.hours[0].update(open='11',high='11')
+    _,_,v1,_=case.run();case.policy_change=v2_policy
+    a,_,v2,_=case.run();assert a['status']=='READY'
+    assert all(r['hour_classification']=='STRICT_C3' and not r['day_applicable'] for r in read(Path(a['artifact_root']),'volume_semantics.jsonl'))
+    for f in FIELDS:
+        old=correction(v1,f,'60');new=correction(v2,f,'60')
+        assert tuple(old[k] for k in ('decision','corrected_value','row_action'))==tuple(new[k] for k in ('decision','corrected_value','row_action'))
+
+
+@pytest.mark.parametrize('bad',[[],None,'v2-terminal-suffix-20261022'])
+def test_v2_non_object_policy_is_rejected_with_fixed_reason(case,bad):
+    case.write();path=case.root/'bad-policy.json';path.write_bytes(enc(bad))
+    result=verify(p3b_root=case.p3b,download_root=case.dl,inventory_path=case.dl/'download_inventory.jsonl',
+        output_root=case.root/'invalid-policy-output',policy_path=path,readable=case.readable,symbols=['TESTUSDT'])
+    assert result['status']=='BLOCKED' and result['reason_codes']==['POLICY_MISMATCH']

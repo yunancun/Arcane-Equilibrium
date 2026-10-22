@@ -723,3 +723,157 @@ def test_real_bundle_rejects_forged_row_positions(tmp_path,mutation,reason):
     rewrite_corrections(root,rows)
     result=v.summarize_sample(tmp_path/'plan',[root],tmp_path/'tampered-summary')
     assert result['status']=='BLOCKED' and result['reason_codes']==[reason],result
+
+
+def v2_integration(root,configure=None):
+    from program_code.research.tests.test_r8_data_verification import real_dv13_flow,dv7_reverify,suffix_case
+    flow=real_dv13_flow(root,configure=configure or suffix_case)
+    dv7_reverify(root,flow)
+    return flow
+
+
+def test_v2_real_dv1_bundle_is_consumed_with_confirmed_error_priority(tmp_path):
+    from program_code.research.tests.test_r8_data_verification import suffix_case
+    def configure(case):
+        suffix_case(case)
+        case.hours[0].update(open='11',high='11') # retained open -> L1 missing, V correction remains error
+    root=tmp_path/'real';v2_integration(root,configure)
+    r=v.summarize_sample(root/'plan',[root/'bundle-v2'],tmp_path/'summary')
+    assert r['primary_file']=='sample_report.txt',r
+    text=(tmp_path/'summary/sample_report.txt').read_text()
+    assert 'N=1 n=1 e=1 u=0 s=0' in text
+    assert 'EVIDENCE_INCOMPLETE' not in r['reason_codes']
+
+
+def test_v2_same_frozen_sample_dual_policy_five_sections_no_acceptance_default(tmp_path):
+    root=tmp_path/'real';v2_integration(root)
+    before=(root/'plan/sample_plan.json').read_bytes()
+    r=v.summarize_policies(root/'plan',[root/'bundle'],[root/'bundle-v2'],tmp_path/'dual')
+    assert r['primary_file']=='sample_report.txt',r
+    report=(tmp_path/'dual/sample_report.txt').read_text()
+    assert (root/'plan/sample_plan.json').read_bytes()==before
+    for literal in ('n_error_v1=0','n_unresolved_v1=1','n_semantics_v1=0',
+        'n_terminal_source_selected_days=1','n_terminal_source_selected_hours=1','n_tail_trades=1',
+        'n_error_policy=1','n_unresolved_policy=0','n_semantics_policy=0',
+        'n_source_truth_unverified=1','risk_union_days=1','acceptance_target=PENDING_OPERATOR_DECISION',
+        'v1-strict','v2-terminal-suffix-20261022','availability','level=full_batch','level=base_stratum',
+        'interval=D n_volume_corrected_e=0','interval=60 n_volume_corrected_e=1'):
+        assert literal in report,literal
+    assert 'acceptance=PASS' not in report and '驗收通過' not in report
+    assert 'ACCEPTANCE_TARGET_PENDING' in r['reason_codes']
+
+
+@pytest.mark.parametrize('field,value',[
+ ('tail_count',999),('tail_volume','99'),('prefix_first_timestamp','0'),
+ ('hour_classification','STRICT_C3'),('day_applicable',False),('volume_source','v1_strict')])
+def test_v2_semantics_forgery_cannot_authenticate_corrected_quantity(tmp_path,field,value):
+    root=tmp_path/'real';v2_integration(root)
+    bundle=root/'bundle-v2';p=bundle/'volume_semantics.jsonl'
+    rows=[json.loads(x) for x in p.read_bytes().splitlines()];rows[0][field]=value
+    p.write_bytes(b''.join(v.encoded(x) for x in rows))
+    vp=bundle/'verification.json';verification=json.loads(vp.read_bytes())
+    verification['files'][p.name]['sha256']=v.sha(p.read_bytes());vp.write_bytes(v.encoded(verification))
+    result=v.summarize_sample(root/'plan',[bundle],tmp_path/'summary')
+    assert result['status']=='BLOCKED'
+    assert 'VOLUME_SEMANTICS_EVIDENCE_MISMATCH' in result['reason_codes'],result
+
+
+def test_v2_historical_plan_can_drive_both_policies_without_rewriting_draws(tmp_path):
+    from program_code.research.tests.test_r8_data_verification import real_dv13_flow,suffix_case,dv7_reverify,verify,read,enc
+    import shutil
+    root=tmp_path/'real';flow=real_dv13_flow(root,configure=suffix_case)
+    p=read(root/'plan','policy.json');p['standard_sha256']='ad80220cd6dc3f8dc5c451c6281aa9f1b2acf7fbb47bc80ed21eb3905710110c'
+    (root/'plan/policy.json').write_bytes(enc(p));plan=read(root/'plan','sample_plan.json')
+    plan['policy_sha256']=v.sha(enc(p));data=enc(plan)
+    (root/'plan/sample_plan.json').write_bytes(data);(root/'plan/sample_plan.sha256').write_text(v.sha(data)+'\n')
+    old_bundle=root/'before-policy-transition';shutil.move(root/'bundle',old_bundle)
+    r=verify(p3b_root=root/'p3b',download_root=root/'downloads',inventory_path=root/'downloads/download_inventory.jsonl',
+        output_root=root/'bundle',policy_path=root/'plan/policy.json',readable=plan['readable'],symbols=[flow['symbol']],sample_plan_path=root/'plan/sample_plan.json')
+    assert r['status']=='READY',r
+    for pth in old_bundle.rglob('*'):
+        if pth.is_file() and pth.name not in r['files']:
+            target=root/'bundle'/pth.relative_to(old_bundle);target.parent.mkdir(parents=True,exist_ok=True);shutil.copyfile(pth,target)
+    # v2 uses the new approved standard while the plan retains its historic v1 policy.
+    current=v._policy(plan['p3b_manifest_sha256'],v.V2)
+    (root/'policy-v2.json').write_bytes(enc(current))
+    r=verify(p3b_root=root/'p3b',download_root=root/'downloads',inventory_path=root/'downloads/download_inventory.jsonl',
+        output_root=root/'bundle-v2',policy_path=root/'policy-v2.json',readable=plan['readable'],symbols=[flow['symbol']],sample_plan_path=root/'plan/sample_plan.json',previous_corrections_path=root/'bundle/corrections.jsonl')
+    assert r['status']=='READY',r
+    for pth in (root/'bundle').rglob('*'):
+        if pth.is_file() and pth.name not in r['files']:
+            target=root/'bundle-v2'/pth.relative_to(root/'bundle');target.parent.mkdir(parents=True,exist_ok=True);shutil.copyfile(pth,target)
+    result=v.summarize_policies(root/'plan',[root/'bundle'],[root/'bundle-v2'],tmp_path/'dual')
+    assert result['primary_file']=='sample_report.txt',result
+    assert (root/'plan/sample_plan.json').read_bytes()==data
+
+
+@pytest.mark.parametrize('status',['UNAVAILABLE','CONTRADICTS','AMBIGUOUS'])
+def test_v2_confidence_is_not_a_statistical_gate(tmp_path,status):
+    root=tmp_path/'real';v2_integration(root)
+    bundle=root/'bundle-v2';path=bundle/'volume_semantics.jsonl'
+    rows=[json.loads(x) for x in path.read_bytes().splitlines()]
+    for r in rows:
+        for name in r['confidence_evidence']:
+            r['confidence_evidence'][name]={'status':status,'source_refs':[],'details':[]}
+    path.write_bytes(b''.join(v.encoded(x) for x in rows))
+    vp=bundle/'verification.json';verification=json.loads(vp.read_bytes())
+    verification['files'][path.name]['sha256']=v.sha(path.read_bytes());vp.write_bytes(v.encoded(verification))
+    result=v.summarize_sample(root/'plan',[bundle],tmp_path/'summary')
+    assert result['primary_file']=='sample_report.txt',result
+    assert 'N=1 n=1 e=1 u=0 s=0' in (tmp_path/'summary/sample_report.txt').read_text()
+    assert 'EVIDENCE_INCOMPLETE' not in result['reason_codes']
+
+
+def test_v2_dual_report_preserves_overlapping_l1_flag_on_confirmed_error_day(tmp_path):
+    from program_code.research.tests.test_r8_data_verification import suffix_case
+    def configure(case):suffix_case(case);case.hours[0].update(open='11',high='11')
+    root=tmp_path/'real';v2_integration(root,configure)
+    result=v.summarize_policies(root/'plan',[root/'bundle'],[root/'bundle-v2'],tmp_path/'dual')
+    assert result['primary_file']=='sample_report.txt'
+    report=(tmp_path/'dual/sample_report.txt').read_text()
+    assert 'overlapping_unresolved_flags policy=v2-terminal-suffix-20261022' in report
+    assert '"POST_CORRECTION_L1_FAIL":1' in report
+    assert 'n_error_policy=1 n_unresolved_policy=0' in report
+
+
+@pytest.mark.parametrize('turnover_error',[False,True])
+def test_v2_missing_original_is_day_unresolved_with_confirmed_error_priority(tmp_path,turnover_error):
+    from program_code.research.tests.test_r8_data_verification import suffix_case,read
+    def configure(case):
+        suffix_case(case)
+        if turnover_error:case.daily[0]['turnover']='239'
+    root=tmp_path/'real';v2_integration(root,configure)
+    bundle=root/'bundle-v2'
+    ref=next(r for c in read(bundle,'corrections.jsonl') for r in c['source_refs'] if r['kind']=='trade' and r['relative_path'])
+    path=bundle/ref['relative_path'];path.rename(path.with_name(path.name+'.held'))
+    result=v.summarize_sample(root/'plan',[bundle],tmp_path/'summary')
+    assert result['primary_file']=='sample_report.txt',result
+    report=(tmp_path/'summary/sample_report.txt').read_text()
+    assert ('N=1 n=1 e=1 u=0 s=0' if turnover_error else 'N=1 n=1 e=0 u=1 s=0') in report
+    assert 'EVIDENCE_INCOMPLETE' in result['reason_codes']
+
+
+@pytest.mark.parametrize('name',['verification.json','policy.json'])
+def test_v2_non_object_input_is_rejected_without_uncaught_exception(tmp_path,name):
+    root=tmp_path/'real';v2_integration(root)
+    path=root/('bundle-v2' if name=='verification.json' else 'plan')/name
+    path.write_bytes(v.encoded([]))
+    result=v.summarize_sample(root/'plan',[root/'bundle-v2'],tmp_path/'summary')
+    assert result['status']=='BLOCKED' and result['primary_file'] is None
+
+
+def test_v2_partial_only_batch_reports_availability_without_random_sample_claim(tmp_path):
+    from program_code.research.tests.test_r8_data_verification import T as start,HOUR,real_dv13_flow,dv7_reverify
+    def configure(case):
+        case.hours=case.hours[6:];case.trades=case.trades[6:];case.first=start+6*HOUR
+        case.daily[0].update(volume='18.5',turnover='180')
+        case.trades.insert(1,dict(case.trades[0],timestamp='1609482600.0000002',size='0.5',trdMatchID='tail'))
+    root=tmp_path/'real';flow=real_dv13_flow(root,configure=configure);dv7_reverify(root,flow)
+    result=v.summarize_policies(root/'plan',[root/'bundle'],[root/'bundle-v2'],tmp_path/'dual')
+    assert result['primary_file']=='sample_report.txt',result
+    report=(tmp_path/'dual/sample_report.txt').read_text()
+    assert 'level=full_batch day_denominator=1' in report
+    assert 'sampling_population=EMPTY_POPULATION' in report
+    assert 'level=base_stratum' not in report and 'conservative_upper=' not in report
+    assert 'n_terminal_source_selected_days=1' in report
+    assert 'ACCEPTANCE_TARGET_PENDING' in result['reason_codes']
