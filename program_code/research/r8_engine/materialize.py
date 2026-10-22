@@ -34,8 +34,9 @@ HEADERS = {
 DATASETS = (('kline', '60'), ('kline', 'D'), ('open_interest', '4h'), ('funding', 'funding'))
 TRAIN_END = 1751328000000
 V2 = 'v2-terminal-suffix-20261022'
-STANDARD_SHA256 = 'ba65fbca3b9230ad1807b82c923e9e60ab870edbe5c1e0d5090ebce99b06f6d0'
-V1_STANDARDS = (STANDARD_SHA256, '125901d0341487bd058be70e7cc2ed27be7c3be270a45d05587e471104b7cacf',
+STANDARD_SHA256 = 'afcb87578676c998b4ce7529c6e1c09d5214cfe7e8af53ad03d120781c696931'
+V1_STANDARDS = (STANDARD_SHA256, 'd0fbf9ff02d080027d575eb6488f2c552c3a583485b8c685166fe0ef94b2af98',
+                'ba65fbca3b9230ad1807b82c923e9e60ab870edbe5c1e0d5090ebce99b06f6d0', '125901d0341487bd058be70e7cc2ed27be7c3be270a45d05587e471104b7cacf',
                 'ad80220cd6dc3f8dc5c451c6281aa9f1b2acf7fbb47bc80ed21eb3905710110c')
 # Reviewed deployment pins: (P3b SHA, readable start/end, symbols, verification.json SHA).
 # No directory scan, caller policy selection, mutable latest, or unverified fallback.
@@ -46,7 +47,7 @@ REF_KEYS = set('kind relative_path url sha256 row request_id list_index byte_sta
 CORRECTION_KEYS = set('schema_version correction_id symbol dataset interval timestamp field original_value candidate_value corrected_value unit formula evidence_kind source_refs coverage_status order_status rule_ids decision reason_code row_action policy_sha256 approval_event supersedes'.split())
 VERIFICATION_KEYS = set('schema_version status policy_sha256 p3b_manifest_sha256 sample_plan_sha256 previous_corrections_sha256 review_refs tool_commit readable counts files reason_codes'.split())
 SEMANTIC_KEYS = set('schema_version policy_sha256 volume_semantics_policy symbol day_start timestamp hour_classification day_applicable original_volume trade_volume volume_delta volume_source tail_group_count tail_count tail_volume tail_first_timestamp tail_last_timestamp prefix_first_timestamp prefix_count source_refs reason_codes confidence_evidence'.split())
-HOUR_CLASSIFICATIONS = set('STRICT_C3 TERMINAL_SUFFIX_EXACT PARTIAL_TIMESTAMP_SUBSET NO_COMPLETE_SUFFIX POSITIVE_VOLUME_DELTA MISSING_ORIGINAL_HOUR IDENTITY_UNCERTAIN OUT_OF_SCOPE C1_INVALID C2_CONFLICT EMPTY_PREFIX'.split())
+HOUR_CLASSIFICATIONS = set('STRICT_C3 TERMINAL_SUFFIX_EXACT PARTIAL_SUBSET_UNDETERMINED PARTIAL_TIMESTAMP_SUBSET NO_COMPLETE_SUFFIX POSITIVE_VOLUME_DELTA MISSING_ORIGINAL_HOUR IDENTITY_UNCERTAIN OUT_OF_SCOPE C1_INVALID C2_CONFLICT EMPTY_PREFIX'.split())
 
 
 def _fail(reason):

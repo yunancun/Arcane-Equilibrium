@@ -571,6 +571,60 @@ LOCAL_P3B=Path('/Users/ncyu/Projects/TradeBot/r8-research/data/p3b-20261020')
 LOCAL_CROSSCHECK=Path('/Users/ncyu/Projects/TradeBot/r8-research/crosscheck-20261022')
 
 
+_PEER_MATERIALIZATIONS = {}
+
+
+@pytest.fixture(scope='session', params=[1, 2])
+def real_peer_materialization(request, tmp_path_factory):
+    """Shared immutable output of real verify, preregister and U4, for both peers."""
+    if not LOCAL_P3B.exists() or not LOCAL_CROSSCHECK.exists():
+        pytest.skip('frozen local crosscheck/P3b originals unavailable')
+    key = (str(tmp_path_factory.getbasetemp()), request.param)
+    if key not in _PEER_MATERIALIZATIONS:
+        root = tmp_path_factory.mktemp('real-peers-v'+str(request.param))
+        case = actual_bch_bundle(root, request.param)
+        outputs = {}
+        with pytest.MonkeyPatch.context() as pins:
+            # Only deployment identity is injected; every producer/consumer is real.
+            pins.setattr(mod, 'VERIFICATION_BUNDLES', ((case.manifest_sha, case.start,
+                case.end, ('BCHUSDT','BTCUSDT'), case.bundle_sha),))
+            for family in ('ordinary', 'listing'):
+                record = registration(lookback=(1607904000000-case.start)//1000)
+                record['data_range']['end'] = '2028-01-01T00:00:00Z'
+                record['time_splits'][-1]['end'] = '2028-01-01T00:00:00Z'
+                record['selection']['symbols'] = ['BCHUSDT']
+                record.update(data_family=family, data_policy_sha256=case.policy_sha)
+                book = ResearchLedger(root/('ledger-'+family))
+                registered = book.preregister(record)
+                out = root/family
+                manifest = mod.materialize(u1=case.u1, u1_manifest_sha256=case.manifest_sha,
+                    ledger=book.out, hypothesis='h1', window={'start':1607904000000,'end':case.end}, out=out)
+                assert dv_read(out,'verification/hypothesis_binding.json')['registration_sha256'] == registered
+                outputs[family] = dict(root=out, manifest=manifest, registration_sha256=registered)
+        _PEER_MATERIALIZATIONS[key] = dict(case=case, version=request.param, outputs=outputs)
+    return _PEER_MATERIALIZATIONS[key]
+
+
+def peer_view_rows(out, symbol='BCHUSDT'):
+    """Decode actual U4 files into U5's public data-view input shape."""
+    from program_code.research.r8_engine.lean_algo import rules
+    datasets = {}
+    for name in ('kline_day','funding','open_interest','turnover_hour','turnover_day'):
+        rows = []
+        for row in csv.reader((out/'custom'/name/(symbol.lower()+'.csv')).read_text().splitlines()):
+            value = dict(known_at=int(row[0]), t=int(row[1]))
+            if name == 'kline_day': value.update(dict(zip(('open','high','low','close','volume'),row[2:])))
+            else: value['value'] = row[2]
+            rows.append(value)
+        datasets[name] = rows
+    datasets['kline_hour'] = [dict(r, t=int(r['timestamp']), known_at=int(r['timestamp'])+DV_HOUR)
+        for r in csv.DictReader((out/'source'/('kline_'+symbol+'_60.csv')).read_text().splitlines())]
+    datasets['listing_regime'] = [dict(known_at=int(r['known_at']),day_start=int(r['day_start']),
+        stage=r['stage'],reason_code=r['reason_code'],cooling=json.loads(r['cooling']))
+        for r in csv.DictReader((out/'custom/listing_regime'/(symbol.lower()+'.csv')).read_text().splitlines())]
+    return rules.index_data({symbol:datasets})
+
+
 def actual_bch_bundle(root,version):
     """Copy opaque originals; real verify alone decodes the approved training prefix."""
     from types import SimpleNamespace
@@ -600,6 +654,7 @@ def actual_bch_bundle(root,version):
     inventory.sort(key=lambda r:(r['symbol'],r['day_start'],r['source_kind'],r['interval'],r['request_id']))
     inv=root/'download_inventory.jsonl';inv.write_bytes(b''.join(dv_encode(r) for r in inventory))
     p=json.loads(Path(mod.__file__).with_name('data_verification_policy.json').read_bytes())
+    p['standard_sha256']=digest((Path(__file__).resolve().parents[3]/'docs/execution_plan/2026-10-22--r8-stage2-data-verification-standard.md').read_bytes())
     if version==1:p.pop('volume_semantics_policy');p.update(schema_version='r8_data_verification_policy_v1',approval_event='RH-20261022-04')
     policy=root/'policy.json';policy.write_bytes(dv_encode(p))
     result=verifier.verify(p3b_root=u1,download_root=downloads,inventory_path=inv,output_root=root/'verified',
@@ -888,3 +943,45 @@ def test_sample_plan_identity_and_schema_rejected(tmp_path,monkeypatch,mutation)
         mutate_bundle(case,'verification.json',lambda r:r.update(sample_plan_sha256=digest((case.bundle/'sample_plan.json').read_bytes())))
     with pytest.raises(mod.MaterializationError,match='SAMPLE'):mod.materialize(**case.args)
     assert dv_read(tmp_path/'result.blocked','verification.json')['status']=='BLOCKED'
+
+
+_PEER_RUNS = {}
+
+
+@pytest.fixture(scope='session')
+def real_peer_run(real_peer_materialization):
+    """Execute the committed U5 with a local Colima image, never a process double."""
+    import os
+    import subprocess
+    import tempfile
+    from program_code.research.r8_engine import lean_runner
+    from program_code.research.tests.test_r8_engine_series import cost_parameters
+    if os.environ.get('R8_REAL_LEAN') != '1':
+        pytest.skip('local Colima runtime integration requires R8_REAL_LEAN=1')
+    assert subprocess.check_output(['docker','context','show'],text=True).strip() == 'colima'
+    subprocess.run(['docker','image','inspect',lean_runner.IMAGE],check=True,stdout=subprocess.DEVNULL)
+    peer = real_peer_materialization; output = peer['outputs']['listing']; root = output['root']
+    assert root.is_relative_to('/Users')
+    repo = Path(__file__).resolve().parents[3]
+    head = subprocess.check_output(['git','-C',str(repo),'rev-parse','HEAD'],text=True).strip()
+    key = (str(root),head)
+    if key not in _PEER_RUNS:
+        manifest = output['manifest']; t = manifest['window']['start']+DV_HOUR
+        config = dict(trial_id=None,materialization_sha256=digest(canonical(manifest)),
+            code_commit=head,engine_commit=head,symbols=manifest['strategy_symbols'],initial_cash='100000',
+            leverage='10',gross_exposure_cap='1',decision_resolution='hour',sharpe_frequency_seconds=3600,
+            warmup=manifest['warmup'],score_windows=[manifest['window']],folds=[],model_artifact=None,
+            random_seed=1,strategy=dict(grid=[dict(score='1')],neighborhood=dict(numeric={},categorical=['score']),
+                schedule=[dict(t=t,targets={'BCHUSDT':{'quantity':'1'}})],
+                visibility_probe=dict(t=t,symbol='BCHUSDT',dataset='listing_regime',field='stage',map={'initial':'1'})),
+            algorithm=dict(path=lean_runner.EXAMPLE,**{'class':'FixedSchedule'}),mode='validation',cost=cost_parameters())
+        out = root.parent/'lean-run'; tmp = root.parent/'container-inputs'; tmp.mkdir()
+        (root.parent/'run-config.json').write_bytes(canonical(config))
+        with pytest.MonkeyPatch.context() as local_tmp:
+            local_tmp.setattr(tempfile,'tempdir',str(tmp))
+            result = lean_runner.execute(config,root,out,repo=repo)
+        assert result['status'] == 'completed', (result['failure_reason'],str(out/'lean.log'))
+        assert result['decisions'] and result['voided']
+        assert result['docker_argv'][result['docker_argv'].index('--network')+1] == 'none'
+        _PEER_RUNS[key] = dict(materialization=root/'materialization.json',run=out/'run.json',result=result)
+    return _PEER_RUNS[key]

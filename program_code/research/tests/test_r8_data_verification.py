@@ -1082,7 +1082,7 @@ def dv7_main_verifier():
     import subprocess,types
     from program_code.research.r8_data import verification as current
     source=subprocess.check_output(['git','show',
-        '55586c1e919958bcac12437404ed7c164832a7fe:program_code/research/r8_data/verification.py'],cwd=SPEC.parents[2])
+        'a892fea5a171dd1b7fda421e7b2d4c3bf9c1de13:program_code/research/r8_data/verification.py'],cwd=SPEC.parents[2])
     module=types.ModuleType('_dv7_reviewed_main');module.__file__=current.__file__
     sys.modules[module.__name__]=module
     exec(compile(source,current.__file__,'exec'),module.__dict__)

@@ -1843,14 +1843,51 @@ def test_dv5_three_entry_mask_keeps_targets_and_never_restores_listing_history(c
     assert len(dv5_data()['X']['kline_hour']) == 5
 
 
-@pytest.mark.skip(reason='待 DV2／DV6 真實實作：DV2 materialize.py 的真實物化、listing_regimes.jsonl、custom/listing_regime、hypothesis_binding.json 及 turnover_decisions.jsonl，經 U5 score/fit/decision')
-def test_dv5_pending_real_dv2_materialization_views():
-    pass
+from program_code.research.tests.test_r8_engine_materialize import (
+    real_peer_materialization, real_peer_run, peer_view_rows)
 
 
-@pytest.mark.skip(reason='待 DV2／DV6 真實實作：DV2 真實物化及 DV5 真實 run.json 交給 DV6 series.py recompute，核對 recompute_passed=true 與 differences=[]')
-def test_dv5_pending_real_dv6_recompute():
-    pass
+def test_dv5_real_dv2_materialization_views(real_peer_materialization, cost, record_property):
+    from program_code.research.r8_engine import lean_runner
+    peer = real_peer_materialization
+    for family, output in peer['outputs'].items():
+        root, manifest = output['root'], output['manifest']
+        binding = lean_runner.verification_bundle(root,manifest)
+        assert binding['family'] == family
+        data = peer_view_rows(root); calls = []
+        class Probe(rules.R8Hypothesis):
+            def inspect(self, view, name):
+                calls.append(name)
+                assert list(view) == ['BCHUSDT']
+                assert view['BCHUSDT']['listing_regime'][-1]['stage'] == 'initial'
+                if family == 'ordinary':
+                    assert not any(k in view['BCHUSDT'] for k in ('kline_hour','kline_day','turnover_hour','turnover_day'))
+                else:
+                    assert view['BCHUSDT']['kline_hour']
+            def score(self, params, train_window, validation_window, data, cost):
+                self.inspect(data,'score'); return '1'
+            def fit(self, fit_window, data, params):
+                self.inspect(data,'fit'); return 'real-u4-view'
+            def on_decision(self, time, data, model, params):
+                self.inspect(data,'decision'); return {s:{'weight':'0'} for s in data}
+        window = dict(start=manifest['warmup']['start'],end=manifest['window']['end'])
+        fit = rules.fit_fold(Probe,1,window,data,strategy(['1']),cost,family=family)
+        t = manifest['window']['end']-HOUR
+        assert rules.decide(Probe(1),t,data,fit['artifact'],['BCHUSDT'],family=family) == {'BCHUSDT':{'weight':'0'}}
+        assert calls == ['score','fit','decision']
+        short = {s:{k:rules.KnownRows(rows.prefix(t)) for k,rows in ds.items()} for s,ds in data.items()}
+        snapshot = lambda source: {s:{k:list(rows) for k,rows in ds.items()}
+                                   for s,ds in rules.data_view(source,t,family=family).items()}
+        assert snapshot(data) == snapshot(short)
+        record_property('real_view',json.dumps(dict(version=peer['version'],family=family,
+            materialization=str(root/'materialization.json'),calls=calls,policy_sha256=binding['policy_sha256'])))
+
+
+def test_dv5_real_dv6_recompute(real_peer_run, record_property):
+    from program_code.research.r8_engine import series
+    result = series.recompute(real_peer_run['materialization'],real_peer_run['run'])
+    assert result['recompute_passed'] is True and result['differences'] == []
+    record_property('real_recompute',json.dumps(result))
 
 
 def dv5_turnover(value='10000000', hourly='9000000', triggered=True, sufficient=True):

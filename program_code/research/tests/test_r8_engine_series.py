@@ -1898,7 +1898,7 @@ def dv6_fixture(tmp_path, *, original='9900000', effective='9900000', hourly='50
     m['files'][name]={'sha256':hashlib.sha256(raw.encode()).hexdigest(),'rows':sum(v is not None for v in originals),
         'first':days[0],'last':days[-1],'source_file':'kline_BTCUSDT_D.csv.gz','source_sha256':'b'*64}
     path.write_bytes(canonical(m))
-    policy={'schema_version':f'r8_data_verification_policy_v{version}','standard_sha256':'ba65fbca3b9230ad1807b82c923e9e60ab870edbe5c1e0d5090ebce99b06f6d0',
+    policy={'schema_version':f'r8_data_verification_policy_v{version}','standard_sha256':'afcb87578676c998b4ce7529c6e1c09d5214cfe7e8af53ad03d120781c696931',
         'approval_event':'RH-20261022-05' if version==2 else 'RH-20261022-04','p3b_manifest_sha256':'a'*64,
         'listing':{'x_pct':'50','y_pct':'20','z_pct':'20','cooling_days':7,'quantity':'hourly_base_volume_daily_mean',
                    'variation':'mean_relative_difference','stage_end_ranges':[[1,3],[7,15],[15,30]]},
@@ -1942,14 +1942,35 @@ def test_dv6_dual_calculation_controls_replay_and_keeps_hourly_order_cap(tmp_pat
     assert series.replay(data,run)['voided'][0]['reason']=='order_cap'
 
 
-@pytest.mark.skip(reason='待 DV2／DV5 真實實作：DV2 真實物化與 turnover_decisions 表尚待整合')
-def test_dv6_integration_real_dv2_materialization():
-    pass
+from program_code.research.tests.test_r8_engine_materialize import real_peer_materialization, real_peer_run
 
 
-@pytest.mark.skip(reason='待 DV2／DV5 真實實作：DV5 真實 run 交本單元 recompute 尚待整合')
-def test_dv6_integration_real_dv5_run_recompute():
-    pass
+def test_dv6_integration_real_dv2_materialization(real_peer_materialization, record_property):
+    from program_code.research.r8_engine import lean_runner
+    from program_code.research.r8_engine.lean_algo import rules
+    peer = real_peer_materialization
+    for family, output in peer['outputs'].items():
+        path = output['root']/'materialization.json'
+        data = series.Materialization(path)
+        binding = lean_runner.verification_bundle(output['root'], output['manifest'])
+        assert binding['family'] == family
+        assert binding['registration_sha256'] == output['registration_sha256']
+        rows = [json.loads(line) for line in (output['root']/'verification/turnover_decisions.jsonl').read_bytes().splitlines()]
+        for row in rows:
+            symbol, t = row['symbol'], row['decision_utc_day']
+            median, hourly, sufficient = data.liquidity(symbol,t,cost_parameters())
+            assert sufficient == row['history_sufficient']
+            assert median == Decimal(row['selected_median'])
+            reason, bps = rules.turnover_liquidity(row,t,data.manifest['first_bar'][symbol],cost_parameters())
+            if not sufficient: assert reason == 'insufficient_history'
+        record_property('real_peer', json.dumps(dict(version=peer['version'],family=family,
+            materialization=str(path),sha256=data.sha256,decisions=len(rows))))
+
+
+def test_dv6_integration_real_dv5_run_recompute(real_peer_run, record_property):
+    result = series.recompute(real_peer_run['materialization'],real_peer_run['run'])
+    assert result['recompute_passed'] is True and result['differences'] == []
+    record_property('real_recompute',json.dumps(result))
 
 
 def dv6_table(path, rows):
