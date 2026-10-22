@@ -502,10 +502,18 @@
       "meaning": "Section 17 records full approval effective when PR #240 merges into main; sections 1-16 unchanged."
     },
     "r8-stage2-data-verification-standard-r3": {
-      "kind": "recorded_file",
+      "kind": "git_blob",
       "path": "docs/execution_plan/2026-10-22--r8-stage2-data-verification-standard.md",
       "sha256": "125901d0341487bd058be70e7cc2ed27be7c3be270a45d05587e471104b7cacf",
-      "meaning": "Operator approved X=50%, Y=20%, Z=20%, W=7 days, quantity A and mean-relative-difference formula, enabled DV6, approved the 300/900 sampling plan and entire standard. Six bounded delivery identities and fixed cross-unit contracts; effective on merge, no implementation or data acceptance claimed."
+      "meaning": "Operator approved X=50%, Y=20%, Z=20%, W=7 days, quantity A and mean-relative-difference formula, enabled DV6, approved the 300/900 sampling plan and entire standard. Six bounded delivery identities and fixed cross-unit contracts; effective on merge, no implementation or data acceptance claimed.",
+      "commit": "d6b162092eae81bd981cdc8308c98d580dffc763",
+      "blob": "f14cb6b80e0331df85f64dfa60bb470a023ac6d1"
+    },
+    "r8-stage2-data-verification-standard-erratum-1": {
+      "kind": "recorded_file",
+      "path": "docs/execution_plan/2026-10-22--r8-stage2-data-verification-standard.md",
+      "sha256": "ad80220cd6dc3f8dc5c451c6281aa9f1b2acf7fbb47bc80ed21eb3905710110c",
+      "meaning": "Conductor clarification of existing C5 definitions: C4/G is field-specific at opening/closing timestamps; H/L/V/A are independent of within-timestamp order. Original text and DV1 historical review limits retained; 26-day report cited. No new rule or RH event."
     }
   },
   "routes": [
@@ -686,7 +694,8 @@
         "r8-stage2-p4-addendum-r3",
         "r8-stage2-data-verification-standard-r2",
         "r8-stage2-p4-addendum-r4",
-        "r8-stage2-data-verification-standard-r3"
+        "r8-stage2-data-verification-standard-r3",
+        "r8-stage2-data-verification-standard-erratum-1"
       ],
       "status_history": [
         {

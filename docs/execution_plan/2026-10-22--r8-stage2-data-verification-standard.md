@@ -462,3 +462,45 @@ Operator 2026-10-22 以選項回覆核准，依本輪 conductor 續派轉錄；�
 | Operator 整份規範核准 | **核准並開始實作**；依§9六個交付身分執行 | Operator「核准並開始實作 (Recommended)」 | 2026-10-22；RH-20261022-04 |
 | 生效版本／合入main | **自PR #240合入main時生效**；本輪未合併，合併commit及時刻由Git記錄 | conductor負責合併；不是Codex合併授權 | 待實際合併記錄，不預填合併SHA／時刻 |
 | 舊年未決後續A／B | 尚未選定；維持C，看到凍結稽核結果後再裁決 | Operator | 待凍結稽核結果 |
+
+
+## 勘誤一（2026-10-22，conductor 依規範既有定義澄清）
+
+C4 與 §5 G 閘門的「同戳多價」逐欄判定：O 只看目標時窗的最早時間戳是否具有唯一價格，C 只看最晚時間戳；H、L、V、A 與同一時刻內的成交先後無關，不因同戳多價而未決。中間時間戳的多價照常記入 findings，保留時間戳與價格集合；不得以檔案行順序推定成交先後。日線與各小時按各自目標時窗判定。
+
+這是依 C5 既有的 O／H／L／C／V／A 定義所作的解釋，不是新規則。原文保留；C1–C3 的涵蓋／數量條件、DV-O-SEM 採交易所定義、DV-A 不套 G、逐欄後整列 L1／L2 重檢均不變。下表引用 DV1 報告的既有26日逐日結果，並非全市場驗收或公開逐筆檔完整性保證。
+
+來源：`/Users/ncyu/Projects/TradeBot/audits/2026-10-22-r8-data-verify-dv1/REPORT.md`「26日逐日結果」，SHA-256 `b14f6b2756c62facfb22077ce393fbc4bbc892b0c6f5c80d3127b6c2dd598225`；機器明細 `26-day-results.json`，SHA-256 `302149717a84f1288bc46e93257d3f43aa44bcebb4164b0605315ab29ee46d2a`。DV1 原 E2 因300秒上限到期為 UNVERIFIED、E4 NOT_RUN；conductor 已審讀並接受核心裁決邏輯，原狀態不改寫。
+
+K=KEEP、R=CORRECT、U=UNRESOLVED；欄位順序 O/H/L/C/V/A。整列 include 7、missing 19；C4 解釋不解除其他涵蓋失敗。
+
+| 標的 | 日期 | O/H/L/C/V/A | 整列 |
+|---|---|---|---|
+| BCHUSDT | 2020-12-14 | R/K/R/K/K/R | include |
+| BCHUSDT | 2021-02-18 | U/U/U/U/U/R | missing |
+| BCHUSDT | 2021-02-28 | U/U/U/U/U/R | missing |
+| BCHUSDT | 2021-03-03 | K/K/K/R/R/R | include |
+| BCHUSDT | 2021-04-02 | U/U/U/U/U/R | missing |
+| BTCUSDT | 2020-03-25 | K/K/R/K/K/R | include |
+| BTCUSDT | 2021-02-12 | U/U/U/U/U/R | missing |
+| BTCUSDT | 2021-02-13 | U/U/U/U/U/R | missing |
+| BTCUSDT | 2021-02-14 | U/U/U/U/U/R | missing |
+| BTCUSDT | 2021-02-27 | U/U/U/U/U/R | missing |
+| BUZZUSDT | 2025-04-19 | U/K/K/R/R/U | missing |
+| DOTUSDT | 2021-11-29 | U/U/U/U/U/R | missing |
+| ETHUSDT | 2021-04-01 | U/U/U/U/U/R | missing |
+| ETHUSDT | 2021-04-07 | U/U/U/U/U/R | missing |
+| LINKUSDT | 2020-10-21 | K/K/R/K/K/R | include |
+| LINKUSDT | 2021-03-03 | U/U/U/U/U/R | missing |
+| LINKUSDT | 2021-03-25 | U/K/K/R/R/R | missing |
+| LTCUSDT | 2020-10-21 | K/K/R/K/K/R | include |
+| LTCUSDT | 2021-02-18 | U/K/K/U/R/R | missing |
+| LTCUSDT | 2021-03-17 | U/U/U/U/U/R | missing |
+| LTCUSDT | 2021-04-08 | K/K/K/R/R/R | include |
+| LTCUSDT | 2021-04-10 | U/U/U/U/U/R | missing |
+| PUMPBTCUSDT | 2025-06-03 | U/U/U/U/U/U | missing |
+| XEMUSDT | 2021-11-30 | U/U/U/U/U/R | missing |
+| XTZUSDT | 2020-10-21 | K/K/R/K/K/R | include |
+| XTZUSDT | 2021-03-24 | U/U/U/U/U/R | missing |
+
+其中 BCHUSDT 2020-12-14：O CORRECT 272.95、H KEEP 280.35、L CORRECT 265.15、C KEEP 276.95、V KEEP 10905.15、A CORRECT 2954180.78。A 依疑點日規則取小時交易所自報成交額加總，不以逐筆成交額取代。窗內3組同戳多價保留於 findings，首末時間戳均唯一價，因此不阻斷 O／C。
