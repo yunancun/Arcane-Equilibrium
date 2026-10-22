@@ -164,5 +164,8 @@ Route-Id 是本歷史命名空間。這些都不能互相當成完整產品版�
   查核紀錄見 `docs/execution_plan/2026-10-19--r8-stage2-p1-engine-selection-record.md`。不授予 Linux、資料庫、帳戶、支出或任何效果。
 - **RH-20261020-01／open_item_decided**：P4 補充指令的兩項方法論裁決：折內自動網格選擇算一個試驗；多重檢驗採 BY、FDR 0.10。另同意讀取交易所逐筆成交的目錄清單，核對下架品種清單的完整性。
   其餘參數由 QC 起草，見 `docs/execution_plan/2026-10-20--r8-stage2-p4-research-core-addendum.md` §9。不授予 Linux、資料庫、帳戶、支出或任何效果。
+- **RH-20261022-02／amendment_proposed**：Operator 要求交叉比對 BCHUSDT 零價及日／時分歧，並預先設計驗證與後續處理規範；原文保存在 JSON `authority_source` 及[規範草案](../execution_plan/2026-10-22--r8-stage2-data-verification-standard.md) §2。
+  本次只起草：原件不可覆寫、外所只旁證、逐筆涵蓋優先、未決視缺漏、L1–L4 與預登記抽樣；open、成交額、部分日與驗收強度四項仍待裁決，BCH 兩個候選價格未套用。
+  待 conductor 審查與 Operator 核准，不合併；§17 核准前不生效。TODO DATA-VERIFY 為 WAITING／不可派發，核准並合入只解除實作前置；REPORT-TOOLS／P5 另須其實作與驗收完成。不授予本輪取數、程式改動、holdout 開啟或交易效果。
 - 新路線、採納、撤回、取代及更正按 [決策規則](../decisions/2026-10-03--route-history-versioning.md)
   追加事件；現行派工及效果授權仍回 TODO 與既有 ADR/AMD。

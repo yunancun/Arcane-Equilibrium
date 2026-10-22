@@ -1,9 +1,17 @@
 # CLAUDE_CHANGELOG.md — 開發歷史歸檔
 
 > 從 CLAUDE.md / TODO.md 遷出的 Wave/Sprint/Batch + TODO version-increment 歷史敘事。新 session 不需要讀此文件，僅供回顧歷史時查閱。
-> 最後更新：2026-10-22（R8 階段 2–3 投入上限延長五個工作日；TODO v915）
+> 最後更新：2026-10-22（R8 研究資料驗證與更正規範草案；TODO v916）
 
 ---
+
+## R8 研究資料驗證與更正規範草案 — 2026-10-22
+
+- 依 conductor 派工與 Operator 2026-10-22 交叉比對／規範指示，從 main `6c96b8806` 起草[規範](execution_plan/2026-10-22--r8-stage2-data-verification-standard.md)。原文保存在 §2 與 `RH-20261022-02`；只作文件 PR，待 conductor 方法論審查及 Operator 核准，Codex 不合併。
+- 明定不可覆寫 P3b、外所只作旁證、未決視缺漏、當下可讀範圍與 holdout 限制；展開 L1–L4、逐筆涵蓋／同戳檢查、逐欄裁決、版本化更正與 manifest。BCHUSDT 2020-12-14 open 272.95／low 265.15 為報告支持的首筆候選，尚未套用。
+- open 語義、成交額、部分日與可達驗收強度仍待裁決；抽樣提議每年份×流動性層300日、最多7,200日，命中層一次擴至900日、最多21,600日；數值、下載估計、8–13人工作日及相容介面均標「未經 Operator 確認」。查明 U6 只讀 U4 source／overlay，嚴格 manifest 頂層不新增鍵，以既有 files 表綁證據的方案仍待實作驗證。
+- 補充指令只追加 §17 指向草案與核准前不生效。TODO v916 新增 DATA-VERIFY WAITING／dispatchable=false；Operator 核准並合入解除實作前置，實作與驗收完成才解除 REPORT-TOOLS／P5 的本項依賴。路線簿追加 RH 事件、新規範及 addendum 版本雜湊，舊 addendum digest 固定到原 Git 物件，人類總覽同步。
+- 文件自檢保留 walk-forward §5 五項前檢、時序 CV、特徵洩漏與微結構硬門檻，不代替獨立方法論審查；全市場物化、抽樣、26日新規則回歸及 P4 重算均 NOT_RUN。未改程式、未取數、未更新 Wiki、未更動帳本或 P3b。
 
 ## R8 階段 2–3 投入上限延長 — 2026-10-22
 
