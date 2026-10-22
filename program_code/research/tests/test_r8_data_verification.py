@@ -685,7 +685,7 @@ def real_dv13_flow(root,index=None,fetch_failure=None,configure=None):
         (p3b/'manifest.json').write_bytes(enc(m))
         for r in read(case.dl,'download_inventory.jsonl'):
             payloads[r['url']]=(case.dl/r['relative_path']).read_bytes()
-            requests.append(fetch.DownloadRequest(r['request_id'],symbol,t,r['interval'],r['source_kind'],r['url']))
+            requests.append(fetch.DownloadRequest(r['request_id'],symbol,r['day_start'],r['interval'],r['source_kind'],r['url']))
         # Fetch outputs have their own immutable root.
         shutil.move(str(case.dl),str(root/'fixture-download-source'))
         full_sha=None;mode='portable_fixed_values'
@@ -718,7 +718,8 @@ def real_dv13_flow(root,index=None,fetch_failure=None,configure=None):
             payloads[r['url']]=data
             requests.append(fetch.DownloadRequest(str(r['request_id']),symbol,t,'trade' if kind=='bybit_trade' else '1',kind,r['url']))
         mode='local_original_bytes'
-    scope={'start':t,'end':t+DAY};manifest_sha=sha((p3b/'manifest.json').read_bytes())
+    scope=case.readable if index is None else {'start':t,'end':t+DAY}
+    manifest_sha=sha((p3b/'manifest.json').read_bytes())
     sources=[fetch.CSVSource(x['symbol'],x['dataset'],x['interval'],n,x['sha256']) for n,x in m['files'].items()]
     plan=fetch.build_sample_plan(p3b,root/'plan',sources,readable=scope,p3b_manifest_sha256=manifest_sha)
     assert plan['primary_file']=='sample_plan.json',plan
@@ -749,6 +750,27 @@ def real_dv13_flow(root,index=None,fetch_failure=None,configure=None):
         'plan':plan,'fetch':downloaded,'verification':output,'summary':summary}
     (root/'integration.json').write_bytes(enc(provenance))
     return provenance
+
+
+def real_partial_and_sampled_flow(root,readable_offset=0):
+    """A partial first day without trades and a fully evidenced sampled next day."""
+    def configure(case):
+        first_hour=1 if readable_offset else 6
+        case.first=T-HOUR if readable_offset else T+first_hour*HOUR
+        case.readable={'start':T+readable_offset,'end':T+2*DAY}
+        case.daily=[bar(T,volume=str(24-first_hour),turnover=str(10*(24-first_hour))),
+                    bar(T+DAY,volume='24',turnover='240')]
+        case.hours=[bar(T+i*HOUR) for i in range(first_hour,48)]
+        case.trades=None
+        lines=['timestamp,symbol,side,size,price,trdMatchID']
+        lines += [f'{(T+DAY+h*HOUR)//1000}.0000001,TESTUSDT,Buy,1,10,{h}' for h in range(24)]
+        data=gzip.compress(('\n'.join(lines)+'\n').encode(),mtime=0)
+        (case.dl/'sampled.csv.gz').write_bytes(data)
+        case.extra_inventory=[dict(schema_version='r8_verification_download_v1',request_id='sampled',symbol='TESTUSDT',
+            day_start=T+DAY,interval='trade',source_kind='bybit_trade',url='https://public.bybit.com/trading/TESTUSDT/TESTUSDT2021-01-02.csv.gz',
+            started_at=T+DAY,finished_at=T+DAY+1,http_status=200,api_status=None,byte_count=len(data),
+            relative_path='sampled.csv.gz',sha256=sha(data),status='AVAILABLE',reason_code=None)]
+    return real_dv13_flow(root,configure=configure)
 
 
 def test_l2_missing_hour_routes_turnover_without_price_adjudication(case):

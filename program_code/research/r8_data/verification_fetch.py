@@ -787,7 +787,7 @@ def _bundle_outcomes(root,p,plan_sha):
                 raise InvalidInput('EVIDENCE_ROW_COUNT_MISMATCH')
             contents[name]=rows
     evidence=_AdjudicationEvidence(source_rows,contents['findings.jsonl'],verification['files']['findings.jsonl']['sha256'])
-    days={}; ids=set(); keys=set(); order=[];reasons=set()
+    days={}; ids=set(); keys=set(); order=[];reasons={}
     for row in contents['corrections.jsonl']:
         _keys(row,_CORRECTION_KEYS); _refs(row['source_refs'],root,verified,missing_trades)
         for name in ('correction_id','unit','formula','reason_code'):
@@ -809,13 +809,15 @@ def _bundle_outcomes(root,p,plan_sha):
             raise InvalidInput('INVALID_CORRECTION_STATUS')
         if row['evidence_kind'] not in ('trade_adjudication','reported_turnover_selection'):
             raise InvalidInput('INVALID_EVIDENCE_KIND')
+        l1_only=(row['decision']=='KEEP' and row['reason_code']=='L1_VALID' and row['rule_ids']==['DV-L1']
+                 and row['coverage_status']==row['order_status']=='NOT_APPLICABLE')
+        needs_l3=row['evidence_kind']=='trade_adjudication' and not l1_only
         if row['decision']!='UNRESOLVED':
             if not any(ref['relative_path'] is not None for ref in row['source_refs']) or row['original_value'] is None:
                 raise InvalidInput('MISSING_EVIDENCE')
-            if row['evidence_kind']=='trade_adjudication' and (
+            if needs_l3 and (
                 row['coverage_status']!='PASS' or row['order_status'] not in (('UNIQUE',) if row['field'] in ('open','close') else ('UNIQUE','NOT_APPLICABLE'))
-            ) and not (row['decision']=='KEEP' and row['reason_code']=='L1_VALID' and row['rule_ids']==['DV-L1']
-                       and row['coverage_status']==row['order_status']=='NOT_APPLICABLE'):
+            ):
                 raise InvalidInput('INVALID_ADJUDICATION')
             if row['evidence_kind']=='reported_turnover_selection' and row['field']!='turnover':
                 raise InvalidInput('INVALID_ADJUDICATION')
@@ -824,12 +826,12 @@ def _bundle_outcomes(root,p,plan_sha):
             missing={r['relative_path'] for r in row['source_refs'] if r['kind']=='trade'
                      and (r['relative_path'] is None or r['relative_path'] in missing_trades)}
             source_rows.bind(dict(row,source_refs=[r for r in row['source_refs'] if not (r['kind']=='trade' and r['relative_path'] in missing)]))
-            if row['evidence_kind']=='trade_adjudication':
+            if needs_l3:
                 try:complete=not missing and evidence.complete(row)
                 except (InvalidInput,KeyError,ValueError) as exc:
                     if isinstance(exc,InvalidInput) and str(exc)!='INVALID_DECIMAL':raise
                     complete=False
-                if not complete:reasons.add('EVIDENCE_INCOMPLETE')
+                if not complete:reasons.setdefault((row['symbol'],t//DAY*DAY),set()).add('EVIDENCE_INCOMPLETE')
         if (row['decision']=='CORRECT') != (row['corrected_value'] is not None) or (row['decision']=='UNRESOLVED' and row['row_action']!='missing'):
             raise InvalidInput('INVALID_CORRECTION')
         if row['original_value'] is not None and not isinstance(row['original_value'],str):
@@ -883,7 +885,7 @@ def _bundle_outcomes(root,p,plan_sha):
     for (symbol,day),state in days.items():
         required={(interval,t,field) for interval,times in (('D',[day]),('60',range(day,day+DAY,HOUR))) for t in times for field in _FIELDS}
         unresolved=state['unresolved'] or verification['status']=='BLOCKED' or not required<=state['covered']
-        result[(symbol,day)]=('u' if state['incomplete'] else 'e' if state['error'] else 'u' if unresolved else 's' if state['semantic'] else 'ok')
+        result[(symbol,day)]=('e' if state['error'] else 'u' if state['incomplete'] or unresolved else 's' if state['semantic'] else 'ok')
     return result,reasons
 
 
@@ -902,10 +904,10 @@ def summarize_sample(plan_root, verification_roots, artifact_root):
     """
     try:
         p,plan_sha=_load_plan(plan_root)
-        outcomes={};reasons=[]
+        outcomes={};day_reasons={};reasons=[]
         for root in verification_roots:
             bundle_outcomes,bundle_reasons=_bundle_outcomes(root,p,plan_sha)
-            reasons.extend(bundle_reasons)
+            day_reasons.update(bundle_reasons)
             for key,value in bundle_outcomes.items():
                 if key in outcomes:
                     raise InvalidInput('OVERLAPPING_VERIFICATION')
@@ -917,6 +919,9 @@ def summarize_sample(plan_root, verification_roots, artifact_root):
             N,n=s['population_size'],s['base_size']
             values=[outcomes.get((d['symbol'],d['day_start']),'u') for d in s['draws']]
             base=values[:n]; e,u,semantic=(base.count(x) for x in ('e','u','s'))
+            # Only the base and, when triggered, its frozen expansion participate.
+            evaluated=s['draws'] if e or u else s['draws'][:n]
+            for d in evaluated:reasons.extend(day_reasons.get((d['symbol'],d['day_start']),()))
             lines.append(f"{s['year']} {s['tier']} N={N} n={n} e={e} u={u} s={semantic}")
             for i,x in enumerate((e,e+u)):
                 upper=hypergeometric_upper(N,n,x,Fraction(1,20*H))
