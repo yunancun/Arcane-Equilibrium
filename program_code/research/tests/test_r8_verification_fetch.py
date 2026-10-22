@@ -962,3 +962,84 @@ def test_e2_004_extra_verified_day_is_only_a_separate_diagnostic(tmp_path):
     assert 'n_terminal_source_selected_days=1' in diagnostic
     assert (root/'plan/sample_plan.json').read_bytes()==frozen
     assert 'acceptance_target=PENDING_OPERATOR_DECISION' in report
+
+
+@pytest.mark.parametrize('days',[64,128])
+def test_dual_policy_migration_visits_corrections_linearly(tmp_path,monkeypatch,record_property,days):
+    from program_code.research.tests.test_r8_data_verification import T as start,HOUR,bar
+    def configure(case):
+        case.readable={'start':start,'end':start+days*D}
+        # Purposive partial days keep real verifier evidence small while the
+        # number of migration keys grows independently of correction visits.
+        case.daily=[bar(start+d*D,volume='2',turnover='10') for d in range(days)]
+        case.hours=[bar(start+d*D) for d in range(days)]
+    root=tmp_path/'real';v2_integration(root,configure)
+    original=v._bundle_outcomes;observed={'rows':0,'symbol_reads':0}
+    class CountedRow(dict):
+        def __getitem__(self,key):
+            if key=='symbol':
+                observed['symbol_reads']+=1
+                assert observed['symbol_reads']<=16*observed['rows'],'correction visits exceeded the linear report budget'
+            return super().__getitem__(key)
+    def observe(*args,**kwargs):
+        result=original(*args,**kwargs)
+        detail=args[3] if len(args)>3 else kwargs.get('details')
+        if detail is not None and detail['policy']==v.V2:
+            observed['rows']=len(detail['corrections'])
+            detail['corrections']=[CountedRow(r) for r in detail['corrections']]
+        return result
+    monkeypatch.setattr(v,'_bundle_outcomes',observe)
+    result=v.summarize_policies(root/'plan',[root/'bundle'],[root/'bundle-v2'],tmp_path/'measured')
+    assert result['primary_file']=='sample_report.txt',result
+    report=(tmp_path/'measured/sample_report.txt').read_bytes()
+    assert report.count(b'\nmigration ')==days
+    monkeypatch.setattr(v,'_bundle_outcomes',original)
+    plain=v.summarize_policies(root/'plan',[root/'bundle'],[root/'bundle-v2'],tmp_path/'plain')
+    assert report==Path(plain['artifact_root'],'sample_report.txt').read_bytes()
+    record_property('migration_days',days)
+    record_property('correction_rows',observed['rows'])
+    record_property('correction_symbol_reads',observed['symbol_reads'])
+
+
+@pytest.mark.parametrize('mode,classification',[('replace','MISSING_ORIGINAL_HOUR'),('alongside','C1_INVALID')])
+def test_off_grid_original_hour_keeps_both_reports_consumable(tmp_path,mode,classification):
+    from program_code.research.tests.test_r8_data_verification import T as start,HOUR,bar,read
+    def configure(case):
+        case.readable={'start':start,'end':start+2*D}
+        case.daily=[bar(start+d*D,volume='24',turnover='240') for d in range(2)]
+        case.hours=[bar(start+i*HOUR) for i in range(48)]
+        if mode=='replace':case.hours[0]['timestamp']+=1
+        else:case.hours.insert(1,bar(start+1))
+    root=tmp_path/'real';v2_integration(root,configure)
+    single=v.summarize_sample(root/'plan',[root/'bundle-v2'],tmp_path/'single')
+    dual=v.summarize_policies(root/'plan',[root/'bundle'],[root/'bundle-v2'],tmp_path/'dual')
+    assert single['primary_file']==dual['primary_file']=='sample_report.txt',(single,dual)
+    rows=read(root/'bundle-v2','volume_semantics.jsonl')
+    assert all(r['timestamp']%HOUR==0 for r in rows)
+    first=next(r for r in rows if r['timestamp']==start)
+    assert first['hour_classification']==classification
+    assert not any(r['day_applicable'] for r in rows if r['day_start']==start)
+    assert 'C1_INVALID' in first['reason_codes']
+    if mode=='replace':assert first['original_volume'] is None
+    for name in ('findings.jsonl','corrections.jsonl'):
+        assert any(r['interval']=='60' and r['timestamp']==start+1 for r in read(root/'bundle-v2',name))
+    migrations=[json.loads(l.removeprefix('migration ')) for l in (tmp_path/'dual/sample_report.txt').read_text().splitlines() if l.startswith('migration ')]
+    first_day=next(r for r in migrations if r['day_start']==start)
+    assert (first_day['v1'],first_day['v2'])==('u','u')
+
+
+def test_undetermined_partial_subset_is_consumed_as_unresolved(tmp_path):
+    from program_code.research.tests.test_r8_data_verification import T as start
+    def configure(case):
+        sizes=[2**i for i in range(1,31)];need=2**30-1
+        case.trades=case.trades[1:]+[dict(timestamp=str(start//1000+1800),symbol='TESTUSDT',side='Buy',size=str(s),price='10',trdMatchID='power'+str(i)) for i,s in enumerate(sizes)]
+        case.trades.sort(key=lambda r:Fraction(r['timestamp']))
+        case.hours[0]['volume']=str(sum(sizes)-need)
+        case.daily[0]['volume']=str(sum(sizes)+23)
+    root=tmp_path/'real';v2_integration(root,configure)
+    single=v.summarize_sample(root/'plan',[root/'bundle-v2'],tmp_path/'single')
+    dual=v.summarize_policies(root/'plan',[root/'bundle'],[root/'bundle-v2'],tmp_path/'dual')
+    assert single['primary_file']==dual['primary_file']=='sample_report.txt',(single,dual)
+    report=(tmp_path/'dual/sample_report.txt').read_text()
+    assert 'n_error_policy=0 n_unresolved_policy=1 n_semantics_policy=0' in report
+    assert 'PARTIAL_SUBSET_UNDETERMINED' in report

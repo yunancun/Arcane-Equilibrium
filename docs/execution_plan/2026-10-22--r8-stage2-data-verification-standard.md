@@ -707,3 +707,11 @@ DV7 測試另覆蓋：同日多尾段、跨多戳尾段、部分同戳子集／�
 4. **DV3 證據與統計（§4.5 第5點）**：完成的非 UNRESOLVED 逐筆裁決，除純 `L1_VALID`／`DV-L1` KEEP 且 coverage／order 皆 NOT_APPLICABLE 外，須有 L3 證據；完成裁決的原列綁定仍須成立。L3 缺證據時把 `EVIDENCE_INCOMPLETE` 按 `(symbol,UTC day)` 保存，不擴散至其他日；統計只納入實際評估的凍結 draws（base，以及 base e 或 u 非零時的已凍結擴樣序列）。同日已有認證完整的 CORRECT 優先計 e，否則證據不完整計 u；即使 e 優先，所屬已評估日的 `EVIDENCE_INCOMPLETE` 原因仍保留。原件缺失含 SourceRef 的 path／SHA 皆 null 表示法，不把該日移出分母。對應 `verification_fetch.py:436–469,718–755,812–853,884–889,918–940`；提交 `256dcd4c6`、`fb89a9ccd`、`9248ac79d`。這是既有錯誤優先及證據要求的實作，不新增抽樣門檻。
 
 **與 §8.4.1／§13 的相容界線。** 可選文字報告沿既有 files 雜湊表，部分日資訊沿 findings.details，沒有新頂層鍵；涵蓋標記不新增逐筆來源選擇權；按日證據及 e 優先與 §13.6 一致。原凍結 plan／draws 不改，符合雙政策同一樣本的要求。main 的 v1 消費者仍核對 plan 與驗證政策相等，僅接受 v1 schema／嚴格 C3 證據；§8.4.1 已明定的 v1 計畫對 v2 驗證政策連結、v2 分類及證據驗證，由 DV7 實作，不能把本補記或 pin 更新當作現行工具已支援 v2。此次核對未發現須改動既有規則的契約衝突。
+
+## 勘誤三（2026-10-22，conductor 依 #243 審查）
+
+§8.4.1 的 `hour_classification` 固定列舉加入 `PARTIAL_SUBSET_UNDETERMINED`；其含義僅為「部分同戳子集的診斷搜尋超出固定資源上限而未判定」。上述原文與其他列舉全部保留。
+
+此值與其他拒絕分類同樣不放行，不採該子集、不挑同戳先後，不改變任何採值或可用性結果；不得把未判定冒稱為 `NO_COMPLETE_SUFFIX` 或 `PARTIAL_TIMESTAMP_SUBSET`。
+
+本次部分同戳子集診斷採精確整數縮放、最大公因數約分及位元集合動態規劃，固定資源上限為：狀態位元寬度 1,048,576（`MAX_PARTIAL_SUBSET_BITS`）、同戳群 4,096 筆（`MAX_PARTIAL_SUBSET_ITEMS`），以及輸入分子／分母與最小公倍分母各 4,096 位元（`MAX_PARTIAL_SCALE_BITS`）。任何一項超限即記上述未判定分類；這些上限只約束部分同戳子集的拒絕診斷，不約束已完整匹配的同戳群尾段。

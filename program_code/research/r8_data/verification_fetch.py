@@ -36,7 +36,8 @@ SEED = 20261022
 TIERS = ('GE_100M', 'GE_10M', 'GE_1M', 'NO_OPEN')
 STANDARD = 'docs/execution_plan/2026-10-22--r8-stage2-data-verification-standard.md'
 V2 = 'v2-terminal-suffix-20261022'
-_V1_STANDARDS=('125901d0341487bd058be70e7cc2ed27be7c3be270a45d05587e471104b7cacf',
+_V1_STANDARDS=('ba65fbca3b9230ad1807b82c923e9e60ab870edbe5c1e0d5090ebce99b06f6d0',
+               '125901d0341487bd058be70e7cc2ed27be7c3be270a45d05587e471104b7cacf',
                'ad80220cd6dc3f8dc5c451c6281aa9f1b2acf7fbb47bc80ed21eb3905710110c')
 
 
@@ -768,7 +769,7 @@ class _AdjudicationEvidence:
 
 
 _VOLUME_KEYS='schema_version policy_sha256 volume_semantics_policy symbol day_start timestamp hour_classification day_applicable original_volume trade_volume volume_delta volume_source tail_group_count tail_count tail_volume tail_first_timestamp tail_last_timestamp prefix_first_timestamp prefix_count source_refs reason_codes confidence_evidence'
-_HOUR_CLASSES=('STRICT_C3','TERMINAL_SUFFIX_EXACT','PARTIAL_TIMESTAMP_SUBSET','NO_COMPLETE_SUFFIX','POSITIVE_VOLUME_DELTA','MISSING_ORIGINAL_HOUR','IDENTITY_UNCERTAIN','OUT_OF_SCOPE','C1_INVALID','C2_CONFLICT','EMPTY_PREFIX')
+_HOUR_CLASSES=('STRICT_C3','TERMINAL_SUFFIX_EXACT','PARTIAL_TIMESTAMP_SUBSET','PARTIAL_SUBSET_UNDETERMINED','NO_COMPLETE_SUFFIX','POSITIVE_VOLUME_DELTA','MISSING_ORIGINAL_HOUR','IDENTITY_UNCERTAIN','OUT_OF_SCOPE','C1_INVALID','C2_CONFLICT','EMPTY_PREFIX')
 
 
 class _VolumeEvidence(_AdjudicationEvidence):
@@ -1178,8 +1179,11 @@ def summarize_policies(plan_root,v1_verification_roots,v2_verification_roots,art
                 detail={k:r[k] for k in ('symbol','interval','timestamp','field','decision','row_action','original_value','candidate_value','corrected_value','reason_code','source_refs')}
                 detail['reason_codes']=r.get('reason_codes',[r['reason_code']])
                 lines.append('field_evidence policy='+version+' '+encoded(detail).decode().strip())
+        migration_reasons={}
+        for r in all_rows[V2]:
+            migration_reasons.setdefault((r['symbol'],r['timestamp']//DAY*DAY),set()).update(r['reason_codes'])
         for key in sorted(frozen_base|verified_days):
-            lines.append('migration '+encoded(dict(symbol=key[0],day_start=key[1],v1=all_outcomes['v1-strict'].get(key,'u'),v2=all_outcomes[V2].get(key,'u'),reason_codes=sorted({c for r in all_rows[V2] if (r['symbol'],r['timestamp']//DAY*DAY)==key for c in r['reason_codes']}))).decode().strip())
+            lines.append('migration '+encoded(dict(symbol=key[0],day_start=key[1],v1=all_outcomes['v1-strict'].get(key,'u'),v2=all_outcomes[V2].get(key,'u'),reason_codes=sorted(migration_reasons.get(key,())))).decode().strip())
         data=('\n'.join(lines)+'\n').encode()
         return _emit(artifact_root,'sample_report.txt',data,len(data.splitlines()),reasons,files)
     except (InvalidInput,OSError,EOFError,TypeError,KeyError,IndexError,ValueError) as exc:

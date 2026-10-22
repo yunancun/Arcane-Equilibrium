@@ -111,7 +111,8 @@ V2 = 'v2-terminal-suffix-20261022'
 
 def v2_policy(p):
     p.update(schema_version='r8_data_verification_policy_v2',
-             approval_event='RH-20261022-05',volume_semantics_policy=V2)
+             approval_event='RH-20261022-05',volume_semantics_policy=V2,
+             standard_sha256=sha(SPEC.read_bytes()))
 
 
 def suffix_case(case):
@@ -702,7 +703,7 @@ class OfflineArchiveTransport:
         return fetch.Response(404 if self.unavailable else 200,{'Content-Length':str(len(data))},io.BytesIO(data if method=='GET' else b''))
 
 
-def real_dv13_flow(root,index=None,fetch_failure=None,configure=None):
+def real_dv13_flow(root,index=None,fetch_failure=None,configure=None,frozen_standard=None):
     """Real plan -> local byte transport -> real verifier -> real statistics.
 
     Local archives use a one-symbol fixture manifest to bound the population;
@@ -763,6 +764,16 @@ def real_dv13_flow(root,index=None,fetch_failure=None,configure=None):
     sources=[fetch.CSVSource(x['symbol'],x['dataset'],x['interval'],n,x['sha256']) for n,x in m['files'].items()]
     plan=fetch.build_sample_plan(p3b,root/'plan',sources,readable=scope,p3b_manifest_sha256=manifest_sha)
     assert plan['primary_file']=='sample_plan.json',plan
+    if frozen_standard is not None:
+        # Prepare a historical-policy fixture before any verifier consumes it.
+        # This never mutates an archived plan or any original market bytes.
+        p=read(root/'plan','policy.json');p['standard_sha256']=frozen_standard
+        sample=read(root/'plan','sample_plan.json');sample['policy_sha256']=sha(enc(p))
+        (root/'plan/policy.json').write_bytes(enc(p))
+        (root/'plan/sample_plan.json').write_bytes(enc(sample))
+        (root/'plan/sample_plan.sha256').write_text(sha(enc(sample))+'\n')
+        plan['primary_sha256']=sha(enc(sample))
+        for name,meta in plan['files'].items():meta['sha256']=sha((root/'plan'/name).read_bytes())
     transport=OfflineArchiveTransport(payloads,fetch_failure=='UNAVAILABLE')
     downloaded=fetch.fetch_downloads(root/'downloads',requests,approved_urls=list(payloads),readable={'start':t+HOUR,'end':t+DAY} if fetch_failure=='SCOPE_INCOMPLETE' else scope,
         max_total_bytes=0 if fetch_failure=='SIZE_BLOCKED' else sum(map(len,payloads.values())),max_file_bytes=max(map(len,payloads.values())),
@@ -1082,7 +1093,8 @@ def dv7_main_verifier():
 def test_dv7_26_days_spec_cells_tail_witnesses_and_v1_bytes(tmp_path,index,dv7_main_verifier,record_property):
     base=Path('/Users/ncyu/Projects/TradeBot')
     if not (base/'r8-research/crosscheck-20261022').exists():pytest.skip('frozen local originals unavailable')
-    root=tmp_path/'integration';flow=real_dv13_flow(root,index)
+    root=tmp_path/'integration';flow=real_dv13_flow(root,index,
+        frozen_standard='ba65fbca3b9230ad1807b82c923e9e60ab870edbe5c1e0d5090ebce99b06f6d0')
     plan=read(root/'plan','sample_plan.json')
     oracle=dv7_main_verifier(p3b_root=root/'p3b',download_root=root/'downloads',
         inventory_path=root/'downloads/download_inventory.jsonl',output_root=root/'main-bundle',
@@ -1264,6 +1276,43 @@ def test_v2_numeric_timestamp_grouping_no_partial_equal_stamp_selection(case):
     assert correction(cs,'volume')['decision']=='UNRESOLVED'
 
 
+def test_v2_large_partial_subset_diagnosis_is_resource_bounded(tmp_path,record_property):
+    # Isolate the historical exponential search so RED cannot exhaust the runner.
+    import subprocess,time
+    script = '''
+import json,resource,sys,time
+from pathlib import Path
+from fractions import Fraction
+from program_code.research.tests.test_r8_data_verification import Case,T,v2_policy,read,correction
+from program_code.research.r8_data import verification as v
+case=Case(Path(sys.argv[1]));case.policy_change=v2_policy
+sizes=[2**i for i in range(1,31)];need=2**30-1
+case.trades=case.trades[1:]+[dict(timestamp=str(T//1000+1800),symbol='TESTUSDT',side='Buy',size=str(s),price='10',trdMatchID='power'+str(i)) for i,s in enumerate(sizes)]
+case.trades.sort(key=lambda r:Fraction(r['timestamp']))
+case.hours[0]['volume']=str(sum(sizes)-need)
+case.daily[0]['volume']=str(sum(sizes)+23)
+start=time.monotonic();result,_,cs,_=case.run()
+assert result['status']=='READY',result
+row=next(r for r in read(Path(result['artifact_root']),'volume_semantics.jsonl') if r['timestamp']==T)
+print(json.dumps(dict(classification=row['hour_classification'],applicable=row['day_applicable'],decision=correction(cs,'volume')['decision'],seconds=time.monotonic()-start,peak_rss=resource.getrusage(resource.RUSAGE_SELF).ru_maxrss)))
+'''
+    started=time.monotonic()
+    try:
+        completed=subprocess.run([sys.executable,'-c',script,str(tmp_path)],
+            cwd=SPEC.parents[2],capture_output=True,text=True,timeout=5)
+    except subprocess.TimeoutExpired:
+        pytest.fail('partial subset diagnosis exceeded the fixed five-second process budget')
+    assert completed.returncode==0,completed.stderr
+    result=json.loads(completed.stdout)
+    assert (result['classification'],result['applicable'],result['decision'])==('PARTIAL_SUBSET_UNDETERMINED',False,'UNRESOLVED')
+    from program_code.research.r8_data import verification as v
+    assert (v.MAX_PARTIAL_SUBSET_BITS,v.MAX_PARTIAL_SUBSET_ITEMS,v.MAX_PARTIAL_SCALE_BITS)==(1048576,4096,4096)
+    peak_bytes=result['peak_rss']*(1 if sys.platform=='darwin' else 1024)
+    assert peak_bytes<256*1024*1024
+    record_property('partial_subset_wall_seconds',time.monotonic()-started)
+    record_property('partial_subset_peak_bytes',peak_bytes)
+
+
 def test_v2_no_next_day_or_outside_readable_market_decode(case):
     suffix_case(case)
     # Move the tail to 23:00; no following-day price may be read for confidence.
@@ -1311,6 +1360,7 @@ def test_v2_frozen_sample_policy_mismatch_is_not_blanket_exempt(case):
 
 
 @pytest.mark.parametrize('standard',[
+ 'ba65fbca3b9230ad1807b82c923e9e60ab870edbe5c1e0d5090ebce99b06f6d0',
  'ad80220cd6dc3f8dc5c451c6281aa9f1b2acf7fbb47bc80ed21eb3905710110c',
  '125901d0341487bd058be70e7cc2ed27be7c3be270a45d05587e471104b7cacf'])
 def test_v2_historical_v1_frozen_policy_identity_is_retained(case,standard):

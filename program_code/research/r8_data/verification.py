@@ -20,6 +20,7 @@ import gzip
 import hashlib
 import io
 import json
+from math import gcd
 from pathlib import Path, PurePosixPath
 import re
 import subprocess
@@ -30,15 +31,19 @@ DAY = 86400000
 HOUR = 3600000
 TRAIN_START = 1577836800000
 TRAIN_END = 1751328000000
-STANDARD_SHA256 = 'ba65fbca3b9230ad1807b82c923e9e60ab870edbe5c1e0d5090ebce99b06f6d0'
+STANDARD_SHA256 = 'd0fbf9ff02d080027d575eb6488f2c552c3a583485b8c685166fe0ef94b2af98'
 FIELDS = ('open', 'high', 'low', 'close', 'volume', 'turnover')
 DELTA = {'D': DAY, '60': HOUR, '1': 60000}
 REF_KEYS = set('kind relative_path url sha256 row request_id list_index byte_start byte_end trade_id line_sha256'.split())
 INV_KEYS = set('schema_version request_id symbol day_start interval source_kind url started_at finished_at http_status api_status byte_count relative_path sha256 status reason_code'.split())
 CORRECTION_KEYS = set('schema_version correction_id symbol dataset interval timestamp field original_value candidate_value corrected_value unit formula evidence_kind source_refs coverage_status order_status rule_ids decision reason_code row_action policy_sha256 approval_event supersedes'.split())
 V2 = 'v2-terminal-suffix-20261022'
+MAX_PARTIAL_SUBSET_BITS = 1048576
+MAX_PARTIAL_SUBSET_ITEMS = 4096
+MAX_PARTIAL_SCALE_BITS = 4096
 # Approved v1 document bytes at PR240 and PR241, retained by frozen plans.
-V1_STANDARDS = (STANDARD_SHA256,'125901d0341487bd058be70e7cc2ed27be7c3be270a45d05587e471104b7cacf',
+V1_STANDARDS = (STANDARD_SHA256,'ba65fbca3b9230ad1807b82c923e9e60ab870edbe5c1e0d5090ebce99b06f6d0',
+                '125901d0341487bd058be70e7cc2ed27be7c3be270a45d05587e471104b7cacf',
                 'ad80220cd6dc3f8dc5c451c6281aa9f1b2acf7fbb47bc80ed21eb3905710110c')
 
 
@@ -542,6 +547,28 @@ def _correction(run,b,f,decision,reason,candidate,refs,coverage,order,rules,form
     c['correction_id']=_sha(_encoded(c));return c
 
 
+def _partial_subset(sizes,need):
+    """Bounded exact denial diagnostic; no selected prices or quantities."""
+    unknown='PARTIAL_SUBSET_UNDETERMINED'
+    if len(sizes)>MAX_PARTIAL_SUBSET_ITEMS:return unknown
+    values=[need,*sizes];scale=1
+    for value in values:
+        if max(value.numerator.bit_length(),value.denominator.bit_length())>MAX_PARTIAL_SCALE_BITS:return unknown
+        scale=scale//gcd(scale,value.denominator)*value.denominator
+        if scale.bit_length()>MAX_PARTIAL_SCALE_BITS:return unknown
+    units=[v.numerator*(scale//v.denominator) for v in values]
+    divisor=0
+    for value in units:divisor=gcd(divisor,value)
+    target=units[0]//divisor
+    if target+1>MAX_PARTIAL_SUBSET_BITS:return unknown
+    mask=(1<<(target+1))-1;possible=1
+    for value in units[1:]:
+        size=value//divisor
+        if size<=target:possible|=(possible<<size)&mask
+        if possible>>target&1:return 'PARTIAL_TIMESTAMP_SUBSET'
+    return 'NO_COMPLETE_SUFFIX'
+
+
 def _suffix(groups, original):
     """Unique complete numeric timestamp suffix; subset sums only diagnose denial."""
     stamps=sorted(groups);total=sum((g['volume'] for g in groups.values()),Fraction(0))
@@ -555,11 +582,7 @@ def _suffix(groups, original):
         if amount==target:
             prefix=stamps[:-len(tail)]
             return ('TERMINAL_SUFFIX_EXACT' if prefix else 'EMPTY_PREFIX'),tail,prefix
-        need=target-before;possible={Fraction(0)}
-        for size in g['sizes']:
-            possible|={x+size for x in possible if x+size<=need}
-            if need in possible:return 'PARTIAL_TIMESTAMP_SUBSET',None,None
-        return 'NO_COMPLETE_SUFFIX',None,None
+        return _partial_subset(g['sizes'],target-before),None,None
     return 'NO_COMPLETE_SUFFIX',None,None
 
 
@@ -592,9 +615,11 @@ def _confidence(groups,tail,prefix,h,hs,minutes):
 
 
 def _volume_day(run,sym,day,hs,trades,expected,global_errors,hour_errors,minutes):
-    by_time={}
-    for h in hs:by_time.setdefault(h.t,[]).append(h)
-    times=sorted(expected|set(by_time)|{int(t//HOUR)*HOUR for t in trades.groups})
+    by_time={};off_grid={}
+    for h in hs:
+        if h.t%HOUR:off_grid.setdefault(h.t//HOUR*HOUR,[]).append(h)
+        else:by_time.setdefault(h.t,[]).append(h)
+    times=sorted({t//HOUR*HOUR for t in expected}|set(by_time)|set(off_grid)|{int(t//HOUR)*HOUR for t in trades.groups})
     rows=[]
     for t in times:
         bars=by_time.get(t,[]);h=bars[0] if len(bars)==1 else None
@@ -603,7 +628,7 @@ def _volume_day(run,sym,day,hs,trades,expected,global_errors,hour_errors,minutes
         if not run.start<=day or day+DAY>run.end:errors.append('OUT_OF_SCOPE')
         if trades.identity_uncertain or len(bars)>1 or h is not None and h.structural:errors.append('IDENTITY_UNCERTAIN')
         if not bars:errors.append('MISSING_ORIGINAL_HOUR')
-        if trades.errors or h is not None and ('volume' not in h.nums or h.nums['volume']<0):errors.append('C1_INVALID')
+        if off_grid.get(t) or trades.errors or h is not None and ('volume' not in h.nums or h.nums['volume']<0):errors.append('C1_INVALID')
         if 'C2_WINDOWS' in global_errors or 'C2_WINDOWS' in hour_errors.get(t,set()):errors.append('C2_CONFLICT')
         tail=prefix=None
         original=h.nums.get('volume') if h else None
@@ -615,7 +640,7 @@ def _volume_day(run,sym,day,hs,trades,expected,global_errors,hour_errors,minutes
         if delta is not None and delta!=0:
             codes.add('C3_ORIGINAL_FAIL');run.original_c3.add((sym,'60',t));run.original_c3.add((sym,'D',day))
         if classification not in ('STRICT_C3','TERMINAL_SUFFIX_EXACT'):codes.add(classification)
-        refs=(h.refs if h else [])+trades.refs
+        refs=(h.refs if h else [])+trades.refs+[r for b in off_grid.get(t,[]) for r in b.refs]
         if tail is not None:
             refs += [r for s in tail for r in groups[s]['refs']]
             if prefix:refs+=groups[prefix[0]]['refs']
