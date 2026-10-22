@@ -20,6 +20,7 @@ import gzip
 import hashlib
 import io
 import json
+from math import gcd
 from pathlib import Path, PurePosixPath
 import re
 import subprocess
@@ -30,12 +31,20 @@ DAY = 86400000
 HOUR = 3600000
 TRAIN_START = 1577836800000
 TRAIN_END = 1751328000000
-STANDARD_SHA256 = 'ba65fbca3b9230ad1807b82c923e9e60ab870edbe5c1e0d5090ebce99b06f6d0'
+STANDARD_SHA256 = 'd0fbf9ff02d080027d575eb6488f2c552c3a583485b8c685166fe0ef94b2af98'
 FIELDS = ('open', 'high', 'low', 'close', 'volume', 'turnover')
 DELTA = {'D': DAY, '60': HOUR, '1': 60000}
 REF_KEYS = set('kind relative_path url sha256 row request_id list_index byte_start byte_end trade_id line_sha256'.split())
 INV_KEYS = set('schema_version request_id symbol day_start interval source_kind url started_at finished_at http_status api_status byte_count relative_path sha256 status reason_code'.split())
 CORRECTION_KEYS = set('schema_version correction_id symbol dataset interval timestamp field original_value candidate_value corrected_value unit formula evidence_kind source_refs coverage_status order_status rule_ids decision reason_code row_action policy_sha256 approval_event supersedes'.split())
+V2 = 'v2-terminal-suffix-20261022'
+MAX_PARTIAL_SUBSET_BITS = 1048576
+MAX_PARTIAL_SUBSET_ITEMS = 4096
+MAX_PARTIAL_SCALE_BITS = 4096
+# Approved v1 document bytes at PR240 and PR241, retained by frozen plans.
+V1_STANDARDS = (STANDARD_SHA256,'ba65fbca3b9230ad1807b82c923e9e60ab870edbe5c1e0d5090ebce99b06f6d0',
+                '125901d0341487bd058be70e7cc2ed27be7c3be270a45d05587e471104b7cacf',
+                'ad80220cd6dc3f8dc5c451c6281aa9f1b2acf7fbb47bc80ed21eb3905710110c')
 
 
 class _Invalid(ValueError):
@@ -183,11 +192,23 @@ def _check_ref(ref):
         _digest_string(ref['line_sha256'])
 
 
-def _policy(manifest_sha):
-    return dict(schema_version='r8_data_verification_policy_v1',standard_sha256=STANDARD_SHA256,approval_event='RH-20261022-04',p3b_manifest_sha256=manifest_sha,
+def _policy(manifest_sha, version='v1-strict', standard_sha=STANDARD_SHA256):
+    if version not in ('v1-strict',V2):_fail('POLICY_MISMATCH')
+    if standard_sha not in (V1_STANDARDS if version=='v1-strict' else (STANDARD_SHA256,)):_fail('POLICY_MISMATCH')
+    p = dict(schema_version='r8_data_verification_policy_v1',standard_sha256=standard_sha,approval_event='RH-20261022-04',p3b_manifest_sha256=manifest_sha,
                 listing=dict(x_pct='50',y_pct='20',z_pct='20',cooling_days=7,quantity='hourly_base_volume_daily_mean',variation='mean_relative_difference',stage_end_ranges=[[1,3],[7,15],[15,30]]),
                 sampling=dict(seed=20261022,base_per_stratum=300,max_per_stratum=900,max_expansions=1,confidence='0.95',upper_limit='0.025'),
                 turnover=dict(window_days=12,thresholds=['1000000','10000000','100000000'],trigger_pct='5',general='exchange_reported',suspect='sum_hourly_reported'),l4_price_threshold_pct='1')
+    if version==V2:p.update(schema_version='r8_data_verification_policy_v2',approval_event='RH-20261022-05',volume_semantics_policy=V2)
+    return p
+
+
+def _policy_version(policy):
+    # Explicit schema discriminant; a missing version is never inferred.
+    if not isinstance(policy,dict):_fail('POLICY_MISMATCH')
+    if policy.get('schema_version')=='r8_data_verification_policy_v1':return 'v1-strict'
+    if policy.get('schema_version')=='r8_data_verification_policy_v2' and policy.get('volume_semantics_policy')==V2:return V2
+    _fail('POLICY_MISMATCH')
 
 
 def _array_spans(raw, key=b'list'):
@@ -239,8 +260,12 @@ class _Run:
     def __init__(self, readable, policy_sha):
         self.start,self.end=readable['start'],readable['end']
         self.policy_sha=policy_sha; self.findings=[]; self.corrections=[]; self.blocked=set(); self.flagged=set(); self.price_days=set(); self.unresolved=set(); self.fids=set()
+        self.version='v1-strict';self.semantics=[];self.volume_by_key={};self.selected=set();self.original_c3=set()
 
     def finding(self,symbol,interval,t,field,rule,reason,refs=(),**details):
+        if self.version==V2 and rule=='C3_QUANTITY':
+            semantic=self.volume_by_key.get((symbol,interval,t))
+            if semantic:details.update(volume_semantics_policy=V2,hour_classification=semantic['hour_classification'])
         # Day diagnostics describe only the readable intersection, not an
         # unreadable midnight row. Preserve the day identity in existing details.
         if rule in ('DV-L2','DV-L4') and t is not None and t%DAY==0 and t<self.start<t+DAY:
@@ -409,6 +434,7 @@ class _Trades:
     groups: dict = field(default_factory=dict)
     errors: set = field(default_factory=set)
     refs: list = field(default_factory=list)
+    identity_uncertain: bool = False
 
 
 def _trade_file(r,root,run):
@@ -417,7 +443,7 @@ def _trade_file(r,root,run):
     if not (run.start<=day and day+DAY<=run.end):out.errors.add('SCOPE_INCOMPLETE');return out
     if r['status']!='AVAILABLE':out.errors.add(r['reason_code']);return out
     date=datetime.fromtimestamp(day//1000,timezone.utc).strftime('%Y-%m-%d')
-    if r['url']!=f'https://public.bybit.com/trading/{symbol}/{symbol}{date}.csv.gz':out.errors.add('C1_ID_TIME');return out
+    if r['url']!=f'https://public.bybit.com/trading/{symbol}/{symbol}{date}.csv.gz':out.errors.add('C1_ID_TIME');out.identity_uncertain=True;return out
     raw=_payload(r,root);seen=set();previous=None;directions=set()
     with gzip.GzipFile(fileobj=io.BytesIO(raw)) as stream:
         header=next(csv.reader([stream.readline().decode('utf-8').strip()]))
@@ -430,6 +456,7 @@ def _trade_file(r,root,run):
             if len(pieces)!=len(header):out.errors.add('C1_ID_TIME');out.refs.append(row_ref);continue
             try:
                 stamp=_number(pieces[ti].decode('ascii'))*1000
+                if pieces[si].decode('ascii')!=symbol:out.identity_uncertain=True
                 if pieces[si].decode('ascii')!=symbol or not day<=stamp<day+DAY or not run.start<=stamp<run.end:out.errors.add('C1_ID_TIME');out.refs.append(row_ref);continue
                 row=dict(zip(header,next(csv.reader([line.decode('utf-8')]))))
                 price,size=_number(row['price']),_number(row['size'])
@@ -438,9 +465,9 @@ def _trade_file(r,root,run):
                 if previous is not None and previous!=stamp:directions.add(1 if stamp>previous else -1)
                 previous=stamp
                 ref=_ref('trade',r['relative_path'],r['sha256'],url=r['url'],request_id=r['request_id'],row=rownum,trade_id=row['trdMatchID'],line_sha256=_sha(line))
-                group=out.groups.setdefault(stamp,{'prices':set(),'volume':Fraction(0),'turnover':Fraction(0),'refs':[]})
+                group=out.groups.setdefault(stamp,{'prices':set(),'volume':Fraction(0),'turnover':Fraction(0),'refs':[],'sizes':[]})
                 group['prices'].add(price);group['volume']+=size;group['turnover']+=price*size
-                group['refs'].append(ref)
+                group['refs'].append(ref);group['sizes'].append(size)
             except (ValueError,UnicodeError):out.errors.add('C1_ID_TIME');out.refs.append(row_ref)
     if len(directions)>1:out.errors.add('C1_ID_TIME')
     return out
@@ -504,7 +531,142 @@ def _l2(run,sym,day,ds,hs,meta,instrument):
 
 def _correction(run,b,f,decision,reason,candidate,refs,coverage,order,rules,formula,kind='trade_adjudication'):
     c=dict(schema_version='r8_data_correction_v1',symbol=b.symbol,dataset=b.dataset,interval=b.interval,timestamp=b.t,field=f,original_value=b.values.get(f),candidate_value=_text(candidate),corrected_value=_text(candidate) if decision=='CORRECT' else None,unit='USDT' if f=='turnover' else 'base_coin' if f=='volume' else 'USDT/base_coin',formula=formula,evidence_kind=kind,source_refs=_refs(b.refs+list(refs)),coverage_status=coverage,order_status=order,rule_ids=sorted(set(rules)),decision=decision,reason_code=reason,row_action='missing' if decision=='UNRESOLVED' else 'include',policy_sha256=run.policy_sha,approval_event='RH-20261022-04',supersedes=None)
+    if run.version==V2:
+        key=(b.symbol,b.interval,b.t);selected=key in run.selected
+        codes={reason}
+        if key in run.original_c3:codes.add('C3_ORIGINAL_FAIL')
+        if selected:
+            codes.add('SOURCE_TRUTH_UNVERIFIED')
+            if f in ('high','low','close','volume'):codes.add('TRADE_SOURCE_SELECTED_BY_E')
+            if b.interval=='60':codes.add('TERMINAL_SUFFIX_SOURCE_SELECTED')
+        semantic=run.volume_by_key.get(key)
+        if semantic:codes.update(semantic['reason_codes'])
+        source=None
+        if f=='volume' and decision!='UNRESOLVED':source='trade_reconstructed_terminal_suffix' if selected else 'v1_strict'
+        c.update(schema_version='r8_data_correction_v2',approval_event='RH-20261022-05',volume_semantics_policy=V2,volume_source=source,reason_codes=sorted(codes))
     c['correction_id']=_sha(_encoded(c));return c
+
+
+def _partial_subset(sizes,need):
+    """Bounded exact denial diagnostic; no selected prices or quantities."""
+    unknown='PARTIAL_SUBSET_UNDETERMINED'
+    if len(sizes)>MAX_PARTIAL_SUBSET_ITEMS:return unknown
+    values=[need,*sizes];scale=1
+    for value in values:
+        if max(value.numerator.bit_length(),value.denominator.bit_length())>MAX_PARTIAL_SCALE_BITS:return unknown
+        scale=scale//gcd(scale,value.denominator)*value.denominator
+        if scale.bit_length()>MAX_PARTIAL_SCALE_BITS:return unknown
+    units=[v.numerator*(scale//v.denominator) for v in values]
+    divisor=0
+    for value in units:divisor=gcd(divisor,value)
+    target=units[0]//divisor
+    if target+1>MAX_PARTIAL_SUBSET_BITS:return unknown
+    mask=(1<<(target+1))-1;possible=1
+    for value in units[1:]:
+        size=value//divisor
+        if size<=target:possible|=(possible<<size)&mask
+        if possible>>target&1:return 'PARTIAL_TIMESTAMP_SUBSET'
+    return 'NO_COMPLETE_SUFFIX'
+
+
+def _suffix(groups, original):
+    """Unique complete numeric timestamp suffix; subset sums only diagnose denial."""
+    stamps=sorted(groups);total=sum((g['volume'] for g in groups.values()),Fraction(0))
+    delta=original-total
+    if delta==0:return 'STRICT_C3',[],stamps
+    if delta>0:return 'POSITIVE_VOLUME_DELTA',None,None
+    target=-delta;amount=Fraction(0);tail=[]
+    for t in reversed(stamps):
+        g=groups[t];before=amount;amount+=g['volume'];tail.insert(0,t)
+        if amount<target:continue
+        if amount==target:
+            prefix=stamps[:-len(tail)]
+            return ('TERMINAL_SUFFIX_EXACT' if prefix else 'EMPTY_PREFIX'),tail,prefix
+        return _partial_subset(g['sizes'],target-before),None,None
+    return 'NO_COMPLETE_SUFFIX',None,None
+
+
+def _confidence(groups,tail,prefix,h,hs,minutes):
+    def entry(status='UNAVAILABLE',refs=(),**details):
+        return dict(status=status,source_refs=_refs(refs),details=[dict(name=k,value=v) for k,v in sorted(details.items())])
+    result={k:entry() for k in ('prefix_hlc','tail_minute','next_hour_open')}
+    if not tail or not prefix:return result
+    a=_aggregate({t:groups[t] for t in prefix})
+    values=a[0]
+    status='AMBIGUOUS' if values['close'] is None else 'SUPPORTS' if all(h.nums.get(f)==values[f] for f in ('high','low','close')) else 'CONTRADICTS'
+    result['prefix_hlc']=entry(status,h.refs+a[2])
+    stamps={int(t//60000)*60000 for t in tail}
+    ms=[m for m in minutes if m.t in stamps and _valid(m)]
+    if {m.t for m in ms}==stamps and len(ms)==len(stamps):
+        matching=True;ambiguous=False;refs=[]
+        for m in ms:
+            a=_aggregate({t:g for t,g in groups.items() if m.t<=t<m.t+60000})
+            if not a:matching=False;continue
+            ambiguous|=a[0]['close'] is None
+            matching&=all(m.nums.get(f)==a[0][f] for f in ('high','low','close','volume'))
+            refs+=m.refs+a[2]
+        result['tail_minute']=entry('AMBIGUOUS' if ambiguous else 'SUPPORTS' if matching else 'CONTRADICTS',refs)
+    # Only the already-loaded same-day next hour can supply this retrospective evidence.
+    nxt=[b for b in hs if b.t==h.t+HOUR and b.t//DAY==h.t//DAY and _valid(b)]
+    if len(nxt)==1:
+        a=_aggregate(groups);close=a[0]['close']
+        result['next_hour_open']=entry('AMBIGUOUS' if close is None else 'SUPPORTS' if nxt[0].nums['open']==close else 'CONTRADICTS',nxt[0].refs+a[2])
+    return result
+
+
+def _volume_day(run,sym,day,hs,trades,expected,global_errors,hour_errors,minutes):
+    by_time={};off_grid={}
+    for h in hs:
+        if h.t%HOUR:off_grid.setdefault(h.t//HOUR*HOUR,[]).append(h)
+        else:by_time.setdefault(h.t,[]).append(h)
+    times=sorted({t//HOUR*HOUR for t in expected}|set(by_time)|set(off_grid)|{int(t//HOUR)*HOUR for t in trades.groups})
+    rows=[]
+    for t in times:
+        bars=by_time.get(t,[]);h=bars[0] if len(bars)==1 else None
+        groups={s:g for s,g in trades.groups.items() if t<=s<t+HOUR}
+        errors=[]
+        if not run.start<=day or day+DAY>run.end:errors.append('OUT_OF_SCOPE')
+        if trades.identity_uncertain or len(bars)>1 or h is not None and h.structural:errors.append('IDENTITY_UNCERTAIN')
+        if not bars:errors.append('MISSING_ORIGINAL_HOUR')
+        if off_grid.get(t) or trades.errors or h is not None and ('volume' not in h.nums or h.nums['volume']<0):errors.append('C1_INVALID')
+        if 'C2_WINDOWS' in global_errors or 'C2_WINDOWS' in hour_errors.get(t,set()):errors.append('C2_CONFLICT')
+        tail=prefix=None
+        original=h.nums.get('volume') if h else None
+        total=sum((g['volume'] for g in groups.values()),Fraction(0)) if groups or not trades.errors else None
+        delta=original-total if original is not None and total is not None else None
+        if errors:classification=errors[0]
+        else:classification,tail,prefix=_suffix(groups,original)
+        codes=set(errors)
+        if delta is not None and delta!=0:
+            codes.add('C3_ORIGINAL_FAIL');run.original_c3.add((sym,'60',t));run.original_c3.add((sym,'D',day))
+        if classification not in ('STRICT_C3','TERMINAL_SUFFIX_EXACT'):codes.add(classification)
+        refs=(h.refs if h else [])+trades.refs+[r for b in off_grid.get(t,[]) for r in b.refs]
+        if tail is not None:
+            refs += [r for s in tail for r in groups[s]['refs']]
+            if prefix:refs+=groups[prefix[0]]['refs']
+        rows.append(dict(schema_version='r8_volume_semantics_v2',policy_sha256=run.policy_sha,volume_semantics_policy=V2,
+            symbol=sym,day_start=day,timestamp=t,hour_classification=classification,day_applicable=False,
+            original_volume=_text(original),trade_volume=_text(total),volume_delta=_text(delta),volume_source=None,
+            tail_group_count=len(tail) if tail is not None else None,
+            tail_count=sum(len(groups[s]['refs']) for s in tail) if tail is not None else None,
+            tail_volume=_text(sum((groups[s]['volume'] for s in tail),Fraction(0))) if tail is not None else None,
+            tail_first_timestamp=_text(tail[0]/1000) if tail else None,tail_last_timestamp=_text(tail[-1]/1000) if tail else None,
+            prefix_first_timestamp=_text(prefix[0]/1000) if prefix else None,
+            prefix_count=sum(len(groups[s]['refs']) for s in prefix) if prefix is not None else None,
+            source_refs=_refs(refs),reason_codes=sorted(codes),confidence_evidence=_confidence(groups,tail,prefix,h,hs,minutes)))
+    applicable=bool(rows) and not global_errors and any(r['hour_classification']=='TERMINAL_SUFFIX_EXACT' for r in rows) and all(r['hour_classification'] in ('STRICT_C3','TERMINAL_SUFFIX_EXACT') for r in rows)
+    for r in rows:
+        key=(sym,'60',r['timestamp']);r['day_applicable']=applicable
+        if applicable and r['hour_classification']=='TERMINAL_SUFFIX_EXACT':
+            r['volume_source']='trade_reconstructed_terminal_suffix';run.selected.add(key)
+            r['reason_codes']=sorted(set(r['reason_codes'])|{'TERMINAL_SUFFIX_SOURCE_SELECTED','TRADE_SOURCE_SELECTED_BY_E','SOURCE_TRUTH_UNVERIFIED'})
+        elif r['hour_classification']=='STRICT_C3' and not global_errors:r['volume_source']='v1_strict'
+        run.volume_by_key[key]=r
+    if applicable:run.selected.add((sym,'D',day))
+    if rows:
+        selected=next((r for r in rows if r['hour_classification']!='STRICT_C3'),rows[0])
+        run.volume_by_key[(sym,'D',day)]=dict(hour_classification=selected['hour_classification'],reason_codes=sorted({c for r in rows for c in r['reason_codes']}))
+    run.semantics.extend(rows)
 
 
 def _turnover(run,b,hs,meta,suspect):
@@ -529,7 +691,7 @@ def _turnover(run,b,hs,meta,suspect):
     return _correction(run,b,'turnover',decision,reason,candidate,refs,'NOT_APPLICABLE','NOT_APPLICABLE',['DV-A'],formula,'reported_turnover_selection')
 
 
-def _adjudicate(run,sym,day,ds,hs,trades,meta,instrument,minutes=()):
+def _adjudicate(run,sym,day,ds,hs,trades,meta,instrument,minutes=(),semantics_only=False):
     aggregates={};all_groups=trades.groups
     for interval,rows in [('D',ds),('60',hs)]:
         for b in rows:
@@ -552,8 +714,12 @@ def _adjudicate(run,sym,day,ds,hs,trades,meta,instrument,minutes=()):
         if h.nums.get('volume',0)>0 and not agg:errors.add('C2_WINDOWS')
         if agg and h.nums.get('volume')!=agg[0]['volume']:errors.add('C3_QUANTITY')
         if not agg:errors.add('C5_REBUILD')
+    if run.version==V2:_volume_day(run,sym,day,hs,trades,expected,global_errors,hour_errors,minutes)
+    for t,rows in hmap.items():
+        h=rows[0];agg=aggregates.get(('60',t));errors=hour_errors[t]
         refs=h.refs+trades.refs+(agg[2] if agg else [])
         run.finding(sym,'60',t,'volume','C3_QUANTITY','COVERAGE_CONFLICT' if errors else 'COVERAGE_RECONCILED',refs,reported_volume=h.values['volume'],trade_volume=_text(agg[0]['volume']) if agg else None,trade_count=agg[5] if agg else 0,first_timestamp_ms=_text(agg[3]) if agg else None,last_timestamp_ms=_text(agg[4]) if agg else None)
+    if semantics_only and (sym,'D',day) not in run.selected:return
     for b in ds+hs:
         agg=aggregates.get((b.interval,b.t));errors=set(global_errors)
         if b.interval=='D':errors.update(e for es in hour_errors.values() for e in es)
@@ -564,6 +730,9 @@ def _adjudicate(run,sym,day,ds,hs,trades,meta,instrument,minutes=()):
         for e in sorted(errors):
             rule=e if e in {'C1_ID_TIME','C2_WINDOWS','C3_QUANTITY','C4_ORDER','C5_REBUILD'} else 'DV-L3'
             run.finding(sym,b.interval,b.t,'row',rule,'TIMESTAMP_MULTI_PRICE' if e=='C4_ORDER' else 'COVERAGE_CONFLICT' if e in ('C2_WINDOWS','C3_QUANTITY') else e,b.refs+refs,multi_timestamp_count=agg[1] if agg else None)
+        original_errors=set(errors)
+        selected=(sym,b.interval,b.t) in run.selected
+        if selected:errors.discard('C3_QUANTITY')
         coverage='UNAVAILABLE' if not all_groups else 'CONFLICT' if errors else 'PASS'
         if agg and agg[1]:
             ambiguous=[(t,g) for t,g in sorted(all_groups.items()) if b.t<=t<b.t+DELTA[b.interval] and len(g['prices'])>1]
@@ -590,6 +759,7 @@ def _adjudicate(run,sym,day,ds,hs,trades,meta,instrument,minutes=()):
                 o=b.nums.get('open');lo=b.nums.get('low');hi=b.nums.get('high')
                 original_valid=o is not None and o>0 and lo is not None and hi is not None and lo<=o<=hi
                 if original_valid:decision='KEEP';reason='EXCHANGE_OPEN_SEMANTICS' if o!=candidate else 'MATCH';rule='DV-O-SEM' if o!=candidate else 'DV-KEEP'
+                elif selected and original_errors:decision='UNRESOLVED';reason=sorted(original_errors)[0]
                 else:
                     supports=[h for h in (hs if b.interval=='D' else minutes) if b.t<=h.t<b.t+DELTA[b.interval] and _valid(h)]
                     # 原生 open 支持必須來自最早的可用細週期箱。
@@ -615,8 +785,9 @@ def _finish_row(run,b,row):
         n=effective;valid=all(n[f]>0 for f in FIELDS[:4]) and n['low']<=min(n['open'],n['close'])<=max(n['open'],n['close'])<=n['high'] and n['volume']>=0 and n['turnover']>=0
         if not valid:
             for c in row:
-                if c['field']!='turnover':c.update(decision='UNRESOLVED',corrected_value=None,reason_code='POST_L1_FAILED')
-            run.mark(b,'DV-L1','POST_L1_FAILED')
+                if run.version==V2:c['reason_codes']=sorted(set(c['reason_codes'])|{'POST_CORRECTION_L1_FAIL'})
+                if (b.symbol,b.interval,b.t) not in run.selected and c['field']!='turnover':c.update(decision='UNRESOLVED',corrected_value=None,reason_code='POST_L1_FAILED')
+            run.mark(b,'DV-L1','POST_CORRECTION_L1_FAIL' if run.version==V2 else 'POST_L1_FAILED')
     missing=not valid or b.structural or any(c['decision']=='UNRESOLVED' for c in row)
     if missing:run.unresolved.add((b.symbol,b.interval,b.t,_encoded(b.refs[0])))
     for c in row:
@@ -774,7 +945,9 @@ def _sample(path,run,manifest_sha,symbols,report=None):
         return None,set()
     raw=Path(path).read_bytes();p=_json(raw)
     _keys(p,{'schema_version','policy_sha256','p3b_manifest_sha256','readable','seed','strata'})
-    if p['schema_version']!='r8_verification_sample_plan_v1' or p['policy_sha256']!=run.policy_sha or p['p3b_manifest_sha256']!=manifest_sha or p['readable']!={'start':run.start,'end':run.end} or type(p['seed']) is not int or p['seed']!=20261022:_fail('SAMPLE_IDENTITY')
+    allowed={_sha(_encoded(_policy(manifest_sha,standard_sha=s))) for s in V1_STANDARDS} if run.version==V2 else {run.policy_sha}
+    if p['schema_version']!='r8_verification_sample_plan_v1' or p['policy_sha256'] not in allowed or p['p3b_manifest_sha256']!=manifest_sha or p['readable']!={'start':run.start,'end':run.end} or type(p['seed']) is not int or p['seed']!=20261022:_fail('SAMPLE_IDENTITY')
+    run.v1_policy_sha=p['policy_sha256']
     if not isinstance(p['strata'],list):_fail('SAMPLE_SCHEMA')
     days=set();strata=set();previous=None;tiers=['GE_100M','GE_10M','GE_1M','NO_OPEN']
     for s in p['strata']:
@@ -853,7 +1026,7 @@ def _previous(path,run):
         if type(t) is not int or not run.start<=t<run.end or identity.get('symbol') not in run.symbols:_fail('PREVIOUS_SCOPE')
         c=_json(line);_keys(c,CORRECTION_KEYS)
         if c['schema_version']!='r8_data_correction_v1' or c['approval_event']!='RH-20261022-04':_fail('PREVIOUS_CORRECTION_SCHEMA')
-        if c['policy_sha256']!=run.policy_sha:_fail('PREVIOUS_POLICY_MISMATCH')
+        if c['policy_sha256']!=(run.v1_policy_sha if run.version==V2 else run.policy_sha):_fail('PREVIOUS_POLICY_MISMATCH')
         if c['interval'] not in DELTA or c['dataset']!={'D':'kline_day','60':'kline_hour','1':'kline_minute'}[c['interval']] or c['field'] not in FIELDS:_fail('PREVIOUS_CORRECTION_SCHEMA')
         if c['coverage_status'] not in ('PASS','CONFLICT','UNAVAILABLE','NOT_APPLICABLE') or c['order_status'] not in ('UNIQUE','TIMESTAMP_MULTI_PRICE','UNAVAILABLE','NOT_APPLICABLE'):_fail('PREVIOUS_CORRECTION_SCHEMA')
         if c['evidence_kind'] not in ('trade_adjudication','reported_turnover_selection'):_fail('PREVIOUS_CORRECTION_SCHEMA')
@@ -979,9 +1152,11 @@ def verify(*,p3b_root,download_root,inventory_path,output_root,policy_path,reada
         symbols=sorted(symbols)
         manifest_raw=_safe(roots[0],'manifest.json').read_bytes();manifest_sha=_sha(manifest_raw);manifest=_json(manifest_raw)
         raw_policy=Path(policy_path).read_bytes();policy=_json(raw_policy)
-        if _encoded(policy)!=_encoded(_policy(manifest_sha)) or raw_policy!=_encoded(policy):_fail('POLICY_MISMATCH')
+        version=_policy_version(policy)
+        if _encoded(policy)!=_encoded(_policy(manifest_sha,version,policy.get('standard_sha256'))) or raw_policy!=_encoded(policy):_fail('POLICY_MISMATCH')
         if manifest.get('tool_version')!='r8-public-data-2':_fail('P3B_VERSION')
         run=_Run(readable,_sha(raw_policy));run.symbols=symbols
+        run.version=version;run.v1_policy_sha=_sha(_encoded(_policy(manifest_sha)))
         repo=Path(__file__).resolve().parents[3]
         actual_commit=subprocess.check_output(['git','-C',str(repo),'rev-parse','HEAD'],text=True,stderr=subprocess.DEVNULL).strip()
         if tool_commit is not None and tool_commit!=actual_commit:_fail('TOOL_COMMIT_MISMATCH')
@@ -1007,7 +1182,7 @@ def verify(*,p3b_root,download_root,inventory_path,output_root,policy_path,reada
             items=inventory_index.get((sym,day,'bybit_trade'),[])
             if (sym,day) in sample_days:run.flagged.add((sym,day));run.price_days.add((sym,day))
             minutes=[]
-            if (sym,day) in run.price_days:
+            if (sym,day) in run.price_days or version==V2 and (sym,day) in run.flagged:
                 for r in inventory_index.get((sym,day,'bybit_minute'),[]):minutes+=_minute_rows(r,roots[1],run)
                 mt={}
                 for m in minutes:mt.setdefault(m.t,[]).append(m)
@@ -1024,10 +1199,11 @@ def verify(*,p3b_root,download_root,inventory_path,output_root,policy_path,reada
                     digests={r['sha256'] for r in items if r['status']=='AVAILABLE'}
                     trades=next((c for r,c in zip(items,candidates) if r['status']=='AVAILABLE'),candidates[0])
                     if len(digests)>1:trades.errors.add('C1_ID_TIME')
+                    if len(digests)>1:trades.identity_uncertain=True
                 if not ds and not hs:
                     run.finding(sym,'D',day,'row','DV-L3','MISSING_COUNTERPART',trades.refs);run.blocked.add('MISSING_COUNTERPART')
-                _adjudicate(run,sym,day,ds,hs,trades,meta,instruments[sym],minutes)
-            elif (sym,day) in run.flagged:
+                _adjudicate(run,sym,day,ds,hs,trades,meta,instruments[sym],minutes,semantics_only=(sym,day) not in run.price_days)
+            if (sym,day) in run.flagged and (sym,day) not in run.price_days and (sym,'D',day) not in run.selected:
                 for b in ds+hs:
                     row=[_correction(run,b,f,'KEEP','L1_VALID',b.nums.get(f),[],'NOT_APPLICABLE','NOT_APPLICABLE',['DV-L1'],'original_value') for f in FIELDS[:5]]
                     row.append(_turnover(run,b,hs,meta,True));_finish_row(run,b,row)
@@ -1040,6 +1216,9 @@ def verify(*,p3b_root,download_root,inventory_path,output_root,policy_path,reada
         run.findings.sort(key=_sort_record)
         coverage_sha=_sha(b''.join(_encoded(f) for f in run.findings))
         for c in run.corrections:
+            if version==V2:
+                c['reason_codes']=sorted(set(c['reason_codes'])|{c['reason_code']})
+                if c['field']=='volume' and c['decision']=='UNRESOLVED':c['volume_source']=None
             if c['evidence_kind']=='trade_adjudication':c['source_refs']=_refs(c['source_refs']+[_ref('report','findings.jsonl',coverage_sha)])
             key=(c['symbol'],c['dataset'],c['interval'],c['timestamp'],c['field'])
             if key in previous:
@@ -1053,11 +1232,13 @@ def verify(*,p3b_root,download_root,inventory_path,output_root,policy_path,reada
         if any(f['rule_id']=='DV-L4' and f['reason_code'] in ('UNAVAILABLE','INCOMPARABLE','INCOMPARABLE_PARTIAL') for f in run.findings):reasons.add('EXTERNAL_COVERAGE_LIMITED')
         out.mkdir(parents=True)
         payloads={'policy.json':raw_policy,'findings.jsonl':b''.join(_encoded(f) for f in run.findings),'corrections.jsonl':b''.join(_encoded(c) for c in run.corrections)}
+        if version==V2:payloads['volume_semantics.jsonl']=b''.join(_encoded(r) for r in sorted(run.semantics,key=lambda r:(r['day_start'],r['symbol'],r['timestamp'])))
         if sample_plan_path is not None:payloads['sample_plan.json']=Path(sample_plan_path).read_bytes()
         if sample_report is not None:payloads['sample_report.txt']=sample_report
         for name,data in payloads.items():
             (out/name).write_bytes(data);files[name]={'sha256':_sha(data),'rows':len(data.splitlines())}
         v=dict(schema_version='r8_data_verification_v1',status='BLOCKED' if run.blocked else 'READY',policy_sha256=run.policy_sha,p3b_manifest_sha256=manifest_sha,sample_plan_sha256=sample_sha,previous_corrections_sha256=previous_sha,review_refs=_refs(review_refs),tool_commit=tool_commit,readable=dict(readable),counts=dict(input_rows=len(bars),checked_days=len(days),flagged_days=len(run.flagged),corrected_fields=sum(c['decision']=='CORRECT' for c in run.corrections),unresolved_rows=len(run.unresolved)),files=dict(files),reason_codes=sorted(reasons))
+        if version==V2:v.update(schema_version='r8_data_verification_v2',standard_sha256=STANDARD_SHA256,volume_semantics_policy=V2)
         data=_encoded(v);(out/'verification.json').write_bytes(data);files['verification.json']={'sha256':_sha(data),'rows':1};primary='verification.json';primary_sha=_sha(data)
     except (_Invalid,OSError,ValueError,KeyError,TypeError,IndexError,OverflowError,zipfile.BadZipFile,EOFError,subprocess.SubprocessError) as exc:
         reasons.add(str(exc) if isinstance(exc,_Invalid) else 'INPUT_OR_TOOL_ERROR')

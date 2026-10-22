@@ -1,9 +1,27 @@
 # CLAUDE_CHANGELOG.md — 開發歷史歸檔
 
 > 從 CLAUDE.md / TODO.md 遷出的 Wave/Sprint/Batch + TODO version-increment 歷史敘事。新 session 不需要讀此文件，僅供回顧歷史時查閱。
-> 最後更新：2026-10-22（PR #242 合入已審 main、勘誤二與來源補記；TODO v921）
+> 最後更新：2026-10-22（PR #243 三項 P2 記錄者修正；TODO v923）
 
 ---
+
+## R8 DV7 PR #243：三項 P2 記錄者續修 — 2026-10-22
+
+- conductor 對照程式後確認三項 P2 全部屬實，明示授權在同一 [PR #243](https://github.com/yunancun/Arcane-Equilibrium/pull/243) 修正；基線為已發布 `dd3b85d888d142383e15c4616b1bf3db3d626279`，fetch 後 main 仍為 `55586c1e919958bcac12437404ed7c164832a7fe`。這是記錄者發布續修，原DV7停止／E2初審及唯一複審FAIL／E4 NOT_RUN不變，不重開原交付。
+- 子集診斷：僅在完整同戳群尾段首次超過差額後，採精確整數縮放、最大公因數約分與位元集合DP。固定上限為1,048,576狀態位元、4,096筆及4,096位元的分子／分母／公分母；超限為 `PARTIAL_SUBSET_UNDETERMINED`，仍拒絕、不改採值。30個2¹…2³⁰反例RED超過5秒程序預算；GREEN約0.144秒、峰值RSS 47,808,512 bytes，連同原小群組拒絕案例9 passed。DV3接受此拒絕分類亦另有紅綠。
+- 遷移原因碼：一次建 `(symbol,day_start)`→原因碼集合後查表；64／128個合成部分日的真實雙政策報表原先均超出線性存取預算，修後2 passed，768／1,536 correction列分別5,312／10,624次symbol讀取。以相同封存輸入對照修前實作，26／26主報表及內嵌單政策報表bytes全同；此比較隔離效能修正，於勘誤三pin變更前完成。
+- 非整點原列：findings／corrections保存原始整點加1毫秒；語義列只用整點鍵。缺真正整點原列按既有順序記 `MISSING_ORIGINAL_HOUR` 並保存 `C1_INVALID` 原因；整點與異常列並存則記 `C1_INVALID`。兩個真實DV1→DV3案例從兩個summarizer中止到正常產出，該日v1／v2均為u，2 passed。
+- 規範僅末尾追加「勘誤三（2026-10-22，conductor 依 #243 審查）」；新 `STANDARD_SHA256=d0fbf9ff02d080027d575eb6488f2c552c3a583485b8c685166fe0ef94b2af98`。保留ba65fbca規範的v1歷史政策身分，測試在消費前準備此歷史pin的fixture，與固定main原實作比78份完整bytes；v2使用新pin，舊bundle不回寫。§13.7、採值與可用性、§4.5／§13.6與驗收目標待決均不變。
+- `c9650fddc` 的 hosted research run `39816584641`／job `119956704414` 為1 failed、1185 passed、52 skipped：新增記憶體斷言讀到Linux生命週期RSS 1,393,569,792 bytes。Linux exec會保留被替換位址空間的高水位，不能當作此次子集診斷配置量；僅將測試改用驗證呼叫前啟動的tracemalloc峰值，256 MiB門檻與5秒逾時不變，RSS仍記錄。聚焦GREEN 1 passed，約0.300秒、配置峰值5,567,053 bytes；產品程式／分類／規範不改。固定新head完整回歸與CI仍須重跑，保留原失敗收據。新head自動審查另提 [語義列按日索引P2](https://github.com/yunancun/Arcane-Equilibrium/pull/243#discussion_r4351071691)，依續派原文交conductor，未修未resolve；原三則已於c965回覆修正提交並resolve。
+- 修改限定兩程式、兩測試、規範末尾與pin、TODO v922→v923、changelog及登記簿文件雜湊；不新增RH事件。PR分支根目錄DV1／DV3／全部R8、僅兩個指定structure檔、工作樹不變快照、26日逐格及雙政策報表的最終結果見倉庫外 `audits/2026-10-22-r8-data-verify-dv7-p2/REPORT.md`、XML及SHA256SUMS；既存archive索引失敗單列。推送後回覆並resolve原三則thread，再請新head自動審查；新程式意見原文交conductor，不自行續修。不取數、不碰Linux runtime／資料庫／Demo／live、不更新Wiki、不合併。
+
+## R8 DV7 記錄者小修與發布候選 — 2026-10-22
+
+- [PR #243](https://github.com/yunancun/Arcane-Equilibrium/pull/243)：自 fetch 後 `origin/main 55586c1e919958bcac12437404ed7c164832a7fe` 建 linked worktree／`codex/r8-data-verify-dv7-publish-20261022`，先原樣推送 DV7 `aef6a9d3f4b88e335a327fe8afa9fc8b0af6b82f`，再 no-ff 合入保留原提交。原DV7的E2初審FAIL 001–004、唯一複審FAIL 004、E4 NOT_RUN及停止／釋放歷史均保留；conductor依既有記錄者發布慣例授權此窄修，不重開DV7、不補造原E4通過。
+- DV7-E2-004：`summarize_policies` 非空凍結計畫的主全批只用 frozen base，額外已驗證日另列 `verified_outside_base`，明示不進主分母、非隨機、無上界、不用於驗收。空計畫仍以全部已驗證日作全批，明示目的性／非隨機／無上界。兩日base加一日C的真實雙政策案例先重現分母3，修後分母2、C僅在診斷統計；雙邊缺base日仍計2個未決，目的性標名亦先紅後綠。三項聚焦檢查通過，DV3預檢125 passed。
+- 分母／標名小修只改 `verification_fetch.py` 與 `test_r8_verification_fetch.py`。額外必要整合修正逐項列一項：`test_r8_data_verification.py` 的 `dv7_main_verifier` 在讀固定main前先判斷本機原件可用度；CI run `39801663078`／job `119903826746` 在head `22609f76d` 因淺層checkout無固定main物件而出現26個setup errors（其餘1179 passed、26 skipped），本機邊界重現亦26 errors，前移既有缺原件檢查後為26 skipped且零main物件讀取。這是缺外置原件時的明示未執行，不作資料驗證通過；本機有原件的完整回歸仍須重跑。`verification.py` 維持原DV7內容，規範及 `STANDARD_SHA256=ba65fbca3b9230ad1807b82c923e9e60ab870edbe5c1e0d5090ebce99b06f6d0` 不動。§13.6五分項、§4.5種子／分層／計數／上界門檻及驗收目標 `PENDING_OPERATOR_DECISION` 均保留，裁決邏輯不變。
+- 最終PR分支根目錄DV1／DV3／全部 `test_r8_*.py`、兩個指定structure檔及工作樹不變快照，連同26日v1的78份完整bytes對main、v2對§13.7、雙政策26／26與報表修前修後差異，詳倉庫外 `audits/2026-10-22-r8-data-verify-dv7-publish/REPORT.md`、XML、比對JSON及SHA256SUMS。數字以本次完成證據為準；原DV7已有195／124／1230 passed不冒稱本次重跑，原archive索引失敗保留並重驗。
+- TODO v921→v922僅更新版本行與DATA-VERIFY列；路線登記簿記錄本次TODO／changelog文件雜湊，不新增RH事件。草稿待必要CI與 `research tests (linux)` 通過後轉正式；程式審查意見原文交conductor、不自主修改。發布候選非全市場抽樣／DV4／下游或runtime驗收；只用本機訓練段原件，不取數、不碰Linux／資料庫／Demo／live、不更新Wiki、不合併。
 
 ## R8 規範 PR #242：合入已審 main、勘誤二與來源補記 — 2026-10-22
 

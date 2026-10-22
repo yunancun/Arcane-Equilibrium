@@ -526,10 +526,46 @@
       "blob": "072088b48bd4dfc0380e545d6a0538d4f8e27f3f"
     },
     "r8-stage2-data-verification-standard-v2-erratum-2": {
-      "kind": "recorded_file",
+      "kind": "git_blob",
       "path": "docs/execution_plan/2026-10-22--r8-stage2-data-verification-standard.md",
       "sha256": "ba65fbca3b9230ad1807b82c923e9e60ab870edbe5c1e0d5090ebce99b06f6d0",
-      "meaning": "Conductor-dispatched PR #242 follow-up after merging reviewed main 1ea85a9a: implementation mapping for frozen expansion reports, partial-day diagnostics, L2 turnover flags and per-day L3 evidence counting; supplied background URLs transcribed without online verification. No rule or RH event changed; source edits remain the standard pin only relative to merged main, with v2 awaiting DV7."
+      "meaning": "Conductor-dispatched PR #242 follow-up after merging reviewed main 1ea85a9a: implementation mapping for frozen expansion reports, partial-day diagnostics, L2 turnover flags and per-day L3 evidence counting; supplied background URLs transcribed without online verification. No rule or RH event changed; source edits remain the standard pin only relative to merged main, with v2 awaiting DV7.",
+      "commit": "dd3b85d888d142383e15c4616b1bf3db3d626279",
+      "blob": "27e53e6755f45d7ff049341dd8bfc3cb1a4fada5"
+    },
+    "r8-dv7-publish-todo-v922": {
+      "kind": "git_blob",
+      "path": "TODO.md",
+      "sha256": "ac051e60c8a633208d5a8734ea470c7c57ba397e9d547ad7c56710e4df294484",
+      "meaning": "Conductor-authorized DV7 recorder publication PR #243 and narrow denominator/label repair; original stopped E2 FAIL and E4 NOT_RUN retained. Publication candidate only, no new RH event or data/runtime acceptance.",
+      "commit": "dd3b85d888d142383e15c4616b1bf3db3d626279",
+      "blob": "ada350fc20b352c5503356625562d998b0e0ec3c"
+    },
+    "r8-dv7-publish-changelog": {
+      "kind": "git_blob",
+      "path": "docs/CLAUDE_CHANGELOG.md",
+      "sha256": "d2f7442dbe7d6cb2ab70cd74ba94e0579b637c3dbc49b13571caeedba867ac66",
+      "meaning": "Conductor-authorized DV7 recorder publication PR #243 and narrow denominator/label repair; original stopped E2 FAIL and E4 NOT_RUN retained. Publication candidate only, no new RH event or data/runtime acceptance.",
+      "commit": "dd3b85d888d142383e15c4616b1bf3db3d626279",
+      "blob": "bc507e8a3169d436bb83020762430d627a49b749"
+    },
+    "r8-stage2-data-verification-standard-v2-erratum-3": {
+      "kind": "recorded_file",
+      "path": "docs/execution_plan/2026-10-22--r8-stage2-data-verification-standard.md",
+      "sha256": "d0fbf9ff02d080027d575eb6488f2c552c3a583485b8c685166fe0ef94b2af98",
+      "meaning": "Conductor-authorized PR #243 P2 follow-up: bounded rejection-only subset diagnosis and erratum three, linear migration indexing, aligned semantic keys preserving malformed originals. Original stopped DV7 history retained; no new RH event, merge, data or runtime acceptance."
+    },
+    "r8-dv7-p2-todo-v923": {
+      "kind": "recorded_file",
+      "path": "TODO.md",
+      "sha256": "468c670074e5a0ba3f94032a97f4d86f2987795759485bc874cc0828cd03fab4",
+      "meaning": "Conductor-authorized PR #243 P2 follow-up: bounded rejection-only subset diagnosis and erratum three, linear migration indexing, aligned semantic keys preserving malformed originals. Original stopped DV7 history retained; no new RH event, merge, data or runtime acceptance."
+    },
+    "r8-dv7-p2-changelog": {
+      "kind": "recorded_file",
+      "path": "docs/CLAUDE_CHANGELOG.md",
+      "sha256": "500195cb33d1904df209639a8bcfbbcfb4773c3629d67aee174f9e722cfdaf06",
+      "meaning": "Conductor-authorized PR #243 P2 follow-up: bounded rejection-only subset diagnosis and erratum three, linear migration indexing, aligned semantic keys preserving malformed originals. Original stopped DV7 history retained; no new RH event, merge, data or runtime acceptance."
     }
   },
   "routes": [
@@ -713,7 +749,9 @@
         "r8-stage2-data-verification-standard-r3",
         "r8-stage2-data-verification-standard-erratum-1",
         "r8-stage2-data-verification-standard-v2-volume",
-        "r8-stage2-data-verification-standard-v2-erratum-2"
+        "r8-stage2-data-verification-standard-v2-erratum-2",
+        "r8-dv7-publish-todo-v922",
+        "r8-dv7-publish-changelog"
       ],
       "status_history": [
         {

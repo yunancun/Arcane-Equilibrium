@@ -35,6 +35,10 @@ TRAIN_END = 1751328000000
 SEED = 20261022
 TIERS = ('GE_100M', 'GE_10M', 'GE_1M', 'NO_OPEN')
 STANDARD = 'docs/execution_plan/2026-10-22--r8-stage2-data-verification-standard.md'
+V2 = 'v2-terminal-suffix-20261022'
+_V1_STANDARDS=('ba65fbca3b9230ad1807b82c923e9e60ab870edbe5c1e0d5090ebce99b06f6d0',
+               '125901d0341487bd058be70e7cc2ed27be7c3be270a45d05587e471104b7cacf',
+               'ad80220cd6dc3f8dc5c451c6281aa9f1b2acf7fbb47bc80ed21eb3905710110c')
 
 
 class InvalidInput(ValueError):
@@ -133,10 +137,12 @@ def _decimal(text):
     return n
 
 
-def _policy(manifest):
+def _policy(manifest,version='v1-strict',standard_sha=None):
     standard = Path(__file__).resolve().parents[3] / STANDARD
-    return dict(schema_version='r8_data_verification_policy_v1',
-                standard_sha256=sha(standard.read_bytes()), approval_event='RH-20261022-04',
+    current=sha(standard.read_bytes())
+    if standard_sha is not None and standard_sha not in ((current,)+_V1_STANDARDS if version=='v1-strict' else (current,)):raise InvalidInput('POLICY_MISMATCH')
+    result=dict(schema_version='r8_data_verification_policy_v1',
+                standard_sha256=current if standard_sha is None else standard_sha, approval_event='RH-20261022-04',
                 p3b_manifest_sha256=_hash(manifest),
                 listing=dict(x_pct='50',y_pct='20',z_pct='20',cooling_days=7,
                              quantity='hourly_base_volume_daily_mean',variation='mean_relative_difference',
@@ -146,6 +152,9 @@ def _policy(manifest):
                 turnover=dict(window_days=12,thresholds=['1000000','10000000','100000000'],
                               trigger_pct='5',general='exchange_reported',suspect='sum_hourly_reported'),
                 l4_price_threshold_pct='1')
+    if version==V2:result.update(schema_version='r8_data_verification_policy_v2',approval_event='RH-20261022-05',volume_semantics_policy=V2)
+    elif version!='v1-strict':raise InvalidInput('POLICY_MISMATCH')
+    return result
 
 
 @dataclass(frozen=True)
@@ -387,7 +396,7 @@ def _json(data):
     return value
 
 
-def _load_plan(root):
+def _load_plan(root,*,allow_empty=False):
     data=_path(root,'sample_plan.json').read_bytes()
     if _path(root,'sample_plan.sha256').read_bytes() != (sha(data)+'\n').encode():
         raise InvalidInput('PLAN_SEAL_MISMATCH')
@@ -397,9 +406,11 @@ def _load_plan(root):
         raise InvalidInput('INVALID_PLAN')
     start,end=_readable(p['readable'])
     policy=_path(root,'policy.json').read_bytes()
-    if sha(policy)!=_hash(p['policy_sha256']) or policy!=encoded(_policy(p['p3b_manifest_sha256'])):
+    supplied=_json(policy)
+    if not isinstance(supplied,dict):raise InvalidInput('POLICY_MISMATCH')
+    if sha(policy)!=_hash(p['policy_sha256']) or policy!=encoded(_policy(p['p3b_manifest_sha256'],standard_sha=supplied.get('standard_sha256'))):
         raise InvalidInput('POLICY_MISMATCH')
-    if not isinstance(p['strata'],list) or not p['strata']:
+    if not isinstance(p['strata'],list) or not p['strata'] and not allow_empty:
         raise InvalidInput('EMPTY_POPULATION')
     seen=set(); prior=None
     for s in p['strata']:
@@ -675,15 +686,17 @@ class _AdjudicationEvidence:
             t=Fraction(_decimal(r['timestamp']))*1000
             if not day<=t<day+DAY or not self.sources.plan['readable']['start']<=t<self.sources.plan['readable']['end']:
                 return None
+            if r['symbol']!=symbol:return None
             price=Fraction(_decimal(r['price']));size=Fraction(_decimal(r['size']))
-            if r['symbol']!=symbol or not r['trdMatchID'] or r['trdMatchID'] in ids or price<=0 or size<=0:return None
+            if not r['trdMatchID'] or r['trdMatchID'] in ids or price<=0 or size<=0 or r.get('side') not in ('Buy','Sell'):return None
             ids.add(r['trdMatchID'])
             if previous is not None and t!=previous:direction.add(t>previous)
             previous=t
             if len(direction)>1:return None
             for window in (('D',day),('60',int(t//HOUR)*HOUR)):
-                a=totals.setdefault(window,dict(volume=Fraction(0),count=0,first=t,last=t,open={price},close={price},high=price,low=price))
+                a=totals.setdefault(window,dict(volume=Fraction(0),count=0,first=t,last=t,open={price},close={price},high=price,low=price,groups={}))
                 a['volume']+=size;a['count']+=1;a['high']=max(a['high'],price);a['low']=min(a['low'],price)
+                a['groups'].setdefault(t,[]).append((size,r['trdMatchID']))
                 if t<a['first']:a['first']=t;a['open']={price}
                 elif t==a['first']:a['open'].add(price)
                 if t>a['last']:a['last']=t;a['close']={price}
@@ -755,13 +768,130 @@ class _AdjudicationEvidence:
         return True
 
 
-def _bundle_outcomes(root,p,plan_sha):
+_VOLUME_KEYS='schema_version policy_sha256 volume_semantics_policy symbol day_start timestamp hour_classification day_applicable original_volume trade_volume volume_delta volume_source tail_group_count tail_count tail_volume tail_first_timestamp tail_last_timestamp prefix_first_timestamp prefix_count source_refs reason_codes confidence_evidence'
+_HOUR_CLASSES=('STRICT_C3','TERMINAL_SUFFIX_EXACT','PARTIAL_TIMESTAMP_SUBSET','PARTIAL_SUBSET_UNDETERMINED','NO_COMPLETE_SUFFIX','POSITIVE_VOLUME_DELTA','MISSING_ORIGINAL_HOUR','IDENTITY_UNCERTAIN','OUT_OF_SCOPE','C1_INVALID','C2_CONFLICT','EMPTY_PREFIX')
+
+
+class _VolumeEvidence(_AdjudicationEvidence):
+    """Independently authenticate complete-group suffixes against original bytes."""
+    def __init__(self,sources,findings,report_sha,rows,policy_sha,verified,missing_trades,correction_days):
+        super().__init__(sources,findings,report_sha)
+        self.semantics={};self.valid_hours=set();self.selected_days=set();self.incomplete_days=set();order=[]
+        for r in rows:
+            _keys(r,_VOLUME_KEYS);_symbol(r['symbol'])
+            day=_integer(r['day_start']);t=_integer(r['timestamp'])
+            if (r['schema_version']!='r8_volume_semantics_v2' or r['volume_semantics_policy']!=V2
+                or r['policy_sha256']!=policy_sha or day%DAY or t%HOUR or not day<=t<day+DAY
+                or r['hour_classification'] not in _HOUR_CLASSES or type(r['day_applicable']) is not bool):
+                raise InvalidInput('VOLUME_SEMANTICS_EVIDENCE_MISMATCH')
+            key=(r['symbol'],t)
+            if key in self.semantics:raise InvalidInput('VOLUME_SEMANTICS_EVIDENCE_MISMATCH')
+            self.semantics[key]=r;order.append((day,r['symbol'],t))
+            _refs(r['source_refs'],sources.root,verified,missing_trades)
+            if r['reason_codes']!=sorted(set(r['reason_codes'])) or any(not isinstance(x,str) for x in r['reason_codes']):raise InvalidInput('INVALID_REASON_CODES')
+            if r['volume_source'] not in (None,'v1_strict','trade_reconstructed_terminal_suffix'):raise InvalidInput('VOLUME_SEMANTICS_EVIDENCE_MISMATCH')
+            for name in ('original_volume','trade_volume','volume_delta','tail_volume','tail_first_timestamp','tail_last_timestamp','prefix_first_timestamp'):
+                if r[name] is not None and (not isinstance(r[name],str) or not re.fullmatch(r'-?[0-9]+(?:\.[0-9]+)?',r[name])):raise InvalidInput('VOLUME_SEMANTICS_EVIDENCE_MISMATCH')
+            for name in ('tail_count','tail_group_count','prefix_count'):
+                if r[name] is not None:_integer(r[name])
+            _keys(r['confidence_evidence'],'prefix_hlc tail_minute next_hour_open')
+            for e in r['confidence_evidence'].values():
+                _keys(e,'status source_refs details')
+                if e['status'] not in ('SUPPORTS','CONTRADICTS','UNAVAILABLE','AMBIGUOUS'):raise InvalidInput('INVALID_CONFIDENCE_EVIDENCE')
+                _refs(e['source_refs'],sources.root,verified,missing_trades)
+                names=[]
+                for d in e['details']:
+                    _keys(d,'name value')
+                    if not isinstance(d['name'],str) or d['value'] is not None and not isinstance(d['value'],str):raise InvalidInput('INVALID_DETAIL')
+                    names.append(d['name'])
+                if names!=sorted(set(names)):raise InvalidInput('INVALID_DETAIL_ORDER')
+            if r['hour_classification'] in ('STRICT_C3','TERMINAL_SUFFIX_EXACT'):
+                if any(x['kind']=='trade' and (x['relative_path'] is None or x['relative_path'] in missing_trades) for x in r['source_refs']):
+                    self.incomplete_days.add((r['symbol'],day))
+                else:
+                    if not self.authenticate(r):raise InvalidInput('VOLUME_SEMANTICS_EVIDENCE_MISMATCH')
+                    self.valid_hours.add(key)
+        if order!=sorted(order):raise InvalidInput('VOLUME_SEMANTICS_EVIDENCE_MISMATCH')
+        for symbol,day in correction_days|{(r['symbol'],r['day_start']) for r in rows}:
+            ds=[r for r in rows if (r['symbol'],r['day_start'])==(symbol,day)]
+            applicable=all((symbol,r['timestamp']) in self.valid_hours for r in ds) and any(r['hour_classification']=='TERMINAL_SUFFIX_EXACT' for r in ds)
+            manifest=sources.load_manifest()
+            first=min((m.get('first_timestamp',day) for m in manifest['files'].values() if m.get('symbol')==symbol and m.get('interval')=='60'),default=day)
+            delivery=int(manifest.get('universe',{}).get(symbol,{}).get('deliveryTime',0))
+            expected=set(range(max(first,day),min(day+DAY,((delivery+HOUR-1)//HOUR)*HOUR) if delivery else day+DAY,HOUR))
+            if not expected<={r['timestamp'] for r in ds}:raise InvalidInput('VOLUME_SEMANTICS_EVIDENCE_MISMATCH')
+            applicable &= {r['timestamp'] for r in ds}==expected
+            # Missing originals remain a per-day evidence gap. Retain the
+            # declaration for schema/source identity, never for proof of e.
+            if (symbol,day) in self.incomplete_days:applicable=ds[0]['day_applicable']
+            if any(r['day_applicable']!=applicable for r in ds):raise InvalidInput('VOLUME_SEMANTICS_EVIDENCE_MISMATCH')
+            for r in ds:
+                source='trade_reconstructed_terminal_suffix' if applicable and r['hour_classification']=='TERMINAL_SUFFIX_EXACT' else 'v1_strict' if r['hour_classification']=='STRICT_C3' else None
+                if r['volume_source']!=source:raise InvalidInput('VOLUME_SEMANTICS_EVIDENCE_MISMATCH')
+                if source=='trade_reconstructed_terminal_suffix' and not {'C3_ORIGINAL_FAIL','TERMINAL_SUFFIX_SOURCE_SELECTED','TRADE_SOURCE_SELECTED_BY_E','SOURCE_TRUTH_UNVERIFIED'}<=set(r['reason_codes']):raise InvalidInput('VOLUME_SEMANTICS_EVIDENCE_MISMATCH')
+            if applicable:self.selected_days.add((symbol,day))
+
+    def authenticate(self,r):
+        symbol=r['symbol'];t=r['timestamp'];day=r['day_start']
+        originals=[x for x in r['source_refs'] if x['kind']=='trade' and x['row'] is None and x['relative_path'] is not None]
+        if len(originals)!=1:return False
+        try:totals=self.trade_totals(originals[0],symbol,day)
+        except (OSError,InvalidInput):return False
+        if totals is None:return False
+        a=totals.get(('60',t),dict(volume=Fraction(0),groups={}))
+        original=Fraction(_decimal(r['original_volume']));delta=original-a['volume']
+        if Fraction(_decimal(r['trade_volume']))!=a['volume'] or Fraction(_decimal(r['volume_delta']))!=delta:return False
+        groups=a['groups'];stamps=sorted(groups);prefix=[];tail=[]
+        if delta==0:
+            if r['hour_classification']!='STRICT_C3':return False
+            prefix=stamps
+        elif delta<0:
+            # An independent forward prefix equality, not DV1's reverse suffix loop.
+            running=Fraction(0)
+            for i,stamp in enumerate(stamps[:-1]):
+                running+=sum(size for size,_ in groups[stamp])
+                if running==original:prefix=stamps[:i+1];tail=stamps[i+1:];break
+            if not prefix or r['hour_classification']!='TERMINAL_SUFFIX_EXACT':return False
+        else:return False
+        expected=dict(tail_group_count=len(tail),tail_count=sum(len(groups[s]) for s in tail),prefix_count=sum(len(groups[s]) for s in prefix))
+        if any(r[k]!=v for k,v in expected.items()):return False
+        if Fraction(_decimal(r['tail_volume']))!=sum((size for s in tail for size,_ in groups[s]),Fraction(0)):return False
+        for name,stamp in (('tail_first_timestamp',tail[0] if tail else None),('tail_last_timestamp',tail[-1] if tail else None),('prefix_first_timestamp',prefix[0] if prefix else None)):
+            if (r[name] is not None if stamp is None else r[name] is None or Fraction(_decimal(r[name]))*1000!=stamp):return False
+        tail_ids={identity for s in tail for _,identity in groups[s]}
+        if not tail_ids<={x['trade_id'] for x in r['source_refs'] if x['kind']=='trade'}:return False
+        f=self.findings.get((symbol,'60',t,'volume','C3_QUANTITY'),[])
+        if len(f)!=1 or f[0]['reason_code']!=('COVERAGE_RECONCILED' if delta==0 and prefix else 'COVERAGE_CONFLICT'):return False
+        d={x['name']:x['value'] for x in f[0]['details']}
+        if Fraction(_decimal(d.get('reported_volume')))!=original:return False
+        self.sources.bind(dict(symbol=symbol,interval='60',timestamp=t,field='volume',original_value=d['reported_volume'],source_refs=r['source_refs']))
+        if d.get('volume_semantics_policy')!=V2 or d.get('hour_classification')!=r['hour_classification']:return False
+        if delta!=0 and 'C3_ORIGINAL_FAIL' not in r['reason_codes']:return False
+        return True
+
+    def hour_complete(self,symbol,t,original,aggregate):
+        r=self.semantics.get((symbol,t))
+        if r and r['hour_classification']=='TERMINAL_SUFFIX_EXACT':return (symbol,t//DAY*DAY) in self.selected_days and (symbol,t) in self.valid_hours
+        return super().hour_complete(symbol,t,original,aggregate)
+
+    def selected(self,row):
+        day=(row['symbol'],row['timestamp']//DAY*DAY)
+        return day in self.selected_days and (row['interval']=='D' or self.semantics.get((row['symbol'],row['timestamp']),{}).get('hour_classification')=='TERMINAL_SUFFIX_EXACT')
+
+
+def _bundle_outcomes(root,p,plan_sha,details=None):
     verification=_json(_path(root,'verification.json').read_bytes())
-    _keys(verification,_VERIFICATION_KEYS)
-    if (verification['schema_version']!='r8_data_verification_v1' or verification['status'] not in ('READY','BLOCKED')
-        or verification['policy_sha256']!=p['policy_sha256'] or verification['p3b_manifest_sha256']!=p['p3b_manifest_sha256']
+    if not isinstance(verification,dict):raise InvalidInput('VERIFICATION_BINDING_MISMATCH')
+    schema=verification.get('schema_version');v2=schema=='r8_data_verification_v2'
+    _keys(verification,_VERIFICATION_KEYS+(' standard_sha256 volume_semantics_policy' if v2 else ''))
+    expected_policy=encoded(_policy(p['p3b_manifest_sha256'],V2 if v2 else 'v1-strict'))
+    if (schema not in ('r8_data_verification_v1','r8_data_verification_v2') or verification['status'] not in ('READY','BLOCKED')
+        or verification['policy_sha256']!=(sha(expected_policy) if v2 else p['policy_sha256']) or verification['p3b_manifest_sha256']!=p['p3b_manifest_sha256']
         or verification['sample_plan_sha256']!=plan_sha or verification['readable']!=p['readable']):
         raise InvalidInput('VERIFICATION_BINDING_MISMATCH')
+    if v2 and (verification['volume_semantics_policy']!=V2 or verification['standard_sha256']!=_policy(p['p3b_manifest_sha256'])['standard_sha256']
+        or _path(root,'policy.json').read_bytes()!=expected_policy or _path(root,'sample_plan.json').read_bytes()!=encoded(p)):
+        raise InvalidInput('POLICY_MISMATCH')
     _keys(verification['counts'],'input_rows checked_days flagged_days corrected_fields unresolved_rows')
     for value in verification['counts'].values():
         _integer(value)
@@ -775,21 +905,23 @@ def _bundle_outcomes(root,p,plan_sha):
         raise InvalidInput('INVALID_REASON_CODES')
     if not isinstance(verification['files'],dict) or not {'findings.jsonl','corrections.jsonl'}<=set(verification['files']):
         raise InvalidInput('MISSING_EVIDENCE')
+    if v2 and not {'policy.json','volume_semantics.jsonl','sample_plan.json'}<=set(verification['files']):raise InvalidInput('MISSING_EVIDENCE')
     contents={}
     for name,meta in verification['files'].items():
         _keys(meta,'sha256 rows'); _integer(meta['rows'])
         data=_path(root,name).read_bytes()
         if sha(data)!=_hash(meta['sha256']):
             raise InvalidInput('EVIDENCE_HASH_MISMATCH')
-        if name in ('findings.jsonl','corrections.jsonl'):
+        if name in ('findings.jsonl','corrections.jsonl','volume_semantics.jsonl'):
             rows=[_json(line) for line in data.splitlines(keepends=True)]
             if len(rows)!=meta['rows']:
                 raise InvalidInput('EVIDENCE_ROW_COUNT_MISMATCH')
             contents[name]=rows
     evidence=_AdjudicationEvidence(source_rows,contents['findings.jsonl'],verification['files']['findings.jsonl']['sha256'])
+    if v2:evidence=_VolumeEvidence(source_rows,contents['findings.jsonl'],verification['files']['findings.jsonl']['sha256'],contents['volume_semantics.jsonl'],verification['policy_sha256'],verified,missing_trades,{(r['symbol'],_integer(r['timestamp'])//DAY*DAY) for r in contents['corrections.jsonl']})
     days={}; ids=set(); keys=set(); order=[];reasons={}
     for row in contents['corrections.jsonl']:
-        _keys(row,_CORRECTION_KEYS); _refs(row['source_refs'],root,verified,missing_trades)
+        _keys(row,_CORRECTION_KEYS+(' volume_semantics_policy volume_source reason_codes' if v2 else '')); _refs(row['source_refs'],root,verified,missing_trades)
         for name in ('correction_id','unit','formula','reason_code'):
             if not isinstance(row[name],str) or not row[name]:
                 raise InvalidInput('INVALID_CORRECTION')
@@ -797,8 +929,15 @@ def _bundle_outcomes(root,p,plan_sha):
             raise InvalidInput('INVALID_RULE_IDS')
         if row['supersedes'] is not None and (not isinstance(row['supersedes'],str) or not row['supersedes'] or row['supersedes']==row['correction_id']):
             raise InvalidInput('INVALID_SUPERSEDES')
-        if row['schema_version']!='r8_data_correction_v1' or row['policy_sha256']!=p['policy_sha256'] or row['approval_event']!='RH-20261022-04':
+        if row['schema_version']!=('r8_data_correction_v2' if v2 else 'r8_data_correction_v1') or row['policy_sha256']!=verification['policy_sha256'] or row['approval_event']!=('RH-20261022-05' if v2 else 'RH-20261022-04'):
             raise InvalidInput('CORRECTION_BINDING_MISMATCH')
+        if v2:
+            selected=evidence.selected(row)
+            source=('trade_reconstructed_terminal_suffix' if selected else 'v1_strict') if row['field']=='volume' and row['decision']!='UNRESOLVED' else None
+            if (row['volume_semantics_policy']!=V2 or row['volume_source']!=source
+                or row['reason_codes']!=sorted(set(row['reason_codes']))
+                or selected and 'SOURCE_TRUTH_UNVERIFIED' not in row['reason_codes']):raise InvalidInput('VOLUME_SEMANTICS_EVIDENCE_MISMATCH')
+            if sha(encoded({k:v for k,v in row.items() if k!='correction_id'}))!=row['correction_id']:raise InvalidInput('CORRECTION_ID_MISMATCH')
         _symbol(row['symbol'])
         t=_integer(row['timestamp']); start,end=_readable(p['readable'])
         if row['interval'] not in ('D','60','1') or row['dataset']!={'D':'kline_day','60':'kline_hour','1':'kline_minute'}[row['interval']] or not start<=t<end or row['field'] not in _FIELDS:
@@ -886,6 +1025,7 @@ def _bundle_outcomes(root,p,plan_sha):
         required={(interval,t,field) for interval,times in (('D',[day]),('60',range(day,day+DAY,HOUR))) for t in times for field in _FIELDS}
         unresolved=state['unresolved'] or verification['status']=='BLOCKED' or not required<=state['covered']
         result[(symbol,day)]=('e' if state['error'] else 'u' if state['incomplete'] or unresolved else 's' if state['semantic'] else 'ok')
+    if details is not None:details.update(policy=V2 if v2 else 'v1-strict',verification=verification,corrections=contents['corrections.jsonl'],findings=contents['findings.jsonl'],semantics=contents.get('volume_semantics.jsonl',[]))
     return result,reasons
 
 
@@ -949,6 +1089,103 @@ def summarize_sample(plan_root, verification_roots, artifact_root):
             reasons.append('VERIFICATION_NOT_ARCHIVED')
         lines.append('status='+('BLOCKED' if reasons else 'READY'))
         return _emit(artifact_root,'sample_report.txt', ('\n'.join(lines)+'\n').encode(),len(lines),reasons)
+    except (InvalidInput,OSError,EOFError,TypeError,KeyError,IndexError,ValueError) as exc:
+        return _handoff(artifact_root,reasons=(str(exc) if isinstance(exc,InvalidInput) else 'INVALID_EVIDENCE',))
+
+
+def summarize_policies(plan_root,v1_verification_roots,v2_verification_roots,artifact_root):
+    """§13.6 five-part comparison of one frozen sample; acceptance stays pending.
+
+    The original single-policy sample reports retain §4.5 and their exact
+    expansion handoff grammar. This comparison is recorder evidence, never an
+    expansion instruction, a hypothesis input, or an acceptance decision.
+    """
+    try:
+        p,plan_sha=_load_plan(plan_root,allow_empty=True);all_outcomes={};all_rows={};all_semantics={};bundles={}
+        for version,roots in (('v1-strict',v1_verification_roots),(V2,v2_verification_roots)):
+            outcomes={};rows=[];semantics=[];bundles[version]=[]
+            for root in roots:
+                detail={};values,_=_bundle_outcomes(root,p,plan_sha,detail)
+                if detail['policy']!=version:raise InvalidInput('POLICY_MISMATCH')
+                if set(values)&set(outcomes):raise InvalidInput('OVERLAPPING_VERIFICATION')
+                outcomes.update(values);rows+=detail['corrections'];semantics+=detail['semantics']
+                bundles[version].append((root,detail['verification']))
+            all_outcomes[version]=outcomes;all_rows[version]=rows;all_semantics[version]=semantics
+        if set(all_outcomes['v1-strict'])!=set(all_outcomes[V2]):raise InvalidInput('FROZEN_SAMPLE_PAIR_MISMATCH')
+        lines=['sample_plan_sha256='+plan_sha,
+               'base denominator only; expansion is diagnostic' if p['strata'] else
+               'batch_kind=purposive sampling=nonrandom upper_bound=NOT_APPLICABLE acceptance=NOT_APPLICABLE',
+               'acceptance_target=PENDING_OPERATOR_DECISION']
+        reasons=['ACCEPTANCE_TARGET_PENDING'];files={}
+        if not p['strata']:
+            lines.append('sampling_population=EMPTY_POPULATION');reasons.append('EMPTY_POPULATION')
+        for version,roots in (('v1-strict',v1_verification_roots),(V2,v2_verification_roots)):
+            if not p['strata']:continue
+            folder='v1' if version=='v1-strict' else 'v2'
+            report=summarize_sample(plan_root,roots,Path(artifact_root)/folder)
+            if report['primary_file'] is None:raise InvalidInput('POLICY_REPORT_UNAVAILABLE')
+            reasons+=report['reason_codes']
+            for name,meta in report['files'].items():files[folder+'/'+name]=meta
+            lines += ['policy='+version,(Path(report['artifact_root'])/report['primary_file']).read_text().rstrip('\n')]
+        frozen_base={(d['symbol'],d['day_start']) for s in p['strata'] for d in s['draws'][:s['base_size']]}
+        verified_days=set(all_outcomes['v1-strict'])
+        full_batch=frozen_base if p['strata'] else verified_days
+        groups=[('full_batch',full_batch)]
+        for s in p['strata']:
+            groups.append((f"base_stratum year={s['year']} tier={s['tier']} N={s['population_size']}",
+                {(d['symbol'],d['day_start']) for d in s['draws'][:s['base_size']]}))
+        if p['strata'] and verified_days-frozen_base:
+            groups.append(('verified_outside_base',verified_days-frozen_base))
+        for level,days in groups:
+            lines.append(f'level={level} day_denominator={len(days)}')
+            if level=='verified_outside_base':
+                lines += ['main_denominator=excluded sampling=nonrandom upper_bound=NOT_APPLICABLE acceptance=NOT_APPLICABLE',
+                          'verified_days='+encoded(sorted([list(k) for k in days])).decode().strip()]
+            for version,suffix in (('v1-strict','v1'),(V2,'policy')):
+                values=[all_outcomes[version].get(key,'u') for key in days]
+                lines.append(f'n_error_{suffix}={values.count("e")} n_unresolved_{suffix}={values.count("u")} n_semantics_{suffix}={values.count("s")}')
+            selected=[r for r in all_semantics[V2] if (r['symbol'],r['day_start']) in days and r['day_applicable'] and r['hour_classification']=='TERMINAL_SUFFIX_EXACT']
+            risk={(r['symbol'],r['day_start']) for r in selected}
+            union=risk|{k for k in days if all_outcomes[V2].get(k,'u') in ('e','u')}
+            lines += [f'n_terminal_source_selected_days={len(risk)} n_terminal_source_selected_hours={len(selected)} n_tail_trades={sum(r["tail_count"] for r in selected)}',
+                f'n_source_truth_unverified={len(risk)} day_denominator={len(days)} risk_union_days={len(union)}',
+                'original_C3_failed_selected_days='+encoded(sorted([list(k) for k in risk])).decode().strip()]
+            tail_keys={(r['symbol'],r['timestamp']) for r in selected}
+            for interval in ('D','60'):
+                rows=[r for r in all_rows[V2] if r['interval']==interval and (r['symbol'],r['timestamp']//DAY*DAY) in risk
+                      and (interval=='D' or (r['symbol'],r['timestamp']) in tail_keys)]
+                corrected=[r for r in rows if r['decision']=='CORRECT' and 'TRADE_SOURCE_SELECTED_BY_E' in r['reason_codes']]
+                lines.append(f'interval={interval} n_volume_corrected_e={sum(r["field"]=="volume" for r in corrected)} n_price_corrected_e={sum(r["field"] in ("high","low","close") for r in corrected)}')
+            for version in ('v1-strict',V2):
+                rows=[r for r in all_rows[version] if (r['symbol'],r['timestamp']//DAY*DAY) in days]
+                flags={}
+                for r in rows:
+                    codes=set(r.get('reason_codes',[]))&{'C2_WINDOWS','C2_CONFLICT','TIMESTAMP_MULTI_PRICE','POST_L1_FAILED','POST_CORRECTION_L1_FAIL','POST_L2_UNRESOLVED'}
+                    if r['decision']=='UNRESOLVED':codes.add(r['reason_code'])
+                    for code in codes:flags.setdefault(code,set()).add((r['symbol'],r['timestamp']//DAY*DAY))
+                lines.append('overlapping_unresolved_flags policy='+version+' '+encoded({k:len(v) for k,v in sorted(flags.items())}).decode().strip())
+                for interval in ('D','60'):
+                    scoped=[r for r in rows if r['interval']==interval];by_row={}
+                    for r in scoped:by_row.setdefault((r['symbol'],r['timestamp']),set()).add(r['row_action'])
+                    included=sum(actions=={'include'} for actions in by_row.values())
+                    lines.append(f'availability policy={version} interval={interval} row_denominator={len(by_row)} include={included} missing={len(by_row)-included}')
+                    for field in _FIELDS:
+                        values=[r['decision'] for r in scoped if r['field']==field]
+                        lines.append(f'field={field} KEEP={values.count("KEEP")} CORRECT={values.count("CORRECT")} UNRESOLVED={values.count("UNRESOLVED")}')
+        # Preserve field reasons, overlapping unresolved flags, original and
+        # candidate values and their source hashes without reclassifying e as u.
+        for version in ('v1-strict',V2):
+            for r in all_rows[version]:
+                detail={k:r[k] for k in ('symbol','interval','timestamp','field','decision','row_action','original_value','candidate_value','corrected_value','reason_code','source_refs')}
+                detail['reason_codes']=r.get('reason_codes',[r['reason_code']])
+                lines.append('field_evidence policy='+version+' '+encoded(detail).decode().strip())
+        migration_reasons={}
+        for r in all_rows[V2]:
+            migration_reasons.setdefault((r['symbol'],r['timestamp']//DAY*DAY),set()).update(r['reason_codes'])
+        for key in sorted(frozen_base|verified_days):
+            lines.append('migration '+encoded(dict(symbol=key[0],day_start=key[1],v1=all_outcomes['v1-strict'].get(key,'u'),v2=all_outcomes[V2].get(key,'u'),reason_codes=sorted(migration_reasons.get(key,())))).decode().strip())
+        data=('\n'.join(lines)+'\n').encode()
+        return _emit(artifact_root,'sample_report.txt',data,len(data.splitlines()),reasons,files)
     except (InvalidInput,OSError,EOFError,TypeError,KeyError,IndexError,ValueError) as exc:
         return _handoff(artifact_root,reasons=(str(exc) if isinstance(exc,InvalidInput) else 'INVALID_EVIDENCE',))
 
