@@ -241,6 +241,11 @@ class _Run:
         self.policy_sha=policy_sha; self.findings=[]; self.corrections=[]; self.blocked=set(); self.flagged=set(); self.price_days=set(); self.unresolved=set(); self.fids=set()
 
     def finding(self,symbol,interval,t,field,rule,reason,refs=(),**details):
+        # Day diagnostics describe only the readable intersection, not an
+        # unreadable midnight row. Preserve the day identity in existing details.
+        if rule in ('DV-L2','DV-L4') and t is not None and t%DAY==0 and t<self.start<t+DAY:
+            details.update(day_start=t,scope_start=self.start,scope_end=min(t+DAY,self.end))
+            t=self.start
         f=dict(schema_version='r8_data_finding_v1',symbol=symbol,dataset='kline_day' if interval=='D' else 'kline_hour' if interval=='60' else 'kline_minute',interval=interval,timestamp=t,field=field,rule_id=rule,reason_code=reason,source_refs=_refs(refs),details=[dict(name=k,value=None if v is None else str(v)) for k,v in sorted(details.items())])
         f['finding_id']=_sha(_encoded(f))
         if f['finding_id'] not in self.fids:self.findings.append(f);self.fids.add(f['finding_id'])
@@ -474,9 +479,11 @@ def _l2(run,sym,day,ds,hs,meta,instrument):
     if times and any(t not in set(times) for t in range(min(times),max(times)+HOUR,HOUR)):flags.append('GAPPED')
     if times and not partial and set(times)!=set(range(day,day+DAY,HOUR)):flags.append('GAPPED')
     full=not flags and len(hs)==24 and len(set(times))==24
+    if flags:run.flagged.add((sym,day))
     for reason in sorted(set(flags)):
         run.finding(sym,'D',day,'row','DV-L2',reason,refs)
     if not valid:
+        run.flagged.add((sym,day))
         run.finding(sym,'D',day,'row','DV-L2','NO_VALID_HOURLY',refs);return
     valid.sort(key=lambda b:b.t)
     agg={'open':valid[0].nums['open'],'high':max(b.nums['high'] for b in valid),'low':min(b.nums['low'] for b in valid),'close':valid[-1].nums['close'],'volume':sum((b.nums['volume'] for b in valid),Fraction(0)),'turnover':sum((b.nums['turnover'] for b in valid),Fraction(0)) if all('turnover' in b.nums and b.nums['turnover']>=0 for b in valid) else None}
@@ -698,7 +705,7 @@ def _external_identity(root,refs,venue,symbol,instrument):
 
 def _l4(run,sym,day,hs,inventory,root,meta,instrument,identity_refs):
     for venue in ('binance_hour','okx_hour'):
-        items=[r for r in inventory if r['source_kind']==venue and r['symbol']==sym and r['day_start']==day]
+        items=inventory.get((sym,day,venue),[])
         available=[r for r in items if r['status']=='AVAILABLE']
         refs=[_inventory_ref(r,'raw') for r in items]
         if not available:
@@ -728,8 +735,43 @@ def _l4(run,sym,day,hs,inventory,root,meta,instrument,identity_refs):
             run.finding(sym,'60',h.t,'close','DV-L4',reason,h.refs+irefs+[v[2] for v in matches],venue=venue,bybit_close=h.values['close'],external_close=_text(other),volume_availability='BASE_QUANTITY_AVAILABLE' if matches else 'UNAVAILABLE',turnover_availability='USDT_AVAILABLE' if matches else 'UNAVAILABLE')
 
 
-def _sample(path,run,manifest_sha,symbols):
-    if path is None:return None,set()
+def _expanded_sample(raw,plan,plan_sha):
+    """Consume DV3's existing report; only its declared, frozen prefix is read.
+
+    DV3 owns the trigger and statistics. This validates the handoff bounds and
+    identity, never substitutes a draw or changes the base denominator.
+    """
+    if len(raw)>65536 or not raw.endswith(b'\n') or b'\r' in raw:_fail('EXPANSION_REPORT_SCHEMA')
+    lines=raw.decode('utf-8').splitlines()
+    if len(lines)<2 or lines[0]!='sample_plan_sha256='+plan_sha:_fail('EXPANSION_PLAN_MISMATCH')
+    if lines[1]!='base denominator only; expansion is diagnostic':_fail('EXPANSION_REPORT_SCHEMA')
+    i=2;extra=set()
+    for s in plan['strata']:
+        if i+2>=len(lines):_fail('EXPANSION_REPORT_SCHEMA')
+        match=re.fullmatch(r'([0-9]+) (GE_100M|GE_10M|GE_1M|NO_OPEN) N=([0-9]+) n=([0-9]+) e=([0-9]+) u=([0-9]+) s=([0-9]+)',lines[i])
+        if match is None:_fail('EXPANSION_REPORT_SCHEMA')
+        year,tier,N,n,e,u,semantic=match.groups();N,n,e,u,semantic=map(int,(N,n,e,u,semantic))
+        if (int(year),tier,N,n)!=(s['year'],s['tier'],s['population_size'],s['base_size']) or e+u+semantic>n:_fail('EXPANSION_STRATUM_MISMATCH')
+        for label in ('error','conservative'):
+            i+=1
+            if not re.fullmatch(label+r' simultaneous_upper=[0-9]+/[1-9][0-9]* standalone95=[0-9]+/[1-9][0-9]*',lines[i]):_fail('EXPANSION_REPORT_SCHEMA')
+        i+=1
+        if e or u:
+            if i>=len(lines) or lines[i]!=f"required_prefix={s['max_size']} max_expansions=1":_fail('EXPANSION_PREFIX_MISMATCH')
+            extra.update((d['symbol'],d['day_start']) for d in s['draws'][n:s['max_size']])
+            i+=1
+    for label in ('error_estimate','error_upper','conservative_estimate','conservative_upper'):
+        if i>=len(lines) or not re.fullmatch(label+r'=[0-9]+/[1-9][0-9]*',lines[i]):_fail('EXPANSION_REPORT_SCHEMA')
+        i+=1
+    if lines[i:] not in (['status=READY'],['status=BLOCKED']):_fail('EXPANSION_REPORT_SCHEMA')
+    if not extra:_fail('EXPANSION_NOT_REQUESTED')
+    return extra
+
+
+def _sample(path,run,manifest_sha,symbols,report=None):
+    if path is None:
+        if report is not None:_fail('EXPANSION_PLAN_REQUIRED')
+        return None,set()
     raw=Path(path).read_bytes();p=_json(raw)
     _keys(p,{'schema_version','policy_sha256','p3b_manifest_sha256','readable','seed','strata'})
     if p['schema_version']!='r8_verification_sample_plan_v1' or p['policy_sha256']!=run.policy_sha or p['p3b_manifest_sha256']!=manifest_sha or p['readable']!={'start':run.start,'end':run.end} or type(p['seed']) is not int or p['seed']!=20261022:_fail('SAMPLE_IDENTITY')
@@ -754,6 +796,7 @@ def _sample(path,run,manifest_sha,symbols):
         # 只處理已選基礎樣本；凍結的後續序列不構成讀取其他日期的授權。
         # 擴樣仍須有 DV3 明確產物。
     base={(d['symbol'],d['day_start']) for s in p['strata'] for d in s['draws'][:s['base_size']]}
+    if report is not None:base|=_expanded_sample(report,p,_sha(raw))
     return _sha(raw),base
 
 
@@ -859,7 +902,20 @@ def _coalesce_conflicts(corrections):
     return result
 
 
-def _post_l2(run,bars):
+def _bar_index(bars):
+    index={}
+    for b in bars:
+        if b.t is not None:index.setdefault((b.symbol,b.t//DAY*DAY,b.interval),[]).append(b)
+    return index
+
+
+def _inventory_index(inventory):
+    index={}
+    for r in inventory:index.setdefault((r['symbol'],r['day_start'],r['source_kind']),[]).append(r)
+    return index
+
+
+def _post_l2(run,bars,index):
     """重新檢查有效視圖的跨週期差異，明列語義保留或缺漏。"""
     updates={}
     for c in run.corrections:updates.setdefault((c['symbol'],c['interval'],c['timestamp']),[]).append(c)
@@ -872,10 +928,10 @@ def _post_l2(run,bars):
         for c in cs:
             if c['decision']=='CORRECT':vals[c['field']]=_number(c['corrected_value'])
         if set(vals)==set(FIELDS):effective[(b.symbol,b.interval,b.t)]=(vals,b)
-    days={(b.symbol,b.t//DAY*DAY) for b in bars if b.t is not None}
+    days={(sym,day) for sym,day,_ in index}
     for sym,day in sorted(days):
         d=effective.get((sym,'D',day));hs=[effective[(sym,'60',t)] for t in range(day,day+DAY,HOUR) if (sym,'60',t) in effective]
-        original_hs=[b for b in bars if b.symbol==sym and b.interval=='60' and b.t is not None and day<=b.t<day+DAY]
+        original_hs=index.get((sym,day,'60'),[])
         if not d or not hs or len(hs)!=len(original_hs):
             run.finding(sym,'D',day,'row','DV-L2','POST_L2_MISSING_INPUTS',[r for b in original_hs for r in b.refs]);continue
         full=len(hs)==24
@@ -897,7 +953,7 @@ def _sort_record(r):
     return (-1 if r['timestamp'] is None else r['timestamp'],r['symbol'],r['dataset'],r['interval'],r['field'],r.get('finding_id',r.get('correction_id')))
 
 
-def verify(*,p3b_root,download_root,inventory_path,output_root,policy_path,readable,symbols,tool_commit=None,sample_plan_path=None,previous_corrections_path=None,review_refs=(),external_contract_refs=()):
+def verify(*,p3b_root,download_root,inventory_path,output_root,policy_path,readable,symbols,tool_commit=None,sample_plan_path=None,sample_report_path=None,previous_corrections_path=None,review_refs=(),external_contract_refs=()):
     """Create a new §8.4 bundle and return exactly r8_verification_handoff_v1.
 
     Roots locate independent immutable source namespaces; SourceRef.relative_path
@@ -906,11 +962,13 @@ def verify(*,p3b_root,download_root,inventory_path,output_root,policy_path,reada
     supplied as SourceRefs rooted at download_root. Missing identity is explicitly
     INCOMPARABLE. No source is fetched. Only the frozen training range is admitted;
     callers cannot open OOS or holdout through readable or a policy override.
+    Optional sample_report_path is DV3's existing sample_report.txt;
+    declared expansion prefixes retain the original plan SHA and enter L3.
     """
     out=Path(output_root);files={};primary=None;primary_sha=None;reasons=set();run=None;v=None
     try:
         roots=[Path(p3b_root),Path(download_root)]
-        for root in roots+[out,Path(policy_path),Path(inventory_path)]+[Path(p) for p in (sample_plan_path,previous_corrections_path) if p is not None]:
+        for root in roots+[out,Path(policy_path),Path(inventory_path)]+[Path(p) for p in (sample_plan_path,sample_report_path,previous_corrections_path) if p is not None]:
             if any(p.is_symlink() for p in (root,*root.parents)):_fail('SYMLINK_DENIED')
         roots=[p.resolve() for p in roots]
         if any(out.resolve().is_relative_to(r) or r.is_relative_to(out.resolve()) for r in roots):_fail('OUTPUT_SOURCE_OVERLAP')
@@ -933,23 +991,24 @@ def verify(*,p3b_root,download_root,inventory_path,output_root,policy_path,reada
         if not review_refs:reasons.add('REVIEW_PENDING')
         bars,meta,instruments=_load_p3b(roots[0],manifest,symbols,run)
         inventory=_load_inventory(Path(inventory_path),roots[1],symbols,run)
-        sample_sha,sample_days=_sample(sample_plan_path,run,manifest_sha,symbols)
+        bar_index=_bar_index(bars);inventory_index=_inventory_index(inventory)
+        sample_report=Path(sample_report_path).read_bytes() if sample_report_path is not None else None
+        sample_sha,sample_days=_sample(sample_plan_path,run,manifest_sha,symbols,sample_report)
         previous_sha,previous=_previous(previous_corrections_path,run)
-        days={(b.symbol,b.t//DAY*DAY) for b in bars if b.t is not None}|sample_days
+        days={(sym,day) for sym,day,_ in bar_index}|sample_days
         # 已保存的逐筆請求也保留對應日；不因 CSV 缺失而消失。
         # 是否需要裁決，仍依 L1/L2/L4 與固定抽樣集合判斷。
-        days|={(r['symbol'],r['day_start']) for r in inventory if r['source_kind']=='bybit_trade'}
+        days|={(sym,day) for sym,day,kind in inventory_index if kind=='bybit_trade'}
         for sym,day in sorted(days):
-            ds=[b for b in bars if b.symbol==sym and b.interval=='D' and b.t is not None and day<=b.t<day+DAY]
-            hs=[b for b in bars if b.symbol==sym and b.interval=='60' and b.t is not None and day<=b.t<day+DAY]
+            ds=bar_index.get((sym,day,'D'),[])
+            hs=bar_index.get((sym,day,'60'),[])
             _l2(run,sym,day,ds,hs,meta,instruments[sym])
-            _l4(run,sym,day,hs,inventory,roots[1],meta,instruments[sym],external_contract_refs)
-            items=[r for r in inventory if r['symbol']==sym and r['day_start']==day and r['source_kind']=='bybit_trade']
+            _l4(run,sym,day,hs,inventory_index,roots[1],meta,instruments[sym],external_contract_refs)
+            items=inventory_index.get((sym,day,'bybit_trade'),[])
             if (sym,day) in sample_days:run.flagged.add((sym,day));run.price_days.add((sym,day))
             minutes=[]
             if (sym,day) in run.price_days:
-                for r in inventory:
-                    if r['symbol']==sym and r['day_start']==day and r['source_kind']=='bybit_minute':minutes+=_minute_rows(r,roots[1],run)
+                for r in inventory_index.get((sym,day,'bybit_minute'),[]):minutes+=_minute_rows(r,roots[1],run)
                 mt={}
                 for m in minutes:mt.setdefault(m.t,[]).append(m)
                 for group in mt.values():
@@ -976,7 +1035,7 @@ def verify(*,p3b_root,download_root,inventory_path,output_root,policy_path,reada
             if b.t is None:
                 cs=[_correction(run,b,f,'UNRESOLVED','INVALID_TIMESTAMP',None,[],'UNAVAILABLE','UNAVAILABLE',['DV-L1'],'unavailable') for f in FIELDS]
                 _finish_row(run,b,cs)
-        _post_l2(run,bars)
+        _post_l2(run,bars,bar_index)
         run.corrections=_coalesce_conflicts(run.corrections)
         run.findings.sort(key=_sort_record)
         coverage_sha=_sha(b''.join(_encoded(f) for f in run.findings))
@@ -995,6 +1054,7 @@ def verify(*,p3b_root,download_root,inventory_path,output_root,policy_path,reada
         out.mkdir(parents=True)
         payloads={'policy.json':raw_policy,'findings.jsonl':b''.join(_encoded(f) for f in run.findings),'corrections.jsonl':b''.join(_encoded(c) for c in run.corrections)}
         if sample_plan_path is not None:payloads['sample_plan.json']=Path(sample_plan_path).read_bytes()
+        if sample_report is not None:payloads['sample_report.txt']=sample_report
         for name,data in payloads.items():
             (out/name).write_bytes(data);files[name]={'sha256':_sha(data),'rows':len(data.splitlines())}
         v=dict(schema_version='r8_data_verification_v1',status='BLOCKED' if run.blocked else 'READY',policy_sha256=run.policy_sha,p3b_manifest_sha256=manifest_sha,sample_plan_sha256=sample_sha,previous_corrections_sha256=previous_sha,review_refs=_refs(review_refs),tool_commit=tool_commit,readable=dict(readable),counts=dict(input_rows=len(bars),checked_days=len(days),flagged_days=len(run.flagged),corrected_fields=sum(c['decision']=='CORRECT' for c in run.corrections),unresolved_rows=len(run.unresolved)),files=dict(files),reason_codes=sorted(reasons))

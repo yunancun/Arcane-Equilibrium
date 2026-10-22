@@ -433,7 +433,7 @@ _SOURCE_KEYS='kind relative_path url sha256 row request_id list_index byte_start
 _FIELDS=('open','high','low','close','volume','turnover')
 
 
-def _refs(refs, evidence_root, verified):
+def _refs(refs, evidence_root, verified, missing_trades=None):
     if not isinstance(refs,list):
         raise InvalidInput('INVALID_SOURCE_REFS')
     orders=[]
@@ -444,7 +444,7 @@ def _refs(refs, evidence_root, verified):
         if ref['relative_path'] is not None:
             path=_path(evidence_root,ref['relative_path']); digest=_hash(ref['sha256'])
             identity=(path,digest)
-            if identity not in verified:
+            if identity not in verified and not (missing_trades is not None and ref['kind']=='trade' and ref['relative_path'] in missing_trades):
                 try:
                     # Cross-range sources are opaque: verify bytes, never decode
                     # market fields to authenticate a source identity.
@@ -453,10 +453,13 @@ def _refs(refs, evidence_root, verified):
                         for chunk in iter(lambda:source.read(1024*1024),b''):
                             actual.update(chunk)
                 except OSError:
-                    raise InvalidInput('SOURCE_EVIDENCE_UNAVAILABLE') from None
-                if actual.hexdigest()!=digest:
-                    raise InvalidInput('SOURCE_EVIDENCE_HASH_MISMATCH')
-                verified.add(identity)
+                    if missing_trades is None or ref['kind']!='trade':
+                        raise InvalidInput('SOURCE_EVIDENCE_UNAVAILABLE') from None
+                    missing_trades.add(ref['relative_path'])
+                else:
+                    if actual.hexdigest()!=digest:
+                        raise InvalidInput('SOURCE_EVIDENCE_HASH_MISMATCH')
+                    verified.add(identity)
         elif ref['sha256'] is not None:
             raise InvalidInput('INVALID_SOURCE_REF')
         for name in ('row','list_index','byte_start','byte_end'):
@@ -653,6 +656,105 @@ class _SourceRows:
         if not original_found:
             raise InvalidInput('SOURCE_ORIGINAL_ROW_MISSING')
 
+class _AdjudicationEvidence:
+    """Authenticate the L3 proof, without trusting PASS/UNIQUE declarations."""
+    def __init__(self,sources,findings,report_sha):
+        self.sources=sources;self.report_sha=report_sha;self.findings={};self.totals={};self.hours={}
+        for f in findings:
+            key=(f['symbol'],f['interval'],f['timestamp'],f['field'],f['rule_id'])
+            self.findings.setdefault(key,[]).append(f)
+
+    def trade_totals(self,ref,symbol,day):
+        key=(ref['relative_path'],ref['sha256'],symbol,day)
+        if key in self.totals:return self.totals[key]
+        self.totals[key]=None
+        data=self.sources.data(ref)
+        data=gzip.decompress(data) if data.startswith(b'\x1f\x8b') else data
+        totals={};ids=set();previous=None;direction=set()
+        for r in csv.DictReader(io.StringIO(data.decode('utf-8'))):
+            t=Fraction(_decimal(r['timestamp']))*1000
+            if not day<=t<day+DAY or not self.sources.plan['readable']['start']<=t<self.sources.plan['readable']['end']:
+                return None
+            price=Fraction(_decimal(r['price']));size=Fraction(_decimal(r['size']))
+            if r['symbol']!=symbol or not r['trdMatchID'] or r['trdMatchID'] in ids or price<=0 or size<=0:return None
+            ids.add(r['trdMatchID'])
+            if previous is not None and t!=previous:direction.add(t>previous)
+            previous=t
+            if len(direction)>1:return None
+            for window in (('D',day),('60',int(t//HOUR)*HOUR)):
+                a=totals.setdefault(window,dict(volume=Fraction(0),count=0,first=t,last=t,open={price},close={price},high=price,low=price))
+                a['volume']+=size;a['count']+=1;a['high']=max(a['high'],price);a['low']=min(a['low'],price)
+                if t<a['first']:a['first']=t;a['open']={price}
+                elif t==a['first']:a['open'].add(price)
+                if t>a['last']:a['last']=t;a['close']={price}
+                elif t==a['last']:a['close'].add(price)
+        self.totals[key]=totals
+        return totals
+
+    @staticmethod
+    def trade_refs(refs,original):
+        identity=(original['relative_path'],original['sha256'],original['url'])
+        matched=[r for r in refs if r['kind']=='trade' and (r['relative_path'],r['sha256'],r['url'])==identity]
+        return any(r['row'] is None for r in matched) and any(r['row'] is not None and r['trade_id'] and r['line_sha256'] for r in matched)
+
+    def hour_complete(self,symbol,t,original,aggregate):
+        key=(symbol,t,original['relative_path'],original['sha256'])
+        if key in self.hours:return self.hours[key]
+        self.hours[key]=False
+        fs=self.findings.get((symbol,'60',t,'volume','C3_QUANTITY'),[])
+        if len(fs)!=1 or fs[0]['reason_code']!='COVERAGE_RECONCILED' or not aggregate:return False
+        f=fs[0];d={x['name']:x['value'] for x in f['details']}
+        if not self.trade_refs(f['source_refs'],original):return False
+        if not all(isinstance(d.get(k),str) for k in ('reported_volume','trade_volume','trade_count','first_timestamp_ms','last_timestamp_ms')):return False
+        if (Fraction(_decimal(d.get('reported_volume')))!=aggregate['volume']
+            or Fraction(_decimal(d.get('trade_volume')))!=aggregate['volume']
+            or d.get('trade_count')!=str(aggregate['count'])
+            or Fraction(_decimal(d.get('first_timestamp_ms')))!=aggregate['first']
+            or Fraction(_decimal(d.get('last_timestamp_ms')))!=aggregate['last']):return False
+        self.sources.bind(dict(symbol=symbol,interval='60',timestamp=t,field='volume',original_value=d['reported_volume'],source_refs=f['source_refs']))
+        self.hours[key]=True
+        return True
+
+    def complete(self,row):
+        refs=row['source_refs'];symbol=row['symbol'];t=row['timestamp'];day=t//DAY*DAY
+        originals=[r for r in refs if r['kind']=='trade' and r['row'] is None and r['relative_path'] is not None]
+        if len(originals)!=1 or not self.trade_refs(refs,originals[0]):return False
+        if not any(r['kind']=='report' and r['relative_path']=='findings.jsonl' and r['sha256']==self.report_sha for r in refs):return False
+        totals=self.trade_totals(originals[0],symbol,day)
+        if not totals:return False
+        a=totals.get((row['interval'],t))
+        if not a or row['candidate_value'] is None:return False
+        candidate=Fraction(_decimal(row['candidate_value']));expected=a.get(row['field'])
+        if expected is None or (expected!={candidate} if isinstance(expected,set) else expected!=candidate):return False
+        lines=self.sources.cache[('lines',originals[0]['relative_path'])]
+        header=next(csv.reader([lines[0].decode('utf-8')]))
+        witnesses=[]
+        for ref in refs:
+            if ref['kind']=='trade' and ref['row'] is not None and ref['relative_path']==originals[0]['relative_path']:
+                values=next(csv.reader([lines[ref['row']-1].decode('utf-8')]))
+                witnesses.append((Fraction(_decimal(values[header.index('timestamp')]))*1000,
+                                  Fraction(_decimal(values[header.index('price')]))))
+        if not all(any(stamp==a[edge] for stamp,_ in witnesses) for edge in ('first','last')):return False
+        if row['field'] in ('high','low') and not any(price==candidate for _,price in witnesses):return False
+        if row['interval']=='D':
+            manifest=self.sources.load_manifest()
+            first=min((m.get('first_timestamp',day) for m in manifest['files'].values()
+                       if m.get('symbol')==symbol and m.get('dataset')=='kline' and m.get('interval')=='60'),default=day)
+            delivery=int(manifest.get('universe',{}).get(symbol,{}).get('deliveryTime',0))
+            start=max(day,first);end=min(day+DAY,((delivery+HOUR-1)//HOUR)*HOUR) if delivery else day+DAY
+            times=list(range(start,end,HOUR))
+            if {stamp for interval,stamp in totals if interval=='60'}!=set(times):return False
+        else:times=[t]
+        if not times or not all(self.hour_complete(symbol,h,originals[0],totals.get(('60',h))) for h in times):return False
+        fs=self.findings.get((symbol,row['interval'],t,row['field'],'C5_REBUILD'),[])
+        if len(fs)!=1 or fs[0]['reason_code']!='SOURCE_COMPARISON':return False
+        f=fs[0];d={x['name']:x['value'] for x in f['details']}
+        if d.get('original_csv')!=row['original_value'] or Fraction(_decimal(d.get('trade_value')))!=candidate:return False
+        if not self.trade_refs(f['source_refs'],originals[0]):return False
+        self.sources.bind(dict(row,source_refs=f['source_refs']))
+        return True
+
+
 def _bundle_outcomes(root,p,plan_sha):
     verification=_json(_path(root,'verification.json').read_bytes())
     _keys(verification,_VERIFICATION_KEYS)
@@ -663,7 +765,7 @@ def _bundle_outcomes(root,p,plan_sha):
     _keys(verification['counts'],'input_rows checked_days flagged_days corrected_fields unresolved_rows')
     for value in verification['counts'].values():
         _integer(value)
-    verified=set(); source_rows=_SourceRows(root,p)
+    verified=set();missing_trades=set(); source_rows=_SourceRows(root,p)
     _refs(verification['review_refs'],root,verified)
     if not re.fullmatch('[0-9a-f]{40}',str(verification['tool_commit'])):
         raise InvalidInput('INVALID_TOOL_COMMIT')
@@ -684,9 +786,10 @@ def _bundle_outcomes(root,p,plan_sha):
             if len(rows)!=meta['rows']:
                 raise InvalidInput('EVIDENCE_ROW_COUNT_MISMATCH')
             contents[name]=rows
-    days={}; ids=set(); keys=set(); order=[]
+    evidence=_AdjudicationEvidence(source_rows,contents['findings.jsonl'],verification['files']['findings.jsonl']['sha256'])
+    days={}; ids=set(); keys=set(); order=[];reasons={}
     for row in contents['corrections.jsonl']:
-        _keys(row,_CORRECTION_KEYS); _refs(row['source_refs'],root,verified)
+        _keys(row,_CORRECTION_KEYS); _refs(row['source_refs'],root,verified,missing_trades)
         for name in ('correction_id','unit','formula','reason_code'):
             if not isinstance(row[name],str) or not row[name]:
                 raise InvalidInput('INVALID_CORRECTION')
@@ -706,18 +809,29 @@ def _bundle_outcomes(root,p,plan_sha):
             raise InvalidInput('INVALID_CORRECTION_STATUS')
         if row['evidence_kind'] not in ('trade_adjudication','reported_turnover_selection'):
             raise InvalidInput('INVALID_EVIDENCE_KIND')
+        l1_only=(row['decision']=='KEEP' and row['reason_code']=='L1_VALID' and row['rule_ids']==['DV-L1']
+                 and row['coverage_status']==row['order_status']=='NOT_APPLICABLE')
+        needs_l3=row['evidence_kind']=='trade_adjudication' and not l1_only
         if row['decision']!='UNRESOLVED':
             if not any(ref['relative_path'] is not None for ref in row['source_refs']) or row['original_value'] is None:
                 raise InvalidInput('MISSING_EVIDENCE')
-            if row['evidence_kind']=='trade_adjudication' and (
+            if needs_l3 and (
                 row['coverage_status']!='PASS' or row['order_status'] not in (('UNIQUE',) if row['field'] in ('open','close') else ('UNIQUE','NOT_APPLICABLE'))
-            ) and not (row['decision']=='KEEP' and row['reason_code']=='L1_VALID' and row['rule_ids']==['DV-L1']
-                       and row['coverage_status']==row['order_status']=='NOT_APPLICABLE'):
+            ):
                 raise InvalidInput('INVALID_ADJUDICATION')
             if row['evidence_kind']=='reported_turnover_selection' and row['field']!='turnover':
                 raise InvalidInput('INVALID_ADJUDICATION')
+        complete=True
         if row['decision']!='UNRESOLVED':
-            source_rows.bind(row)
+            missing={r['relative_path'] for r in row['source_refs'] if r['kind']=='trade'
+                     and (r['relative_path'] is None or r['relative_path'] in missing_trades)}
+            source_rows.bind(dict(row,source_refs=[r for r in row['source_refs'] if not (r['kind']=='trade' and r['relative_path'] in missing)]))
+            if needs_l3:
+                try:complete=not missing and evidence.complete(row)
+                except (InvalidInput,KeyError,ValueError) as exc:
+                    if isinstance(exc,InvalidInput) and str(exc)!='INVALID_DECIMAL':raise
+                    complete=False
+                if not complete:reasons.setdefault((row['symbol'],t//DAY*DAY),set()).add('EVIDENCE_INCOMPLETE')
         if (row['decision']=='CORRECT') != (row['corrected_value'] is not None) or (row['decision']=='UNRESOLVED' and row['row_action']!='missing'):
             raise InvalidInput('INVALID_CORRECTION')
         if row['original_value'] is not None and not isinstance(row['original_value'],str):
@@ -731,8 +845,9 @@ def _bundle_outcomes(root,p,plan_sha):
         keys.add(key); ids.add(row['correction_id'])
         order.append((t,row['symbol'],row['dataset'],row['interval'],row['field'],row['correction_id']))
         day=t//DAY*DAY
-        state=days.setdefault((row['symbol'],day),dict(error=False,unresolved=False,semantic=False,covered=set()))
-        state['error'] |= row['decision']=='CORRECT'
+        state=days.setdefault((row['symbol'],day),dict(error=False,unresolved=False,incomplete=False,semantic=False,covered=set()))
+        state['error'] |= row['decision']=='CORRECT' and complete
+        state['incomplete'] |= not complete
         state['unresolved'] |= row['decision']=='UNRESOLVED' or row['row_action']=='missing'
         state['semantic'] |= row['decision']=='KEEP' and row['evidence_kind']=='reported_turnover_selection'
         state['covered'].add((row['interval'],t,row['field']))
@@ -747,7 +862,7 @@ def _bundle_outcomes(root,p,plan_sha):
             visited.add(current); current=links[current]
     finding_order=[]; ids=set()
     for row in contents['findings.jsonl']:
-        _keys(row,_FINDING_KEYS); _refs(row['source_refs'],root,verified); _symbol(row['symbol'])
+        _keys(row,_FINDING_KEYS); _refs(row['source_refs'],root,verified,missing_trades); _symbol(row['symbol'])
         if row['schema_version']!='r8_data_finding_v1' or row['finding_id'] in ids:
             raise InvalidInput('INVALID_FINDING')
         ids.add(row['finding_id'])
@@ -770,8 +885,8 @@ def _bundle_outcomes(root,p,plan_sha):
     for (symbol,day),state in days.items():
         required={(interval,t,field) for interval,times in (('D',[day]),('60',range(day,day+DAY,HOUR))) for t in times for field in _FIELDS}
         unresolved=state['unresolved'] or verification['status']=='BLOCKED' or not required<=state['covered']
-        result[(symbol,day)]=('e' if state['error'] else 'u' if unresolved else 's' if state['semantic'] else 'ok')
-    return result
+        result[(symbol,day)]=('e' if state['error'] else 'u' if state['incomplete'] or unresolved else 's' if state['semantic'] else 'ok')
+    return result,reasons
 
 
 def summarize_sample(plan_root, verification_roots, artifact_root):
@@ -784,23 +899,29 @@ def summarize_sample(plan_root, verification_roots, artifact_root):
     value bindings; unavailable or mismatched evidence fails closed.
     Human-readable report keeps statistical diagnostics outside the fixed JSON
     contracts. It never substitutes the expanded denominator for the base one.
+    The report's plan SHA and required_prefix lines are also DV1's explicit
+    expansion handoff; DV1 validates the bounds and archives these exact bytes.
     """
     try:
         p,plan_sha=_load_plan(plan_root)
-        outcomes={}
+        outcomes={};day_reasons={};reasons=[]
         for root in verification_roots:
-            for key,value in _bundle_outcomes(root,p,plan_sha).items():
+            bundle_outcomes,bundle_reasons=_bundle_outcomes(root,p,plan_sha)
+            day_reasons.update(bundle_reasons)
+            for key,value in bundle_outcomes.items():
                 if key in outcomes:
                     raise InvalidInput('OVERLAPPING_VERIFICATION')
                 outcomes[key]=value
         H=len(p['strata']); total=sum(s['population_size'] for s in p['strata'])
         estimates=[Fraction(0),Fraction(0)]; uppers=[Fraction(0),Fraction(0)]
         lines=['sample_plan_sha256='+plan_sha,'base denominator only; expansion is diagnostic']
-        reasons=[]
         for s in p['strata']:
             N,n=s['population_size'],s['base_size']
             values=[outcomes.get((d['symbol'],d['day_start']),'u') for d in s['draws']]
             base=values[:n]; e,u,semantic=(base.count(x) for x in ('e','u','s'))
+            # Only the base and, when triggered, its frozen expansion participate.
+            evaluated=s['draws'] if e or u else s['draws'][:n]
+            for d in evaluated:reasons.extend(day_reasons.get((d['symbol'],d['day_start']),()))
             lines.append(f"{s['year']} {s['tier']} N={N} n={n} e={e} u={u} s={semantic}")
             for i,x in enumerate((e,e+u)):
                 upper=hypergeometric_upper(N,n,x,Fraction(1,20*H))
