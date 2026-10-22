@@ -296,8 +296,10 @@ def test_api_only_status_decoded_never_market_numbers(tmp_path,monkeypatch):
 def dv1_fixture(tmp,p,days,*,error=False,unresolved=False,semantic=False):
     """Isolated fixed-format fixture, expressly NOT the required real DV1 test."""
     root=tmp/'dv1'; root.mkdir()
+    original=b'timestamp,open,high,low,close,volume,turnover\n1577836800000,1,1,1,1,1,1\n'
+    (root/'source.csv').write_bytes(original)
     ref={k:None for k in 'kind relative_path url sha256 row request_id list_index byte_start byte_end trade_id line_sha256'.split()}
-    ref.update(kind='csv',relative_path='source.csv',sha256='b'*64,row=2)
+    ref.update(kind='csv',relative_path='source.csv',sha256=hashlib.sha256(original).hexdigest(),row=2)
     rows=[]
     for day in days:
         for interval,times in [('D',[day]),('60',range(day,day+D,H))]:
@@ -453,3 +455,51 @@ def test_production_transport_verifies_tls_no_auth_proxy_or_redirect(monkeypatch
     assert https._context.verify_mode==ssl.CERT_REQUIRED and https._context.check_hostname
     assert redirect.redirect_request(None,None,302,'',{},'https://evil/') is None
     assert set(captured['request'].headers)=={'User-agent','Accept-encoding'}
+
+
+def test_e2_manifest_population_cannot_be_narrowed_by_omitting_symbol(tmp_path):
+    only_a=source(tmp_path,'AUSDT')
+    source(tmp_path,'BUSDT')
+    r=plan(tmp_path,only_a)
+    assert r['status']=='BLOCKED' and r['primary_file'] is None
+    assert r['reason_codes']==['INCOMPLETE_MANIFEST_SOURCES']
+    assert not (tmp_path/'out'/'sample_plan.sha256').exists()
+
+
+def test_e2_nonexistent_referenced_evidence_blocks_summary(tmp_path):
+    p=artifact(plan(tmp_path,source(tmp_path,days=1),end=T+D))
+    root=dv1_fixture(tmp_path,p,[T])
+    referenced=root/'source.csv'
+    if referenced.exists(): referenced.unlink()
+    r=v.summarize_sample(tmp_path/'out',[root],tmp_path/'summary')
+    assert r['status']=='BLOCKED' and r['primary_file'] is None
+    assert r['reason_codes']==['SOURCE_EVIDENCE_UNAVAILABLE']
+
+
+def test_e2_referenced_evidence_hash_mismatch_blocks_summary(tmp_path):
+    p=artifact(plan(tmp_path,source(tmp_path,days=1),end=T+D))
+    root=dv1_fixture(tmp_path,p,[T]); (root/'source.csv').write_bytes(b'tampered')
+    r=v.summarize_sample(tmp_path/'out',[root],tmp_path/'summary')
+    assert r['status']=='BLOCKED' and r['reason_codes']==['SOURCE_EVIDENCE_HASH_MISMATCH']
+
+
+@pytest.mark.parametrize('status',[404,500])
+def test_e2_failed_head_prevents_get_of_other_host(tmp_path,status):
+    a=request(); b=v.DownloadRequest('2','BUSDT',T,'60','binance_hour','https://data.binance.vision/data/futures/um/daily/klines/BUSDT/1h/BUSDT-1h-2020-01-01.zip')
+    r,rows,calls=download(tmp_path,[a,b],heads={a.url:(status,{},b'')})
+    assert r['status']=='BLOCKED' and len(rows)==2
+    assert len(calls)==1
+    assert not any(c[0]=='GET' for c in calls)
+    assert rows[0]['http_status']==status and rows[0]['reason_code']=='HTTP_UNAVAILABLE'
+
+
+def test_e2_head_transport_error_prevents_any_get(tmp_path):
+    a,b=request(),request(2,'BUSDT'); calls=[]
+    def send(method,url):
+        calls.append((method,url))
+        if url==a.url: raise OSError('simulated')
+        return v.Response(200,{'Content-Length':'3'},__import__('io').BytesIO(b'abc'))
+    c=Clock()
+    r=v.fetch_downloads(tmp_path/'out',[a,b],approved_urls=[a.url,b.url],readable={'start':T,'end':T+D},max_total_bytes=10,max_file_bytes=10,transport=send,clock=c,sleep=c.sleep,now=lambda:T)
+    assert r['status']=='BLOCKED' and not any(method=='GET' for method,url in calls)
+    assert len(calls)==1

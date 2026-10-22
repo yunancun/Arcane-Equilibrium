@@ -220,6 +220,26 @@ def build_sample_plan(source_root, artifact_root, sources, *, readable,
         manifest=json.loads(manifest_bytes)
         if not isinstance(manifest.get('files'),dict) or not isinstance(manifest.get('universe'),dict):
             raise InvalidInput('INVALID_MANIFEST')
+        sources=list(sources)
+        required_sources=set()
+        for name,meta in manifest['files'].items():
+            if not isinstance(meta,dict):
+                raise InvalidInput('INVALID_MANIFEST')
+            if meta.get('dataset')!='kline' or meta.get('interval') not in ('D','60'):
+                continue
+            _path(source_root,name)
+            coverage=meta.get('coverage')
+            if coverage is not None:
+                if not isinstance(coverage,list) or len(coverage)!=2:
+                    raise InvalidInput('INVALID_MANIFEST_COVERAGE')
+                a,b=(_integer(t) for t in coverage)
+                if a>=b:
+                    raise InvalidInput('INVALID_MANIFEST_COVERAGE')
+                if b<=start or a>=end:
+                    continue
+            required_sources.add(name)
+        if not required_sources <= {s.relative_path for s in sources}:
+            raise InvalidInput('INCOMPLETE_MANIFEST_SOURCES')
         policy = encoded(_policy(p3b_manifest_sha256))
         hourly, daily, first, seen, windows = {}, {}, {}, set(), {}
         truncated = set(truncated_days)
@@ -408,7 +428,7 @@ _SOURCE_KEYS='kind relative_path url sha256 row request_id list_index byte_start
 _FIELDS=('open','high','low','close','volume','turnover')
 
 
-def _refs(refs):
+def _refs(refs, evidence_root, verified):
     if not isinstance(refs,list):
         raise InvalidInput('INVALID_SOURCE_REFS')
     orders=[]
@@ -417,7 +437,21 @@ def _refs(refs):
         if ref['kind'] not in ('raw','csv','trade','instruments','policy','plan','report'):
             raise InvalidInput('INVALID_SOURCE_KIND')
         if ref['relative_path'] is not None:
-            _path(Path.cwd(),ref['relative_path']); _hash(ref['sha256'])
+            path=_path(evidence_root,ref['relative_path']); digest=_hash(ref['sha256'])
+            identity=(path,digest)
+            if identity not in verified:
+                try:
+                    # Cross-range sources are opaque: verify bytes, never decode
+                    # market fields to authenticate a source identity.
+                    with path.open('rb') as source:
+                        actual=hashlib.sha256()
+                        for chunk in iter(lambda:source.read(1024*1024),b''):
+                            actual.update(chunk)
+                except OSError:
+                    raise InvalidInput('SOURCE_EVIDENCE_UNAVAILABLE') from None
+                if actual.hexdigest()!=digest:
+                    raise InvalidInput('SOURCE_EVIDENCE_HASH_MISMATCH')
+                verified.add(identity)
         elif ref['sha256'] is not None:
             raise InvalidInput('INVALID_SOURCE_REF')
         for name in ('row','list_index','byte_start','byte_end'):
@@ -445,7 +479,8 @@ def _bundle_outcomes(root,p,plan_sha):
     _keys(verification['counts'],'input_rows checked_days flagged_days corrected_fields unresolved_rows')
     for value in verification['counts'].values():
         _integer(value)
-    _refs(verification['review_refs'])
+    verified=set()
+    _refs(verification['review_refs'],root,verified)
     if not re.fullmatch('[0-9a-f]{40}',str(verification['tool_commit'])):
         raise InvalidInput('INVALID_TOOL_COMMIT')
     if verification['previous_corrections_sha256'] is not None:
@@ -467,7 +502,7 @@ def _bundle_outcomes(root,p,plan_sha):
             contents[name]=rows
     days={}; ids=set(); keys=set(); order=[]
     for row in contents['corrections.jsonl']:
-        _keys(row,_CORRECTION_KEYS); _refs(row['source_refs'])
+        _keys(row,_CORRECTION_KEYS); _refs(row['source_refs'],root,verified)
         for name in ('correction_id','unit','formula','reason_code'):
             if not isinstance(row[name],str) or not row[name]:
                 raise InvalidInput('INVALID_CORRECTION')
@@ -488,7 +523,7 @@ def _bundle_outcomes(root,p,plan_sha):
         if row['evidence_kind'] not in ('trade_adjudication','reported_turnover_selection'):
             raise InvalidInput('INVALID_EVIDENCE_KIND')
         if row['decision']!='UNRESOLVED':
-            if not row['source_refs'] or row['original_value'] is None:
+            if not any(ref['relative_path'] is not None for ref in row['source_refs']) or row['original_value'] is None:
                 raise InvalidInput('MISSING_EVIDENCE')
             if row['evidence_kind']=='trade_adjudication' and (row['coverage_status']!='PASS' or row['order_status']!='UNIQUE'):
                 raise InvalidInput('INVALID_ADJUDICATION')
@@ -521,7 +556,7 @@ def _bundle_outcomes(root,p,plan_sha):
             visited.add(current); current=links[current]
     finding_order=[]; ids=set()
     for row in contents['findings.jsonl']:
-        _keys(row,_FINDING_KEYS); _refs(row['source_refs']); _symbol(row['symbol'])
+        _keys(row,_FINDING_KEYS); _refs(row['source_refs'],root,verified); _symbol(row['symbol'])
         if row['schema_version']!='r8_data_finding_v1' or row['finding_id'] in ids:
             raise InvalidInput('INVALID_FINDING')
         ids.add(row['finding_id'])
@@ -551,6 +586,9 @@ def _bundle_outcomes(root,p,plan_sha):
 def summarize_sample(plan_root, verification_roots, artifact_root):
     """Consume DV1 bundles. Missing/incomplete sampled days always count as u.
 
+    SourceRef paths must resolve to original, hash-matching files within each
+    supplied bundle root; unavailable external references fail closed. The
+    recorder must package the approved opaque originals for this handoff.
     Human-readable report keeps statistical diagnostics outside the fixed JSON
     contracts. It never substitutes the expanded denominator for the base one.
     """
@@ -829,7 +867,7 @@ def fetch_downloads(artifact_root, requests, *, approved_urls, readable,
                     row['reason_code']='PREFLIGHT_BLOCKED'
         else:
             # All HEAD responses are closed without reading a body or market values.
-            blocked_size=None
+            blocked_size=None; preflight_incomplete=False
             for row in rows:
                 url=row['url']; host=hosts[url]
                 if url in responses:
@@ -862,6 +900,7 @@ def fetch_downloads(artifact_root, requests, *, approved_urls, readable,
                 except (InvalidInput,OSError) as exc:
                     reason=str(exc) if isinstance(exc,InvalidInput) else 'TRANSPORT_ERROR'
                     row['reason_code']=reason
+                    preflight_incomplete=True
                     if reason in ('UNKNOWN_LENGTH','SIZE_LIMIT','UNSUPPORTED_ENCODING'):
                         blocked_size=reason
                 finally:
@@ -869,7 +908,7 @@ def fetch_downloads(artifact_root, requests, *, approved_urls, readable,
                     responses[url]=row
                 if sum(lengths.values())>max_total_bytes:
                     blocked_size='SIZE_LIMIT'
-                if blocked_size:
+                if blocked_size or preflight_incomplete:
                     break
             if sum(lengths.values())>max_total_bytes:
                 blocked_size='SIZE_LIMIT'
@@ -889,6 +928,19 @@ def fetch_downloads(artifact_root, requests, *, approved_urls, readable,
             if blocked_size:
                 for row in rows:
                     row.update(status='SIZE_BLOCKED',reason_code=blocked_size)
+            elif preflight_incomplete or set(hosts)-set(lengths):
+                # An HTTP/transport failure has no usable length either. Keep
+                # its own failure, and block otherwise successful peers before
+                # any GET so the total never silently excludes failed URLs.
+                for row in rows:
+                    original=responses.get(row['url'],row)
+                    if row is not original:
+                        identity=row['request_id']; row.update(original); row['request_id']=identity
+                    if row['reason_code'] in (None,'REUSED'):
+                        if hosts[row['url']] in stopped:
+                            row.update(status='UNAVAILABLE',reason_code='HOST_STOPPED')
+                        else:
+                            row.update(status='SIZE_BLOCKED',reason_code='PREFLIGHT_INCOMPLETE')
             else:
                 remaining=max_total_bytes
                 batch_stopped=False
