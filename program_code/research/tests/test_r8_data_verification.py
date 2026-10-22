@@ -535,7 +535,7 @@ def test_previous_bundle_chain_and_immutable_original_identity(case):
     assert {c['supersedes'] for c in new}=={c['correction_id'] for c in old}
     case.daily[0]['volume']='22'
     c,*_=case.run(previous_corrections_path=prev)
-    assert c['status']=='BLOCKED' and 'PREVIOUS_SOURCE_MISMATCH' in c['reason_codes']
+    assert c['status']=='BLOCKED' and 'PREVIOUS_POLICY_MISMATCH' in c['reason_codes']
 
 
 @pytest.mark.parametrize('mode,reason',[('cycle','SUPERSEDES_CYCLE'),('duplicate','CORRECTION_CONFLICT'),('evidence','MISSING_EVIDENCE'),('unknown','SCHEMA_FIELDS')])
