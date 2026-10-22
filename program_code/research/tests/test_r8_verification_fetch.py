@@ -381,13 +381,17 @@ def test_incomplete_trade_evidence_census_counts_unresolved(tmp_path):
 
 
 @pytest.mark.parametrize('missing',['original','witness','coverage','comparison','report_ref','quantity',
-                                    'boundary_witness','coverage_detail','trade_file'])
+                                    'boundary_witness','coverage_detail','trade_file','unavailable_reference'])
 def test_completed_real_l3_requires_each_evidence_component(tmp_path,missing):
     from program_code.research.tests.test_r8_data_verification import real_dv13_flow,read
     root=tmp_path/'real';flow=real_dv13_flow(root)
     assert flow['summary']['status']=='READY'
     bundle=root/'bundle';rows=read(bundle,'corrections.jsonl');findings=read(bundle,'findings.jsonl')
-    if missing=='trade_file':
+    if missing=='unavailable_reference':
+        for row in rows:
+            for ref in row['source_refs']:
+                if ref['kind']=='trade' and ref['row'] is None:ref.update(relative_path=None,sha256=None)
+    elif missing=='trade_file':
         ref=next(r for row in rows for r in row['source_refs'] if r['kind']=='trade' and r['relative_path'])
         (bundle/ref['relative_path']).unlink()
     elif missing=='boundary_witness':

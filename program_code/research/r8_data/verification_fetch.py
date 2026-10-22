@@ -821,8 +821,9 @@ def _bundle_outcomes(root,p,plan_sha):
                 raise InvalidInput('INVALID_ADJUDICATION')
         complete=True
         if row['decision']!='UNRESOLVED':
-            missing=any(r['kind']=='trade' and r['relative_path'] in missing_trades for r in row['source_refs'])
-            source_rows.bind(dict(row,source_refs=[r for r in row['source_refs'] if not (r['kind']=='trade' and r['relative_path'] in missing_trades)]))
+            missing={r['relative_path'] for r in row['source_refs'] if r['kind']=='trade'
+                     and (r['relative_path'] is None or r['relative_path'] in missing_trades)}
+            source_rows.bind(dict(row,source_refs=[r for r in row['source_refs'] if not (r['kind']=='trade' and r['relative_path'] in missing)]))
             if row['evidence_kind']=='trade_adjudication':
                 try:complete=not missing and evidence.complete(row)
                 except (InvalidInput,KeyError,ValueError) as exc:
