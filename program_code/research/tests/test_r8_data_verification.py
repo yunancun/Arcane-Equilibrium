@@ -1,0 +1,612 @@
+"""Independent §3–§8.4 examples. No expected values are computed by DV1.
+
+DV3 real integration is explicitly pending. The 26-day oracle below was frozen
+from report C and a separate timestamp-set audit before verification.py existed.
+"""
+from pathlib import Path
+import csv
+import gzip
+import hashlib
+import io
+import json
+import sys
+from decimal import Decimal
+
+import pytest
+
+sys.path.insert(0, str(Path(__file__).resolve().parents[3]))
+from program_code.research.r8_data.verification import verify
+
+DAY = 86400000
+HOUR = 3600000
+T = 1609459200000  # 2021-01-01, within the frozen training range
+FIELDS = ('open', 'high', 'low', 'close', 'volume', 'turnover')
+SPEC = Path(__file__).resolve().parents[3] / 'docs/execution_plan/2026-10-22--r8-stage2-data-verification-standard.md'
+HANDOFF_KEYS = {'schema_version','status','artifact_root','primary_file','primary_sha256','files','reason_codes'}
+FINDING_KEYS = {'schema_version','finding_id','symbol','dataset','interval','timestamp','field','rule_id','reason_code','source_refs','details'}
+CORRECTION_KEYS = {'schema_version','correction_id','symbol','dataset','interval','timestamp','field','original_value','candidate_value','corrected_value','unit','formula','evidence_kind','source_refs','coverage_status','order_status','rule_ids','decision','reason_code','row_action','policy_sha256','approval_event','supersedes'}
+VERIFICATION_KEYS = {'schema_version','status','policy_sha256','p3b_manifest_sha256','sample_plan_sha256','previous_corrections_sha256','review_refs','tool_commit','readable','counts','files','reason_codes'}
+SOURCE_KEYS = {'kind','relative_path','url','sha256','row','request_id','list_index','byte_start','byte_end','trade_id','line_sha256'}
+
+
+def enc(x):
+    return (json.dumps(x, sort_keys=True, separators=(',', ':'), ensure_ascii=False, allow_nan=False)+'\n').encode()
+
+
+def sha(b):
+    return hashlib.sha256(b).hexdigest()
+
+
+def policy(manifest):
+    return dict(schema_version='r8_data_verification_policy_v1', standard_sha256=sha(SPEC.read_bytes()), approval_event='RH-20261022-04', p3b_manifest_sha256=manifest,
+                listing=dict(x_pct='50',y_pct='20',z_pct='20',cooling_days=7,quantity='hourly_base_volume_daily_mean',variation='mean_relative_difference',stage_end_ranges=[[1,3],[7,15],[15,30]]),
+                sampling=dict(seed=20261022,base_per_stratum=300,max_per_stratum=900,max_expansions=1,confidence='0.95',upper_limit='0.025'),
+                turnover=dict(window_days=12,thresholds=['1000000','10000000','100000000'],trigger_pct='5',general='exchange_reported',suspect='sum_hourly_reported'),l4_price_threshold_pct='1')
+
+
+def bar(t, **kw):
+    r=dict(timestamp=t,open='10',high='10',low='10',close='10',volume='1',turnover='10')
+    r.update(kw)
+    return r
+
+
+class Case:
+    def __init__(self, root):
+        self.root=root; self.p3b=root/'p3b'; self.dl=root/'downloads'
+        self.p3b.mkdir(); self.dl.mkdir()
+        self.daily=[bar(T,volume='24',turnover='240')]
+        self.hours=[bar(T+i*HOUR) for i in range(24)]
+        self.trades=[dict(timestamp=str((T+i*HOUR)//1000)+'.0000001',symbol='TESTUSDT',side='Buy',size='1',price='10',trdMatchID=str(i)) for i in range(24)]
+        self.extra_inventory=[]; self.policy_change=None; self.first=T-HOUR; self.delivery=0
+        self.readable={'start':T,'end':T+DAY}; self.outputs=0
+
+    def write(self):
+        files={}; requests=[]
+        for interval, rows in [('D',self.daily),('60',self.hours)]:
+            rawrows=[[str(r['timestamp'])]+[r[f] for f in FIELDS] for r in rows]
+            rid=len(requests)+1; raw=enc({'retCode':0,'result':{'category':'linear','symbol':'TESTUSDT','list':rawrows}})
+            (self.p3b/'raw').mkdir(exist_ok=True); (self.p3b/f'raw/{rid}.json').write_bytes(raw)
+            requests.append(dict(request_id=rid,base_url='https://api.bybit.com',endpoint='/v5/market/kline',params=dict(category='linear',symbol='TESTUSDT',interval=interval),http_status=200,retCode=0,raw_sha256=sha(raw)))
+            s=io.StringIO(); w=csv.writer(s,lineterminator='\n'); w.writerow(['timestamp',*FIELDS]); w.writerows(rawrows)
+            data=gzip.compress(s.getvalue().encode(),mtime=0); name=f'kline_TESTUSDT_{interval}.csv.gz'; (self.p3b/name).write_bytes(data)
+            files[name]=dict(sha256=sha(data),dataset='kline',symbol='TESTUSDT',interval=interval,source_request_ids=[rid],first_timestamp=self.first,last_timestamp=T+DAY-HOUR)
+        req=b''.join(enc(r) for r in requests); (self.p3b/'requests.jsonl').write_bytes(req)
+        inst=enc({'retCode':0,'result':{'category':'linear','list':[dict(symbol='TESTUSDT',baseCoin='TEST',quoteCoin='USDT',settleCoin='USDT',contractType='LinearPerpetual',deliveryTime=str(self.delivery),launchTime=str(self.first))]}})
+        (self.p3b/'raw/3.json').write_bytes(inst)
+        requests.append(dict(request_id=3,base_url='https://api.bybit.com',endpoint='/v5/market/instruments-info',params={'category':'linear'},http_status=200,retCode=0,raw_sha256=sha(inst)))
+        req=b''.join(enc(r) for r in requests);(self.p3b/'requests.jsonl').write_bytes(req)
+        manifest=enc(dict(files=files,request_log_sha256=sha(req),universe_request_ids=[3],universe={'TESTUSDT':{'deliveryTime':self.delivery}},tool_version='r8-public-data-2'))
+        (self.p3b/'manifest.json').write_bytes(manifest)
+        p=policy(sha(manifest))
+        if self.policy_change:self.policy_change(p)
+        (self.root/'policy.json').write_bytes(enc(p))
+        inv=[]
+        if self.trades is not None:
+            s=io.StringIO();w=csv.DictWriter(s,fieldnames=['timestamp','symbol','side','size','price','trdMatchID'],lineterminator='\n');w.writeheader();w.writerows(self.trades)
+            b=gzip.compress(s.getvalue().encode(),mtime=0); (self.dl/'trades.csv.gz').write_bytes(b)
+            inv.append(dict(schema_version='r8_verification_download_v1',request_id='trades',symbol='TESTUSDT',day_start=T,interval='trade',source_kind='bybit_trade',url='https://public.bybit.com/trading/TESTUSDT/TESTUSDT2021-01-01.csv.gz',started_at=T,finished_at=T+1,http_status=200,api_status=None,byte_count=len(b),relative_path='trades.csv.gz',sha256=sha(b),status='AVAILABLE',reason_code=None))
+        inv+=self.extra_inventory
+        inv.sort(key=lambda x:(x['symbol'],x['day_start'],x['source_kind'],x['interval'],x['request_id']))
+        (self.dl/'download_inventory.jsonl').write_bytes(b''.join(enc(r) for r in inv))
+
+    def run(self, **kw):
+        self.write();self.outputs+=1
+        out=self.root/f'out{self.outputs}'
+        result=verify(p3b_root=self.p3b,download_root=self.dl,inventory_path=self.dl/'download_inventory.jsonl',output_root=out,policy_path=self.root/'policy.json',readable=self.readable,symbols=['TESTUSDT'],**kw)
+        return result, read(out,'findings.jsonl'), read(out,'corrections.jsonl'), read(out,'verification.json')
+
+
+def read(out,name):
+    p=out/name
+    if not p.exists(): return [] if name.endswith('jsonl') else {}
+    return [json.loads(l) for l in p.read_bytes().splitlines()] if name.endswith('jsonl') else json.loads(p.read_bytes())
+
+
+def correction(cs,field,interval='D',timestamp=T):
+    return next(c for c in cs if c['interval']==interval and c['timestamp']==timestamp and c['field']==field)
+
+
+@pytest.fixture
+def case(tmp_path):return Case(tmp_path)
+
+
+def test_exact_bundle_handoff_and_deterministic_bytes(case):
+    a,fs,cs,v=case.run()
+    assert a['status']=='READY' and set(a)==HANDOFF_KEYS
+    assert set(v)==VERIFICATION_KEYS
+    assert v['counts']==dict(input_rows=25,checked_days=1,flagged_days=0,corrected_fields=0,unresolved_rows=0)
+    assert v['review_refs']==[] and 'REVIEW_PENDING' in v['reason_codes']
+    assert cs==[]
+    for f in fs:
+        assert set(f)==FINDING_KEYS
+        assert all(set(r)==SOURCE_KEYS for r in f['source_refs'])
+    b,*_=case.run()
+    assert a['files']==b['files']
+    for name,meta in a['files'].items():
+        data=(Path(a['artifact_root'])/name).read_bytes()
+        assert sha(data)==meta['sha256']
+        assert all(enc(json.loads(l))==l+b'\n' for l in data.splitlines())
+    assert a['primary_file']=='verification.json'
+    assert a['primary_sha256']==a['files']['verification.json']['sha256']
+    assert 'verification.json' not in v['files']
+
+
+@pytest.mark.parametrize('field,value,reason',[
+    ('open','0','NONPOSITIVE_PRICE'),('high','-1','NONPOSITIVE_PRICE'),('low','0','NONPOSITIVE_PRICE'),('close','NaN','INVALID_NUMBER'),
+    ('volume','-1','NEGATIVE_QUANTITY'),('turnover','-1','NEGATIVE_QUANTITY'),('open','Infinity','INVALID_NUMBER'),('close','garbage','INVALID_NUMBER'),
+    ('low','11','INVALID_OHLC'),('high','9','INVALID_OHLC')])
+def test_l1_rejects_every_market_invalidity(case,field,value,reason):
+    case.daily[0][field]=value
+    _,fs,cs,_=case.run()
+    assert any(f['rule_id']=='DV-L1' and f['reason_code']==reason for f in fs)
+    assert cs
+
+
+@pytest.mark.parametrize('stamp,reason',[('bad','INVALID_TIMESTAMP'),('1609459200000.5','INVALID_TIMESTAMP'),(T+1,'OFF_GRID_TIMESTAMP')])
+def test_l1_timestamp_not_guessed(case,stamp,reason):
+    case.daily[0]['timestamp']=stamp
+    a,fs,cs,_=case.run()
+    assert any(f['reason_code']==reason for f in fs)
+    if reason=='INVALID_TIMESTAMP':assert a['status']=='BLOCKED' and fs[0]['timestamp'] is None
+
+
+def test_duplicate_key_all_rows_missing_even_identical(case):
+    case.daily*=2
+    _,fs,cs,v=case.run()
+    assert any(f['reason_code']=='DUPLICATE_KEY' for f in fs)
+    assert all(c['row_action']=='missing' and c['decision']=='UNRESOLVED' for c in cs if c['interval']=='D')
+    assert v['counts']['unresolved_rows']>=2
+
+
+def test_unsorted_is_not_silently_reordered(case):
+    case.hours[0],case.hours[1]=case.hours[1],case.hours[0]
+    _,fs,_,_=case.run()
+    assert any(f['reason_code']=='UNSORTED_KEYS' for f in fs)
+
+
+@pytest.mark.parametrize('change,reason',[
+    ('gap','GAPPED'),('no_daily','MISSING_COUNTERPART'),('no_hours','NO_VALID_HOURLY'),('invalid','INVALID_INPUT'),('scope','SCOPE_INCOMPLETE')])
+def test_l2_union_and_incomplete_flags(case,change,reason):
+    if change=='gap':del case.hours[10]
+    elif change=='no_daily':case.daily=[]
+    elif change=='no_hours':case.hours=[]
+    elif change=='invalid':case.hours[2]['close']='0'
+    else:case.readable['start']=T+HOUR
+    _,fs,_,_=case.run()
+    assert any(f['reason_code']==reason for f in fs)
+
+
+def test_dva_turnover_only_does_not_require_trades(case):
+    case.daily[0]['turnover']='-1';case.trades=None
+    _,fs,cs,v=case.run()
+    c=correction(cs,'turnover')
+    assert (c['decision'],c['corrected_value'],c['evidence_kind'])==('CORRECT','240','reported_turnover_selection')
+    assert c['coverage_status']==c['order_status']=='NOT_APPLICABLE'
+    assert not any(f['rule_id']=='DV-L3' for f in fs)
+    assert v['counts']['unresolved_rows']==0
+
+
+def test_amount_difference_alone_is_diagnostic(case):
+    case.daily[0]['turnover']='239';case.trades=None
+    _,fs,cs,v=case.run()
+    assert any(f['reason_code']=='TURNOVER_DIFFERENCE' for f in fs)
+    assert cs==[] and v['counts']['flagged_days']==0
+
+
+@pytest.mark.parametrize('mode,reason',[('missing','TURNOVER_INPUT_INCOMPLETE'),('duplicate','TURNOVER_INPUT_INCOMPLETE'),('nan','TURNOVER_INPUT_INCOMPLETE')])
+def test_dva_rejects_incomplete_grid(case,mode,reason):
+    case.daily[0]['turnover']='-1'
+    if mode=='missing':del case.hours[5]
+    elif mode=='duplicate':case.hours.append(dict(case.hours[0]))
+    else:case.hours[0]['turnover']='NaN'
+    _,_,cs,_=case.run()
+    assert correction(cs,'turnover')['decision']=='UNRESOLVED'
+    assert correction(cs,'turnover')['reason_code']==reason
+
+
+def test_dva_works_despite_quantity_conflict_but_row_stays_missing(case):
+    case.hours[0]['volume']='2'
+    case.daily[0]['turnover']='239'
+    _,_,cs,_=case.run()
+    assert correction(cs,'turnover')['corrected_value']=='240'
+    assert correction(cs,'turnover')['row_action']=='missing'
+    assert correction(cs,'volume')['decision']=='UNRESOLVED'
+
+
+def test_valid_open_keeps_exchange_semantics(case):
+    case.daily[0].update(open='9',low='9',volume='23')
+    case.hours[0].update(open='9',low='9')
+    # L2 low mismatch flags the day; reconstruction high/low would exclude kept O.
+    _,_,cs,_=case.run()
+    assert correction(cs,'open')['original_value']=='9'
+    assert correction(cs,'open')['decision']=='UNRESOLVED'
+    assert correction(cs,'low')['reason_code']=='POST_L1_FAILED'
+
+
+def test_open_semantics_keep_when_rebuilt_range_contains_it(case):
+    case.daily[0].update(open='9',low='9',volume='23')
+    case.hours[0].update(open='9',low='9')
+    case.trades[1]['price']='9';case.hours[1].update(open='10',low='9',close='9')
+    _,_,cs,_=case.run()
+    c=correction(cs,'open')
+    assert c['decision']=='KEEP' and c['corrected_value'] is None
+    assert c['reason_code']=='EXCHANGE_OPEN_SEMANTICS' and c['original_value']=='9'
+
+
+def test_invalid_open_requires_native_support_and_post_l1(case):
+    case.daily[0].update(open='0',low='0')
+    _,_,cs,_=case.run()
+    assert correction(cs,'open')['corrected_value']=='10'
+    assert correction(cs,'low')['corrected_value']=='10'
+    assert all(c['row_action']=='include' for c in cs if c['interval']=='D')
+
+
+@pytest.mark.parametrize('mode,reason',[
+    ('duplicate_id','C1_ID_TIME'),('bad_price','C1_ID_TIME'),('bad_size','C1_ID_TIME'),('wrong_symbol','C1_ID_TIME'),('outside_day','C1_ID_TIME'),('clock','C1_ID_TIME'),
+    ('empty_hour','C2_WINDOWS'),('quantity','C3_QUANTITY'),('multi','C4_ORDER'),('zero_box','C5_REBUILD')])
+def test_each_coverage_gate_rejects(case,mode,reason):
+    case.daily[0]['close']='9'
+    if mode=='duplicate_id':case.trades[1]['trdMatchID']='0'
+    elif mode=='bad_price':case.trades[0]['price']='0'
+    elif mode=='bad_size':case.trades[0]['size']='0'
+    elif mode=='wrong_symbol':case.trades[0]['symbol']='OTHERUSDT'
+    elif mode=='outside_day':case.trades[0]['timestamp']=str((T-DAY)//1000)
+    elif mode=='clock':case.trades[1],case.trades[2]=case.trades[2],case.trades[1]
+    elif mode=='empty_hour':del case.trades[3]
+    elif mode=='quantity':case.hours[3]['volume']='2'
+    elif mode=='multi':
+        case.trades.insert(1,dict(case.trades[0],price='11',trdMatchID='multi',size='0.5'));case.trades[0]['size']='0.5';case.hours[0]['high']='11'
+    else:
+        del case.trades[3];case.hours[3]['volume']='0';case.daily[0]['volume']='23'
+    _,fs,cs,_=case.run()
+    assert any(f['rule_id']==reason for f in fs)
+    assert correction(cs,'open' if mode=='multi' else 'close')['decision']=='UNRESOLVED'
+
+
+def test_first_stamp_multi_only_blocks_open_and_other_hour_independent(case):
+    case.daily[0]['close']='9'
+    case.trades.insert(1,dict(case.trades[0],price='11',trdMatchID='multi',size='0.5'));case.trades[0]['size']='0.5';case.hours[0]['high']='11'
+    _,_,cs,_=case.run()
+    assert correction(cs,'open')['order_status']=='TIMESTAMP_MULTI_PRICE'
+    assert correction(cs,'close')['decision']=='CORRECT'
+    assert correction(cs,'close')['corrected_value']=='10'
+    assert correction(cs,'high')['decision']=='CORRECT'
+    assert correction(cs,'close','60',T+HOUR)['decision']=='KEEP'
+
+
+def test_exact_scientific_strings_and_submillisecond_boundary(case):
+    case.trades[0].update(timestamp=str(T//1000)+'.000000000001',price='1e1',size='1e0')
+    case.daily[0]['close']='9'
+    _,_,cs,_=case.run()
+    assert correction(cs,'close')['corrected_value']=='10'
+
+
+def test_decimal_no_default_context_rounding(case):
+    value='10.000000000000000000000000000001'
+    case.daily[0].update(high=value,close='9')
+    case.hours[-1].update(high=value,close=value)
+    case.trades[-1]['price']=value
+    _,_,cs,_=case.run()
+    assert correction(cs,'close')['corrected_value']==value
+
+
+def test_holdout_and_oos_refused_before_any_market_read(case):
+    case.readable={'start':1751328000000,'end':1751414400000}
+    a,_,_,_=case.run()
+    assert a['status']=='BLOCKED' and 'READABLE_SCOPE_DENIED' in a['reason_codes']
+
+
+def test_policy_parameters_cannot_be_overridden(case):
+    case.policy_change=lambda p:p['turnover'].update(trigger_pct='6')
+    a,_,_,_=case.run()
+    assert a['status']=='BLOCKED' and 'POLICY_MISMATCH' in a['reason_codes']
+
+
+# Report C §5, §6, interpreted per conductor clarification (2026-10-22):
+# C4 is field-specific. Interior multi-price stamps do not invalidate a bar.
+CROSSCHECK = [
+ ('BCHUSDT','2020-12-14',3),('BCHUSDT','2021-02-18',1169),('BCHUSDT','2021-02-28',293),('BCHUSDT','2021-03-03',437),('BCHUSDT','2021-04-02',848),
+ ('BTCUSDT','2020-03-25',18),('BTCUSDT','2021-02-12',7576),('BTCUSDT','2021-02-13',5476),('BTCUSDT','2021-02-14',5947),('BTCUSDT','2021-02-27',9364),
+ ('BUZZUSDT','2025-04-19',2065),('DOTUSDT','2021-11-29',794),('ETHUSDT','2021-04-01',2318),('ETHUSDT','2021-04-07',3192),
+ ('LINKUSDT','2020-10-21',61),('LINKUSDT','2021-03-03',1314),('LINKUSDT','2021-03-25',1507),('LTCUSDT','2020-10-21',10),('LTCUSDT','2021-02-18',2665),
+ ('LTCUSDT','2021-03-17',939),('LTCUSDT','2021-04-08',901),('LTCUSDT','2021-04-10',1541),('PUMPBTCUSDT','2025-06-03',6229),('XEMUSDT','2021-11-30',218),('XTZUSDT','2020-10-21',3),('XTZUSDT','2021-03-24',1276)]
+
+
+@pytest.mark.skip(reason='PENDING_INTEGRATION: call real DV3 sample_plan/inventory/local transport then DV1; pin peer commit, file and input/output SHA (§9).')
+def test_dv3_real_plan_inventory_originals_into_dv1():
+    pass
+
+
+def external(case, *, price='10.1', wrong_contract=False, partial=False):
+    """Native Binance files and native exchangeInfo, not a fake verifier."""
+    import zipfile
+    data=','.join([str(T),'10','11','9',price,'2',str(T+HOUR-1),'20','2','1','10','0'])+'\n'
+    buf=io.BytesIO()
+    with zipfile.ZipFile(buf,'w') as archive:archive.writestr('TESTUSDT-1h-2021-01-01.csv',data)
+    raw=buf.getvalue();(case.dl/'external.zip').write_bytes(raw)
+    inv=dict(schema_version='r8_verification_download_v1',request_id='external',symbol='TESTUSDT',day_start=T,interval='60',source_kind='binance_hour',url='https://data.binance.vision/data/futures/um/daily/klines/TESTUSDT/1h/TESTUSDT-1h-2021-01-01.zip',started_at=T,finished_at=T+1,http_status=200,api_status=None,byte_count=len(raw),relative_path='external.zip',sha256=sha(raw),status='AVAILABLE',reason_code=None)
+    case.extra_inventory.append(inv)
+    info=enc({'symbols':[dict(symbol='TESTUSDT',contractType='CURRENT_QUARTER' if wrong_contract else 'PERPETUAL',baseAsset='TEST',quoteAsset='USDT',marginAsset='USDT')]})
+    (case.dl/'instrument.json').write_bytes(info)
+    ref=dict.fromkeys(SOURCE_KEYS);ref.update(kind='instruments',relative_path='instrument.json',sha256=sha(info),url='https://fapi.binance.com/fapi/v1/exchangeInfo')
+    if partial:case.first=T
+    return [ref]
+
+
+@pytest.mark.parametrize('price,hit',[('10.1',False),('10.100000000000000000000000000001',True),('9.9',False),('9.899999999999999999999999999999',True)])
+def test_l4_strict_one_percent_no_tolerance(case,price,hit):
+    refs=external(case,price=price)
+    _,fs,_,_=case.run(external_contract_refs=refs)
+    assert any(f['reason_code']=='PRICE_THRESHOLD_EXCEEDED' for f in fs)==hit
+    assert any(f['reason_code']==('PRICE_THRESHOLD_EXCEEDED' if hit else 'WITHIN_THRESHOLD') for f in fs)
+
+
+@pytest.mark.parametrize('mode,reason',[('wrong','INCOMPARABLE'),('missing','INCOMPARABLE'),('partial','INCOMPARABLE_PARTIAL'),('zero','UNDEFINED')])
+def test_l4_rejects_incomparable_contract_partial_and_nonpositive(case,mode,reason):
+    refs=external(case,wrong_contract=mode=='wrong',partial=mode=='partial')
+    if mode=='zero':case.hours[0]['close']='0'
+    _,fs,_,_=case.run(external_contract_refs=[] if mode=='missing' else refs)
+    assert any(f['rule_id']=='DV-L4' and f['reason_code']==reason for f in fs)
+    assert not any(f['reason_code']=='PRICE_THRESHOLD_EXCEEDED' for f in fs)
+
+
+def test_l4_missing_source_remains_unavailable(case):
+    _,fs,_,_=case.run()
+    assert len([f for f in fs if f['rule_id']=='DV-L4' and f['reason_code']=='UNAVAILABLE'])==2
+
+
+def test_l1_l2_gap_is_terminal_missing_not_manufactured_zero_trade(case):
+    del case.hours[10];del case.trades[10]
+    # Day quantity differs from available hours: L3 must also fail the missing box.
+    _,fs,cs,_=case.run()
+    assert correction(cs,'volume')['decision']=='UNRESOLVED'
+    assert any(f['rule_id']=='C2_WINDOWS' for f in fs)
+
+
+def test_coverage_known_delisting_window_cannot_accept_later_trades(case):
+    case.delivery=T+12*HOUR
+    case.daily[0]['volume']='23'
+    _,fs,cs,_=case.run()
+    assert any(f['rule_id']=='C2_WINDOWS' for f in fs)
+    assert correction(cs,'volume')['decision']=='UNRESOLVED'
+
+
+def test_dva_observed_partial_listing_sums_only_complete_existing_boxes(case):
+    case.hours=case.hours[6:];case.trades=case.trades[6:];case.first=T+6*HOUR
+    case.daily[0].update(volume='18',turnover='179')
+    # A bad turnover is sufficient to select reported amount, without G.
+    case.daily[0]['turnover']='-1';case.trades=None
+    _,fs,cs,_=case.run()
+    assert correction(cs,'turnover')['corrected_value']=='180'
+    assert any({'name':'grid','value':'PARTIAL'} in f['details'] for f in fs if f['rule_id']=='DV-A')
+
+
+def test_scoped_csv_and_raw_poison_are_never_market_decoded(case):
+    case.hours.insert(0,bar(T-HOUR,close='SECRET_BEFORE'))
+    case.hours.append(bar(T+DAY,close='SECRET_AFTER'))
+    a,fs,cs,_=case.run()
+    assert a['status']=='READY'
+    assert b'SECRET' not in b''.join((Path(a['artifact_root'])/n).read_bytes() for n in a['files'])
+    assert not any(f['reason_code']=='INVALID_NUMBER' for f in fs)
+
+
+def test_unavailable_trade_and_scope_crossing_have_terminal_findings(case):
+    case.daily[0]['volume']='23';case.trades=None
+    _,fs,cs,_=case.run()
+    assert correction(cs,'volume')['decision']=='UNRESOLVED'
+    assert any(f['reason_code']=='TRADE_UNAVAILABLE' for f in fs)
+    case.readable['end']=T+12*HOUR
+    _,fs,cs,_=case.run()
+    assert any(f['reason_code']=='SCOPE_INCOMPLETE' for f in fs)
+
+
+def test_minute_bad_support_cannot_vote_open_into_validity(case):
+    case.daily[0].update(open='0',low='0');case.hours[0]['open']='9'
+    # Earliest hourly open is not T.O and later equal opens cannot vote it in.
+    case.hours[0]['low']='9'
+    _,_,cs,_=case.run()
+    assert correction(cs,'open')['decision']=='UNRESOLVED'
+    assert correction(cs,'open')['reason_code']=='NATIVE_OPEN_SUPPORT_MISSING'
+
+
+def test_corrections_have_exact_keys_provenance_and_no_keep_rewrite(case):
+    case.daily[0].update(open='0',low='0',turnover='240.00')
+    a,fs,cs,v=case.run()
+    assert cs and all(set(c)==CORRECTION_KEYS for c in cs)
+    assert all(set(f)==FINDING_KEYS for f in fs)
+    for c in cs:
+        assert all(set(r)==SOURCE_KEYS for r in c['source_refs'])
+        assert c['rule_ids']==sorted(set(c['rule_ids']))
+        if c['decision']!='CORRECT':assert c['corrected_value'] is None
+    assert correction(cs,'turnover')['original_value']=='240.00'
+    assert correction(cs,'turnover')['decision']=='KEEP'
+    assert correction(cs,'open')['corrected_value']=='10'
+
+
+@pytest.mark.parametrize('mode,reason',[('unknown','SCHEMA_FIELDS'),('version','SCHEMA_VERSION'),('duplicate','DUPLICATE_JSON_KEY'),('sha','SOURCE_HASH_MISMATCH'),('path','UNSAFE_PATH'),('symlink','SYMLINK_DENIED')])
+def test_inventory_schema_hash_and_path_refusals(case,mode,reason):
+    case.daily[0]['volume']='23';case.write()
+    p=case.dl/'download_inventory.jsonl';r=json.loads(p.read_bytes())
+    if mode=='unknown':r['extra']=True
+    elif mode=='version':r['schema_version']='v999'
+    elif mode=='sha':r['sha256']='0'*64
+    elif mode=='path':r['relative_path']='../escape'
+    elif mode=='symlink':
+        (case.dl/'link.gz').symlink_to(case.dl/'trades.csv.gz');r['relative_path']='link.gz'
+    raw=enc(r)
+    if mode=='duplicate':raw=raw.replace(b'"interval":"trade"',b'"interval":"trade","interval":"trade"')
+    p.write_bytes(raw)
+    a=verify(p3b_root=case.p3b,download_root=case.dl,inventory_path=p,output_root=case.root/'result',policy_path=case.root/'policy.json',readable=case.readable,symbols=['TESTUSDT'])
+    assert a['status']=='BLOCKED' and reason in a['reason_codes']
+
+
+# 31 original disputed fields from C §5. Ambiguous boundaries have no candidate.
+DISPUTED = [
+ {'open':'272.95','low':'265.15'},{'close':'704.45'},{'close':'460.85'},{'close':'521.2'},{'close':'581.8'},
+ {'low':'6457.5'},{'close':None},{'close':'47191.5'},{'close':'48689.5'},{'close':'46137'},
+ {'close':'0.006479'},{'high':'37.535'},{'close':'1968.2'},{'close':'1965'},
+ {'open':'10.425','low':'10.342'},{'close':None},{'close':'25.558'},
+ {'open':'48.83','low':'48.76'},{'close':None},{'close':'206.02'},{'close':'226.44'},{'close':'256.71'},
+ {'open':None},{'open':'0.172','high':'0.177'},{'open':'2.131','low':'2.1'},{'close':'3.99'}]
+
+
+@pytest.mark.parametrize('index',range(26),ids=[s+'-'+d for s,d,_ in CROSSCHECK])
+def test_frozen_26_day_originals_and_31_disputes(tmp_path,index,record_property):
+    from datetime import datetime, timezone
+    base=Path('/Users/ncyu/Projects/TradeBot')
+    p3b=base/'r8-research/data/p3b-20261020';dl=base/'r8-research/crosscheck-20261022';audit=base/'audits/2026-10-22-r8-crosscheck'
+    if not p3b.exists() or not dl.exists() or not audit.exists():pytest.skip('26-day original files unavailable on this host')
+    symbol,date,multi=CROSSCHECK[index];t=int(datetime.fromisoformat(date).replace(tzinfo=timezone.utc).timestamp())*1000
+    manifest_sha=sha((p3b/'manifest.json').read_bytes())
+    assert manifest_sha=='b6519a7b2f5eae4759612690790ddb6680db62aa4e723427f51c21a7d6257006'
+    p=policy(manifest_sha);(tmp_path/'policy.json').write_bytes(enc(p));records=[]
+    for line in (dl/'requests.jsonl').read_bytes().splitlines():
+        r=json.loads(line);m=r['metadata']
+        if m.get('symbol')!=symbol or m.get('date_utc')!=date:continue
+        kind={'bybit_trade_file':'bybit_trade','bybit_1m':'bybit_minute'}.get(r['kind'])
+        if kind is None:continue
+        records.append(dict(schema_version='r8_verification_download_v1',request_id=str(r['request_id']),symbol=symbol,day_start=t,interval='trade' if kind=='bybit_trade' else '1',source_kind=kind,url=r['url'],started_at=t,finished_at=t+1,http_status=r['http_status'],api_status=None if kind=='bybit_trade' else 0,byte_count=r['saved_bytes'],relative_path=r['path'],sha256=r['sha256'],status='AVAILABLE',reason_code=None))
+    records.sort(key=lambda r:(r['symbol'],r['day_start'],r['source_kind'],r['interval'],r['request_id']))
+    (tmp_path/'inventory.jsonl').write_bytes(b''.join(enc(r) for r in records))
+    out=tmp_path/'bundle'
+    a=verify(p3b_root=p3b,download_root=dl,inventory_path=tmp_path/'inventory.jsonl',output_root=out,policy_path=tmp_path/'policy.json',readable={'start':t,'end':t+DAY},symbols=[symbol])
+    assert a['status']=='READY',a
+    fs,cs=read(out,'findings.jsonl'),read(out,'corrections.jsonl')
+    daily=[c for c in cs if c['interval']=='D']
+    expected=DAILY_DECISIONS[index]
+    assert {c['field']:c['decision'] for c in daily if c['field']!='turnover'}==dict(zip(FIELDS[:5],expected))
+    assert {c['row_action'] for c in daily}==({'missing'} if 'UNRESOLVED' in expected else {'include'})
+    for f,ambiguous in zip(('open','close'),BOUNDARY_MULTI[index]):
+        assert (correction(cs,f,timestamp=t)['order_status']=='TIMESTAMP_MULTI_PRICE')==ambiguous
+    if index==0:
+        assert correction(cs,'open',timestamp=t)['corrected_value']=='272.95'
+        assert correction(cs,'low',timestamp=t)['corrected_value']=='265.15'
+        assert correction(cs,'close',timestamp=t)['decision']=='KEEP'
+        assert correction(cs,'turnover',timestamp=t)['corrected_value']=='2954180.78'
+    assert any(f['interval']=='D' and f['rule_id']=='C4_ORDER' and {'name':'multi_timestamp_count','value':str(multi)} in f['details'] for f in fs)
+    for f,expected in DISPUTED[index].items():
+        c=correction(cs,f,timestamp=t)
+        assert c['candidate_value']==expected
+    if symbol in ('XEMUSDT','PUMPBTCUSDT'):
+        assert any(f['rule_id']=='C2_WINDOWS' and f['reason_code']=='COVERAGE_CONFLICT' for f in fs)
+    # Original D values remain faithful to the independent archived scoped input.
+    original=json.loads((audit/'p3b-scoped-inputs.json').read_bytes())['scoped_csv_rows'][symbol+'|D']
+    row=next(r for r in original if r['timestamp']==t)
+    for c in daily:assert c['original_value']==row[c['field']]
+    assert all(any(r['kind']=='raw' and r['byte_start'] is not None for r in c['source_refs']) for c in daily)
+    assert any(f['rule_id']=='C5_REBUILD' and f['reason_code']=='SOURCE_COMPARISON' for f in fs)
+    record_property('crosscheck',json.dumps(dict(symbol=symbol,date=date,earliest_multi=BOUNDARY_MULTI[index][0],latest_multi=BOUNDARY_MULTI[index][1],decisions={c['field']:{k:c[k] for k in ('decision','corrected_value','candidate_value','reason_code','row_action','coverage_status','order_status')} for c in daily},verification_sha256=a['primary_sha256'],bundle=str(out)),sort_keys=True))
+
+
+def test_frozen_sample_without_trade_still_has_terminal_result(case):
+    case.trades=None;case.write()
+    p=json.loads((case.root/'policy.json').read_bytes())
+    plan=dict(schema_version='r8_verification_sample_plan_v1',policy_sha256=sha(enc(p)),p3b_manifest_sha256=p['p3b_manifest_sha256'],readable=case.readable,seed=20261022,strata=[dict(year=2021,tier='NO_OPEN',population_size=1,base_size=1,max_size=1,draws=[dict(rank=1,symbol='TESTUSDT',day_start=T)])])
+    path=case.root/'sample_plan.json';path.write_bytes(enc(plan))
+    a,fs,cs,v=case.run(sample_plan_path=path)
+    assert a['status']=='READY' and v['counts']['flagged_days']==1
+    assert correction(cs,'open')['decision']=='UNRESOLVED'
+    refs=[r for c in cs for r in c['source_refs'] if r['kind']=='trade']
+    assert refs and refs[0]['url']=='https://public.bybit.com/trading/TESTUSDT/TESTUSDT2021-01-01.csv.gz'
+    assert refs[0]['relative_path'] is None and refs[0]['sha256'] is None
+
+
+def test_trade_corrections_pin_coverage_report_digest(case):
+    case.daily[0]['volume']='23'
+    a,_,cs,_=case.run()
+    c=correction(cs,'volume')
+    assert any(r['kind']=='report' and r['relative_path']=='findings.jsonl' and r['sha256']==a['files']['findings.jsonl']['sha256'] for r in c['source_refs'])
+
+
+def test_prior_correction_outside_scope_not_market_decoded(case):
+    # Invalid UTF8 value must never be decoded: scope is checked first.
+    p=case.root/'prior.jsonl'
+    p.write_bytes(b'{"timestamp":1751328000000,"symbol":"TESTUSDT","original_value":"\xff"}\n')
+    a,_,_,_=case.run(previous_corrections_path=p)
+    assert a['status']=='BLOCKED' and 'PREVIOUS_SCOPE' in a['reason_codes']
+
+
+def test_previous_bundle_chain_and_immutable_original_identity(case):
+    case.daily[0]['volume']='23'
+    a,_,old,_=case.run();prev=Path(a['artifact_root'])/'corrections.jsonl'
+    b,_,new,v=case.run(previous_corrections_path=prev)
+    assert b['status']=='READY'
+    assert v['previous_corrections_sha256']==sha(prev.read_bytes())
+    assert {c['supersedes'] for c in new}=={c['correction_id'] for c in old}
+    case.daily[0]['volume']='22'
+    c,*_=case.run(previous_corrections_path=prev)
+    assert c['status']=='BLOCKED' and 'PREVIOUS_SOURCE_MISMATCH' in c['reason_codes']
+
+
+@pytest.mark.parametrize('mode,reason',[('cycle','SUPERSEDES_CYCLE'),('duplicate','CORRECTION_CONFLICT'),('evidence','MISSING_EVIDENCE'),('unknown','SCHEMA_FIELDS')])
+def test_previous_correction_rejects_invalid_lineage(case,mode,reason):
+    case.daily[0]['volume']='23';a,_,cs,_=case.run()
+    if mode=='cycle':cs[0]['supersedes']=cs[0]['correction_id']
+    elif mode=='duplicate':cs.append(dict(cs[0]))
+    elif mode=='evidence':cs[0]['source_refs']=[]
+    else:cs[0]['surprise']=True
+    p=case.root/'bad-prior.jsonl';p.write_bytes(b''.join(enc(c) for c in cs))
+    r,*_=case.run(previous_corrections_path=p)
+    assert r['status']=='BLOCKED' and reason in r['reason_codes']
+
+
+# Frozen BEFORE the clarified implementation, from C boundary evidence and C3
+# hourly quantity conflicts. O,H,L,C,V order; A remains an independent decision.
+BOUNDARY_MULTI = [(False,False),(True,False),(False,False),(False,False),(False,False),
+ (False,False),(False,True),(False,False),(False,False),(True,False),
+ (True,False),(False,False),(False,False),(False,False),(False,False),
+ (False,True),(True,False),(False,False),(True,True),(True,False),
+ (False,False),(False,False),(True,False),(False,False),(False,False),(False,False)]
+U='UNRESOLVED';K='KEEP';C='CORRECT'
+DAILY_DECISIONS = [
+ (C,K,C,K,K),(U,U,U,U,U),(U,U,U,U,U),(K,K,K,C,C),(U,U,U,U,U),
+ (K,K,C,K,K),(U,U,U,U,U),(U,U,U,U,U),(U,U,U,U,U),(U,U,U,U,U),
+ (U,K,K,C,C),(U,U,U,U,U),(U,U,U,U,U),(U,U,U,U,U),(K,K,C,K,K),
+ (U,U,U,U,U),(U,K,K,C,C),(K,K,C,K,K),(U,K,K,U,C),(U,U,U,U,U),
+ (K,K,K,C,C),(U,U,U,U,U),(U,U,U,U,U),(U,U,U,U,U),(K,K,C,K,K),(U,U,U,U,U)]
+
+
+@pytest.mark.parametrize('position,unresolved',[('first',{'open'}),('middle',set()),('last',{'close'})])
+def test_conductor_c4_only_boundary_dependent_fields(case,position,unresolved):
+    idx={'first':0,'middle':12,'last':23}[position]
+    case.daily[0].update(volume='23',low='9')
+    case.trades[idx]['size']='0.5'
+    case.trades.insert(idx+1,dict(case.trades[idx],price='11',size='0.5',trdMatchID='additional'))
+    case.hours[idx]['high']='11'
+    _,fs,cs,_=case.run()
+    daily=[c for c in cs if c['interval']=='D']
+    assert {c['field'] for c in daily if c['decision']=='UNRESOLVED'}==unresolved
+    assert correction(cs,'high')['corrected_value']=='11'
+    assert correction(cs,'low')['corrected_value']=='10'
+    assert correction(cs,'volume')['corrected_value']=='24'
+    assert any(f['rule_id']=='C4_ORDER' and {'name':'prices','value':'10,11'} in f['details'] for f in fs)
+
+
+def test_hourly_turnover_only_invalid_never_triggers_trade_gate(case):
+    case.hours[0]['turnover']='NaN';case.trades=None
+    _,fs,cs,_=case.run()
+    assert not any(f['rule_id']=='DV-L3' for f in fs)
+    assert all(c['decision']=='KEEP' for c in cs if c['field']!='turnover')
+    assert correction(cs,'turnover')['decision']=='UNRESOLVED'
+
+
+def test_partial_post_l2_keeps_original_open_semantic_difference(case):
+    case.hours=case.hours[6:];case.trades=case.trades[6:];case.first=T+6*HOUR
+    case.daily[0].update(open='11',high='11',volume='17',turnover='180')
+    case.hours[10].update(open='11',high='11',low='11',close='11');case.trades[10]['price']='11'
+    _,fs,cs,_=case.run()
+    assert correction(cs,'open')['decision']=='KEEP'
+    assert any(f['reason_code']=='POST_L2_SEMANTICS' and f['field']=='open' for f in fs)
+
+
+@pytest.mark.parametrize('mode,reason',[('rank','SAMPLE_SCOPE'),('unknown','SCHEMA_FIELDS'),('policy','SAMPLE_IDENTITY'),('outside','SAMPLE_SCOPE')])
+def test_sample_plan_cannot_change_scope_identity_or_draw_rank(case,mode,reason):
+    case.trades=None;case.write();p=json.loads((case.root/'policy.json').read_bytes())
+    plan=dict(schema_version='r8_verification_sample_plan_v1',policy_sha256=sha(enc(p)),p3b_manifest_sha256=p['p3b_manifest_sha256'],readable=case.readable,seed=20261022,strata=[dict(year=2021,tier='NO_OPEN',population_size=1,base_size=1,max_size=1,draws=[dict(rank=1,symbol='TESTUSDT',day_start=T)])])
+    if mode=='rank':plan['strata'][0]['draws'][0]['rank']=2
+    elif mode=='unknown':plan['extra']=1
+    elif mode=='policy':plan['policy_sha256']='0'*64
+    else:plan['strata'][0]['draws'][0]['day_start']=T+DAY
+    path=case.root/'plan.json';path.write_bytes(enc(plan))
+    a,*_=case.run(sample_plan_path=path)
+    assert a['status']=='BLOCKED' and reason in a['reason_codes']
