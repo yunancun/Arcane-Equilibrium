@@ -605,10 +605,9 @@ def _volume_day(run,sym,day,hs,trades,expected,global_errors,hour_errors,minutes
         if not bars:errors.append('MISSING_ORIGINAL_HOUR')
         if trades.errors or h is not None and ('volume' not in h.nums or h.nums['volume']<0):errors.append('C1_INVALID')
         if 'C2_WINDOWS' in global_errors or 'C2_WINDOWS' in hour_errors.get(t,set()):errors.append('C2_CONFLICT')
-        if not groups and not errors:errors.append('C1_INVALID')
         tail=prefix=None
         original=h.nums.get('volume') if h else None
-        total=sum((g['volume'] for g in groups.values()),Fraction(0)) if groups else None
+        total=sum((g['volume'] for g in groups.values()),Fraction(0)) if groups or not trades.errors else None
         delta=original-total if original is not None and total is not None else None
         if errors:classification=errors[0]
         else:classification,tail,prefix=_suffix(groups,original)
@@ -667,7 +666,7 @@ def _turnover(run,b,hs,meta,suspect):
     return _correction(run,b,'turnover',decision,reason,candidate,refs,'NOT_APPLICABLE','NOT_APPLICABLE',['DV-A'],formula,'reported_turnover_selection')
 
 
-def _adjudicate(run,sym,day,ds,hs,trades,meta,instrument,minutes=()):
+def _adjudicate(run,sym,day,ds,hs,trades,meta,instrument,minutes=(),semantics_only=False):
     aggregates={};all_groups=trades.groups
     for interval,rows in [('D',ds),('60',hs)]:
         for b in rows:
@@ -695,6 +694,7 @@ def _adjudicate(run,sym,day,ds,hs,trades,meta,instrument,minutes=()):
         h=rows[0];agg=aggregates.get(('60',t));errors=hour_errors[t]
         refs=h.refs+trades.refs+(agg[2] if agg else [])
         run.finding(sym,'60',t,'volume','C3_QUANTITY','COVERAGE_CONFLICT' if errors else 'COVERAGE_RECONCILED',refs,reported_volume=h.values['volume'],trade_volume=_text(agg[0]['volume']) if agg else None,trade_count=agg[5] if agg else 0,first_timestamp_ms=_text(agg[3]) if agg else None,last_timestamp_ms=_text(agg[4]) if agg else None)
+    if semantics_only and (sym,'D',day) not in run.selected:return
     for b in ds+hs:
         agg=aggregates.get((b.interval,b.t));errors=set(global_errors)
         if b.interval=='D':errors.update(e for es in hour_errors.values() for e in es)
@@ -1157,7 +1157,7 @@ def verify(*,p3b_root,download_root,inventory_path,output_root,policy_path,reada
             items=inventory_index.get((sym,day,'bybit_trade'),[])
             if (sym,day) in sample_days:run.flagged.add((sym,day));run.price_days.add((sym,day))
             minutes=[]
-            if (sym,day) in run.price_days:
+            if (sym,day) in run.price_days or version==V2 and (sym,day) in run.flagged:
                 for r in inventory_index.get((sym,day,'bybit_minute'),[]):minutes+=_minute_rows(r,roots[1],run)
                 mt={}
                 for m in minutes:mt.setdefault(m.t,[]).append(m)
@@ -1177,8 +1177,8 @@ def verify(*,p3b_root,download_root,inventory_path,output_root,policy_path,reada
                     if len(digests)>1:trades.identity_uncertain=True
                 if not ds and not hs:
                     run.finding(sym,'D',day,'row','DV-L3','MISSING_COUNTERPART',trades.refs);run.blocked.add('MISSING_COUNTERPART')
-                _adjudicate(run,sym,day,ds,hs,trades,meta,instruments[sym],minutes)
-            elif (sym,day) in run.flagged:
+                _adjudicate(run,sym,day,ds,hs,trades,meta,instruments[sym],minutes,semantics_only=(sym,day) not in run.price_days)
+            if (sym,day) in run.flagged and (sym,day) not in run.price_days and (sym,'D',day) not in run.selected:
                 for b in ds+hs:
                     row=[_correction(run,b,f,'KEEP','L1_VALID',b.nums.get(f),[],'NOT_APPLICABLE','NOT_APPLICABLE',['DV-L1'],'original_value') for f in FIELDS[:5]]
                     row.append(_turnover(run,b,hs,meta,True));_finish_row(run,b,row)

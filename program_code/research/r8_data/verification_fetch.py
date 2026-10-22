@@ -773,7 +773,7 @@ _HOUR_CLASSES=('STRICT_C3','TERMINAL_SUFFIX_EXACT','PARTIAL_TIMESTAMP_SUBSET','N
 
 class _VolumeEvidence(_AdjudicationEvidence):
     """Independently authenticate complete-group suffixes against original bytes."""
-    def __init__(self,sources,findings,report_sha,rows,policy_sha,verified,missing_trades):
+    def __init__(self,sources,findings,report_sha,rows,policy_sha,verified,missing_trades,correction_days):
         super().__init__(sources,findings,report_sha)
         self.semantics={};self.valid_hours=set();self.selected_days=set();self.incomplete_days=set();order=[]
         for r in rows:
@@ -811,13 +811,14 @@ class _VolumeEvidence(_AdjudicationEvidence):
                     if not self.authenticate(r):raise InvalidInput('VOLUME_SEMANTICS_EVIDENCE_MISMATCH')
                     self.valid_hours.add(key)
         if order!=sorted(order):raise InvalidInput('VOLUME_SEMANTICS_EVIDENCE_MISMATCH')
-        for symbol,day in {(r['symbol'],r['day_start']) for r in rows}:
+        for symbol,day in correction_days|{(r['symbol'],r['day_start']) for r in rows}:
             ds=[r for r in rows if (r['symbol'],r['day_start'])==(symbol,day)]
             applicable=all((symbol,r['timestamp']) in self.valid_hours for r in ds) and any(r['hour_classification']=='TERMINAL_SUFFIX_EXACT' for r in ds)
             manifest=sources.load_manifest()
             first=min((m.get('first_timestamp',day) for m in manifest['files'].values() if m.get('symbol')==symbol and m.get('interval')=='60'),default=day)
             delivery=int(manifest.get('universe',{}).get(symbol,{}).get('deliveryTime',0))
             expected=set(range(max(first,day),min(day+DAY,((delivery+HOUR-1)//HOUR)*HOUR) if delivery else day+DAY,HOUR))
+            if not expected<={r['timestamp'] for r in ds}:raise InvalidInput('VOLUME_SEMANTICS_EVIDENCE_MISMATCH')
             applicable &= {r['timestamp'] for r in ds}==expected
             # Missing originals remain a per-day evidence gap. Retain the
             # declaration for schema/source identity, never for proof of e.
@@ -835,8 +836,8 @@ class _VolumeEvidence(_AdjudicationEvidence):
         if len(originals)!=1:return False
         try:totals=self.trade_totals(originals[0],symbol,day)
         except (OSError,InvalidInput):return False
-        a=totals.get(('60',t)) if totals else None
-        if not a:return False
+        if totals is None:return False
+        a=totals.get(('60',t),dict(volume=Fraction(0),groups={}))
         original=Fraction(_decimal(r['original_volume']));delta=original-a['volume']
         if Fraction(_decimal(r['trade_volume']))!=a['volume'] or Fraction(_decimal(r['volume_delta']))!=delta:return False
         groups=a['groups'];stamps=sorted(groups);prefix=[];tail=[]
@@ -854,12 +855,12 @@ class _VolumeEvidence(_AdjudicationEvidence):
         expected=dict(tail_group_count=len(tail),tail_count=sum(len(groups[s]) for s in tail),prefix_count=sum(len(groups[s]) for s in prefix))
         if any(r[k]!=v for k,v in expected.items()):return False
         if Fraction(_decimal(r['tail_volume']))!=sum((size for s in tail for size,_ in groups[s]),Fraction(0)):return False
-        for name,stamp in (('tail_first_timestamp',tail[0] if tail else None),('tail_last_timestamp',tail[-1] if tail else None),('prefix_first_timestamp',prefix[0])):
+        for name,stamp in (('tail_first_timestamp',tail[0] if tail else None),('tail_last_timestamp',tail[-1] if tail else None),('prefix_first_timestamp',prefix[0] if prefix else None)):
             if (r[name] is not None if stamp is None else r[name] is None or Fraction(_decimal(r[name]))*1000!=stamp):return False
         tail_ids={identity for s in tail for _,identity in groups[s]}
         if not tail_ids<={x['trade_id'] for x in r['source_refs'] if x['kind']=='trade'}:return False
         f=self.findings.get((symbol,'60',t,'volume','C3_QUANTITY'),[])
-        if len(f)!=1 or f[0]['reason_code']!=('COVERAGE_RECONCILED' if delta==0 else 'COVERAGE_CONFLICT'):return False
+        if len(f)!=1 or f[0]['reason_code']!=('COVERAGE_RECONCILED' if delta==0 and prefix else 'COVERAGE_CONFLICT'):return False
         d={x['name']:x['value'] for x in f[0]['details']}
         if Fraction(_decimal(d.get('reported_volume')))!=original:return False
         self.sources.bind(dict(symbol=symbol,interval='60',timestamp=t,field='volume',original_value=d['reported_volume'],source_refs=r['source_refs']))
@@ -916,7 +917,7 @@ def _bundle_outcomes(root,p,plan_sha,details=None):
                 raise InvalidInput('EVIDENCE_ROW_COUNT_MISMATCH')
             contents[name]=rows
     evidence=_AdjudicationEvidence(source_rows,contents['findings.jsonl'],verification['files']['findings.jsonl']['sha256'])
-    if v2:evidence=_VolumeEvidence(source_rows,contents['findings.jsonl'],verification['files']['findings.jsonl']['sha256'],contents['volume_semantics.jsonl'],verification['policy_sha256'],verified,missing_trades)
+    if v2:evidence=_VolumeEvidence(source_rows,contents['findings.jsonl'],verification['files']['findings.jsonl']['sha256'],contents['volume_semantics.jsonl'],verification['policy_sha256'],verified,missing_trades,{(r['symbol'],_integer(r['timestamp'])//DAY*DAY) for r in contents['corrections.jsonl']})
     days={}; ids=set(); keys=set(); order=[];reasons={}
     for row in contents['corrections.jsonl']:
         _keys(row,_CORRECTION_KEYS+(' volume_semantics_policy volume_source reason_codes' if v2 else '')); _refs(row['source_refs'],root,verified,missing_trades)
@@ -1123,7 +1124,9 @@ def summarize_policies(plan_root,v1_verification_roots,v2_verification_roots,art
             reasons+=report['reason_codes']
             for name,meta in report['files'].items():files[folder+'/'+name]=meta
             lines += ['policy='+version,(Path(report['artifact_root'])/report['primary_file']).read_text().rstrip('\n')]
-        groups=[('full_batch',set(all_outcomes['v1-strict']))]
+        frozen_base={(d['symbol'],d['day_start']) for s in p['strata'] for d in s['draws'][:s['base_size']]}
+        full_batch=frozen_base|set(all_outcomes['v1-strict'])
+        groups=[('full_batch',full_batch)]
         for s in p['strata']:
             groups.append((f"base_stratum year={s['year']} tier={s['tier']} N={s['population_size']}",
                 {(d['symbol'],d['day_start']) for d in s['draws'][:s['base_size']]}))
@@ -1142,8 +1145,8 @@ def summarize_policies(plan_root,v1_verification_roots,v2_verification_roots,art
             for interval in ('D','60'):
                 rows=[r for r in all_rows[V2] if r['interval']==interval and (r['symbol'],r['timestamp']//DAY*DAY) in risk
                       and (interval=='D' or (r['symbol'],r['timestamp']) in tail_keys)]
-                corrected=[r for r in rows if r['decision']=='CORRECT']
-                lines.append(f'interval={interval} n_volume_corrected_e={sum(r["field"]=="volume" for r in corrected)} n_price_corrected_e={sum(r["field"] in _FIELDS[:4] for r in corrected)}')
+                corrected=[r for r in rows if r['decision']=='CORRECT' and 'TRADE_SOURCE_SELECTED_BY_E' in r['reason_codes']]
+                lines.append(f'interval={interval} n_volume_corrected_e={sum(r["field"]=="volume" for r in corrected)} n_price_corrected_e={sum(r["field"] in ("high","low","close") for r in corrected)}')
             for version in ('v1-strict',V2):
                 rows=[r for r in all_rows[version] if (r['symbol'],r['timestamp']//DAY*DAY) in days]
                 flags={}
@@ -1167,8 +1170,8 @@ def summarize_policies(plan_root,v1_verification_roots,v2_verification_roots,art
                 detail={k:r[k] for k in ('symbol','interval','timestamp','field','decision','row_action','original_value','candidate_value','corrected_value','reason_code','source_refs')}
                 detail['reason_codes']=r.get('reason_codes',[r['reason_code']])
                 lines.append('field_evidence policy='+version+' '+encoded(detail).decode().strip())
-        for key in sorted(all_outcomes['v1-strict']):
-            lines.append('migration '+encoded(dict(symbol=key[0],day_start=key[1],v1=all_outcomes['v1-strict'][key],v2=all_outcomes[V2][key],reason_codes=sorted({c for r in all_rows[V2] if (r['symbol'],r['timestamp']//DAY*DAY)==key for c in r['reason_codes']}))).decode().strip())
+        for key in sorted(full_batch):
+            lines.append('migration '+encoded(dict(symbol=key[0],day_start=key[1],v1=all_outcomes['v1-strict'].get(key,'u'),v2=all_outcomes[V2].get(key,'u'),reason_codes=sorted({c for r in all_rows[V2] if (r['symbol'],r['timestamp']//DAY*DAY)==key for c in r['reason_codes']}))).decode().strip())
         data=('\n'.join(lines)+'\n').encode()
         return _emit(artifact_root,'sample_report.txt',data,len(data.splitlines()),reasons,files)
     except (InvalidInput,OSError,EOFError,TypeError,KeyError,IndexError,ValueError) as exc:

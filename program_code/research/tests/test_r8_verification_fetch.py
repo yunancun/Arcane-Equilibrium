@@ -877,3 +877,53 @@ def test_v2_partial_only_batch_reports_availability_without_random_sample_claim(
     assert 'level=base_stratum' not in report and 'conservative_upper=' not in report
     assert 'n_terminal_source_selected_days=1' in report
     assert 'ACCEPTANCE_TARGET_PENDING' in result['reason_codes']
+
+
+@pytest.mark.parametrize('remove_all',[False,True])
+@pytest.mark.parametrize('selected',[False,True])
+def test_e2_001_v2_missing_semantics_hours_rejected_after_resealing(tmp_path,remove_all,selected):
+    root=tmp_path/'real';v2_integration(root,None if selected else lambda case:None);bundle=root/'bundle-v2'
+    path=bundle/'volume_semantics.jsonl';rows=[json.loads(x) for x in path.read_bytes().splitlines()]
+    rows=[] if remove_all else rows[:1]+rows[2:]
+    path.write_bytes(b''.join(v.encoded(x) for x in rows))
+    vp=bundle/'verification.json';meta=json.loads(vp.read_bytes())
+    meta['files'][path.name].update(sha256=v.sha(path.read_bytes()),rows=len(rows));vp.write_bytes(v.encoded(meta))
+    result=v.summarize_sample(root/'plan',[bundle],tmp_path/'summary')
+    assert result['primary_file'] is None and result['reason_codes']==['VOLUME_SEMANTICS_EVIDENCE_MISMATCH']
+
+
+def test_e2_002_real_zero_trade_hour_keeps_classification_and_error_priority(tmp_path):
+    from program_code.research.tests.test_r8_data_verification import suffix_case
+    def configure(case):
+        suffix_case(case);case.trades=[r for r in case.trades if r['trdMatchID']!='1']
+        case.hours[1].update(volume='0',turnover='0');case.daily[0].update(volume='23.5',turnover='230')
+    root=tmp_path/'real';v2_integration(root,configure)
+    result=v.summarize_policies(root/'plan',[root/'bundle'],[root/'bundle-v2'],tmp_path/'dual')
+    assert result['primary_file']=='sample_report.txt',result
+    text=(tmp_path/'dual/sample_report.txt').read_text()
+    assert 'n_terminal_source_selected_days=1 n_terminal_source_selected_hours=1 n_tail_trades=1' in text
+    assert 'n_error_policy=1 n_unresolved_policy=0' in text
+
+
+def test_e2_003_open_never_gains_e_authority_or_price_correction_count(tmp_path):
+    from program_code.research.tests.test_r8_data_verification import suffix_case,read
+    def configure(case):suffix_case(case);case.daily[0]['open']='0'
+    root=tmp_path/'real';v2_integration(root,configure)
+    cs=read(root/'bundle-v2','corrections.jsonl')
+    assert next(r for r in cs if r['interval']=='D' and r['field']=='open')['decision']=='UNRESOLVED'
+    result=v.summarize_policies(root/'plan',[root/'bundle'],[root/'bundle-v2'],tmp_path/'dual')
+    assert result['primary_file']=='sample_report.txt',result
+    text=(tmp_path/'dual/sample_report.txt').read_text()
+    assert 'interval=D n_volume_corrected_e=0 n_price_corrected_e=0' in text
+    assert 'interval=60 n_volume_corrected_e=1 n_price_corrected_e=0' in text
+
+
+def test_e2_004_both_missing_bundles_still_use_frozen_full_batch(tmp_path):
+    plan(tmp_path,source(tmp_path,days=2,valid=True),end=T+2*D)
+    result=v.summarize_policies(tmp_path/'out',[],[],tmp_path/'dual')
+    assert result['primary_file']=='sample_report.txt',result
+    report=(tmp_path/'dual/sample_report.txt').read_text()
+    section=report.split('level=full_batch ')[1].split('level=base_stratum')[0]
+    assert 'day_denominator=2' in section
+    assert 'n_error_v1=0 n_unresolved_v1=2 n_semantics_v1=0' in section
+    assert 'n_error_policy=0 n_unresolved_policy=2 n_semantics_policy=0' in section

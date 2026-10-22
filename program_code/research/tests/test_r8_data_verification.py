@@ -1354,3 +1354,30 @@ def test_v2_non_object_policy_is_rejected_with_fixed_reason(case,bad):
     result=verify(p3b_root=case.p3b,download_root=case.dl,inventory_path=case.dl/'download_inventory.jsonl',
         output_root=case.root/'invalid-policy-output',policy_path=path,readable=case.readable,symbols=['TESTUSDT'])
     assert result['status']=='BLOCKED' and result['reason_codes']==['POLICY_MISMATCH']
+
+
+def test_e2_001_v2_turnover_only_day_has_every_required_hour(case):
+    case.policy_change=v2_policy;case.hours.pop(12)
+    case.daily[0].update(volume='23',turnover='230');case.trades=None
+    result,_,cs,_=case.run()
+    assert result['status']=='READY'
+    rows=read(Path(result['artifact_root']),'volume_semantics.jsonl')
+    assert {r['timestamp'] for r in rows}==set(range(T,T+DAY,HOUR))
+    missing=next(r for r in rows if r['timestamp']==T+12*HOUR)
+    assert missing['hour_classification']=='MISSING_ORIGINAL_HOUR'
+    assert all(not r['day_applicable'] for r in rows)
+    assert correction(cs,'turnover')['decision']=='UNRESOLVED'
+
+
+def test_e2_002_zero_trade_hour_is_strict_without_bypassing_rebuild_gate(case):
+    suffix_case(case)
+    case.trades=[r for r in case.trades if r['trdMatchID']!='1']
+    case.hours[1].update(volume='0',turnover='0')
+    case.daily[0].update(volume='23.5',turnover='230')
+    result,_,cs,_=case.run();rows=read(Path(result['artifact_root']),'volume_semantics.jsonl')
+    zero=next(r for r in rows if r['timestamp']==T+HOUR)
+    assert (zero['hour_classification'],zero['trade_volume'],zero['volume_delta'])==('STRICT_C3','0','0')
+    assert zero['day_applicable'] is True
+    assert (zero['prefix_count'],zero['prefix_first_timestamp'],zero['tail_count'])==(0,None,0)
+    assert correction(cs,'volume','60',T+HOUR)['row_action']=='missing'
+    assert 'C5_REBUILD' in correction(cs,'volume','60',T+HOUR)['reason_codes']
