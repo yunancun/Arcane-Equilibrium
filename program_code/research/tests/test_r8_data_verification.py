@@ -662,7 +662,7 @@ class OfflineArchiveTransport:
         return fetch.Response(404 if self.unavailable else 200,{'Content-Length':str(len(data))},io.BytesIO(data if method=='GET' else b''))
 
 
-def real_dv13_flow(root,index=None,fetch_failure=None):
+def real_dv13_flow(root,index=None,fetch_failure=None,configure=None):
     """Real plan -> local byte transport -> real verifier -> real statistics.
 
     Local archives use a one-symbol fixture manifest to bound the population;
@@ -676,7 +676,9 @@ def real_dv13_flow(root,index=None,fetch_failure=None):
     from program_code.research.r8_data import verification_fetch as fetch
     root=Path(root);root.mkdir(exist_ok=True,parents=True);p3b=root/'p3b';payloads={};requests=[]
     if index is None:
-        case=Case(root);case.write();symbol='TESTUSDT';t=T
+        case=Case(root)
+        if configure is not None:configure(case)
+        case.write();symbol='TESTUSDT';t=T
         # Case's source directory is immutable after this fixture preparation.
         m=json.loads((p3b/'manifest.json').read_bytes())
         m['universe'][symbol]['launch_time']=case.first
@@ -747,3 +749,186 @@ def real_dv13_flow(root,index=None,fetch_failure=None):
         'plan':plan,'fetch':downloaded,'verification':output,'summary':summary}
     (root/'integration.json').write_bytes(enc(provenance))
     return provenance
+
+
+def test_l2_missing_hour_routes_turnover_without_price_adjudication(case):
+    case.hours.pop(12)
+    case.daily[0].update(volume='23',turnover='230')
+    case.trades=None
+    result,findings,cs,_=case.run()
+    assert result['status']=='READY'
+    assert any(f['reason_code']=='GAPPED' for f in findings)
+    amount=next((c for c in cs if c['interval']=='D' and c['field']=='turnover'),None)
+    assert amount is not None, 'L2 coverage finding left original daily turnover available'
+    assert (amount['decision'],amount['reason_code'],amount['row_action'])==('UNRESOLVED','TURNOVER_INPUT_INCOMPLETE','missing')
+    assert not any(f['rule_id'] in ('DV-L3','C3_QUANTITY','C5_REBUILD') for f in findings)
+    assert not any(r['kind']=='trade' for c in cs for r in c['source_refs'])
+
+
+def test_daily_selection_inspects_each_bar_and_inventory_only_linearly(case,monkeypatch,record_property):
+    from program_code.research.r8_data import verification as dv1
+    days=120
+    case.readable={'start':T,'end':T+days*DAY}
+    case.daily=[bar(T+d*DAY,volume='24',turnover='240') for d in range(days)]
+    case.hours=[bar(T+i*HOUR) for i in range(days*24)]
+    case.trades=None
+    case.extra_inventory=[dict(schema_version='r8_verification_download_v1',request_id=str(d),symbol='TESTUSDT',
+        day_start=T+d*DAY,interval='60',source_kind='binance_hour',url='https://data.binance.vision/unavailable',
+        started_at=T,finished_at=T,http_status=404,api_status=None,byte_count=0,relative_path=None,sha256=None,
+        status='UNAVAILABLE',reason_code='HTTP_UNAVAILABLE') for d in range(days)]
+    class Counted(list):
+        visits=0
+        def __iter__(self):
+            for item in super().__iter__():
+                self.visits+=1
+                yield item
+    observed={};load_bars=dv1._load_p3b;load_inventory=dv1._load_inventory
+    def counted_bars(*args):
+        bars,meta,instruments=load_bars(*args)
+        observed['bars']=Counted(bars)
+        return observed['bars'],meta,instruments
+    def counted_inventory(*args):
+        observed['inventory']=Counted(load_inventory(*args))
+        return observed['inventory']
+    monkeypatch.setattr(dv1,'_load_p3b',counted_bars)
+    monkeypatch.setattr(dv1,'_load_inventory',counted_inventory)
+    result,_,cs,info=case.run()
+    assert result['status']=='READY' and info['counts']['checked_days']==days and not cs
+    assert observed['bars'].visits<=len(observed['bars'])*8
+    assert observed['inventory'].visits<=len(observed['inventory'])*4
+    record_property('bar_count',len(observed['bars']))
+    record_property('bar_visits',observed['bars'].visits)
+    record_property('inventory_count',len(observed['inventory']))
+    record_property('inventory_visits',observed['inventory'].visits)
+
+
+def real_expansion_flow(root):
+    """302 fixed days, one precommitted base error; both passes use real peers."""
+    from datetime import datetime,timezone
+    import shutil
+    from program_code.research.r8_data import verification_fetch as fetch
+    root.mkdir();case=Case(root);days=302
+    case.readable={'start':T,'end':T+days*DAY}
+    case.daily=[bar(T+d*DAY,volume='24',turnover='240') for d in range(days)]
+    case.hours=[bar(T+i*HOUR) for i in range(days*24)]
+    # Frozen independently of the sampled order; the raw and CSV both retain it.
+    case.daily[0].update(high='11',close='11')
+    case.trades=None;case.write()
+    manifest=json.loads((case.p3b/'manifest.json').read_bytes())
+    manifest['universe']['TESTUSDT']['launch_time']=case.first
+    (case.p3b/'manifest.json').write_bytes(enc(manifest))
+    inputs=[fetch.CSVSource(x['symbol'],x['dataset'],x['interval'],name,x['sha256']) for name,x in manifest['files'].items()]
+    planned=fetch.build_sample_plan(case.p3b,root/'plan',inputs,readable=case.readable,p3b_manifest_sha256=sha(enc(manifest)))
+    assert planned['status']=='READY'
+    frozen=(root/'plan/sample_plan.json').read_bytes();p=json.loads(frozen);s=p['strata'][0]
+    assert len(p['strata'])==1 and (s['population_size'],s['base_size'],s['max_size'])==(302,300,302)
+    assert T in {d['day_start'] for d in s['draws'][:300]}
+    payloads={};requests=[]
+    for d in s['draws']:
+        day=d['day_start'];date=datetime.fromtimestamp(day//1000,timezone.utc).strftime('%Y-%m-%d')
+        url=f'https://public.bybit.com/trading/TESTUSDT/TESTUSDT{date}.csv.gz'
+        lines=['timestamp,symbol,side,size,price,trdMatchID']
+        lines += [f'{(day+h*HOUR)//1000}.0000001,TESTUSDT,Buy,1,10,{h}' for h in range(24)]
+        payloads[url]=gzip.compress(('\n'.join(lines)+'\n').encode(),mtime=0)
+        requests.append(fetch.DownloadRequest(str(day),'TESTUSDT',day,'trade','bybit_trade',url))
+    bundles=[];summaries=[]
+    for stage,count in [('base',300),('expanded',302)]:
+        transport=OfflineArchiveTransport(payloads);download=root/(stage+'-downloads')
+        got=fetch.fetch_downloads(download,requests[:count],approved_urls=list(payloads),readable=case.readable,
+            max_total_bytes=sum(map(len,payloads.values())),max_file_bytes=max(map(len,payloads.values())),
+            transport=transport,clock=transport.clock,sleep=transport.sleep,now=lambda:T)
+        assert got['status']=='READY',got
+        bundle=root/(stage+'-bundle');kw={}
+        if stage=='expanded':kw['sample_report_path']=root/'base-summary/sample_report.txt'
+        result=verify(p3b_root=case.p3b,download_root=download,inventory_path=download/'download_inventory.jsonl',
+            output_root=bundle,policy_path=root/'plan/policy.json',readable=case.readable,symbols=['TESTUSDT'],
+            sample_plan_path=root/'plan/sample_plan.json',**kw)
+        assert result['status']=='READY',result
+        for name in ('manifest.json','requests.jsonl'):shutil.copyfile(case.p3b/name,bundle/name)
+        shutil.copyfile(download/'download_inventory.jsonl',bundle/'download_inventory.jsonl')
+        for name in ('findings.jsonl','corrections.jsonl'):
+            for row in read(bundle,name):
+                for ref in row['source_refs']:
+                    path=ref['relative_path']
+                    if path is None or (bundle/path).exists():continue
+                    source=next(base/path for base in (case.p3b,download) if (base/path).is_file())
+                    (bundle/path).parent.mkdir(parents=True,exist_ok=True);shutil.copyfile(source,bundle/path)
+        summary=fetch.summarize_sample(root/'plan',[bundle],root/(stage+'-summary'))
+        if stage=='base':
+            assert 'EXPANSION_REQUIRED' in summary['reason_codes'],summary
+            assert 'N=302 n=300 e=1 u=0 s=299' in (root/'base-summary/sample_report.txt').read_text()
+        bundles.append(bundle);summaries.append(summary)
+    assert frozen==(root/'plan/sample_plan.json').read_bytes()
+    return root,p,bundles,summaries
+
+
+def test_real_dv3_error_expands_frozen_prefix_into_dv1_l3(tmp_path,monkeypatch):
+    import socket
+    def deny(*args,**kwargs):raise AssertionError('network forbidden')
+    monkeypatch.setattr(socket.socket,'connect',deny)
+    monkeypatch.setattr(socket,'create_connection',deny)
+    root,p,bundles,summaries=real_expansion_flow(tmp_path/'expansion')
+    assert summaries[1]['status']=='READY',summaries[1]
+    extra={d['day_start'] for d in p['strata'][0]['draws'][300:]}
+    base=read(bundles[0],'corrections.jsonl');expanded=read(bundles[1],'corrections.jsonl')
+    assert not any(c['timestamp']//DAY*DAY in extra for c in base)
+    selected=[c for c in expanded if c['timestamp']//DAY*DAY in extra]
+    assert len(selected)==2*25*6
+    assert all(c['decision']=='KEEP' and c['row_action']=='include' for c in selected)
+    assert all(c['coverage_status']=='PASS' for c in selected if c['evidence_kind']=='trade_adjudication')
+    for b in bundles:assert read(b,'verification.json')['sample_plan_sha256']==sha((root/'plan/sample_plan.json').read_bytes())
+    report=(root/'base-summary/sample_report.txt').read_bytes()
+    assert (bundles[1]/'sample_report.txt').read_bytes()==report
+    assert read(bundles[1],'verification.json')['files']['sample_report.txt']['sha256']==sha(report)
+    assert 'N=302 n=300 e=1 u=0 s=299' in (root/'expanded-summary/sample_report.txt').read_text()
+
+
+@pytest.mark.parametrize('mutation,reason',[
+    ('sha','EXPANSION_PLAN_MISMATCH'),('tier','EXPANSION_STRATUM_MISMATCH'),
+    ('population','EXPANSION_STRATUM_MISMATCH'),('base','EXPANSION_STRATUM_MISMATCH'),
+    ('short_prefix','EXPANSION_PREFIX_MISMATCH'),('long_prefix','EXPANSION_PREFIX_MISMATCH'),
+    ('duplicate_prefix','EXPANSION_REPORT_SCHEMA'),('no_trigger','EXPANSION_REPORT_SCHEMA'),
+    ('rank','SAMPLE_SCOPE'),('replace_draw','EXPANSION_PLAN_MISMATCH')])
+def test_expansion_handoff_rejects_changed_identity_or_nonprefix(tmp_path,mutation,reason):
+    from program_code.research.r8_data import verification as dv1
+    from program_code.research.r8_data import verification_fetch as dv3
+    from program_code.research.tests.test_r8_verification_fetch import source,plan,artifact,T as start
+    p=artifact(plan(tmp_path,source(tmp_path,days=365,valid=True),end=start+365*DAY))
+    summary=dv3.summarize_sample(tmp_path/'out',[],tmp_path/'summary')
+    report=Path(summary['artifact_root'],summary['primary_file']).read_bytes()
+    assert 'EXPANSION_REQUIRED' in summary['reason_codes']
+    path=tmp_path/'out/sample_plan.json'
+    if mutation=='sha':report=report.replace(sha(path.read_bytes()).encode(),b'0'*64)
+    if mutation=='tier':report=report.replace(b'2020 GE_100M',b'2020 NO_OPEN')
+    if mutation=='population':report=report.replace(b'N=353',b'N=354')
+    if mutation=='base':report=report.replace(b'n=300',b'n=299')
+    if mutation=='short_prefix':report=report.replace(b'required_prefix=353',b'required_prefix=301')
+    if mutation=='long_prefix':report=report.replace(b'required_prefix=353',b'required_prefix=354')
+    if mutation=='duplicate_prefix':report=report.replace(b'required_prefix=353 max_expansions=1\n',b'required_prefix=353 max_expansions=1\n'*2)
+    if mutation=='no_trigger':report=report.replace(b'e=0 u=300',b'e=0 u=0')
+    if mutation=='rank':
+        p['strata'][0]['draws'][300]['rank']=302;path.write_bytes(enc(p))
+    if mutation=='replace_draw':
+        draws=p['strata'][0]['draws'];draws[0]['day_start'],draws[-1]['day_start']=draws[-1]['day_start'],draws[0]['day_start']
+        path.write_bytes(enc(p))
+    run=dv1._Run(p['readable'],p['policy_sha256'])
+    with pytest.raises(ValueError,match='^'+reason+'$'):
+        dv1._sample(path,run,p['p3b_manifest_sha256'],['AUSDT'],report)
+
+
+@pytest.mark.parametrize('mode',['missing_counterpart','partial_listing'])
+def test_l2_coverage_only_turnover_worklist(case,mode):
+    case.trades=None
+    if mode=='missing_counterpart':
+        case.hours=[];case.daily[0].update(volume='0',turnover='0')
+    else:
+        case.first=T+6*HOUR;case.hours=case.hours[6:]
+        case.daily[0].update(volume='18',turnover='180')
+    result,findings,cs,_=case.run()
+    assert result['status']=='READY'
+    amount=correction(cs,'turnover')
+    if mode=='missing_counterpart':
+        assert (amount['decision'],amount['reason_code'],amount['row_action'])==('UNRESOLVED','TURNOVER_INPUT_INCOMPLETE','missing')
+    else:
+        assert (amount['decision'],amount['candidate_value'],amount['formula'])==('KEEP','180','sum_hourly_reported')
+    assert not any(f['rule_id'] in ('DV-L3','C3_QUANTITY','C5_REBUILD') for f in findings)

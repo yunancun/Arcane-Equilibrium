@@ -361,20 +361,62 @@ def rewrite_corrections(root,rows):
     (root/'verification.json').write_bytes(v.encoded(info))
 
 def test_error_deduplicates_unresolved_same_day_and_semantics_kept(tmp_path):
-    p=artifact(plan(tmp_path,source(tmp_path,days=1,valid=True),end=T+D))
-    root=dv1_fixture(tmp_path,p,[T],error=True,unresolved=True)
-    r=v.summarize_sample(tmp_path/'out',[root],tmp_path/'summary')
+    from program_code.research.tests.test_r8_data_verification import real_dv13_flow
+    def configure(case):
+        case.daily[0].update(high='11',close='11')
+        case.hours[1]['open']='0'
+    flow=real_dv13_flow(tmp_path/'real',configure=configure)
+    r=flow['summary']
     assert 'N=1 n=1 e=1 u=0 s=0' in Path(r['artifact_root'],r['primary_file']).read_text()
 
 
-def test_complete_census_keep_semantic_has_zero_bound(tmp_path):
+def test_incomplete_trade_evidence_census_counts_unresolved(tmp_path):
     p=artifact(plan(tmp_path,source(tmp_path,days=1,valid=True),end=T+D))
     root=dv1_fixture(tmp_path,p,[T],semantic=True)
     r=v.summarize_sample(tmp_path/'out',[root],tmp_path/'summary')
-    assert r['status']=='READY'
+    assert r['status']=='BLOCKED'
     text=Path(r['artifact_root'],r['primary_file']).read_text()
-    assert 'N=1 n=1 e=0 u=0 s=1' in text
-    assert 'conservative_upper=0/1' in text
+    assert 'N=1 n=1 e=0 u=1 s=0' in text
+    assert 'EVIDENCE_INCOMPLETE' in r['reason_codes']
+
+
+@pytest.mark.parametrize('missing',['original','witness','coverage','comparison','report_ref','quantity',
+                                    'boundary_witness','coverage_detail','trade_file'])
+def test_completed_real_l3_requires_each_evidence_component(tmp_path,missing):
+    from program_code.research.tests.test_r8_data_verification import real_dv13_flow,read
+    root=tmp_path/'real';flow=real_dv13_flow(root)
+    assert flow['summary']['status']=='READY'
+    bundle=root/'bundle';rows=read(bundle,'corrections.jsonl');findings=read(bundle,'findings.jsonl')
+    if missing=='trade_file':
+        ref=next(r for row in rows for r in row['source_refs'] if r['kind']=='trade' and r['relative_path'])
+        (bundle/ref['relative_path']).unlink()
+    elif missing=='boundary_witness':
+        target=next(row for row in rows if row['interval']=='D' and row['field']=='open')
+        target['source_refs']=[r for r in target['source_refs'] if not (r['kind']=='trade' and r['row']==2)]
+    elif missing in ('original','witness','report_ref'):
+        for row in rows:
+            row['source_refs']=[r for r in row['source_refs'] if not (
+                missing=='original' and r['kind']=='trade' and r['row'] is None or
+                missing=='witness' and r['kind']=='trade' and r['row'] is not None or
+                missing=='report_ref' and r['kind']=='report')]
+    else:
+        target=next(f for f in findings if f['rule_id']==('C5_REBUILD' if missing=='comparison' else 'C3_QUANTITY'))
+        if missing=='coverage_detail':
+            target['details']=[d for d in target['details'] if d['name']!='trade_count']
+        elif missing=='quantity':
+            next(d for d in target['details'] if d['name']=='trade_volume')['value']='999'
+        else:findings.remove(target)
+    data=b''.join(v.encoded(f) for f in findings);(bundle/'findings.jsonl').write_bytes(data)
+    info=read(bundle,'verification.json');info['files']['findings.jsonl']={'sha256':v.sha(data),'rows':len(findings)}
+    (bundle/'verification.json').write_bytes(v.encoded(info))
+    for row in rows:
+        for ref in row['source_refs']:
+            if ref['relative_path']=='findings.jsonl':ref['sha256']=v.sha(data)
+    rewrite_corrections(bundle,rows)
+    result=v.summarize_sample(root/'plan',[bundle],tmp_path/'summary')
+    assert result['status']=='BLOCKED'
+    assert 'EVIDENCE_INCOMPLETE' in result['reason_codes']
+    assert 'N=1 n=1 e=0 u=1 s=0' in Path(result['artifact_root'],result['primary_file']).read_text()
 
 
 def test_expansion_only_frozen_prefix_and_base_denominator_unchanged(tmp_path):
