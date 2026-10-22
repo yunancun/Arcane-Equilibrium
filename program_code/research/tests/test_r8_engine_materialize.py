@@ -44,19 +44,19 @@ def dv_read(root, name):
 class VerifiedCase:
     def __init__(self, root, monkeypatch, *, days=40, version=1, first_hour=0,
                  quantities=None, amounts=None, daily_amounts=None, suffix=False,
-                 missing=(), registration_change=None, instrument_change=None, poison_outside=False, end_offset=0, daily_open='10', sampling=False):
+                 missing=(), registration_change=None, instrument_change=None, poison_outside=False, end_offset=0, daily_open='10', sampling=False, daily_transform=None, symbols=('BTCUSDT','XUSDT')):
         self.root, self.monkeypatch = root, monkeypatch
         root.mkdir(parents=True, exist_ok=True)
         self.u1 = root/'u1'; self.u1.mkdir()
         self.downloads = root/'downloads'; self.downloads.mkdir()
         self.start = DV_T; self.end = DV_T+days*DV_DAY+end_offset
         self.first = DV_T+first_hour*DV_HOUR
-        self.version = version; self.files = {}; self.requests = []; self.inventory = []
+        self.version = version; self.files = {}; self.requests = []; self.inventory = []; self.symbols = symbols
         self.poison_outside = poison_outside
         quantities = quantities or ['1']*days
         amounts = amounts or ['10']*days  # each hourly reported turnover
         instruments = []
-        for symbol in ('BTCUSDT', 'XUSDT'):
+        for symbol in symbols:
             hours, daily = [], []
             for d in range(days):
                 day = DV_T+d*DV_DAY; bins = range(first_hour if d == 0 else 0, 24)
@@ -80,6 +80,8 @@ class VerifiedCase:
                     url=f'https://public.bybit.com/trading/{symbol}/{symbol}{datetime.fromtimestamp(day//1000,timezone.utc):%Y-%m-%d}.csv.gz',
                     started_at=day, finished_at=day+1, http_status=200, api_status=None,
                     byte_count=len(data), relative_path=name, sha256=digest(data), status='AVAILABLE', reason_code=None))
+            if daily_transform:
+                daily_transform(daily)
             for interval, rows in [('60', hours), ('D', daily)]:
                 self._market(symbol, 'kline', interval, ['timestamp', *DV_FIELDS], rows)
             funding=[[str(DV_T), '0']]
@@ -96,7 +98,7 @@ class VerifiedCase:
         request_bytes = b''.join(dv_encode(r) for r in self.requests)
         (self.u1/'requests.jsonl').write_bytes(request_bytes)
         manifest = dict(tool_version='r8-public-data-2', files=self.files, request_log_sha256=digest(request_bytes),
-                        universe_request_ids=[rid], universe={s:{'deliveryTime':0,'launch_time':self.first} for s in ('BTCUSDT','XUSDT')})
+                        universe_request_ids=[rid], universe={s:{'deliveryTime':0,'launch_time':self.first} for s in symbols})
         (self.u1/'manifest.json').write_bytes(dv_encode(manifest))
         self.manifest_sha = digest(dv_encode(manifest))
         spec = Path(__file__).resolve().parents[3]/'docs/execution_plan/2026-10-22--r8-stage2-data-verification-standard.md'
@@ -117,7 +119,7 @@ class VerifiedCase:
             assert handoff['status']=='READY',handoff
             plan=root/'plan/sample_plan.json'
         result = verifier.verify(p3b_root=self.u1, download_root=self.downloads, inventory_path=root/'inventory.jsonl',
-            output_root=root/'bundle', policy_path=root/'policy.json', readable={'start':self.start,'end':self.end}, symbols=['BTCUSDT','XUSDT'],sample_plan_path=plan)
+            output_root=root/'bundle', policy_path=root/'policy.json', readable={'start':self.start,'end':self.end}, symbols=list(symbols),sample_plan_path=plan)
         assert result['status'] == 'READY', result
         self.bundle_sha = result['primary_sha256']
         self.bundle = root/'verification-bundles'/self.bundle_sha
@@ -135,7 +137,7 @@ class VerifiedCase:
 
     def pin(self):
         self.monkeypatch.setattr(mod, 'VERIFICATION_BUNDLES',
-            ((self.manifest_sha,self.start,self.end,('BTCUSDT','XUSDT'),self.bundle_sha),), raising=False)
+            ((self.manifest_sha,self.start,self.end,self.symbols,self.bundle_sha),), raising=False)
 
     def _csv(self, path, header, rows):
         text = io.StringIO(); writer = csv.writer(text, lineterminator='\n'); writer.writerow(header);writer.writerows(rows)
@@ -986,3 +988,190 @@ def real_peer_run(real_peer_materialization):
     assert result['decisions'] and result['voided']
     assert result['docker_argv'][result['docker_argv'].index('--network')+1] == 'none'
     return _PEER_RUNS[key]
+
+
+def test_recorder_r2_midnight_endpoint_verified_liquidity(tmp_path, monkeypatch):
+    from program_code.research.r8_engine import series, lean_runner
+    from program_code.research.r8_engine.lean_algo import rules
+    from program_code.research.tests.test_r8_engine_series import cost_parameters, run_for
+    case = VerifiedCase(tmp_path, monkeypatch, days=16, amounts=['20000000']*16,
+                        symbols=('BTCUSDT',), registration_change=lambda r:r['selection'].update(symbols=['BTCUSDT']))
+    manifest = mod.materialize(**case.args)
+    data = series.Materialization(case.args['out']/'materialization.json')
+    run = run_for(data.path)
+    # A real nonzero BTC hold-baseline position reaches midnight liquidation.
+    baseline = series.baselines(data, run)
+    assert any(value != 0 for _, value in baseline['btc_perp_hold_v1']['returns'])
+    lean_runner.verification_bundle(case.args['out'], manifest)
+    table = dv_read(case.args['out'], 'verification/turnover_decisions.jsonl')
+    for symbol in manifest['symbols']:
+        row = next(r for r in table if (r['symbol'], r['decision_utc_day']) == (symbol, case.end))
+        assert row['known_at'] == case.end
+        assert [i['day_start'] for i in row['inputs']] == list(range(case.end-12*DV_DAY, case.end, DV_DAY))
+        rules.turnover_liquidity(row, case.end, manifest['first_bar'][symbol], cost_parameters())
+        assert data.liquidity(symbol, case.end, cost_parameters())[2]
+
+
+def test_recorder_r2_first_partial_day_all_hours(tmp_path, monkeypatch):
+    from program_code.research.r8_engine import series, lean_runner
+    from program_code.research.r8_engine.lean_algo import rules
+    from program_code.research.tests.test_r8_engine_series import cost_parameters
+    case = VerifiedCase(tmp_path, monkeypatch, days=16,
+                        registration_change=lambda r:r.update(max_lookback_seconds=13*86400+3600))
+    case.args['window']['start'] += DV_HOUR
+    manifest = mod.materialize(**case.args)
+    lean_runner.verification_bundle(case.args['out'], manifest)
+    data = series.Materialization(case.args['out']/'materialization.json')
+    table = {(r['symbol'], r['decision_utc_day']): r for r in dv_read(case.args['out'], 'verification/turnover_decisions.jsonl')}
+    day = case.args['window']['start']//DV_DAY*DV_DAY
+    for symbol in manifest['symbols']:
+        for t in range(day+DV_HOUR, day+DV_DAY, DV_HOUR):
+            row = table.get((symbol, day))
+            rules.turnover_liquidity(row, t, manifest['first_bar'][symbol], cost_parameters())
+            data.liquidity(symbol, t, cost_parameters())
+        assert [i['day_start'] for i in row['inputs']] == list(range(day-12*DV_DAY, day, DV_DAY))
+
+
+def test_recorder_r2_duplicate_original_daily_quarantined(tmp_path, monkeypatch):
+    from program_code.research.r8_engine import series, lean_runner
+    def duplicate(rows):
+        rows.insert(5, list(rows[5]))
+    case = VerifiedCase(tmp_path, monkeypatch, days=16, daily_transform=duplicate)
+    manifest = mod.materialize(**case.args)
+    day = DV_T+5*DV_DAY
+    corrections = dv_read(case.bundle, 'corrections.jsonl')
+    assert any(r['timestamp'] == day and r['row_action'] == 'missing' for r in corrections)
+    lean_runner.verification_bundle(case.args['out'], manifest)
+    data = series.Materialization(case.args['out']/'materialization.json')
+    for symbol in manifest['symbols']:
+        assert data.turnover.original[symbol][day] is None
+        assert day not in data.daily[symbol]
+    assert all(i['exchange_reported'] is None for r in dv_read(case.args['out'], 'verification/turnover_decisions.jsonl') for i in r['inputs'] if i['day_start'] == day)
+
+
+def test_recorder_r2_negative_original_daily_unavailable(tmp_path, monkeypatch):
+    from program_code.research.r8_engine import series, lean_runner
+    def negative(rows):
+        rows[5][-1] = '-1'
+    case = VerifiedCase(tmp_path, monkeypatch, days=16, daily_transform=negative)
+    manifest = mod.materialize(**case.args)
+    lean_runner.verification_bundle(case.args['out'], manifest)
+    data = series.Materialization(case.args['out']/'materialization.json')
+    for symbol in manifest['symbols']:
+        assert data.turnover.original[symbol][DV_T+5*DV_DAY] is None
+
+
+def test_recorder_r2_midnight_listing_origin_causal_views(tmp_path, monkeypatch):
+    from program_code.research.r8_engine import series, lean_runner
+    from program_code.research.r8_engine.lean_algo import rules
+    case = VerifiedCase(tmp_path, monkeypatch, days=16, first_hour=23,
+                        registration_change=lambda r:r.update(data_family='listing'))
+    manifest = mod.materialize(**case.args)
+    lean_runner.verification_bundle(case.args['out'], manifest)
+    series.Materialization(case.args['out']/'materialization.json')
+    rows = dv_read(case.args['out'], 'verification/listing_regimes.jsonl')
+    keys = [(r['known_at'], r['symbol']) for r in rows]
+    assert keys == sorted(set(keys))
+    known = case.first+DV_HOUR
+    for symbol in manifest['symbols']:
+        own = [r for r in rows if r['symbol'] == symbol]
+        assert own[0]['known_at'] == known == own[0]['day_start']
+        assert own[0]['observed_listing_at'] == case.first
+        assert own[0]['quantity_inputs'][0]['hour_count'] == 1
+        indexed = peer_view_rows(case.args['out'], symbol)
+        for t, strict in [(known-1,False),(known,True),(known,False),(known+1,True),
+                          (known+DV_DAY-1,False),(known+DV_DAY,True),(known+DV_DAY,False)]:
+            view = rules.data_view(indexed, t, strict, family='listing')[symbol]
+            visible = tuple(r for r in own if r['known_at'] < t or not strict and r['known_at'] == t)
+            assert len(view.get('listing_regime',())) == len(visible)
+            if visible:
+                assert view['listing_regime'][-1]['day_start'] == visible[-1]['day_start']
+
+
+def test_recorder_r2_verified_submit_finishes_both_baselines(tmp_path, monkeypatch, record_property):
+    import subprocess
+    from program_code.research.r8_engine import series, lean_runner
+    from program_code.research.tests.test_r8_engine_series import run_for, iso, refresh_run_hashes
+    def register(r):
+        r['selection']['symbols'] = ['BTCUSDT']
+        r.update(sharpe_frequency_seconds=3600,decision_period={'unit':'hour','value':1})
+    case = VerifiedCase(tmp_path/'inputs', monkeypatch, days=16, amounts=['20000000']*16,
+        symbols=('BTCUSDT',), registration_change=register)
+    case.args['validation'] = False
+    monkeypatch.setattr(mod, 'P3B_MANIFEST_SHA256', case.manifest_sha)
+    manifest = mod.materialize(**case.args)
+    lean_runner.verification_bundle(case.args['out'], manifest)
+    path = case.args['out']/'materialization.json'
+    data = series.Materialization(path)
+    # Snapshot actual engine bytes; the hypothesis is outside the engine tree.
+    repo = tmp_path/'repo'; repo.mkdir()
+    project = Path(mod.__file__).resolve().parents[3]
+    for directory in series.ENGINE_DIRS:
+        shutil.copytree(project/directory, repo/directory, ignore=shutil.ignore_patterns('__pycache__'))
+    (repo/'hypothesis.py').write_bytes((project/lean_runner.EXAMPLE).read_bytes())
+    (repo/'.gitignore').write_text('__pycache__/\n*.pyc\n')
+    def git(*args):
+        return subprocess.check_output(['git','-C',str(repo),*args], stderr=subprocess.DEVNULL).decode().strip()
+    git('init','-q'); git('config','user.name','R2 offline fixture'); git('config','user.email','fixture@example.invalid')
+    git('add','.'); git('-c','core.hooksPath=/dev/null','commit','-qm','Record actual engine fixture')
+    head = git('rev-parse','HEAD'); git('update-ref','refs/remotes/origin/main',head)
+    run = run_for(path); cfg = run['run_config']
+    cfg.update(mode='trial',trial_id='t1',code_commit=head,engine_commit=head,
+               algorithm={'path':'hypothesis.py','class':'FixedSchedule'})
+    run.update(mode='trial',algorithm_files={n:digest((repo/n).read_bytes()) for n in git('ls-files','--',*series.ENGINE_DIRS,'hypothesis.py').splitlines()})
+    refresh_run_hashes(run)
+    record = begin(make_book(tmp_path/'template'))
+    configuration = {'strategy_parameters':{'run':{k:cfg[k] for k in series.IDENTITY_RUN_KEYS},'strategy':cfg['strategy']},'cost_model_parameters':cfg['cost']}
+    window = {k:iso(v) for k,v in manifest['window'].items()}
+    record.update(data_window=window,fit_window=window,score_window=window,
+        manifest_sha256=data.sha256,data_files={k:v['sha256'] for k,v in manifest['files'].items()},
+        code_commit=head,configuration=configuration,configuration_sha256=digest(canonical(configuration)),
+        sharpe_frequency={'unit':'hour','seconds':3600,'annualized':False},**series.RUNTIME_METADATA)
+    case.book.begin_trial(record)
+    run['started_at'] = run['ended_at'] = series.timestamp(case.book.trial_record('t1')['record']['started_at'])
+    # Synthetic no-trade observations; actual submit independently computes both baselines.
+    replayed = series.replay(data, run)
+    for key in ('orders','fills','voided','funding','endpoint_funding','steps'):
+        run[key] = replayed[key]
+    runpath = tmp_path/'run.json'; runpath.write_bytes(canonical(run))
+    def materialize_again(**kwargs):
+        mod.materialize(u1=kwargs['u1'],u1_manifest_sha256=case.manifest_sha,ledger=kwargs['ledger'],
+            hypothesis=kwargs['hypothesis'],window=kwargs['window'],trial=kwargs['trial'],out=kwargs['out'])
+        return kwargs['out']/'materialization.json'
+    finished = series.submit(case.book.out,'t1',case.u1,runpath,materializer=materialize_again,repo=repo)
+    assert finished['status'] == 'completed' and case.book.trial_record('t1')['finished'] is True
+    summary = finished['result_summary']
+    hold = json.loads((case.book.out/'u6_artifacts'/summary['btc_perp_hold_sha256']).read_bytes())
+    matched = json.loads((case.book.out/'u6_artifacts'/summary['provenance']['baseline_sha256']).read_bytes())
+    assert any(value != 0 for _,value in hold['returns'])
+    assert len(hold['returns']) == len(matched['returns']) == 72
+    record_property('r2_submit',json.dumps(dict(finished=True,periods=72,hold_sha256=summary['btc_perp_hold_sha256'],baseline_sha256=summary['provenance']['baseline_sha256'])))
+
+
+def test_recorder_r2_zero_volume_prefix_and_endpoint_consistent(tmp_path, monkeypatch):
+    from program_code.research.r8_engine import series, lean_runner
+    case = VerifiedCase(tmp_path, monkeypatch, days=16, quantities=['0']*15+['1'])
+    manifest = mod.materialize(**case.args)
+    lean_runner.verification_bundle(case.args['out'], manifest)
+    data = series.Materialization(case.args['out']/'materialization.json')
+    assert all(t == DV_T+15*DV_DAY for t in data.turnover.origins.values())
+    assert all(t == DV_T for t in manifest['first_bar'].values())
+    row = next(r for r in dv_read(case.args['out'],'verification/turnover_decisions.jsonl')
+               if r['decision_utc_day'] == case.end)
+    assert row['history_sufficient'] is True
+    assert all(i['effective_reported'] is None for i in row['inputs'][:-1])
+
+
+@pytest.mark.parametrize('original, mutation', [(False,'duplicate'),(False,'descending'),(True,'descending')])
+def test_recorder_r2_market_order_guard_remains_strict(tmp_path, monkeypatch, original, mutation):
+    from program_code.research.r8_engine import lean_runner
+    case = VerifiedCase(tmp_path, monkeypatch, days=16)
+    manifest = mod.materialize(**case.args)
+    name = ('verification/original/' if original else 'source/')+'kline_XUSDT_D.csv'
+    path = case.args['out']/name; lines = path.read_bytes().splitlines(keepends=True)
+    if mutation == 'duplicate':lines.insert(6, lines[6])
+    else:lines[5],lines[6] = lines[6],lines[5]
+    raw = b''.join(lines);path.write_bytes(raw)
+    manifest['files'][name].update(sha256=digest(raw),rows=len(lines)-1)
+    with pytest.raises(ValueError,match='TURNOVER_SOURCE_ORDER'):
+        lean_runner.verification_bundle(case.args['out'],manifest)

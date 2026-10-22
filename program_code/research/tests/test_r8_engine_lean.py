@@ -1981,6 +1981,7 @@ def dv5_materialization(path, manifest, family='ordinary', v2=False, wrong_type=
     for prefix in ('source','verification/original'):
         put(prefix+'/kline_X_D.csv',daily.encode(),12,8*DAY,19*DAY)
     put('source/kline_X_60.csv',hourly.encode(),288,8*DAY,20*DAY-HOUR)
+    put('verification/original/kline_X_60.csv',hourly.encode(),288,8*DAY,20*DAY-HOUR)
     for resolution, count, step, start, amount in [('day',12,DAY,8*DAY,'10000000'),('hour',288,HOUR,8*DAY,'375000')]:
         raw=''.join(f'{start+(i+1)*step},{start+i*step},{amount}\n' for i in range(count)).encode()
         put('custom/turnover_'+resolution+'/x.csv',raw,count,start,start+(count-1)*step)

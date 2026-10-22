@@ -690,6 +690,10 @@ def _listing(symbol, first, launch, origin_refs, hours, daily, hour_refs, end, p
     records, quantities, q = [], [], []
     stage, reason = 'initial', 'OBSERVED_FIRST_HOUR'
     def record(day, known, cooling):
+        # At a 23:00 origin both observations arrive at midnight. The daily
+        # update contains the origin and completed first box at the same time.
+        if records and records[-1]['known_at'] == known:
+            records.pop()
         records.append(dict(schema_version='r8_listing_regime_v1', symbol=symbol, day_start=day,
             known_at=known, observed_listing_at=first, launch_time=launch,
             listing_time_mismatch=abs(first-launch) > DAY, origin_refs=origin_refs,
@@ -728,7 +732,9 @@ def _listing(symbol, first, launch, origin_refs, hours, daily, hour_refs, end, p
 def _turnover(symbol, first, start, end, original_daily, daily, hours, daily_refs, hour_refs, policy_sha, *, history_first=None):
     records = []
     history_first = first if history_first is None else history_first
-    for decision_day in range((start+DAY-1)//DAY*DAY, end, DAY):
+    # Include the first partial day and the independently checked terminal day.
+    # A non-midnight end reuses its day's row; inputs always precede midnight.
+    for decision_day in range(start//DAY*DAY, end+1, DAY):
         inputs, d_values, e_values, h_values, reasons = [], [], [], [], set()
         sufficient = decision_day >= ((history_first+DAY-1)//DAY+12)*DAY
         for day in range(decision_day-12*DAY, decision_day, DAY):

@@ -1896,6 +1896,9 @@ def dv6_fixture(tmp_path, *, original='9900000', effective='9900000', hourly='50
     name='verification/original/kline_BTCUSDT_D.csv';target=path.parent/name;target.parent.mkdir(parents=True);target.write_text(raw)
     m['files'][name]={'sha256':hashlib.sha256(raw.encode()).hexdigest(),'rows':sum(v is not None for v in originals),
         'first':days[0],'last':days[-1],'source_file':'kline_BTCUSDT_D.csv.gz','source_sha256':'b'*64}
+    source='source/kline_BTCUSDT_60.csv'; original_name='verification/original/kline_BTCUSDT_60.csv'
+    (path.parent/original_name).write_bytes((path.parent/source).read_bytes())
+    m['files'][original_name]=copy.deepcopy(m['files'][source])
     path.write_bytes(canonical(m))
     policy={'schema_version':f'r8_data_verification_policy_v{version}','standard_sha256':'afcb87578676c998b4ce7529c6e1c09d5214cfe7e8af53ad03d120781c696931',
         'approval_event':'RH-20261022-05' if version==2 else 'RH-20261022-04','p3b_manifest_sha256':'a'*64,

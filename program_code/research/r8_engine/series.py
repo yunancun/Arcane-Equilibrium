@@ -473,7 +473,7 @@ class TurnoverVerification:
             raise SeriesError('VERIFICATION_ACCESS_SCOPE') from exc
 
     def __init__(self, data):
-        self.data, self.rows, self.original = data, {}, {}
+        self.data, self.rows, self.original, self.origins = data, {}, {}, {}
         self.files = data.manifest['files']; self.raw = {}; self.source_shas = {}
         for name, meta in self.files.items():
             self.source_shas.setdefault(meta['source_file'], set()).add(meta['source_sha256'])
@@ -559,6 +559,14 @@ class TurnoverVerification:
             if any(t % HOUR for t in data.hourly[symbol]) or any(t % DAY for t in data.daily[symbol]):
                 raise SeriesError('TURNOVER_SOURCE_GRID')
             self.original[symbol] = self.original_days(symbol)
+            for t, volume in self.original_days(symbol, '60', 'volume').items():
+                if volume is None:
+                    raise SeriesError('TURNOVER_ORIGIN_UNKNOWN')
+                if volume > 0:
+                    self.origins[symbol] = t
+                    break
+            if symbol not in self.origins:
+                raise SeriesError('TURNOVER_ORIGIN_UNKNOWN')
         name = 'verification/turnover_decisions.jsonl'
         if name not in self.raw:
             raise SeriesError('TURNOVER_TABLE_MISSING')
@@ -645,11 +653,11 @@ class TurnoverVerification:
             raise SeriesError('VERIFICATION_JSON_OBJECT')
         return result
 
-    def original_days(self, symbol):
-        name = 'verification/original/kline_'+symbol+'_D.csv'
+    def original_days(self, symbol, interval='D', field='turnover'):
+        name = 'verification/original/kline_'+symbol+'_'+interval+'.csv'
         if name not in self.raw:
             raise SeriesError('TURNOVER_ORIGINAL_MISSING')
-        effective = self.files.get('source/kline_'+symbol+'_D.csv', {})
+        effective = self.files.get('source/kline_'+symbol+'_'+interval+'.csv', {})
         if any(self.files[name][k] != effective.get(k) for k in ('source_file','source_sha256')):
             raise SeriesError('TURNOVER_ORIGINAL_IDENTITY')
         reader = csv.DictReader(io.StringIO(self.raw[name].decode('utf-8')))
@@ -661,11 +669,13 @@ class TurnoverVerification:
                 t = int(row['timestamp'])
             except (ValueError, TypeError) as exc:
                 raise SeriesError('TURNOVER_ORIGINAL_TIME') from exc
-            if t % DAY or not self.scope[0] <= t < self.scope[1] or times and t < times[-1]:
+            if t % (DAY if interval == 'D' else HOUR) or not self.scope[0] <= t < self.scope[1] or times and t < times[-1]:
                 raise SeriesError('TURNOVER_ORIGINAL_SCOPE')
             # 時刻／標的／範圍先於市場值；無法用的原額保留 null 比較及零中位數輸入。
             try:
-                value = _exchange_decimal(row['turnover'])
+                value = _exchange_decimal(row[field])
+                if value < 0:
+                    value = None
             except SeriesError:
                 value = None
             result[t] = value if t not in result else None
@@ -717,6 +727,8 @@ class TurnoverVerification:
             if type(item['day_start']) is not int or item['day_start'] != t:
                 raise SeriesError('TURNOVER_WINDOW')
             d = self.original[symbol].get(t); e = data.daily[symbol].get(t, {}).get('turnover')
+            if t < self.origins[symbol]:
+                d = e = None  # A partial listing day is not a complete daily input.
             self.refs(item['source_refs'], row['reason_codes'], bound=True)
             if (d is not None or e is not None or item['sum_hourly_reported'] is not None) and not item['source_refs']:
                 raise SeriesError('TURNOVER_SOURCE_REFS_MISSING')
@@ -727,7 +739,7 @@ class TurnoverVerification:
             h = None; status = item['hourly_status']
             if status != 'NOT_EVALUATED':
                 hours = [data.hourly[symbol].get(t+i*HOUR, {}).get('turnover') for i in range(24)]
-                first = data.manifest['first_bar'][symbol]
+                first = max(self.origins[symbol], data.manifest['first_bar'][symbol])
                 delivery = data.manifest['delistings'].get(symbol, {}).get('deliveryTime')
                 if (first is not None and first <= t and (delivery is None or delivery >= t+DAY) and
                         self.scope[0] <= t and t+DAY <= self.scope[1] and all(v is not None for v in hours)):

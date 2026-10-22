@@ -348,7 +348,11 @@ def verification_bundle(root, manifest):
         earlier = grouped[row['symbol']]
         stage_index = ('initial','middle','stabilizing','ordinary').index(row['stage'])
         age = (row['day_start']-row['observed_listing_at']//rules.DAY*rules.DAY)//rules.DAY+1
-        if (not earlier and (row['stage'] != 'initial' or age != 1)
+        # A first box closing at midnight is represented by its complete daily
+        # update, with unchanged known_at and all origin evidence retained.
+        initial_age = 2 if (row['observed_listing_at'] % rules.DAY == rules.DAY-rules.HOUR
+                           and row['day_start'] == row['known_at'] == row['observed_listing_at']+rules.HOUR) else 1
+        if (not earlier and (row['stage'] != 'initial' or age != initial_age)
                 or not (1,2,8,16)[stage_index] <= age
                 or stage_index < 3 and age > (3,15,30)[stage_index]):
             raise ValueError('LISTING_STAGE_BOUNDARY')
@@ -392,21 +396,23 @@ def verification_bundle(root, manifest):
     # Independently bind every 12-day input to manifest-bound, in-scope CSV bytes.
     from fractions import Fraction
     cache = {}
-    def market(symbol, interval, original=False):
+    def market(symbol, interval, original=False, field='turnover'):
         name = ('verification/original/' if original else 'source/') + 'kline_'+symbol+'_'+interval+'.csv'
-        if name not in cache:
+        key = (name, field)
+        if key not in cache:
             records = {}; reader = csv.DictReader(io.StringIO(raw(name).decode('utf-8')))
             if reader.fieldnames != ['timestamp','open','high','low','close','volume','turnover']:
                 raise ValueError('TURNOVER_SOURCE_SCHEMA')
             previous_t = None
             for item in reader:
                 stamp = int(item['timestamp'])
-                if stamp % (rules.DAY if interval=='D' else rules.HOUR) or previous_t is not None and stamp <= previous_t:
+                if (stamp % (rules.DAY if interval=='D' else rules.HOUR)
+                        or previous_t is not None and (stamp < previous_t or stamp == previous_t and not original)):
                     raise ValueError('TURNOVER_SOURCE_ORDER')
                 if not rules.milliseconds(manifest['warmup']['start']) <= stamp < rules.milliseconds(manifest['window']['end']):
                     raise ValueError('TURNOVER_SOURCE_OUT_OF_SCOPE')
                 try:
-                    value = rules.decimal(item['turnover'])
+                    value = rules.decimal(item[field])
                     if value < 0:
                         raise ValueError('TURNOVER_SOURCE_AMOUNT')
                     value = Fraction(value)
@@ -414,9 +420,20 @@ def verification_bundle(root, manifest):
                     if not original:
                         raise
                     value = None  # Invalid original evidence is not a usable amount.
-                records[stamp] = value; previous_t = stamp
-            cache[name] = records
-        return cache[name]
+                records[stamp] = None if original and stamp in records else value
+                previous_t = stamp
+            cache[key] = records
+        return cache[key]
+    origins = {}
+    for symbol in manifest['symbols']:
+        for stamp, volume in market(symbol, '60', True, 'volume').items():
+            if volume is None:
+                raise ValueError('TURNOVER_ORIGIN_UNKNOWN')
+            if volume > 0:
+                origins[symbol] = stamp
+                break
+        if symbol not in origins:
+            raise ValueError('TURNOVER_ORIGIN_UNKNOWN')
     table = verification_json(raw('verification/turnover_decisions.jsonl'),lines=True)
     if not table and any(t is not None for t in manifest['first_bar'].values()):
         raise ValueError('TURNOVER_INPUT_INCOMPLETE')
@@ -435,12 +452,14 @@ def verification_bundle(root, manifest):
             day = item['day_start']
             for field, original in (('exchange_reported',True),('effective_reported',False)):
                 value = market(symbol,'D',original).get(day)
+                if day < origins[symbol]:
+                    value = None  # The first observed UTC day may be incomplete.
                 supplied = None if item[field] is None else Fraction(rules.decimal(item[field]))
                 if value != supplied or field=='effective_reported' and ((value is not None) != (item['daily_status']=='VALID')):
                     raise ValueError('TURNOVER_SOURCE_MISMATCH')
             if item['hourly_status'] != 'NOT_EVALUATED':
                 hours = market(symbol,'60')
-                full = all(day+i*rules.HOUR in hours for i in range(24))
+                full = day >= origins[symbol] and all(day+i*rules.HOUR in hours for i in range(24))
                 value = sum((hours[day+i*rules.HOUR] for i in range(24)),Fraction(0)) if full else None
                 supplied = None if item['sum_hourly_reported'] is None else Fraction(rules.decimal(item['sum_hourly_reported']))
                 if value != supplied or full != (item['hourly_status']=='VALID'):

@@ -1,9 +1,18 @@
 # CLAUDE_CHANGELOG.md — 開發歷史歸檔
 
 > 從 CLAUDE.md / TODO.md 遷出的 Wave/Sprint/Batch + TODO version-increment 歷史敘事。新 session 不需要讀此文件，僅供回顧歷史時查閱。
-> 最後更新：2026-10-22（R8 DV2-R1／DV5／DV6 記錄者整合發布；TODO v925）
+> 最後更新：2026-10-22（R8 DV256 記錄者 R2 審查修正；TODO v926）
 
 ---
+
+## R8 DV256 記錄者 R2：修正 PR #246 五項整合邊界 — 2026-10-22
+
+- conductor 逐項確認自動審查1 P1／4 P2屬實，明示授權 `R8-DV256-RECORDER-FIX-R2-20261022` 新准入與同範圍租約，在 `64c2952553` 上續作同一 [PR #246](https://github.com/yunancun/Arcane-Equilibrium/pull/246)。原 `R8-DV256-RECORDER-PUBLISH-20261022` 停止及 `R8-DV256-RECORDER-PUBLISH-R1-20261022` 發布／審查紀錄保留；原DV2-R1／DV5／DV6的E2／E4與停止歷史不變。R2限兩小時，不合併。
+- 六項核心測試先取得正確紅燈：終點流動性與真實submit基準計算均 `TURNOVER_DECISION_MISSING`；首個部分日 `TURNOVER_DECISION_INVALID`；隔離重複日原件 `TURNOVER_SOURCE_ORDER`；負原額 `TURNOVER_AMOUNT_MISMATCH`；午夜上市 `LISTING_REGIME_ORDER`。測試前置設定失敗另存，不冒充缺陷紅燈。
+- U4從起點所在UTC日產生決策列，午夜終點亦有 `decision_utc_day=known_at=end`，各列只取前12個完整日。23:00首箱閉合與日更新同時可知時，只保留同一known_at的完整日更新，保留起點、來源與首箱數量，不改實際知悉時間或嚴格排序鍵。U5接受這個首筆日更新。
+- U5把原始日證據的重複戳記為金額不可用；有效來源仍嚴格唯一，兩者倒序均拒絕。U6把負原額記為不可用。新增終點在真實BCH原件暴露上市首個不完整日比對缺口：U5／U6各自從manifest綁定原始小時量重建首個正量時刻，將其之前的非完整日排除；保留原始首根bar的歷史充分性時鐘。三方未共用計算函式，沒有改規範、政策或pin。
+- 實際程式僅 `materialize.py`、`lean_runner.py`、`series.py`；對應三個測試檔補真實verify／帳本／U4／U5／U6消費與完整submit、因果截點、防退化案例，原合成消費fixture補既有U4格式的原始小時證據。11個邊界及既有歷史時鐘檢查通過；submit以合成無交易觀測驅動真實重物化、兩個基準與finish_trial，BTC持有基準有非零部位成本，不冒稱該合成run是LEAN執行。
+- 全部R8、原件三方互通8項（真實Colima network none）、26日v1 78份bytes／v2 §13.7／雙政策報表及42項歷史回歸、指定兩個結構靜態檔、CI與新head自動審查，見PR與 `audits/2026-10-22-r8-data-verify-dv256-fix-r2/` 的固定head證據。測試期間不改工作樹；不取數、不碰遠端Linux／資料庫／Demo／live、不更新Wiki。TODO v925→v926，追加文件hash身分，不新增RH事件或規範裁決。
 
 ## R8 DV2-R1／DV5／DV6 記錄者整合發布 — 2026-10-22
 
