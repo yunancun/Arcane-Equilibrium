@@ -241,6 +241,11 @@ class _Run:
         self.policy_sha=policy_sha; self.findings=[]; self.corrections=[]; self.blocked=set(); self.flagged=set(); self.price_days=set(); self.unresolved=set(); self.fids=set()
 
     def finding(self,symbol,interval,t,field,rule,reason,refs=(),**details):
+        # Day diagnostics describe only the readable intersection, not an
+        # unreadable midnight row. Preserve the day identity in existing details.
+        if rule in ('DV-L2','DV-L4') and t is not None and t%DAY==0 and t<self.start<t+DAY:
+            details.update(day_start=t,scope_start=self.start,scope_end=min(t+DAY,self.end))
+            t=self.start
         f=dict(schema_version='r8_data_finding_v1',symbol=symbol,dataset='kline_day' if interval=='D' else 'kline_hour' if interval=='60' else 'kline_minute',interval=interval,timestamp=t,field=field,rule_id=rule,reason_code=reason,source_refs=_refs(refs),details=[dict(name=k,value=None if v is None else str(v)) for k,v in sorted(details.items())])
         f['finding_id']=_sha(_encoded(f))
         if f['finding_id'] not in self.fids:self.findings.append(f);self.fids.add(f['finding_id'])

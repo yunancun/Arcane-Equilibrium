@@ -773,6 +773,29 @@ def real_partial_and_sampled_flow(root,readable_offset=0):
     return real_dv13_flow(root,configure=configure)
 
 
+def test_partial_readable_day_keeps_diagnostics_and_complete_sample_statistics(tmp_path,monkeypatch):
+    import socket
+    from program_code.research.r8_data import verification_fetch as fetch
+    def deny(*args,**kwargs):raise AssertionError('network forbidden')
+    monkeypatch.setattr(socket.socket,'connect',deny)
+    monkeypatch.setattr(socket,'create_connection',deny)
+    root=tmp_path/'partial';flow=real_partial_and_sampled_flow(root,HOUR)
+    assert flow['verification']['status']=='READY'
+    assert flow['summary']['status']=='READY',flow['summary']
+    findings=read(root/'bundle','findings.jsonl')
+    diagnostics=[f for f in findings if f['rule_id']=='DV-L2' and T<=f['timestamp']<T+DAY]
+    assert {'SCOPE_INCOMPLETE','GAPPED','MISSING_COUNTERPART','POST_L2_MISSING_INPUTS'}<={f['reason_code'] for f in diagnostics}
+    assert all(f['timestamp']==T+HOUR for f in diagnostics)
+    assert all({d['name']:d['value'] for d in f['details']}.items()>={
+        'day_start':str(T),'scope_start':str(T+HOUR),'scope_end':str(T+DAY)}.items() for f in diagnostics)
+    assert all(f['timestamp'] is None or T+HOUR<=f['timestamp']<T+2*DAY for f in findings)
+    p=read(root/'plan','sample_plan.json')
+    assert [d['day_start'] for s in p['strata'] for d in s['draws']]==[T+DAY]
+    outcomes,_=fetch._bundle_outcomes(root/'bundle',p,sha((root/'plan/sample_plan.json').read_bytes()))
+    assert outcomes=={('TESTUSDT',T):'u',('TESTUSDT',T+DAY):'s'}
+    assert 'N=1 n=1 e=0 u=0 s=1' in (root/'summary/sample_report.txt').read_text()
+
+
 def test_l2_missing_hour_routes_turnover_without_price_adjudication(case):
     case.hours.pop(12)
     case.daily[0].update(volume='23',turnover='230')
