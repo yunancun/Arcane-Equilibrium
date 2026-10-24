@@ -727,3 +727,13 @@ DV7 測試另覆蓋：同日多尾段、跨多戳尾段、部分同戳子集／�
    - 整體物化失敗：U4 無法計算決策、或政策／身分／綁定等任何驗證失敗時，整個物化失敗、不產生可用物化，失敗證據另寫 `<out>.blocked/verification.json`（`status=BLOCKED`，依 §8.3）。這與決策列的 status 是兩件事，不得混稱。對應 `materialize.py::_Bundle.blocked` 與 `materialize` 的失敗處理。
    - U5／U6 消費端：遇到 `status=BLOCKED` 的決策列，或缺少當日決策列時，一律 fail-closed（該 run／重算失敗），不推定、不降級為舊分級。U5 對應 `lean_runner.py::verification_inputs`、`lean_algo/rules.py::turnover_liquidity` 與 `lean_algo/framework.py` 的決策表查找／失敗處理；BLOCKED 拋 `TURNOVER_DECISION_BLOCKED`，缺列傳入 `None` 後拒絕為 `TURNOVER_DECISION_INVALID`。U6 對應 `series.py::TurnoverVerification.check`、`TurnoverVerification.at` 與 `Materialization.liquidity`；分別拒絕為 `TURNOVER_BLOCKED`、`TURNOVER_DECISION_MISSING`。這些失敗不進入舊分級後備路徑。
 4. **有限 bundle 釘選與正式研究界線。** 現行 `VERIFICATION_BUNDLES` 僅保留 conductor 已審的 BCH／BTC 有限訓練前綴（2020-03-25 至 2020-12-15 半開範圍，來源為既有 crosscheck）。政策／規範 SHA 改變時，僅可用同一來源與同一程序重新產生並更新該釘選，不擴大範圍。正式研究所需的全訓練段 bundle 釘選，須待 DV4 產出並經 conductor 審查後，另以 PR 登記；現行 U4 對其他範圍一律拒絕。
+
+
+## 勘誤五（conductor 依 DV4 停止補記）
+
+2026-10-24：`R8-S2-DATA-VERIFY-DV4-20261022` 第一階段保留 `BLOCKED_SHARD_CONTRACT` 與未通過資料驗收的原始結論；conductor 另派 `R8-DV4-SHARD-RECORDER-20261024` 修正執行支援。本補記保留前文與勘誤一至四，不改抽樣、分母、擴樣觸發或任何裁決規則。
+
+1. **完整計畫先驗證，然後切分執行。** 每個分片均使用同一 P3b manifest、原始凍結 `sample_plan.json` 與相同完整 `readable`。身分、schema、種子、層與 rank、重複、日期範圍及全部 draws（含尚未啟用的擴樣序列）仍依原規則對 P3b 全體標的宇宙驗證；任何宇宙外 draw 仍拒絕。不得裁短計畫或 readable 以配合分片。`symbols` 可為該宇宙非空子集；完整驗證後，僅將 symbol 屬於本分片的已選基礎 draws 與 DV3 擴樣交接指定 draws 納入本次 L3，其餘 draws 不屬本分片，不因此報錯。
+2. **產物明示分片。** 沿用 §8.4 的固定 JSON 鍵與版本。子集執行在 `verification.json.reason_codes` 保存 `SAMPLE_SHARD_SYMBOLS=<按字典序排列、以逗號分隔的標的>`；`sample_plan_sha256` 與封存的完整計畫 bytes 保持原值。分片只改執行範圍，不提供新市場值讀取授權。逐筆 findings 與裁決欄位須等價；corrections 對其本分片整份 findings 的 SourceRef SHA 及由內容衍生的 correction ID 依實際 bytes 綁定，不能為追求容器相等而偽造雜湊。
+3. **合併統計維持原分母與拒絕語義。** 分片間標的範圍不得重疊；DV3 多 root 彙總繼續以 `OVERLAPPING_VERIFICATION` 拒絕重複覆蓋。任一原定待評估 draw 未被任何分片覆蓋時，仍計 `u`，不得刪除、縮小分母或改抽其他日期。擴樣僅按原凍結前綴診斷，不取代基礎分母。完整、不重疊分片與不分片執行的 DV3 報表必須逐位元組相同。
+4. **驗收邊界。** 本修正只提供執行切分；DV4 全訓練段資料驗收、§4.5／§13.6 及 `PENDING_OPERATOR_DECISION` 保持原狀。未執行的取數、正式驗證與獨立審查不得因本 PR、測試或 CI 通過而升格。本 PR 不合併，交 conductor 審查。

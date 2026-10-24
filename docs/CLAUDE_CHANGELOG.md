@@ -1,9 +1,17 @@
 # CLAUDE_CHANGELOG.md — 開發歷史歸檔
 
 > 從 CLAUDE.md / TODO.md 遷出的 Wave/Sprint/Batch + TODO version-increment 歷史敘事。新 session 不需要讀此文件，僅供回顧歷史時查閱。
-> 最後更新：2026-10-22 UTC（DV4 記錄者 R2 合入 #246；TODO v928）
+> 最後更新：2026-10-24 UTC（DV4 凍結抽樣分片支援；TODO v929）
 
 ---
+
+## R8 DV4 記錄者：凍結抽樣分片支援 — 2026-10-24 UTC
+
+- conductor 明示派工 `R8-DV4-SHARD-RECORDER-20261024`，自 `origin/main d2969b7be7fe815909b560d4e089e0938d3f2858` 建立獨立分支並取得新准入／租約；原 DV4 `BLOCKED_SHARD_CONTRACT`、資料驗收未通過與 E4 UNVERIFIED 歷史全部保留。時限兩小時，PR 不合併，審查與合併由 Claude Code conductor 負責。
+- DV1 對 P3b 完整標的宇宙驗證凍結計畫及全部 draws，維持 schema／身分／readable／seed／rank／重複與日期限制；完成驗證及完整擴樣交接後，僅挑選本分片標的進 L3。以既有 `verification.json.reason_codes` 的 `SAMPLE_SHARD_SYMBOLS=` 宣告範圍，不新增 JSON 鍵、不裁短 readable、不修改原始計畫。DV3 保留多 root 重疊拒絕及未覆蓋 draw 計 u 的原邏輯。
+- 新增真實 DV3→DV1→DV3 的離線測試：v1／v2、2／3 分片逐筆 findings／裁決等價與 DV3 report bytes 相同；漏片計 u、重疊拒絕、非本分片及未啟用擴樣 draw 仍完整檢查。整份 findings 容器 SHA 及其衍生 correction ID 按各分片真實 bytes 驗證，其他裁決欄位逐筆比對。原實作四項等價測試失敗，分片修正後四項通過；最初 fixture import／URL 問題另外保留，不作產品紅燈。
+- 規範只在末尾追加「勘誤五（conductor 依 DV4 停止補記）」；同步 DV1、U4、DV6 與 U4 政策的規範 pin，保留舊 v1 凍結政策可讀性。同一已審 BCH／BTC 有限來源及程序重產 U4 bundle pin，不擴大資料或交易範圍。TODO v928→v929，登記簿增加本次文件雜湊來源，不新增 RH 裁決事件。
+- DV1、DV3、完整 R8（含 26 日原件回歸與真實三方互通）均在本 PR 分支根目錄執行；結構測試僅 `test_file_line_policy_static.py` 與 `test_docs_readme_index_static.py`。精確測試數字、UTC、head、pin、CI 及最多30分鐘的 `@codex review` 回執保存於倉庫外 `audits/2026-10-24-r8-dv4-shard-recorder/` 與 PR；未完成檢查不宣稱通過。沒有取數、遠端 Linux／資料庫／Demo／live 或 Wiki 寫入，DATA-VERIFY 全鏈與待決驗收目標保持未結案。
 
 ## R8 DV4 記錄者 R2：合入 #246 並接回凍結紀錄 — 2026-10-22 UTC
 

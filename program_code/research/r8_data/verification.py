@@ -31,7 +31,7 @@ DAY = 86400000
 HOUR = 3600000
 TRAIN_START = 1577836800000
 TRAIN_END = 1751328000000
-STANDARD_SHA256 = 'afcb87578676c998b4ce7529c6e1c09d5214cfe7e8af53ad03d120781c696931'
+STANDARD_SHA256 = '794f4f652ab23ad78eb84d57c5f76fb8deb55b432f051ae4d963a69336c8b051'
 FIELDS = ('open', 'high', 'low', 'close', 'volume', 'turnover')
 DELTA = {'D': DAY, '60': HOUR, '1': 60000}
 REF_KEYS = set('kind relative_path url sha256 row request_id list_index byte_start byte_end trade_id line_sha256'.split())
@@ -41,8 +41,9 @@ V2 = 'v2-terminal-suffix-20261022'
 MAX_PARTIAL_SUBSET_BITS = 1048576
 MAX_PARTIAL_SUBSET_ITEMS = 4096
 MAX_PARTIAL_SCALE_BITS = 4096
-# Approved v1 document bytes at PR240 and PR241, retained by frozen plans.
-V1_STANDARDS = (STANDARD_SHA256,'d0fbf9ff02d080027d575eb6488f2c552c3a583485b8c685166fe0ef94b2af98','ba65fbca3b9230ad1807b82c923e9e60ab870edbe5c1e0d5090ebce99b06f6d0',
+# Approved historical v1 document bytes retained by frozen plans.
+V1_STANDARDS = (STANDARD_SHA256,'afcb87578676c998b4ce7529c6e1c09d5214cfe7e8af53ad03d120781c696931',
+                'd0fbf9ff02d080027d575eb6488f2c552c3a583485b8c685166fe0ef94b2af98','ba65fbca3b9230ad1807b82c923e9e60ab870edbe5c1e0d5090ebce99b06f6d0',
                 '125901d0341487bd058be70e7cc2ed27be7c3be270a45d05587e471104b7cacf',
                 'ad80220cd6dc3f8dc5c451c6281aa9f1b2acf7fbb47bc80ed21eb3905710110c')
 
@@ -300,24 +301,24 @@ class _Run:
                 b.errors.append(('row','INVALID_OHLC'));self.mark(b,'DV-L1','INVALID_OHLC')
 
 
-def _load_p3b(root,manifest,symbols,run):
+def _load_p3b(root,manifest,symbols,run,*,universe=None):
     request_raw=_source(root,'requests.jsonl',manifest['request_log_sha256'])
     requests={}
     for line in request_raw.splitlines():
         r=_json(line); rid=r['request_id']
         if type(rid) is not int or rid in requests:_fail('REQUEST_ID_CONFLICT')
         requests[rid]=r
-    instruments={}
+    instruments={};identity_symbols=set(symbols if universe is None else universe)
     for rid in manifest['universe_request_ids']:
         r=requests[rid]; raw=_source(root,f'raw/{rid}.json',r['raw_sha256']);page=_json(raw)
         if r['endpoint']!='/v5/market/instruments-info' or r['http_status']!=200 or r['retCode']!=0 or page['retCode']!=0:continue
         for item in page['result']['list']:
             sym=item.get('symbol')
-            if sym not in symbols:continue
+            if sym not in identity_symbols:continue
             if item.get('contractType')!='LinearPerpetual' or item.get('quoteCoin')!='USDT' or item.get('settleCoin')!='USDT':_fail('CONTRACT_IDENTITY')
             if sym in instruments and instruments[sym]!=item:_fail('CONTRACT_IDENTITY')
             instruments[sym]=item
-    if set(instruments)!=set(symbols):_fail('CONTRACT_IDENTITY')
+    if set(instruments)!=identity_symbols:_fail('CONTRACT_IDENTITY')
     bars=[];meta={}
     for sym in symbols:
         for interval in ('D','60'):
@@ -939,11 +940,13 @@ def _expanded_sample(raw,plan,plan_sha):
     return extra
 
 
-def _sample(path,run,manifest_sha,symbols,report=None):
+def _sample(path,run,manifest_sha,symbols,report=None,*,universe=None):
     if path is None:
         if report is not None:_fail('EXPANSION_PLAN_REQUIRED')
         return None,set()
     raw=Path(path).read_bytes();p=_json(raw)
+    universe=set(symbols if universe is None else universe)
+    if not set(symbols)<=universe:_fail('SAMPLE_SCOPE')
     _keys(p,{'schema_version','policy_sha256','p3b_manifest_sha256','readable','seed','strata'})
     allowed={_sha(_encoded(_policy(manifest_sha,standard_sha=s))) for s in V1_STANDARDS} if run.version==V2 else {run.policy_sha}
     if p['schema_version']!='r8_verification_sample_plan_v1' or p['policy_sha256'] not in allowed or p['p3b_manifest_sha256']!=manifest_sha or p['readable']!={'start':run.start,'end':run.end} or type(p['seed']) is not int or p['seed']!=20261022:_fail('SAMPLE_IDENTITY')
@@ -961,7 +964,7 @@ def _sample(path,run,manifest_sha,symbols,report=None):
         if s['base_size']!=min(300,s['population_size']) or s['max_size']!=min(900,s['population_size']) or len(s['draws'])!=s['max_size']:_fail('SAMPLE_SCHEMA')
         for rank,d in enumerate(s['draws'],1):
             _keys(d,{'rank','symbol','day_start'})
-            if type(d['rank']) is not int or d['rank']!=rank or type(d['day_start']) is not int or d['day_start']%DAY or d['symbol'] not in symbols or not run.start<=d['day_start'] or d['day_start']+DAY>run.end:_fail('SAMPLE_SCOPE')
+            if type(d['rank']) is not int or d['rank']!=rank or type(d['day_start']) is not int or d['day_start']%DAY or d['symbol'] not in universe or not run.start<=d['day_start'] or d['day_start']+DAY>run.end:_fail('SAMPLE_SCOPE')
             if datetime.fromtimestamp(d['day_start']//1000,timezone.utc).year!=s['year']:_fail('SAMPLE_SCHEMA')
             k=(d['symbol'],d['day_start'])
             if k in days:_fail('SAMPLE_DUPLICATE')
@@ -970,7 +973,8 @@ def _sample(path,run,manifest_sha,symbols,report=None):
         # 擴樣仍須有 DV3 明確產物。
     base={(d['symbol'],d['day_start']) for s in p['strata'] for d in s['draws'][:s['base_size']]}
     if report is not None:base|=_expanded_sample(report,p,_sha(raw))
-    return _sha(raw),base
+    # Validate every frozen draw and the global expansion handoff before slicing.
+    return _sha(raw),{key for key in base if key[0] in symbols}
 
 
 
@@ -1137,6 +1141,9 @@ def verify(*,p3b_root,download_root,inventory_path,output_root,policy_path,reada
     callers cannot open OOS or holdout through readable or a policy override.
     Optional sample_report_path is DV3's existing sample_report.txt;
     declared expansion prefixes retain the original plan SHA and enter L3.
+    With a frozen plan, symbols may select a shard of the P3b universe. The
+    complete plan/readable and expansion handoff are validated before selecting
+    this shard's draws; verification.reason_codes declares its symbol scope.
     """
     out=Path(output_root);files={};primary=None;primary_sha=None;reasons=set();run=None;v=None
     try:
@@ -1164,11 +1171,15 @@ def verify(*,p3b_root,download_root,inventory_path,output_root,policy_path,reada
         if not re.fullmatch('[0-9a-f]{40}',tool_commit):_fail('TOOL_COMMIT')
         for ref in review_refs:_check_ref(ref)
         if not review_refs:reasons.add('REVIEW_PENDING')
-        bars,meta,instruments=_load_p3b(roots[0],manifest,symbols,run)
+        universe=manifest.get('universe') if sample_plan_path is not None else None
+        if sample_plan_path is not None and (not isinstance(universe,dict) or any(not isinstance(s,str) or not re.fullmatch('[A-Z0-9]+USDT',s) for s in universe) or not set(symbols)<=set(universe)):_fail('SAMPLE_SCOPE')
+        bars,meta,instruments=_load_p3b(roots[0],manifest,symbols,run,universe=universe)
         inventory=_load_inventory(Path(inventory_path),roots[1],symbols,run)
         bar_index=_bar_index(bars);inventory_index=_inventory_index(inventory)
         sample_report=Path(sample_report_path).read_bytes() if sample_report_path is not None else None
-        sample_sha,sample_days=_sample(sample_plan_path,run,manifest_sha,symbols,sample_report)
+        sample_sha,sample_days=_sample(sample_plan_path,run,manifest_sha,symbols,sample_report,universe=universe)
+        if sample_plan_path is not None and set(symbols)!=set(universe):
+            reasons.add('SAMPLE_SHARD_SYMBOLS='+','.join(symbols))
         previous_sha,previous=_previous(previous_corrections_path,run)
         days={(sym,day) for sym,day,_ in bar_index}|sample_days
         # 已保存的逐筆請求也保留對應日；不因 CSV 缺失而消失。

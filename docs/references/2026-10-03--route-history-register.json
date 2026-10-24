@@ -712,6 +712,24 @@
       "path": "docs/CLAUDE_CHANGELOG.md",
       "sha256": "2c8e200a638267dc280e4a1cd49f630f689251355500962bce14b4dbf3408876",
       "meaning": "Conductor-authorized recorder R2 merges PR246 main into the existing PR248 branch. Both document histories and exact Operator quotations retained; prior source hashes remain historical. No new sampling, data verification, acceptance or runtime claim. Publication gates and review outcomes are recorded separately in recorder-r2-20261022 evidence."
+    },
+    "r8-data-verification-shard-erratum-5": {
+      "kind": "recorded_file",
+      "path": "docs/execution_plan/2026-10-22--r8-stage2-data-verification-standard.md",
+      "sha256": "794f4f652ab23ad78eb84d57c5f76fb8deb55b432f051ae4d963a69336c8b051",
+      "meaning": "Conductor-authorized R8-DV4-SHARD-RECORDER-20261024: full-universe frozen-plan validation before symbol sharding; unchanged adjudication and denominator, overlap refusal and uncovered draws count u. Original DV4 BLOCKED_SHARD_CONTRACT and acceptance/review limitations retained; unmerged source repair, no new RH event or data acceptance."
+    },
+    "r8-data-verification-shard-todo-v929": {
+      "kind": "recorded_file",
+      "path": "TODO.md",
+      "sha256": "5bc56a705a7230b3772e2d9180109b83ec88857da882390ad2fe0421dfa94da4",
+      "meaning": "Conductor-authorized R8-DV4-SHARD-RECORDER-20261024: full-universe frozen-plan validation before symbol sharding; unchanged adjudication and denominator, overlap refusal and uncovered draws count u. Original DV4 BLOCKED_SHARD_CONTRACT and acceptance/review limitations retained; unmerged source repair, no new RH event or data acceptance."
+    },
+    "r8-data-verification-shard-changelog": {
+      "kind": "recorded_file",
+      "path": "docs/CLAUDE_CHANGELOG.md",
+      "sha256": "084b5f0796da90c4121f4e7ea3aeaa889b2af3bac41360091d681b3fc965680a",
+      "meaning": "Conductor-authorized R8-DV4-SHARD-RECORDER-20261024: full-universe frozen-plan validation before symbol sharding; unchanged adjudication and denominator, overlap refusal and uncovered draws count u. Original DV4 BLOCKED_SHARD_CONTRACT and acceptance/review limitations retained; unmerged source repair, no new RH event or data acceptance."
     }
   },
   "routes": [
