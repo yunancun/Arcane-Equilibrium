@@ -12,6 +12,7 @@
 - 新增真實 DV3→DV1→DV3 的離線測試：v1／v2、2／3 分片逐筆 findings／裁決等價與 DV3 report bytes 相同；漏片計 u、重疊拒絕、非本分片及未啟用擴樣 draw 仍完整檢查。整份 findings 容器 SHA 及其衍生 correction ID 按各分片真實 bytes 驗證，其他裁決欄位逐筆比對。原實作四項等價測試失敗，分片修正後四項通過；最初 fixture import／URL 問題另外保留，不作產品紅燈。
 - 規範只在末尾追加「勘誤五（conductor 依 DV4 停止補記）」；同步 DV1、U4、DV6 與 U4 政策的規範 pin，保留舊 v1 凍結政策可讀性。同一已審 BCH／BTC 有限來源及程序重產 U4 bundle pin，不擴大資料或交易範圍。TODO v928→v929，登記簿增加本次文件雜湊來源，不新增 RH 裁決事件。
 - 規範新 SHA `794f4f652ab23ad78eb84d57c5f76fb8deb55b432f051ae4d963a69336c8b051`；U4 政策 SHA `01134cf4628a2d75d07a4660dd6864c3237ebbedd9a14128e812439c1ae7fca0`；同來源有限 bundle 由 `3ea5995b4a7c14a4df1f4ae8fb5b2116aeadaf86` 重產，SHA `30b7d223cd74696c80cfb95d9bd7bc15944230cfd2ef71bc4ea42eb2bf2cc733`，原 pin `58fd0d224de878e42c78f0a0e1132683dbd0fc3fe9fc5e7d13c95a28d20258b0` 保留於 Git。本機 Colima VM 仍運作但 Docker daemon 不可連，未重啟服務；實際互通結果單獨列示，不以 fixture／skip 取代真實執行。
+- 首次固定 head `9d3172364` 回歸重現既有線性掃描計數包裝器未轉交新 `universe` 關鍵字，真實 loader 尚未執行即失敗。僅修測試 wrapper 的 `**kwargs` 轉交，原走訪次數斷言不變；聚焦1 fail→1 pass。兩個已知失敗長測試在 source 未變時中止，原日誌／XML保留；新 head 重跑，未重跑相同 head CI。
 - DV1、DV3、完整 R8（含 26 日原件回歸與真實三方互通）均在本 PR 分支根目錄執行；結構測試僅 `test_file_line_policy_static.py` 與 `test_docs_readme_index_static.py`。精確測試數字、UTC、head、pin、CI 及最多30分鐘的 `@codex review` 回執保存於倉庫外 `audits/2026-10-24-r8-dv4-shard-recorder/` 與 PR；未完成檢查不宣稱通過。沒有取數、遠端 Linux／資料庫／Demo／live 或 Wiki 寫入，DATA-VERIFY 全鏈與待決驗收目標保持未結案。
 
 ## R8 DV4 記錄者 R2：合入 #246 並接回凍結紀錄 — 2026-10-22 UTC

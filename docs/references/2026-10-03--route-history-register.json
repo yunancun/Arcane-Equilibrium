@@ -728,7 +728,7 @@
     "r8-data-verification-shard-changelog": {
       "kind": "recorded_file",
       "path": "docs/CLAUDE_CHANGELOG.md",
-      "sha256": "978294babcd773459b8ee416e0106546dcb38ef3f568ca03bc604457f424d7d5",
+      "sha256": "31858a5efe144987f871130eec0f7cd314c9382ab176ea0d8885a3fdbf4d4f52",
       "meaning": "Conductor-authorized R8-DV4-SHARD-RECORDER-20261024: full-universe frozen-plan validation before symbol sharding; unchanged adjudication and denominator, overlap refusal and uncovered draws count u. Original DV4 BLOCKED_SHARD_CONTRACT and acceptance/review limitations retained; unmerged source repair, no new RH event or data acceptance."
     }
   },

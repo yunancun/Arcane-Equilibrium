@@ -879,8 +879,8 @@ def test_daily_selection_inspects_each_bar_and_inventory_only_linearly(case,monk
                 self.visits+=1
                 yield item
     observed={};load_bars=dv1._load_p3b;load_inventory=dv1._load_inventory
-    def counted_bars(*args):
-        bars,meta,instruments=load_bars(*args)
+    def counted_bars(*args,**kwargs):
+        bars,meta,instruments=load_bars(*args,**kwargs)
         observed['bars']=Counted(bars)
         return observed['bars'],meta,instruments
     def counted_inventory(*args):
