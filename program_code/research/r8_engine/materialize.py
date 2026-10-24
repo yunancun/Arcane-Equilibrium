@@ -43,7 +43,7 @@ V1_STANDARDS = (STANDARD_SHA256, 'afcb87578676c998b4ce7529c6e1c09d5214cfe7e8af53
 # No directory scan, caller policy selection, mutable latest, or unverified fallback.
 VERIFICATION_BUNDLES = ((P3B_MANIFEST_SHA256, 1585094400000, 1607990400000,
                          ('BCHUSDT', 'BTCUSDT'),
-                         '58fd0d224de878e42c78f0a0e1132683dbd0fc3fe9fc5e7d13c95a28d20258b0'),)
+                         '30b7d223cd74696c80cfb95d9bd7bc15944230cfd2ef71bc4ea42eb2bf2cc733'),)
 REF_KEYS = set('kind relative_path url sha256 row request_id list_index byte_start byte_end trade_id line_sha256'.split())
 CORRECTION_KEYS = set('schema_version correction_id symbol dataset interval timestamp field original_value candidate_value corrected_value unit formula evidence_kind source_refs coverage_status order_status rule_ids decision reason_code row_action policy_sha256 approval_event supersedes'.split())
 VERIFICATION_KEYS = set('schema_version status policy_sha256 p3b_manifest_sha256 sample_plan_sha256 previous_corrections_sha256 review_refs tool_commit readable counts files reason_codes'.split())
