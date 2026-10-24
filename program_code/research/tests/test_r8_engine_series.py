@@ -1900,7 +1900,7 @@ def dv6_fixture(tmp_path, *, original='9900000', effective='9900000', hourly='50
     (path.parent/original_name).write_bytes((path.parent/source).read_bytes())
     m['files'][original_name]=copy.deepcopy(m['files'][source])
     path.write_bytes(canonical(m))
-    policy={'schema_version':f'r8_data_verification_policy_v{version}','standard_sha256':'afcb87578676c998b4ce7529c6e1c09d5214cfe7e8af53ad03d120781c696931',
+    policy={'schema_version':f'r8_data_verification_policy_v{version}','standard_sha256':'7d27fc00edbabf7996b3a5aba9c529f95649da7264a60eaec31999ca03de7c20',
         'approval_event':'RH-20261022-05' if version==2 else 'RH-20261022-04','p3b_manifest_sha256':'a'*64,
         'listing':{'x_pct':'50','y_pct':'20','z_pct':'20','cooling_days':7,'quantity':'hourly_base_volume_daily_mean',
                    'variation':'mean_relative_difference','stage_end_ranges':[[1,3],[7,15],[15,30]]},

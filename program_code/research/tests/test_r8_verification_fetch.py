@@ -370,6 +370,46 @@ def test_error_deduplicates_unresolved_same_day_and_semantics_kept(tmp_path):
     assert 'N=1 n=1 e=1 u=0 s=0' in Path(r['artifact_root'],r['primary_file']).read_text()
 
 
+@pytest.mark.parametrize('version', ['v1-strict', v.V2])
+@pytest.mark.parametrize('other', ['none', 'price', 'volume', 'unresolved', 'missing_evidence'])
+def test_operator_turnover_selection_counts_and_both_census_bounds(tmp_path, version, other):
+    from program_code.research.tests.test_r8_data_verification import real_dv13_flow, dv7_reverify, read
+    def configure(case):
+        case.daily[0]['turnover'] = '239'
+        if other == 'price':case.daily[0].update(high='11',close='11')
+        if other == 'volume':case.daily[0]['volume'] = '23'
+        if other == 'unresolved':case.hours[0]['volume'] = '2'
+    root=tmp_path/'real';flow=real_dv13_flow(root,configure=configure)
+    dv7_reverify(root,flow)
+    bundle=root/('bundle' if version=='v1-strict' else 'bundle-v2')
+    if other=='missing_evidence':
+        ref=next(r for c in read(bundle,'corrections.jsonl') for r in c['source_refs'] if r['kind']=='trade' and r['relative_path'])
+        (bundle/ref['relative_path']).unlink()
+    result=v.summarize_sample(root/'plan',[bundle],tmp_path/'summary')
+    assert result['primary_file']=='sample_report.txt',result
+    text=(tmp_path/'summary/sample_report.txt').read_text();lines=text.splitlines()
+    e=int(other in ('price','volume'));u=int(other in ('unresolved','missing_evidence'))
+    assert f'2021 NO_OPEN N=1 n=1 e={e} u={u} s=0' in lines
+    assert f'turnover_selection 2021 NO_OPEN n_turnover_selection={int(other=="none")}' in lines
+    assert f'error_estimate={e}/1' in lines and f'error_upper={e}/1' in lines
+    assert f'conservative_estimate={e+u}/1' in lines and f'conservative_upper={e+u}/1' in lines
+    assert 'counting_method=operator_turnover_selection_excluded_from_e' in lines
+    assert 'legacy_counting_method=turnover_selection_included_in_e' in lines
+    assert 'legacy 2021 NO_OPEN N=1 n=1 e=1 u=0 s=0' in lines
+    for name in ('error_estimate','error_upper','conservative_estimate','conservative_upper'):
+        assert 'legacy_'+name+'=1/1' in lines
+    evidence=[json.loads(line.split(' ',1)[1]) for line in (tmp_path/'summary/turnover_selection.txt').read_text().splitlines() if line.startswith('turnover_selection_evidence ')]
+    assert len(evidence)==1 and evidence[0]['original_value']=='239' and evidence[0]['selected_value']=='240'
+    assert evidence[0]['day_classification']==('e' if e else 'u' if u else 'turnover_selection')
+    if other=='none':
+        assert result['status']=='READY' and 'required_prefix=' not in text
+        dual=v.summarize_policies(root/'plan',[root/'bundle'],[root/'bundle-v2'],tmp_path/'dual')
+        comparison=(Path(dual['artifact_root'])/dual['primary_file']).read_text()
+        for suffix in ('v1','policy'):
+            assert f'n_error_{suffix}=0 n_unresolved_{suffix}=0 n_semantics_{suffix}=0 n_turnover_selection_{suffix}=1' in comparison
+            assert f'legacy_n_error_{suffix}=1 legacy_n_unresolved_{suffix}=0' in comparison
+
+
 def test_incomplete_trade_evidence_census_counts_unresolved(tmp_path):
     p=artifact(plan(tmp_path,source(tmp_path,days=1,valid=True),end=T+D))
     root=dv1_fixture(tmp_path,p,[T],semantic=True)
@@ -837,7 +877,7 @@ def test_v2_dual_report_preserves_overlapping_l1_flag_on_confirmed_error_day(tmp
 
 
 @pytest.mark.parametrize('turnover_error',[False,True])
-def test_v2_missing_original_is_day_unresolved_with_confirmed_error_priority(tmp_path,turnover_error):
+def test_v2_missing_original_stays_unresolved_despite_turnover_selection(tmp_path,turnover_error):
     from program_code.research.tests.test_r8_data_verification import suffix_case,read
     def configure(case):
         suffix_case(case)
@@ -849,7 +889,8 @@ def test_v2_missing_original_is_day_unresolved_with_confirmed_error_priority(tmp
     result=v.summarize_sample(root/'plan',[bundle],tmp_path/'summary')
     assert result['primary_file']=='sample_report.txt',result
     report=(tmp_path/'summary/sample_report.txt').read_text()
-    assert ('N=1 n=1 e=1 u=0 s=0' if turnover_error else 'N=1 n=1 e=0 u=1 s=0') in report
+    assert 'N=1 n=1 e=0 u=1 s=0' in report.splitlines()[2]
+    assert ('e=1 u=0 s=0' if turnover_error else 'e=0 u=1 s=0') in next(line for line in report.splitlines() if line.startswith('legacy 2021 '))
     assert 'EVIDENCE_INCOMPLETE' in result['reason_codes']
 
 

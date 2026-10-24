@@ -34,15 +34,16 @@ HEADERS = {
 DATASETS = (('kline', '60'), ('kline', 'D'), ('open_interest', '4h'), ('funding', 'funding'))
 TRAIN_END = 1751328000000
 V2 = 'v2-terminal-suffix-20261022'
-STANDARD_SHA256 = 'afcb87578676c998b4ce7529c6e1c09d5214cfe7e8af53ad03d120781c696931'
-V1_STANDARDS = (STANDARD_SHA256, 'd0fbf9ff02d080027d575eb6488f2c552c3a583485b8c685166fe0ef94b2af98',
+STANDARD_SHA256 = '7d27fc00edbabf7996b3a5aba9c529f95649da7264a60eaec31999ca03de7c20'
+V1_STANDARDS = (STANDARD_SHA256,'794f4f652ab23ad78eb84d57c5f76fb8deb55b432f051ae4d963a69336c8b051', 'afcb87578676c998b4ce7529c6e1c09d5214cfe7e8af53ad03d120781c696931',
+                'd0fbf9ff02d080027d575eb6488f2c552c3a583485b8c685166fe0ef94b2af98',
                 'ba65fbca3b9230ad1807b82c923e9e60ab870edbe5c1e0d5090ebce99b06f6d0', '125901d0341487bd058be70e7cc2ed27be7c3be270a45d05587e471104b7cacf',
                 'ad80220cd6dc3f8dc5c451c6281aa9f1b2acf7fbb47bc80ed21eb3905710110c')
 # Reviewed deployment pins: (P3b SHA, readable start/end, symbols, verification.json SHA).
 # No directory scan, caller policy selection, mutable latest, or unverified fallback.
 VERIFICATION_BUNDLES = ((P3B_MANIFEST_SHA256, 1585094400000, 1607990400000,
                          ('BCHUSDT', 'BTCUSDT'),
-                         '58fd0d224de878e42c78f0a0e1132683dbd0fc3fe9fc5e7d13c95a28d20258b0'),)
+                         '9cb848bce19fa7f2153805784fe73dbafa5c6c727e14a233e072c72572fe75fe'),)
 REF_KEYS = set('kind relative_path url sha256 row request_id list_index byte_start byte_end trade_id line_sha256'.split())
 CORRECTION_KEYS = set('schema_version correction_id symbol dataset interval timestamp field original_value candidate_value corrected_value unit formula evidence_kind source_refs coverage_status order_status rule_ids decision reason_code row_action policy_sha256 approval_event supersedes'.split())
 VERIFICATION_KEYS = set('schema_version status policy_sha256 p3b_manifest_sha256 sample_plan_sha256 previous_corrections_sha256 review_refs tool_commit readable counts files reason_codes'.split())

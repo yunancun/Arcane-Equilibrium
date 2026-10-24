@@ -1,9 +1,29 @@
 # CLAUDE_CHANGELOG.md — 開發歷史歸檔
 
 > 從 CLAUDE.md / TODO.md 遷出的 Wave/Sprint/Batch + TODO version-increment 歷史敘事。新 session 不需要讀此文件，僅供回顧歷史時查閱。
-> 最後更新：2026-10-22 UTC（DV4 記錄者 R2 合入 #246；TODO v928）
+> 最後更新：2026-10-24 UTC（DV4 記錄者R2、Operator選源計數裁決；TODO v930）
 
 ---
+
+## R8 DV4 記錄者 R2：BLOCKED 等價與 Operator 選源計數裁決 — 2026-10-24 UTC
+
+- conductor 續派新身分 `R8-DV4-SHARD-RECORDER-R2-20261024`，以 PR #249 的 `7a2aa46db08074ff3217313c7c0abdbc8457a9d8` 取得新准入／租約。原記錄者 STOPPED_WITH_UNRESOLVED_CODE_FINDINGS、27個失敗、4個Docker前置錯誤及2項P2保留，不重開舊身分。
+- 修復 conductor 確認的兩項P2：DV6 fixture 舊規範pin；DV3彙總時任一分片BLOCKED即對整組非e日傳播保守u，新舊計法分別保留各自e優先序。原反例先紅，真實v1/v2與2/3分片再驗；READY、RAW_SOURCE_MISSING／CONFLICT、純成交額選源與根順序均覆蓋，逐筆裁決／findings及報表bytes比較不以假函式替代。
+- Operator 原文「批准新身分續作 (Recommended)」、「單列為選源，不計 e (Recommended)」追加於規範勘誤六及 `RH-20261024-01`（follows `RH-20261023-01`）。批准的DV4續作身分為 `R8-S2-DATA-VERIFY-DV4-R1-20261024`，範圍、檔案、驗收同DV4，原停止歷史保留；本記錄者未執行DV4全樣本資料驗收。
+- 純 `reported_turnover_selection` CORRECT且無其他e／未決者歸 `n_turnover_selection`；其他已確認更正仍e，未決／缺證據仍u。v1／v2皆並列新計法與選源也算e的舊計法，包括逐層／加權全體有限母體上界。原值／選用值明細另以既有handoff.files綁SHA；主報告擴樣語法保留64KiB限額、嚴格接受新比較段並保留舊格式，不忽略任意尾段。
+- 新增10個真實選源分類／新舊census上界案例，先10 fail再10 pass；擴樣比較段先1 fail再含原拒絕案例16 pass。26日回歸保留v1原bytes及v2逐欄斷言，另記新舊e／選源／u，預期分類從前次保留的全日／全小時原裁決列凍結，再由當前DV3驗證，不從六個日線欄位推定。
+- 勘誤六只追加原規範；DV1／DV6／U4規範pin、DV6 fixture與U4 policy同步，保留所有舊v1凍結政策身分。相同BCH／BTC有限來源與程序重產bundle pin，不擴樣、不改來源範圍。TODO v929→v930；登記簿保留歷史雜湊並新增本次來源。
+- conductor已重啟Colima，本次現場只讀核對Docker29.2.1／12CPU／指定LEAN digest；真實三方互通8項、DV1、DV3、完整R8與指定兩個靜態檔均在PR分支根目錄重跑。最終head、精確數字、UTC、CI及30分鐘上限的正式審查見 `audits/2026-10-24-r8-dv4-shard-recorder-r2/` 和PR；未完成不宣稱通過。新程式類審查意見按原文交conductor。本PR不合併、不取數、不更新Wiki，未操作遠端Linux／資料庫／Demo／live。
+
+## R8 DV4 記錄者：凍結抽樣分片支援 — 2026-10-24 UTC
+
+- conductor 明示派工 `R8-DV4-SHARD-RECORDER-20261024`，自 `origin/main d2969b7be7fe815909b560d4e089e0938d3f2858` 建立獨立分支並取得新准入／租約；原 DV4 `BLOCKED_SHARD_CONTRACT`、資料驗收未通過與 E4 UNVERIFIED 歷史全部保留。時限兩小時，PR 不合併，審查與合併由 Claude Code conductor 負責。
+- DV1 對 P3b 完整標的宇宙驗證凍結計畫及全部 draws，維持 schema／身分／readable／seed／rank／重複與日期限制；完成驗證及完整擴樣交接後，僅挑選本分片標的進 L3。以既有 `verification.json.reason_codes` 的 `SAMPLE_SHARD_SYMBOLS=` 宣告範圍，不新增 JSON 鍵、不裁短 readable、不修改原始計畫。DV3 保留多 root 重疊拒絕及未覆蓋 draw 計 u 的原邏輯。
+- 新增真實 DV3→DV1→DV3 的離線測試：v1／v2、2／3 分片逐筆 findings／裁決等價與 DV3 report bytes 相同；漏片計 u、重疊拒絕、非本分片及未啟用擴樣 draw 仍完整檢查。整份 findings 容器 SHA 及其衍生 correction ID 按各分片真實 bytes 驗證，其他裁決欄位逐筆比對。原實作四項等價測試失敗，分片修正後四項通過；最初 fixture import／URL 問題另外保留，不作產品紅燈。
+- 規範只在末尾追加「勘誤五（conductor 依 DV4 停止補記）」；同步 DV1、U4、DV6 與 U4 政策的規範 pin，保留舊 v1 凍結政策可讀性。同一已審 BCH／BTC 有限來源及程序重產 U4 bundle pin，不擴大資料或交易範圍。TODO v928→v929，登記簿增加本次文件雜湊來源，不新增 RH 裁決事件。
+- 規範新 SHA `794f4f652ab23ad78eb84d57c5f76fb8deb55b432f051ae4d963a69336c8b051`；U4 政策 SHA `01134cf4628a2d75d07a4660dd6864c3237ebbedd9a14128e812439c1ae7fca0`；同來源有限 bundle 由 `3ea5995b4a7c14a4df1f4ae8fb5b2116aeadaf86` 重產，SHA `30b7d223cd74696c80cfb95d9bd7bc15944230cfd2ef71bc4ea42eb2bf2cc733`，原 pin `58fd0d224de878e42c78f0a0e1132683dbd0fc3fe9fc5e7d13c95a28d20258b0` 保留於 Git。本機 Colima VM 仍運作但 Docker daemon 不可連，未重啟服務；實際互通結果單獨列示，不以 fixture／skip 取代真實執行。
+- 首次固定 head `9d3172364` 回歸重現既有線性掃描計數包裝器未轉交新 `universe` 關鍵字，真實 loader 尚未執行即失敗。僅修測試 wrapper 的 `**kwargs` 轉交，原走訪次數斷言不變；聚焦1 fail→1 pass。兩個已知失敗長測試在 source 未變時中止，原日誌／XML保留；新 head 重跑，未重跑相同 head CI。
+- DV1、DV3、完整 R8（含 26 日原件回歸與真實三方互通）均在本 PR 分支根目錄執行；結構測試僅 `test_file_line_policy_static.py` 與 `test_docs_readme_index_static.py`。精確測試數字、UTC、head、pin、CI 及最多30分鐘的 `@codex review` 回執保存於倉庫外 `audits/2026-10-24-r8-dv4-shard-recorder/` 與 PR；未完成檢查不宣稱通過。沒有取數、遠端 Linux／資料庫／Demo／live 或 Wiki 寫入，DATA-VERIFY 全鏈與待決驗收目標保持未結案。
 
 ## R8 DV4 記錄者 R2：合入 #246 並接回凍結紀錄 — 2026-10-22 UTC
 

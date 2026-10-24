@@ -712,6 +712,42 @@
       "path": "docs/CLAUDE_CHANGELOG.md",
       "sha256": "2c8e200a638267dc280e4a1cd49f630f689251355500962bce14b4dbf3408876",
       "meaning": "Conductor-authorized recorder R2 merges PR246 main into the existing PR248 branch. Both document histories and exact Operator quotations retained; prior source hashes remain historical. No new sampling, data verification, acceptance or runtime claim. Publication gates and review outcomes are recorded separately in recorder-r2-20261022 evidence."
+    },
+    "r8-data-verification-shard-erratum-5": {
+      "kind": "recorded_file",
+      "path": "docs/execution_plan/2026-10-22--r8-stage2-data-verification-standard.md",
+      "sha256": "794f4f652ab23ad78eb84d57c5f76fb8deb55b432f051ae4d963a69336c8b051",
+      "meaning": "Conductor-authorized R8-DV4-SHARD-RECORDER-20261024: full-universe frozen-plan validation before symbol sharding; unchanged adjudication and denominator, overlap refusal and uncovered draws count u. Original DV4 BLOCKED_SHARD_CONTRACT and acceptance/review limitations retained; unmerged source repair, no new RH event or data acceptance."
+    },
+    "r8-data-verification-shard-todo-v929": {
+      "kind": "recorded_file",
+      "path": "TODO.md",
+      "sha256": "5bc56a705a7230b3772e2d9180109b83ec88857da882390ad2fe0421dfa94da4",
+      "meaning": "Conductor-authorized R8-DV4-SHARD-RECORDER-20261024: full-universe frozen-plan validation before symbol sharding; unchanged adjudication and denominator, overlap refusal and uncovered draws count u. Original DV4 BLOCKED_SHARD_CONTRACT and acceptance/review limitations retained; unmerged source repair, no new RH event or data acceptance."
+    },
+    "r8-data-verification-shard-changelog": {
+      "kind": "recorded_file",
+      "path": "docs/CLAUDE_CHANGELOG.md",
+      "sha256": "31858a5efe144987f871130eec0f7cd314c9382ab176ea0d8885a3fdbf4d4f52",
+      "meaning": "Conductor-authorized R8-DV4-SHARD-RECORDER-20261024: full-universe frozen-plan validation before symbol sharding; unchanged adjudication and denominator, overlap refusal and uncovered draws count u. Original DV4 BLOCKED_SHARD_CONTRACT and acceptance/review limitations retained; unmerged source repair, no new RH event or data acceptance."
+    },
+    "r8-dv4-recorder-r2-erratum-6": {
+      "kind": "recorded_file",
+      "path": "docs/execution_plan/2026-10-22--r8-stage2-data-verification-standard.md",
+      "sha256": "7d27fc00edbabf7996b3a5aba9c529f95649da7264a60eaec31999ca03de7c20",
+      "meaning": "R8-DV4-SHARD-RECORDER-R2-20261024: Operator RH-20261024-01, preserved predecessor histories, BLOCKED shard repair and parallel turnover-selection counts. Unmerged source; data acceptance and runtime not claimed."
+    },
+    "r8-dv4-recorder-r2-todo-v930": {
+      "kind": "recorded_file",
+      "path": "TODO.md",
+      "sha256": "627be3af0fd666f2b4b8a0f080b434c130bdbce417d473deb85811fed62f1084",
+      "meaning": "R8-DV4-SHARD-RECORDER-R2-20261024: Operator RH-20261024-01, preserved predecessor histories, BLOCKED shard repair and parallel turnover-selection counts. Unmerged source; data acceptance and runtime not claimed."
+    },
+    "r8-dv4-recorder-r2-changelog": {
+      "kind": "recorded_file",
+      "path": "docs/CLAUDE_CHANGELOG.md",
+      "sha256": "7fd4922e2b5a1b3697c861855d07c13191f4cb04c11cb519b4a5580aa9a50311",
+      "meaning": "R8-DV4-SHARD-RECORDER-R2-20261024: Operator RH-20261024-01, preserved predecessor histories, BLOCKED shard repair and parallel turnover-selection counts. Unmerged source; data acceptance and runtime not claimed."
     }
   },
   "routes": [
@@ -2592,6 +2628,23 @@
         "authority_preservation": "authority_source and operator_excerpt unchanged from previous PR head",
         "evidence_root": "/Users/ncyu/Projects/TradeBot/audits/2026-10-22-r8-sample-download/recorder-r2-20261022/"
       }
+    },
+    {
+      "id": "RH-20261024-01",
+      "recorded_on": "2026-10-24",
+      "recorded_at_utc": "2026-10-24T12:34:13.660996+00:00",
+      "event_type": "open_item_decided",
+      "route_ids": [
+        "R8"
+      ],
+      "follows": "RH-20261023-01",
+      "decision_ref": "docs/execution_plan/2026-10-22--r8-stage2-data-verification-standard.md",
+      "authority_source": "Operator 2026-10-24 對話選項（conductor 轉錄，原文照錄）：\n1. 對「DV4 續作身分」：「批准新身分續作 (Recommended)」。\n2. 對「疑點日成交額選源的計數」：「單列為選源，不計 e (Recommended)」。",
+      "operator_excerpt": [
+        "批准新身分續作 (Recommended)",
+        "單列為選源，不計 e (Recommended)"
+      ],
+      "meaning": "Conductor interpretation: DV4 successor R8-S2-DATA-VERIFY-DV4-R1-20261024 retains the original scope, files and acceptance, with stopped history preserved. Pure DV-A reported_turnover_selection CORRECT days without other errors or unresolved evidence form n_turnover_selection, not e/u; price/volume corrections remain e and unresolved selection days remain u. Both v1/v2 report new and legacy selection-as-e counts and bounds. This recorder R2 repairs PR249 under a separate explicit identity; no DV4 data acceptance, runtime activation, fetch or merge is implied."
     }
   ],
   "external_provenance": [
@@ -2632,5 +2685,5 @@
       "portable_summary": "docs/decisions/2026-10-08--r8-amendment-1-first-loop-on-native-replay.md"
     }
   ],
-  "last_event_recorded_on": "2026-10-23"
+  "last_event_recorded_on": "2026-10-24"
 }
