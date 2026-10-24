@@ -453,7 +453,7 @@ class Materialization:
 class TurnoverVerification:
     """DV6：只驗 manifest 綁定切片；與 U4／U5 的生產及選級程式相互獨立。"""
 
-    STANDARD = '794f4f652ab23ad78eb84d57c5f76fb8deb55b432f051ae4d963a69336c8b051'
+    STANDARD = '7d27fc00edbabf7996b3a5aba9c529f95649da7264a60eaec31999ca03de7c20'
     ROW_KEYS = ('schema_version symbol decision_utc_day known_at policy_sha256 history_sufficient '
                 'inputs m_d m_e m_h tier_d tier_e tier_h triggered selected_source selected_median '
                 'selected_tier status reason_codes').split()

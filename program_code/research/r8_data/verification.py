@@ -31,7 +31,7 @@ DAY = 86400000
 HOUR = 3600000
 TRAIN_START = 1577836800000
 TRAIN_END = 1751328000000
-STANDARD_SHA256 = '794f4f652ab23ad78eb84d57c5f76fb8deb55b432f051ae4d963a69336c8b051'
+STANDARD_SHA256 = '7d27fc00edbabf7996b3a5aba9c529f95649da7264a60eaec31999ca03de7c20'
 FIELDS = ('open', 'high', 'low', 'close', 'volume', 'turnover')
 DELTA = {'D': DAY, '60': HOUR, '1': 60000}
 REF_KEYS = set('kind relative_path url sha256 row request_id list_index byte_start byte_end trade_id line_sha256'.split())
@@ -42,7 +42,7 @@ MAX_PARTIAL_SUBSET_BITS = 1048576
 MAX_PARTIAL_SUBSET_ITEMS = 4096
 MAX_PARTIAL_SCALE_BITS = 4096
 # Approved historical v1 document bytes retained by frozen plans.
-V1_STANDARDS = (STANDARD_SHA256,'afcb87578676c998b4ce7529c6e1c09d5214cfe7e8af53ad03d120781c696931',
+V1_STANDARDS = (STANDARD_SHA256,'794f4f652ab23ad78eb84d57c5f76fb8deb55b432f051ae4d963a69336c8b051','afcb87578676c998b4ce7529c6e1c09d5214cfe7e8af53ad03d120781c696931',
                 'd0fbf9ff02d080027d575eb6488f2c552c3a583485b8c685166fe0ef94b2af98','ba65fbca3b9230ad1807b82c923e9e60ab870edbe5c1e0d5090ebce99b06f6d0',
                 '125901d0341487bd058be70e7cc2ed27be7c3be270a45d05587e471104b7cacf',
                 'ad80220cd6dc3f8dc5c451c6281aa9f1b2acf7fbb47bc80ed21eb3905710110c')
@@ -917,13 +917,14 @@ def _expanded_sample(raw,plan,plan_sha):
     lines=raw.decode('utf-8').splitlines()
     if len(lines)<2 or lines[0]!='sample_plan_sha256='+plan_sha:_fail('EXPANSION_PLAN_MISMATCH')
     if lines[1]!='base denominator only; expansion is diagnostic':_fail('EXPANSION_REPORT_SCHEMA')
-    i=2;extra=set()
+    i=2;extra=set();counts=[]
     for s in plan['strata']:
         if i+2>=len(lines):_fail('EXPANSION_REPORT_SCHEMA')
         match=re.fullmatch(r'([0-9]+) (GE_100M|GE_10M|GE_1M|NO_OPEN) N=([0-9]+) n=([0-9]+) e=([0-9]+) u=([0-9]+) s=([0-9]+)',lines[i])
         if match is None:_fail('EXPANSION_REPORT_SCHEMA')
         year,tier,N,n,e,u,semantic=match.groups();N,n,e,u,semantic=map(int,(N,n,e,u,semantic))
         if (int(year),tier,N,n)!=(s['year'],s['tier'],s['population_size'],s['base_size']) or e+u+semantic>n:_fail('EXPANSION_STRATUM_MISMATCH')
+        counts.append((e,u,semantic))
         for label in ('error','conservative'):
             i+=1
             if not re.fullmatch(label+r' simultaneous_upper=[0-9]+/[1-9][0-9]* standalone95=[0-9]+/[1-9][0-9]*',lines[i]):_fail('EXPANSION_REPORT_SCHEMA')
@@ -935,7 +936,23 @@ def _expanded_sample(raw,plan,plan_sha):
     for label in ('error_estimate','error_upper','conservative_estimate','conservative_upper'):
         if i>=len(lines) or not re.fullmatch(label+r'=[0-9]+/[1-9][0-9]*',lines[i]):_fail('EXPANSION_REPORT_SCHEMA')
         i+=1
-    if lines[i:] not in (['status=READY'],['status=BLOCKED']):_fail('EXPANSION_REPORT_SCHEMA')
+    if i>=len(lines) or lines[i] not in ('status=READY','status=BLOCKED'):_fail('EXPANSION_REPORT_SCHEMA')
+    footer=lines[i+1:]
+    if footer:
+        if len(footer)!=7+4*len(plan['strata']) or footer[:3]!=[
+            'counting_comparison=operator_20261024','counting_method=operator_turnover_selection_excluded_from_e',
+            'legacy_counting_method=turnover_selection_included_in_e']:_fail('EXPANSION_REPORT_SCHEMA')
+        j=3
+        for s,current in zip(plan['strata'],counts):
+            label=f"{s['year']} {s['tier']}";n=s['base_size']
+            chosen=re.fullmatch(re.escape('turnover_selection '+label)+r' n_turnover_selection=([0-9]+)',footer[j])
+            old=re.fullmatch(re.escape(f"legacy {label} N={s['population_size']} n={n}")+r' e=([0-9]+) u=([0-9]+) s=([0-9]+)',footer[j+1])
+            if chosen is None or int(chosen[1])+sum(current)>n or old is None or sum(map(int,old.groups()))>n:_fail('EXPANSION_REPORT_SCHEMA')
+            for k,name in enumerate(('error','conservative'),2):
+                if not re.fullmatch('legacy_'+name+r' simultaneous_upper=[0-9]+/[1-9][0-9]* standalone95=[0-9]+/[1-9][0-9]*',footer[j+k]):_fail('EXPANSION_REPORT_SCHEMA')
+            j+=4
+        for line,name in zip(footer[j:],('error_estimate','error_upper','conservative_estimate','conservative_upper')):
+            if not re.fullmatch('legacy_'+name+r'=[0-9]+/[1-9][0-9]*',line):_fail('EXPANSION_REPORT_SCHEMA')
     if not extra:_fail('EXPANSION_NOT_REQUESTED')
     return extra
 

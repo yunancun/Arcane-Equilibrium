@@ -36,7 +36,7 @@ SEED = 20261022
 TIERS = ('GE_100M', 'GE_10M', 'GE_1M', 'NO_OPEN')
 STANDARD = 'docs/execution_plan/2026-10-22--r8-stage2-data-verification-standard.md'
 V2 = 'v2-terminal-suffix-20261022'
-_V1_STANDARDS=('afcb87578676c998b4ce7529c6e1c09d5214cfe7e8af53ad03d120781c696931',
+_V1_STANDARDS=('794f4f652ab23ad78eb84d57c5f76fb8deb55b432f051ae4d963a69336c8b051','afcb87578676c998b4ce7529c6e1c09d5214cfe7e8af53ad03d120781c696931',
                'd0fbf9ff02d080027d575eb6488f2c552c3a583485b8c685166fe0ef94b2af98',
                'ba65fbca3b9230ad1807b82c923e9e60ab870edbe5c1e0d5090ebce99b06f6d0',
                '125901d0341487bd058be70e7cc2ed27be7c3be270a45d05587e471104b7cacf',
@@ -987,8 +987,12 @@ def _bundle_outcomes(root,p,plan_sha,details=None):
         keys.add(key); ids.add(row['correction_id'])
         order.append((t,row['symbol'],row['dataset'],row['interval'],row['field'],row['correction_id']))
         day=t//DAY*DAY
-        state=days.setdefault((row['symbol'],day),dict(error=False,unresolved=False,incomplete=False,semantic=False,covered=set()))
-        state['error'] |= row['decision']=='CORRECT' and complete
+        state=days.setdefault((row['symbol'],day),dict(error=False,legacy_error=False,turnover_selection=False,unresolved=False,incomplete=False,semantic=False,covered=set()))
+        corrected=row['decision']=='CORRECT' and complete
+        selection=row['field']=='turnover' and row['evidence_kind']=='reported_turnover_selection'
+        state['error'] |= corrected and not selection
+        state['legacy_error'] |= corrected
+        state['turnover_selection'] |= corrected and selection
         state['incomplete'] |= not complete
         state['unresolved'] |= row['decision']=='UNRESOLVED' or row['row_action']=='missing'
         state['semantic'] |= row['decision']=='KEEP' and row['evidence_kind']=='reported_turnover_selection'
@@ -1023,13 +1027,39 @@ def _bundle_outcomes(root,p,plan_sha,details=None):
         finding_order.append((row['timestamp'] if row['timestamp'] is not None else -1,row['symbol'],row['dataset'],row['interval'],row['field'],row['finding_id']))
     if finding_order!=sorted(finding_order):
         raise InvalidInput('INVALID_FINDING_ORDER')
-    result={}
+    result={};legacy={}
     for (symbol,day),state in days.items():
         required={(interval,t,field) for interval,times in (('D',[day]),('60',range(day,day+DAY,HOUR))) for t in times for field in _FIELDS}
         unresolved=state['unresolved'] or verification['status']=='BLOCKED' or not required<=state['covered']
-        result[(symbol,day)]=('e' if state['error'] else 'u' if state['incomplete'] or unresolved else 's' if state['semantic'] else 'ok')
-    if details is not None:details.update(policy=V2 if v2 else 'v1-strict',verification=verification,corrections=contents['corrections.jsonl'],findings=contents['findings.jsonl'],semantics=contents.get('volume_semantics.jsonl',[]))
+        pending=state['incomplete'] or unresolved
+        result[(symbol,day)]=('e' if state['error'] else 'u' if pending else 'turnover_selection' if state['turnover_selection'] else 's' if state['semantic'] else 'ok')
+        legacy[(symbol,day)]=('e' if state['legacy_error'] else 'u' if pending else 's' if state['semantic'] else 'ok')
+    if details is not None:details.update(policy=V2 if v2 else 'v1-strict',verification=verification,corrections=contents['corrections.jsonl'],findings=contents['findings.jsonl'],semantics=contents.get('volume_semantics.jsonl',[]),legacy_outcomes=legacy)
     return result,reasons
+
+
+def _combined_outcomes(roots,p,plan_sha,*,include_rows=False):
+    """A blocked shard has the same conservative scope as one whole bundle."""
+    outcomes={};legacy={};reasons={};documents=[];blocked=False
+    draws={(d['symbol'],d['day_start']) for s in p['strata'] for d in s['draws']}
+    for root in roots:
+        detail={};values,day_reasons=_bundle_outcomes(root,p,plan_sha,detail)
+        if set(values)&set(outcomes):raise InvalidInput('OVERLAPPING_VERIFICATION')
+        outcomes.update(values);reasons.update(day_reasons)
+        legacy.update(detail['legacy_outcomes'])
+        blocked |= detail['verification']['status']=='BLOCKED'
+        if not include_rows:
+            # Validate one whole bundle, then retain only bounded selection
+            # evidence. Sampling must not accumulate every shard's raw rows.
+            detail['corrections']=[r for r in detail['corrections'] if r['decision']=='CORRECT'
+                and r['evidence_kind']=='reported_turnover_selection' and (r['symbol'],r['timestamp']//DAY*DAY) in draws]
+            detail['semantics']=[]
+        del detail['findings'],detail['legacy_outcomes']
+        documents.append((root,detail))
+    if blocked:
+        outcomes={key:'e' if value=='e' else 'u' for key,value in outcomes.items()}
+        legacy={key:'e' if value=='e' else 'u' for key,value in legacy.items()}
+    return outcomes,legacy,reasons,documents
 
 
 def summarize_sample(plan_root, verification_roots, artifact_root):
@@ -1049,23 +1079,22 @@ def summarize_sample(plan_root, verification_roots, artifact_root):
     """
     try:
         p,plan_sha=_load_plan(plan_root)
-        outcomes={};day_reasons={};reasons=[]
-        for root in verification_roots:
-            bundle_outcomes,bundle_reasons=_bundle_outcomes(root,p,plan_sha)
-            day_reasons.update(bundle_reasons)
-            for key,value in bundle_outcomes.items():
-                if key in outcomes:
-                    raise InvalidInput('OVERLAPPING_VERIFICATION')
-                outcomes[key]=value
+        outcomes,legacy,day_reasons,documents=_combined_outcomes(verification_roots,p,plan_sha);reasons=[]
         H=len(p['strata']); total=sum(s['population_size'] for s in p['strata'])
         estimates=[Fraction(0),Fraction(0)]; uppers=[Fraction(0),Fraction(0)]
+        legacy_estimates=[Fraction(0),Fraction(0)];legacy_uppers=[Fraction(0),Fraction(0)]
         lines=['sample_plan_sha256='+plan_sha,'base denominator only; expansion is diagnostic']
+        comparison=['counting_comparison=operator_20261024',
+                    'counting_method=operator_turnover_selection_excluded_from_e',
+                    'legacy_counting_method=turnover_selection_included_in_e']
+        evaluated_days=set()
         for s in p['strata']:
             N,n=s['population_size'],s['base_size']
             values=[outcomes.get((d['symbol'],d['day_start']),'u') for d in s['draws']]
             base=values[:n]; e,u,semantic=(base.count(x) for x in ('e','u','s'))
             # Only the base and, when triggered, its frozen expansion participate.
             evaluated=s['draws'] if e or u else s['draws'][:n]
+            evaluated_days.update((d['symbol'],d['day_start']) for d in evaluated)
             for d in evaluated:reasons.extend(day_reasons.get((d['symbol'],d['day_start']),()))
             lines.append(f"{s['year']} {s['tier']} N={N} n={n} e={e} u={u} s={semantic}")
             for i,x in enumerate((e,e+u)):
@@ -1074,6 +1103,14 @@ def summarize_sample(plan_root, verification_roots, artifact_root):
                 estimates[i]+=Fraction(N,total)*Fraction(x,n)
                 uppers[i]+=Fraction(N,total)*upper
                 lines.append(f'{("error","conservative")[i]} simultaneous_upper={upper.numerator}/{upper.denominator} standalone95={solo.numerator}/{solo.denominator}')
+            old=[legacy.get((d['symbol'],d['day_start']),'u') for d in s['draws'][:n]]
+            le,lu,ls=(old.count(x) for x in ('e','u','s'))
+            comparison += [f"turnover_selection {s['year']} {s['tier']} n_turnover_selection={base.count('turnover_selection')}",
+                           f"legacy {s['year']} {s['tier']} N={N} n={n} e={le} u={lu} s={ls}"]
+            for i,x in enumerate((le,le+lu)):
+                upper=hypergeometric_upper(N,n,x,Fraction(1,20*H));solo=hypergeometric_upper(N,n,x,Fraction(1,20))
+                legacy_estimates[i]+=Fraction(N,total)*Fraction(x,n);legacy_uppers[i]+=Fraction(N,total)*upper
+                comparison.append(f'legacy_{("error","conservative")[i]} simultaneous_upper={upper.numerator}/{upper.denominator} standalone95={solo.numerator}/{solo.denominator}')
             if e or u:
                 lines.append(f"required_prefix={s['max_size']} max_expansions=1")
                 if n<s['max_size']:
@@ -1088,12 +1125,27 @@ def summarize_sample(plan_root, verification_roots, artifact_root):
         for i,name in enumerate(('error','conservative')):
             for label,value in (('estimate',estimates[i]),('upper',uppers[i])):
                 lines.append(f'{name}_{label}={value.numerator}/{value.denominator}')
+            for label,value in (('estimate',legacy_estimates[i]),('upper',legacy_uppers[i])):
+                comparison.append(f'legacy_{name}_{label}={value.numerator}/{value.denominator}')
         if uppers[1]>Fraction(1,40):
             reasons.append('UPPER_LIMIT_EXCEEDED')
         if not verification_roots:
             reasons.append('VERIFICATION_NOT_ARCHIVED')
         lines.append('status='+('BLOCKED' if reasons else 'READY'))
-        return _emit(artifact_root,'sample_report.txt', ('\n'.join(lines)+'\n').encode(),len(lines),reasons)
+        lines+=comparison
+        selected=[]
+        for _,detail in documents:
+            for row in detail['corrections']:
+                key=(row['symbol'],row['timestamp']//DAY*DAY)
+                if key in evaluated_days and row['decision']=='CORRECT' and row['evidence_kind']=='reported_turnover_selection':
+                    selected.append(dict(symbol=key[0],day_start=key[1],interval=row['interval'],timestamp=row['timestamp'],
+                        original_value=row['original_value'],selected_value=row['corrected_value'],day_classification=outcomes.get(key,'u')))
+        selected.sort(key=lambda r:(r['symbol'],r['timestamp'],r['interval']))
+        # Keep per-value evidence outside the bounded expansion handoff.
+        evidence=b'sample_plan_sha256='+plan_sha.encode()+b'\n'+b''.join(b'turnover_selection_evidence '+encoded(r) for r in selected)
+        _write(artifact_root,'turnover_selection.txt',evidence)
+        extras={'turnover_selection.txt':dict(sha256=sha(evidence),rows=len(selected)+1)}
+        return _emit(artifact_root,'sample_report.txt', ('\n'.join(lines)+'\n').encode(),len(lines),reasons,extras)
     except (InvalidInput,OSError,EOFError,TypeError,KeyError,IndexError,ValueError) as exc:
         return _handoff(artifact_root,reasons=(str(exc) if isinstance(exc,InvalidInput) else 'INVALID_EVIDENCE',))
 
@@ -1106,16 +1158,15 @@ def summarize_policies(plan_root,v1_verification_roots,v2_verification_roots,art
     expansion instruction, a hypothesis input, or an acceptance decision.
     """
     try:
-        p,plan_sha=_load_plan(plan_root,allow_empty=True);all_outcomes={};all_rows={};all_semantics={};bundles={}
+        p,plan_sha=_load_plan(plan_root,allow_empty=True);all_outcomes={};all_legacy={};all_rows={};all_semantics={};bundles={}
         for version,roots in (('v1-strict',v1_verification_roots),(V2,v2_verification_roots)):
-            outcomes={};rows=[];semantics=[];bundles[version]=[]
-            for root in roots:
-                detail={};values,_=_bundle_outcomes(root,p,plan_sha,detail)
+            outcomes,legacy,_,documents=_combined_outcomes(roots,p,plan_sha,include_rows=True)
+            rows=[];semantics=[];bundles[version]=[]
+            for root,detail in documents:
                 if detail['policy']!=version:raise InvalidInput('POLICY_MISMATCH')
-                if set(values)&set(outcomes):raise InvalidInput('OVERLAPPING_VERIFICATION')
-                outcomes.update(values);rows+=detail['corrections'];semantics+=detail['semantics']
+                rows+=detail['corrections'];semantics+=detail['semantics']
                 bundles[version].append((root,detail['verification']))
-            all_outcomes[version]=outcomes;all_rows[version]=rows;all_semantics[version]=semantics
+            all_outcomes[version]=outcomes;all_legacy[version]=legacy;all_rows[version]=rows;all_semantics[version]=semantics
         if set(all_outcomes['v1-strict'])!=set(all_outcomes[V2]):raise InvalidInput('FROZEN_SAMPLE_PAIR_MISMATCH')
         lines=['sample_plan_sha256='+plan_sha,
                'base denominator only; expansion is diagnostic' if p['strata'] else
@@ -1148,7 +1199,9 @@ def summarize_policies(plan_root,v1_verification_roots,v2_verification_roots,art
                           'verified_days='+encoded(sorted([list(k) for k in days])).decode().strip()]
             for version,suffix in (('v1-strict','v1'),(V2,'policy')):
                 values=[all_outcomes[version].get(key,'u') for key in days]
-                lines.append(f'n_error_{suffix}={values.count("e")} n_unresolved_{suffix}={values.count("u")} n_semantics_{suffix}={values.count("s")}')
+                lines.append(f'n_error_{suffix}={values.count("e")} n_unresolved_{suffix}={values.count("u")} n_semantics_{suffix}={values.count("s")} n_turnover_selection_{suffix}={values.count("turnover_selection")}')
+                old=[all_legacy[version].get(key,'u') for key in days]
+                lines.append(f'legacy_n_error_{suffix}={old.count("e")} legacy_n_unresolved_{suffix}={old.count("u")} legacy_n_semantics_{suffix}={old.count("s")}')
             selected=[r for r in all_semantics[V2] if (r['symbol'],r['day_start']) in days and r['day_applicable'] and r['hour_classification']=='TERMINAL_SUFFIX_EXACT']
             risk={(r['symbol'],r['day_start']) for r in selected}
             union=risk|{k for k in days if all_outcomes[V2].get(k,'u') in ('e','u')}

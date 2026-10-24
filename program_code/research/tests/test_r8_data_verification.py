@@ -979,6 +979,29 @@ def test_real_dv3_error_expands_frozen_prefix_into_dv1_l3(tmp_path,monkeypatch):
     assert 'N=302 n=300 e=1 u=0 s=299' in (root/'expanded-summary/sample_report.txt').read_text()
 
 
+@pytest.mark.parametrize('format', ['comparison', 'legacy', 'unknown_footer', 'selection_count', 'legacy_count', 'extra_prefix'])
+def test_expansion_handoff_accepts_bounded_counting_comparison(tmp_path,format):
+    from program_code.research.r8_data import verification as dv1
+    from program_code.research.r8_data import verification_fetch as dv3
+    from program_code.research.tests.test_r8_verification_fetch import source,plan,artifact,T as start
+    p=artifact(plan(tmp_path,source(tmp_path,days=365,valid=True),end=start+365*DAY))
+    summary=dv3.summarize_sample(tmp_path/'out',[],tmp_path/'summary')
+    raw=Path(summary['artifact_root'],summary['primary_file']).read_bytes()
+    assert len(raw)<=65536
+    if format=='legacy':raw=raw.split(b'counting_comparison=')[0]
+    if format=='unknown_footer':raw+=b'unknown=1\n'
+    if format=='selection_count':raw=raw.replace(b'n_turnover_selection=0',b'n_turnover_selection=301')
+    if format=='legacy_count':raw=raw.replace(b'legacy 2020 GE_100M N=353',b'legacy 2020 GE_100M N=354')
+    if format=='extra_prefix':raw+=b'required_prefix=353 max_expansions=1\n'
+    run=dv1._Run(p['readable'],p['policy_sha256'])
+    args=(tmp_path/'out/sample_plan.json',run,p['p3b_manifest_sha256'],['AUSDT'],raw)
+    if format in ('comparison','legacy'):
+        _,days=dv1._sample(*args)
+        assert days=={(d['symbol'],d['day_start']) for s in p['strata'] for d in s['draws']}
+    else:
+        with pytest.raises(ValueError,match='^EXPANSION_REPORT_SCHEMA$'):dv1._sample(*args)
+
+
 @pytest.mark.parametrize('mutation,reason',[
     ('sha','EXPANSION_PLAN_MISMATCH'),('tier','EXPANSION_STRATUM_MISMATCH'),
     ('population','EXPANSION_STRATUM_MISMATCH'),('base','EXPANSION_STRATUM_MISMATCH'),
@@ -1136,6 +1159,38 @@ def test_dv7_26_days_spec_cells_tail_witnesses_and_v1_bytes(tmp_path,index,dv7_m
         for c in cs if (c['interval'],c['timestamp'],c['field'])==(interval,stamp,f)) for f in FIELDS}
         for interval,stamp in sorted({(c['interval'],c['timestamp']) for c in cs if c['row_action']=='include'})]
     assert all(set(row)==set(FIELDS) and all(isinstance(v,str) for v in row.values()) for row in effective)
+    # Frozen from the preserved pre-R2 correction rows across ALL hourly/daily
+    # fields, not inferred from the implementation or only six daily cells.
+    expected_counts={
+        'v1':'e e u e u e e u u u e u u u e u e e e u e u u u e u'.split(),
+        'v2':'e e e e e e e e e e e u e e e e e e e e e e u u e e'.split()}
+    from program_code.research.r8_data import verification_fetch as fetch
+    statistics={}
+    if plan['strata']:
+        reports=[('v1',flow['summary']),('v2',fetch.summarize_sample(root/'plan',[root/'bundle-v2'],root/'summary-v2-counting'))]
+    else:
+        # Partial/uncovered original days remain purposive, outside sampling N.
+        dual=fetch.summarize_policies(root/'plan',[root/'bundle'],[root/'bundle-v2'],root/'purposive-counting')
+        reports=[('v1',dual),('v2',dual)]
+    for version,report in reports:
+        assert report['primary_file']=='sample_report.txt',report
+        path=Path(report['artifact_root'])/report['primary_file'];text=path.read_text();lines=text.splitlines()
+        outcome=expected_counts[version][index];e=int(outcome=='e');u=int(outcome=='u')
+        old_e=int(index!=22);old_u=1-old_e
+        if plan['strata']:
+            assert f'N=1 n=1 e={e} u={u} s=0' in lines[2]
+            assert next(line for line in lines if line.startswith('turnover_selection ')).endswith('n_turnover_selection=0')
+            assert f'N=1 n=1 e={old_e} u={old_u} s=0' in next(line for line in lines if line.startswith('legacy '))
+            assert f'error_upper={e}/1' in lines and 'conservative_upper=1/1' in lines
+            assert f'legacy_error_upper={old_e}/1' in lines and 'legacy_conservative_upper=1/1' in lines
+        else:
+            suffix='v1' if version=='v1' else 'policy'
+            assert 'batch_kind=purposive sampling=nonrandom upper_bound=NOT_APPLICABLE acceptance=NOT_APPLICABLE' in lines
+            assert f'n_error_{suffix}={e} n_unresolved_{suffix}={u} n_semantics_{suffix}=0 n_turnover_selection_{suffix}=0' in lines
+            assert f'legacy_n_error_{suffix}={old_e} legacy_n_unresolved_{suffix}={old_u} legacy_n_semantics_{suffix}=0' in lines
+        statistics[version]=dict(e=e,u=u,n_turnover_selection=0,legacy_e=old_e,legacy_u=old_u,
+            sampling='single_day_fixture' if plan['strata'] else 'purposive',sample_report=str(path),sample_report_sha256=sha(path.read_bytes()))
+    record_property('turnover_counting',json.dumps(dict(symbol=flow['symbol'],date=CROSSCHECK[index][1],policies=statistics),sort_keys=True))
     record_property('dv7',json.dumps(dict(symbol=flow['symbol'],date=CROSSCHECK[index][1],v1_sha256=hashes,
         field_cells=42,boundary_flags=2,v2_daily=expected,selected_hours=len(tails),tail_count=sum(r['tail_count'] for r in tails),bundle=str(root/'bundle-v2')),sort_keys=True))
 

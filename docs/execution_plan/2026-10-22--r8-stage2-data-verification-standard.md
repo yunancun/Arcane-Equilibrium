@@ -737,3 +737,19 @@ DV7 測試另覆蓋：同日多尾段、跨多戳尾段、部分同戳子集／�
 2. **產物明示分片。** 沿用 §8.4 的固定 JSON 鍵與版本。子集執行在 `verification.json.reason_codes` 保存 `SAMPLE_SHARD_SYMBOLS=<按字典序排列、以逗號分隔的標的>`；`sample_plan_sha256` 與封存的完整計畫 bytes 保持原值。分片只改執行範圍，不提供新市場值讀取授權。逐筆 findings 與裁決欄位須等價；corrections 對其本分片整份 findings 的 SourceRef SHA 及由內容衍生的 correction ID 依實際 bytes 綁定，不能為追求容器相等而偽造雜湊。
 3. **合併統計維持原分母與拒絕語義。** 分片間標的範圍不得重疊；DV3 多 root 彙總繼續以 `OVERLAPPING_VERIFICATION` 拒絕重複覆蓋。任一原定待評估 draw 未被任何分片覆蓋時，仍計 `u`，不得刪除、縮小分母或改抽其他日期。擴樣僅按原凍結前綴診斷，不取代基礎分母。完整、不重疊分片與不分片執行的 DV3 報表必須逐位元組相同。
 4. **驗收邊界。** 本修正只提供執行切分；DV4 全訓練段資料驗收、§4.5／§13.6 及 `PENDING_OPERATOR_DECISION` 保持原狀。未執行的取數、正式驗證與獨立審查不得因本 PR、測試或 CI 通過而升格。本 PR 不合併，交 conductor 審查。
+
+
+## 勘誤六（2026-10-24，Operator 裁決）
+
+本節由 conductor 轉錄 Operator 對話選項，追加於原文之後；上列規範、勘誤與原停止證據全部保留。權威事件為 `RH-20261024-01`，承接 `RH-20261023-01`。
+
+1. 對「DV4 續作身分」，Operator 原文：「批准新身分續作 (Recommended)」。conductor 呈報的執行解讀：以 `R8-S2-DATA-VERIFY-DV4-R1-20261024` 續作，範圍、檔案與驗收和原 DV4 完全相同，原停止歷史保留。本文件／工具修正由另一新記錄者身分 `R8-DV4-SHARD-RECORDER-R2-20261024` 執行；記錄批准不代表 DV4 已執行或驗收通過。
+2. 對「疑點日成交額選源的計數」，Operator 原文：「單列為選源，不計 e (Recommended)」。conductor 呈報的執行解讀：只因 DV-A、`evidence_kind=reported_turnover_selection`、依 §6.2 改用小時 reported turnover 加總而 CORRECT 的日子，屬已核准的語義選源，另列原值與選用值，不算確認錯誤；價格與成交量的 CORRECT 照舊計 e。兩種計法的數字與上界必須明確標名並列。
+
+**適用 v1 與 v2 的逐日計數。** 凍結母集合、抽樣順序、種子、N／n、來源身分及欄位裁決不變。日內任何已完成且證據完整的非 DV-A CORRECT（包括價格／成交量）仍優先歸 e。沒有此類 e 時，任一未決、缺失、證據不完整、未覆蓋 draw 或 BLOCKED 狀態仍歸 u；只有所有 CORRECT 都是成交額選源且無上述未決的日，才歸新類別 `n_turnover_selection`，不重複計 e、u 或 s。原 s（選定語義但保持 KEEP）仍保留，兩類不得混同。
+
+**§4.5 新舊數字並列。** 主計法標名 `operator_turnover_selection_excluded_from_e`，依本節的新 e 與 u 計算 e/n、(e+u)/n、有限母體逐層及加權全體上界；擴樣／上界門檻使用此主計法。另以 `turnover_selection_included_in_e` 標名舊計法，保留「任何證據完整 CORRECT 都算 e、e 優先於 u」的逐日去重、相同分母、同時及單層95%上界，全部並列，不能只報較低的一組。舊計法只作比較，不新增或覆蓋主計法的擴樣指令。原始 CORRECT 與來源證據不改寫，沒有以更正後一致掩去已確認價格／成交量錯誤。
+
+`sample_report.txt` 保留主計法的既有擴樣交接主段，末尾追加有界且固定標記的計數比較段；DV1 嚴格驗證此段的格式、層身分、分母及計數範圍，保留舊格式可讀性與64 KiB上限，不忽略任意尾段。逐筆選源的原值／選用值及最終日分類存於同交付的 `turnover_selection.txt`，由既有 handoff.files 記列數與SHA；既有 verification／corrections／findings JSON schema 不新增鍵。雙政策報告亦並列新舊計數；非隨機目的性批次的上界仍為 NOT_APPLICABLE，不把26日固定回歸當全市場抽樣驗收。
+
+**BLOCKED 分片等價補充。** 分片僅切分執行，不縮小整體阻擋範圍。彙總相同凍結計畫的一組分片時，任一 bundle 為 BLOCKED，整組已覆蓋且未確認為 e 的日都保守計 u，與不分片 BLOCKED 相同；新舊兩種計法分別保留各自已確認 e 的優先序。不能讓其他 READY 分片把這些日改成 s／選源類或降低保守上界。重疊仍拒絕，漏片仍計 u；未取得的分片不被推定 READY。

@@ -28,7 +28,7 @@ def offline(monkeypatch):
     monkeypatch.setattr(socket, 'create_connection', deny)
 
 
-def frozen_case(root, days=1, invalid_contract=False):
+def frozen_case(root, days=1, invalid_contract=False, blocked=None, selection_only=False):
     """Three symbols with independent e/s/s expected daily outcomes."""
     p3b = root / 'p3b'; downloads = root / 'downloads'
     (p3b / 'raw').mkdir(parents=True); downloads.mkdir()
@@ -37,9 +37,15 @@ def frozen_case(root, days=1, invalid_contract=False):
         for interval, count, step, volume in [('D', days, DAY, '24'), ('60', days * 24, HOUR, '1')]:
             rows = [[str(T + i * step), '10', '10', '10', '10', volume, str(int(volume) * 10)] for i in range(count)]
             if symbol == 'AUSDT' and interval == 'D':
-                rows[0][2] = rows[0][4] = '11'  # Real L2/C5 correction, frozen before sampling.
+                if selection_only:rows[0][-1] = '239'
+                else:rows[0][2] = rows[0][4] = '11'  # Real L2/C5 correction, frozen before sampling.
             rid = len(requests) + 1
-            raw = enc(dict(retCode=0, result=dict(category='linear', symbol=symbol, list=rows)))
+            raw_rows = rows
+            if blocked and symbol == 'BUSDT' and interval == 'D':
+                raw_rows = [] if blocked == 'missing' else rows + [list(rows[0])]
+                if blocked == 'conflict':
+                    raw_rows[-1][2] = '12'
+            raw = enc(dict(retCode=0, result=dict(category='linear', symbol=symbol, list=raw_rows)))
             (p3b / f'raw/{rid}.json').write_bytes(raw)
             requests.append(dict(request_id=rid, base_url='https://api.bybit.com', endpoint='/v5/market/kline',
                 params=dict(category='linear', symbol=symbol, interval=interval), http_status=200,
@@ -83,7 +89,7 @@ def frozen_case(root, days=1, invalid_contract=False):
     return root
 
 
-def verify_bundle(root, name, symbols, report=None, version='v1-strict'):
+def verify_bundle(root, name, symbols, report=None, version='v1-strict', status='READY'):
     bundle = root / name; plan = read(root/'plan', 'sample_plan.json')
     policy_path = root/'plan/policy.json'
     if version == dv1.V2:
@@ -95,7 +101,7 @@ def verify_bundle(root, name, symbols, report=None, version='v1-strict'):
         inventory_path=root/'downloads/download_inventory.jsonl', output_root=bundle,
         policy_path=policy_path, readable=plan['readable'], symbols=symbols,
         sample_plan_path=root/'plan/sample_plan.json', sample_report_path=report)
-    assert result['status'] == 'READY', json.dumps(result)
+    assert result['status'] == status, json.dumps(result)
     assert (bundle/'sample_plan.json').read_bytes() == (root/'plan/sample_plan.json').read_bytes()
     v = read(bundle, 'verification.json')
     assert set(v) == VERIFICATION_KEYS | ({'standard_sha256', 'volume_semantics_policy'} if version == dv1.V2 else set())
@@ -131,6 +137,7 @@ def equivalent(root, whole, pieces, label):
     assert a['reason_codes'] == b['reason_codes']
     report = root/(label+'-shard-report')/'sample_report.txt'
     assert (root/(label+'-whole-report')/'sample_report.txt').read_bytes() == report.read_bytes()
+    assert (root/(label+'-whole-report')/'turnover_selection.txt').read_bytes() == (report.parent/'turnover_selection.txt').read_bytes()
     return report
 
 
@@ -142,6 +149,22 @@ def test_shards_equal_unsharded_draws_and_report_bytes(tmp_path, shards, version
     pieces = [verify_bundle(root, f'shard-{i}', symbols, version=version) for i, symbols in enumerate(shards)]
     report = equivalent(root, whole, pieces, 'base')
     assert 'N=3 n=3 e=1 u=0 s=2' in report.read_text()
+
+
+@pytest.mark.parametrize('blocked', ['missing', 'conflict'])
+@pytest.mark.parametrize('selection_only', [False, True])
+@pytest.mark.parametrize('shards', [[['AUSDT'], ['BUSDT', 'CUSDT']], [[s] for s in SYMBOLS]])
+@pytest.mark.parametrize('version', ['v1-strict', dv1.V2])
+def test_blocked_shards_preserve_global_u_and_report_bytes(tmp_path, blocked, selection_only, shards, version):
+    root = frozen_case(tmp_path, blocked=blocked, selection_only=selection_only)
+    whole = verify_bundle(root, 'whole', SYMBOLS, version=version, status='BLOCKED')
+    pieces = [verify_bundle(root, f'shard-{i}', symbols, version=version,
+              status='BLOCKED' if 'BUSDT' in symbols else 'READY') for i, symbols in enumerate(shards)]
+    report = equivalent(root, whole, pieces, 'blocked')
+    assert ('N=3 n=3 e=0 u=3 s=0' if selection_only else 'N=3 n=3 e=1 u=2 s=0') in report.read_text().splitlines()[2]
+    assert 'conservative_upper=1/1' in report.read_text()
+    reverse = dv3.summarize_sample(root/'plan', list(reversed(pieces)), root/'reverse')
+    assert (Path(reverse['artifact_root'])/reverse['primary_file']).read_bytes() == report.read_bytes()
 
 
 @pytest.mark.parametrize('version', ['v1-strict', dv1.V2])

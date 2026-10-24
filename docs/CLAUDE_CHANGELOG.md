@@ -1,9 +1,19 @@
 # CLAUDE_CHANGELOG.md — 開發歷史歸檔
 
 > 從 CLAUDE.md / TODO.md 遷出的 Wave/Sprint/Batch + TODO version-increment 歷史敘事。新 session 不需要讀此文件，僅供回顧歷史時查閱。
-> 最後更新：2026-10-24 UTC（DV4 凍結抽樣分片支援；TODO v929）
+> 最後更新：2026-10-24 UTC（DV4 記錄者R2、Operator選源計數裁決；TODO v930）
 
 ---
+
+## R8 DV4 記錄者 R2：BLOCKED 等價與 Operator 選源計數裁決 — 2026-10-24 UTC
+
+- conductor 續派新身分 `R8-DV4-SHARD-RECORDER-R2-20261024`，以 PR #249 的 `7a2aa46db08074ff3217313c7c0abdbc8457a9d8` 取得新准入／租約。原記錄者 STOPPED_WITH_UNRESOLVED_CODE_FINDINGS、27個失敗、4個Docker前置錯誤及2項P2保留，不重開舊身分。
+- 修復 conductor 確認的兩項P2：DV6 fixture 舊規範pin；DV3彙總時任一分片BLOCKED即對整組非e日傳播保守u，新舊計法分別保留各自e優先序。原反例先紅，真實v1/v2與2/3分片再驗；READY、RAW_SOURCE_MISSING／CONFLICT、純成交額選源與根順序均覆蓋，逐筆裁決／findings及報表bytes比較不以假函式替代。
+- Operator 原文「批准新身分續作 (Recommended)」、「單列為選源，不計 e (Recommended)」追加於規範勘誤六及 `RH-20261024-01`（follows `RH-20261023-01`）。批准的DV4續作身分為 `R8-S2-DATA-VERIFY-DV4-R1-20261024`，範圍、檔案、驗收同DV4，原停止歷史保留；本記錄者未執行DV4全樣本資料驗收。
+- 純 `reported_turnover_selection` CORRECT且無其他e／未決者歸 `n_turnover_selection`；其他已確認更正仍e，未決／缺證據仍u。v1／v2皆並列新計法與選源也算e的舊計法，包括逐層／加權全體有限母體上界。原值／選用值明細另以既有handoff.files綁SHA；主報告擴樣語法保留64KiB限額、嚴格接受新比較段並保留舊格式，不忽略任意尾段。
+- 新增10個真實選源分類／新舊census上界案例，先10 fail再10 pass；擴樣比較段先1 fail再含原拒絕案例16 pass。26日回歸保留v1原bytes及v2逐欄斷言，另記新舊e／選源／u，預期分類從前次保留的全日／全小時原裁決列凍結，再由當前DV3驗證，不從六個日線欄位推定。
+- 勘誤六只追加原規範；DV1／DV6／U4規範pin、DV6 fixture與U4 policy同步，保留所有舊v1凍結政策身分。相同BCH／BTC有限來源與程序重產bundle pin，不擴樣、不改來源範圍。TODO v929→v930；登記簿保留歷史雜湊並新增本次來源。
+- conductor已重啟Colima，本次現場只讀核對Docker29.2.1／12CPU／指定LEAN digest；真實三方互通8項、DV1、DV3、完整R8與指定兩個靜態檔均在PR分支根目錄重跑。最終head、精確數字、UTC、CI及30分鐘上限的正式審查見 `audits/2026-10-24-r8-dv4-shard-recorder-r2/` 和PR；未完成不宣稱通過。新程式類審查意見按原文交conductor。本PR不合併、不取數、不更新Wiki，未操作遠端Linux／資料庫／Demo／live。
 
 ## R8 DV4 記錄者：凍結抽樣分片支援 — 2026-10-24 UTC
 
